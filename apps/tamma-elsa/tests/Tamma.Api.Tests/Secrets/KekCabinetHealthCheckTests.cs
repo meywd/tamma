@@ -14,15 +14,23 @@ using Tamma.Data.Entities;
 namespace Tamma.Api.Tests.Secrets;
 
 /// <summary>
-/// PF-S10 — pin the legacy-NULL handling in
-/// <see cref="KekCabinetHealthCheck"/>. The previous filter
-/// (<c>WHERE v != null</c>) skipped legacy rows entirely; after two
-/// rotations they would silently fall off the retired-keys ring and
-/// become permanently undecryptable, but readiness still passed.
+/// Integration tests for <see cref="KekCabinetHealthCheck"/>.
 ///
-/// The fix: count rows with <c>KekVersion IS NULL</c> separately and
-/// surface as <see cref="HealthStatus.Unhealthy"/> with a remediation
-/// message.
+/// <para>Covered scenarios:</para>
+/// <list type="bullet">
+///   <item><description>No encrypted rows → Healthy ("no encrypted tenant rows yet").</description></item>
+///   <item><description>All rows at the active KEK version → Healthy.</description></item>
+///   <item><description>A row whose <c>KekVersion</c> is older than the minimum
+///   decryptable version (active − retainedHistorySize) → Unhealthy with a
+///   rotation-runbook message. This ensures the health check catches laggard rows
+///   before they fall outside the retained-keys ring and become permanently
+///   undecryptable.</description></item>
+///   <item><description>No <see cref="IDbContextFactory{ControlPlaneDbContext}"/> wired
+///   (dev/test path, stub resolver) → Healthy with a "no CP DbContext factory" note.</description></item>
+/// </list>
+///
+/// <para><c>KekVersion</c> is <c>smallint NOT NULL DEFAULT 1</c> (Phase 0 schema).
+/// Legacy-NULL rows cannot exist, so no NULL-specific path is tested.</para>
 /// </summary>
 [TestFixture]
 public class KekCabinetHealthCheckTests
@@ -79,9 +87,9 @@ public class KekCabinetHealthCheckTests
         _db.Tenants.Add(tenant);
         await _db.SaveChangesAsync();
 
-        // Set EncryptedConnectionString to a non-null bytea so the
-        // health check picks the row up; KekVersion to whatever the
-        // test wants (NULL allowed).
+        // KekVersion is smallint NOT NULL DEFAULT 1 (plan 2026-06-09 §2.2).
+        // Legacy-NULL rows can no longer be seeded via raw SQL — passing null
+        // falls back to the column default (1) to keep the helper compiling.
         await using var cmd = _conn.CreateCommand();
         cmd.CommandText = """
             UPDATE tenants
@@ -90,8 +98,7 @@ public class KekCabinetHealthCheckTests
             WHERE "Id" = @id
         """;
         cmd.Parameters.Add(new NpgsqlParameter("id", tenant.Id));
-        cmd.Parameters.Add(new NpgsqlParameter("kek",
-            kekVersion is null ? (object)DBNull.Value : (object)kekVersion.Value));
+        cmd.Parameters.Add(new NpgsqlParameter<short>("kek", (short)(kekVersion ?? 1)));
         await cmd.ExecuteNonQueryAsync();
         return tenant.Id;
     }
@@ -120,48 +127,6 @@ public class KekCabinetHealthCheckTests
         var result = await check.CheckHealthAsync(new HealthCheckContext());
 
         result.Status.Should().Be(HealthStatus.Healthy);
-    }
-
-    [Test]
-    public async Task CheckHealth_LegacyNullVersionRow_ReturnsUnhealthy()
-    {
-        // PF-S10 — exact regression case: KekVersion=null + active=v3 +
-        // retainedHistorySize=2 (so the cabinet covers v1..v3). Without
-        // the fix the legacy row is invisible to the laggard check and
-        // readiness passes. With the fix we surface as Unhealthy with
-        // a remediation message.
-        await SeedTenantWithKekVersionAsync(kekVersion: null);
-        var kek = MakeKekProvider(activeVersion: 3, retainedHistorySize: 2);
-        var check = new KekCabinetHealthCheck(
-            kek, NullLogger<KekCabinetHealthCheck>.Instance, _dbContextFactory);
-
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
-
-        result.Status.Should().Be(HealthStatus.Unhealthy);
-        result.Description.Should().Contain("legacy");
-        result.Description.Should().Contain("re-encrypt");
-    }
-
-    [Test]
-    public async Task CheckHealth_LegacyNullCount_ReportedInMessage()
-    {
-        // Three legacy rows (NULL version) + one current row. The
-        // health check should surface "3 legacy rows lack version
-        // stamp" so operators have an actionable count.
-        for (var i = 0; i < 3; i++)
-        {
-            await SeedTenantWithKekVersionAsync(kekVersion: null);
-        }
-        await SeedTenantWithKekVersionAsync(kekVersion: 3);
-
-        var kek = MakeKekProvider(activeVersion: 3, retainedHistorySize: 2);
-        var check = new KekCabinetHealthCheck(
-            kek, NullLogger<KekCabinetHealthCheck>.Instance, _dbContextFactory);
-
-        var result = await check.CheckHealthAsync(new HealthCheckContext());
-
-        result.Status.Should().Be(HealthStatus.Unhealthy);
-        result.Description.Should().Contain("3 legacy rows");
     }
 
     [Test]

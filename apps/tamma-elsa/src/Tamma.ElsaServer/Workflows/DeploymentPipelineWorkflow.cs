@@ -10,6 +10,7 @@ using Elsa.Workflows.Runtime.Activities;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using Tamma.Api.Services.Agents;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -226,8 +227,8 @@ public class DeploymentPipelineWorkflow : WorkflowBase
             WorkflowDefinitionId = new("llm-call"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["role"] = "devops",
-                ["action"] = "deploy",
+                ["role"] = AgentRole.Devops.ToWire(),
+                ["action"] = AgentAction.Deploy.ToWire(),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["stage"] = stage,

@@ -13,24 +13,24 @@ export function ProviderHealthDashboard(): JSX.Element {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-gray-500 dark:text-gray-400">
           Auto-refreshes every 10 seconds. {entries.length} provider(s) tracked.
         </p>
         <button
           onClick={reload}
           disabled={loading}
-          className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50"
+          className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600 dark:hover:bg-gray-800"
         >
           Refresh
         </button>
       </div>
 
-      {error && <div className="mb-4 text-sm text-red-600">{error}</div>}
+      {error && <div className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</div>}
 
       {loading && entries.length === 0 && <LoadingSpinner />}
 
       {entries.length === 0 && !loading && (
-        <div className="text-center py-12 text-gray-500">
+        <div className="text-center py-12 text-gray-500 dark:text-gray-400">
           <p className="text-lg font-medium">No providers tracked yet</p>
           <p className="text-sm mt-1">Provider health data will appear once providers are used.</p>
         </div>

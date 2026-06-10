@@ -16,6 +16,7 @@ The LLM Call is the **universal building block** for all AI operations in Tamma.
 - Retry with exponential backoff (transient errors)
 - Agent config resolution from ELSA Agents DB
 - Prompt registry resolution (role + action to rendered template)
+- Prompt & convention resolution: exact `(role, action)` lookup — see [Role/Action Taxonomy](Role-Action-Taxonomy.md)
 - Agentic tool loop (multi-turn tool calling)
 - Per-attempt diagnostics collection
 

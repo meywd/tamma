@@ -13,7 +13,7 @@ namespace Tamma.Api.Tests.Tenancy;
 
 /// <summary>
 /// Namespace-scoped fixture that boots a dedicated Postgres container for
-/// Phase-3 dual-connection-string + RLS integration tests. Matches the
+/// dual-connection-string tenancy integration tests. Matches the
 /// pattern used by <c>DiagnosticsSetUpFixture</c> so the tenant-isolation
 /// suite stays hermetic from the shared <see cref="ApiTestFixture"/>.
 /// </summary>
@@ -26,10 +26,10 @@ namespace Tamma.Api.Tests.Tenancy;
 ///     running as the superuser <c>tamma</c> — used for migrations and
 ///     cross-tenant admin paths.</description></item>
 ///   <item><description>App connection (<c>ConnectionStrings:TammaAppDb</c>)
-///     running as <c>tamma_app</c> — the unprivileged role created by the
-///     Phase-2 RLS migration. The password is forced to a known value
-///     (<c>app_test_pw</c>) after migrations land so the connection
-///     actually works.</description></item>
+///     running as <c>tamma_app</c> — the least-privilege runtime role
+///     created by the baseline migration. The password is forced to a
+///     known value (<c>app_test_pw</c>) after migrations land so the
+///     connection actually works.</description></item>
 /// </list>
 /// <para>
 /// Tests reset the schema between cases via <see cref="ResetDatabaseAsync"/>
@@ -65,7 +65,7 @@ public class TenancySetUpFixture
 
         // Rewrite the admin connection string to derive the app connection
         // string against the same database but as the tamma_app role. The
-        // Phase-2 migration creates the role with a placeholder password;
+        // baseline migration creates the role with a placeholder password;
         // we re-ALTER it after migrations land.
         var adminBuilder = new NpgsqlConnectionStringBuilder(AdminConnectionString);
         var appBuilder = new NpgsqlConnectionStringBuilder(AdminConnectionString)
@@ -89,16 +89,8 @@ public class TenancySetUpFixture
         Environment.SetEnvironmentVariable("OpenSearch__Enabled", "false");
         Environment.SetEnvironmentVariable("Jwt__Secret", null);
 
-        // Extensions must be installed as superuser before migrations run.
-        await using (var bootstrap = new NpgsqlConnection(AdminConnectionString))
-        {
-            await bootstrap.OpenAsync();
-            await using var cmd = bootstrap.CreateCommand();
-            cmd.CommandText =
-                "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";" +
-                "CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";";
-            await cmd.ExecuteNonQueryAsync();
-        }
+        // No extension bootstrap needed: both migration baselines apply on
+        // bare Postgres (gen_random_uuid() is a pg_catalog builtin since PG13).
 
         Factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(b =>
@@ -114,12 +106,12 @@ public class TenancySetUpFixture
             await db.Database.MigrateAsync();
         }
 
-        // After Phase-2 migration installed the tamma_app role with
+        // After the baseline migration installed the tamma_app role with
         // 'changeme', reset the password so the app connection string can
         // actually bind. Also ensure the role is granted the necessary
-        // default privileges on any tables that existed before the Phase-2
-        // migration (the ALTER DEFAULT PRIVILEGES in the migration only
-        // applies to tables created AFTER the statement runs).
+        // privileges on any tables that existed before the baseline ran
+        // (the ALTER DEFAULT PRIVILEGES in the migration only applies to
+        // tables created AFTER the statement runs).
         await using (var admin = new NpgsqlConnection(AdminConnectionString))
         {
             await admin.OpenAsync();
@@ -138,7 +130,7 @@ public class TenancySetUpFixture
             _respawner = await Respawner.CreateAsync(conn, new RespawnerOptions
             {
                 DbAdapter = DbAdapter.Postgres,
-                TablesToIgnore = new[] { new Respawn.Graph.Table("__TammaMigrationsHistory") },
+                TablesToIgnore = new[] { new Respawn.Graph.Table("__ControlPlaneMigrationsHistory") },
                 SchemasToInclude = new[] { "public" }
             });
         }

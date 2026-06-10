@@ -12,6 +12,7 @@ using Tamma.Activities.CodeIndex;
 using Tamma.Activities.Debug;
 using Tamma.Activities.Security;
 using Tamma.Activities.Debug.Models;
+using Tamma.Api.Services.Agents;
 using Endpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
@@ -376,7 +377,8 @@ public class DebuggingWorkflow : WorkflowBase
             WorkflowDefinitionId = new("llm-call"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["agentRole"] = "implementer",
+                ["agentRole"] = AgentRole.Developer.ToWire(),
+                ["action"] = AgentAction.Debug.ToWire(),
                 ["taskPrompt"] = $"Apply fix for hypothesis: {SecurityHelpers.SanitizeForPrompt(selectedHypothesisJson.Get(ctx) ?? "unknown")} (mode: {debugContextMode.Get(ctx)}, iteration: {currentIteration.Get(ctx)})",
                 ["sessionId"] = sessionId.Get(ctx).ToString()
             }),

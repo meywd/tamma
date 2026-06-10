@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Operations
-**Status**: Draft
+**Status**: DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (AC2 `resourceSummary` join closed by 2026-05-31 follow-up; AC3 SSE `?fallback=poll` shipped 2026-06-05 — see AC3 note below). No remaining residuals.
 **Priority**: Medium (without this UX, platform admins investigate
 stuck tenants via `psql` and Elsa Studio — workable but slow; this
 is the first-class observability surface for the workflow-driven
@@ -86,11 +86,20 @@ typo-proof**.
       without also hitting AC2.
 - [ ] Heartbeat: `event: ping\ndata: {}\n\n` every 15s so
       intermediate proxies don't drop the connection.
-- [ ] **SSE fallback**: if the client cannot open the stream
+- [x] **SSE fallback**: if the client cannot open the stream
       (proxy incompatibility), the dashboard falls back to
       polling AC2 every 2 seconds. A query param
       `?fallback=poll` lets the client explicitly request polling
       mode.
+      > **Shipped 2026-06-05:** `?fallback=poll` on the events/stream
+      > endpoint returns a one-shot JSON `PollSnapshot`
+      > (`{ events, nextEventId, hasMore }`) instead of a `text/event-stream`.
+      > No `Last-Event-ID` → most recent `PollSnapshotMax` (200) events,
+      > chronological; header present → only rows past that cursor. Same M4
+      > tag scrub + tenant scoping as the stream. The client echoes
+      > `nextEventId` (the newest row's Guid Id — the SAME resume token the
+      > stream emits as `id:`) back via `Last-Event-ID` on the next poll;
+      > an empty delta echoes the prior cursor so the client keeps its place.
 - [ ] Per Story 28-8, the SSE handler subscribes to the
       `tenant.deleted` signal and terminates the stream with a
       final `event: tenant_deleted` when a tenant's
@@ -402,3 +411,44 @@ valid. Each action requires a confirmation dialog.
   requiring two platform admin approvals before enabling in
   production — deferred to a follow-up if the first production
   use shows one admin is insufficient.
+
+## Closed by 2026-05-31 follow-up
+
+**AC2 `resourceSummary` (24h analytics) — now wired.** The
+verification residual ("the AdminTenants detail endpoint does NOT
+join to `platform_analytics_hourly`") is resolved.
+
+- `IPlatformAnalyticsService.GetTenantResourceSummaryAsync(Guid
+  tenantId, …)` was added (fact-table-only, O(≤24)-row scan over
+  `platform_analytics_hourly` for the window `[now-24h, now)`,
+  excludes the platform-wide `TenantId IS NULL` rows). Returns
+  `TenantResourceSummary.Empty` (all zeros) for a freshly
+  provisioned tenant — never null, never an error, 200 OK.
+- `GET /api/admin/tenants/{id}/detail` now carries a
+  `resourceSummary` object on `AdminTenantDetailResponse`.
+
+**Metric-model divergence (accepted/deferred).** The wide-row
+`PlatformAnalyticsHourly` fact table is the only analytics source
+that shipped — the long-narrow MetricKey/Tags metric model from the
+original 28-10 spec was NOT built. `resourceSummary` therefore
+surfaces only the metrics that exist as real columns:
+`workflowsLast24h` (WorkflowsStarted), `workflowsCompletedLast24h`,
+`workflowsFailedLast24h`, `agentDispatchesLast24h`,
+`tokensInLast24h`, `tokensOutLast24h`, `llmCostUsdLast24h` (CostUsd).
+
+The AC2-named keys that could NOT be surfaced as-spec'd:
+- **`apiRequestsLast24h`** — not available; the fact table carries no
+  API-request counter. Blocked until the 28-10 long-narrow metric
+  model lands.
+- **`errorsLast24h` (5xx)** — no HTTP-error column on the fact table.
+  `workflowsFailedLast24h` is surfaced instead as the nearest real
+  error signal the table tracks (failed workflow instances).
+
+**Tests** (TDD, all green): 4 endpoint-level
+(`AdminTenantsTests` — aggregate / fresh-zeroed / >24h-excluded /
+other-tenant-and-platform-wide-excluded) + 4 service-level
+(`PlatformAnalyticsServiceFactTableTests` — sum / empty / window /
+isolation).
+
+The **AC3 SSE-fallback verification residual is unaffected** and
+remains open as a separate item.

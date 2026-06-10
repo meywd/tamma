@@ -44,7 +44,7 @@ function eventColor(type: string): string {
 export function EventsTimeline({ events }: EventsTimelineProps): JSX.Element {
   if (events.length === 0) {
     return (
-      <div className="text-sm text-gray-500 italic py-4">
+      <div className="text-sm text-gray-500 italic py-4 dark:text-gray-400">
         No platform events recorded for this tenant yet.
       </div>
     );
@@ -59,11 +59,11 @@ export function EventsTimeline({ events }: EventsTimelineProps): JSX.Element {
         >
           <div className="flex items-center justify-between mb-1">
             <code className="text-xs font-mono font-semibold">{evt.type}</code>
-            <time className="text-xs text-gray-500 font-mono">
+            <time className="text-xs text-gray-500 font-mono dark:text-gray-400">
               {formatTimestamp(evt.createdAt)}
             </time>
           </div>
-          <details className="text-xs font-mono text-gray-600">
+          <details className="text-xs font-mono text-gray-600 dark:text-gray-400">
             <summary className="cursor-pointer select-none hover:text-gray-800">
               tags / data
             </summary>

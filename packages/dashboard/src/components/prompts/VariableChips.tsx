@@ -24,7 +24,7 @@ export function VariableChips({
   emptyHint = 'No {{variables}} detected yet.',
 }: VariableChipsProps): JSX.Element {
   if (variables.length === 0) {
-    return <p className="text-xs text-gray-500 italic">{emptyHint}</p>;
+    return <p className="text-xs text-gray-500 italic dark:text-gray-400">{emptyHint}</p>;
   }
 
   const handleInsert = (name: string) => {

@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Story 31-10 — Integration Test Harness for Epic 31 git-platform drivers.
+
+    Tests run against real platform servers via Testcontainers. Skipped
+    cleanly when Docker is not available (mirrors wave-A
+    chromadb.integration.test.ts gating). Real driver code over real
+    HTTP — NO mocks. Adding a new platform contract test here means
+    bringing up its container in Fixtures/ + wiring a contract test
+    class that drives the IGitPlatformClient + IGitPlatformActionsClient
+    methods against the live API.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
+    <PackageReference Include="NUnit.Analyzers" Version="3.10.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
+    <!--
+      Generic Testcontainers package — used for spinning up the
+      gitea/gitea image. There is no Testcontainers.Gitea module
+      shipped today; the generic ContainerBuilder is what we need.
+    -->
+    <PackageReference Include="Testcontainers" Version="3.10.0" />
+    <PackageReference Include="coverlet.collector" Version="6.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Tamma.Platforms.Abstractions\Tamma.Platforms.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\Tamma.Platforms.Gitea\Tamma.Platforms.Gitea.csproj" />
+  </ItemGroup>
+
+</Project>

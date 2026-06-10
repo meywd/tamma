@@ -17,6 +17,10 @@ namespace Tamma.Api.Services.Secrets;
 /// remediation message ("rotate the laggard rows under runbook
 /// kek-rotation.md before retiring more keys"). It runs on the
 /// "ready" probe; the liveness probe (no DB dependency) ignores it.</para>
+///
+/// <para>Phase 0 made <c>KekVersion</c> <c>NOT NULL</c> in the schema,
+/// so the legacy "NULL = version 0" state can never exist and has been
+/// removed from this check.</para>
 /// </summary>
 public sealed class KekCabinetHealthCheck : IHealthCheck
 {
@@ -63,45 +67,18 @@ public sealed class KekCabinetHealthCheck : IHealthCheck
             await using var ctx = await _dbContextFactory
                 .CreateDbContextAsync(cancellationToken)
                 .ConfigureAwait(false);
-            // PF-S10 — count legacy rows that were stamped before
-            // KekVersion existed (NULL). Treat them as "version 0";
-            // after two rotations they fall off the retired ring and
-            // become permanently undecryptable. Report as Unhealthy
-            // with a remediation message so readiness blocks the
-            // deploy until an operator re-encrypts them.
-            var legacyNullCount = await ctx.Tenants
-                .IgnoreQueryFilters()
-                .Where(t => t.DeletedAt == null)
-                .Where(t => EF.Property<byte[]?>(t, "EncryptedConnectionString") != null)
-                .Where(t => EF.Property<int?>(t, "KekVersion") == null)
-                .CountAsync(cancellationToken)
-                .ConfigureAwait(false);
+            // Legacy "KekVersion IS NULL = version 0" detection removed — Phase 0 made
+            // the column NOT NULL, so the state cannot exist.
 
             // Find the lowest KekVersion across non-deleted tenant rows
-            // that actually carry an encrypted connection string AND
-            // have a populated KekVersion. We separately track legacy
-            // (NULL-version) rows above.
+            // that actually carry an encrypted connection string.
             var minRow = await ctx.Tenants
                 .IgnoreQueryFilters()
                 .Where(t => t.DeletedAt == null)
                 .Where(t => EF.Property<byte[]?>(t, "EncryptedConnectionString") != null)
-                .Select(t => (int?)EF.Property<int?>(t, "KekVersion"))
-                .Where(v => v != null)
+                .Select(t => (int?)EF.Property<short>(t, "KekVersion"))
                 .MinAsync(cancellationToken)
                 .ConfigureAwait(false);
-
-            if (legacyNullCount > 0)
-            {
-                var msg =
-                    $"{legacyNullCount} legacy rows lack version stamp; "
-                    + $"re-encrypt before any further rotation "
-                    + $"(active={activeVersion}, retainedHistorySize={retainedHistorySize}). "
-                    + "Rows with KekVersion IS NULL are treated as version 0 "
-                    + "and will fall off the retired-keys ring after two "
-                    + "rotations — see runbook kek-rotation.md.";
-                _logger.LogError("{Message}", msg);
-                return HealthCheckResult.Unhealthy(msg);
-            }
 
             if (minRow is null)
             {

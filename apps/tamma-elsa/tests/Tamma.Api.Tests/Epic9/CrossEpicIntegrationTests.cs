@@ -53,6 +53,12 @@ public class CrossEpicIntegrationTests
             Plan = "free",
         });
         await db.SaveChangesAsync();
+
+        // Phase 3 -- agent configs / prompt overrides / diagnostics are
+        // tenant-resident; the unified resolver only reaches them for
+        // provisioned tenants.
+        await ApiTestFixture.ProvisionTenantAsync(_tenantA);
+        await ApiTestFixture.ProvisionTenantAsync(_tenantB);
     }
 
     // ---------------------------------------------------------------------
@@ -110,7 +116,9 @@ public class CrossEpicIntegrationTests
         // tenant isolation story still holds — two different actors, two
         // different override sets, one shared system fallback.
         const string role = "developer";
-        const string action = "implement";
+        // Story 27-18 — 'implement' is no longer a taxonomy action; use the
+        // specific developer-owned token 'implement-feature'.
+        const string action = "implement-feature";
         const string tenantASpecificMarker =
             "TENANT-A-CUSTOM-TEMPLATE-{{taskDescription}}";
 
@@ -313,14 +321,14 @@ public class CrossEpicIntegrationTests
             var ctx = scope.ServiceProvider.GetRequiredService<ITenantContext>();
             ctx.SetTenantId(_tenantA);
             var svc = scope.ServiceProvider.GetRequiredService<PromptStoreService>();
-            resolvedA = (await svc.ResolveRoleActionAsync(_tenantA, "developer", "implement"))!;
+            resolvedA = (await svc.ResolveRoleActionAsync(_tenantA, "developer", "implement-feature"))!;
         }
         using (var scope = ApiTestFixture.Factory.Services.CreateScope())
         {
             var ctx = scope.ServiceProvider.GetRequiredService<ITenantContext>();
             ctx.SetTenantId(_tenantB);
             var svc = scope.ServiceProvider.GetRequiredService<PromptStoreService>();
-            resolvedB = (await svc.ResolveRoleActionAsync(_tenantB, "developer", "implement"))!;
+            resolvedB = (await svc.ResolveRoleActionAsync(_tenantB, "developer", "implement-feature"))!;
         }
 
         resolvedA.Should().NotBeNull();

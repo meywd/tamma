@@ -133,14 +133,14 @@ export function ProviderEntryForm(
     <form onSubmit={handleSubmit} className={`p-3 rounded-md border space-y-3 ${isEdit ? 'bg-yellow-50 border-yellow-200' : 'bg-blue-50 border-blue-200'}`}>
       {/* Provider — select dropdown */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">Provider</label>
         <select
           value={KNOWN_PROVIDERS.includes(provider) ? provider : '__custom__'}
           onChange={(e) => {
             if (e.target.value === '__custom__') return;
             handleProviderChange(e.target.value);
           }}
-          className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+          className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-800 dark:border-gray-600"
         >
           <option value="" disabled>Select a provider...</option>
           {KNOWN_PROVIDERS.map((p) => (
@@ -157,14 +157,14 @@ export function ProviderEntryForm(
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
             placeholder="Custom provider name"
-            className="w-full mt-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full mt-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600"
           />
         )}
       </div>
 
       {/* Model — dropdown with available models + custom option */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">Model</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">Model</label>
         {availableModels.length > 0 ? (
           <>
             <select
@@ -173,7 +173,7 @@ export function ProviderEntryForm(
                 if (e.target.value === '__custom__') return;
                 setModel(e.target.value);
               }}
-              className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-800 dark:border-gray-600"
             >
               <option value="">Default model</option>
               {availableModels.map((m) => (
@@ -189,7 +189,7 @@ export function ProviderEntryForm(
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
                 placeholder="Custom model name"
-                className="w-full mt-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full mt-1 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600"
               />
             )}
           </>
@@ -199,23 +199,23 @@ export function ProviderEntryForm(
             value={model}
             onChange={(e) => setModel(e.target.value)}
             placeholder="e.g., claude-sonnet-4-5"
-            className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600"
           />
         )}
       </div>
 
       {/* API Key Ref */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">API Key Env Var</label>
+        <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">API Key Env Var</label>
         <input
           type="text"
           value={apiKeyRef}
           onChange={(e) => setApiKeyRef(e.target.value)}
           placeholder="e.g., ANTHROPIC_API_KEY"
-          className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600"
         />
         {provider && DEFAULT_API_KEY_REF[provider.toLowerCase()] && !apiKeyRef && (
-          <p className="text-xs text-gray-400 mt-0.5">
+          <p className="text-xs text-gray-400 mt-0.5 dark:text-gray-500">
             Default: {DEFAULT_API_KEY_REF[provider.toLowerCase()]}
           </p>
         )}
@@ -231,7 +231,7 @@ export function ProviderEntryForm(
         <button
           type="button"
           onClick={onCancel}
-          className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
+          className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md dark:bg-gray-800 dark:text-gray-300"
         >
           Cancel
         </button>

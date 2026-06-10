@@ -91,7 +91,7 @@ export function PhaseRoleMatrix(): JSX.Element | null {
   }, [draft, save]);
 
   if (loading && !draft) return <LoadingSpinner />;
-  if (error && !draft) return <div className="text-red-600 text-sm">{error}</div>;
+  if (error && !draft) return <div className="text-red-600 text-sm dark:text-red-400">{error}</div>;
   if (!draft) return null;
 
   const hasChanges = JSON.stringify(draft) !== JSON.stringify(config);
@@ -109,14 +109,14 @@ export function PhaseRoleMatrix(): JSX.Element | null {
         </button>
       }
     >
-      {saveError && <div className="mb-4 text-sm text-red-600">{saveError}</div>}
+      {saveError && <div className="mb-4 text-sm text-red-600 dark:text-red-400">{saveError}</div>}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-200">
-              <th className="text-left py-3 pr-4 font-semibold text-gray-900">Phase</th>
-              <th className="text-left py-3 pr-4 font-semibold text-gray-900">Assigned Role</th>
-              <th className="text-left py-3 font-semibold text-gray-500">Default</th>
+            <tr className="border-b border-gray-200 dark:border-gray-700">
+              <th className="text-left py-3 pr-4 font-semibold text-gray-900 dark:text-gray-100">Phase</th>
+              <th className="text-left py-3 pr-4 font-semibold text-gray-900 dark:text-gray-100">Assigned Role</th>
+              <th className="text-left py-3 font-semibold text-gray-500 dark:text-gray-400">Default</th>
             </tr>
           </thead>
           <tbody>
@@ -126,17 +126,15 @@ export function PhaseRoleMatrix(): JSX.Element | null {
               const isOverridden = draft.phaseRoleMap?.[phase] !== undefined && draft.phaseRoleMap[phase] !== defaultRole;
 
               return (
-                <tr key={phase} className="border-b border-gray-100">
+                <tr key={phase} className="border-b border-gray-100 dark:border-gray-800">
                   <td className="py-3 pr-4">
-                    <span className="font-medium text-gray-900">{PHASE_LABELS[phase]}</span>
+                    <span className="font-medium text-gray-900 dark:text-gray-100">{PHASE_LABELS[phase]}</span>
                   </td>
                   <td className="py-3 pr-4">
                     <select
                       value={currentRole}
                       onChange={(e) => handleChange(phase, e.target.value as AgentType)}
-                      className={`px-2 py-1 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                        isOverridden ? 'border-blue-300 bg-blue-50' : 'border-gray-300'
-                      }`}
+                      className={`px-2 py-1 text-sm border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${ isOverridden ? 'border-blue-300 bg-blue-50' : 'border-gray-300' }`}
                     >
                       {ALL_ROLES.map((role) => (
                         <option key={role} value={role}>
@@ -145,7 +143,7 @@ export function PhaseRoleMatrix(): JSX.Element | null {
                       ))}
                     </select>
                   </td>
-                  <td className="py-3 text-gray-500">{ROLE_LABELS[defaultRole]}</td>
+                  <td className="py-3 text-gray-500 dark:text-gray-400">{ROLE_LABELS[defaultRole]}</td>
                 </tr>
               );
             })}

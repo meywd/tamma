@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Auth
-**Status**: Draft
+**Status**: DONE (2026-06-07) — AC1 `active_tenant_slug` claim shipped (the last residual); `JwtService` now emits the active tenant's slug + includes `slug` in each `tenants[]` entry, plumbed from `m.Tenant.Slug`. AC3 (refresh-token tenant binding + reuse-detection) shipped 2026-05-29; AC3 follow-ups (`AUTH.REFRESH_REUSE_DETECTED` platform_events emission) shipped 2026-05-30; AC2 atomic SwitchOrg (single CP transaction + `FOR UPDATE` serialisation + post-commit audit emission) shipped 2026-05-30; `tenant_mismatch_on_refresh` 400 marked intentionally-not-implemented per design (see Implementation Notes section below). Audit reference: `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. Residual (corrected 2026-06-06): only the AC1 `tenantSlug` claim is unshipped — `jti` IS emitted (`JwtService.cs:142`) and the AC6 logout-all path IS implemented (`RevokeAllForUserAsync`, `AuthEndpoints.cs:706`); both were mis-listed as residuals before. `tenantSlug` is a UI-display nicety (~5–20 LoC) and the only item keeping this MOSTLY DONE.
 **Priority**: High (without per-tenant-scoped JWTs plus a switch-org
 endpoint, users with memberships in more than one tenant cannot
 navigate between them without re-logging-in, refresh tokens leak
@@ -103,9 +103,19 @@ Removed versus the pre-epic token:
       validates not expired / not revoked, issues a new access +
       refresh token pair scoped to the **same** `TenantId`. A
       refresh token with `TenantId=<A>` can NEVER mint an access
-      token for tenant B — a request asserting a different
+      token for tenant B — ~~a request asserting a different
       target returns 400 `{ "error": "tenant_mismatch_on_refresh",
-      "action": "POST /api/v1/auth/switch-org" }`.
+      "action": "POST /api/v1/auth/switch-org" }`~~. **Intentionally
+      not implemented (2026-05-30)**: `RefreshRequest` is
+      `{ refreshToken }` — there is no target-tenant field for a
+      caller to "assert" against. Refresh is single-tenant by
+      design (the token IS the tenant binding), so a 400 with the
+      `tenant_mismatch_on_refresh` code is unreachable. The DB-side
+      enforcement (token.TenantId is the source of truth, membership
+      loss returns 401 with `action: switch-org`) IS in place; the
+      400 path that the AC text described is an error class the new
+      DTO contract cannot produce. Switch-org is the cross-tenant
+      path. See Implementation Notes for the design call.
 - [ ] Refresh rotates: the incoming refresh token is marked
       `RevokedAt=NOW()` and the new one issued in a single CP
       transaction. Presenting the revoked token a second time
@@ -329,6 +339,189 @@ Removed versus the pre-epic token:
       and `(UserId, TenantId, RevokedAt)` for the admin-path hot
       query (validated by EXPLAIN ANALYZE against a seeded dataset
       of 100k rows)
+
+## Implementation notes for AC3 (2026-05-29)
+
+AC3 (refresh-token tenant binding + reuse-detection) shipped on `feat/wave-b`.
+Closes the gap flagged by the 2026-05-29 Epic 28 audit.
+
+**Schema:**
+- `apps/tamma-elsa/src/Tamma.Data/Entities/RefreshToken.cs` — added
+  `TenantId UUID NULL`, `JtiChainHead UUID NULL`, `RevokedReason VARCHAR(32) NULL`.
+  Closed-enum constants in `RefreshTokenRevokedReasons` (manual_logout, logout_all,
+  rotation_consumed, switch_org, reuse_detected, password_reset, admin_force_logout).
+- Migration: `Migrations/ControlPlane/20260529125335_Story28_9_RefreshTokenTenantBinding.cs`.
+  Adds the three columns + two partial indexes (`IX_refresh_tokens_JtiChainHead`,
+  `IX_refresh_tokens_UserId_TenantId`) + two CHECK constraints
+  (closed enum on `RevokedReason`, NULL-parity between `RevokedAt` and `RevokedReason`).
+
+**Repository (`apps/tamma-elsa/src/Tamma.Data/Repositories/RefreshTokenRepository.cs`):**
+- New overload `CreateAsync(userId, tenantId, hash, expiresAt, jtiChainHead)`
+  for tenant-bound issuance; legacy 3-arg overload preserved for transitional callers.
+- New `RevokeAsync(id, reason)` + `RevokeAllForUserAsync(userId, reason)`
+  overloads carrying explicit revoke reasons; legacy overloads default to
+  `manual_logout` / `logout_all`.
+- New `FindByJtiChainHeadAsync(chainHead)` and `RevokeChainAsync(chainHead, reason)`
+  for reuse-detection.
+- Client-side guard `EnsureKnownReason` rejects unknown reasons with
+  `ArgumentException` before the DB CHECK fires.
+
+**Endpoint changes (`apps/tamma-elsa/src/Tamma.Api/Endpoints/AuthEndpoints.cs`):**
+- `Login` mints refresh row with the active tenant (NULL when rootless) and a
+  fresh `JtiChainHead`.
+- `Refresh` re-resolves the role for the bound tenant on every rotation
+  (the mid-session demotion catch-up), reads `token.TenantId` as the binding
+  source of truth, propagates `JtiChainHead` to the rotated row, stamps the
+  consumed row with `rotation_consumed`. Reuse-detection (revoked-then-replayed)
+  burns the entire lineage via `RevokeChainAsync(chainHead, reuse_detected)`;
+  pre-Story-28-9 rows with NULL chain head fall back to the previous
+  `RevokeAllForUserAsync` semantics.
+- `SwitchOrg` revokes the presented refresh row with `switch_org`, bulk-revokes
+  with `switch_org` when no token is in the body, and mints a NEW chain head
+  for the target-tenant lineage (the source-tenant chain terminates at
+  switch-org).
+- `Logout(?all=true)` tags the bulk revoke with `logout_all`; per-token logout
+  uses `manual_logout`.
+- `PasswordResetConfirm` uses `password_reset` reason.
+
+**Tests:**
+- `tests/Tamma.Api.Tests/Auth/RefreshTokenTenantBindingTests.cs` — entity shape,
+  model graph, repository CRUD with new columns, CHECK constraints (32 assertions).
+- `tests/Tamma.Api.Tests/Auth/RefreshTokenReuseDetectionTests.cs` —
+  end-to-end reuse-detection via the Refresh handler (chain burn, sibling 401,
+  pre-Story-28-9 fallback path).
+- `tests/Tamma.Api.Tests/Auth/SwitchOrgRefreshTokenTests.cs` —
+  tenant binding on the new refresh row, new chain head on switch-org,
+  `switch_org` revoke reason on both single-token and bulk-revoke paths.
+- All existing Auth + Epic28 tests (311 + 272) continue to pass.
+
+**Run:** `sg docker -c "dotnet test apps/tamma-elsa/Tamma.sln"`.
+
+**Out of scope (AC1 / AC2 / AC4–AC7 parts):** the audit's other AC3-adjacent
+notes (jti claim explicit in tokens, `tenant_mismatch_on_refresh` 400 — the
+current `RefreshRequest` DTO has no target-tenant field, so that error path
+is only reachable when a future DTO addition lands), `IsPlatformAdminHandler`,
+`tamma_auth_*` metrics, and the `DELETE /api/admin/users/{userId}/sessions`
+endpoint stay on the parent agent's plan for the rest of Story 28-9.
+
+## Closed by 2026-05-30 follow-up
+
+### AC2 — atomic SwitchOrg (single CP transaction + `FOR UPDATE`) — SHIPPED
+
+The #1 security gap from the 2026-05-30 Epic 28 residual verification
+report is closed. Before the fix, `AuthEndpoints.SwitchOrg` ran its
+revoke-old → persist-active-tenant → insert-new sequence with NO
+transaction wrap and NO row-lock; a crash mid-sequence could leave the
+old refresh token revoked-without-a-new-one-issued (half-rotated
+session), and concurrent switch-org calls from the same user could
+interleave into inconsistent session state.
+
+**Atomicity** — the handover (FOR-UPDATE lock → persist active tenant →
+revoke old refresh token → insert new tenant-bound refresh row) now runs
+inside a single `ControlPlaneDbContext.Database.BeginTransactionAsync()`
+that commits as a unit. If any step throws (e.g. the insert fails) the
+whole transaction rolls back, so the old token is NEVER left revoked.
+No silent fallback: if the transaction cannot be established the
+exception propagates.
+
+**Serialisation** — concurrent switch-org calls from the same user are
+serialised by a Postgres `SELECT ... FOR UPDATE` row-lock on the user's
+newest active `refresh_tokens` row, taken as the first statement inside
+the transaction via the new repository method
+`IRefreshTokenRepository.FindActiveTokenForUpdateAsync(userId)`. The
+second caller blocks until the first caller's transaction commits, then
+proceeds against the rotated state. The method is provider-guarded
+(Npgsql `FromSqlInterpolated` with `FOR UPDATE`; EF InMemory degrades to
+a plain newest-active lookup — production code is NOT weakened, the
+fallback only exists for the unit-test provider). When the user holds no
+active refresh token (rootless session) the lookup returns null and the
+insert still runs inside the transaction.
+
+**Event ordering** — `USER.ORG_SWITCHED.SUCCESS` is emitted to
+`platform_events` AFTER the transaction commits (the spec's "single CP
+transaction PLUS a RabbitMQ event publish after commit"). The emission
+is post-commit best-effort: a publisher failure does NOT roll back the
+committed token rotation (matching the AC3 reuse-detection emission
+pattern). The endpoint keeps the existing `USER.ORG_SWITCHED.SUCCESS`
+event type rather than the AC2-text's `AUTH.TENANT_SWITCHED` to avoid
+breaking the already-shipped Story-28-R2 audit contract; the
+durable-audit-after-commit requirement is satisfied by the existing
+event.
+
+Code: `AuthEndpoints.SwitchOrg` (transaction wrap + `cpDb` parameter);
+`RefreshTokenRepository.FindActiveTokenForUpdateAsync` +
+`IRefreshTokenRepository.FindActiveTokenForUpdateAsync`.
+
+Tests (`tests/Tamma.Api.Tests/Auth/SwitchOrgEndpointTests.cs`): four new
+tests — `SwitchOrg_RollsBackRevoke_WhenInsertNewRefreshTokenFails`
+(atomicity: injected insert failure rolls back the revoke),
+`SwitchOrg_ConcurrentCalls_ConvergeOnSingleCoherentState`
+(serialisation: a serialised pair leaves exactly one active token bound
+to the last target),
+`SwitchOrg_EmitsAuditEventAfterCommit_AndPublisherFailureDoesNotRollBackRotation`
+(post-commit best-effort), and
+`SwitchOrg_EmitsOrgSwitchedAuditEvent_OnHappyPath`. All 23 SwitchOrg
+tests pass against the real-Postgres `ApiTestFixture` (Testcontainers).
+
+**Fixture caveat**: the Auth tests run against a real Postgres container
+(`ApiTestFixture`), so the transaction + `FOR UPDATE` exercise the same
+EF/Npgsql surface as production. The direct-handler harness shares one
+`ControlPlaneDbContext` per call, so the concurrency test drives the two
+switches sequentially (each on its own scope/transaction) and asserts on
+the resulting coherent state, which the `FOR UPDATE` serialisation
+guarantees in a true-concurrent production deploy.
+
+### Prior AC3 residuals
+
+Two of the AC3 residuals listed in the Status line above closed on
+`feat/wave-b`:
+
+### `AUTH.REFRESH_REUSE_DETECTED` platform_events emission — SHIPPED
+
+`AuthEndpoints.Refresh` now emits an `AUTH.REFRESH_REUSE_DETECTED` row to
+`platform_events` whenever the reuse-detection branch fires (revoked
+token replayed). Tags carry `userId`, `tenantId` (when bound),
+`jtiChainHead` (when known), `actorIp` (resolved through
+`TrustedProxyResolver`), and `source=auth`. Data carries
+`revokedTokenCount` so the dashboard can show "this incident burned N
+sessions". Best-effort: a publisher failure logs `LogWarning` and does
+NOT mask the 401 because the security action (lineage burn) already
+happened. The legacy fallback path (pre-Story-28-9 row with NULL
+`JtiChainHead` / NULL `TenantId`) emits the event without the
+`jtiChainHead` / `tenantId` tags so SIEM can distinguish the two paths.
+
+Code: `AuthEndpoints.cs` — new private helper
+`BuildRefreshReuseDetectedEvent`; the reuse-detection branch in `Refresh`
+calls the publisher inside a try/catch.
+
+Tests: `RefreshTokenReuseDetectionTests.cs` — two new tests
+(`Refresh_ReuseDetection_EmitsAuthRefreshReuseDetectedEvent`,
+`Refresh_ReuseDetection_LegacyNullChainHead_EmitsEventWithoutChainHeadTag`).
+
+### `tenant_mismatch_on_refresh` 400 — INTENTIONALLY NOT IMPLEMENTED
+
+Decision: do NOT add a target-tenant field to `RefreshRequest`.
+
+**Rationale:** the AC3 text describes a 400 error code emitted when a
+client asserts a different target tenant on a refresh call. The current
+DTO (`{ refreshToken }`) provides no way for a client to assert a target
+— refresh's contract is "give me a new pair for the tenant I'm on", and
+the token IS the binding (token.TenantId is the source of truth, set
+when the row was created at login / switch-org). Adding a target field
+would change the contract for zero functional gain: the cross-tenant
+flow already exists as `POST /api/v1/auth/switch-org` with explicit
+membership validation, audit emission, and chain-head reset. Refresh
+deliberately stays single-tenant.
+
+The DB-side enforcement of the same invariant IS in place: if the
+refresh row is bound to tenant A but the user's membership in A was
+revoked between refreshes, the handler returns 401 with `action: POST
+/api/v1/auth/switch-org` (the membership-lost branch in `Refresh`). That
+is the actual user-visible expression of "this refresh token can't mint
+an access token for somewhere else".
+
+If a future client capability requires cross-tenant assertion on
+refresh, re-open this residual: add the field, the 400 path, the test.
 
 ## Risks / Open Questions
 

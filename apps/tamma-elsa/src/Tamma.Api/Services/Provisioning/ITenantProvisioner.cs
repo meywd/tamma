@@ -5,8 +5,8 @@ namespace Tamma.Api.Services.Provisioning;
 /// <list type="bullet">
 ///   <item><description><see cref="NullTenantProvisioner"/> — dev/default
 ///     when <c>Cranl:ApiKey</c> is absent. Flips the row to
-///     <see cref="ProvisioningState.Ready"/> immediately and the tenant
-///     rides on the central / shared Postgres via RLS. No external
+///     <see cref="ProvisioningState.Ready"/> immediately; the tenant's
+///     placement stays on the unified tenant_databases pool. No external
 ///     calls.</description></item>
 ///   <item><description><see cref="CranlTenantProvisioner"/> — production.
 ///     Walks the README's per-tenant flow (project → db → poll → app
@@ -16,7 +16,15 @@ namespace Tamma.Api.Services.Provisioning;
 /// <para>All methods are idempotent: calling <see cref="ProvisionAsync"/>
 /// on a tenant that already has a Cranl project returns the current
 /// status without doing anything new.</para>
+///
+/// <para><b>Story 30-3 — DEPRECATED.</b> Replaced by the v2 surface
+/// <see cref="V2.ITenantInfrastructureProvider"/> + the
+/// <see cref="V2.TenantProviderRegistry"/>. Existing call sites
+/// (admin endpoints, the platform task handler) continue to compile —
+/// the wave-C migration converts them to the v2 contract. New code
+/// MUST use v2; no exceptions.</para>
 /// </summary>
+[Obsolete("Use ITenantInfrastructureProvider (V2) instead. Removed in Wave C.")]
 public interface ITenantProvisioner
 {
     /// <summary>

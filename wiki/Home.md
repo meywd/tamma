@@ -6,9 +6,9 @@
 
 - [Project Roadmap](Roadmap) - All 31 epics with timeline, status, and layer placement
 - [Architecture](Architecture) - System architecture overview (three deployment modes, `IAgentExecutor`, pluggable backends)
-- [Deployment](Deployment) - Docker stack, Phase-3 RLS runbook, env vars, Redis/Cranl activation
+- [Deployment](Deployment) - Docker stack, least-privilege app-role runbook, env vars, Redis/Cranl activation
 - [Agent Dispatch](Agent-Dispatch) - Epic 19 completion: `LocalExecutor`, `GitHubActionsExecutor`, webhook mode, TS `execute-agent` CLI
-- [Security](Security) - RLS, rate limiting, API key hashing, content sanitization, libsodium, webhook tenant-scoping
+- [Security](Security) - Schema-per-tenant isolation, rate limiting, API key hashing, content sanitization, libsodium, webhook tenant-scoping
 - [GitHub Integration](GitHub-Integration) - Octokit App client, OAuth flows, Actions dispatch
 - [Testing](Testing) - Test strategy, testcontainers patterns, per-scope coverage
 - [Port Audit](Port-Audit) - TS → C# port-gap audit (196 findings) + 2026-04-20 code-review round (18 findings)
@@ -53,7 +53,7 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 
 ### Architecture Highlights
 
-- **Three Deployment Modes** — CLI (`LocalExecutor`), SaaS single-tenant (central Postgres + RLS), SaaS multi-tenant (Cranl-provisioned per-tenant infra)
+- **Three Deployment Modes** — CLI (`LocalExecutor`), SaaS on the central pool (schema-per-tenant), SaaS with Cranl-minted per-tenant hosting infra
 - **`IAgentExecutor` Abstraction** — Local subprocess or GitHub Actions dispatch; mode resolved via `TAMMA_AGENT_MODE` env / config / auto-detect
 - **Interface-Based Provider Abstraction** -- Swap AI providers (Claude, GPT-4, Gemini, OpenRouter, local LLMs)
 - **Platform-Agnostic Git Integration** -- GitHub today; Gitea/Forgejo/GitLab via Epic 31 drivers
@@ -87,7 +87,7 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 - **Libsodium secrets provisioner** -- `LibsodiumGitHubSecretsProvisioner` encrypts GitHub Actions repository secrets via `Sodium.Core` sealed boxes.
 - **TammaEngine SSE lifecycle** (engine/012) -- in-process `InMemoryEngineLifecycleBus` + SSE endpoints `/api/engine/events/state`, `/api/engine/events/logs`. Tenant-scoped fanout; 15-second heartbeats.
 - **Redis-backed distributed rate limit** (auth/014) -- `IDistributedRateLimitBackend` with Lua `INCR + EXPIRE`; activated by `ConnectionStrings:Redis`.
-- **Cranl per-tenant provisioner** -- `CranlTenantProvisioner`; admin endpoint `POST /api/admin/tenants/{id}/provision`. `NullTenantProvisioner` is the default — tenants stay on the shared central Postgres via RLS until `Cranl:ApiKey` + `Cranl:OrganizationId` set.
+- **Cranl per-tenant provisioner** -- `CranlTenantProvisioner`; admin endpoint `POST /api/admin/tenants/{id}/provision`. `NullTenantProvisioner` is the default — no external resources are minted until `Cranl:ApiKey` + `Cranl:OrganizationId` set (tenant placement stays on the central pool).
 - **Content sanitizer port (~360 LoC)** -- C# port of the TS `ContentSanitizer` with prompt-injection detection, zero-width removal, NFKD normalisation.
 - **Mobile-responsive wiki nav** -- 2026-04-19 fix: side nav hides on mobile with hamburger toggle (commit `365ef54`).
 

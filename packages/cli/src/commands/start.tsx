@@ -139,6 +139,33 @@ export async function startCommand(options: CLIOptions): Promise<void> {
     for (const err of errors) {
       console.error(`  - ${err}`);
     }
+    // In `--mode service` (docker tamma-engine container), sit idle
+    // instead of exiting so the container doesn't restart-loop and so
+    // the deploy's layer-4 health check passes. The engine just isn't
+    // useful until config is provided — but it's also not the customer-
+    // facing surface in SaaS deployments where workers run via GitHub
+    // Actions per-tenant (Story 19-1). For a `tamma start` invocation
+    // outside service mode (single-user CLI), the original fail-fast
+    // behavior is preserved.
+    if (options.mode === 'service') {
+      console.error('');
+      console.error('Engine is in --mode service with incomplete config; sitting idle.');
+      console.error('Configure GitHub credentials and restart to activate the worker loop.');
+      try { fs.writeFileSync('/tmp/tamma-engine-healthy', String(Date.now())); } catch { /* best-effort */ }
+      await new Promise<void>(resolve => {
+        // Node's event loop exits when there's no pending work; signal
+        // handlers alone aren't considered work, so without an active
+        // timer this Promise would never block — the process would exit
+        // immediately and docker would restart-loop the container. The
+        // 2^30ms (~12d) heartbeat keeps the loop alive at zero CPU cost
+        // until SIGTERM/SIGINT clears it and resolves the Promise.
+        const heartbeat = setInterval(() => { /* keep-alive */ }, 1 << 30);
+        const cleanup = (): void => { clearInterval(heartbeat); resolve(); };
+        process.once('SIGTERM', cleanup);
+        process.once('SIGINT',  cleanup);
+      });
+      return;
+    }
     process.exit(1);
   }
 

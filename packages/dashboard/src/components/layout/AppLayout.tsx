@@ -11,7 +11,7 @@ export function AppLayout(): JSX.Element {
       <NavHeader />
       <div className="flex min-h-screen font-sans" style={{ paddingTop: 48 }}>
         <Sidebar />
-        <main id="main-content" className="flex-1 p-8 bg-gray-50 overflow-auto">
+        <main id="main-content" className="flex-1 p-8 bg-gray-50 overflow-auto dark:bg-gray-900">
           <Outlet />
         </main>
       </div>

@@ -97,7 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }): JSX.Element
 
   const logout = useCallback(async () => {
     try {
-      await apiClient.post('/api/v1/auth/logout', {});
+      await apiClient.post('/api/auth/logout', {});
     } catch {
       // Even if logout fails server-side, clear local state so the user
       // can't keep acting under a stale session.

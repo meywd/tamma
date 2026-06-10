@@ -1,6 +1,6 @@
 using FluentAssertions;
 using NUnit.Framework;
-using Tamma.Api.Logging;
+using Tamma.Core.Logging;
 
 namespace Tamma.Api.Tests.Logging;
 

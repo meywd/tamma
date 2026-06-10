@@ -29,12 +29,12 @@ export function ConsumerLink({ consumer, tenantId }: ConsumerLinkProps): JSX.Ele
     case 'postgres':
       return (
         <span className="inline-flex items-center gap-1 text-sm">
-          <span className="text-gray-700">
+          <span className="text-gray-700 dark:text-gray-300">
             Postgres role <code className="font-mono">{consumer.target}</code>
           </span>
           <a
             href="/admin/runtime/dbcontexts"
-            className="text-blue-600 hover:underline text-xs"
+            className="text-blue-600 hover:underline text-xs dark:text-blue-400"
           >
             (RLS runbook)
           </a>
@@ -44,13 +44,13 @@ export function ConsumerLink({ consumer, tenantId }: ConsumerLinkProps): JSX.Ele
     case 'cranl':
       return (
         <span className="inline-flex items-center gap-1 text-sm">
-          <span className="text-gray-700">
+          <span className="text-gray-700 dark:text-gray-300">
             Cranl app <code className="font-mono">{consumer.target}</code>
           </span>
           {tenantId ? (
             <a
               href={`/admin/tenants/${tenantId}`}
-              className="text-blue-600 hover:underline text-xs"
+              className="text-blue-600 hover:underline text-xs dark:text-blue-400"
             >
               (tenant page)
             </a>
@@ -60,7 +60,7 @@ export function ConsumerLink({ consumer, tenantId }: ConsumerLinkProps): JSX.Ele
 
     case 'github_webhook':
       return (
-        <span className="text-sm text-gray-700">
+        <span className="text-sm text-gray-700 dark:text-gray-300">
           GitHub installation{' '}
           <code className="font-mono">{consumer.target}</code>
         </span>
@@ -68,7 +68,7 @@ export function ConsumerLink({ consumer, tenantId }: ConsumerLinkProps): JSX.Ele
 
     case 'hmac_shared':
       return (
-        <span className="text-sm text-gray-700">
+        <span className="text-sm text-gray-700 dark:text-gray-300">
           HMAC shared with <code className="font-mono">{consumer.target}</code>
         </span>
       );
@@ -76,10 +76,10 @@ export function ConsumerLink({ consumer, tenantId }: ConsumerLinkProps): JSX.Ele
     case 'tamma_engine':
       return (
         <span className="inline-flex items-center gap-1 text-sm">
-          <span className="text-gray-700">
+          <span className="text-gray-700 dark:text-gray-300">
             Engine <code className="font-mono">{consumer.target}</code>
           </span>
-          <a href="/admin" className="text-blue-600 hover:underline text-xs">
+          <a href="/admin" className="text-blue-600 hover:underline text-xs dark:text-blue-400">
             (runtime health)
           </a>
         </span>
@@ -87,7 +87,7 @@ export function ConsumerLink({ consumer, tenantId }: ConsumerLinkProps): JSX.Ele
 
     default:
       return (
-        <span className="text-sm text-gray-700">
+        <span className="text-sm text-gray-700 dark:text-gray-300">
           <code className="font-mono">{consumer.label ?? consumer.target}</code>
         </span>
       );

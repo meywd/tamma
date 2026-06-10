@@ -50,7 +50,7 @@ export function PromptTable({
           aria-label="Filter by role"
           value={roleFilter}
           onChange={(e) => setRoleFilter(e.target.value)}
-          className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[160px]"
+          className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[160px] dark:bg-gray-800 dark:border-gray-600"
         >
           <option value="all">All Roles ({ROLES.length})</option>
           {ROLES.map((r) => (
@@ -63,7 +63,7 @@ export function PromptTable({
           aria-label="Filter by action"
           value={actionFilter}
           onChange={(e) => setActionFilter(e.target.value)}
-          className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[180px]"
+          className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-[180px] dark:bg-gray-800 dark:border-gray-600"
         >
           <option value="all">All Actions ({ACTIONS.length})</option>
           {ACTIONS.map((a) => (
@@ -78,46 +78,46 @@ export function PromptTable({
           placeholder="Search template content..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1 max-w-xs"
+          className="text-sm border border-gray-300 rounded-md px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1 max-w-xs dark:bg-gray-800 dark:border-gray-600"
         />
-        <span className="text-xs text-gray-500 ml-auto">
+        <span className="text-xs text-gray-500 ml-auto dark:text-gray-400">
           {filtered.length} of {prompts.length} templates
         </span>
       </div>
       {/* Table */}
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden dark:bg-gray-800 dark:border-gray-700">
         <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
+          <thead className="bg-gray-50 dark:bg-gray-900">
             <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Role
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Action
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Source
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Tools
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Max Tokens
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Variables
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Preview
               </th>
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+          <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-800">
             {filtered.length === 0 ? (
               <tr>
                 <td
                   colSpan={7}
-                  className="px-4 py-8 text-center text-sm text-gray-500"
+                  className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400"
                 >
                   No templates match the current filters.
                 </td>
@@ -126,7 +126,7 @@ export function PromptTable({
               filtered.map((p) => (
                 <tr
                   key={`${p.role ?? '_'}/${p.action ?? '_'}`}
-                  className="hover:bg-gray-50 cursor-pointer"
+                  className="hover:bg-gray-50 cursor-pointer dark:hover:bg-gray-800"
                   onClick={() => {
                     if (p.role && p.action) onRowClick(p.role, p.action);
                   }}
@@ -143,33 +143,29 @@ export function PromptTable({
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                        p.source === 'user'
-                          ? 'bg-amber-100 text-amber-800'
-                          : 'bg-gray-100 text-gray-700'
-                      }`}
+                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${ p.source === 'user' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-700' }`}
                     >
                       {p.source === 'user' ? 'override' : 'system'}
                     </span>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     {p.enableTools ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
                         on
                       </span>
                     ) : (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
                         off
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-600 font-mono">
+                  <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-600 font-mono dark:text-gray-400">
                     {p.maxTokens.toLocaleString()}
                   </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-600 font-mono">
+                  <td className="px-4 py-3 whitespace-nowrap text-xs text-gray-600 font-mono dark:text-gray-400">
                     {p.variables?.length ?? 0}
                   </td>
-                  <td className="px-4 py-3 text-xs text-gray-500 max-w-md truncate">
+                  <td className="px-4 py-3 text-xs text-gray-500 max-w-md truncate dark:text-gray-400">
                     {p.template.slice(0, 80).replace(/\s+/g, ' ')}
                     {p.template.length > 80 ? '…' : ''}
                   </td>

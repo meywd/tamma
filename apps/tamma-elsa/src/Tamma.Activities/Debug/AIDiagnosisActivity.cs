@@ -208,15 +208,19 @@ public class AIDiagnosisActivity : CodeActivity<DiagnosisResult>
 
     private async Task<string> CallLlm(string prompt)
     {
-        var useMock = _configuration?.GetValue<bool>("Anthropic:UseMock") ?? true;
-
-        if (useMock)
+        // No mock path: simulated diagnosis responses with fake hypotheses, fake
+        // confidence scores and fake "affected_files" were leaking into audit
+        // events and corrupting the debug-loop trail. All diagnoses now route
+        // through the real engine callback or direct Anthropic API.
+        // See: feat/wave-b cleanup.
+        if (_httpClientFactory == null)
         {
-            return SimulateDiagnosisResponse();
+            throw new InvalidOperationException(
+                "AIDiagnosisActivity requires IHttpClientFactory; no simulated fallback is permitted.");
         }
 
         var callbackUrl = _configuration?["Engine:CallbackUrl"];
-        if (!string.IsNullOrEmpty(callbackUrl) && _httpClientFactory != null)
+        if (!string.IsNullOrEmpty(callbackUrl))
         {
             var client = _httpClientFactory.CreateClient();
             var requestBody = new
@@ -234,69 +238,31 @@ public class AIDiagnosisActivity : CodeActivity<DiagnosisResult>
             return result.GetProperty("output").GetString() ?? "{}";
         }
 
-        // Direct API call
-        if (_httpClientFactory != null)
+        // Direct API call (when no engine callback is configured)
+        var directClient = _httpClientFactory.CreateClient("anthropic");
+        var model = _configuration?["Anthropic:Model"] ?? "claude-sonnet-4-20250514";
+
+        var directRequestBody = new
         {
-            var client = _httpClientFactory.CreateClient("anthropic");
-            var model = _configuration?["Anthropic:Model"] ?? "claude-sonnet-4-20250514";
+            model,
+            max_tokens = 4096,
+            system = "You are an expert debugging specialist. Analyze the provided context and generate ranked root cause hypotheses in JSON format.",
+            messages = new[] { new { role = "user", content = prompt } }
+        };
 
-            var requestBody = new
-            {
-                model,
-                max_tokens = 4096,
-                system = "You are an expert debugging specialist. Analyze the provided context and generate ranked root cause hypotheses in JSON format.",
-                messages = new[] { new { role = "user", content = prompt } }
-            };
+        var directResponse = await directClient.PostAsJsonAsync("/v1/messages", directRequestBody);
+        directResponse.EnsureSuccessStatusCode();
 
-            var response = await client.PostAsJsonAsync("/v1/messages", requestBody);
-            response.EnsureSuccessStatusCode();
-
-            var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var contentArray = result.GetProperty("content");
-            foreach (var block in contentArray.EnumerateArray())
-            {
-                if (block.GetProperty("type").GetString() == "text")
-                    return block.GetProperty("text").GetString() ?? "{}";
-            }
+        var directResult = await directResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var contentArray = directResult.GetProperty("content");
+        foreach (var block in contentArray.EnumerateArray())
+        {
+            if (block.GetProperty("type").GetString() == "text")
+                return block.GetProperty("text").GetString() ?? "{}";
         }
 
-        return SimulateDiagnosisResponse();
-    }
-
-    private static string SimulateDiagnosisResponse()
-    {
-        return JsonSerializer.Serialize(new
-        {
-            analysis_summary = "Analysis of error context suggests multiple potential root causes. " +
-                "The most likely cause is a logic error in the implementation.",
-            hypotheses = new[]
-            {
-                new
-                {
-                    rank = 1,
-                    description = "Logic error in condition evaluation — incorrect operator or boundary check",
-                    confidence = 0.75,
-                    suggested_fix = "Review and correct the conditional logic in the failing path",
-                    affected_files = new[] { "src/main.ts" }
-                },
-                new
-                {
-                    rank = 2,
-                    description = "Missing null/undefined check causing runtime exception",
-                    confidence = 0.55,
-                    suggested_fix = "Add null guard before accessing the property",
-                    affected_files = new[] { "src/service.ts" }
-                },
-                new
-                {
-                    rank = 3,
-                    description = "Type mismatch between expected and actual function return",
-                    confidence = 0.35,
-                    suggested_fix = "Ensure function return type matches the caller's expectation",
-                    affected_files = new[] { "src/types.ts", "src/handler.ts" }
-                }
-            }
-        });
+        throw new InvalidOperationException(
+            "Anthropic API response contained no text block; refusing to fabricate a diagnosis.");
     }
 
     private DiagnosisResult ParseDiagnosisResponse(string response)

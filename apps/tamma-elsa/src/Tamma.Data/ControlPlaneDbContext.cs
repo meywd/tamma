@@ -41,6 +41,30 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<GitHubInstallationRepo> GitHubInstallationRepos => Set<GitHubInstallationRepo>();
     public DbSet<GitHubWebhookDelivery> GitHubWebhookDeliveries => Set<GitHubWebhookDelivery>();
 
+    /// <summary>
+    /// Story 31-2 — generalised per-(tenant, platform_kind) installation
+    /// registry. The <see cref="GitHubInstallation"/> table stays for
+    /// 31-3 dual-read; new platform bindings (Gitea/Forgejo/GitLab/etc.)
+    /// land here.
+    /// </summary>
+    public DbSet<TenantPlatformInstallation> TenantPlatformInstallations =>
+        Set<TenantPlatformInstallation>();
+
+    /// <summary>
+    /// Story 31-7 — cross-platform webhook delivery idempotency journal.
+    /// Generalises <see cref="GitHubWebhookDeliveries"/>; the older
+    /// table stays for the deprecation window but new deliveries land
+    /// in this table for every <c>PlatformKind</c>.
+    /// </summary>
+    public DbSet<PlatformWebhookDelivery> PlatformWebhookDeliveries =>
+        Set<PlatformWebhookDelivery>();
+
+    /// <summary>
+    /// Unified-tenancy Phase 0 — operator DB pool registry. One row per
+    /// Postgres database available for tenant-schema placement.
+    /// </summary>
+    public DbSet<TenantDatabase> TenantDatabases => Set<TenantDatabase>();
+
     // ── Control-plane platform tables (Story 28-6 + 28-10) ──
     //
     // These three tables (platform_events, platform_queued_tasks,
@@ -212,6 +236,116 @@ public class ControlPlaneDbContext : DbContext
         ConfigureAlertEvaluatorCursor(modelBuilder);
         ConfigureKekRotations(modelBuilder);
         ConfigurePlatformBootstrap(modelBuilder);
+        ConfigureTenantPlatformInstallations(modelBuilder);
+        ConfigurePlatformWebhookDeliveries(modelBuilder);
+        ConfigureTenantDatabases(modelBuilder);
+    }
+
+    /// <summary>
+    /// Story 31-7 — <c>platform_webhook_deliveries</c> table. CHECK
+    /// constraint pins <c>PlatformKind</c> to the same closed enum the
+    /// installations table uses; the unique
+    /// <c>(PlatformKind, DeliveryId)</c> index is the natural key the
+    /// receiver hashes against to drop duplicate deliveries.
+    /// </summary>
+    private static void ConfigurePlatformWebhookDeliveries(
+        ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<PlatformWebhookDelivery>(entity =>
+        {
+            entity.ToTable("platform_webhook_deliveries", t =>
+            {
+                t.HasCheckConstraint(
+                    "CK_platform_webhook_deliveries_PlatformKind",
+                    "\"PlatformKind\" IN ('github','gitea','forgejo','gitlab','bitbucket','azure_devops')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.ReceivedAt).HasDefaultValueSql("now()");
+
+            // Natural key — receiver checks this composite before
+            // dispatching to drop a re-delivery of the same logical
+            // event from a platform that retried on transient errors.
+            entity.HasIndex(e => new { e.PlatformKind, e.DeliveryId })
+                .HasDatabaseName("UX_platform_webhook_deliveries_Kind_DeliveryId")
+                .IsUnique();
+
+            // Pruner support — drop rows older than N days for cleanup.
+            entity.HasIndex(e => e.ReceivedAt)
+                .HasDatabaseName("IX_platform_webhook_deliveries_ReceivedAt");
+        });
+    }
+
+    /// <summary>
+    /// Story 31-2 — <c>tenant_platform_installations</c> table.
+    /// CHECK constraints pin <c>PlatformKind</c> + <c>Status</c> to
+    /// closed enums; the partial unique index on
+    /// <c>(TenantId, PlatformKind, InstallationExternalId)</c> is what
+    /// the resolver hashes against, with a separate partial unique on
+    /// <c>(TenantId, PlatformKind)</c> filtered by
+    /// <c>IsPrimary = true</c> guaranteeing a unique primary per tenant
+    /// kind for the no-explicit-kind resolution path.
+    /// </summary>
+    private static void ConfigureTenantPlatformInstallations(
+        ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<TenantPlatformInstallation>(entity =>
+        {
+            entity.ToTable("tenant_platform_installations", t =>
+            {
+                t.HasCheckConstraint(
+                    "CK_tenant_platform_installations_PlatformKind",
+                    "\"PlatformKind\" IN ('github','gitea','forgejo','gitlab','bitbucket','azure_devops')");
+                t.HasCheckConstraint(
+                    "CK_tenant_platform_installations_Status",
+                    "\"Status\" IN ('connected','suspended','disconnected')");
+                t.HasCheckConstraint(
+                    "CK_tenant_platform_installations_CredentialSecretScope",
+                    "\"CredentialSecretScope\" IN ('platform','tenant')");
+                t.HasCheckConstraint(
+                    "CK_tenant_platform_installations_WebhookSecretScope",
+                    "\"WebhookSecretScope\" IS NULL OR \"WebhookSecretScope\" IN ('platform','tenant')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.MetadataJson)
+                .HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.IsPrimary).HasDefaultValue(true);
+            entity.Property(e => e.Status).HasDefaultValue("connected");
+            entity.Property(e => e.CredentialSecretScope).HasDefaultValue("tenant");
+
+            // Webhook resolve path — 31-7 only has the external id from the
+            // payload, not the row id. Composite (PlatformKind, ExternalId)
+            // narrows to the right driver instance even when two platforms
+            // mint colliding ids.
+            entity.HasIndex(e => new { e.PlatformKind, e.InstallationExternalId })
+                .HasDatabaseName("IX_tenant_platform_installations_PlatformKind_ExternalId")
+                .HasFilter("\"InstallationExternalId\" IS NOT NULL AND \"DeletedAt\" IS NULL");
+
+            // Idempotency / dedupe: the same external installation can't
+            // be registered twice against the same tenant + kind. The
+            // filter excludes soft-deleted rows so a tenant can re-add
+            // a previously-disconnected installation cleanly.
+            entity.HasIndex(e => new
+            {
+                e.TenantId,
+                e.PlatformKind,
+                e.InstallationExternalId,
+            })
+                .HasDatabaseName("UX_tenant_platform_installations_TenantId_Kind_ExternalId")
+                .HasFilter("\"InstallationExternalId\" IS NOT NULL AND \"DeletedAt\" IS NULL")
+                .IsUnique();
+
+            // At most one primary per (TenantId, PlatformKind) — keeps
+            // the no-explicit-kind resolver path deterministic. Partial
+            // index so non-primary rows don't collide.
+            entity.HasIndex(e => new { e.TenantId, e.PlatformKind })
+                .HasDatabaseName("UX_tenant_platform_installations_PrimaryPerKind")
+                .HasFilter("\"IsPrimary\" = TRUE AND \"DeletedAt\" IS NULL")
+                .IsUnique();
+        });
     }
 
     /// <summary>
@@ -289,6 +423,46 @@ public class ControlPlaneDbContext : DbContext
             entity.HasIndex(e => e.StartedAt)
                 .HasDatabaseName("IX_kek_rotations_StartedAt")
                 .IsDescending(true);
+        });
+    }
+
+    /// <summary>
+    /// Unified-tenancy Phase 0 — <c>tenant_databases</c> registry (the admin DB
+    /// pool). CHECKs pin the two closed enums; <c>Label</c> is the operator key.
+    /// </summary>
+    private static void ConfigureTenantDatabases(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<TenantDatabase>(entity =>
+        {
+            entity.ToTable("tenant_databases", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_tenant_databases_placement_class",
+                    "\"PlacementClass\" IN ('shared','dedicated')");
+                t.HasCheckConstraint(
+                    "ck_tenant_databases_status",
+                    "\"Status\" IN ('active','draining','full','retired')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Label).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Host).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.Port).HasDefaultValue(5432);
+            entity.Property(e => e.AdminConnectionStringEncrypted)
+                .IsRequired().HasColumnType("bytea");
+            entity.Property(e => e.PlacementClass)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("shared");
+            entity.Property(e => e.TierEligibility)
+                .HasColumnType("text[]").HasDefaultValueSql("'{}'::text[]");
+            entity.Property(e => e.TenantCount).HasDefaultValue(0);
+            entity.Property(e => e.Status)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("active");
+            entity.Property(e => e.KekVersion).HasDefaultValue((short)1);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            entity.HasIndex(e => e.Label).IsUnique();
+            entity.HasIndex(e => e.Status);
         });
     }
 

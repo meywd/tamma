@@ -1,47 +1,58 @@
 using FluentAssertions;
 using NUnit.Framework;
 using Tamma.Api.Auth;
+using Tamma.Api.Services.Agents;
 
 namespace Tamma.Api.Tests.PromptStore;
 
 /// <summary>
-/// Tests for the <see cref="SystemPrompts"/> static registry.
-/// Verifies that every role/action combination is populated and that
-/// system prompt / action default lookups work.
+/// Tests for the <see cref="SystemPrompts"/> static registry after the Story
+/// 27-18 taxonomy reshape: the registry is the jagged per-role
+/// <c>(role, action)</c> matrix from <see cref="RolePhaseMap"/> (NOT a flat 8×10
+/// product), there is no generic <c>action-default</c> tier, and every cell ships
+/// a non-empty transitional system-default body (SPEC §3.5).
 /// </summary>
 [TestFixture]
 public class SystemPromptsTests
 {
     private static readonly string[] Roles =
-    [
-        "developer",
-        "tester",
-        "security",
-        "devops",
-        "architect",
-        "product_owner",
-        "senior_developer",
-        "tech_writer",
-    ];
+        System.Enum.GetValues<AgentRole>().Select(r => r.ToWire()).ToArray();
 
-    private static readonly string[] Actions =
-    [
-        "context-scan",
-        "plan",
-        "plan-review",
-        "implement",
-        "write-tests",
-        "refactor",
-        "code-review",
-        "triage",
-        "summarize",
-        "debug",
-    ];
+    /// <summary>The exact count of jagged (role, action) cells from SPEC §4.</summary>
+    private static int ExpectedCellCount =>
+        RolePhaseMap.EligibleActions.Sum(kv => kv.Value.Count);
 
     [Test]
-    public void RoleActionTemplates_ContainsAllEightyCombinations()
+    public void RoleActionTemplates_MatchesJaggedTaxonomyCellCount()
     {
-        SystemPrompts.RoleActionTemplates.Should().HaveCount(80);
+        // 85 cells (72 distinct action tokens; shared tokens repeat across
+        // roles). Asserted against the live taxonomy so it never drifts.
+        SystemPrompts.RoleActionTemplates.Should().HaveCount(ExpectedCellCount);
+    }
+
+    [Test]
+    public void RoleActionTemplates_CoversEveryTaxonomyCell_AndNothingExtra()
+    {
+        var expected = RolePhaseMap.EligibleActions
+            .SelectMany(kv => kv.Value.Select(a => (Role: kv.Key.ToWire(), Action: a.ToWire())))
+            .ToHashSet();
+
+        var actual = SystemPrompts.RoleActionTemplates
+            .Select(t => (Role: t.Role!, t.Action))
+            .ToHashSet();
+
+        actual.Should().BeEquivalentTo(expected,
+            "the prompt registry must be exactly the jagged RolePhaseMap taxonomy — no missing cells, no flat-product extras");
+    }
+
+    [Test]
+    public void RoleActionTemplates_EveryCell_HasNonEmptyBody()
+    {
+        foreach (var t in SystemPrompts.RoleActionTemplates)
+        {
+            t.Template.Should().NotBeNullOrWhiteSpace(
+                $"transitional system default for {t.Role}/{t.Action} must be a real body, not a placeholder (SPEC §3.5)");
+        }
     }
 
     [Test]
@@ -55,19 +66,8 @@ public class SystemPromptsTests
         }
     }
 
-    [Test]
-    public void ActionDefaults_ContainsAllTenActions()
-    {
-        SystemPrompts.ActionDefaults.Should().HaveCount(10);
-        foreach (var action in Actions)
-        {
-            SystemPrompts.ActionDefaults.Should().ContainKey(action);
-            SystemPrompts.ActionDefaults[action].Template.Should().NotBeNullOrWhiteSpace();
-        }
-    }
-
-    [TestCaseSource(nameof(AllRoleActionPairs))]
-    public void GetRoleAction_ReturnsTemplateForEveryRoleActionPair(string role, string action)
+    [TestCaseSource(nameof(AllTaxonomyPairs))]
+    public void GetRoleAction_ReturnsTemplateForEveryTaxonomyCell(string role, string action)
     {
         var template = SystemPrompts.GetRoleAction(role, action);
 
@@ -82,7 +82,7 @@ public class SystemPromptsTests
     [Test]
     public void GetRoleAction_ReturnsNullForUnknownRole()
     {
-        SystemPrompts.GetRoleAction("unknown-role", "plan").Should().BeNull();
+        SystemPrompts.GetRoleAction("unknown-role", "context-scan").Should().BeNull();
     }
 
     [Test]
@@ -92,21 +92,13 @@ public class SystemPromptsTests
     }
 
     [Test]
-    public void GetActionDefault_ReturnsTemplateForEveryAction()
+    public void GetRoleAction_ReturnsNull_ForActionNotInRoleSet()
     {
-        foreach (var action in Actions)
-        {
-            var template = SystemPrompts.GetActionDefault(action);
-            template.Should().NotBeNull($"action default for '{action}' should exist");
-            template!.Action.Should().Be(action);
-            template.Template.Should().NotBeNullOrWhiteSpace();
-        }
-    }
-
-    [Test]
-    public void GetActionDefault_ReturnsNullForUnknownAction()
-    {
-        SystemPrompts.GetActionDefault("not-a-real-action").Should().BeNull();
+        // 'deploy' is a devops-only action; the developer role does not own it,
+        // so the jagged matrix has no developer/deploy cell.
+        SystemPrompts.GetRoleAction("developer", "deploy").Should().BeNull();
+        // Conversely it DOES exist for devops.
+        SystemPrompts.GetRoleAction("devops", "deploy").Should().NotBeNull();
     }
 
     [Test]
@@ -125,15 +117,16 @@ public class SystemPromptsTests
         foreach (var template in SystemPrompts.RoleActionTemplates)
         {
             template.SystemPrompt.Should().Be(
-                SystemPrompts.RoleSystemPrompts[template.Role],
+                SystemPrompts.RoleSystemPrompts[template.Role!],
                 $"template for {template.Role}/{template.Action} should use role system prompt");
         }
     }
 
     [Test]
-    public void Developer_ImplementPrompt_HasExpectedVariables()
+    public void Developer_ImplementFeaturePrompt_HasExpectedVariables()
     {
-        var template = SystemPrompts.GetRoleAction("developer", "implement");
+        // implement-feature maps to the Implement body family (Story 27-18).
+        var template = SystemPrompts.GetRoleAction("developer", "implement-feature");
         template.Should().NotBeNull();
         template!.Variables.Should().Contain("workItemJson")
                             .And.Contain("planJson")
@@ -143,42 +136,43 @@ public class SystemPromptsTests
     [Test]
     public void ToolEnablement_ReviewStyleActions_AreDisabledForTools()
     {
-        // Review/triage/summarize style actions should not need tools
-        SystemPrompts.GetRoleAction("developer", "plan-review")!.EnableTools.Should().BeFalse();
+        // Review/triage/summarize style families should not need tools.
+        SystemPrompts.GetRoleAction("architect", "plan-review")!.EnableTools.Should().BeFalse();
         SystemPrompts.GetRoleAction("developer", "code-review")!.EnableTools.Should().BeFalse();
-        SystemPrompts.GetRoleAction("developer", "triage")!.EnableTools.Should().BeFalse();
-        SystemPrompts.GetRoleAction("developer", "summarize")!.EnableTools.Should().BeFalse();
+        SystemPrompts.GetRoleAction("developer", "triage-defect")!.EnableTools.Should().BeFalse();
+        SystemPrompts.GetRoleAction("tech_writer", "summarize-changes")!.EnableTools.Should().BeFalse();
     }
 
     [Test]
     public void ToolEnablement_ImplementAction_EnablesTools()
     {
-        SystemPrompts.GetRoleAction("developer", "implement")!.EnableTools.Should().BeTrue();
+        SystemPrompts.GetRoleAction("developer", "implement-feature")!.EnableTools.Should().BeTrue();
     }
 
-    public static IEnumerable<TestCaseData> AllRoleActionPairs()
+    public static IEnumerable<TestCaseData> AllTaxonomyPairs()
     {
-        foreach (var role in Roles)
+        foreach (var (role, actions) in RolePhaseMap.EligibleActions)
         {
-            foreach (var action in Actions)
+            foreach (var action in actions)
             {
-                yield return new TestCaseData(role, action).SetName($"{role}/{action}");
+                var roleWire = role.ToWire();
+                var actionWire = action.ToWire();
+                yield return new TestCaseData(roleWire, actionWire).SetName($"{roleWire}/{actionWire}");
             }
         }
     }
 
     // ------------------------------------------------------------------
-    // Audit prompts/001 — lock the role-tailored review-lens shape.
-    // The C# port emits a single role-tailored bullet block (or a generic
-    // fallback for the four roles without a matching switch arm) instead
-    // of TS's four parallel ternaries. This is a deliberate LLM-quality
-    // improvement; these tests guard against silent regressions either way.
+    // Audit prompts/001 — role-tailored review-lens shape is retained on the
+    // review-family cells. The PlanReview body is used by the per-role
+    // plan-review lens actions; CodeReview by the code-review lens actions.
     // ------------------------------------------------------------------
 
     [Test]
     public void PlanReview_SecurityRole_EmitsSecurityBullets()
     {
-        var template = SystemPrompts.GetRoleAction("security", "plan-review");
+        // security owns 'plan-review-security' (PlanReview body family).
+        var template = SystemPrompts.GetRoleAction("security", "plan-review-security");
 
         template.Should().NotBeNull();
         template!.Template.Should().Contain("Check for security implications in each task");
@@ -188,7 +182,8 @@ public class SystemPromptsTests
     [Test]
     public void PlanReview_TesterRole_EmitsTestingBullets()
     {
-        var template = SystemPrompts.GetRoleAction("tester", "plan-review");
+        // tester owns 'review-testability' (PlanReview body family).
+        var template = SystemPrompts.GetRoleAction("tester", "review-testability");
 
         template.Should().NotBeNull();
         template!.Template.Should().Contain("Check that testing strategy is comprehensive");
@@ -206,21 +201,19 @@ public class SystemPromptsTests
     [Test]
     public void PlanReview_DevopsRole_EmitsDevopsBullets()
     {
-        var template = SystemPrompts.GetRoleAction("devops", "plan-review");
+        // devops owns 'review-operability' (PlanReview body family).
+        var template = SystemPrompts.GetRoleAction("devops", "review-operability");
 
         template.Should().NotBeNull();
         template!.Template.Should().Contain("Check for deployment and infrastructure impact");
     }
 
-    [TestCase("developer")]
-    [TestCase("product_owner")]
-    [TestCase("senior_developer")]
-    [TestCase("tech_writer")]
-    public void PlanReview_RoleWithoutMatchingArm_EmitsGenericFallback(string role)
+    [Test]
+    public void PlanReview_RoleWithoutMatchingArm_EmitsGenericFallback()
     {
-        // Audit prompts/001: roles without a dedicated switch arm get a single
-        // explicit fallback line instead of TS's four blank indented lines.
-        var template = SystemPrompts.GetRoleAction(role, "plan-review");
+        // product_owner owns 'review-scope' (PlanReview body) and has no
+        // dedicated review-lens switch arm → generic fallback line.
+        var template = SystemPrompts.GetRoleAction("product_owner", "review-scope");
 
         template.Should().NotBeNull();
         template!.Template.Should().Contain("Apply your role-specific expertise to the plan");
@@ -229,19 +222,19 @@ public class SystemPromptsTests
     [Test]
     public void CodeReview_SecurityRole_EmitsSecurityBullets()
     {
-        var template = SystemPrompts.GetRoleAction("security", "code-review");
+        // security owns 'code-review-security' (CodeReview body family).
+        var template = SystemPrompts.GetRoleAction("security", "code-review-security");
 
         template.Should().NotBeNull();
         template!.Template.Should().Contain("Look for credential leaks");
     }
 
-    [TestCase("developer")]
-    [TestCase("product_owner")]
-    [TestCase("senior_developer")]
-    [TestCase("tech_writer")]
-    public void CodeReview_RoleWithoutMatchingArm_EmitsGenericFallback(string role)
+    [Test]
+    public void CodeReview_RoleWithoutMatchingArm_EmitsGenericFallback()
     {
-        var template = SystemPrompts.GetRoleAction(role, "code-review");
+        // developer owns 'code-review' (CodeReview body) and has no dedicated
+        // code-review-lens switch arm → generic fallback line.
+        var template = SystemPrompts.GetRoleAction("developer", "code-review");
 
         template.Should().NotBeNull();
         template!.Template.Should().Contain("Apply your role-specific expertise to the diff");

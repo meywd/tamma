@@ -10,6 +10,7 @@ using Elsa.Workflows.Runtime.Activities;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using Tamma.Api.Services.Agents;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -83,8 +84,8 @@ public class TestCaseCreationWorkflow : WorkflowBase
             WorkflowDefinitionId = new("llm-call"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["role"] = "tester",
-                ["action"] = "write-tests",
+                ["role"] = AgentRole.Tester.ToWire(),
+                ["action"] = AgentAction.WriteTests.ToWire(),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["tasksJson"] = tasksJson.Get(ctx),

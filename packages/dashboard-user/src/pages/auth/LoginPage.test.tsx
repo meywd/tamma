@@ -42,7 +42,7 @@ describe('LoginPage', () => {
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /sign in with github/i })).toHaveAttribute(
       'href',
-      '/api/auth/github',
+      '/oauth2/start?rd=%2F',
     );
   });
 

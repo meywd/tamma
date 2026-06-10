@@ -24,6 +24,16 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Tamma.Core\Tamma.Core.csproj" />
+    <!--
+      Story 31-7: PlatformWebhookDeliveryRepository signs against the
+      shared PlatformKind enum + PlatformKindWire mapping in
+      Tamma.Platforms.Abstractions so the wire string ('github',
+      'gitea', ...) cannot drift between the receiver, the repo, and
+      the database CHECK constraint. Tamma.Platforms.Abstractions has
+      zero runtime dependencies on Tamma.Data so this is acyclic
+      (Data -> Platforms.Abstractions; Platforms -> Data; no cycle).
+    -->
+    <ProjectReference Include="..\Tamma.Platforms.Abstractions\Tamma.Platforms.Abstractions.csproj" />
   </ItemGroup>
 
   <!--

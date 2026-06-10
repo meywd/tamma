@@ -23,7 +23,16 @@ public sealed record SecretProvisionResult(
 /// <see cref="NullGitHubSecretsProvisioner"/> reports every repo as
 /// <c>github_client_not_configured</c> so the operator knows secrets need
 /// manual rotation.</para>
+///
+/// <para><b>DEPRECATED (Story 31-8)</b>: prefer
+/// <c>ICiSecretsProvisioner</c> exposed via
+/// <c>IGitPlatformDriver.CiSecrets</c>. This GitHub-only seam stays
+/// callable for transition; new callers should reach the
+/// platform-neutral interface so adding GitLab / Gitea / Forgejo
+/// pushes is a config change, not a code change.</para>
 /// </summary>
+[Obsolete("Use ICiSecretsProvisioner via IGitPlatformDriver.CiSecrets (Story 31-8). " +
+    "This GitHub-only seam stays callable for transition.", error: false)]
 public interface IGitHubSecretsProvisioner
 {
     /// <summary>

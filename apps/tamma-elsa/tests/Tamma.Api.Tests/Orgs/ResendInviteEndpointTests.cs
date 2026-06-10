@@ -249,6 +249,9 @@ public class ResendInviteEndpointTests
             OwnerId = owner.Id,
         });
         await _membershipRepo.AddAsync(tenant.Id, owner.Id, TenantRoleHierarchy.Owner);
+        // Phase 3 -- tenant events live in the tenant store, which is only
+        // reachable for provisioned tenants.
+        await ApiTestFixture.ProvisionTenantAsync(tenant.Id);
         return (tenant.Id, owner.Id);
     }
 

@@ -50,10 +50,6 @@ function makeData(): SystemDefaultsResponse {
       senior_developer: 'You are senior dev.',
       tech_writer: 'You are tech writer.',
     },
-    actionDefaults: {
-      implement: makePrompt('', 'implement'),
-      plan: makePrompt('', 'plan'),
-    },
   };
 }
 
@@ -108,15 +104,6 @@ describe('PromptsAdminPage', () => {
     render(<PromptsAdminPage />);
     await user.click(screen.getByRole('button', { name: /^System Prompts$/i }));
     expect(screen.getAllByRole('button', { name: /^edit$/i })).toHaveLength(8);
-  });
-
-  it('switches to the Action Defaults tab', async () => {
-    setup();
-    render(<PromptsAdminPage />);
-    await user.click(screen.getByRole('button', { name: /^Action Defaults$/i }));
-    expect(
-      screen.getByText(/Layer-4 safety-net templates/i),
-    ).toBeInTheDocument();
   });
 
   it('switches to the Conventions tab and mounts the conventions stub', async () => {

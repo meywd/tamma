@@ -1,6 +1,6 @@
 # Deployment
 
-This page covers environment variables, the Phase-3 RLS runbook, and the optional Redis / Cranl activations. For the overall architecture see [Architecture](Architecture).
+This page covers environment variables, the least-privilege app-role runbook, and the optional Redis / Cranl activations. For the overall architecture see [Architecture](Architecture).
 
 ## Docker Compose stack
 
@@ -31,10 +31,10 @@ Configuration uses ASP.NET's colon-separated config keys, which translate to `__
 | Key | Purpose |
 |-----|---------|
 | `ConnectionStrings:TammaDb` | **Admin** connection. Superuser role. Used by migrations and background services. |
-| `ConnectionStrings:TammaAppDb` | **App** connection. Role `tamma_app` (non-superuser). Per-request `DbContext`s. RLS policies bite here because the role lacks `BYPASSRLS`. |
-| `ConnectionStrings:DefaultConnection` | Legacy alias. Treated as admin when `TammaDb` is unset. Pre-Phase-3 configs still boot. |
+| `ConnectionStrings:TammaAppDb` | **App** connection. Role `tamma_app` (non-superuser, least-privilege: plain DML on the control plane, no DDL). Per-request `DbContext`s. |
+| `ConnectionStrings:DefaultConnection` | Legacy alias. Treated as admin when `TammaDb` is unset. Older configs still boot. |
 
-If `TammaAppDb` is absent in production the API logs a warning and falls through to the admin connection — **RLS is inactive until you wire the app-role connection**. This is expected in local dev with a single-role Postgres.
+If `TammaAppDb` is absent in production the API logs a warning and falls through to the admin connection — **the least-privilege role is bypassed until you wire the app-role connection**. This is expected in local dev with a single-role Postgres.
 
 ### GitHub App (optional; activates SaaS + Actions executor)
 
@@ -63,7 +63,7 @@ When set, the API swaps `InMemoryDistributedRateLimitBackend` → `RedisDistribu
 | `Cranl:OrganizationId` | Cranl organization ID. |
 | `Cranl:BaseUrl` | Override default Cranl API root (optional). |
 
-When both `ApiKey` and `OrganizationId` are set, DI wires `CranlTenantProvisioner` + `CranlProvisioningWorkflow` + the task-queue handler. Otherwise `NullTenantProvisioner` is the default — every tenant stays on the shared central Postgres via RLS.
+When both `ApiKey` and `OrganizationId` are set, DI wires `CranlTenantProvisioner` + `CranlProvisioningWorkflow` + the task-queue handler. Otherwise `NullTenantProvisioner` is the default — no external resources are minted and tenant placement stays on the `tenant_databases` pool (central DB by default; every tenant still gets its own `t_<hex>` schema + role).
 
 ### Agent dispatch (optional mode override)
 
@@ -73,6 +73,20 @@ When both `ApiKey` and `OrganizationId` are set, DI wires `CranlTenantProvisione
 | `Agent:ExecutorMode` | Same, via config. `Auto` means "detect via GitHub App presence". |
 
 See [Agent Dispatch](Agent-Dispatch).
+
+### Tenant pre-drop backup (optional; OFF by default)
+
+| Key | Purpose |
+|-----|---------|
+| `Backup:DeletionBackup` | `true` enables a `pg_dump` snapshot of a tenant DB before `DROP DATABASE` in the delete workflow. Default `false`. |
+| `Backup:Directory` | Destination for dump files. **Must be a durable mounted volume** in prod. Default `/var/backups/tamma`. |
+| `Backup:PgDumpPath` | Path to `pg_dump`. Default `pg_dump`. |
+| `Backup:TimeoutSeconds` | Dump timeout. Default `1800`. |
+
+Runs on the **elsa-server** host. Enabling requires `postgresql-client`
+in the elsa-server image (the base image ships only `curl`) plus a mounted
+backup volume — see [tenant-deletion-backup.md](https://github.com/Tam-ma/tamma/blob/main/docs/deployment/tenant-deletion-backup.md).
+The password is passed via `PGPASSWORD`, never on argv.
 
 ### SMTP (required for register / reset emails)
 
@@ -85,15 +99,15 @@ See [Agent Dispatch](Agent-Dispatch).
 
 A KEK (key-encryption-key) backend is stubbed but currently env-var-only (Doc 01 §8.2). Vault wiring is deferred to a future story — see `docs/stories/` for Epic 28 when that lands.
 
-## Phase-3 RLS runbook
+## Least-privilege app-role runbook
 
-Phase-3 is the **dual-connection row-level-security** layer. It's active when `ConnectionStrings:TammaAppDb` is set to a connection that authenticates as the `tamma_app` role.
+`tamma_app` is the **least-privilege runtime role** for the control-plane API: plain DML on the control-plane tables, no DDL, no CREATEDB/CREATEROLE. It's active when `ConnectionStrings:TammaAppDb` is set to a connection that authenticates as `tamma_app`. (Tenant isolation itself does not depend on this role — every tenant has its own `t_<hex>` schema + per-tenant Postgres role under the unified tenancy model; the legacy shared-tables RLS layer was removed in unified-tenancy Phase 5.)
 
 ### Activation steps
 
-1. **Migrate to the Phase-2 schema** if you haven't already. The `admin-db` Phase-1/2 migrations create the `tamma_app` role, the RLS policies, and the `SET LOCAL app.current_tenant_id` usage pattern.
+1. **Bootstrap the roles** if you haven't already: `scripts/db/postgres-roles.sql` creates `tamma_admin` / `tamma_provisioner` / `tamma_app` (the three-role privilege split); the EF migration pipeline issues the table-level grants.
 
-2. **Set a password on the `tamma_app` role** (the migration creates the role but leaves authentication to the operator):
+2. **Set a password on the `tamma_app` role** (the bootstrap creates the role; the docker-entrypoint hook binds passwords, or set one manually):
 
     ```sql
     ALTER ROLE tamma_app WITH PASSWORD '<generated-strong-password>';
@@ -108,14 +122,14 @@ Phase-3 is the **dual-connection row-level-security** layer. It's active when `C
 
     Keep `ConnectionStrings__TammaDb` on the superuser so migrations still work.
 
-4. **Restart the API**. On boot, if the app-role connection is reachable, Serilog logs confirm RLS is active; if it falls through to admin, a Warning fires with "RLS will be inactive until the app-role connection is wired".
+4. **Restart the API**. On boot, `DbRoleLeastPrivilegeCheck` runs `SELECT current_user` against TammaAppDb and refuses readiness (Production) if the API is running as `tamma_provisioner` or `tamma_admin`; if TammaAppDb falls through to admin, a Warning fires.
 
-5. **Verify**: hit a tenant-scoped endpoint as a user from tenant A, then manually query `tenant_b`'s data. EF query filters + Postgres RLS policies must both refuse — defence in depth. The interceptor runs `SET LOCAL app.current_tenant_id = '<tenantA>'` at the start of every request's first query.
+5. **Verify**: hit a tenant-scoped endpoint as a user from tenant A, then manually query tenant B's schema as tenant A's role — Postgres must refuse (the per-tenant role has no privileges outside its own `t_<hex>` schema).
 
 ### What fails closed
 
-- A DbContext opened with no tenant in scope (e.g. via a forgotten DI configuration) returns an **empty result set** instead of "show all" — query filters enforce this.
-- A DbContext opened on the admin connection still bypasses RLS; this is intentional (migrations), but means **admin endpoints must do their own authorization**. Never take user input and run it on the admin connection.
+- A control-plane DbContext opened with no tenant in scope (e.g. via a forgotten DI configuration) returns an **empty result set** instead of "show all" — EF query filters enforce this.
+- A DbContext opened on the admin connection bypasses the least-privilege role; this is intentional (migrations), but means **admin endpoints must do their own authorization**. Never take user input and run it on the admin connection.
 
 ## Cranl per-tenant provisioning (optional)
 

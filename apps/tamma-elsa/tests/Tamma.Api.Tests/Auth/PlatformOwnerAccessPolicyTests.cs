@@ -62,6 +62,24 @@ public class PlatformOwnerAccessPolicyTests
         Environment.SetEnvironmentVariable(
             "ConnectionStrings__TammaDb",
             ApiTestFixture.Postgres.GetConnectionString());
+        // This factory boots in Production (below), so it supplies
+        // ConnectionStrings:ControlPlane like a real Production deployment.
+        // (The Story 28-3 RequireTenantIsolation startup guard was removed in
+        // unified-tenancy Phase 3 — the LRU resolver registers
+        // unconditionally now.) Reset in OneTimeTearDown so the shared static
+        // env doesn't leak a CP string into sibling tests.
+        Environment.SetEnvironmentVariable(
+            "ConnectionStrings__ControlPlane",
+            ApiTestFixture.Postgres.GetConnectionString());
+        // Production also hard-requires Cranl:EncryptionKey since the
+        // unified-tenancy Phase 2 startup seeder (TenantDatabasesSeeder)
+        // eagerly resolves ITenantConnectionStringProtector to encrypt the
+        // central pool row's admin connection string. Any base64 32-byte
+        // value works — the policy gate under test never decrypts it.
+        // Cranl__ApiKey stays unset so the Null provisioner seam still wins.
+        Environment.SetEnvironmentVariable(
+            "Cranl__EncryptionKey",
+            Convert.ToBase64String(new byte[32]));
 
         _factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(b =>
@@ -80,6 +98,8 @@ public class PlatformOwnerAccessPolicyTests
         Environment.SetEnvironmentVariable("Jwt__Secret", null);
         Environment.SetEnvironmentVariable("Jwt__Issuer", null);
         Environment.SetEnvironmentVariable("Jwt__Audience", null);
+        Environment.SetEnvironmentVariable("ConnectionStrings__ControlPlane", null);
+        Environment.SetEnvironmentVariable("Cranl__EncryptionKey", null);
     }
 
     /// <summary>

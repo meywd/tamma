@@ -173,6 +173,41 @@ public class EventRepository(
         await db.SaveChangesAsync();
     }
 
+    public async Task<(IReadOnlyList<DomainEvent> Events, int Total)> QueryWithPaginationAsync(
+        Guid? tenantId, string? type, int? issueNumber, int limit, int offset)
+    {
+        // Tenant-scoped path — mirrors QueryAsync's exact-match semantics
+        // and adds offset + Total. Cross-tenant (null tenantId) is not
+        // supported here for the same reason QueryAsync rejects it with an
+        // issueNumber: paginated cross-tenant scans would need a per-tenant
+        // fan-out via ITenantDbContextFactory and no story demands it.
+        if (tenantId is not Guid tid)
+        {
+            throw new NotSupportedException(
+                "QueryWithPaginationAsync requires a tenant id. Cross-tenant " +
+                "paginated event search would need a per-tenant fan-out via " +
+                "ITenantDbContextFactory; no current story demands it. See " +
+                ".dev/decisions/story-28-1-design-calls.md Decision #2.");
+        }
+
+        await using var db = await tenantDbFactory.CreateAsync(tid);
+        var query = db.DomainEvents.Where(e => e.TenantId == tid);
+        if (!string.IsNullOrEmpty(type))
+            query = query.Where(e => e.Type == type);
+        if (issueNumber.HasValue)
+            query = query.Where(e => e.IssueNumber == issueNumber.Value);
+
+        var total = await query.CountAsync();
+        var rows = await query
+            .OrderByDescending(e => e.CreatedAt)
+            .ThenByDescending(e => e.SequenceNumber)
+            .Skip(offset)
+            .Take(limit)
+            .ToListAsync();
+
+        return (rows, total);
+    }
+
     public async Task<(IReadOnlyList<DomainEvent> Events, int Total)> ListByTenantAsync(
         Guid tenantId, string? typePrefix, int limit, int offset)
     {

@@ -41,4 +41,17 @@ public interface IPlatformAnalyticsService
         DateTime? since = null,
         int limit = 20,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Story 28-11 AC2 — the last-24h resource rollup for a single tenant,
+    /// summed from its <c>platform_analytics_hourly</c> rows whose
+    /// <c>Hour</c> is within <c>[now-24h, now)</c>. Reads only the wide-row
+    /// fact table (no live fan-out) so it is cheap enough to inline on the
+    /// admin tenant-detail response. A tenant with no rows yet returns
+    /// <see cref="TenantResourceSummary.Empty"/> (all zeros) — never null,
+    /// never throwing.
+    /// </summary>
+    Task<TenantResourceSummary> GetTenantResourceSummaryAsync(
+        Guid tenantId,
+        CancellationToken ct = default);
 }

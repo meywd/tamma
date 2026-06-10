@@ -67,7 +67,7 @@ export function AgentsOverview(): JSX.Element | null {
   }
 
   if (error && !draft) {
-    return <div className="text-red-600 text-sm">{error}</div>;
+    return <div className="text-red-600 text-sm dark:text-red-400">{error}</div>;
   }
 
   if (!draft) return null;
@@ -77,7 +77,7 @@ export function AgentsOverview(): JSX.Element | null {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <p className="text-sm text-gray-500">
+        <p className="text-sm text-gray-500 dark:text-gray-400">
           Configure provider chains and settings per agent role.
         </p>
         <button
@@ -89,7 +89,7 @@ export function AgentsOverview(): JSX.Element | null {
         </button>
       </div>
 
-      {saveError && <div className="mb-4 text-sm text-red-600">{saveError}</div>}
+      {saveError && <div className="mb-4 text-sm text-red-600 dark:text-red-400">{saveError}</div>}
 
       {/* Defaults Card */}
       <div className="mb-6">

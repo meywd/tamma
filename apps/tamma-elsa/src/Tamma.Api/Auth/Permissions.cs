@@ -23,6 +23,32 @@ public static class Permissions
         ["settings:view"] = ["admin", "owner"],
         ["settings:manage"] = ["owner"],
         ["apikeys:manage"] = ["admin", "owner"],
+        // Story 27-3 — Prompt Store tenant-admin path. CLAUDE.md
+        // "Prompt Store Architecture / RBAC" requires PUT/DELETE override to
+        // be allowed for `tenant_owner` OR `tenant_admin` (not member-only),
+        // which the existing `settings:manage` permission (owner-only) does
+        // NOT cover. We therefore add a dedicated `prompts:manage` permission
+        // with admin+owner reach. Single-user mode is unaffected — every
+        // signed-up user is auto-`owner` of their personal tenant, so the new
+        // permission still grants them edit access without a code-path split.
+        ["prompts:manage"] = ["admin", "owner"],
+        // Story 27-10 — convention store tenant-admin path. Mirrors
+        // `prompts:manage`: CLAUDE.md "Prompt Store Architecture / RBAC" (the
+        // convention store follows the same tenant-scoped RBAC) requires
+        // PUT/DELETE of a tenant override to be reachable by `tenant_owner` OR
+        // `tenant_admin` (not member). The owner-only `settings:manage` would
+        // 403 every tenant_admin, so the dedicated `conventions:manage`
+        // permission grants admin+owner reach. Single-user mode is unaffected —
+        // every signed-up user is auto-`owner` of their personal tenant.
+        ["conventions:manage"] = ["admin", "owner"],
+        // Story 31-9 — onboarding platform picker / connect. The
+        // existing `settings:manage` permission is owner-only and
+        // would 403 every tenant_admin trying to wire a platform
+        // installation; the existing prompts:manage is named for
+        // prompts only. A dedicated `platforms:manage` permission
+        // with admin+owner reach keeps the picker accessible to
+        // tenant admins per the Epic 31 RBAC plan.
+        ["platforms:manage"] = ["admin", "owner"],
     };
 
     public static bool HasPermission(string? role, string? permission)

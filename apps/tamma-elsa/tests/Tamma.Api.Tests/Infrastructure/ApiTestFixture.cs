@@ -30,16 +30,15 @@ public class ApiTestFixture
 {
     public static PostgreSqlContainer Postgres { get; private set; } = null!;
     /// <summary>
-    /// Story 28-1 PR D — second Postgres container that holds the per-tenant
-    /// schema (agent_configs, prompt_overrides, provider_health, ...).
-    /// In production each tenant gets its own physical DB; in tests we use
-    /// one shared tenant DB and let <c>TenantDbContextFactory</c>'s shared
-    /// connection-string mode (<c>StubTenantConnectionResolver</c>) hand
-    /// every tenant the same connection. The CP migration drops the moved
-    /// tables from this fixture's CP DB; the tenant migration creates them
-    /// here. Without this split, every test that exercises a moved entity
-    /// hits "relation does not exist" because the moved tables only live
-    /// on the tenant DB now.
+    /// Story 28-1 PR D — second Postgres container holding the tenant-table
+    /// layout. Unified-tenancy Phase 3: this container is the SYSTEM STORE
+    /// (TenantId-NULL platform default rows reached via
+    /// <c>ISystemStoreDbContextFactory</c> / ConnectionStrings:TammaAppDb).
+    /// Actual TENANT data lives in per-tenant <c>t_&lt;hex&gt;</c> schemas
+    /// provisioned on the CP container (the seeded central pool row points
+    /// at it) — tests reach it through the real
+    /// <c>LruPooledTenantConnectionResolver</c> after calling
+    /// <see cref="ProvisionTenantAsync"/>.
     /// </summary>
     public static PostgreSqlContainer TenantPostgres { get; private set; } = null!;
     public static WebApplicationFactory<Program> Factory { get; private set; } = null!;
@@ -85,6 +84,15 @@ public class ApiTestFixture
             "ConnectionStrings__TammaAppDb", TenantPostgres.GetConnectionString());
         Environment.SetEnvironmentVariable("OpenSearch__Enabled", "false");
 
+        // Phase 3 — every provisioned test tenant gets its own LRU pool
+        // entry; the production default (MaxEntries=500) lets hundreds of
+        // idle per-tenant pools pile up over an assembly run and exhausts
+        // the container's connection slots (PostgresException 53300). A
+        // small cap forces real LRU eviction (which disposes the data
+        // source and closes its connections) while still exercising the
+        // production resolver. Process-wide: later fixtures inherit it.
+        Environment.SetEnvironmentVariable("TenantConnectionPool__MaxEntries", "8");
+
         // Intentionally DO NOT set Jwt__Secret here. Program.cs picks one of
         // three auth branches: real JWT (secret present), permissive dev
         // (secret empty + Development env), or hard-fail (empty + non-dev).
@@ -108,13 +116,9 @@ public class ApiTestFixture
                 builder.DisableAlertHostedServices();
             });
 
-        // The InitialSchema migration references uuid_generate_v4() (pre-existing
-        // mentorship schema) which lives in the uuid-ossp extension. Enable it
-        // before running migrations so the container image (stock postgres:17-alpine)
-        // can execute the migration bundle. Same need on the tenant DB —
-        // the tenant migration creates uuid + jsonb columns.
-        await EnableExtensionsAsync(Postgres.GetConnectionString());
-        await EnableExtensionsAsync(TenantPostgres.GetConnectionString());
+        // Both migration baselines (InitialControlPlane + InitialTenant) apply
+        // on bare Postgres — gen_random_uuid() is a pg_catalog builtin since
+        // PG13, so no extension bootstrap is needed.
 
         // Force service resolution so Program.cs migrations run against the container.
         using var scope = Factory.Services.CreateScope();
@@ -131,7 +135,7 @@ public class ApiTestFixture
         _respawner = await Respawner.CreateAsync(conn, new RespawnerOptions
         {
             DbAdapter = DbAdapter.Postgres,
-            TablesToIgnore = new[] { new Respawn.Graph.Table("__TammaMigrationsHistory") },
+            TablesToIgnore = new[] { new Respawn.Graph.Table("__ControlPlaneMigrationsHistory") },
             SchemasToInclude = new[] { "public" }
         });
 
@@ -165,26 +169,32 @@ public class ApiTestFixture
         await using var tenantConn = new Npgsql.NpgsqlConnection(TenantPostgres.GetConnectionString());
         await tenantConn.OpenAsync();
         await _tenantRespawner.ResetAsync(tenantConn);
+
+        // Phase 3 — Respawner wiped plans + tenant_databases; placement
+        // needs both back before any test provisions a tenant.
+        await TestTenantProvisioning.ReseedPoolAsync(
+            Factory.Services, Postgres.GetConnectionString());
     }
+
+    /// <summary>
+    /// Phase 3 — provision a test tenant through the unified pipeline so
+    /// the LRU resolver can reach its tenant data. The tenants row must
+    /// exist before calling.
+    /// </summary>
+    public static Task ProvisionTenantAsync(Guid tenantId) =>
+        TestTenantProvisioning.ProvisionAsync(Factory.Services, tenantId);
 
     public static HttpClient CreateClient() => Factory.CreateClient();
 
-    private static async Task EnableExtensionsAsync(string connectionString)
-    {
-        await using var bootstrap = new Npgsql.NpgsqlConnection(connectionString);
-        await bootstrap.OpenAsync();
-        await using var cmd = bootstrap.CreateCommand();
-        cmd.CommandText =
-            "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";" +
-            "CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";";
-        await cmd.ExecuteNonQueryAsync();
-    }
-
     private static async Task ApplyTenantMigrationsAsync(string connectionString)
     {
+        // Unified-tenancy Phase 1: pin the history table to the schema named
+        // by the connection string's Search Path. The fixture's container CS
+        // carries no Search Path → null → public, identical to before.
+        var schema = Tamma.Data.Pooling.TenantNaming.SchemaFromConnectionString(connectionString);
         var options = new DbContextOptionsBuilder<TenantDbContext>()
             .UseNpgsql(connectionString, npgsql =>
-                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory"))
+                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema))
             .Options;
         await using var ctx = new TenantDbContext(options);
         await ctx.Database.MigrateAsync();

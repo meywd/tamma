@@ -10,12 +10,13 @@ namespace Tamma.Data.Pooling;
 
 /// <summary>
 /// Story 28-4 — DI extension that wires the production
-/// <see cref="LruPooledTenantConnectionResolver"/> over the
-/// <see cref="StubTenantConnectionResolver"/> registered by
-/// <c>AddTammaData</c>. Call this AFTER
-/// <c>builder.Services.AddTammaData(...)</c> so the explicit
-/// <see cref="ServiceLifetime.Singleton"/> registration here wins over
-/// the stub's <c>TryAddSingleton</c>.
+/// <see cref="LruPooledTenantConnectionResolver"/>. Unified-tenancy
+/// Phase 3: this is the ONLY tenant connection path — the transitional
+/// <c>StubTenantConnectionResolver</c> was deleted and <c>AddTammaData</c>
+/// registers no resolver fallback. Call this AFTER
+/// <c>builder.Services.AddTammaData(...)</c> so the
+/// <c>ControlPlaneDbContext</c> factory swap below sees the default
+/// registration.
 ///
 /// <para><b>What this does</b>:
 /// <list type="number">
@@ -23,13 +24,17 @@ namespace Tamma.Data.Pooling;
 ///     from the <c>TenantConnectionPool</c> config section.</description></item>
 ///   <item><description>Registers the pool metrics singleton (used by
 ///     OpenTelemetry exporters + the admin diagnostics endpoint).</description></item>
-///   <item><description>Adds an <see cref="IDbContextFactory{TContext}"/>
-///     for <c>ControlPlaneDbContext</c> so the resolver (a singleton)
-///     can read CP rows on cold-miss without depending on a scoped
-///     DbContext.</description></item>
-///   <item><description>Replaces the
-///     <see cref="ITenantConnectionResolver"/> registration with the
-///     production LRU resolver. The resolver implements
+///   <item><description>When a dedicated CP connection string is given,
+///     replaces the <see cref="IDbContextFactory{TContext}"/> for
+///     <c>ControlPlaneDbContext</c> with a pooled factory on that string
+///     so the resolver (a singleton) can read CP rows on cold-miss
+///     without depending on a scoped DbContext. When the CP string is
+///     null/empty (dev / self-host / single-pod: the CP IS the central
+///     DB), the non-pooled factory <c>AddTammaData</c> already registered
+///     on the central/admin connection is used as-is.</description></item>
+///   <item><description>Registers the
+///     <see cref="ITenantConnectionResolver"/> as the production LRU
+///     resolver. The resolver implements
 ///     <see cref="IAdminPoolDiagnostics"/> too — same instance is
 ///     forwarded to that service id so admin endpoints can resolve
 ///     either interface.</description></item>
@@ -38,9 +43,9 @@ namespace Tamma.Data.Pooling;
 ///
 /// <para><b>Why a separate extension</b>: <c>AddTammaData</c> runs in
 /// every test fixture (including ones that don't want a real Postgres
-/// pool). Keeping this opt-in via a separate call lets unit-test
-/// fixtures stick with the stub while the production composition root
-/// (<c>Program.cs</c>) opts into the LRU resolver.</para>
+/// pool). Keeping this as a separate call lets unit-test fixtures
+/// register their own resolver doubles while the production composition
+/// root (<c>Program.cs</c>) wires the LRU resolver unconditionally.</para>
 /// </summary>
 public static class TenantConnectionPoolServiceCollectionExtensions
 {
@@ -53,22 +58,20 @@ public static class TenantConnectionPoolServiceCollectionExtensions
     /// <param name="services">DI container.</param>
     /// <param name="configuration">Root configuration. Reads
     /// <c>TenantConnectionPool</c> section.</param>
-    /// <param name="controlPlaneConnectionString">Connection string
-    /// for the control-plane database. Used to wire the
-    /// <c>ControlPlaneDbContext</c> factory.</param>
+    /// <param name="controlPlaneConnectionString">Connection string for
+    /// the dedicated control-plane database, or <c>null</c>/empty when
+    /// the control plane shares the central DB (dev / self-host). When
+    /// set, the <c>ControlPlaneDbContext</c> factory is re-wired as a
+    /// pooled factory on this string; when unset, the factory already
+    /// registered by <c>AddTammaData</c> (central/admin connection) is
+    /// kept.</param>
     public static IServiceCollection AddTenantConnectionPool(
         this IServiceCollection services,
         IConfiguration configuration,
-        string controlPlaneConnectionString)
+        string? controlPlaneConnectionString = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
-        if (string.IsNullOrWhiteSpace(controlPlaneConnectionString))
-            throw new ArgumentException(
-                "AddTenantConnectionPool requires a non-empty control-plane " +
-                "connection string. The resolver reads tenant rows from CP " +
-                "to look up encrypted connection strings on cold-miss.",
-                nameof(controlPlaneConnectionString));
 
         // Bind options from the TenantConnectionPool section. Defaults
         // (MaxEntries=500, MaxPoolSize=5) come from the options class —
@@ -100,17 +103,30 @@ public static class TenantConnectionPoolServiceCollectionExtensions
         // <c>IDbContextFactory&lt;ControlPlaneDbContext&gt;</c>
         // descriptor on top of the existing one and both options
         // pipelines run on construction.
-        services.RemoveAll<IDbContextFactory<ControlPlaneDbContext>>();
-        services.RemoveAll<DbContextOptions<ControlPlaneDbContext>>();
-        services.AddPooledDbContextFactory<ControlPlaneDbContext>(opts =>
+        //
+        // Unified-tenancy Phase 3: the CP string is OPTIONAL. Without a
+        // dedicated CP database (dev / self-host / single-pod — the CP IS
+        // the central DB), AddTammaData's non-pooled factory on the
+        // central/admin connection serves the resolver's cold-miss CP
+        // lookups directly; re-wiring it here on the same string would
+        // only duplicate the registration it already has.
+        if (!string.IsNullOrWhiteSpace(controlPlaneConnectionString))
         {
-            opts.UseNpgsql(controlPlaneConnectionString, npgsql =>
-                npgsql.MigrationsHistoryTable("__TammaMigrationsHistory"));
-        });
+            services.RemoveAll<IDbContextFactory<ControlPlaneDbContext>>();
+            services.RemoveAll<DbContextOptions<ControlPlaneDbContext>>();
+            services.AddPooledDbContextFactory<ControlPlaneDbContext>(opts =>
+            {
+                opts.UseNpgsql(controlPlaneConnectionString, npgsql =>
+                    // Must match ControlPlaneDesignTimeDbContextFactory and DependencyInjection.cs
+                    // (unified-tenancy Phase 0 reconciliation).
+                    npgsql.MigrationsHistoryTable("__ControlPlaneMigrationsHistory"));
+            });
+        }
 
-        // Replace the stub. Use Replace+Singleton (not TryAdd) so this
-        // call deterministically wins over AddTammaData's
-        // TryAddSingleton fallback regardless of registration order.
+        // Use RemoveAll+Singleton (not TryAdd) so this call
+        // deterministically wins regardless of registration order —
+        // e.g. a fixture that pre-staged a resolver double and then
+        // composes the production wiring.
         services.RemoveAll<ITenantConnectionResolver>();
         services.AddSingleton<LruPooledTenantConnectionResolver>();
         services.AddSingleton<ITenantConnectionResolver>(

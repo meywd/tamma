@@ -42,7 +42,7 @@ public class PromptEventsServiceTests
         var tenantId = Guid.NewGuid();
         var userId = Guid.NewGuid();
 
-        await _service.EmitUpdatedAsync(tenantId, userId, "developer", "plan", new Dictionary<string, object?>
+        await _service.EmitUpdatedAsync(tenantId, userId, "developer", "plan-implementation", new Dictionary<string, object?>
         {
             ["template"] = "new template",
         });
@@ -56,7 +56,7 @@ public class PromptEventsServiceTests
 
         using var tags = JsonDocument.Parse(evt.Tags);
         tags.RootElement.GetProperty("role").GetString().Should().Be("developer");
-        tags.RootElement.GetProperty("action").GetString().Should().Be("plan");
+        tags.RootElement.GetProperty("action").GetString().Should().Be("plan-implementation");
         tags.RootElement.GetProperty("userId").GetString().Should().Be(userId.ToString());
     }
 
@@ -103,7 +103,7 @@ public class PromptEventsServiceTests
 
         // Should not bubble up
         var act = () => service.EmitUpdatedAsync(
-            Guid.NewGuid(), null, "developer", "plan",
+            Guid.NewGuid(), null, "developer", "plan-implementation",
             new Dictionary<string, object?>());
         await act.Should().NotThrowAsync();
     }
@@ -125,6 +125,10 @@ public class PromptEventsServiceTests
 
         public Task<(IReadOnlyList<Tamma.Data.Entities.DomainEvent> Events, int Total)> ListByTenantAsync(
             Guid tenantId, string? typePrefix, int limit, int offset)
+            => throw new NotImplementedException();
+
+        public Task<(IReadOnlyList<Tamma.Data.Entities.DomainEvent> Events, int Total)> QueryWithPaginationAsync(
+            Guid? tenantId, string? type, int? issueNumber, int limit, int offset)
             => throw new NotImplementedException();
     }
 }

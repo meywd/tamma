@@ -14,11 +14,16 @@ using Tamma.Api.Extensions;
 using Tamma.Api.Infrastructure;
 using Tamma.Api.Middleware;
 using Tamma.Api.Services;
+using Tamma.Api.Services.Provisioning.V2;
 using Tamma.Core.Interfaces;
 using Tamma.Api.Services.PlatformTasks;
+using Tamma.Api.Services.Webhooks;
 using Tamma.Data;
 using Tamma.Data.Pooling;
 using Tamma.Data.Repositories;
+using Tamma.Platforms.Gitea;
+using Tamma.Platforms.GitHub;
+using Tamma.Platforms.GitLab;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -173,15 +178,17 @@ builder.Services.AddHttpClient("github", client =>
 // ────────────────────────────────────────────────────────────────────────────
 // Database + repositories (via extension method)
 //
-// Phase-3 dual-connection-string architecture:
+// Dual-connection-string architecture:
 //   - TammaDb        → admin / migrations / background services (superuser)
-//   - TammaAppDb     → per-request runtime, role=tamma_app, RLS-enforced
+//   - TammaAppDb     → per-request runtime, role=tamma_app (least-privilege
+//                      runtime role; tenant isolation itself is schema +
+//                      per-tenant role under the unified tenancy model)
 //
-// For backward compat with pre-Phase-3 configs, `DefaultConnection` still
+// For backward compat with older configs, `DefaultConnection` still
 // works: it's treated as the admin string when TammaDb isn't set. If
 // TammaAppDb is absent, it falls through to the admin connection with a
 // warning — dev-mode single-role Postgres continues to function, but
-// production must set TammaAppDb explicitly (see the Phase-3 runbook).
+// production must set TammaAppDb explicitly.
 // ────────────────────────────────────────────────────────────────────────────
 // IsNullOrWhiteSpace fallback (not just `??`): appsettings.json may ship an
 // empty TammaDb default to opt operators into env-only configuration, and the
@@ -196,8 +203,8 @@ if (appConnectionString is null)
 {
     Log.Warning(
         "ConnectionStrings:TammaAppDb is not configured — falling back to the "
-        + "admin connection for per-request DbContexts. RLS will be inactive "
-        + "until the app-role connection is wired (see Phase-3 runbook). "
+        + "admin connection for per-request DbContexts. The least-privilege "
+        + "tamma_app role is bypassed until the app-role connection is wired. "
         + "This is expected for local development; production deployments "
         + "must set this explicitly.");
 }
@@ -228,45 +235,43 @@ builder.Services.AddSingleton<
 
 builder.Services.AddTammaData(connectionString, appConnectionString, controlPlaneConnectionString);
 
-// ── Story 28-4 — production tenant connection pool (LRU + handles) ──
+// ── Story 28-4 / unified-tenancy Phase 3 — tenant connection pool ──
 //
-// Replaces the StubTenantConnectionResolver registered by AddTammaData
-// with the LRU-cached LruPooledTenantConnectionResolver. Callers (every
-// per-tenant DbContext build, every TenantDbContextFactory.CreateAsync)
-// gain warm-pool reuse + ref-counted leases for SSE/streaming consumers.
+// The LRU-cached LruPooledTenantConnectionResolver is the ONLY tenant
+// connection path: every per-tenant DbContext build (every
+// TenantDbContextFactory.CreateAsync) resolves the tenant's stored
+// encrypted connection string through it. Registered UNCONDITIONALLY —
+// the transitional StubTenantConnectionResolver and the
+// Tamma:RequireTenantIsolation startup guard were removed in Phase 3.
 //
-// Wired AFTER AddTammaData so this Replace+AddSingleton wins over the
-// stub's TryAddSingleton fallback. The CP connection string drives the
-// resolver's pooled IDbContextFactory<ControlPlaneDbContext> for cold-
-// miss tenant-row lookups.
-//
-// Test fixtures and dev environments without a real CP connection
-// string keep the StubTenantConnectionResolver wiring (good enough for
-// the EF query-filter fallback that the existing tests rely on).
-if (!string.IsNullOrWhiteSpace(controlPlaneConnectionString))
-{
-    builder.Services.AddTenantConnectionPool(
-        builder.Configuration,
-        controlPlaneConnectionString);
+// Wired AFTER AddTammaData. The CP connection string is optional: when
+// set, the resolver's cold-miss tenant-row lookups go through a pooled
+// IDbContextFactory<ControlPlaneDbContext> on the dedicated CP database;
+// when unset (dev / self-host — the CP IS the central DB), the factory
+// AddTammaData registered on the central connection is used as-is.
+builder.Services.AddTenantConnectionPool(
+    builder.Configuration,
+    controlPlaneConnectionString);
 
-    // Optional pre-warm of top-N most-active tenants on startup. Off
-    // by default (TenantConnectionPool:Warmup:Enabled=false). Reads
-    // the top-tenants list from Story 28-10's IPlatformAnalyticsService
-    // — fresh installs see an empty list and skip cleanly.
-    builder.Services.Configure<Tamma.Api.Services.PoolWarmupOptions>(opts =>
-        builder.Configuration
-            .GetSection(Tamma.Api.Services.PoolWarmupOptions.SectionName)
-            .Bind(opts));
-    builder.Services.AddHostedService<Tamma.Api.Services.PoolWarmupService>();
-}
-else
-{
-    Log.Information(
-        "Story 28-4 — no ControlPlane connection string configured; " +
-        "tenant connection pool stays on the StubTenantConnectionResolver. " +
-        "Set ConnectionStrings:ControlPlane to enable the LRU pool + " +
-        "/api/admin/pools/* diagnostics.");
-}
+// Optional pre-warm of top-N most-active tenants on startup. Off
+// by default (TenantConnectionPool:Warmup:Enabled=false). Reads
+// the top-tenants list from Story 28-10's IPlatformAnalyticsService
+// — fresh installs see an empty list and skip cleanly.
+builder.Services.Configure<Tamma.Api.Services.PoolWarmupOptions>(opts =>
+    builder.Configuration
+        .GetSection(Tamma.Api.Services.PoolWarmupOptions.SectionName)
+        .Bind(opts));
+builder.Services.AddHostedService<Tamma.Api.Services.PoolWarmupService>();
+
+// Story 30-8 — V2 routing seam: the LRU pool consults
+// ITenantEndpointDirectory before falling back to the legacy
+// EncryptedConnectionString path. Wires the registry, the null
+// provider seam, the provider-key lookup (gracefully handles
+// Story 30-3's not-yet-landed migration via information_schema
+// probe) and the V2 directory adapter. Real providers plug in
+// via additional AddSingleton<ITenantInfrastructureProvider, …>
+// calls (Stories 30-4..30-6).
+builder.Services.AddTenantProvisioningV2();
 
 // R2-M1: register IErrorRedactor so KekRotationCoordinator can scrub
 // ex.Message before it lands in platform_events.data or
@@ -281,9 +286,31 @@ builder.Services.TryAddSingleton<
 // only one rotation can be in flight at a time.
 builder.Services.AddSingleton<Tamma.Api.Services.Secrets.KekRotationCoordinator>();
 
+// Story 28-12 AC5 residual — OTel ObservableGauge
+// `tamma.kek_rotation.remaining` reading "tenants still needing rekey"
+// from the coordinator's in-memory status snapshot. Constructing this
+// singleton instantiates the Meter ("Tamma.KekRotation") whose gauge is
+// then discoverable by any wired MeterProvider; resolve it eagerly so
+// the meter exists from process start rather than first /status poll.
+builder.Services.AddSingleton<Tamma.Api.Services.Secrets.KekRotationMetrics>();
+
 // R2-H13 — readiness probe refuses to flip green when there are
 // tenant rows further behind than the cabinet history can decrypt.
 builder.Services.AddSingleton<Tamma.Api.Services.Secrets.KekCabinetHealthCheck>();
+
+// ── Story 28-12 AC1+AC2 (2026-05-30 residual #3) ─────────────────────
+// Runtime least-privilege assertion: probe `SELECT current_user` on the
+// app connection and refuse readiness in Production if the API is running
+// as tamma_provisioner / tamma_admin (privileged) instead of tamma_app.
+// Outside Production it's a warning only (dev/test run as a single default
+// role with no split — keeps the suite green). Captures the resolved app
+// connection string + environment so the check is self-contained.
+builder.Services.AddSingleton(sp =>
+    new Tamma.Api.Services.Secrets.DbRoleLeastPrivilegeCheck(
+        appConnectionString,
+        builder.Environment.IsProduction(),
+        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<
+            Tamma.Api.Services.Secrets.DbRoleLeastPrivilegeCheck>>()));
 
 // Keep existing mentorship repos/services for backward compat
 builder.Services.AddScoped<IMentorshipSessionRepository, MentorshipSessionRepository>();
@@ -348,16 +375,14 @@ builder.Services.AddSingleton<Tamma.Api.Services.RateLimit.IApiKeyRateLimiter,
 builder.Services.AddHttpContextAccessor();
 // IMemoryCache for the installation router cache (audit finding 029).
 builder.Services.AddMemoryCache();
-// GitHub OAuth http client (token exchange + profile fetch). User-Agent
-// header is required by the GitHub API.
-builder.Services.AddHttpClient("github-oauth", client =>
+// Bridge from oauth2-proxy (browser auth gateway) to Tamma's tamma_session
+// JWT. The middleware is wired in the request pipeline below; the
+// HttpClient feeds it /oauth2/userinfo lookups.
+builder.Services.AddHttpClient("oauth2-proxy", client =>
 {
-    client.DefaultRequestHeaders.Add("User-Agent", "Tamma-API");
-    client.DefaultRequestHeaders.Add("Accept", "application/json");
+    client.Timeout = TimeSpan.FromSeconds(5);
 });
-builder.Services.AddScoped<Tamma.Api.Services.OAuth.IGitHubOAuthService,
-    Tamma.Api.Services.OAuth.GitHubOAuthService>();
-
+builder.Services.AddScoped<Tamma.Api.Middleware.ProxyHeaderAuthMiddleware>();
 // Hardening workstreams — ported from the deleted TS API services.
 // Each extension method owns its own service registrations.
 builder.Services.AddPromptStoreServices();
@@ -374,9 +399,9 @@ builder.Services.AddProviderSessionServices();
 builder.Services.AddSaaSServices();
 // Per-tenant provisioning (Cranl). When Cranl:ApiKey + Cranl:OrganizationId
 // are both configured, the Cranl-backed provisioner + workflow + queue
-// handler are wired; otherwise the Null seam keeps every tenant on the
-// shared central Postgres via RLS. See docs/vendors/cranl/README.md for
-// the per-tenant provisioning flow.
+// handler are wired; otherwise the Null seam mints no external resources —
+// tenant placement stays on the unified tenant_databases pool (central DB
+// by default). See docs/vendors/cranl/README.md for the provisioning flow.
 builder.Services.AddTenantProvisioning(builder.Configuration);
 
 // Platform secret cabinet (Epic 29). Story 29-1 wires only the
@@ -425,6 +450,102 @@ if (!string.IsNullOrWhiteSpace(
 {
     builder.Services.AddTammaSecretReveal(builder.Configuration);
 }
+
+// Story 31-2: platform routing resolver. Exposes IPlatformResolver as a
+// scoped service over a singleton driver cache and the Epic 29 secret
+// store seam. Drivers themselves (GitHub 31-3, Gitea 31-4, ...) ship in
+// sibling projects and self-register their per-kind
+// IGitPlatformDriverFactory via keyed DI; until 31-3 lands no kind has
+// a real factory and the resolver returns null for every tenant.
+//
+// Credential reader registration follows the same conditional pattern as
+// IAlertChannelSecretReader (Story 1.5-37): when the Story 29-2
+// SecretsDbContextFactory is registered we wire the real reader; in tests
+// or dev environments without it we fall back to NullPlatformCredentialReader
+// so a misconfigured host doesn't fail at DI-validation time.
+builder.Services.AddSingleton<Tamma.Platforms.PlatformDriverCache>();
+if (builder.Services.Any(d => d.ServiceType ==
+    typeof(Microsoft.EntityFrameworkCore.IDbContextFactory<
+        Tamma.Api.Services.Secrets.Postgres.SecretsDbContext>)))
+{
+    builder.Services.AddScoped<
+        Tamma.Platforms.Abstractions.IPlatformCredentialReader,
+        Tamma.Api.Services.Platforms.SecretStorePlatformCredentialReader>();
+}
+else
+{
+    builder.Services.AddSingleton<
+        Tamma.Platforms.Abstractions.IPlatformCredentialReader,
+        Tamma.Api.Services.Platforms.NullPlatformCredentialReader>();
+}
+builder.Services.AddScoped<
+    Tamma.Platforms.Abstractions.IPlatformResolver,
+    Tamma.Platforms.PlatformResolver>();
+builder.Services.AddScoped<
+    Tamma.Platforms.IPlatformInstallationEventEmitter,
+    Tamma.Platforms.PlatformInstallationEventEmitter>();
+
+// Story 31-9 — onboarding platform picker connect service. Composes
+// the secret-cabinet (29-1/29-3 reveal-on-create), the 31-2 platform
+// installation registry, and the 31-1 driver factory to validate +
+// persist a new platform binding. Scoped because it touches the
+// per-request DbContext via the repository.
+//
+// Resolved via a factory lambda so the DI container does not eagerly
+// validate ISecretRevealService at startup. ISecretRevealService is
+// only registered when ConnectionStrings:SecretStore / ControlPlane
+// is configured (Program.cs lines 433-439). Test environments without
+// Postgres connection strings would fail container build-time
+// ValidateOnBuild if PlatformConnectService were registered with
+// constructor-injection sugar; the factory shape defers resolution to
+// the first request, at which point the endpoint is gated on
+// PlatformsManage so it would 401/403 long before the service is
+// invoked. When the reveal service is wired (production +
+// AddTammaPostgresSecrets-enabled tests) the factory hands back a
+// real PlatformConnectService.
+builder.Services.AddScoped<
+    Tamma.Api.Services.Onboarding.IPlatformConnectService>(sp =>
+{
+    var reveal = sp.GetService<Tamma.Api.Services.Secrets.Reveal.ISecretRevealService>();
+    if (reveal is null)
+    {
+        // No secret cabinet wired — the endpoint will surface a
+        // 503-style error when invoked. Tests exercise the service
+        // directly via constructor injection.
+        return new Tamma.Api.Services.Onboarding.NullPlatformConnectService();
+    }
+    return new Tamma.Api.Services.Onboarding.PlatformConnectService(
+        sp.GetRequiredService<Tamma.Data.Repositories.ITenantPlatformInstallationRepository>(),
+        reveal,
+        sp,
+        sp.GetRequiredService<Tamma.Platforms.IPlatformInstallationEventEmitter>(),
+        sp.GetRequiredService<TimeProvider>(),
+        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<
+            Tamma.Api.Services.Onboarding.PlatformConnectService>>());
+});
+
+// Story 31-4: register the Gitea driver factory under keyed DI for
+// PlatformKind.Gitea. PlatformResolver picks the factory up via
+// GetKeyedService<IGitPlatformDriverFactory>(PlatformKind.Gitea) when
+// a tenant's installation row carries platform_kind = 'gitea'. The
+// extension is idempotent and registers the named tamma-gitea HTTP
+// client + OAuth2 token cache + webhook signature verifier.
+builder.Services.AddGiteaPlatformDriver();
+
+// Story 31-5: Forgejo compat shim. Composes the Gitea driver — wire-
+// compatible REST surface — under PlatformKind.Forgejo so the resolver
+// can pick a Forgejo-branded driver for tenants with platform_kind =
+// 'forgejo'. Webhook verifier registered keyed-DI with X-Forgejo-Sig
+// preferred, X-Gitea-Sig fallback for older forks. Idempotent.
+builder.Services.AddForgejoPlatformDriver();
+
+// Story 31-7: webhook receiver. Registers per-platform signature
+// verifiers (HMAC for GitHub/Gitea/Forgejo, static-token for GitLab),
+// the in-process IWebhookEventDispatcher (single-handler-per-event for
+// now; multi-handler dispatch is a follow-up), the cross-platform
+// idempotency repo, and the secret-resolver that bridges the
+// installation row to its webhook secret via the Story 29 seam.
+builder.Services.AddTammaWebhookReceiver();
 
 // Engine callback services (audit findings 001, 004, 005-011). Context store
 // is in-memory (single-instance only) until the real RAG pipeline ports.
@@ -512,6 +633,23 @@ builder.Services.AddSingleton(_ =>
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.LocalExecutor>();
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.GitHubActionsExecutor>();
 
+// Story 28-5 AC4 — optional pre-drop tenant backup (pg_dump), disabled by
+// default. Bound here too so the activity resolves config when the delete
+// workflow runs in-process under the API host.
+builder.Services.AddOptions<Tamma.Activities.TenantLifecycle.TenantBackupOptions>()
+    .Configure(opts =>
+        builder.Configuration
+            .GetSection(Tamma.Activities.TenantLifecycle.TenantBackupOptions.SectionName)
+            .Bind(opts));
+
+// Unified-tenancy Phase 4 — pg_dump/pg_restore knobs for the tenant move
+// engine (TenantMoveService, registered by AddPlatformEventBus).
+builder.Services.AddOptions<Tamma.Api.Services.Provisioning.TenantMoveOptions>()
+    .Configure(opts =>
+        builder.Configuration
+            .GetSection(Tamma.Api.Services.Provisioning.TenantMoveOptions.SectionName)
+            .Bind(opts));
+
 // Factory + activity wrapper.
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.AgentExecutorFactory>();
 
@@ -523,12 +661,32 @@ builder.Services.AddSingleton<Tamma.Api.Services.Engine.Lifecycle.IEngineLifecyc
     Tamma.Api.Services.Engine.Lifecycle.InMemoryEngineLifecycleBus>();
 builder.Services.Configure<Tamma.Api.Services.Engine.Lifecycle.EngineLifecycleOptions>(
     builder.Configuration.GetSection("EngineLifecycle"));
+// Task #10 (post-review) — register the heartbeat options as a singleton
+// so the shared API test fixture can flip RunOnStartup=false without
+// removing the hosted-service registration. Default options (RunOnStartup=true)
+// preserve production behaviour.
+builder.Services.TryAddSingleton<Tamma.Api.Services.Engine.Lifecycle.EngineRegistryHeartbeatOptions>();
 builder.Services.AddHostedService<Tamma.Api.Services.Engine.Lifecycle.EngineRegistryHeartbeatService>();
 
 // Story 28-6: in-process platform-event bus. Subscribers attach in this
 // process only; multi-pod fanout pending a Postgres LISTEN/NOTIFY bridge
 // against platform_events. Repository registration lives in AddTammaData.
 builder.Services.AddPlatformEventBus();
+
+// Story 31-6: GitLab driver — registers the keyed
+// IGitPlatformDriverFactory the 31-2 PlatformResolver picks up. Same
+// driver serves SaaS gitlab.com and self-hosted; BaseUrl comes from
+// the per-tenant PlatformInstallation row.
+builder.Services.AddGitLabPlatform();
+
+// Story 31-3: GitHub driver — wraps the existing
+// IGitHubActionsClient (Tamma.Activities) behind IGitPlatformDriver
+// so GitHub becomes a peer of Gitea/GitLab/Forgejo for the 31-2
+// PlatformResolver. The factory pulls the inner client from the
+// request scope on each CreateAsync call so it picks up the existing
+// Octokit / Null registration above without changing those code
+// paths.
+builder.Services.AddGitHubPlatformDriver();
 
 builder.Services.AddKnowledgeBaseServices(builder.Configuration);
 
@@ -627,6 +785,12 @@ builder.Services.AddHealthChecks()
     .AddNpgSql(connectionString, tags: new[] { "ready" })
     .AddCheck<Tamma.Api.Services.Secrets.KekCabinetHealthCheck>(
         name: "kek-cabinet",
+        failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
+        tags: new[] { "ready" })
+    // Story 28-12 AC1+AC2 — least-privilege DB role assertion (see the
+    // DbRoleLeastPrivilegeCheck registration above for the gating rules).
+    .AddCheck<Tamma.Api.Services.Secrets.DbRoleLeastPrivilegeCheck>(
+        name: "db-role-least-privilege",
         failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
         tags: new[] { "ready" });
 
@@ -727,6 +891,14 @@ builder.Services.AddSingleton<
 // each capability owner (e.g. webhook routing in Story 28-7); the
 // worker itself is hosted-service singleton + registry singleton.
 builder.Services.AddPlatformTaskWorker(builder.Configuration);
+
+// Unified-tenancy Phase 4 — `tenant.move` platform-task handler. Drives
+// ITenantMoveService.MoveAsync for tasks enqueued by
+// POST /api/admin/tenants/{tenantId}/move; on failure it stamps the
+// tenant's FailureReason shadow column and rethrows so the worker
+// retries (dead-letter at the ceiling).
+builder.Services
+    .AddPlatformTaskHandler<Tamma.Api.Services.Provisioning.MoveTenantTaskHandler>();
 
 // ────────────────────────────────────────────────────────────────────────────
 // Authentication + Authorization
@@ -831,6 +1003,39 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("settings:manage"));
         });
+        // Story 27-3 — Prompt Store tenant-admin policy. CLAUDE.md
+        // "Prompt Store Architecture / RBAC" allows PUT/DELETE override to
+        // tenant_owner OR tenant_admin (admin+owner in this codebase's role
+        // matrix). The existing SettingsManage policy is owner-only and would
+        // 403 every tenant_admin, so prompt PUT/DELETE/POST-reset routes use
+        // the dedicated PromptManage gate instead.
+        options.AddPolicy("PromptManage", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("prompts:manage"));
+        });
+        // Story 27-10 — Convention Store tenant-admin policy. Mirrors
+        // PromptManage exactly: tenant PUT/DELETE of a convention override must
+        // be reachable by tenant_owner OR tenant_admin (admin+owner here);
+        // member-role callers hit 403. SettingsManage is owner-only and would
+        // 403 every tenant_admin, so the dedicated ConventionManage gate is used
+        // for the tenant override mutations. The /api/admin/conventions/* system
+        // -default routes use PlatformOwnerAccess instead (platform-admin only).
+        options.AddPolicy("ConventionManage", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("conventions:manage"));
+        });
+        // Story 31-9 — onboarding platform picker / connect. CLAUDE.md
+        // "Operating Modes" requires the same admin+owner reach as
+        // PromptManage so tenant admins (not just owners) can wire
+        // platform installations. SettingsManage is owner-only and
+        // would 403 every admin-role tenant member.
+        options.AddPolicy("PlatformsManage", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("platforms:manage"));
+        });
         options.AddPolicy("WorkflowsView", p =>
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
@@ -907,7 +1112,7 @@ else if (builder.Environment.IsDevelopment())
             .Build();
         // Register all named policies with permissive default
         foreach (var name in new[] { "AdminAccess", "OwnerAccess", "PlatformOwnerAccess", "MemberAccess", "SettingsView",
-            "SettingsManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
+            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
             "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny" })
         {
             options.AddPolicy(name, p => p.AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement()));
@@ -922,6 +1127,14 @@ else
 }
 
 var app = builder.Build();
+
+// Story 28-12 AC5 residual — eagerly resolve the KEK-rotation metrics so
+// the `tamma.kek_rotation.remaining` ObservableGauge's Meter is alive
+// from process start (otherwise no consumer would force-construct the
+// lazy singleton until the first /status poll). Resolving here also keeps
+// the instance rooted on the app's service provider for the process
+// lifetime so the Meter is never GC-disposed mid-run.
+_ = app.Services.GetRequiredService<Tamma.Api.Services.Secrets.KekRotationMetrics>();
 
 // ────────────────────────────────────────────────────────────────────────────
 // CLI dispatch — Story 29-9 one-shot commands run BEFORE the HTTP pipeline
@@ -953,6 +1166,12 @@ app.UseHttpsRedirection();
 app.UseCors("AllowDashboard");
 
 app.UseAuthentication();
+// After UseAuthentication and BEFORE UseAuthorization: if the request
+// arrived without a valid JWT but with a _oauth2_proxy cookie, mint a
+// tamma_session JWT from the proxy's /oauth2/userinfo response. CLI /
+// API-key callers (no proxy cookie) pass through untouched. See
+// ProxyHeaderAuthMiddleware for the full rationale.
+app.UseMiddleware<Tamma.Api.Middleware.ProxyHeaderAuthMiddleware>();
 app.UseAuthorization();
 app.UseRateLimiter();
 // Story 28-R2 follow-up B — verify the impersonation row backing any
@@ -996,7 +1215,12 @@ auth.MapPost("/verify-email", AuthEndpoints.VerifyEmail);
 auth.MapPost("/resend-verification", AuthEndpoints.ResendVerification);
 auth.MapPost("/login", AuthEndpoints.Login);
 auth.MapPost("/refresh", AuthEndpoints.Refresh);
-auth.MapPost("/logout", AuthEndpoints.Logout).RequireAuthorization("MemberAccess");
+// Logout sits at bare /api/auth/logout (not /api/v1/auth/logout) to match
+// the bare-path session endpoints /api/auth/me and /api/auth/role-check
+// that the dashboard polls. The /api/v1/auth/* group reserves login,
+// register, refresh — the OAuth2-flow endpoints — while the bare /api/auth
+// group is for "what is my current session" semantics.
+app.MapPost("/api/auth/logout", AuthEndpoints.Logout).RequireAuthorization("MemberAccess");
 auth.MapPost("/password-reset/request", AuthEndpoints.PasswordResetRequest);
 auth.MapPost("/password-reset/confirm", AuthEndpoints.PasswordResetConfirm);
 // Story 28-9 — switch-org owns refresh-token rotation alongside the new JWT
@@ -1012,14 +1236,9 @@ app.MapGet("/api/auth/me", AuthEndpoints.GetMe).RequireAuthorization("Authentica
 // status alone (audit finding 010). AuthenticatedAny enforces auth; the
 // endpoint itself returns 403 for insufficient role.
 app.MapGet("/api/auth/role-check", AuthEndpoints.RoleCheck).RequireAuthorization("AuthenticatedAny");
-// Audit finding 014 — rate limit OAuth start + callback (60/min). Both share
-// the policy because the callback's HTTP-side cost is comparable to the start
-// (token exchange + GitHub API call) and an attacker spraying either consumes
-// the same downstream budget.
-app.MapGet("/api/auth/github", AuthEndpoints.GitHubAuth)
-    .RequireRateLimiting("OAuthStart");
-app.MapGet("/api/auth/github/callback", AuthEndpoints.GitHubCallback)
-    .RequireRateLimiting("OAuthStart");
+// Browser user-login flow lives in oauth2-proxy (see docker/oauth2-proxy.cfg
+// + nginx auth_request). Tamma.Api does NOT own a /api/auth/github route;
+// the dashboard's "Sign in with GitHub" button links to /oauth2/start.
 
 // ── Admin ──
 var admin = app.MapGroup("/api/admin").RequireAuthorization("AdminAccess");
@@ -1050,7 +1269,11 @@ admin.MapPost("/users/invite", AdminEndpoints.InviteUser);
 admin.MapGet("/users/invites", AdminEndpoints.ListInvites);
 admin.MapDelete("/users/invites/{id}", AdminEndpoints.DeleteInvite);
 // SelfOrApiKeysManage: a regular member can manage their own keys; admins
-// can manage anyone's. Audit finding 016.
+// can manage anyone's. Audit finding 016. The path is "/keys" (not
+// "/api-keys") and the response shape is { apiKeys: [...] } per the
+// Story 16.2 contract — see the apiKeysApi client at
+// packages/dashboard/src/services/admin/admin-api-client.ts which is the
+// canonical consumer of these endpoints.
 admin.MapPost("/users/{id}/keys", AdminEndpoints.CreateUserApiKey).RequireAuthorization("SelfOrApiKeysManage");
 admin.MapGet("/users/{id}/keys", AdminEndpoints.ListUserApiKeys).RequireAuthorization("SelfOrApiKeysManage");
 admin.MapDelete("/users/{id}/keys/{keyId}", AdminEndpoints.DeleteUserApiKey).RequireAuthorization("SelfOrApiKeysManage");
@@ -1058,8 +1281,9 @@ admin.MapDelete("/users/{id}/keys/{keyId}", AdminEndpoints.DeleteUserApiKey).Req
 // Tenant provisioning (audit cranl/003). Platform-owner-only — these flip
 // per-tenant Cranl resources into existence (POST), report status (GET), or
 // tear them down (POST /deprovision). When Cranl:ApiKey is unset the Null
-// provisioner short-circuits to "shared infra" and these endpoints still
-// work — they just mark the tenant Ready without external API calls.
+// provisioner mints nothing and these endpoints still work — they just mark
+// the tenant Ready without external API calls (placement stays on the
+// unified tenant_databases pool).
 //
 // Story 28-R2 / C1: switched from OwnerAccess → PlatformOwnerAccess. The
 // legacy OwnerAccess policy keys off the per-tenant role and admits every
@@ -1153,6 +1377,40 @@ admin.MapPost("/tenants/{tenantId:guid}/cleanup",
     .RequireAuthorization("PlatformOwnerAccess");
 admin.MapPatch("/tenants/{tenantId:guid}/plan",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.UpdateTenantPlan)
+    .RequireAuthorization("PlatformOwnerAccess");
+
+// Unified-tenancy Phase 4 — move a tenant's schema to another pool row.
+// POST validates cheaply + enqueues a `tenant.move` platform task and
+// returns 202 with the GET polling URL (the same 202-plus-status-poll
+// shape the Cranl provisioning endpoints use); the MoveTenantTaskHandler
+// drives ITenantMoveService.MoveAsync when PlatformTaskWorker claims the
+// row. GET reports Status / FailureReason / current placement.
+admin.MapPost("/tenants/{tenantId:guid}/move",
+        Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.MoveTenant)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapGet("/tenants/{tenantId:guid}/move",
+        Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.GetTenantMove)
+    .RequireAuthorization("PlatformOwnerAccess");
+
+// Unified-tenancy Phase 4 — platform-admin CRUD over the tenant_databases
+// registry (the operator's DB pool). The admin connection string travels
+// inbound only (encrypted at rest; never serialised into a response);
+// rotation evicts the TenantDatabasePool decrypt cache. PlatformOwnerAccess
+// because pool rows carry cross-tenant blast radius.
+admin.MapGet("/tenant-databases",
+        Tamma.Api.Endpoints.Admin.AdminTenantDatabasesEndpoints.ListDatabases)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapGet("/tenant-databases/{databaseId:guid}",
+        Tamma.Api.Endpoints.Admin.AdminTenantDatabasesEndpoints.GetDatabaseDetail)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapPost("/tenant-databases",
+        Tamma.Api.Endpoints.Admin.AdminTenantDatabasesEndpoints.CreateDatabase)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapPatch("/tenant-databases/{databaseId:guid}",
+        Tamma.Api.Endpoints.Admin.AdminTenantDatabasesEndpoints.UpdateDatabase)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapDelete("/tenant-databases/{databaseId:guid}",
+        Tamma.Api.Endpoints.Admin.AdminTenantDatabasesEndpoints.DeleteDatabase)
     .RequireAuthorization("PlatformOwnerAccess");
 
 // Story 28-R2 follow-up B — platform-admin impersonation surface (SOC2
@@ -1395,6 +1653,21 @@ app.MapGet("/api/v1/onboarding/status", OnboardingEndpoints.GetStatus)
 app.MapGet("/api/v1/onboarding/install-github", OnboardingEndpoints.InstallGitHub)
     .RequireAuthorization("MemberAccess");
 
+// ── Story 31-9 — onboarding platform picker + installation API ──
+// GET /platforms returns the list of platforms the picker renders +
+// per-kind capability flags, marking deferred kinds (Bitbucket /
+// AzureDevOps) as coming-soon. POST /install is gated by the new
+// PlatformsManage policy (admin+owner): wires a credential into the
+// Epic 29 cabinet, runs an auth dry-run via the driver factory, and
+// inserts a tenant_platform_installations row. GET /installations
+// powers the connected-platforms list on the settings panel.
+app.MapGet("/api/onboarding/platforms", PlatformInstallEndpoints.ListPlatforms)
+    .RequireAuthorization("MemberAccess");
+app.MapPost("/api/onboarding/install", PlatformInstallEndpoints.Install)
+    .RequireAuthorization("PlatformsManage");
+app.MapGet("/api/onboarding/installations", PlatformInstallEndpoints.ListInstallations)
+    .RequireAuthorization("MemberAccess");
+
 // ── Agents Config ──
 // Rate limit (finding 020): ConfigRead default for the group; ConfigWrite
 // override on the PUT.
@@ -1422,22 +1695,76 @@ prompts.MapGet("/system", PromptEndpoints.ListSystemDefaults);
 prompts.MapGet("/defaults", PromptEndpoints.ListSystemDefaults);
 prompts.MapGet("/system/{role}/{action}", PromptEndpoints.GetSystemDefault);
 prompts.MapGet("/defaults/{role}/{action}", PromptEndpoints.GetSystemDefault);
-prompts.MapGet("/defaults/{action}", PromptEndpoints.GetActionDefault);
-// Resolved (per-user) reads + mutations
+// Story 27-18 — the generic action-default tier and its
+// `GET /api/prompts/defaults/{action}` route were removed (clean cut, no
+// compat shim). Resolution is override → system default → error.
+// Resolved (per-user) reads + mutations.
+// Story 27-3 — PUT/DELETE/POST-reset gated by `PromptManage` (admin+owner)
+// instead of `SettingsManage` (owner-only). CLAUDE.md "Prompt Store
+// Architecture / RBAC" requires tenant_admin to be able to manage tenant
+// overrides in SaaS mode; the legacy SettingsManage gate would 403 every
+// admin-role caller. Single-user mode is unaffected — every signed-up user
+// is auto-`owner` of their personal tenant.
 prompts.MapGet("/{role}/{action}", PromptEndpoints.GetPrompt);
-prompts.MapPut("/{role}/{action}", PromptEndpoints.UpsertPrompt).RequireAuthorization("SettingsManage");
-prompts.MapDelete("/{role}/{action}", PromptEndpoints.DeletePrompt).RequireAuthorization("SettingsManage");
-prompts.MapPost("/{role}/{action}/reset", PromptEndpoints.DeletePrompt).RequireAuthorization("SettingsManage");
+prompts.MapPut("/{role}/{action}", PromptEndpoints.UpsertPrompt).RequireAuthorization("PromptManage");
+prompts.MapDelete("/{role}/{action}", PromptEndpoints.DeletePrompt).RequireAuthorization("PromptManage");
+prompts.MapPost("/{role}/{action}/reset", PromptEndpoints.DeletePrompt).RequireAuthorization("PromptManage");
 // Role-system overrides (preamble) — CLAUDE.md role-system scope is keyed by
 // (userId, role) only; no action axis. Dropped the {action} URL segment to
 // match (audit prompts/005).
-prompts.MapPut("/system/{role}", PromptEndpoints.UpsertSystemPrompt).RequireAuthorization("SettingsManage");
-prompts.MapDelete("/system/{role}", PromptEndpoints.DeleteSystemPrompt).RequireAuthorization("SettingsManage");
+prompts.MapPut("/system/{role}", PromptEndpoints.UpsertSystemPrompt).RequireAuthorization("PromptManage");
+prompts.MapDelete("/system/{role}", PromptEndpoints.DeleteSystemPrompt).RequireAuthorization("PromptManage");
 prompts.MapPost("/{role}/{action}/render", PromptEndpoints.RenderPrompt);
 
 // ── Convention Templates (no auth) ──
+// Legacy starter-template catalogue (Story 27 prep). LEFT UNCHANGED for
+// backward compat — distinct surface from the DB-backed convention store below.
 app.MapGet("/api/convention-templates", ConventionEndpoints.ListAll);
 app.MapGet("/api/convention-templates/{key}", ConventionEndpoints.GetByKey);
+
+// ── Convention Store (DB-backed, Story 27-10) ──
+// Tenant CRUD + tenant-scoped resolution + registry pickers. All endpoints
+// require auth (any authed tenant member can READ; ConventionManage gates the
+// tenant override mutations). Mirrors the prompt-store registration in style,
+// with one DELIBERATE difference: convention reads use AuthenticatedAny (any
+// authed tenant member) rather than SettingsView (admin/owner) because
+// conventions are per-workflow context injected into prompts — all agents
+// running a workflow need read access, not just admins (Story 27-10 spec §5).
+//
+// Route ordering (mirrors prompt store Story 27-3): the specific routes
+// (/defaults*, /resolve, /registry/*) MUST be registered BEFORE the
+// parameterized /{role}/{action} so a literal segment like "resolve" is not
+// swallowed by the {role} route.
+//
+// Rate limiting: the prompt-store endpoints do NOT apply per-endpoint rate
+// limiting (the /api/prompts group carries no RequireRateLimiting), so for
+// consistency the convention store does the same here rather than inventing a
+// bespoke per-tenant limiter. The story's GET 100/min / write 30/min / resolve
+// 300/min targets are tracked as a deferred item (would reuse the existing
+// AddFixedWindowLimiter policies in Program.cs once the prompt store adopts
+// them too).
+var conventions = app.MapGroup("/api/conventions").RequireAuthorization("AuthenticatedAny");
+conventions.MapGet("/", ConventionStoreEndpoints.ListAll);
+// Specific routes first — defaults, resolve, registry.
+conventions.MapGet("/defaults", ConventionStoreEndpoints.ListSystemDefaults);
+conventions.MapGet("/defaults/{role}/{action}", ConventionStoreEndpoints.GetSystemDefault);
+conventions.MapPost("/resolve", ConventionStoreEndpoints.Resolve);
+conventions.MapGet("/registry/roles", ConventionStoreEndpoints.RegistryRoles);
+conventions.MapGet("/registry/actions", ConventionStoreEndpoints.RegistryActions);
+conventions.MapGet("/registry/role-actions", ConventionStoreEndpoints.RegistryRoleActions);
+// Parameterized routes last. Tenant override mutations gated by ConventionManage
+// (tenant_owner/tenant_admin; member → 403). Reads are any authed member.
+conventions.MapGet("/{role}/{action}", ConventionStoreEndpoints.GetResolved);
+conventions.MapPut("/{role}/{action}", ConventionStoreEndpoints.UpsertTenantOverride).RequireAuthorization("ConventionManage");
+conventions.MapDelete("/{role}/{action}", ConventionStoreEndpoints.DeleteTenantOverride).RequireAuthorization("ConventionManage");
+
+// ── Convention Store — system-default admin (platform-admin only) ──
+// PlatformOwnerAccess matches the prompt/other admin routes' platform-admin
+// gate. Non-platform-admin → 403.
+var adminConventions = app.MapGroup("/api/admin/conventions").RequireAuthorization("PlatformOwnerAccess");
+adminConventions.MapPut("/{role}/{action}", ConventionStoreEndpoints.UpsertSystemDefault);
+adminConventions.MapDelete("/{role}/{action}", ConventionStoreEndpoints.DeleteSystemDefault);
+adminConventions.MapPost("/{role}/{action}/reset", ConventionStoreEndpoints.ResetSystemDefault);
 
 // ── Settings / Config ──
 // Rate limit (finding 020): ConfigRead default for the group; ConfigWrite
@@ -1547,8 +1874,22 @@ workflows.MapGet("/instances/{id}/events", WorkflowEndpoints.GetInstanceEvents);
 var github = app.MapGroup("/api/github");
 github.MapGet("/callback", GitHubEndpoints.Callback)
     .RequireRateLimiting("OAuthStart");
+// Legacy GitHub-specific webhook path. Story 31-7 generalises the
+// receiver to /api/webhooks/{platform}; the old path stays active
+// (with the GitHub-specific install-linking logic) for the deprecation
+// window so in-flight GitHub deliveries during a deploy don't change
+// shape. New deployments wire downstream platforms (Gitea, Forgejo,
+// GitLab) through the new path; the next epic story will port the
+// install-linking handler into a neutral IWebhookHandler and retire
+// the legacy path.
 github.MapPost("/webhooks", GitHubEndpoints.Webhooks)
     .RequireRateLimiting("GitHubWebhook");
+
+// Story 31-7 — generalised webhook receiver. Path-based routing for
+// GitHub/Gitea/Forgejo/GitLab; per-platform signature verification,
+// idempotency, and dispatch via IWebhookEventDispatcher.
+app.MapPost("/api/webhooks/{platform}", WebhookEndpoints.Receive)
+    .RequireRateLimiting("GitHubWebhook"); // reuse the 300/min budget
 
 // ── SaaS (API key auth) ──
 app.MapPost("/api/v1/llm/chat", SaaSEndpoints.LlmChat).RequireAuthorization();
@@ -1606,7 +1947,7 @@ kb.MapGet("/analytics/costs", KbEndpoints.GetKbCosts);
 //
 // On first-ever deploy (no EF migration history), any legacy tables from the
 // previous TypeScript API / raw-SQL mentorship schema would collide with the
-// InitialSchema migration. Drop them before applying migrations — per the
+// InitialControlPlane baseline. Drop them before applying migrations — per the
 // Epic 19 wipe-and-recreate directive. Subsequent deploys apply migrations
 // incrementally without any cleanup.
 // ────────────────────────────────────────────────────────────────────────────
@@ -1618,12 +1959,18 @@ using (var scope = app.Services.CreateScope())
         // Per the Epic 19 wipe-and-recreate directive ("nothing exists
         // important, wipe and recreate"): drop all Tamma-managed tables
         // including the EF migration history on every deploy, then let
-        // Migrate() rebuild from InitialSchema + all subsequent migrations.
+        // Migrate() rebuild from the InitialControlPlane baseline + any
+        // subsequent migrations.
         //
         // This is destructive. Do NOT adopt this pattern in an environment
         // with user data you care about. It exists to unstick the EF Core
         // + Npgsql history-table race that crashed two consecutive deploys
-        // with SqlState=42P07 on __TammaMigrationsHistory.
+        // with SqlState=42P07 on the CP migrations-history table.
+        //
+        // History-table note (unified-tenancy Phase 0): the CP history table
+        // was renamed from __TammaMigrationsHistory to __ControlPlaneMigrationsHistory
+        // to match the design-time factory. BOTH names are dropped below so
+        // servers deployed before this rename are also cleaned up correctly.
         //
         // TAMMA_PRESERVE_DB=1 opts out — Migrate() runs incrementally,
         // preserving data but risking the 42P07 collision until EF/Npgsql
@@ -1644,6 +1991,7 @@ using (var scope = app.Services.CreateScope())
                     email_outbox,
                     github_installation_repos, github_installations,
                     github_webhook_deliveries,
+                    platform_webhook_deliveries,
                     junior_developers, kek_rotations,
                     mentorship_events, mentorship_sessions,
                     password_reset_tokens, plans,
@@ -1653,21 +2001,78 @@ using (var scope = app.Services.CreateScope())
                     platform_email_outbox, platform_events, platform_queued_tasks,
                     prompt_overrides,
                     provider_diagnostics, provider_health, queued_tasks, refresh_tokens,
-                    sanitization_rules, stories, tenant_memberships, tenant_invites, tenants,
+                    sanitization_rules, stories,
+                    tenant_databases, tenant_invites, tenant_memberships, tenants,
+                    tenant_platform_installations,
                     user_api_keys, user_installations, user_invites, users,
                     workflow_definitions, workflow_instances,
                     knex_migrations, knex_migrations_lock,
-                    ""__TammaMigrationsHistory""
+                    ""__TammaMigrationsHistory"",
+                    ""__ControlPlaneMigrationsHistory""
                 CASCADE;");
         }
 
         dbContext.Database.Migrate();
         Log.Information("Database migrations applied successfully ({Count} total)",
             dbContext.Database.GetAppliedMigrations().Count());
+
+        // ── Startup seeds (insert-missing-only, no-op on re-run) ────────────
+        //
+        // Plans: the three default tiers referenced by tenants.Plan and by
+        // the Phase 2 placement lookup (Plan.PlacementPolicy). PlansSeeder's
+        // doc contract says "invoked once at API startup after migrations
+        // apply" — this is that call site.
+        await Tamma.Data.Seeders.PlansSeeder.SeedAsync(dbContext);
+
+        // tenant_databases: register the central DB as pool member #1
+        // (unified-tenancy Phase 2) so single-user/dev and SaaS share one
+        // placement code path. The admin connection string uses the SAME
+        // lookup chain as NpgsqlTenantAdminConnection (TenantAdmin →
+        // DefaultConnection → ControlPlane) so the seeded row's envelope
+        // matches what the lifecycle activities connect with.
+        var tenantAdminCs = app.Configuration.GetConnectionString("TenantAdmin");
+        if (string.IsNullOrWhiteSpace(tenantAdminCs))
+        {
+            tenantAdminCs = app.Configuration.GetConnectionString("DefaultConnection")
+                ?? app.Configuration.GetConnectionString("ControlPlane");
+        }
+        if (string.IsNullOrWhiteSpace(tenantAdminCs))
+        {
+            Log.Warning(
+                "TenantDatabasesSeeder skipped — no admin connection string found via "
+                + "ConnectionStrings:TenantAdmin / :DefaultConnection / :ControlPlane. "
+                + "Tenant placement will have no pool member until one is configured.");
+        }
+        else
+        {
+            // Boot-safe: resolving the protector can throw in Production when
+            // Cranl:EncryptionKey is unset (TenantSecretProtector's hard-fail
+            // guard). That guard is correct for deployments that PROVISION
+            // tenants, but it must not crash-loop a deployment that never
+            // does — pre-Phase-2 the protector was only
+            // resolved lazily. Warn + skip mirrors the missing-admin-CS path:
+            // placement simply has no pool member until the key is configured.
+            try
+            {
+                var protector = scope.ServiceProvider
+                    .GetRequiredService<Tamma.Data.Abstractions.ITenantConnectionStringProtector>();
+                await Tamma.Data.Seeders.TenantDatabasesSeeder.SeedAsync(
+                    dbContext, tenantAdminCs, protector);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex,
+                    "TenantDatabasesSeeder skipped — connection-string protector "
+                    + "unavailable (set Cranl:EncryptionKey to enable the tenant "
+                    + "placement pool). Tenant provisioning is unavailable until then.");
+            }
+        }
+
+        Log.Information("Startup seeds applied (plans + tenant_databases bootstrap)");
     }
     catch (Exception ex)
     {
-        Log.Error(ex, "Fatal: database migration failed");
+        Log.Error(ex, "Fatal: database migration/startup-seed failed");
         throw;
     }
 }

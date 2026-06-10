@@ -34,6 +34,15 @@ public sealed class TaskQueueProcessorOptions
     /// budget is exhausted). Default 10 minutes.
     /// </summary>
     public TimeSpan VisibilityTimeout { get; set; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// Task #10 (post-review): when <c>true</c> (default) the processor
+    /// starts its poll loop in <see cref="BackgroundService.ExecuteAsync"/>.
+    /// Shared API test fixtures gate this off to avoid background DB
+    /// activity racing test assertions. Mirrors the existing
+    /// <c>BuiltInAlertRuleSeederOptions.RunOnStartup</c> pattern.
+    /// </summary>
+    public bool RunOnStartup { get; set; } = true;
 }
 
 /// <summary>
@@ -65,6 +74,14 @@ public sealed class TaskQueueProcessor : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Task #10 (post-review): test-fixture gate.
+        if (!_options.RunOnStartup)
+        {
+            _logger.LogDebug(
+                "TaskQueueProcessor gated off (RunOnStartup=false); skipping poll loop.");
+            return;
+        }
+
         _logger.LogInformation(
             "TaskQueueProcessor started. Poll interval={Interval}, batch={Batch}, max retries={Retries}",
             _options.PollInterval, _options.BatchSize, _options.MaxRetries);

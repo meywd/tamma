@@ -151,38 +151,27 @@ public class WriteRegressionTestActivity : CodeActivity<TestGenerationResult>
 
     private async Task<string> CallLlm(string prompt)
     {
-        var useMock = _configuration?.GetValue<bool>("Anthropic:UseMock") ?? true;
-
-        if (useMock)
-        {
-            return SimulateTestResponse();
-        }
-
+        // No mock path: simulated test responses returned a hard-coded
+        // `expect(true).toBe(true)` test claiming `fails_as_expected = true`,
+        // which (a) doesn't reproduce any bug and (b) lies in the audit trail
+        // about regression coverage. All regression tests now require a real
+        // engine callback. See: feat/wave-b cleanup.
         var callbackUrl = _configuration?["Engine:CallbackUrl"];
-        if (!string.IsNullOrEmpty(callbackUrl) && _httpClientFactory != null)
+        if (string.IsNullOrEmpty(callbackUrl) || _httpClientFactory == null)
         {
-            var client = _httpClientFactory.CreateClient();
-            var response = await client.PostAsJsonAsync(
-                $"{callbackUrl.TrimEnd('/')}/api/engine/execute-task",
-                new { prompt, analysisType = "regression_test", role = "tester" });
-            response.EnsureSuccessStatusCode();
-
-            var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-            return result.GetProperty("output").GetString() ?? "{}";
+            throw new InvalidOperationException(
+                "WriteRegressionTestActivity requires Engine:CallbackUrl and IHttpClientFactory; "
+                + "no simulated fallback is permitted.");
         }
 
-        return SimulateTestResponse();
-    }
+        var client = _httpClientFactory.CreateClient();
+        var response = await client.PostAsJsonAsync(
+            $"{callbackUrl.TrimEnd('/')}/api/engine/execute-task",
+            new { prompt, analysisType = "regression_test", role = "tester" });
+        response.EnsureSuccessStatusCode();
 
-    private static string SimulateTestResponse()
-    {
-        return JsonSerializer.Serialize(new
-        {
-            test_file_path = "tests/regression/bug-regression.test.ts",
-            test_name = "should reproduce the reported bug",
-            test_code = "describe('Bug Regression', () => {\n  it('should reproduce the reported bug', () => {\n    // Arrange: set up the conditions from the bug report\n    // Act: perform the action that triggers the bug\n    // Assert: verify the buggy behavior exists\n    expect(true).toBe(true);\n  });\n});",
-            fails_as_expected = true
-        });
+        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return result.GetProperty("output").GetString() ?? "{}";
     }
 
     private TestGenerationResult ParseTestResponse(string response)

@@ -51,6 +51,7 @@ public class TenantDbContext : DbContext
     // ── Tenant-scoped entities ──
     public DbSet<AgentConfig> AgentConfigs => Set<AgentConfig>();
     public DbSet<PromptOverride> PromptOverrides => Set<PromptOverride>();
+    public DbSet<Convention> Conventions => Set<Convention>();
     public DbSet<ProviderHealth> ProviderHealths => Set<ProviderHealth>();
     public DbSet<ProviderDiagnostic> ProviderDiagnostics => Set<ProviderDiagnostic>();
     public DbSet<SanitizationRule> SanitizationRules => Set<SanitizationRule>();

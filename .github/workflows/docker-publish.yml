@@ -689,21 +689,104 @@ jobs:
                 ps
             "
 
-      - name: "Health check: API via proxy (with retry)"
+      # Layer-4 services (tamma-dashboard, tamma-engine, elsa-studio) are
+      # started by "Start layer 4" but never previously verified. A
+      # restart-looping container would silently survive the deploy and
+      # surface as a user-visible 500 only after merge. This step probes
+      # `docker ps` state for each layer-4 service and fails the deploy if
+      # any are restart-looping or exited. References user's "with tests
+      # checking all apps healths, if they are public" instruction —
+      # tamma-engine is included because even though it isn't customer-
+      # facing, a crash-loop signals broken config we want to know about.
+      - name: "Verify layer 4: dashboard + engine + studio not restart-looping"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
-              for i in \$(seq 1 15); do
-                if curl -sfk -H 'Host: api.tamma.dev' https://localhost/api/health 2>/dev/null; then
-                  echo ' API OK (https)' && exit 0
-                elif curl -sf -H 'Host: api.tamma.dev' http://localhost/api/health 2>/dev/null; then
-                  echo ' API OK (http)' && exit 0
+              cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
+              COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
+              FAIL=0 && \
+              for svc in tamma-dashboard tamma-engine elsa-studio; do
+                CONTAINER=\$(\$COMPOSE ps -q \$svc | head -1)
+                if [ -z \"\$CONTAINER\" ]; then
+                  echo \"::error::\$svc container not found\"
+                  FAIL=1
+                  continue
                 fi
-                echo \"Health check attempt \$i/15 failed, retrying in 5s...\"
+                # 3 polls × 10s — enough headroom for normal start, fast
+                # enough to fail a restart-loop (which cycles ~every 1m).
+                for i in 1 2 3; do
+                  STATE=\$(docker inspect --format '{{.State.Status}}' \$CONTAINER)
+                  RESTARTS=\$(docker inspect --format '{{.RestartCount}}' \$CONTAINER)
+                  echo \"\$svc check \$i/3: state=\$STATE restarts=\$RESTARTS\"
+                  if [ \"\$STATE\" = 'restarting' ] || [ \"\$STATE\" = 'exited' ]; then
+                    echo \"::error::\$svc is \$STATE (restart count: \$RESTARTS)\"
+                    \$COMPOSE logs --tail=40 \$svc
+                    FAIL=1
+                    break
+                  fi
+                  sleep 10
+                done
+              done
+              exit \$FAIL
+            "
+
+      - name: "Health check: public surfaces (api + app + elsa via proxy)"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              # Probes each public *.tamma.dev surface from inside the VPS
+              # against the local nginx-proxy (Host header sets routing).
+              # Allows 2xx and 3xx — auth-gated paths legitimately 302 to
+              # the OAuth start endpoint, that still proves the upstream
+              # is reachable. 5xx / connection failure fail the deploy.
+              probe () {
+                local host=\$1
+                local path=\$2
+                local label=\$3
+                for i in \$(seq 1 15); do
+                  CODE=\$(curl -sk -H \"Host: \$host\" -o /dev/null -w '%{http_code}' \"https://localhost\$path\" 2>/dev/null || echo '000')
+                  case \"\$CODE\" in
+                    2*|3*) echo \" \$label OK (\$CODE)\"; return 0 ;;
+                  esac
+                  echo \"\$label attempt \$i/15: code=\$CODE, retry in 5s\"
+                  sleep 5
+                done
+                echo \"::error::\$label health check failed after 15 attempts (final code: \$CODE)\"
+                return 1
+              }
+              FAIL=0
+              probe api.tamma.dev /api/health 'api.tamma.dev'  || FAIL=1
+              probe app.tamma.dev /          'app.tamma.dev'   || FAIL=1
+              probe elsa.tamma.dev /health   'elsa.tamma.dev'  || FAIL=1
+              exit \$FAIL
+            "
+
+      # User-OAuth lives in oauth2-proxy now. The proxy's /oauth2/start
+      # endpoint must 302 to github.com/login/oauth/authorize when its
+      # OAUTH2_PROXY_CLIENT_ID/SECRET are bound; if env mapping breaks
+      # (PR #343 shipped that failure mode for the old endpoint), users
+      # see a broken Sign-in button instead of a clear deploy failure.
+      # Probing app.tamma.dev because that's the host that fronts
+      # oauth2-proxy via nginx.
+      - name: "Health check: GitHub OAuth start endpoint"
+        run: |
+          ssh -i ~/.ssh/deploy_key \
+            -p ${{ secrets.VPS_SSH_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
+              for i in \$(seq 1 10); do
+                CODE=\$(curl -sk -H 'Host: app.tamma.dev' -o /tmp/oauth-probe.body -w '%{http_code}' 'https://localhost/oauth2/start?rd=%2F' 2>/dev/null || echo '000')
+                LOC=\$(curl -sk -H 'Host: app.tamma.dev' -D - -o /dev/null 'https://localhost/oauth2/start?rd=%2F' 2>/dev/null | tr -d '\r' | awk -F': ' 'tolower(\$1)==\"location\"{print \$2; exit}')
+                if [ \"\$CODE\" = '302' ] && echo \"\$LOC\" | grep -q 'github.com/login/oauth/authorize'; then
+                  echo ' /oauth2/start OK (302 → github.com/login/oauth/authorize)'
+                  exit 0
+                fi
+                BODY=\$(head -c 200 /tmp/oauth-probe.body 2>/dev/null || echo '')
+                echo \"OAuth probe attempt \$i/10: code=\$CODE loc=\$LOC body=\$BODY\"
                 sleep 5
               done
-              echo '::error::API health check via proxy failed after 15 attempts (75s)'
+              echo '::error::/oauth2/start did not redirect to GitHub (final code: '\$CODE'). Check OAUTH2_PROXY_CLIENT_ID/SECRET binding in docker-compose.yml and that the OAuth App callback URL matches https://app.tamma.dev/oauth2/callback.'
               exit 1
             "
 

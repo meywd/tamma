@@ -106,3 +106,50 @@ public sealed record TenantAnalyticsRow(
 public sealed record EventTypeBucket(
     string Type,
     int Count);
+
+/// <summary>
+/// Story 28-11 AC2 — per-tenant 24-hour resource rollup surfaced on the
+/// admin tenant-detail response (<c>resourceSummary</c>). Every field is a
+/// sum of the tenant's <c>platform_analytics_hourly</c> rows whose
+/// <c>Hour</c> falls inside <c>[now-24h, now)</c>. A tenant with no rows yet
+/// (freshly provisioned) gets an all-zero instance via
+/// <see cref="Empty"/> — never null, never an error.
+///
+/// <para><b>Metric-model caveat:</b> only the columns that actually exist on
+/// <see cref="Tamma.Data.Entities.PlatformAnalyticsHourly"/> are surfaced
+/// here. The Story 28-10 spec's <c>apiRequestsLast24h</c> /
+/// <c>errorsLast24h</c> (5xx) keys are NOT available because the wide-row
+/// fact table does not carry an API-request or HTTP-error counter — that
+/// would require the long-narrow MetricKey/Tags model that was deferred.
+/// <see cref="WorkflowsFailedLast24h"/> is the nearest real error signal the
+/// table tracks (failed workflow instances).</para>
+/// </summary>
+public sealed record TenantResourceSummary(
+    /// <summary>Sum of <c>WorkflowsStarted</c> in the last 24h.</summary>
+    long WorkflowsLast24h,
+    /// <summary>Sum of <c>WorkflowsCompleted</c> in the last 24h.</summary>
+    long WorkflowsCompletedLast24h,
+    /// <summary>
+    /// Sum of <c>WorkflowsFailed</c> in the last 24h. This is the real
+    /// "error" signal the fact table carries (the 28-10 spec's 5xx
+    /// <c>errorsLast24h</c> is not available until the long-narrow metric
+    /// model lands).
+    /// </summary>
+    long WorkflowsFailedLast24h,
+    /// <summary>Sum of <c>AgentDispatches</c> in the last 24h.</summary>
+    long AgentDispatchesLast24h,
+    /// <summary>Sum of <c>TokensIn</c> in the last 24h.</summary>
+    long TokensInLast24h,
+    /// <summary>Sum of <c>TokensOut</c> in the last 24h.</summary>
+    long TokensOutLast24h,
+    /// <summary>Sum of <c>CostUsd</c> in the last 24h (4-decimal cap).</summary>
+    decimal LlmCostUsdLast24h)
+{
+    /// <summary>
+    /// Zeroed summary for a tenant with no <c>platform_analytics_hourly</c>
+    /// rows in the window. Returned instead of null so the dashboard cards
+    /// render "0" rather than failing on a missing object.
+    /// </summary>
+    public static TenantResourceSummary Empty { get; } =
+        new(0, 0, 0, 0, 0, 0, 0m);
+}

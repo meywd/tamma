@@ -38,7 +38,15 @@ namespace Tamma.Api.Services.Provisioning;
 /// in <see cref="TenantProvisioningTaskHandler"/> on the
 /// <see cref="TaskQueueProcessor"/> thread. Subsequent
 /// <see cref="GetStatusAsync"/> calls report the current row state.</para>
+///
+/// <para><b>Story 30-3 — DEPRECATED.</b> Replaced by
+/// <see cref="V2.Cranl.CranlTenantProviderV2"/>. The v2 implementation
+/// preserves this same enqueue-onto-platform-queue dispatch pattern (see
+/// <see cref="TenantProvisioningTaskHandler"/>'s reliance on the static
+/// task-type constants below). Wave-C will remove this class once admin
+/// endpoints + tests migrate.</para>
 /// </summary>
+[Obsolete("Use ITenantInfrastructureProvider (V2) instead. Removed in Wave C.")]
 public sealed class CranlTenantProvisioner : ITenantProvisioner
 {
     public const string ProvisioningTaskType = "provisioning.tenant";

@@ -16,15 +16,30 @@ services:
       - RabbitMq__Password=${RABBITMQ_PASSWORD}
       - Logging__LogLevel__Default=Warning
       - Elsa__Server__BaseUrl=${ELSA_BASE_URL:-https://tamma.yourcompany.com}
+      # ── Story 28-5 — optional pre-drop tenant pg_dump backup ──────────
+      # OFF by default (the default relies on cluster-level PG backups).
+      # To enable: (1) add postgresql-client to the elsa-server image so
+      # pg_dump resolves, (2) uncomment the Backup__* vars + the
+      # tenant_backups volume below, (3) set BACKUP_DELETION_BACKUP=true in
+      # .env. Without a durable volume the dump lands on the container's
+      # ephemeral FS and is lost on restart. See
+      # docs/deployment/tenant-deletion-backup.md.
+      # - Backup__DeletionBackup=${BACKUP_DELETION_BACKUP:-false}
+      # - Backup__Directory=/var/backups/tamma
+      # - Backup__PgDumpPath=pg_dump
+      # - Backup__TimeoutSeconds=${BACKUP_TIMEOUT_SECONDS:-1800}
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
     volumes:
       - ./workflows:/app/workflows:ro
       - ./activities:/app/activities:ro
       - elsa_storage:/app/storage
+      # - tenant_backups:/var/backups/tamma   # Story 28-5 (uncomment with Backup__DeletionBackup)
     networks:
       - tamma-network
     deploy:
@@ -74,6 +89,37 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── Story 28-1 AC2 — one-shot central-DB bootstrap ──────────────────────
+  # Ensures the central `tamma` database exists before api / elsa-server
+  # start. The central `tamma` DB hosts the control plane and is pool
+  # member #1 ("central") in tenant_databases; tenants live in t_<hex>
+  # schemas with per-tenant roles (unified tenancy model) — so this is
+  # largely a no-op next to postgres' own POSTGRES_DB creation, but it is
+  # idempotent and forward-compatible with the future tamma_control /
+  # tamma_global_elsa split (set TAMMA_CONTROL_DB / TAMMA_GLOBAL_ELSA_DB).
+  # Schema migrations are applied by the apps themselves at boot
+  # (tamma-api → Database.Migrate(); elsa-server → ef.RunMigrations=true);
+  # this service only guarantees the target databases exist. Runs once and
+  # exits 0; dependents gate on service_completed_successfully.
+  db-bootstrap:
+    image: postgres:17-alpine
+    restart: 'no'
+    environment:
+      PGHOST: postgres
+      PGPORT: '5432'
+      PGUSER: tamma
+      PGPASSWORD: ${DB_PASSWORD}
+      TAMMA_CONTROL_DB: tamma
+      TAMMA_GLOBAL_ELSA_DB: ${TAMMA_GLOBAL_ELSA_DB:-tamma}
+    entrypoint: ['/bin/sh', '-c', '/scripts/db/bootstrap-shared-dbs.sh']
+    volumes:
+      - ../../scripts/db:/scripts/db:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tamma-network
+
   rabbitmq:
     image: rabbitmq:3-management-alpine
     environment:
@@ -107,15 +153,56 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - ELSA_SERVER_URL=http://elsa-server:5000
       - DATABASE_URL=postgresql://tamma:${DB_PASSWORD}@postgres:5432/tamma
-      # Phase-3 dual connection strings (findings orgs/002, orgs/004).
-      # TammaDb = admin role for migrations + background services;
-      # TammaAppDb = tamma_app role for per-request endpoints (RLS-enforced).
-      # Operators must rotate the tamma_app password after first deploy
-      # and set TAMMA_APP_DB_PASSWORD in the env. If TAMMA_APP_DB_PASSWORD
-      # is unset the app falls back to the admin connection with a
-      # warning — acceptable on day-1 bring-up but blocks the RLS layer.
-      - ConnectionStrings__TammaDb=Server=postgres;Port=5432;Database=tamma;User Id=tamma;Password=${DB_PASSWORD};
+      # ── Story 28-12 AC1+AC2 — Postgres three-role privilege split ────
+      # The runtime API connects as `tamma_app` (least privilege): it can
+      # SELECT/INSERT/UPDATE/DELETE the CP tables but CANNOT CREATE
+      # DATABASE / CREATE ROLE. A SQL-injection or logic bug in request
+      # handling therefore cannot escalate to provisioning databases or
+      # roles. The roles are bootstrapped by scripts/db/postgres-roles.sql
+      # at cluster init; operators set the three passwords below.
+      #
+      # At startup the API runs `SELECT current_user` against TammaAppDb
+      # and refuses readiness (Unhealthy on /health/ready) if it is running
+      # as tamma_provisioner or tamma_admin — see DbRoleLeastPrivilegeCheck.
+      # The check is a hard fail in Production and a warning elsewhere.
+      #
+      #   TammaDb     → tamma_admin    : migrations + DDL + background
+      #                                  services. SUPERUSER-adjacent. The
+      #                                  container's POSTGRES_USER (`tamma`)
+      #                                  IS the cluster superuser that
+      #                                  bootstraps the roles, so TammaDb
+      #                                  stays on `tamma` until the operator
+      #                                  hands DDL over to a dedicated
+      #                                  tamma_admin role (the role exists
+      #                                  after postgres-roles.sql runs; flip
+      #                                  the User Id below when ready).
+      #   TammaAppDb  → tamma_app       : the runtime API's per-request,
+      #                                  least-privilege role.
+      #   Provisioner → tamma_provisioner: CREATE DATABASE / CREATE ROLE.
+      #                                  Used ONLY by the provisioning
+      #                                  workflow (CreateTenantWorkflow /
+      #                                  DeleteTenantWorkflow) on the
+      #                                  global-Elsa host — belongs in the
+      #                                  elsa-server env, NOT here. Slotted
+      #                                  here only so a single .env carries
+      #                                  all three URLs; the API never reads
+      #                                  Provisioner. Distinct slot name so
+      #                                  an ops typo can't point the API at
+      #                                  the provisioner URL.
+      #
+      # Operators must rotate each role's password after first deploy and
+      # set the *_DB_PASSWORD vars in the env. If TAMMA_APP_DB_PASSWORD is
+      # unset, TammaAppDb falls back to the admin password — acceptable on
+      # day-1 bring-up but the startup role check will WARN (non-prod) /
+      # block readiness (prod) until tamma_app is wired.
+      - ConnectionStrings__TammaDb=Server=postgres;Port=5432;Database=tamma;User Id=${TAMMA_ADMIN_DB_USER:-tamma};Password=${TAMMA_ADMIN_DB_PASSWORD:-${DB_PASSWORD}};
       - ConnectionStrings__TammaAppDb=Server=postgres;Port=5432;Database=tamma;User Id=tamma_app;Password=${TAMMA_APP_DB_PASSWORD:-${DB_PASSWORD}};
+      - ConnectionStrings__Provisioner=Server=postgres;Port=5432;Database=tamma;User Id=tamma_provisioner;Password=${TAMMA_PROVISIONER_DB_PASSWORD:-${DB_PASSWORD}};
+      # AES-GCM KEK for tenant connection-string envelopes (unified-tenancy
+      # Phase 2 placement pool + provisioning). base64-encoded 32 random
+      # bytes. When empty, the API still boots (the tenant_databases
+      # bootstrap seeder warn+skips) but tenant provisioning is unavailable.
+      - Cranl__EncryptionKey=${CRANL_ENCRYPTION_KEY:-}
       - SLACK_WEBHOOK=${SLACK_WEBHOOK}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - JWT_SECRET=${JWT_SECRET}
@@ -124,6 +211,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
     networks:
       - tamma-network
     deploy:
@@ -175,6 +264,8 @@ volumes:
     driver: local
   elsa_storage:
     driver: local
+  # tenant_backups:    # Story 28-5 — durable pre-drop tenant pg_dump target
+  #   driver: local    # (uncomment together with Backup__DeletionBackup)
 
 networks:
   tamma-network:

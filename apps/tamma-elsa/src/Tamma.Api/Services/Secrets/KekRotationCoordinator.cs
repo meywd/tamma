@@ -612,11 +612,11 @@ public sealed class KekRotationCoordinator
                 .IgnoreQueryFilters()
                 .Where(t => t.DeletedAt == null)
                 .Where(t => EF.Property<byte[]?>(t, "EncryptedConnectionString") != null)
-                .Where(t => (EF.Property<int?>(t, "KekVersion") ?? 0) < toVersion)
+                .Where(t => EF.Property<short>(t, "KekVersion") < toVersion)
                 .Select(t => new RotationRow(
                     t.Id,
                     EF.Property<byte[]?>(t, "EncryptedConnectionString"),
-                    EF.Property<int?>(t, "KekVersion") ?? 0))
+                    (int)EF.Property<short>(t, "KekVersion")))
                 .ToListAsync(ct).ConfigureAwait(false);
 
             UpdateStatus(s => s with { TotalTenants = rotationRows.Count });
@@ -667,7 +667,7 @@ public sealed class KekRotationCoordinator
 
                     var entry = writeCtx.Entry(tenant);
                     entry.Property("EncryptedConnectionString").CurrentValue = newEnvelope;
-                    entry.Property("KekVersion").CurrentValue = toVersion;
+                    entry.Property("KekVersion").CurrentValue = (short)toVersion;
                     tenant.UpdatedAt = DateTime.UtcNow;
                     await writeCtx.SaveChangesAsync(ct).ConfigureAwait(false);
 

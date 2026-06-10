@@ -80,4 +80,27 @@ public interface ITenantAdminConnection
         string databaseName,
         string roleName,
         string password);
+
+    /// <summary>
+    /// Story 28-5 AC4 — expose the admin connection's host / port /
+    /// credentials targeting <paramref name="databaseName"/> as discrete
+    /// parts, for external CLI tooling (notably <c>pg_dump</c> in the
+    /// pre-drop backup step) that needs the values separately rather than
+    /// as a single Npgsql connection string. The password is returned so
+    /// the caller can pass it via the <c>PGPASSWORD</c> environment
+    /// variable — callers MUST NOT place it on a process command line
+    /// (it would leak via <c>/proc/&lt;pid&gt;/cmdline</c>).
+    /// </summary>
+    TenantAdminConnectionInfo GetConnectionInfo(string databaseName);
 }
+
+/// <summary>
+/// Discrete connection parameters for the admin connection targeting a
+/// specific database. See <see cref="ITenantAdminConnection.GetConnectionInfo"/>.
+/// </summary>
+public sealed record TenantAdminConnectionInfo(
+    string Host,
+    int Port,
+    string Username,
+    string Password,
+    string Database);

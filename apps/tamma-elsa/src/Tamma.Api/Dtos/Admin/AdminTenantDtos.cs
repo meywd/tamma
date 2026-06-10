@@ -1,3 +1,5 @@
+using Tamma.Api.Services.Analytics;
+
 namespace Tamma.Api.Dtos.Admin;
 
 /// <summary>
@@ -40,7 +42,17 @@ public record AdminTenantListItem(
     /// <summary>Populated when <c>Status='deleting'</c>; else null.</summary>
     DateTime? DeleteRequestedAt,
     int? KekVersion,
-    bool HasEncryptedConnectionString);
+    bool HasEncryptedConnectionString,
+    /// <summary>
+    /// Unified-tenancy Phase 4 — which <c>tenant_databases</c> pool row
+    /// hosts this tenant's schema (shadow column; null until placement).
+    /// </summary>
+    Guid? DatabaseId = null,
+    /// <summary>
+    /// Unified-tenancy Phase 4 — the tenant's <c>t_&lt;hex&gt;</c> schema
+    /// inside its assigned database (shadow column; null until placement).
+    /// </summary>
+    string? SchemaName = null);
 
 /// <summary>
 /// Paged list envelope. <see cref="Total"/> reflects the full filter-matched
@@ -65,7 +77,14 @@ public record AdminTenantDetailResponse(
     /// reflects whether the action is legal against the current
     /// <see cref="AdminTenantListItem.Status"/>.
     /// </summary>
-    AdminTenantActionGate Actions);
+    AdminTenantActionGate Actions,
+    /// <summary>
+    /// Story 28-11 AC2 — the tenant's last-24h resource rollup, aggregated
+    /// from <c>platform_analytics_hourly</c>. Always present (never null): a
+    /// freshly provisioned tenant with no rows yet carries
+    /// <see cref="TenantResourceSummary.Empty"/> (all zeros).
+    /// </summary>
+    TenantResourceSummary ResourceSummary);
 
 public record AdminTenantEventItem(
     Guid Id,
@@ -101,3 +120,42 @@ public record AdminTenantActionResponse(
     Guid TenantId,
     string Status,
     string Message);
+
+/// <summary>
+/// Request body for <c>POST /api/admin/tenants/{tenantId}/move</c>
+/// (unified-tenancy Phase 4). <see cref="TargetDatabaseId"/> must be an
+/// existing <c>tenant_databases</c> pool row that differs from the
+/// tenant's current placement.
+/// </summary>
+public record MoveTenantRequest(Guid TargetDatabaseId);
+
+/// <summary>
+/// 202 body for <c>POST /api/admin/tenants/{tenantId}/move</c>. The move
+/// runs out-of-band on the platform task queue (mirroring the Cranl
+/// provisioning shape); <see cref="StatusUrl"/> is the polling endpoint.
+/// </summary>
+public record AdminTenantMoveAcceptedResponse(
+    Guid TenantId,
+    Guid TargetDatabaseId,
+    /// <summary>Tenant Status at enqueue time (the move flips it to
+    /// <c>draining</c> once the queued task starts).</summary>
+    string? Status,
+    string StatusUrl,
+    string Message);
+
+/// <summary>
+/// Response for <c>GET /api/admin/tenants/{tenantId}/move</c> — the move
+/// polling surface. <see cref="Status"/> is <c>tenants.Status</c>
+/// (<c>draining</c> while the move runs; back to <c>active</c> on
+/// completion); <see cref="FailureReason"/> carries the last move error
+/// the queue handler recorded (null when none / after a successful
+/// retry); <see cref="DatabaseId"/> + <see cref="SchemaName"/> show the
+/// current placement (the DatabaseId flips to the target once the move's
+/// re-point commits).
+/// </summary>
+public record AdminTenantMoveStatusResponse(
+    Guid TenantId,
+    string? Status,
+    string? FailureReason,
+    Guid? DatabaseId,
+    string? SchemaName);

@@ -1,1 +1,56 @@
 @import "tailwindcss";
+
+/* Tailwind v4 — opt out of the default media-query-based dark mode and
+   wire it to a `dark` class on <html>. The theme store toggles this
+   class, with localStorage persistence + prefers-color-scheme default. */
+@variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  :root.dark {
+    color-scheme: dark;
+  }
+
+  /* Smooth color transitions when toggling theme — keeps the swap from
+     looking like a hard repaint flash on slower machines. */
+  :where(html, body, *) {
+    transition:
+      background-color 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease;
+  }
+
+  /* Body background follows the theme so iframed / legacy components
+     that don't set their own bg fall back to the right surface. */
+  body {
+    background-color: rgb(249 250 251);
+  }
+  .dark body {
+    background-color: rgb(17 24 39);
+  }
+
+  /* Native form controls — <select>, <option>, <input type="date">,
+     scrollbars — are rendered by the OS, not the page CSS. They look at
+     the `color-scheme` property on the *element* (or its ancestors) to
+     decide which palette to use. Without this, a Tailwind-styled
+     <select class="dark:bg-gray-800"> looks correct when closed but
+     opens a white-on-white dropdown panel because the option list is
+     drawn by the OS in light mode. Forcing `color-scheme: dark` on form
+     controls inside `.dark` lets the browser render the dropdown panel
+     in dark mode. */
+  .dark select,
+  .dark input,
+  .dark textarea {
+    color-scheme: dark;
+  }
+
+  /* Belt-and-braces — set the option color too. Chrome respects it on
+     the panel; Firefox/Safari fall back to color-scheme above. */
+  .dark select option,
+  .dark select optgroup {
+    background-color: rgb(31 41 55); /* gray-800 */
+    color: rgb(243 244 246); /* gray-100 */
+  }
+}

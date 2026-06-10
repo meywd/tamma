@@ -28,7 +28,11 @@ const ROLE_LABELS: Record<string, string> = {
 
 export function AgentRoleCard({ role, roleConfig, isDefaults = false, onChange }: AgentRoleCardProps): JSX.Element {
   const label = ROLE_LABELS[role] ?? role;
-  const chainLength = roleConfig.providerChain?.length ?? 0;
+  // Defensive — when /api/config/agents returns `{}` (no tenant override
+  // yet, fresh deploy) the parent passes `roleConfig={undefined}` for the
+  // defaults card. Treat undefined as empty so the card still renders.
+  const config = roleConfig ?? {};
+  const chainLength = config.providerChain?.length ?? 0;
 
   return (
     <Card
@@ -39,26 +43,26 @@ export function AgentRoleCard({ role, roleConfig, isDefaults = false, onChange }
           {chainLength > 0 && (
             <Badge variant="neutral">{chainLength} provider{chainLength !== 1 ? 's' : ''}</Badge>
           )}
-          {roleConfig.maxBudgetUsd !== undefined && (
-            <Badge variant="warning">${roleConfig.maxBudgetUsd}</Badge>
+          {config.maxBudgetUsd !== undefined && (
+            <Badge variant="warning">${config.maxBudgetUsd}</Badge>
           )}
         </div>
       }
     >
       <ProviderChainEditor
-        chain={roleConfig.providerChain ?? []}
+        chain={config.providerChain ?? []}
         onChange={(chain) => onChange({ ...roleConfig, providerChain: chain })}
       />
 
       <div className="mt-4 space-y-3">
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Max Budget (USD)</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">Max Budget (USD)</label>
           <input
             type="number"
             min={0}
             max={100}
             step={0.5}
-            value={roleConfig.maxBudgetUsd ?? ''}
+            value={config.maxBudgetUsd ?? ''}
             onChange={(e) => {
               const val = e.target.value;
               const updated = { ...roleConfig };
@@ -70,21 +74,21 @@ export function AgentRoleCard({ role, roleConfig, isDefaults = false, onChange }
               onChange(updated);
             }}
             placeholder="No limit"
-            className="w-32 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-32 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Permission Mode</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">Permission Mode</label>
           <select
-            value={roleConfig.permissionMode ?? 'default'}
+            value={config.permissionMode ?? 'default'}
             onChange={(e) =>
               onChange({
                 ...roleConfig,
                 permissionMode: e.target.value as 'default' | 'bypassPermissions',
               })
             }
-            className="w-48 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-48 px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600"
           >
             <option value="default">Default</option>
             <option value="bypassPermissions">Bypass Permissions</option>

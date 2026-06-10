@@ -145,7 +145,9 @@ if (!string.IsNullOrWhiteSpace(cpConnection))
 {
     builder.Services.AddDbContextFactory<Tamma.Data.ControlPlaneDbContext>(opts =>
         opts.UseNpgsql(cpConnection, npgsql =>
-            npgsql.MigrationsHistoryTable("__TammaMigrationsHistory")));
+            // Must match ControlPlaneDesignTimeDbContextFactory and DependencyInjection.cs
+            // (unified-tenancy Phase 0 reconciliation).
+            npgsql.MigrationsHistoryTable("__ControlPlaneMigrationsHistory")));
     builder.Services.AddScoped(sp =>
         sp.GetRequiredService<Microsoft.EntityFrameworkCore.IDbContextFactory<
             Tamma.Data.ControlPlaneDbContext>>().CreateDbContext());
@@ -178,6 +180,23 @@ builder.Services.AddHttpClient();
 // agent config, health, diagnostics, and provider execution to the central
 // Fastify/ASP.NET API plane.
 builder.Services.AddHttpClient<Tamma.Activities.LlmCall.TammaApiClient>();
+
+// Production blocker fix (post-Story 27-18) — Engine → API authentication for
+// the resolve activities. ResolveConventionsActivity (Story 27-13) and
+// ResolvePromptFromRegistryActivity (Story 27-18) POST to API endpoints gated
+// by AuthenticatedAny / SettingsView; previously they used a plain
+// CreateClient() with NO Authorization header, which 401'd in production
+// (Dev mode silently passed via AllowAnonymousHandler, masking the issue).
+//
+// The DelegatingHandler reads Tamma:ApiToken (env: TAMMA_API_TOKEN) — the
+// same key TammaApiClient already uses — and stamps Authorization: Bearer
+// <token> on every outgoing request. Token absent → no-op (dev-friendly).
+//
+// Activities resolve this client via IHttpClientFactory.CreateClient("tamma-engine").
+builder.Services.AddTransient<Tamma.Activities.LlmCall.TammaEngineAuthHandler>();
+builder.Services
+    .AddHttpClient("tamma-engine")
+    .AddHttpMessageHandler<Tamma.Activities.LlmCall.TammaEngineAuthHandler>();
 
 // Wave C.4 §4 — per-process health monitor for TammaApiClient. Singleton
 // so the rolling 5-min window is shared across every call site. Fires
@@ -224,6 +243,15 @@ builder.Services.AddSingleton(_ =>
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.LocalExecutor>();
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.GitHubActionsExecutor>();
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.AgentExecutorFactory>();
+
+// Story 28-5 AC4 — optional pre-drop tenant backup (pg_dump). Disabled
+// by default; the DeleteTenantWorkflow's BackupTenantDatabaseActivity
+// reads this to decide whether to snapshot before DROP DATABASE.
+builder.Services.AddOptions<Tamma.Activities.TenantLifecycle.TenantBackupOptions>()
+    .Configure(opts =>
+        builder.Configuration
+            .GetSection(Tamma.Activities.TenantLifecycle.TenantBackupOptions.SectionName)
+            .Bind(opts));
 
 // Security services (Epic 11 — LLM injection hardening)
 builder.Services.AddSingleton<IContentSanitizer, ContentSanitizer>();

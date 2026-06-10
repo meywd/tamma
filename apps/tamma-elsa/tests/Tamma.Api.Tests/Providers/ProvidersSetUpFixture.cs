@@ -49,11 +49,8 @@ public class ProvidersSetUpFixture
 
         await Task.WhenAll(Postgres.StartAsync(), TenantPostgres.StartAsync());
 
-        // InitialSchema uses uuid_generate_v4() which requires the uuid-ossp
-        // extension; create it up-front so EF migrations succeed on a vanilla
-        // Postgres image.
-        await EnableExtensionsAsync(Postgres.GetConnectionString());
-        await EnableExtensionsAsync(TenantPostgres.GetConnectionString());
+        // Both migration baselines apply on bare Postgres — gen_random_uuid()
+        // is a pg_catalog builtin since PG13; no extension bootstrap needed.
 
         // Environment variables have highest precedence in the default
         // configuration chain, so set the connection string there rather
@@ -96,7 +93,7 @@ public class ProvidersSetUpFixture
         _respawner = await Respawner.CreateAsync(conn, new RespawnerOptions
         {
             DbAdapter = DbAdapter.Postgres,
-            TablesToIgnore = new[] { new Respawn.Graph.Table("__TammaMigrationsHistory") },
+            TablesToIgnore = new[] { new Respawn.Graph.Table("__ControlPlaneMigrationsHistory") },
             SchemasToInclude = new[] { "public" },
         });
 
@@ -147,17 +144,20 @@ public class ProvidersSetUpFixture
         await using var tenantConn = new Npgsql.NpgsqlConnection(TenantPostgres.GetConnectionString());
         await tenantConn.OpenAsync();
         await _tenantRespawner.ResetAsync(tenantConn);
+
+        // Phase 3 — Respawner wiped plans + tenant_databases; placement
+        // needs both back before any test provisions a tenant.
+        await TestTenantProvisioning.ReseedPoolAsync(
+            Factory.Services, Postgres.GetConnectionString());
     }
 
-    private static async Task EnableExtensionsAsync(string connectionString)
-    {
-        await using var conn = new Npgsql.NpgsqlConnection(connectionString);
-        await conn.OpenAsync();
-        await using var cmd = new Npgsql.NpgsqlCommand(
-            "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"; CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";",
-            conn);
-        await cmd.ExecuteNonQueryAsync();
-    }
+    /// <summary>
+    /// Phase 3 — provision a test tenant through the unified pipeline so
+    /// the LRU resolver can reach its tenant data. The tenants row must
+    /// exist before calling.
+    /// </summary>
+    public static Task ProvisionTenantAsync(Guid tenantId) =>
+        TestTenantProvisioning.ProvisionAsync(Factory.Services, tenantId);
 
     private static async Task ApplyTenantMigrationsAsync(string connectionString)
     {

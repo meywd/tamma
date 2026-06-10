@@ -54,7 +54,7 @@ secret_access_events
 - **Envelope encryption**: DEK per secret version wraps the ciphertext; KEK wraps each DEK. KEK lives in env var on ship (Epic 28 §8.2 KEK decision); OpenBao adoption deferred to Story 28-13 until trigger conditions fire.
 - **Reveal-once-on-create**: the plaintext is shown to the operator once at creation time and never again. After that point, only the rotation workflow can read it.
 - **Versioned rotations**: a retired secret stays `retired_grace` for a configurable window (default 15 min) so in-flight connections drain without breaking.
-- **RLS + tenant filter**: `secret_versions` are RLS-scoped to the tenant; tenant admins see their own only. Four-layer defense (RBAC + app-role connection filter + RLS + store-level assertion). Full defense depends on Story 19-6.
+- **Tenant filter**: `secret_versions` are tenant-filtered at the store level; tenant admins see their own only. Three-layer defense (RBAC + endpoint filter + store-level scope assertion), on top of the unified schema-per-tenant isolation model.
 
 ## Rotation workflow primitive
 

@@ -38,7 +38,7 @@ describe('RegisterPage', () => {
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
     expect(
       screen.getByRole('link', { name: /sign up with github/i }),
-    ).toHaveAttribute('href', '/api/auth/github');
+    ).toHaveAttribute('href', '/oauth2/start?rd=%2F');
   });
 
   it('posts registration payload and navigates to /verify-email', async () => {

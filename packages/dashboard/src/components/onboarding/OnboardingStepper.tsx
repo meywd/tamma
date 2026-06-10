@@ -43,13 +43,7 @@ export function OnboardingStepper({ current }: OnboardingStepperProps): JSX.Elem
           <li key={step.id} className="flex-1 flex items-center min-w-0">
             <div className="flex flex-col items-center min-w-0">
               <div
-                className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold transition-colors ${
-                  done
-                    ? 'bg-blue-500 text-white'
-                    : active
-                      ? 'bg-blue-500/20 text-blue-300 ring-2 ring-blue-500'
-                      : 'bg-slate-800 text-slate-500 ring-1 ring-slate-700'
-                }`}
+                className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold transition-colors ${ done ? 'bg-blue-500 text-white' : active ? 'bg-blue-500/20 text-blue-300 ring-2 ring-blue-500' : 'bg-slate-800 text-slate-500 ring-1 ring-slate-700' }`}
                 aria-current={active ? 'step' : undefined}
               >
                 {done ? (
@@ -70,22 +64,14 @@ export function OnboardingStepper({ current }: OnboardingStepperProps): JSX.Elem
                 )}
               </div>
               <span
-                className={`mt-2 text-[10px] uppercase tracking-wider truncate max-w-[5.5rem] ${
-                  active
-                    ? 'text-blue-300 font-semibold'
-                    : done
-                      ? 'text-slate-300'
-                      : 'text-slate-500'
-                }`}
+                className={`mt-2 text-[10px] uppercase tracking-wider truncate max-w-[5.5rem] ${ active ? 'text-blue-300 font-semibold' : done ? 'text-slate-300' : 'text-slate-500' }`}
               >
                 {step.label}
               </span>
             </div>
             {idx < STEPS.length - 1 && (
               <div
-                className={`flex-1 h-px mx-2 ${
-                  done ? 'bg-blue-500/60' : 'bg-slate-800'
-                }`}
+                className={`flex-1 h-px mx-2 ${ done ? 'bg-blue-500/60' : 'bg-slate-800' }`}
                 aria-hidden="true"
               />
             )}

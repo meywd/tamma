@@ -157,6 +157,20 @@ public static class AdminTenantEventsSseEndpoint
             return;
         }
 
+        // AC3 — long-poll fallback for environments that cannot hold an
+        // open SSE connection (corporate proxies that buffer
+        // text/event-stream, HTTP/1.0 intermediaries, dashboards behind
+        // a CDN that strips streaming). `?fallback=poll` returns a single
+        // JSON snapshot of recent events + a cursor the client passes back
+        // via Last-Event-ID on the next poll. Same scrub + tenant-scoping
+        // as the stream; just one-shot instead of a held connection.
+        if (IsPollFallbackRequested(http))
+        {
+            await WritePollSnapshotAsync(tenantId, dbFactory, jsonOptions, http, ct)
+                .ConfigureAwait(false);
+            return;
+        }
+
         // Set SSE response headers BEFORE the first write. Caller
         // gets the 200 + content-type immediately so the browser's
         // EventSource opens the readyState=OPEN state right away.
@@ -334,6 +348,141 @@ public static class AdminTenantEventsSseEndpoint
         // clean termination instead of an abrupt EOF.
         try { await WriteAsync(http, ": stream-closing\n\n", CancellationToken.None); }
         catch { /* client already gone */ }
+    }
+
+    /// <summary>
+    /// AC3 — maximum events returned in a single <c>?fallback=poll</c>
+    /// snapshot. A poll is one-shot so it can carry more than the 2s
+    /// stream tick's back-pressure cap, but still bounded so a busy
+    /// tenant can't return an unbounded payload.
+    /// </summary>
+    public const int PollSnapshotMax = 200;
+
+    /// <summary>
+    /// AC3 — public shape of the long-poll fallback response.
+    /// <see cref="Events"/> are chronological (oldest first, matching the
+    /// stream's frame order). <see cref="NextEventId"/> is the
+    /// <c>platform_events.Id</c> (a Guid) the client echoes back verbatim
+    /// in the <c>Last-Event-ID</c> request header on its next poll to
+    /// fetch only newer rows — the SAME resume token the SSE stream uses,
+    /// so the poll path round-trips through
+    /// <see cref="ResolveStartingCursorAsync"/> identically. It is the id
+    /// of the newest returned row; on an empty delta it echoes the
+    /// client's previous cursor (so the client never loses its place);
+    /// null only when the store has no rows for the tenant yet.
+    /// <see cref="HasMore"/> is true only on a resume poll that filled the
+    /// <see cref="PollSnapshotMax"/> page (more new rows await — poll again
+    /// immediately); always false on the initial newest-window snapshot.
+    /// </summary>
+    public sealed record PollSnapshot(
+        IReadOnlyList<SanitizedEvent> Events,
+        Guid? NextEventId,
+        bool HasMore);
+
+    /// <summary>
+    /// True when the caller asked for the long-poll fallback via
+    /// <c>?fallback=poll</c> (case-insensitive). Read directly off the
+    /// query collection — same idiom as <c>?all=true</c> on logout — so
+    /// the handler signature (and its existing test call-sites) stay
+    /// unchanged.
+    /// </summary>
+    private static bool IsPollFallbackRequested(HttpContext http)
+        => string.Equals(
+            http.Request.Query["fallback"].ToString(),
+            "poll",
+            StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// AC3 — writes the one-shot JSON snapshot for <c>?fallback=poll</c>.
+    /// Resolution mirrors the stream:
+    /// <list type="bullet">
+    ///   <item>No <c>Last-Event-ID</c> → return the most recent
+    ///     <see cref="PollSnapshotMax"/> rows (chronological) so a fresh
+    ///     dashboard has content to render.</item>
+    ///   <item><c>Last-Event-ID</c> present → return rows strictly past
+    ///     that cursor (tenant-scoped), i.e. only what's new since the
+    ///     last poll.</item>
+    /// </list>
+    /// Every row goes through the same <see cref="ScrubEvent"/> allowlist
+    /// as the stream.
+    /// </summary>
+    private static async Task WritePollSnapshotAsync(
+        Guid tenantId,
+        IDbContextFactory<ControlPlaneDbContext> dbFactory,
+        IOptions<HttpJsonOptions> jsonOptions,
+        HttpContext http,
+        CancellationToken ct)
+    {
+        var serializerOptions = jsonOptions.Value.SerializerOptions
+            ?? new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
+        var rawLastEventId = ReadLastEventIdHeader(http);
+        var resuming = !string.IsNullOrEmpty(rawLastEventId);
+
+        List<RawEvent> rows;
+        long cursorBaseline;
+        await using (var db = await dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false))
+        {
+            if (resuming)
+            {
+                // Forward mode — only rows newer than the client's cursor.
+                cursorBaseline = await ResolveStartingCursorAsync(
+                    db,
+                    tenantId,
+                    rawLastEventId,
+                    Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance,
+                    ct).ConfigureAwait(false);
+
+                rows = await db.PlatformEvents
+                    .AsNoTracking()
+                    .Where(e => e.TenantId == tenantId && e.SequenceNumber > cursorBaseline)
+                    .OrderBy(e => e.SequenceNumber)
+                    .Take(PollSnapshotMax)
+                    .Select(e => new RawEvent(
+                        e.Id, e.Type, e.SequenceNumber, e.CreatedAt, e.Tags, e.Data))
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+            }
+            else
+            {
+                // Initial snapshot — most recent N, then flip to
+                // chronological so the wire order matches the stream.
+                rows = await db.PlatformEvents
+                    .AsNoTracking()
+                    .Where(e => e.TenantId == tenantId)
+                    .OrderByDescending(e => e.SequenceNumber)
+                    .Take(PollSnapshotMax)
+                    .Select(e => new RawEvent(
+                        e.Id, e.Type, e.SequenceNumber, e.CreatedAt, e.Tags, e.Data))
+                    .ToListAsync(ct)
+                    .ConfigureAwait(false);
+                rows.Reverse();
+                cursorBaseline = 0L;
+            }
+        }
+
+        var events = rows.Select(ScrubEvent).ToList();
+        // Resume token is the newest returned row's Guid Id — the same
+        // value the SSE stream emits as `id:` and resolves from
+        // Last-Event-ID. On an empty resume delta, echo the client's prior
+        // cursor back so it doesn't lose its place; null only when the
+        // tenant has no rows at all.
+        Guid? nextEventId = rows.Count > 0
+            ? rows[^1].Id
+            : (resuming && Guid.TryParse(rawLastEventId, out var prior) && prior != Guid.Empty
+                ? prior
+                : (Guid?)null);
+        // HasMore only means "a full resume page — poll again now". The
+        // initial newest-window snapshot is never "more" (there is nothing
+        // newer than what we just returned).
+        var hasMore = resuming && rows.Count >= PollSnapshotMax;
+        var snapshot = new PollSnapshot(events, nextEventId, hasMore);
+
+        http.Response.StatusCode = StatusCodes.Status200OK;
+        http.Response.Headers.ContentType = "application/json; charset=utf-8";
+        http.Response.Headers.CacheControl = "no-cache, no-store";
+        var json = JsonSerializer.Serialize(snapshot, serializerOptions);
+        await http.Response.WriteAsync(json, ct).ConfigureAwait(false);
     }
 
     /// <summary>

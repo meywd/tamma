@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using Tamma.Api.Logging;
+using Tamma.Core.Logging;
 using Tamma.Api.Services.TenantStatus;
 using Tamma.Data;
 using Tamma.Data.Abstractions;

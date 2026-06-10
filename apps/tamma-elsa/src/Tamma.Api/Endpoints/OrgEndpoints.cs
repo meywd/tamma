@@ -31,6 +31,7 @@ public static class OrgEndpoints
         ITenantMembershipRepository membershipRepo,
         IUserRepository userRepo,
         IEventRepository events,
+        Tamma.Data.Abstractions.ITenantProvisioningService provisioning,
         ClaimsPrincipal principal)
     {
         var userId = ResolveUserId(principal);
@@ -63,6 +64,16 @@ public static class OrgEndpoints
 
         // Finding 009: persist as the user's active tenant.
         await userRepo.UpdateActiveTenantAsync(userId.Value, tenant.Id);
+
+        // Unified-tenancy Phase 3: provision the org tenant synchronously
+        // (placement -> role -> schema -> minted connection string ->
+        // migrations), mirroring EnsurePersonalTenantMiddleware. The stub
+        // resolver's shared-path fallback is gone, so an unprovisioned org
+        // cannot reach ANY tenant data -- including the TENANT.CREATED
+        // event emitted right below. Failure policy: propagate; failing
+        // creation with the real error beats returning a broken
+        // half-tenant.
+        await provisioning.ProvisionAsync(tenant.Id);
 
         // Finding 008: emit DCB event.
         await EmitTenantEvent(events, "TENANT.CREATED.SUCCESS", tenant.Id, userId.Value, new
@@ -747,6 +758,16 @@ public static class OrgEndpoints
             if (!confirmation.Verify(confirm, tenantId, callerId.Value))
                 return Results.BadRequest(new { error = "confirmation_expired", message = "Invalid or expired confirmation token" });
 
+            // Unified-tenancy Phase 3: emit BEFORE deleting. Once the
+            // tenant row is soft-deleted the resolver treats the tenant as
+            // gone (DeletedAt IS NULL filter) and its event store becomes
+            // unreachable -- emitting afterwards throws
+            // TenantNotFoundException after the delete already happened.
+            await EmitTenantEvent(events, "TENANT.PURGED.SUCCESS", tenantId, callerId.Value, new
+            {
+                phase = "hard-delete",
+            });
+
             await using var tx = await db.Database.BeginTransactionAsync();
             try
             {
@@ -766,23 +787,22 @@ public static class OrgEndpoints
                 throw;
             }
 
-            await EmitTenantEvent(events, "TENANT.PURGED.SUCCESS", tenantId, callerId.Value, new
-            {
-                phase = "hard-delete",
-            });
-
             return Results.NoContent();
         }
 
         // Phase 1 (soft-delete) — mint the HMAC confirmation token and return 202.
-        await tenantRepo.SoftDeleteAsync(tenantId);
-        await userRepo.SwitchActiveTenantAwayFromAsync(callerId.Value, tenantId);
-        var token = confirmation.Generate(tenantId, callerId.Value);
-
+        // Unified-tenancy Phase 3: emit BEFORE soft-deleting -- a
+        // soft-deleted tenant's event store is unreachable through the
+        // resolver (DeletedAt IS NULL filter), so emitting afterwards
+        // throws TenantNotFoundException after the delete already happened.
         await EmitTenantEvent(events, "TENANT.DELETED.SUCCESS", tenantId, callerId.Value, new
         {
             phase = "soft-delete",
         });
+
+        await tenantRepo.SoftDeleteAsync(tenantId);
+        await userRepo.SwitchActiveTenantAwayFromAsync(callerId.Value, tenantId);
+        var token = confirmation.Generate(tenantId, callerId.Value);
 
         return Results.Json(new
         {
@@ -795,10 +815,7 @@ public static class OrgEndpoints
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private static Guid? ResolveUserId(ClaimsPrincipal principal)
-    {
-        var raw = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        return Guid.TryParse(raw, out var id) ? id : null;
-    }
+        => principal.GetUserId();
 
     private static bool RoleAtLeast(HttpContext ctx, string min)
     {

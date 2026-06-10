@@ -13,18 +13,21 @@ namespace Tamma.ElsaServer.Workflows;
 /// <c>DELETE /api/admin/tenants/{id}</c>. The workflow flips the tenant
 /// to <c>deleting</c>, optionally honours a cooling-off delay (held by
 /// the trigger / queue, not by this definition), evicts the LRU pool
-/// entry, drops the database, drops the role, and emits the terminal
-/// <c>TENANT.DELETED.SUCCESS</c> event.
+/// entry, drops the tenant's schema (unified-tenancy Phase 2 —
+/// schema-per-tenant on the assigned pool database), drops the role, and
+/// emits the terminal <c>TENANT.DELETED.SUCCESS</c> event, releasing the
+/// placement slot in the same save.
 ///
 /// <para>Wall-clock O(1) on tenant data volume — the cost is
-/// <c>DROP DATABASE</c>, not a row-by-row purge — matching epic-28
-/// success metric #3 (a tenant with 10 events and a tenant with 10M
-/// events both finish in &lt; 30s).</para>
+/// <c>DROP SCHEMA … CASCADE</c>, not a row-by-row purge — matching
+/// epic-28 success metric #3 (a tenant with 10 events and a tenant with
+/// 10M events both finish in &lt; 30s).</para>
 ///
-/// <para>Idempotency: every activity probes its target before performing
-/// the destructive work. A workflow restart between Step C and Step D
-/// (database dropped, role still present) re-runs both steps; the role
-/// drop short-circuits if the role is already gone.</para>
+/// <para>Idempotency: every activity probes its target (or uses
+/// <c>IF EXISTS</c>) before performing the destructive work. A workflow
+/// restart between Step C and Step D (schema dropped, role still
+/// present) re-runs both steps; the schema drop is a silent no-op and
+/// the role drop short-circuits if the role is already gone.</para>
 /// </summary>
 public class DeleteTenantWorkflow : WorkflowBase
 {
@@ -34,7 +37,7 @@ public class DeleteTenantWorkflow : WorkflowBase
         builder.DefinitionId = "delete-tenant";
         builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description =
-            "Tear down a tenant: mark deleting, evict pool, drop DB + role, emit terminal event.";
+            "Tear down a tenant: mark deleting, evict pool, drop schema + role, emit terminal event.";
 
         var tenantId = builder.WithVariable<Guid>("TenantId", Guid.Empty);
         var attempt = builder.WithVariable<int>("Attempt", 1);
@@ -81,11 +84,23 @@ public class DeleteTenantWorkflow : WorkflowBase
             Attempt = new Input<int>(ctx => attempt.Get(ctx)),
         };
 
-        // ── Step C: DROP DATABASE WITH (FORCE) ──────────────────────────
-        var dropDatabase = new DropTenantDatabaseActivity
+        // ── Step B2: optional pg_dump backup (gated by Backup:DeletionBackup;
+        //    no-op when off). Must run AFTER evictPool (pool released) and
+        //    BEFORE dropSchema (snapshot the data before it's gone). ────
+        var backupDatabase = new BackupTenantDatabaseActivity
         {
-            Id = "DropTenantDatabase",
-            Name = "Drop Tenant Database",
+            Id = "BackupTenantDatabase",
+            Name = "Backup Tenant Database",
+            TenantId = new Input<Guid>(ctx => tenantId.Get(ctx)),
+            Attempt = new Input<int>(ctx => attempt.Get(ctx)),
+        };
+
+        // ── Step C: DROP SCHEMA IF EXISTS t_<hex> CASCADE on the
+        //    assigned pool database (unified-tenancy Phase 2) ────────────
+        var dropSchema = new DropTenantSchemaActivity
+        {
+            Id = "DropTenantSchema",
+            Name = "Drop Tenant Schema",
             TenantId = new Input<Guid>(ctx => tenantId.Get(ctx)),
             Attempt = new Input<int>(ctx => attempt.Get(ctx)),
         };
@@ -115,7 +130,8 @@ public class DeleteTenantWorkflow : WorkflowBase
                 initInputs,
                 markDeleting,
                 evictPool,
-                dropDatabase,
+                backupDatabase,
+                dropSchema,
                 dropRole,
                 emitDeleted,
             },

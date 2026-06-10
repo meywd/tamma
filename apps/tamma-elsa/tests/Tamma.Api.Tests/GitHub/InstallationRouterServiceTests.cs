@@ -8,6 +8,8 @@ using Tamma.Api.Services.GitHub;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
+#pragma warning disable CS0618 // Story 31-8: transitional consumer of obsolete IGitHubSecretsProvisioner.
+
 namespace Tamma.Api.Tests.GitHub;
 
 /// <summary>

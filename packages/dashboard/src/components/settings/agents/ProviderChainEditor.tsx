@@ -51,13 +51,13 @@ function SortableEntry({
     <div
       ref={setNodeRef}
       style={style}
-      className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-md border border-gray-200"
+      className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-md border border-gray-200 dark:bg-gray-900 dark:border-gray-700"
     >
       <button
         type="button"
         {...attributes}
         {...listeners}
-        className="cursor-grab text-gray-400 hover:text-gray-600 touch-none"
+        className="cursor-grab text-gray-400 hover:text-gray-600 touch-none dark:text-gray-500"
         title="Drag to reorder"
       >
         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
@@ -65,19 +65,19 @@ function SortableEntry({
         </svg>
       </button>
       <div className="flex-1 min-w-0 cursor-pointer" onClick={onEdit} title="Click to edit">
-        <span className="text-sm font-medium text-gray-900">{entry.provider}</span>
-        {entry.model && <span className="text-sm text-gray-500 ml-2">{entry.model}</span>}
+        <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{entry.provider}</span>
+        {entry.model && <span className="text-sm text-gray-500 ml-2 dark:text-gray-400">{entry.model}</span>}
         {entry.apiKeyRef && (
-          <span className="text-xs text-gray-400 ml-2">[{entry.apiKeyRef}]</span>
+          <span className="text-xs text-gray-400 ml-2 dark:text-gray-500">[{entry.apiKeyRef}]</span>
         )}
       </div>
-      <span className="text-xs text-gray-400 shrink-0">
+      <span className="text-xs text-gray-400 shrink-0 dark:text-gray-500">
         {index === 0 ? 'Primary' : `Fallback ${index}`}
       </span>
       <button
         type="button"
         onClick={onEdit}
-        className="text-gray-400 hover:text-blue-600 text-sm shrink-0"
+        className="text-gray-400 hover:text-blue-600 text-sm shrink-0 dark:text-gray-500"
         title="Edit provider"
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -159,18 +159,18 @@ export function ProviderChainEditor({ chain, onChange }: ProviderChainEditorProp
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <label className="text-sm font-medium text-gray-700">Provider Chain</label>
+        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Provider Chain</label>
         <button
           type="button"
           onClick={handleShowAdd}
-          className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+          className="text-sm text-blue-600 hover:text-blue-800 font-medium dark:text-blue-400"
         >
           {showForm ? 'Cancel' : '+ Add Provider'}
         </button>
       </div>
 
       {chain.length === 0 && !showForm && (
-        <p className="text-sm text-gray-500 italic py-2">
+        <p className="text-sm text-gray-500 italic py-2 dark:text-gray-400">
           No providers configured. Uses defaults.
         </p>
       )}

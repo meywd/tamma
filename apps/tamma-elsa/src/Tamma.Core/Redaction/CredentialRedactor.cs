@@ -5,7 +5,7 @@ namespace Tamma.Core.Redaction;
 /// <summary>
 /// Wave C.4 — scrubs common credential patterns from error strings
 /// before they land in the DCB event store. Complements
-/// <c>Tamma.Api.Logging.LogSanitizer</c> (which only guards against
+/// <c>Tamma.Core.Logging.LogSanitizer</c> (which only guards against
 /// log-injection CRLF/tab control characters) with a proper
 /// secret-stripping pass for Bearer tokens, API keys, Basic-auth in URLs,
 /// and Postgres-style connection strings.

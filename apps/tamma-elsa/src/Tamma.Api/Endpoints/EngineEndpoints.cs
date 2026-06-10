@@ -43,10 +43,85 @@ public static class EngineEndpoints
     public static Task<IResult> GetPlan() =>
         Task.FromResult(Results.Ok(new { plan = (object?)null, message = "No active plan" }));
 
-    public static async Task<IResult> GetHistory(IEventRepository eventRepo, ITenantContext tc, int? limit)
+    /// <summary>
+    /// Story 4-7 (event query API for time-travel). Tenant-scoped paginated
+    /// event read for the dashboard "history" timeline and for ad-hoc
+    /// time-travel debugging.
+    ///
+    /// <para>Query parameters:
+    /// <list type="bullet">
+    ///   <item><c>limit</c> — page size, clamped to 1..200, default 50.</item>
+    ///   <item><c>offset</c> — zero-based offset, default 0, negative
+    ///     values clamped to 0.</item>
+    ///   <item><c>eventType</c> — optional exact match on
+    ///     <see cref="DomainEvent.Type"/>.</item>
+    ///   <item><c>issueNumber</c> — optional issue-scoped filter (matches
+    ///     <see cref="DomainEvent.IssueNumber"/>).</item>
+    /// </list>
+    /// Tenant scoping is implicit: the repo call is bound to
+    /// <see cref="ITenantContext.TenantId"/> resolved by
+    /// <c>TenantContextMiddleware</c>. Cross-tenant reads are not exposed
+    /// here — that's the admin surface.</para>
+    ///
+    /// <para>Response shape: <c>{ events, total, limit, offset, hasMore,
+    /// nextOffset? }</c>. <c>hasMore</c> is the canonical signal a UI uses
+    /// to render a "next page" control; <c>nextOffset</c> is included only
+    /// when <c>hasMore</c> is true so callers don't accidentally page off
+    /// the end.</para>
+    /// </summary>
+    public static async Task<IResult> GetHistory(
+        IEventRepository eventRepo,
+        ITenantContext tc,
+        int? limit,
+        int? offset,
+        string? eventType,
+        int? issueNumber)
     {
-        var events = await eventRepo.QueryAsync(tc.TenantId, null, null, limit ?? 50);
-        return Results.Ok(events.Select(e => new { e.Id, e.Type, e.Data, e.CreatedAt }));
+        var clampedLimit = Math.Clamp(limit ?? 50, 1, 200);
+        var clampedOffset = Math.Max(offset ?? 0, 0);
+
+        // No tenant bound (anonymous in dev-permissive mode, or a JWT
+        // missing the active_tenant_id claim): the endpoint is tenant-
+        // scoped by design — return an empty page rather than crashing
+        // the per-tenant DbContext factory with Guid.Empty.
+        if (tc.TenantId is not Guid tenantId || tenantId == Guid.Empty)
+        {
+            return Results.Ok(new
+            {
+                events = Array.Empty<object>(),
+                total = 0,
+                limit = clampedLimit,
+                offset = clampedOffset,
+                hasMore = false,
+                nextOffset = (int?)null,
+            });
+        }
+
+        var (rows, total) = await eventRepo.QueryWithPaginationAsync(
+            tenantId,
+            string.IsNullOrWhiteSpace(eventType) ? null : eventType,
+            issueNumber,
+            clampedLimit,
+            clampedOffset);
+
+        var hasMore = clampedOffset + rows.Count < total;
+        return Results.Ok(new
+        {
+            events = rows.Select(e => new
+            {
+                e.Id,
+                e.Type,
+                e.Data,
+                e.CreatedAt,
+                e.IssueNumber,
+                e.SequenceNumber,
+            }),
+            total,
+            limit = clampedLimit,
+            offset = clampedOffset,
+            hasMore,
+            nextOffset = hasMore ? (int?)(clampedOffset + rows.Count) : null,
+        });
     }
 
     /// <summary>

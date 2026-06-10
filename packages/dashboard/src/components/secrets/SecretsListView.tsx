@@ -132,7 +132,7 @@ export function SecretsListView({
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold text-gray-900">
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
           {scopeLabel} secrets
         </h2>
         {allowCreate ? (
@@ -149,7 +149,7 @@ export function SecretsListView({
       {error ? (
         <div
           role="alert"
-          className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md p-3"
+          className="mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-md p-3 dark:bg-red-950 dark:text-red-300 dark:border-red-800"
         >
           {error}
         </div>
@@ -167,34 +167,34 @@ export function SecretsListView({
       ) : null}
 
       {loading ? (
-        <p className="text-sm text-gray-500">Loading secrets…</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">Loading secrets…</p>
       ) : secrets.length === 0 ? (
-        <div className="bg-white border border-gray-200 rounded-lg p-8 text-center">
-          <p className="text-sm text-gray-600">
+        <div className="bg-white border border-gray-200 rounded-lg p-8 text-center dark:bg-gray-800 dark:border-gray-700">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
             {emptyStateMessage ?? 'No secrets yet.'}
           </p>
         </div>
       ) : (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden dark:bg-gray-800 dark:border-gray-700">
           <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+            <thead className="bg-gray-50 dark:bg-gray-900">
               <tr>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-400">
                   Name
                 </th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-400">
                   Purpose
                 </th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-400">
                   Consumers
                 </th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-400">
                   Active version
                 </th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-400">
                   Last rotated
                 </th>
-                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase dark:text-gray-400">
                   Next due
                 </th>
               </tr>
@@ -202,11 +202,11 @@ export function SecretsListView({
             <tbody className="divide-y divide-gray-200">
               {secrets.map((s) => (
                 <tr key={s.secretId}>
-                  <td className="px-4 py-2 text-sm font-mono text-gray-900">{s.name}</td>
-                  <td className="px-4 py-2 text-sm text-gray-700">{s.purpose}</td>
-                  <td className="px-4 py-2 text-sm text-gray-700">
+                  <td className="px-4 py-2 text-sm font-mono text-gray-900 dark:text-gray-100">{s.name}</td>
+                  <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">{s.purpose}</td>
+                  <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">
                     {s.consumerRefs.length === 0 ? (
-                      <span className="text-gray-400">—</span>
+                      <span className="text-gray-400 dark:text-gray-500">—</span>
                     ) : (
                       <ul className="space-y-1">
                         {s.consumerRefs.map((c, i) => (
@@ -217,11 +217,11 @@ export function SecretsListView({
                       </ul>
                     )}
                   </td>
-                  <td className="px-4 py-2 text-sm text-gray-700">{s.activeVersion}</td>
-                  <td className="px-4 py-2 text-sm text-gray-500">
+                  <td className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300">{s.activeVersion}</td>
+                  <td className="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
                     {s.lastRotatedAt ? new Date(s.lastRotatedAt).toLocaleDateString() : '—'}
                   </td>
-                  <td className="px-4 py-2 text-sm text-gray-500">
+                  <td className="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
                     {s.nextRotationDueAt
                       ? new Date(s.nextRotationDueAt).toLocaleDateString()
                       : '—'}

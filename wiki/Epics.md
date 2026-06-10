@@ -58,7 +58,7 @@ _Last audited: 2026-04-21_
 
 | Epic | Name | Stories | Effort | Layer | Page |
 |------|------|---------|--------|-------|------|
-| 27 | Prompt Store — Multi-Tenant Prompt Management | 7 | 86h | 4 | [Epic-27-Prompt-Store](Epics/Epic-27-Prompt-Store) |
+| 27 | Prompt Store — Multi-Tenant Prompt Management | 7 + 12 taxonomy stories (27-8..27-19) | 86h+ | 4 | [Epic-27-Prompt-Store](Epics/Epic-27-Prompt-Store) |
 | 28 | Database-per-Tenant Isolation | 12 + 1 deferred | 265h | 4 | [Epic-28-DB-Per-Tenant](Epics/Epic-28-DB-Per-Tenant) |
 | 29 | Platform Secret Management | 10 | 166h | 4 | [Epic-29-Secret-Management](Epics/Epic-29-Secret-Management) |
 | 30 | Pluggable Tenant Infrastructure Provisioning | 10 | 216h | 5 | [Epic-30-Pluggable-Provisioning](Epics/Epic-30-Pluggable-Provisioning) |
@@ -66,6 +66,8 @@ _Last audited: 2026-04-21_
 | 33 | Per-Tenant Identity Providers | (deferred — trigger-gated) | 100–400h depending on tier | 5+ | [Epic-33-Per-Tenant-IdP](Epics/Epic-33-Per-Tenant-IdP) |
 
 > **Note**: Epic 32 is intentionally skipped (no folder under `docs/stories/`).
+
+> **Epic 27 taxonomy stories (27-8..27-19):** 27-8 Convention Store Schema, 27-9 Convention Store Service, 27-10 Convention Store API, 27-11 Convention Store Admin UI, 27-12 Convention Store Tenant UI, 27-13 Convention Store Integration, 27-14 Convention Store Events, 27-15 AgentRole/AgentAction Taxonomy + RolePhaseMap Rebuild, 27-16 Taxonomy Codegen (Prompt + Convention Seed), 27-17 Taxonomy Drift Build Test, 27-18 Prompt Store Taxonomy Reshape, 27-19 Workflow Dispatch-Site Migration. See [Role/Action Taxonomy](Role-Action-Taxonomy.md) for the (role,action) exact lookup design.
 
 ## Audit
 

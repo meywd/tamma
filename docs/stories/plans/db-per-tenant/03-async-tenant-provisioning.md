@@ -1,5 +1,7 @@
 # 03 — Async Tenant Provisioning (Global Elsa Workflow)
 
+> **Superseded/extended by the unified schema-per-tenant model** — see `docs/superpowers/plans/2026-06-09-unified-schema-per-tenant.md` (complete 2026-06-10).
+
 **Status**: Design (pending implementation)
 **Owner**: Epic 17 / Epic 18 (tenant lifecycle)
 **Depends on**: `01-control-plane-split.md`, `02-elsa-two-tier.md`

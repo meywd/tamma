@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Tamma.Api.Services.PromptStore;
 
 namespace Tamma.Api.Extensions;
@@ -19,6 +20,12 @@ public static class PromptStoreServiceCollectionExtensions
     {
         services.AddScoped<PromptStoreService>();
         services.AddScoped<PromptEventsService>();
+        // Story 27-2 — process-wide operating mode. Used by handlers that
+        // need to pick between the user-scoped and tenant-scoped resolver
+        // surfaces on PromptStoreService. Singleton because the value is
+        // resolved from configuration once at startup and never changes
+        // (CLAUDE.md "Operating Modes / Mode detection").
+        services.TryAddSingleton<ITammaModeProvider, TammaModeProvider>();
         return services;
     }
 }

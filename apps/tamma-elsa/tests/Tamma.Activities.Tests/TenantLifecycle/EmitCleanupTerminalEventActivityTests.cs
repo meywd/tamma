@@ -25,19 +25,19 @@ public class EmitCleanupTerminalEventActivityTests
     {
         var failedSteps = new[]
         {
-            CleanupSteps.DropDatabase,
+            CleanupSteps.DropSchema,
             CleanupSteps.DropRole,
         };
         var details = new Dictionary<string, string>
         {
-            [CleanupSteps.DropDatabase] = "PostgresException: db in use",
+            [CleanupSteps.DropSchema] = "PostgresException: db in use",
             [CleanupSteps.DropRole] = "PostgresException: still owns objects",
         };
 
         var summary = EmitCleanupTerminalEventActivity.BuildFailureSummaryForTesting(
             failedSteps, details);
 
-        summary.Should().Contain(CleanupSteps.DropDatabase);
+        summary.Should().Contain(CleanupSteps.DropSchema);
         summary.Should().Contain(CleanupSteps.DropRole);
         summary.Should().Contain("db in use");
         summary.Should().Contain("still owns objects");
@@ -89,7 +89,7 @@ public class EmitCleanupTerminalEventActivityTests
         // failedSteps.Count == 0 → DELETED.SUCCESS, else DELETE.FAILED.
         var store = new InMemoryCleanupStateStore();
         CleanupWorkflowState.RecordSuccess(store, CleanupSteps.EvictPool);
-        CleanupWorkflowState.RecordSuccess(store, CleanupSteps.DropDatabase);
+        CleanupWorkflowState.RecordSuccess(store, CleanupSteps.DropSchema);
         CleanupWorkflowState.RecordSuccess(store, CleanupSteps.DropRole);
         CleanupWorkflowState.RecordSuccess(store, CleanupSteps.SoftDeleteRow);
 
@@ -102,16 +102,16 @@ public class EmitCleanupTerminalEventActivityTests
     public void TerminalEvent_OutcomeDerivedFromAccumulator_PartialFailure()
     {
         // Step 2 fails, the rest succeed → terminal must still fire
-        // and report DELETE.FAILED with failedSteps=["drop-tenant-db"].
+        // and report DELETE.FAILED with failedSteps=["drop-tenant-schema"].
         var store = new InMemoryCleanupStateStore();
         CleanupWorkflowState.RecordSuccess(store, CleanupSteps.EvictPool);
         CleanupWorkflowState.RecordFailure(
-            store, CleanupSteps.DropDatabase, "PgErr", "db in use");
+            store, CleanupSteps.DropSchema, "PgErr", "db in use");
         CleanupWorkflowState.RecordSuccess(store, CleanupSteps.DropRole);
         CleanupWorkflowState.RecordSuccess(store, CleanupSteps.SoftDeleteRow);
 
         var failed = CleanupWorkflowState.GetFailedSteps(store);
-        failed.Should().ContainSingle().Which.Should().Be(CleanupSteps.DropDatabase);
+        failed.Should().ContainSingle().Which.Should().Be(CleanupSteps.DropSchema);
         CleanupWorkflowState.GetSucceededSteps(store).Should().HaveCount(3);
         // Activity's runtime check: failedSteps.Count > 0 → partial.
     }
@@ -121,7 +121,7 @@ public class EmitCleanupTerminalEventActivityTests
     {
         var store = new InMemoryCleanupStateStore();
         CleanupWorkflowState.RecordFailure(store, CleanupSteps.EvictPool, "X", "x");
-        CleanupWorkflowState.RecordFailure(store, CleanupSteps.DropDatabase, "Y", "y");
+        CleanupWorkflowState.RecordFailure(store, CleanupSteps.DropSchema, "Y", "y");
         CleanupWorkflowState.RecordFailure(store, CleanupSteps.DropRole, "Z", "z");
         CleanupWorkflowState.RecordFailure(store, CleanupSteps.SoftDeleteRow, "W", "w");
 

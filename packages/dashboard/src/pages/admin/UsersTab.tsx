@@ -70,7 +70,7 @@ function RoleSelector({
     <select
       value={currentRole}
       onChange={(e) => onChange(e.target.value as UserRole)}
-      className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+      className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600"
     >
       <option value="owner" disabled={!canPromote}>
         owner
@@ -137,15 +137,15 @@ function InviteDialog({ onClose }: { onClose: () => void }): JSX.Element {
         aria-labelledby="invite-dialog-title"
         tabIndex={-1}
         onKeyDown={handleKeyDown}
-        className="relative bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4 outline-none"
+        className="relative bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4 outline-none dark:bg-gray-800"
       >
-        <h3 id="invite-dialog-title" className="text-lg font-semibold text-gray-900 mb-4">
+        <h3 id="invite-dialog-title" className="text-lg font-semibold text-gray-900 mb-4 dark:text-gray-100">
           Invite User
         </h3>
 
         {inviteUrl ? (
           <div>
-            <p className="text-sm text-gray-600 mb-3">
+            <p className="text-sm text-gray-600 mb-3 dark:text-gray-400">
               Share this invite link with the user:
             </p>
             <div className="flex items-center gap-2">
@@ -153,7 +153,7 @@ function InviteDialog({ onClose }: { onClose: () => void }): JSX.Element {
                 type="text"
                 readOnly
                 value={inviteUrl}
-                className="flex-1 text-sm border border-gray-300 rounded-md px-3 py-2 bg-gray-50"
+                className="flex-1 text-sm border border-gray-300 rounded-md px-3 py-2 bg-gray-50 dark:bg-gray-900 dark:border-gray-600"
               />
               <button
                 type="button"
@@ -167,7 +167,7 @@ function InviteDialog({ onClose }: { onClose: () => void }): JSX.Element {
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md dark:bg-gray-800 dark:text-gray-300"
               >
                 Done
               </button>
@@ -176,7 +176,7 @@ function InviteDialog({ onClose }: { onClose: () => void }): JSX.Element {
         ) : (
           <div>
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">
                 Email (optional)
               </label>
               <input
@@ -184,29 +184,29 @@ function InviteDialog({ onClose }: { onClose: () => void }): JSX.Element {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="user@example.com"
-                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600"
               />
             </div>
 
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">Role</label>
               <select
                 value={role}
                 onChange={(e) => setRole(e.target.value as 'admin' | 'member')}
-                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600"
               >
                 <option value="member">Member</option>
                 <option value="admin">Admin</option>
               </select>
             </div>
 
-            {error && <p className="text-sm text-red-600 mb-4">{error}</p>}
+            {error && <p className="text-sm text-red-600 mb-4 dark:text-red-400">{error}</p>}
 
             <div className="flex justify-end gap-3">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md dark:bg-gray-800 dark:text-gray-300"
               >
                 Cancel
               </button>
@@ -245,7 +245,7 @@ export function UsersTab(): JSX.Element {
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
         {error}
       </div>
     );
@@ -253,7 +253,7 @@ export function UsersTab(): JSX.Element {
 
   if (users.length === 0) {
     return (
-      <div className="text-center py-12 text-gray-500">
+      <div className="text-center py-12 text-gray-500 dark:text-gray-400">
         <p className="text-lg mb-2">No users yet</p>
         <p className="text-sm">Invite users to get started.</p>
         <button
@@ -271,8 +271,8 @@ export function UsersTab(): JSX.Element {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-gray-900">
-          Users <span className="text-gray-400 font-normal">({total})</span>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+          Users <span className="text-gray-400 font-normal dark:text-gray-500">({total})</span>
         </h2>
         <button
           type="button"
@@ -283,33 +283,33 @@ export function UsersTab(): JSX.Element {
         </button>
       </div>
 
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden dark:bg-gray-800 dark:border-gray-700">
         <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
+          <thead className="bg-gray-50 dark:bg-gray-900">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 User
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Email
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Role
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Last Active
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Created
               </th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Actions
               </th>
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+          <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-800">
             {users.map((user) => (
-              <tr key={user.id} className="hover:bg-gray-50">
+              <tr key={user.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="flex items-center gap-3">
                     <img
@@ -317,12 +317,12 @@ export function UsersTab(): JSX.Element {
                       alt={user.githubLogin}
                       className="h-8 w-8 rounded-full"
                     />
-                    <span className="text-sm font-medium text-gray-900">
+                    <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
                       {user.githubLogin}
                     </span>
                   </div>
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                   {user.email ?? '-'}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
@@ -333,10 +333,10 @@ export function UsersTab(): JSX.Element {
                     onChange={(newRole) => setConfirmRole({ user, newRole })}
                   />
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                   {user.lastActiveAt ? formatRelative(user.lastActiveAt) : 'Never'}
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                   {formatDate(user.createdAt)}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-right">
@@ -344,7 +344,7 @@ export function UsersTab(): JSX.Element {
                     <button
                       type="button"
                       onClick={() => setConfirmRemove(user)}
-                      className="text-sm text-red-600 hover:text-red-800 font-medium"
+                      className="text-sm text-red-600 hover:text-red-800 font-medium dark:text-red-400"
                     >
                       Remove
                     </button>

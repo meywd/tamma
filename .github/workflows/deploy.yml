@@ -105,6 +105,7 @@ jobs:
             "OAUTH2_PROXY_COOKIE_SECRET=${{ secrets.TAMMA_OAUTH2_PROXY_COOKIE_SECRET }}" \
             "ELSA_ADMIN_API_KEY=${{ secrets.TAMMA_ELSA_ADMIN_API_KEY }}" \
             "TAMMA_SERVICE_API_KEY=${{ secrets.TAMMA_SERVICE_API_KEY }}" \
+            "CRANL_ENCRYPTION_KEY=${{ secrets.TAMMA_CRANL_ENCRYPTION_KEY }}" \
             "API_BASE_URL=https://api.tamma.dev" \
             "DASHBOARD_URL=https://app.tamma.dev" \
           | ssh -i ~/.ssh/deploy_key \

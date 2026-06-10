@@ -1,0 +1,269 @@
+# Unified Schema-per-Tenant Tenancy Model — Architecture & Implementation Plan
+
+> **For agentic workers:** This is an ARCHITECTURE + PHASE-DECOMPOSITION plan. It is intentionally
+> not a single bite-sized TDD script — the change spans multiple subsystems. Each **Phase** below
+> becomes its own detailed `superpowers:writing-plans` task-plan at execution time, implemented via
+> `superpowers:subagent-driven-development`. Do NOT start coding from this doc until the "Decisions
+> needed" section is resolved.
+
+> **STATUS: ALL PHASES COMPLETE (2026-06-10).** The §1 invariants hold: one tenant type; every
+> tenant has SchemaName + DatabaseId + an encrypted Search-Path connection string; placement is
+> tier-driven and admin-managed (CRUD + move); isolation is schema + per-tenant role; the control
+> plane is global; the spec's uniform connection-string CHECK ships in its transitional form
+> (deviations 6-7) pending the post-Epic-30 scope tightening. Execution records live in the five
+> phase task-plans (2026-06-09/10).
+
+**Goal:** Replace the two-mode tenancy model (RLS-shared-tables *vs* optional own-DB) with ONE model:
+every tenant has a uniquely-named schema and an (encrypted) connection string; the database behind
+that connection string may host one tenant or many; placement is a SaaS-admin concern driven by
+subscription tier. Tenant behavior is identical regardless of placement.
+
+**Architecture:** Control-plane data stays global (one CP database). Tenant-resident data lives in a
+per-tenant schema (`t_<hex>`) inside an assigned database, addressed by a connection string carrying
+`Search Path=<schema>`. A `tenant_databases` registry (the admin's DB pool) records which databases
+exist and which tenants live where; `plans.placement_policy` maps subscription tier → shared-pool vs
+dedicated DB. Isolation is by schema + per-tenant role. Phase-3 RLS on tenant tables is removed.
+
+**Tech Stack:** PostgreSQL 17 (schemas + per-tenant roles + `search_path`), EF Core 9 (per-schema
+migrations history), Npgsql (`Search Path` connection-string key), existing AES-GCM KEK envelope for
+connection-string encryption, existing `LruPooledTenantConnectionResolver`.
+
+**Why now:** The server has **zero business data** (verified 2026-06-09: 0 users / 0 tenants / 0
+events; the only rows are shipped workflow defs + migration history + seed alert rules). Stores are
+fully replaceable, so we set the correct model from zero instead of carrying the split. No data
+migration is required — schema is recreated from the EF model; the server gets one `volume-reset` at
+next deploy.
+
+---
+
+## 1. Target model (the invariants)
+
+1. **One tenant type.** No `shared-infra` vs `per-tenant` distinction in code or behavior.
+2. **Every tenant has:** a unique `schema_name`, a `database_id` (which DB hosts that schema), and an
+   encrypted `connection_string` (Host/Port/Database/Username/Password + `Search Path=<schema>`).
+3. **The DB behind a tenant** may hold 1..N tenant schemas. "Dedicated" = the tenant is the only
+   schema in its DB; "shared" = it co-resides with others. This is *placement*, invisible to the app.
+4. **Isolation** = schema + per-tenant role (`role_<hex>` with `USAGE`/`CREATE` on only its own
+   schema, default `search_path` = its schema). NOT RLS on co-mingled tables.
+5. **Placement is admin-managed and tier-driven** (`plans.placement_policy`). Admin can list DBs, see
+   tenant→DB mapping, and **move** a tenant to another DB.
+6. **Control plane is global** (one CP DB): `users`, `tenants`, `tenant_memberships`,
+   `platform_events`, `plans`, `tenant_databases`, etc. Cross-tenant admin queries keep working.
+
+This makes the spec's data-integrity CHECK *correct and uniform* (no `ProviderKey` exemption):
+`CHECK (Status = 'pending_verification' OR EncryptedConnectionString IS NOT NULL)` — because every
+active tenant genuinely has a connection string.
+
+---
+
+## 2. Data model changes (control plane, global DB)
+
+### 2.1 New table `tenant_databases` (the admin DB pool / registry)
+
+| Column | Type | Notes |
+|---|---|---|
+| `Id` | uuid PK | |
+| `Label` | text | operator-facing name, e.g. `shared-eu-1`, `dedicated-acme` |
+| `Host`, `Port` | text/int | |
+| `AdminConnectionStringEncrypted` | bytea | provisioner-role conn for creating schemas/roles (AES-GCM/KEK) |
+| `PlacementClass` | text CHECK in (`shared`,`dedicated`) | |
+| `TierEligibility` | text[] | which plan tiers may land here (e.g. `{free,team}`) |
+| `TenantCapacity` | int null | max schemas (null = unbounded); for shared pools |
+| `TenantCount` | int | maintained on placement/move |
+| `Status` | text CHECK in (`active`,`draining`,`full`,`retired`) | |
+| `KekVersion` | smallint NOT NULL DEFAULT 1 | for the admin conn envelope |
+| `CreatedAt`,`UpdatedAt` | timestamptz | |
+
+### 2.2 `tenants` table — columns to add / fix to spec
+
+- Add `SchemaName text` — unique, `t_<guid32>`; the tenant's schema in its DB.
+- Add `DatabaseId uuid` FK → `tenant_databases(Id)` (Restrict).
+- `EncryptedConnectionString bytea` — keep; now **required once provisioned** (see CHECK).
+- `KekVersion smallint NOT NULL DEFAULT 1` — **fix to spec** (currently `integer NULL`).
+- `Status` — `CHECK ("Status" IS NULL OR "Status" IN ('pending_verification','provisioning','active','delete_requested','deleting','deleted','failed','suspended'))`.
+- `CHECK ("Status" = 'pending_verification' OR "EncryptedConnectionString" IS NOT NULL)` — uniform.
+- Remove the `ProviderKey`-as-mode flag from tenancy logic (keep column only if Epic 30 still needs
+  it as a backend label; otherwise drop — see Decisions).
+
+### 2.3 `plans` table — placement policy
+
+- Add `PlacementPolicy text NOT NULL DEFAULT 'shared'` CHECK in (`shared`,`dedicated`).
+- Seed: `free`,`team` → `shared`; `enterprise` → `dedicated` (confirm map in Decisions).
+
+### 2.4 `api_keys` (CP) — fix to spec
+
+- `Scope` CHECK in (`platform`,`user`) on the CP table; tenant-DB `api_keys.Scope` CHECK = `tenant`.
+
+---
+
+## 3. Subsystem responsibilities & file map
+
+| Subsystem | Key files | Responsibility |
+|---|---|---|
+| Naming | `Tamma.Data/Pooling/TenantNaming.cs` | add `SchemaName(guid)` → `t_<hex>`; keep `RoleName`; `DatabaseName` becomes "the assigned DB's name", not derived from tenant id |
+| CP model | `Tamma.Data/TammaModelConfiguration.cs`, `ControlPlaneDbContext.cs`, new `Entities/TenantDatabase.cs` | registry table, tenant columns, CHECKs, plan policy |
+| Placement | new `Tamma.Api/Services/Provisioning/ITenantPlacementService.cs` | pick/assign a DB for a (tenant, plan-tier); capacity + tier eligibility |
+| Tenant schema lifecycle | `Tamma.Activities/TenantLifecycle/*` (`CreateTenantDatabaseActivity` → becomes Create*Schema*; new `CreateTenantSchemaActivity`, role grants) | create role+schema in the assigned DB, grant schema-scoped, set search_path |
+| Migrations into schema | `Tamma.Data/Pooling/EfTenantDbMigrator.cs`, `TenantDbContextFactory.cs` | apply `TenantDbContext` migrations into `t_<hex>` (search_path + `__TenantMigrationsHistory` in-schema) |
+| Resolver | `Tamma.Data/Pooling/LruPooledTenantConnectionResolver.cs`, remove `StubTenantConnectionResolver` central path | every tenant → decrypt conn string → pooled `NpgsqlDataSource` with search_path |
+| Conn-string mint/encrypt | `Tamma.Api/Services/Provisioning/TenantSecretProtector*` | build `…;Search Path=t_<hex>`, encrypt, store on tenant row |
+| Admin | `Tamma.Api/Endpoints/Admin/*` (new `TenantDatabasesEndpoints`, `MoveTenantEndpoint`) | DB-pool CRUD; tenant→DB view; move-tenant op |
+| Move tenant | new `Tamma.Activities/TenantLifecycle/MoveTenantWorkflow` + activities | `pg_dump --schema` → restore into target → re-point conn string → evict pool → drop source schema/role |
+| RLS removal | Phase-3 RLS SQL + `Tamma:RequireTenantIsolation` guard, `docker/init-db.sql` | drop RLS-on-tenant-tables; isolation now schema+role |
+| Backup (28-5) | `BackupTenantDatabaseActivity` | becomes schema-scoped: `pg_dump --schema=t_<hex>` instead of whole-DB |
+| Migration collapse | all 4 owned contexts' `Migrations/` dirs | regenerate single baseline per context reflecting the above |
+
+---
+
+## 4. Phase decomposition (each becomes its own task-plan)
+
+- **Phase 0 — DONE 2026-06-09.** CP schema to target + collapse CP baseline. Add `tenant_databases`, tenant columns
+  (`SchemaName`, `DatabaseId`), CHECKs (Status, uniform connection-string, api_keys Scope), KekVersion
+  → smallint; `plans.PlacementPolicy` + seed. Reconcile the runtime/design-time history-table-name
+  mismatch. Delete CP migrations (`Migrations/` + `Migrations/ControlPlane/`) and regenerate one
+  `InitialControlPlane`. Validate apply on a throwaway Postgres. **Schema-only — no behavior change.**
+- **Phase 1 — DONE 2026-06-09.** Tenant schema + per-schema migrations. `TenantNaming.SchemaName`; `EfTenantDbMigrator`
+  + `TenantDbContextFactory` apply into `t_<hex>` via `Search Path` + in-schema history table. Collapse
+  the tenant baseline.
+- **Phase 2 (re-ordered: was "Phase 3 — unified creation path") — DONE 2026-06-10.** `ITenantPlacementService` (tier → DB); `CreateTenantSchemaActivity`
+  (role+schema+grants); mint+encrypt connection string for **every** tenant, including the personal
+  tenant at registration. Remove "shared-infra-only until provisioning."
+- **Phase 3 (re-ordered: was Phase 2) — DONE 2026-06-10.** Resolver always uses the stored
+  connection string + search_path; remove `StubTenantConnectionResolver` central fallback — now
+  possible because every tenant mints at creation.
+- **Phase 4 — DONE 2026-06-10.** Admin placement + move. `tenant_databases` CRUD endpoints (OwnerAccess); tenant→DB
+  view; `MoveTenantWorkflow` (dump-schema → restore → re-point → evict → drop source).
+- **Phase 5 — DONE 2026-06-10.** Drop RLS policies on tenant tables; retire the
+  `ProviderKey` mode flag (per Decisions); adapt the 28-5 backup to `--schema`.
+
+Re-order rationale: stub removal hard-depends on every tenant having a minted connection string, so
+the creation-path phase had to land first — sequencing swapped during execution (2026-06-09).
+
+Phases 0–2 are internal/safe (Phase 2's registration/login change soft-fails onto the shared path
+until Phase 3). Phase 3 flips the access path — gate behind tests. Phases 4–5 are additive + cleanup.
+
+---
+
+## 5. Per-tenant credentials & isolation (recommended)
+
+**Role-per-tenant** (`role_<hex>`): `GRANT USAGE, CREATE ON SCHEMA t_<hex> TO role_<hex>`,
+`ALTER ROLE role_<hex> SET search_path = t_<hex>`, and crucially **no grant on `public` or other
+tenant schemas**, so a tenant connection cannot read another schema even by changing `search_path`.
+This generalizes the existing db-per-tenant role model to schema-per-tenant and gives real isolation
+inside a shared DB. (Alternative — one shared role per DB — is simpler but weaker; see Decisions.)
+
+---
+
+## 6. Decisions
+
+**LOCKED (2026-06-09):**
+
+1. **Role model: role-per-tenant.** Each tenant connects as `role_<hex>` with `USAGE`/`CREATE` on only
+   its own schema + default `search_path = t_<hex>`, no grant on `public`/sibling schemas. Strong
+   isolation inside a shared DB. (See §5.)
+2. **Tier → placement: `free`+`team` → shared pool, `enterprise` → dedicated DB.** `plans.PlacementPolicy`
+   seed: free=`shared`, team=`shared`, enterprise=`dedicated`.
+
+**Resolved with defaults (revisit if needed; do NOT block Phase 0):**
+
+3. **`ProviderKey`/Epic 30 — default:** keep `ProviderKey` only as a *backend label* (which provider
+   minted the hosting DB into `tenant_databases`), NOT as a tenancy-mode flag. Epic 30's
+   `ITenantInfrastructureProvider` becomes the thing that *provisions a database row into the
+   registry*; per-tenant placement/schema lifecycle is owned by this model. Final drop-or-keep of the
+   column decided in Phase 5.
+4. **Move-tenant downtime — default:** brief per-tenant **read-only window** during a move (mark
+   `draining` → dump-schema → restore → re-point → evict → drop source). Online/zero-downtime move is
+   explicitly out of scope (§7).
+5. **Scope vs Epic 28 — default:** treat as an **extension/re-scope of Epic 28** (reuses 28's resolver,
+   KEK envelope, lifecycle-workflow + activity base). Tracking-doc update only; not a blocker. Confirm
+   epic numbering when we wire story docs.
+
+**Phase 0/1 implementation deviations (2026-06-09, recorded from the task-plans):**
+
+6. **api_keys Scope CHECK is transitional**: `('platform','user','installation','service','tenant')`
+   on CP — live code writes service/installation/tenant scopes to CP today. Tighten to the spec's
+   `('platform','user')` when tenant-scoped keys physically move out (Phase 2+).
+7. **Conn-string CHECK exempts `provisioning`,`failed`,`deleted`,`deleting`,`delete_requested`**
+   (besides NULL/`pending_verification`) — presence is enforced only for `active`/`suspended`.
+   Today's flows hold NULL conn strings in those states (mint happens mid-provisioning; failure can
+   precede mint; delete nulls the envelope), and force-delete enters deleting/delete_requested from
+   `failed` (or legacy NULL-status) rows that never got minted — without the exemption the designed
+   cleanup path hits 23514. Spec-exact form lands with Phase 3's mint-at-creation.
+8. **RLS + tamma_app role ported verbatim** into the collapsed `InitialControlPlane` baseline
+   (34 raw-SQL objects) so Phase 0 stays behavior-neutral; removal stays Phase 5.
+9. **uuid-ossp dependency eliminated** (mentorship defaults → `gen_random_uuid`) — an extension
+   function would not resolve under a per-tenant `search_path`; both baselines now apply on bare
+   Postgres with zero extensions.
+10. **Tenant baseline carries zero raw SQL** — the NULLS NOT DISTINCT unique indexes are
+    model-level in EF 9.
+
+**Phase 2 implementation deviations (2026-06-10, recorded from the task-plan):**
+
+11. **Central DB bootstraps as pool member #1** (tenant_databases Label='central', shared, all
+    tiers, insert-missing-only seeder) — dev/self-host and SaaS share one placement path.
+12. **Personal tenants provision synchronously at first login** in single-user mode (soft-fail
+    until Phase 3 stub removal makes it hard).
+
+**Phase 3 implementation deviations (2026-06-10, recorded from the task-plan):**
+
+13. **System store** — platform-default rows stay in the central DB public schema behind
+    ISystemStoreDbContextFactory (not moved to CP tables).
+14. **RequireTenantIsolation knob deleted** — it guarded the stub fallback that no longer exists.
+15. **Dev KEK ships in appsettings.Development.json** (dev-only, documented).
+16. **Unified path exposed and fixed 4 latent production bugs** (test migration, commits
+    f1107558..a58f983d): EF internal-service-provider explosion at >20 tenant data sources
+    (TenantDbContextFactory now lends a pooled connection); CreateOrg emitted into the
+    not-yet-provisioned tenant store (now provisions synchronously — orgs and personal tenants
+    share the same first-class path); DeleteOrg emitted after the soft-delete made the store
+    unreachable (emit-before-delete); per-tenant migration connections stranded one idle pool
+    each (Pooling=false on the one-shot migration connection).
+17. **Known residuals (deliberate):** failed CreateOrg leaves a recoverable half-tenant (idempotent
+    re-provision exists, operator-driven — no self-service org re-provision endpoint yet);
+    tenant-terminal lifecycle events (DELETED/PURGED) are written to the tenant's own store and are
+    unreachable post-delete — move to the CP store when convenient.
+
+**Phase 4 implementation deviations (2026-06-10):**
+
+18. **`draining` added to the Status CHECK** (extends the Phase 0 enumeration) and is a
+    first-class read-only state: middleware 503s unsafe verbs, the LRU resolver still yields
+    connections (reads flow during a move window).
+19. **Move is a service + platform-queue task, not an Elsa workflow** — no workflow dispatch
+    subscriber exists anywhere; the Cranl 202+queue pattern is the established one. NOTE:
+    `PlatformTaskWorker:RunOnStartup` defaults to false — queued moves execute only on
+    deployments that enable the worker.
+20. **Move-engine hardening from adversarial review**: same-physical-DB alias guard (a move
+    between two pool rows aliasing one database would have dropped the live schema and deleted
+    its own dump), pg_restore ignored-error budget + per-table row-count verification (silent
+    partial restores), per-tenant Postgres advisory lock (concurrent moves), 0700 temp dir +
+    drain grace window.
+
+**Phase 5 implementation deviations (2026-06-10):**
+
+21. **tamma_app role + grants + three-role privilege split KEPT** — least-privilege runtime role,
+    independent of RLS (DbRoleLeastPrivilegeCheck still enforces it).
+22. **ProviderKey + V2 endpoint directory KEPT** as the Epic-30 backend-label seam (decision 3
+    final: a label for which provider minted hosting infrastructure — never a tenancy mode).
+23. **The trigger-backed "users.TenantId immutable" invariant** is app-layer convention (switch-org
+    writes Settings.activeTenantId; the old direct-update route is pinned 404 by tests) — no
+    replacement guard added.
+
+---
+
+## 7. Non-goals / explicitly out of scope
+
+- Cross-region DB placement, read replicas, connection-pooler (pgbouncer) topology.
+- Online (zero-downtime) tenant moves (unless Decision 4 says otherwise).
+- Any data migration tooling — there is no data; recreate from the model.
+
+---
+
+## Self-review notes
+
+- Spec coverage: the original "schema to spec + collapse migrations" ask is absorbed into Phase 0/1
+  (CHECKs, KekVersion, baselines). The new "one model + tier-driven placement" requirement is the
+  spine (Phases 0–4). RLS removal is Phase 5.
+- Open risk: Phase 3 touches auth/registration — the highest-blast-radius change; it must land with
+  the unified resolver (Phase 2) already green, behind the full suite + a Postgres integration run.
+- Validation: every phase that regenerates migrations must prove the baseline applies to a throwaway
+  Postgres before commit; CI's "Integration Tests (Postgres)" is the gate; server gets one
+  `volume-reset` at deploy.

@@ -52,9 +52,9 @@ export function BudgetOverview(): JSX.Element {
             const variant = pct > 90 ? 'error' : pct > 70 ? 'warning' : 'healthy';
 
             return (
-              <div key={role} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+              <div key={role} className="p-4 bg-gray-50 rounded-lg border border-gray-200 dark:bg-gray-900 dark:border-gray-700">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-gray-900">
+                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
                     {ROLE_LABELS[role]}
                   </span>
                   <Badge variant={variant}>
@@ -62,11 +62,9 @@ export function BudgetOverview(): JSX.Element {
                   </Badge>
                 </div>
                 {budget !== undefined && (
-                  <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div className="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700">
                     <div
-                      className={`h-2 rounded-full transition-all ${
-                        pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-yellow-500' : 'bg-green-500'
-                      }`}
+                      className={`h-2 rounded-full transition-all ${ pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-yellow-500' : 'bg-green-500' }`}
                       style={{ width: `${pct}%` }}
                     />
                   </div>

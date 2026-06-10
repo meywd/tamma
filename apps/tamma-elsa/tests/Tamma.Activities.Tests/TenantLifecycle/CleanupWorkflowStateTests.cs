@@ -57,19 +57,19 @@ public class CleanupWorkflowStateTests
 
         CleanupWorkflowState.RecordFailure(
             store,
-            CleanupSteps.DropDatabase,
+            CleanupSteps.DropSchema,
             failureCode: "PostgresException",
             redactedDetail: "permission denied for database");
 
         CleanupWorkflowState.GetFailedSteps(store).Should()
-            .Equal(CleanupSteps.DropDatabase);
-        store.GetBool(CleanupWorkflowVariables.SuccessFlag(CleanupSteps.DropDatabase))
+            .Equal(CleanupSteps.DropSchema);
+        store.GetBool(CleanupWorkflowVariables.SuccessFlag(CleanupSteps.DropSchema))
             .Should().Be(false);
-        store.GetString(CleanupWorkflowVariables.FailureCode(CleanupSteps.DropDatabase))
+        store.GetString(CleanupWorkflowVariables.FailureCode(CleanupSteps.DropSchema))
             .Should().Be("PostgresException");
         var details = CleanupWorkflowState.GetStepDetails(store);
-        details.Should().ContainKey(CleanupSteps.DropDatabase);
-        details[CleanupSteps.DropDatabase].Should()
+        details.Should().ContainKey(CleanupSteps.DropSchema);
+        details[CleanupSteps.DropSchema].Should()
             .Be("PostgresException: permission denied for database");
     }
 
@@ -112,14 +112,14 @@ public class CleanupWorkflowStateTests
         var store = new InMemoryCleanupStateStore();
 
         CleanupWorkflowState.RecordSuccess(store, CleanupSteps.EvictPool);
-        CleanupWorkflowState.RecordFailure(store, CleanupSteps.DropDatabase, "PgErr", "could not drop");
+        CleanupWorkflowState.RecordFailure(store, CleanupSteps.DropSchema, "PgErr", "could not drop");
         CleanupWorkflowState.RecordSuccess(store, CleanupSteps.DropRole);
         CleanupWorkflowState.RecordFailure(store, CleanupSteps.SoftDeleteRow, "DbUpdate", "concurrency");
 
         CleanupWorkflowState.GetSucceededSteps(store).Should()
             .BeEquivalentTo(new[] { CleanupSteps.EvictPool, CleanupSteps.DropRole });
         CleanupWorkflowState.GetFailedSteps(store).Should()
-            .BeEquivalentTo(new[] { CleanupSteps.DropDatabase, CleanupSteps.SoftDeleteRow });
+            .BeEquivalentTo(new[] { CleanupSteps.DropSchema, CleanupSteps.SoftDeleteRow });
         CleanupWorkflowState.GetStepDetails(store).Should().HaveCount(2);
     }
 
@@ -180,7 +180,7 @@ public class CleanupWorkflowStateTests
         // Same rationale: emitted as tags on platform_events rows,
         // queried by the dashboard. Don't rename.
         CleanupSteps.EvictPool.Should().Be("evict-pool");
-        CleanupSteps.DropDatabase.Should().Be("drop-tenant-db");
+        CleanupSteps.DropSchema.Should().Be("drop-tenant-schema");
         CleanupSteps.DropRole.Should().Be("drop-tenant-role");
         CleanupSteps.SoftDeleteRow.Should().Be("soft-delete-cp-row");
     }

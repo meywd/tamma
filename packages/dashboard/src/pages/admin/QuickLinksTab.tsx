@@ -53,7 +53,7 @@ const ICON_COLORS: Record<string, string> = {
 export function QuickLinksTab(): JSX.Element {
   return (
     <div>
-      <h2 className="text-lg font-semibold text-gray-900 mb-4">Quick Links</h2>
+      <h2 className="text-lg font-semibold text-gray-900 mb-4 dark:text-gray-100">Quick Links</h2>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {LINKS.map((link) => (
@@ -67,17 +67,15 @@ export function QuickLinksTab(): JSX.Element {
             <Card className="hover:shadow-md transition-shadow cursor-pointer">
               <div className="flex items-center gap-4">
                 <div
-                  className={`h-10 w-10 rounded-lg flex items-center justify-center text-lg font-bold ${
-                    ICON_COLORS[link.icon] ?? 'bg-gray-100 text-gray-700'
-                  }`}
+                  className={`h-10 w-10 rounded-lg flex items-center justify-center text-lg font-bold ${ ICON_COLORS[link.icon] ?? 'bg-gray-100 text-gray-700' }`}
                 >
                   {link.icon}
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-900">{link.name}</h3>
-                  <p className="text-sm text-gray-500">{link.description}</p>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{link.name}</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{link.description}</p>
                 </div>
-                <div className="ml-auto text-gray-400">
+                <div className="ml-auto text-gray-400 dark:text-gray-500">
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     className="h-4 w-4"

@@ -1,21 +1,22 @@
 namespace Tamma.Api.Services.Provisioning;
 
 /// <summary>
-/// Resolves the per-request Postgres connection string for a given tenant.
-/// Two modes:
+/// Legacy v1 seam — resolves the per-request Postgres connection string
+/// for a given tenant. Superseded by the unified
+/// <c>Tamma.Data.Abstractions.ITenantConnectionResolver</c> +
+/// <c>LruPooledTenantConnectionResolver</c>, where every tenant has a
+/// <c>t_&lt;hex&gt;</c> schema + per-tenant role + encrypted connection
+/// string and placement is owned by the <c>tenant_databases</c> pool.
 ///
 /// <list type="bullet">
-///   <item><description><b>Central (shared) infra</b>: tenant rides on the
-///     central Postgres via RLS — returns the central connection string
-///     unchanged. This is the default for every tenant where
+///   <item><description><b>Central connection</b>: returns the central
+///     connection string unchanged for every tenant where
 ///     <c>tenants.cranl_database_url_encrypted IS NULL</c>.</description></item>
 ///   <item><description><b>Per-tenant Cranl DB</b>: tenant has been
 ///     provisioned via <see cref="CranlTenantProvisioner"/> and has its
 ///     own Postgres on Cranl. Returns the decrypted Cranl
 ///     <c>DATABASE_URL</c> so the per-request DbContext binds to that
-///     database. RLS is unnecessary in this mode (one tenant = one DB)
-///     and the <c>TenantContextInterceptor</c> can skip the
-///     <c>set_config</c> binding.</description></item>
+///     database.</description></item>
 /// </list>
 ///
 /// <para><b>Status (audit cranl/004): STUBBED.</b> The interface +
@@ -43,8 +44,8 @@ public interface ITenantConnectionResolver
 
 /// <summary>
 /// Resolved connection envelope. Carries the connection string + a
-/// flag signalling whether the connection is per-tenant (RLS off) or
-/// the shared central plane (RLS on, tenant context binding required).
+/// flag signalling whether the connection is a dedicated per-tenant
+/// database or the shared central plane.
 /// </summary>
 public sealed record TenantConnection(
     string ConnectionString,

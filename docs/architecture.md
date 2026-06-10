@@ -983,6 +983,29 @@ class WorkflowEngine {
 
 ---
 
+## Role/Action Taxonomy & Prompt/Convention Resolution
+
+Tamma resolves both **prompts** and **coding conventions** by exact
+`(role, action)` lookup against a single shared, code-defined taxonomy owned by
+`RolePhaseMap`. There is no keyword matching, no tokenizer, no composite action
+string.
+
+- **Taxonomy:** `AgentRole` (8 roles) × per-role specific actions (~80 jagged
+  cells, e.g. architect/`plan-system-design`, developer/`plan-implementation`).
+  Strong-typed via `AgentRole`/`AgentAction` enums with `ToWire()`/`Parse()`;
+  the wire format stays a primitive string (Elsa serialization back-compat).
+- **Resolution:** at the prompt-pull boundary in `LlmCallWorkflow`,
+  `(role, action)` resolves tenant-override → system-default → error. Prompts
+  and conventions use the identical key.
+- **Anti-drift:** prompt seed and convention seed are codegen'd from the one
+  taxonomy; a build test fails if any workflow dispatch site emits a pair
+  outside it.
+- **Scope note:** dynamic selection of `(role, action)` per issue context
+  (the `SingleIssueCycleWorkflow` "roundabout") is a separate initiative that
+  consumes this model unchanged.
+
+Full design: `docs/superpowers/specs/2026-05-18-role-action-taxonomy-and-resolution-design.md`.
+
 ## Implementation Patterns (AI Agent Consistency)
 
 ### 1. Naming Conventions
@@ -1031,6 +1054,15 @@ SSE    /api/v1/events/stream
 "TRIGGER.ACTIVATED"
 "WORKFLOW.STEP_COMPLETED"
 "GATE.REVIEW_REQUESTED"
+```
+
+Epic 28 added these `platform_events` types (control-plane audit trail):
+
+```text
+TENANT.LIFECYCLE.<STEP>.{STEP_STARTED|STEP_COMPLETED|STEP_FAILED}  // create/delete steps, incl. BACKUP_DATABASE
+ANALYTICS.ROLLUP.{PLATFORM_COMPLETED|TENANT_COMPLETED|TENANT_FAILED|HOUR_COMPLETED}
+ANALYTICS.PURGE.HOURLY        // 13-month retention sweep ran (rowsDeleted, cutoff)
+ANALYTICS.PURGE.FAILED        // retention sweep threw (best-effort; rollup unaffected)
 ```
 
 ### 2. Structure Patterns
@@ -1490,6 +1522,19 @@ data: {"issueId":"uuid","filesChanged":["src/foo.ts"]}
 event: WORKFLOW.STEP_COMPLETED
 data: {"issueId":"uuid","step":"CODE_GENERATION"}
 ```
+
+**Admin tenant-events stream + long-poll fallback (Epic 28-11):**
+
+```text
+GET /api/admin/tenants/{id}/events/stream              // SSE (text/event-stream)
+GET /api/admin/tenants/{id}/events/stream?fallback=poll // one-shot JSON snapshot
+```
+
+The `?fallback=poll` variant returns `PollSnapshot { events, nextEventId,
+hasMore }` (cap 200 events, same tenant-scoping + tag scrub as the stream)
+for clients behind proxies that buffer streaming. The client echoes
+`nextEventId` back via the `Last-Event-ID` header on the next poll — the
+same resume token the SSE stream uses.
 
 ### WebSocket (Future)
 

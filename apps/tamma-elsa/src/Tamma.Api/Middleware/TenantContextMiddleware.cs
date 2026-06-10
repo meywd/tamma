@@ -142,9 +142,14 @@ public class TenantContextMiddleware(RequestDelegate next)
         // CP. On miss, fall through to a single CP read that BOTH
         // populates the cache AND short-circuits non-active states.
         // Active / null statuses fall through to the resolver warm-up.
+        //
+        // Phase 4 (unified tenancy): the gate is verb-aware —
+        // `draining` (tenant move in progress, brief read-only window)
+        // lets safe verbs (GET/HEAD/OPTIONS) through and 503s mutations
+        // with Retry-After: 5.
         if (statusCache.TryGet(tenantId, out var cachedStatus))
         {
-            if (!TenantStatusEvaluator.IsActive(cachedStatus))
+            if (!TenantStatusEvaluator.AllowsRequest(cachedStatus, context.Request.Method))
             {
                 logger.LogWarning(
                     "tenant.middleware.status_gate_cached tenantId={TenantId} status={Status} source={Source} path={Path}",
@@ -189,7 +194,7 @@ public class TenantContextMiddleware(RequestDelegate next)
                 : row.Status;
             statusCache.Set(tenantId, effectiveStatus);
 
-            if (!TenantStatusEvaluator.IsActive(effectiveStatus))
+            if (!TenantStatusEvaluator.AllowsRequest(effectiveStatus, context.Request.Method))
             {
                 logger.LogWarning(
                     "tenant.middleware.status_gate tenantId={TenantId} status={Status} source={Source} path={Path}",
@@ -314,8 +319,7 @@ public class TenantContextMiddleware(RequestDelegate next)
             return (fromClaim, "jwt_claim");
 
         // Source 4: user-row fallback (JWT lacked tid).
-        var userIdRaw = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (Guid.TryParse(userIdRaw, out var userId))
+        if (context.User.GetUserId() is Guid userId)
         {
             var user = await userRepo.GetByIdAsync(userId).ConfigureAwait(false);
             if (user?.TenantId is not null && user.TenantId.Value != Guid.Empty)

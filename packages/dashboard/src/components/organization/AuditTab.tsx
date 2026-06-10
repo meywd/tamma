@@ -113,11 +113,7 @@ export function AuditTab(): JSX.Element {
               setFamilyPrefix(f.prefix);
               setPage(0);
             }}
-            className={`px-3 py-1 text-xs rounded-full border transition-colors ${
-              familyPrefix === f.prefix
-                ? 'bg-blue-600 text-white border-blue-600'
-                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-            }`}
+            className={`px-3 py-1 text-xs rounded-full border transition-colors ${ familyPrefix === f.prefix ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50' } dark:text-gray-300 dark:border-gray-600`}
           >
             {f.label}
           </button>
@@ -125,7 +121,7 @@ export function AuditTab(): JSX.Element {
       </div>
 
       {error && (
-        <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+        <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
           {mapOrgError(error)}
         </div>
       )}
@@ -135,35 +131,35 @@ export function AuditTab(): JSX.Element {
           <LoadingSpinner size="lg" />
         </div>
       ) : rows.length === 0 ? (
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center text-sm text-gray-500">
+        <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center text-sm text-gray-500 dark:bg-gray-900 dark:text-gray-400 dark:border-gray-700">
           No audit events match the current filter.
         </div>
       ) : (
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden dark:bg-gray-800 dark:border-gray-700">
           <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+            <thead className="bg-gray-50 dark:bg-gray-900">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                   When
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                   Type
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                   Summary
                 </th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+            <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-800">
               {rows.map((r) => (
-                <tr key={r.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                <tr key={r.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                     {formatTimestamp(r.createdAt)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <Badge variant="neutral">{r.type}</Badge>
                   </td>
-                  <td className="px-6 py-4 text-sm text-gray-900">{r.summary}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-100">{r.summary}</td>
                 </tr>
               ))}
             </tbody>
@@ -172,7 +168,7 @@ export function AuditTab(): JSX.Element {
       )}
 
       {/* Pagination */}
-      <div className="flex items-center justify-between mt-4 text-sm text-gray-600">
+      <div className="flex items-center justify-between mt-4 text-sm text-gray-600 dark:text-gray-400">
         <div>
           Showing {rows.length === 0 ? 0 : page * PAGE_SIZE + 1}–
           {page * PAGE_SIZE + rows.length} of {total}
@@ -182,7 +178,7 @@ export function AuditTab(): JSX.Element {
             type="button"
             onClick={() => setPage((p) => Math.max(0, p - 1))}
             disabled={page === 0}
-            className="px-3 py-1 border border-gray-300 rounded-md text-sm disabled:opacity-50"
+            className="px-3 py-1 border border-gray-300 rounded-md text-sm disabled:opacity-50 dark:border-gray-600"
           >
             Prev
           </button>
@@ -193,7 +189,7 @@ export function AuditTab(): JSX.Element {
             type="button"
             onClick={() => setPage((p) => p + 1)}
             disabled={page + 1 >= totalPages}
-            className="px-3 py-1 border border-gray-300 rounded-md text-sm disabled:opacity-50"
+            className="px-3 py-1 border border-gray-300 rounded-md text-sm disabled:opacity-50 dark:border-gray-600"
           >
             Next
           </button>

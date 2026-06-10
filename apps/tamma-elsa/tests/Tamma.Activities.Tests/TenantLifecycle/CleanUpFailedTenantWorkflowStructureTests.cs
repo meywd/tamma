@@ -36,7 +36,7 @@ public class CleanUpFailedTenantWorkflowStructureTests
         typeof(Event),                                    // round-2 M3 — starter trigger
         typeof(SetVariable),                              // initInputs
         typeof(EvictTenantPoolForCleanupActivity),        // step 1
-        typeof(DropTenantDatabaseForCleanupActivity),     // step 2
+        typeof(DropTenantSchemaForCleanupActivity),       // step 2
         typeof(DropTenantRoleForCleanupActivity),         // step 3
         typeof(SoftDeleteTenantRowActivity),              // step 4
         typeof(EmitCleanupTerminalEventActivity),         // terminal
@@ -96,7 +96,7 @@ public class CleanUpFailedTenantWorkflowStructureTests
     }
 
     [Test]
-    public void Build_EvictPoolPrecedesDropDatabase()
+    public void Build_EvictPoolPrecedesDropSchema()
     {
         var workflow = new CleanUpFailedTenantWorkflow();
         var builder = WorkflowTestHelper.BuildWorkflow(workflow);
@@ -104,30 +104,30 @@ public class CleanUpFailedTenantWorkflowStructureTests
         var activities = sequence.Activities.ToList();
 
         var evictIdx = activities.FindIndex(a => a is EvictTenantPoolForCleanupActivity);
-        var dropDbIdx = activities.FindIndex(a => a is DropTenantDatabaseForCleanupActivity);
+        var dropDbIdx = activities.FindIndex(a => a is DropTenantSchemaForCleanupActivity);
 
         evictIdx.Should().BeGreaterThan(0);
         dropDbIdx.Should().BeGreaterThan(0);
         evictIdx.Should().BeLessThan(dropDbIdx,
-            "the resolver pool must be evicted before DROP DATABASE WITH (FORCE) "
+            "the resolver pool must be evicted before DROP SCHEMA … CASCADE "
             + "so the cached NpgsqlDataSource is released first");
     }
 
     [Test]
-    public void Build_DropDatabasePrecedesDropRole()
+    public void Build_DropSchemaPrecedesDropRole()
     {
         var workflow = new CleanUpFailedTenantWorkflow();
         var builder = WorkflowTestHelper.BuildWorkflow(workflow);
         var sequence = (Sequence)builder.Object.Root!;
         var activities = sequence.Activities.ToList();
 
-        var dropDbIdx = activities.FindIndex(a => a is DropTenantDatabaseForCleanupActivity);
+        var dropDbIdx = activities.FindIndex(a => a is DropTenantSchemaForCleanupActivity);
         var dropRoleIdx = activities.FindIndex(a => a is DropTenantRoleForCleanupActivity);
 
         dropDbIdx.Should().BeGreaterThan(0);
         dropRoleIdx.Should().BeGreaterThan(0);
         dropDbIdx.Should().BeLessThan(dropRoleIdx,
-            "DROP OWNED BY in DropTenantRoleForCleanupActivity fails if the role still owns the DB");
+            "DROP ROLE in DropTenantRoleForCleanupActivity fails if the role still owns the schema");
     }
 
     [Test]

@@ -61,6 +61,42 @@ export default [
       '@typescript-eslint/no-non-null-assertion': 'off',
     },
   },
+  // Forbid raw fetch('/api/...') in dashboard pages and components. The
+  // shape of bug we keep finding (path drift, response-shape drift, header
+  // drift) is *always* a page or component that bypasses the typed client
+  // in services/. Funneling every API call through services/ means the
+  // contract lives in one place, types catch shape changes, and a path
+  // rename is a single edit instead of a hunt across pages. Tests, services,
+  // and hooks are fine to fetch directly.
+  {
+    files: [
+      'packages/dashboard/src/pages/**/*.{ts,tsx}',
+      'packages/dashboard/src/components/**/*.{ts,tsx}',
+      'packages/dashboard-user/src/pages/**/*.{ts,tsx}',
+      'packages/dashboard-user/src/components/**/*.{ts,tsx}',
+    ],
+    ignores: [
+      '**/*.test.{ts,tsx}',
+      '**/*.spec.{ts,tsx}',
+    ],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.name='fetch'][arguments.0.type='Literal'][arguments.0.value=/^\\/api\\//]",
+          message:
+            'Raw fetch("/api/...") is not allowed in pages/components. Route through a typed client in services/ — the page becomes thin presentation, and path/shape drift gets caught at the boundary instead of in production.',
+        },
+        {
+          selector:
+            "CallExpression[callee.name='fetch'][arguments.0.type='TemplateLiteral'][arguments.0.quasis.0.value.raw=/^\\/api\\//]",
+          message:
+            'Raw fetch(`/api/...`) is not allowed in pages/components. Route through a typed client in services/.',
+        },
+      ],
+    },
+  },
   prettierConfig,
   {
     ignores: [

@@ -27,41 +27,40 @@ describe('useTenantPrompts', () => {
 
   it('loads and merges /api/prompts/system defaults with /api/prompts user overrides', async () => {
     const systemDefaults = {
-      RoleActionTemplates: [
+      roleActionTemplates: [
         {
-          Role: 'developer',
-          Action: 'implement',
-          Template: 'sys impl',
-          SystemPrompt: 'sys',
-          Variables: ['role'],
-          EnableTools: true,
-          MaxTokens: 4096,
-          Source: 'system',
+          role: 'developer',
+          action: 'implement',
+          template: 'sys impl',
+          systemPrompt: 'sys',
+          variables: ['role'],
+          enableTools: true,
+          maxTokens: 4096,
+          source: 'system',
         },
         {
-          Role: 'tester',
-          Action: 'write-tests',
-          Template: 'sys tests',
-          SystemPrompt: 'sys',
-          Variables: [],
-          EnableTools: false,
-          MaxTokens: 4096,
-          Source: 'system',
+          role: 'tester',
+          action: 'write-tests',
+          template: 'sys tests',
+          systemPrompt: 'sys',
+          variables: [],
+          enableTools: false,
+          maxTokens: 4096,
+          source: 'system',
         },
       ],
-      SystemPrompts: {},
-      ActionDefaults: {},
+      systemPrompts: {},
     };
     const userOverrides = [
       {
-        Role: 'developer',
-        Action: 'implement',
-        Template: 'user impl',
-        SystemPrompt: 'sys',
-        Variables: ['role'],
-        EnableTools: true,
-        MaxTokens: 8192,
-        Source: 'user',
+        role: 'developer',
+        action: 'implement',
+        template: 'user impl',
+        systemPrompt: 'sys',
+        variables: ['role'],
+        enableTools: true,
+        maxTokens: 8192,
+        source: 'user',
       },
     ];
 
@@ -103,21 +102,21 @@ describe('useTenantPrompts', () => {
         return Promise.resolve(
           mockResponse({
             body: {
-              Role: 'developer',
-              Action: 'implement',
-              Template: 'new',
-              SystemPrompt: 'sys',
-              Variables: [],
-              EnableTools: false,
-              MaxTokens: 4096,
-              Source: 'user',
+              role: 'developer',
+              action: 'implement',
+              template: 'new',
+              systemPrompt: 'sys',
+              variables: [],
+              enableTools: false,
+              maxTokens: 4096,
+              source: 'user',
             },
           }),
         );
       }
       if (url.endsWith('/api/prompts/system')) {
         return Promise.resolve(
-          mockResponse({ body: { RoleActionTemplates: [], SystemPrompts: {}, ActionDefaults: {} } }),
+          mockResponse({ body: { roleActionTemplates: [], systemPrompts: {} } }),
         );
       }
       return Promise.resolve(mockResponse({ body: [] }));
@@ -146,7 +145,7 @@ describe('useTenantPrompts', () => {
         return Promise.resolve(mockResponse({ body: { message: 'deleted' } }));
       }
       return Promise.resolve(
-        mockResponse({ body: { RoleActionTemplates: [], SystemPrompts: {}, ActionDefaults: {} } }),
+        mockResponse({ body: { roleActionTemplates: [], systemPrompts: {} } }),
       );
     }) as typeof fetch;
     const { result } = renderHook(() => useTenantPrompts());
@@ -164,21 +163,21 @@ describe('useTenantPrompts', () => {
         return Promise.resolve(
           mockResponse({
             body: {
-              Role: 'developer',
-              Action: 'implement',
-              Version: 1,
-              RenderedTemplate: 'Hello world',
-              RenderedSystemPrompt: 'sys',
-              EnableTools: false,
-              MaxTokens: 4096,
-              UnresolvedVariables: [],
+              role: 'developer',
+              action: 'implement',
+              version: 1,
+              renderedTemplate: 'Hello world',
+              renderedSystemPrompt: 'sys',
+              enableTools: false,
+              maxTokens: 4096,
+              unresolvedVariables: [],
             },
           }),
         );
       }
       if (url.endsWith('/api/prompts/system')) {
         return Promise.resolve(
-          mockResponse({ body: { RoleActionTemplates: [], SystemPrompts: {}, ActionDefaults: {} } }),
+          mockResponse({ body: { roleActionTemplates: [], systemPrompts: {} } }),
         );
       }
       return Promise.resolve(mockResponse({ body: [] }));

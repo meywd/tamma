@@ -5,14 +5,26 @@ namespace Tamma.Data.Repositories;
 
 public class RefreshTokenRepository(ControlPlaneDbContext db) : IRefreshTokenRepository
 {
-    public async Task<RefreshToken> CreateAsync(Guid userId, string tokenHash, DateTime expiresAt)
+    private const string NpgsqlProviderName = "Npgsql.EntityFrameworkCore.PostgreSQL";
+
+    public Task<RefreshToken> CreateAsync(Guid userId, string tokenHash, DateTime expiresAt)
+        => CreateAsync(userId, tenantId: null, tokenHash, expiresAt, jtiChainHead: null);
+
+    public async Task<RefreshToken> CreateAsync(
+        Guid userId,
+        Guid? tenantId,
+        string tokenHash,
+        DateTime expiresAt,
+        Guid? jtiChainHead)
     {
         var token = new RefreshToken
         {
             UserId = userId,
+            TenantId = tenantId,
             TokenHash = tokenHash,
             ExpiresAt = expiresAt,
-            CreatedAt = DateTime.UtcNow
+            JtiChainHead = jtiChainHead,
+            CreatedAt = DateTime.UtcNow,
         };
         db.RefreshTokens.Add(token);
         await db.SaveChangesAsync();
@@ -22,23 +34,98 @@ public class RefreshTokenRepository(ControlPlaneDbContext db) : IRefreshTokenRep
     public async Task<RefreshToken?> GetByTokenHashAsync(string tokenHash)
         => await db.RefreshTokens.Include(t => t.User).FirstOrDefaultAsync(t => t.TokenHash == tokenHash);
 
-    public async Task RevokeAsync(Guid id)
+    /// <summary>
+    /// Story 28-9 AC2 — serialisation point for concurrent switch-org calls.
+    /// On Postgres, takes a real <c>FOR UPDATE</c> row-lock on the user's
+    /// newest active refresh token so a second switch-org caller blocks
+    /// until the first caller's transaction commits. On the InMemory
+    /// provider the lock clause is unavailable, so we degrade to a plain
+    /// newest-active lookup (safe — in-process unit tests never race the
+    /// same context). MUST run inside an open transaction (the caller owns
+    /// the transaction) for the Postgres lock to be held for the duration
+    /// of the revoke-old + insert-new sequence.
+    /// </summary>
+    public async Task<RefreshToken?> FindActiveTokenForUpdateAsync(Guid userId)
     {
+        if (string.Equals(db.Database.ProviderName, NpgsqlProviderName, StringComparison.Ordinal))
+        {
+            // FOR UPDATE on the single newest active row. ORDER BY +
+            // LIMIT 1 keeps the lock target deterministic when the user
+            // holds several active tokens (multiple devices). The lock is
+            // released when the caller's transaction commits / rolls back.
+            var rows = await db.RefreshTokens.FromSqlInterpolated($"""
+                SELECT * FROM refresh_tokens
+                WHERE "UserId" = {userId}
+                  AND "RevokedAt" IS NULL
+                ORDER BY "CreatedAt" DESC
+                LIMIT 1
+                FOR UPDATE
+                """).ToListAsync();
+            return rows.FirstOrDefault();
+        }
+
+        // InMemory fallback — no real lock, plain newest-active lookup.
+        return await db.RefreshTokens
+            .Where(t => t.UserId == userId && t.RevokedAt == null)
+            .OrderByDescending(t => t.CreatedAt)
+            .FirstOrDefaultAsync();
+    }
+
+    public Task RevokeAsync(Guid id)
+        => RevokeAsync(id, RefreshTokenRevokedReasons.ManualLogout);
+
+    public async Task RevokeAsync(Guid id, string reason)
+    {
+        EnsureKnownReason(reason);
         var token = await db.RefreshTokens.FindAsync(id);
-        if (token is not null)
+        if (token is not null && token.RevokedAt is null)
         {
             token.RevokedAt = DateTime.UtcNow;
+            token.RevokedReason = reason;
             await db.SaveChangesAsync();
         }
     }
 
-    public async Task<int> RevokeAllForUserAsync(Guid userId)
+    public Task<int> RevokeAllForUserAsync(Guid userId)
+        => RevokeAllForUserAsync(userId, RefreshTokenRevokedReasons.LogoutAll);
+
+    public async Task<int> RevokeAllForUserAsync(Guid userId, string reason)
     {
+        EnsureKnownReason(reason);
         var tokens = await db.RefreshTokens
             .Where(t => t.UserId == userId && t.RevokedAt == null)
             .ToListAsync();
+        var now = DateTime.UtcNow;
         foreach (var token in tokens)
-            token.RevokedAt = DateTime.UtcNow;
+        {
+            token.RevokedAt = now;
+            token.RevokedReason = reason;
+        }
+        await db.SaveChangesAsync();
+        return tokens.Count;
+    }
+
+    public async Task<IReadOnlyList<RefreshToken>> FindByJtiChainHeadAsync(Guid chainHead)
+    {
+        if (chainHead == Guid.Empty) return Array.Empty<RefreshToken>();
+        return await db.RefreshTokens
+            .Where(t => t.JtiChainHead == chainHead && t.RevokedAt == null)
+            .ToListAsync();
+    }
+
+    public async Task<int> RevokeChainAsync(Guid chainHead, string reason)
+    {
+        EnsureKnownReason(reason);
+        if (chainHead == Guid.Empty) return 0;
+        var tokens = await db.RefreshTokens
+            .Where(t => t.JtiChainHead == chainHead && t.RevokedAt == null)
+            .ToListAsync();
+        var now = DateTime.UtcNow;
+        foreach (var token in tokens)
+        {
+            token.RevokedAt = now;
+            token.RevokedReason = reason;
+        }
         await db.SaveChangesAsync();
         return tokens.Count;
     }
@@ -51,5 +138,29 @@ public class RefreshTokenRepository(ControlPlaneDbContext db) : IRefreshTokenRep
         db.RefreshTokens.RemoveRange(expired);
         await db.SaveChangesAsync();
         return expired.Count;
+    }
+
+    /// <summary>
+    /// Story 28-9 AC3 — defence-in-depth check. The DB has a CHECK
+    /// constraint that rejects unknown reasons; this client-side guard
+    /// turns a "SQL error from a typo" into a clearer ArgumentException
+    /// at the offending call site, with the actual offending value in
+    /// the message.
+    /// </summary>
+    private static void EnsureKnownReason(string reason)
+    {
+        if (reason is RefreshTokenRevokedReasons.ManualLogout
+            or RefreshTokenRevokedReasons.LogoutAll
+            or RefreshTokenRevokedReasons.RotationConsumed
+            or RefreshTokenRevokedReasons.SwitchOrg
+            or RefreshTokenRevokedReasons.ReuseDetected
+            or RefreshTokenRevokedReasons.PasswordReset
+            or RefreshTokenRevokedReasons.AdminForceLogout)
+        {
+            return;
+        }
+        throw new ArgumentException(
+            $"Unknown refresh-token revoke reason '{reason}'. See {nameof(RefreshTokenRevokedReasons)}.",
+            nameof(reason));
     }
 }

@@ -50,6 +50,28 @@ public interface IPlatformEmailOutboxRepository
     Task<PlatformEmailOutboxMessage?> MarkFailedAsync(
         Guid id, string error, TimeSpan? backoff, CancellationToken ct = default);
 
+    /// <summary>
+    /// Story 28-5 AC2 step-10 + AC5 — idempotently enqueue the per-tenant
+    /// welcome email (<c>Template='welcome'</c>) into the control-plane
+    /// outbox. Exactly-once-per-tenant: if a non-<c>failed</c> welcome row
+    /// already exists for <paramref name="tenantId"/> the existing row is
+    /// returned unchanged (workflow replay safety). A prior <c>failed</c>
+    /// welcome does NOT block a fresh enqueue — the partial unique index
+    /// <c>(TenantId, Template) WHERE Status &lt;&gt; 'failed'</c> backs this
+    /// in Postgres, and the in-code pre-check covers the in-memory path.
+    ///
+    /// <para>The body is rendered from the standard welcome copy keyed on
+    /// <paramref name="tenantName"/>; <paramref name="toAddress"/> is the
+    /// tenant owner's verified email and <paramref name="fromAddress"/> the
+    /// platform <c>Email:From</c> sender.</para>
+    /// </summary>
+    Task<PlatformEmailOutboxMessage> EnqueueWelcomeOnceAsync(
+        Guid tenantId,
+        string toAddress,
+        string tenantName,
+        string fromAddress,
+        CancellationToken ct = default);
+
     /// <summary>Read by id, or <c>null</c>.</summary>
     Task<PlatformEmailOutboxMessage?> GetByIdAsync(
         Guid id, CancellationToken ct = default);

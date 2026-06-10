@@ -6,47 +6,34 @@
  */
 
 import { useCallback, useEffect, useState, type JSX } from 'react';
-
-interface ConventionSummary {
-  key: string;
-  name: string;
-  description: string;
-}
-
-interface ConventionDetail extends ConventionSummary {
-  conventions: string;
-}
+import {
+  conventionTemplatesApi,
+  type ConventionTemplate,
+  type ConventionTemplateSummary,
+} from '../../services/admin/prompts-api-client.js';
 
 interface ConventionSelectorProps {
   onInsert: (text: string) => void;
 }
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
-
 export function ConventionSelector({ onInsert }: ConventionSelectorProps): JSX.Element {
-  const [conventions, setConventions] = useState<ConventionSummary[]>([]);
+  const [conventions, setConventions] = useState<ConventionTemplateSummary[]>([]);
   const [selected, setSelected] = useState<string>('');
-  const [detail, setDetail] = useState<ConventionDetail | null>(null);
+  const [detail, setDetail] = useState<ConventionTemplate | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    async function fetchList(): Promise<void> {
-      try {
-        const res = await fetch(`${API_BASE}/api/convention-templates`, {
-          credentials: 'include',
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const list = (await res.json()) as ConventionSummary[];
+    conventionTemplatesApi.list()
+      .then((list) => {
         if (!cancelled) setConventions(list);
-      } catch (err) {
+      })
+      .catch((err: unknown) => {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to load conventions');
         }
-      }
-    }
-    void fetchList();
+      });
     return () => {
       cancelled = true;
     };
@@ -59,13 +46,7 @@ export function ConventionSelector({ onInsert }: ConventionSelectorProps): JSX.E
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
-        `${API_BASE}/api/convention-templates/${encodeURIComponent(key)}`,
-        { credentials: 'include' },
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as ConventionDetail;
-      setDetail(body);
+      setDetail(await conventionTemplatesApi.get(key));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load convention');
     } finally {
@@ -78,10 +59,10 @@ export function ConventionSelector({ onInsert }: ConventionSelectorProps): JSX.E
   }, [detail, onInsert]);
 
   return (
-    <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+    <div className="border border-gray-200 rounded-lg p-3 bg-gray-50 dark:bg-gray-900 dark:border-gray-700">
       <label
         htmlFor="convention-template-select"
-        className="block text-xs font-medium text-gray-600 mb-1"
+        className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400"
       >
         Convention Template
       </label>
@@ -90,7 +71,7 @@ export function ConventionSelector({ onInsert }: ConventionSelectorProps): JSX.E
         aria-label="Convention Template"
         value={selected}
         onChange={(e) => void handleSelect(e.target.value)}
-        className="w-full px-2 py-1 text-sm border border-gray-300 rounded-md bg-white"
+        className="w-full px-2 py-1 text-sm border border-gray-300 rounded-md bg-white dark:bg-gray-800 dark:border-gray-600"
       >
         <option value="">Choose a convention template…</option>
         {conventions.map((c) => (
@@ -100,15 +81,15 @@ export function ConventionSelector({ onInsert }: ConventionSelectorProps): JSX.E
         ))}
       </select>
 
-      {error && <div className="mt-2 text-xs text-red-600">{error}</div>}
+      {error && <div className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</div>}
 
-      {loading && <div className="mt-2 text-xs text-gray-500">Loading…</div>}
+      {loading && <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">Loading…</div>}
 
       {detail && (
         <div className="mt-3 space-y-2">
           <details className="text-xs">
-            <summary className="cursor-pointer text-gray-600">Preview</summary>
-            <pre className="mt-1 bg-white p-2 border border-gray-200 rounded max-h-40 overflow-auto whitespace-pre-wrap">
+            <summary className="cursor-pointer text-gray-600 dark:text-gray-400">Preview</summary>
+            <pre className="mt-1 bg-white p-2 border border-gray-200 rounded max-h-40 overflow-auto whitespace-pre-wrap dark:bg-gray-800 dark:border-gray-700">
               {detail.conventions}
             </pre>
           </details>

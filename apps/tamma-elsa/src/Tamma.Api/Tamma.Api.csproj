@@ -61,6 +61,27 @@
     <ProjectReference Include="..\Tamma.Core\Tamma.Core.csproj" />
     <ProjectReference Include="..\Tamma.Data\Tamma.Data.csproj" />
     <ProjectReference Include="..\Tamma.Activities\Tamma.Activities.csproj" />
+    <!-- Story 31-2: platform abstraction + per-tenant resolver. The Api
+         registers IPlatformResolver / IPlatformCredentialReader in
+         Program.cs and adapts ISecretStore + ISecretStoreBackend into
+         the credential reader so every secret read goes through Epic 29. -->
+    <ProjectReference Include="..\Tamma.Platforms.Abstractions\Tamma.Platforms.Abstractions.csproj" />
+    <ProjectReference Include="..\Tamma.Platforms\Tamma.Platforms.csproj" />
+    <!-- Story 31-4: Gitea driver self-registers via AddGiteaPlatformDriver()
+         in Program.cs. Keyed-DI factory under PlatformKind.Gitea is the only
+         seam PlatformResolver consumes. -->
+    <ProjectReference Include="..\Tamma.Platforms.Gitea\Tamma.Platforms.Gitea.csproj" />
+    <!-- Story 31-6: GitLab driver. Registered via AddGitLabPlatform() in
+         Program.cs and consumed by 31-2's PlatformResolver via keyed DI
+         under PlatformKind.GitLab. -->
+    <ProjectReference Include="..\Tamma.Platforms.GitLab\Tamma.Platforms.GitLab.csproj" />
+    <!-- Story 31-3: GitHub driver. Wraps the existing
+         IGitHubAppClient / IGitHubActionsClient behind IGitPlatformDriver
+         so GitHub matches the Gitea / GitLab driver pattern. Registered
+         via AddGitHubPlatformDriver() in Program.cs and consumed by 31-2's
+         PlatformResolver via keyed DI under PlatformKind.GitHub. -->
+    <ProjectReference Include="..\Tamma.Platforms.GitHub\Tamma.Platforms.GitHub.csproj" />
+
   </ItemGroup>
 
 </Project>

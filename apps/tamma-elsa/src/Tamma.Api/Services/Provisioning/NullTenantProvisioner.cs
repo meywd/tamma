@@ -6,14 +6,22 @@ namespace Tamma.Api.Services.Provisioning;
 
 /// <summary>
 /// Default <see cref="ITenantProvisioner"/> when <c>Cranl:ApiKey</c> is
-/// not configured. Treats every tenant as "shared infrastructure" — the
-/// row is flipped to <see cref="ProvisioningState.Ready"/> immediately
-/// and tenant traffic continues to ride on the central Postgres via RLS.
-/// No external Cranl calls are made.
+/// not configured. Mints no external resources — the row is flipped to
+/// <see cref="ProvisioningState.Ready"/> immediately and the tenant's
+/// placement stays on the unified tenant_databases pool (central DB by
+/// default). No external Cranl calls are made.
 ///
 /// <para>This is the seam that keeps dev / self-hosted deployments
 /// working without a Cranl account.</para>
+///
+/// <para><b>Story 30-3 — DEPRECATED.</b> The v2 equivalent is
+/// <see cref="V2.NullTenantProvider"/>, which throws
+/// <see cref="NotSupportedException"/> on provisioning calls instead of
+/// faking a "Ready" state. Single-user mode still relies on this v1 seam
+/// while admin endpoints route through the v1 surface; Wave-C migrates
+/// admin endpoints to the v2 registry and retires this class.</para>
 /// </summary>
+[Obsolete("Use ITenantInfrastructureProvider (V2) instead. Removed in Wave C.")]
 public sealed class NullTenantProvisioner : ITenantProvisioner
 {
     private readonly ControlPlaneDbContext _db;

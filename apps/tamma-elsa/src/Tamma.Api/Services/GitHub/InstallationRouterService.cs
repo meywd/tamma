@@ -4,10 +4,13 @@ using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
 using Tamma.Activities.AgentDispatch;
 using Tamma.Api.Services.TaskQueue;
+using Tamma.Core.Logging;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Services.GitHub;
+
+#pragma warning disable CS0618 // Story 31-8: transitional consumer of obsolete IGitHubSecretsProvisioner.
 
 /// <summary>
 /// Concrete <see cref="IInstallationRouterService"/> implementation.
@@ -356,7 +359,7 @@ public sealed class InstallationRouterService : IInstallationRouterService
             default:
                 _logger.LogDebug(
                     "Webhook event {Event} (action={Action}) skipped (not handled)",
-                    Logging.LogSanitizer.Clean(eventType), Logging.LogSanitizer.Clean(action));
+                    LogSanitizer.Clean(eventType), LogSanitizer.Clean(action));
                 return new WebhookResult(eventType, action, Skipped: true);
         }
     }
@@ -476,7 +479,7 @@ public sealed class InstallationRouterService : IInstallationRouterService
         {
             _logger.LogInformation(
                 "workflow_run.completed webhook matched waiter: repo={Repo} run={RunId} conclusion={Conclusion}",
-                Logging.LogSanitizer.Clean(repoFullName), runId, Logging.LogSanitizer.Clean(conclusion));
+                LogSanitizer.Clean(repoFullName), runId, LogSanitizer.Clean(conclusion));
         }
         else
         {
@@ -528,7 +531,7 @@ public sealed class InstallationRouterService : IInstallationRouterService
         {
             _logger.LogDebug(
                 "Webhook event {Event} (action={Action}) skipped: no task queue registered",
-                Logging.LogSanitizer.Clean(eventType), Logging.LogSanitizer.Clean(action));
+                LogSanitizer.Clean(eventType), LogSanitizer.Clean(action));
             return new WebhookResult(eventType, action, Skipped: true);
         }
 
@@ -587,13 +590,13 @@ public sealed class InstallationRouterService : IInstallationRouterService
             // there's no orphan-tolerant fallback. Skip.
             _logger.LogDebug(
                 "Webhook event {Event} (action={Action}) skipped: tenant queue unavailable",
-                Logging.LogSanitizer.Clean(eventType), Logging.LogSanitizer.Clean(action));
+                LogSanitizer.Clean(eventType), LogSanitizer.Clean(action));
             return new WebhookResult(eventType, action, Skipped: true);
         }
 
         _logger.LogInformation(
             "Webhook {Event} (action={Action}) queued as task {TaskId} (installation={InstallationId}, tenant={TenantId}, scope={Scope})",
-            Logging.LogSanitizer.Clean(eventType), Logging.LogSanitizer.Clean(action),
+            LogSanitizer.Clean(eventType), LogSanitizer.Clean(action),
             taskId, installationId, tenantId, scope);
 
         return new WebhookResult(eventType, action, Skipped: false, TaskId: taskId);

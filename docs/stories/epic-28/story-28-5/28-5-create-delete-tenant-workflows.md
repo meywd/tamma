@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Provisioning
-**Status**: Draft
+**Status**: DONE (2026-06-05) — all ACs satisfied (AC4 step C backup shipped + step D accepted as FORCE divergence; cooling-off shipped earlier). NOTE: the pg_dump backup path is gated off by default and its live end-to-end run (binary present + flag on) is wiring-tested but not exercised in CI. AC1 verify-email→PROVISIONING_REQUESTED trigger shipped 2026-05-30 (conditional / idempotent — see Closed by 2026-05-30 follow-up section below); AC2 step-10 `QueueWelcomeEmail` + AC5 welcome-to-CP-outbox shipped 2026-05-31 (see Closed by 2026-05-31 follow-up section below). Audit reference `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. AC4 step C pg_dump backup shipped 2026-06-05 (`BackupTenantDatabaseActivity`, gated by `Backup:DeletionBackup`, no-op when off; inserted between EvictTenantPool and DropTenantDatabase). AC4 step D `pg_terminate_backend` resolved as accepted spec divergence — `DROP DATABASE WITH (FORCE)` covers it (see AC4 step D note below). No remaining AC4 residual.
 **Priority**: High (this is the central tenant-lifecycle artefact; the
 async-provisioning directive in Doc 03 §0 hinges entirely on it)
 **Estimated Effort**: XL (40h+) — target 45h
@@ -117,6 +117,11 @@ Per Doc 03 §1.2 and the epic README:
   - C (optional): pg_dump backup when `Backup:DeletionBackup=true`
     per Doc 04 §9.
   - D: `pg_terminate_backend` on lingering backends.
+    > **Accepted spec divergence (2026-06-05):** no separate
+    > `pg_terminate_backend` step. Postgres 17's `DROP DATABASE ... WITH
+    > (FORCE)` (step F/G) atomically terminates lingering backends as part
+    > of the drop — see `DropTenantDatabaseActivity.cs`. This removes the
+    > terminate/drop race the explicit two-step form had.
   - E: `ALTER DATABASE ... CONNECTION LIMIT 0` on both DBs.
   - F: `DROP DATABASE tamma_tenant_<g> WITH (FORCE)`.
   - G: `DROP DATABASE tamma_tenant_<g>_elsa WITH (FORCE)`.
@@ -313,3 +318,126 @@ The 14 integration tests from Doc 03 §9.1:
   correlation handling must treat the second as a no-op. Elsa
   correlation + Step 1's `Status='provisioning'` guard cover this;
   add an explicit test.
+
+## Closed by 2026-05-30 follow-up
+
+### AC1 verify-email → `TENANT.PROVISIONING_REQUESTED` trigger — SHIPPED
+
+`AuthEndpoints.VerifyEmail` now flips owned-tenant Status from
+`pending_verification` to `provisioning` and emits
+`TENANT.PROVISIONING_REQUESTED` (one event per transitioned tenant)
+inside the verify-email handler, after `EmailVerified=true` lands.
+
+**Design call — conditional / idempotent guard:**
+the AC1 spec describes an unconditional flip, but the production
+reality is that `Register` does NOT today stamp Status='pending_verification'
+on the newly-minted personal tenant (Status defaults to NULL, and
+`TenantStatusEvaluator.IsActive(null)` returns true — "legacy rows
+are active"). If verify-email also unconditionally flipped NULL-Status
+tenants to `provisioning`, live signups would land in 503 until a
+workflow consumer drained the event — and the Elsa trigger that consumes
+`TENANT.PROVISIONING_REQUESTED` is not yet wired in production
+(see `AdminTenantsEndpoints.cs` lines 60-65: "wired via the Elsa trigger
+in a follow-up"). Wiring verify-email to unconditionally flip would
+brick the live signup flow.
+
+The conditional guard implemented here ONLY transitions tenants
+explicitly marked `pending_verification` — which today happens
+exclusively via `AdminTenantsEndpoints.RetryTenant`. NULL-Status
+tenants (shared-infra default) are LEFT ALONE. When the db-per-tenant
+rollout reaches the point where `Register` stamps `pending_verification`
+on new tenants (Story 28-5 AC1's original assumption), the verify-email
+coupling will fire automatically with no further code change. Until
+then, it's an audit-trail emission for tenants admins have re-marked
+pending — preserving the existing live signup flow.
+
+**Best-effort semantics:** the trigger runs after `EmailVerified=true`
+commits. A publisher / DbContext failure logs `LogWarning` and does NOT
+fail the verify-email response — `EmailVerified=true` is the
+user-visible contract; the provisioning trigger is a downstream
+side-effect. The admin retry path (`POST /api/admin/tenants/{id}/actions/retry`)
+recovers any tenant whose trigger emission failed.
+
+**Idempotency:** repeat verify-email calls are blocked by the existing
+"Email already verified" 400 in the handler, so the trigger fires at
+most once per user-initiated verification.
+
+**Event shape:** `source=verify-email` (distinct from `source=admin-retry`
+emitted by `AdminTenantsEndpoints.RetryTenant`), `userId` and `tenantId`
+tags. The `PlatformEvent` row carries `TenantId` and `UserId` directly
+for SIEM filtering.
+
+Code: `AuthEndpoints.cs` — new private helpers
+`TryTriggerProvisioningForOwnedTenantsAsync` and
+`BuildVerifyEmailProvisioningEvent`; signature change on `VerifyEmail`
+to accept `HttpContext` (for `IPlatformEventPublisher` +
+`IServiceScopeFactory` resolution).
+
+Tests: `VerifyEmailProvisioningTriggerTests.cs` — five tests covering
+the happy-path flip + emission, NULL-status no-op, multi-owned-tenant
+fan-out, idempotency against `provisioning` Status, and
+publisher-unavailable safety.
+
+**Out of scope of this follow-up:** AC2 step 10 `QueueWelcomeEmail`
+inside the workflow (still a residual), AC4 pg_dump backup + pg_terminate_backend
+in the delete workflow. The Elsa trigger that consumes
+`TENANT.PROVISIONING_REQUESTED` remains future work.
+
+## Closed by 2026-05-31 follow-up
+
+### AC2 step-10 `QueueWelcomeEmail` + AC5 welcome → control-plane outbox — SHIPPED
+
+`CreateTenantWorkflow` now appends **step 10 `QueueWelcomeEmailActivity`**
+after `MarkTenantActiveActivity`. It inserts a `template='welcome'` row into
+the **control-plane** `platform_email_outbox` (per Epic 28 conflict
+resolution #2 — Doc 03 §7.1 wins over Doc 01 §4.3; welcome mail rides the CP
+outbox so it delivers independent of tenant-DB routing). Delivery is the
+existing `OutboxSmtpSender`, unchanged (AC5 §2).
+
+**Recipient / body:** owner email resolved from `tenant.Owner.Email` (CP
+lookup via `IDbContextFactory<ControlPlaneDbContext>`, factory-scoped like
+the sibling lifecycle activities); subject/body rendered by
+`WelcomeEmailContent.Render(tenant.Name)` (a `Tamma.Data` helper that mirrors
+`Tamma.Api`'s `EmailTemplates.WelcomeEmail` copy — the activity project can't
+reference `Tamma.Api`). `FromAddress` = `Email:From` config (fallback
+`noreply@tamma.dev`).
+
+**Exactly-once-per-tenant (AC2 step-10 / AC5):**
+`IPlatformEmailOutboxRepository.EnqueueWelcomeOnceAsync` does an in-code
+pre-check for an existing non-`failed` welcome row and returns it unchanged;
+a concurrent-run race is caught by swallowing the `DbUpdateException` from the
+new **partial unique index** `UX_platform_email_outbox_tenant_template_active`
+on `(TenantId, Template) WHERE Status <> 'failed' AND TenantId IS NOT NULL`
+(migration `20260531212831_WelcomeEmailUniquePerTenant`). A terminally
+`failed` prior welcome does NOT block a fresh enqueue. Workflow replay is
+therefore a no-op — re-running step 10 produces no second row.
+
+**Non-fatal (AC5 §3):** when the tenant has no owner email the activity logs
+a warning and returns rather than throwing — a missing welcome must not fail
+an already-active tenant's provisioning.
+
+**Code:** `Tamma.Activities/TenantLifecycle/QueueWelcomeEmailActivity.cs`
+(new), `Tamma.ElsaServer/Workflows/CreateTenantWorkflow.cs` (step-10 wiring),
+`Tamma.Data/Repositories/IPlatformEmailOutboxRepository.cs` +
+`PlatformEmailOutboxRepository.cs` (`EnqueueWelcomeOnceAsync`),
+`Tamma.Data/Repositories/WelcomeEmailContent.cs` (new),
+`Tamma.Data/TammaModelConfiguration.cs` + migration `…WelcomeEmailUniquePerTenant`.
+
+**Tests:** `QueueWelcomeEmailActivityTests.cs` (StepName + base-class wiring),
+`PlatformEmailOutboxRepositoryTests` (+3: inserts welcome row with correct
+recipient/template; idempotent second call → one row; re-queues after a
+`failed` prior), `CreateTenantWorkflowStructureTests` (step-10 ordering).
+
+**Flagged for human review:** none for duplication — the
+`EmailTemplates.WelcomeEmail` template in `Tamma.Api` currently has **zero
+production callers** (confirmed by grep); the welcome email was not being
+enqueued anywhere before this change, so the workflow path is the sole
+enqueue site. No `AuthEndpoints` change was made or needed.
+
+**Out of scope of this follow-up:** AC4 pg_dump backup +
+pg_terminate_backend verification in the delete workflow (separate residual,
+left as-is). AC5 §3's "after 3 retries emit `welcome_email_queued=false`"
+nuance is satisfied structurally (enqueue is best-effort and non-fatal); the
+explicit 3-retry-then-flag counter on the enqueue itself is not implemented —
+enqueue against the CP DB is a local insert, not a network call, so the
+transport-retry semantics live in `OutboxSmtpSender`, not this step.

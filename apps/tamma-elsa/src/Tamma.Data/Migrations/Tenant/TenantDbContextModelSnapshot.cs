@@ -100,7 +100,7 @@ namespace Tamma.Data.Migrations.Tenant
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id")
-                        .HasDefaultValueSql("uuid_generate_v4()");
+                        .HasDefaultValueSql("gen_random_uuid()");
 
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
@@ -150,7 +150,7 @@ namespace Tamma.Data.Migrations.Tenant
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id")
-                        .HasDefaultValueSql("uuid_generate_v4()");
+                        .HasDefaultValueSql("gen_random_uuid()");
 
                     b.Property<DateTime?>("CompletedAt")
                         .HasColumnType("timestamp with time zone")
@@ -470,6 +470,67 @@ namespace Tamma.Data.Migrations.Tenant
                     b.ToTable("budget_configs", (string)null);
                 });
 
+            modelBuilder.Entity("Tamma.Data.Entities.Convention", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Enabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Version")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Role", "Action")
+                        .IsUnique()
+                        .HasDatabaseName("IX_conventions_TenantId_Role_Action");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("TenantId", "Role", "Action"), false);
+
+                    b.ToTable("conventions", (string)null);
+                });
+
             modelBuilder.Entity("Tamma.Data.Entities.DomainEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -687,10 +748,16 @@ namespace Tamma.Data.Migrations.Tenant
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId", "Scope", "Role", "Action")
-                        .IsUnique();
+                    b.HasIndex("UserId", "TenantId", "Scope", "Role", "Action")
+                        .IsUnique()
+                        .HasDatabaseName("IX_prompt_overrides_UserId_TenantId_Scope_Role_Action");
 
-                    b.ToTable("prompt_overrides", (string)null);
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("UserId", "TenantId", "Scope", "Role", "Action"), false);
+
+                    b.ToTable("prompt_overrides", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_prompt_overrides_principal_xor", "(\"UserId\" IS NOT NULL AND \"TenantId\" IS NULL) OR (\"UserId\" IS NULL AND \"TenantId\" IS NOT NULL)");
+                        });
                 });
 
             modelBuilder.Entity("Tamma.Data.Entities.ProviderDiagnostic", b =>

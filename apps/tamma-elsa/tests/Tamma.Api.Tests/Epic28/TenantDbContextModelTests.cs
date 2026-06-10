@@ -38,6 +38,7 @@ public class TenantDbContextModelTests
         {
             "agent_configs",
             "prompt_overrides",
+            "conventions",
             "provider_health",
             "provider_diagnostics",
             "sanitization_rules",

@@ -51,14 +51,24 @@ internal static class TammaModelConfiguration
         // ── User ──
         modelBuilder.Entity<User>(entity =>
         {
-            entity.ToTable("users");
+            entity.ToTable("users", t =>
+            {
+                // Story 28-R2/C1 — model-level CHECK on platform_role. The
+                // legacy raw-SQL constraint ('users_platform_role_check')
+                // from the pre-collapse chain was dropped when the chain was
+                // collapsed into InitialControlPlane (Phase 0); this model-
+                // level constraint is now the only source of truth.
+                t.HasCheckConstraint(
+                    "ck_users_platform_role",
+                    "\"platform_role\" IN ('user','platform_admin')");
+            });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.Email).IsRequired().HasMaxLength(255);
             entity.Property(e => e.Role).IsRequired().HasMaxLength(20).HasDefaultValue("member");
             // Story 28-R2/C1 — separate platform-admin column. The DB-level
-            // CHECK constraint is installed by the AddUsersPlatformRole
-            // migration; here we just declare the EF projection.
+            // CHECK constraint is the model-level ck_users_platform_role
+            // declared above; here we just declare the EF projection.
             entity.Property(e => e.PlatformRole)
                 .HasColumnName("platform_role")
                 .IsRequired()
@@ -87,14 +97,60 @@ internal static class TammaModelConfiguration
         // ── RefreshToken ──
         modelBuilder.Entity<RefreshToken>(entity =>
         {
-            entity.ToTable("refresh_tokens");
+            entity.ToTable("refresh_tokens", t =>
+            {
+                // Story 28-9 AC3 — pin RevokedReason to the closed enum.
+                // Adding a value requires widening the constraint via a new
+                // migration; the entity-level constants in
+                // RefreshTokenRevokedReasons mirror this list.
+                t.HasCheckConstraint(
+                    "CK_refresh_tokens_RevokedReason",
+                    "\"RevokedReason\" IS NULL OR \"RevokedReason\" IN ("
+                    + "'manual_logout','logout_all','rotation_consumed',"
+                    + "'switch_org','reuse_detected','password_reset',"
+                    + "'admin_force_logout')");
+
+                // Story 28-9 AC3 — RevokedReason is set IFF RevokedAt is
+                // set. The pair must move together so a SIEM query can
+                // trust "WHERE RevokedReason='reuse_detected'" without a
+                // null-RevokedAt fallback. New writes go through the
+                // repository's Revoke* methods which set both atomically.
+                t.HasCheckConstraint(
+                    "CK_refresh_tokens_RevokedReason_NullParity",
+                    "(\"RevokedAt\" IS NULL) = (\"RevokedReason\" IS NULL)");
+            });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.TokenHash).IsRequired();
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
 
+            // Story 28-9 AC3 — tenant binding (nullable for rootless tokens
+            // issued at login before a tenant is picked) + JtiChainHead
+            // lineage pointer (nullable for pre-story rows). RevokedReason
+            // mirrors the RevokedAt nullability via the CHECK constraint
+            // above.
+            entity.Property(e => e.TenantId);
+            entity.Property(e => e.JtiChainHead);
+            entity.Property(e => e.RevokedReason).HasMaxLength(32);
+
             entity.HasIndex(e => e.TokenHash).IsUnique();
             entity.HasIndex(e => e.UserId);
+
+            // Story 28-9 AC3 — reuse-detection hot path. Given a presented
+            // (revoked) refresh token we look up by hash, read its
+            // JtiChainHead, then revoke every active sibling. Partial index
+            // on JtiChainHead IS NOT NULL keeps it tight (only this story's
+            // tokens carry the column).
+            entity.HasIndex(e => e.JtiChainHead)
+                .HasDatabaseName("IX_refresh_tokens_JtiChainHead")
+                .HasFilter("\"JtiChainHead\" IS NOT NULL");
+
+            // Story 28-9 AC3 — tenant-scoped queries (logout-all per
+            // tenant, admin debugging). Partial keeps rootless tokens out
+            // of the index.
+            entity.HasIndex(e => new { e.UserId, e.TenantId })
+                .HasDatabaseName("IX_refresh_tokens_UserId_TenantId")
+                .HasFilter("\"TenantId\" IS NOT NULL");
 
             entity.HasOne(e => e.User)
                 .WithMany(u => u.RefreshTokens)
@@ -157,9 +213,74 @@ internal static class TammaModelConfiguration
                 entity.Property<string?>("Status").HasMaxLength(32);
                 entity.Property<Guid?>("PlanId");
                 entity.Property<byte[]?>("EncryptedConnectionString").HasColumnType("bytea");
-                entity.Property<int?>("KekVersion");
+                // smallint NOT NULL DEFAULT 1 per spec (plan 2026-06-09 §2.2). CLR type
+                // short — every EF.Property<T> read of this column must use short.
+                entity.Property<short>("KekVersion").HasDefaultValue((short)1);
                 entity.Property<string?>("FailureReason");
                 entity.Property<DateTime?>("DeleteRequestedAt");
+
+                // ── Epic 30 shadow columns (Story 30-3) ──
+                //
+                // ProviderKey + ProviderResourceIds back the v2
+                // ITenantInfrastructureProvider contract. ProviderKey is a
+                // backend LABEL: it records which provider (e.g. 'cranl')
+                // minted hosting infrastructure for the tenant, and the
+                // minted cloud-resource ids land in
+                // tenants.provider_resource_ids JSONB. It is NOT a tenancy
+                // mode — placement and schema lifecycle are owned by the
+                // unified model (SchemaName + DatabaseId below). Both stay
+                // nullable: NULL simply means no external backend minted
+                // infrastructure for this tenant. The migration backfills
+                // 'cranl' for any row already populated with the legacy
+                // cranl_* identifiers.
+                entity.Property<string?>("ProviderKey").HasMaxLength(40);
+                entity.Property<string?>("ProviderResourceIds")
+                    .HasColumnType("jsonb");
+
+                // ── Unified-tenancy Phase 0 (plan 2026-06-09 §2.2) ──
+                //
+                // SchemaName = the tenant's schema (t_<hex>) inside its assigned DB;
+                // DatabaseId = which tenant_databases row hosts that schema. Both stay
+                // NULL until the unified creation path (Phase 3) mints them — Phase 0
+                // is schema-only.
+                entity.Property<string?>("SchemaName").HasMaxLength(63);
+                entity.Property<Guid?>("DatabaseId");
+
+                entity.HasIndex("SchemaName").IsUnique()
+                    .HasFilter("\"SchemaName\" IS NOT NULL");
+                entity.HasIndex("DatabaseId");
+
+                entity.HasOne<TenantDatabase>()
+                    .WithMany()
+                    .HasForeignKey("DatabaseId")
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                // CHECKs reference shadow columns, so they live inside this guard.
+                // Conn-string CHECK: the spec invariant is "active tenants always have
+                // a connection string" — enforced only for active/suspended.
+                // provisioning/failed/deleted are exempt because today's flows
+                // legitimately hold NULL there (mint happens mid-provisioning;
+                // failure can precede mint; delete nulls the envelope).
+                // deleting/delete_requested are exempt because force-delete enters
+                // them from failed (or legacy NULL-status) rows that never got a
+                // connection string minted — without the exemption the designed
+                // cleanup path (AdminTenantsEndpoints.ForceDeleteTenant,
+                // MarkTenantDeletingActivity) hits 23514.
+                // Tighten to spec-exact (only pending_verification exempt) in Phase 3.
+                entity.ToTable("tenants", t =>
+                {
+                    t.HasCheckConstraint(
+                        "ck_tenants_status",
+                        "\"Status\" IS NULL OR \"Status\" IN ('pending_verification'," +
+                        "'provisioning','active','draining','delete_requested','deleting'," +
+                        "'deleted','failed','suspended')");
+                    t.HasCheckConstraint(
+                        "ck_tenants_connection_string_present",
+                        "\"Status\" IS NULL OR \"Status\" IN ('pending_verification'," +
+                        "'provisioning','failed','deleted','deleting'," +
+                        "'delete_requested') " +
+                        "OR \"EncryptedConnectionString\" IS NOT NULL");
+                });
 
                 // Epic 28 shadow-column indexes used by Admin tenant
                 // filtering + plan FK joins.
@@ -229,7 +350,16 @@ internal static class TammaModelConfiguration
         // ── ApiKey ──
         modelBuilder.Entity<ApiKey>(entity =>
         {
-            entity.ToTable("api_keys");
+            entity.ToTable("api_keys", t =>
+            {
+                // Phase 0 transitional enumeration (plan 2026-06-09 §2.4 deviation 1).
+                // Spec target on CP is ('platform','user') — unreachable until
+                // tenant-scoped keys physically move to tenant schemas (Phase 2+)
+                // and the service/installation scopes are reconciled with the spec.
+                t.HasCheckConstraint(
+                    "ck_api_keys_scope",
+                    "\"Scope\" IN ('platform','user','installation','service','tenant')");
+            });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.Scope).IsRequired().HasMaxLength(50);
@@ -253,8 +383,6 @@ internal static class TammaModelConfiguration
             // Story 28-7 — partial index for active-key lookups only (filter
             // out revoked rows to keep the b-tree dense).
             entity.HasIndex(e => e.RevokedAt).HasFilter("\"RevokedAt\" IS NULL");
-            // Story 28-7 deferred-item — per-key rate limit shadow column.
-            entity.Property<int?>("RateLimitRpm");
         });
 
         // ── GitHubInstallation ──
@@ -315,13 +443,20 @@ internal static class TammaModelConfiguration
         // ── Plan (Story 28-1) ──
         modelBuilder.Entity<Plan>(entity =>
         {
-            entity.ToTable("plans");
+            entity.ToTable("plans", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_plans_placement_policy",
+                    "\"PlacementPolicy\" IN ('shared','dedicated')");
+            });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Slug).IsRequired().HasMaxLength(64);
             entity.Property(e => e.DisplayName).IsRequired().HasMaxLength(255);
             entity.Property(e => e.MonthlyPriceUsd).HasPrecision(18, 2);
             entity.Property(e => e.Quotas).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
             entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.PlacementPolicy)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("shared");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
@@ -407,6 +542,17 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
             entity.HasIndex(e => new { e.Status, e.NextAttemptAt });
+
+            // Story 28-5 AC2 step-10 + AC5 — exactly-once-per-tenant welcome
+            // email. Partial unique index on (TenantId, Template) excluding
+            // terminally-failed rows so a failed welcome can be re-queued
+            // while a pending/sending/sent one blocks duplicates. The
+            // QueueWelcomeEmailActivity insert relies on this index for the
+            // concurrent-run race; the pre-check covers the in-memory path.
+            entity.HasIndex(e => new { e.TenantId, e.Template })
+                .IsUnique()
+                .HasFilter("\"Status\" <> 'failed' AND \"TenantId\" IS NOT NULL")
+                .HasDatabaseName("UX_platform_email_outbox_tenant_template_active");
         });
 
         // ── AdminImpersonation (Story 28-R2 follow-up B) ──
@@ -566,9 +712,23 @@ internal static class TammaModelConfiguration
         });
 
         // ── PromptOverride ──
+        // Story 27-2: dual-scoping. Single-user-mode rows have user_id set
+        // (tenant_id IS NULL); SaaS-mode rows have tenant_id set
+        // (user_id IS NULL). The principal_xor CHECK constraint (added in
+        // migration 27-2) enforces exactly-one. Unique index covers BOTH
+        // keys with NULLS NOT DISTINCT semantics so the (null, tid, ...)
+        // and (uid, null, ...) row spaces are disjoint and both keys
+        // dedupe on null.
         modelBuilder.Entity<PromptOverride>(entity =>
         {
-            entity.ToTable("prompt_overrides");
+            entity.ToTable("prompt_overrides", t =>
+            {
+                // Story 27-2 — exactly one of user_id / tenant_id is non-null.
+                t.HasCheckConstraint(
+                    "ck_prompt_overrides_principal_xor",
+                    "(\"UserId\" IS NOT NULL AND \"TenantId\" IS NULL) " +
+                    "OR (\"UserId\" IS NULL AND \"TenantId\" IS NOT NULL)");
+            });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.Scope).IsRequired().HasMaxLength(50);
@@ -579,9 +739,86 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            entity.HasIndex(e => new { e.UserId, e.Scope, e.Role, e.Action }).IsUnique();
+            // Story 27-2 — unique on (UserId, TenantId, Scope, Role, Action)
+            // with NULLS NOT DISTINCT so a single (null, tenantId, scope,
+            // role, action) row is unique across all repeated NULLs in
+            // UserId. NULLS NOT DISTINCT requires PG15+ (production runs
+            // PG17 — see Tamma project tech stack).
+            // Replaces the raw-SQL index from migration 20260429152530 — NULLS NOT
+            // DISTINCT became model-expressible in EF 9. Name preserved.
+            entity.HasIndex(e => new { e.UserId, e.TenantId, e.Scope, e.Role, e.Action })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("IX_prompt_overrides_UserId_TenantId_Scope_Role_Action");
 
             if (omitTenantIdColumn) entity.Ignore(e => e.TenantId);
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
+        });
+
+        // ── Convention ──
+        // Story 27-8: two-tier convention store.
+        //   tenant_id IS NULL  → system default (shipped by Tamma, seeded in 27-16)
+        //   tenant_id NOT NULL → tenant override (tenant admin owns it)
+        //
+        // Unlike PromptOverride this table has only ONE principal key column
+        // (tenant_id). There is no user_id column, no principal_xor CHECK, and
+        // no per-user override layer — tenant admins own the whole team's
+        // conventions; members cannot personalise them.
+        //
+        // omitTenantIdColumn is NOT applied here. TenantId is the two-tier
+        // discriminator: omitting it in single-user mode would destroy the
+        // ability to distinguish system defaults (null) from overrides
+        // (non-null). Following BudgetConfig precedent which also retains the
+        // nullable tenant_id column for system-vs-tenant discrimination.
+        //
+        // No FK to tenants table — per-tenant DB routing makes a hard FK
+        // awkward (same precedent as PromptOverride). See Convention.cs
+        // doc-comment.
+        //
+        // The UNIQUE(TenantId, Role, Action) index uses NULLS NOT DISTINCT
+        // (declared on the model below — EF 9 expresses it natively) so
+        // exactly one system-default row per (role, action) cell is permitted.
+        // This index also serves as the resolution hot-path B-tree seek —
+        // no separate non-unique index is needed (it would be fully covered
+        // by the unique index and would be redundant).
+        modelBuilder.Entity<Convention>(entity =>
+        {
+            entity.ToTable("conventions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Role).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.Action).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.Body).IsRequired();
+            entity.Property(e => e.Version).HasDefaultValue(1);
+            entity.Property(e => e.Enabled).HasDefaultValue(true);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // Unique on (TenantId, Role, Action) with NULLS NOT DISTINCT so
+            // the single null-tenant system-default per (role, action) cell
+            // is unique. NULLS NOT DISTINCT requires PG 15+ (production runs
+            // PG17).
+            // Replaces the raw-SQL index from migration 20260524143833. Name preserved.
+            entity.HasIndex(e => new { e.TenantId, e.Role, e.Action })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("IX_conventions_TenantId_Role_Action");
+
+            // No omitTenantIdColumn branch — intentional. Unlike BudgetConfig,
+            // where tenant_id is a simple ownership column that can be dropped
+            // in a per-tenant DB, here tenant_id IS the two-tier discriminator:
+            // NULL = system-default row, non-null = tenant override. Dropping
+            // it would destroy the semantics of the entire table. This is
+            // therefore NOT analogous to BudgetConfig's omitTenantIdColumn
+            // pattern.
+            //
+            // Epic 28 per-tenant DB cutover (Story 28-13+): when
+            // omitTenantIdColumn is set to true for a per-tenant DB, it is an
+            // OPEN design decision how system-default convention rows are
+            // provided in that DB (options include: replicate them during
+            // provisioning, resolve them via the control-plane DB, or keep a
+            // shared read-only conventions DB). Do NOT add a branch here until
+            // that design is resolved.
             ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
 
@@ -969,7 +1206,11 @@ internal static class TammaModelConfiguration
         {
             entity.ToTable("mentorship_sessions");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id").HasDefaultValueSql("uuid_generate_v4()");
+            // gen_random_uuid (pg_catalog builtin, PG13+) instead of uuid-ossp's
+            // uuid_generate_v4: extension functions don't resolve under a
+            // per-tenant "Search Path=t_<hex>" and the extension dependency is
+            // pointless since PG13. Unified-tenancy Phase 1.
+            entity.Property(e => e.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.StoryId).HasColumnName("story_id").IsRequired();
             entity.Property(e => e.JuniorId).HasColumnName("junior_id").IsRequired();
             entity.Property(e => e.CurrentState).HasColumnName("current_state").HasConversion<string>().IsRequired();
@@ -998,7 +1239,7 @@ internal static class TammaModelConfiguration
         {
             entity.ToTable("mentorship_events");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).HasColumnName("id").HasDefaultValueSql("uuid_generate_v4()");
+            entity.Property(e => e.Id).HasColumnName("id").HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.SessionId).HasColumnName("session_id").IsRequired();
             entity.Property(e => e.EventType).HasColumnName("event_type").IsRequired();
             entity.Property(e => e.EventData).HasColumnName("event_data").HasColumnType("jsonb")

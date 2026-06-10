@@ -26,6 +26,19 @@ public sealed class OutboxSmtpSenderOptions
         TimeSpan.FromHours(2),
         TimeSpan.FromHours(6),
     };
+
+    /// <summary>
+    /// Task #10 (post-review): when <c>true</c> (default) the sender starts
+    /// its poll loop in <see cref="BackgroundService.ExecuteAsync"/>. Tests
+    /// that assert outbox-row state (e.g. <c>AuthRegisterTxnIdIntegrationTests
+    /// .Register_OutboxRowPersistedWithMatchingTxnId</c>) flake when the
+    /// loop races the test and flips <c>status="pending"</c> to
+    /// <c>"sent"</c> / <c>"failed"</c> before the assertion runs. The
+    /// shared <c>ApiTestFixture</c> opts out via <see cref="HostedServiceGateExtensions.DisableRacyHostedServices"/>.
+    /// Mirrors the existing <c>BuiltInAlertRuleSeederOptions.RunOnStartup</c>
+    /// gate pattern.
+    /// </summary>
+    public bool RunOnStartup { get; set; } = true;
 }
 
 /// <summary>
@@ -78,6 +91,15 @@ public sealed class OutboxSmtpSender : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Task #10 (post-review): gate for the shared test fixture. Tests
+        // that assert outbox-row state shouldn't race the poll loop.
+        if (!_options.RunOnStartup)
+        {
+            _logger.LogDebug(
+                "OutboxSmtpSender gated off (RunOnStartup=false); skipping poll loop.");
+            return;
+        }
+
         // Only run when SMTP is the active provider. The single hosted-service
         // registration covers all three provider modes (smtp / resend /
         // in-memory) so we don't need conditional DI registration.

@@ -12,7 +12,10 @@ namespace Tamma.Activities.TenantLifecycle;
 /// Step 5 of <c>DeleteTenantWorkflow</c>. Marks the tenant row as
 /// soft-deleted (sets <c>DeletedAt = now()</c>, flips
 /// <c>Status='deleted'</c>, nulls the encrypted connection string +
-/// KEK slot) and emits the terminal <c>TENANT.DELETED.SUCCESS</c> event
+/// KEK slot), releases the unified-tenancy placement (pool
+/// <c>TenantCount</c> decrement + <c>DatabaseId</c>/<c>SchemaName</c>
+/// nulled — see <see cref="TenantPlacementShadow.ReleaseAsync"/>) and
+/// emits the terminal <c>TENANT.DELETED.SUCCESS</c> event
 /// via <see cref="IPlatformEventPublisher"/>.
 ///
 /// <para>The CP row stays around for audit; deletion is logical. The
@@ -53,7 +56,15 @@ public sealed class EmitDeletedSuccessActivity : TenantLifecycleActivity
         }
         db.Entry(tenant).Property("Status").CurrentValue = "deleted";
         db.Entry(tenant).Property("EncryptedConnectionString").CurrentValue = (byte[]?)null;
-        db.Entry(tenant).Property("KekVersion").CurrentValue = (int?)null;
+        // KekVersion is smallint NOT NULL DEFAULT 1 — clearing on delete is a no-op (plan 2026-06-09 §2.2).
+
+        // Unified-tenancy Phase 2 — release the placement (decrement the
+        // pool row's TenantCount, null DatabaseId/SchemaName) in the SAME
+        // SaveChanges that nulls the envelope: pool slot + shadow props +
+        // soft-delete move together or not at all.
+        await TenantPlacementShadow.ReleaseAsync(
+            db, tenant, Logger, context.CancellationToken);
+
         await db.SaveChangesAsync(context.CancellationToken);
 
         var publisher = context.GetRequiredService<IPlatformEventPublisher>();

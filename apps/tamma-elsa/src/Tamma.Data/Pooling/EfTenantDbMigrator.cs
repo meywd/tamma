@@ -40,12 +40,58 @@ public sealed class EfTenantDbMigrator : ITenantDbMigrator
                 "tenantConnectionString must be supplied",
                 nameof(tenantConnectionString));
 
+        // Unified-tenancy Phase 1: the connection string's Search Path names the
+        // tenant's schema. Unqualified DDL in the baseline lands in the first
+        // search_path schema; the history table is pinned to the same schema so
+        // each tenant tracks its own applied set. No Search Path → public,
+        // exactly the pre-Phase-1 behavior.
+        var schema = TenantNaming.SchemaFromConnectionString(tenantConnectionString);
+
+        // Pooling=false — ADO.NET connection pools are process-global and
+        // keyed by connection string. Every tenant's migration string is
+        // unique, so a pooled migration connection strands one idle
+        // physical connection per provisioned tenant until the idle-prune
+        // timer (~5 min) fires; provision enough tenants in a window and
+        // the cluster runs out of connection slots (53300). Migrations are
+        // one-shot per provisioning — a non-pooled connection that closes
+        // on dispose is the correct lifetime.
+        var migrationConnectionString = new Npgsql.NpgsqlConnectionStringBuilder(
+            tenantConnectionString)
+        {
+            Pooling = false,
+        }.ConnectionString;
+
         var options = new DbContextOptionsBuilder<TenantDbContext>()
-            .UseNpgsql(tenantConnectionString, npgsql =>
-                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory"))
+            .UseNpgsql(migrationConnectionString, npgsql =>
+                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema))
             .Options;
 
         await using var ctx = new TenantDbContext(options);
+        if (schema is not null)
+        {
+            // Safety net for callers that migrate before the schema exists
+            // (Phase 1 harnesses, admin-credentialed paths). Phase 2: the
+            // unified pipeline runs migrations AS THE TENANT ROLE, which has
+            // no CREATE privilege on the database — and Postgres checks that
+            // privilege BEFORE the IF NOT EXISTS bail-out (deliberate, see
+            // CreateSchemaCommand in src/backend/commands/schemacmds.c), so a
+            // bare CREATE SCHEMA IF NOT EXISTS fails with 42501 even when
+            // TenantProvisioningService.CreateSchemaAsync already created the
+            // schema. The DO block skips the CREATE entirely when the schema
+            // is present, so the privilege is only needed when genuinely
+            // creating. Schema name is validated by SchemaFromConnectionString
+            // ([a-z_][a-z0-9_]*); Quote defends in depth.
+            // Safety relies on SchemaFromConnectionString enforcing
+            // ^[a-z_][a-z0-9_]*$ — no quoting metacharacters can reach
+            // the literal embedded in the DO block. Quote() is a second
+            // layer of defence for the EXECUTE'd CREATE SCHEMA.
+            await ctx.Database.ExecuteSqlRawAsync(
+                "DO $$ BEGIN "
+                + $"IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = '{schema}') THEN "
+                + $"EXECUTE 'CREATE SCHEMA {TenantNaming.Quote(schema)}'; "
+                + "END IF; END $$;", ct)
+                .ConfigureAwait(false);
+        }
         // EF's MigrateAsync is idempotent — only pending migrations
         // execute, the rest are no-ops by reading __TenantMigrationsHistory.
         await ctx.Database.MigrateAsync(ct).ConfigureAwait(false);

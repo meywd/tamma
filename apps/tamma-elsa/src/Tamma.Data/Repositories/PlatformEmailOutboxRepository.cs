@@ -127,6 +127,78 @@ public sealed class PlatformEmailOutboxRepository : IPlatformEmailOutboxReposito
         return msg;
     }
 
+    public async Task<PlatformEmailOutboxMessage> EnqueueWelcomeOnceAsync(
+        Guid tenantId,
+        string toAddress,
+        string tenantName,
+        string fromAddress,
+        CancellationToken ct = default)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("tenantId is required.", nameof(tenantId));
+        if (string.IsNullOrWhiteSpace(toAddress))
+            throw new ArgumentException("toAddress is required.", nameof(toAddress));
+        if (string.IsNullOrWhiteSpace(fromAddress))
+            throw new ArgumentException("fromAddress is required.", nameof(fromAddress));
+
+        // Pre-check: a non-failed welcome row already pending/sending/sent
+        // for this tenant means the activity already ran (or is racing a
+        // concurrent run). Return it unchanged — exactly-once-per-tenant.
+        var existing = await _db.PlatformEmailOutbox
+            .AsNoTracking()
+            .Where(m => m.TenantId == tenantId
+                        && m.Template == WelcomeEmailContent.Template
+                        && m.Status != "failed")
+            .OrderBy(m => m.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+        if (existing is not null) return existing;
+
+        var (subject, html, text) = WelcomeEmailContent.Render(tenantName);
+        var now = DateTime.UtcNow;
+        var msg = new PlatformEmailOutboxMessage
+        {
+            TenantId = tenantId,
+            Template = WelcomeEmailContent.Template,
+            ToAddress = toAddress,
+            Subject = subject,
+            HtmlBody = html,
+            TextBody = text,
+            FromAddress = fromAddress,
+            Status = "pending",
+            Attempts = 0,
+            MaxAttempts = 5,
+            NextAttemptAt = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+
+        _db.PlatformEmailOutbox.Add(msg);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Race: a concurrent run inserted the welcome row between our
+            // pre-check and SaveChanges. The partial unique index
+            // (TenantId, Template) WHERE Status <> 'failed' rejected the
+            // duplicate. Detach our losing entity and return the winner so
+            // the workflow step is replay-safe.
+            _db.Entry(msg).State = EntityState.Detached;
+            var winner = await _db.PlatformEmailOutbox
+                .AsNoTracking()
+                .Where(m => m.TenantId == tenantId
+                            && m.Template == WelcomeEmailContent.Template
+                            && m.Status != "failed")
+                .OrderBy(m => m.CreatedAt)
+                .FirstOrDefaultAsync(ct);
+            if (winner is not null) return winner;
+            throw;
+        }
+
+        return msg;
+    }
+
     public async Task<PlatformEmailOutboxMessage?> GetByIdAsync(
         Guid id, CancellationToken ct = default)
         => await _db.PlatformEmailOutbox.FindAsync(new object[] { id }, ct);

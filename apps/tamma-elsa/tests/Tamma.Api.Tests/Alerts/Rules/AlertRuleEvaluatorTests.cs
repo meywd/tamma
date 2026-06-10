@@ -799,6 +799,11 @@ public class AlertRuleEvaluatorTests
             Guid tenantId, string? typePrefix, int limit, int offset) =>
             Task.FromResult<(IReadOnlyList<DomainEvent>, int)>(
                 (Array.Empty<DomainEvent>(), 0));
+
+        public Task<(IReadOnlyList<DomainEvent> Events, int Total)> QueryWithPaginationAsync(
+            Guid? tenantId, string? type, int? issueNumber, int limit, int offset) =>
+            Task.FromResult<(IReadOnlyList<DomainEvent>, int)>(
+                (Array.Empty<DomainEvent>(), 0));
     }
 }
 
@@ -867,6 +872,11 @@ public class AlertRuleEvaluatorPostgresTests
                 UpdatedAt = DateTime.UtcNow,
             });
             await db.SaveChangesAsync();
+
+            // Phase 3 -- domain_events is tenant-resident; provision before
+            // the unified resolver can reach it.
+            await Infrastructure.TestTenantProvisioning.ProvisionAsync(
+                ApiTestFixture.Factory.Services, tenantId);
 
             // Story 28-1 PR D — domain_events live on the tenant DB.
             // Route the seed through ITenantDbContextFactory.
@@ -983,6 +993,10 @@ public class AlertRuleEvaluatorPostgresTests
         public Task ClearAsync(Guid tenantId) => Task.CompletedTask;
         public Task<(IReadOnlyList<DomainEvent> Events, int Total)> ListByTenantAsync(
             Guid tenantId, string? typePrefix, int limit, int offset) =>
+            Task.FromResult<(IReadOnlyList<DomainEvent>, int)>(
+                (Array.Empty<DomainEvent>(), 0));
+        public Task<(IReadOnlyList<DomainEvent> Events, int Total)> QueryWithPaginationAsync(
+            Guid? tenantId, string? type, int? issueNumber, int limit, int offset) =>
             Task.FromResult<(IReadOnlyList<DomainEvent>, int)>(
                 (Array.Empty<DomainEvent>(), 0));
     }

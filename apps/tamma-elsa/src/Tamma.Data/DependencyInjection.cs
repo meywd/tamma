@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Npgsql;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Repositories;
 
@@ -31,9 +30,11 @@ public static class DependencyInjection
     ///   <item><description><c>ConnectionStrings:TammaDb</c> — admin / CP
     ///     connection. Falls back to <c>DefaultConnection</c> for dev.
     ///     </description></item>
-    ///   <item><description><c>ConnectionStrings:TammaAppDb</c> — per-tenant
-    ///     connection. Falls back to the admin connection with a warning.
-    ///     Replaced by per-tenant resolver in Story 28-4.</description></item>
+    ///   <item><description><c>ConnectionStrings:TammaAppDb</c> — central
+    ///     app connection. Falls back to the admin connection with a warning.
+    ///     Unified-tenancy Phase 3: used ONLY by the system store
+    ///     (<see cref="ISystemStoreDbContextFactory"/>); tenant data always
+    ///     goes through <see cref="ITenantConnectionResolver"/>.</description></item>
     /// </list>
     /// </summary>
     public static IServiceCollection AddTammaData(
@@ -73,35 +74,45 @@ public static class DependencyInjection
         services.AddDbContextFactory<ControlPlaneDbContext>(options =>
         {
             options.UseNpgsql(adminConnectionString, npgsql =>
-                npgsql.MigrationsHistoryTable("__TammaMigrationsHistory"));
+                // Must match ControlPlaneDesignTimeDbContextFactory — one history table
+                // for design-time and runtime (unified-tenancy Phase 0 reconciliation).
+                npgsql.MigrationsHistoryTable("__ControlPlaneMigrationsHistory"));
         });
         services.AddScoped(sp =>
             sp.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>()
                 .CreateDbContext());
 
-        // Factory for per-tenant contexts. Uses the app connection when
-        // provided, else falls back to the admin connection.
+        // Central connection string (app ?? admin) — retained ONLY for the
+        // system store below. Tenant data no longer rides it.
         var tenantConnectionString = string.IsNullOrWhiteSpace(appConnectionString)
             ? adminConnectionString
             : appConnectionString;
-        services.AddSingleton<ITenantDbContextFactory>(
-            _ => new TenantDbContextFactory(tenantConnectionString));
 
-        // Story 28-3 contract: every consumer of per-tenant connection
-        // pooling depends on ITenantConnectionResolver, not directly on
-        // a connection string. Wave A.5 post-merge restores the stub
-        // resolver so KekRotationCoordinator (Story 28-12) and the
-        // LRU pool cache (Story 28-4) have an implementation to wire
-        // against until the real per-tenant pool resolver replaces it.
-        //
-        // TryAddSingleton lets a higher-priority composition (e.g. the
-        // pool-cache extension once Story 28-4 lands) register its own
-        // resolver first without conflicting with this fallback.
-        services.TryAddSingleton<ITenantConnectionResolver>(sp =>
-        {
-            var dataSource = NpgsqlDataSource.Create(tenantConnectionString);
-            return new StubTenantConnectionResolver(dataSource);
-        });
+        // Unified-tenancy Phase 3 — tenant contexts are resolver-only. The
+        // factory asks ITenantConnectionResolver (production:
+        // LruPooledTenantConnectionResolver, wired by
+        // AddTenantConnectionPool) for the tenant's per-tenant
+        // NpgsqlDataSource built from the stored encrypted connection
+        // string. There is no shared-connection fallback any more.
+        services.AddSingleton<ITenantDbContextFactory>(sp =>
+            new TenantDbContextFactory(
+                sp.GetRequiredService<ITenantConnectionResolver>()));
+
+        // Unified-tenancy Phase 3 — the SYSTEM STORE seam. Platform-level
+        // system-default rows (TenantId IS NULL) live in the CENTRAL database's
+        // public-schema tenant tables; services reach them through this factory
+        // instead of riding a tenant connection. Deliberately bound to the same
+        // central connection string the shared TenantDbContextFactory uses
+        // (app ?? admin) — the system store IS the central DB.
+        services.AddSingleton<ISystemStoreDbContextFactory>(
+            _ => new SystemStoreDbContextFactory(tenantConnectionString));
+
+        // Unified-tenancy Phase 3 — NO fallback ITenantConnectionResolver is
+        // registered here. The composition root (Program.cs) wires the
+        // LruPooledTenantConnectionResolver unconditionally via
+        // AddTenantConnectionPool; test fixtures register their own resolver
+        // double. The transitional StubTenantConnectionResolver (every tenant
+        // on the shared central DB) was deleted in this phase.
 
         // Control-plane repositories.
         services.AddScoped<IUserRepository, UserRepository>();
@@ -116,6 +127,14 @@ public static class DependencyInjection
         services.AddScoped<IPlatformApiKeyIndexRepository, PlatformApiKeyIndexRepository>();
         services.AddScoped<IInstallationRepository, InstallationRepository>();
         services.AddScoped<IGitHubWebhookDeliveryRepository, GitHubWebhookDeliveryRepository>();
+        // Story 31-2: per-(tenant, platform_kind) installation registry. Scoped
+        // because ControlPlaneDbContext is. The installation row carries a
+        // SecretRef pointing at Epic 29's secret store; the resolver
+        // (registered in Tamma.Api) reads plaintext through ISecretStore +
+        // ISecretStoreBackend at resolve time.
+        services.AddScoped<
+            ITenantPlatformInstallationRepository,
+            TenantPlatformInstallationRepository>();
         // PF-S9 — single-row sentinel that pins the bootstrap superadmin.
         // Scoped because it leans on ControlPlaneDbContext.
         services.AddScoped<IPlatformBootstrapRepository, PlatformBootstrapRepository>();
@@ -123,6 +142,7 @@ public static class DependencyInjection
         // Tenant-scoped repositories (use ITenantDbContextFactory internally).
         services.AddScoped<IAgentConfigRepository, AgentConfigRepository>();
         services.AddScoped<IPromptRepository, PromptRepository>();
+        services.AddScoped<IConventionRepository, ConventionRepository>();
         services.AddScoped<IProviderHealthRepository, ProviderHealthRepository>();
         services.AddScoped<IDiagnosticsRepository, DiagnosticsRepository>();
         services.AddScoped<ISanitizationRepository, SanitizationRepository>();

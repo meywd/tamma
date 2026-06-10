@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Auth
-**Status**: Draft
+**Status**: DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md` (impl uses `tamma_sk_t_` not `tk_t_`; tenant id encoded in prefix per Doc 01 §3.1 option 1 — `platform_api_key_index` role needs human verification)
 **Priority**: High (API-key auth is broken under DB-per-tenant until a
 prefix scheme routes the key to the correct DbContext; every bot /
 CI / SDK integration depends on it)

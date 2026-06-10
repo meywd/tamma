@@ -105,6 +105,12 @@ jobs:
             runner: ubuntu-latest
           - platform: linux-arm64
             runner: ubuntu-24.04-arm
+          # Windows binary built on Linux: bun build --compile --target=bun-windows-x64
+          # cross-compiles, and Linux has GNU tar available by default. This avoids the
+          # complexity of running tar/sha256sum on a Windows runner.
+          # TODO: add Scoop manifest / winget config in a follow-up (out of scope).
+          - platform: windows-x64
+            runner: ubuntu-latest
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
 

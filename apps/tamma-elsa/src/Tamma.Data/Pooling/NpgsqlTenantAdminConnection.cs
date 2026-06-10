@@ -119,6 +119,23 @@ public sealed class NpgsqlTenantAdminConnection : ITenantAdminConnection
         return b.ConnectionString;
     }
 
+    public TenantAdminConnectionInfo GetConnectionInfo(string databaseName)
+    {
+        if (string.IsNullOrWhiteSpace(databaseName))
+            throw new ArgumentException("databaseName must be supplied", nameof(databaseName));
+
+        var b = new NpgsqlConnectionStringBuilder(_adminConnectionString);
+        return new TenantAdminConnectionInfo(
+            // NpgsqlConnectionStringBuilder defaults Host to null and Port
+            // to 5432 when absent; normalise Host to localhost so pg_dump
+            // always receives an explicit --host.
+            Host: string.IsNullOrWhiteSpace(b.Host) ? "localhost" : b.Host,
+            Port: b.Port,
+            Username: b.Username ?? string.Empty,
+            Password: b.Password ?? string.Empty,
+            Database: databaseName);
+    }
+
     private async Task<NpgsqlConnection> OpenAsync(CancellationToken ct)
     {
         var conn = new NpgsqlConnection(_adminConnectionString);

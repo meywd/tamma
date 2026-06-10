@@ -88,6 +88,32 @@ public class ProviderHealthEndpointsIntegrationTests
             });
 
         _client = _factory.CreateClient();
+
+        // Phase 3 -- the startup filter pins every request to the fixed
+        // Tenant id and the endpoints store circuit state in the
+        // tenant-resident provider_health table, so the tenant must exist
+        // AND be provisioned before the first request.
+        await EnsureTenantProvisionedAsync();
+    }
+
+    private async Task EnsureTenantProvisionedAsync()
+    {
+        var tid = Guid.Parse(Tenant);
+        using var scope = _factory.Services.CreateScope();
+        var cp = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        if (!await cp.Tenants.IgnoreQueryFilters().AnyAsync(t => t.Id == tid))
+        {
+            cp.Tenants.Add(new Tenant
+            {
+                Id = tid,
+                Name = $"Test {tid:N}",
+                Slug = $"t-{tid:N}",
+                Plan = "free"
+            });
+            await cp.SaveChangesAsync();
+        }
+
+        await TestTenantProvisioning.ProvisionAsync(_factory.Services, tid);
     }
 
     [TearDown]

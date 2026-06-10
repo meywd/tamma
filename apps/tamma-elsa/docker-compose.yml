@@ -19,15 +19,25 @@ services:
       - RabbitMq__Password=${RABBITMQ_PASSWORD:-tamma_dev_123}
       - Logging__LogLevel__Default=Information
       - Elsa__Server__BaseUrl=http://localhost:5000
+      # ── Story 28-5 — optional pre-drop tenant pg_dump backup (OFF) ────
+      # Requires pg_dump in the image + a mounted Backup__Directory. See
+      # docs/deployment/tenant-deletion-backup.md.
+      # - Backup__DeletionBackup=${BACKUP_DELETION_BACKUP:-false}
+      # - Backup__Directory=/app/backups
+      # - Backup__PgDumpPath=pg_dump
+      # - Backup__TimeoutSeconds=${BACKUP_TIMEOUT_SECONDS:-1800}
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
     volumes:
       - ./workflows:/app/workflows
       - ./activities:/app/activities
       - ./data:/app/storage
+      # - ./data/backups:/app/backups   # Story 28-5 tenant backup target (uncomment with Backup__DeletionBackup)
     networks:
       - tamma-network
     healthcheck:
@@ -55,6 +65,35 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # ── Story 28-1 AC2 — one-shot shared-DB bootstrap ───────────────────────
+  # Ensures the shared `tamma` database exists before api / elsa-server
+  # start. In shared-infra mode this is largely a no-op (postgres creates
+  # POSTGRES_DB=tamma itself), but the script is idempotent and forward-
+  # compatible with the future tamma_control / tamma_global_elsa split —
+  # set TAMMA_CONTROL_DB / TAMMA_GLOBAL_ELSA_DB to point it at real split
+  # DBs. Migrations themselves are applied by the apps at boot
+  # (tamma-api → Database.Migrate(); elsa-server → ef.RunMigrations=true),
+  # so this service only guarantees the target databases exist. Runs once
+  # and exits 0; dependents gate on service_completed_successfully.
+  db-bootstrap:
+    image: postgres:17-alpine
+    restart: 'no'
+    environment:
+      PGHOST: postgres
+      PGPORT: '5432'
+      PGUSER: ${DB_USER:-tamma}
+      PGPASSWORD: ${DB_PASSWORD:-tamma_dev_123}
+      TAMMA_CONTROL_DB: ${DB_NAME:-tamma}
+      TAMMA_GLOBAL_ELSA_DB: ${TAMMA_GLOBAL_ELSA_DB:-${DB_NAME:-tamma}}
+    entrypoint: ['/bin/sh', '-c', '/scripts/db/bootstrap-shared-dbs.sh']
+    volumes:
+      - ../../scripts/db:/scripts/db:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - tamma-network
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
@@ -91,8 +130,19 @@ services:
       # rotate it via `ALTER ROLE tamma_app WITH PASSWORD ...` and wire
       # the rotated value via TAMMA_APP_DB_PASSWORD below. Until then
       # TammaAppDb falls back to TammaDb with a warning.
+      #
+      # Story 28-12 AC1+AC2 — dev mirrors the prod three-role shape so the
+      # `ConnectionStrings:TammaAppDb is not configured` warning goes away
+      # and dev matches prod. Dev keeps a single underlying Postgres role
+      # (the tamma_app / tamma_provisioner roles only exist after
+      # scripts/db/postgres-roles.sql runs), so the startup current_user
+      # role check (DbRoleLeastPrivilegeCheck) is a WARNING here, never a
+      # hard fail — that gating lives in ASPNETCORE_ENVIRONMENT=Development.
+      # Provisioner is slotted for parity; the API never reads it (it
+      # belongs to the provisioning workflow on the elsa-server host).
       - ConnectionStrings__TammaDb=Server=postgres;Port=5432;Database=${DB_NAME:-tamma};User Id=${DB_USER:-tamma};Password=${DB_PASSWORD:-tamma_dev_123};
-      - ConnectionStrings__TammaAppDb=Server=postgres;Port=5432;Database=${DB_NAME:-tamma};User Id=tamma_app;Password=${TAMMA_APP_DB_PASSWORD:-changeme};
+      - ConnectionStrings__TammaAppDb=Server=postgres;Port=5432;Database=${DB_NAME:-tamma};User Id=${TAMMA_APP_DB_USER:-tamma_app};Password=${TAMMA_APP_DB_PASSWORD:-changeme};
+      - ConnectionStrings__Provisioner=Server=postgres;Port=5432;Database=${DB_NAME:-tamma};User Id=${TAMMA_PROVISIONER_DB_USER:-tamma_provisioner};Password=${TAMMA_PROVISIONER_DB_PASSWORD:-changeme};
       - SLACK_WEBHOOK=${SLACK_WEBHOOK:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
     depends_on:
@@ -100,6 +150,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
     networks:
       - tamma-network
     healthcheck:

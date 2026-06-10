@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using NUnit.Framework;
 using Tamma.Api.Dtos.Admin;
 using Tamma.Api.Endpoints.Admin;
+using Tamma.Api.Services.Analytics;
 using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
@@ -50,6 +51,12 @@ public class AdminTenantsTests
     // invalidation. Tests use a recording bus to assert the publish
     // call wires through alongside the local invalidation.
     private RecordingInvalidationBus _invalidationBus = null!;
+    // Story 28-11 AC2 — the detail endpoint joins to platform_analytics_hourly
+    // for the 24h resourceSummary. The real service reads the fact table off
+    // the same ControlPlaneDbContext, so tests use the production
+    // implementation (no tenant factory needed — the summary is fact-table
+    // only).
+    private IPlatformAnalyticsService _analytics = null!;
 
     [SetUp]
     public async Task SetUp()
@@ -66,6 +73,7 @@ public class AdminTenantsTests
         _timeProvider = TimeProvider.System;
         _connectionResolver = new RecordingTenantConnectionResolver();
         _invalidationBus = new RecordingInvalidationBus();
+        _analytics = new PlatformAnalyticsService(_db, tenantFactory: null, _timeProvider);
 
         await PlansSeeder.SeedAsync(_db);
     }
@@ -124,7 +132,7 @@ public class AdminTenantsTests
         _db.Entry(tenant).Property("PlanId").CurrentValue = planId ?? PlansSeeder.FreePlanId;
         _db.Entry(tenant).Property("FailureReason").CurrentValue = failureReason;
         _db.Entry(tenant).Property("DeleteRequestedAt").CurrentValue = deleteRequestedAt;
-        _db.Entry(tenant).Property("KekVersion").CurrentValue = kekVersion;
+        _db.Entry(tenant).Property("KekVersion").CurrentValue = (short)(kekVersion ?? 1);
         _db.Entry(tenant).Property("EncryptedConnectionString").CurrentValue = encryptedConn;
         await _db.SaveChangesAsync();
         return id;
@@ -294,6 +302,55 @@ public class AdminTenantsTests
                 "encrypted connection string bytes must never leak through the DTO");
     }
 
+    // ── Phase 4 — tenant→DB view (DatabaseId + SchemaName shadow columns) ──
+
+    [Test]
+    public async Task ListAndDetail_SurfacePlacementShadowColumns_DatabaseIdAndSchemaName()
+    {
+        var poolRow = new TenantDatabase
+        {
+            Id = Guid.NewGuid(),
+            Label = "central-test",
+            Host = "db.internal",
+            Port = 5432,
+            AdminConnectionStringEncrypted = new byte[] { 0x01 },
+            TierEligibility = [],
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        _db.TenantDatabases.Add(poolRow);
+        var tenantId = await SeedTenantAsync("Placed");
+        var tenant = await _db.Tenants.FirstAsync(t => t.Id == tenantId);
+        _db.Entry(tenant).Property("DatabaseId").CurrentValue = (Guid?)poolRow.Id;
+        _db.Entry(tenant).Property("SchemaName").CurrentValue = "t_0123456789abcdef";
+        await _db.SaveChangesAsync();
+
+        var resp = await InvokeListAsync();
+        var item = resp.Body.Tenants.Single(t => t.Id == tenantId);
+        item.DatabaseId.Should().Be(poolRow.Id,
+            "the list projection must surface which pool row hosts the tenant");
+        item.SchemaName.Should().Be("t_0123456789abcdef",
+            "the list projection must surface the tenant's schema name");
+
+        var detail = await AdminTenantsEndpoints.GetTenantDetail(
+            tenantId, _db, _publisher, _analytics);
+        var ok = detail.Should().BeOfType<Ok<AdminTenantDetailResponse>>().Subject;
+        ok.Value!.Tenant.DatabaseId.Should().Be(poolRow.Id);
+        ok.Value.Tenant.SchemaName.Should().Be("t_0123456789abcdef");
+    }
+
+    [Test]
+    public async Task ListTenants_UnplacedTenant_CarriesNullPlacementColumns()
+    {
+        var tenantId = await SeedTenantAsync("Unplaced");
+
+        var resp = await InvokeListAsync();
+
+        var item = resp.Body.Tenants.Single(t => t.Id == tenantId);
+        item.DatabaseId.Should().BeNull();
+        item.SchemaName.Should().BeNull();
+    }
+
     // ── Detail ──
 
     [Test]
@@ -313,7 +370,7 @@ public class AdminTenantsTests
         await _db.SaveChangesAsync();
 
         var result = await AdminTenantsEndpoints.GetTenantDetail(
-            tenantId, _db, _publisher);
+            tenantId, _db, _publisher, _analytics);
 
         var ok = result.Should().BeOfType<Ok<AdminTenantDetailResponse>>().Subject;
         ok.Value!.Tenant.Id.Should().Be(tenantId);
@@ -325,9 +382,128 @@ public class AdminTenantsTests
     public async Task GetTenantDetail_Returns404_WhenTenantMissing()
     {
         var result = await AdminTenantsEndpoints.GetTenantDetail(
-            Guid.NewGuid(), _db, _publisher);
+            Guid.NewGuid(), _db, _publisher, _analytics);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status404NotFound);
+    }
+
+    // ── Detail: resourceSummary (Story 28-11 AC2) ──
+
+    [Test]
+    public async Task GetTenantDetail_ResourceSummary_Aggregates24hFactTableRows()
+    {
+        var tenantId = await SeedTenantAsync("Busy");
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+
+        // Two hourly rows inside the 24h window for this tenant.
+        await SeedFactRowAsync(tenantId, now.AddHours(-1),
+            workflowsStarted: 10, workflowsCompleted: 8, workflowsFailed: 1,
+            agentDispatches: 4, tokensIn: 1000, tokensOut: 500, costUsd: 0.50m);
+        await SeedFactRowAsync(tenantId, now.AddHours(-2),
+            workflowsStarted: 5, workflowsCompleted: 4, workflowsFailed: 0,
+            agentDispatches: 2, tokensIn: 250, tokensOut: 125, costUsd: 0.25m);
+
+        var result = await AdminTenantsEndpoints.GetTenantDetail(
+            tenantId, _db, _publisher, _analytics);
+
+        var ok = result.Should().BeOfType<Ok<AdminTenantDetailResponse>>().Subject;
+        var rs = ok.Value!.ResourceSummary;
+        rs.Should().NotBeNull("resourceSummary must always be present, never null");
+        rs!.WorkflowsLast24h.Should().Be(15);   // 10 + 5
+        rs.WorkflowsCompletedLast24h.Should().Be(12);  // 8 + 4
+        rs.WorkflowsFailedLast24h.Should().Be(1);
+        rs.AgentDispatchesLast24h.Should().Be(6);  // 4 + 2
+        rs.TokensInLast24h.Should().Be(1250);
+        rs.TokensOutLast24h.Should().Be(625);
+        rs.LlmCostUsdLast24h.Should().Be(0.75m);
+    }
+
+    [Test]
+    public async Task GetTenantDetail_ResourceSummary_FreshTenant_ReturnsZeroedSummary_Not404()
+    {
+        var tenantId = await SeedTenantAsync("Fresh");
+
+        var result = await AdminTenantsEndpoints.GetTenantDetail(
+            tenantId, _db, _publisher, _analytics);
+
+        var ok = result.Should().BeOfType<Ok<AdminTenantDetailResponse>>().Subject;
+        var rs = ok.Value!.ResourceSummary;
+        rs.Should().NotBeNull("a tenant with no analytics rows yet must get a zeroed summary, not null");
+        rs!.WorkflowsLast24h.Should().Be(0);
+        rs.WorkflowsCompletedLast24h.Should().Be(0);
+        rs.WorkflowsFailedLast24h.Should().Be(0);
+        rs.AgentDispatchesLast24h.Should().Be(0);
+        rs.TokensInLast24h.Should().Be(0);
+        rs.TokensOutLast24h.Should().Be(0);
+        rs.LlmCostUsdLast24h.Should().Be(0m);
+    }
+
+    [Test]
+    public async Task GetTenantDetail_ResourceSummary_ExcludesRowsOlderThan24h()
+    {
+        var tenantId = await SeedTenantAsync("Aging");
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+
+        await SeedFactRowAsync(tenantId, now.AddHours(-1), workflowsStarted: 3, costUsd: 0.10m);
+        // 25h old — outside the window, must be excluded.
+        await SeedFactRowAsync(tenantId, now.AddHours(-25), workflowsStarted: 999, costUsd: 9.99m);
+
+        var result = await AdminTenantsEndpoints.GetTenantDetail(
+            tenantId, _db, _publisher, _analytics);
+
+        var ok = result.Should().BeOfType<Ok<AdminTenantDetailResponse>>().Subject;
+        var rs = ok.Value!.ResourceSummary;
+        rs!.WorkflowsLast24h.Should().Be(3, "rows older than 24h are excluded");
+        rs.LlmCostUsdLast24h.Should().Be(0.10m);
+    }
+
+    [Test]
+    public async Task GetTenantDetail_ResourceSummary_ExcludesOtherTenantsRows()
+    {
+        var tenantId = await SeedTenantAsync("Mine");
+        var otherTenantId = await SeedTenantAsync("Theirs");
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+
+        await SeedFactRowAsync(tenantId, now.AddHours(-1), workflowsStarted: 2, costUsd: 0.20m);
+        await SeedFactRowAsync(otherTenantId, now.AddHours(-1), workflowsStarted: 50, costUsd: 5.00m);
+        // Platform-wide row (TenantId null) must also be ignored.
+        await SeedFactRowAsync(null, now.AddHours(-1), workflowsStarted: 100, costUsd: 10.00m);
+
+        var result = await AdminTenantsEndpoints.GetTenantDetail(
+            tenantId, _db, _publisher, _analytics);
+
+        var ok = result.Should().BeOfType<Ok<AdminTenantDetailResponse>>().Subject;
+        var rs = ok.Value!.ResourceSummary;
+        rs!.WorkflowsLast24h.Should().Be(2, "only the target tenant's rows count");
+        rs.LlmCostUsdLast24h.Should().Be(0.20m);
+    }
+
+    private async Task SeedFactRowAsync(
+        Guid? tenantId,
+        DateTime hour,
+        long workflowsStarted = 0,
+        long workflowsCompleted = 0,
+        long workflowsFailed = 0,
+        long agentDispatches = 0,
+        long tokensIn = 0,
+        long tokensOut = 0,
+        decimal costUsd = 0m)
+    {
+        _db.PlatformAnalyticsHourly.Add(new PlatformAnalyticsHourly
+        {
+            Id = Guid.NewGuid(),
+            Hour = hour,
+            TenantId = tenantId,
+            WorkflowsStarted = workflowsStarted,
+            WorkflowsCompleted = workflowsCompleted,
+            WorkflowsFailed = workflowsFailed,
+            AgentDispatches = agentDispatches,
+            TokensIn = tokensIn,
+            TokensOut = tokensOut,
+            CostUsd = costUsd,
+            ComputedAt = hour.AddMinutes(5),
+        });
+        await _db.SaveChangesAsync();
     }
 
     // ── Action gate computation ──

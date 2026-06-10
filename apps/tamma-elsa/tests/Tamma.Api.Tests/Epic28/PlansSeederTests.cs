@@ -69,4 +69,23 @@ public class PlansSeederTests
         PlansSeeder.TeamPlanId.Should().NotBe(PlansSeeder.EnterprisePlanId);
         PlansSeeder.FreePlanId.Should().NotBe(PlansSeeder.EnterprisePlanId);
     }
+
+    /// <summary>
+    /// Unified-tenancy plan 2026-06-09 §2.3, decision 2 — verifies that each
+    /// tier gets the correct placement policy: free/team go to the shared
+    /// pool; enterprise gets a dedicated single-tenant DB.
+    /// </summary>
+    [Test]
+    public async Task SeedAsync_SetsPlacementPolicyPerTier()
+    {
+        var dbName = nameof(SeedAsync_SetsPlacementPolicyPerTier);
+        await using var ctx = CreateContext(dbName);
+
+        await PlansSeeder.SeedAsync(ctx);
+
+        var bySlug = await ctx.Plans.AsNoTracking().ToDictionaryAsync(p => p.Slug);
+        bySlug["free"].PlacementPolicy.Should().Be("shared");
+        bySlug["team"].PlacementPolicy.Should().Be("shared");
+        bySlug["enterprise"].PlacementPolicy.Should().Be("dedicated");
+    }
 }

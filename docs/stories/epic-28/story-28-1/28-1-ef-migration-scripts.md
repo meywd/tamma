@@ -2,7 +2,7 @@
 
 **Epic**: Epic 28 - Database-per-Tenant Isolation
 **Category**: Foundation
-**Status**: Draft
+**Status**: MOSTLY DONE — see audit `docs/superpowers/plans/2026-05-29-epic-28-status-audit.md`. AC2 bootstrap + AC3 reset scripts now exist and are wired into both compose files (2026-05-31 follow-up below). The 3-skipped-test gap from `bedf38a9` is resolved (2026-05-30 follow-up below): #1 re-enabled by PR D, #2/#3 kept as end-state contract tests blocked on Epic 30 / full db-per-tenant cutover. **Remaining residual (AC1 last bullet — per-tenant Elsa DB migrate/run): code-verified as an INTENTIONAL no-op stub, NOT runtime-verified, and correctly deferred to the Epic 30 db-per-tenant runtime cutover** (2026-06-07 verification below).
 **Priority**: High (every other Epic 28 story is blocked until four migration sets compile and apply cleanly)
 **Estimated Effort**: L (20-40h) — target 30h
 
@@ -81,20 +81,41 @@ to apply when it spins up a new tenant**.
 
 ### AC5: Strict typing and constraints
 
-- [ ] `tenants.Status` is backed by a `CHECK` constraint enumerating the
+- [x] `tenants.Status` is backed by a `CHECK` constraint enumerating the
       valid states from Doc 01 §10.2:
       `pending_verification | provisioning | active | delete_requested | deleting | deleted | failed | suspended`.
-- [ ] `tenants.KekVersion` is `smallint NOT NULL DEFAULT 1` per Doc 01
+      > **Landed via unified-tenancy Phase 0 (2026-06-09):**
+      > `ck_tenants_status` in `TammaModelConfiguration.cs` (also permits
+      > `NULL` for pre-cutover rows).
+- [x] `tenants.KekVersion` is `smallint NOT NULL DEFAULT 1` per Doc 01
       §8.1 and Doc 04 §4.3.
+      > **Superseded divergence:** Story 28-1 originally shipped `integer
+      > NULL` with a legacy-row heuristic in
+      > `AesGcmConnectionStringDecryptor` (accepted 2026-06-05). Unified-
+      > tenancy Phase 0 (2026-06-09) brought the column to spec —
+      > `Property<short>("KekVersion").HasDefaultValue((short)1)` — and
+      > excised the legacy-NULL path.
 - [ ] `tenants.EncryptedConnectionString` is `bytea` (nullable only
       during `pending_verification`; enforced by a partial `CHECK`
       constraint — `Status = 'pending_verification' OR
       EncryptedConnectionString IS NOT NULL`).
+      > **Transitional form shipped (Phase 0, 2026-06-09):**
+      > `ck_tenants_connection_string_present` also exempts
+      > `provisioning`/`failed`/`deleted` (and `NULL` Status) because
+      > today's flows legitimately hold NULL there. Spec-exact form lands
+      > with Phase 3's mint-at-creation.
 - [ ] `tenants.EncryptedElsaConnectionString` mirrors the same shape
       per Doc 04 §4.3.
 - [ ] `api_keys` CP table has a `Scope` column constrained to
       `('platform','user')`; tenant DB `api_keys` has `Scope = 'tenant'`
       enforced by a `CHECK` constraint per Doc 01 §1.4.
+      > **Transitional form shipped (Phase 0, 2026-06-09):** CP
+      > `ck_api_keys_scope` allows
+      > `('platform','user','installation','service','tenant')` — live
+      > code still writes service/installation/tenant scopes to CP.
+      > Tighten to `('platform','user')` when tenant-scoped keys
+      > physically move out (Phase 2+). Tenant-DB
+      > `ck_api_keys_tenant_scope` (`Scope = 'tenant'`) is in place.
 
 ### AC6: Required indexes
 
@@ -208,3 +229,227 @@ to apply when it spins up a new tenant**.
   seed plan rows. Choose deterministic UUIDs (e.g. `00000000-0000-0000-0000-00000000000{1,2,3}`)
   and document them in a header comment on the seed migration so
   integration tests can rely on them.
+
+## Closed by 2026-05-30 follow-up — disposition of 3 skipped end-state tests
+
+Audit `2026-05-29-epic-28-status-audit.md` flagged commit `bedf38a9`
+("skip 3 aspirational 28-1 tests"). All three tests were re-examined
+post PR D (`c90e03a6`, the 15-entity move from CP → Tenant). Final
+verdict:
+
+| # | Test                                                                                                          | Verdict                                          | Rationale                                                                                                                                                                                                                                                                                                          |
+|---|---------------------------------------------------------------------------------------------------------------|--------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1 | `Epic28.ControlPlaneDbContextModelTests.Model_Has_ExpectedControlPlaneEntities`                               | **Re-enabled (passing)** — closed by PR D       | PR D shipped the 15-entity move (11 business POCOs + 4 mentorship). The `[Ignore]` was removed and the assertion list expanded to the final 25 CP-resident tables (Doc 01 §1.2 base 14 + analytics + alerts + KEK rotations + admin impersonations + bootstrap + Story 31-2/31-7 platform-installations & webhooks). |
+| 2 | `Epic28.ControlPlaneDbContextModelTests.Tenants_Cranl_Columns_Are_Ignored_On_NewContext`                      | **Kept `[Ignore]`** — blocked on Epic 30        | Cranl columns (`CranlDatabaseUrlEncrypted` et al.) are *load-bearing in production*: `LruPooledTenantConnectionResolver` reads them to route per-request DB connections (Story 29-10 stopgap). Removing them today would break tenant routing. Re-enable when Epic 30 ships pluggable infra backends + an alternative routing column. |
+| 3 | `Epic28.TenantDbContextModelTests.Tenant_Resident_Entities_Have_No_TenantId_Column`                           | **Kept `[Ignore]`** — blocked on full cutover   | Production today routes most tenants via `StubTenantConnectionResolver` onto a shared central Postgres (see `CLAUDE.md` "Routing (current state)"). The `TenantId` predicate in tenant repositories is the only isolation plane while the shared-DB topology is in play. Re-enable when every tenant has a dedicated physical DB (Epic 28 full cutover or Epic 30 removes the shared-DB seam). |
+
+Tests #2 and #3 encode the **end-state contract** for the db-per-tenant
+architecture and intentionally remain in the suite as living specs.
+Each `[Ignore]` attribute names the owning epic so the test re-enables
+deterministically when the corresponding blocker lands. They are not
+"aspirational with no plan" — they are aspirational with a plan that
+lives in another epic.
+
+**Status correction:** the audit flagged "3 skipped tests" but PR D
+(`c90e03a6`, dated 2026-04-28, six days after `bedf38a9`) had already
+re-enabled test #1 when the 15-entity move shipped. Today's count is
+2 skipped, both with cross-epic ownership.
+
+**Verification:**
+```
+sg docker -c "dotnet test apps/tamma-elsa/Tamma.sln \
+  --filter 'FullyQualifiedName~Epic28.ControlPlaneDbContextModelTests|FullyQualifiedName~Epic28.TenantDbContextModelTests'"
+# Expect: 13 passed, 2 skipped
+```
+
+## Closed by 2026-05-31 follow-up — AC2 bootstrap + AC3 reset scripts (shared-infra reconciliation)
+
+AC2 and AC3 required `scripts/db/bootstrap-shared-dbs.{sh,ps1}` and
+`scripts/db/reset-all.{sh,ps1}`, neither of which existed. They are now
+shipped — but **reconciled against the real current topology**, not the
+aspirational two-database design the AC text was written against.
+
+### Topology reality (why the AC text needed reconciling)
+
+The AC2/AC3 text assumes two separate databases — `tamma_control` and
+`tamma_global_elsa`. The actual deployment is **shared-infrastructure
+mode**:
+
+- `docker-compose.yml` + `docker-compose.prod.yml` define a **single
+  `postgres` service** with **one database, `tamma`**.
+- Both `tamma-api` and `elsa-server` use the same `Database=tamma`
+  connection string — Elsa's tables live in `tamma`, there is no separate
+  `tamma_global_elsa` DB.
+- `ConnectionStrings:ControlPlane` is deliberately unset; all
+  tenants + control-plane data share `tamma` via Phase-3 RLS. Reconfirmed
+  by the 2026-05-31 hotfix (`146c354e`). (The `Tamma__RequireTenantIsolation`
+  knob the prod compose file used to set was removed in unified-tenancy
+  Phase 3 along with the stub-resolver fallback it guarded.)
+- **Migrations are applied by the apps themselves at boot**, not by a
+  shell script: `Tamma.Api/Program.cs` calls
+  `dbContext.Database.Migrate()`; `Tamma.ElsaServer/Program.cs` sets
+  `ef.RunMigrations = true` on Elsa's EF modules. The EF migration
+  assemblies are the single source of truth for the schema.
+
+### How the scripts reconcile aspirational → real
+
+- The scripts **ensure the databases that actually exist today** (`tamma`)
+  rather than blindly creating `tamma_control` + `tamma_global_elsa`. DB
+  names are **parameterised** (`TAMMA_CONTROL_DB`, `TAMMA_GLOBAL_ELSA_DB`),
+  both defaulting to the shared `tamma`. They de-dupe so shared mode emits
+  one summary line, not two for the same DB.
+- **Forward-compatible with the per-tenant-DB cutover**: when
+  `tamma_control` / `tamma_global_elsa` become real databases, point those
+  two env vars at them and the identical create-if-missing + summary logic
+  applies — no script change needed.
+- "Apply migrations" is honoured by the app's own boot-time
+  `Database.Migrate()` / `RunMigrations`. The bootstrap script's job in the
+  normal Docker flow is to **guarantee the target databases exist** before
+  the api / elsa-server containers start. For fresh-cluster / CI flows that
+  want the schema applied *without* booting the app, set
+  `TAMMA_RUN_EF_MIGRATIONS=1` and the script drives `dotnet ef database
+  update` (best-effort; needs the .NET SDK on the host) and reports the
+  real applied-migration delta. Otherwise the summary reports
+  `migrationsApplied: 0` (DB-existence-only) and the app self-migrates.
+
+### AC2 — `bootstrap-shared-dbs.{sh,ps1}`
+
+- Idempotent: each DB guarded by `SELECT 1 FROM pg_database WHERE datname
+  = …` before `CREATE DATABASE`. Safe to re-run (second run is a no-op).
+- Exits non-zero on any failure (`set -euo pipefail` + explicit checks).
+- Emits one JSON-lines summary per DB on stdout:
+  `{ "db": "…", "migrationsApplied": N, "durationMs": N }`.
+- Reads `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD` (with `DB_PASSWORD`
+  fallback) and the two DB-name env vars, all with sensible defaults.
+- Bounded `pg_isready` wait so the one-shot service tolerates a slow
+  Postgres start.
+
+### AC3 — `reset-all.{sh,ps1}`
+
+- Drops (`DROP DATABASE IF EXISTS`, after terminating other backends) +
+  recreates the shared DBs by delegating to the bootstrap script (single
+  source of truth for create + summary).
+- **Never touches per-tenant DBs**: a hard guard refuses any name matching
+  `tamma_tenant_*`. (There are none in shared mode; the guard protects the
+  forward-compatible path.)
+- Safety gate: refuses to run unless `TAMMA_RESET_CONFIRM=yes` or
+  `--force`/`-Force`, and always refuses when
+  `ASPNETCORE_ENVIRONMENT=Production`.
+- Idempotent final schema: `DROP IF EXISTS` + bootstrap create-if-missing
+  + the same EF migration set ⇒ running twice yields the same result.
+
+### Compose wiring — one-shot `db-bootstrap` service
+
+Chose the **one-shot service** approach (per AC2's stated preference) over
+mangling the Postgres entrypoint:
+
+- Added a `db-bootstrap` service (`postgres:17-alpine`, `restart: 'no'`) to
+  **both** `docker-compose.yml` and `docker-compose.prod.yml`. It bind-
+  mounts the repo-root `scripts/db` dir (`../../scripts/db:/scripts/db:ro`)
+  and runs `bootstrap-shared-dbs.sh`, `depends_on` postgres
+  `service_healthy`.
+- `elsa-server` and `tamma-api` now `depends_on` `db-bootstrap` with
+  `condition: service_completed_successfully` (Compose ≥ 2.20; the local
+  toolchain is v2.40). This guarantees the DB exists before either app
+  boots and self-migrates — no deadlock, because the bootstrap container
+  always runs to completion and exits 0.
+- Because the apps self-migrate, the practical effect in shared mode is an
+  ordering + existence guarantee; the script becomes load-bearing on a
+  fresh cluster, in CI, and the day the `tamma_control` /
+  `tamma_global_elsa` split lands.
+
+### Validation performed
+
+- `bash -n` clean on both `.sh` scripts.
+- `docker compose -f docker-compose.yml config -q` and
+  `… -f docker-compose.prod.yml config -q` both pass (only the pre-existing
+  obsolete-`version` warning + unset-var warnings — no errors; the
+  `service_completed_successfully` condition is accepted).
+- Verified the `../../scripts/db` bind mount resolves to
+  `/home/meywd/tamma/scripts/db` where the executable script lives.
+
+### Needs human verification
+
+- **shellcheck** was not available in this environment — only `bash -n`
+  syntax validation ran. Recommend a shellcheck pass in CI.
+- **PowerShell scripts** were not statically validated (no `pwsh` on this
+  host). The `.ps1` files mirror the `.sh` logic but should be parsed
+  on a Windows/pwsh box before relying on them.
+- The compose dependency assumes the apps self-migrate on boot (confirmed
+  in `Program.cs`); confirm this remains true if migration handling is
+  ever refactored.
+
+## Per-tenant Elsa runner residual — 2026-06-07 verification (AC1, last bullet)
+
+Read-only code audit of the per-tenant DB creation + migration paths to
+settle the "per-tenant Elsa runner verification" residual. **Verdict: 28-1
+correctly stays MOSTLY DONE.** AC1's first three bullets (CP / Tenant /
+global-Elsa migration sets) and AC2–AC6 are satisfied; **AC1's fourth
+bullet — per-tenant Elsa DB migrations applied against a tenant-resolved
+connection string into `tamma_tenant_<guid32>_elsa` — is a deliberate
+no-op stub, not a working runner.** Closing 28-1 outright would overclaim.
+
+### What is CODE-VERIFIED now (static, no runtime)
+
+- **Naming is real and tested-shaped.**
+  `Tamma.Data/Pooling/TenantNaming.cs` emits the canonical per-tenant Elsa
+  DB name `tamma_tenant_<hex>_elsa` via `ElsaDatabaseName(Guid)`
+  (`ElsaSuffix = "_elsa"`, hex = `Guid.ToString("N")`, under the 63-byte
+  Postgres identifier limit). This is the only Elsa-DB-specific piece that
+  is fully implemented.
+- **Per-tenant APP DB create + migrate IS implemented** (not Elsa).
+  `CreateTenantWorkflow` (10 steps) wires
+  `CreateTenantDatabaseActivity` → `CREATE DATABASE tamma_tenant_<hex>`
+  (idempotent `pg_database` probe, owner = the minted role) then
+  `MigrateTenantDatabaseActivity` → `ITenantDbMigrator.MigrateTenantAppAsync`,
+  which in `EfTenantDbMigrator` builds an ad-hoc `TenantDbContext` on the
+  tenant connection string and runs EF `MigrateAsync` against
+  `__TenantMigrationsHistory` (idempotent). That covers the *app* schema.
+- **The per-tenant Elsa migrator is an explicit no-op stub.**
+  `EfTenantDbMigrator.MigrateTenantElsaAsync` logs
+  `tenant.lifecycle.migrate_elsa skipped reason=elsa_db_not_split` and
+  returns `Task.CompletedTask`. Its own XML doc states per-tenant Elsa DBs
+  are deferred (Story 28-5 plan §9 open question — embed Elsa migration
+  assembly hash, fail-fast on drift). The interface
+  (`ITenantDbMigrator.MigrateTenantElsaAsync`) exists so the activity
+  surface is stable for the day the dedicated Elsa DBs ship.
+- **There is NO per-tenant Elsa step in the provisioning workflow.**
+  `CreateTenantWorkflow`'s `Activities` list has no
+  Create-Tenant-Elsa-Database or Migrate-Tenant-Elsa activity;
+  `src/Tamma.Activities/TenantLifecycle/` ships no Elsa-DB activity file.
+  `MigrateTenantElsaAsync` has **no production caller** (grep: only the
+  interface decl + the stub impl). So the Elsa runner is not merely
+  unverified — it is not invoked anywhere in the live provisioning path.
+
+### What is RUNTIME-DEFERRED to the Epic 30 db-per-tenant cutover
+
+- The whole per-tenant-DB topology is dormant in dev/test/today's prod:
+  at the time this story closed, `Tamma.Api/Program.cs` only swapped in the
+  LRU pool when `ConnectionStrings:ControlPlane` was set; otherwise every
+  tenant rode the shared central `tamma` DB via `StubTenantConnectionResolver`.
+  (Unified-tenancy Phase 3 has since removed the stub and the
+  `Tamma:RequireTenantIsolation` knob — the LRU resolver registers
+  unconditionally now.) In the shared mode of that era no per-tenant DB was
+  created at all, so a per-tenant Elsa DB had nothing to attach to.
+- Therefore the per-tenant Elsa runner cannot be runtime-verified until
+  the db-per-tenant runtime cutover lands (Epic 30 / full Epic 28 cutover)
+  — the same blocker that keeps end-state contract tests #2/#3 `[Ignore]`d
+  (see the 2026-05-30 follow-up above). Verifying it now would require
+  standing up real per-tenant DBs, which the current resolver wiring does
+  not do outside a CP-connection-string deployment.
+
+### Conclusion
+
+- **Closeable now?** No — keep MOSTLY DONE. AC1's per-tenant-Elsa bullet is
+  a stub-with-a-plan, not a verified runner.
+- **What 28-1 genuinely delivers today:** the four migration *sets* compile
+  and apply (CP, Tenant, global-Elsa via Elsa's EF provider, and the
+  per-tenant *app* migrate runner), bootstrap/reset scripts, seed plans,
+  constraints, and indexes — enough to unblock every downstream Epic 28
+  story, which is the story's stated purpose.
+- **Honest residual line:** "per-tenant Elsa DB migrate/run is an
+  intentional no-op stub (`EfTenantDbMigrator.MigrateTenantElsaAsync`),
+  uncalled by the provisioning workflow, deferred to the Epic 30
+  db-per-tenant runtime cutover." Not "verification pending" — there is
+  nothing to verify until the runner is built and the runtime topology
+  flips on.

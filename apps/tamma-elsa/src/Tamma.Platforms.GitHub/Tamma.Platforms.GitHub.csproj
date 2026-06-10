@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Tamma.Platforms.GitHub</RootNamespace>
+    <AssemblyName>Tamma.Platforms.GitHub</AssemblyName>
+    <Version>1.0.0</Version>
+    <Authors>Tamma Team</Authors>
+    <Description>
+      Story 31-3: GitHub git platform driver. Composes the existing
+      Octokit-backed IGitHubActionsClient (Tamma.Activities) and
+      IGitHubAppClient (Tamma.Api) behind the IGitPlatformDriver
+      surface so GitHub matches the Gitea / GitLab driver pattern.
+      No Octokit calls live here — this project is the seam between
+      the platform-neutral abstraction and Tamma's existing GitHub
+      clients.
+    </Description>
+  </PropertyGroup>
+
+  <!-- Microsoft.Extensions.DependencyInjection.Abstractions and
+       Microsoft.Extensions.Logging.Abstractions flow transitively from
+       Tamma.Activities (Elsa 3.5.3 → 9.0.11). Explicit references here
+       at older versions trigger NU1605 (package downgrade) outside the
+       Directory.Build.props scope (e.g., the Tamma.Api docker build
+       context which is one directory deeper than the props file). -->
+  <ItemGroup>
+    <ProjectReference Include="..\Tamma.Platforms.Abstractions\Tamma.Platforms.Abstractions.csproj" />
+    <!-- Tamma.Activities exposes IGitHubActionsClient — the narrow
+         GitHub Actions surface we wrap. Activities does NOT depend
+         on Tamma.Api so referencing it does not introduce a cycle. -->
+    <ProjectReference Include="..\Tamma.Activities\Tamma.Activities.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Tamma.Platforms.GitHub.Tests" />
+  </ItemGroup>
+
+</Project>

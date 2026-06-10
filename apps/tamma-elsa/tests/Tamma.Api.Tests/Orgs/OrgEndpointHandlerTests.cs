@@ -12,6 +12,7 @@ using Tamma.Api.Dtos.Orgs;
 using Tamma.Api.Endpoints;
 using Tamma.Api.Services.Email;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -37,6 +38,7 @@ public class OrgEndpointHandlerTests
     private IEventRepository _events = null!;
     private InMemoryEmailService _emailInbox = null!;
     private DeleteConfirmationService _confirmation = null!;
+    private ITenantProvisioningService _provisioning = null!;
 
     [SetUp]
     public async Task Setup()
@@ -49,6 +51,7 @@ public class OrgEndpointHandlerTests
         _inviteRepo = _scope.ServiceProvider.GetRequiredService<IInviteRepository>();
         _userRepo = _scope.ServiceProvider.GetRequiredService<IUserRepository>();
         _events = _scope.ServiceProvider.GetRequiredService<IEventRepository>();
+        _provisioning = _scope.ServiceProvider.GetRequiredService<ITenantProvisioningService>();
         _emailInbox = new InMemoryEmailService();
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -98,7 +101,7 @@ public class OrgEndpointHandlerTests
         var user = await CreateUser();
         var result = await OrgEndpoints.CreateOrg(
             new CreateOrgRequest("Acme", "admin"),
-            _tenantRepo, _membershipRepo, _userRepo, _events, Principal(user.Id));
+            _tenantRepo, _membershipRepo, _userRepo, _events, _provisioning, Principal(user.Id));
 
         // BadRequest result type
         result.Should().BeAssignableTo<IResult>();
@@ -112,7 +115,7 @@ public class OrgEndpointHandlerTests
         var user = await CreateUser();
         var result = await OrgEndpoints.CreateOrg(
             new CreateOrgRequest("A", "acme-corp"),
-            _tenantRepo, _membershipRepo, _userRepo, _events, Principal(user.Id));
+            _tenantRepo, _membershipRepo, _userRepo, _events, _provisioning, Principal(user.Id));
         var status = await ExecuteAndGetStatus(result);
         status.Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -123,7 +126,7 @@ public class OrgEndpointHandlerTests
         var user = await CreateUser();
         var result = await OrgEndpoints.CreateOrg(
             new CreateOrgRequest("Acme", "my.org"),  // '.' never valid in slug
-            _tenantRepo, _membershipRepo, _userRepo, _events, Principal(user.Id));
+            _tenantRepo, _membershipRepo, _userRepo, _events, _provisioning, Principal(user.Id));
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status400BadRequest);
     }
 
@@ -135,7 +138,7 @@ public class OrgEndpointHandlerTests
 
         var result = await OrgEndpoints.CreateOrg(
             new CreateOrgRequest("Acme Two", "acme-corp"),
-            _tenantRepo, _membershipRepo, _userRepo, _events, Principal(user.Id));
+            _tenantRepo, _membershipRepo, _userRepo, _events, _provisioning, Principal(user.Id));
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status409Conflict);
     }
 
@@ -145,7 +148,7 @@ public class OrgEndpointHandlerTests
         var user = await CreateUser();
         var result = await OrgEndpoints.CreateOrg(
             new CreateOrgRequest("Acme Inc.", "acme-corp"),
-            _tenantRepo, _membershipRepo, _userRepo, _events, Principal(user.Id));
+            _tenantRepo, _membershipRepo, _userRepo, _events, _provisioning, Principal(user.Id));
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status201Created);
 
         var refreshed = await _userRepo.GetByIdAsync(user.Id);
@@ -549,6 +552,14 @@ public class OrgEndpointHandlerTests
         });
         await _membershipRepo.AddAsync(tenant.Id, owner.Id, "owner");
         await _membershipRepo.AddAsync(tenant.Id, member.Id, "member");
+        // Phase 3 -- handlers emit DCB events into the tenant store, which
+        // is only reachable for provisioned tenants.
+        await ApiTestFixture.ProvisionTenantAsync(tenant.Id);
+        // Provisioning stamped the envelope/status shadow columns in its
+        // own scope. Drop this scope's stale tracked Tenant (created before
+        // provisioning) so a handler's full-entity Update() can't write the
+        // pre-provisioning nulls back over the stored envelope.
+        _db.ChangeTracker.Clear();
         return (tenant.Id, owner.Id, member.Id);
     }
 

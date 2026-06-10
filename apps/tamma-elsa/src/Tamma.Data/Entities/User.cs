@@ -34,8 +34,8 @@ public class User
     /// keys off this column instead.
     ///
     /// <para>Constrained at the DB level to <c>"user" | "platform_admin"</c>
-    /// via a CHECK constraint added by the
-    /// <c>AddUsersPlatformRole</c> migration. The bootstrap superadmin (the
+    /// via the model-level <c>ck_users_platform_role</c> CHECK constraint
+    /// (see <c>TammaModelConfiguration</c>). The bootstrap superadmin (the
     /// first user ever created) defaults to <c>platform_admin</c>; every
     /// other registration / invite / OAuth bootstrap defaults to
     /// <c>"user"</c>.</para>

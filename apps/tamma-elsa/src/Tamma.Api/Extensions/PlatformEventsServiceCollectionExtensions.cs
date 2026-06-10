@@ -42,6 +42,34 @@ public static class PlatformEventsServiceCollectionExtensions
         // WITH FORCE per Postgres 17 docs).
         services.TryAddSingleton<ITenantAdminConnection, NpgsqlTenantAdminConnection>();
 
+        // Unified-tenancy Phase 2 — accessor over the tenant_databases
+        // registry. The tenant lifecycle runs its cluster-scoped DDL
+        // (CREATE ROLE / SCHEMA / GRANT) through the ASSIGNED pool row's
+        // admin connection, which this seam decrypts and serves. Singleton
+        // (caches decrypted admin strings per pool row) + fresh connection
+        // per statement, mirroring NpgsqlTenantAdminConnection.
+        services.TryAddSingleton<ITenantDatabasePool, TenantDatabasePool>();
+
+        // Unified-tenancy Phase 2 — tier-driven placement: picks the
+        // tenant_databases row for a tenant by plans.PlacementPolicy and
+        // stamps tenants.SchemaName/DatabaseId. Stateless (opens a CP
+        // context per call via the factory), so singleton is safe.
+        services.TryAddSingleton<ITenantPlacementService, TenantPlacementService>();
+
+        // Unified-tenancy Phase 2 — the ONE provisioning step engine
+        // (placement → role → schema → conn-string → migrate → encrypt →
+        // active) shared by the SaaS CreateTenantWorkflow activities and
+        // the single-user EnsurePersonalTenantMiddleware. Stateless over
+        // singleton seams, so singleton is safe.
+        services.TryAddSingleton<ITenantProvisioningService, TenantProvisioningService>();
+
+        // Unified-tenancy Phase 4 — the schema-move engine (draining →
+        // pg_dump → restore → re-point → drop source → active). Stateless
+        // over singleton seams (pool, provisioning, resolver, process
+        // runner), so singleton is safe. TenantMoveOptions is bound in
+        // Program.cs beside TenantBackupOptions.
+        services.TryAddSingleton<ITenantMoveService, TenantMoveService>();
+
         // Story 28-5 — per-tenant migrator runs the InitialTenant migration
         // set against a freshly-created tenant DB. Singleton; opens an
         // ad-hoc TenantDbContext per call.

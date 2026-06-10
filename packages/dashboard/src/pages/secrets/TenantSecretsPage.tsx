@@ -24,13 +24,13 @@ export function TenantSecretsPage(): JSX.Element {
   }, [tenantId]);
 
   if (loading) {
-    return <p className="text-sm text-gray-500">Loading…</p>;
+    return <p className="text-sm text-gray-500 dark:text-gray-400">Loading…</p>;
   }
 
   if (!api || !tenantId) {
     return (
-      <div className="bg-white border border-gray-200 rounded-lg p-8 text-center">
-        <p className="text-sm text-gray-600">
+      <div className="bg-white border border-gray-200 rounded-lg p-8 text-center dark:bg-gray-800 dark:border-gray-700">
+        <p className="text-sm text-gray-600 dark:text-gray-400">
           No active tenant selected. Pick an organization from the switcher to
           manage its secrets.
         </p>
@@ -40,8 +40,8 @@ export function TenantSecretsPage(): JSX.Element {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-1">Organization secrets</h1>
-      <p className="text-sm text-gray-600 mb-6">
+      <h1 className="text-2xl font-bold text-gray-900 mb-1 dark:text-gray-100">Organization secrets</h1>
+      <p className="text-sm text-gray-600 mb-6 dark:text-gray-400">
         Tenant-scoped credentials (database users, Cranl API keys, webhook
         HMACs). Values are stored envelope-encrypted and isolated to this
         organization; the plaintext is revealed to you exactly once at

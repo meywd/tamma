@@ -260,6 +260,10 @@ public class GitHubWebhookTaskQueueIntegrationTests
             await db.SaveChangesAsync();
         }
 
+        // Phase 3 -- queued_tasks live in the tenant store, which is only
+        // reachable for provisioned tenants.
+        await ApiTestFixture.ProvisionTenantAsync(tenantId);
+
         const string body = """
             {
               "ref": "refs/heads/main",

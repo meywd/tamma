@@ -354,7 +354,7 @@ public class AuthAuditEventTests
         await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantB.Id, RefreshToken: presented),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, _publisher,
+            _cookieWriter, _publisher, _db,
             MakePrincipal(user.Id, user.Email, jti: "jti-switch-1"), ctx);
 
         _publisher.Events.Should().ContainSingle(e => e.Type == "USER.ORG_SWITCHED.SUCCESS");
@@ -395,7 +395,7 @@ public class AuthAuditEventTests
         await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(tenantB.Id, RefreshToken: null),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, _publisher,
+            _cookieWriter, _publisher, _db,
             MakePrincipal(user.Id, user.Email), ctx);
 
         var evt = _publisher.Events.Single(e => e.Type == "USER.ORG_SWITCHED.SUCCESS");
@@ -417,7 +417,7 @@ public class AuthAuditEventTests
         var result = await AuthEndpoints.SwitchOrg(
             new SwitchOrgRequest(otherTenant.Id, RefreshToken: null),
             _userRepo, _membershipRepo, _jwtService, _refreshTokenRepo,
-            _cookieWriter, _publisher,
+            _cookieWriter, _publisher, _db,
             MakePrincipal(user.Id, user.Email), ctx);
 
         await result.ExecuteAsync(ctx);

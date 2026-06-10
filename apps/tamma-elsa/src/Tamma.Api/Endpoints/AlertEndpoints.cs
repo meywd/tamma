@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Tamma.Api.Auth;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -492,12 +493,7 @@ public static class AlertEndpoints
         updatedAt = c.UpdatedAt,
     };
 
-    private static Guid? ResolveUserId(HttpContext http)
-    {
-        var sub = http.User.FindFirstValue(ClaimTypes.NameIdentifier)
-            ?? http.User.FindFirstValue("sub");
-        return Guid.TryParse(sub, out var uid) ? uid : null;
-    }
+    private static Guid? ResolveUserId(HttpContext http) => http.User.GetUserId();
 
     /// <summary>
     /// Guard against credential values leaking into the

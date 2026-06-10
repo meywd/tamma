@@ -93,6 +93,10 @@ public class AgentEndpointsIntegrationTests
             });
             await db.SaveChangesAsync();
 
+            // Phase 3 -- agent_configs is tenant-resident; provision before
+            // the unified resolver can reach it.
+            await ApiTestFixture.ProvisionTenantAsync(tenantId);
+
             var repo = scope.ServiceProvider.GetRequiredService<IAgentConfigRepository>();
             await repo.UpsertAsync(tenantId, configJson, null);
         }
@@ -219,14 +223,14 @@ public class AgentEndpointsIntegrationTests
     // -----------------------------------------------------------------------
 
     [Test]
-    public async Task ResolveForPhase_Implement_Developer_ReturnsConfig()
+    public async Task ResolveForPhase_ImplementFeature_Developer_ReturnsConfig()
     {
-        var payload = new { phase = "implement", role = "developer" };
+        var payload = new { phase = "implement-feature", role = "developer" };
         var resp = await _client.PostAsJsonAsync("/api/v1/agents/resolve-for-phase", payload);
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var body = await resp.Content.ReadFromJsonAsync<JsonElement>();
-        body.GetProperty("phase").GetString().Should().Be("implement");
+        body.GetProperty("phase").GetString().Should().Be("implement-feature");
         body.GetProperty("role").GetString().Should().Be("developer");
         body.GetProperty("provider").GetString().Should().NotBeNullOrEmpty();
     }
@@ -234,7 +238,9 @@ public class AgentEndpointsIntegrationTests
     [Test]
     public async Task ResolveForPhase_IneligiblePair_Returns_BadRequest()
     {
-        var payload = new { phase = "plan", role = "tester" };
+        // plan-system-design is a valid action, but only architect may perform
+        // it — a tester is ineligible for the pair.
+        var payload = new { phase = "plan-system-design", role = "tester" };
         var resp = await _client.PostAsJsonAsync("/api/v1/agents/resolve-for-phase", payload);
         resp.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }

@@ -1,3 +1,5 @@
+using Npgsql;
+
 namespace Tamma.Data.Pooling;
 
 /// <summary>
@@ -9,7 +11,9 @@ namespace Tamma.Data.Pooling;
 /// <para>The hex-encoded GUID (no hyphens) keeps role/database names
 /// inside the 63-byte Postgres identifier limit while staying
 /// deterministic and round-trippable: 6 chars prefix + 32 chars hex + the
-/// optional <c>_elsa</c> suffix is comfortably under 63.</para>
+/// optional <c>_elsa</c> suffix is comfortably under 63. The per-tenant
+/// schema uses a shorter <c>t_</c> prefix (34 chars total) to remain
+/// visually distinct from the role/database name.</para>
 ///
 /// <para>Identifier safety: the names emitted here contain only
 /// <c>[a-z0-9_]</c> and have a fixed prefix of <c>tamma_tenant_</c>. They
@@ -44,6 +48,40 @@ public static class TenantNaming
     /// </summary>
     public static string ElsaDatabaseName(Guid tenantId) =>
         $"{Prefix}{HexOf(tenantId)}{ElsaSuffix}";
+
+    /// <summary>
+    /// Canonical per-tenant schema name — <c>t_&lt;hex&gt;</c> (unified-tenancy
+    /// plan 2026-06-09 §2.2). Short prefix keeps it visually distinct from the
+    /// role (<c>tamma_tenant_&lt;hex&gt;</c>) and comfortably under the 63-byte
+    /// identifier limit (34 chars).
+    /// </summary>
+    public static string SchemaName(Guid tenantId) => $"t_{HexOf(tenantId)}";
+
+    /// <summary>
+    /// Extracts the tenant schema from a connection string's
+    /// <c>Search Path</c> key: first comma-separated segment, or null when the
+    /// key is absent/empty (callers treat null as "default <c>public</c>
+    /// behavior, exactly as before Phase 1"). Rejects identifiers outside
+    /// <c>[a-z_][a-z0-9_]*</c> — schema names only ever come from
+    /// <see cref="SchemaName"/> or operator config, never user input, so
+    /// anything else indicates a corrupted/hostile connection string.
+    /// </summary>
+    public static string? SchemaFromConnectionString(string connectionString)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        var searchPath = new NpgsqlConnectionStringBuilder(connectionString).SearchPath;
+        if (string.IsNullOrWhiteSpace(searchPath))
+            return null;
+
+        var first = searchPath.Split(',')[0].Trim();
+        if (first.Length == 0)
+            return null;
+        if (!System.Text.RegularExpressions.Regex.IsMatch(first, "^[a-z_][a-z0-9_]*$"))
+            throw new ArgumentException(
+                $"Search Path schema '{first}' is not a safe identifier.",
+                nameof(connectionString));
+        return first;
+    }
 
     /// <summary>
     /// Quote an identifier for safe inclusion in a SQL statement.

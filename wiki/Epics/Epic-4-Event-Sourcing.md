@@ -144,7 +144,7 @@ Elsa Workflow                TammaActivity             IEventRepository       Po
      |
      v
   Tamma.Api.Endpoints.Events ─── IEventRepository.QueryAsync(tenantId, null, 123, 100)
-                                  (TenantDbContext global filter applies RLS)
+                                  (TenantDbContext applies tenant scoping)
      |
      v
   JSON list:

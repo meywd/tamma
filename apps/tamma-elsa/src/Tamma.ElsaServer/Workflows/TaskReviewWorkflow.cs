@@ -10,6 +10,7 @@ using Elsa.Workflows.Runtime.Activities;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using Tamma.Api.Services.Agents;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -102,25 +103,25 @@ public class TaskReviewWorkflow : WorkflowBase
         // ================================================================
 
         // Architect review
-        var archReviewCall = RoleReviewDispatch("ArchReview", "Architect Review", "architect",
+        var archReviewCall = RoleReviewDispatch("ArchReview", "Architect Review", AgentRole.Architect,
             repository, tasksJson, planJson, allReviewsJson, llmResult);
         var extractArch = ExtractReview(architectReview, llmResult,
             "ExtractArchReview", "Extract Architect Review");
 
         // Senior Developer review
-        var srDevReviewCall = RoleReviewDispatch("SrDevReview", "Sr Dev Review", "senior_developer",
+        var srDevReviewCall = RoleReviewDispatch("SrDevReview", "Sr Dev Review", AgentRole.SeniorDeveloper,
             repository, tasksJson, planJson, allReviewsJson, llmResult);
         var extractSrDev = ExtractReview(seniorDevReview, llmResult,
             "ExtractSrDevReview", "Extract Sr Dev Review");
 
         // Developer review
-        var devReviewCall = RoleReviewDispatch("DevReview", "Developer Review", "developer",
+        var devReviewCall = RoleReviewDispatch("DevReview", "Developer Review", AgentRole.Developer,
             repository, tasksJson, planJson, allReviewsJson, llmResult);
         var extractDev = ExtractReview(developerReview, llmResult,
             "ExtractDevReview", "Extract Developer Review");
 
         // Tester review
-        var testerReviewCall = RoleReviewDispatch("TesterReview", "Tester Review", "tester",
+        var testerReviewCall = RoleReviewDispatch("TesterReview", "Tester Review", AgentRole.Tester,
             repository, tasksJson, planJson, allReviewsJson, llmResult);
         var extractTester = ExtractReview(testerReview, llmResult,
             "ExtractTesterReview", "Extract Tester Review");
@@ -304,7 +305,7 @@ public class TaskReviewWorkflow : WorkflowBase
     // Helper: Create a DispatchWorkflow for a role review
     // ================================================================
     private static DispatchWorkflow RoleReviewDispatch(
-        string id, string displayName, string role,
+        string id, string displayName, AgentRole role,
         Variable<string> repository, Variable<string> tasksJson,
         Variable<string> planJson, Variable<string> allReviewsJson,
         Variable<IDictionary<string, object>?> result)
@@ -315,8 +316,8 @@ public class TaskReviewWorkflow : WorkflowBase
             WorkflowDefinitionId = new("llm-call"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["role"] = role,
-                ["action"] = "task-review",
+                ["role"] = role.ToWire(),
+                ["action"] = RolePhaseMap.GetReviewActionForRole(role).ToWire(),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["tasksJson"] = tasksJson.Get(ctx),

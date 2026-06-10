@@ -32,9 +32,9 @@ const TABS: TabDef[] = [
 
 function TenantsLinkPanel(): JSX.Element {
   return (
-    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
-      <h2 className="text-lg font-semibold text-gray-900 mb-2">Tenants</h2>
-      <p className="text-sm text-gray-600 mb-4">
+    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6 dark:bg-gray-800 dark:border-gray-700">
+      <h2 className="text-lg font-semibold text-gray-900 mb-2 dark:text-gray-100">Tenants</h2>
+      <p className="text-sm text-gray-600 mb-4 dark:text-gray-400">
         View every tenant&apos;s lifecycle status, recent platform events,
         and run state-gated admin actions (retry provisioning, initiate
         delete, force-delete stuck tenants, change plan).
@@ -54,21 +54,17 @@ export function AdminLayout(): JSX.Element {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Admin Panel</h1>
+      <h1 className="text-2xl font-bold text-gray-900 mb-6 dark:text-gray-100">Admin Panel</h1>
 
       {/* Tab Navigation */}
-      <div className="border-b border-gray-200 mb-6">
+      <div className="border-b border-gray-200 mb-6 dark:border-gray-700">
         <nav className="flex -mb-px space-x-8" aria-label="Admin tabs">
           {TABS.map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`py-3 px-1 border-b-2 text-sm font-medium transition-colors ${
-                activeTab === tab.id
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
+              className={`py-3 px-1 border-b-2 text-sm font-medium transition-colors ${ activeTab === tab.id ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300' } dark:text-gray-400`}
             >
               {tab.label}
             </button>

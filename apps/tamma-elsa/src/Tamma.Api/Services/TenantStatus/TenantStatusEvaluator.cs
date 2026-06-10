@@ -10,7 +10,8 @@ namespace Tamma.Api.Services.TenantStatus;
 /// flip surfaces the same shape regardless of which authentication
 /// surface the caller hit.
 ///
-/// <para>Mapping (Doc 04 §8.1):</para>
+/// <para>Mapping (Doc 04 §8.1 + Doc 03 §6.1, verified 2026-05-30
+/// against Story 28-8 AC2 by audit-residual closure):</para>
 /// <list type="table">
 ///   <listheader>
 ///     <term>Status</term>
@@ -30,11 +31,31 @@ namespace Tamma.Api.Services.TenantStatus;
 ///   </item>
 ///   <item>
 ///     <term><c>failed</c></term>
-///     <description>424 Failed Dependency + <c>tenant_provisioning_failed</c>.</description>
+///     <description>424 Failed Dependency + <c>tenant_provisioning_failed</c>
+///     (Retry-After deliberately absent so the client stops polling).</description>
 ///   </item>
 ///   <item>
-///     <term><c>deleting</c></term>
-///     <description>503 + <c>tenant_deleting</c> + <c>Retry-After: 0</c>.</description>
+///     <term><c>suspended</c></term>
+///     <description>402 Payment Required + <c>tenant_suspended</c>. Plan
+///     / billing remediation; not retryable on its own.</description>
+///   </item>
+///   <item>
+///     <term><c>delete_requested</c> (grace expired) / <c>dropping</c> /
+///       <c>deleting</c></term>
+///     <description>503 + <c>tenant_deleting</c> + <c>Retry-After: 0</c>.
+///     Doc 04 §8.1 footnote — client should NOT retry, the data plane
+///     is being torn down. (Caller is responsible for short-circuiting
+///     <c>delete_requested</c> with grace-not-expired as
+///     "pass through" per AC2; this evaluator only handles the
+///     terminal branch.)</description>
+///   </item>
+///   <item>
+///     <term><c>draining</c></term>
+///     <description>Phase 4 (unified tenancy) read-only window — a tenant
+///     move is in progress. Safe verbs (GET/HEAD/OPTIONS) pass through
+///     (see <see cref="AllowsRequest"/>); mutating verbs get 503 +
+///     <c>tenant_read_only</c> + <c>Retry-After: 5</c> so clients retry
+///     once the move lands.</description>
 ///   </item>
 ///   <item>
 ///     <term><c>deleted</c></term>
@@ -52,8 +73,19 @@ public static class TenantStatusEvaluator
     public const string StatusPendingVerification = "pending_verification";
     public const string StatusProvisioning = "provisioning";
     public const string StatusFailed = "failed";
+    public const string StatusSuspended = "suspended";
+    public const string StatusDeleteRequested = "delete_requested";
+    public const string StatusDropping = "dropping";
     public const string StatusDeleting = "deleting";
     public const string StatusDeleted = "deleted";
+
+    /// <summary>
+    /// Phase 4 (unified tenancy) — the tenant is mid-move to another pool
+    /// database and is serving a brief READ-ONLY window (parent plan
+    /// decision 4). Not a teardown state: clients should retry mutations
+    /// after <c>Retry-After</c>.
+    /// </summary>
+    public const string StatusDraining = "draining";
 
     /// <summary>
     /// Returns true when <paramref name="status"/> permits the request to
@@ -63,6 +95,35 @@ public static class TenantStatusEvaluator
     public static bool IsActive(string? status) =>
         status is null
         || string.Equals(status, StatusActive, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Returns true when <paramref name="status"/> is the Phase 4
+    /// read-only window (<c>draining</c>) — safe verbs may proceed,
+    /// mutating verbs must be 503'd via
+    /// <see cref="WriteNonActiveResponseAsync"/>.
+    /// </summary>
+    public static bool IsReadOnly(string? status) =>
+        string.Equals(status, StatusDraining, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// RFC 9110 §9.2.1 safe methods that a read-only tenant may still
+    /// serve: GET, HEAD, OPTIONS.
+    /// </summary>
+    public static bool IsSafeMethod(string method) =>
+        HttpMethods.IsGet(method)
+        || HttpMethods.IsHead(method)
+        || HttpMethods.IsOptions(method);
+
+    /// <summary>
+    /// Verb-aware gate: <c>active</c>/<c>null</c> allow every verb;
+    /// <c>draining</c> allows only <see cref="IsSafeMethod">safe</see>
+    /// verbs; every other status blocks regardless of verb. Callers that
+    /// get <c>false</c> must write
+    /// <see cref="WriteNonActiveResponseAsync"/> and short-circuit.
+    /// </summary>
+    public static bool AllowsRequest(string? status, string method) =>
+        IsActive(status)
+        || (IsReadOnly(status) && IsSafeMethod(method));
 
     /// <summary>
     /// Writes the HTTP response for a non-active status. The caller MUST
@@ -122,13 +183,53 @@ public static class TenantStatusEvaluator
                 }, cancellationToken).ConfigureAwait(false);
                 return;
 
+            case StatusSuspended:
+                // 402 Payment Required — plan downgraded / billing failed.
+                // Doc 04 §8.1 + Story 28-8 AC2. Not retryable; the
+                // tenant_owner must remediate via the billing portal.
+                context.Response.StatusCode = StatusCodes.Status402PaymentRequired;
+                await WriteJsonAsync(context, new
+                {
+                    error = "tenant_suspended",
+                    status = StatusSuspended,
+                }, cancellationToken).ConfigureAwait(false);
+                return;
+
+            case StatusDeleteRequested:
+            case StatusDropping:
             case StatusDeleting:
+                // Doc 04 §8.1 footnote — `delete_requested` (grace
+                // expired), `dropping`, and `deleting` are all terminal
+                // teardown states from the client's perspective. 503 +
+                // Retry-After:0 signals "we're going away; don't poll".
+                // (`delete_requested` with grace NOT expired must be
+                // short-circuited by the caller as pass-through before
+                // reaching this evaluator — AC2.)
                 context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
                 context.Response.Headers["Retry-After"] = "0";
                 await WriteJsonAsync(context, new
                 {
                     error = "tenant_deleting",
-                    status = StatusDeleting,
+                    status = (status ?? string.Empty).ToLowerInvariant(),
+                }, cancellationToken).ConfigureAwait(false);
+                return;
+
+            case StatusDraining:
+                // Phase 4 read-only window — a mutating verb reached the
+                // writer while a tenant move is in progress. 503 +
+                // Retry-After: 5 (the window is brief by design); the body
+                // names the move so this is distinguishable from
+                // teardown (`tenant_deleting`) and provisioning
+                // (`tenant_not_ready`).
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                context.Response.Headers["Retry-After"] = "5";
+                await WriteJsonAsync(context, new
+                {
+                    error = "tenant_read_only",
+                    status = StatusDraining,
+                    retryAfter = 5,
+                    message = "tenant move in progress — writes are "
+                        + "temporarily unavailable; retry shortly",
                 }, cancellationToken).ConfigureAwait(false);
                 return;
 

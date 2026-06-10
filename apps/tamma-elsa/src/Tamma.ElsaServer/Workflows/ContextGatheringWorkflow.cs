@@ -6,6 +6,7 @@ using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using Tamma.Activities.Context;
+using Tamma.Api.Services.Agents;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
@@ -87,24 +88,24 @@ public class ContextGatheringWorkflow : WorkflowBase
         // ================================================================
 
         // Dev Scan
-        var devScan = RoleScan("DevScan", "Dev Scan", "developer",
+        var devScan = RoleScan("DevScan", "Dev Scan", AgentRole.Developer,
             repository, workItemJson, workItemType, "{}",
             llmResult);
         var extractDev = Extract(devFindings, llmResult, "ExtractDev", "Extract Dev Findings");
-        var storeDev = StoreRole("StoreDev", "Store Dev", "developer",
+        var storeDev = StoreRole("StoreDev", "Store Dev", AgentRole.Developer.ToWire(),
             repository, issueNumber, devFindings, contextIds);
 
         // QA Scan
-        var qaScan = RoleScan("QAScan", "QA Scan", "tester",
+        var qaScan = RoleScan("QAScan", "QA Scan", AgentRole.Tester,
             repository, workItemJson, workItemType,
             ctx => devFindings.Get(ctx),
             llmResult);
         var extractQA = Extract(qaFindings, llmResult, "ExtractQA", "Extract QA Findings");
-        var storeQA = StoreRole("StoreQA", "Store QA", "tester",
+        var storeQA = StoreRole("StoreQA", "Store QA", AgentRole.Tester.ToWire(),
             repository, issueNumber, qaFindings, contextIds);
 
         // Security Scan
-        var secScan = RoleScan("SecurityScan", "Security Scan", "security",
+        var secScan = RoleScan("SecurityScan", "Security Scan", AgentRole.Security,
             repository, workItemJson, workItemType,
             ctx => System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
             {
@@ -113,11 +114,11 @@ public class ContextGatheringWorkflow : WorkflowBase
             }),
             llmResult);
         var extractSec = Extract(securityFindings, llmResult, "ExtractSec", "Extract Security Findings");
-        var storeSec = StoreRole("StoreSec", "Store Security", "security",
+        var storeSec = StoreRole("StoreSec", "Store Security", AgentRole.Security.ToWire(),
             repository, issueNumber, securityFindings, contextIds);
 
         // DevOps Scan
-        var devopsScan = RoleScan("DevOpsScan", "DevOps Scan", "devops",
+        var devopsScan = RoleScan("DevOpsScan", "DevOps Scan", AgentRole.Devops,
             repository, workItemJson, workItemType,
             ctx => System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
             {
@@ -127,11 +128,11 @@ public class ContextGatheringWorkflow : WorkflowBase
             }),
             llmResult);
         var extractDevOps = Extract(devopsFindings, llmResult, "ExtractDevOps", "Extract DevOps Findings");
-        var storeDevOps = StoreRole("StoreDevOps", "Store DevOps", "devops",
+        var storeDevOps = StoreRole("StoreDevOps", "Store DevOps", AgentRole.Devops.ToWire(),
             repository, issueNumber, devopsFindings, contextIds);
 
         // Architect Scan
-        var archScan = RoleScan("ArchScan", "Architect Scan", "architect",
+        var archScan = RoleScan("ArchScan", "Architect Scan", AgentRole.Architect,
             repository, workItemJson, workItemType,
             ctx => System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
             {
@@ -142,7 +143,7 @@ public class ContextGatheringWorkflow : WorkflowBase
             }),
             llmResult);
         var extractArch = Extract(architectFindings, llmResult, "ExtractArch", "Extract Architect Findings");
-        var storeArch = StoreRole("StoreArch", "Store Architect", "architect",
+        var storeArch = StoreRole("StoreArch", "Store Architect", AgentRole.Architect.ToWire(),
             repository, issueNumber, architectFindings, contextIds);
 
         // ================================================================
@@ -154,8 +155,8 @@ public class ContextGatheringWorkflow : WorkflowBase
             WorkflowDefinitionId = new("llm-call"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["role"] = "product_owner",
-                ["action"] = "summarize",
+                ["role"] = AgentRole.ProductOwner.ToWire(),
+                ["action"] = AgentAction.SummarizeStakeholder.ToWire(),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["workItemJson"] = workItemJson.Get(ctx),
@@ -277,7 +278,7 @@ public class ContextGatheringWorkflow : WorkflowBase
     // ================================================================
 
     private static DispatchWorkflow RoleScan(
-        string id, string name, string role,
+        string id, string name, AgentRole role,
         Variable<string> repository, Variable<string> workItemJson,
         Variable<string> workItemType, string previousFindings,
         Variable<IDictionary<string, object>?> result)
@@ -288,8 +289,8 @@ public class ContextGatheringWorkflow : WorkflowBase
             WorkflowDefinitionId = new("llm-call"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["role"] = role,
-                ["action"] = "context-scan",
+                ["role"] = role.ToWire(),
+                ["action"] = AgentAction.ContextScan.ToWire(),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["workItemJson"] = workItemJson.Get(ctx),
@@ -307,7 +308,7 @@ public class ContextGatheringWorkflow : WorkflowBase
     }
 
     private static DispatchWorkflow RoleScan(
-        string id, string name, string role,
+        string id, string name, AgentRole role,
         Variable<string> repository, Variable<string> workItemJson,
         Variable<string> workItemType,
         Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> previousFindingsBuilder,
@@ -319,8 +320,8 @@ public class ContextGatheringWorkflow : WorkflowBase
             WorkflowDefinitionId = new("llm-call"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["role"] = role,
-                ["action"] = "context-scan",
+                ["role"] = role.ToWire(),
+                ["action"] = AgentAction.ContextScan.ToWire(),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["workItemJson"] = workItemJson.Get(ctx),

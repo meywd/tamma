@@ -64,6 +64,14 @@ graph TB
     TN -.-> TEN
 ```
 
+> **Operational note — tenant deletion is destructive.** `DeleteTenantWorkflow`
+> runs `DROP DATABASE ... WITH (FORCE)`. An optional pre-drop `pg_dump`
+> backup step (Story 28-5 AC4) is available but **OFF by default**, and
+> enabling it has a hard prerequisite: a `pg_dump` binary in the
+> elsa-server image + a durable mounted backup volume. See
+> [docs/deployment/tenant-deletion-backup.md](../../deployment/tenant-deletion-backup.md)
+> and the [configuration reference](../../deployment/configuration-reference.md).
+
 ## Stories
 
 | # | Title | Effort | Category |

@@ -106,21 +106,21 @@ function CreateApiKeyDialog({
         aria-labelledby="create-key-dialog-title"
         tabIndex={-1}
         onKeyDown={handleKeyDown}
-        className="relative bg-white rounded-lg shadow-xl p-6 max-w-lg w-full mx-4 outline-none"
+        className="relative bg-white rounded-lg shadow-xl p-6 max-w-lg w-full mx-4 outline-none dark:bg-gray-800"
       >
-        <h3 id="create-key-dialog-title" className="text-lg font-semibold text-gray-900 mb-4">
+        <h3 id="create-key-dialog-title" className="text-lg font-semibold text-gray-900 mb-4 dark:text-gray-100">
           {generatedKey ? 'API Key Created' : 'Create API Key'}
         </h3>
 
         {generatedKey ? (
           <div>
-            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4">
-              <p className="text-sm font-medium text-yellow-800 mb-1">
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 mb-4 dark:bg-yellow-950 dark:border-yellow-800">
+              <p className="text-sm font-medium text-yellow-800 mb-1 dark:text-yellow-200">
                 Copy this key now. You will not be able to see it again.
               </p>
             </div>
             <div className="flex items-center gap-2 mb-4">
-              <code className="flex-1 text-sm bg-gray-100 border border-gray-300 rounded-md px-3 py-2 font-mono break-all">
+              <code className="flex-1 text-sm bg-gray-100 border border-gray-300 rounded-md px-3 py-2 font-mono break-all dark:bg-gray-800 dark:border-gray-600">
                 {generatedKey}
               </code>
               <button
@@ -135,7 +135,7 @@ function CreateApiKeyDialog({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md dark:bg-gray-800 dark:text-gray-300"
               >
                 Done
               </button>
@@ -144,11 +144,11 @@ function CreateApiKeyDialog({
         ) : (
           <div>
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">User</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">User</label>
               <select
                 value={selectedUserId}
                 onChange={(e) => setSelectedUserId(e.target.value)}
-                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600"
               >
                 <option value="">Select a user...</option>
                 {users.map((u) => (
@@ -160,23 +160,23 @@ function CreateApiKeyDialog({
             </div>
 
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Label</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1 dark:text-gray-300">Label</label>
               <input
                 type="text"
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
                 placeholder="e.g. CI Pipeline, Dev Machine"
-                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600"
               />
             </div>
 
-            {error && <p className="text-sm text-red-600 mb-4">{error}</p>}
+            {error && <p className="text-sm text-red-600 mb-4 dark:text-red-400">{error}</p>}
 
             <div className="flex justify-end gap-3">
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md dark:bg-gray-800 dark:text-gray-300"
               >
                 Cancel
               </button>
@@ -219,7 +219,7 @@ export function ApiKeysTab(): JSX.Element {
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
         {error}
       </div>
     );
@@ -228,8 +228,8 @@ export function ApiKeysTab(): JSX.Element {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-gray-900">
-          API Keys <span className="text-gray-400 font-normal">({apiKeys.length})</span>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+          API Keys <span className="text-gray-400 font-normal dark:text-gray-500">({apiKeys.length})</span>
         </h2>
         <button
           type="button"
@@ -241,53 +241,53 @@ export function ApiKeysTab(): JSX.Element {
       </div>
 
       {apiKeys.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">
+        <div className="text-center py-12 text-gray-500 dark:text-gray-400">
           <p className="text-lg mb-2">No API keys</p>
           <p className="text-sm">Create an API key for programmatic access.</p>
         </div>
       ) : (
-        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden dark:bg-gray-800 dark:border-gray-700">
           <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+            <thead className="bg-gray-50 dark:bg-gray-900">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                   Key Prefix
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                   Label
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                   User
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                   Created
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                   Last Used
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                   Actions
                 </th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+            <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-800">
               {apiKeys.map((key) => (
-                <tr key={key.id} className="hover:bg-gray-50">
+                <tr key={key.id} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <code className="text-sm font-mono text-gray-700 bg-gray-100 px-2 py-0.5 rounded">
+                    <code className="text-sm font-mono text-gray-700 bg-gray-100 px-2 py-0.5 rounded dark:bg-gray-800 dark:text-gray-300">
                       {key.keyPrefix}...
                     </code>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
                     {key.label}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                     {userMap.get(key.userId) ?? key.userId}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                     {formatDate(key.createdAt)}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                     {key.lastUsedAt ? formatRelative(key.lastUsedAt) : 'Never'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right">
@@ -300,7 +300,7 @@ export function ApiKeysTab(): JSX.Element {
                           label: key.label,
                         })
                       }
-                      className="text-sm text-red-600 hover:text-red-800 font-medium"
+                      className="text-sm text-red-600 hover:text-red-800 font-medium dark:text-red-400"
                     >
                       Revoke
                     </button>

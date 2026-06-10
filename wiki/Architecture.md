@@ -33,17 +33,17 @@ Tamma ships the same codebase under three operational topologies. `IAgentExecuto
                       opensearch (optional, profile=observability)
 
  Multi-tenant SaaS    tamma-api                                tamma_control (CP)          GitHubActionsExecutor
- (db-per-tenant)      elsa-server                              tenant_<guid> × N (TP)      (agent code runs on
-                      intelligence-server                      (Cranl / Hetzner / CF / BYO  tenant's own Actions
-                      nginx-proxy                               per Epic 30 backend)        runners — never on the
-                      + every service above                                                  control plane)
+ (schema-per-tenant)  elsa-server                              t_<hex> schema × N in       (agent code runs on
+                      intelligence-server                      pooled DBs (tenant_databases tenant's own Actions
+                      nginx-proxy                               registry; Epic 30 backends   runners — never on the
+                      + every service above                     provision pool rows)         control plane)
 ```
 
 | Facet                | CLI                             | Self-hosted SaaS                             | Multi-tenant SaaS                                    |
 | -------------------- | ------------------------------- | -------------------------------------------- | ---------------------------------------------------- |
 | Entry point          | `packages/cli/src/index.tsx`    | `apps/tamma-elsa/src/Tamma.Api/Program.cs`   | Same as self-hosted + `Cranl:ApiKey` set             |
-| DB layout            | optional dev Postgres           | Central Postgres (single schema)             | `tamma_control` CP + per-tenant DBs (Epic 28)        |
-| Tenant isolation     | none (single user)              | Epic 17 RLS scaffold (dormant / superseded)  | Epic 28 DB-per-tenant (authoritative)                |
+| DB layout            | optional dev Postgres           | Central Postgres (pool member #1 "central")  | `tamma_control` CP + `t_<hex>` schemas in pooled DBs (unified tenancy) |
+| Tenant isolation     | none (single user)              | Epic 17 RLS scaffold (dormant / superseded)  | Schema-per-tenant: role + `t_<hex>` schema (authoritative; supersedes Epic 28 db-per-tenant) |
 | Agent execution      | `LocalExecutor` subprocess      | `LocalExecutor` or `GitHubActionsExecutor`   | Only `GitHubActionsExecutor` (user code stays on their runner) |
 | Provisioning         | n/a                             | Seed schema at startup                       | `ITenantInfrastructureProvider` (Epic 30)            |
 | GitHub App required  | No                              | Optional (LocalExecutor fallback)            | Yes (mandatory for dispatch)                         |
@@ -122,7 +122,7 @@ Activity categories (`apps/tamma-elsa/src/Tamma.Activities/`):
 | Security        | `Security/`         | `ContentSanitizer`, `ErrorRedactor`, `ActionGate`, `ToolCallValidator`, `ProviderAllowlist`    |
 | TDD / Testing   | `TDD/`, `Testing/`  | TDD cycle management, test execution                                                           |
 | Tool Execution  | `ToolExecution/`    | `ParallelToolExecutor`, `IFileSystemTool`, `IToolLoopEventSink`                                |
-| Tenant Lifecycle| `TenantLifecycle/`  | 15 activities — BuildConnectionString, CreateDatabase, Encrypt, Migrate, Seed, WarmPool, …      |
+| Tenant Lifecycle| `TenantLifecycle/`  | 19 activities — AssignPlacement, CreateRole, CreateSchema, BuildConnectionString, Encrypt, Migrate, Seed, WarmPool, DropSchema, DropRole, … (CreateDatabase/DropDatabase superseded by schema-per-tenant, unified-tenancy Phase 2) |
 | Code Index      | `CodeIndex/`        | Codebase indexing hooks                                                                        |
 | Core            | `Core/`             | Shared primitives                                                                              |
 
@@ -136,7 +136,8 @@ Activity categories (`apps/tamma-elsa/src/Tamma.Activities/`):
 | Auth                 | `/api/v1/auth/*`, `/api/auth/*`  | mostly none + member     | `Endpoints/AuthEndpoints.cs` (982 lines) |
 | Admin                | `/api/admin/*`                   | AdminAccess / OwnerAccess | `Endpoints/AdminEndpoints.cs`          |
 | Admin analytics      | `/api/admin/analytics/*`         | OwnerAccess              | `Services/Analytics/`                  |
-| Admin tenant provisioning | `/api/admin/tenants/*`      | OwnerAccess              | `Endpoints/AdminEndpoints.cs` + `Services/Provisioning/` |
+| Admin tenant provisioning | `/api/admin/tenants/*` (incl. `POST/GET .../{id}/move`) | OwnerAccess              | `Endpoints/AdminEndpoints.cs` + `Services/Provisioning/` |
+| Admin DB pool        | `/api/admin/tenant-databases/*`  | OwnerAccess              | `Endpoints/Admin/AdminTenantDatabasesEndpoints.cs` |
 | Admin KEK rotation   | `/api/admin/kek/rotate/*`        | OwnerAccess              | `Endpoints/KekRotationEndpoints.cs`    |
 | Orgs / Tenants       | `/api/v1/orgs/*`                 | MemberAccess + membership filter | `Endpoints/OrgEndpoints.cs` (844 lines) |
 | Onboarding wizard    | `/api/v1/onboarding/*`           | MemberAccess             | `Endpoints/OnboardingEndpoints.cs`     |
@@ -170,32 +171,33 @@ Memory budget (from `docker/docker-compose.yml` + production overrides in `docke
 
 ## 3. Data storage layout
 
-There are **four** EF Core DbContexts, corresponding to two different epochs of tenancy design. The current direction (Epic 28) is db-per-tenant; the older `TammaDbContext` / `TammaAppDbContext` pair is **scheduled for deletion in Wave A.5** (see §13).
+There are **two** EF Core DbContexts: `ControlPlaneDbContext` and `TenantDbContext` (Epic 28 split). The pre-Epic-28 `TammaDbContext` / `TammaAppDbContext` pair was **deleted in Wave A.5** (see §13).
 
 ### 3.1 Control-plane DB (Epic 28, authoritative)
 
 Code: `apps/tamma-elsa/src/Tamma.Data/ControlPlaneDbContext.cs`.
 Connection string: `ConnectionStrings:ControlPlane`. Falls back to the admin connection for local dev (logged at startup).
-Migrations: `apps/tamma-elsa/src/Tamma.Data/Migrations/ControlPlane/`.
+Migrations: `apps/tamma-elsa/src/Tamma.Data/Migrations/ControlPlane/` — a single collapsed `InitialControlPlane` baseline (unified-tenancy Phase 0, 2026-06-09); history table `__ControlPlaneMigrationsHistory` (runtime == design-time).
 
-**14 tables** (all CP-resident, no tenant query filters — the CP is not tenant-scoped):
+**15 core tables** (all CP-resident, no tenant query filters — the CP is not tenant-scoped):
 
 | Table                          | Entity                       | Purpose                                                   |
 | ------------------------------ | ---------------------------- | --------------------------------------------------------- |
 | `users`                        | `User`                       | Platform identities (email, github_id, settings jsonb)    |
 | `refresh_tokens`               | `RefreshToken`               | Session refresh token hashes                              |
 | `password_reset_tokens`        | `PasswordResetToken`         | Forgot-password reset hashes                              |
-| `tenants`                      | `Tenant` (+6 shadow props)   | Tenant directory. Epic-28 shadow cols: `PlanId`, `Status`, `EncryptedConnectionString`, `KekVersion`, `FailureReason`, `DeleteRequestedAt` |
+| `tenants`                      | `Tenant` (+shadow props)     | Tenant directory. Epic-28 shadow cols: `PlanId`, `Status` (CHECK `ck_tenants_status`), `EncryptedConnectionString`, `KekVersion` (`smallint NOT NULL DEFAULT 1`), `FailureReason`, `DeleteRequestedAt`; unified-tenancy Phase-0 cols: `SchemaName`, `DatabaseId` (FK → `tenant_databases`) |
 | `tenant_memberships`           | `TenantMembership`           | User ↔ tenant with per-tenant role                        |
 | `user_invites`                 | `UserInvite`                 | Pending email-invite tokens                               |
-| `api_keys`                     | `ApiKey` (Scope != 'tenant') | Platform-scoped + user-scoped API keys only               |
+| `api_keys`                     | `ApiKey`                     | API keys. Transitional CHECK `ck_api_keys_scope` allows `platform/user/installation/service/tenant`; tightens to `platform/user` when tenant-scoped keys physically move out (Phase 2+) |
 | `github_installations`         | `GitHubInstallation`         | GitHub App install records                                |
 | `github_installation_repos`    | `GitHubInstallationRepo`     | Per-installation repo activation                          |
 | `github_webhook_deliveries`    | `GitHubWebhookDelivery`      | Replay-protection ledger for webhook deliveries           |
-| `plans`                        | `Plan`                       | Billing plans (free / team / enterprise) + quotas jsonb   |
+| `plans`                        | `Plan`                       | Billing plans (free / team / enterprise) + quotas jsonb + `PlacementPolicy` (`shared`/`dedicated`; free/team=shared, enterprise=dedicated) |
 | `platform_events`              | `PlatformEvent`              | Cross-tenant audit log (admin analytics)                  |
 | `platform_queued_tasks`        | `PlatformQueuedTask`         | CP-scoped background jobs (provisioning, etc.)            |
 | `platform_email_outbox`        | `PlatformEmailOutboxMessage` | CP-scoped outbound mail (invites, verifications)          |
+| `tenant_databases`             | `TenantDatabase`             | Operator DB pool — one row per Postgres DB hosting tenant schemas (placement class, tier eligibility, capacity, AES-GCM-encrypted admin connection string). Live since unified-tenancy Phase 2: the central DB auto-bootstraps as pool member #1 (Label `central`, shared, all tiers; insert-missing-only seeder at API startup) |
 
 ```
 control-plane schema (text ER)
@@ -204,9 +206,9 @@ users ──< tenant_memberships >── tenants ──< user_invites
   │                                 │
   │                                 ├── github_installations ──< github_installation_repos
   │                                 │
-  ├── refresh_tokens                └── (shadow) PlanId ─→ plans
-  ├── password_reset_tokens
-  └── api_keys  (Scope ∈ {'platform','user'})
+  ├── refresh_tokens                ├── (shadow) PlanId ─→ plans
+  ├── password_reset_tokens         └── (shadow) DatabaseId ─→ tenant_databases
+  └── api_keys  (CHECK Scope ∈ {'platform','user','installation','service','tenant'} — transitional)
 
 github_webhook_deliveries  (orphan — delivery-id uniqueness only)
 platform_events            (orphan — audit)
@@ -214,18 +216,19 @@ platform_queued_tasks      (orphan — job queue)
 platform_email_outbox      (orphan — SMTP outbox)
 ```
 
-### 3.2 Per-tenant DB (Epic 28, authoritative)
+### 3.2 Per-tenant schema (unified tenancy, authoritative)
 
 Code: `apps/tamma-elsa/src/Tamma.Data/TenantDbContext.cs`.
-Connection string: resolved per-request by `ITenantConnectionResolver` (`apps/tamma-elsa/src/Tamma.Data/Abstractions/ITenantConnectionResolver.cs`). Each tenant lives in its own Postgres DB, so there is no `TenantId` column on any row — **the discriminator is the connection string**.
-Migrations: `apps/tamma-elsa/src/Tamma.Data/Migrations/Tenant/`.
+Connection string: resolved per-request by `ITenantConnectionResolver` (`apps/tamma-elsa/src/Tamma.Data/Abstractions/ITenantConnectionResolver.cs`). Since unified-tenancy Phase 3 (2026-06-10) there is exactly **one** implementation — `LruPooledTenantConnectionResolver`, which decrypts the tenant's stored `EncryptedConnectionString` (`...;Search Path=t_<hex>`) and caches a pooled `NpgsqlDataSource` per tenant; the transitional `StubTenantConnectionResolver` (central-DB fallback) is deleted. Each tenant lives in its own `t_<hex>` Postgres schema inside a pooled database (`tenant_databases` registry), connecting as its own `tamma_tenant_<hex>` role — there is no `TenantId` column on any row; **the discriminator is the connection string**. (History: Epic 28 originally placed each tenant in its own database; unified-tenancy Phase 2 (2026-06-10) superseded that with schema-per-tenant — same connection-is-the-boundary model, cheaper placement.)
+Migrations: `apps/tamma-elsa/src/Tamma.Data/Migrations/Tenant/` — a single collapsed `InitialTenant` baseline (unified-tenancy Phase 1, 2026-06-09) that applies on bare Postgres (no extensions; `gen_random_uuid()` is a pg_catalog builtin since PG13). Tenant migrations are schema-aware: when the connection string carries a `Search Path`, `EfTenantDbMigrator` applies the baseline into that `t_<hex>` schema with an in-schema `__TenantMigrationsHistory`; with no `Search Path` it applies into `public`, exactly as before.
 
-**16 tables**:
+**17 tables**:
 
 | Table                    | Entity               | Purpose                                                                 |
 | ------------------------ | -------------------- | ----------------------------------------------------------------------- |
 | `agent_configs`          | `AgentConfig`        | Per-tenant role → provider-chain mapping                                |
 | `prompt_overrides`       | `PromptOverride`     | 3-layer prompt store overrides (user × scope × role × action)           |
+| `conventions`            | `Convention`         | Convention store rows; system defaults (TenantId NULL) live in the **system store** (§6.3) |
 | `provider_health`        | `ProviderHealth`     | Three-state circuit-breaker per provider+model                          |
 | `provider_diagnostics`   | `ProviderDiagnostic` | Per-call cost + latency + success samples                               |
 | `sanitization_rules`     | `SanitizationRule`   | Per-tenant content-sanitizer rule overrides                             |
@@ -253,6 +256,7 @@ email_outbox ────┘
 
 agent_configs
 prompt_overrides
+conventions
 provider_health ───< provider_diagnostics
 sanitization_rules
 budget_configs
@@ -263,16 +267,16 @@ stories ──< mentorship_sessions ──< mentorship_events
                  └─→ junior_developers
 ```
 
-### 3.3 Legacy contexts (scheduled for deletion in Wave A.5)
+### 3.3 Legacy contexts (deleted in Wave A.5)
 
-Two DbContexts predate Epic 28 and still compile into the binary:
+Two DbContexts predated Epic 28 and were removed by Wave A.5; only doc comments reference them now:
 
-- **`TammaDbContext`** — `apps/tamma-elsa/src/Tamma.Data/TammaDbContext.cs`. The original single-DB context holding the union of everything CP + tenant. Still used by admin paths, migrations, background services, and most Story 18 endpoints. Carries the legacy `TenantId` column on every row and a permissive query filter.
-- **`TammaAppDbContext`** — `apps/tamma-elsa/src/Tamma.Data/TammaAppDbContext.cs`. Subclass of `TammaDbContext` that connects as `tamma_app` (non-superuser) so the **Epic 17 RLS** policies installed by migration `20260419021119_Phase2RlsAndTriggers` bite. Fail-closed query filter (`EnforceTenantFilter => true`).
+- **`TammaDbContext`** — the original single-DB context holding the union of everything CP + tenant, with a legacy `TenantId` column on every row and a permissive query filter. Superseded by `ControlPlaneDbContext` + `TenantDbContext`.
+- **`TammaAppDbContext`** — subclass that connected as `tamma_app` (non-superuser) so the **Epic 17 RLS** policies bit. Superseded by the per-tenant connection model.
 
-Both are flagged for removal once every endpoint migrates to the CP + tenant split. The long code comment at the top of `TammaDbContext.EnforceTenantFilter` documents the transition plan. The RLS approach from Epic 17 is **superseded** by the db-per-tenant model (Epic 28) — see §6.
+The legacy `ConnectionStrings:TammaDb` / `:TammaAppDb` configuration keys survive in `Program.cs`'s Phase-3 lookup chain (they now feed the new contexts). The RLS approach from Epic 17 is **superseded** by the schema-per-tenant model (unified tenancy, formerly Epic 28 db-per-tenant) — see §6.
 
-The `Phase-2 RLS` migration (`20260419021119`) also installed a `prevent_tenant_id_change()` trigger and six BEFORE-UPDATE triggers that block any mutation of `TenantId` on established rows. Those triggers remain useful during the transition (they enforce the "personal tenant bootstrap is a one-way NULL → uuid" invariant) and will be dropped with the legacy context.
+The `Phase-2 RLS` migration (`20260419021119`) also installed a `prevent_tenant_id_change()` trigger and six BEFORE-UPDATE triggers that block any mutation of `TenantId` on established rows. Those triggers remain useful during the transition (they enforce the "personal tenant bootstrap is a one-way NULL → uuid" invariant). The standalone migration file no longer exists — unified-tenancy Phase 0 collapsed the CP chain into the `InitialControlPlane` baseline and carried these objects into it verbatim; they are dropped in unified-tenancy Phase 5.
 
 ---
 
@@ -310,9 +314,6 @@ tamma-api (Tamma.Api/Program.cs)
    │      └─ NpgsqlDataSource from ITenantConnectionResolver (per-tenant pool cache)
    │           └─ reads tenants.EncryptedConnectionString → IConnectionStringDecryptor (AesGcm)
    │               └─ IKekProvider.GetKek(kekId) → TAMMA_SECRET_STORE_KEK_PRIMARY / _SECONDARY
-   │
-   ├─► TammaAppDbContext / TammaDbContext   [legacy — scheduled Wave A.5 deletion]
-   │      └─ ConnectionStrings:TammaAppDb / :TammaDb
    │
    ├─► ElsaClient                            [packages/orchestrator/src/elsa-client.ts — used by TS engine only]
    │      └─ http(s)://elsa-server:5000/api/workflow-definitions/…
@@ -421,7 +422,7 @@ ApiKeyAuthHandler                                           [Auth/ApiKeyAuthHand
    └─► ClaimsPrincipal with permissions[] from ApiKey.Permissions
 ```
 
-Platform scopes (`api_keys.Scope`): `'platform'` / `'user'` live in CP; `'tenant'` keys live in the tenant DB with a CHECK constraint enforcing the bifurcation.
+Platform scopes (`api_keys.Scope`): the target bifurcation is `'platform'` / `'user'` in CP and `'tenant'` keys in the tenant DB (`ck_api_keys_tenant_scope` enforces the tenant side). Transitionally (unified-tenancy Phase 0), live code still writes `service`/`installation`/`tenant` scopes to CP, so the CP CHECK `ck_api_keys_scope` allows all five; it tightens to `('platform','user')` when tenant-scoped keys physically move out (Phase 2+).
 
 ### 5.4 Authorization policies (`Program.cs:562-642`)
 
@@ -439,9 +440,18 @@ Path-tenant routes (`/api/v1/orgs/{tenantId}/**`) additionally run `RequireTenan
 
 ---
 
-## 6. Tenant isolation (Epic 28 — authoritative direction)
+## 6. Tenant isolation (unified tenancy — authoritative direction)
 
-The current architecture is **one Postgres database per tenant, plus a shared control plane**. This supersedes the Epic 17 RLS scaffold that is still present in code for backward compatibility.
+The current architecture is **one Postgres role + `t_<hex>` schema per tenant inside a pooled database, plus a shared control plane**. This supersedes both the Epic 17 RLS scaffold (removed in unified-tenancy Phase 5) and the original Epic 28 db-per-tenant layout (replaced by schema-per-tenant in unified-tenancy Phase 2, 2026-06-10).
+
+**Tenant creation path** (unified-tenancy Phase 2 — `TenantProvisioningService`, shared by the SaaS `CreateTenantWorkflow` and the single-user `EnsurePersonalTenantMiddleware`):
+
+1. **Placement** — `ITenantPlacementService` picks a `tenant_databases` pool row by the tenant's plan tier (`plans.PlacementPolicy`: free/team → `shared`, enterprise → `dedicated`) and stamps `tenants.DatabaseId` + `SchemaName`. The central DB auto-bootstraps as pool member #1 (`central`, shared, all tiers) so dev/self-host and SaaS share one code path.
+2. **Role + schema** — `CREATE ROLE tamma_tenant_<hex>` on the placement row's cluster, then `CREATE SCHEMA t_<hex> AUTHORIZATION` that role + `GRANT CONNECT` + per-DB default `search_path` — schema-scoped grants only, nothing on `public` or sibling schemas.
+3. **Mint** — a tenant-facing connection string (`...;Search Path=t_<hex>`) is built against the pool row's database, AES-GCM-encrypted under the current KEK, and persisted to `tenants.EncryptedConnectionString` + `KekVersion`.
+4. **Migrate** — `EfTenantDbMigrator` applies the `InitialTenant` baseline into the schema (in-schema `__TenantMigrationsHistory`).
+
+Personal tenants provision **synchronously at first login**, and since Phase 3 this is **mandatory** — provisioning failures propagate and fail the request (the transitional soft-fail onto a shared path died with the stub resolver). Org creation likewise provisions its tenant synchronously before the first tenant-store write. Delete runs the reverse: schema-scoped backup (`pg_dump -n t_<hex>`) → `DROP SCHEMA ... CASCADE` → `DROP OWNED BY` + `DROP ROLE` on the target cluster → pool slot released (TenantCount decrement, `DatabaseId`/`SchemaName` nulled). The previous `CREATE DATABASE`/`DROP DATABASE` activities are deleted.
 
 ```
 resolution pipeline (per request)
@@ -466,15 +476,17 @@ TenantDbContext bound to the tenant-specific NpgsqlDataSource
         │  isolation comes from the CONNECTION, not the row
 ```
 
+Since unified-tenancy Phase 3 (2026-06-10) this pipeline is the **only** tenant connection path: `LruPooledTenantConnectionResolver` registers unconditionally (in dev/self-host the "control plane" is simply the central DB), `TenantDbContextFactory` is resolver-only (its shared-connection-string ctor is gone), and `StubTenantConnectionResolver` is deleted. The `Tamma:RequireTenantIsolation` guard knob was deleted with it — it guarded exactly the stub fallback that no longer exists. An unprovisioned tenant touching tenant data now fails fast (`TenantNotProvisionedException` / `TenantNotFoundException` → mapped by `TenantContextMiddleware`).
+
 Key files:
 
-- **Abstractions**: `apps/tamma-elsa/src/Tamma.Data/Abstractions/ITenantConnectionResolver.cs`, `ITenantDbContextFactory.cs`, `IConnectionStringDecryptor.cs`.
-- **CP shadow columns** (Doc 01 §8.1): declared on `Tenant` entity in `ControlPlaneDbContext.ConfigureTenants` — `PlanId`, `Status` (state machine `pending_verification` → `provisioning` → `active` → `suspended` → `deleting` → `deleted`), `EncryptedConnectionString` (bytea), `KekVersion`, `FailureReason`, `DeleteRequestedAt`.
-- **Interceptors**: `Tamma.Data/Interceptors/TenantContextInterceptor.cs` runs `SET LOCAL app.current_tenant_id = '...'` on every connection open (used on the legacy `TammaAppDbContext` path to make the Phase-2 RLS policies enforce).
+- **Abstractions**: `apps/tamma-elsa/src/Tamma.Data/Abstractions/ITenantConnectionResolver.cs`, `ITenantDbContextFactory.cs`, `ISystemStoreDbContextFactory.cs`, `IConnectionStringDecryptor.cs`.
+- **Resolver**: `apps/tamma-elsa/src/Tamma.Data/Pooling/LruPooledTenantConnectionResolver.cs` — the single `ITenantConnectionResolver` implementation (LRU-cached per-tenant `NpgsqlDataSource`s).
+- **CP shadow columns** (Doc 01 §8.1): declared on the `Tenant` entity in `TammaModelConfiguration.ConfigureControlPlaneEntities` — `PlanId`, `Status` (state machine `pending_verification` → `provisioning` → `active` → `suspended`/`failed`/`delete_requested` → `deleting` → `deleted`, plus the Phase-4 `draining` read-only state during a tenant move; CHECK-enforced by `ck_tenants_status` since unified-tenancy Phase 0), `EncryptedConnectionString` (bytea), `KekVersion` (`smallint NOT NULL DEFAULT 1`), `FailureReason`, `DeleteRequestedAt`, plus `SchemaName` / `DatabaseId` (FK → `tenant_databases`; added in Phase 0, stamped at creation by the Phase-2 placement service).
 
 ### 6.1 Epic 17 RLS — superseded
 
-The Epic 17 Phase-2 scaffold shipped with `Phase2RlsAndTriggers` (migration `20260419021119`). It created the `tamma_app` Postgres role, eight RLS policies against `current_setting('app.current_tenant_id')`, and the six BEFORE-UPDATE triggers. On the central-DB path those policies enforce; on the per-tenant-DB path they are unnecessary (the database IS the boundary). The RLS scaffold remains live for admin / legacy paths still bound to `TammaDbContext` and will be removed with those contexts in Wave A.5.
+The Epic 17 Phase-2 scaffold originally shipped with `Phase2RlsAndTriggers` (migration `20260419021119`). It created the `tamma_app` Postgres role, eight RLS policies against `current_setting('app.current_tenant_id')`, and the six BEFORE-UPDATE triggers. On the central-DB path those policies enforce; on the per-tenant-DB path they are unnecessary (the database IS the boundary). Unified-tenancy Phase 0 (2026-06-09) collapsed the CP migration chain into a single `InitialControlPlane` baseline and ported the surviving RLS scaffold into it: the role plus 7 RLS policies and 4 tenant-id triggers — the remaining policies/triggers died with the tables that moved out of the CP schema. Phase 0 stayed behavior-neutral for the tables that remained; unified-tenancy Phase 5 (2026-06-10) then dropped the policies/triggers from the baseline — `tamma_app` and its grants are kept as the least-privilege runtime role, independent of RLS.
 
 ### 6.2 KEK rotation (Story 28-12)
 
@@ -486,6 +498,20 @@ The Epic 17 Phase-2 scaffold shipped with `Phase2RlsAndTriggers` (migration `202
 4. When every row is rewrapped, promote secondary → primary, clear secondary.
 
 Endpoints: `POST /api/admin/kek/rotate/start`, `GET /api/admin/kek/rotate/status` (owner-only). `apps/tamma-elsa/src/Tamma.Api/Endpoints/KekRotationEndpoints.cs`.
+
+### 6.3 System store (unified-tenancy Phase 3)
+
+Platform-level default rows — the **system store** — live in the central database's `public`-schema tenant tables (exactly where they always have) and are reached through a dedicated seam, `ISystemStoreDbContextFactory` (`apps/tamma-elsa/src/Tamma.Data/Abstractions/ISystemStoreDbContextFactory.cs`), which returns a `TenantDbContext` bound to the central connection (no `Search Path`). This replaced the transitional trick of routing `Guid.Empty` through the stub resolver.
+
+In practice the system store holds **conventions only**: `ConventionStore`/`ConventionStoreSeeder` read and write system-default rows (`TenantId IS NULL`) through the seam, while tenant-override rows go through `ITenantDbContextFactory` into the tenant's own schema — the resolution semantics (tenant → system → error) are unchanged. The other candidate entities (`sanitization_rules`, `agent_configs`, `budget_configs`, `provider_health`) turned out to have **no live system-row tier** — their platform defaults are in-code (Story 28-1), so no split was built for them. Moving system rows into CP-native tables is explicitly deferred (Phase 5+ consideration, only if friction appears).
+
+### 6.4 Admin DB pool + tenant move (unified-tenancy Phase 4)
+
+Shipped 2026-06-10. Platform owners manage the `tenant_databases` pool through `/api/admin/tenant-databases` (`Endpoints/Admin/AdminTenantDatabasesEndpoints.cs`, `PlatformOwnerAccess`): list, detail-with-tenants (the tenant→DB view; `GET /api/admin/tenants` projections expose `DatabaseId`/`SchemaName` as the other half), create (plaintext admin conn string inbound only — live `SELECT 1` probe, Host/Port parsed from the string, AES-GCM-encrypted at rest, never serialized back out; 409 on label duplicates and on rows aliasing an existing physical database), patch (label/tierEligibility/tenantCapacity/status/conn-string rotation + pool cache evict), and hard delete (409 while any tenant references the row).
+
+**Move tenant** (`POST /api/admin/tenants/{id}/move` → 202 + a `tenant.move` platform-queue task handled by `MoveTenantTaskHandler`; `GET .../move` polls Status/FailureReason/placement): `TenantMoveService` (`Services/Provisioning/TenantMoveService.cs`) executes draining read-only window (mutating verbs 503 at `TenantContextMiddleware`; reads keep flowing) → drain grace → `pg_dump -F c -n t_<hex>` → role+schema on target → `pg_restore --no-owner --role` with an ignored-error budget plus `__TenantMigrationsHistory` + per-table row-count verification → re-point the encrypted conn string + TenantCount bookkeeping in one commit → evict + live round-trip verify → drop source schema (cross-cluster: + role) → `active`. Same-cluster moves (source Host:Port == target) keep the role/password and swap only `Database`; cross-cluster moves mint a fresh role+password on the target and drop the role on the source. Hardening: per-tenant advisory lock (concurrent moves), same-physical-DB alias guard, 0700 temp dir. Failures before the re-point leave the tenant `draining` with the source intact (idempotent re-run or PATCH back to `active`); failures after it leave the tenant on the target (re-run completes drop/activate). Note `PlatformTaskWorker:RunOnStartup` defaults to false — queued moves run only where the worker is enabled — and `pg_dump`/`pg_restore` must exist in the API image (`TenantMove:*` options).
+
+The move is deliberately **not** an Elsa workflow: no workflow-dispatch subscriber exists anywhere; the Cranl 202+queue pattern is the established async-admin-op mechanism.
 
 See [Epic 28 — DB-per-Tenant](Epics/Epic-28-DB-Per-Tenant.md) for the full 14-story plan and [Multi-Tenant Provisioning](Multi-Tenant-Provisioning.md) for the onboarding UX.
 
@@ -799,17 +825,12 @@ Note: `CLAUDE.md` documents "PostgreSQL 17" as the target. The shipped compose f
 
 ## 13. Current vs future state
 
-### 13.1 Wave A.5 cleanup (not done — flagged)
+### 13.1 Wave A.5 cleanup (contexts deleted — residuals flagged)
 
-The following are **in the codebase but scheduled for deletion**:
+Wave A.5 **landed**: `TammaDbContext`, `TammaAppDbContext`, and the mentorship single-DB path are gone — every endpoint now runs on the `ControlPlaneDbContext` + `TenantDbContext` split (`MentorshipSessionRepository` uses `ITenantDbContextFactory`). Remaining residuals **in the codebase but scheduled for deletion**:
 
-1. **`TammaDbContext`** (`Tamma.Data/TammaDbContext.cs`) — legacy monolithic context. Still used by admin paths, migrations, background services, and most Story 18 endpoints. To be removed once every endpoint migrates to the CP + tenant split.
-2. **`TammaAppDbContext`** (`Tamma.Data/TammaAppDbContext.cs`) — RLS-enforcing subclass. Obsolete once db-per-tenant covers every path.
-3. **Phase-2 RLS artefacts** — the `tamma_app` role, 8 RLS policies, 6 tenant-id triggers installed by migration `20260419021119`. The triggers have belt-and-suspenders value during the transition but become redundant under db-per-tenant.
-4. **`CranlProvisioningColumns` migration (20260419204924)** — single-DB columns (`cranl_project_id`, `cranl_database_id`, etc.) on `tenants`. They are explicitly `.Ignore()`'d by `ControlPlaneDbContext` but still exist on the POCO. Wave A.5 removes them as Epic 30's `ITenantInfrastructureProvider` v2 supersedes the inline Cranl columns.
-5. **Mentorship single-DB path** — `MentorshipSessionRepository` + `MentorshipController` still reference `TammaDbContext`. Move to `TenantDbContext` when the mentorship stories get re-validated.
-
-Until Wave A.5 lands, the app runs on a **hybrid**: new Epic 28 endpoints use the CP + tenant contexts; legacy endpoints use the shared `TammaDbContext`. Both write to the same Postgres cluster in practice.
+1. **Phase-2 RLS artefacts** — the `tamma_app` role, 7 RLS policies, 4 tenant-id triggers (originally 8/6 in migration `20260419021119`; since unified-tenancy Phase 0 the survivors live in the collapsed `InitialControlPlane` baseline — the rest died with tables that left the CP schema). The triggers have belt-and-suspenders value during the transition but become redundant under schema-per-tenant; removal is unified-tenancy Phase 5.
+2. **Cranl provisioning columns** (`cranl_project_id`, `cranl_database_id`, etc. on `tenants` — originally migration `20260419204924`, now part of the collapsed `InitialControlPlane` baseline). Epic 30's `ITenantInfrastructureProvider` v2 supersedes the inline Cranl columns; they go when the legacy provisioning path is removed.
 
 ### 13.2 Coming in Epic 30
 
@@ -885,9 +906,17 @@ Edge services deploy via `wrangler publish` to Cloudflare Workers; the main stac
 
 ---
 
+## Role/Action Taxonomy & Resolution
+
+Prompts and conventions resolve by exact `(role, action)` lookup against one
+shared code-defined taxonomy (no keyword matching). See
+[Role/Action Taxonomy](Role-Action-Taxonomy.md).
+
+---
+
 ## For more detail
 
-- [Deployment runbook](Deployment.md) — VPS bring-up, Cranl activation, Phase-3 RLS runbook
+- [Deployment runbook](Deployment.md) — VPS bring-up, Cranl activation, least-privilege app-role runbook
 - [Multi-Tenant Provisioning](Multi-Tenant-Provisioning.md) — Epic 30 backend selection
 - [Agent Dispatch](Agent-Dispatch.md) — Epic 19 implementation detail
 - [Secret Management](Secret-Management.md) — Epic 29 cabinet + rotation

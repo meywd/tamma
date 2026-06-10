@@ -43,13 +43,13 @@ export function TenantPromptTable({
 
   return (
     <div>
-      <div className="mb-4 text-sm text-gray-600">
+      <div className="mb-4 text-sm text-gray-600 dark:text-gray-400">
         <strong>{overrideCount}</strong> of {prompts.length} prompts overridden
       </div>
 
       <div className="flex flex-wrap gap-4 mb-4">
         <div>
-          <label htmlFor="prompt-role-filter" className="block text-xs text-gray-500 mb-1">
+          <label htmlFor="prompt-role-filter" className="block text-xs text-gray-500 mb-1 dark:text-gray-400">
             Filter by role
           </label>
           <select
@@ -57,7 +57,7 @@ export function TenantPromptTable({
             aria-label="Filter by role"
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value)}
-            className="px-3 py-1.5 text-sm border border-gray-300 rounded-md"
+            className="px-3 py-1.5 text-sm border border-gray-300 rounded-md dark:border-gray-600"
           >
             <option value="all">All Roles</option>
             {roles.map((r) => (
@@ -68,7 +68,7 @@ export function TenantPromptTable({
           </select>
         </div>
         <div>
-          <label htmlFor="prompt-action-filter" className="block text-xs text-gray-500 mb-1">
+          <label htmlFor="prompt-action-filter" className="block text-xs text-gray-500 mb-1 dark:text-gray-400">
             Filter by action
           </label>
           <select
@@ -76,7 +76,7 @@ export function TenantPromptTable({
             aria-label="Filter by action"
             value={actionFilter}
             onChange={(e) => setActionFilter(e.target.value)}
-            className="px-3 py-1.5 text-sm border border-gray-300 rounded-md"
+            className="px-3 py-1.5 text-sm border border-gray-300 rounded-md dark:border-gray-600"
           >
             <option value="all">All Actions</option>
             {actions.map((a) => (
@@ -88,9 +88,9 @@ export function TenantPromptTable({
         </div>
       </div>
 
-      <div className="overflow-x-auto bg-white border border-gray-200 rounded-lg">
+      <div className="overflow-x-auto bg-white border border-gray-200 rounded-lg dark:bg-gray-800 dark:border-gray-700">
         <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-600">
+          <thead className="bg-gray-50 text-gray-600 dark:bg-gray-900 dark:text-gray-400">
             <tr>
               <th className="px-4 py-2 text-left font-medium">Role</th>
               <th className="px-4 py-2 text-left font-medium">Action</th>
@@ -107,9 +107,7 @@ export function TenantPromptTable({
                   key={`${p.role}:${p.action}`}
                   data-testid={`prompt-row-${p.role}-${p.action}`}
                   onClick={() => onRowClick(p.role, p.action)}
-                  className={`cursor-pointer border-t border-gray-100 hover:bg-gray-50 ${
-                    isOverride ? 'bg-blue-50 border-l-4 border-l-blue-400' : ''
-                  }`}
+                  className={`cursor-pointer border-t border-gray-100 hover:bg-gray-50 ${ isOverride ? 'bg-blue-50 border-l-4 border-l-blue-400' : '' } dark:border-gray-800 dark:hover:bg-gray-800`}
                 >
                   <td className="px-4 py-2 font-mono text-xs">{p.role}</td>
                   <td className="px-4 py-2 font-mono text-xs">{p.action}</td>
@@ -124,7 +122,7 @@ export function TenantPromptTable({
           </tbody>
         </table>
         {filtered.length === 0 && (
-          <div className="py-10 text-center text-sm text-gray-500">
+          <div className="py-10 text-center text-sm text-gray-500 dark:text-gray-400">
             No prompts match the current filters.
           </div>
         )}

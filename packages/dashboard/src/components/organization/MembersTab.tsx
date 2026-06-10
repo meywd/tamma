@@ -66,7 +66,7 @@ export function MembersTab(): JSX.Element {
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
         {mapOrgError(error)}
       </div>
     );
@@ -99,39 +99,39 @@ export function MembersTab(): JSX.Element {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-gray-900">
-          Members <span className="text-gray-400 font-normal">({total})</span>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+          Members <span className="text-gray-400 font-normal dark:text-gray-500">({total})</span>
         </h2>
       </div>
 
       {actionError && (
-        <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">
+        <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-300 dark:border-red-800">
           {actionError}
         </div>
       )}
 
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden dark:bg-gray-800 dark:border-gray-700">
         <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
+          <thead className="bg-gray-50 dark:bg-gray-900">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Name
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Email
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Role
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Joined
               </th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider dark:text-gray-400">
                 Actions
               </th>
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+          <tbody className="bg-white divide-y divide-gray-200 dark:bg-gray-800">
             {members.map((m) => {
               const isSelf = m.userId === me?.id;
               const roleOptions = callerRole
@@ -145,14 +145,14 @@ export function MembersTab(): JSX.Element {
                 !(callerRole === 'admin' && m.role === 'owner');
 
               return (
-                <tr key={m.userId} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                <tr key={m.userId} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-gray-100">
                     {m.displayName ?? m.userId}
                     {isSelf && (
-                      <span className="ml-2 text-xs text-gray-400">(you)</span>
+                      <span className="ml-2 text-xs text-gray-400 dark:text-gray-500">(you)</span>
                     )}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                     {m.email ?? '-'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
@@ -165,7 +165,7 @@ export function MembersTab(): JSX.Element {
                             newRole: e.target.value as TenantRole,
                           })
                         }
-                        className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="text-sm border border-gray-300 rounded-md px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-800 dark:border-gray-600"
                         aria-label={`Role for ${m.displayName ?? m.userId}`}
                       >
                         {(['owner', 'admin', 'member'] as TenantRole[]).map((r) => (
@@ -182,7 +182,7 @@ export function MembersTab(): JSX.Element {
                       <Badge variant={ROLE_BADGE[m.role]}>{m.role}</Badge>
                     )}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                     {formatDate(m.joinedAt)}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right">
@@ -190,7 +190,7 @@ export function MembersTab(): JSX.Element {
                       <button
                         type="button"
                         onClick={() => setConfirmRemove(m)}
-                        className="text-sm text-red-600 hover:text-red-800 font-medium"
+                        className="text-sm text-red-600 hover:text-red-800 font-medium dark:text-red-400"
                       >
                         Remove
                       </button>

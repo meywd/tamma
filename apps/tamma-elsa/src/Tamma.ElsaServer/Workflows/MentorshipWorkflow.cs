@@ -7,6 +7,7 @@ using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using System.Text.Json;
 using Tamma.Activities.Mentorship;
+using Tamma.Api.Services.Agents;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -348,7 +349,8 @@ public class MentorshipWorkflow : WorkflowBase
             WorkflowDefinitionId = new("llm-call"),
             Input = new(context => new Dictionary<string, object>
             {
-                ["agentRole"] = "mentor",
+                ["agentRole"] = AgentRole.SeniorDeveloper.ToWire(),
+                ["action"] = AgentAction.MentorFeedback.ToWire(),
                 ["taskPrompt"] = "Generate plan decomposition",
                 ["sessionId"] = sessionId.Get(context).ToString()
             }),

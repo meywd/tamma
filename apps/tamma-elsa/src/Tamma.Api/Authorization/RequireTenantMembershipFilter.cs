@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Tamma.Api.Auth;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Authorization;
@@ -50,8 +51,7 @@ public sealed class RequireTenantMembershipFilter(
             return Results.BadRequest(new { error = "Missing or invalid tenantId route value" });
         }
 
-        var userIdRaw = http.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (userIdRaw is null || !Guid.TryParse(userIdRaw, out var userId))
+        if (http.User.GetUserId() is not Guid userId)
         {
             return Results.Json(
                 new { error = "Not authenticated" },

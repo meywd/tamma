@@ -99,13 +99,13 @@ export function TenantDetailPage(): JSX.Element {
       <div className="space-y-4">
         <Link
           to="/admin/tenants"
-          className="text-sm text-blue-600 hover:text-blue-800"
+          className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400"
         >
           ← Back to tenants
         </Link>
         <div
           role="alert"
-          className="bg-red-50 border border-red-200 rounded-md p-4 text-sm text-red-800"
+          className="bg-red-50 border border-red-200 rounded-md p-4 text-sm text-red-800 dark:bg-red-950 dark:border-red-800"
         >
           {error}
         </div>
@@ -122,18 +122,18 @@ export function TenantDetailPage(): JSX.Element {
       <div>
         <Link
           to="/admin/tenants"
-          className="text-sm text-blue-600 hover:text-blue-800"
+          className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400"
         >
           ← Back to tenants
         </Link>
       </div>
 
       {/* Header */}
-      <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6 dark:bg-gray-800 dark:border-gray-700">
         <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">{tenant.name}</h1>
-            <p className="text-sm text-gray-500 mt-1">
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{tenant.name}</h1>
+            <p className="text-sm text-gray-500 mt-1 dark:text-gray-400">
               <code className="font-mono">{tenant.slug}</code> ·{' '}
               <code className="font-mono text-xs">{tenant.id}</code>
             </p>
@@ -141,7 +141,7 @@ export function TenantDetailPage(): JSX.Element {
           <TenantStatusBadge status={tenant.status} />
         </div>
         {tenant.failureReason && (
-          <div className="mt-4 bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-800">
+          <div className="mt-4 bg-red-50 border border-red-200 rounded-md p-3 text-sm text-red-800 dark:bg-red-950 dark:border-red-800">
             <strong>Last failure reason:</strong> {tenant.failureReason}
           </div>
         )}
@@ -149,70 +149,70 @@ export function TenantDetailPage(): JSX.Element {
 
       {/* Metadata grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <dl className="bg-white rounded-lg border border-gray-200 shadow-sm p-6 space-y-3">
+        <dl className="bg-white rounded-lg border border-gray-200 shadow-sm p-6 space-y-3 dark:bg-gray-800 dark:border-gray-700">
           <div className="flex justify-between">
-            <dt className="text-sm font-medium text-gray-500">Type</dt>
-            <dd className="text-sm text-gray-900">{tenant.type}</dd>
+            <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Type</dt>
+            <dd className="text-sm text-gray-900 dark:text-gray-100">{tenant.type}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-sm font-medium text-gray-500">Created</dt>
-            <dd className="text-sm text-gray-900">
+            <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Created</dt>
+            <dd className="text-sm text-gray-900 dark:text-gray-100">
               {new Date(tenant.createdAt).toLocaleString()}
             </dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-sm font-medium text-gray-500">Last activity</dt>
-            <dd className="text-sm text-gray-900">
+            <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Last activity</dt>
+            <dd className="text-sm text-gray-900 dark:text-gray-100">
               {new Date(tenant.updatedAt).toLocaleString()}
             </dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-sm font-medium text-gray-500">Owner email</dt>
-            <dd className="text-sm text-gray-900">
+            <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Owner email</dt>
+            <dd className="text-sm text-gray-900 dark:text-gray-100">
               {tenant.ownerEmail ?? (
-                <span className="text-gray-400 italic">Unknown</span>
+                <span className="text-gray-400 italic dark:text-gray-500">Unknown</span>
               )}
             </dd>
           </div>
           {tenant.deleteRequestedAt && (
             <div className="flex justify-between">
-              <dt className="text-sm font-medium text-gray-500">
+              <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">
                 Delete requested at
               </dt>
-              <dd className="text-sm text-gray-900">
+              <dd className="text-sm text-gray-900 dark:text-gray-100">
                 {new Date(tenant.deleteRequestedAt).toLocaleString()}
               </dd>
             </div>
           )}
         </dl>
 
-        <dl className="bg-white rounded-lg border border-gray-200 shadow-sm p-6 space-y-3">
+        <dl className="bg-white rounded-lg border border-gray-200 shadow-sm p-6 space-y-3 dark:bg-gray-800 dark:border-gray-700">
           <div className="flex justify-between">
-            <dt className="text-sm font-medium text-gray-500">Plan</dt>
-            <dd className="text-sm text-gray-900">
+            <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">Plan</dt>
+            <dd className="text-sm text-gray-900 dark:text-gray-100">
               {tenant.planName ?? tenant.legacyPlan}
               {tenant.planSlug && (
-                <span className="ml-1 text-xs text-gray-400 font-mono">
+                <span className="ml-1 text-xs text-gray-400 font-mono dark:text-gray-500">
                   ({tenant.planSlug})
                 </span>
               )}
             </dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-sm font-medium text-gray-500">
+            <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">
               Encrypted connection string
             </dt>
-            <dd className="text-sm text-gray-900">
+            <dd className="text-sm text-gray-900 dark:text-gray-100">
               {tenant.hasEncryptedConnectionString ? (
-                <span className="text-green-700">Present</span>
+                <span className="text-green-700 dark:text-green-300">Present</span>
               ) : (
-                <span className="text-gray-400 italic">None</span>
+                <span className="text-gray-400 italic dark:text-gray-500">None</span>
               )}
             </dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-sm font-medium text-gray-500">KEK version</dt>
-            <dd className="text-sm text-gray-900 font-mono">
+            <dt className="text-sm font-medium text-gray-500 dark:text-gray-400">KEK version</dt>
+            <dd className="text-sm text-gray-900 font-mono dark:text-gray-100">
               {tenant.kekVersion ?? '—'}
             </dd>
           </div>
@@ -222,12 +222,12 @@ export function TenantDetailPage(): JSX.Element {
       {/* Plan change */}
       <section
         aria-labelledby="plan-change-heading"
-        className="bg-white rounded-lg border border-gray-200 shadow-sm p-6"
+        className="bg-white rounded-lg border border-gray-200 shadow-sm p-6 dark:bg-gray-800 dark:border-gray-700"
       >
-        <h2 id="plan-change-heading" className="text-lg font-semibold text-gray-900 mb-3">
+        <h2 id="plan-change-heading" className="text-lg font-semibold text-gray-900 mb-3 dark:text-gray-100">
           Change plan
         </h2>
-        <p className="text-sm text-gray-600 mb-4">
+        <p className="text-sm text-gray-600 mb-4 dark:text-gray-400">
           Changes the billable plan immediately. Emits <code>PLAN.UPDATED</code>{' '}
           to the audit log.
         </p>
@@ -235,7 +235,7 @@ export function TenantDetailPage(): JSX.Element {
           <div className="flex-1 max-w-xs">
             <label
               htmlFor="plan-select"
-              className="block text-xs font-medium text-gray-600 mb-1"
+              className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400"
             >
               Target plan
             </label>
@@ -244,7 +244,7 @@ export function TenantDetailPage(): JSX.Element {
               value={planDraft}
               onChange={(e) => setPlanDraft(e.target.value)}
               disabled={!actions.canChangePlan || planSaving}
-              className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+              className="w-full text-sm border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed dark:bg-gray-800 dark:border-gray-600"
             >
               <option value="free">Free</option>
               <option value="team">Team</option>
@@ -265,12 +265,12 @@ export function TenantDetailPage(): JSX.Element {
           </button>
         </div>
         {!actions.canChangePlan && (
-          <p className="text-xs text-gray-500 mt-2 italic">
+          <p className="text-xs text-gray-500 mt-2 italic dark:text-gray-400">
             Plan changes are gated when the tenant is deleting/deleted.
           </p>
         )}
         {planMessage && (
-          <div className="mt-3 bg-blue-50 border border-blue-200 rounded-md text-sm text-blue-800 px-3 py-2">
+          <div className="mt-3 bg-blue-50 border border-blue-200 rounded-md text-sm text-blue-800 px-3 py-2 dark:bg-blue-950 dark:text-blue-200 dark:border-blue-800">
             {planMessage}
           </div>
         )}
@@ -279,11 +279,11 @@ export function TenantDetailPage(): JSX.Element {
       {/* Destructive actions */}
       <section
         aria-labelledby="tenant-actions-heading"
-        className="bg-white rounded-lg border border-gray-200 shadow-sm p-6"
+        className="bg-white rounded-lg border border-gray-200 shadow-sm p-6 dark:bg-gray-800 dark:border-gray-700"
       >
         <h2
           id="tenant-actions-heading"
-          className="text-lg font-semibold text-gray-900 mb-3"
+          className="text-lg font-semibold text-gray-900 mb-3 dark:text-gray-100"
         >
           Tenant actions
         </h2>
@@ -297,12 +297,12 @@ export function TenantDetailPage(): JSX.Element {
       {/* Events timeline */}
       <section
         aria-labelledby="tenant-events-heading"
-        className="bg-white rounded-lg border border-gray-200 shadow-sm p-6"
+        className="bg-white rounded-lg border border-gray-200 shadow-sm p-6 dark:bg-gray-800 dark:border-gray-700"
       >
         <div className="flex items-center justify-between mb-3">
           <h2
             id="tenant-events-heading"
-            className="text-lg font-semibold text-gray-900"
+            className="text-lg font-semibold text-gray-900 dark:text-gray-100"
           >
             Recent platform events
           </h2>
@@ -310,7 +310,7 @@ export function TenantDetailPage(): JSX.Element {
             type="button"
             onClick={() => void load()}
             disabled={loading}
-            className="text-sm text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50"
+            className="text-sm text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50 dark:text-blue-400"
           >
             Refresh
           </button>

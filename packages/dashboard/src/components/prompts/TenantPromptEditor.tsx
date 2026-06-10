@@ -181,34 +181,34 @@ export function TenantPromptEditor(props: TenantPromptEditorProps): JSX.Element 
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-white rounded-lg shadow-xl w-full max-w-3xl mx-4"
+        className="bg-white rounded-lg shadow-xl w-full max-w-3xl mx-4 dark:bg-gray-800"
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
               {role} / {action}
             </h2>
-            <p className="text-xs text-gray-500">Edit the prompt template for this role+action.</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Edit the prompt template for this role+action.</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-sm text-gray-500 hover:text-gray-800"
+            className="text-sm text-gray-500 hover:text-gray-800 dark:text-gray-400"
           >
             Close
           </button>
         </div>
 
         <div className="px-6 py-4 space-y-4">
-          {loading && <div className="text-sm text-gray-500">Loading…</div>}
+          {loading && <div className="text-sm text-gray-500 dark:text-gray-400">Loading…</div>}
 
           {!isOverride && (
-            <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-xs p-3 rounded">
+            <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-xs p-3 rounded dark:bg-yellow-950 dark:text-yellow-200 dark:border-yellow-800">
               This is a system default. Saving will create an override for your tenant.
             </div>
           )}
           {isOverride && (
-            <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs p-3 rounded flex items-center justify-between gap-3">
+            <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs p-3 rounded flex items-center justify-between gap-3 dark:bg-blue-950 dark:text-blue-200 dark:border-blue-800">
               <span>This is a tenant override.</span>
               {!readOnly && (
                 <button
@@ -223,12 +223,12 @@ export function TenantPromptEditor(props: TenantPromptEditorProps): JSX.Element 
           )}
 
           {saveError && (
-            <div className="text-sm text-red-600" role="alert">
+            <div className="text-sm text-red-600 dark:text-red-400" role="alert">
               {saveError}
             </div>
           )}
           {toast && (
-            <div className="text-sm text-green-700" role="status">
+            <div className="text-sm text-green-700 dark:text-green-300" role="status">
               {toast}
             </div>
           )}
@@ -236,7 +236,7 @@ export function TenantPromptEditor(props: TenantPromptEditorProps): JSX.Element 
           <div>
             <label
               htmlFor="prompt-template-body"
-              className="block text-xs font-medium text-gray-600 mb-1"
+              className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400"
             >
               Template
             </label>
@@ -247,12 +247,12 @@ export function TenantPromptEditor(props: TenantPromptEditorProps): JSX.Element 
               onChange={(e) => setTemplate(e.target.value)}
               rows={10}
               readOnly={readOnly}
-              className="w-full px-3 py-2 text-sm font-mono border border-gray-300 rounded-md"
+              className="w-full px-3 py-2 text-sm font-mono border border-gray-300 rounded-md dark:border-gray-600"
             />
           </div>
 
           <div>
-            <div className="block text-xs font-medium text-gray-600 mb-1">Variables detected</div>
+            <div className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400">Variables detected</div>
             <div
               data-testid="extracted-variables"
               className="text-xs font-mono text-purple-700"
@@ -266,7 +266,7 @@ export function TenantPromptEditor(props: TenantPromptEditorProps): JSX.Element 
           <div>
             <label
               htmlFor="prompt-system-body"
-              className="block text-xs font-medium text-gray-600 mb-1"
+              className="block text-xs font-medium text-gray-600 mb-1 dark:text-gray-400"
             >
               System Prompt
             </label>
@@ -276,12 +276,12 @@ export function TenantPromptEditor(props: TenantPromptEditorProps): JSX.Element 
               onChange={(e) => setSystemPrompt(e.target.value)}
               rows={4}
               readOnly={readOnly}
-              className="w-full px-3 py-2 text-sm font-mono border border-gray-300 rounded-md"
+              className="w-full px-3 py-2 text-sm font-mono border border-gray-300 rounded-md dark:border-gray-600"
             />
           </div>
 
           <div className="flex flex-wrap gap-4">
-            <label className="flex items-center gap-2 text-xs text-gray-700">
+            <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
               <input
                 type="checkbox"
                 checked={enableTools}
@@ -290,7 +290,7 @@ export function TenantPromptEditor(props: TenantPromptEditorProps): JSX.Element 
               />
               Enable tools
             </label>
-            <div className="flex items-center gap-2 text-xs text-gray-700">
+            <div className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
               <label htmlFor="prompt-max-tokens">Max tokens</label>
               <input
                 id="prompt-max-tokens"
@@ -300,7 +300,7 @@ export function TenantPromptEditor(props: TenantPromptEditorProps): JSX.Element 
                 value={maxTokens}
                 disabled={readOnly}
                 onChange={(e) => setMaxTokens(Number(e.target.value) || 4096)}
-                className="w-24 px-2 py-1 border border-gray-300 rounded-md"
+                className="w-24 px-2 py-1 border border-gray-300 rounded-md dark:border-gray-600"
               />
             </div>
           </div>
@@ -315,11 +315,11 @@ export function TenantPromptEditor(props: TenantPromptEditorProps): JSX.Element 
           />
         </div>
 
-        <div className="flex items-center justify-end gap-2 px-6 py-3 border-t border-gray-100">
+        <div className="flex items-center justify-end gap-2 px-6 py-3 border-t border-gray-100 dark:border-gray-800">
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md"
+            className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md dark:bg-gray-800 dark:text-gray-300"
           >
             Close
           </button>

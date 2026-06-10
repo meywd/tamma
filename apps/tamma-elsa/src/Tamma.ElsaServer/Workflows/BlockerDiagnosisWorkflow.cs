@@ -12,6 +12,7 @@ using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
 using Tamma.Activities.Security;
+using Tamma.Api.Services.Agents;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -184,7 +185,8 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
             WorkflowDefinitionId = new("llm-call"),
             Input = new(context => new Dictionary<string, object>
             {
-                ["role"] = "analyst",
+                ["role"] = AgentRole.SeniorDeveloper.ToWire(),
+                ["action"] = AgentAction.ResolveBlocker.ToWire(),
                 ["analysisType"] = "BlockerDiagnosis",
                 ["content"] = BuildDiagnosisPrompt(
                     aggregatedSignals.Get(context),
@@ -404,7 +406,8 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         WorkflowDefinitionId = new("llm-call"),
                         Input = new(context => new Dictionary<string, object>
                         {
-                            ["role"] = "analyst",
+                            ["role"] = AgentRole.SeniorDeveloper.ToWire(),
+                            ["action"] = AgentAction.MentorFeedback.ToWire(),
                             ["analysisType"] = "GuidanceGeneration",
                             ["content"] = $"Provide Socratic hints for: {SecurityHelpers.SanitizeForPrompt(diagnosisResult.Get(context)?.RootCauseHypothesis ?? "unknown blocker")}. " +
                                           $"Blocker type: {diagnosisResult.Get(context)?.BlockerType}. " +
@@ -510,7 +513,8 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         WorkflowDefinitionId = new("llm-call"),
                         Input = new(context => new Dictionary<string, object>
                         {
-                            ["role"] = "analyst",
+                            ["role"] = AgentRole.SeniorDeveloper.ToWire(),
+                            ["action"] = AgentAction.MentorFeedback.ToWire(),
                             ["analysisType"] = "GuidanceGeneration",
                             ["content"] = $"Provide direct guidance for: {SecurityHelpers.SanitizeForPrompt(diagnosisResult.Get(context)?.RootCauseHypothesis ?? "unknown blocker")}. " +
                                           $"Blocker type: {diagnosisResult.Get(context)?.BlockerType}. " +
@@ -578,7 +582,8 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
     }
 
     /// <summary>
-    /// Level 3: Code Assistance. 45-minute wait. Uses implementer role.
+    /// Level 3: Code Assistance. 45-minute wait. Uses the developer role
+    /// (implement-fix) to produce working solution code.
     /// </summary>
     private static If BuildAssistanceLevel(
         Variable<Guid> sessionId,
@@ -607,7 +612,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         Value = new(context => "Assistance")
                     }, "Set Level: Assistance"),
 
-                    // Dispatch LLM for code assistance (uses implementer role)
+                    // Dispatch LLM for code assistance (developer implements a fix example)
                     WithLabel(new DispatchWorkflow
                     {
                         Id = "AssistanceLlmCall",
@@ -615,7 +620,8 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         WorkflowDefinitionId = new("llm-call"),
                         Input = new(context => new Dictionary<string, object>
                         {
-                            ["role"] = "implementer",
+                            ["role"] = AgentRole.Developer.ToWire(),
+                            ["action"] = AgentAction.ImplementFix.ToWire(),
                             ["analysisType"] = "GuidanceGeneration",
                             ["content"] = $"Provide code example for: {SecurityHelpers.SanitizeForPrompt(diagnosisResult.Get(context)?.RootCauseHypothesis ?? "unknown blocker")}. " +
                                           $"Blocker type: {diagnosisResult.Get(context)?.BlockerType}. " +

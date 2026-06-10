@@ -78,9 +78,26 @@ public class ControlPlaneDbContextModelTests
             "admin_impersonations",
             // PF-S9 — bootstrap superadmin sentinel (single-row).
             "platform_bootstrap",
+            // Story 31-2 — generalised per-(tenant, platform_kind)
+            // installation registry. Lives on CP because cross-tenant
+            // routing (webhook arrives with no tenant context) needs
+            // cross-tenant lookups.
+            "tenant_platform_installations",
+            // Story 31-7 — cross-platform webhook delivery idempotency
+            // journal. Generalises github_webhook_deliveries; the
+            // older table stays for the deprecation window but new
+            // deliveries land here for every PlatformKind.
+            "platform_webhook_deliveries",
+            // Unified-tenancy Phase 0 (plan 2026-06-09) — registry of
+            // shared-pool and dedicated DB instances. Each tenant row
+            // references one of these via DatabaseId.
+            "tenant_databases",
         }, because: "Story 28-1 PR D (Decision #4) — enumerate every "
             + "CP-resident table; the 11 + 4 mentorship tenant-resident "
-            + "entities have moved to TenantDbContext.");
+            + "entities have moved to TenantDbContext. Story 31-2 adds "
+            + "tenant_platform_installations; Story 31-7 adds "
+            + "platform_webhook_deliveries. Unified-tenancy Phase 0 adds "
+            + "tenant_databases.");
     }
 
     [Test]
@@ -102,6 +119,29 @@ public class ControlPlaneDbContextModelTests
         shadowNames.Should().Contain("KekVersion");
         shadowNames.Should().Contain("FailureReason");
         shadowNames.Should().Contain("DeleteRequestedAt");
+    }
+
+    [Test]
+    public void Tenant_Carries_V2ProviderShadowColumns_FromStory303()
+    {
+        using var ctx = CreateContext();
+
+        var tenant = ctx.Model.FindEntityType(typeof(Tenant))!;
+        var shadow = tenant.GetProperties()
+            .Where(p => p.IsShadowProperty())
+            .ToDictionary(p => p.Name, p => p);
+
+        shadow.Should().ContainKey("ProviderKey",
+            because: "Story 30-3 added tenants.provider_key for V2 dispatch routing");
+        shadow.Should().ContainKey("ProviderResourceIds",
+            because: "Story 30-3 added tenants.provider_resource_ids JSONB for V2 resource ids");
+
+        shadow["ProviderKey"].IsNullable.Should().BeTrue(
+            because: "shared-infra tenants have no provider; column must accept NULL");
+        shadow["ProviderResourceIds"].IsNullable.Should().BeTrue(
+            because: "JSONB stays NULL until the provider populates resource ids");
+
+        shadow["ProviderResourceIds"].GetColumnType().Should().Be("jsonb");
     }
 
     [Test]

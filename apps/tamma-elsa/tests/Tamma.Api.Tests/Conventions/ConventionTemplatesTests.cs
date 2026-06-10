@@ -7,15 +7,14 @@ namespace Tamma.Api.Tests.Conventions;
 [TestFixture]
 public class ConventionTemplatesTests
 {
-    // The full set of 20 keys shipped by Tamma. Matches the deleted TS source
-    // at packages/api/src/services/convention-templates.ts (commit 9e9a57c~1).
-    //
-    // The framework-suffixed keys used by the first port (csharp-aspnet,
-    // rust-actix, go-stdlib, java-spring) were renamed to match the TS
-    // source — the TS file uses bare language keys (csharp, rust, go, java)
-    // even though the bodies mention .NET, cargo, goroutines, Spring Boot.
+    // The full catalogue shipped by Tamma — 20 language/framework + 11 action
+    // + 8 role + 7 cross-cutting = 46 templates. This array is the catalogue
+    // lock: it must stay in sync with ConventionTemplates.All. Adding or
+    // removing a template without updating this list fails
+    // ListAll_ExposesAllExpectedKeys, which is intentional.
     private static readonly string[] ExpectedKeys =
     {
+        // Language / framework (20)
         "typescript-react",
         "typescript-node",
         "typescript-react-native",
@@ -27,7 +26,6 @@ public class ConventionTemplatesTests
         "go",
         "java",
         "kotlin",
-        "scala",
         "swift",
         "swift-uikit",
         "dart-flutter",
@@ -35,17 +33,47 @@ public class ConventionTemplatesTests
         "cpp",
         "ruby-rails",
         "php-laravel",
-        "elixir-phoenix"
+        "elixir-phoenix",
+        "scala",
+        // Action-triggered (11)
+        "action-write-code",
+        "action-review-code",
+        "action-design",
+        "action-write-tests",
+        "action-debug",
+        "action-refactor",
+        "action-document",
+        "action-plan",
+        "action-context-scan",
+        "action-triage",
+        "action-deploy",
+        // Role-triggered (8)
+        "role-security-reviewer",
+        "role-architect",
+        "role-qa-engineer",
+        "role-devops-engineer",
+        "role-tech-lead",
+        "role-developer",
+        "role-product-owner",
+        "role-tech-writer",
+        // Cross-cutting (7)
+        "universal-safety",
+        "universal-quality",
+        "git-conventions",
+        "error-handling",
+        "api-design",
+        "database-conventions",
+        "observability"
     };
 
     [Test]
-    public void ListAll_ReturnsExactlyTwentyTemplates()
+    public void ListAll_ReturnsExactlyTheExpectedCatalogue()
     {
         var service = new ConventionTemplateService();
 
         var templates = service.ListAll();
 
-        templates.Should().HaveCount(20);
+        templates.Should().HaveCount(ExpectedKeys.Length);
     }
 
     [Test]

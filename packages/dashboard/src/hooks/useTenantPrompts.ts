@@ -76,49 +76,58 @@ export interface UseTenantPromptsReturn {
 }
 
 // -----------------------------------------------------------------------
-// Wire types — these match Tamma.Api.Dtos.Prompts.PromptResponse /
-// SystemDefaultsResponse / RenderedPromptResponse (PascalCase on the wire
-// because System.Text.Json defaults to the C# property casing).
+// Wire types — match Tamma.Api.Dtos.Prompts.PromptResponse /
+// SystemDefaultsResponse / RenderedPromptResponse as they appear on the
+// JSON wire.
+//
+// Tamma.Api serializes responses with System.Text.Json's default
+// camelCase policy (NOT C# PropertyNamingPolicy.Default — ASP.NET Core's
+// default JsonOptions enables camelCase). Record field names like
+// RoleActionTemplates show up on the wire as roleActionTemplates. The
+// hook used to declare PascalCase fields here based on the wrong
+// assumption about serialization defaults; on the first authenticated
+// /api/prompts/system fetch the merge step blew up with
+// "Cannot read properties of undefined (reading 'map')" because
+// systemBundle.RoleActionTemplates was undefined while
+// systemBundle.roleActionTemplates was the populated array.
 // -----------------------------------------------------------------------
-
 interface WirePromptResponse {
-  Role?: string | null;
-  Action?: string | null;
-  Template: string;
-  SystemPrompt?: string | null;
-  Variables?: string[] | null;
-  EnableTools: boolean;
-  MaxTokens: number;
-  Source: string;
+  role?: string | null;
+  action?: string | null;
+  template: string;
+  systemPrompt?: string | null;
+  variables?: string[] | null;
+  enableTools: boolean;
+  maxTokens: number;
+  source: string;
 }
 
 interface WireSystemDefaults {
-  RoleActionTemplates: WirePromptResponse[];
-  SystemPrompts: Record<string, string>;
-  ActionDefaults: Record<string, WirePromptResponse>;
+  roleActionTemplates: WirePromptResponse[];
+  systemPrompts: Record<string, string>;
 }
 
 interface WireRenderedPromptResponse {
-  Role: string;
-  Action: string;
-  Version: number;
-  RenderedTemplate: string;
-  RenderedSystemPrompt: string;
-  EnableTools: boolean;
-  MaxTokens: number;
-  UnresolvedVariables: string[];
+  role: string;
+  action: string;
+  version: number;
+  renderedTemplate: string;
+  renderedSystemPrompt: string;
+  enableTools: boolean;
+  maxTokens: number;
+  unresolvedVariables: string[];
 }
 
 function toResolvedPrompt(w: WirePromptResponse): ResolvedPrompt {
-  const source: PromptSource = w.Source === 'user' ? 'user' : 'system';
+  const source: PromptSource = w.source === 'user' ? 'user' : 'system';
   return {
-    role: w.Role ?? '',
-    action: w.Action ?? '',
-    template: w.Template,
-    systemPrompt: w.SystemPrompt ?? '',
-    variables: w.Variables ?? [],
-    enableTools: w.EnableTools,
-    maxTokens: w.MaxTokens,
+    role: w.role ?? '',
+    action: w.action ?? '',
+    template: w.template,
+    systemPrompt: w.systemPrompt ?? '',
+    variables: w.variables ?? [],
+    enableTools: w.enableTools,
+    maxTokens: w.maxTokens,
     source,
   };
 }
@@ -170,13 +179,13 @@ export function useTenantPrompts(): UseTenantPromptsReturn {
 
       const overrideMap = new Map<string, WirePromptResponse>();
       for (const o of userOverrides) {
-        if (o.Role && o.Action) {
-          overrideMap.set(keyOf(o.Role, o.Action), o);
+        if (o.role && o.action) {
+          overrideMap.set(keyOf(o.role, o.action), o);
         }
       }
 
-      const merged: ResolvedPrompt[] = systemBundle.RoleActionTemplates.map((sys) => {
-        const k = keyOf(sys.Role ?? '', sys.Action ?? '');
+      const merged: ResolvedPrompt[] = (systemBundle.roleActionTemplates ?? []).map((sys) => {
+        const k = keyOf(sys.role ?? '', sys.action ?? '');
         const override = overrideMap.get(k);
         return override ? toResolvedPrompt(override) : toResolvedPrompt(sys);
       });
@@ -260,17 +269,17 @@ export function useTenantPrompts(): UseTenantPromptsReturn {
       try {
         const w = await fetchJson<WireRenderedPromptResponse>(
           `/api/prompts/${encodeURIComponent(role)}/${encodeURIComponent(action)}/render`,
-          { method: 'POST', body: JSON.stringify({ Variables: variables }) },
+          { method: 'POST', body: JSON.stringify({ variables }) },
         );
         return {
-          role: w.Role,
-          action: w.Action,
-          version: w.Version,
-          renderedTemplate: w.RenderedTemplate,
-          renderedSystemPrompt: w.RenderedSystemPrompt,
-          enableTools: w.EnableTools,
-          maxTokens: w.MaxTokens,
-          unresolvedVariables: w.UnresolvedVariables ?? [],
+          role: w.role,
+          action: w.action,
+          version: w.version,
+          renderedTemplate: w.renderedTemplate,
+          renderedSystemPrompt: w.renderedSystemPrompt,
+          enableTools: w.enableTools,
+          maxTokens: w.maxTokens,
+          unresolvedVariables: w.unresolvedVariables ?? [],
         };
       } catch {
         return null;

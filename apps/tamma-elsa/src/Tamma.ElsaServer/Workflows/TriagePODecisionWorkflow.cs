@@ -10,6 +10,7 @@ using Elsa.Workflows.Runtime.Activities;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using Tamma.Api.Services.Agents;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -17,7 +18,7 @@ namespace Tamma.ElsaServer.Workflows;
 /// <summary>
 /// Triage PO Decision — Product Owner makes final triage decision based on panel review.
 ///
-/// Dispatches llm-call with role=product_owner, action=triage.
+/// Dispatches llm-call with role=product_owner, action=triage-intake.
 /// Parses decision: priority, type, complexity, automation level, labels, comment.
 ///
 /// Flow:
@@ -81,8 +82,8 @@ public class TriagePODecisionWorkflow : WorkflowBase
             WorkflowDefinitionId = new("llm-call"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["role"] = "product_owner",
-                ["action"] = "triage",
+                ["role"] = AgentRole.ProductOwner.ToWire(),
+                ["action"] = AgentAction.TriageIntake.ToWire(),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["itemJson"] = itemJson.Get(ctx),

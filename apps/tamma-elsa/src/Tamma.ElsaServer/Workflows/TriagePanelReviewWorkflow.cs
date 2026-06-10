@@ -10,6 +10,7 @@ using Elsa.Workflows.Runtime.Activities;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
+using Tamma.Api.Services.Agents;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -18,7 +19,9 @@ namespace Tamma.ElsaServer.Workflows;
 /// Triage Panel Review — 4-role LLM panel assesses a triage item.
 /// Roles: Security Analyst, Developer, DevOps, Tester.
 ///
-/// Each role dispatches llm-call with role=X, action=triage.
+/// Each role dispatches llm-call with a role-specific triage action
+/// (security=assess-vulnerability, developer/tester=triage-defect,
+/// devops=diagnose-incident).
 /// Results are aggregated into a panel result JSON.
 ///
 /// For security alerts: CVE impact, attack surface, breaking changes,
@@ -91,25 +94,25 @@ public class TriagePanelReviewWorkflow : WorkflowBase
         // ================================================================
 
         // Security review
-        var secReviewCall = RoleTriageDispatch("SecReview", "Security Review", "security",
+        var secReviewCall = RoleTriageDispatch("SecReview", "Security Review", AgentRole.Security,
             repository, itemJson, contextJson, llmResult);
         var extractSec = ExtractTriageReview(securityReview, llmResult,
             "ExtractSecReview", "Extract Security Review");
 
         // Developer review
-        var devReviewCall = RoleTriageDispatch("DevReview", "Developer Review", "developer",
+        var devReviewCall = RoleTriageDispatch("DevReview", "Developer Review", AgentRole.Developer,
             repository, itemJson, contextJson, llmResult);
         var extractDev = ExtractTriageReview(developerReview, llmResult,
             "ExtractDevReview", "Extract Developer Review");
 
         // DevOps review
-        var devopsReviewCall = RoleTriageDispatch("DevOpsReview", "DevOps Review", "devops",
+        var devopsReviewCall = RoleTriageDispatch("DevOpsReview", "DevOps Review", AgentRole.Devops,
             repository, itemJson, contextJson, llmResult);
         var extractDevOps = ExtractTriageReview(devopsReview, llmResult,
             "ExtractDevOpsReview", "Extract DevOps Review");
 
         // Tester review
-        var testerReviewCall = RoleTriageDispatch("TesterReview", "Tester Review", "tester",
+        var testerReviewCall = RoleTriageDispatch("TesterReview", "Tester Review", AgentRole.Tester,
             repository, itemJson, contextJson, llmResult);
         var extractTester = ExtractTriageReview(testerReview, llmResult,
             "ExtractTesterReview", "Extract Tester Review");
@@ -227,7 +230,7 @@ public class TriagePanelReviewWorkflow : WorkflowBase
     // Helper: Create a DispatchWorkflow for a triage role review
     // ================================================================
     private static DispatchWorkflow RoleTriageDispatch(
-        string id, string displayName, string role,
+        string id, string displayName, AgentRole role,
         Variable<string> repository, Variable<string> itemJson,
         Variable<string> contextJson,
         Variable<IDictionary<string, object>?> result)
@@ -238,8 +241,8 @@ public class TriagePanelReviewWorkflow : WorkflowBase
             WorkflowDefinitionId = new("llm-call"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["role"] = role,
-                ["action"] = "triage",
+                ["role"] = role.ToWire(),
+                ["action"] = RolePhaseMap.GetTriageActionForRole(role).ToWire(),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["itemJson"] = itemJson.Get(ctx),

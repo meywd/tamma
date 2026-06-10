@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Tamma.Api.Auth;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Tamma.Api.Dtos.Agents;
@@ -83,8 +84,7 @@ public static class AgentEndpoints
             });
         }
 
-        var userId = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        var userGuid = userId is not null && Guid.TryParse(userId, out var g) ? g : (Guid?)null;
+        var userGuid = principal.GetUserId();
 
         var saved = await configRepo.UpsertAsync(tenantContext.TenantId, configJson, userGuid);
 
@@ -98,7 +98,7 @@ public static class AgentEndpoints
             Tags = JsonSerializer.Serialize(new
             {
                 tenantId = tenantContext.TenantId?.ToString(),
-                userId = userId,
+                userId = userGuid,
             }),
             Metadata = JsonSerializer.Serialize(new
             {

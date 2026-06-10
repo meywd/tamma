@@ -17,10 +17,10 @@ public class Tenant
     // ── Cranl per-tenant provisioning (audit cranl/001 — Doc 02 §3) ──
     //
     // Populated when a platform owner provisions the tenant onto Cranl
-    // (via POST /api/admin/tenants/{id}/provision). NULL while the
-    // tenant rides on the central / shared Postgres via RLS, which is
-    // the default for self-hosted dev and any tenant where the
-    // operator has not yet flipped the switch.
+    // (via POST /api/admin/tenants/{id}/provision). NULL when Cranl has
+    // not minted hosting infrastructure for the tenant — the default;
+    // placement is owned by the unified schema-per-tenant model
+    // (SchemaName + DatabaseId against the tenant_databases pool).
     public string? CranlProjectId { get; set; }
     public string? CranlDatabaseId { get; set; }
     public string? CranlAppId { get; set; }
@@ -29,9 +29,10 @@ public class Tenant
     /// <summary>
     /// Encrypted DATABASE_URL handed back by Cranl after the database
     /// reaches <c>running</c>. Encrypted at rest with AES-GCM keyed
-    /// from <c>Cranl:EncryptionKey</c> (or the Phase-3 fallback noted
-    /// in TenantSecretProtector). NULL when the tenant uses shared
-    /// infra — routing falls through to the central connection.
+    /// from <c>Cranl:EncryptionKey</c> (or the HKDF fallback noted
+    /// in TenantSecretProtector). NULL when Cranl never minted a
+    /// database for the tenant — routing then uses the tenant's
+    /// unified-model connection string (EncryptedConnectionString).
     /// </summary>
     public byte[]? CranlDatabaseUrlEncrypted { get; set; }
 

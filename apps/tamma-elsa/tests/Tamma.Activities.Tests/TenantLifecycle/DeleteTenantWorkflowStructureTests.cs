@@ -17,9 +17,10 @@ namespace Tamma.Activities.Tests.TenantLifecycle;
 ///   <item><description>Root is a Sequence — the delete flow is linear and
 ///     idempotent.</description></item>
 ///   <item><description>Steps run in the right order: mark → evict pool →
-///     drop DB → drop role → emit success. The pool eviction must precede
-///     <c>DROP DATABASE</c> so the resolver releases its cached
-///     <c>NpgsqlDataSource</c> before the backends are kicked.</description></item>
+///     drop schema → drop role → emit success. The pool eviction must precede
+///     <c>DROP SCHEMA … CASCADE</c> so the resolver releases its cached
+///     <c>NpgsqlDataSource</c> first (unified-tenancy Phase 2 — the
+///     delete path is schema-scoped).</description></item>
 /// </list>
 /// </summary>
 [TestFixture]
@@ -30,7 +31,8 @@ public class DeleteTenantWorkflowStructureTests
         typeof(SetVariable),                       // initInputs
         typeof(MarkTenantDeletingActivity),
         typeof(EvictTenantPoolActivity),
-        typeof(DropTenantDatabaseActivity),
+        typeof(BackupTenantDatabaseActivity),      // AC4 — pre-drop backup (gated)
+        typeof(DropTenantSchemaActivity),
         typeof(DropTenantRoleActivity),
         typeof(EmitDeletedSuccessActivity),
     };
@@ -68,7 +70,7 @@ public class DeleteTenantWorkflowStructureTests
     }
 
     [Test]
-    public void Build_EvictPoolPrecedesDropDatabase()
+    public void Build_EvictPoolPrecedesDropSchema()
     {
         var workflow = new DeleteTenantWorkflow();
         var builder = WorkflowTestHelper.BuildWorkflow(workflow);
@@ -80,18 +82,40 @@ public class DeleteTenantWorkflowStructureTests
         for (var i = 0; i < activities.Count; i++)
         {
             if (activities[i] is EvictTenantPoolActivity) evictIdx = i;
-            if (activities[i] is DropTenantDatabaseActivity) dropDbIdx = i;
+            if (activities[i] is DropTenantSchemaActivity) dropDbIdx = i;
         }
 
         evictIdx.Should().BeGreaterThan(0);
         dropDbIdx.Should().BeGreaterThan(0);
         evictIdx.Should().BeLessThan(dropDbIdx,
-            "the resolver pool must be evicted before DROP DATABASE WITH (FORCE) "
+            "the resolver pool must be evicted before DROP SCHEMA … CASCADE "
             + "so the cached NpgsqlDataSource is released first");
     }
 
     [Test]
-    public void Build_DropDatabasePrecedesDropRole()
+    public void Build_BackupPrecedesDropSchema()
+    {
+        var workflow = new DeleteTenantWorkflow();
+        var builder = WorkflowTestHelper.BuildWorkflow(workflow);
+        var sequence = (Sequence)builder.Object.Root;
+        var activities = sequence.Activities.ToList();
+
+        var backupIdx = -1;
+        var dropDbIdx = -1;
+        for (var i = 0; i < activities.Count; i++)
+        {
+            if (activities[i] is BackupTenantDatabaseActivity) backupIdx = i;
+            if (activities[i] is DropTenantSchemaActivity) dropDbIdx = i;
+        }
+
+        backupIdx.Should().BeGreaterThan(0);
+        dropDbIdx.Should().BeGreaterThan(0);
+        backupIdx.Should().BeLessThan(dropDbIdx,
+            "AC4 — the pg_dump backup must complete before DROP SCHEMA");
+    }
+
+    [Test]
+    public void Build_DropSchemaPrecedesDropRole()
     {
         var workflow = new DeleteTenantWorkflow();
         var builder = WorkflowTestHelper.BuildWorkflow(workflow);
@@ -102,13 +126,13 @@ public class DeleteTenantWorkflowStructureTests
         var dropRoleIdx = -1;
         for (var i = 0; i < activities.Count; i++)
         {
-            if (activities[i] is DropTenantDatabaseActivity) dropDbIdx = i;
+            if (activities[i] is DropTenantSchemaActivity) dropDbIdx = i;
             if (activities[i] is DropTenantRoleActivity) dropRoleIdx = i;
         }
 
         dropDbIdx.Should().BeGreaterThan(0);
         dropRoleIdx.Should().BeGreaterThan(0);
         dropDbIdx.Should().BeLessThan(dropRoleIdx,
-            "DROP OWNED BY in DropTenantRoleActivity fails if the role still owns the DB");
+            "DROP ROLE in DropTenantRoleActivity fails if the role still owns the schema");
     }
 }

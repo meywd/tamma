@@ -269,5 +269,8 @@ public class DiagnosticsEndpointsIntegrationTests
             UpdatedAt = DateTime.UtcNow,
         });
         await cp.SaveChangesAsync();
+        // Phase 3 — tenant data is only reachable through the unified
+        // resolver once the tenant is provisioned.
+        await DiagnosticsSetUpFixture.ProvisionTenantAsync(tenantId);
     }
 }

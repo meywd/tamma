@@ -23,6 +23,15 @@ public static class WorkflowTestHelper
     {
         var mockBuilder = new Mock<IWorkflowBuilder>();
 
+        // Resilient default-value generation: any unconfigured WithVariable<T>()
+        // (no-arg) returns a real Variable<T> instead of null, so workflows that
+        // declare variables of custom/uncommon types (Guid, DiagnosisResult,
+        // Hypothesis?, …) build without NREs when their activity input delegates
+        // call variable.Get(ctx). The explicit Setup() calls below still take
+        // precedence; this only fills the gaps. Needed by Story 27-17's taxonomy
+        // drift test, which builds EVERY workflow in the assembly.
+        mockBuilder.DefaultValueProvider = new VariableDefaultValueProvider();
+
         string? definitionId = null;
         string? name = null;
         string? description = null;
@@ -121,5 +130,26 @@ public static class WorkflowTestHelper
             }
         }
         return activities;
+    }
+
+    /// <summary>
+    /// Moq default-value provider that materialises a real <see cref="Variable{T}"/>
+    /// for any requested <c>Variable&lt;T&gt;</c> return type (so unconfigured
+    /// <c>WithVariable&lt;T&gt;()</c> calls never yield null), delegating to Moq's
+    /// empty provider for every other type.
+    /// </summary>
+    private sealed class VariableDefaultValueProvider : DefaultValueProvider
+    {
+        protected override object? GetDefaultValue(Type type, Mock mock)
+        {
+            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Variable<>))
+                return Activator.CreateInstance(type);
+
+            // Mirror Moq's Empty provider for everything else: zero value for
+            // value types, null for reference types.
+            return type.IsValueType && Nullable.GetUnderlyingType(type) == null
+                ? Activator.CreateInstance(type)
+                : null;
+        }
     }
 }

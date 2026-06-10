@@ -32,6 +32,11 @@ WORKDIR /app
 
 # Install curl for health checks
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+# Story 28-5 — to enable Backup:DeletionBackup (pre-drop tenant pg_dump),
+# add postgresql-client so pg_dump resolves on PATH, e.g.:
+#   RUN apt-get update && apt-get install -y curl postgresql-client \
+#       && rm -rf /var/lib/apt/lists/*
+# Left out by default to keep the image lean (the feature ships OFF).
 
 # Create non-root user for security
 RUN groupadd -r tamma && useradd -r -g tamma tamma

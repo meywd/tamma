@@ -16,7 +16,7 @@ namespace Tamma.Activities.TenantLifecycle;
 ///
 /// <para>The cooling-off window (Doc 04 §6.5) is honoured by the workflow
 /// scheduling a delay between this step and the destructive
-/// <see cref="DropTenantDatabaseActivity"/>; the activity itself just
+/// <see cref="DropTenantSchemaActivity"/>; the activity itself just
 /// flips the row.</para>
 /// </summary>
 [Activity(

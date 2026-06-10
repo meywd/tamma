@@ -380,40 +380,41 @@ public static class AdminEndpoints
             TenantId = tenantContext.TenantId
         });
 
+        // Story 16.2 contract — the dashboard's apiKeysApi.create reads
+        // exactly these five fields. Don't include keyHash, ownerId, etc.
+        // — the response leaks otherwise. The raw key is shown ONCE here
+        // and never again; the dashboard surfaces it for the user to copy.
         return Results.Created($"/api/admin/users/{id}/keys/{apiKey.Id}",
-            new ServiceKeyResponse(
+            new CreateUserApiKeyResponse(
                 apiKey.Id,
-                apiKey.OwnerId,
-                apiKey.Label,
+                rawKey,
                 apiKey.KeyPrefix,
-                apiKey.Permissions,
-                apiKey.CreatedAt,
-                apiKey.LastUsedAt,
-                apiKey.RevokedAt,
-                apiKey.RotatedFromId,
-                rawKey));
+                apiKey.Label,
+                apiKey.CreatedAt));
     }
 
     public static async Task<IResult> ListUserApiKeys(Guid id, IApiKeyRepository apiKeyRepo)
     {
         var keys = await apiKeyRepo.ListByOwnerAsync(id.ToString());
-        return Results.Ok(keys.Select(k =>
-            new ServiceKeyResponse(
+        // Story 16.2 contract — { apiKeys: ApiKeyEntry[] }. The dashboard's
+        // apiKeysApi.list does fetchJSON<{ apiKeys: ... }>(...).then(r => r.apiKeys)
+        // and the per-item shape (ApiKeyEntry) is the seven fields below.
+        return Results.Ok(new UserApiKeyListResponse(
+            keys.Select(k => new UserApiKeyEntry(
                 k.Id,
-                k.OwnerId,
-                k.Label,
                 k.KeyPrefix,
-                k.Permissions,
-                k.CreatedAt,
+                k.Label,
+                k.OwnerId,
                 k.LastUsedAt,
-                k.RevokedAt,
-                k.RotatedFromId)));
+                k.CreatedAt,
+                k.RevokedAt)).ToList()));
     }
 
     public static async Task<IResult> DeleteUserApiKey(Guid id, Guid keyId, IApiKeyRepository apiKeyRepo)
     {
         await apiKeyRepo.RevokeAsync(keyId);
-        return Results.Ok(new { message = "API key revoked" });
+        // Story 16.2 contract — apiKeysApi.revoke reads { ok: true }.
+        return Results.Ok(new { ok = true });
     }
 
     // ─── Tenant provisioning (audit cranl/003) ─────────────────────────────
@@ -421,7 +422,8 @@ public static class AdminEndpoints
     // Platform-owner-only endpoints that drive per-tenant Cranl provisioning.
     // ITenantProvisioner is wired by ProvisioningServiceCollectionExtensions:
     // the Cranl-backed impl runs when Cranl:ApiKey is set, otherwise the Null
-    // impl flips the row to Ready immediately (shared infrastructure mode).
+    // impl flips the row to Ready immediately (no external resources minted;
+    // placement stays on the unified tenant_databases pool).
 
     public static async Task<IResult> ProvisionTenant(
         Guid tenantId,

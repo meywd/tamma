@@ -10,6 +10,10 @@ import { ProviderHealthPage } from './pages/settings/ProviderHealthPage.js';
 import { BudgetPage } from './pages/settings/BudgetPage.js';
 import { PromptsPage } from './pages/settings/PromptsPage.js';
 import { PromptsAdminPage } from './pages/admin/prompts/PromptsAdminPage.js';
+// Story 27-11 — platform-admin convention management UI.
+import { ConventionsAdminPage } from './pages/admin/conventions/ConventionsAdminPage.js';
+// Story 27-12 — tenant convention management UI.
+import { ConventionsPage } from './pages/settings/ConventionsPage.js';
 // Story 28-11 — platform-admin tenant-status UX.
 import { TenantsListPage } from './pages/admin/tenants/TenantsListPage.js';
 import { TenantDetailPage } from './pages/admin/tenants/TenantDetailPage.js';
@@ -171,6 +175,18 @@ export const router = createBrowserRouter([
           </AdminGuard>
         ),
       },
+      // Story 27-11: platform-admin convention management UI.
+      {
+        path: '/admin/conventions',
+        element: (
+          <AdminGuard>
+            <ConventionsAdminPage />
+          </AdminGuard>
+        ),
+      },
+      // Story 27-12: tenant convention management UI (all authenticated members;
+      // members see read-only banner; admin/owner can modify).
+      { path: '/settings/conventions', element: <ConventionsPage /> },
       // Story 28-11: platform-admin tenant-status UX. List + detail for
       // every tenant with status badge, lifecycle events, and
       // state-gated destructive actions (retry / delete / force-delete).

@@ -141,26 +141,26 @@ export function SecretRevealModal({
         aria-describedby="secret-reveal-warning"
         tabIndex={-1}
         onKeyDown={handleKeyDown}
-        className="relative bg-white rounded-lg shadow-xl p-6 max-w-lg w-full mx-4 outline-none"
+        className="relative bg-white rounded-lg shadow-xl p-6 max-w-lg w-full mx-4 outline-none dark:bg-gray-800"
       >
         <h3
           id="secret-reveal-title"
-          className="text-lg font-semibold text-gray-900 mb-1"
+          className="text-lg font-semibold text-gray-900 mb-1 dark:text-gray-100"
         >
           Secret created: {name}
         </h3>
         <p
           id="secret-reveal-warning"
-          className="text-sm text-red-700 font-medium mb-3"
+          className="text-sm text-red-700 font-medium mb-3 dark:text-red-300"
         >
           This value will not be shown again. Copy it now.
         </p>
         {expiryLine ? (
-          <p className="text-xs text-gray-500 mb-3">{expiryLine}</p>
+          <p className="text-xs text-gray-500 mb-3 dark:text-gray-400">{expiryLine}</p>
         ) : null}
 
         <div className="mb-4">
-          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">
+          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 dark:text-gray-400">
             Version {version} plaintext
           </label>
           <div className="flex gap-2">
@@ -168,7 +168,7 @@ export function SecretRevealModal({
               type="text"
               readOnly
               value={plaintext}
-              className="flex-1 font-mono text-sm px-3 py-2 bg-gray-50 border border-gray-300 rounded-md"
+              className="flex-1 font-mono text-sm px-3 py-2 bg-gray-50 border border-gray-300 rounded-md dark:bg-gray-900 dark:border-gray-600"
               aria-label="Secret plaintext"
               onFocus={(e) => e.currentTarget.select()}
             />
@@ -181,13 +181,13 @@ export function SecretRevealModal({
             </button>
           </div>
           {copyFailed ? (
-            <p className="text-xs text-red-600 mt-1">
+            <p className="text-xs text-red-600 mt-1 dark:text-red-400">
               Copy failed — select the value manually and copy it.
             </p>
           ) : null}
         </div>
 
-        <label className="flex items-start gap-2 text-sm text-gray-700 mb-5">
+        <label className="flex items-start gap-2 text-sm text-gray-700 mb-5 dark:text-gray-300">
           <input
             type="checkbox"
             checked={acknowledged}

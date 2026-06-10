@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!--
+      BL0006: "Do not use RenderTree types outside of the Blazor framework."
+      We use RenderTreeBuilder + RenderTreeFrame to render and inspect the
+      RenderFragment produced by the UI hint handlers without spinning up a
+      full Blazor renderer (bUnit). The risk (API changes between minor .NET
+      versions) is acceptable for unit tests that are pinned to net8.0.
+    -->
+    <NoWarn>$(NoWarn);BL0006</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Tamma.Studio is a Blazor WASM app; we only need to load its types in
+         a plain net8.0 test host, not run it in a browser. The framework
+         reference below pulls in Microsoft.AspNetCore.Components for
+         RenderTreeBuilder + RenderFragment. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
+    <PackageReference Include="NUnit.Analyzers" Version="3.10.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Moq" Version="4.20.70" />
+    <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <PackageReference Include="coverlet.collector" Version="6.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Tamma.Studio\Tamma.Studio.csproj" />
+  </ItemGroup>
+
+</Project>

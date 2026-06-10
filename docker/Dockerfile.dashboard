@@ -33,7 +33,9 @@ COPY --from=build /app/packages/dashboard/dist /usr/share/nginx/html
 
 EXPOSE 3001
 
+# 127.0.0.1, not localhost: nginx listens IPv4-only and busybox wget
+# resolves localhost to ::1 without falling back -> permanent unhealthy
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD wget -qO- http://localhost:3001/ || exit 1
+  CMD wget -qO- http://127.0.0.1:3001/ || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

@@ -16,6 +16,8 @@ const MEMBER_NAV_GROUPS: NavGroup[] = [
       { to: '/account', label: 'Account' },
       { to: '/keys', label: 'API Keys' },
       { to: '/settings/prompts', label: 'AI Prompts' },
+      // Story 27-12: tenant convention management.
+      { to: '/settings/conventions', label: 'Conventions' },
     ],
   },
   {
@@ -49,6 +51,8 @@ const ADMIN_NAV_GROUPS: NavGroup[] = [
       { to: '/admin', label: 'Admin Panel' },
       // Story 27-4: prompt-store admin UI.
       { to: '/admin/prompts', label: 'System Prompts' },
+      // Story 27-11: convention admin UI.
+      { to: '/admin/conventions', label: 'System Conventions' },
     ],
   },
 ];
@@ -66,7 +70,7 @@ export function Sidebar(): JSX.Element {
       </div>
       {navGroups.map((group) => (
         <div key={group.label} className="mb-4">
-          <div className="px-5 mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">
+          <div className="px-5 mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
             {group.label}
           </div>
           <ul className="list-none m-0 p-0">

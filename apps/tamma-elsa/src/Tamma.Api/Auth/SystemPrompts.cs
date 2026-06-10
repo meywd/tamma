@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using Tamma.Api.Services.Agents;
+using Tamma.Core;
 
 namespace Tamma.Api.Auth;
 
@@ -6,8 +8,8 @@ namespace Tamma.Api.Auth;
 /// Immutable description of a system-shipped prompt template.
 /// Corresponds to <c>PromptTemplate</c> in <c>default-prompts.ts</c>.
 /// </summary>
-/// <param name="Role">Agent role (developer, tester, security, etc.) — may be null for action-defaults.</param>
-/// <param name="Action">The action this prompt is for (context-scan, plan, etc.).</param>
+/// <param name="Role">Agent role (developer, tester, security, etc.).</param>
+/// <param name="Action">The action this prompt is for (context-scan, plan-implementation, etc.).</param>
 /// <param name="Template">The user-facing prompt template with <c>{{variable}}</c> placeholders.</param>
 /// <param name="SystemPrompt">System prompt (role identity preamble).</param>
 /// <param name="Variables">Variable names expected by the template.</param>
@@ -25,48 +27,47 @@ public sealed record PromptTemplate(
     int Version = 1);
 
 /// <summary>
-/// System-shipped prompt registry. Immutable at runtime; ported from the deleted
-/// TypeScript <c>packages/api/src/services/default-prompts.ts</c>.
+/// System-shipped prompt registry. Immutable at runtime.
+///
 /// <para>
-/// Exposes three layers used by <c>PromptStoreService</c>:
+/// <b>Story 27-18 — taxonomy reshape.</b> The flat 8×10 cartesian product
+/// (80 cells) and the generic <c>action-default</c> safety-net tier are GONE.
+/// The registry is now the jagged per-role <c>(role, action)</c> taxonomy of
+/// <see cref="RolePhaseMap"/> (SPEC §4 — 8 roles × their specific action sets,
+/// ~72 cells total). Prompts key off the IDENTICAL <c>(role, action)</c>
+/// taxonomy that conventions use; there is no generic fallback action anywhere.
+/// </para>
+///
+/// <para>
+/// Exposes two layers used by <c>PromptStoreService</c>:
 /// <list type="bullet">
-///   <item><see cref="RoleSystemPrompts"/> — 8 role identity preambles keyed by role name.</item>
-///   <item><see cref="ActionDefaults"/> — 10 generic action templates keyed by action name (safety net).</item>
-///   <item><see cref="RoleActionTemplates"/> — 80 role+action templates (primary good defaults).</item>
+///   <item><see cref="RoleSystemPrompts"/> — 8 role identity preambles keyed by role wire string.</item>
+///   <item><see cref="RoleActionTemplates"/> — the jagged per-role <c>(role, action)</c> templates
+///         (one non-empty body per cell in each role's <see cref="RolePhaseMap"/> action set).</item>
 /// </list>
+/// There is intentionally no third "generic action-default" tier — resolution is
+/// <c>override → system default → TammaError</c> (see <c>PromptStoreService</c>).
+/// </para>
+///
+/// <para>
+/// <b>Transitional bodies (SPEC §3.5).</b> The body text for each of the ~72
+/// cells is, in this story, MIGRATED from the 10 original action body builders
+/// (<see cref="ContextScan"/>, <see cref="Plan"/>, …) by mapping each specific
+/// action to its closest body family. These are real, non-empty prompt bodies —
+/// NOT placeholders — and serve as the authoritative system defaults until Story
+/// 27-16 codegen regenerates per-cell authoritative bodies. The mapping lives in
+/// <see cref="BodyBuilderFor"/>; the rationale per cell is documented there.
 /// </para>
 /// </summary>
 public static class SystemPrompts
 {
     // -----------------------------------------------------------------------
-    // Role / action catalogue
+    // Role catalogue (derived from the AgentRole taxonomy)
     // -----------------------------------------------------------------------
 
+    /// <summary>The 8 agent roles, as wire strings (from <see cref="AgentRole"/>).</summary>
     public static readonly IReadOnlyList<string> Roles =
-    [
-        "developer",
-        "tester",
-        "security",
-        "devops",
-        "architect",
-        "product_owner",
-        "senior_developer",
-        "tech_writer",
-    ];
-
-    public static readonly IReadOnlyList<string> Actions =
-    [
-        "context-scan",
-        "plan",
-        "plan-review",
-        "implement",
-        "write-tests",
-        "refactor",
-        "code-review",
-        "triage",
-        "summarize",
-        "debug",
-    ];
+        Enum.GetValues<AgentRole>().Select(r => r.ToWire()).ToArray();
 
     // -----------------------------------------------------------------------
     // Layer 1 — System prompts (role identity preambles)
@@ -94,85 +95,7 @@ public static class SystemPrompts
         });
 
     // -----------------------------------------------------------------------
-    // Layer 2 — Action defaults (safety net — generic per-action template)
-    // -----------------------------------------------------------------------
-
-    public static readonly IReadOnlyDictionary<string, PromptTemplate> ActionDefaults =
-        new ReadOnlyDictionary<string, PromptTemplate>(new Dictionary<string, PromptTemplate>
-        {
-            ["context-scan"] = ActionDefault(
-                "context-scan",
-                "You are a {{role}} scanning a codebase for a {{workItemType}} work item.\n\n## Work Item\n{{workItemJson}}\n\nProvide structured findings covering relevant files, interfaces, dependencies, conventions, and risks.",
-                ["role", "workItemType", "workItemJson"],
-                enableTools: true,
-                maxTokens: 4096),
-
-            ["plan"] = ActionDefault(
-                "plan",
-                "You are a {{role}} creating an implementation plan for {{workItemJson}}.\n\nBreak the work item into discrete tasks. For each task identify files changed, dependencies, complexity, and testing strategy.",
-                ["role", "workItemJson"],
-                enableTools: true,
-                maxTokens: 8192),
-
-            ["plan-review"] = ActionDefault(
-                "plan-review",
-                "You are a {{role}} reviewing an implementation plan.\n\nPlan:\n{{planJson}}\n\nFor each issue, report task, severity (critical|major|minor|suggestion), category, and recommendation. End with a verdict.",
-                ["role", "planJson"],
-                enableTools: false,
-                maxTokens: 4096),
-
-            ["implement"] = ActionDefault(
-                "implement",
-                "You are a {{role}} implementing code changes for {{currentTask}}.\n\nFollow project conventions:\n{{conventions}}\n\nProvide the complete implementation for each file.",
-                ["role", "currentTask", "conventions"],
-                enableTools: true,
-                maxTokens: 16384),
-
-            ["write-tests"] = ActionDefault(
-                "write-tests",
-                "You are a {{role}} writing tests for {{testTarget}}.\n\nSource:\n{{sourceCode}}\n\nList test cases, then provide the full test file.",
-                ["role", "testTarget", "sourceCode"],
-                enableTools: true,
-                maxTokens: 8192),
-
-            ["refactor"] = ActionDefault(
-                "refactor",
-                "You are a {{role}} refactoring {{targetCode}} to {{refactoringGoal}}.\n\nProvide analysis, refactored files, and verification steps.",
-                ["role", "targetCode", "refactoringGoal"],
-                enableTools: true,
-                maxTokens: 8192),
-
-            ["code-review"] = ActionDefault(
-                "code-review",
-                "You are a {{role}} reviewing a pull request.\n\nDescription: {{prDescription}}\n\nDiff:\n{{diff}}\n\nReport issues by file+line with severity and fix suggestions; conclude with a verdict.",
-                ["role", "prDescription", "diff"],
-                enableTools: false,
-                maxTokens: 8192),
-
-            ["triage"] = ActionDefault(
-                "triage",
-                "You are a {{role}} triaging issue {{issueJson}}.\n\nClassify type, severity, priority, owner role, effort, labels, and related issues.",
-                ["role", "issueJson"],
-                enableTools: false,
-                maxTokens: 2048),
-
-            ["summarize"] = ActionDefault(
-                "summarize",
-                "You are a {{role}} summarizing {{findings}} for {{audience}}.\n\nWrite a concise GitHub-comment-style summary with key findings and action items.",
-                ["role", "findings", "audience"],
-                enableTools: false,
-                maxTokens: 2048),
-
-            ["debug"] = ActionDefault(
-                "debug",
-                "You are a {{role}} diagnosing a failure.\n\nError:\n{{errorContext}}\n\nStack:\n{{stackTrace}}\n\nProvide diagnosis (root cause + confidence), the fix (full files), and verification commands.",
-                ["role", "errorContext", "stackTrace"],
-                enableTools: true,
-                maxTokens: 8192),
-        });
-
-    // -----------------------------------------------------------------------
-    // Layer 3 — Role + action templates (80 entries)
+    // Layer 2 — Role + action templates (jagged per-role taxonomy, ~72 cells)
     // -----------------------------------------------------------------------
 
     public static readonly IReadOnlyList<PromptTemplate> RoleActionTemplates = BuildRoleActionTemplates();
@@ -188,78 +111,175 @@ public static class SystemPrompts
     public static PromptTemplate? GetRoleAction(string role, string action)
         => RoleActionIndex.TryGetValue(Key(role, action), out var t) ? t : null;
 
-    /// <summary>Resolve the system action-default template, or null if unknown.</summary>
-    public static PromptTemplate? GetActionDefault(string action)
-        => ActionDefaults.TryGetValue(action, out var t) ? t : null;
-
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
     private static string Key(string role, string action) => $"{role}:{action}";
 
-    private static PromptTemplate ActionDefault(
-        string action,
-        string template,
-        IReadOnlyList<string> variables,
-        bool enableTools,
-        int maxTokens)
-        => new(
-            Role: null,
-            Action: action,
-            Template: template,
-            SystemPrompt: string.Empty,
-            Variables: variables,
-            EnableTools: enableTools,
-            MaxTokens: maxTokens);
-
+    /// <summary>
+    /// Build the jagged <c>(role, action)</c> template matrix directly from the
+    /// authoritative <see cref="RolePhaseMap.EligibleActions"/> SPEC §4 sets, so
+    /// the prompt registry and the resolver share a single source of truth. Each
+    /// cell's body is produced by mapping the action to its closest body family
+    /// via <see cref="BodyBuilderFor"/> (transitional seeds, SPEC §3.5).
+    /// </summary>
     private static IReadOnlyList<PromptTemplate> BuildRoleActionTemplates()
     {
-        var list = new List<PromptTemplate>(80);
+        var list = new List<PromptTemplate>(72);
 
-        foreach (var role in Roles)
+        foreach (var (role, actions) in RolePhaseMap.EligibleActions)
         {
-            list.Add(ContextScan(role));
-            list.Add(Plan(role));
-            list.Add(PlanReview(role));
-            list.Add(Implement(role));
-            list.Add(WriteTests(role));
-            list.Add(Refactor(role));
-            list.Add(CodeReview(role));
-            list.Add(Triage(role));
-            list.Add(Summarize(role));
-            list.Add(Debug(role));
+            var roleWire = role.ToWire();
+            foreach (var action in actions)
+            {
+                var actionWire = action.ToWire();
+                var builder = BodyBuilderFor(action);
+                list.Add(builder(roleWire, actionWire));
+            }
         }
 
         return list.AsReadOnly();
     }
+
+    /// <summary>
+    /// Map each specific <see cref="AgentAction"/> to the original body builder of
+    /// the closest family (Story 27-18 family mapping — TRANSITIONAL, SPEC §3.5,
+    /// pending Story 27-16 authoritative per-cell codegen). Atomic actions map to
+    /// their namesake builder; planning/design actions → <see cref="Plan"/>;
+    /// review-of-plan lenses → <see cref="PlanReview"/>; review-of-code/audit
+    /// lenses → <see cref="CodeReview"/>; documentation/write-ups →
+    /// <see cref="Summarize"/>; diagnose/incident actions → <see cref="Debug"/>;
+    /// triage/assess/classify → <see cref="Triage"/>; build/execute actions →
+    /// <see cref="Implement"/>.
+    /// </summary>
+    private static Func<string, string, PromptTemplate> BodyBuilderFor(AgentAction action) => action switch
+    {
+        // ── context-scan (atomic, shared) ──
+        AgentAction.ContextScan => ContextScan,
+
+        // ── planning / design / decomposition → Plan ──
+        AgentAction.ClarifyRequirements => Plan,
+        AgentAction.PlanScope => Plan,
+        AgentAction.DefineAcceptanceCriteria => Plan,
+        AgentAction.PlanRoadmap => Plan,
+        AgentAction.PlanSystemDesign => Plan,
+        AgentAction.DesignApiContract => Plan,
+        AgentAction.DesignDataModel => Plan,
+        AgentAction.DesignIntegration => Plan,
+        AgentAction.PlanMigrationStrategy => Plan,
+        AgentAction.CreateTasks => Plan,
+        AgentAction.PlanImplementation => Plan,
+        AgentAction.PlanRefactor => Plan,
+        AgentAction.PlanFix => Plan,
+        AgentAction.PlanDebugging => Plan,
+        AgentAction.PlanTestStrategy => Plan,
+        AgentAction.PlanDeployment => Plan,
+        AgentAction.PlanIncidentResponse => Plan,
+
+        // ── review-of-plan / risk / feasibility / testability lenses → PlanReview ──
+        AgentAction.PlanReview => PlanReview,
+        AgentAction.ReviewAcceptance => PlanReview,
+        AgentAction.ReviewScope => PlanReview,
+        AgentAction.AssessTechnicalRisk => PlanReview,
+        AgentAction.ReviewFeasibility => PlanReview,
+        AgentAction.ReviewTestability => PlanReview,
+        AgentAction.ThreatModel => PlanReview,
+        AgentAction.PlanReviewSecurity => PlanReview,
+        AgentAction.ReviewOperability => PlanReview,
+
+        // ── review-of-code / audit / verify lenses → CodeReview ──
+        AgentAction.CodeReview => CodeReview,
+        AgentAction.CodeReviewArchitecture => CodeReview,
+        AgentAction.MentorFeedback => CodeReview,
+        AgentAction.SelfReview => CodeReview,
+        AgentAction.VerifyAcceptance => CodeReview,
+        AgentAction.CodeReviewCoverage => CodeReview,
+        AgentAction.CodeReviewSecurity => CodeReview,
+        AgentAction.AssessVulnerability => CodeReview,
+        AgentAction.AuditDependencies => CodeReview,
+        AgentAction.AuditSecrets => CodeReview,
+        AgentAction.ReviewCompliance => CodeReview,
+        AgentAction.ReviewDocs => CodeReview,
+
+        // ── implementation / build / execute → Implement ──
+        AgentAction.ImplementFeature => Implement,
+        AgentAction.ImplementFix => Implement,
+        AgentAction.AddressReviewComments => Implement,
+        AgentAction.ImplementInfrastructure => Implement,
+        AgentAction.ConfigureCicd => Implement,
+        AgentAction.Deploy => Implement,
+        AgentAction.Rollback => Implement,
+
+        // ── tests → WriteTests ──
+        AgentAction.WriteTests => WriteTests,
+        AgentAction.WriteTestCases => WriteTests,
+        AgentAction.WriteRegressionTest => WriteTests,
+        AgentAction.ExploratoryTest => WriteTests,
+
+        // ── refactor (atomic) ──
+        AgentAction.Refactor => Refactor,
+
+        // ── debug / diagnose / incident analysis → Debug ──
+        AgentAction.Debug => Debug,
+        AgentAction.DebugRootcause => Debug,
+        AgentAction.ResolveBlocker => Debug,
+        AgentAction.DiagnoseIncident => Debug,
+        AgentAction.AnalyzeSecurityIncident => Debug,
+
+        // ── triage / assess / classify / monitor → Triage ──
+        AgentAction.TriageIntake => Triage,
+        AgentAction.TriageTechnical => Triage,
+        AgentAction.TriageDefect => Triage,
+        AgentAction.PrioritizeBacklog => Triage,
+        AgentAction.MonitorHealth => Triage,
+        AgentAction.AssessCapacity => Triage,
+
+        // ── summarize / documentation / write-ups → Summarize ──
+        AgentAction.SummarizeStakeholder => Summarize,
+        AgentAction.SummarizeTechnical => Summarize,
+        AgentAction.SummarizeChanges => Summarize,
+        AgentAction.WriteAdr => Summarize,
+        AgentAction.WritePostmortem => Summarize,
+        AgentAction.WriteUserDocs => Summarize,
+        AgentAction.WriteApiDocs => Summarize,
+        AgentAction.WriteReleaseNotes => Summarize,
+        AgentAction.WriteRunbook => Summarize,
+        AgentAction.UpdateChangelog => Summarize,
+
+        // Exhaustive over the 72-token AgentAction enum. A newly-added token with
+        // no arm here is a hard failure rather than a silent default — keeps the
+        // transitional mapping honest until 27-16 replaces it.
+        _ => throw new TammaError(
+            "PROMPT.SEED.NO_BODY_FAMILY",
+            $"No transitional body family mapped for action '{action.ToWire()}'. " +
+            "Add a mapping in SystemPrompts.BodyBuilderFor (Story 27-18) or regenerate via Story 27-16.",
+            new Dictionary<string, object?> { ["action"] = action.ToWire() },
+            retryable: false,
+            severity: TammaErrorSeverity.Critical),
+    };
 
     private static string SystemFor(string role) => RoleSystemPrompts.TryGetValue(role, out var s)
         ? s
         : RoleSystemPrompts["developer"];
 
     // -----------------------------------------------------------------------
-    // Individual action templates
-    // Templates mirror default-prompts.ts, with one deliberate divergence
-    // (port-gap audit prompts/001):
+    // Individual action body builders (migrated bodies — TRANSITIONAL, §3.5)
     //
-    //   plan-review and code-review templates emit a single role-tailored
-    //   review-lens block via RoleReviewLens / RoleReviewLensForCodeReview.
-    //   The TS source used four parallel ternaries — three of which collapsed
-    //   to whitespace-only lines for the matching role and to four blank
-    //   indented lines for unmatched roles. The C# port emits a concrete
-    //   instruction in either case (the role's specific bullets, or a generic
-    //   "Apply your role-specific expertise" fallback). This is a deliberate
-    //   LLM-quality improvement; the contract drift is documented in the
-    //   prompts-scope audit and locked by tests in
-    //   tests/Tamma.Api.Tests/PromptStore/SystemPromptsTests.cs.
+    // Each builder takes (role, action) and is role-parameterized via {{role}}
+    // and SystemFor(role). The body text is preserved from the original 10
+    // builders; the Action field is now the SPECIFIC taxonomy action token (e.g.
+    // "plan-implementation"), not the old generic one ("plan"). The deliberate
+    // review-lens behaviour (RoleReviewLens / RoleReviewLensForCodeReview) is
+    // retained.
     //
-    // All other templates are byte-for-byte equivalent to default-prompts.ts.
+    // These are the system defaults until Story 27-16 regenerates authoritative
+    // per-cell bodies (SPEC §3.5 "transitional seed" state).
     // -----------------------------------------------------------------------
 
-    private static PromptTemplate ContextScan(string role) => new(
+    private static PromptTemplate ContextScan(string role, string action) => new(
         Role: role,
-        Action: "context-scan",
+        Action: action,
         Template:
             "You are a {{role}} scanning a codebase for a {{workItemType}} work item.\n\n" +
             "## Work Item\n{{workItemJson}}\n\n" +
@@ -286,9 +306,9 @@ public static class SystemPrompts
         EnableTools: true,
         MaxTokens: 4096);
 
-    private static PromptTemplate Plan(string role) => new(
+    private static PromptTemplate Plan(string role, string action) => new(
         Role: role,
-        Action: "plan",
+        Action: action,
         Template:
             "You are a {{role}} creating an implementation plan.\n\n" +
             "## Work Item\n{{workItemJson}}\n\n" +
@@ -319,9 +339,9 @@ public static class SystemPrompts
         EnableTools: true,
         MaxTokens: 8192);
 
-    private static PromptTemplate PlanReview(string role) => new(
+    private static PromptTemplate PlanReview(string role, string action) => new(
         Role: role,
-        Action: "plan-review",
+        Action: action,
         Template:
             "You are a {{role}} reviewing an implementation plan.\n\n" +
             "## Work Item\n{{workItemJson}}\n\n" +
@@ -355,9 +375,9 @@ public static class SystemPrompts
         EnableTools: false,
         MaxTokens: 4096);
 
-    private static PromptTemplate Implement(string role) => new(
+    private static PromptTemplate Implement(string role, string action) => new(
         Role: role,
-        Action: "implement",
+        Action: action,
         Template:
             "You are a {{role}} implementing code changes.\n\n" +
             "## Work Item\n{{workItemJson}}\n\n" +
@@ -393,9 +413,9 @@ public static class SystemPrompts
         EnableTools: true,
         MaxTokens: 16384);
 
-    private static PromptTemplate WriteTests(string role) => new(
+    private static PromptTemplate WriteTests(string role, string action) => new(
         Role: role,
-        Action: "write-tests",
+        Action: action,
         Template:
             "You are a {{role}} writing tests for the Tamma project.\n\n" +
             "## Test Target\n{{testTarget}}\n\n" +
@@ -434,9 +454,9 @@ public static class SystemPrompts
         EnableTools: true,
         MaxTokens: 8192);
 
-    private static PromptTemplate Refactor(string role) => new(
+    private static PromptTemplate Refactor(string role, string action) => new(
         Role: role,
-        Action: "refactor",
+        Action: action,
         Template:
             "You are a {{role}} analyzing and refactoring code.\n\n" +
             "## Target Code\n{{targetCode}}\n\n" +
@@ -470,9 +490,9 @@ public static class SystemPrompts
         EnableTools: true,
         MaxTokens: 8192);
 
-    private static PromptTemplate CodeReview(string role) => new(
+    private static PromptTemplate CodeReview(string role, string action) => new(
         Role: role,
-        Action: "code-review",
+        Action: action,
         Template:
             "You are a {{role}} reviewing code changes in a pull request.\n\n" +
             "## PR Description\n{{prDescription}}\n\n" +
@@ -510,9 +530,9 @@ public static class SystemPrompts
         EnableTools: false,
         MaxTokens: 8192);
 
-    private static PromptTemplate Triage(string role) => new(
+    private static PromptTemplate Triage(string role, string action) => new(
         Role: role,
-        Action: "triage",
+        Action: action,
         Template:
             "You are a {{role}} triaging an issue or alert.\n\n" +
             "## Issue / Alert\n{{issueJson}}\n\n" +
@@ -542,9 +562,9 @@ public static class SystemPrompts
         EnableTools: false,
         MaxTokens: 2048);
 
-    private static PromptTemplate Summarize(string role) => new(
+    private static PromptTemplate Summarize(string role, string action) => new(
         Role: role,
-        Action: "summarize",
+        Action: action,
         Template:
             "You are a {{role}} summarizing findings for an issue comment.\n\n" +
             "## Work Item\n{{workItemJson}}\n\n" +
@@ -573,9 +593,9 @@ public static class SystemPrompts
         EnableTools: false,
         MaxTokens: 2048);
 
-    private static PromptTemplate Debug(string role) => new(
+    private static PromptTemplate Debug(string role, string action) => new(
         Role: role,
-        Action: "debug",
+        Action: action,
         Template:
             "You are a {{role}} diagnosing and fixing a failure.\n\n" +
             "## Error Context\n{{errorContext}}\n\n" +
@@ -616,7 +636,7 @@ public static class SystemPrompts
         MaxTokens: 8192);
 
     // -----------------------------------------------------------------------
-    // Role-specific review lenses (inlined in plan-review / code-review)
+    // Role-specific review lenses (inlined in plan-review / code-review bodies)
     // -----------------------------------------------------------------------
 
     private static string RoleReviewLens(string role) => role switch
