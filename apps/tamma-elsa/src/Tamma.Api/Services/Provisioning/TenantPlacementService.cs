@@ -36,8 +36,13 @@ public sealed class TenantPlacementService : ITenantPlacementService
             ?? throw new InvalidOperationException(
                 $"Tenant '{tenantId}' not found — cannot assign placement.");
 
+        if (tenant.DeletedAt is not null)
+            throw new InvalidOperationException(
+                $"Tenant '{tenantId}' is soft-deleted — placement is not allowed.");
+
         // Idempotency: an already-placed tenant returns its existing
         // placement unchanged (SchemaName + DatabaseId shadow columns).
+        // Both props or neither: a half-stamped row (corrupt state) is treated as unplaced and re-stamped below.
         var entry = db.Entry(tenant);
         var existingSchema = entry.Property<string?>("SchemaName").CurrentValue;
         var existingDatabaseId = entry.Property<Guid?>("DatabaseId").CurrentValue;

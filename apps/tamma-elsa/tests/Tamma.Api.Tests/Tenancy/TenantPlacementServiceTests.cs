@@ -192,6 +192,83 @@ public class TenantPlacementServiceTests
             .TenantCount.Should().Be(0, "skipped rows are untouched");
     }
 
+    [Test]
+    public async Task Assign_SoftDeletedTenant_Throws()
+    {
+        var dbName = nameof(Assign_SoftDeletedTenant_Throws);
+        var tenantId = Guid.NewGuid();
+        await using var ctx = CreateContext(dbName);
+        await PlansSeeder.SeedAsync(ctx);
+        ctx.Tenants.Add(new Tenant
+        {
+            Id = tenantId,
+            Name = "Soft-Deleted Tenant",
+            Slug = $"deleted-{tenantId:N}"[..20],
+            Plan = "free",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            DeletedAt = DateTime.UtcNow,
+        });
+        await ctx.SaveChangesAsync();
+        await AddPoolRowsAsync(dbName, PoolRow("central"));
+
+        var act = async () => await CreateService(dbName).AssignAsync(tenantId);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>(
+                "placement of a soft-deleted tenant must be rejected"))
+            .Where(ex => ex.Message.Contains("soft-deleted"),
+                "the error must mention 'soft-deleted' so the caller knows why placement was refused");
+    }
+
+    [Test]
+    public async Task Assign_CorruptState_OnePropSet_ReStamps()
+    {
+        var dbName = nameof(Assign_CorruptState_OnePropSet_ReStamps);
+        var tenantId = Guid.NewGuid();
+
+        // Seed tenant with only SchemaName stamped (DatabaseId left null) —
+        // this represents a half-stamped / corrupt row.
+        await using var seed = CreateContext(dbName);
+        await PlansSeeder.SeedAsync(seed);
+        var tenant = new Tenant
+        {
+            Id = tenantId,
+            Name = "Corrupt State Tenant",
+            Slug = $"corrupt-{tenantId:N}"[..20],
+            Plan = "free",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        seed.Tenants.Add(tenant);
+        await seed.SaveChangesAsync();
+
+        // Write only SchemaName shadow column, leave DatabaseId null.
+        var seedEntry = seed.Entry(tenant);
+        seedEntry.Property<string?>("SchemaName").CurrentValue = TenantNaming.SchemaName(tenantId);
+        await seed.SaveChangesAsync();
+
+        var row = PoolRow("central");
+        await AddPoolRowsAsync(dbName, row);
+
+        var placement = await CreateService(dbName).AssignAsync(tenantId);
+
+        placement.DatabaseId.Should().Be(row.Id,
+            "a half-stamped (corrupt) tenant must be treated as unplaced and re-stamped");
+        placement.SchemaName.Should().Be(TenantNaming.SchemaName(tenantId));
+
+        await using var verify = CreateContext(dbName);
+        var verifyTenant = await verify.Tenants.SingleAsync(t => t.Id == tenantId);
+        var verifyEntry = verify.Entry(verifyTenant);
+        verifyEntry.Property<string?>("SchemaName").CurrentValue
+            .Should().Be(TenantNaming.SchemaName(tenantId),
+                "re-stamp must set SchemaName");
+        verifyEntry.Property<Guid?>("DatabaseId").CurrentValue.Should().Be(row.Id,
+            "re-stamp must set DatabaseId");
+
+        var poolRow = await verify.TenantDatabases.SingleAsync(d => d.Id == row.Id);
+        poolRow.TenantCount.Should().Be(1, "re-stamp must increment TenantCount");
+    }
+
     private sealed class InMemoryCpFactory : IDbContextFactory<ControlPlaneDbContext>
     {
         private readonly string _dbName;
