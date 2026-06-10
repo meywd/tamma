@@ -120,3 +120,42 @@ public record AdminTenantActionResponse(
     Guid TenantId,
     string Status,
     string Message);
+
+/// <summary>
+/// Request body for <c>POST /api/admin/tenants/{tenantId}/move</c>
+/// (unified-tenancy Phase 4). <see cref="TargetDatabaseId"/> must be an
+/// existing <c>tenant_databases</c> pool row that differs from the
+/// tenant's current placement.
+/// </summary>
+public record MoveTenantRequest(Guid TargetDatabaseId);
+
+/// <summary>
+/// 202 body for <c>POST /api/admin/tenants/{tenantId}/move</c>. The move
+/// runs out-of-band on the platform task queue (mirroring the Cranl
+/// provisioning shape); <see cref="StatusUrl"/> is the polling endpoint.
+/// </summary>
+public record AdminTenantMoveAcceptedResponse(
+    Guid TenantId,
+    Guid TargetDatabaseId,
+    /// <summary>Tenant Status at enqueue time (the move flips it to
+    /// <c>draining</c> once the queued task starts).</summary>
+    string? Status,
+    string StatusUrl,
+    string Message);
+
+/// <summary>
+/// Response for <c>GET /api/admin/tenants/{tenantId}/move</c> — the move
+/// polling surface. <see cref="Status"/> is <c>tenants.Status</c>
+/// (<c>draining</c> while the move runs; back to <c>active</c> on
+/// completion); <see cref="FailureReason"/> carries the last move error
+/// the queue handler recorded (null when none / after a successful
+/// retry); <see cref="DatabaseId"/> + <see cref="SchemaName"/> show the
+/// current placement (the DatabaseId flips to the target once the move's
+/// re-point commits).
+/// </summary>
+public record AdminTenantMoveStatusResponse(
+    Guid TenantId,
+    string? Status,
+    string? FailureReason,
+    Guid? DatabaseId,
+    string? SchemaName);

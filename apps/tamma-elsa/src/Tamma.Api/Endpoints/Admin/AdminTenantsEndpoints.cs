@@ -9,6 +9,10 @@ using Tamma.Api.Services.TenantStatus;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
+using Tamma.Data.Repositories;
+// `using Tamma.Api.Services.Provisioning` would make ITenantConnectionResolver
+// ambiguous against Tamma.Data.Abstractions — alias the one type we need.
+using MoveTenantTaskPayload = Tamma.Api.Services.Provisioning.MoveTenantTaskPayload;
 
 namespace Tamma.Api.Endpoints.Admin;
 
@@ -637,6 +641,136 @@ public static class AdminTenantsEndpoints
             tenantId,
             current ?? StatusActive,
             $"Plan changed to {plan.DisplayName}."));
+    }
+
+    // ── POST /api/admin/tenants/{id}/move ──
+
+    /// <summary>
+    /// Unified-tenancy Phase 4 — queue a tenant move to another
+    /// <c>tenant_databases</c> pool row. Validation here is deliberately
+    /// cheap (tenant exists, target row exists, target differs from the
+    /// current placement); the deep checks (tenant 'active', target
+    /// 'active' + tier-eligible + capacity, aliasing guard) run inside
+    /// <see cref="ITenantMoveService.MoveAsync"/> when the platform-queue
+    /// worker claims the task. Returns 202 + the
+    /// <c>GET /api/admin/tenants/{id}/move</c> polling URL — the same
+    /// 202-plus-status-poll shape the Cranl provisioning endpoints use.
+    /// </summary>
+    public static async Task<IResult> MoveTenant(
+        Guid tenantId,
+        MoveTenantRequest? req,
+        ControlPlaneDbContext db,
+        IPlatformQueuedTaskRepository platformTasks,
+        IPlatformEventPublisher publisher,
+        ClaimsPrincipal principal,
+        CancellationToken ct = default)
+    {
+        if (req is null || req.TargetDatabaseId == Guid.Empty)
+            return Results.BadRequest(new
+            {
+                error = "target_database_id_required",
+                message = "Body must carry a non-empty targetDatabaseId.",
+            });
+
+        var tenant = await db.Tenants
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Id == tenantId && t.DeletedAt == null, ct);
+        if (tenant is null)
+            return Results.NotFound(new { error = "tenant_not_found" });
+
+        var targetExists = await db.TenantDatabases
+            .AsNoTracking()
+            .AnyAsync(d => d.Id == req.TargetDatabaseId, ct);
+        if (!targetExists)
+            return Results.NotFound(new { error = "target_database_not_found" });
+
+        var currentDatabaseId =
+            (Guid?)db.Entry(tenant).Property("DatabaseId").CurrentValue;
+        if (currentDatabaseId == req.TargetDatabaseId)
+            return Results.Json(
+                new
+                {
+                    error = "already_on_target_database",
+                    message = $"Tenant '{tenantId}' is already placed on database "
+                        + $"'{req.TargetDatabaseId}' — moving a tenant onto its current "
+                        + "pool row is a no-op.",
+                },
+                statusCode: StatusCodes.Status409Conflict);
+
+        await platformTasks.EnqueueAsync(new PlatformQueuedTask
+        {
+            Type = MoveTenantTaskPayload.TaskType,
+            TenantId = tenantId,
+            Payload = JsonSerializer.Serialize(new MoveTenantTaskPayload
+            {
+                TenantId = tenantId,
+                TargetDatabaseId = req.TargetDatabaseId,
+            }),
+        }, ct);
+
+        await publisher.AppendAndPublishAsync(
+            BuildAdminEvent(
+                "TENANT.MOVE.REQUESTED",
+                tenantId,
+                principal,
+                new Dictionary<string, object?>
+                {
+                    ["targetDatabaseId"] = req.TargetDatabaseId.ToString("D"),
+                    ["sourceDatabaseId"] = currentDatabaseId?.ToString("D"),
+                    ["source"] = "admin-move",
+                }),
+            ct);
+
+        var statusUrl = $"/api/admin/tenants/{tenantId}/move";
+        return Results.Accepted(
+            statusUrl,
+            new AdminTenantMoveAcceptedResponse(
+                tenantId,
+                req.TargetDatabaseId,
+                (string?)db.Entry(tenant).Property("Status").CurrentValue,
+                statusUrl,
+                "Move queued — the tenant enters a brief read-only window "
+                + "(status 'draining') while the schema is moved; poll the "
+                + "status URL for progress."));
+    }
+
+    // ── GET /api/admin/tenants/{id}/move ──
+
+    /// <summary>
+    /// Unified-tenancy Phase 4 — move polling surface (the move analogue
+    /// of <c>GET /api/admin/tenants/{id}/provisioning</c>). Reports the
+    /// tenant's <c>Status</c> (<c>draining</c> while a move runs; back to
+    /// <c>active</c> on completion), the last move error the queue
+    /// handler stamped into <c>FailureReason</c>, and the current
+    /// placement (<c>DatabaseId</c> flips to the target once the move's
+    /// re-point commits).
+    /// </summary>
+    public static async Task<IResult> GetTenantMove(
+        Guid tenantId,
+        ControlPlaneDbContext db,
+        CancellationToken ct = default)
+    {
+        var row = await db.Tenants
+            .AsNoTracking()
+            .IgnoreQueryFilters()
+            .Where(t => t.Id == tenantId && t.DeletedAt == null)
+            .Select(t => new
+            {
+                Status = EF.Property<string?>(t, "Status"),
+                FailureReason = EF.Property<string?>(t, "FailureReason"),
+                DatabaseId = EF.Property<Guid?>(t, "DatabaseId"),
+                SchemaName = EF.Property<string?>(t, "SchemaName"),
+            })
+            .FirstOrDefaultAsync(ct);
+        if (row is null)
+            return Results.NotFound(new { error = "tenant_not_found" });
+
+        return Results.Ok(new AdminTenantMoveStatusResponse(
+            tenantId,
+            row.Status,
+            row.FailureReason,
+            row.DatabaseId,
+            row.SchemaName));
     }
 
     // ── helpers ──

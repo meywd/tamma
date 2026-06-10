@@ -890,6 +890,14 @@ builder.Services.AddSingleton<
 // worker itself is hosted-service singleton + registry singleton.
 builder.Services.AddPlatformTaskWorker(builder.Configuration);
 
+// Unified-tenancy Phase 4 — `tenant.move` platform-task handler. Drives
+// ITenantMoveService.MoveAsync for tasks enqueued by
+// POST /api/admin/tenants/{tenantId}/move; on failure it stamps the
+// tenant's FailureReason shadow column and rethrows so the worker
+// retries (dead-letter at the ceiling).
+builder.Services
+    .AddPlatformTaskHandler<Tamma.Api.Services.Provisioning.MoveTenantTaskHandler>();
+
 // ────────────────────────────────────────────────────────────────────────────
 // Authentication + Authorization
 // ────────────────────────────────────────────────────────────────────────────
@@ -1366,6 +1374,19 @@ admin.MapPost("/tenants/{tenantId:guid}/cleanup",
     .RequireAuthorization("PlatformOwnerAccess");
 admin.MapPatch("/tenants/{tenantId:guid}/plan",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.UpdateTenantPlan)
+    .RequireAuthorization("PlatformOwnerAccess");
+
+// Unified-tenancy Phase 4 — move a tenant's schema to another pool row.
+// POST validates cheaply + enqueues a `tenant.move` platform task and
+// returns 202 with the GET polling URL (the same 202-plus-status-poll
+// shape the Cranl provisioning endpoints use); the MoveTenantTaskHandler
+// drives ITenantMoveService.MoveAsync when PlatformTaskWorker claims the
+// row. GET reports Status / FailureReason / current placement.
+admin.MapPost("/tenants/{tenantId:guid}/move",
+        Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.MoveTenant)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapGet("/tenants/{tenantId:guid}/move",
+        Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.GetTenantMove)
     .RequireAuthorization("PlatformOwnerAccess");
 
 // Unified-tenancy Phase 4 — platform-admin CRUD over the tenant_databases
