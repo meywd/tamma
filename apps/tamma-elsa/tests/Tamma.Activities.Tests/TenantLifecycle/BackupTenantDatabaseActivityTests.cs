@@ -120,6 +120,122 @@ public class BackupTenantDatabaseActivityTests
             .WithMessage("*timed out*");
     }
 
+    // ── Unified-tenancy Phase 2 — schema-scoped flavor ────────────────
+
+    private static readonly Guid PoolRow = Guid.Parse("66666666-6666-6666-6666-666666666666");
+    private static readonly string Schema = Tamma.Data.Pooling.TenantNaming.SchemaName(Tenant);
+
+    [Test]
+    public async Task BackupSchemaAsync_Disabled_IsNoOp()
+    {
+        var runner = new RecordingProcessRunner();
+        var pool = new RecordingTenantDatabasePool { SchemaExists = true };
+        var options = new TenantBackupOptions { DeletionBackup = false };
+
+        var produced = await BackupTenantDatabaseActivity.BackupSchemaAsync(
+            options, pool, runner, Tenant, PoolRow, Schema,
+            DateTime.UtcNow, null, CancellationToken.None);
+
+        produced.Should().BeFalse();
+        runner.LastRequest.Should().BeNull("disabled backup must never spawn pg_dump");
+        pool.SchemaExistsCalls.Should().Be(0, "disabled backup must not even probe the schema");
+    }
+
+    [Test]
+    public async Task BackupSchemaAsync_SchemaMissing_SkipsDump()
+    {
+        // Replay after a successful drop: the schema is gone — skip
+        // cleanly, mirroring the legacy DatabaseExistsAsync probe.
+        var runner = new RecordingProcessRunner();
+        var pool = new RecordingTenantDatabasePool { SchemaExists = false };
+        var options = NewEnabledOptions();
+
+        var produced = await BackupTenantDatabaseActivity.BackupSchemaAsync(
+            options, pool, runner, Tenant, PoolRow, Schema,
+            DateTime.UtcNow, null, CancellationToken.None);
+
+        produced.Should().BeFalse();
+        runner.LastRequest.Should().BeNull("nothing to dump when the schema is already gone");
+    }
+
+    [Test]
+    public async Task BackupSchemaAsync_Enabled_InvokesPgDumpWithSchemaFlag_PasswordOnlyInEnvironment()
+    {
+        var runner = new RecordingProcessRunner
+        {
+            Result = new ProcessRunResult(0, "", "", false, 1),
+        };
+        var pool = new RecordingTenantDatabasePool
+        {
+            SchemaExists = true,
+            Info = new TenantAdminConnectionInfo(
+                Host: "pool.internal", Port: 6432, Username: "tamma_provisioner",
+                Password: "pool-secret-pw", Database: "tamma_pool"),
+        };
+        var options = NewEnabledOptions();
+        options.PgDumpPath = "pg_dump";
+
+        var produced = await BackupTenantDatabaseActivity.BackupSchemaAsync(
+            options, pool, runner, Tenant, PoolRow, Schema,
+            DateTime.UtcNow, null, CancellationToken.None);
+
+        produced.Should().BeTrue();
+        var req = runner.LastRequest!;
+        req.FileName.Should().Be("pg_dump");
+
+        // The dump targets the POOL ROW's database, scoped to the
+        // tenant's schema — neighbours on the shared database must
+        // never land in this tenant's snapshot.
+        req.Arguments.Should().ContainInOrder("--dbname", "tamma_pool");
+        req.Arguments.Should().ContainInOrder("--schema", Schema);
+        req.Arguments.Should().ContainInOrder("--host", "pool.internal");
+        req.Arguments.Should().ContainInOrder("--port", "6432");
+
+        // The critical assertion: the password must NEVER appear in argv.
+        req.Arguments.Should().NotContain("pool-secret-pw");
+        req.Arguments.Should().NotContain(a => a.Contains("pool-secret-pw"));
+
+        // …it travels via PGPASSWORD instead.
+        req.EnvironmentOverrides.Should().NotBeNull();
+        req.EnvironmentOverrides!["PGPASSWORD"].Should().Be("pool-secret-pw");
+    }
+
+    [Test]
+    public async Task BackupSchemaAsync_NonZeroExit_Throws()
+    {
+        var runner = new RecordingProcessRunner
+        {
+            Result = new ProcessRunResult(1, "", "no matching schemas were found", false, 1),
+        };
+        var pool = new RecordingTenantDatabasePool { SchemaExists = true };
+        var options = NewEnabledOptions();
+
+        var act = async () => await BackupTenantDatabaseActivity.BackupSchemaAsync(
+            options, pool, runner, Tenant, PoolRow, Schema,
+            DateTime.UtcNow, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*pg_dump failed*");
+    }
+
+    [Test]
+    public async Task BackupSchemaAsync_TimedOut_Throws()
+    {
+        var runner = new RecordingProcessRunner
+        {
+            Result = new ProcessRunResult(-1, "", "", true, 999),
+        };
+        var pool = new RecordingTenantDatabasePool { SchemaExists = true };
+        var options = NewEnabledOptions();
+
+        var act = async () => await BackupTenantDatabaseActivity.BackupSchemaAsync(
+            options, pool, runner, Tenant, PoolRow, Schema,
+            DateTime.UtcNow, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*timed out*");
+    }
+
     private static TenantBackupOptions NewEnabledOptions() => new()
     {
         DeletionBackup = true,

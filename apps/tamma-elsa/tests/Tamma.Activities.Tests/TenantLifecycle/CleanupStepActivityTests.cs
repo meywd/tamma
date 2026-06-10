@@ -40,11 +40,11 @@ public class CleanupStepActivityTests
     }
 
     [Test]
-    public void DropTenantDatabaseForCleanupActivity_HasCorrectStepName()
+    public void DropTenantSchemaForCleanupActivity_HasCorrectStepName()
     {
-        var activity = new DropTenantDatabaseForCleanupActivity();
-        activity.StepName.Should().Be(CleanupSteps.DropDatabase);
-        activity.StepName.Should().Be("drop-tenant-db");
+        var activity = new DropTenantSchemaForCleanupActivity();
+        activity.StepName.Should().Be(CleanupSteps.DropSchema);
+        activity.StepName.Should().Be("drop-tenant-schema");
     }
 
     [Test]
@@ -73,7 +73,7 @@ public class CleanupStepActivityTests
         // failure — silently regressing H6.
         new EvictTenantPoolForCleanupActivity().Should()
             .BeAssignableTo<CleanupStepActivity>();
-        new DropTenantDatabaseForCleanupActivity().Should()
+        new DropTenantSchemaForCleanupActivity().Should()
             .BeAssignableTo<CleanupStepActivity>();
         new DropTenantRoleForCleanupActivity().Should()
             .BeAssignableTo<CleanupStepActivity>();
@@ -90,7 +90,7 @@ public class CleanupStepActivityTests
         var stepNames = new[]
         {
             new EvictTenantPoolForCleanupActivity().StepName,
-            new DropTenantDatabaseForCleanupActivity().StepName,
+            new DropTenantSchemaForCleanupActivity().StepName,
             new DropTenantRoleForCleanupActivity().StepName,
             new SoftDeleteTenantRowActivity().StepName,
         };
@@ -108,8 +108,8 @@ public class CleanupStepActivityTests
         // event-stream UI can surface only cleanup events.
         new EvictTenantPoolForCleanupActivity().EventType.Should()
             .Be("TENANT.CLEANUP.EVICT_POOL");
-        new DropTenantDatabaseForCleanupActivity().EventType.Should()
-            .Be("TENANT.CLEANUP.DROP_TENANT_DB");
+        new DropTenantSchemaForCleanupActivity().EventType.Should()
+            .Be("TENANT.CLEANUP.DROP_TENANT_SCHEMA");
         new DropTenantRoleForCleanupActivity().EventType.Should()
             .Be("TENANT.CLEANUP.DROP_TENANT_ROLE");
         new SoftDeleteTenantRowActivity().EventType.Should()

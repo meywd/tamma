@@ -215,6 +215,49 @@ public class TenantDatabasePoolTests
             .Should().BeFalse();
     }
 
+    [Test]
+    public async Task SchemaExistsOn_ProbesTargetDatabaseSchemata()
+    {
+        // Phase 2 Task 5 interface growth — the delete path's backup
+        // step probes the schema before invoking pg_dump so a replay
+        // after a successful drop skips cleanly.
+        var pool = CreatePool();
+        var schemaName = $"t_{Guid.NewGuid():N}";
+
+        (await pool.SchemaExistsOnAsync(_databaseId, schemaName))
+            .Should().BeFalse("the schema has not been created yet");
+
+        await pool.ExecuteOnAsync(_databaseId, $"CREATE SCHEMA \"{schemaName}\"");
+
+        (await pool.SchemaExistsOnAsync(_databaseId, schemaName))
+            .Should().BeTrue("the schema now exists on the pool row's database");
+
+        await pool.ExecuteOnAsync(_databaseId, $"DROP SCHEMA \"{schemaName}\" CASCADE");
+
+        (await pool.SchemaExistsOnAsync(_databaseId, schemaName))
+            .Should().BeFalse("the probe must observe the drop");
+    }
+
+    [Test]
+    public async Task GetConnectionInfo_ExposesRowAdminPartsTargetingRowDatabase()
+    {
+        // Phase 2 Task 5 interface growth (pre-authorized by the plan) —
+        // pg_dump needs the connection parts discretely; the Database is
+        // the pool row's OWN database (schema-per-tenant shares it).
+        var pool = CreatePool();
+        var adminBuilder = new NpgsqlConnectionStringBuilder(_adminConnectionString);
+
+        var info = await pool.GetConnectionInfoAsync(_databaseId);
+
+        info.Host.Should().Be(adminBuilder.Host);
+        info.Port.Should().Be(adminBuilder.Port);
+        info.Username.Should().Be(adminBuilder.Username);
+        info.Password.Should().Be(adminBuilder.Password,
+            "pg_dump receives the password via PGPASSWORD — the caller needs it decrypted");
+        info.Database.Should().Be("tenant_pool_test",
+            "the dump targets the pool row's database, scoped by --schema");
+    }
+
     private sealed class InMemoryCpFactory : IDbContextFactory<ControlPlaneDbContext>
     {
         private readonly string _dbName;

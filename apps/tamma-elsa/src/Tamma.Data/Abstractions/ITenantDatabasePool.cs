@@ -27,6 +27,29 @@ public interface ITenantDatabasePool
     Task<bool> RoleExistsOnAsync(Guid databaseId, string roleName, CancellationToken ct = default);
 
     /// <summary>
+    /// True when the row's database contains the schema
+    /// (<c>information_schema.schemata</c> probe). Idempotency probe for
+    /// the delete path (Phase 2 Task 5) — a workflow retry after the
+    /// schema was already dropped must skip cleanly, mirroring the legacy
+    /// <see cref="ITenantAdminConnection.DatabaseExistsAsync"/> probe.
+    /// </summary>
+    Task<bool> SchemaExistsOnAsync(Guid databaseId, string schemaName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Discrete connection parameters of the pool row's admin connection,
+    /// targeting the row's OWN database — for external CLI tooling
+    /// (notably <c>pg_dump</c> in the pre-drop backup step) that needs the
+    /// values separately rather than as one Npgsql connection string.
+    /// Mirrors <see cref="ITenantAdminConnection.GetConnectionInfo"/>
+    /// (Phase 2 Task 5 interface growth, pre-authorized by the plan). The
+    /// password is returned so the caller can pass it via the
+    /// <c>PGPASSWORD</c> environment variable — callers MUST NOT place it
+    /// on a process command line (it would leak via
+    /// <c>/proc/&lt;pid&gt;/cmdline</c>).
+    /// </summary>
+    Task<TenantAdminConnectionInfo> GetConnectionInfoAsync(Guid databaseId, CancellationToken ct = default);
+
+    /// <summary>
     /// Database name of the pool row's target database, parsed from the
     /// decrypted admin connection string. Needed by the schema step for
     /// <c>GRANT CONNECT ON DATABASE</c> / <c>ALTER ROLE ... IN DATABASE</c>

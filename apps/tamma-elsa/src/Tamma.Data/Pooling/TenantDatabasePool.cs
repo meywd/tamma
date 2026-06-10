@@ -93,6 +93,43 @@ public sealed class TenantDatabasePool : ITenantDatabasePool
         return result is not null;
     }
 
+    public async Task<bool> SchemaExistsOnAsync(
+        Guid databaseId, string schemaName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(schemaName))
+            throw new ArgumentException("schemaName must be supplied", nameof(schemaName));
+
+        await using var conn = await OpenAsync(databaseId, ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            "SELECT 1 FROM information_schema.schemata WHERE schema_name = @schema";
+        cmd.Parameters.AddWithValue("schema", schemaName);
+        var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result is not null;
+    }
+
+    public async Task<TenantAdminConnectionInfo> GetConnectionInfoAsync(
+        Guid databaseId, CancellationToken ct = default)
+    {
+        var adminConnectionString = await GetAdminConnectionStringAsync(databaseId, ct)
+            .ConfigureAwait(false);
+        var b = new NpgsqlConnectionStringBuilder(adminConnectionString);
+        if (string.IsNullOrWhiteSpace(b.Database))
+            throw new InvalidOperationException(
+                $"tenant_databases row {databaseId}: the decrypted admin connection string "
+                + "carries no Database — cannot derive pg_dump connection parts.");
+
+        return new TenantAdminConnectionInfo(
+            // Mirror NpgsqlTenantAdminConnection.GetConnectionInfo:
+            // normalise Host to localhost so pg_dump always receives an
+            // explicit --host.
+            Host: string.IsNullOrWhiteSpace(b.Host) ? "localhost" : b.Host,
+            Port: b.Port,
+            Username: b.Username ?? string.Empty,
+            Password: b.Password ?? string.Empty,
+            Database: b.Database);
+    }
+
     public async Task<string> GetDatabaseNameAsync(
         Guid databaseId, CancellationToken ct = default)
     {

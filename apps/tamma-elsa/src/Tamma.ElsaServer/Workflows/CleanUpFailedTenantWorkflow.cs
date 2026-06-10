@@ -46,8 +46,9 @@ namespace Tamma.ElsaServer.Workflows;
 /// <list type="number">
 ///   <item><description><see cref="EvictTenantPoolForCleanupActivity"/> —
 ///     forget the LRU pool entry.</description></item>
-///   <item><description><see cref="DropTenantDatabaseForCleanupActivity"/> —
-///     <c>DROP DATABASE … WITH (FORCE)</c>.</description></item>
+///   <item><description><see cref="DropTenantSchemaForCleanupActivity"/> —
+///     <c>DROP SCHEMA IF EXISTS … CASCADE</c> on the assigned pool
+///     database (unified-tenancy Phase 2).</description></item>
 ///   <item><description><see cref="DropTenantRoleForCleanupActivity"/> —
 ///     <c>DROP OWNED BY</c> + <c>DROP ROLE IF EXISTS</c>.</description></item>
 ///   <item><description><see cref="SoftDeleteTenantRowActivity"/> —
@@ -156,11 +157,11 @@ public class CleanUpFailedTenantWorkflow : WorkflowBase
             TenantId = new Input<Guid>(ctx => tenantId.Get(ctx)),
         };
 
-        // ── Step 2: drop database (probe-before-drop) ────────────────
-        var dropDb = new DropTenantDatabaseForCleanupActivity
+        // ── Step 2: drop schema (IF EXISTS … CASCADE, placement-aware) ──
+        var dropSchema = new DropTenantSchemaForCleanupActivity
         {
-            Id = "DropTenantDatabaseForCleanup",
-            Name = "Drop Tenant Database",
+            Id = "DropTenantSchemaForCleanup",
+            Name = "Drop Tenant Schema",
             TenantId = new Input<Guid>(ctx => tenantId.Get(ctx)),
         };
 
@@ -197,7 +198,7 @@ public class CleanUpFailedTenantWorkflow : WorkflowBase
                 trigger,
                 initInputs,
                 evictPool,
-                dropDb,
+                dropSchema,
                 dropRole,
                 softDelete,
                 terminal,

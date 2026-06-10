@@ -12,8 +12,11 @@ namespace Tamma.Activities.TenantLifecycle;
 /// H6 / Story 28-5 AC7 — fourth step of the cleanup
 /// <see cref="Elsa.Workflows.Activities.Sequence"/>. Soft-deletes the CP
 /// <c>tenants</c> row: stamps <c>DeletedAt = now()</c> on first run,
-/// flips <c>Status = 'deleted'</c>, and nulls the encrypted connection
-/// string slot + its KEK version pointer.
+/// flips <c>Status = 'deleted'</c>, nulls the encrypted connection
+/// string slot + its KEK version pointer, and releases the
+/// unified-tenancy placement (pool <c>TenantCount</c> decrement +
+/// <c>DatabaseId</c>/<c>SchemaName</c> nulled — see
+/// <see cref="TenantPlacementShadow.ReleaseAsync"/>).
 ///
 /// <para>This is deliberately split off from
 /// <see cref="EmitCleanupTerminalEventActivity"/> so that:</para>
@@ -80,6 +83,13 @@ public sealed class SoftDeleteTenantRowActivity : CleanupStepActivity
         db.Entry(tenant).Property("Status").CurrentValue = "deleted";
         db.Entry(tenant).Property("EncryptedConnectionString").CurrentValue = (byte[]?)null;
         // KekVersion is smallint NOT NULL DEFAULT 1 — clearing on delete is a no-op (plan 2026-06-09 §2.2).
+
+        // Unified-tenancy Phase 2 — release the placement (decrement the
+        // pool row's TenantCount, null DatabaseId/SchemaName) in the SAME
+        // SaveChanges that nulls the envelope. Idempotent: a replayed
+        // cleanup against an already-released row is a no-op.
+        await TenantPlacementShadow.ReleaseAsync(
+            db, tenant, Logger, context.CancellationToken).ConfigureAwait(false);
 
         tenant.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);

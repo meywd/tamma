@@ -8,11 +8,11 @@ namespace Tamma.Activities.TenantLifecycle;
 
 /// <summary>
 /// Step 2 of <c>DeleteTenantWorkflow</c>. Evicts the tenant from the LRU
-/// pool cache. Required before <see cref="DropTenantDatabaseActivity"/>
-/// because <c>DROP DATABASE … WITH (FORCE)</c> kills the active backends
-/// in the pool but leaves the cached <see cref="Npgsql.NpgsqlDataSource"/>
-/// holding stale connections — the resolver needs to forget the tenant
-/// so subsequent requests don't try to reuse the dropped pool.
+/// pool cache. Required before <see cref="DropTenantSchemaActivity"/>
+/// because <c>DROP SCHEMA … CASCADE</c> destroys the objects the cached
+/// <see cref="Npgsql.NpgsqlDataSource"/>'s connections are pointed at —
+/// the resolver needs to forget the tenant so subsequent requests don't
+/// try to reuse the dropped schema.
 ///
 /// <para>Idempotent — eviction of a non-cached tenant is a no-op.</para>
 ///

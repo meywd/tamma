@@ -11,7 +11,7 @@ namespace Tamma.Activities.TenantLifecycle;
 /// <c>ex.GetType().Name</c> as the failure code (a regression from the
 /// rich, fixed-vocabulary codes the dashboard + alerting groups on).
 /// This classifier maps <c>(stepName, exception)</c> back to the
-/// structured codes — <c>drop_database_failed</c>,
+/// structured codes — <c>drop_schema_failed</c>,
 /// <c>drop_role_failed</c>, <c>network_error</c>,
 /// <c>permission_denied</c>, <c>evict_pool_failed</c>,
 /// <c>cancelled</c>, <c>step_failed</c> — and produces a redacted,
@@ -22,7 +22,7 @@ namespace Tamma.Activities.TenantLifecycle;
 /// <para><b>Stability contract:</b> failure codes are stable across
 /// releases — dashboards and alerts group on these strings. New step
 /// names require a new switch arm; new exception shapes within a step
-/// fall through to the step-specific default (<c>drop_database_failed</c>,
+/// fall through to the step-specific default (<c>drop_schema_failed</c>,
 /// <c>drop_role_failed</c>) or the generic <c>step_failed</c>.</para>
 ///
 /// <para><b>Snippet contract:</b> redacted via the supplied
@@ -48,15 +48,15 @@ public static class CleanupFailureClassifier
     ///
     /// <para>Step-name keyed primary classification: each step has its
     /// own well-known failure shapes so the operator UX matches what
-    /// actually went wrong (e.g. a <c>drop-tenant-db</c> permission
+    /// actually went wrong (e.g. a <c>drop-tenant-schema</c> permission
     /// denied is <c>permission_denied</c>, not the generic
-    /// <c>drop_database_failed</c>). Within a step, secondary
+    /// <c>drop_schema_failed</c>). Within a step, secondary
     /// classification by exception-type then by message-keyword catches
     /// the network-error and permission-denied cases.</para>
     /// </summary>
     /// <param name="stepName">The kebab-case step name as defined on
     /// <see cref="CleanupSteps"/> (<c>evict-pool</c>,
-    /// <c>drop-tenant-db</c>, <c>drop-tenant-role</c>,
+    /// <c>drop-tenant-schema</c>, <c>drop-tenant-role</c>,
     /// <c>soft-delete-cp-row</c>). Unknown step names fall through to
     /// the generic classifier.</param>
     /// <param name="ex">The exception thrown by the step body.</param>
@@ -93,7 +93,7 @@ public static class CleanupFailureClassifier
         var code = stepName switch
         {
             CleanupSteps.EvictPool => ClassifyEvictPoolFailure(typeName, rawMessage),
-            CleanupSteps.DropDatabase => ClassifyDatabaseFailure(typeName, rawMessage),
+            CleanupSteps.DropSchema => ClassifySchemaFailure(typeName, rawMessage),
             CleanupSteps.DropRole => ClassifyRoleFailure(typeName, rawMessage),
             _ => ClassifyGeneric(typeName, rawMessage),
         };
@@ -117,7 +117,7 @@ public static class CleanupFailureClassifier
         return "evict_pool_failed";
     }
 
-    private static string ClassifyDatabaseFailure(string typeName, string rawMessage)
+    private static string ClassifySchemaFailure(string typeName, string rawMessage)
     {
         if (LooksLikeNetwork(typeName, rawMessage))
             return "network_error";
@@ -125,7 +125,7 @@ public static class CleanupFailureClassifier
             return "permission_denied";
         if (LooksLikeCancellation(typeName))
             return "cancelled";
-        return "drop_database_failed";
+        return "drop_schema_failed";
     }
 
     private static string ClassifyRoleFailure(string typeName, string rawMessage)

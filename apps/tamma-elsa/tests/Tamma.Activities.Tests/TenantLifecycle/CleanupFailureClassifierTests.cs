@@ -36,13 +36,13 @@ public class CleanupFailureClassifierTests
     // ── Step + exception-type → failure code ─────────────────────────
 
     [Test]
-    public void Classify_DropDatabase_SqlError_YieldsDropDatabaseFailedCode()
+    public void Classify_DropSchema_SqlError_YieldsDropSchemaFailedCode()
     {
         var ex = new InvalidOperationException("relation does not exist");
         var (code, snippet) = CleanupFailureClassifier.ClassifyFailure(
-            CleanupSteps.DropDatabase, ex, _redactor);
+            CleanupSteps.DropSchema, ex, _redactor);
 
-        code.Should().Be("drop_database_failed");
+        code.Should().Be("drop_schema_failed");
         snippet.Should().Contain("relation");
     }
 
@@ -60,13 +60,13 @@ public class CleanupFailureClassifierTests
     public void Classify_TimeoutOnAnyStep_YieldsNetworkErrorCode()
     {
         // Network-shape detection beats step-specific defaults — a
-        // timeout on drop-tenant-db is "network_error", not
-        // "drop_database_failed", because the operator response is
+        // timeout on drop-tenant-schema is "network_error", not
+        // "drop_schema_failed", because the operator response is
         // different (retry vs. inspect).
         var ex = new TimeoutException("timed out after 30s");
 
         CleanupFailureClassifier.ClassifyFailure(
-            CleanupSteps.DropDatabase, ex, _redactor).FailureCode
+            CleanupSteps.DropSchema, ex, _redactor).FailureCode
             .Should().Be("network_error");
         CleanupFailureClassifier.ClassifyFailure(
             CleanupSteps.DropRole, ex, _redactor).FailureCode
@@ -77,11 +77,11 @@ public class CleanupFailureClassifierTests
     }
 
     [Test]
-    public void Classify_PermissionDeniedOnDropDatabase_YieldsPermissionDeniedCode()
+    public void Classify_PermissionDeniedOnDropSchema_YieldsPermissionDeniedCode()
     {
         var ex = new InvalidOperationException("permission denied for database");
         var (code, _) = CleanupFailureClassifier.ClassifyFailure(
-            CleanupSteps.DropDatabase, ex, _redactor);
+            CleanupSteps.DropSchema, ex, _redactor);
 
         code.Should().Be("permission_denied");
     }
@@ -107,13 +107,13 @@ public class CleanupFailureClassifierTests
     }
 
     [Test]
-    public void Classify_SocketException_OnDropDatabase_YieldsNetworkErrorCode()
+    public void Classify_SocketException_OnDropSchema_YieldsNetworkErrorCode()
     {
         // SocketException is the canonical transport-level failure
         // surface. Must classify as network_error regardless of step.
         var ex = new SocketException();
         var (code, _) = CleanupFailureClassifier.ClassifyFailure(
-            CleanupSteps.DropDatabase, ex, _redactor);
+            CleanupSteps.DropSchema, ex, _redactor);
 
         code.Should().Be("network_error");
     }
@@ -124,7 +124,7 @@ public class CleanupFailureClassifierTests
         var ex = new OperationCanceledException("workflow cancelled by host");
 
         CleanupFailureClassifier.ClassifyFailure(
-            CleanupSteps.DropDatabase, ex, _redactor).FailureCode
+            CleanupSteps.DropSchema, ex, _redactor).FailureCode
             .Should().Be("cancelled");
         CleanupFailureClassifier.ClassifyFailure(
             CleanupSteps.SoftDeleteRow, ex, _redactor).FailureCode
@@ -154,7 +154,7 @@ public class CleanupFailureClassifierTests
         var longMessage = new string('x', 4000);
         var ex = new InvalidOperationException(longMessage);
         var (_, snippet) = CleanupFailureClassifier.ClassifyFailure(
-            CleanupSteps.DropDatabase, ex, _redactor);
+            CleanupSteps.DropSchema, ex, _redactor);
 
         snippet.Length.Should().BeLessThanOrEqualTo(200);
     }
@@ -168,7 +168,7 @@ public class CleanupFailureClassifierTests
         var ex = new InvalidOperationException(
             "auth failed: Authorization: Bearer sk-secret-credential-abcdef");
         var (_, snippet) = CleanupFailureClassifier.ClassifyFailure(
-            CleanupSteps.DropDatabase, ex, _redactor);
+            CleanupSteps.DropSchema, ex, _redactor);
 
         snippet.Should().NotContain("sk-secret-credential-abcdef");
         snippet.Should().Contain("[REDACTED]");
@@ -180,7 +180,7 @@ public class CleanupFailureClassifierTests
         var ex = new InvalidOperationException(
             "could not connect to http://10.0.0.42:5432/internal");
         var (_, snippet) = CleanupFailureClassifier.ClassifyFailure(
-            CleanupSteps.DropDatabase, ex, _redactor);
+            CleanupSteps.DropSchema, ex, _redactor);
 
         snippet.Should().NotContain("10.0.0.42");
     }
@@ -195,7 +195,7 @@ public class CleanupFailureClassifierTests
         var ex = new InvalidOperationException(
             "auth failed: sk-ant-credential-payload-here");
         var (_, snippet) = CleanupFailureClassifier.ClassifyFailure(
-            CleanupSteps.DropDatabase, ex, _redactor);
+            CleanupSteps.DropSchema, ex, _redactor);
 
         snippet.Should().NotContain("credential-payload-here");
         snippet.Should().Contain("[REDACTED]");
@@ -211,9 +211,9 @@ public class CleanupFailureClassifierTests
         // here.
         var ex = new InvalidOperationException("hello");
         var (code, snippet) = CleanupFailureClassifier.ClassifyFailure(
-            CleanupSteps.DropDatabase, ex, redactor: null);
+            CleanupSteps.DropSchema, ex, redactor: null);
 
-        code.Should().Be("drop_database_failed");
+        code.Should().Be("drop_schema_failed");
         snippet.Should().Be("hello");
     }
 
@@ -226,7 +226,7 @@ public class CleanupFailureClassifierTests
         var longMessage = new string('y', 4000);
         var ex = new InvalidOperationException(longMessage);
         var (_, snippet) = CleanupFailureClassifier.ClassifyFailure(
-            CleanupSteps.DropDatabase, ex, redactor: null);
+            CleanupSteps.DropSchema, ex, redactor: null);
 
         snippet.Length.Should().BeLessThanOrEqualTo(200);
     }
@@ -237,7 +237,7 @@ public class CleanupFailureClassifierTests
     public void Classify_NullException_Throws()
     {
         var act = () => CleanupFailureClassifier.ClassifyFailure(
-            CleanupSteps.DropDatabase, ex: null!, _redactor);
+            CleanupSteps.DropSchema, ex: null!, _redactor);
 
         act.Should().Throw<ArgumentNullException>();
     }

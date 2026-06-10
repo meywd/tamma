@@ -23,7 +23,7 @@ namespace Tamma.Activities.TenantLifecycle;
 //
 //    Sequence:
 //      EvictTenantPoolForCleanupActivity     (best-effort)
-//      DropTenantDatabaseForCleanupActivity  (best-effort)
+//      DropTenantSchemaForCleanupActivity    (best-effort)
 //      DropTenantRoleForCleanupActivity      (best-effort)
 //      SoftDeleteTenantRowActivity           (best-effort)
 //      EmitCleanupTerminalEventActivity      (terminal, reads the others)
@@ -55,7 +55,12 @@ namespace Tamma.Activities.TenantLifecycle;
 public static class CleanupSteps
 {
     public const string EvictPool = "evict-pool";
-    public const string DropDatabase = "drop-tenant-db";
+
+    /// <summary>Unified-tenancy Phase 2 — replaced the db-per-tenant
+    /// <c>drop-tenant-db</c> step (the create path provisions a schema on
+    /// a shared pool database now, so cleanup drops the schema).</summary>
+    public const string DropSchema = "drop-tenant-schema";
+
     public const string DropRole = "drop-tenant-role";
     public const string SoftDeleteRow = "soft-delete-cp-row";
 }
@@ -369,7 +374,7 @@ public abstract class CleanupStepActivity : TammaAsyncActivity
         {
             // PF — re-port of the per-step failure classifier. Restores
             // the rich, fixed-vocabulary failure codes
-            // (drop_database_failed / drop_role_failed / network_error /
+            // (drop_schema_failed / drop_role_failed / network_error /
             // permission_denied / evict_pool_failed / cancelled /
             // step_failed) lost when the original
             // CleanUpFailedTenantActivity classifier was deleted during
