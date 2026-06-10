@@ -53,6 +53,12 @@ public class CrossEpicIntegrationTests
             Plan = "free",
         });
         await db.SaveChangesAsync();
+
+        // Phase 3 -- agent configs / prompt overrides / diagnostics are
+        // tenant-resident; the unified resolver only reaches them for
+        // provisioned tenants.
+        await ApiTestFixture.ProvisionTenantAsync(_tenantA);
+        await ApiTestFixture.ProvisionTenantAsync(_tenantB);
     }
 
     // ---------------------------------------------------------------------

@@ -181,6 +181,11 @@ public class E2EAlertFlowTests
             await db.SaveChangesAsync();
         }
 
+        // Phase 3 -- domain_events is tenant-resident; provision before
+        // the emitter writes through the unified resolver.
+        await Infrastructure.TestTenantProvisioning.ProvisionAsync(
+            _factory.Services, tenantId);
+
         // Emit directly via IAlertEventEmitter — this is the shortest
         // path that mirrors what CheckBudgetActivity will do in a
         // running workflow. We could equivalently insert a raw
@@ -314,6 +319,11 @@ public class E2EAlertFlowTests
                 UpdatedAt = DateTime.UtcNow,
             });
             await db.SaveChangesAsync();
+
+            // Phase 3 -- domain_events is tenant-resident; provision before
+            // the seed below writes through the unified resolver.
+            await Infrastructure.TestTenantProvisioning.ProvisionAsync(
+                _factory.Services, tenantId);
 
             var factory = scope.ServiceProvider
                 .GetRequiredService<Tamma.Data.Abstractions.ITenantDbContextFactory>();

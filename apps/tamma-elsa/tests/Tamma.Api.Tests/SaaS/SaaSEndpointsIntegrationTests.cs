@@ -60,6 +60,7 @@ public class SaaSEndpointsIntegrationTests
     [Test]
     public async Task PostLlmChat_HappyPath_Returns200AndRecordsDiagnostic()
     {
+        await EnsurePinnedTenantProvisionedAsync();
         var handler = new CannedHandler(HttpStatusCode.OK, """
             {
               "id": "msg_1",
@@ -116,6 +117,7 @@ public class SaaSEndpointsIntegrationTests
     [Test]
     public async Task PostLlmChat_UpstreamError_Returns502AndRecordsFailureDiagnostic()
     {
+        await EnsurePinnedTenantProvisionedAsync();
         var handler = new CannedHandler(HttpStatusCode.InternalServerError, "{\"error\":\"boom\"}");
         using var client = CreateClientWithCannedAnthropic(handler);
 
@@ -390,14 +392,17 @@ public class SaaSEndpointsIntegrationTests
         return _cachedFactory;
     }
 
-    private static async Task<(Guid DefinitionId, Guid InstanceId)> SeedWorkflowInstanceAsync()
+    /// <summary>
+    /// Make sure the pinned tenant exists on CP and is provisioned —
+    /// TenantContextMiddleware doesn't run for dev-mode permissive auth,
+    /// but every code path that touches the pinned tenant's data
+    /// (diagnostics, workflows, events) rides the unified resolver, which
+    /// requires a provisioned tenant (Phase 3).
+    /// </summary>
+    private static async Task EnsurePinnedTenantProvisionedAsync()
     {
         using var scope = SharedFactory().Services.CreateScope();
         var cp = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
-
-        // Make sure the pinned tenant exists on CP — TenantContextMiddleware
-        // doesn't run for dev-mode permissive auth, but other code paths
-        // (analytics fan-outs, audit) read CP tenants for the active set.
         var tenantExists = await cp.Tenants.IgnoreQueryFilters()
             .AnyAsync(t => t.Id == TestTenantId);
         if (!tenantExists)
@@ -413,6 +418,16 @@ public class SaaSEndpointsIntegrationTests
             });
             await cp.SaveChangesAsync();
         }
+
+        await Infrastructure.TestTenantProvisioning.ProvisionAsync(
+            SharedFactory().Services, TestTenantId);
+    }
+
+    private static async Task<(Guid DefinitionId, Guid InstanceId)> SeedWorkflowInstanceAsync()
+    {
+        await EnsurePinnedTenantProvisionedAsync();
+
+        using var scope = SharedFactory().Services.CreateScope();
 
         // Story 28-1 PR D — workflow_definitions + workflow_instances live
         // on the tenant DB now. Seed via ITenantDbContextFactory.
@@ -497,6 +512,11 @@ public class SaaSEndpointsIntegrationTests
             TenantId = tenantId
         });
         await db.SaveChangesAsync();
+
+        // Phase 3 -- key-rotation audit events land in the tenant store,
+        // which is only reachable for provisioned tenants.
+        await Infrastructure.TestTenantProvisioning.ProvisionAsync(
+            SharedFactory().Services, tenantId);
 
         return (userId, tenantId, installationEntityId);
     }

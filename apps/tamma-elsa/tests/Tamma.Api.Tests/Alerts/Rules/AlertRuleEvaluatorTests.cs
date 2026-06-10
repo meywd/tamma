@@ -873,6 +873,11 @@ public class AlertRuleEvaluatorPostgresTests
             });
             await db.SaveChangesAsync();
 
+            // Phase 3 -- domain_events is tenant-resident; provision before
+            // the unified resolver can reach it.
+            await Infrastructure.TestTenantProvisioning.ProvisionAsync(
+                ApiTestFixture.Factory.Services, tenantId);
+
             // Story 28-1 PR D — domain_events live on the tenant DB.
             // Route the seed through ITenantDbContextFactory.
             var factory = scope.ServiceProvider

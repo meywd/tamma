@@ -93,6 +93,10 @@ public class AgentEndpointsIntegrationTests
             });
             await db.SaveChangesAsync();
 
+            // Phase 3 -- agent_configs is tenant-resident; provision before
+            // the unified resolver can reach it.
+            await ApiTestFixture.ProvisionTenantAsync(tenantId);
+
             var repo = scope.ServiceProvider.GetRequiredService<IAgentConfigRepository>();
             await repo.UpsertAsync(tenantId, configJson, null);
         }
