@@ -19,10 +19,11 @@ the linked docs.
 | Flag | Default | Host | Effect | Docs |
 |---|---|---|---|---|
 | `Backup:DeletionBackup` | `false` | elsa-server | `pg_dump` snapshot of a tenant DB before `DROP DATABASE` in `DeleteTenantWorkflow`. Requires `pg_dump` in the image + a durable mounted `Backup:Directory`. | [tenant-deletion-backup.md](./tenant-deletion-backup.md) |
-| `Tamma:RequireTenantIsolation` | `false` | api | When `true` in Production, the startup guard hard-fails if `ConnectionStrings:ControlPlane` is missing. Leave `false` for shared-infra-in-prod (the documented default topology). | Story 28-3 |
 | `TenantConnectionPool:Warmup:Enabled` | `false` | api | Pre-warm the top-N tenant connection pools at startup. | [connection-pool-tuning.md](./connection-pool-tuning.md) |
 | `HourlyAnalyticsRollup:Enabled` | `true` | elsa-server | Hourly `platform_analytics_hourly` rollup scheduler. | [../runbooks/platform-analytics-hourly-rollup.md](../runbooks/platform-analytics-hourly-rollup.md) |
 | `TenantCleanupTrigger:Enabled` | `true` | elsa-server | Consumes `TENANT.CLEANUP_REQUESTED` events to drive `DeleteTenantWorkflow`. | Story 28-5 |
+
+> **Removed:** `Tamma:RequireTenantIsolation` was deleted in unified-tenancy Phase 3 — the `LruPooledTenantConnectionResolver` is now the only tenant connection path (the stub fallback it guarded no longer exists), so the knob has no effect and is ignored.
 
 ## Configuration sections
 

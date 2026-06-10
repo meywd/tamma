@@ -5,6 +5,7 @@ using Npgsql;
 using NUnit.Framework;
 using Tamma.Api.Services.Agents;
 using Tamma.Api.Services.Conventions;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Core;
 using Tamma.Data;
 using Tamma.Data.Pooling;

@@ -280,10 +280,11 @@ mode**:
 - Both `tamma-api` and `elsa-server` use the same `Database=tamma`
   connection string — Elsa's tables live in `tamma`, there is no separate
   `tamma_global_elsa` DB.
-- `ConnectionStrings:ControlPlane` is deliberately unset (the prod
-  `tamma-api` block sets `Tamma__RequireTenantIsolation=false`); all
+- `ConnectionStrings:ControlPlane` is deliberately unset; all
   tenants + control-plane data share `tamma` via Phase-3 RLS. Reconfirmed
-  by the 2026-05-31 hotfix (`146c354e`).
+  by the 2026-05-31 hotfix (`146c354e`). (The `Tamma__RequireTenantIsolation`
+  knob the prod compose file used to set was removed in unified-tenancy
+  Phase 3 along with the stub-resolver fallback it guarded.)
 - **Migrations are applied by the apps themselves at boot**, not by a
   shell script: `Tamma.Api/Program.cs` calls
   `dbContext.Database.Migrate()`; `Tamma.ElsaServer/Program.cs` sets
@@ -423,12 +424,13 @@ no-op stub, not a working runner.** Closing 28-1 outright would overclaim.
 ### What is RUNTIME-DEFERRED to the Epic 30 db-per-tenant cutover
 
 - The whole per-tenant-DB topology is dormant in dev/test/today's prod:
-  `Tamma.Api/Program.cs` only swaps in the LRU pool when
-  `ConnectionStrings:ControlPlane` is set; otherwise (the documented VPS
-  default, `Tamma:RequireTenantIsolation=false`) every tenant rides the
-  shared central `tamma` DB via `StubTenantConnectionResolver`. In that
-  mode no per-tenant DB is created at all, so a per-tenant Elsa DB has
-  nothing to attach to.
+  at the time this story closed, `Tamma.Api/Program.cs` only swapped in the
+  LRU pool when `ConnectionStrings:ControlPlane` was set; otherwise every
+  tenant rode the shared central `tamma` DB via `StubTenantConnectionResolver`.
+  (Unified-tenancy Phase 3 has since removed the stub and the
+  `Tamma:RequireTenantIsolation` knob — the LRU resolver registers
+  unconditionally now.) In the shared mode of that era no per-tenant DB was
+  created at all, so a per-tenant Elsa DB had nothing to attach to.
 - Therefore the per-tenant Elsa runner cannot be runtime-verified until
   the db-per-tenant runtime cutover lands (Epic 30 / full Epic 28 cutover)
   — the same blocker that keeps end-state contract tests #2/#3 `[Ignore]`d

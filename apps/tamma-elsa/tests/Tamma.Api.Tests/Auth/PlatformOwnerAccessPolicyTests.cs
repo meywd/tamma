@@ -62,13 +62,12 @@ public class PlatformOwnerAccessPolicyTests
         Environment.SetEnvironmentVariable(
             "ConnectionStrings__TammaDb",
             ApiTestFixture.Postgres.GetConnectionString());
-        // This factory boots in Production (below), so it must supply
-        // ConnectionStrings:ControlPlane like a real Production deployment —
-        // otherwise the Story 28-3 AC3 stub-resolver guard
-        // (DependencyInjection.GuardTenantIsolationInProduction, Program.cs)
-        // refuses to start. Reset in OneTimeTearDown so the shared static env
-        // doesn't leak a CP string into sibling tests (which would flip them
-        // off the stub resolver onto the LRU pool).
+        // This factory boots in Production (below), so it supplies
+        // ConnectionStrings:ControlPlane like a real Production deployment.
+        // (The Story 28-3 RequireTenantIsolation startup guard was removed in
+        // unified-tenancy Phase 3 — the LRU resolver registers
+        // unconditionally now.) Reset in OneTimeTearDown so the shared static
+        // env doesn't leak a CP string into sibling tests.
         Environment.SetEnvironmentVariable(
             "ConnectionStrings__ControlPlane",
             ApiTestFixture.Postgres.GetConnectionString());

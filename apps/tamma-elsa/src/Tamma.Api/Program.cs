@@ -233,72 +233,43 @@ builder.Services.AddSingleton<
 
 builder.Services.AddTammaData(connectionString, appConnectionString, controlPlaneConnectionString);
 
-// ── Story 28-3 AC3 (2026-05-30 residual #2; revised 2026-05-31) ────────
-// Fail fast ONLY if a Production deployment has opted into mandatory
-// per-tenant DB isolation (Tamma:RequireTenantIsolation=true) but is missing
-// ConnectionStrings:ControlPlane — otherwise it would silently fall back to
-// StubTenantConnectionResolver (every tenant on the shared central DB).
-// Shared-infrastructure mode (no CP string, Phase-3 RLS isolation) is the
-// documented production DEFAULT — what the Hetzner VPS deploy runs — so the
-// guard is a no-op unless the operator explicitly requires isolation.
-// No-op outside Production. Logic lives in Tamma.Data.DependencyInjection so
-// it is unit-testable without a host.
-var requireTenantIsolation =
-    builder.Configuration.GetValue<bool>("Tamma:RequireTenantIsolation");
-DependencyInjection.GuardTenantIsolationInProduction(
-    builder.Environment.IsProduction(),
-    requireTenantIsolation,
+// ── Story 28-4 / unified-tenancy Phase 3 — tenant connection pool ──
+//
+// The LRU-cached LruPooledTenantConnectionResolver is the ONLY tenant
+// connection path: every per-tenant DbContext build (every
+// TenantDbContextFactory.CreateAsync) resolves the tenant's stored
+// encrypted connection string through it. Registered UNCONDITIONALLY —
+// the transitional StubTenantConnectionResolver and the
+// Tamma:RequireTenantIsolation startup guard were removed in Phase 3.
+//
+// Wired AFTER AddTammaData. The CP connection string is optional: when
+// set, the resolver's cold-miss tenant-row lookups go through a pooled
+// IDbContextFactory<ControlPlaneDbContext> on the dedicated CP database;
+// when unset (dev / self-host — the CP IS the central DB), the factory
+// AddTammaData registered on the central connection is used as-is.
+builder.Services.AddTenantConnectionPool(
+    builder.Configuration,
     controlPlaneConnectionString);
 
-// ── Story 28-4 — production tenant connection pool (LRU + handles) ──
-//
-// Replaces the StubTenantConnectionResolver registered by AddTammaData
-// with the LRU-cached LruPooledTenantConnectionResolver. Callers (every
-// per-tenant DbContext build, every TenantDbContextFactory.CreateAsync)
-// gain warm-pool reuse + ref-counted leases for SSE/streaming consumers.
-//
-// Wired AFTER AddTammaData so this Replace+AddSingleton wins over the
-// stub's TryAddSingleton fallback. The CP connection string drives the
-// resolver's pooled IDbContextFactory<ControlPlaneDbContext> for cold-
-// miss tenant-row lookups.
-//
-// Test fixtures and dev environments without a real CP connection
-// string keep the StubTenantConnectionResolver wiring (good enough for
-// the EF query-filter fallback that the existing tests rely on).
-if (!string.IsNullOrWhiteSpace(controlPlaneConnectionString))
-{
-    builder.Services.AddTenantConnectionPool(
-        builder.Configuration,
-        controlPlaneConnectionString);
+// Optional pre-warm of top-N most-active tenants on startup. Off
+// by default (TenantConnectionPool:Warmup:Enabled=false). Reads
+// the top-tenants list from Story 28-10's IPlatformAnalyticsService
+// — fresh installs see an empty list and skip cleanly.
+builder.Services.Configure<Tamma.Api.Services.PoolWarmupOptions>(opts =>
+    builder.Configuration
+        .GetSection(Tamma.Api.Services.PoolWarmupOptions.SectionName)
+        .Bind(opts));
+builder.Services.AddHostedService<Tamma.Api.Services.PoolWarmupService>();
 
-    // Optional pre-warm of top-N most-active tenants on startup. Off
-    // by default (TenantConnectionPool:Warmup:Enabled=false). Reads
-    // the top-tenants list from Story 28-10's IPlatformAnalyticsService
-    // — fresh installs see an empty list and skip cleanly.
-    builder.Services.Configure<Tamma.Api.Services.PoolWarmupOptions>(opts =>
-        builder.Configuration
-            .GetSection(Tamma.Api.Services.PoolWarmupOptions.SectionName)
-            .Bind(opts));
-    builder.Services.AddHostedService<Tamma.Api.Services.PoolWarmupService>();
-
-    // Story 30-8 — V2 routing seam: the LRU pool consults
-    // ITenantEndpointDirectory before falling back to the legacy
-    // EncryptedConnectionString path. Wires the registry, the null
-    // provider seam, the provider-key lookup (gracefully handles
-    // Story 30-3's not-yet-landed migration via information_schema
-    // probe) and the V2 directory adapter. Real providers plug in
-    // via additional AddSingleton<ITenantInfrastructureProvider, …>
-    // calls (Stories 30-4..30-6).
-    builder.Services.AddTenantProvisioningV2();
-}
-else
-{
-    Log.Information(
-        "Story 28-4 — no ControlPlane connection string configured; " +
-        "tenant connection pool stays on the StubTenantConnectionResolver. " +
-        "Set ConnectionStrings:ControlPlane to enable the LRU pool + " +
-        "/api/admin/pools/* diagnostics.");
-}
+// Story 30-8 — V2 routing seam: the LRU pool consults
+// ITenantEndpointDirectory before falling back to the legacy
+// EncryptedConnectionString path. Wires the registry, the null
+// provider seam, the provider-key lookup (gracefully handles
+// Story 30-3's not-yet-landed migration via information_schema
+// probe) and the V2 directory adapter. Real providers plug in
+// via additional AddSingleton<ITenantInfrastructureProvider, …>
+// calls (Stories 30-4..30-6).
+builder.Services.AddTenantProvisioningV2();
 
 // R2-M1: register IErrorRedactor so KekRotationCoordinator can scrub
 // ex.Message before it lands in platform_events.data or

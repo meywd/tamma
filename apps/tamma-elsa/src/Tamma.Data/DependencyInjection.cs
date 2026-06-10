@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Npgsql;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Repositories;
 
@@ -31,9 +30,11 @@ public static class DependencyInjection
     ///   <item><description><c>ConnectionStrings:TammaDb</c> — admin / CP
     ///     connection. Falls back to <c>DefaultConnection</c> for dev.
     ///     </description></item>
-    ///   <item><description><c>ConnectionStrings:TammaAppDb</c> — per-tenant
-    ///     connection. Falls back to the admin connection with a warning.
-    ///     Replaced by per-tenant resolver in Story 28-4.</description></item>
+    ///   <item><description><c>ConnectionStrings:TammaAppDb</c> — central
+    ///     app connection. Falls back to the admin connection with a warning.
+    ///     Unified-tenancy Phase 3: used ONLY by the system store
+    ///     (<see cref="ISystemStoreDbContextFactory"/>); tenant data always
+    ///     goes through <see cref="ITenantConnectionResolver"/>.</description></item>
     /// </list>
     /// </summary>
     public static IServiceCollection AddTammaData(
@@ -81,13 +82,21 @@ public static class DependencyInjection
             sp.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>()
                 .CreateDbContext());
 
-        // Factory for per-tenant contexts. Uses the app connection when
-        // provided, else falls back to the admin connection.
+        // Central connection string (app ?? admin) — retained ONLY for the
+        // system store below. Tenant data no longer rides it.
         var tenantConnectionString = string.IsNullOrWhiteSpace(appConnectionString)
             ? adminConnectionString
             : appConnectionString;
-        services.AddSingleton<ITenantDbContextFactory>(
-            _ => new TenantDbContextFactory(tenantConnectionString));
+
+        // Unified-tenancy Phase 3 — tenant contexts are resolver-only. The
+        // factory asks ITenantConnectionResolver (production:
+        // LruPooledTenantConnectionResolver, wired by
+        // AddTenantConnectionPool) for the tenant's per-tenant
+        // NpgsqlDataSource built from the stored encrypted connection
+        // string. There is no shared-connection fallback any more.
+        services.AddSingleton<ITenantDbContextFactory>(sp =>
+            new TenantDbContextFactory(
+                sp.GetRequiredService<ITenantConnectionResolver>()));
 
         // Unified-tenancy Phase 3 — the SYSTEM STORE seam. Platform-level
         // system-default rows (TenantId IS NULL) live in the CENTRAL database's
@@ -98,21 +107,12 @@ public static class DependencyInjection
         services.AddSingleton<ISystemStoreDbContextFactory>(
             _ => new SystemStoreDbContextFactory(tenantConnectionString));
 
-        // Story 28-3 contract: every consumer of per-tenant connection
-        // pooling depends on ITenantConnectionResolver, not directly on
-        // a connection string. Wave A.5 post-merge restores the stub
-        // resolver so KekRotationCoordinator (Story 28-12) and the
-        // LRU pool cache (Story 28-4) have an implementation to wire
-        // against until the real per-tenant pool resolver replaces it.
-        //
-        // TryAddSingleton lets a higher-priority composition (e.g. the
-        // pool-cache extension once Story 28-4 lands) register its own
-        // resolver first without conflicting with this fallback.
-        services.TryAddSingleton<ITenantConnectionResolver>(sp =>
-        {
-            var dataSource = NpgsqlDataSource.Create(tenantConnectionString);
-            return new StubTenantConnectionResolver(dataSource);
-        });
+        // Unified-tenancy Phase 3 — NO fallback ITenantConnectionResolver is
+        // registered here. The composition root (Program.cs) wires the
+        // LruPooledTenantConnectionResolver unconditionally via
+        // AddTenantConnectionPool; test fixtures register their own resolver
+        // double. The transitional StubTenantConnectionResolver (every tenant
+        // on the shared central DB) was deleted in this phase.
 
         // Control-plane repositories.
         services.AddScoped<IUserRepository, UserRepository>();
@@ -164,87 +164,5 @@ public static class DependencyInjection
         services.TryAddScoped<IPlatformEmailOutboxRepository, PlatformEmailOutboxRepository>();
 
         return services;
-    }
-
-    /// <summary>
-    /// Story 28-3 AC3 (2026-05-30 residual follow-up) — release-build
-    /// hard-fail when a <b>Production</b> deployment is missing
-    /// <c>ConnectionStrings:ControlPlane</c>.
-    ///
-    /// <para><b>The gap this closes</b>: <c>AddTammaData</c> always
-    /// registers <see cref="StubTenantConnectionResolver"/> (which routes
-    /// every tenant to the single shared central DB). The real
-    /// <c>LruPooledTenantConnectionResolver</c> only replaces it — via
-    /// <c>AddTenantConnectionPool</c> — when a CP connection string is
-    /// present. A Production deployment that forgets the CP string would
-    /// therefore silently keep the stub, putting every tenant on the same
-    /// database and defeating tenant isolation, with only an Info log to
-    /// show for it. This guard converts that silent fallback into a
-    /// fail-fast startup exception.</para>
-    ///
-    /// <para><b>Why this seam</b>: the guard is a pure function of
-    /// <paramref name="isProduction"/> + the CP connection string, so it
-    /// is fully unit-testable without standing up a host, and the
-    /// composition root (<c>Program.cs</c>) calls it with a single line
-    /// next to the existing CP-string gating. It lives here (rather than
-    /// inline in <c>Program.cs</c>) so a sibling stream editing
-    /// <c>Program.cs</c> concurrently does not collide on the logic.</para>
-    ///
-    /// <para><b>Fires ONLY when isolation is explicitly required</b>
-    /// (2026-05-31 revision): shared-infrastructure mode — every tenant on
-    /// the central Postgres, isolated via Phase-3 RLS, with
-    /// <c>ConnectionStrings:ControlPlane</c> deliberately unset — is the
-    /// <b>documented production default</b> (it is what the Hetzner VPS
-    /// deploy runs; see <c>docker-compose.prod.yml</c>). The first cut of
-    /// this guard fired on ANY Production host without a CP string and so
-    /// crash-looped that supported topology. The guard now fires only when
-    /// the operator has set <c>Tamma:RequireTenantIsolation=true</c> —
-    /// declaring "per-tenant DBs are mandatory here, a missing CP string is
-    /// a misconfiguration." Without the opt-in, shared-DB-in-Production is
-    /// allowed and the resolver's existing Info-log fallback stands.</para>
-    ///
-    /// <para><b>Always a no-op outside Production</b>: Development / Test
-    /// deployments run on the stub WITHOUT a CP string by design (the whole
-    /// test suite relies on this), regardless of the opt-in.</para>
-    /// </summary>
-    /// <param name="isProduction"><c>true</c> when the host environment is
-    /// Production (e.g. <c>builder.Environment.IsProduction()</c>).</param>
-    /// <param name="requireTenantIsolation"><c>true</c> when the operator has
-    /// opted into mandatory per-tenant DB isolation via
-    /// <c>Tamma:RequireTenantIsolation</c>. When <c>false</c> (the default),
-    /// shared-infrastructure mode is permitted in Production.</param>
-    /// <param name="controlPlaneConnectionString">The resolved
-    /// <c>ConnectionStrings:ControlPlane</c> value (already trimmed of
-    /// fallbacks by the caller), or <c>null</c>/empty when unset.</param>
-    /// <exception cref="InvalidOperationException">Thrown when
-    /// <paramref name="isProduction"/> AND
-    /// <paramref name="requireTenantIsolation"/> are both <c>true</c> and
-    /// <paramref name="controlPlaneConnectionString"/> is null/whitespace —
-    /// the deployment declared per-tenant isolation mandatory but would
-    /// otherwise run the stub resolver with isolation disabled.</exception>
-    public static void GuardTenantIsolationInProduction(
-        bool isProduction,
-        bool requireTenantIsolation,
-        string? controlPlaneConnectionString)
-    {
-        // Shared-infrastructure mode (RLS isolation, no CP string) is the
-        // documented production default — only enforce per-tenant DB routing
-        // when the operator has explicitly opted in.
-        if (!isProduction || !requireTenantIsolation)
-            return;
-
-        if (string.IsNullOrWhiteSpace(controlPlaneConnectionString))
-            throw new InvalidOperationException(
-                "Tamma:RequireTenantIsolation=true but "
-                + "ConnectionStrings:ControlPlane is not configured in a "
-                + "Production environment. The deployment declared per-tenant "
-                + "database isolation mandatory, yet without the CP string the "
-                + "platform falls back to StubTenantConnectionResolver, which "
-                + "routes EVERY tenant to the single shared central database — "
-                + "isolation would be disabled. Refusing to start. Either set "
-                + "ConnectionStrings:ControlPlane to the dedicated control-plane "
-                + "database to enable the per-tenant LRU connection pool "
-                + "(Story 28-4), or unset Tamma:RequireTenantIsolation to run in "
-                + "shared-infrastructure mode (Phase-3 RLS isolation).");
     }
 }

@@ -197,18 +197,6 @@ services:
       - ConnectionStrings__TammaDb=Server=postgres;Port=5432;Database=tamma;User Id=${TAMMA_ADMIN_DB_USER:-tamma};Password=${TAMMA_ADMIN_DB_PASSWORD:-${DB_PASSWORD}};
       - ConnectionStrings__TammaAppDb=Server=postgres;Port=5432;Database=tamma;User Id=tamma_app;Password=${TAMMA_APP_DB_PASSWORD:-${DB_PASSWORD}};
       - ConnectionStrings__Provisioner=Server=postgres;Port=5432;Database=tamma;User Id=tamma_provisioner;Password=${TAMMA_PROVISIONER_DB_PASSWORD:-${DB_PASSWORD}};
-      # ── Story 28-3 AC3 — tenant-isolation mode (default: shared-DB) ──────
-      # This VPS runs SHARED-INFRASTRUCTURE mode: every tenant lives in the
-      # central `tamma` database, isolated via Phase-3 RLS, with NO
-      # ConnectionStrings:ControlPlane set (per-tenant DB routing / Cranl is
-      # not enabled here). That is the documented production default.
-      #
-      # Flip Tamma__RequireTenantIsolation=true ONLY when migrating to
-      # per-tenant databases — it makes a missing ConnectionStrings:ControlPlane
-      # a fail-fast startup error (so an operator who intends isolation but
-      # forgets the CP string can't silently serve every tenant from one DB).
-      # Left explicit-false here so the knob is discoverable.
-      - Tamma__RequireTenantIsolation=false
       # AES-GCM KEK for tenant connection-string envelopes (unified-tenancy
       # Phase 2 placement pool + provisioning). base64-encoded 32 random
       # bytes. When empty, the API still boots (the tenant_databases

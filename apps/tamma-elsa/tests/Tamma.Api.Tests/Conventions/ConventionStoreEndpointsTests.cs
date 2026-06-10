@@ -14,6 +14,7 @@ using Tamma.Api.Services.Agents;
 using Tamma.Api.Services.Conventions;
 using Tamma.Api.Services.PromptStore;
 using Tamma.Api.Tests.Infrastructure;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Pooling;
 using Tamma.Data.Repositories;

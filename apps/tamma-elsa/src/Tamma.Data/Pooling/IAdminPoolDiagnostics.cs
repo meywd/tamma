@@ -3,10 +3,9 @@ namespace Tamma.Data.Pooling;
 /// <summary>
 /// Story 28-4 AC5 — admin-only diagnostics surface for the per-tenant
 /// connection pool. Implemented by <see cref="LruPooledTenantConnectionResolver"/>
-/// (the production resolver). Test doubles + the legacy
-/// <c>StubTenantConnectionResolver</c> do NOT implement this interface so
-/// the admin endpoint can return a 404 / 503 cleanly when running in a
-/// non-production wiring.
+/// (the production resolver). Test doubles do NOT implement this
+/// interface so the admin endpoint can return a 404 / 503 cleanly when
+/// running in a non-production wiring.
 ///
 /// <para>The detailed snapshot here is a strict superset of
 /// <see cref="Tamma.Data.Abstractions.TenantConnectionPoolStats"/> —

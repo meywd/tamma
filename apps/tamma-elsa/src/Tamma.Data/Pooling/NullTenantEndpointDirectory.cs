@@ -12,10 +12,10 @@ namespace Tamma.Data.Pooling;
 /// <para>Used by:</para>
 /// <list type="bullet">
 ///   <item><description><b>Single-user mode</b> (CLAUDE.md §"Operating
-///     Modes"): no V2 providers are wired; the LRU resolver itself is
-///     swapped out for the
-///     <c>StubTenantConnectionResolver</c> in this mode anyway, so the
-///     null directory is just a safety net for stray DI resolutions.</description></item>
+///     Modes"): no V2 providers are wired; the LRU resolver (the only
+///     tenant connection path since unified-tenancy Phase 3) falls
+///     through to the legacy <c>EncryptedConnectionString</c> path via
+///     this null directory.</description></item>
 ///   <item><description><b>Pre-30-3 SaaS mode</b>: V2 types exist
 ///     (Story 30-1) but no provider is registered yet. Tenants stay on
 ///     the legacy <c>EncryptedConnectionString</c> path.</description></item>

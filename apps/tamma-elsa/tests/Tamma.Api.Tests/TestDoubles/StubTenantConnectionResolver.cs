@@ -1,25 +1,27 @@
 using Npgsql;
 using Tamma.Data.Abstractions;
 
-namespace Tamma.Data;
+namespace Tamma.Api.Tests.TestDoubles;
 
 /// <summary>
-/// Transitional <see cref="ITenantConnectionResolver"/> that routes every
-/// tenant to the same shared <see cref="NpgsqlDataSource"/>. Wave A.5
-/// post-merge: the original Story 28-3 stub was removed from the tree;
-/// this restored version keeps DI registration working (all callers that
-/// depend on <see cref="ITenantConnectionResolver"/>, notably
-/// <c>KekRotationCoordinator</c> and <c>LruPooledTenantConnectionResolver</c>
-/// consumers) until Story 28-4's real per-tenant pool cache is wired
-/// in production. Per-tenant isolation at this point is still enforced
-/// by <see cref="TenantDbContext.TenantId"/> + the query filter, not by
-/// the connection.
+/// TEST-ONLY <see cref="ITenantConnectionResolver"/> that routes every
+/// tenant to the same shared <see cref="NpgsqlDataSource"/>.
+///
+/// <para>Unified-tenancy Phase 3 deleted the production
+/// <c>Tamma.Data.StubTenantConnectionResolver</c> — tenant data goes
+/// exclusively through <c>LruPooledTenantConnectionResolver</c> now. This
+/// relocated copy exists solely so the ConventionStore test harnesses keep
+/// compiling until the Phase 3 test-fixture migration (Task 5) moves them
+/// onto provisioned tenants, at which point this class should be deleted.
+/// Per-tenant isolation through this double is enforced only by
+/// <c>TenantDbContext.TenantId</c> + the EF query filter, not by the
+/// connection.</para>
 ///
 /// <para>The resolver owns a single <see cref="NpgsqlDataSource"/> it
 /// disposes when itself disposed. The pool statistics reported are
 /// trivially synthetic — <c>WarmPoolCount</c> is always 1.</para>
 /// </summary>
-public sealed class StubTenantConnectionResolver
+internal sealed class StubTenantConnectionResolver
     : ITenantConnectionResolver, IAsyncDisposable
 {
     private readonly NpgsqlDataSource _dataSource;

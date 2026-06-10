@@ -7,45 +7,24 @@ namespace Tamma.Data;
 /// <summary>
 /// Default <see cref="ITenantDbContextFactory"/> implementation.
 ///
-/// <para>Two construction modes share this class:</para>
-/// <list type="bullet">
-///   <item><description>Wave A.5 transitional form — a single shared
-///     Npgsql connection string resolves every tenant against the
-///     central DB. The per-tenant scoping is enforced by the EF query
-///     filter wired from <see cref="TenantDbContext.TenantId"/>.
-///     Used by DI registration in
-///     <see cref="DependencyInjection.AddTammaData"/> while the
-///     per-tenant pool cache is still being rolled out.</description></item>
-///   <item><description>Story 28-4 target form — an injected
-///     <see cref="ITenantConnectionResolver"/> returns a per-tenant
-///     <see cref="Npgsql.NpgsqlDataSource"/> (LRU pool). Call sites
-///     stay identical; only the resolver implementation changes when
-///     the pool cache lands in production.</description></item>
-/// </list>
+/// <para>Unified-tenancy Phase 3 — resolver-only. The injected
+/// <see cref="ITenantConnectionResolver"/> (production:
+/// <see cref="LruPooledTenantConnectionResolver"/>) returns the tenant's
+/// per-tenant <see cref="Npgsql.NpgsqlDataSource"/> built from the stored
+/// encrypted connection string (<c>Search Path=t_&lt;hex&gt;</c>). The
+/// transitional shared-connection-string mode (Wave A.5 — every tenant on
+/// the central DB, scoped only by the EF query filter) was removed together
+/// with <c>StubTenantConnectionResolver</c>. Platform-level system-default
+/// rows are reached via <see cref="ISystemStoreDbContextFactory"/> instead.</para>
 /// </summary>
 public sealed class TenantDbContextFactory : ITenantDbContextFactory
 {
-    private readonly string? _connectionString;
-    private readonly ITenantConnectionResolver? _resolver;
-
-    /// <summary>
-    /// Construct with a shared connection string. Wave A.5 transitional
-    /// mode — every tenant resolves to the same central DB, EF query
-    /// filter supplies the tenant scoping.
-    /// </summary>
-    public TenantDbContextFactory(string connectionString)
-    {
-        if (string.IsNullOrWhiteSpace(connectionString))
-            throw new ArgumentException(
-                "TenantDbContextFactory requires a non-empty connection string.",
-                nameof(connectionString));
-        _connectionString = connectionString;
-    }
+    private readonly ITenantConnectionResolver _resolver;
 
     /// <summary>
     /// Construct with an injected <see cref="ITenantConnectionResolver"/>.
-    /// Story 28-4 form — the resolver hands back a per-tenant
-    /// <c>NpgsqlDataSource</c>; pool lifetime is owned by the resolver.
+    /// The resolver hands back a per-tenant <c>NpgsqlDataSource</c>; pool
+    /// lifetime is owned by the resolver.
     /// </summary>
     public TenantDbContextFactory(ITenantConnectionResolver resolver)
     {
@@ -64,23 +43,14 @@ public sealed class TenantDbContextFactory : ITenantDbContextFactory
 
         var builder = new DbContextOptionsBuilder<TenantDbContext>();
 
-        if (_resolver is not null)
-        {
-            var dataSource = await _resolver
-                .GetDataSourceAsync(tenantId, cancellationToken)
-                .ConfigureAwait(false);
-            // NpgsqlDataSource.ConnectionString may omit the password — fine,
-            // the helper only reads the Search Path key.
-            var schema = TenantNaming.SchemaFromConnectionString(dataSource.ConnectionString);
-            builder.UseNpgsql(dataSource, npgsql =>
-                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema));
-        }
-        else
-        {
-            var schema = TenantNaming.SchemaFromConnectionString(_connectionString!);
-            builder.UseNpgsql(_connectionString!, npgsql =>
-                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema));
-        }
+        var dataSource = await _resolver
+            .GetDataSourceAsync(tenantId, cancellationToken)
+            .ConfigureAwait(false);
+        // NpgsqlDataSource.ConnectionString may omit the password — fine,
+        // the helper only reads the Search Path key.
+        var schema = TenantNaming.SchemaFromConnectionString(dataSource.ConnectionString);
+        builder.UseNpgsql(dataSource, npgsql =>
+            npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema));
 
         return new TenantDbContext(builder.Options, tenantId);
     }
