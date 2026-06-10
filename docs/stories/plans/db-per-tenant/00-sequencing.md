@@ -1,5 +1,7 @@
 # DB-per-Tenant — Implementation Sequencing Plan
 
+> **Superseded/extended by the unified schema-per-tenant model** — see `docs/superpowers/plans/2026-06-09-unified-schema-per-tenant.md` (complete 2026-06-10).
+
 **Status**: Active
 **Scope**: Execution plan for the 12 Epic 28 stories. Derived from the
 four design documents in this directory.

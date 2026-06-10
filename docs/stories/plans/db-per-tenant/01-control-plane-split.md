@@ -1,5 +1,7 @@
 # DB-per-Tenant — Control-Plane / Tenant Split
 
+> **Superseded/extended by the unified schema-per-tenant model** — see `docs/superpowers/plans/2026-06-09-unified-schema-per-tenant.md` (complete 2026-06-10).
+
 **Status**: Design proposal — not yet approved, no code changes committed.
 **Audience**: Platform engineers implementing the migration from shared
 `public` schema + `TenantId` column to a database-per-tenant topology.

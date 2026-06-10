@@ -1,5 +1,7 @@
 # Epic 28: Database-per-Tenant Foundation
 
+> **Extended/superseded by the unified schema-per-tenant model** — see `docs/superpowers/plans/2026-06-09-unified-schema-per-tenant.md` (complete 2026-06-10).
+
 **Status:** In progress — 28-1/2/3/4/5/6/7/8/9/12 landed (Wave A + A.5); 28-10/11 in flight; 28-13 deferred (trigger-gated)
 **Stories:** 12 active (28-1..28-12) + 1 deferred (28-13)
 **Layer:** Layer 4 (Foundation + Provisioning + Auth + Operations)

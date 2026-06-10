@@ -6,6 +6,13 @@
 > `superpowers:subagent-driven-development`. Do NOT start coding from this doc until the "Decisions
 > needed" section is resolved.
 
+> **STATUS: ALL PHASES COMPLETE (2026-06-10).** The §1 invariants hold: one tenant type; every
+> tenant has SchemaName + DatabaseId + an encrypted Search-Path connection string; placement is
+> tier-driven and admin-managed (CRUD + move); isolation is schema + per-tenant role; the control
+> plane is global; the spec's uniform connection-string CHECK ships in its transitional form
+> (deviations 6-7) pending the post-Epic-30 scope tightening. Execution records live in the five
+> phase task-plans (2026-06-09/10).
+
 **Goal:** Replace the two-mode tenancy model (RLS-shared-tables *vs* optional own-DB) with ONE model:
 every tenant has a uniquely-named schema and an (encrypted) connection string; the database behind
 that connection string may host one tenant or many; placement is a SaaS-admin concern driven by
@@ -126,7 +133,7 @@ active tenant genuinely has a connection string.
   possible because every tenant mints at creation.
 - **Phase 4 — DONE 2026-06-10.** Admin placement + move. `tenant_databases` CRUD endpoints (OwnerAccess); tenant→DB
   view; `MoveTenantWorkflow` (dump-schema → restore → re-point → evict → drop source).
-- **Phase 5 — Remove Phase-3 RLS + cleanup.** Drop RLS policies on tenant tables; retire the
+- **Phase 5 — DONE 2026-06-10.** Drop RLS policies on tenant tables; retire the
   `ProviderKey` mode flag (per Decisions); adapt the 28-5 backup to `--schema`.
 
 Re-order rationale: stub removal hard-depends on every tenant having a minted connection string, so
@@ -229,6 +236,16 @@ inside a shared DB. (Alternative — one shared role per DB — is simpler but w
     its own dump), pg_restore ignored-error budget + per-table row-count verification (silent
     partial restores), per-tenant Postgres advisory lock (concurrent moves), 0700 temp dir +
     drain grace window.
+
+**Phase 5 implementation deviations (2026-06-10):**
+
+21. **tamma_app role + grants + three-role privilege split KEPT** — least-privilege runtime role,
+    independent of RLS (DbRoleLeastPrivilegeCheck still enforces it).
+22. **ProviderKey + V2 endpoint directory KEPT** as the Epic-30 backend-label seam (decision 3
+    final: a label for which provider minted hosting infrastructure — never a tenancy mode).
+23. **The trigger-backed "users.TenantId immutable" invariant** is app-layer convention (switch-org
+    writes Settings.activeTenantId; the old direct-update route is pinned 404 by tests) — no
+    replacement guard added.
 
 ---
 

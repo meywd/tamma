@@ -1,5 +1,7 @@
 # Elsa Two-Tier Topology — Global + Per-Tenant
 
+> **Superseded/extended by the unified schema-per-tenant model** — see `docs/superpowers/plans/2026-06-09-unified-schema-per-tenant.md` (complete 2026-06-10).
+
 **Status:** Design — pending implementation
 **Depends on:** `01-control-plane-split.md` (control-plane / tenant-DB split — assumed as context)
 **Supersedes:** the single-Elsa-instance model currently running in `apps/tamma-elsa/docker-compose.yml`

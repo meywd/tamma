@@ -117,3 +117,53 @@ decision 3; §3 row "RLS removal").
   TenantId-mutation is blocked by trigger). T1's test-filter run + T3's full suite catch it; if a
   trigger-dependent invariant matters (one-way personal-tenant TenantId), the fix is an app-layer
   guard, not keeping the trigger — decide there and record.
+
+---
+
+## Execution record (2026-06-10)
+
+**Commits:** `6854093b` (T1, RLS drop), `e906b339` (T2, ProviderKey/two-mode purge), plus the
+closing docs commit (`docs(tenancy-p5): unified schema-per-tenant tenancy COMPLETE`) on
+`feat/wave-b`.
+
+**Task 1 — RLS removal (`6854093b`, 4 files, +34/-425):** From the trailing Sql block of
+`20260609205701_InitialControlPlane.cs` (-156 lines net) DELETED: the
+`prevent_tenant_id_change()` function + its 4 triggers, 7 DROP-POLICY-guard + CREATE POLICY
+pairs, and ENABLE/FORCE ROW LEVEL SECURITY on the 7 shared tables (plus the matching Down()
+function-drop prologue). KEPT: `tamma_app` role + grants (least-privilege runtime role,
+independent of RLS), partial/expression indexes, legacy CHECKs, api_keys self-FK.
+`has-pending-model-changes` clean; bare-PG apply verified (pg_policy=0, relrowsecurity=false
+everywhere, function gone, tamma_app present, kept objects spot-checked).
+`AppRoleRegressionTests.cs` deleted whole (272 lines — RLS-policy assertions incl. the 2
+env-gated Story-28-1 skips; least-privilege enforcement remains via the runtime
+`DbRoleLeastPrivilegeCheck`); `TenancySetUpFixture` trimmed of policy provisioning;
+`SwitchOrgEndpointTests` pins the app-layer TenantId-immutability convention (deviation 23).
+
+**Task 2 — ProviderKey + language purge (`e906b339`, 29 files, +170/-154):** ProviderKey
+reworded everywhere to backend-label semantics (Tenant.cs, TammaModelConfiguration,
+ITenantConnectionResolver, provisioner seams, V2 lookup — no behavior change); two-mode /
+"Phase-3 RLS" current-state claims purged from `CLAUDE.md`, `docker-compose.prod.yml`,
+`scripts/db/*` (4 scripts), `Program.cs`/endpoints comments, and 8 wiki pages (Home,
+Architecture, Security, Deployment, Testing, Agent-Dispatch, Secret-Management,
+Epic-4-Event-Sourcing). 28-5 backup `--schema` adaptation was already done in Phase 2
+(recorded there).
+
+**Task 3 — full suite (post-`e906b339`):** 0 failures. Per project:
+
+| Project | Passed | Skipped | Total |
+|---|---|---|---|
+| Tamma.Api.Tests | 2855 | 6 | 2861 |
+| Tamma.Activities.Tests | 1237 | 0 | 1237 |
+| Tamma.Core.Tests | 23 | 0 | 23 |
+| Tamma.Platforms.Abstractions.Tests | 66 | 0 | 66 |
+| Tamma.Platforms.Gitea.Tests | 96 | 0 | 96 |
+| Tamma.Platforms.GitHub.Tests | 63 | 0 | 63 |
+| Tamma.Platforms.GitLab.Tests | 97 | 0 | 97 |
+| Tamma.Platforms.IntegrationTests | 18 | 3 | 21 |
+| Tamma.Platforms.Tests | 90 | 0 | 90 |
+| Tamma.Studio.Tests | 30 | 0 | 30 |
+| **Total** | **4575** | **9** | **4584** |
+
+(Baseline ~4586 minus the 2 deleted RLS skip-tests → 4584.) Parent plan updated: Phase 5 DONE,
+deviations 21-23 recorded, ALL-PHASES-COMPLETE status banner added. wiki/Security.md +
+wiki/Architecture.md RLS sections were updated in T2.

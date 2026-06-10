@@ -1,5 +1,7 @@
 # 04 — Runtime Connection Management & Tenant Deletion
 
+> **Superseded/extended by the unified schema-per-tenant model** — see `docs/superpowers/plans/2026-06-09-unified-schema-per-tenant.md` (complete 2026-06-10).
+
 > **Scope.** This document covers the two load-bearing operational concerns
 > of the database-per-tenant architecture:
 >
