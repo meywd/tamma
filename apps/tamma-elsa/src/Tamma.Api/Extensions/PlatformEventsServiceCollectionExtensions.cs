@@ -42,6 +42,14 @@ public static class PlatformEventsServiceCollectionExtensions
         // WITH FORCE per Postgres 17 docs).
         services.TryAddSingleton<ITenantAdminConnection, NpgsqlTenantAdminConnection>();
 
+        // Unified-tenancy Phase 2 — accessor over the tenant_databases
+        // registry. The tenant lifecycle runs its cluster-scoped DDL
+        // (CREATE ROLE / SCHEMA / GRANT) through the ASSIGNED pool row's
+        // admin connection, which this seam decrypts and serves. Singleton
+        // (caches decrypted admin strings per pool row) + fresh connection
+        // per statement, mirroring NpgsqlTenantAdminConnection.
+        services.TryAddSingleton<ITenantDatabasePool, TenantDatabasePool>();
+
         // Story 28-5 — per-tenant migrator runs the InitialTenant migration
         // set against a freshly-created tenant DB. Singleton; opens an
         // ad-hoc TenantDbContext per call.

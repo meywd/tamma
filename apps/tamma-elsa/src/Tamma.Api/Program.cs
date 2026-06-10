@@ -1991,10 +1991,47 @@ using (var scope = app.Services.CreateScope())
         dbContext.Database.Migrate();
         Log.Information("Database migrations applied successfully ({Count} total)",
             dbContext.Database.GetAppliedMigrations().Count());
+
+        // ── Startup seeds (insert-missing-only, no-op on re-run) ────────────
+        //
+        // Plans: the three default tiers referenced by tenants.Plan and by
+        // the Phase 2 placement lookup (Plan.PlacementPolicy). PlansSeeder's
+        // doc contract says "invoked once at API startup after migrations
+        // apply" — this is that call site.
+        await Tamma.Data.Seeders.PlansSeeder.SeedAsync(dbContext);
+
+        // tenant_databases: register the central DB as pool member #1
+        // (unified-tenancy Phase 2) so single-user/dev and SaaS share one
+        // placement code path. The admin connection string uses the SAME
+        // lookup chain as NpgsqlTenantAdminConnection (TenantAdmin →
+        // DefaultConnection → ControlPlane) so the seeded row's envelope
+        // matches what the lifecycle activities connect with.
+        var tenantAdminCs = app.Configuration.GetConnectionString("TenantAdmin");
+        if (string.IsNullOrWhiteSpace(tenantAdminCs))
+        {
+            tenantAdminCs = app.Configuration.GetConnectionString("DefaultConnection")
+                ?? app.Configuration.GetConnectionString("ControlPlane");
+        }
+        if (string.IsNullOrWhiteSpace(tenantAdminCs))
+        {
+            Log.Warning(
+                "TenantDatabasesSeeder skipped — no admin connection string found via "
+                + "ConnectionStrings:TenantAdmin / :DefaultConnection / :ControlPlane. "
+                + "Tenant placement will have no pool member until one is configured.");
+        }
+        else
+        {
+            var protector = scope.ServiceProvider
+                .GetRequiredService<Tamma.Data.Abstractions.ITenantConnectionStringProtector>();
+            await Tamma.Data.Seeders.TenantDatabasesSeeder.SeedAsync(
+                dbContext, tenantAdminCs, protector);
+        }
+
+        Log.Information("Startup seeds applied (plans + tenant_databases bootstrap)");
     }
     catch (Exception ex)
     {
-        Log.Error(ex, "Fatal: database migration failed");
+        Log.Error(ex, "Fatal: database migration/startup-seed failed");
         throw;
     }
 }
