@@ -12,8 +12,8 @@ using Tamma.Data;
 namespace Tamma.Data.Migrations.Tenant
 {
     [DbContext(typeof(TenantDbContext))]
-    [Migration("20260524143833_ConventionStore")]
-    partial class ConventionStore
+    [Migration("20260610013731_InitialTenant")]
+    partial class InitialTenant
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -103,7 +103,7 @@ namespace Tamma.Data.Migrations.Tenant
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id")
-                        .HasDefaultValueSql("uuid_generate_v4()");
+                        .HasDefaultValueSql("gen_random_uuid()");
 
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
@@ -153,7 +153,7 @@ namespace Tamma.Data.Migrations.Tenant
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id")
-                        .HasDefaultValueSql("uuid_generate_v4()");
+                        .HasDefaultValueSql("gen_random_uuid()");
 
                     b.Property<DateTime?>("CompletedAt")
                         .HasColumnType("timestamp with time zone")
@@ -526,7 +526,10 @@ namespace Tamma.Data.Migrations.Tenant
                     b.HasKey("Id");
 
                     b.HasIndex("TenantId", "Role", "Action")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasDatabaseName("IX_conventions_TenantId_Role_Action");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("TenantId", "Role", "Action"), false);
 
                     b.ToTable("conventions", (string)null);
                 });
@@ -749,7 +752,10 @@ namespace Tamma.Data.Migrations.Tenant
                     b.HasKey("Id");
 
                     b.HasIndex("UserId", "TenantId", "Scope", "Role", "Action")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasDatabaseName("IX_prompt_overrides_UserId_TenantId_Scope_Role_Action");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("UserId", "TenantId", "Scope", "Role", "Action"), false);
 
                     b.ToTable("prompt_overrides", null, t =>
                         {

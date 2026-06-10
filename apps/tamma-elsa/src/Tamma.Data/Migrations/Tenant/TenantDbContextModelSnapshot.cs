@@ -100,7 +100,7 @@ namespace Tamma.Data.Migrations.Tenant
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id")
-                        .HasDefaultValueSql("uuid_generate_v4()");
+                        .HasDefaultValueSql("gen_random_uuid()");
 
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
@@ -150,7 +150,7 @@ namespace Tamma.Data.Migrations.Tenant
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id")
-                        .HasDefaultValueSql("uuid_generate_v4()");
+                        .HasDefaultValueSql("gen_random_uuid()");
 
                     b.Property<DateTime?>("CompletedAt")
                         .HasColumnType("timestamp with time zone")
@@ -523,7 +523,10 @@ namespace Tamma.Data.Migrations.Tenant
                     b.HasKey("Id");
 
                     b.HasIndex("TenantId", "Role", "Action")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasDatabaseName("IX_conventions_TenantId_Role_Action");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("TenantId", "Role", "Action"), false);
 
                     b.ToTable("conventions", (string)null);
                 });
@@ -746,7 +749,10 @@ namespace Tamma.Data.Migrations.Tenant
                     b.HasKey("Id");
 
                     b.HasIndex("UserId", "TenantId", "Scope", "Role", "Action")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasDatabaseName("IX_prompt_overrides_UserId_TenantId_Scope_Role_Action");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("UserId", "TenantId", "Scope", "Role", "Action"), false);
 
                     b.ToTable("prompt_overrides", null, t =>
                         {

@@ -7,7 +7,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Tamma.Data.Migrations.Tenant
 {
     /// <inheritdoc />
-    public partial class AddMovedEntitiesToTenantSchema : Migration
+    public partial class InitialTenant : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
@@ -69,6 +69,27 @@ namespace Tamma.Data.Migrations.Tenant
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_budget_configs", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "conventions",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "gen_random_uuid()"),
+                    TenantId = table.Column<Guid>(type: "uuid", nullable: true),
+                    Role = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
+                    Action = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
+                    Body = table.Column<string>(type: "text", nullable: false),
+                    Version = table.Column<int>(type: "integer", nullable: false, defaultValue: 1),
+                    Enabled = table.Column<bool>(type: "boolean", nullable: false, defaultValue: true),
+                    CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()"),
+                    UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()"),
+                    CreatedBy = table.Column<Guid>(type: "uuid", nullable: true),
+                    UpdatedBy = table.Column<Guid>(type: "uuid", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_conventions", x => x.Id);
                 });
 
             migrationBuilder.CreateTable(
@@ -164,6 +185,7 @@ namespace Tamma.Data.Migrations.Tenant
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_prompt_overrides", x => x.Id);
+                    table.CheckConstraint("ck_prompt_overrides_principal_xor", "(\"UserId\" IS NOT NULL AND \"TenantId\" IS NULL) OR (\"UserId\" IS NULL AND \"TenantId\" IS NOT NULL)");
                 });
 
             migrationBuilder.CreateTable(
@@ -300,7 +322,7 @@ namespace Tamma.Data.Migrations.Tenant
                 name: "mentorship_sessions",
                 columns: table => new
                 {
-                    id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "uuid_generate_v4()"),
+                    id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "gen_random_uuid()"),
                     story_id = table.Column<string>(type: "text", nullable: false),
                     junior_id = table.Column<string>(type: "text", nullable: false),
                     current_state = table.Column<string>(type: "text", nullable: false),
@@ -362,7 +384,7 @@ namespace Tamma.Data.Migrations.Tenant
                 name: "mentorship_events",
                 columns: table => new
                 {
-                    id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "uuid_generate_v4()"),
+                    id = table.Column<Guid>(type: "uuid", nullable: false, defaultValueSql: "gen_random_uuid()"),
                     session_id = table.Column<Guid>(type: "uuid", nullable: false),
                     event_type = table.Column<string>(type: "text", nullable: false),
                     event_data = table.Column<string>(type: "jsonb", nullable: true),
@@ -424,6 +446,13 @@ namespace Tamma.Data.Migrations.Tenant
                 columns: new[] { "TenantId", "AccountId" },
                 unique: true,
                 filter: "\"TenantId\" IS NOT NULL");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_conventions_TenantId_Role_Action",
+                table: "conventions",
+                columns: new[] { "TenantId", "Role", "Action" },
+                unique: true)
+                .Annotation("Npgsql:NullsDistinct", false);
 
             migrationBuilder.CreateIndex(
                 name: "IX_domain_events_TenantId",
@@ -518,10 +547,11 @@ namespace Tamma.Data.Migrations.Tenant
                 column: "workflow_instance_id");
 
             migrationBuilder.CreateIndex(
-                name: "IX_prompt_overrides_UserId_Scope_Role_Action",
+                name: "IX_prompt_overrides_UserId_TenantId_Scope_Role_Action",
                 table: "prompt_overrides",
-                columns: new[] { "UserId", "Scope", "Role", "Action" },
-                unique: true);
+                columns: new[] { "UserId", "TenantId", "Scope", "Role", "Action" },
+                unique: true)
+                .Annotation("Npgsql:NullsDistinct", false);
 
             migrationBuilder.CreateIndex(
                 name: "IX_provider_diagnostics_CorrelationId",
@@ -625,6 +655,9 @@ namespace Tamma.Data.Migrations.Tenant
 
             migrationBuilder.DropTable(
                 name: "budget_configs");
+
+            migrationBuilder.DropTable(
+                name: "conventions");
 
             migrationBuilder.DropTable(
                 name: "domain_events");
