@@ -108,14 +108,9 @@ public class ApiTestFixture
                 builder.DisableAlertHostedServices();
             });
 
-        // The TENANT migration chain references uuid_generate_v4() (mentorship
-        // schema) which lives in the uuid-ossp extension. Enable it before
-        // running migrations so the container image (stock postgres:17-alpine)
-        // can execute the migration bundle. The CP InitialControlPlane baseline
-        // only uses the built-in gen_random_uuid(); extensions are enabled on
-        // both DBs for uniformity.
-        await EnableExtensionsAsync(Postgres.GetConnectionString());
-        await EnableExtensionsAsync(TenantPostgres.GetConnectionString());
+        // Both migration baselines (InitialControlPlane + InitialTenant) apply
+        // on bare Postgres — gen_random_uuid() is a pg_catalog builtin since
+        // PG13, so no extension bootstrap is needed.
 
         // Force service resolution so Program.cs migrations run against the container.
         using var scope = Factory.Services.CreateScope();
@@ -169,17 +164,6 @@ public class ApiTestFixture
     }
 
     public static HttpClient CreateClient() => Factory.CreateClient();
-
-    private static async Task EnableExtensionsAsync(string connectionString)
-    {
-        await using var bootstrap = new Npgsql.NpgsqlConnection(connectionString);
-        await bootstrap.OpenAsync();
-        await using var cmd = bootstrap.CreateCommand();
-        cmd.CommandText =
-            "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";" +
-            "CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";";
-        await cmd.ExecuteNonQueryAsync();
-    }
 
     private static async Task ApplyTenantMigrationsAsync(string connectionString)
     {

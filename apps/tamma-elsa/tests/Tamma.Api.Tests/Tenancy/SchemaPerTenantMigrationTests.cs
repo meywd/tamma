@@ -115,10 +115,10 @@ public class SchemaPerTenantMigrationTests
 
         await using (var ctxA = new TenantDbContext(optsA, tenantA))
         {
-            // Minimal valid AgentConfig — Id / Config / CreatedAt / UpdatedAt
-            // all carry DB-side defaults (gen_random_uuid(), '{}'::jsonb,
-            // now()); the tenant context breaks the Tenant navigation so no
-            // FK row is required.
+            // Minimal valid AgentConfig — Id / CreatedAt / UpdatedAt carry
+            // DB-side defaults (gen_random_uuid(), now()); Config is sent
+            // explicitly by EF via its CLR initializer "{}". The tenant
+            // context breaks the Tenant navigation so no FK row is required.
             ctxA.AgentConfigs.Add(new AgentConfig { TenantId = tenantA });
             await ctxA.SaveChangesAsync();
         }

@@ -107,13 +107,8 @@ public class DiagnosticsSetUpFixture
                 builder.DisableAlertHostedServices();
             });
 
-        // The TENANT migration chain depends on uuid-ossp (uuid_generate_v4 in
-        // the mentorship schema). Ensure the extensions are available before EF
-        // applies migrations; the CP InitialControlPlane baseline only uses the
-        // built-in gen_random_uuid().
-        await EnableExtensionsAsync(Postgres.GetConnectionString());
-        await EnableExtensionsAsync(TenantPostgres.GetConnectionString());
-
+        // Both migration baselines apply on bare Postgres — gen_random_uuid()
+        // is a pg_catalog builtin since PG13; no extension bootstrap needed.
         using var scope = Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
         await db.Database.MigrateAsync();
@@ -178,17 +173,6 @@ public class DiagnosticsSetUpFixture
         await using var tenantConn = new NpgsqlConnection(TenantPostgres.GetConnectionString());
         await tenantConn.OpenAsync();
         await _tenantRespawner.ResetAsync(tenantConn);
-    }
-
-    private static async Task EnableExtensionsAsync(string connectionString)
-    {
-        await using var conn = new NpgsqlConnection(connectionString);
-        await conn.OpenAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText =
-            "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";" +
-            "CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";";
-        await cmd.ExecuteNonQueryAsync();
     }
 
     private static async Task ApplyTenantMigrationsAsync(string connectionString)

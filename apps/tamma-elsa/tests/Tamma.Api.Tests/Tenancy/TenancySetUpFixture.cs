@@ -89,16 +89,8 @@ public class TenancySetUpFixture
         Environment.SetEnvironmentVariable("OpenSearch__Enabled", "false");
         Environment.SetEnvironmentVariable("Jwt__Secret", null);
 
-        // Extensions must be installed as superuser before migrations run.
-        await using (var bootstrap = new NpgsqlConnection(AdminConnectionString))
-        {
-            await bootstrap.OpenAsync();
-            await using var cmd = bootstrap.CreateCommand();
-            cmd.CommandText =
-                "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";" +
-                "CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";";
-            await cmd.ExecuteNonQueryAsync();
-        }
+        // No extension bootstrap needed: both migration baselines apply on
+        // bare Postgres (gen_random_uuid() is a pg_catalog builtin since PG13).
 
         Factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(b =>

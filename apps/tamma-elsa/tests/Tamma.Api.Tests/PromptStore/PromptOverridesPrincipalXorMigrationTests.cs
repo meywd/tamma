@@ -40,19 +40,6 @@ public class PromptOverridesPrincipalXorMigrationTests
         await _postgres.StartAsync();
         _connectionString = _postgres.GetConnectionString();
 
-        // Earlier migrations reference uuid_generate_v4() (mentorship
-        // tables) + gen_random_uuid() (most tables) — install both
-        // extensions before running the migration graph.
-        await using (var ext = new NpgsqlConnection(_connectionString))
-        {
-            await ext.OpenAsync();
-            await using var cmd = new NpgsqlCommand(
-                "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"
-              + "CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";",
-                ext);
-            await cmd.ExecuteNonQueryAsync();
-        }
-
         // Run the full tenant migration graph — including Story 27-2 — so
         // we test the live shape, not a hand-rolled mirror.
         var migrator = new EfTenantDbMigrator();

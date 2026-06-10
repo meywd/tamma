@@ -52,9 +52,8 @@ public class ProviderSessionSetUpFixture
         await WaitUntilReadyAsync(Postgres.GetConnectionString());
         await WaitUntilReadyAsync(TenantPostgres.GetConnectionString());
 
-        // uuid-ossp + pgcrypto are used by earlier migrations — create up-front.
-        await EnableExtensionsAsync(Postgres.GetConnectionString());
-        await EnableExtensionsAsync(TenantPostgres.GetConnectionString());
+        // Both migration baselines apply on bare Postgres — gen_random_uuid()
+        // is a pg_catalog builtin since PG13; no extension bootstrap needed.
 
         // Phase-3: point both DefaultConnection and TammaDb at our container.
         // Clearing TammaDb would let appsettings.json's stale localhost
@@ -139,17 +138,6 @@ public class ProviderSessionSetUpFixture
         await using var tenantConn = new NpgsqlConnection(TenantPostgres.GetConnectionString());
         await tenantConn.OpenAsync();
         await _tenantRespawner.ResetAsync(tenantConn);
-    }
-
-    private static async Task EnableExtensionsAsync(string connectionString)
-    {
-        await using var bootstrap = new NpgsqlConnection(connectionString);
-        await bootstrap.OpenAsync();
-        await using var cmd = bootstrap.CreateCommand();
-        cmd.CommandText =
-            "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";" +
-            "CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";";
-        await cmd.ExecuteNonQueryAsync();
     }
 
     private static async Task ApplyTenantMigrationsAsync(string connectionString)

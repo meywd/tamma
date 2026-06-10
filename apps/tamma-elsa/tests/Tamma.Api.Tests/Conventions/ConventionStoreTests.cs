@@ -68,16 +68,6 @@ public class ConventionStoreTests
         await _postgres.StartAsync();
         _connectionString = _postgres.GetConnectionString();
 
-        await using (var ext = new NpgsqlConnection(_connectionString))
-        {
-            await ext.OpenAsync();
-            await using var cmd = new NpgsqlCommand(
-                "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"
-              + "CREATE EXTENSION IF NOT EXISTS \"pgcrypto\";",
-                ext);
-            await cmd.ExecuteNonQueryAsync();
-        }
-
         var migrator = new EfTenantDbMigrator();
         await migrator.MigrateTenantAppAsync(_connectionString);
 

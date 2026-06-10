@@ -595,3 +595,20 @@ git commit -m "docs(tenancy-p1): mark Phase 1 complete; drop dead extension boot
 - **Known risk**: `dataSource.ConnectionString` on NpgsqlDataSource — verify the property exposes
   the original string (it does; password may be stripped, but Search Path survives — the helper
   only reads Search Path). If the stripped form ever loses Search Path, the proof test catches it.
+
+---
+
+## Execution record (2026-06-09)
+
+All 7 tasks completed on feat/wave-b (commits 3f9e6b75..831811db + this docs-closure commit;
+full suite 4409 passed / 0 failed across 10 projects). Validation: old-chain vs
+collapsed-baseline diff = 31 lines, fully whitelisted (uuid-ossp env-prep + gen_random_uuid defaults
++ pg_dump noise); behavior probes all as labeled (NND indexes, principal-xor CHECK, tenant-scope
+CHECK, extension-free mentorship defaults); two-tenants-one-DB proof test green (schema-pinned
+history tables, cross-schema data isolation — confirmed no EF query-filter confound). Notable:
+- RED failure mode for the proof test was Postgres 3F000 "no schema has been selected to create in"
+  — the migrator's CREATE SCHEMA safety net is what makes Search Path-only conn strings viable
+  until Phase 3's create-activity owns schema creation.
+- Six test fixtures + the design-time factory still use the unpinned 1-arg MigrationsHistoryTable
+  (no Search Path in their conn strings → identical behavior). Phase 2 should consolidate into a
+  single UseTenantNpgsql(...) helper so future Search-Path callers can't silently split history.

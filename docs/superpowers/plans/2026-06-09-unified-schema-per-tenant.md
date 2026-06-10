@@ -115,7 +115,7 @@ active tenant genuinely has a connection string.
   → smallint; `plans.PlacementPolicy` + seed. Reconcile the runtime/design-time history-table-name
   mismatch. Delete CP migrations (`Migrations/` + `Migrations/ControlPlane/`) and regenerate one
   `InitialControlPlane`. Validate apply on a throwaway Postgres. **Schema-only — no behavior change.**
-- **Phase 1 — Tenant schema + per-schema migrations.** `TenantNaming.SchemaName`; `EfTenantDbMigrator`
+- **Phase 1 — DONE 2026-06-09.** Tenant schema + per-schema migrations. `TenantNaming.SchemaName`; `EfTenantDbMigrator`
   + `TenantDbContextFactory` apply into `t_<hex>` via `Search Path` + in-schema history table. Collapse
   the tenant baseline.
 - **Phase 2 — Unified resolver.** Resolver always uses the stored connection string + search_path;
@@ -167,7 +167,7 @@ inside a shared DB. (Alternative — one shared role per DB — is simpler but w
    KEK envelope, lifecycle-workflow + activity base). Tracking-doc update only; not a blocker. Confirm
    epic numbering when we wire story docs.
 
-**Phase 0 implementation deviations (2026-06-09, recorded from the task-plan):**
+**Phase 0/1 implementation deviations (2026-06-09, recorded from the task-plans):**
 
 6. **api_keys Scope CHECK is transitional**: `('platform','user','installation','service','tenant')`
    on CP — live code writes service/installation/tenant scopes to CP today. Tighten to the spec's
@@ -180,6 +180,11 @@ inside a shared DB. (Alternative — one shared role per DB — is simpler but w
    cleanup path hits 23514. Spec-exact form lands with Phase 3's mint-at-creation.
 8. **RLS + tamma_app role ported verbatim** into the collapsed `InitialControlPlane` baseline
    (34 raw-SQL objects) so Phase 0 stays behavior-neutral; removal stays Phase 5.
+9. **uuid-ossp dependency eliminated** (mentorship defaults → `gen_random_uuid`) — an extension
+   function would not resolve under a per-tenant `search_path`; both baselines now apply on bare
+   Postgres with zero extensions.
+10. **Tenant baseline carries zero raw SQL** — the NULLS NOT DISTINCT unique indexes are
+    model-level in EF 9.
 
 ---
 

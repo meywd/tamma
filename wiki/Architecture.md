@@ -170,7 +170,7 @@ Memory budget (from `docker/docker-compose.yml` + production overrides in `docke
 
 ## 3. Data storage layout
 
-There are **four** EF Core DbContexts, corresponding to two different epochs of tenancy design. The current direction (Epic 28) is db-per-tenant; the older `TammaDbContext` / `TammaAppDbContext` pair is **scheduled for deletion in Wave A.5** (see §13).
+There are **two** EF Core DbContexts: `ControlPlaneDbContext` and `TenantDbContext` (Epic 28 split). The pre-Epic-28 `TammaDbContext` / `TammaAppDbContext` pair was **deleted in Wave A.5** (see §13).
 
 ### 3.1 Control-plane DB (Epic 28, authoritative)
 
@@ -219,7 +219,7 @@ platform_email_outbox      (orphan — SMTP outbox)
 
 Code: `apps/tamma-elsa/src/Tamma.Data/TenantDbContext.cs`.
 Connection string: resolved per-request by `ITenantConnectionResolver` (`apps/tamma-elsa/src/Tamma.Data/Abstractions/ITenantConnectionResolver.cs`). Each tenant lives in its own Postgres DB, so there is no `TenantId` column on any row — **the discriminator is the connection string**.
-Migrations: `apps/tamma-elsa/src/Tamma.Data/Migrations/Tenant/`.
+Migrations: `apps/tamma-elsa/src/Tamma.Data/Migrations/Tenant/` — a single collapsed `InitialTenant` baseline (unified-tenancy Phase 1, 2026-06-09) that applies on bare Postgres (no extensions; `gen_random_uuid()` is a pg_catalog builtin since PG13). Tenant migrations are schema-aware: when the connection string carries a `Search Path`, `EfTenantDbMigrator` applies the baseline into that `t_<hex>` schema with an in-schema `__TenantMigrationsHistory`; with no `Search Path` it applies into `public`, exactly as before.
 
 **16 tables**:
 
@@ -264,14 +264,14 @@ stories ──< mentorship_sessions ──< mentorship_events
                  └─→ junior_developers
 ```
 
-### 3.3 Legacy contexts (scheduled for deletion in Wave A.5)
+### 3.3 Legacy contexts (deleted in Wave A.5)
 
-Two DbContexts predate Epic 28 and still compile into the binary:
+Two DbContexts predated Epic 28 and were removed by Wave A.5; only doc comments reference them now:
 
-- **`TammaDbContext`** — `apps/tamma-elsa/src/Tamma.Data/TammaDbContext.cs`. The original single-DB context holding the union of everything CP + tenant. Still used by admin paths, migrations, background services, and most Story 18 endpoints. Carries the legacy `TenantId` column on every row and a permissive query filter.
-- **`TammaAppDbContext`** — `apps/tamma-elsa/src/Tamma.Data/TammaAppDbContext.cs`. Subclass of `TammaDbContext` that connects as `tamma_app` (non-superuser) so the **Epic 17 RLS** policies installed by migration `20260419021119_Phase2RlsAndTriggers` bite. Fail-closed query filter (`EnforceTenantFilter => true`).
+- **`TammaDbContext`** — the original single-DB context holding the union of everything CP + tenant, with a legacy `TenantId` column on every row and a permissive query filter. Superseded by `ControlPlaneDbContext` + `TenantDbContext`.
+- **`TammaAppDbContext`** — subclass that connected as `tamma_app` (non-superuser) so the **Epic 17 RLS** policies bit. Superseded by the per-tenant connection model.
 
-Both are flagged for removal once every endpoint migrates to the CP + tenant split. The long code comment at the top of `TammaDbContext.EnforceTenantFilter` documents the transition plan. The RLS approach from Epic 17 is **superseded** by the db-per-tenant model (Epic 28) — see §6.
+The legacy `ConnectionStrings:TammaDb` / `:TammaAppDb` configuration keys survive in `Program.cs`'s Phase-3 lookup chain (they now feed the new contexts). The RLS approach from Epic 17 is **superseded** by the db-per-tenant model (Epic 28) — see §6.
 
 The `Phase-2 RLS` migration (`20260419021119`) also installed a `prevent_tenant_id_change()` trigger and six BEFORE-UPDATE triggers that block any mutation of `TenantId` on established rows. Those triggers remain useful during the transition (they enforce the "personal tenant bootstrap is a one-way NULL → uuid" invariant). The standalone migration file no longer exists — unified-tenancy Phase 0 collapsed the CP chain into the `InitialControlPlane` baseline and carried these objects into it verbatim; they are dropped in unified-tenancy Phase 5.
 
@@ -311,9 +311,6 @@ tamma-api (Tamma.Api/Program.cs)
    │      └─ NpgsqlDataSource from ITenantConnectionResolver (per-tenant pool cache)
    │           └─ reads tenants.EncryptedConnectionString → IConnectionStringDecryptor (AesGcm)
    │               └─ IKekProvider.GetKek(kekId) → TAMMA_SECRET_STORE_KEK_PRIMARY / _SECONDARY
-   │
-   ├─► TammaAppDbContext / TammaDbContext   [legacy — scheduled Wave A.5 deletion]
-   │      └─ ConnectionStrings:TammaAppDb / :TammaDb
    │
    ├─► ElsaClient                            [packages/orchestrator/src/elsa-client.ts — used by TS engine only]
    │      └─ http(s)://elsa-server:5000/api/workflow-definitions/…
@@ -800,17 +797,12 @@ Note: `CLAUDE.md` documents "PostgreSQL 17" as the target. The shipped compose f
 
 ## 13. Current vs future state
 
-### 13.1 Wave A.5 cleanup (not done — flagged)
+### 13.1 Wave A.5 cleanup (contexts deleted — residuals flagged)
 
-The following are **in the codebase but scheduled for deletion**:
+Wave A.5 **landed**: `TammaDbContext`, `TammaAppDbContext`, and the mentorship single-DB path are gone — every endpoint now runs on the `ControlPlaneDbContext` + `TenantDbContext` split (`MentorshipSessionRepository` uses `ITenantDbContextFactory`). Remaining residuals **in the codebase but scheduled for deletion**:
 
-1. **`TammaDbContext`** (`Tamma.Data/TammaDbContext.cs`) — legacy monolithic context. Still used by admin paths, migrations, background services, and most Story 18 endpoints. To be removed once every endpoint migrates to the CP + tenant split.
-2. **`TammaAppDbContext`** (`Tamma.Data/TammaAppDbContext.cs`) — RLS-enforcing subclass. Obsolete once db-per-tenant covers every path.
-3. **Phase-2 RLS artefacts** — the `tamma_app` role, 7 RLS policies, 4 tenant-id triggers (originally 8/6 in migration `20260419021119`; since unified-tenancy Phase 0 the survivors live in the collapsed `InitialControlPlane` baseline — the rest died with tables that left the CP schema). The triggers have belt-and-suspenders value during the transition but become redundant under db-per-tenant; removal is unified-tenancy Phase 5.
-4. **Cranl provisioning columns** (`cranl_project_id`, `cranl_database_id`, etc. on `tenants` — originally migration `20260419204924`, now part of the collapsed `InitialControlPlane` baseline). Epic 30's `ITenantInfrastructureProvider` v2 supersedes the inline Cranl columns; they go when the legacy provisioning path is removed.
-5. **Mentorship single-DB path** — `MentorshipSessionRepository` + `MentorshipController` still reference `TammaDbContext`. Move to `TenantDbContext` when the mentorship stories get re-validated.
-
-Until Wave A.5 lands, the app runs on a **hybrid**: new Epic 28 endpoints use the CP + tenant contexts; legacy endpoints use the shared `TammaDbContext`. Both write to the same Postgres cluster in practice.
+1. **Phase-2 RLS artefacts** — the `tamma_app` role, 7 RLS policies, 4 tenant-id triggers (originally 8/6 in migration `20260419021119`; since unified-tenancy Phase 0 the survivors live in the collapsed `InitialControlPlane` baseline — the rest died with tables that left the CP schema). The triggers have belt-and-suspenders value during the transition but become redundant under db-per-tenant; removal is unified-tenancy Phase 5.
+2. **Cranl provisioning columns** (`cranl_project_id`, `cranl_database_id`, etc. on `tenants` — originally migration `20260419204924`, now part of the collapsed `InitialControlPlane` baseline). Epic 30's `ITenantInfrastructureProvider` v2 supersedes the inline Cranl columns; they go when the legacy provisioning path is removed.
 
 ### 13.2 Coming in Epic 30
 

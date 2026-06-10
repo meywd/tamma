@@ -286,16 +286,13 @@ public class KekRotationPostFixTests
         services.AddSingleton(NpgsqlDataSource.Create(connectionString));
         await using var sp = services.BuildServiceProvider();
 
-        // Apply the migration so the kek_rotations + tenants tables
-        // exist for the SaveChanges path.
+        // Create the schema so the kek_rotations + tenants tables
+        // exist for the SaveChanges path. No extensions needed — the model
+        // only uses gen_random_uuid(), a pg_catalog builtin since PG13.
         await using (var bootCtx = await sp
             .GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>()
             .CreateDbContextAsync())
         {
-            await bootCtx.Database.ExecuteSqlRawAsync(
-                "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"");
-            await bootCtx.Database.ExecuteSqlRawAsync(
-                "CREATE EXTENSION IF NOT EXISTS pgcrypto");
             await bootCtx.Database.EnsureCreatedAsync();
         }
 
