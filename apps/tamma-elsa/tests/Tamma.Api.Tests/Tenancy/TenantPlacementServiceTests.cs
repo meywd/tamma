@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 using Tamma.Api.Services.Provisioning;
+using Tamma.Data.Abstractions;
 using Tamma.Data;
 using Tamma.Data.Entities;
 using Tamma.Data.Pooling;

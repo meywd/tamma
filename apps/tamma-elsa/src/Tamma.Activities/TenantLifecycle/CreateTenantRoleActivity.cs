@@ -10,14 +10,19 @@ using Tamma.Data.Pooling;
 namespace Tamma.Activities.TenantLifecycle;
 
 /// <summary>
-/// Step 2 of <c>CreateTenantWorkflow</c>. Creates the per-tenant Postgres
+/// Step 3 of <c>CreateTenantWorkflow</c>. Creates the per-tenant Postgres
 /// login role <c>tamma_tenant_&lt;hex&gt;</c> with a freshly-generated
-/// password. Idempotent via a <c>pg_roles</c> probe; a workflow retry
-/// after a partial success returns the existing role's transient
-/// password from <see cref="GeneratedPassword"/> only when this activity
-/// instance generated it (no recovery of an existing password — by
-/// design; if the role exists from a prior partial run, the operator
-/// must drop it first).
+/// password — on the ASSIGNED pool row's cluster (roles are
+/// cluster-scoped, so the DDL must run where the tenant was placed, not
+/// on the central admin connection). Unified-tenancy Phase 2 delegates
+/// the step logic to <see cref="ITenantProvisioningService.CreateRoleAsync"/>
+/// so the SaaS workflow and the single-user middleware mint roles through
+/// the SAME implementation. Idempotent via a <c>pg_roles</c> probe on the
+/// target cluster; the service returns <c>null</c> on the skip and this
+/// activity converts that to an empty-string
+/// <see cref="GeneratedPassword"/> (the workflow-variable contract — no
+/// recovery of an existing password, by design; if the role exists from a
+/// prior partial run, the operator must drop it first).
 ///
 /// <para>Output: <see cref="GeneratedPassword"/> is the plaintext
 /// password the workflow needs to hand to
@@ -30,15 +35,22 @@ namespace Tamma.Activities.TenantLifecycle;
 [Activity(
     "Tamma.TenantLifecycle",
     "Create Tenant Role",
-    "CREATE ROLE tamma_tenant_<hex> with a fresh password (idempotent).",
+    "CREATE ROLE tamma_tenant_<hex> with a fresh password on the assigned pool cluster (idempotent).",
     Kind = ActivityKind.Task)]
 public sealed class CreateTenantRoleActivity : TenantLifecycleActivity
 {
     public override string StepName => "create-role";
 
+    [Input(Description = "Assigned pool row id (output of AssignTenantPlacementActivity).")]
+    public Input<string> DatabaseId { get; set; } = default!;
+
+    [Input(Description = "Assigned schema name (output of AssignTenantPlacementActivity).")]
+    public Input<string> SchemaName { get; set; } = default!;
+
     [Output(
         Description = "The plaintext password generated for the new role. "
-                      + "Sensitive — workflow must not persist this in the journal.")]
+                      + "Sensitive — workflow must not persist this in the journal. "
+                      + "Empty string on idempotent-skip (role already existed).")]
     public Output<string> GeneratedPassword { get; set; } = default!;
 
     [Output(Description = "Canonical role name (tamma_tenant_<hex>).")]
@@ -49,51 +61,19 @@ public sealed class CreateTenantRoleActivity : TenantLifecycleActivity
         Guid tenantId,
         int attempt)
     {
-        var admin = context.GetRequiredService<ITenantAdminConnection>();
-        var roleName = TenantNaming.RoleName(tenantId);
-        var quoted = TenantNaming.Quote(roleName);
+        var placement = AssignTenantPlacementActivity.ReconstructPlacement(
+            DatabaseId.Get(context), SchemaName.Get(context), "CreateTenantRole");
 
-        if (await admin.RoleExistsAsync(roleName, context.CancellationToken))
-        {
-            // Leave the existing role in place. The encrypted connection
-            // string from a prior partial run is the only path to recover
-            // the password; if Step 8 hadn't completed, the operator
-            // runbook calls for: connect to the placement database, run
-            // DROP OWNED BY <role> (drops the schema + contents), then
-            // DROP ROLE <role>, then retry provisioning.
-            Logger?.LogInformation(
-                "tenant.lifecycle.create_role idempotent_skip tenantId={TenantId} role={Role}",
-                tenantId, roleName);
-            RoleName.Set(context, roleName);
-            // Signal that we did not generate a fresh password this run —
-            // the encrypt step will fail-fast if it cannot read a stored
-            // password from a prior attempt.
-            GeneratedPassword.Set(context, string.Empty);
-            return;
-        }
+        var password = await context.GetRequiredService<ITenantProvisioningService>()
+            .CreateRoleAsync(tenantId, placement, context.CancellationToken);
 
-        var password = GenerateStrongPassword();
-
-        // Quote the password literal — Postgres allows '...' with '' as
-        // an escape for a single quote. Reject any candidate password
-        // that contains a single quote so we never need to worry about
-        // injection here. The generator below uses [A-Za-z0-9!@#%^*_-]
-        // only, so this is defence-in-depth.
-        if (password.Contains('\''))
-            throw new InvalidOperationException(
-                "Generated password contained a quote — refusing to issue CREATE ROLE.");
-
-        var sql =
-            $"CREATE ROLE {quoted} WITH LOGIN PASSWORD '{password}' "
-            + "NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;";
-
-        await admin.ExecuteAsync(sql, context.CancellationToken);
-
-        RoleName.Set(context, roleName);
-        GeneratedPassword.Set(context, password);
-        Logger?.LogInformation(
-            "tenant.lifecycle.create_role created tenantId={TenantId} role={Role}",
-            tenantId, roleName);
+        RoleName.Set(context, TenantNaming.RoleName(tenantId));
+        // null (idempotent-skip — the service logged it) → empty string:
+        // the workflow-variable contract downstream steps key off. The
+        // encrypt step fail-fasts when it cannot read a stored password
+        // envelope from a prior attempt (operator runbook: DROP OWNED BY
+        // on the placement database, DROP ROLE, retry provisioning).
+        GeneratedPassword.Set(context, password ?? string.Empty);
     }
 
     /// <summary>

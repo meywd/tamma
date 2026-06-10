@@ -16,7 +16,11 @@ namespace Tamma.Activities.Tests.TenantLifecycle;
 ///   <item><description>Build()'s metadata is set (definitionId / name / version).</description></item>
 ///   <item><description>Root is a Sequence (not a Flowchart) — the create
 ///     flow is intentionally linear.</description></item>
-///   <item><description>The expected ten activities are present in order.</description></item>
+///   <item><description>The expected twelve activities are present in
+///     order — unified-tenancy Phase 2 inserted
+///     <see cref="AssignTenantPlacementActivity"/> +
+///     <see cref="CreateTenantSchemaActivity"/> and removed the
+///     db-per-tenant CreateTenantDatabaseActivity.</description></item>
 /// </list>
 /// </summary>
 [TestFixture]
@@ -26,8 +30,9 @@ public class CreateTenantWorkflowStructureTests
     {
         typeof(SetVariable),                                       // initInputs
         typeof(MarkProvisioningActivity),
+        typeof(AssignTenantPlacementActivity),
         typeof(CreateTenantRoleActivity),
-        typeof(CreateTenantDatabaseActivity),
+        typeof(CreateTenantSchemaActivity),
         typeof(BuildTenantConnectionStringActivity),
         typeof(MigrateTenantDatabaseActivity),
         typeof(SeedTenantDefaultsActivity),
@@ -80,8 +85,10 @@ public class CreateTenantWorkflowStructureTests
         var names = builder.Object.Variables.Select(v => v.Name).ToHashSet();
         names.Should().Contain(new[]
         {
-            "TenantId", "Attempt", "RoleName", "GeneratedPassword",
-            "DatabaseName", "TenantConnectionString",
+            "TenantId", "Attempt", "DatabaseId", "SchemaName",
+            "RoleName", "GeneratedPassword", "TenantConnectionString",
         });
+        names.Should().NotContain("DatabaseName",
+            "Phase 2 removed the db-per-tenant CreateTenantDatabaseActivity");
     }
 }

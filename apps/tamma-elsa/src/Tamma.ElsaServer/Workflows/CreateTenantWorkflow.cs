@@ -21,29 +21,36 @@ namespace Tamma.ElsaServer.Workflows;
 /// definition (see <see cref="DeleteTenantWorkflow"/> for the symmetric
 /// teardown invoked on terminal failure).</para>
 ///
-/// <para>The eight activities executed in order:</para>
+/// <para>Unified-tenancy Phase 2 — the workflow provisions a
+/// schema-per-tenant placement instead of a database-per-tenant: an
+/// <see cref="AssignTenantPlacementActivity"/> picks the
+/// <c>tenant_databases</c> pool row by plan tier, the role + schema DDL
+/// runs on THAT row's cluster through the shared
+/// <c>ITenantProvisioningService</c> step engine (the same one the
+/// single-user middleware uses), and the minted connection string
+/// carries <c>Search Path=t_&lt;hex&gt;</c>.</para>
+///
+/// <para>The activities executed in order:</para>
 ///
 /// <list type="number">
 ///   <item><description><see cref="MarkProvisioningActivity"/></description></item>
+///   <item><description><see cref="AssignTenantPlacementActivity"/> —
+///     outputs the DatabaseId + SchemaName variables the next three
+///     steps reconstruct the placement from.</description></item>
 ///   <item><description><see cref="CreateTenantRoleActivity"/></description></item>
-///   <item><description><see cref="CreateTenantDatabaseActivity"/></description></item>
-///   <item><description>Inline build of the per-tenant connection string
-///     from the role, password, and admin host/port via the same
-///     <see cref="Tamma.Data.Abstractions.ITenantAdminConnection"/>
-///     resolved by <see cref="CreateTenantRoleActivity"/>. Stored in a
-///     workflow variable that lives only in the in-memory journal slot
-///     scrubbed by the platform-event sanitiser.</description></item>
+///   <item><description><see cref="CreateTenantSchemaActivity"/></description></item>
+///   <item><description><see cref="BuildTenantConnectionStringActivity"/> —
+///     mints the per-tenant connection string. Stored in a workflow
+///     variable that lives only in the in-memory journal slot scrubbed
+///     by the platform-event sanitiser.</description></item>
 ///   <item><description><see cref="MigrateTenantDatabaseActivity"/></description></item>
 ///   <item><description><see cref="SeedTenantDefaultsActivity"/></description></item>
 ///   <item><description><see cref="EncryptAndPersistConnectionStringActivity"/></description></item>
 ///   <item><description><see cref="WarmTenantPoolActivity"/></description></item>
 ///   <item><description><see cref="MarkTenantActiveActivity"/> — emits the
 ///     terminal <c>TENANT.CREATED.SUCCESS</c> event.</description></item>
+///   <item><description><see cref="QueueWelcomeEmailActivity"/></description></item>
 /// </list>
-///
-/// <para>The connection-string assembly happens in <see cref="BuildTenantConnectionStringActivity"/>
-/// (a thin code activity defined alongside) so the workflow shape stays
-/// declarative and unit-testable in isolation.</para>
 /// </summary>
 public class CreateTenantWorkflow : WorkflowBase
 {
@@ -53,14 +60,15 @@ public class CreateTenantWorkflow : WorkflowBase
         builder.DefinitionId = "create-tenant";
         builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description =
-            "Provision a new tenant: role + database + migration + encrypted creds + activate.";
+            "Provision a new tenant: placement + role + schema + migration + encrypted creds + activate.";
 
         // ── Workflow variables ───────────────────────────────────────────
         var tenantId = builder.WithVariable<Guid>("TenantId", Guid.Empty);
         var attempt = builder.WithVariable<int>("Attempt", 1);
+        var databaseId = builder.WithVariable<string>("DatabaseId", "");
+        var schemaName = builder.WithVariable<string>("SchemaName", "");
         var roleName = builder.WithVariable<string>("RoleName", "");
         var generatedPassword = builder.WithVariable<string>("GeneratedPassword", "");
-        var databaseName = builder.WithVariable<string>("DatabaseName", "");
         var tenantConnectionString = builder.WithVariable<string>("TenantConnectionString", "");
 
         // ── Inputs ────────────────────────────────────────────────────────
@@ -98,41 +106,55 @@ public class CreateTenantWorkflow : WorkflowBase
             Attempt = new Input<int>(ctx => attempt.Get(ctx)),
         };
 
-        // ── Step 2: create role (outputs role + password) ────────────────
+        // ── Step 2: assign placement (outputs pool row id + schema) ──────
+        var assignPlacement = new AssignTenantPlacementActivity
+        {
+            Id = "AssignTenantPlacement",
+            Name = "Assign Tenant Placement",
+            TenantId = new Input<Guid>(ctx => tenantId.Get(ctx)),
+            Attempt = new Input<int>(ctx => attempt.Get(ctx)),
+            DatabaseId = new Output<string>(databaseId),
+            SchemaName = new Output<string>(schemaName),
+        };
+
+        // ── Step 3: create role on the placement cluster ─────────────────
         var createRole = new CreateTenantRoleActivity
         {
             Id = "CreateTenantRole",
             Name = "Create Tenant Role",
             TenantId = new Input<Guid>(ctx => tenantId.Get(ctx)),
             Attempt = new Input<int>(ctx => attempt.Get(ctx)),
+            DatabaseId = new Input<string>(ctx => databaseId.Get(ctx)),
+            SchemaName = new Input<string>(ctx => schemaName.Get(ctx)),
             RoleName = new Output<string>(roleName),
             GeneratedPassword = new Output<string>(generatedPassword),
         };
 
-        // ── Step 3: create database (outputs database name) ──────────────
-        var createDatabase = new CreateTenantDatabaseActivity
+        // ── Step 4: create schema + grants on the placement database ────
+        var createSchema = new CreateTenantSchemaActivity
         {
-            Id = "CreateTenantDatabase",
-            Name = "Create Tenant Database",
+            Id = "CreateTenantSchema",
+            Name = "Create Tenant Schema",
             TenantId = new Input<Guid>(ctx => tenantId.Get(ctx)),
             Attempt = new Input<int>(ctx => attempt.Get(ctx)),
-            DatabaseName = new Output<string>(databaseName),
+            DatabaseId = new Input<string>(ctx => databaseId.Get(ctx)),
+            SchemaName = new Input<string>(ctx => schemaName.Get(ctx)),
         };
 
-        // ── Step 4: assemble the per-tenant connection string ───────────
+        // ── Step 5: mint the per-tenant connection string ────────────────
         var buildConnectionString = new BuildTenantConnectionStringActivity
         {
             Id = "BuildTenantConnectionString",
             Name = "Build Tenant Connection String",
             TenantId = new Input<Guid>(ctx => tenantId.Get(ctx)),
             Attempt = new Input<int>(ctx => attempt.Get(ctx)),
-            DatabaseName = new Input<string>(ctx => databaseName.Get(ctx)),
-            RoleName = new Input<string>(ctx => roleName.Get(ctx)),
+            DatabaseId = new Input<string>(ctx => databaseId.Get(ctx)),
+            SchemaName = new Input<string>(ctx => schemaName.Get(ctx)),
             Password = new Input<string>(ctx => generatedPassword.Get(ctx)),
             ConnectionString = new Output<string>(tenantConnectionString),
         };
 
-        // ── Step 5: migrate ──────────────────────────────────────────────
+        // ── Step 6: migrate ──────────────────────────────────────────────
         var migrateDatabase = new MigrateTenantDatabaseActivity
         {
             Id = "MigrateTenantDatabase",
@@ -142,7 +164,7 @@ public class CreateTenantWorkflow : WorkflowBase
             TenantConnectionString = new Input<string>(ctx => tenantConnectionString.Get(ctx)),
         };
 
-        // ── Step 6: seed defaults ───────────────────────────────────────
+        // ── Step 7: seed defaults ───────────────────────────────────────
         var seedDefaults = new SeedTenantDefaultsActivity
         {
             Id = "SeedTenantDefaults",
@@ -152,7 +174,7 @@ public class CreateTenantWorkflow : WorkflowBase
             TenantConnectionString = new Input<string>(ctx => tenantConnectionString.Get(ctx)),
         };
 
-        // ── Step 7: encrypt + persist creds ─────────────────────────────
+        // ── Step 8: encrypt + persist creds ─────────────────────────────
         var encryptAndPersist = new EncryptAndPersistConnectionStringActivity
         {
             Id = "EncryptAndPersist",
@@ -162,7 +184,7 @@ public class CreateTenantWorkflow : WorkflowBase
             TenantConnectionString = new Input<string>(ctx => tenantConnectionString.Get(ctx)),
         };
 
-        // ── Step 8: warm pool ───────────────────────────────────────────
+        // ── Step 9: warm pool ───────────────────────────────────────────
         var warmPool = new WarmTenantPoolActivity
         {
             Id = "WarmTenantPool",
@@ -171,7 +193,7 @@ public class CreateTenantWorkflow : WorkflowBase
             Attempt = new Input<int>(ctx => attempt.Get(ctx)),
         };
 
-        // ── Step 9: mark active + emit TENANT.CREATED.SUCCESS ──────────
+        // ── Step 10: mark active + emit TENANT.CREATED.SUCCESS ──────────
         var markActive = new MarkTenantActiveActivity
         {
             Id = "MarkTenantActive",
@@ -180,7 +202,7 @@ public class CreateTenantWorkflow : WorkflowBase
             Attempt = new Input<int>(ctx => attempt.Get(ctx)),
         };
 
-        // ── Step 10: queue welcome email (CP outbox, exactly-once) ──────
+        // ── Step 11: queue welcome email (CP outbox, exactly-once) ──────
         // Story 28-5 AC2 step-10 + AC5 — runs AFTER the tenant is active so
         // a failed/aborted provision never sends a welcome. Idempotent +
         // non-fatal (see QueueWelcomeEmailActivity).
@@ -198,8 +220,9 @@ public class CreateTenantWorkflow : WorkflowBase
             {
                 initInputs,
                 markProvisioning,
+                assignPlacement,
                 createRole,
-                createDatabase,
+                createSchema,
                 buildConnectionString,
                 migrateDatabase,
                 seedDefaults,

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Pooling;
 
 namespace Tamma.Api.Services.Provisioning;

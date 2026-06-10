@@ -1,4 +1,4 @@
-namespace Tamma.Api.Services.Provisioning;
+namespace Tamma.Data.Abstractions;
 
 /// <summary>
 /// Unified-tenancy Phase 2 — the ONE implementation of the tenant
@@ -6,6 +6,12 @@ namespace Tamma.Api.Services.Provisioning;
 /// and the single-user EnsurePersonalTenantMiddleware (universal rule:
 /// one behavior, two scoping models). Steps are individually idempotent
 /// so the Elsa workflow can wrap each in its own activity with retries.
+///
+/// <para>Lives in Tamma.Data.Abstractions (implementation:
+/// <c>Tamma.Api/Services/Provisioning/TenantProvisioningService</c>) so
+/// the tenant-lifecycle activities in Tamma.Activities can resolve it
+/// without a hard dependency on Tamma.Api — same layering as
+/// <see cref="IPlatformEventPublisher"/> (Phase 2 Task 4).</para>
 /// </summary>
 public interface ITenantProvisioningService
 {
