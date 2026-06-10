@@ -209,6 +209,11 @@ services:
       # forgets the CP string can't silently serve every tenant from one DB).
       # Left explicit-false here so the knob is discoverable.
       - Tamma__RequireTenantIsolation=false
+      # AES-GCM KEK for tenant connection-string envelopes (unified-tenancy
+      # Phase 2 placement pool + provisioning). base64-encoded 32 random
+      # bytes. When empty, the API still boots (the tenant_databases
+      # bootstrap seeder warn+skips) but tenant provisioning is unavailable.
+      - Cranl__EncryptionKey=${CRANL_ENCRYPTION_KEY:-}
       - SLACK_WEBHOOK=${SLACK_WEBHOOK}
       - GITHUB_TOKEN=${GITHUB_TOKEN}
       - JWT_SECRET=${JWT_SECRET}

@@ -2021,10 +2021,27 @@ using (var scope = app.Services.CreateScope())
         }
         else
         {
-            var protector = scope.ServiceProvider
-                .GetRequiredService<Tamma.Data.Abstractions.ITenantConnectionStringProtector>();
-            await Tamma.Data.Seeders.TenantDatabasesSeeder.SeedAsync(
-                dbContext, tenantAdminCs, protector);
+            // Boot-safe: resolving the protector can throw in Production when
+            // Cranl:EncryptionKey is unset (TenantSecretProtector's hard-fail
+            // guard). That guard is correct for deployments that PROVISION
+            // tenants, but it must not crash-loop a shared-infrastructure
+            // deployment that never does — pre-Phase-2 the protector was only
+            // resolved lazily. Warn + skip mirrors the missing-admin-CS path:
+            // placement simply has no pool member until the key is configured.
+            try
+            {
+                var protector = scope.ServiceProvider
+                    .GetRequiredService<Tamma.Data.Abstractions.ITenantConnectionStringProtector>();
+                await Tamma.Data.Seeders.TenantDatabasesSeeder.SeedAsync(
+                    dbContext, tenantAdminCs, protector);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex,
+                    "TenantDatabasesSeeder skipped — connection-string protector "
+                    + "unavailable (set Cranl:EncryptionKey to enable the tenant "
+                    + "placement pool). Tenant provisioning is unavailable until then.");
+            }
         }
 
         Log.Information("Startup seeds applied (plans + tenant_databases bootstrap)");
