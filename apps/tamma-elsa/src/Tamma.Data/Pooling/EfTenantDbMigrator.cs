@@ -67,6 +67,10 @@ public sealed class EfTenantDbMigrator : ITenantDbMigrator
             // is present, so the privilege is only needed when genuinely
             // creating. Schema name is validated by SchemaFromConnectionString
             // ([a-z_][a-z0-9_]*); Quote defends in depth.
+            // Safety relies on SchemaFromConnectionString enforcing
+            // ^[a-z_][a-z0-9_]*$ — no quoting metacharacters can reach
+            // the literal embedded in the DO block. Quote() is a second
+            // layer of defence for the EXECUTE'd CREATE SCHEMA.
             await ctx.Database.ExecuteSqlRawAsync(
                 "DO $$ BEGIN "
                 + $"IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = '{schema}') THEN "

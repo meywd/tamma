@@ -35,8 +35,8 @@ public static class TenantRolePassword
             {
                 var b = bytes[i];
                 // Reject the top sliver when the alphabet doesn't divide
-                // 256 evenly to avoid modulo bias — alphabet length is 76
-                // here, so we accept bytes < 76 * 3 = 228, else resample.
+                // 256 evenly to avoid modulo bias — alphabet length is 65
+                // here, so we accept bytes < 65 * 3 = 195, else resample.
                 if (b >= alphabet.Length * (256 / alphabet.Length)) continue;
                 sb.Append(alphabet[b % alphabet.Length]);
             }

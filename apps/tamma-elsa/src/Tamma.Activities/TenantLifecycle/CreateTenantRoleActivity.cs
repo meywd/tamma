@@ -58,7 +58,9 @@ public sealed class CreateTenantRoleActivity : TenantLifecycleActivity
             // Leave the existing role in place. The encrypted connection
             // string from a prior partial run is the only path to recover
             // the password; if Step 8 hadn't completed, the operator
-            // runbook calls for DROP ROLE + retry.
+            // runbook calls for: connect to the placement database, run
+            // DROP OWNED BY <role> (drops the schema + contents), then
+            // DROP ROLE <role>, then retry provisioning.
             Logger?.LogInformation(
                 "tenant.lifecycle.create_role idempotent_skip tenantId={TenantId} role={Role}",
                 tenantId, roleName);

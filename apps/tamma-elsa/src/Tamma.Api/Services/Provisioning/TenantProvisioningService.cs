@@ -158,7 +158,9 @@ public sealed class TenantProvisioningService : ITenantProvisioningService
                 $"Tenant role '{TenantNaming.RoleName(tenantId)}' already exists on pool row "
                 + $"{placement.DatabaseId} but tenants.EncryptedConnectionString is empty — the "
                 + "password from the prior partial run is unrecoverable. Operator runbook: "
-                + "DROP ROLE on the placement cluster, then retry provisioning.");
+                + "connect to the placement database, run "
+                + $"'DROP OWNED BY {TenantNaming.RoleName(tenantId)}' (drops the schema and its "
+                + "contents), then 'DROP ROLE' for the same role, then retry provisioning.");
         }
 
         await CreateSchemaAsync(tenantId, placement, ct);
@@ -187,6 +189,11 @@ public sealed class TenantProvisioningService : ITenantProvisioningService
 
     private async Task<bool> HasStoredEnvelopeAsync(Guid tenantId, CancellationToken ct)
     {
+        // NOTE: a legacy db-per-tenant envelope (minted before Phase 2,
+        // without a Search Path) would satisfy this check and cause
+        // ProvisionAsync to skip re-creating the role and schema — moot
+        // post-Task-4 (CreateTenantWorkflow activity deleted, zero rows
+        // in prod), noted for completeness.
         await using var db = await _cpFactory.CreateDbContextAsync(ct);
         var envelope = await db.Tenants
             .IgnoreQueryFilters()
