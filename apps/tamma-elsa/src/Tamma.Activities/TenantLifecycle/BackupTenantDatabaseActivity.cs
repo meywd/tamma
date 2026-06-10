@@ -17,8 +17,8 @@ namespace Tamma.Activities.TenantLifecycle;
 /// Story 28-5 AC4 step C — optional <c>pg_dump</c> backup of the tenant's
 /// data, taken BEFORE <see cref="DropTenantSchemaActivity"/> drops it.
 /// Gated behind <c>Backup:DeletionBackup</c>; a pure no-op when the
-/// flag is off (the shared-infrastructure default relies on cluster-level
-/// Postgres backups, so per-tenant snapshots are opt-in).
+/// flag is off (the default relies on cluster-level Postgres backups,
+/// so per-tenant snapshots are opt-in).
 ///
 /// <para><b>Unified-tenancy Phase 2 — placement-aware:</b> a tenant with
 /// a <c>SchemaName</c>/<c>DatabaseId</c> placement gets a schema-scoped

@@ -10,9 +10,10 @@ namespace Tamma.Api.Services.Secrets.Query;
 /// <see cref="SecretScope"/> and an optional <c>tenantId</c>. The
 /// implementation filters at the DB level so a bug in the endpoint
 /// layer that forgets to pass the tenant id still fails closed (404
-/// on detail, empty list on list). Combined with the Story 29-5 RLS
-/// defense-in-depth this gives four layers (RBAC → endpoint filter →
-/// this scope check → RLS) protecting against cross-tenant reads.</para>
+/// on detail, empty list on list). Combined with schema-level tenant
+/// isolation (unified tenancy model) this gives three layers (RBAC →
+/// endpoint filter → this scope check) protecting against
+/// cross-tenant reads.</para>
 ///
 /// <para>Plaintext is never returned by any method on this interface.
 /// The detail + version list + audit list are all metadata-only; the

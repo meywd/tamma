@@ -53,7 +53,7 @@ dotnet test --filter "FullyQualifiedName~ContentSanitizerTests"
 
 ## Testcontainers pattern
 
-Integration tests that need Postgres (tenancy, RLS, migrations, real repositories) use **Testcontainers for .NET**:
+Integration tests that need Postgres (tenancy, schema isolation, migrations, real repositories) use **Testcontainers for .NET**:
 
 ```csharp
 [TestFixture]
@@ -103,5 +103,5 @@ Test fixtures now clean `ConnectionStrings__TammaAppDb` / `TammaDb` at `OneTimeT
 ## Related
 
 - [Security](Security)
-- [Deployment → Phase-3 RLS runbook](Deployment#phase-3-rls-runbook)
+- [Deployment → least-privilege app-role runbook](Deployment#least-privilege-app-role-runbook)
 - [Port Audit](Port-Audit) — most findings landed with their own tests

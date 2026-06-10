@@ -3,7 +3,7 @@ namespace Tamma.Activities.TenantLifecycle;
 /// <summary>
 /// Story 28-5 AC4 — configuration for the optional pre-drop tenant
 /// backup. Bound from the <c>Backup</c> configuration section. Disabled
-/// by default: the shared-infrastructure default topology relies on
+/// by default: the default topology relies on
 /// cluster-level Postgres backups, so per-tenant <c>pg_dump</c> snapshots
 /// are opt-in (turned on once an SLA promises soft-delete recovery).
 /// </summary>

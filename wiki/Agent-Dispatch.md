@@ -132,7 +132,7 @@ End-to-end dispatch / monitor / collect tests cover both executors with mock cli
 
 ## Follow-up: Story 19-6
 
-`docs/stories/epic-19/story-19-6-wire-app-role-context.md` is the follow-up story to **actually wire** `TammaAppDbContext` into endpoints and repositories. Phase-3 RLS scaffolding is shipped but the runtime is still on the permissive admin connection (review finding 1). 19-6 closes the app-role-wiring half; Story 30-8 (Epic 30) closes the per-tenant endpoint-routing half.
+`docs/stories/epic-19/story-19-6-wire-app-role-context.md` was the follow-up story to wire the app-role (`tamma_app`) connection into endpoints and repositories (review finding 1). The landscape has since changed: the legacy `TammaAppDbContext` + RLS scaffold was superseded by the unified schema-per-tenant model (tenant isolation is schema + per-tenant role; the RLS layer was removed in unified-tenancy Phase 5), and Story 30-8 closed the per-tenant endpoint-routing half. `tamma_app` survives as the least-privilege runtime role for the control plane.
 
 ## Related
 

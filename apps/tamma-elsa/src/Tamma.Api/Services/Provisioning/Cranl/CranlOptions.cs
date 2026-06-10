@@ -4,9 +4,10 @@ namespace Tamma.Api.Services.Provisioning.Cranl;
 /// Configuration for the Cranl HTTP client.
 ///
 /// <para>Bound from the <c>Cranl:*</c> configuration section. When
-/// <see cref="ApiKey"/> is blank the Null seam wins and provisioning
-/// short-circuits to "shared infrastructure" mode (no per-tenant Cranl
-/// resources, tenant rides on the central Postgres via RLS).</para>
+/// <see cref="ApiKey"/> is blank the Null seam wins and no external
+/// Cranl resources are minted — tenant placement stays on the unified
+/// schema-per-tenant model (the <c>tenant_databases</c> pool, central
+/// DB by default).</para>
 ///
 /// <para>See <c>docs/vendors/cranl/README.md</c> for endpoint reference and
 /// the per-tenant provisioning flow.</para>

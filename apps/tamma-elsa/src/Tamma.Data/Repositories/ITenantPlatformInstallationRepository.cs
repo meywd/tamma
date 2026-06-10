@@ -11,8 +11,8 @@ namespace Tamma.Data.Repositories;
 /// 31-1) covers, and exposes the lookups the resolver needs
 /// (<see cref="GetByTenantPrimaryAsync"/>, <see cref="GetByTenantKindAsync"/>,
 /// <see cref="GetByExternalIdAsync"/>) in a single place so cross-cutting
-/// concerns (soft-delete filtering, RLS scoping in the SaaS-target
-/// architecture) live behind one seam.</para>
+/// concerns (soft-delete filtering, tenant scoping) live behind one
+/// seam.</para>
 ///
 /// <para>Soft-delete semantics: every read method excludes rows where
 /// <see cref="TenantPlatformInstallation.DeletedAt"/> is non-null. A

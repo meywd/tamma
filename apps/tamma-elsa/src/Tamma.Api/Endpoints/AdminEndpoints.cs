@@ -422,7 +422,8 @@ public static class AdminEndpoints
     // Platform-owner-only endpoints that drive per-tenant Cranl provisioning.
     // ITenantProvisioner is wired by ProvisioningServiceCollectionExtensions:
     // the Cranl-backed impl runs when Cranl:ApiKey is set, otherwise the Null
-    // impl flips the row to Ready immediately (shared infrastructure mode).
+    // impl flips the row to Ready immediately (no external resources minted;
+    // placement stays on the unified tenant_databases pool).
 
     public static async Task<IResult> ProvisionTenant(
         Guid tenantId,

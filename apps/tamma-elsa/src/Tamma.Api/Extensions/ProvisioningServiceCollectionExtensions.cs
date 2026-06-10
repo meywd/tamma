@@ -14,7 +14,8 @@ namespace Tamma.Api.Extensions;
 /// <see cref="GitHubInstallationServiceCollectionExtensions"/> pattern:
 /// the real Cranl-backed implementation is wired only when the
 /// <c>Cranl:*</c> options are populated; otherwise the Null seam wins
-/// and tenants ride on the central / shared Postgres via RLS.
+/// and no external resources are minted — tenant placement stays on the
+/// unified tenant_databases pool (central DB by default).
 /// </summary>
 public static class ProvisioningServiceCollectionExtensions
 {
@@ -30,8 +31,8 @@ public static class ProvisioningServiceCollectionExtensions
     ///     <see cref="TenantSecretProtector"/> for at-rest encryption of
     ///     the tenant DATABASE_URL.</description></item>
     ///   <item><description>Otherwise: registers
-    ///     <see cref="NullTenantProvisioner"/> only — every tenant gets
-    ///     "shared infrastructure" semantics and no Cranl wiring is
+    ///     <see cref="NullTenantProvisioner"/> only — no external
+    ///     resources are minted for any tenant and no Cranl wiring is
     ///     created.</description></item>
     /// </list>
     /// Idempotent via TryAdd*; safe to call from tests + production.

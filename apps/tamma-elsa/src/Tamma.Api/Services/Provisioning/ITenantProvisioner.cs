@@ -5,8 +5,8 @@ namespace Tamma.Api.Services.Provisioning;
 /// <list type="bullet">
 ///   <item><description><see cref="NullTenantProvisioner"/> — dev/default
 ///     when <c>Cranl:ApiKey</c> is absent. Flips the row to
-///     <see cref="ProvisioningState.Ready"/> immediately and the tenant
-///     rides on the central / shared Postgres via RLS. No external
+///     <see cref="ProvisioningState.Ready"/> immediately; the tenant's
+///     placement stays on the unified tenant_databases pool. No external
 ///     calls.</description></item>
 ///   <item><description><see cref="CranlTenantProvisioner"/> — production.
 ///     Walks the README's per-tenant flow (project → db → poll → app

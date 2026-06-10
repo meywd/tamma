@@ -1,18 +1,18 @@
 # Security
 
-Tamma's security model is defence-in-depth: the database enforces tenant isolation via RLS, the API layer validates and sanitises every inbound edge, and the LLM pipeline sanitises every outbound prompt and every inbound agent output. This page is the map.
+Tamma's security model is defence-in-depth: the database enforces tenant isolation via schema-per-tenant + per-tenant Postgres roles, the API layer validates and sanitises every inbound edge, and the LLM pipeline sanitises every outbound prompt and every inbound agent output. This page is the map.
 
-## Tenant isolation (Phase-3 RLS)
+## Tenant isolation (unified schema-per-tenant)
 
-Every tenant-scoped table carries:
+Each tenant is physically isolated inside its assigned pool database:
 
-1. A `tenant_id` column (`uuid`, NOT NULL).
-2. An EF query filter that reads the ambient tenant from `ITenantContextAccessor`.
-3. A Postgres RLS policy `USING (tenant_id = current_setting('app.current_tenant_id')::uuid)`.
+1. A dedicated `t_<hex>` schema holding all of the tenant's application tables.
+2. A dedicated per-tenant Postgres role that owns only that schema — its connection string pins `Search Path` to the tenant schema, so cross-tenant reads are impossible at the role level.
+3. An AES-GCM-encrypted per-tenant connection string (`tenants.EncryptedConnectionString`), resolved per request by `LruPooledTenantConnectionResolver` against the `tenant_databases` pool.
 
-Per-request, a DbCommand interceptor runs `SET LOCAL app.current_tenant_id = '<tenantId>'` before the first query. If no tenant is in scope, the query filter **fails closed** to an empty result set — this is the `feat/auth-foundation` orgs/002 fix.
+Control-plane tables that remain shared (tenants, users, memberships) carry EF query filters that read the ambient tenant from `ITenantContextAccessor`; if no tenant is in scope they **fail closed** to an empty result set. The legacy shared-tables RLS layer was removed in unified-tenancy Phase 5 — isolation is schema + per-tenant role.
 
-The app connects as the non-superuser **`tamma_app`** role (no `BYPASSRLS`). The admin/superuser connection string is only used for migrations and background services. See [Deployment → Phase-3 RLS runbook](Deployment#phase-3-rls-runbook).
+The control-plane API connects as the non-superuser **`tamma_app`** role (least-privilege: plain DML, no DDL). The admin/superuser connection string is only used for migrations and background services.
 
 ## API key hashing
 
@@ -111,7 +111,7 @@ Before the fix, two tenants with Tamma installed on the same `owner/repo` could 
 
 Several controls default to the safe option when unconfigured:
 
-- RLS: no tenant in scope → empty result set.
+- Tenant scoping: no tenant in scope → EF query filters return an empty result set.
 - GitHub webhook signature: `WebhookSecret` unset → reject webhook (not accept).
 - GitHub App client: `AppId`/`PrivateKey` unset → `NullGitHubAppClient` returns 503, not a silent success.
 - GitHub Actions client: ditto → `NullGitHubActionsClient`.

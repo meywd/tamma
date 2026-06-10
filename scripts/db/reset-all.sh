@@ -5,20 +5,20 @@
 # invokes bootstrap-shared-dbs.sh to re-ensure them. Intended for CI /
 # local-dev resets and the integration-test setup — NEVER for production.
 #
-# ── Topology reconciliation (READ bootstrap-shared-dbs.sh header first) ──
-# Current deployment is SHARED-INFRASTRUCTURE mode: control-plane + tenant
-# + Elsa data all live in the ONE central `tamma` DB. So "drop the shared
-# DBs" today means dropping `tamma` (and, when Elsa is split onto its own
-# database, that DB too). Both default to `tamma` and are parameterised so
-# this script extends unchanged to the future tamma_control /
-# tamma_global_elsa split.
+# ── Topology (READ bootstrap-shared-dbs.sh header first) ────────────────
+# The unified tenancy model puts the control plane + tenant `t_<hex>`
+# schemas + Elsa data in the ONE central `tamma` DB (pool member #1 in
+# tenant_databases). So "drop the shared DBs" today means dropping
+# `tamma` (and, when Elsa is split onto its own database, that DB too).
+# Both default to `tamma` and are parameterised so this script extends
+# unchanged to a future tamma_control / tamma_global_elsa split.
 #
-# ── DOES NOT touch per-tenant databases ─────────────────────────────────
-# Per-tenant DBs (`tamma_tenant_<guid>` / `..._elsa`) are workflow-
-# provisioned and live OUTSIDE this script's remit. There are none in
-# shared mode, but as a hard guard this script REFUSES to drop any
-# database whose name matches `tamma_tenant_*` — even if an operator
-# mis-points TAMMA_CONTROL_DB / TAMMA_GLOBAL_ELSA_DB at one.
+# ── DOES NOT touch dedicated per-tenant databases ───────────────────────
+# Dedicated per-tenant DBs (`tamma_tenant_<guid>` / `..._elsa`, e.g.
+# backend-provisioned hosting databases) live OUTSIDE this script's
+# remit. As a hard guard this script REFUSES to drop any database whose
+# name matches `tamma_tenant_*` — even if an operator mis-points
+# TAMMA_CONTROL_DB / TAMMA_GLOBAL_ELSA_DB at one.
 #
 # ── Idempotency (AC3) ───────────────────────────────────────────────────
 # Running twice in succession yields an identical final schema: the drop

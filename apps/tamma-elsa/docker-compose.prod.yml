@@ -17,7 +17,7 @@ services:
       - Logging__LogLevel__Default=Warning
       - Elsa__Server__BaseUrl=${ELSA_BASE_URL:-https://tamma.yourcompany.com}
       # ── Story 28-5 — optional pre-drop tenant pg_dump backup ──────────
-      # OFF by default (shared-infra relies on cluster-level PG backups).
+      # OFF by default (the default relies on cluster-level PG backups).
       # To enable: (1) add postgresql-client to the elsa-server image so
       # pg_dump resolves, (2) uncomment the Backup__* vars + the
       # tenant_backups volume below, (3) set BACKUP_DELETION_BACKUP=true in
@@ -89,10 +89,11 @@ services:
       timeout: 5s
       retries: 5
 
-  # ── Story 28-1 AC2 — one-shot shared-DB bootstrap ───────────────────────
-  # Ensures the shared `tamma` database exists before api / elsa-server
-  # start. This VPS runs SHARED-INFRASTRUCTURE mode (one central `tamma`
-  # DB, Phase-3 RLS, ConnectionStrings:ControlPlane unset) — so this is
+  # ── Story 28-1 AC2 — one-shot central-DB bootstrap ──────────────────────
+  # Ensures the central `tamma` database exists before api / elsa-server
+  # start. The central `tamma` DB hosts the control plane and is pool
+  # member #1 ("central") in tenant_databases; tenants live in t_<hex>
+  # schemas with per-tenant roles (unified tenancy model) — so this is
   # largely a no-op next to postgres' own POSTGRES_DB creation, but it is
   # idempotent and forward-compatible with the future tamma_control /
   # tamma_global_elsa split (set TAMMA_CONTROL_DB / TAMMA_GLOBAL_ELSA_DB).
@@ -176,7 +177,7 @@ services:
       #                                  after postgres-roles.sql runs; flip
       #                                  the User Id below when ready).
       #   TammaAppDb  → tamma_app       : the runtime API's per-request,
-      #                                  RLS-enforced, least-privilege role.
+      #                                  least-privilege role.
       #   Provisioner → tamma_provisioner: CREATE DATABASE / CREATE ROLE.
       #                                  Used ONLY by the provisioning
       #                                  workflow (CreateTenantWorkflow /

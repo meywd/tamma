@@ -8,12 +8,12 @@
   invokes bootstrap-shared-dbs.ps1. For CI / local-dev resets and the
   integration-test setup — NEVER for production.
 
-  TOPOLOGY: read bootstrap-shared-dbs.ps1's header first. Current
-  deployment is SHARED-INFRASTRUCTURE mode — control-plane + tenant + Elsa
-  data all live in ONE central `tamma` DB. "Drop the shared DBs" today
-  means dropping `tamma` (+ a separate Elsa DB when one exists). Both
-  default to `tamma` and are parameterised for the future tamma_control /
-  tamma_global_elsa split.
+  TOPOLOGY: read bootstrap-shared-dbs.ps1's header first. The unified
+  tenancy model puts the control plane + tenant `t_<hex>` schemas + Elsa
+  data in ONE central `tamma` DB (pool member #1 in tenant_databases).
+  "Drop the shared DBs" today means dropping `tamma` (+ a separate Elsa
+  DB when one exists). Both default to `tamma` and are parameterised for
+  a future tamma_control / tamma_global_elsa split.
 
   DOES NOT touch per-tenant databases. Per-tenant DBs
   (`tamma_tenant_<guid>` / `..._elsa`) are workflow-provisioned. This

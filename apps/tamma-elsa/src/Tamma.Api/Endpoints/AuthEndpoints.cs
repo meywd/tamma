@@ -284,9 +284,9 @@ public static class AuthEndpoints
 
         var verifyUrl = BuildVerificationUrl(config, verificationToken);
         // Story 28-1 PR B — registration verification email is
-        // platform-scope: no tenant DB exists yet to land the row in
-        // (the personal tenant we just minted is shared-infra-only
-        // until provisioning runs separately). Leaving TenantId unset
+        // platform-scope: no tenant schema exists yet to land the row in
+        // (the personal tenant we just minted has no placement until
+        // provisioning runs separately). Leaving TenantId unset
         // routes through IPlatformEmailOutboxRepository →
         // platform_email_outbox. UserId is preserved for correlation.
         // Decision matrix: .dev/decisions/story-28-1-design-calls.md §5.
@@ -338,8 +338,8 @@ public static class AuthEndpoints
         // email address, not earlier (resists bot-driven provisioning).
         //
         // Conditional, idempotent guard: only tenants explicitly stamped
-        // pending_verification transition. NULL-Status tenants (today's
-        // shared-infra default — see Register, which leaves Status unset)
+        // pending_verification transition. NULL-Status tenants (the
+        // default — see Register, which leaves Status unset)
         // are LEFT ALONE because TenantStatusEvaluator treats NULL as
         // active. Promoting them would 503 the user until a Story 28-5
         // workflow consumer drains the event, which is not yet wired in

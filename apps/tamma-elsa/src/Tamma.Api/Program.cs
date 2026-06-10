@@ -178,15 +178,17 @@ builder.Services.AddHttpClient("github", client =>
 // ────────────────────────────────────────────────────────────────────────────
 // Database + repositories (via extension method)
 //
-// Phase-3 dual-connection-string architecture:
+// Dual-connection-string architecture:
 //   - TammaDb        → admin / migrations / background services (superuser)
-//   - TammaAppDb     → per-request runtime, role=tamma_app, RLS-enforced
+//   - TammaAppDb     → per-request runtime, role=tamma_app (least-privilege
+//                      runtime role; tenant isolation itself is schema +
+//                      per-tenant role under the unified tenancy model)
 //
-// For backward compat with pre-Phase-3 configs, `DefaultConnection` still
+// For backward compat with older configs, `DefaultConnection` still
 // works: it's treated as the admin string when TammaDb isn't set. If
 // TammaAppDb is absent, it falls through to the admin connection with a
 // warning — dev-mode single-role Postgres continues to function, but
-// production must set TammaAppDb explicitly (see the Phase-3 runbook).
+// production must set TammaAppDb explicitly.
 // ────────────────────────────────────────────────────────────────────────────
 // IsNullOrWhiteSpace fallback (not just `??`): appsettings.json may ship an
 // empty TammaDb default to opt operators into env-only configuration, and the
@@ -201,8 +203,8 @@ if (appConnectionString is null)
 {
     Log.Warning(
         "ConnectionStrings:TammaAppDb is not configured — falling back to the "
-        + "admin connection for per-request DbContexts. RLS will be inactive "
-        + "until the app-role connection is wired (see Phase-3 runbook). "
+        + "admin connection for per-request DbContexts. The least-privilege "
+        + "tamma_app role is bypassed until the app-role connection is wired. "
         + "This is expected for local development; production deployments "
         + "must set this explicitly.");
 }
@@ -397,9 +399,9 @@ builder.Services.AddProviderSessionServices();
 builder.Services.AddSaaSServices();
 // Per-tenant provisioning (Cranl). When Cranl:ApiKey + Cranl:OrganizationId
 // are both configured, the Cranl-backed provisioner + workflow + queue
-// handler are wired; otherwise the Null seam keeps every tenant on the
-// shared central Postgres via RLS. See docs/vendors/cranl/README.md for
-// the per-tenant provisioning flow.
+// handler are wired; otherwise the Null seam mints no external resources —
+// tenant placement stays on the unified tenant_databases pool (central DB
+// by default). See docs/vendors/cranl/README.md for the provisioning flow.
 builder.Services.AddTenantProvisioning(builder.Configuration);
 
 // Platform secret cabinet (Epic 29). Story 29-1 wires only the
@@ -1279,8 +1281,9 @@ admin.MapDelete("/users/{id}/keys/{keyId}", AdminEndpoints.DeleteUserApiKey).Req
 // Tenant provisioning (audit cranl/003). Platform-owner-only — these flip
 // per-tenant Cranl resources into existence (POST), report status (GET), or
 // tear them down (POST /deprovision). When Cranl:ApiKey is unset the Null
-// provisioner short-circuits to "shared infra" and these endpoints still
-// work — they just mark the tenant Ready without external API calls.
+// provisioner mints nothing and these endpoints still work — they just mark
+// the tenant Ready without external API calls (placement stays on the
+// unified tenant_databases pool).
 //
 // Story 28-R2 / C1: switched from OwnerAccess → PlatformOwnerAccess. The
 // legacy OwnerAccess policy keys off the per-tenant role and admits every
@@ -2045,8 +2048,8 @@ using (var scope = app.Services.CreateScope())
             // Boot-safe: resolving the protector can throw in Production when
             // Cranl:EncryptionKey is unset (TenantSecretProtector's hard-fail
             // guard). That guard is correct for deployments that PROVISION
-            // tenants, but it must not crash-loop a shared-infrastructure
-            // deployment that never does — pre-Phase-2 the protector was only
+            // tenants, but it must not crash-loop a deployment that never
+            // does — pre-Phase-2 the protector was only
             // resolved lazily. Warn + skip mirrors the missing-admin-CS path:
             // placement simply has no pool member until the key is configured.
             try

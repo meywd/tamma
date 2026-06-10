@@ -442,7 +442,7 @@ Path-tenant routes (`/api/v1/orgs/{tenantId}/**`) additionally run `RequireTenan
 
 ## 6. Tenant isolation (unified tenancy — authoritative direction)
 
-The current architecture is **one Postgres role + `t_<hex>` schema per tenant inside a pooled database, plus a shared control plane**. This supersedes both the Epic 17 RLS scaffold (still present in code for backward compatibility) and the original Epic 28 db-per-tenant layout (replaced by schema-per-tenant in unified-tenancy Phase 2, 2026-06-10).
+The current architecture is **one Postgres role + `t_<hex>` schema per tenant inside a pooled database, plus a shared control plane**. This supersedes both the Epic 17 RLS scaffold (removed in unified-tenancy Phase 5) and the original Epic 28 db-per-tenant layout (replaced by schema-per-tenant in unified-tenancy Phase 2, 2026-06-10).
 
 **Tenant creation path** (unified-tenancy Phase 2 — `TenantProvisioningService`, shared by the SaaS `CreateTenantWorkflow` and the single-user `EnsurePersonalTenantMiddleware`):
 
@@ -483,11 +483,10 @@ Key files:
 - **Abstractions**: `apps/tamma-elsa/src/Tamma.Data/Abstractions/ITenantConnectionResolver.cs`, `ITenantDbContextFactory.cs`, `ISystemStoreDbContextFactory.cs`, `IConnectionStringDecryptor.cs`.
 - **Resolver**: `apps/tamma-elsa/src/Tamma.Data/Pooling/LruPooledTenantConnectionResolver.cs` — the single `ITenantConnectionResolver` implementation (LRU-cached per-tenant `NpgsqlDataSource`s).
 - **CP shadow columns** (Doc 01 §8.1): declared on the `Tenant` entity in `TammaModelConfiguration.ConfigureControlPlaneEntities` — `PlanId`, `Status` (state machine `pending_verification` → `provisioning` → `active` → `suspended`/`failed`/`delete_requested` → `deleting` → `deleted`, plus the Phase-4 `draining` read-only state during a tenant move; CHECK-enforced by `ck_tenants_status` since unified-tenancy Phase 0), `EncryptedConnectionString` (bytea), `KekVersion` (`smallint NOT NULL DEFAULT 1`), `FailureReason`, `DeleteRequestedAt`, plus `SchemaName` / `DatabaseId` (FK → `tenant_databases`; added in Phase 0, stamped at creation by the Phase-2 placement service).
-- **Interceptors**: `Tamma.Data/Interceptors/TenantContextInterceptor.cs` runs `SET LOCAL app.current_tenant_id = '...'` on every connection open (used on the legacy `TammaAppDbContext` path to make the Phase-2 RLS policies enforce).
 
 ### 6.1 Epic 17 RLS — superseded
 
-The Epic 17 Phase-2 scaffold originally shipped with `Phase2RlsAndTriggers` (migration `20260419021119`). It created the `tamma_app` Postgres role, eight RLS policies against `current_setting('app.current_tenant_id')`, and the six BEFORE-UPDATE triggers. On the central-DB path those policies enforce; on the per-tenant-DB path they are unnecessary (the database IS the boundary). Unified-tenancy Phase 0 (2026-06-09) collapsed the CP migration chain into a single `InitialControlPlane` baseline and ported the surviving RLS scaffold into it: the role plus 7 RLS policies and 4 tenant-id triggers — the remaining policies/triggers died with the tables that moved out of the CP schema. Phase 0 stays behavior-neutral for the tables that remain; removal is planned for unified-tenancy Phase 5.
+The Epic 17 Phase-2 scaffold originally shipped with `Phase2RlsAndTriggers` (migration `20260419021119`). It created the `tamma_app` Postgres role, eight RLS policies against `current_setting('app.current_tenant_id')`, and the six BEFORE-UPDATE triggers. On the central-DB path those policies enforce; on the per-tenant-DB path they are unnecessary (the database IS the boundary). Unified-tenancy Phase 0 (2026-06-09) collapsed the CP migration chain into a single `InitialControlPlane` baseline and ported the surviving RLS scaffold into it: the role plus 7 RLS policies and 4 tenant-id triggers — the remaining policies/triggers died with the tables that moved out of the CP schema. Phase 0 stayed behavior-neutral for the tables that remained; unified-tenancy Phase 5 (2026-06-10) then dropped the policies/triggers from the baseline — `tamma_app` and its grants are kept as the least-privilege runtime role, independent of RLS.
 
 ### 6.2 KEK rotation (Story 28-12)
 
@@ -917,7 +916,7 @@ shared code-defined taxonomy (no keyword matching). See
 
 ## For more detail
 
-- [Deployment runbook](Deployment.md) — VPS bring-up, Cranl activation, Phase-3 RLS runbook
+- [Deployment runbook](Deployment.md) — VPS bring-up, Cranl activation, least-privilege app-role runbook
 - [Multi-Tenant Provisioning](Multi-Tenant-Provisioning.md) — Epic 30 backend selection
 - [Agent Dispatch](Agent-Dispatch.md) — Epic 19 implementation detail
 - [Secret Management](Secret-Management.md) — Epic 29 cabinet + rotation

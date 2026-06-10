@@ -6,10 +6,10 @@ namespace Tamma.Api.Services.Provisioning;
 
 /// <summary>
 /// Default <see cref="ITenantProvisioner"/> when <c>Cranl:ApiKey</c> is
-/// not configured. Treats every tenant as "shared infrastructure" — the
-/// row is flipped to <see cref="ProvisioningState.Ready"/> immediately
-/// and tenant traffic continues to ride on the central Postgres via RLS.
-/// No external Cranl calls are made.
+/// not configured. Mints no external resources — the row is flipped to
+/// <see cref="ProvisioningState.Ready"/> immediately and the tenant's
+/// placement stays on the unified tenant_databases pool (central DB by
+/// default). No external Cranl calls are made.
 ///
 /// <para>This is the seam that keeps dev / self-hosted deployments
 /// working without a Cranl account.</para>

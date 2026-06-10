@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
 # Story 28-1 AC2 — idempotent bootstrap for Tamma's shared databases.
 #
-# ── Topology reconciliation (READ THIS) ─────────────────────────────────
-# Story 28-1 AC2 was written against the ASPIRATIONAL db-per-tenant design
-# (separate `tamma_control` + `tamma_global_elsa` databases). The REAL
-# current deployment is SHARED-INFRASTRUCTURE mode: every tenant + the
-# control-plane data + Elsa's own tables all live in ONE central `tamma`
-# database, isolated by Phase-3 RLS. `ConnectionStrings:ControlPlane` is
-# deliberately unset on the VPS (see docker-compose.prod.yml, the
-# tamma-api `Tamma__RequireTenantIsolation=false` block, and the root
-# CLAUDE.md "Multi-tenant provisioning (Cranl)" section).
+# ── Topology (unified schema-per-tenant) ────────────────────────────────
+# Story 28-1 AC2 was written against the original db-per-tenant design
+# (separate `tamma_control` + `tamma_global_elsa` databases). The current
+# deployment uses the UNIFIED tenancy model: the central `tamma` database
+# hosts the control plane + Elsa's own tables and is pool member #1
+# ("central") in `tenant_databases`; every tenant lives in its own
+# `t_<hex>` schema with a per-tenant Postgres role and an AES-GCM-
+# encrypted connection string. Placement is tier-driven via the
+# `tenant_databases` pool (see the root CLAUDE.md "Multi-tenant
+# provisioning (Cranl)" section).
 #
 # Because of that, the databases this script must ENSURE exist today are
-# just `tamma` (control-plane + tenant data) and — only if a deployment
+# just `tamma` (control plane + tenant schemas) and — only if a deployment
 # splits Elsa onto its own database — a separate Elsa database. Both
-# default to the single shared `tamma` DB. The DB names are PARAMETERISED
-# so this script is forward-compatible with the per-tenant-DB cutover:
+# default to the single central `tamma` DB. The DB names are PARAMETERISED
+# so this script is forward-compatible with additional pool databases:
 # when `tamma_control` / `tamma_global_elsa` become real, point
 # TAMMA_CONTROL_DB / TAMMA_GLOBAL_ELSA_DB at them and the same create-if-
 # missing + summary logic applies unchanged.

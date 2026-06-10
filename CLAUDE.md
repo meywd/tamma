@@ -628,10 +628,10 @@ User selects a starter, customizes it, saves to `.tamma/config.json` in their re
 
 ## Multi-tenant provisioning (Cranl)
 
-The C# port supports two infra modes per tenant:
+The C# port uses one unified tenancy model, with Cranl as an optional hosting backend:
 
-- **Shared infrastructure (default)**: tenant rides on the central Postgres on Hetzner via Phase-3 RLS. No external resources. This is the dev / self-hosted default and what every tenant gets when Cranl is not configured.
-- **Per-tenant Cranl resources**: each tenant gets one Cranl Project + one Postgres Database + one Application (the Elsa engine, deployed from the Tamma GitHub repo). Central Tamma stays the control plane (auth, orgs, tenant registry, routing); Cranl is the data + compute plane.
+- **Unified schema-per-tenant (every tenant)**: each tenant gets a `t_<hex>` schema + a per-tenant Postgres role + an AES-GCM-encrypted connection string (`Search Path`-scoped). Placement is tier-driven via the `tenant_databases` pool — the central DB auto-bootstraps as pool member #1 ("central"); admin CRUD + move live at `/api/admin/tenant-databases` and `/api/admin/tenants/{id}/move`.
+- **Cranl/V2 hosting backends (optional)**: a backend like Cranl can mint per-tenant hosting databases (and, for dedicated compute, a Cranl Project + Application running the Elsa engine) and register them into the pool. `ProviderKey` on the tenant is a backend LABEL — it records which provider minted the infrastructure; placement and schema lifecycle stay owned by the unified model. Central Tamma stays the control plane (auth, orgs, tenant registry, routing).
 
 **Enable Cranl provisioning** by setting:
 ```
@@ -646,7 +646,7 @@ Tamma:ControlPlaneUrl        — https://api.tamma.dev (used as TAMMA_CONTROL_PL
 Tamma:TenantSharedSecret     — HMAC secret pushed as TAMMA_SHARED_SECRET to each engine
 ```
 
-When `Cranl:ApiKey` is unset the Null seam wins (`NullTenantProvisioner`) and tenants stay on the shared central DB. The admin endpoints still work — they just mark tenants Ready immediately.
+When `Cranl:ApiKey` is unset the Null seam wins (`NullTenantProvisioner`) and no external resources are minted — tenant placement stays on the `tenant_databases` pool (central DB by default). The admin endpoints still work — they just mark tenants Ready immediately.
 
 **Admin endpoints** (platform-owner only — `OwnerAccess` policy):
 ```
@@ -657,7 +657,7 @@ POST  /api/admin/tenants/{tenantId}/deprovision
 
 `POST /provision` returns `202 Accepted` immediately; the long-running Cranl polling (db ready ≈ 1-3 min, app deploy ≈ 3-8 min) runs on the existing `TaskQueueProcessor` thread. Subsequent `GET /provisioning` calls report state transitions: `pending → database_provisioning → database_ready → app_provisioning → app_deploying → ready`.
 
-**Routing** (current state): per-request DB connection switching by tenant is wired in production via `ConnectionStrings:ControlPlane` + `LruPooledTenantConnectionResolver`. In dev/test environments without a CP connection string, the resolver falls back to `StubTenantConnectionResolver` which keeps every tenant on the central DB. The `cranl_database_url_encrypted` column is populated correctly during provisioning, so flipping routing on for a tenant only requires the env config — no code change.
+**Routing** (current state): per-request DB connection switching by tenant is unconditional — `LruPooledTenantConnectionResolver` is always wired (the old stub resolver is removed) and every tenant resolves through its own encrypted connection string against its assigned pool database. The `cranl_database_url_encrypted` column is still populated during Cranl provisioning, so a backend-minted hosting database joins the pool with no code change.
 
 **Encryption**: tenant `DATABASE_URL` is AES-GCM-encrypted at rest via `TenantSecretProtector`. Key source: `Cranl:EncryptionKey` (base64, 32 bytes) — required in production. Without it, a key is derived from `Cranl:ApiKey` via HKDF and a warning logged. TODO: migrate to OpenBao via `IKeyProtector` once Story 28-13 lands.
 

@@ -222,14 +222,17 @@ internal static class TammaModelConfiguration
                 // ── Epic 30 shadow columns (Story 30-3) ──
                 //
                 // ProviderKey + ProviderResourceIds back the v2
-                // ITenantInfrastructureProvider contract: the dispatch
-                // workflow (30-2) selects a provider by tenants.provider_key
-                // and writes minted cloud-resource ids into
-                // tenants.provider_resource_ids JSONB. Both stay nullable so
-                // tenants that haven't been routed to a v2 backend yet (the
-                // shared-infra default) continue to work; the migration
-                // backfills 'cranl' for any row already populated with the
-                // legacy cranl_* identifiers.
+                // ITenantInfrastructureProvider contract. ProviderKey is a
+                // backend LABEL: it records which provider (e.g. 'cranl')
+                // minted hosting infrastructure for the tenant, and the
+                // minted cloud-resource ids land in
+                // tenants.provider_resource_ids JSONB. It is NOT a tenancy
+                // mode — placement and schema lifecycle are owned by the
+                // unified model (SchemaName + DatabaseId below). Both stay
+                // nullable: NULL simply means no external backend minted
+                // infrastructure for this tenant. The migration backfills
+                // 'cranl' for any row already populated with the legacy
+                // cranl_* identifiers.
                 entity.Property<string?>("ProviderKey").HasMaxLength(40);
                 entity.Property<string?>("ProviderResourceIds")
                     .HasColumnType("jsonb");

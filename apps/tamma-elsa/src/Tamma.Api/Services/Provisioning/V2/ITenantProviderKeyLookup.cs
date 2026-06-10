@@ -10,7 +10,9 @@ namespace Tamma.Api.Services.Provisioning.V2;
 /// rolls out the physical column.
 ///
 /// <para>Returns <c>null</c> when the tenant has no <c>provider_key</c>
-/// set (legacy tenants, or tenants on the shared-infra path) — the
+/// set (no external backend ever minted hosting infrastructure for the
+/// tenant — its placement is owned by the unified
+/// <c>tenant_databases</c> model) — the
 /// directory translates this to
 /// <c>TenantEndpointResolution.NotApplicable</c> so the LRU resolver
 /// falls back to the pre-30-8 <c>EncryptedConnectionString</c> path.</para>

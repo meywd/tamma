@@ -4,20 +4,21 @@
   PowerShell mirror of bootstrap-shared-dbs.sh (identical behaviour).
 
 .DESCRIPTION
-  TOPOLOGY RECONCILIATION (read this):
-  Story 28-1 AC2 was written against the ASPIRATIONAL db-per-tenant design
-  (separate `tamma_control` + `tamma_global_elsa` databases). The REAL
-  current deployment is SHARED-INFRASTRUCTURE mode: every tenant + the
-  control-plane data + Elsa's own tables all live in ONE central `tamma`
-  database, isolated by Phase-3 RLS. `ConnectionStrings:ControlPlane` is
-  deliberately unset on the VPS (see docker-compose.prod.yml + root
-  CLAUDE.md "Multi-tenant provisioning (Cranl)").
+  TOPOLOGY (unified schema-per-tenant):
+  Story 28-1 AC2 was written against the original db-per-tenant design
+  (separate `tamma_control` + `tamma_global_elsa` databases). The current
+  deployment uses the UNIFIED tenancy model: the central `tamma` database
+  hosts the control plane + Elsa's own tables and is pool member #1
+  ("central") in `tenant_databases`; every tenant lives in its own
+  `t_<hex>` schema with a per-tenant role and an AES-GCM-encrypted
+  connection string (see root CLAUDE.md "Multi-tenant provisioning
+  (Cranl)").
 
   So the databases this script ENSURES today are just `tamma` (control +
-  tenant data) and — only if Elsa is split onto its own database — a
-  separate Elsa DB. Both default to the single shared `tamma` DB and are
-  PARAMETERISED so this script is forward-compatible with the per-tenant
-  cutover: point -ControlDb / -GlobalElsaDb at the real split databases
+  tenant schemas) and — only if Elsa is split onto its own database — a
+  separate Elsa DB. Both default to the single central `tamma` DB and are
+  PARAMETERISED so this script is forward-compatible with additional pool
+  databases: point -ControlDb / -GlobalElsaDb at the real split databases
   and the same create-if-missing + summary logic applies unchanged.
 
   WHAT "apply migrations" MEANS HERE:
