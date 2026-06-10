@@ -5,41 +5,39 @@ using Tamma.Data.Entities;
 namespace Tamma.Data.Repositories;
 
 /// <summary>
-/// Tenant-scoped convention store persistence (Story 27-9). Uses
-/// <see cref="ITenantDbContextFactory"/> for all reads/writes; the ambient
-/// <see cref="ITenantContext"/> MUST carry a tenant id (mirrors
-/// <see cref="PromptRepository"/> — Story 28-1 PR D).
+/// Tenant-scoped convention store persistence (Story 27-9).
 ///
-/// <para><b>DB routing vs row scoping.</b> The ambient tenant id
-/// (<see cref="RequireTenantId"/>) picks the PHYSICAL database via the factory.
-/// The <c>tenantId</c> / <c>tenant_id IS NULL</c> predicates select WHICH ROWS
-/// (tenant-override tier vs system-default tier) within that database — the
-/// system defaults seeded by Story 27-16 live in the same per-tenant DB as the
-/// overrides. In the transitional shared-DB model the factory routes every
-/// tenant to one physical DB anyway, so a single index seek on
-/// <c>(tenant_id, role, action)</c> (the <c>NULLS NOT DISTINCT</c> unique index
-/// from Story 27-8) resolves both tiers.</para>
+/// <para><b>Two stores, one repository (unified-tenancy Phase 3).</b>
+/// Tenant-override rows (<c>tenant_id = X</c>) live in the calling tenant's
+/// physical store and route through <see cref="ITenantDbContextFactory"/> with
+/// the ambient <see cref="ITenantContext"/> tenant id. System-default rows
+/// (<c>tenant_id IS NULL</c>, seeded by Story 27-16 / managed by Story 27-10
+/// admin CRUD) live in the SYSTEM STORE — the central DB's public-schema
+/// <c>conventions</c> table — and route through
+/// <see cref="ISystemStoreDbContextFactory"/>, with no ambient tenant
+/// required. The <c>tenant_id</c> predicates still discriminate the row tier
+/// inside each store.</para>
 /// </summary>
 public class ConventionRepository(
     ITenantDbContextFactory tenantDbFactory,
-    ITenantContext tenantContext) : IConventionRepository
+    ITenantContext tenantContext,
+    ISystemStoreDbContextFactory systemStoreFactory) : IConventionRepository
 {
     /// <remarks>
     /// Ambient <see cref="ITenantContext.TenantId"/> is required for physical DB
-    /// routing even when reading or writing system-default rows
-    /// (<c>tenant_id IS NULL</c>): the per-tenant DB factory routes the request
-    /// to the correct physical database based on the ambient tenant, regardless
-    /// of whether the rows being read/written are system defaults or tenant
-    /// overrides. In single-user mode <see cref="EnsurePersonalTenantMiddleware"/>
-    /// always binds a personal tenant up-front, so this should never be unset.
+    /// routing of TENANT-OVERRIDE rows: the per-tenant DB factory routes the
+    /// request to the calling tenant's physical database. System-default rows
+    /// do NOT use this — they route through the system store. In single-user
+    /// mode <see cref="EnsurePersonalTenantMiddleware"/> always binds a personal
+    /// tenant up-front, so this should never be unset.
     /// </remarks>
     private Guid RequireTenantId() => tenantContext.TenantId
         ?? throw new InvalidOperationException(
             "ConventionRepository requires an ambient tenant id. The per-tenant "
-            + "DB factory routes both system-default (tenant_id IS NULL) and "
-            + "tenant-override rows through the calling tenant's physical "
-            + "database — single-user mode binds a personal tenant up-front "
-            + "(EnsurePersonalTenantMiddleware), so this should always be set.");
+            + "DB factory routes tenant-override rows through the calling "
+            + "tenant's physical database — single-user mode binds a personal "
+            + "tenant up-front (EnsurePersonalTenantMiddleware), so this should "
+            + "always be set.");
 
     public async Task<Convention?> GetTenantOverrideAsync(
         Guid tenantId, string role, string action, CancellationToken ct)
@@ -56,15 +54,13 @@ public class ConventionRepository(
     }
 
     /// <remarks>
-    /// Ambient <see cref="ITenantContext.TenantId"/> is required for physical DB
-    /// routing even though system-default rows carry <c>tenant_id IS NULL</c>
-    /// — see <see cref="RequireTenantId"/> doc-comment.
+    /// System-default rows (<c>tenant_id IS NULL</c>) live in the SYSTEM STORE
+    /// (central DB public schema) — no ambient tenant id required.
     /// </remarks>
     public async Task<Convention?> GetSystemDefaultAsync(
         string role, string action, CancellationToken ct)
     {
-        var dbTenant = RequireTenantId();
-        await using var db = await tenantDbFactory.CreateAsync(dbTenant, ct);
+        await using var db = await systemStoreFactory.CreateAsync(ct);
         return await db.Conventions.IgnoreQueryFilters()
             .FirstOrDefaultAsync(
                 c => c.TenantId == default(Guid?) && c.Role == role && c.Action == action,
@@ -179,29 +175,25 @@ public class ConventionRepository(
     }
 
     /// <remarks>
-    /// Ambient <see cref="ITenantContext.TenantId"/> is required for physical DB
-    /// routing even though system-default rows carry <c>tenant_id IS NULL</c>
-    /// — see <see cref="RequireTenantId"/> doc-comment.
+    /// System-default rows (<c>tenant_id IS NULL</c>) live in the SYSTEM STORE
+    /// (central DB public schema) — no ambient tenant id required.
     /// </remarks>
     public async Task<IReadOnlyList<Convention>> ListSystemDefaultsAsync(CancellationToken ct)
     {
-        var dbTenant = RequireTenantId();
-        await using var db = await tenantDbFactory.CreateAsync(dbTenant, ct);
+        await using var db = await systemStoreFactory.CreateAsync(ct);
         return await db.Conventions.IgnoreQueryFilters()
             .Where(c => c.TenantId == default(Guid?))
             .ToListAsync(ct);
     }
 
     /// <remarks>
-    /// Ambient <see cref="ITenantContext.TenantId"/> is required for physical DB
-    /// routing even though system-default rows carry <c>tenant_id IS NULL</c>
-    /// — see <see cref="RequireTenantId"/> doc-comment.
+    /// System-default rows (<c>tenant_id IS NULL</c>) live in the SYSTEM STORE
+    /// (central DB public schema) — no ambient tenant id required.
     /// </remarks>
     public async Task<(Convention Row, bool WasCreated, Convention? PreviousRow)> UpsertSystemDefaultAsync(
         string role, string action, string body, bool enabled, Guid? updatedBy, CancellationToken ct)
     {
-        var dbTenant = RequireTenantId();
-        await using var db = await tenantDbFactory.CreateAsync(dbTenant, ct);
+        await using var db = await systemStoreFactory.CreateAsync(ct);
 
         // NOTE: check-then-insert — concurrent same-key (NULL, role, action)
         // upserts surface as a Postgres unique-violation (23505) via the
@@ -273,15 +265,13 @@ public class ConventionRepository(
     }
 
     /// <remarks>
-    /// Ambient <see cref="ITenantContext.TenantId"/> is required for physical DB
-    /// routing even though system-default rows carry <c>tenant_id IS NULL</c>
-    /// — see <see cref="RequireTenantId"/> doc-comment.
+    /// System-default rows (<c>tenant_id IS NULL</c>) live in the SYSTEM STORE
+    /// (central DB public schema) — no ambient tenant id required.
     /// </remarks>
     public async Task<(bool WasDeleted, int? DeletedVersion)> DeleteSystemDefaultAsync(
         string role, string action, CancellationToken ct)
     {
-        var dbTenant = RequireTenantId();
-        await using var db = await tenantDbFactory.CreateAsync(dbTenant, ct);
+        await using var db = await systemStoreFactory.CreateAsync(ct);
 
         // tenant_id IS NULL discriminator keeps DELETE off tenant overrides
         // (mirror-image of DeleteTenantOverrideAsync).

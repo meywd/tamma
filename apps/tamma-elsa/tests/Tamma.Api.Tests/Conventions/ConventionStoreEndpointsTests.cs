@@ -47,6 +47,7 @@ public class ConventionStoreEndpointsTests
     private string _connectionString = null!;
     private NpgsqlDataSource _dataSource = null!;
     private StubTenantConnectionResolver _resolver = null!;
+    private SystemStoreDbContextFactory _systemStoreFactory = null!;
 
     private static readonly Guid AmbientTenant =
         Guid.Parse("bbbbbbbb-1111-2222-3333-bbbbbbbbbbbb");
@@ -71,6 +72,7 @@ public class ConventionStoreEndpointsTests
 
         _dataSource = NpgsqlDataSource.Create(_connectionString);
         _resolver = new StubTenantConnectionResolver(_dataSource);
+        _systemStoreFactory = new SystemStoreDbContextFactory(_connectionString);
     }
 
     [OneTimeTearDown]
@@ -92,7 +94,7 @@ public class ConventionStoreEndpointsTests
         }
 
         var seeder = new ConventionStoreSeeder(
-            _resolver, TimeProvider.System,
+            _systemStoreFactory, TimeProvider.System,
             NullLogger<ConventionStoreSeeder>.Instance);
         await using var db = NewContext();
         await seeder.SeedAsync(db, default);
@@ -112,7 +114,7 @@ public class ConventionStoreEndpointsTests
         var factory = new TenantDbContextFactory(_resolver);
         var tc = new TenantContext();
         tc.SetTenantId(AmbientTenant);
-        var repo = new ConventionRepository(factory, tc);
+        var repo = new ConventionRepository(factory, tc, _systemStoreFactory);
         // Story 27-14: events now emit from the store — pass a no-op event repo
         // so the endpoint tests don't need an event-store DB.
         var eventsService = new ConventionEventsService(new NullConventionEventRepository());
@@ -450,7 +452,7 @@ public class ConventionStoreEndpointsTests
         var factory = new TenantDbContextFactory(_resolver);
         var tc = new TenantContext();
         tc.SetTenantId(AmbientTenant);
-        var repo = new ConventionRepository(factory, tc);
+        var repo = new ConventionRepository(factory, tc, _systemStoreFactory);
 
         var eventRepo = new EventRepository(
             fx.Factory,

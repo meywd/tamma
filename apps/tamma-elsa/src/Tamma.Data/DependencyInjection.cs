@@ -89,6 +89,15 @@ public static class DependencyInjection
         services.AddSingleton<ITenantDbContextFactory>(
             _ => new TenantDbContextFactory(tenantConnectionString));
 
+        // Unified-tenancy Phase 3 — the SYSTEM STORE seam. Platform-level
+        // system-default rows (TenantId IS NULL) live in the CENTRAL database's
+        // public-schema tenant tables; services reach them through this factory
+        // instead of riding a tenant connection. Deliberately bound to the same
+        // central connection string the shared TenantDbContextFactory uses
+        // (app ?? admin) — the system store IS the central DB.
+        services.AddSingleton<ISystemStoreDbContextFactory>(
+            _ => new SystemStoreDbContextFactory(tenantConnectionString));
+
         // Story 28-3 contract: every consumer of per-tenant connection
         // pooling depends on ITenantConnectionResolver, not directly on
         // a connection string. Wave A.5 post-merge restores the stub

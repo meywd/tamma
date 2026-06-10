@@ -46,6 +46,15 @@ public class ConventionStoreTests
     private string _connectionString = null!;
     private NpgsqlDataSource _dataSource = null!;
     private StubTenantConnectionResolver _resolver = null!;
+    private SystemStoreDbContextFactory _systemStoreFactory = null!;
+
+    // Unified-tenancy Phase 3 split harness: a SECOND physical database in the
+    // same container acting as a tenant store that carries NO system-default
+    // rows — proves the repository's system leg reads the system store, not
+    // the tenant connection.
+    private string _tenantOnlyConnectionString = null!;
+    private NpgsqlDataSource _tenantOnlyDataSource = null!;
+    private StubTenantConnectionResolver _tenantOnlyResolver = null!;
 
     // The ambient request tenant id that routes the physical DB (shared in
     // the transitional model). Distinct from the row-scoping tenant id passed
@@ -73,11 +82,31 @@ public class ConventionStoreTests
 
         _dataSource = NpgsqlDataSource.Create(_connectionString);
         _resolver = new StubTenantConnectionResolver(_dataSource);
+        _systemStoreFactory = new SystemStoreDbContextFactory(_connectionString);
+
+        // Second database (same container) = a tenant store WITHOUT system
+        // rows, for the Phase 3 system/tenant split tests.
+        await using (var conn = new NpgsqlConnection(_connectionString))
+        {
+            await conn.OpenAsync();
+            await using var cmd = new NpgsqlCommand(
+                "CREATE DATABASE convention_tenant_only_store;", conn);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        _tenantOnlyConnectionString = new NpgsqlConnectionStringBuilder(_connectionString)
+        {
+            Database = "convention_tenant_only_store",
+        }.ConnectionString;
+        await migrator.MigrateTenantAppAsync(_tenantOnlyConnectionString);
+        _tenantOnlyDataSource = NpgsqlDataSource.Create(_tenantOnlyConnectionString);
+        _tenantOnlyResolver = new StubTenantConnectionResolver(_tenantOnlyDataSource);
     }
 
     [OneTimeTearDown]
     public async Task OneTimeTearDown()
     {
+        await _tenantOnlyResolver.DisposeAsync();
+        await _tenantOnlyDataSource.DisposeAsync();
         await _resolver.DisposeAsync();
         await _dataSource.DisposeAsync();
         await _postgres.DisposeAsync();
@@ -86,17 +115,20 @@ public class ConventionStoreTests
     [SetUp]
     public async Task SeedSystemDefaults()
     {
-        // Fresh table each test, then re-seed the system defaults so resolution
-        // has the tenant_id IS NULL rows it depends on.
-        await using (var conn = new NpgsqlConnection(_connectionString))
+        // Fresh tables each test (both stores), then re-seed the system
+        // defaults into the SYSTEM store so resolution has the
+        // tenant_id IS NULL rows it depends on. The tenant-only store stays
+        // free of system rows by construction.
+        foreach (var cs in new[] { _connectionString, _tenantOnlyConnectionString })
         {
+            await using var conn = new NpgsqlConnection(cs);
             await conn.OpenAsync();
             await using var cmd = new NpgsqlCommand("TRUNCATE TABLE conventions;", conn);
             await cmd.ExecuteNonQueryAsync();
         }
 
         var seeder = new ConventionStoreSeeder(
-            _resolver, TimeProvider.System,
+            _systemStoreFactory, TimeProvider.System,
             NullLogger<ConventionStoreSeeder>.Instance);
         await using var db = NewContext();
         await seeder.SeedAsync(db, default);
@@ -127,9 +159,34 @@ public class ConventionStoreTests
         var factory = new TenantDbContextFactory(_resolver);
         var tc = new TenantContext();
         tc.SetTenantId(AmbientTenant);
-        var repo = new ConventionRepository(factory, tc);
+        var repo = new ConventionRepository(factory, tc, _systemStoreFactory);
         var eventsService = new ConventionEventsService(new NullConventionEventRepository());
         return new ConventionStore(repo, eventsService);
+    }
+
+    /// <summary>
+    /// Unified-tenancy Phase 3 split store: the TENANT leg routes to the
+    /// tenant-only database (which never carries system rows) while the SYSTEM
+    /// leg routes to the seeded central database — the two legs genuinely hit
+    /// DIFFERENT physical stores.
+    /// </summary>
+    private ConventionStore NewSplitStore()
+    {
+        var factory = new TenantDbContextFactory(_tenantOnlyResolver);
+        var tc = new TenantContext();
+        tc.SetTenantId(AmbientTenant);
+        var repo = new ConventionRepository(factory, tc, _systemStoreFactory);
+        var eventsService = new ConventionEventsService(new NullConventionEventRepository());
+        return new ConventionStore(repo, eventsService);
+    }
+
+    private TenantDbContext NewTenantOnlyContext()
+    {
+        var options = new DbContextOptionsBuilder<TenantDbContext>()
+            .UseNpgsql(_tenantOnlyDataSource, npgsql =>
+                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory"))
+            .Options;
+        return new TenantDbContext(options);
     }
 
     // Null event repository for store tests — events are verified separately in
@@ -256,6 +313,85 @@ public class ConventionStoreTests
         acmeResolved.Source.Should().Be(ConventionSource.Tenant);
         globexResolved.Source.Should().Be(ConventionSource.System);
         globexResolved.Body.Should().NotBe("ACME-ONLY");
+    }
+
+    // ------------------------------------------------------------------
+    // Unified-tenancy Phase 3 — system/tenant store SPLIT. The tenant leg
+    // points at a database that carries ZERO system-default rows; the system
+    // leg points at the seeded central database. These tests fail if the
+    // repository's system-default reads/writes ride the tenant connection.
+    // ------------------------------------------------------------------
+
+    [Test]
+    public async Task Resolve_SystemDefault_ComesFromSystemStore_WhenTenantStoreHasNoSystemRows()
+    {
+        var store = NewSplitStore();
+        var tenantId = Guid.NewGuid();
+
+        // Precondition: the TENANT store has no system-default rows at all —
+        // if resolution still succeeds, the system leg hit the system store.
+        await using (var tenantDb = NewTenantOnlyContext())
+        {
+            (await tenantDb.Conventions.IgnoreQueryFilters()
+                .CountAsync(c => c.TenantId == null))
+                .Should().Be(0, "the tenant store must carry no system rows for this proof");
+        }
+
+        var resolved = await store.ResolveAsync(tenantId, Role, Action, default);
+
+        resolved.Source.Should().Be(ConventionSource.System);
+        resolved.Body.Should().Be(ConventionSeedSpecs.DefaultBody(RoleWire, ActionWire),
+            "the system default must resolve from the SYSTEM store even though "
+            + "the tenant's own store has no tenant_id IS NULL rows");
+    }
+
+    [Test]
+    public async Task Resolve_TenantOverrideInTenantStore_StillWins_OverSystemStoreDefault()
+    {
+        var store = NewSplitStore();
+        var tenantId = Guid.NewGuid();
+
+        await store.UpsertAsync(tenantId, Role, Action, "SPLIT-TENANT-BODY", enabled: true, Guid.NewGuid(), default);
+
+        // The override row landed in the TENANT store, not the system store.
+        await using (var tenantDb = NewTenantOnlyContext())
+        {
+            (await tenantDb.Conventions.IgnoreQueryFilters()
+                .CountAsync(c => c.TenantId == tenantId))
+                .Should().Be(1, "tenant-override writes route to the tenant store");
+        }
+        await using (var systemDb = NewContext())
+        {
+            (await systemDb.Conventions.IgnoreQueryFilters()
+                .CountAsync(c => c.TenantId == tenantId))
+                .Should().Be(0, "tenant-override writes must NOT land in the system store");
+        }
+
+        // Resolution overlays the tenant store's override on the system store's defaults.
+        var resolved = await store.ResolveAsync(tenantId, Role, Action, default);
+        resolved.Source.Should().Be(ConventionSource.Tenant);
+        resolved.Body.Should().Be("SPLIT-TENANT-BODY");
+    }
+
+    [Test]
+    public async Task UpsertSystemDefault_WritesToSystemStore_NotTenantStore()
+    {
+        var store = NewSplitStore();
+        var admin = Guid.NewGuid();
+
+        await store.UpsertSystemDefaultAsync(Role, Action, "SPLIT-SYSTEM-BODY", enabled: true, admin, default);
+
+        await using (var tenantDb = NewTenantOnlyContext())
+        {
+            (await tenantDb.Conventions.IgnoreQueryFilters()
+                .CountAsync(c => c.TenantId == null))
+                .Should().Be(0, "system-default writes must NOT land in the tenant store");
+        }
+
+        await using var systemDb = NewContext();
+        var row = await systemDb.Conventions.IgnoreQueryFilters()
+            .FirstAsync(c => c.TenantId == null && c.Role == RoleWire && c.Action == ActionWire);
+        row.Body.Should().Be("SPLIT-SYSTEM-BODY", "system-default writes route to the system store");
     }
 
     // ------------------------------------------------------------------

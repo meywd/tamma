@@ -84,9 +84,11 @@ public class ConventionStoreSeederTests
 
     private ConventionStoreSeeder NewSeeder() =>
         new(
-            // resolver path is exercised by the SeedAsync(ct) overload elsewhere;
-            // here we drive the SeedAsync(TenantDbContext, ct) seam directly.
-            new StubTenantConnectionResolver(_dataSource),
+            // The system-store path is exercised by the SeedAsync(ct) overload
+            // below; most tests drive the SeedAsync(TenantDbContext, ct) seam
+            // directly (unified-tenancy Phase 3: the seeder targets the SYSTEM
+            // STORE, no tenant resolver involved).
+            new SystemStoreDbContextFactory(_connectionString),
             TimeProvider.System,
             NullLogger<ConventionStoreSeeder>.Instance);
 
@@ -244,10 +246,11 @@ public class ConventionStoreSeederTests
     }
 
     [Test]
-    public async Task SeedAsync_ResolverOverload_SeedsViaTheStartupPath()
+    public async Task SeedAsync_SystemStoreOverload_SeedsViaTheStartupPath()
     {
-        // Exercise the production startup path: resolve the data source from
-        // ITenantConnectionResolver and build the context internally.
+        // Exercise the production startup path: build the tenant-less context
+        // from ISystemStoreDbContextFactory internally (Phase 3 — the seeder
+        // writes the SYSTEM STORE, no tenant resolver involved).
         var seeder = NewSeeder();
 
         var result = await seeder.SeedAsync(default);

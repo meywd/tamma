@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
-using Tamma.Data.Pooling;
 
 namespace Tamma.Api.Services.Conventions;
 
@@ -34,23 +33,17 @@ public sealed class ConventionStoreSeederOptions
 /// share one source, so they cannot drift; an anti-drift test pins the three
 /// keysets (prompt registry, convention seed, taxonomy) set-equal.</para>
 ///
-/// <para><b>DbContext / DB targeting.</b> System-default rows are NOT tenant
-/// bound (<c>tenant_id IS NULL</c>). In the transitional shared-DB model every
-/// tenant rides one physical DB, so the seeder resolves the shared
-/// <c>NpgsqlDataSource</c> via <see cref="ITenantConnectionResolver"/> and
-/// builds a tenant-less <see cref="TenantDbContext"/> (the same ad-hoc-context
-/// path <c>EfTenantDbMigrator</c> uses). The <c>TenantDbContext</c> applies no
-/// global query filter (see <c>TammaModelConfiguration.ApplyTenantFilter</c> —
-/// a documented no-op in Wave A.5), so the seeder reads/writes
-/// <c>tenant_id IS NULL</c> rows with an explicit predicate.</para>
-///
-/// <para><b>Per-tenant-DB scope (DEFERRED — Epic 28 cutover).</b> When the
-/// db-per-tenant split lands, each tenant's physical DB needs its own copy of
-/// the system-default rows, seeded at provision time. That is a provisioning
-/// concern (and an OPEN design decision documented on the <c>Convention</c>
-/// entity / <c>TammaModelConfiguration</c>), NOT a startup seeder. This seeder
-/// implements ONLY the startup / shared-DB path; the provisioning path is a
-/// follow-up for the Story 27-9 + provisioning flow.</para>
+/// <para><b>DbContext / DB targeting (unified-tenancy Phase 3).</b>
+/// System-default rows are NOT tenant bound (<c>tenant_id IS NULL</c>) — they
+/// live in the SYSTEM STORE (the central DB's public-schema <c>conventions</c>
+/// table), so the seeder builds its tenant-less <see cref="TenantDbContext"/>
+/// via <see cref="ISystemStoreDbContextFactory"/>. The <c>TenantDbContext</c>
+/// applies no global query filter (see
+/// <c>TammaModelConfiguration.ApplyTenantFilter</c> — a documented no-op in
+/// Wave A.5), so the seeder reads/writes <c>tenant_id IS NULL</c> rows with an
+/// explicit predicate. Tenant schemas never carry system-default rows;
+/// resolution reads them from the system store (see
+/// <c>ConventionRepository</c>).</para>
 ///
 /// <para><b>INSERT-MISSING-ONLY (product decision 2026-05-25).</b> Convention
 /// system defaults are DB-managed at runtime via platform-admin CRUD
@@ -80,30 +73,30 @@ public sealed class ConventionStoreSeederOptions
 /// </summary>
 public sealed class ConventionStoreSeeder : IHostedService
 {
-    private readonly ITenantConnectionResolver _resolver;
+    private readonly ISystemStoreDbContextFactory _systemStore;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<ConventionStoreSeeder> _logger;
     private readonly ConventionStoreSeederOptions _options;
 
     public ConventionStoreSeeder(
-        ITenantConnectionResolver resolver,
+        ISystemStoreDbContextFactory systemStore,
         TimeProvider timeProvider,
         ILogger<ConventionStoreSeeder> logger)
-        : this(resolver, timeProvider, logger, new ConventionStoreSeederOptions())
+        : this(systemStore, timeProvider, logger, new ConventionStoreSeederOptions())
     {
     }
 
     public ConventionStoreSeeder(
-        ITenantConnectionResolver resolver,
+        ISystemStoreDbContextFactory systemStore,
         TimeProvider timeProvider,
         ILogger<ConventionStoreSeeder> logger,
         ConventionStoreSeederOptions options)
     {
-        ArgumentNullException.ThrowIfNull(resolver);
+        ArgumentNullException.ThrowIfNull(systemStore);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(options);
-        _resolver = resolver;
+        _systemStore = systemStore;
         _timeProvider = timeProvider;
         _logger = logger;
         _options = options;
@@ -136,30 +129,13 @@ public sealed class ConventionStoreSeeder : IHostedService
         Task.CompletedTask;
 
     /// <summary>
-    /// Resolve the shared tenant data source, build a tenant-less
-    /// <see cref="TenantDbContext"/>, and run the upsert. The
-    /// <see cref="Guid.Empty"/> tenant id is only used to address the shared
-    /// data source — the rows written carry <c>TenantId IS NULL</c>.
+    /// Build a tenant-less <see cref="TenantDbContext"/> bound to the SYSTEM
+    /// STORE (central DB public schema — unified-tenancy Phase 3) and run the
+    /// insert-missing-only seed. The rows written carry <c>TenantId IS NULL</c>.
     /// </summary>
     public async Task<SeedResult> SeedAsync(CancellationToken ct)
     {
-        // Guid.Empty addresses the shared data source in the transitional
-        // single-DB model (StubTenantConnectionResolver ignores the id).
-        var dataSource = await _resolver
-            .GetDataSourceAsync(Guid.Empty, ct)
-            .ConfigureAwait(false);
-
-        // Unified-tenancy Phase 1: pin the history table to the schema named by
-        // the connection string's Search Path (null → public, pre-Phase-1
-        // behavior). NpgsqlDataSource.ConnectionString may omit the password —
-        // fine, the helper only reads the Search Path key.
-        var schema = TenantNaming.SchemaFromConnectionString(dataSource.ConnectionString);
-        var options = new DbContextOptionsBuilder<TenantDbContext>()
-            .UseNpgsql(dataSource, npgsql =>
-                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema))
-            .Options;
-
-        await using var db = new TenantDbContext(options);
+        await using var db = await _systemStore.CreateAsync(ct).ConfigureAwait(false);
         return await SeedAsync(db, ct).ConfigureAwait(false);
     }
 

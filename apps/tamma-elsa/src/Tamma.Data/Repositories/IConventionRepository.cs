@@ -10,14 +10,18 @@ namespace Tamma.Data.Repositories;
 /// default (seeded by Story 27-16), <c>tenant_id = X</c> identifies tenant X's
 /// override. There is NO <c>user_id</c> column and NO per-user override layer
 /// (see <see cref="Convention"/>). The system defaults live in the DB (one row
-/// per taxonomy cell) — NOT in code — so this repository reads BOTH tiers from
-/// the same per-tenant physical database.</para>
+/// per taxonomy cell) — NOT in code.</para>
 ///
-/// <para>All reads/writes route through <see cref="Abstractions.ITenantDbContextFactory"/>
+/// <para><b>Two stores (unified-tenancy Phase 3).</b> Tenant-override
+/// reads/writes route through <see cref="Abstractions.ITenantDbContextFactory"/>
 /// using the ambient request tenant id (<see cref="ITenantContext.TenantId"/>)
-/// to pick the physical DB — exactly like <see cref="PromptRepository"/>. The
-/// <c>tenantId</c> argument here selects WHICH ROWS to read/write within that
-/// DB (system-default vs tenant-override tier), not which database to target.</para>
+/// to pick the tenant's physical store — exactly like
+/// <see cref="PromptRepository"/>. System-default reads/writes
+/// (<c>tenant_id IS NULL</c>) route through
+/// <see cref="Abstractions.ISystemStoreDbContextFactory"/> — the SYSTEM STORE,
+/// the central DB's public-schema <c>conventions</c> table — and need no
+/// ambient tenant. The <c>tenantId</c> argument on tenant methods still selects
+/// WHICH ROWS to read/write (row tier), not which database to target.</para>
 /// </summary>
 public interface IConventionRepository
 {
