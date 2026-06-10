@@ -23,6 +23,16 @@ public interface ITenantDatabasePool
     /// </summary>
     Task<int> ExecuteOnAsync(Guid databaseId, string commandText, CancellationToken ct = default);
 
+    /// <summary>
+    /// Execute one scalar query on the pool row's admin connection
+    /// (autocommit, fresh connection — mirrors <see cref="ExecuteOnAsync"/>).
+    /// Phase 4 interface growth: the move engine verifies the restored
+    /// schema by comparing <c>__TenantMigrationsHistory</c> row counts on
+    /// the source and target rows. Same quoting rules as
+    /// <see cref="ExecuteOnAsync"/> — never inline untrusted input.
+    /// </summary>
+    Task<object?> ExecuteScalarOnAsync(Guid databaseId, string commandText, CancellationToken ct = default);
+
     /// <summary>True when pg_roles on the row's cluster has the role.</summary>
     Task<bool> RoleExistsOnAsync(Guid databaseId, string roleName, CancellationToken ct = default);
 

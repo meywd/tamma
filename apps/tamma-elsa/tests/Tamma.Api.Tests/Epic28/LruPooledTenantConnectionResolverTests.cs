@@ -146,6 +146,69 @@ public class LruPooledTenantConnectionResolverTests
     }
 
     [Test]
+    public async Task Draining_Tenant_Yields_Connections_On_Cold_Path()
+    {
+        // Phase 4 move window — 'draining' must stay connection-yielding:
+        // the middleware 503s writes, but reads route through the resolver
+        // and must keep hitting the SOURCE schema after the drain-evict.
+        var tenantId = await SeedActiveTenantAsync(status: "draining");
+        await using var resolver = CreateResolver();
+
+        var ds = await resolver.GetDataSourceAsync(tenantId);
+
+        ds.Should().NotBeNull(
+            "draining is the move's read-only window — the cold path must "
+            + "build a pool, not throw TenantNotProvisionedException");
+        _decryptor.Calls.Should().Be(1);
+    }
+
+    [Test]
+    public async Task Draining_Tenant_Yields_Connections_After_Explicit_Evict()
+    {
+        // The exact sequence TenantMoveService runs at step 2: warm pool →
+        // Status flips to draining → EvictAsync. The very next read must
+        // rebuild and serve, not die at ResolveTenantRowAsync.
+        var tenantId = await SeedActiveTenantAsync();
+        await using var resolver = CreateResolver();
+        await resolver.GetDataSourceAsync(tenantId);
+
+        await using (var ctx = await _factory.CreateDbContextAsync())
+        {
+            var tenant = await ctx.Tenants.FirstAsync(t => t.Id == tenantId);
+            ctx.Entry(tenant).Property("Status").CurrentValue = "draining";
+            await ctx.SaveChangesAsync();
+        }
+        await resolver.EvictAsync(tenantId);
+
+        var act = async () => await resolver.GetDataSourceAsync(tenantId);
+        await act.Should().NotThrowAsync(
+            "reads during the move window route through the resolver and "
+            + "must keep working until the move re-points the envelope");
+    }
+
+    [Test]
+    public async Task HotPath_Status_Probe_Draining_Keeps_Serving_Cached_Pool()
+    {
+        // Probe gate mirror of the carve-out: a probe value of 'draining'
+        // must NOT force the evict-then-rebuild path — the warm pool keeps
+        // serving reads for the whole move window.
+        var tenantId = await SeedActiveTenantAsync();
+        var probe = new RecordingProbe();
+        await using var resolver = CreateResolverWithProbe(probe);
+
+        await resolver.GetDataSourceAsync(tenantId);
+        var callsAfterFirst = _decryptor.Calls;
+
+        probe.Set(tenantId, "draining");
+        var act = async () => await resolver.GetDataSourceAsync(tenantId);
+
+        await act.Should().NotThrowAsync();
+        _decryptor.Calls.Should().Be(callsAfterFirst,
+            "a draining probe value must let the resolver serve the cache "
+            + "(no forced cold refresh, no exception)");
+    }
+
+    [Test]
     public async Task Empty_Envelope_Throws_ConnectionStringMissingException()
     {
         var tenantId = Guid.NewGuid();

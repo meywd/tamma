@@ -133,7 +133,7 @@ public sealed class BackupTenantDatabaseActivity : TenantLifecycleActivity
 
         // --schema dumps the tenant's schema ONLY — neighbours on the
         // shared pool database must never land in this tenant's snapshot.
-        var arguments = BuildPgDumpArguments(info, destination, schemaName);
+        var arguments = PgToolArguments.ForPgDump(info, destination, schemaName);
 
         await RunPgDumpAsync(
             options, processRunner, arguments, info.Password,
@@ -179,7 +179,7 @@ public sealed class BackupTenantDatabaseActivity : TenantLifecycleActivity
         var destination = BuildDestination(options, dbName, nowUtc);
 
         await RunPgDumpAsync(
-            options, processRunner, BuildPgDumpArguments(info, destination), info.Password,
+            options, processRunner, PgToolArguments.ForPgDump(info, destination), info.Password,
             tenantId, target: dbName, destination, logger, cancellationToken)
             .ConfigureAwait(false);
         return true;
@@ -194,33 +194,9 @@ public sealed class BackupTenantDatabaseActivity : TenantLifecycleActivity
         return System.IO.Path.Combine(options.Directory, $"{targetName}_{stamp}.dump");
     }
 
-    // Custom format (-Fc) is compressed + restorable with pg_restore.
-    // --no-password fails fast instead of prompting if PGPASSWORD is
-    // somehow absent. Password goes through the environment ONLY.
-    private static List<string> BuildPgDumpArguments(
-        TenantAdminConnectionInfo info, string destination, string? schemaName = null)
-    {
-        var arguments = new List<string>
-        {
-            "--host", info.Host,
-            "--port", info.Port.ToString(CultureInfo.InvariantCulture),
-            "--username", info.Username,
-            "--dbname", info.Database,
-        };
-        if (schemaName is not null)
-        {
-            arguments.Add("--schema");
-            arguments.Add(schemaName);
-        }
-        arguments.AddRange(new[]
-        {
-            "--format", "custom",
-            "--no-password",
-            "--file", destination,
-        });
-        return arguments;
-    }
-
+    // pg_dump argv lives in PgToolArguments (Phase 4 extraction — shared
+    // with TenantMoveService). Custom format, --no-password, password via
+    // the environment ONLY.
     private static async Task RunPgDumpAsync(
         TenantBackupOptions options,
         IProcessRunner processRunner,

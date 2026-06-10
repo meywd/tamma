@@ -43,6 +43,18 @@ internal sealed class RecordingTenantDatabasePool : ITenantDatabasePool
         return Task.FromResult(0);
     }
 
+    public List<(Guid DatabaseId, string CommandText)> ScalarQueries { get; } = new();
+
+    /// <summary>Scalar handler — defaults to 0L for every query.</summary>
+    public Func<Guid, string, object?> ScalarResult { get; set; } = (_, _) => 0L;
+
+    public Task<object?> ExecuteScalarOnAsync(
+        Guid databaseId, string commandText, CancellationToken ct = default)
+    {
+        ScalarQueries.Add((databaseId, commandText));
+        return Task.FromResult(ScalarResult(databaseId, commandText));
+    }
+
     public Task<bool> RoleExistsOnAsync(
         Guid databaseId, string roleName, CancellationToken ct = default)
     {

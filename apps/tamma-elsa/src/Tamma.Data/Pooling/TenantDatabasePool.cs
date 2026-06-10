@@ -79,6 +79,18 @@ public sealed class TenantDatabasePool : ITenantDatabasePool
         return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
+    public async Task<object?> ExecuteScalarOnAsync(
+        Guid databaseId, string commandText, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(commandText))
+            throw new ArgumentException("commandText must be supplied", nameof(commandText));
+
+        await using var conn = await OpenAsync(databaseId, ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = commandText;
+        return await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+    }
+
     public async Task<bool> RoleExistsOnAsync(
         Guid databaseId, string roleName, CancellationToken ct = default)
     {

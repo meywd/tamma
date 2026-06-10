@@ -1,6 +1,8 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
+using Tamma.Data.Entities;
 using Tamma.Data.Pooling;
 
 namespace Tamma.Api.Services.Provisioning;
@@ -64,17 +66,11 @@ public sealed class TenantPlacementService : ITenantPlacementService
 
         // Candidates: active rows of the plan's placement class, eligible
         // for the tier, with capacity headroom; dedicated rows must be
-        // empty (one tenant per dedicated DB). NOTE: TierEligibility is a
-        // text[] column — Npgsql translates Contains to array containment.
-        var candidates = db.TenantDatabases.Where(d =>
-            d.Status == "active"
-            && d.PlacementClass == policy
-            && d.TierEligibility.Contains(slug)
-            && (d.TenantCapacity == null || d.TenantCount < d.TenantCapacity));
-        if (policy == "dedicated")
-        {
-            candidates = candidates.Where(d => d.TenantCount == 0);
-        }
+        // empty (one tenant per dedicated DB). The predicate is shared
+        // with TenantMoveService's target validation (Phase 4) via
+        // EligibleFor. NOTE: TierEligibility is a text[] column — Npgsql
+        // translates Contains to array containment.
+        var candidates = db.TenantDatabases.Where(EligibleFor(slug, policy));
 
         var row = await candidates
                 .OrderBy(d => d.TenantCount)
@@ -114,5 +110,31 @@ public sealed class TenantPlacementService : ITenantPlacementService
             tenantId, row.Id, row.Label, schemaName, slug, policy, row.TenantCount);
 
         return new TenantPlacement(row.Id, schemaName);
+    }
+
+    /// <summary>
+    /// The ONE eligibility rule for landing a tenant of plan tier
+    /// <paramref name="tier"/> (placement policy <paramref name="policy"/>)
+    /// on a <c>tenant_databases</c> row: active, matching placement class,
+    /// tier-eligible, capacity headroom — and empty when dedicated.
+    /// Shared by <see cref="AssignAsync"/> (as an EF query predicate) and
+    /// by <c>TenantMoveService</c>'s target validation (compiled,
+    /// in-memory) so placement and move can never disagree (Phase 4
+    /// reuse/extract).
+    /// </summary>
+    public static Expression<Func<TenantDatabase, bool>> EligibleFor(string tier, string policy)
+    {
+        if (policy == "dedicated")
+        {
+            return d => d.Status == "active"
+                && d.PlacementClass == policy
+                && d.TierEligibility.Contains(tier)
+                && (d.TenantCapacity == null || d.TenantCount < d.TenantCapacity)
+                && d.TenantCount == 0;
+        }
+        return d => d.Status == "active"
+            && d.PlacementClass == policy
+            && d.TierEligibility.Contains(tier)
+            && (d.TenantCapacity == null || d.TenantCount < d.TenantCapacity);
     }
 }

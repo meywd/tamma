@@ -640,6 +640,14 @@ builder.Services.AddOptions<Tamma.Activities.TenantLifecycle.TenantBackupOptions
             .GetSection(Tamma.Activities.TenantLifecycle.TenantBackupOptions.SectionName)
             .Bind(opts));
 
+// Unified-tenancy Phase 4 — pg_dump/pg_restore knobs for the tenant move
+// engine (TenantMoveService, registered by AddPlatformEventBus).
+builder.Services.AddOptions<Tamma.Api.Services.Provisioning.TenantMoveOptions>()
+    .Configure(opts =>
+        builder.Configuration
+            .GetSection(Tamma.Api.Services.Provisioning.TenantMoveOptions.SectionName)
+            .Bind(opts));
+
 // Factory + activity wrapper.
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.AgentExecutorFactory>();
 

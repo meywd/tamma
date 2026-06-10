@@ -297,10 +297,21 @@ public sealed class LruPooledTenantConnectionResolver
     /// rule (Doc 04 §2.2). NULL is treated as 'active' so legacy rows
     /// without the shadow column populated keep working without a
     /// status backfill.
+    ///
+    /// <para><b>Phase 4 move window:</b> <c>draining</c> is
+    /// connection-yielding too. During a tenant move
+    /// (<c>ITenantMoveService</c>) the middleware already 503s mutating
+    /// verbs, but reads must keep flowing — the probe gate and the cold
+    /// path must both keep serving the SOURCE schema until the move
+    /// re-points the envelope and evicts. Without this carve-out, the
+    /// drain-evict would make every read die here with
+    /// <see cref="TenantNotProvisionedException"/> for the whole move
+    /// window.</para>
     /// </summary>
     private static bool IsActiveStatus(string? status) =>
         status is null
-        || string.Equals(status, "active", StringComparison.OrdinalIgnoreCase);
+        || string.Equals(status, "active", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(status, "draining", StringComparison.OrdinalIgnoreCase);
 
     public ValueTask<NpgsqlDataSource> GetElsaDataSourceAsync(
         Guid tenantId,
@@ -882,13 +893,17 @@ public sealed class LruPooledTenantConnectionResolver
         if (tenant is null || tenant.DeletedAt is not null)
             throw new TenantNotFoundException(tenantId);
 
-        // 'active' is the only status that yields connections per Doc 04
-        // §2.2. Other statuses (provisioning, suspended, deleting, ...)
-        // map to TenantNotProvisioned. NULL status is treated as
-        // 'active' to keep dev/seed rows working without forcing a
-        // status backfill.
+        // 'active' yields connections per Doc 04 §2.2 — and so does
+        // 'draining' (Phase 4 move window: TenantContextMiddleware blocks
+        // writes with 503, but the resolver must still serve reads against
+        // the SOURCE schema after the drain-evict, until the move
+        // re-points the envelope). Other statuses (provisioning,
+        // suspended, deleting, ...) map to TenantNotProvisioned. NULL
+        // status is treated as 'active' to keep dev/seed rows working
+        // without forcing a status backfill. The rule is shared with the
+        // hot-path probe gate via IsActiveStatus.
         var status = tenant.Status;
-        if (status is not null && !string.Equals(status, "active", StringComparison.OrdinalIgnoreCase))
+        if (!IsActiveStatus(status))
             throw new TenantNotProvisionedException(tenantId, status);
 
         if (tenant.Envelope is null || tenant.Envelope.Length == 0)

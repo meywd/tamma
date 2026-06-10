@@ -63,6 +63,13 @@ public static class PlatformEventsServiceCollectionExtensions
         // singleton seams, so singleton is safe.
         services.TryAddSingleton<ITenantProvisioningService, TenantProvisioningService>();
 
+        // Unified-tenancy Phase 4 — the schema-move engine (draining →
+        // pg_dump → restore → re-point → drop source → active). Stateless
+        // over singleton seams (pool, provisioning, resolver, process
+        // runner), so singleton is safe. TenantMoveOptions is bound in
+        // Program.cs beside TenantBackupOptions.
+        services.TryAddSingleton<ITenantMoveService, TenantMoveService>();
+
         // Story 28-5 — per-tenant migrator runs the InitialTenant migration
         // set against a freshly-created tenant DB. Singleton; opens an
         // ad-hoc TenantDbContext per call.
