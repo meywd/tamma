@@ -156,8 +156,10 @@ public class SwitchOrgEndpointTests
         await result.ExecuteAsync(ctx);
         ctx.Response.StatusCode.Should().Be(StatusCodes.Status200OK);
 
-        // Active tenant persisted in Settings JSON (users.TenantId is locked
-        // by the prevent_tenant_id_change trigger; switch-org stashes the
+        // Active tenant persisted in Settings JSON (users.TenantId is the
+        // personal-tenant column, immutable post-bootstrap by app-layer
+        // convention — the legacy prevent_tenant_id_change DB trigger was
+        // removed in unified-tenancy Phase 5; switch-org stashes the
         // runtime active tenant under Settings.activeTenantId instead).
         var refreshed = await _userRepo.GetByIdAsync(user.Id);
         refreshed!.TenantId.Should().Be(tenantA.Id, "personal-tenant column is immutable");
@@ -378,8 +380,9 @@ public class SwitchOrgEndpointTests
             && c.Value == tenantB.Id.ToString(),
             "lost membership in the previously-active tenant should drop to the first remaining membership");
 
-        // Persisted in Settings JSON (users.TenantId column is immutable
-        // post-bootstrap because of the prevent_tenant_id_change trigger).
+        // Persisted in Settings JSON (users.TenantId column is the
+        // personal-tenant column, immutable post-bootstrap by app-layer
+        // convention; the legacy DB trigger was removed in Phase 5).
         var refreshed = await _userRepo.GetByIdAsync(user.Id);
         var settings = System.Text.Json.JsonDocument.Parse(refreshed!.Settings).RootElement;
         settings.GetProperty("activeTenantId").GetString().Should().Be(tenantB.Id.ToString());

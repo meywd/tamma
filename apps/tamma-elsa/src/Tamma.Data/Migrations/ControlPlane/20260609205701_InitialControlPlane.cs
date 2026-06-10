@@ -1155,19 +1155,18 @@ namespace Tamma.Data.Migrations.ControlPlane
                 onDelete: ReferentialAction.SetNull);
 
             // ── Ported from the pre-collapse chain (unified-tenancy Phase 0) ──
-            // Objects the EF model cannot express, preserved verbatim so the
-            // collapsed baseline reproduces the old chain's schema exactly:
-            // RLS (tamma_app role, ENABLE/FORCE, policies, prevent_tenant_id_change
-            // triggers), partial/expression indexes, legacy CHECKs, and the
-            // api_keys self-FK. RLS removal is deliberately deferred to
-            // unified-tenancy Phase 5 — Phase 0 is behavior-neutral.
-            // Must remain the last operation in Up(): sections 2-7 reference tables created above.
+            // Objects the EF model cannot express. The legacy shared-tables RLS
+            // machinery (policies, ENABLE/FORCE, prevent_tenant_id_change
+            // function + triggers) was removed in unified-tenancy Phase 5:
+            // tenant isolation is schema-per-tenant + per-tenant role since
+            // Phase 2/3. What remains: the tamma_app role + grants (the
+            // least-privilege runtime role, independent of RLS), partial/
+            // expression indexes, legacy CHECKs, and the api_keys self-FK.
+            // Must remain the last operation in Up(): sections 2-4 reference tables created above.
             migrationBuilder.Sql("""
                 -- 1. tamma_app role (cluster-level, idempotent) + grants.
-                --    Phase-3 RLS design: tamma_app is the future runtime role;
-                --    RLS policies are enforced only for non-BYPASSRLS roles like
-                --    tamma_app — the migrator/superuser connection bypasses RLS
-                --    entirely, so policies here have no effect on migrations.
+                --    tamma_app is the least-privilege runtime role the API
+                --    connects as (no DDL, no BYPASSRLS, plain DML on public).
                 --    Password is a placeholder; production overrides via ALTER ROLE.
                 DO $$
                 BEGIN
@@ -1189,127 +1188,7 @@ namespace Tamma.Data.Migrations.ControlPlane
                 ALTER DEFAULT PRIVILEGES IN SCHEMA public
                   GRANT USAGE, SELECT ON SEQUENCES TO tamma_app;
 
-                -- 2. prevent_tenant_id_change trigger function + BEFORE-UPDATE
-                --    triggers. First NULL → uuid assignment is permitted
-                --    (personal-tenant bootstrap); any later change is blocked.
-                CREATE OR REPLACE FUNCTION prevent_tenant_id_change()
-                RETURNS TRIGGER AS $$
-                BEGIN
-                  IF OLD."TenantId" IS NOT NULL
-                     AND OLD."TenantId" IS DISTINCT FROM NEW."TenantId" THEN
-                    RAISE EXCEPTION 'Cannot change TenantId on existing row';
-                  END IF;
-                  RETURN NEW;
-                END;
-                $$ LANGUAGE plpgsql;
-
-                DROP TRIGGER IF EXISTS trg_prevent_tenant_change_users ON users;
-                CREATE TRIGGER trg_prevent_tenant_change_users
-                  BEFORE UPDATE ON users
-                  FOR EACH ROW EXECUTE FUNCTION prevent_tenant_id_change();
-
-                DROP TRIGGER IF EXISTS trg_prevent_tenant_change_github_installations ON github_installations;
-                CREATE TRIGGER trg_prevent_tenant_change_github_installations
-                  BEFORE UPDATE ON github_installations
-                  FOR EACH ROW EXECUTE FUNCTION prevent_tenant_id_change();
-
-                DROP TRIGGER IF EXISTS trg_prevent_tenant_change_api_keys ON api_keys;
-                CREATE TRIGGER trg_prevent_tenant_change_api_keys
-                  BEFORE UPDATE ON api_keys
-                  FOR EACH ROW EXECUTE FUNCTION prevent_tenant_id_change();
-
-                DROP TRIGGER IF EXISTS trg_prevent_tenant_change_user_invites ON user_invites;
-                CREATE TRIGGER trg_prevent_tenant_change_user_invites
-                  BEFORE UPDATE ON user_invites
-                  FOR EACH ROW EXECUTE FUNCTION prevent_tenant_id_change();
-
-                -- 3. RLS ENABLE + FORCE on the seven CP tenant-scoped tables.
-                ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
-                ALTER TABLE tenants FORCE ROW LEVEL SECURITY;
-                ALTER TABLE tenant_memberships ENABLE ROW LEVEL SECURITY;
-                ALTER TABLE tenant_memberships FORCE ROW LEVEL SECURITY;
-                ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-                ALTER TABLE users FORCE ROW LEVEL SECURITY;
-                ALTER TABLE github_installations ENABLE ROW LEVEL SECURITY;
-                ALTER TABLE github_installations FORCE ROW LEVEL SECURITY;
-                ALTER TABLE github_installation_repos ENABLE ROW LEVEL SECURITY;
-                ALTER TABLE github_installation_repos FORCE ROW LEVEL SECURITY;
-                ALTER TABLE user_invites ENABLE ROW LEVEL SECURITY;
-                ALTER TABLE user_invites FORCE ROW LEVEL SECURITY;
-                ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY;
-                ALTER TABLE api_keys FORCE ROW LEVEL SECURITY;
-
-                -- 4. RLS policies — FINAL shapes as the old chain left them
-                --    (users / github_installations / user_invites carry the
-                --    Phase2RlsNullPolicyTightening strict shape, no IS NULL branch).
-                DROP POLICY IF EXISTS tenant_isolation_policy ON tenants;
-                CREATE POLICY tenant_isolation_policy ON tenants
-                  USING ("Id" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
-                  WITH CHECK ("Id" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
-
-                DROP POLICY IF EXISTS tenant_isolation_policy ON tenant_memberships;
-                CREATE POLICY tenant_isolation_policy ON tenant_memberships
-                  USING ("TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
-                  WITH CHECK ("TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid);
-
-                -- The IS NULL branch below is deliberate: it covers the Phase-1 join
-                -- path where a repo row can be reached via an installation whose TenantId
-                -- has not yet been set. The github_installations policy intentionally
-                -- lacks this branch (tightened in Phase2RlsNullPolicyTightening).
-                DROP POLICY IF EXISTS tenant_isolation_policy ON github_installation_repos;
-                CREATE POLICY tenant_isolation_policy ON github_installation_repos
-                  USING (
-                    EXISTS (
-                      SELECT 1 FROM github_installations gi
-                      WHERE gi."Id" = github_installation_repos."InstallationEntityId"
-                        AND (
-                          gi."TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
-                          OR gi."TenantId" IS NULL
-                        )
-                    )
-                  );
-
-                DROP POLICY IF EXISTS tenant_isolation_policy ON api_keys;
-                CREATE POLICY tenant_isolation_policy ON api_keys
-                  USING (
-                    "Scope" = 'service'
-                    OR "TenantId" IS NULL
-                    OR "TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
-                  )
-                  WITH CHECK (
-                    "Scope" = 'service'
-                    OR "TenantId" IS NULL
-                    OR "TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
-                  );
-
-                DROP POLICY IF EXISTS tenant_isolation_policy ON users;
-                CREATE POLICY tenant_isolation_policy ON users
-                  USING (
-                    "TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
-                  )
-                  WITH CHECK (
-                    "TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
-                  );
-
-                DROP POLICY IF EXISTS tenant_isolation_policy ON github_installations;
-                CREATE POLICY tenant_isolation_policy ON github_installations
-                  USING (
-                    "TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
-                  )
-                  WITH CHECK (
-                    "TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
-                  );
-
-                DROP POLICY IF EXISTS tenant_isolation_policy ON user_invites;
-                CREATE POLICY tenant_isolation_policy ON user_invites
-                  USING (
-                    "TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
-                  )
-                  WITH CHECK (
-                    "TenantId" = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid
-                  );
-
-                -- 5. Partial / expression indexes the EF model cannot express.
+                -- 2. Partial / expression indexes the EF model cannot express.
                 CREATE INDEX IF NOT EXISTS ix_refresh_tokens_active_expires
                   ON refresh_tokens ("ExpiresAt")
                   WHERE "RevokedAt" IS NULL;
@@ -1330,7 +1209,7 @@ namespace Tamma.Data.Migrations.ControlPlane
                   ON api_keys ("Scope")
                   WHERE "RevokedAt" IS NULL;
 
-                -- 6. Legacy CHECK constraints not represented in the model.
+                -- 3. Legacy CHECK constraints not represented in the model.
                 -- 'team' (not legacy 'pro') matches the real PlansSeeder slugs
                 -- written by UpdateTenantPlan.
                 ALTER TABLE tenants
@@ -1357,7 +1236,7 @@ namespace Tamma.Data.Migrations.ControlPlane
                   ADD CONSTRAINT ck_github_installations_account_type
                   CHECK ("AccountType" IN ('User', 'Organization'));
 
-                -- 7. api_keys self-FK (RotatedFromId has no navigation in the model).
+                -- 4. api_keys self-FK (RotatedFromId has no navigation in the model).
                 ALTER TABLE api_keys
                   ADD CONSTRAINT fk_api_keys_rotated_from
                   FOREIGN KEY ("RotatedFromId") REFERENCES api_keys("Id")
@@ -1368,17 +1247,16 @@ namespace Tamma.Data.Migrations.ControlPlane
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            // Ported objects: triggers die via the DROP FUNCTION ... CASCADE line
-            // immediately below (the function is the trigger's dependency).
-            // All remaining table-scoped objects (policies, partial indexes,
+            // Ported objects: all table-scoped objects (partial indexes,
             // CHECKs, the api_keys self-FK) die with the DropTable calls below.
+            // (The prevent_tenant_id_change function + triggers and all RLS
+            // policies were removed from Up() in unified-tenancy Phase 5, so
+            // there is nothing function-scoped left to drop here.)
             // The tamma_app role is deliberately NOT dropped: it is
             // cluster-level and may carry grants in other databases on the
             // same server — dropping a role another DB still references is
             // unsafe. Operators can remove it manually via
             // `DROP OWNED BY tamma_app; DROP ROLE tamma_app;` if needed.
-            migrationBuilder.Sql("DROP FUNCTION IF EXISTS prevent_tenant_id_change() CASCADE;");
-
             migrationBuilder.DropForeignKey(
                 name: "FK_users_tenants_TenantId",
                 table: "users");
