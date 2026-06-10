@@ -31,6 +31,7 @@ the linked docs.
 |---|---|---|---|
 | `ConnectionStrings` | all | `DefaultConnection`, optional `TenantAdmin`, `ControlPlane`. | Story 28-1/28-4 |
 | `Backup` | api + elsa-server | Pre-drop tenant backup (`DeletionBackup`, `Directory`, `PgDumpPath`, `TimeoutSeconds`). | [tenant-deletion-backup.md](./tenant-deletion-backup.md) |
+| `TenantMove` | api | Tenant move engine (unified-tenancy Phase 4): `PgDumpPath` (default `pg_dump`), `PgRestorePath` (default `pg_restore`) — PATH-resolved; `TimeoutSeconds` (default 1800, per tool run); `DrainGraceSeconds` (default 2, delay between drain/evict and the dump so in-flight writes land). **`pg_dump`/`pg_restore` must be present in the API image** for moves (and in the elsa-server image for the `Backup` row above). Moves are queued platform tasks — they execute only where `PlatformTaskWorker:RunOnStartup=true`. | wiki/Multi-Tenant-Provisioning.md "Move tenant" |
 | `TenantConnectionPool` | api | Per-tenant LRU `NpgsqlDataSource` pool sizing + warmup. | [connection-pool-tuning.md](./connection-pool-tuning.md) |
 | `HourlyAnalyticsRollup` | elsa-server | Rollup scheduler cadence (`FireAtMinute`, `PollInterval`). | [runbook](../runbooks/platform-analytics-hourly-rollup.md) |
 | `Cranl` | api | Per-tenant infra provisioning (see `CLAUDE.md` "Multi-tenant provisioning"). | — |

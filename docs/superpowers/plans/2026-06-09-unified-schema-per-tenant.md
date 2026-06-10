@@ -124,7 +124,7 @@ active tenant genuinely has a connection string.
 - **Phase 3 (re-ordered: was Phase 2) — DONE 2026-06-10.** Resolver always uses the stored
   connection string + search_path; remove `StubTenantConnectionResolver` central fallback — now
   possible because every tenant mints at creation.
-- **Phase 4 — Admin placement + move.** `tenant_databases` CRUD endpoints (OwnerAccess); tenant→DB
+- **Phase 4 — DONE 2026-06-10.** Admin placement + move. `tenant_databases` CRUD endpoints (OwnerAccess); tenant→DB
   view; `MoveTenantWorkflow` (dump-schema → restore → re-point → evict → drop source).
 - **Phase 5 — Remove Phase-3 RLS + cleanup.** Drop RLS policies on tenant tables; retire the
   `ProviderKey` mode flag (per Decisions); adapt the 28-5 backup to `--schema`.
@@ -214,6 +214,21 @@ inside a shared DB. (Alternative — one shared role per DB — is simpler but w
     re-provision exists, operator-driven — no self-service org re-provision endpoint yet);
     tenant-terminal lifecycle events (DELETED/PURGED) are written to the tenant's own store and are
     unreachable post-delete — move to the CP store when convenient.
+
+**Phase 4 implementation deviations (2026-06-10):**
+
+18. **`draining` added to the Status CHECK** (extends the Phase 0 enumeration) and is a
+    first-class read-only state: middleware 503s unsafe verbs, the LRU resolver still yields
+    connections (reads flow during a move window).
+19. **Move is a service + platform-queue task, not an Elsa workflow** — no workflow dispatch
+    subscriber exists anywhere; the Cranl 202+queue pattern is the established one. NOTE:
+    `PlatformTaskWorker:RunOnStartup` defaults to false — queued moves execute only on
+    deployments that enable the worker.
+20. **Move-engine hardening from adversarial review**: same-physical-DB alias guard (a move
+    between two pool rows aliasing one database would have dropped the live schema and deleted
+    its own dump), pg_restore ignored-error budget + per-table row-count verification (silent
+    partial restores), per-tenant Postgres advisory lock (concurrent moves), 0700 temp dir +
+    drain grace window.
 
 ---
 

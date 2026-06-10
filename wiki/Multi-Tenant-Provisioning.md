@@ -4,7 +4,7 @@
 **Depends on**: Epic 28 (tenant DbContext factory, tenant lifecycle workflows), Epic 29 Stories 29-6..29-8 (rotation primitive + handlers).
 **Source**: `docs/stories/epic-30/` (10 briefs + 10 impl plans + README).
 
-## Current state — unified tenancy Phases 2–3 (shipped 2026-06-10)
+## Current state — unified tenancy Phases 2–4 (shipped 2026-06-10)
 
 Before any Epic 30 backend lands, tenant creation already runs a **unified schema-per-tenant pipeline** (`TenantProvisioningService`, shared by the SaaS `CreateTenantWorkflow`, inline org creation (`OrgEndpoints.CreateOrg`), and the single-user `EnsurePersonalTenantMiddleware`):
 
@@ -16,6 +16,41 @@ Before any Epic 30 backend lands, tenant creation already runs a **unified schem
 The central DB auto-bootstraps as pool member #1 (`Label='central'`, shared, all tiers) so dev/self-host and SaaS share one placement path. Since Phase 3, provisioning is **mandatory and synchronous on both entry paths**: org creation (`POST /api/v1/orgs`) calls `ITenantProvisioningService.ProvisionAsync` inline before the org's first tenant-store write (failure propagates — no half-usable org), and personal tenants provision **synchronously at first login** in single-user mode with failures failing the request (the transitional soft-fail onto a shared path was removed with the stub resolver). Tenant data access goes through one path only — `LruPooledTenantConnectionResolver` resolving the tenant's stored encrypted `...;Search Path=t_<hex>` connection string; `StubTenantConnectionResolver` is deleted. Delete drops the schema (`DROP SCHEMA ... CASCADE`) and role (`DROP OWNED BY` + `DROP ROLE`) and releases the pool slot; backups are schema-scoped (`pg_dump -n t_<hex>`).
 
 **Superseded**: the Epic-28 `CreateTenantDatabaseActivity`/`DropTenantDatabaseActivity` (one Postgres *database* per tenant) were deleted in Phase 2 — placement now hands out schemas inside pooled databases. Epic 30's role narrows accordingly: its backends provision **pool rows into `tenant_databases`** (and dedicated compute), not per-tenant DBs directly — see `ProviderKey` Decision 3 in `docs/superpowers/plans/2026-06-09-unified-schema-per-tenant.md`.
+
+### Admin DB-pool CRUD + tenant→database view (Phase 4)
+
+Platform owners (the `PlatformOwnerAccess` policy) manage the pool directly — `AdminTenantDatabasesEndpoints`:
+
+| Endpoint | Behavior |
+|---|---|
+| `GET /api/admin/tenant-databases` | list pool rows (Id, Label, Host, Port, PlacementClass, TierEligibility, TenantCapacity, TenantCount, Status, KekVersion, timestamps) — the admin connection string is **never** serialized into any response |
+| `GET /api/admin/tenant-databases/{id}` | row + the tenants placed on it (Id, Slug, SchemaName, Status) — the pool side of the tenant→DB view |
+| `POST /api/admin/tenant-databases` | register a row: plaintext `adminConnectionString` inbound only — probed live (`SELECT 1`, 5 s timeout; unreachable → 422 + Npgsql error), Host/Port parsed **from** the string (no separate body fields, no mismatch possible), AES-GCM-encrypted at rest. 409 on duplicate label and on a (Host, Port, Database) tuple aliasing an existing row's physical database |
+| `PATCH /api/admin/tenant-databases/{id}` | mutable: label, tierEligibility, tenantCapacity, status (`active`\|`draining`\|`full`\|`retired`), adminConnectionString (re-probe + re-encrypt + pool decrypt-cache evict) |
+| `DELETE /api/admin/tenant-databases/{id}` | hard delete; 409 unless TenantCount == 0 **and** no `tenants.DatabaseId` references the row (defensive count — bookkeeping could drift) |
+
+The tenant side of the view: `GET /api/admin/tenants` list/detail projections expose each tenant's `DatabaseId` + `SchemaName`. Pool capacity stays advisory (Phase 2 note) — CRUD validates shape, not global invariants.
+
+### Move tenant (Phase 4)
+
+`POST /api/admin/tenants/{tenantId}/move` body `{ "targetDatabaseId": "..." }` (owner-only) validates cheaply, returns **202 Accepted**, and enqueues a `tenant.move` platform-queue task (the same 202+queue pattern Cranl provisioning uses — there is **no** Elsa workflow for moves). `GET /api/admin/tenants/{tenantId}/move` polls: tenant `Status` (`draining` while the move runs, back to `active` on completion), the last move error (`FailureReason` shadow column, cleared on a later success), and current placement (`DatabaseId` flips to the target once the re-point commits).
+
+`TenantMoveService` step order (each step idempotent or safely re-runnable; logs `tenant.move.<step>`):
+
+1. **validate** — tenant active (or `draining` when resuming an interrupted move), has placement; target row active, differs from source, passes the same tier-eligibility/capacity predicate placement uses. A per-tenant Postgres **advisory lock** rejects concurrent moves; an **alias guard** rejects a "move" between two pool rows that point at the same physical database (it would drop the live schema).
+2. **drain** — Status → `draining` + pool evict. This is the brief read-only window: `TenantContextMiddleware` 503s (+`Retry-After`) mutating verbs while GET/HEAD/OPTIONS keep flowing (the LRU resolver still yields connections for a draining tenant). A configurable grace delay (`TenantMove:DrainGraceSeconds`, default 2) lets in-flight writes land before the dump.
+3. **dump** — `pg_dump -F c -n t_<hex>` from the source row (PGPASSWORD env only, never argv; 0700 temp dir).
+4. **role on target** — same-cluster (source Host:Port == target) skips (role exists cluster-wide, password kept); cross-cluster creates the role on the target cluster with a fresh password.
+5. **schema on target** — `CREATE SCHEMA ... AUTHORIZATION` + grants, same as provisioning.
+6. **restore + verify** — `pg_restore --no-owner --role <tenant role>` into the target DB, with an ignored-error budget plus `__TenantMigrationsHistory` **and per-table row-count** verification against the source (catches silent partial restores). Mismatch aborts with the source intact and the tenant still `draining`.
+7. **re-point** — same-cluster: decrypt the envelope and swap only `Database`; cross-cluster: mint a fresh `...;Search Path=t_<hex>` string with the new credentials. Encrypt + persist, flip `tenants.DatabaseId`, shift TenantCount source−/target+ in one SaveChanges.
+8. **evict + verify** — pool evict, then a real `TenantDbContext` round-trip against the new placement.
+9. **drop source** — `DROP SCHEMA ... CASCADE` on the source row; cross-cluster also `DROP OWNED BY` + `DROP ROLE` on the source cluster.
+10. **activate** — Status → `active`; temp dump deleted in a finally.
+
+Failure windows: steps 2–6 leave the tenant `draining` with the source intact (re-run the move — steps resume idempotently — or PATCH status back to `active`); failures after the step-7 commit leave the tenant pointing at the **target** (a re-run completes drop/activate).
+
+> **Deployment note**: `PlatformTaskWorker:RunOnStartup` defaults to **false** — queued moves execute only on deployments that enable the worker. Binaries: `pg_dump`/`pg_restore` must be present in the API image (`TenantMove:PgDumpPath`/`PgRestorePath`, PATH-resolved by default) — see `docs/deployment/configuration-reference.md`.
 
 ## Why this epic exists
 

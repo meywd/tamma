@@ -257,3 +257,43 @@ Commit: `feat(tenancy-p4): admin move-tenant endpoint (202 + queued execution)`.
   Testcontainers superuser path; the XML doc states the requirement for operators. (2) The
   platform-queue mirror depends on reading the Cranl handler pattern correctly — T4 instructs
   reading first and STOPPING if the pattern doesn't exist as described.
+
+---
+
+## Execution record (2026-06-10)
+
+**Status: COMPLETE.** Commit range `4d7f14de..1b9f0be1` on `feat/wave-b`, plus the closing docs
+commit (`docs(tenancy-p4): mark Phase 4 complete (admin pool CRUD + hardened move)`).
+
+| Task | Commit | Notes |
+|---|---|---|
+| T1 — `draining` status | `4d7f14de` | CHECK gained `'draining'` in all four mirrored locations (TammaModelConfiguration + collapsed baseline + Designer + snapshot; `has-pending-model-changes` clean). `TenantStatusEvaluator` maps draining → read-only outcome; `TenantContextMiddleware` 503s unsafe verbs with `Retry-After: 5`, GET/HEAD/OPTIONS pass. Real-PG CHECK probe test added. **Finding (folded into T3):** the LRU resolver's status gate treated anything non-active as connection-refusing — a draining tenant would have been a FULL outage, not a read-only window. The resolver carve-out (`draining` is connection-yielding) shipped with T3's commit + `LruPooledTenantConnectionResolverTests` coverage. |
+| T2 — admin pool CRUD | `cd68450b` | `AdminTenantDatabasesEndpoints` (OwnerAccess): list / detail-with-tenants / POST / PATCH / DELETE. Conn string plaintext inbound only — live `SELECT 1` probe (5 s timeout, 422 + Npgsql error on unreachable), Host/Port parsed FROM the string, AES-GCM at rest, never serialized out (asserted on raw JSON in tests). `AdminTenantsEndpoints` projections gained `DatabaseId`/`SchemaName` (tenant side of the view). |
+| T3 — `TenantMoveService` | `4fa9d297` | 10-step engine per the contract (validate → drain → dump → role → schema → restore+verify → re-point → evict+verify → drop source → activate); same- vs cross-cluster branching on source/target Host:Port. `PgToolArguments` extracted from `BackupTenantDatabaseActivity` (shared pg_dump/pg_restore arg builder, PGPASSWORD env only — never argv); placement's tier-eligibility predicate extracted (`TenantPlacementService.EligibleFor`) and reused by validate. Carries the T1 resolver carve-out. 898-line test file: orchestration units (RecordingProcessRunner + recording pool/resolver/provisioning fakes) + env-gated e2e. |
+| — adversarial review | `263edd37` | Criticals found reviewing `4fa9d297`: **P1** same-physical-DB alias guard — a move between two pool rows aliasing one (Host, Port, Database) would have dropped the LIVE schema and deleted its own dump; validate rejects it, the resume sweep skips aliasing rows, and admin POST/PATCH 409 on registering an aliasing row. **P3** silent-partial-restore defense — pg_restore's `errors ignored on restore: N` stderr summary parsed with a budget of exactly 1 (the expected pre-created-schema error) + per-table `count(*)` source-vs-target comparison before the re-point. **P2** per-tenant Postgres advisory lock (`pg_try_advisory_lock(hashtextextended(tenantId,0))` on a dedicated CP session) rejects concurrent moves; resume tail asserts target schema exists + re-runs the verify probe. **P4** 0700 temp dir (recursive delete in finally) + configurable `DrainGraceSeconds` (default 2) covering the in-flight-write window. |
+| T4 — admin move endpoint | `1b9f0be1` | `POST /api/admin/tenants/{id}/move` → cheap validation (404 tenant/target, 409 already-on-target) → 202 + `tenant.move` platform-queue task + polling URL; `GET .../move` reports Status/FailureReason/placement. `MoveTenantTaskHandler`: malformed payload → terminal dead-letter; worker shutdown → reaper re-claim without FailureReason; everything else (incl. the advisory-lock rejection, deliberately retryable) stamps `FailureReason` and rethrows into the retry budget; success clears stale FailureReason. NOTE: `PlatformTaskWorker:RunOnStartup` defaults false — queued moves execute only where the worker is enabled. |
+| T5 — suite + docs | this commit | Full suite + parent-plan deviations 18–20 + wiki (Multi-Tenant-Provisioning, Architecture §6.4 + API table) + `docs/deployment/configuration-reference.md` (`TenantMove` section + pg_dump/pg_restore-in-image note). |
+
+**Full suite (2026-06-10, `dotnet test Tamma.sln --no-build`): 0 failed / 4575 passed / 11 skipped
+(4586 total)** — baseline 4461 → +114 Phase-4 tests.
+
+| Project | Passed | Skipped |
+|---|---:|---:|
+| Tamma.Core.Tests | 23 | 0 |
+| Tamma.Platforms.Abstractions.Tests | 66 | 0 |
+| Tamma.Platforms.Gitea.Tests | 96 | 0 |
+| Tamma.Platforms.GitLab.Tests | 97 | 0 |
+| Tamma.Platforms.Tests | 90 | 0 |
+| Tamma.Studio.Tests | 30 | 0 |
+| Tamma.Platforms.GitHub.Tests | 63 | 0 |
+| Tamma.Platforms.IntegrationTests | 18 | 3 |
+| Tamma.Activities.Tests | 1237 | 0 |
+| Tamma.Api.Tests | 2855 | 8 |
+
+**Live e2e evidence:** `pg_dump`/`pg_restore` are present on the dev host (`/usr/bin`), so
+`TenantMoveServiceEndToEndTests.Move_BetweenTwoPoolRows_EndToEnd` ran LIVE (not `Assert.Ignore`-d):
+two physical DBs in one Testcontainer registered as two pool rows, tenant provisioned on A with a
+marker row, moved to B — schema gone on A, present on B with marker + migrations history, envelope
+decrypts to B's database, resolver round-trip works, TenantCounts shifted, Status `active`. The
+pg_restore ignorable-error count observed was exactly **1** (the expected pre-created-schema
+duplicate) — the budget is pinned there; anything beyond aborts with the source intact.
