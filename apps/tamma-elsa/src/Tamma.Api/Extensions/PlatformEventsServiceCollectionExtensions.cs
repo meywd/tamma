@@ -50,6 +50,12 @@ public static class PlatformEventsServiceCollectionExtensions
         // per statement, mirroring NpgsqlTenantAdminConnection.
         services.TryAddSingleton<ITenantDatabasePool, TenantDatabasePool>();
 
+        // Unified-tenancy Phase 2 — tier-driven placement: picks the
+        // tenant_databases row for a tenant by plans.PlacementPolicy and
+        // stamps tenants.SchemaName/DatabaseId. Stateless (opens a CP
+        // context per call via the factory), so singleton is safe.
+        services.TryAddSingleton<ITenantPlacementService, TenantPlacementService>();
+
         // Story 28-5 — per-tenant migrator runs the InitialTenant migration
         // set against a freshly-created tenant DB. Singleton; opens an
         // ad-hoc TenantDbContext per call.
