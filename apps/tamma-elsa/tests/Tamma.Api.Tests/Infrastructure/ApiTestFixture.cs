@@ -84,6 +84,15 @@ public class ApiTestFixture
             "ConnectionStrings__TammaAppDb", TenantPostgres.GetConnectionString());
         Environment.SetEnvironmentVariable("OpenSearch__Enabled", "false");
 
+        // Phase 3 — every provisioned test tenant gets its own LRU pool
+        // entry; the production default (MaxEntries=500) lets hundreds of
+        // idle per-tenant pools pile up over an assembly run and exhausts
+        // the container's connection slots (PostgresException 53300). A
+        // small cap forces real LRU eviction (which disposes the data
+        // source and closes its connections) while still exercising the
+        // production resolver. Process-wide: later fixtures inherit it.
+        Environment.SetEnvironmentVariable("TenantConnectionPool__MaxEntries", "8");
+
         // Intentionally DO NOT set Jwt__Secret here. Program.cs picks one of
         // three auth branches: real JWT (secret present), permissive dev
         // (secret empty + Development env), or hard-fail (empty + non-dev).

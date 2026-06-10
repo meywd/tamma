@@ -47,8 +47,22 @@ public sealed class EfTenantDbMigrator : ITenantDbMigrator
         // exactly the pre-Phase-1 behavior.
         var schema = TenantNaming.SchemaFromConnectionString(tenantConnectionString);
 
+        // Pooling=false — ADO.NET connection pools are process-global and
+        // keyed by connection string. Every tenant's migration string is
+        // unique, so a pooled migration connection strands one idle
+        // physical connection per provisioned tenant until the idle-prune
+        // timer (~5 min) fires; provision enough tenants in a window and
+        // the cluster runs out of connection slots (53300). Migrations are
+        // one-shot per provisioning — a non-pooled connection that closes
+        // on dispose is the correct lifetime.
+        var migrationConnectionString = new Npgsql.NpgsqlConnectionStringBuilder(
+            tenantConnectionString)
+        {
+            Pooling = false,
+        }.ConnectionString;
+
         var options = new DbContextOptionsBuilder<TenantDbContext>()
-            .UseNpgsql(tenantConnectionString, npgsql =>
+            .UseNpgsql(migrationConnectionString, npgsql =>
                 npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema))
             .Options;
 
