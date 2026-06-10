@@ -312,6 +312,9 @@ public class UserDashboardEndpointHandlerTests
         });
         await _membershipRepo.AddAsync(tenant.Id, owner.Id, TenantRoleHierarchy.Owner);
         await _membershipRepo.AddAsync(tenant.Id, member.Id, TenantRoleHierarchy.Member);
+        // Phase 3 -- tenant events/workflow data live in the tenant store,
+        // which is only reachable for provisioned tenants.
+        await ApiTestFixture.ProvisionTenantAsync(tenant.Id);
         return (tenant.Id, owner.Id, member.Id);
     }
 

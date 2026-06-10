@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
@@ -115,9 +116,32 @@ public class EngineHistoryEndpointTests
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
+
+    /// <summary>
+    /// Phase 3 -- domain_events is tenant-resident; the unified resolver
+    /// only reaches it for tenants that exist AND are provisioned.
+    /// </summary>
+    private async Task EnsureTenantProvisionedAsync(Guid tenantId)
+    {
+        var cp = _scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        if (!await cp.Tenants.IgnoreQueryFilters().AnyAsync(t => t.Id == tenantId))
+        {
+            cp.Tenants.Add(new Tenant
+            {
+                Id = tenantId,
+                Name = $"Test {tenantId:N}",
+                Slug = $"t-{tenantId:N}",
+                Plan = "free"
+            });
+            await cp.SaveChangesAsync();
+        }
+        await ApiTestFixture.ProvisionTenantAsync(tenantId);
+    }
+
     private async Task SeedEventsAsync(
         Guid tenantId, int count, string type, int? issueNumber = null)
     {
+        await EnsureTenantProvisionedAsync(tenantId);
         var baseTime = DateTime.UtcNow;
         for (var i = 0; i < count; i++)
         {
