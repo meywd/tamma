@@ -49,7 +49,20 @@ public sealed class TenantDbContextFactory : ITenantDbContextFactory
         // NpgsqlDataSource.ConnectionString may omit the password — fine,
         // the helper only reads the Search Path key.
         var schema = TenantNaming.SchemaFromConnectionString(dataSource.ConnectionString);
-        builder.UseNpgsql(dataSource, npgsql =>
+
+        // Phase 3 — hand EF a per-context CONNECTION (borrowed from the
+        // resolver's pooled data source), not the data source itself.
+        // Passing an NpgsqlDataSource into UseNpgsql makes the data-source
+        // instance part of EF's internal service-provider cache key: every
+        // distinct tenant pool then builds (and leaks) a fresh internal
+        // service provider, and EF throws
+        // ManyServiceProvidersCreatedWarning once 20 tenants have been
+        // touched in one process. A DbConnection is connection-level state
+        // — all tenants share one internal provider. contextOwnsConnection
+        // ensures the connection returns to the data source's pool when the
+        // context is disposed.
+        var connection = dataSource.CreateConnection();
+        builder.UseNpgsql(connection, contextOwnsConnection: true, npgsql =>
             npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema));
 
         return new TenantDbContext(builder.Options, tenantId);

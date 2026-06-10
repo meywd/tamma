@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using Tamma.Api.Services.Diagnostics;
 using Tamma.Data;
+using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 using BudgetEntity = Tamma.Data.Entities.BudgetConfig;
 
@@ -38,7 +39,7 @@ public class BudgetConfigRepositoryTests
     [Test]
     public async Task Upsert_InsertsNewRow_WhenNoneExists()
     {
-        var tenant = Guid.NewGuid();
+        var tenant = await CreateProvisionedTenantAsync();
         var saved = await _repo.UpsertAsync(new BudgetEntity
         {
             TenantId = tenant,
@@ -57,7 +58,7 @@ public class BudgetConfigRepositoryTests
     [Test]
     public async Task Upsert_UpdatesExistingRow_WhenKeyMatches()
     {
-        var tenant = Guid.NewGuid();
+        var tenant = await CreateProvisionedTenantAsync();
         var account = tenant.ToString();
 
         await _repo.UpsertAsync(new BudgetEntity
@@ -82,7 +83,7 @@ public class BudgetConfigRepositoryTests
     [Test]
     public async Task Get_ReturnsNull_WhenRowAbsent()
     {
-        var tenant = Guid.NewGuid();
+        var tenant = await CreateProvisionedTenantAsync();
         var row = await _repo.GetAsync(tenant, tenant.ToString());
         row.Should().BeNull();
     }
@@ -90,7 +91,7 @@ public class BudgetConfigRepositoryTests
     [Test]
     public async Task Delete_ReturnsTrue_WhenRowExists()
     {
-        var tenant = Guid.NewGuid();
+        var tenant = await CreateProvisionedTenantAsync();
         var account = tenant.ToString();
         await _repo.UpsertAsync(new BudgetEntity
         {
@@ -107,7 +108,8 @@ public class BudgetConfigRepositoryTests
     [Test]
     public async Task Delete_ReturnsFalse_WhenRowAbsent()
     {
-        var removed = await _repo.DeleteAsync(Guid.NewGuid(), "nonexistent");
+        var tenant = await CreateProvisionedTenantAsync();
+        var removed = await _repo.DeleteAsync(tenant, "nonexistent");
         removed.Should().BeFalse();
     }
 
@@ -117,7 +119,7 @@ public class BudgetConfigRepositoryTests
         // Story 28-1 PR A (Decision #1): platform-default writes
         // (TenantId == null) are no-ops because defaults moved to code
         // (BudgetConfigDefaults). Tenant-scoped rows still persist normally.
-        var tenant = Guid.NewGuid();
+        var tenant = await CreateProvisionedTenantAsync();
         var account = tenant.ToString();
 
         await _repo.UpsertAsync(new BudgetEntity
@@ -138,6 +140,25 @@ public class BudgetConfigRepositoryTests
         var tenantRow = await _repo.GetAsync(tenant, account);
         tenantRow.Should().NotBeNull();
         tenantRow!.LimitUsd.Should().Be(999m);
+    }
+
+    /// <summary>
+    /// Phase 3 — budget_configs is tenant-resident; the unified resolver
+    /// only reaches it for tenants that exist AND are provisioned.
+    /// </summary>
+    private async Task<Guid> CreateProvisionedTenantAsync()
+    {
+        var id = Guid.NewGuid();
+        _db.Tenants.Add(new Tenant
+        {
+            Id = id,
+            Name = $"Test {id:N}",
+            Slug = $"t-{id:N}",
+            Plan = "free"
+        });
+        await _db.SaveChangesAsync();
+        await DiagnosticsSetUpFixture.ProvisionTenantAsync(id);
+        return id;
     }
 }
 
@@ -164,20 +185,21 @@ public class PostgresBudgetConfigProviderTests
     }
 
     [Test]
-    public void GetConfig_ReturnsDefault_WhenNoRowExists()
+    public async Task GetConfig_ReturnsDefault_WhenNoRowExists()
     {
+        var tenant = await CreateProvisionedTenantAsync();
         using var scope = DiagnosticsTestHarness.CreateScope();
         var pg = scope.ServiceProvider.GetRequiredService<IBudgetConfigProvider>();
 
-        var cfg = pg.GetConfig(Guid.NewGuid());
+        var cfg = pg.GetConfig(tenant);
         // Default is 0m when Budget:LimitUsd isn't configured in tests.
         cfg.LimitUsd.Should().Be(0m);
     }
 
     [Test]
-    public void SetConfig_PersistsToDb_AndGetConfigRoundTrips()
+    public async Task SetConfig_PersistsToDb_AndGetConfigRoundTrips()
     {
-        var account = Guid.NewGuid();
+        var account = await CreateProvisionedTenantAsync();
         var now = DateTime.UtcNow;
 
         // First scope — write.
@@ -201,5 +223,26 @@ public class PostgresBudgetConfigProviderTests
             cfg.LimitUsd.Should().Be(321.5m);
             cfg.AlertThreshold.Should().Be(0.42);
         }
+    }
+
+    /// <summary>
+    /// Phase 3 — budget_configs is tenant-resident; the unified resolver
+    /// only reaches it for tenants that exist AND are provisioned.
+    /// </summary>
+    private static async Task<Guid> CreateProvisionedTenantAsync()
+    {
+        var id = Guid.NewGuid();
+        using var scope = DiagnosticsTestHarness.CreateScope();
+        var cp = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
+        cp.Tenants.Add(new Tamma.Data.Entities.Tenant
+        {
+            Id = id,
+            Name = $"Test {id:N}",
+            Slug = $"t-{id:N}",
+            Plan = "free"
+        });
+        await cp.SaveChangesAsync();
+        await DiagnosticsSetUpFixture.ProvisionTenantAsync(id);
+        return id;
     }
 }

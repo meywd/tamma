@@ -192,6 +192,7 @@ public class DiagnosticsAggregationTests
     public async Task GetReportAsync_EmptyRange_ReturnsZeroesAndEmptyBuckets()
     {
         var tenant = Guid.NewGuid();
+        await EnsureTenantAsync(tenant);
         var from = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         var report = await _service.GetReportAsync(
             tenant, from, from.AddHours(1), BucketSize.FiveMinutes);
@@ -272,5 +273,8 @@ public class DiagnosticsAggregationTests
             Plan = "free"
         });
         await _db.SaveChangesAsync();
+        // Phase 3 — tenant data is only reachable through the unified
+        // resolver once the tenant is provisioned.
+        await DiagnosticsSetUpFixture.ProvisionTenantAsync(tenantId);
     }
 }

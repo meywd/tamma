@@ -144,7 +144,20 @@ public class ProvidersSetUpFixture
         await using var tenantConn = new Npgsql.NpgsqlConnection(TenantPostgres.GetConnectionString());
         await tenantConn.OpenAsync();
         await _tenantRespawner.ResetAsync(tenantConn);
+
+        // Phase 3 — Respawner wiped plans + tenant_databases; placement
+        // needs both back before any test provisions a tenant.
+        await TestTenantProvisioning.ReseedPoolAsync(
+            Factory.Services, Postgres.GetConnectionString());
     }
+
+    /// <summary>
+    /// Phase 3 — provision a test tenant through the unified pipeline so
+    /// the LRU resolver can reach its tenant data. The tenants row must
+    /// exist before calling.
+    /// </summary>
+    public static Task ProvisionTenantAsync(Guid tenantId) =>
+        TestTenantProvisioning.ProvisionAsync(Factory.Services, tenantId);
 
     private static async Task ApplyTenantMigrationsAsync(string connectionString)
     {

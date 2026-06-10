@@ -64,6 +64,7 @@ public class BudgetServiceTests
     {
         var tenant = Guid.NewGuid();
         var now = DateTime.UtcNow;
+        await EnsureTenantAsync(tenant);
         var sum = await _repo.GetCostSumAsync(tenant, now.AddHours(-1), now);
         sum.Should().Be(0m);
     }
@@ -91,6 +92,7 @@ public class BudgetServiceTests
     {
         var tenant = Guid.NewGuid();
         var now = DateTime.UtcNow;
+        await EnsureTenantAsync(tenant);
         _budgetProvider.SetConfig(tenant, new BudgetConfig(
             LimitUsd: 100m,
             AlertThreshold: 0.8,
@@ -114,6 +116,7 @@ public class BudgetServiceTests
     {
         var tenant = Guid.NewGuid();
         var now = DateTime.UtcNow;
+        await EnsureTenantAsync(tenant);
         _budgetProvider.SetConfig(tenant, new BudgetConfig(
             LimitUsd: 100m,
             AlertThreshold: 0.8,
@@ -133,6 +136,7 @@ public class BudgetServiceTests
     {
         var tenant = Guid.NewGuid();
         var now = DateTime.UtcNow;
+        await EnsureTenantAsync(tenant);
         _budgetProvider.SetConfig(tenant, new BudgetConfig(
             LimitUsd: 100m,
             AlertThreshold: 0.8,
@@ -154,6 +158,7 @@ public class BudgetServiceTests
     {
         var tenant = Guid.NewGuid();
         var now = DateTime.UtcNow;
+        await EnsureTenantAsync(tenant);
         _budgetProvider.SetConfig(tenant, new BudgetConfig(
             LimitUsd: 0m,
             AlertThreshold: 0.8,
@@ -176,6 +181,7 @@ public class BudgetServiceTests
     {
         var tenant = Guid.NewGuid();
         var now = DateTime.UtcNow;
+        await EnsureTenantAsync(tenant);
         _budgetProvider.SetConfig(tenant, new BudgetConfig(
             LimitUsd: 100m,
             AlertThreshold: 0.8,
@@ -234,5 +240,8 @@ public class BudgetServiceTests
             Plan = "free"
         });
         await _db.SaveChangesAsync();
+        // Phase 3 — tenant data is only reachable through the unified
+        // resolver once the tenant is provisioned.
+        await DiagnosticsSetUpFixture.ProvisionTenantAsync(tenantId);
     }
 }
