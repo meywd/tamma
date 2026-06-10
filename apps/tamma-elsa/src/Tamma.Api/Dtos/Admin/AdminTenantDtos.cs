@@ -42,7 +42,17 @@ public record AdminTenantListItem(
     /// <summary>Populated when <c>Status='deleting'</c>; else null.</summary>
     DateTime? DeleteRequestedAt,
     int? KekVersion,
-    bool HasEncryptedConnectionString);
+    bool HasEncryptedConnectionString,
+    /// <summary>
+    /// Unified-tenancy Phase 4 — which <c>tenant_databases</c> pool row
+    /// hosts this tenant's schema (shadow column; null until placement).
+    /// </summary>
+    Guid? DatabaseId = null,
+    /// <summary>
+    /// Unified-tenancy Phase 4 — the tenant's <c>t_&lt;hex&gt;</c> schema
+    /// inside its assigned database (shadow column; null until placement).
+    /// </summary>
+    string? SchemaName = null);
 
 /// <summary>
 /// Paged list envelope. <see cref="Total"/> reflects the full filter-matched

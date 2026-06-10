@@ -179,10 +179,13 @@ public sealed class TenantDatabasePool : ITenantDatabasePool
 
     /// <summary>
     /// Drops the cached decrypted admin string for a pool row — call after
-    /// the row's envelope or KEK version changes. Internal: only tests and
-    /// the (future) pool admin CRUD should need it.
+    /// the row's envelope or KEK version changes. Phase 4 promoted this
+    /// from an internal test hook onto <see cref="ITenantDatabasePool"/> so
+    /// the admin tenant-databases CRUD can invalidate the cache after a
+    /// conn-string rotation (interface growth noted in the Phase 4 plan).
     /// </summary>
-    internal void Evict(Guid databaseId) => _adminConnectionStrings.TryRemove(databaseId, out _);
+    public void EvictAdminConnection(Guid databaseId)
+        => _adminConnectionStrings.TryRemove(databaseId, out _);
 
     private async Task<NpgsqlConnection> OpenAsync(Guid databaseId, CancellationToken ct)
     {

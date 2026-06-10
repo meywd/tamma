@@ -302,6 +302,55 @@ public class AdminTenantsTests
                 "encrypted connection string bytes must never leak through the DTO");
     }
 
+    // ── Phase 4 — tenant→DB view (DatabaseId + SchemaName shadow columns) ──
+
+    [Test]
+    public async Task ListAndDetail_SurfacePlacementShadowColumns_DatabaseIdAndSchemaName()
+    {
+        var poolRow = new TenantDatabase
+        {
+            Id = Guid.NewGuid(),
+            Label = "central-test",
+            Host = "db.internal",
+            Port = 5432,
+            AdminConnectionStringEncrypted = new byte[] { 0x01 },
+            TierEligibility = [],
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        _db.TenantDatabases.Add(poolRow);
+        var tenantId = await SeedTenantAsync("Placed");
+        var tenant = await _db.Tenants.FirstAsync(t => t.Id == tenantId);
+        _db.Entry(tenant).Property("DatabaseId").CurrentValue = (Guid?)poolRow.Id;
+        _db.Entry(tenant).Property("SchemaName").CurrentValue = "t_0123456789abcdef";
+        await _db.SaveChangesAsync();
+
+        var resp = await InvokeListAsync();
+        var item = resp.Body.Tenants.Single(t => t.Id == tenantId);
+        item.DatabaseId.Should().Be(poolRow.Id,
+            "the list projection must surface which pool row hosts the tenant");
+        item.SchemaName.Should().Be("t_0123456789abcdef",
+            "the list projection must surface the tenant's schema name");
+
+        var detail = await AdminTenantsEndpoints.GetTenantDetail(
+            tenantId, _db, _publisher, _analytics);
+        var ok = detail.Should().BeOfType<Ok<AdminTenantDetailResponse>>().Subject;
+        ok.Value!.Tenant.DatabaseId.Should().Be(poolRow.Id);
+        ok.Value.Tenant.SchemaName.Should().Be("t_0123456789abcdef");
+    }
+
+    [Test]
+    public async Task ListTenants_UnplacedTenant_CarriesNullPlacementColumns()
+    {
+        var tenantId = await SeedTenantAsync("Unplaced");
+
+        var resp = await InvokeListAsync();
+
+        var item = resp.Body.Tenants.Single(t => t.Id == tenantId);
+        item.DatabaseId.Should().BeNull();
+        item.SchemaName.Should().BeNull();
+    }
+
     // ── Detail ──
 
     [Test]

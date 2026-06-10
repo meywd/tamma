@@ -65,4 +65,11 @@ public interface ITenantDatabasePool
     Task<string> BuildTenantConnectionStringAsync(
         Guid databaseId, string roleName, string password, string schemaName,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Drops the cached decrypted admin string for a pool row — call after
+    /// the row's envelope or KEK version changes (Phase 4 admin CRUD
+    /// conn-string rotation; pre-authorized interface growth).
+    /// </summary>
+    void EvictAdminConnection(Guid databaseId);
 }

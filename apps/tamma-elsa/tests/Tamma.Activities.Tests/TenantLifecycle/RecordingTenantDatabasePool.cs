@@ -70,4 +70,9 @@ internal sealed class RecordingTenantDatabasePool : ITenantDatabasePool
     public Task<TenantAdminConnectionInfo> GetConnectionInfoAsync(
         Guid databaseId, CancellationToken ct = default) =>
         Task.FromResult(Info);
+
+    public List<Guid> EvictedAdminConnections { get; } = new();
+
+    public void EvictAdminConnection(Guid databaseId) =>
+        EvictedAdminConnections.Add(databaseId);
 }

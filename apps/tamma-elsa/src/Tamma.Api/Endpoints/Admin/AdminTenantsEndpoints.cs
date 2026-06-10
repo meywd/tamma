@@ -169,6 +169,10 @@ public static class AdminTenantsEndpoints
                 KekVersion = (int?)EF.Property<short>(t, "KekVersion"),
                 FailureReason = EF.Property<string?>(t, "FailureReason"),
                 DeleteRequestedAt = EF.Property<DateTime?>(t, "DeleteRequestedAt"),
+                // Phase 4 — tenant→DB view: which pool row hosts the
+                // tenant's schema, and the schema's name.
+                DatabaseId = EF.Property<Guid?>(t, "DatabaseId"),
+                SchemaName = EF.Property<string?>(t, "SchemaName"),
             })
             .ToListAsync(ct);
 
@@ -219,7 +223,9 @@ public static class AdminTenantsEndpoints
                 r.FailureReason,
                 r.DeleteRequestedAt,
                 r.KekVersion,
-                r.EncryptedConn is not null && r.EncryptedConn.Length > 0);
+                r.EncryptedConn is not null && r.EncryptedConn.Length > 0,
+                r.DatabaseId,
+                r.SchemaName);
         }).ToList();
 
         return Results.Ok(new AdminTenantListResponse(items, total, pageNum, size));
@@ -653,6 +659,9 @@ public static class AdminTenantsEndpoints
                 KekVersion = (int?)EF.Property<short>(t, "KekVersion"),
                 FailureReason = EF.Property<string?>(t, "FailureReason"),
                 DeleteRequestedAt = EF.Property<DateTime?>(t, "DeleteRequestedAt"),
+                // Phase 4 — tenant→DB view (see ListTenants).
+                DatabaseId = EF.Property<Guid?>(t, "DatabaseId"),
+                SchemaName = EF.Property<string?>(t, "SchemaName"),
             })
             .FirstOrDefaultAsync(ct);
         if (row is null) return null;
@@ -691,7 +700,9 @@ public static class AdminTenantsEndpoints
             row.FailureReason,
             row.DeleteRequestedAt,
             row.KekVersion,
-            row.EncryptedConn is not null && row.EncryptedConn.Length > 0);
+            row.EncryptedConn is not null && row.EncryptedConn.Length > 0,
+            row.DatabaseId,
+            row.SchemaName);
     }
 
     internal static AdminTenantActionGate ComputeActions(string? status)

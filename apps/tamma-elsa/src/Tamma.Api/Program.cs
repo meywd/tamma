@@ -1360,6 +1360,27 @@ admin.MapPatch("/tenants/{tenantId:guid}/plan",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.UpdateTenantPlan)
     .RequireAuthorization("PlatformOwnerAccess");
 
+// Unified-tenancy Phase 4 — platform-admin CRUD over the tenant_databases
+// registry (the operator's DB pool). The admin connection string travels
+// inbound only (encrypted at rest; never serialised into a response);
+// rotation evicts the TenantDatabasePool decrypt cache. PlatformOwnerAccess
+// because pool rows carry cross-tenant blast radius.
+admin.MapGet("/tenant-databases",
+        Tamma.Api.Endpoints.Admin.AdminTenantDatabasesEndpoints.ListDatabases)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapGet("/tenant-databases/{databaseId:guid}",
+        Tamma.Api.Endpoints.Admin.AdminTenantDatabasesEndpoints.GetDatabaseDetail)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapPost("/tenant-databases",
+        Tamma.Api.Endpoints.Admin.AdminTenantDatabasesEndpoints.CreateDatabase)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapPatch("/tenant-databases/{databaseId:guid}",
+        Tamma.Api.Endpoints.Admin.AdminTenantDatabasesEndpoints.UpdateDatabase)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapDelete("/tenant-databases/{databaseId:guid}",
+        Tamma.Api.Endpoints.Admin.AdminTenantDatabasesEndpoints.DeleteDatabase)
+    .RequireAuthorization("PlatformOwnerAccess");
+
 // Story 28-R2 follow-up B — platform-admin impersonation surface (SOC2
 // audit table + middleware). Begin requires PlatformOwnerAccess (only a
 // real platform-admin can mint an impersonation session); end is gated by
