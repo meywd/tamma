@@ -89,14 +89,35 @@ public class AdminTenantDatabasesEndpointsTests
     private const string UnreachableConnString =
         "Host=127.0.0.1;Port=1;Database=nope;Username=nobody;Password=wrong;Timeout=2";
 
+    /// <summary>
+    /// A reachable conn string to a FRESH physical database on the CP
+    /// container. The seeded central row already points at the container's
+    /// main database, and the duplicate-physical-database guard 409s any
+    /// row aliasing an existing (Host, Port, Database) — so each test row
+    /// gets its own database.
+    /// </summary>
+    private static async Task<string> UniqueReachableConnStringAsync()
+    {
+        var name = $"pool_{Guid.NewGuid():N}";
+        await using var conn = new NpgsqlConnection(ApiTestFixture.Postgres.GetConnectionString());
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"CREATE DATABASE {name}";
+        await cmd.ExecuteNonQueryAsync();
+        return new NpgsqlConnectionStringBuilder(ApiTestFixture.Postgres.GetConnectionString())
+        {
+            Database = name,
+        }.ConnectionString;
+    }
+
     private async Task<AdminTenantDatabaseListItem> CreateRowAsync(
         string label, string? connString = null)
     {
         var result = await AdminTenantDatabasesEndpoints.CreateDatabase(
             new CreateTenantDatabaseRequest(
-                label, connString ?? ReachableConnString,
+                label, connString ?? await UniqueReachableConnStringAsync(),
                 PlacementClass: "shared", TierEligibility: ["free", "team"]),
-            _db, _protector, _timeProvider);
+            _db, _protector, _pool, _timeProvider);
         var created = result.Should()
             .BeOfType<Created<AdminTenantDatabaseListItem>>().Subject;
         return created.Value!;
@@ -165,7 +186,7 @@ public class AdminTenantDatabasesEndpointsTests
         // "central" is seeded by ResetDatabaseAsync.
         var result = await AdminTenantDatabasesEndpoints.CreateDatabase(
             new CreateTenantDatabaseRequest("central", ReachableConnString),
-            _db, _protector, _timeProvider);
+            _db, _protector, _pool, _timeProvider);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }
@@ -175,7 +196,7 @@ public class AdminTenantDatabasesEndpointsTests
     {
         var result = await AdminTenantDatabasesEndpoints.CreateDatabase(
             new CreateTenantDatabaseRequest("dead-pool", UnreachableConnString),
-            _db, _protector, _timeProvider);
+            _db, _protector, _pool, _timeProvider);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status422UnprocessableEntity);
         // The Npgsql error must surface for the operator.
@@ -194,8 +215,8 @@ public class AdminTenantDatabasesEndpointsTests
     {
         var result = await AdminTenantDatabasesEndpoints.CreateDatabase(
             new CreateTenantDatabaseRequest(
-                "weird", ReachableConnString, PlacementClass: "exotic"),
-            _db, _protector, _timeProvider);
+                "weird", await UniqueReachableConnStringAsync(), PlacementClass: "exotic"),
+            _db, _protector, _pool, _timeProvider);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -205,9 +226,39 @@ public class AdminTenantDatabasesEndpointsTests
     {
         var result = await AdminTenantDatabasesEndpoints.CreateDatabase(
             new CreateTenantDatabaseRequest("garbled", "this is ;;= not a conn string=="),
-            _db, _protector, _timeProvider);
+            _db, _protector, _pool, _timeProvider);
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
+    }
+
+    [Test]
+    public async Task CreateDatabase_AliasingExistingPhysicalDatabase_Returns409()
+    {
+        // The seeded central row already points at the CP container's main
+        // database. A second row with the same (Host, Port, Database) —
+        // even with cosmetically different connection-string text — would
+        // let a tenant move between the two rows drop the live schema
+        // (TenantMoveService aliasing hazard), so registration must bounce.
+        var alias = new NpgsqlConnectionStringBuilder(ReachableConnString)
+        {
+            ApplicationName = "sneaky-alias",
+        }.ConnectionString;
+        alias.Should().NotBe(ReachableConnString,
+            "the guard must compare the parsed physical identity, not the raw text");
+
+        var result = await AdminTenantDatabasesEndpoints.CreateDatabase(
+            new CreateTenantDatabaseRequest("alias-of-central", alias),
+            _db, _protector, _pool, _timeProvider);
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
+        var json = JsonSerializer.Serialize(
+            ((IValueHttpResult)result).Value,
+            ((IValueHttpResult)result).Value!.GetType());
+        json.Should().Contain("duplicate_physical_database");
+        json.Should().Contain("central", "the conflicting row must be named");
+
+        (await _db.TenantDatabases.CountAsync(d => d.Label == "alias-of-central"))
+            .Should().Be(0, "an aliasing row must not be persisted");
     }
 
     // ── Detail (tenant→DB view) ──
@@ -317,7 +368,7 @@ public class AdminTenantDatabasesEndpointsTests
     [Test]
     public async Task UpdateDatabase_RotateConnString_EvictsPoolDecryptCache()
     {
-        var original = ReachableConnString;
+        var original = await UniqueReachableConnStringAsync();
         var item = await CreateRowAsync("rotate-me", original);
 
         // Warm the singleton pool's decrypt cache with the ORIGINAL string.
@@ -351,7 +402,7 @@ public class AdminTenantDatabasesEndpointsTests
     [Test]
     public async Task UpdateDatabase_RotateToUnreachableConnString_Returns422_AndKeepsOldEnvelope()
     {
-        var original = ReachableConnString;
+        var original = await UniqueReachableConnStringAsync();
         var item = await CreateRowAsync("rotate-guard", original);
 
         var result = await AdminTenantDatabasesEndpoints.UpdateDatabase(
@@ -362,6 +413,31 @@ public class AdminTenantDatabasesEndpointsTests
         StatusCodeOf(result).Should().Be(StatusCodes.Status422UnprocessableEntity);
         (await _pool.GetAdminConnectionStringAsync(item.Id)).Should().Be(original,
             "a failed rotation must leave the old envelope in place");
+    }
+
+    [Test]
+    public async Task UpdateDatabase_RotateToAliasOfAnotherRow_Returns409_AndKeepsOldEnvelope()
+    {
+        // Rotating a row's conn string so it points at ANOTHER row's
+        // physical database creates the same move-hazard alias as create —
+        // 409. (Re-pointing a row at ITSELF with new credentials is the
+        // normal rotation case and stays allowed — covered by
+        // UpdateDatabase_RotateConnString_EvictsPoolDecryptCache.)
+        var original = await UniqueReachableConnStringAsync();
+        var item = await CreateRowAsync("alias-rotate", original);
+
+        var result = await AdminTenantDatabasesEndpoints.UpdateDatabase(
+            item.Id,
+            new UpdateTenantDatabaseRequest(AdminConnectionString: ReachableConnString),
+            _db, _protector, _pool, _timeProvider);
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
+        var json = JsonSerializer.Serialize(
+            ((IValueHttpResult)result).Value,
+            ((IValueHttpResult)result).Value!.GetType());
+        json.Should().Contain("duplicate_physical_database");
+        (await _pool.GetAdminConnectionStringAsync(item.Id)).Should().Be(original,
+            "a rejected rotation must leave the old envelope in place");
     }
 
     // ── Delete ──
@@ -417,7 +493,7 @@ public class AdminTenantDatabasesEndpointsTests
     [Test]
     public async Task Responses_NeverSerialiseAdminConnectionString()
     {
-        var connString = ReachableConnString;
+        var connString = await UniqueReachableConnStringAsync();
         var password = new NpgsqlConnectionStringBuilder(connString).Password!;
         var item = await CreateRowAsync("sealed-row", connString);
 

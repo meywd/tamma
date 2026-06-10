@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using Tamma.Activities.AgentDispatch;
@@ -28,6 +30,17 @@ public sealed class TenantMoveOptions
 
     /// <summary>Hard timeout for each tool run, in seconds (default 30 minutes).</summary>
     public int TimeoutSeconds { get; set; } = 30 * 60;
+
+    /// <summary>
+    /// Grace delay between the drain/evict and <c>pg_dump</c>, in seconds
+    /// (default 2). In-flight-write window: requests that cleared the
+    /// read-only middleware BEFORE the status flipped to 'draining' may
+    /// still be executing writes on already-leased connections — the evict
+    /// only prevents NEW leases, it does not cancel commands in flight. The
+    /// grace lets those last writes land before the dump snapshots the
+    /// schema. Set 0 in unit tests.
+    /// </summary>
+    public int DrainGraceSeconds { get; set; } = 2;
 }
 
 /// <summary>
@@ -65,11 +78,15 @@ public sealed class TenantMoveOptions
 ///     user must be allowed to <c>SET ROLE</c> to the tenant role
 ///     (superuser or member). pg_restore exits 1 for ignorable errors —
 ///     notably "schema already exists" for the schema we pre-created in
-///     step 5 — so a non-zero exit is logged but NOT fatal by itself;
-///     the history verification below is the authoritative gate.
+///     step 5 — so a non-zero exit is acceptable ONLY when stderr's
+///     "errors ignored on restore: N" summary reports no more than the
+///     expected count (exactly the pre-created schema error); a higher N,
+///     or a non-zero exit with no parseable summary, aborts.
 ///     <b>verify</b>: <c>__TenantMigrationsHistory</c> row count in the
-///     target schema must equal the source's — mismatch aborts (source
-///     intact, tenant still 'draining').</description></item>
+///     target schema must equal the source's (fast pre-gate), then EVERY
+///     base table under the schema is compared source-vs-target by
+///     <c>count(*)</c> — any mismatch aborts (source intact, tenant still
+///     'draining').</description></item>
 ///   <item><description><b>repoint</b> — mint the new connection string
 ///     (same-cluster: decrypt the current envelope and swap only
 ///     <c>Database</c>; cross-cluster: build fresh with the new
@@ -97,8 +114,23 @@ public sealed class TenantMoveOptions
 /// cancel the move. A failure AFTER step 7 committed leaves the tenant
 /// pointing at the TARGET (still 'draining'): re-running
 /// <see cref="MoveAsync"/> with the same target detects the committed
-/// re-point and completes the tail — sweep stale copies of the schema
-/// off every other pool row, then activate.</para>
+/// re-point and completes the tail — assert the schema actually exists on
+/// the target, sweep stale copies of the schema off every other pool row
+/// (skipping rows that alias the target's physical database), re-run the
+/// step-8 verify probe, then activate.</para>
+///
+/// <para><b>Concurrency:</b> the whole of <see cref="MoveAsync"/> runs
+/// under a per-tenant Postgres advisory lock on a dedicated control-plane
+/// session (<c>pg_try_advisory_lock(hashtextextended(tenantId, 0))</c>) —
+/// a second concurrent move for the same tenant is rejected up front. The
+/// lock is released in a finally and dies with the session regardless.</para>
+///
+/// <para><b>Aliasing guard:</b> two tenant_databases rows that point at
+/// the SAME physical (Host, Port, Database) would make a "move" between
+/// them dump-and-drop the live schema — validation rejects that before
+/// any destructive step, and the resume sweep refuses to drop the schema
+/// off any row aliasing the target's physical database. The admin CRUD
+/// rejects registering such duplicate rows in the first place.</para>
 /// </summary>
 public sealed class TenantMoveService : ITenantMoveService
 {
@@ -140,6 +172,13 @@ public sealed class TenantMoveService : ITenantMoveService
     public async Task MoveAsync(
         Guid tenantId, Guid targetDatabaseId, CancellationToken ct = default)
     {
+        // ── Step 0: per-tenant advisory lock for the WHOLE move ──────────
+        // Two concurrent MoveAsync calls for one tenant would interleave
+        // destructive steps (drop/restore/repoint) unpredictably — the
+        // second caller is rejected up front. Held on a dedicated CP
+        // session; released in the finally (and by session death anyway).
+        await using var moveLock = await AcquireMoveLockAsync(tenantId, ct);
+
         // ── Step 1: validate ─────────────────────────────────────────────
         var plan = await ValidateAsync(tenantId, targetDatabaseId, ct);
         var schema = plan.SchemaName;
@@ -149,12 +188,26 @@ public sealed class TenantMoveService : ITenantMoveService
         if (plan.IsResume)
         {
             // The step-7 re-point already committed in a prior run — the
-            // tenant points at the TARGET. Complete the tail: sweep stale
-            // schema copies off every other pool row, then activate.
+            // tenant points at the TARGET. Complete the tail: assert the
+            // schema is really on the target, sweep stale schema copies off
+            // every other pool row, re-verify the resolver round-trip, then
+            // activate.
             _logger.LogInformation(
                 "tenant.move.resume tenantId={TenantId} targetDatabaseId={TargetDatabaseId} "
                 + "schema={Schema}", tenantId, targetDatabaseId, schema);
+            if (!await _pool.SchemaExistsOnAsync(plan.Target.Id, schema, ct))
+            {
+                // Sweeping now would destroy the only remaining copy of the
+                // tenant's data (on whichever row still holds it).
+                throw new InvalidOperationException(
+                    $"Tenant move resume aborted for '{tenantId}': the tenant points at "
+                    + $"target row '{plan.Target.Id}' but schema '{schema}' does not exist "
+                    + "there — refusing to sweep other pool rows (that would drop the only "
+                    + "remaining copy of the data). Investigate the committed re-point "
+                    + "before retrying.");
+            }
             await SweepStaleSchemasAsync(tenantId, plan.Target, schema, roleName, ct);
+            await VerifyTargetRoundTripAsync(tenantId, ct);
             await SetStatusAsync(tenantId, "active", ct);
             _logger.LogInformation(
                 "tenant.move.activate tenantId={TenantId} (resume tail completed)", tenantId);
@@ -171,8 +224,12 @@ public sealed class TenantMoveService : ITenantMoveService
             + "targetDatabaseId={TargetDatabaseId} schema={Schema} sameCluster={SameCluster}",
             tenantId, source.Id, target.Id, schema, sameCluster);
 
-        var dumpFile = Path.Combine(
-            Path.GetTempPath(), $"tamma-move-{schema}-{Guid.NewGuid():N}.dump");
+        // Owner-only (0700 on Unix) private tmp directory — the dump holds
+        // a full copy of the tenant's data and must not be readable by
+        // other local users. The directory (and the dump inside) is
+        // deleted in the finally regardless of outcome.
+        var dumpDir = Directory.CreateTempSubdirectory("tamma-move-");
+        var dumpFile = Path.Combine(dumpDir.FullName, $"{schema}.dump");
         try
         {
             // ── Step 2: drain (read-only window opens) ───────────────────
@@ -181,6 +238,14 @@ public sealed class TenantMoveService : ITenantMoveService
             _logger.LogInformation(
                 "tenant.move.drain tenantId={TenantId} (writes now 503; reads keep flowing)",
                 tenantId);
+
+            // In-flight-write window: requests that cleared the read-only
+            // middleware BEFORE the status flip may still be writing on
+            // already-leased connections — the evict prevents NEW leases
+            // but does not cancel commands in flight. A short grace lets
+            // those last writes land before pg_dump snapshots the schema.
+            if (_options.DrainGraceSeconds > 0)
+                await Task.Delay(TimeSpan.FromSeconds(_options.DrainGraceSeconds), ct);
 
             // ── Step 3: dump the schema from the SOURCE row ──────────────
             var sourceInfo = await _pool.GetConnectionInfoAsync(source.Id, ct);
@@ -232,24 +297,33 @@ public sealed class TenantMoveService : ITenantMoveService
                 "tenant.move.schema tenantId={TenantId} schema={Schema} "
                 + "targetDatabaseId={TargetDatabaseId}", tenantId, schema, target.Id);
 
-            // ── Step 6: restore into the target + verify history ─────────
+            // ── Step 6: restore into the target + verify ─────────────────
             var targetInfo = await _pool.GetConnectionInfoAsync(target.Id, ct);
-            await RunPgToolAsync(
+            var restoreResult = await RunPgToolAsync(
                 _options.PgRestorePath,
                 PgToolArguments.ForPgRestore(targetInfo, dumpFile, roleName),
                 targetInfo.Password,
                 tenantId, step: "restore",
                 // pg_restore exits 1 when it hit ignorable errors — the
                 // pre-created schema's "already exists" is guaranteed to
-                // trip that. The history verification below is the
-                // authoritative success gate; a genuinely failed restore
-                // cannot produce a matching history count.
+                // trip that. EnsureRestoreSucceeded parses stderr's
+                // "errors ignored on restore: N" summary and aborts when N
+                // exceeds that one expected error (or when a non-zero exit
+                // carries no parseable summary).
                 failureIsFatal: false, ct);
+            EnsureRestoreSucceeded(restoreResult, tenantId);
             _logger.LogInformation(
                 "tenant.move.restore tenantId={TenantId} schema={Schema} "
                 + "targetDatabaseId={TargetDatabaseId}", tenantId, schema, target.Id);
 
+            // Fast pre-gate (one table), then the full per-table row-count
+            // comparison. NOTE: a failed restore CAN produce a matching
+            // history count (e.g. data-load errors after the history table
+            // restored) — the per-table comparison is the authoritative
+            // gate, the stderr summary the early-warning.
             await VerifyHistoryAsync(tenantId, source.Id, target.Id, quotedSchema, ct);
+            await VerifyRowCountsAsync(
+                tenantId, source.Id, target.Id, schema, quotedSchema, ct);
 
             // ── Step 7: re-point envelope + bookkeeping (ONE SaveChanges) ─
             await RepointAsync(
@@ -257,18 +331,7 @@ public sealed class TenantMoveService : ITenantMoveService
                 freshPassword, ct);
 
             // ── Step 8: evict + verify through the production factory ────
-            await _resolver.EvictAsync(tenantId, ct);
-            await using (var tenantCtx = await _tenantDbFactory.CreateAsync(tenantId, ct))
-            {
-                // Trivial query against a tenant-schema table proves the
-                // re-pointed envelope decrypts, connects, and lands in the
-                // restored schema (mirrors the provisioning verify).
-                _ = await tenantCtx.AgentConfigs.AsNoTracking()
-                    .FirstOrDefaultAsync(ct);
-            }
-            _logger.LogInformation(
-                "tenant.move.verify_target tenantId={TenantId} (resolver round-trip ok)",
-                tenantId);
+            await VerifyTargetRoundTripAsync(tenantId, ct);
 
             // ── Step 9: drop the source schema (and role, cross-cluster) ─
             await _pool.ExecuteOnAsync(
@@ -289,17 +352,17 @@ public sealed class TenantMoveService : ITenantMoveService
         }
         finally
         {
-            // Tmp-file hygiene regardless of outcome — the dump may hold a
-            // full copy of the tenant's data.
+            // Tmp hygiene regardless of outcome — the dump holds a full
+            // copy of the tenant's data; the whole 0700 directory goes.
             try
             {
-                if (File.Exists(dumpFile)) File.Delete(dumpFile);
+                dumpDir.Delete(recursive: true);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(
-                    ex, "tenant.move.tmp_cleanup_failed tenantId={TenantId} file={File}",
-                    tenantId, dumpFile);
+                    ex, "tenant.move.tmp_cleanup_failed tenantId={TenantId} dir={Dir}",
+                    tenantId, dumpDir.FullName);
             }
         }
     }
@@ -374,6 +437,27 @@ public sealed class TenantMoveService : ITenantMoveService
                 $"Source tenant_databases row '{sourceDatabaseId}' does not exist — the "
                 + "tenant's placement is corrupt.");
 
+        // Same-physical-database aliasing guard: two pool rows can point at
+        // ONE physical (Host, Port, Database) — a "move" between them would
+        // dump the schema, drop it "on the target" (= the live copy), and
+        // then drop "the source" (= the restored copy), losing everything.
+        // Reject BEFORE any destructive step.
+        if (string.Equals(source.Host, target.Host, StringComparison.OrdinalIgnoreCase)
+            && source.Port == target.Port)
+        {
+            var sourceDbName = await _pool.GetDatabaseNameAsync(source.Id, ct);
+            var targetDbName = await _pool.GetDatabaseNameAsync(target.Id, ct);
+            if (string.Equals(sourceDbName, targetDbName, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Tenant move rejected for '{tenantId}': source row '{source.Id}' and "
+                    + $"target row '{targetDatabaseId}' alias the same physical database "
+                    + $"({source.Host}:{source.Port}/{sourceDbName}) — a move between them "
+                    + "would drop the live schema. Remove the duplicate tenant_databases "
+                    + "row instead.");
+            }
+        }
+
         // Tier eligibility/capacity — the SAME predicate placement uses
         // (TenantPlacementService.EligibleFor), evaluated in-memory on the
         // loaded target row.
@@ -415,7 +499,7 @@ public sealed class TenantMoveService : ITenantMoveService
     /// through /proc). Stderr is logged truncated but never embedded in
     /// thrown messages (it can echo connection details).
     /// </summary>
-    private async Task RunPgToolAsync(
+    private async Task<ProcessRunResult> RunPgToolAsync(
         string fileName,
         List<string> arguments,
         string password,
@@ -453,6 +537,61 @@ public sealed class TenantMoveService : ITenantMoveService
                     $"{fileName} failed (exit {result.ExitCode}) during tenant move step "
                     + $"'{step}' (tenant {tenantId}). See logs for stderr.");
         }
+
+        return result;
+    }
+
+    /// <summary>
+    /// pg_restore's "errors ignored on restore: N" stderr summary — emitted
+    /// whenever the tool finished but skipped over errors (exit code 1).
+    /// </summary>
+    private static readonly Regex IgnoredErrorsSummary = new(
+        @"errors ignored on restore:\s*(\d+)",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Exactly ONE ignorable pg_restore error is expected: the step-5
+    /// pre-created schema's "schema t_&lt;hex&gt; already exists" (observed
+    /// count in the live end-to-end move: 1). Anything beyond that means
+    /// real objects or data failed to restore.
+    /// </summary>
+    private const int ExpectedIgnorableRestoreErrors = 1;
+
+    /// <summary>
+    /// Restore-verification hardening: exit 0 → clean; exit != 0 with the
+    /// stderr summary reporting at most <see cref="ExpectedIgnorableRestoreErrors"/>
+    /// ignored errors → acceptable; a higher count, or no parseable summary,
+    /// aborts the move (source schema intact, tenant stays 'draining').
+    /// </summary>
+    private void EnsureRestoreSucceeded(ProcessRunResult result, Guid tenantId)
+    {
+        if (result.ExitCode == 0)
+            return;
+
+        var match = IgnoredErrorsSummary.Match(result.StdErr ?? string.Empty);
+        if (!match.Success)
+        {
+            throw new InvalidOperationException(
+                $"pg_restore exited {result.ExitCode} during the tenant move for "
+                + $"'{tenantId}' and stderr carries no 'errors ignored on restore' summary "
+                + "— treating as a hard failure. Source schema is intact; tenant remains "
+                + "'draining'. See logs for stderr.");
+        }
+
+        var ignored = long.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+        if (ignored > ExpectedIgnorableRestoreErrors)
+        {
+            throw new InvalidOperationException(
+                $"pg_restore ignored {ignored} errors during the tenant move for "
+                + $"'{tenantId}' — only {ExpectedIgnorableRestoreErrors} is expected (the "
+                + "step-5 pre-created schema's \"already exists\"). The restore is not "
+                + "trustworthy. Source schema is intact; tenant remains 'draining'. See "
+                + "logs for stderr.");
+        }
+
+        _logger.LogInformation(
+            "tenant.move.restore ignorable_errors tenantId={TenantId} ignored={Ignored} "
+            + "expected={Expected}", tenantId, ignored, ExpectedIgnorableRestoreErrors);
     }
 
     private async Task VerifyHistoryAsync(
@@ -478,6 +617,82 @@ public sealed class TenantMoveService : ITenantMoveService
         _logger.LogInformation(
             "tenant.move.verify tenantId={TenantId} historyRows={Rows}",
             tenantId, sourceCount);
+    }
+
+    /// <summary>
+    /// Per-table row-count comparison (restore-verification hardening):
+    /// every base table under the schema on the SOURCE row must hold the
+    /// same <c>count(*)</c> on the TARGET. The tenant is draining
+    /// (mutating verbs 503) and evicted, so source counts are stable for
+    /// the comparison window. Any mismatch aborts the move with the
+    /// offending tables listed — source intact, tenant stays 'draining'.
+    /// </summary>
+    private async Task VerifyRowCountsAsync(
+        Guid tenantId, Guid sourceDatabaseId, Guid targetDatabaseId,
+        string schema, string quotedSchema, CancellationToken ct)
+    {
+        // schema is the generated t_<hex> (TenantNaming) — safe to inline
+        // inside a single-quoted literal.
+        var tablesSql =
+            "SELECT string_agg(table_name, ',' ORDER BY table_name) "
+            + "FROM information_schema.tables "
+            + $"WHERE table_schema = '{schema}' AND table_type = 'BASE TABLE';";
+        var rawTables = Convert.ToString(
+            await _pool.ExecuteScalarOnAsync(sourceDatabaseId, tablesSql, ct));
+        if (string.IsNullOrWhiteSpace(rawTables))
+        {
+            throw new InvalidOperationException(
+                $"Tenant move aborted for '{tenantId}': information_schema lists no base "
+                + $"tables under schema '{schema}' on the source row — cannot verify the "
+                + "restore. Source schema is intact; tenant remains 'draining'.");
+        }
+
+        var tables = rawTables.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        var mismatches = new List<string>();
+        foreach (var table in tables)
+        {
+            ct.ThrowIfCancellationRequested();
+            var countSql =
+                $"SELECT count(*) FROM {quotedSchema}.{TenantNaming.Quote(table)};";
+            var sourceCount = Convert.ToInt64(
+                await _pool.ExecuteScalarOnAsync(sourceDatabaseId, countSql, ct) ?? -1L);
+            var targetCount = Convert.ToInt64(
+                await _pool.ExecuteScalarOnAsync(targetDatabaseId, countSql, ct) ?? -1L);
+            if (sourceCount < 0 || sourceCount != targetCount)
+                mismatches.Add($"{table} (source={sourceCount}, target={targetCount})");
+        }
+
+        if (mismatches.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Tenant move aborted for '{tenantId}': per-table row counts differ after "
+                + $"the restore — {string.Join("; ", mismatches)}. Source schema is intact; "
+                + "tenant remains 'draining'. Re-run the move or reset the status to "
+                + "'active'.");
+        }
+        _logger.LogInformation(
+            "tenant.move.verify_rows tenantId={TenantId} tables={Tables} (all counts match)",
+            tenantId, tables.Length);
+    }
+
+    /// <summary>
+    /// Step-8 verify probe (also re-run by the resume tail): evict the
+    /// tenant's pooled connections, then open a real TenantDbContext
+    /// through the production factory — a trivial query proves the
+    /// re-pointed envelope decrypts, connects, and lands in the restored
+    /// schema (mirrors the provisioning verify).
+    /// </summary>
+    private async Task VerifyTargetRoundTripAsync(Guid tenantId, CancellationToken ct)
+    {
+        await _resolver.EvictAsync(tenantId, ct);
+        await using (var tenantCtx = await _tenantDbFactory.CreateAsync(tenantId, ct))
+        {
+            _ = await tenantCtx.AgentConfigs.AsNoTracking()
+                .FirstOrDefaultAsync(ct);
+        }
+        _logger.LogInformation(
+            "tenant.move.verify_target tenantId={TenantId} (resolver round-trip ok)",
+            tenantId);
     }
 
     private async Task RepointAsync(
@@ -557,6 +772,7 @@ public sealed class TenantMoveService : ITenantMoveService
         CancellationToken ct)
     {
         var quotedSchema = TenantNaming.Quote(schema);
+        var targetDbName = await _pool.GetDatabaseNameAsync(target.Id, ct);
         List<TenantDatabase> rows;
         await using (var db = await _cpFactory.CreateDbContextAsync(ct))
         {
@@ -566,6 +782,24 @@ public sealed class TenantMoveService : ITenantMoveService
         foreach (var row in rows)
         {
             ct.ThrowIfCancellationRequested();
+
+            // Aliasing guard: a row whose (Host, Port, Database) equals the
+            // target's points at the SAME physical database the tenant now
+            // lives on — "sweeping" it would drop the live schema.
+            if (string.Equals(row.Host, target.Host, StringComparison.OrdinalIgnoreCase)
+                && row.Port == target.Port
+                && string.Equals(
+                    await _pool.GetDatabaseNameAsync(row.Id, ct), targetDbName,
+                    StringComparison.Ordinal))
+            {
+                _logger.LogWarning(
+                    "tenant.move.sweep_skip tenantId={TenantId} databaseId={DatabaseId} "
+                    + "aliases the target's physical database ({Host}:{Port}/{Db}) — not "
+                    + "swept; remove the duplicate tenant_databases row.",
+                    tenantId, row.Id, row.Host, row.Port, targetDbName);
+                continue;
+            }
+
             if (!await _pool.SchemaExistsOnAsync(row.Id, schema, ct))
                 continue;
 
@@ -601,5 +835,108 @@ public sealed class TenantMoveService : ITenantMoveService
         if (string.IsNullOrWhiteSpace(value)) return string.Empty;
         var trimmed = value.Trim();
         return trimmed.Length <= 500 ? trimmed : trimmed[..500] + "…";
+    }
+
+    // ── concurrency: per-tenant advisory lock ──────────────────────────────
+
+    /// <summary>
+    /// Take <c>pg_try_advisory_lock(hashtextextended(tenantId, 0))</c> on a
+    /// DEDICATED control-plane session held for the whole move (the session
+    /// lives inside the returned handle; disposing it unlocks — and the
+    /// lock dies with the session regardless). Not acquired → a move for
+    /// this tenant is already running somewhere → throw. Returns null when
+    /// the control plane is non-relational (EF InMemory unit suites — no
+    /// session to lock on; production CP is always Postgres).
+    /// </summary>
+    private async Task<MoveAdvisoryLock?> AcquireMoveLockAsync(
+        Guid tenantId, CancellationToken ct)
+    {
+        var db = await _cpFactory.CreateDbContextAsync(ct);
+        try
+        {
+            if (!db.Database.IsRelational())
+            {
+                _logger.LogDebug(
+                    "tenant.move.lock skipped_non_relational tenantId={TenantId}", tenantId);
+                await db.DisposeAsync();
+                return null;
+            }
+
+            await db.Database.OpenConnectionAsync(ct);
+            var conn = db.Database.GetDbConnection();
+            bool acquired;
+            await using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText =
+                    "SELECT pg_try_advisory_lock(hashtextextended(@tid, 0));";
+                var p = cmd.CreateParameter();
+                p.ParameterName = "tid";
+                p.Value = tenantId.ToString("D");
+                cmd.Parameters.Add(p);
+                acquired = await cmd.ExecuteScalarAsync(ct) is true;
+            }
+
+            if (!acquired)
+            {
+                throw new InvalidOperationException(
+                    $"A move for tenant '{tenantId}' is already in progress (the per-tenant "
+                    + "control-plane advisory lock is held by another session) — wait for "
+                    + "it to finish or fail before retrying.");
+            }
+            _logger.LogInformation(
+                "tenant.move.lock acquired tenantId={TenantId}", tenantId);
+            return new MoveAdvisoryLock(db, tenantId, _logger);
+        }
+        catch
+        {
+            await db.DisposeAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Holds the dedicated CP session carrying the per-tenant advisory
+    /// lock. Dispose unlocks explicitly (best-effort — the session-scoped
+    /// lock is released by Postgres when the connection closes anyway) and
+    /// disposes the session.
+    /// </summary>
+    private sealed class MoveAdvisoryLock : IAsyncDisposable
+    {
+        private readonly ControlPlaneDbContext _db;
+        private readonly Guid _tenantId;
+        private readonly ILogger _logger;
+
+        public MoveAdvisoryLock(ControlPlaneDbContext db, Guid tenantId, ILogger logger)
+        {
+            _db = db;
+            _tenantId = tenantId;
+            _logger = logger;
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            try
+            {
+                var conn = _db.Database.GetDbConnection();
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText =
+                    "SELECT pg_advisory_unlock(hashtextextended(@tid, 0));";
+                var p = cmd.CreateParameter();
+                p.ParameterName = "tid";
+                p.Value = _tenantId.ToString("D");
+                cmd.Parameters.Add(p);
+                await cmd.ExecuteScalarAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex, "tenant.move.lock_release_failed tenantId={TenantId} (the lock "
+                    + "dies with the session regardless)", _tenantId);
+            }
+            finally
+            {
+                await _db.DisposeAsync();
+            }
+        }
     }
 }

@@ -25,7 +25,10 @@ namespace Tamma.Api.Endpoints.Admin;
 /// serialised into any response (see <c>AdminTenantDatabaseDtos</c>).</para>
 ///
 /// <para>Validation matrix: label unique → 409; placement/status enum →
-/// 400; conn string unparsable → 400; unreachable → 422; delete with
+/// 400; conn string unparsable → 400; (Host, Port, Database) duplicating
+/// an existing row's physical database → 409 (two rows aliasing one
+/// physical database would let a tenant "move" between them drop the live
+/// schema — see <c>TenantMoveService</c>); unreachable → 422; delete with
 /// TenantCount &gt; 0 OR any tenants.DatabaseId referencing the row
 /// (defensive count — bookkeeping could drift) → 409. Delete is a hard
 /// delete (zero-data project). Capacity stays advisory (Phase 2 note) —
@@ -97,6 +100,7 @@ public static class AdminTenantDatabasesEndpoints
         CreateTenantDatabaseRequest req,
         ControlPlaneDbContext db,
         ITenantConnectionStringProtector protector,
+        ITenantDatabasePool pool,
         [FromServices] TimeProvider timeProvider,
         CancellationToken ct = default)
     {
@@ -129,6 +133,13 @@ public static class AdminTenantDatabasesEndpoints
                 error = "invalid_connection_string",
                 message = parseError,
             });
+
+        // Same-physical-database aliasing guard: two pool rows pointing at
+        // one (Host, Port, Database) would let a tenant move between them
+        // drop the live schema (TenantMoveService) — reject up front.
+        var alias = await FindPhysicalAliasAsync(db, pool, builder, excludeId: null, ct);
+        if (alias is not null)
+            return DuplicatePhysicalDatabase(alias, builder);
 
         // Live reachability probe: a pool row that cannot serve a
         // SELECT 1 would brick every lifecycle step routed at it.
@@ -209,6 +220,14 @@ public static class AdminTenantDatabasesEndpoints
                     error = "invalid_connection_string",
                     message = parseError,
                 });
+
+            // Rotation gets the same aliasing gate as create (excluding the
+            // row being rotated — re-pointing a row at ITSELF with new
+            // credentials is the normal rotation case).
+            var alias = await FindPhysicalAliasAsync(
+                db, pool, builder, excludeId: databaseId, ct);
+            if (alias is not null)
+                return DuplicatePhysicalDatabase(alias, builder);
 
             // Rotation gets the same reachability gate as create — an
             // unreachable rotated string would brick the row just the same.
@@ -346,6 +365,65 @@ public static class AdminTenantDatabasesEndpoints
             // cannot serve provisioning DDL".
             return ex.Message;
         }
+    }
+
+    /// <summary>
+    /// Returns the label of an existing tenant_databases row whose admin
+    /// connection string resolves to the same physical (Host, Port,
+    /// Database) as <paramref name="incoming"/>, or null when none does.
+    /// Existing rows are decrypted via the pool (cached; N is small —
+    /// operators register a handful of rows). Host compares
+    /// case-insensitively; a missing Database falls back to the Username
+    /// (the libpq/Npgsql default database).
+    /// </summary>
+    private static async Task<string?> FindPhysicalAliasAsync(
+        ControlPlaneDbContext db,
+        ITenantDatabasePool pool,
+        NpgsqlConnectionStringBuilder incoming,
+        Guid? excludeId,
+        CancellationToken ct)
+    {
+        var (inHost, inPort, inDb) = PhysicalIdentityOf(incoming);
+
+        var rows = await db.TenantDatabases
+            .AsNoTracking()
+            .Where(d => excludeId == null || d.Id != excludeId)
+            .Select(d => new { d.Id, d.Label })
+            .ToListAsync(ct);
+
+        foreach (var row in rows)
+        {
+            var existing = new NpgsqlConnectionStringBuilder(
+                await pool.GetAdminConnectionStringAsync(row.Id, ct));
+            var (exHost, exPort, exDb) = PhysicalIdentityOf(existing);
+            if (string.Equals(exHost, inHost, StringComparison.OrdinalIgnoreCase)
+                && exPort == inPort
+                && string.Equals(exDb, inDb, StringComparison.Ordinal))
+                return row.Label;
+        }
+        return null;
+    }
+
+    private static (string Host, int Port, string Database) PhysicalIdentityOf(
+        NpgsqlConnectionStringBuilder b) =>
+        (string.IsNullOrWhiteSpace(b.Host) ? "localhost" : b.Host,
+         b.Port,
+         string.IsNullOrWhiteSpace(b.Database) ? b.Username ?? string.Empty : b.Database);
+
+    private static IResult DuplicatePhysicalDatabase(
+        string existingLabel, NpgsqlConnectionStringBuilder incoming)
+    {
+        var (host, port, database) = PhysicalIdentityOf(incoming);
+        return Results.Json(
+            new
+            {
+                error = "duplicate_physical_database",
+                message = $"tenant_databases row '{existingLabel}' already points at "
+                    + $"{host}:{port}/{database} — two pool rows aliasing one physical "
+                    + "database would let a tenant move between them drop the live schema. "
+                    + "Rotate the existing row instead of registering a duplicate.",
+            },
+            statusCode: StatusCodes.Status409Conflict);
     }
 
     private static IResult DuplicateLabel(string label) =>

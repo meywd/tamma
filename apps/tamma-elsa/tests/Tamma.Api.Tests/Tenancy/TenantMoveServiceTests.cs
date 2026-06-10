@@ -82,7 +82,9 @@ public class TenantMoveServiceTests
         new Utf8Protector(),
         _resolver,
         _tenantDbFactory,
-        Options.Create(new TenantMoveOptions()),
+        // DrainGraceSeconds 0: the in-flight-write grace is a wall-clock
+        // delay with no observable side effect worth 2s per test.
+        Options.Create(new TenantMoveOptions { DrainGraceSeconds = 0 }),
         NullLogger<TenantMoveService>.Instance);
 
     /// <summary>
@@ -421,6 +423,94 @@ public class TenantMoveServiceTests
     }
 
     [Test]
+    public async Task Move_RestoreIgnoredErrorsBeyondExpected_Aborts_SourceIntact()
+    {
+        // pg_restore "succeeded" with exit 1 but its stderr summary says it
+        // ignored 5 errors — only 1 (the pre-created schema's "already
+        // exists") is expected. The move must abort with the source intact.
+        var tenantId = await SeedAsync();
+        var (_, _, envelopeBefore) = await ReadTenantAsync(tenantId);
+        _runner.Handler = req => req.FileName == "pg_restore"
+            ? new ProcessRunResult(
+                1, "", "pg_restore: warning: errors ignored on restore: 5", false, 1)
+            : new ProcessRunResult(0, "", "", false, 0);
+
+        var act = async () => await CreateService().MoveAsync(tenantId, TargetDbId);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .WithMessage("*ignored 5 errors*");
+        _pool.Executed.Should().NotContain(c =>
+            c.DatabaseId == SourceDbId && c.Sql.Contains("DROP SCHEMA"));
+        var (status, databaseId, envelopeAfter) = await ReadTenantAsync(tenantId);
+        status.Should().Be("draining");
+        databaseId.Should().Be(SourceDbId);
+        envelopeAfter.Should().Equal(envelopeBefore, "the re-point must not have committed");
+    }
+
+    [Test]
+    public async Task Move_RestoreNonzeroExit_WithoutParseableSummary_Aborts()
+    {
+        // exit != 0 with no "errors ignored on restore" summary on stderr
+        // (e.g. the tool died mid-flight) is a hard failure — the old
+        // "history count is the authoritative gate" leniency is gone.
+        var tenantId = await SeedAsync();
+        _runner.Handler = req => req.FileName == "pg_restore"
+            ? new ProcessRunResult(
+                2, "", "pg_restore: error: could not connect to server", false, 1)
+            : new ProcessRunResult(0, "", "", false, 0);
+
+        var act = async () => await CreateService().MoveAsync(tenantId, TargetDbId);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .WithMessage("*no 'errors ignored on restore' summary*");
+        (await ReadTenantAsync(tenantId)).Status.Should().Be("draining");
+        (await ReadTenantAsync(tenantId)).DatabaseId.Should().Be(SourceDbId);
+    }
+
+    [Test]
+    public async Task Move_RestoreWithExactlyExpectedIgnorableError_Completes()
+    {
+        // The expected shape of a real restore: exit 1 with exactly ONE
+        // ignored error (the step-5 pre-created schema's "already exists").
+        var tenantId = await SeedAsync();
+        _runner.Handler = req => req.FileName == "pg_restore"
+            ? new ProcessRunResult(
+                1, "",
+                "pg_restore: warning: errors ignored on restore: 1", false, 1)
+            : new ProcessRunResult(0, "", "", false, 0);
+
+        await CreateService().MoveAsync(tenantId, TargetDbId);
+
+        var (status, databaseId, _) = await ReadTenantAsync(tenantId);
+        status.Should().Be("active");
+        databaseId.Should().Be(TargetDbId);
+    }
+
+    [Test]
+    public async Task Move_PerTableRowCountMismatch_Aborts_ListingTheTables()
+    {
+        // History counts match (fast pre-gate passes) but a data table lost
+        // rows in the restore — the per-table comparison must catch it and
+        // name the offending table with both counts.
+        var tenantId = await SeedAsync();
+        _pool.ScalarResult = (dbId, sql) =>
+            sql.Contains("string_agg") ? "agent_configs,messages"
+            : sql.Contains("__TenantMigrationsHistory") ? 5L
+            : sql.Contains("\"messages\"") ? (dbId == SourceDbId ? 4L : (object)2L)
+            : 7L;
+
+        var act = async () => await CreateService().MoveAsync(tenantId, TargetDbId);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .WithMessage("*messages (source=4, target=2)*");
+        _pool.Executed.Should().NotContain(c =>
+            c.DatabaseId == SourceDbId && c.Sql.Contains("DROP SCHEMA"));
+        var (status, databaseId, _) = await ReadTenantAsync(tenantId);
+        status.Should().Be("draining");
+        databaseId.Should().Be(SourceDbId);
+    }
+
+    [Test]
     public async Task Move_CrossCluster_RolePreexistsWithoutPassword_ThrowsRunbook()
     {
         var tenantId = await SeedAsync(targetHost: "other.internal", targetPort: 7432);
@@ -443,14 +533,101 @@ public class TenantMoveServiceTests
         // tail (sweep + activate) without re-dumping anything.
         var tenantId = await SeedAsync(
             tenantStatus: "draining", tenantDatabaseId: TargetDbId);
-        _pool.SchemaExists = (dbId, _) => dbId == SourceDbId;
+        // The committed re-point left the schema on the TARGET; the stale
+        // copy still sits on the source row.
+        _pool.SchemaExists = (dbId, _) => dbId == SourceDbId || dbId == TargetDbId;
 
         await CreateService().MoveAsync(tenantId, TargetDbId);
 
         _runner.Requests.Should().BeEmpty("the resume tail must not re-dump or re-restore");
         _pool.Executed.Should().Contain(c =>
             c.DatabaseId == SourceDbId && c.Sql.Contains("DROP SCHEMA"));
+        // The resume tail must re-run the step-8 verify probe (evict +
+        // resolver round-trip) before activating.
+        AssertOrdered(_timeline, "sql:source:DROP SCHEMA", "evict", "tenantdb:verify");
         (await ReadTenantAsync(tenantId)).Status.Should().Be("active");
+    }
+
+    [Test]
+    public async Task Move_Resume_TargetSchemaMissing_Throws_WithoutSweeping()
+    {
+        // Resume-tail hardening: the tenant points at the target but the
+        // schema is NOT there (corrupt re-point / manual drop). Sweeping
+        // now would destroy the only remaining copy — the resume must
+        // refuse before any DROP.
+        var tenantId = await SeedAsync(
+            tenantStatus: "draining", tenantDatabaseId: TargetDbId);
+        _pool.SchemaExists = (dbId, _) => dbId == SourceDbId; // not on target
+
+        var act = async () => await CreateService().MoveAsync(tenantId, TargetDbId);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .WithMessage("*refusing to sweep*");
+        _pool.Executed.Should().NotContain(c => c.Sql.Contains("DROP SCHEMA"),
+            "no sweep may run when the target does not actually hold the schema");
+        (await ReadTenantAsync(tenantId)).Status.Should().Be("draining");
+    }
+
+    [Test]
+    public async Task Move_Resume_SkipsRows_AliasingTargetPhysicalDatabase()
+    {
+        // A third pool row aliases the TARGET's physical (Host, Port,
+        // Database) — the sweep sees the schema "exists" there (it IS the
+        // live one) and must skip it instead of dropping the live data.
+        var aliasDbId = Guid.Parse("dddddddd-0000-0000-0000-000000000003");
+        var tenantId = await SeedAsync(
+            tenantStatus: "draining", tenantDatabaseId: TargetDbId);
+        await using (var cp = await _factory.CreateDbContextAsync())
+        {
+            cp.TenantDatabases.Add(new TenantDatabase
+            {
+                Id = aliasDbId,
+                Label = "alias-of-target",
+                Host = SourceHost,
+                Port = SourcePort,
+                AdminConnectionStringEncrypted = new byte[] { 3 },
+                PlacementClass = "shared",
+                TierEligibility = ["free", "team"],
+                TenantCount = 0,
+                Status = "active",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            });
+            await cp.SaveChangesAsync();
+        }
+        _pool.Infos[aliasDbId] = new TenantAdminConnectionInfo(
+            SourceHost, SourcePort, "tamma_provisioner", "admin-alias-pw", "tgtdb");
+        _pool.Names[aliasDbId] = "alias";
+        _pool.SchemaExists = (_, _) => true;
+
+        await CreateService().MoveAsync(tenantId, TargetDbId);
+
+        _pool.Executed.Should().Contain(c =>
+            c.DatabaseId == SourceDbId && c.Sql.Contains("DROP SCHEMA"),
+            "the genuinely stale source copy must still be swept");
+        _pool.Executed.Should().NotContain(c => c.DatabaseId == aliasDbId,
+            "a row aliasing the target's physical database holds the LIVE schema");
+        (await ReadTenantAsync(tenantId)).Status.Should().Be("active");
+    }
+
+    [Test]
+    public async Task Move_Rejects_SourceAndTargetAliasingSamePhysicalDatabase()
+    {
+        // Two tenant_databases rows can point at ONE physical database —
+        // a "move" between them would drop the live schema and delete the
+        // dump. Validation must reject before ANY destructive step.
+        var tenantId = await SeedAsync();
+        _pool.Infos[TargetDbId] = new TenantAdminConnectionInfo(
+            SourceHost, SourcePort, "tamma_provisioner", "admin-tgt-pw", "srcdb");
+
+        var act = async () => await CreateService().MoveAsync(tenantId, TargetDbId);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .WithMessage("*alias the same physical database*");
+        _runner.Requests.Should().BeEmpty("no dump may run for an aliased pair");
+        _pool.Executed.Should().BeEmpty("no DDL may reach either row");
+        (await ReadTenantAsync(tenantId)).Status.Should().Be("active",
+            "validation failures must not open the read-only window");
     }
 
     // ── fakes ──────────────────────────────────────────────────────────
@@ -472,7 +649,7 @@ public class TenantMoveServiceTests
             => Task.FromResult(CreateDbContext());
     }
 
-    private sealed class RecordingPool : ITenantDatabasePool
+    internal sealed class RecordingPool : ITenantDatabasePool
     {
         private readonly List<string> _timeline;
         public RecordingPool(List<string> timeline) => _timeline = timeline;
@@ -480,7 +657,12 @@ public class TenantMoveServiceTests
         public Dictionary<Guid, TenantAdminConnectionInfo> Infos { get; } = new();
         public Dictionary<Guid, string> Names { get; } = new();
         public List<(Guid DatabaseId, string Sql)> Executed { get; } = new();
-        public Func<Guid, string, object?> ScalarResult { get; set; } = (_, _) => 5L;
+
+        /// <summary>Default: the per-table verify's <c>string_agg</c> table
+        /// enumeration yields one table; every count(*) returns 5 on both
+        /// rows (history + per-table counts match → verification passes).</summary>
+        public Func<Guid, string, object?> ScalarResult { get; set; } =
+            (_, sql) => sql.Contains("string_agg") ? "agent_configs" : (object)5L;
         public Func<Guid, string, bool> SchemaExists { get; set; } = (_, _) => false;
         public bool RoleExists { get; set; }
 
@@ -524,7 +706,7 @@ public class TenantMoveServiceTests
         public void EvictAdminConnection(Guid databaseId) { }
     }
 
-    private sealed class RecordingProvisioning : ITenantProvisioningService
+    internal sealed class RecordingProvisioning : ITenantProvisioningService
     {
         private readonly List<string> _timeline;
         public RecordingProvisioning(List<string> timeline) => _timeline = timeline;
@@ -558,7 +740,7 @@ public class TenantMoveServiceTests
             => throw new NotSupportedException("the move never provisions from scratch");
     }
 
-    private sealed class RecordingRunner : IProcessRunner
+    internal sealed class RecordingRunner : IProcessRunner
     {
         private readonly List<string> _timeline;
         public RecordingRunner(List<string> timeline) => _timeline = timeline;
@@ -575,7 +757,7 @@ public class TenantMoveServiceTests
         }
     }
 
-    private sealed class RecordingResolver : IPoolResolver
+    internal sealed class RecordingResolver : IPoolResolver
     {
         private readonly List<string> _timeline;
         public RecordingResolver(List<string> timeline) => _timeline = timeline;
@@ -598,7 +780,7 @@ public class TenantMoveServiceTests
         public TenantConnectionPoolStats GetStats() => new(0, 0, 0);
     }
 
-    private sealed class FakeTenantDbFactory : ITenantDbContextFactory
+    internal sealed class FakeTenantDbFactory : ITenantDbContextFactory
     {
         private readonly List<string> _timeline;
         private readonly string _dbName = $"move-tenantdb-{Guid.NewGuid():N}";
@@ -614,12 +796,12 @@ public class TenantMoveServiceTests
         }
     }
 
-    private sealed class Utf8Decryptor : IConnectionStringDecryptor
+    internal sealed class Utf8Decryptor : IConnectionStringDecryptor
     {
         public string Decrypt(byte[] envelope, int? kekVersion) => Encoding.UTF8.GetString(envelope);
     }
 
-    private sealed class Utf8Protector : ITenantConnectionStringProtector
+    internal sealed class Utf8Protector : ITenantConnectionStringProtector
     {
         public byte[] Encrypt(string plaintext) => Encoding.UTF8.GetBytes(plaintext);
         public int CurrentKekVersion => 1;
@@ -796,11 +978,15 @@ public class TenantMoveServiceEndToEndTests
             await ctx.SaveChangesAsync();
         }
 
+        // Pass-through recorder around the REAL runner so the test can pin
+        // the observed pg_restore ignorable-error count (the expectation
+        // EnsureRestoreSucceeded binds to).
+        var runner = new RecordingPassthroughRunner();
         var service = new TenantMoveService(
             factory,
             pool,
             provisioning,
-            new DefaultProcessRunner(),
+            runner,
             _decryptor,
             _protector,
             resolver,
@@ -810,6 +996,19 @@ public class TenantMoveServiceEndToEndTests
 
         // ── act ────────────────────────────────────────────────────────
         await service.MoveAsync(tenantId, TargetRowId);
+
+        // ── assert: restore-verification expectation matches reality ───
+        // The ONLY ignorable pg_restore error is the step-5 pre-created
+        // schema's "already exists" — observed count must be exactly 1
+        // (this is what TenantMoveService.ExpectedIgnorableRestoreErrors
+        // is bound to; a drift here must fail loudly).
+        var restore = runner.Runs.Single(r => r.Request.FileName == "pg_restore");
+        restore.Result.ExitCode.Should().Be(1,
+            "pg_restore must exit 1 — the pre-created schema trips exactly one "
+            + $"ignorable error (stderr: {restore.Result.StdErr})");
+        restore.Result.StdErr.Should().MatchRegex(
+            @"errors ignored on restore:\s*1\b",
+            "exactly ONE ignorable error (the pre-created schema) is expected");
 
         // ── assert: physical layout ────────────────────────────────────
         (await ScalarAsync(_adminA,
@@ -888,6 +1087,192 @@ public class TenantMoveServiceEndToEndTests
         {
             var options = new DbContextOptionsBuilder<ControlPlaneDbContext>()
                 .UseInMemoryDatabase(_dbName)
+                .Options;
+            return new ControlPlaneDbContext(options);
+        }
+
+        public Task<ControlPlaneDbContext> CreateDbContextAsync(CancellationToken ct = default)
+            => Task.FromResult(CreateDbContext());
+    }
+
+    private sealed class RecordingPassthroughRunner : IProcessRunner
+    {
+        private readonly DefaultProcessRunner _inner = new();
+        public List<(ProcessRunRequest Request, ProcessRunResult Result)> Runs { get; } = new();
+
+        public async Task<ProcessRunResult> RunAsync(
+            ProcessRunRequest request, CancellationToken ct = default)
+        {
+            var result = await _inner.RunAsync(request, ct);
+            Runs.Add((request, result));
+            return result;
+        }
+    }
+}
+
+/// <summary>
+/// Fix-3 concurrency proof: <see cref="TenantMoveService.MoveAsync"/> holds
+/// a per-tenant Postgres advisory lock on a dedicated control-plane session
+/// for its whole duration — a second concurrent move for the same tenant is
+/// rejected up front, and the lock is released when the first move
+/// finishes. Needs a REAL Postgres control plane (the lock lives in the CP
+/// session; the EF InMemory unit suites skip it), so this fixture boots its
+/// own container and applies the CP migrations; the pool/runner/resolver
+/// seams stay the recording fakes — no pg tools are involved (the dump step
+/// is gated in-memory).
+/// </summary>
+[TestFixture]
+public class TenantMoveServiceConcurrencyTests
+{
+    private static readonly Guid SourceDbId = Guid.Parse("dddddddd-0000-0000-0000-000000000011");
+    private static readonly Guid TargetDbId = Guid.Parse("dddddddd-0000-0000-0000-000000000012");
+    private const string Host = "src.internal";
+    private const int Port = 6432;
+
+    private PostgreSqlContainer _postgres = null!;
+    private NpgsqlCpFactory _factory = null!;
+
+    [OneTimeSetUp]
+    public async Task OneTimeSetUp()
+    {
+        _postgres = new PostgreSqlBuilder()
+            .WithImage("postgres:17-alpine")
+            .WithDatabase("move_cp")
+            .WithUsername("tamma")
+            .WithPassword("tamma")
+            .Build();
+        await _postgres.StartAsync();
+        _factory = new NpgsqlCpFactory(_postgres.GetConnectionString());
+        await using var db = await _factory.CreateDbContextAsync();
+        await db.Database.MigrateAsync();
+    }
+
+    [OneTimeTearDown]
+    public async Task OneTimeTearDown()
+    {
+        if (_postgres is not null)
+            await _postgres.DisposeAsync();
+    }
+
+    [Test]
+    public async Task Move_SecondConcurrentMove_IsRejectedByAdvisoryLock()
+    {
+        // ── arrange: plans + two pool rows + one placed tenant on real CP ─
+        var tenantId = Guid.NewGuid();
+        var schema = TenantNaming.SchemaName(tenantId);
+        var role = TenantNaming.RoleName(tenantId);
+        await using (var cp = await _factory.CreateDbContextAsync())
+        {
+            await PlansSeeder.SeedAsync(cp);
+            foreach (var (id, label) in new[] { (SourceDbId, "src"), (TargetDbId, "tgt") })
+            {
+                cp.TenantDatabases.Add(new TenantDatabase
+                {
+                    Id = id,
+                    Label = label,
+                    Host = Host,
+                    Port = Port,
+                    AdminConnectionStringEncrypted = new byte[] { 1 },
+                    PlacementClass = "shared",
+                    TierEligibility = ["free", "team"],
+                    TenantCount = label == "src" ? 1 : 0,
+                    Status = "active",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                });
+            }
+            var tenant = new Tenant
+            {
+                Id = tenantId,
+                Name = "Concurrent Move Tenant",
+                Slug = $"move-{tenantId:N}"[..20],
+                Type = "personal",
+                Plan = "free",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            var entry = cp.Tenants.Add(tenant);
+            entry.Property("Status").CurrentValue = "active";
+            entry.Property("EncryptedConnectionString").CurrentValue = Encoding.UTF8.GetBytes(
+                $"Host={Host};Port={Port};Database=srcdb;Username={role};"
+                + $"Password=tenant-pw;Search Path={schema}");
+            entry.Property("KekVersion").CurrentValue = (short)1;
+            entry.Property<string?>("SchemaName").CurrentValue = schema;
+            entry.Property<Guid?>("DatabaseId").CurrentValue = SourceDbId;
+            await cp.SaveChangesAsync();
+        }
+
+        var timeline = new List<string>();
+        var pool = new TenantMoveServiceTests.RecordingPool(timeline);
+        pool.Infos[SourceDbId] = new TenantAdminConnectionInfo(
+            Host, Port, "tamma_provisioner", "admin-src-pw", "srcdb");
+        pool.Infos[TargetDbId] = new TenantAdminConnectionInfo(
+            Host, Port, "tamma_provisioner", "admin-tgt-pw", "tgtdb");
+        pool.Names[SourceDbId] = "source";
+        pool.Names[TargetDbId] = "target";
+        var runner = new GatedRunner();
+        var service = new TenantMoveService(
+            _factory,
+            pool,
+            new TenantMoveServiceTests.RecordingProvisioning(timeline),
+            runner,
+            new TenantMoveServiceTests.Utf8Decryptor(),
+            new TenantMoveServiceTests.Utf8Protector(),
+            new TenantMoveServiceTests.RecordingResolver(timeline),
+            new TenantMoveServiceTests.FakeTenantDbFactory(timeline),
+            Options.Create(new TenantMoveOptions { DrainGraceSeconds = 0 }),
+            NullLogger<TenantMoveService>.Instance);
+
+        // ── act: park the first move inside pg_dump (lock held) ─────────
+        var first = service.MoveAsync(tenantId, TargetDbId);
+        await runner.Entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        var second = async () => await service.MoveAsync(tenantId, TargetDbId);
+        (await second.Should().ThrowAsync<InvalidOperationException>())
+            .WithMessage("*already in progress*");
+
+        // ── release: the first move completes and the lock is freed ─────
+        runner.Release.TrySetResult();
+        await first.WaitAsync(TimeSpan.FromSeconds(60));
+
+        await using var conn = new NpgsqlConnection(_postgres.GetConnectionString());
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT pg_try_advisory_lock(hashtextextended(@tid, 0));";
+        cmd.Parameters.AddWithValue("tid", tenantId.ToString("D"));
+        (await cmd.ExecuteScalarAsync()).Should().Be(true,
+            "the advisory lock must be released once the move finishes");
+    }
+
+    private sealed class GatedRunner : IProcessRunner
+    {
+        public TaskCompletionSource Entered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Release { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<ProcessRunResult> RunAsync(
+            ProcessRunRequest request, CancellationToken ct = default)
+        {
+            if (Path.GetFileName(request.FileName) == "pg_dump")
+            {
+                Entered.TrySetResult();
+                await Release.Task.WaitAsync(TimeSpan.FromSeconds(60), ct);
+            }
+            return new ProcessRunResult(0, "", "", false, 0);
+        }
+    }
+
+    private sealed class NpgsqlCpFactory : IDbContextFactory<ControlPlaneDbContext>
+    {
+        private readonly string _connectionString;
+        public NpgsqlCpFactory(string connectionString) => _connectionString = connectionString;
+
+        public ControlPlaneDbContext CreateDbContext()
+        {
+            var options = new DbContextOptionsBuilder<ControlPlaneDbContext>()
+                .UseNpgsql(_connectionString)
                 .Options;
             return new ControlPlaneDbContext(options);
         }
