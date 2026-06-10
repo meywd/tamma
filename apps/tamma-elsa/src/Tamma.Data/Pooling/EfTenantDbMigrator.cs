@@ -40,12 +40,28 @@ public sealed class EfTenantDbMigrator : ITenantDbMigrator
                 "tenantConnectionString must be supplied",
                 nameof(tenantConnectionString));
 
+        // Unified-tenancy Phase 1: the connection string's Search Path names the
+        // tenant's schema. Unqualified DDL in the baseline lands in the first
+        // search_path schema; the history table is pinned to the same schema so
+        // each tenant tracks its own applied set. No Search Path → public,
+        // exactly the pre-Phase-1 behavior.
+        var schema = TenantNaming.SchemaFromConnectionString(tenantConnectionString);
+
         var options = new DbContextOptionsBuilder<TenantDbContext>()
             .UseNpgsql(tenantConnectionString, npgsql =>
-                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory"))
+                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema))
             .Options;
 
         await using var ctx = new TenantDbContext(options);
+        if (schema is not null)
+        {
+            // Safety net until Phase 3's CreateTenantSchemaActivity owns schema
+            // creation with role grants. Schema name is validated by
+            // SchemaFromConnectionString ([a-z_][a-z0-9_]*); Quote defends in depth.
+            await ctx.Database.ExecuteSqlRawAsync(
+                $"CREATE SCHEMA IF NOT EXISTS {TenantNaming.Quote(schema)};", ct)
+                .ConfigureAwait(false);
+        }
         // EF's MigrateAsync is idempotent — only pending migrations
         // execute, the rest are no-ops by reading __TenantMigrationsHistory.
         await ctx.Database.MigrateAsync(ct).ConfigureAwait(false);

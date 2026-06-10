@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
+using Tamma.Data.Pooling;
 
 namespace Tamma.Api.Services.Conventions;
 
@@ -148,9 +149,14 @@ public sealed class ConventionStoreSeeder : IHostedService
             .GetDataSourceAsync(Guid.Empty, ct)
             .ConfigureAwait(false);
 
+        // Unified-tenancy Phase 1: pin the history table to the schema named by
+        // the connection string's Search Path (null → public, pre-Phase-1
+        // behavior). NpgsqlDataSource.ConnectionString may omit the password —
+        // fine, the helper only reads the Search Path key.
+        var schema = TenantNaming.SchemaFromConnectionString(dataSource.ConnectionString);
         var options = new DbContextOptionsBuilder<TenantDbContext>()
             .UseNpgsql(dataSource, npgsql =>
-                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory"))
+                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema))
             .Options;
 
         await using var db = new TenantDbContext(options);

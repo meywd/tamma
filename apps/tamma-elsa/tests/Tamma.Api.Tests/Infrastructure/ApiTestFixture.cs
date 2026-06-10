@@ -183,9 +183,13 @@ public class ApiTestFixture
 
     private static async Task ApplyTenantMigrationsAsync(string connectionString)
     {
+        // Unified-tenancy Phase 1: pin the history table to the schema named
+        // by the connection string's Search Path. The fixture's container CS
+        // carries no Search Path → null → public, identical to before.
+        var schema = Tamma.Data.Pooling.TenantNaming.SchemaFromConnectionString(connectionString);
         var options = new DbContextOptionsBuilder<TenantDbContext>()
             .UseNpgsql(connectionString, npgsql =>
-                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory"))
+                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema))
             .Options;
         await using var ctx = new TenantDbContext(options);
         await ctx.Database.MigrateAsync();

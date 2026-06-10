@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Tamma.Data.Abstractions;
+using Tamma.Data.Pooling;
 
 namespace Tamma.Data;
 
@@ -68,13 +69,17 @@ public sealed class TenantDbContextFactory : ITenantDbContextFactory
             var dataSource = await _resolver
                 .GetDataSourceAsync(tenantId, cancellationToken)
                 .ConfigureAwait(false);
+            // NpgsqlDataSource.ConnectionString may omit the password — fine,
+            // the helper only reads the Search Path key.
+            var schema = TenantNaming.SchemaFromConnectionString(dataSource.ConnectionString);
             builder.UseNpgsql(dataSource, npgsql =>
-                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory"));
+                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema));
         }
         else
         {
+            var schema = TenantNaming.SchemaFromConnectionString(_connectionString!);
             builder.UseNpgsql(_connectionString!, npgsql =>
-                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory"));
+                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema));
         }
 
         return new TenantDbContext(builder.Options, tenantId);
