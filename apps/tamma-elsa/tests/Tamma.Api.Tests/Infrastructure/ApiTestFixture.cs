@@ -30,16 +30,15 @@ public class ApiTestFixture
 {
     public static PostgreSqlContainer Postgres { get; private set; } = null!;
     /// <summary>
-    /// Story 28-1 PR D — second Postgres container that holds the per-tenant
-    /// schema (agent_configs, prompt_overrides, provider_health, ...).
-    /// In production each tenant gets its own physical DB; in tests we use
-    /// one shared tenant DB and let <c>TenantDbContextFactory</c>'s shared
-    /// connection-string mode (<c>StubTenantConnectionResolver</c>) hand
-    /// every tenant the same connection. The CP migration drops the moved
-    /// tables from this fixture's CP DB; the tenant migration creates them
-    /// here. Without this split, every test that exercises a moved entity
-    /// hits "relation does not exist" because the moved tables only live
-    /// on the tenant DB now.
+    /// Story 28-1 PR D — second Postgres container holding the tenant-table
+    /// layout. Unified-tenancy Phase 3: this container is the SYSTEM STORE
+    /// (TenantId-NULL platform default rows reached via
+    /// <c>ISystemStoreDbContextFactory</c> / ConnectionStrings:TammaAppDb).
+    /// Actual TENANT data lives in per-tenant <c>t_&lt;hex&gt;</c> schemas
+    /// provisioned on the CP container (the seeded central pool row points
+    /// at it) — tests reach it through the real
+    /// <c>LruPooledTenantConnectionResolver</c> after calling
+    /// <see cref="ProvisionTenantAsync"/>.
     /// </summary>
     public static PostgreSqlContainer TenantPostgres { get; private set; } = null!;
     public static WebApplicationFactory<Program> Factory { get; private set; } = null!;

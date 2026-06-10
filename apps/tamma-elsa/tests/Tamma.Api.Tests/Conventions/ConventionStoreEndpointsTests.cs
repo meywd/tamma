@@ -47,7 +47,7 @@ public class ConventionStoreEndpointsTests
     private PostgreSqlContainer _postgres = null!;
     private string _connectionString = null!;
     private NpgsqlDataSource _dataSource = null!;
-    private StubTenantConnectionResolver _resolver = null!;
+    private FixedDataSourceTenantConnectionResolver _resolver = null!;
     private SystemStoreDbContextFactory _systemStoreFactory = null!;
 
     private static readonly Guid AmbientTenant =
@@ -72,14 +72,13 @@ public class ConventionStoreEndpointsTests
         await migrator.MigrateTenantAppAsync(_connectionString);
 
         _dataSource = NpgsqlDataSource.Create(_connectionString);
-        _resolver = new StubTenantConnectionResolver(_dataSource);
+        _resolver = new FixedDataSourceTenantConnectionResolver(_dataSource);
         _systemStoreFactory = new SystemStoreDbContextFactory(_connectionString);
     }
 
     [OneTimeTearDown]
     public async Task OneTimeTearDown()
     {
-        await _resolver.DisposeAsync();
         await _dataSource.DisposeAsync();
         await _postgres.DisposeAsync();
     }

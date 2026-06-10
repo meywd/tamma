@@ -46,7 +46,7 @@ public class ConventionStoreTests
     private PostgreSqlContainer _postgres = null!;
     private string _connectionString = null!;
     private NpgsqlDataSource _dataSource = null!;
-    private StubTenantConnectionResolver _resolver = null!;
+    private FixedDataSourceTenantConnectionResolver _resolver = null!;
     private SystemStoreDbContextFactory _systemStoreFactory = null!;
 
     // Unified-tenancy Phase 3 split harness: a SECOND physical database in the
@@ -55,7 +55,7 @@ public class ConventionStoreTests
     // the tenant connection.
     private string _tenantOnlyConnectionString = null!;
     private NpgsqlDataSource _tenantOnlyDataSource = null!;
-    private StubTenantConnectionResolver _tenantOnlyResolver = null!;
+    private FixedDataSourceTenantConnectionResolver _tenantOnlyResolver = null!;
 
     // The ambient request tenant id that routes the physical DB (shared in
     // the transitional model). Distinct from the row-scoping tenant id passed
@@ -82,7 +82,7 @@ public class ConventionStoreTests
         await migrator.MigrateTenantAppAsync(_connectionString);
 
         _dataSource = NpgsqlDataSource.Create(_connectionString);
-        _resolver = new StubTenantConnectionResolver(_dataSource);
+        _resolver = new FixedDataSourceTenantConnectionResolver(_dataSource);
         _systemStoreFactory = new SystemStoreDbContextFactory(_connectionString);
 
         // Second database (same container) = a tenant store WITHOUT system
@@ -100,15 +100,13 @@ public class ConventionStoreTests
         }.ConnectionString;
         await migrator.MigrateTenantAppAsync(_tenantOnlyConnectionString);
         _tenantOnlyDataSource = NpgsqlDataSource.Create(_tenantOnlyConnectionString);
-        _tenantOnlyResolver = new StubTenantConnectionResolver(_tenantOnlyDataSource);
+        _tenantOnlyResolver = new FixedDataSourceTenantConnectionResolver(_tenantOnlyDataSource);
     }
 
     [OneTimeTearDown]
     public async Task OneTimeTearDown()
     {
-        await _tenantOnlyResolver.DisposeAsync();
         await _tenantOnlyDataSource.DisposeAsync();
-        await _resolver.DisposeAsync();
         await _dataSource.DisposeAsync();
         await _postgres.DisposeAsync();
     }
