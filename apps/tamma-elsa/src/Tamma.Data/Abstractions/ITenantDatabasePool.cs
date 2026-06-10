@@ -27,6 +27,14 @@ public interface ITenantDatabasePool
     Task<bool> RoleExistsOnAsync(Guid databaseId, string roleName, CancellationToken ct = default);
 
     /// <summary>
+    /// Database name of the pool row's target database, parsed from the
+    /// decrypted admin connection string. Needed by the schema step for
+    /// <c>GRANT CONNECT ON DATABASE</c> / <c>ALTER ROLE ... IN DATABASE</c>
+    /// (Phase 2 Task 3 interface growth, pre-authorized by the plan).
+    /// </summary>
+    Task<string> GetDatabaseNameAsync(Guid databaseId, CancellationToken ct = default);
+
+    /// <summary>
     /// Tenant-facing connection string: the row's Host/Port/SSL + the
     /// row's database + the tenant role/password +
     /// <c>Search Path=&lt;schemaName&gt;</c>.

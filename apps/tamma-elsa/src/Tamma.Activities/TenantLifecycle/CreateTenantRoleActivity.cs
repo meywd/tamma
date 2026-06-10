@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
@@ -97,32 +96,12 @@ public sealed class CreateTenantRoleActivity : TenantLifecycleActivity
 
     /// <summary>
     /// 32-byte cryptographically-strong password using a Postgres-safe
-    /// alphabet. Excludes single-quote, backslash, semicolon — the three
-    /// characters that have ever caused trouble inside a quoted SQL
-    /// literal — so the CREATE ROLE statement above is safe to build by
-    /// concatenation.
+    /// alphabet. Unified-tenancy Phase 2 extracted the implementation to
+    /// <see cref="TenantRolePassword.Generate"/> (Tamma.Data, next to
+    /// <see cref="TenantNaming"/>) so the shared
+    /// <c>TenantProvisioningService</c> step engine mints from the SAME
+    /// generator; this thin alias keeps the activity's historical test
+    /// surface intact.
     /// </summary>
-    internal static string GenerateStrongPassword()
-    {
-        const string alphabet =
-            "ABCDEFGHJKLMNPQRSTUVWXYZ" + "abcdefghijkmnopqrstuvwxyz" + "23456789" + "!@#%^*_-";
-        const int length = 32;
-
-        Span<byte> bytes = stackalloc byte[length * 2];
-        var sb = new System.Text.StringBuilder(length);
-        while (sb.Length < length)
-        {
-            RandomNumberGenerator.Fill(bytes);
-            for (var i = 0; i < bytes.Length && sb.Length < length; i++)
-            {
-                var b = bytes[i];
-                // Reject 00..F when alphabet doesn't divide 256 evenly to
-                // avoid modulo bias — alphabet length is 76 here, so we
-                // accept bytes < 76 * 3 = 228, otherwise resample.
-                if (b >= alphabet.Length * (256 / alphabet.Length)) continue;
-                sb.Append(alphabet[b % alphabet.Length]);
-            }
-        }
-        return sb.ToString();
-    }
+    internal static string GenerateStrongPassword() => TenantRolePassword.Generate();
 }

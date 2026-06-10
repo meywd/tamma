@@ -55,11 +55,23 @@ public sealed class EfTenantDbMigrator : ITenantDbMigrator
         await using var ctx = new TenantDbContext(options);
         if (schema is not null)
         {
-            // Safety net until Phase 3's CreateTenantSchemaActivity owns schema
-            // creation with role grants. Schema name is validated by
-            // SchemaFromConnectionString ([a-z_][a-z0-9_]*); Quote defends in depth.
+            // Safety net for callers that migrate before the schema exists
+            // (Phase 1 harnesses, admin-credentialed paths). Phase 2: the
+            // unified pipeline runs migrations AS THE TENANT ROLE, which has
+            // no CREATE privilege on the database — and Postgres checks that
+            // privilege BEFORE the IF NOT EXISTS bail-out (deliberate, see
+            // CreateSchemaCommand in src/backend/commands/schemacmds.c), so a
+            // bare CREATE SCHEMA IF NOT EXISTS fails with 42501 even when
+            // TenantProvisioningService.CreateSchemaAsync already created the
+            // schema. The DO block skips the CREATE entirely when the schema
+            // is present, so the privilege is only needed when genuinely
+            // creating. Schema name is validated by SchemaFromConnectionString
+            // ([a-z_][a-z0-9_]*); Quote defends in depth.
             await ctx.Database.ExecuteSqlRawAsync(
-                $"CREATE SCHEMA IF NOT EXISTS {TenantNaming.Quote(schema)};", ct)
+                "DO $$ BEGIN "
+                + $"IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = '{schema}') THEN "
+                + $"EXECUTE 'CREATE SCHEMA {TenantNaming.Quote(schema)}'; "
+                + "END IF; END $$;", ct)
                 .ConfigureAwait(false);
         }
         // EF's MigrateAsync is idempotent — only pending migrations

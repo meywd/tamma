@@ -56,6 +56,13 @@ public static class PlatformEventsServiceCollectionExtensions
         // context per call via the factory), so singleton is safe.
         services.TryAddSingleton<ITenantPlacementService, TenantPlacementService>();
 
+        // Unified-tenancy Phase 2 — the ONE provisioning step engine
+        // (placement → role → schema → conn-string → migrate → encrypt →
+        // active) shared by the SaaS CreateTenantWorkflow activities and
+        // the single-user EnsurePersonalTenantMiddleware. Stateless over
+        // singleton seams, so singleton is safe.
+        services.TryAddSingleton<ITenantProvisioningService, TenantProvisioningService>();
+
         // Story 28-5 — per-tenant migrator runs the InitialTenant migration
         // set against a freshly-created tenant DB. Singleton; opens an
         // ad-hoc TenantDbContext per call.

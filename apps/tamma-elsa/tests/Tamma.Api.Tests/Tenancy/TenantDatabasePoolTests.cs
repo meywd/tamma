@@ -192,6 +192,19 @@ public class TenantDatabasePoolTests
     }
 
     [Test]
+    public async Task GetDatabaseName_ParsesRowTargetDatabase()
+    {
+        // Task 3 interface growth (pre-authorized by the plan):
+        // CreateSchemaAsync needs the placement row's database name for
+        // GRANT CONNECT ON DATABASE / ALTER ROLE ... IN DATABASE.
+        var pool = CreatePool();
+
+        (await pool.GetDatabaseNameAsync(_databaseId)).Should().Be(
+            "tenant_pool_test",
+            "the target database name is parsed from the row's decrypted admin connection string");
+    }
+
+    [Test]
     public async Task RoleExistsOn_ProbesTargetClusterPgRoles()
     {
         var pool = CreatePool();

@@ -93,6 +93,19 @@ public sealed class TenantDatabasePool : ITenantDatabasePool
         return result is not null;
     }
 
+    public async Task<string> GetDatabaseNameAsync(
+        Guid databaseId, CancellationToken ct = default)
+    {
+        var adminConnectionString = await GetAdminConnectionStringAsync(databaseId, ct)
+            .ConfigureAwait(false);
+        var database = new NpgsqlConnectionStringBuilder(adminConnectionString).Database;
+        if (string.IsNullOrWhiteSpace(database))
+            throw new InvalidOperationException(
+                $"tenant_databases row {databaseId}: the decrypted admin connection string "
+                + "carries no Database — cannot derive the placement target database name.");
+        return database;
+    }
+
     public async Task<string> BuildTenantConnectionStringAsync(
         Guid databaseId, string roleName, string password, string schemaName,
         CancellationToken ct = default)
