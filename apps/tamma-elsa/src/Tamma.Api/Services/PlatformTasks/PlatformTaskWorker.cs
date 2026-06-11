@@ -45,6 +45,32 @@ public sealed class PlatformTaskWorkerOptions
     /// and parks itself (Round-2 H8). Set
     /// <c>PlatformTaskWorker:RunOnStartup = true</c> in the host
     /// configuration once handlers are wired.
+    ///
+    /// <para><b>⚠ Do NOT enable in production yet</b> (tenancy-residuals
+    /// assessment, 2026-06): handlers being wired is necessary but NOT
+    /// sufficient. <c>ReserveNextAsync</c> claims the oldest
+    /// <c>pending</c> row of <b>any</b> type, and
+    /// <c>platform_queued_tasks</c> is shared with producers whose rows
+    /// must stay pending:
+    /// <list type="bullet">
+    ///   <item><description><c>RETIRE_SECRET_VERSION</c> — the 29-6
+    ///     rotation saga parks these with <c>runAfter</c> ONLY in the
+    ///     payload (no run-after column); only the
+    ///     <c>RetireScheduler</c> sweeper may drain them. This worker
+    ///     has no handler for the type, so it would park+retry the row
+    ///     each tick and dead-letter it after
+    ///     <see cref="MaxRetries"/> ticks (~25s) — destroying the
+    ///     scheduled secret retirement before its grace period.</description></item>
+    ///   <item><description>Orphan-webhook fallback rows
+    ///     (<c>InstallationRouterService</c>) and v1 Cranl
+    ///     <c>provisioning.tenant</c>[.deprovision] rows — same
+    ///     no-handler park→dead-letter fate.</description></item>
+    /// </list>
+    /// Prerequisite for flipping this on: type-aware reservation (the
+    /// worker reserves only types present in its
+    /// <c>IPlatformTaskHandlerRegistry</c>) or handlers for every
+    /// producer type. See
+    /// <c>.dev/findings/platform-task-worker-runonstartup-hazard.md</c>.
     /// </summary>
     public bool RunOnStartup { get; set; } = false;
 }
