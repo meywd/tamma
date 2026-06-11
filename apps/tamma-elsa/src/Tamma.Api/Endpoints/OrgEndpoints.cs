@@ -731,7 +731,7 @@ public static class OrgEndpoints
         IInviteRepository inviteRepo,
         IUserRepository userRepo,
         IDeleteConfirmationService confirmation,
-        IEventRepository events,
+        IPlatformEventPublisher publisher,
         ClaimsPrincipal principal,
         HttpContext httpContext,
         string? confirm)
@@ -760,16 +760,6 @@ public static class OrgEndpoints
             if (!confirmation.Verify(confirm, tenantId, callerId.Value))
                 return Results.BadRequest(new { error = "confirmation_expired", message = "Invalid or expired confirmation token" });
 
-            // Unified-tenancy Phase 3: emit BEFORE deleting. Once the
-            // tenant row is soft-deleted the resolver treats the tenant as
-            // gone (DeletedAt IS NULL filter) and its event store becomes
-            // unreachable -- emitting afterwards throws
-            // TenantNotFoundException after the delete already happened.
-            await EmitTenantEvent(events, "TENANT.PURGED.SUCCESS", tenantId, callerId.Value, new
-            {
-                phase = "hard-delete",
-            });
-
             await using var tx = await db.Database.BeginTransactionAsync();
             try
             {
@@ -789,21 +779,36 @@ public static class OrgEndpoints
                 throw;
             }
 
+            // Tenancy residual (post-#343): terminal lifecycle events live
+            // in the CONTROL-PLANE store, not the tenant's own schema — the
+            // tenant store is unreachable after the delete (DeletedAt filter
+            // in the resolver), which used to force an emit-BEFORE-delete
+            // ordering that recorded "PURGED" for purges that could still
+            // roll back. The CP store survives tenant deletion, so we emit
+            // AFTER the transaction commits: the event now means the purge
+            // actually happened.
+            await publisher.AppendAndPublishAsync(
+                BuildLifecycleEvent("TENANT.PURGED.SUCCESS", tenantId, callerId.Value, new Dictionary<string, object?>
+                {
+                    ["phase"] = "hard-delete",
+                }));
+
             return Results.NoContent();
         }
 
         // Phase 1 (soft-delete) — mint the HMAC confirmation token and return 202.
-        // Unified-tenancy Phase 3: emit BEFORE soft-deleting -- a
-        // soft-deleted tenant's event store is unreachable through the
-        // resolver (DeletedAt IS NULL filter), so emitting afterwards
-        // throws TenantNotFoundException after the delete already happened.
-        await EmitTenantEvent(events, "TENANT.DELETED.SUCCESS", tenantId, callerId.Value, new
-        {
-            phase = "soft-delete",
-        });
-
         await tenantRepo.SoftDeleteAsync(tenantId);
         await userRepo.SwitchActiveTenantAwayFromAsync(callerId.Value, tenantId);
+
+        // Tenancy residual (post-#343): terminal lifecycle event goes to the
+        // CONTROL-PLANE store (see the PURGED emission above for rationale) —
+        // emitted AFTER the soft-delete so the audit record reflects reality.
+        await publisher.AppendAndPublishAsync(
+            BuildLifecycleEvent("TENANT.DELETED.SUCCESS", tenantId, callerId.Value, new Dictionary<string, object?>
+            {
+                ["phase"] = "soft-delete",
+            }));
+
         var token = confirmation.Generate(tenantId, callerId.Value);
 
         return Results.Json(new
