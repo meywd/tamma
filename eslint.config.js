@@ -105,12 +105,6 @@ export default [
       '**/coverage/**',
       '**/*.config.js',
       '**/.tsbuildinfo',
-      // apps/test-platform manages its own ESLint config (legacy eslintrc).
-      // ESLint 10 removed support for legacy eslintrc, but this app is linted
-      // separately via its own `next lint` / `eslint src/**/*.ts` scripts and
-      // is not part of the root lint scope. Migrate to flat config in a
-      // follow-up.
-      'apps/test-platform/**',
     ],
   },
 ];
