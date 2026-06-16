@@ -40,12 +40,8 @@
   "overrides": {
     "svix": "1.92.2",
     "uuid": "^14.0.0",
-    "drizzle-kit": {
-      "@esbuild-kit/esm-loader": {
-        "@esbuild-kit/core-utils": {
-          "esbuild": "^0.25.0"
-        }
-      }
+    "@esbuild-kit/core-utils": {
+      "esbuild": "^0.25.0"
     }
   }
 }
