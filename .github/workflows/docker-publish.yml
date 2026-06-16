@@ -1,10 +1,16 @@
 # =============================================================================
 # Build & Publish Docker Images + Deploy
 #
-# Builds all Tamma Docker images, pushes to GHCR, then deploys to VPS.
+# Builds all Tamma Docker images and pushes to GHCR on every push/PR.
 # - main: tagged as :main and :sha-<commit>
-# - tags: tagged as :v1.2.3 and :latest
+# - v* tags: tagged as :v1.2.3 and :latest (release images; NOT deployed)
+# - qa-* tags: tagged as :sha-<commit> AND deployed to the VPS
 # - PRs: tagged as :pr-<number>
+#
+# DEPLOY runs ONLY on a `qa-*` tag push. Pushing to main, opening a PR, or
+# cutting a v* release tag builds/publishes images but never touches the VPS.
+# This makes VPS deploys deliberate and serial — eliminating the prior race
+# where concurrent PR/main deploys collided on the shared host.
 #
 # All Docker steps retry up to 3 times to handle Docker Hub rate limits.
 # =============================================================================
@@ -14,7 +20,7 @@ name: Build & Publish Docker Images
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    tags: ['v*', 'qa-*']
   pull_request:
     branches: [main]
 
@@ -327,6 +333,9 @@ jobs:
   deploy:
     name: Deploy to VPS
     needs: [build-ts, build-dashboard, build-dotnet, build-intelligence-server]
+    # Deploy ONLY on a qa-* tag push. PRs, main pushes, and v* release tags
+    # build/publish images but never deploy.
+    if: startsWith(github.ref, 'refs/tags/qa-')
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
