@@ -7,8 +7,10 @@ using Tamma.Api.Authorization;
 using Tamma.Api.Dtos.Orgs;
 using Tamma.Api.Services.Email;
 using Tamma.Api.Services.RateLimit;
+using Tamma.Api.Services.TenantStatus;
 using Tamma.Api.Validation;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -729,7 +731,7 @@ public static class OrgEndpoints
         IInviteRepository inviteRepo,
         IUserRepository userRepo,
         IDeleteConfirmationService confirmation,
-        IEventRepository events,
+        IPlatformEventPublisher publisher,
         ClaimsPrincipal principal,
         HttpContext httpContext,
         string? confirm)
@@ -758,16 +760,6 @@ public static class OrgEndpoints
             if (!confirmation.Verify(confirm, tenantId, callerId.Value))
                 return Results.BadRequest(new { error = "confirmation_expired", message = "Invalid or expired confirmation token" });
 
-            // Unified-tenancy Phase 3: emit BEFORE deleting. Once the
-            // tenant row is soft-deleted the resolver treats the tenant as
-            // gone (DeletedAt IS NULL filter) and its event store becomes
-            // unreachable -- emitting afterwards throws
-            // TenantNotFoundException after the delete already happened.
-            await EmitTenantEvent(events, "TENANT.PURGED.SUCCESS", tenantId, callerId.Value, new
-            {
-                phase = "hard-delete",
-            });
-
             await using var tx = await db.Database.BeginTransactionAsync();
             try
             {
@@ -787,21 +779,36 @@ public static class OrgEndpoints
                 throw;
             }
 
+            // Tenancy residual (post-#343): terminal lifecycle events live
+            // in the CONTROL-PLANE store, not the tenant's own schema — the
+            // tenant store is unreachable after the delete (DeletedAt filter
+            // in the resolver), which used to force an emit-BEFORE-delete
+            // ordering that recorded "PURGED" for purges that could still
+            // roll back. The CP store survives tenant deletion, so we emit
+            // AFTER the transaction commits: the event now means the purge
+            // actually happened.
+            await publisher.AppendAndPublishAsync(
+                BuildLifecycleEvent("TENANT.PURGED.SUCCESS", tenantId, callerId.Value, new Dictionary<string, object?>
+                {
+                    ["phase"] = "hard-delete",
+                }));
+
             return Results.NoContent();
         }
 
         // Phase 1 (soft-delete) — mint the HMAC confirmation token and return 202.
-        // Unified-tenancy Phase 3: emit BEFORE soft-deleting -- a
-        // soft-deleted tenant's event store is unreachable through the
-        // resolver (DeletedAt IS NULL filter), so emitting afterwards
-        // throws TenantNotFoundException after the delete already happened.
-        await EmitTenantEvent(events, "TENANT.DELETED.SUCCESS", tenantId, callerId.Value, new
-        {
-            phase = "soft-delete",
-        });
-
         await tenantRepo.SoftDeleteAsync(tenantId);
         await userRepo.SwitchActiveTenantAwayFromAsync(callerId.Value, tenantId);
+
+        // Tenancy residual (post-#343): terminal lifecycle event goes to the
+        // CONTROL-PLANE store (see the PURGED emission above for rationale) —
+        // emitted AFTER the soft-delete so the audit record reflects reality.
+        await publisher.AppendAndPublishAsync(
+            BuildLifecycleEvent("TENANT.DELETED.SUCCESS", tenantId, callerId.Value, new Dictionary<string, object?>
+            {
+                ["phase"] = "soft-delete",
+            }));
+
         var token = confirmation.Generate(tenantId, callerId.Value);
 
         return Results.Json(new
@@ -810,6 +817,169 @@ public static class OrgEndpoints
             confirmationToken = token.Token,
             expiresAt = token.ExpiresAt,
         }, statusCode: StatusCodes.Status202Accepted);
+    }
+
+    /// <summary>
+    /// Self-service re-provision: <c>POST /api/v1/orgs/{tenantId}/reprovision</c>.
+    ///
+    /// <para>When <see cref="CreateOrg"/>'s synchronous provisioning throws
+    /// (placement → role → schema → minted connection string → migrations),
+    /// the org row survives in a degraded state — no encrypted connection
+    /// string, so the resolver can't reach ANY tenant data. Before this
+    /// endpoint the only recovery was the platform-owner-only
+    /// <c>POST /api/admin/tenants/{id}/actions/retry</c>; now the tenant's
+    /// own owner/admin can retry without filing a support ticket.</para>
+    ///
+    /// <para><b>Authorization</b>: path-tenant membership is enforced by
+    /// <see cref="RequireTenantMembershipFilter"/> (cross-tenant calls 404
+    /// before the handler runs); the handler additionally requires the
+    /// admin+ role (tenant_owner or tenant_admin) — same gate as
+    /// <see cref="UpdateOrgSettings"/>.</para>
+    ///
+    /// <para><b>State machine</b> (reads the <c>tenants.Status</c> shadow
+    /// column):</para>
+    /// <list type="bullet">
+    ///   <item><description><c>provisioning</c> / <c>pending_verification</c>
+    ///     → 409 <c>provisioning_in_progress</c> (a run is already in
+    ///     flight — never start a second).</description></item>
+    ///   <item><description><c>active</c> (or legacy NULL) with an encrypted
+    ///     connection string present → 409 <c>already_provisioned</c>
+    ///     (idempotent no-op refusal — nothing to repair).</description></item>
+    ///   <item><description><c>failed</c>, or <c>active</c>/NULL with NO
+    ///     stored envelope (the degraded CreateOrg leftover) → allowed:
+    ///     flip to <c>provisioning</c>, re-run the SAME
+    ///     <see cref="ITenantProvisioningService.ProvisionAsync"/> pipeline
+    ///     CreateOrg uses (idempotent: CREATE IF NOT EXISTS / re-grant /
+    ///     skip-reencrypt), which flips Status to <c>active</c> on
+    ///     success.</description></item>
+    ///   <item><description>Anything else (<c>suspended</c>, <c>draining</c>,
+    ///     <c>deleting</c>, ...) → 409 <c>tenant_not_reprovisionable</c>.</description></item>
+    /// </list>
+    /// </summary>
+    public static async Task<IResult> ReprovisionOrg(
+        Guid tenantId,
+        ControlPlaneDbContext db,
+        ITenantProvisioningService provisioning,
+        IPlatformEventPublisher publisher,
+        ITenantStatusCache statusCache,
+        ITenantConnectionResolver connectionResolver,
+        ITenantStatusInvalidationBus invalidationBus,
+        ClaimsPrincipal principal,
+        HttpContext httpContext)
+    {
+        var callerId = ResolveUserId(principal);
+        if (callerId is null) return Results.Unauthorized();
+
+        // Path-tenant membership gate already ran; require admin+ to
+        // trigger infrastructure work (mirrors UpdateOrgSettings).
+        if (!RoleAtLeast(httpContext, TenantRoleHierarchy.Admin))
+            return Results.Json(new { error = "Requires admin role or higher" }, statusCode: 403);
+
+        // Soft-deleted rows are filtered by the global query filter —
+        // a deleted org 404s here, same as GetOrg.
+        var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId);
+        if (tenant is null) return Results.NotFound(new { error = "Organization not found" });
+
+        var entry = db.Entry(tenant);
+        var status = (string?)entry.Property("Status").CurrentValue;
+        var envelope = (byte[]?)entry.Property("EncryptedConnectionString").CurrentValue;
+        var hasEnvelope = envelope is { Length: > 0 };
+
+        if (status is TenantStatusEvaluator.StatusProvisioning
+                   or TenantStatusEvaluator.StatusPendingVerification)
+        {
+            return Results.Json(
+                new { error = "provisioning_in_progress", message = "Provisioning is already in flight for this organization" },
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        var looksActive = TenantStatusEvaluator.IsActive(status);
+        if (looksActive && hasEnvelope)
+        {
+            return Results.Json(
+                new { error = "already_provisioned", message = "Organization is already provisioned" },
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        var retryable =
+            string.Equals(status, TenantStatusEvaluator.StatusFailed, StringComparison.OrdinalIgnoreCase)
+            || (looksActive && !hasEnvelope);  // degraded CreateOrg leftover
+        if (!retryable)
+        {
+            return Results.Json(
+                new { error = "tenant_not_reprovisionable", message = $"Organization status '{status}' does not allow re-provisioning" },
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
+        // Claim the run: flip to 'provisioning' BEFORE doing work so a
+        // concurrent second call observes in-flight state and 409s.
+        entry.Property("Status").CurrentValue = TenantStatusEvaluator.StatusProvisioning;
+        entry.Property("FailureReason").CurrentValue = null;
+        tenant.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        statusCache.Invalidate(tenantId);
+        await invalidationBus.PublishAsync(tenantId);
+
+        // Audit breadcrumb in the CONTROL-PLANE store (the tenant store may
+        // be unreachable — that's exactly why we're here).
+        await publisher.AppendAndPublishAsync(
+            BuildLifecycleEvent(
+                "TENANT.PROVISIONING_REQUESTED",
+                tenantId,
+                callerId.Value,
+                new Dictionary<string, object?>
+                {
+                    ["requestedAt"] = DateTime.UtcNow,
+                    ["source"] = "self-service-reprovision",
+                }));
+
+        try
+        {
+            // Same pipeline CreateOrg runs — placement → role → schema →
+            // minted connection string → migrate → encrypt + persist →
+            // Status 'active'. Idempotent on partial prior runs.
+            await provisioning.ProvisionAsync(tenantId);
+        }
+        catch (Exception ex)
+        {
+            // ProvisionAsync uses its own DbContext scope; reload before
+            // stamping so we don't overwrite anything it persisted.
+            await entry.ReloadAsync();
+            entry.Property("Status").CurrentValue = TenantStatusEvaluator.StatusFailed;
+            entry.Property("FailureReason").CurrentValue = "reprovision_failed";
+            tenant.UpdatedAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            statusCache.Invalidate(tenantId);
+            await invalidationBus.PublishAsync(tenantId);
+
+            httpContext.RequestServices
+                .GetService<ILoggerFactory>()?
+                .CreateLogger(typeof(OrgEndpoints))
+                .LogError(ex, "Self-service re-provision failed tenantId={TenantId}", tenantId);
+
+            return Results.Json(
+                new { error = "provisioning_failed", message = "Re-provisioning failed; the organization was returned to the failed state" },
+                statusCode: StatusCodes.Status502BadGateway);
+        }
+
+        // Success — ProvisionAsync flipped Status to 'active' and persisted
+        // the encrypted connection string. Drop every stale cache layer so
+        // the next request routes against the fresh envelope.
+        statusCache.Invalidate(tenantId);
+        await connectionResolver.EvictAsync(tenantId);
+        await invalidationBus.PublishAsync(tenantId);
+
+        await publisher.AppendAndPublishAsync(
+            BuildLifecycleEvent(
+                "TENANT.PROVISIONED.SUCCESS",
+                tenantId,
+                callerId.Value,
+                new Dictionary<string, object?>
+                {
+                    ["source"] = "self-service-reprovision",
+                }));
+
+        return Results.Ok(new { tenantId, status = TenantStatusEvaluator.StatusActive });
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
@@ -825,6 +995,43 @@ public static class OrgEndpoints
 
     private static OrgResponse BuildOrgResponse(Tenant t)
         => new(t.Id, t.Name, t.Slug, t.Type, t.Plan, t.OwnerId, t.Settings, t.CreatedAt);
+
+    /// <summary>
+    /// Build a tenant-lifecycle <see cref="PlatformEvent"/> for the
+    /// control-plane store. Terminal / pre-readiness lifecycle events must
+    /// NOT go through <see cref="EmitTenantEvent"/>: the tenant's own
+    /// event store is unreachable once the tenant is deleted (and before
+    /// it is provisioned), which defeats the audit purpose. Shape mirrors
+    /// <c>AdminTenantsEndpoints.BuildAdminEvent</c>.
+    /// </summary>
+    private static PlatformEvent BuildLifecycleEvent(
+        string type,
+        Guid tenantId,
+        Guid userId,
+        IReadOnlyDictionary<string, object?>? data = null)
+    {
+        var tags = new Dictionary<string, string?>
+        {
+            ["tenantId"] = tenantId.ToString("D"),
+            ["userId"] = userId.ToString("D"),
+            ["source"] = "self-service",
+        };
+
+        var enriched = data is null
+            ? new Dictionary<string, object?>()
+            : new Dictionary<string, object?>(data);
+        enriched["actorUserId"] = userId.ToString("D");
+
+        return new PlatformEvent
+        {
+            Type = type,
+            TenantId = tenantId,
+            UserId = userId,
+            Tags = JsonSerializer.Serialize(tags),
+            Metadata = """{"workflowVersion":"1.0.0","eventSource":"system"}""",
+            Data = JsonSerializer.Serialize(enriched),
+        };
+    }
 
     private static async Task EmitTenantEvent(
         IEventRepository events,

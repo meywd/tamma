@@ -2,6 +2,7 @@ using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -36,6 +37,7 @@ public class OrgEndpointHandlerTests
     private IInviteRepository _inviteRepo = null!;
     private IUserRepository _userRepo = null!;
     private IEventRepository _events = null!;
+    private Tamma.Data.Abstractions.IPlatformEventPublisher _publisher = null!;
     private InMemoryEmailService _emailInbox = null!;
     private DeleteConfirmationService _confirmation = null!;
     private ITenantProvisioningService _provisioning = null!;
@@ -51,6 +53,7 @@ public class OrgEndpointHandlerTests
         _inviteRepo = _scope.ServiceProvider.GetRequiredService<IInviteRepository>();
         _userRepo = _scope.ServiceProvider.GetRequiredService<IUserRepository>();
         _events = _scope.ServiceProvider.GetRequiredService<IEventRepository>();
+        _publisher = _scope.ServiceProvider.GetRequiredService<Tamma.Data.Abstractions.IPlatformEventPublisher>();
         _provisioning = _scope.ServiceProvider.GetRequiredService<ITenantProvisioningService>();
         _emailInbox = new InMemoryEmailService();
         var config = new ConfigurationBuilder()
@@ -386,7 +389,7 @@ public class OrgEndpointHandlerTests
 
         var result = await OrgEndpoints.DeleteOrg(
             tenantId, _db, _tenantRepo, _membershipRepo, _inviteRepo, _userRepo,
-            _confirmation, _events, Principal(ownerId), ctx, confirm: null);
+            _confirmation, _publisher, Principal(ownerId), ctx, confirm: null);
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status409Conflict);
     }
 
@@ -401,8 +404,45 @@ public class OrgEndpointHandlerTests
         var ctx = HttpCtxWithRole(TenantRoleHierarchy.Owner);
         var result = await OrgEndpoints.DeleteOrg(
             tenantId, _db, _tenantRepo, _membershipRepo, _inviteRepo, _userRepo,
-            _confirmation, _events, Principal(ownerId), ctx, confirm: null);
+            _confirmation, _publisher, Principal(ownerId), ctx, confirm: null);
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status202Accepted);
+
+        // Tenancy residual (post-#343): the terminal soft-delete event must
+        // land in the CONTROL-PLANE store (the tenant's own store is
+        // unreachable post-delete, defeating the audit purpose).
+        var cpEvents = await _db.PlatformEvents.AsNoTracking()
+            .Where(e => e.TenantId == tenantId && e.Type == "TENANT.DELETED.SUCCESS")
+            .ToListAsync();
+        cpEvents.Should().HaveCount(1);
+        cpEvents[0].UserId.Should().Be(ownerId);
+        cpEvents[0].Data.Should().Contain("soft-delete");
+    }
+
+    [Test]
+    public async Task DeleteOrg_Phase2_EmitsPurgedEventToControlPlaneStore()
+    {
+        var (tenantId, ownerId, _) = await SeedTenantWithOwnerAndMember();
+        var second = await _tenantRepo.CreateAsync(new Tenant { Name = "Other", Slug = "other-co2", Type = "org" });
+        await _membershipRepo.AddAsync(second.Id, ownerId, "owner");
+
+        var ctx = HttpCtxWithRole(TenantRoleHierarchy.Owner);
+
+        // Phase 2: hard-delete with a VALID token. (The handler 404s
+        // already-soft-deleted rows, so phase 2 runs against the live row.)
+        var token = _confirmation.Generate(tenantId, ownerId);
+        var phase2 = await OrgEndpoints.DeleteOrg(
+            tenantId, _db, _tenantRepo, _membershipRepo, _inviteRepo, _userRepo,
+            _confirmation, _publisher, Principal(ownerId), ctx, confirm: token.Token);
+        (await ExecuteAndGetStatus(phase2)).Should().Be(StatusCodes.Status204NoContent);
+
+        // Terminal purge event survives in the control-plane store even
+        // though the tenant (and its event store) is gone.
+        var purged = await _db.PlatformEvents.AsNoTracking()
+            .Where(e => e.TenantId == tenantId && e.Type == "TENANT.PURGED.SUCCESS")
+            .ToListAsync();
+        purged.Should().HaveCount(1);
+        purged[0].UserId.Should().Be(ownerId);
+        purged[0].Data.Should().Contain("hard-delete");
     }
 
     [Test]
@@ -415,7 +455,7 @@ public class OrgEndpointHandlerTests
         var ctx = HttpCtxWithRole(TenantRoleHierarchy.Owner);
         var result = await OrgEndpoints.DeleteOrg(
             tenantId, _db, _tenantRepo, _membershipRepo, _inviteRepo, _userRepo,
-            _confirmation, _events, Principal(ownerId), ctx, confirm: "junk.deadbeef");
+            _confirmation, _publisher, Principal(ownerId), ctx, confirm: "junk.deadbeef");
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status400BadRequest);
     }
 

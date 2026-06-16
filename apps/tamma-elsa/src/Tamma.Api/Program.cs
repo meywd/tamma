@@ -1526,6 +1526,11 @@ orgs.MapGet("/{tenantId:guid}", OrgEndpoints.GetOrg)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 orgs.MapPut("/{tenantId:guid}/settings", OrgEndpoints.UpdateOrgSettings)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+// Tenancy residual (post-#343): self-service re-provision for a tenant's
+// own owner/admin. Membership filter kills cross-tenant access; the
+// handler enforces admin+ role and the failed/degraded-only state machine.
+orgs.MapPost("/{tenantId:guid}/reprovision", OrgEndpoints.ReprovisionOrg)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 orgs.MapGet("/{tenantId:guid}/members", OrgEndpoints.ListMembers)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 orgs.MapPut("/{tenantId:guid}/members/{userId:guid}/role", OrgEndpoints.UpdateMemberRole)
