@@ -24,7 +24,7 @@ namespace Tamma.Data.Entities;
 /// </summary>
 public class Plan
 {
-    /// <summary>Stable UUIDv7 baked into the seed so FK targets stay deterministic across environments.</summary>
+    /// <summary>Stable sentinel UUID baked into the seed so FK targets stay deterministic across environments.</summary>
     public Guid Id { get; set; }
 
     /// <summary>Human-friendly slug — <c>free</c>, <c>team</c>, <c>enterprise</c>.</summary>

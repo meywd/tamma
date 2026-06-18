@@ -1365,16 +1365,19 @@ admin.MapGet("/analytics/tenants", AdminAnalyticsEndpoints.GetTopTenants)
 admin.MapGet("/analytics/events", AdminAnalyticsEndpoints.GetEventHistogram)
     .RequireAuthorization("PlatformOwnerAccess");
 
-// Story 34-1 — read-only plan price-book endpoints. OwnerAccess per the story
-// (the catalog is platform-owned in both modes; in SaaS only platform owners
-// administer it). The write (create/deprecate version) endpoints are Story
-// 34-2 — this story ships only the three reads + the tested PlanVersionEditor.
+// Story 34-1 — read-only plan price-book endpoints. PlatformOwnerAccess: the
+// price book is platform-GLOBAL (incl. BYOK-vs-platform pricing) in both modes
+// with no per-tenant override layer, so it is platform-scoped admin work — like
+// the adjacent /analytics routes above. OwnerAccess would let every
+// personal-tenant owner read the whole platform price book (Finding C1). The
+// write (create/deprecate version) endpoints are Story 34-2 — this story ships
+// only the three reads + the tested PlanVersionEditor.
 admin.MapGet("/plans", Tamma.Api.Endpoints.Admin.PlanCatalogEndpoints.ListActive)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapGet("/plans/{slug}", Tamma.Api.Endpoints.Admin.PlanCatalogEndpoints.GetActiveBySlug)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapGet("/plans/{slug}/versions", Tamma.Api.Endpoints.Admin.PlanCatalogEndpoints.GetVersions)
-    .RequireAuthorization("OwnerAccess");
+    .RequireAuthorization("PlatformOwnerAccess");
 
 // Story 28-11 — platform-admin tenant-status UX. List + detail surface the
 // Epic-28 shadow columns on tenants (Status, PlanId, KekVersion,

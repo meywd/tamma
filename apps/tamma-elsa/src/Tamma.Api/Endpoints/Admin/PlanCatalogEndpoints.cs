@@ -5,9 +5,11 @@ namespace Tamma.Api.Endpoints.Admin;
 /// <summary>
 /// Story 34-1 — read-only plan price-book endpoints under
 /// <c>/api/admin/plans*</c>. Every endpoint here MUST be gated behind the
-/// <c>OwnerAccess</c> policy at the wiring site: the catalog is platform-owned
-/// in both single-user and SaaS modes (no per-tenant override layer), and in
-/// SaaS only platform owners administer it.
+/// <c>PlatformOwnerAccess</c> policy at the wiring site: the catalog is
+/// platform-GLOBAL (incl. BYOK-vs-platform pricing) in both single-user and
+/// SaaS modes (no per-tenant override layer), so it is platform-scoped admin
+/// work. <c>OwnerAccess</c> would let every personal-tenant owner read the
+/// whole platform price book (Finding C1) — only platform admins may.
 ///
 /// <para>Write (create/deprecate version) endpoints are explicitly deferred to
 /// Story 34-2 — this story ships only the three reads plus the tested

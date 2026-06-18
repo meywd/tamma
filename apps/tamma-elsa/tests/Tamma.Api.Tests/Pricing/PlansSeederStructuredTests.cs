@@ -111,14 +111,24 @@ public class PlansSeederStructuredTests
             await PlansSeeder.SeedAsync(first);
         }
 
-        // Admin edits the free plan's display name (a v2 draft would normally
-        // do this; here we mutate the seeded row directly to model an admin
-        // edit the seeder must NOT clobber).
+        // An admin "edits" the free plan — under the Story 34-1 immutability
+        // invariant that is a NEW VERSION (the active row can't be mutated in
+        // place; the SaveChanges interceptor enforces it), so the rename lands
+        // on a renamed v2 while v1 flips to deprecated. The seeder must NOT
+        // clobber either: its insert-missing-only check keys off the seed's
+        // stable FreePlanId, which now points at the deprecated v1.
         await using (var edit = CreateContext(dbName))
         {
-            var free = await edit.Plans.FirstAsync(p => p.Id == PlansSeeder.FreePlanId);
-            free.DisplayName = "Free (admin-renamed)";
-            await edit.SaveChangesAsync();
+            var editor = new Tamma.Api.Services.Pricing.PlanVersionEditor(
+                edit,
+                new Tamma.Api.Tests.TestDoubles.RecordingPlatformEventPublisher(),
+                TimeProvider.System,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<
+                    Tamma.Api.Services.Pricing.PlanVersionEditor>.Instance);
+            await editor.CreateNewVersionAsync(
+                "free",
+                new Tamma.Api.Services.Pricing.PlanDraftSpec(DisplayName: "Free (admin-renamed)"),
+                new Tamma.Api.Services.Pricing.PlanEditorPrincipal("admin", null));
         }
 
         await using (var reseed = CreateContext(dbName))
@@ -127,10 +137,20 @@ public class PlansSeederStructuredTests
         }
 
         await using var verify = CreateContext(dbName);
-        var reloaded = await verify.Plans.AsNoTracking()
-            .FirstAsync(p => p.Id == PlansSeeder.FreePlanId);
-        reloaded.DisplayName.Should().Be("Free (admin-renamed)",
-            "insert-missing-only seeder must never revert an admin-edited row");
+
+        // v1 (the seed's stable id) is untouched — still deprecated, still its
+        // original seeded "Free" name; the seeder never reverted/duplicated it.
+        var v1 = await verify.Plans.AsNoTracking().FirstAsync(p => p.Id == PlansSeeder.FreePlanId);
+        v1.Status.Should().Be("deprecated");
+        v1.DisplayName.Should().Be("Free", "the seeder must not revert the deprecated v1");
+
+        // The active v2 carries the admin rename and the seeder left it alone.
+        var activeFree = await verify.Plans.AsNoTracking()
+            .FirstAsync(p => p.Slug == "free" && p.Status == "active");
+        activeFree.DisplayName.Should().Be("Free (admin-renamed)",
+            "insert-missing-only seeder must never revert an admin's new active version");
+        (await verify.Plans.AsNoTracking().CountAsync(p => p.Slug == "free"))
+            .Should().Be(2, "exactly v1 (deprecated) + v2 (active); the re-seed added nothing");
     }
 
     [Test]

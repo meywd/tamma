@@ -28,15 +28,15 @@ namespace Tamma.Data.Seeders;
 /// </summary>
 public static class PlansSeeder
 {
-    /// <summary>Stable UUIDv4 for the free plan — never change.</summary>
+    /// <summary>Stable sentinel UUID for the free plan — never change.</summary>
     public static readonly Guid FreePlanId =
         Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
 
-    /// <summary>Stable UUIDv4 for the team plan — never change.</summary>
+    /// <summary>Stable sentinel UUID for the team plan — never change.</summary>
     public static readonly Guid TeamPlanId =
         Guid.Parse("aaaaaaaa-0000-0000-0000-000000000002");
 
-    /// <summary>Stable UUIDv4 for the enterprise plan — never change.</summary>
+    /// <summary>Stable sentinel UUID for the enterprise plan — never change.</summary>
     public static readonly Guid EnterprisePlanId =
         Guid.Parse("aaaaaaaa-0000-0000-0000-000000000003");
 
@@ -61,7 +61,21 @@ public static class PlansSeeder
 
         if (changed)
         {
-            await context.SaveChangesAsync(cancellationToken);
+            // The seeder is the trusted system-defaults populate path: it does
+            // insert-missing-only backfill of children onto an already-active
+            // v1 plan (Story 28-1 shipped the bare plan rows; 34-1 backfills
+            // the typed children). The Story 34-1 immutability interceptor on
+            // ControlPlaneDbContext would otherwise (correctly) reject adding a
+            // child to an active plan, so suppress it for just this save.
+            context.SuppressPlanImmutabilityGuard = true;
+            try
+            {
+                await context.SaveChangesAsync(cancellationToken);
+            }
+            finally
+            {
+                context.SuppressPlanImmutabilityGuard = false;
+            }
         }
     }
 

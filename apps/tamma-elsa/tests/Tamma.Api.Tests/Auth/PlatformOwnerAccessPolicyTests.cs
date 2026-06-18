@@ -160,6 +160,11 @@ public class PlatformOwnerAccessPolicyTests
         "/api/admin/api-keys",
         "/api/admin/analytics/summary",
         "/api/admin/tenants",
+        // Story 34-1 follow-up — the plan price-book is platform-global
+        // (incl. BYOK-vs-platform pricing). It MUST gate on
+        // PlatformOwnerAccess, not OwnerAccess (Finding C1): a tenant-owner
+        // who is not a platform admin must NOT be able to read it.
+        "/api/admin/plans",
     };
 
     [Test]

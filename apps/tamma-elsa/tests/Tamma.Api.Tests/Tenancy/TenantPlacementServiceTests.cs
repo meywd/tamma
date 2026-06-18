@@ -222,6 +222,66 @@ public class TenantPlacementServiceTests
     }
 
     [Test]
+    public async Task Assign_MultiVersionSlug_ResolvesActiveVersionsPlacementPolicy()
+    {
+        // Story 34-1 regression — a slug is now a version chain (a deprecated
+        // v1 + an active v2). The placement lookup must pin Status=="active":
+        // the live v2 says PlacementPolicy="shared", while the deprecated v1
+        // (stale) says "dedicated". With only a SHARED pool row available,
+        // placement succeeds ONLY if the lookup resolves v2's policy. Before
+        // the fix the slug lookup had no Status filter and could pick v1,
+        // failing placement against the shared row.
+        var dbName = nameof(Assign_MultiVersionSlug_ResolvesActiveVersionsPlacementPolicy);
+        var tenantId = Guid.NewGuid();
+
+        await using (var seed = CreateContext(dbName))
+        {
+            await PlansSeeder.SeedAsync(seed);
+
+            var v1Id = Guid.NewGuid();
+            var v2Id = Guid.NewGuid();
+            var now = DateTime.UtcNow;
+            // v1 (deprecated) carries the STALE policy.
+            seed.Plans.Add(new Plan
+            {
+                Id = v1Id, Slug = "versioned", DisplayName = "Versioned v1",
+                Version = 1, Status = "deprecated", BillingInterval = "monthly",
+                MonthlyPriceUsd = 10m, PlacementPolicy = "dedicated",
+                CreatedAt = now, UpdatedAt = now,
+            });
+            // v2 (active) carries the LIVE policy — the one placement must use.
+            seed.Plans.Add(new Plan
+            {
+                Id = v2Id, Slug = "versioned", DisplayName = "Versioned v2",
+                Version = 2, Status = "active", BillingInterval = "monthly",
+                MonthlyPriceUsd = 20m, PlacementPolicy = "shared",
+                SupersedesPlanId = v1Id, CreatedAt = now, UpdatedAt = now,
+            });
+
+            seed.Tenants.Add(new Tenant
+            {
+                Id = tenantId,
+                Name = "Versioned Plan Tenant",
+                Slug = $"versioned-{tenantId:N}"[..20],
+                Plan = "versioned",
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        var sharedRow = PoolRow("shared-central", placementClass: "shared",
+            tiers: ["versioned", "free", "team", "enterprise"]);
+        await AddPoolRowsAsync(dbName, sharedRow);
+
+        var placement = await CreateService(dbName).AssignAsync(tenantId);
+
+        placement.DatabaseId.Should().Be(sharedRow.Id,
+            "placement must resolve the ACTIVE v2 (PlacementPolicy='shared') and land on "
+            + "the shared pool row — not the deprecated v1 ('dedicated')");
+    }
+
+    [Test]
     public async Task Assign_CorruptState_OnePropSet_ReStamps()
     {
         var dbName = nameof(Assign_CorruptState_OnePropSet_ReStamps);

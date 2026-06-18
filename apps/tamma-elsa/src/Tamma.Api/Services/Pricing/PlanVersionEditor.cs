@@ -21,14 +21,19 @@ namespace Tamma.Api.Services.Pricing;
 /// <para>The partial unique index <c>UX_plans_OneActivePerSlug</c> is the
 /// load-bearing backstop — the DB rejects a second <c>active</c> row per slug
 /// regardless of app logic, so a flip-then-insert race can never leave two
-/// active versions. <see cref="EnsureMutableOrThrow"/> is the application-level
-/// guard that rejects any direct mutation of an immutable row with
-/// <c>PLAN.VERSION.IMMUTABLE</c>.</para>
+/// active versions. The AUTHORITATIVE immutability enforcement is the
+/// <c>SaveChanges</c> interceptor on <c>ControlPlaneDbContext</c>, which throws
+/// <c>PLAN.VERSION.IMMUTABLE</c> for ANY mutation of an active/deprecated plan
+/// row OR its child feature/entitlement/price rows — including raw EF mutations
+/// that never go through this editor. <see cref="EnsureMutableOrThrow"/> is an
+/// optional pre-flight convenience that surfaces the same rejection early
+/// (before a write is attempted); it does NOT replace the interceptor.</para>
 ///
 /// <para>This story ships the editor as a tested SERVICE METHOD; wiring it
 /// behind admin create/deprecate ENDPOINTS is Story 34-2. The catalog is
-/// platform-owned in both modes — there is no per-tenant override layer; in
-/// SaaS the endpoint (34-2) gates this on <c>OwnerAccess</c>.</para>
+/// platform-GLOBAL in both modes — there is no per-tenant override layer; in
+/// SaaS the endpoint (34-2) gates this on <c>PlatformOwnerAccess</c> (the
+/// price book is platform-scoped admin work, not a per-tenant owner gate).</para>
 /// </summary>
 public sealed class PlanVersionEditor
 {
@@ -52,11 +57,17 @@ public sealed class PlanVersionEditor
     }
 
     /// <summary>
-    /// Application-level immutability guard. A <c>Plan</c> whose status is
+    /// Optional pre-flight immutability check. A <c>Plan</c> whose status is
     /// <c>active</c> or <c>deprecated</c> may NOT be mutated in place — only a
     /// <c>draft</c> row is writable (plus the controlled active→deprecated flip
     /// performed inside <see cref="CreateNewVersionAsync"/>). Throws
     /// <c>PLAN.VERSION.IMMUTABLE</c> (severity High) otherwise.
+    ///
+    /// <para>This is a convenience that lets a caller reject early, with a
+    /// friendly message, BEFORE attempting a write. It is NOT the authoritative
+    /// guard: the <c>ControlPlaneDbContext</c> <c>SaveChanges</c> interceptor
+    /// enforces the same invariant (incl. child rows) for every save path,
+    /// even raw EF mutations that bypass this editor entirely.</para>
     /// </summary>
     public void EnsureMutableOrThrow(Plan plan)
     {
@@ -171,11 +182,21 @@ public sealed class PlanVersionEditor
             "Plan version-create transaction begin: {Slug} v{Prior} → v{New}",
             slug, prior.Version, newVersion);
 
-        // Flip-then-insert in one transaction. The partial unique index means
-        // the prior MUST be deprecated before the new active row commits, or
-        // the insert is rejected — the DB is the final arbiter of "one active
-        // per slug". InMemory tests don't enforce indexes; the relational
-        // tests (Postgres) cover that invariant.
+        // Flip-then-insert in one transaction with DETERMINISTIC ordering:
+        // deprecate the prior (SaveChanges), THEN add the new active row
+        // (SaveChanges), then commit. EF's single-SaveChanges UPDATE-before-
+        // INSERT topological sort keys off DECLARED index columns and does NOT
+        // reliably account for FILTERED indexes (the determining Status column
+        // lives in the UX_plans_OneActivePerSlug WHERE predicate, not the index
+        // key) — see dotnet/efcore#7193. If EF emitted INSERT-before-UPDATE the
+        // new active row would collide with the still-active prior and the
+        // create would spuriously fail. Two explicit SaveChanges inside ONE
+        // transaction make the ordering unconditional; the partial unique index
+        // remains the final DB-level arbiter of "one active per slug".
+        //
+        // Compatible with the ControlPlaneDbContext immutability interceptor:
+        // the first save is the controlled active→deprecated flip (allowed);
+        // the second adds a freshly-Added active plan + its children (allowed).
         var ownsTx = _db.Database.CurrentTransaction is null
             && _db.Database.IsRelational();
         var tx = ownsTx ? await _db.Database.BeginTransactionAsync(ct) : null;
@@ -183,6 +204,8 @@ public sealed class PlanVersionEditor
         {
             prior.Status = "deprecated";
             prior.UpdatedAt = now;
+            await _db.SaveChangesAsync(ct);
+
             _db.Plans.Add(newPlan);
             await _db.SaveChangesAsync(ct);
 

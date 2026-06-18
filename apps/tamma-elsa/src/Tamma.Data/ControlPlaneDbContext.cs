@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Tamma.Core;
 using Tamma.Core.Entities;
 using Tamma.Core.Enums;
 using Tamma.Data.Entities;
@@ -27,6 +29,224 @@ public class ControlPlaneDbContext : DbContext
     public ControlPlaneDbContext(DbContextOptions<ControlPlaneDbContext> options)
         : base(options)
     {
+    }
+
+    // ── Story 34-1 (AC6) — plan-immutability SaveChanges interceptor ──
+    //
+    // EnforcePlanImmutability scans the ChangeTracker before EVERY save and
+    // throws PLAN.VERSION.IMMUTABLE for any mutation of an active/deprecated
+    // Plan row or its child PlanFeature/PlanEntitlement/PlanPrice rows. The
+    // application-level guard in PlanVersionEditor is no longer the only line
+    // of defence: a raw db.Plans.First(active).MonthlyPriceUsd = 999; SaveChanges
+    // now fails LOUD here. The single controlled active→deprecated flip the
+    // version editor performs is allowed; children of a freshly-Added active
+    // plan (the new version's rows) are allowed.
+
+    /// <summary>
+    /// Story 34-1 — escape hatch for the trusted <c>PlansSeeder</c> system-
+    /// defaults populate path ONLY. The seeder does insert-missing-only
+    /// backfill of children onto an already-active v1 plan (Story 28-1 shipped
+    /// the bare plan rows; 34-1 backfills the typed children), which the
+    /// immutability interceptor would otherwise (correctly) reject. The seeder
+    /// sets this for the duration of its save and resets it in a finally. No
+    /// user-facing or request-handling code should ever set it.
+    /// </summary>
+    public bool SuppressPlanImmutabilityGuard { get; set; }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        if (!SuppressPlanImmutabilityGuard)
+        {
+            EnforcePlanImmutability(resolveUntrackedPlanStatus: ids =>
+                Plans.AsNoTracking()
+                    .Where(p => ids.Contains(p.Id))
+                    .Select(p => new { p.Id, p.Status })
+                    .ToDictionary(x => x.Id, x => x.Status));
+        }
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override async Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        if (!SuppressPlanImmutabilityGuard)
+        {
+            var untracked = await ResolvePlanGuardUntrackedAsync(cancellationToken);
+            EnforcePlanImmutability(resolveUntrackedPlanStatus: _ => untracked);
+        }
+        return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    /// <summary>
+    /// Async pre-pass for <see cref="SaveChangesAsync(bool, CancellationToken)"/>:
+    /// loads the status of any owning plan referenced by a changed child row
+    /// that isn't already in the ChangeTracker, so the synchronous
+    /// <see cref="EnforcePlanImmutability"/> body never blocks on the DB.
+    /// </summary>
+    private async Task<Dictionary<Guid, string>> ResolvePlanGuardUntrackedAsync(
+        CancellationToken ct)
+    {
+        var ids = CollectUntrackedOwningPlanIds();
+        if (ids.Count == 0) return new Dictionary<Guid, string>();
+
+        var rows = await Plans.AsNoTracking()
+            .Where(p => ids.Contains(p.Id))
+            .Select(p => new { p.Id, p.Status })
+            .ToListAsync(ct);
+        return rows.ToDictionary(x => x.Id, x => x.Status);
+    }
+
+    /// <summary>
+    /// Owning-plan ids of changed child rows that are NOT represented by a
+    /// tracked <see cref="Plan"/> entry — these need a DB status lookup.
+    /// </summary>
+    private HashSet<Guid> CollectUntrackedOwningPlanIds()
+    {
+        var trackedPlanIds = new HashSet<Guid>(
+            ChangeTracker.Entries<Plan>().Select(e => e.Entity.Id));
+
+        var needed = new HashSet<Guid>();
+        foreach (var planId in EnumerateChangedChildOwningPlanIds())
+        {
+            if (!trackedPlanIds.Contains(planId)) needed.Add(planId);
+        }
+        return needed;
+    }
+
+    private IEnumerable<Guid> EnumerateChangedChildOwningPlanIds()
+    {
+        foreach (var e in ChangeTracker.Entries<PlanFeature>())
+            if (e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                yield return e.Entity.PlanId;
+        foreach (var e in ChangeTracker.Entries<PlanEntitlement>())
+            if (e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                yield return e.Entity.PlanId;
+        foreach (var e in ChangeTracker.Entries<PlanPrice>())
+            if (e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                yield return e.Entity.PlanId;
+    }
+
+    /// <summary>
+    /// Story 34-1 AC6 — throws <c>PLAN.VERSION.IMMUTABLE</c> (High) when the
+    /// pending change set mutates an immutable plan version or its children.
+    /// </summary>
+    /// <param name="resolveUntrackedPlanStatus">
+    /// Resolves the DB status of owning plans not in the ChangeTracker.
+    /// </param>
+    private void EnforcePlanImmutability(
+        Func<HashSet<Guid>, IReadOnlyDictionary<Guid, string>> resolveUntrackedPlanStatus)
+    {
+        // 1. Direct Plan mutations.
+        foreach (var entry in ChangeTracker.Entries<Plan>())
+        {
+            if (entry.State != EntityState.Modified) continue;
+
+            var originalStatus = entry.OriginalValues.GetValue<string>(nameof(Plan.Status));
+            if (originalStatus is not ("active" or "deprecated")) continue;
+
+            // The ONLY permitted change to an immutable row is the controlled
+            // active→deprecated flip the version editor performs: Status flips
+            // active→deprecated and nothing else changes except UpdatedAt.
+            if (IsControlledDeprecationFlip(entry, originalStatus))
+            {
+                continue;
+            }
+
+            ThrowImmutable(entry.Entity.Slug, entry.Entity.Version,
+                originalStatus, entry.Entity.Id, "plan");
+        }
+
+        // 2. Child mutations (insert / update / delete).
+        var trackedPlanStatus = ChangeTracker.Entries<Plan>()
+            .ToDictionary(e => e.Entity.Id, e => (e.State, e.Entity.Status));
+
+        var untrackedIds = CollectUntrackedOwningPlanIds();
+        var untrackedStatus = untrackedIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : resolveUntrackedPlanStatus(untrackedIds);
+
+        EnforceChildren<PlanFeature>(e => e.PlanId, trackedPlanStatus, untrackedStatus);
+        EnforceChildren<PlanEntitlement>(e => e.PlanId, trackedPlanStatus, untrackedStatus);
+        EnforceChildren<PlanPrice>(e => e.PlanId, trackedPlanStatus, untrackedStatus);
+    }
+
+    private void EnforceChildren<TChild>(
+        Func<TChild, Guid> planIdSelector,
+        IReadOnlyDictionary<Guid, (EntityState State, string Status)> trackedPlanStatus,
+        IReadOnlyDictionary<Guid, string> untrackedStatus)
+        where TChild : class
+    {
+        foreach (var entry in ChangeTracker.Entries<TChild>())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted))
+                continue;
+
+            var planId = planIdSelector(entry.Entity);
+
+            // The new version's children attach to a freshly-Added active plan
+            // — those are part of creating a new immutable version, so allow.
+            if (trackedPlanStatus.TryGetValue(planId, out var tracked))
+            {
+                if (tracked.State == EntityState.Added) continue;
+                if (tracked.Status is "active" or "deprecated")
+                {
+                    ThrowImmutable("(child)", null, tracked.Status, planId, typeof(TChild).Name);
+                }
+                continue;
+            }
+
+            // Owning plan not tracked — use the DB status. A child of an
+            // already-persisted active/deprecated plan is immutable.
+            if (untrackedStatus.TryGetValue(planId, out var dbStatus)
+                && dbStatus is "active" or "deprecated")
+            {
+                ThrowImmutable("(child)", null, dbStatus, planId, typeof(TChild).Name);
+            }
+        }
+    }
+
+    /// <summary>
+    /// True iff this Modified Plan entry is the controlled active→deprecated
+    /// flip the version editor performs: Status changes from <c>active</c> to
+    /// <c>deprecated</c> and no other property changes except <c>UpdatedAt</c>.
+    /// </summary>
+    private static bool IsControlledDeprecationFlip(
+        EntityEntry<Plan> entry, string originalStatus)
+    {
+        if (originalStatus != "active") return false;
+        if (entry.Entity.Status != "deprecated") return false;
+
+        foreach (var prop in entry.Properties)
+        {
+            if (!prop.IsModified) continue;
+            var name = prop.Metadata.Name;
+            if (name is nameof(Plan.Status) or nameof(Plan.UpdatedAt)) continue;
+            // Any other modified column means this is NOT a pure flip.
+            return false;
+        }
+        return true;
+    }
+
+    private static void ThrowImmutable(
+        string slug, int? version, string status, Guid planId, string entityKind)
+    {
+        var versionLabel = version is null ? string.Empty : $" v{version}";
+        throw new TammaError(
+            "PLAN.VERSION.IMMUTABLE",
+            $"Plan '{slug}'{versionLabel} is {status} and immutable — its {entityKind} rows "
+            + "cannot be inserted, updated, or deleted in place. Create a new version "
+            + "via PlanVersionEditor instead.",
+            new Dictionary<string, object?>
+            {
+                ["slug"] = slug,
+                ["version"] = version,
+                ["status"] = status,
+                ["planId"] = planId.ToString("D"),
+                ["entityKind"] = entityKind,
+            },
+            retryable: false,
+            severity: TammaErrorSeverity.High);
     }
 
     // ── Control-plane entities (Doc 01 §1.2 — exactly 14 tables) ──
