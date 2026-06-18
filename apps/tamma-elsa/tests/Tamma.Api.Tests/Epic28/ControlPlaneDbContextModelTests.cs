@@ -59,6 +59,10 @@ public class ControlPlaneDbContextModelTests
             "github_installation_repos",
             "github_webhook_deliveries",
             "plans",
+            // Story 34-1 — typed price-book children of plans.
+            "plan_features",
+            "plan_entitlements",
+            "plan_prices",
             "platform_events",
             "platform_queued_tasks",
             "platform_email_outbox",
@@ -103,7 +107,8 @@ public class ControlPlaneDbContextModelTests
             + "entities have moved to TenantDbContext. Story 31-2 adds "
             + "tenant_platform_installations; Story 31-7 adds "
             + "platform_webhook_deliveries. Unified-tenancy Phase 0 adds "
-            + "tenant_databases. Story 32-1 adds agents + agent_versions.");
+            + "tenant_databases. Story 32-1 adds agents + agent_versions. "
+            + "Story 34-1 adds plan_features + plan_entitlements + plan_prices.");
     }
 
     // ── Story 32-1 — agent entity model shape ──

@@ -809,6 +809,11 @@ builder.Services.AddTammaAlerts();
 // DCB event stream and emits AlertPayloads through IAlertSink.
 builder.Services.AddTammaAlertRuleEngine();
 
+// Story 34-1 — plan price-book catalog: read-only IPlanCatalogService +
+// the PlanVersionEditor (immutable, versioned plan management). CP-resident;
+// platform-owned in both modes.
+builder.Services.AddPlanCatalog();
+
 // Wave C.4 §4 — per-process health monitor for TammaApiClient.
 // Singleton so the rolling 5-min failure window is shared across every
 // call site. Fires PLATFORM.API.UNHEALTHY via IAlertEventEmitter when
@@ -1359,6 +1364,17 @@ admin.MapGet("/analytics/tenants", AdminAnalyticsEndpoints.GetTopTenants)
     .RequireAuthorization("PlatformOwnerAccess");
 admin.MapGet("/analytics/events", AdminAnalyticsEndpoints.GetEventHistogram)
     .RequireAuthorization("PlatformOwnerAccess");
+
+// Story 34-1 — read-only plan price-book endpoints. OwnerAccess per the story
+// (the catalog is platform-owned in both modes; in SaaS only platform owners
+// administer it). The write (create/deprecate version) endpoints are Story
+// 34-2 — this story ships only the three reads + the tested PlanVersionEditor.
+admin.MapGet("/plans", Tamma.Api.Endpoints.Admin.PlanCatalogEndpoints.ListActive)
+    .RequireAuthorization("OwnerAccess");
+admin.MapGet("/plans/{slug}", Tamma.Api.Endpoints.Admin.PlanCatalogEndpoints.GetActiveBySlug)
+    .RequireAuthorization("OwnerAccess");
+admin.MapGet("/plans/{slug}/versions", Tamma.Api.Endpoints.Admin.PlanCatalogEndpoints.GetVersions)
+    .RequireAuthorization("OwnerAccess");
 
 // Story 28-11 — platform-admin tenant-status UX. List + detail surface the
 // Epic-28 shadow columns on tenants (Status, PlanId, KekVersion,
@@ -2028,7 +2044,8 @@ using (var scope = app.Services.CreateScope())
                     platform_webhook_deliveries,
                     junior_developers, kek_rotations,
                     mentorship_events, mentorship_sessions,
-                    password_reset_tokens, plans,
+                    password_reset_tokens,
+                    plan_features, plan_entitlements, plan_prices, plans,
                     platform_analytics_hourly,
                     platform_api_key_index,
                     platform_bootstrap,

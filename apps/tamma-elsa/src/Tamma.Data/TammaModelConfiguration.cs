@@ -440,7 +440,7 @@ internal static class TammaModelConfiguration
             entity.HasIndex(e => new { e.InstallationId, e.ReceivedAt });
         });
 
-        // ── Plan (Story 28-1) ──
+        // ── Plan (Story 28-1; extended by Story 34-1 — versioned price-book) ──
         modelBuilder.Entity<Plan>(entity =>
         {
             entity.ToTable("plans", t =>
@@ -448,8 +448,18 @@ internal static class TammaModelConfiguration
                 t.HasCheckConstraint(
                     "ck_plans_placement_policy",
                     "\"PlacementPolicy\" IN ('shared','dedicated')");
+                // Story 34-1 — pin the version-lifecycle + billing cadence to
+                // their closed enums so a buggy write path can't stash an
+                // unknown value the catalog can't reason about.
+                t.HasCheckConstraint(
+                    "ck_plans_status",
+                    "\"Status\" IN ('active','deprecated','draft')");
+                t.HasCheckConstraint(
+                    "ck_plans_billing_interval",
+                    "\"BillingInterval\" IN ('monthly','annual')");
             });
             entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.Slug).IsRequired().HasMaxLength(64);
             entity.Property(e => e.DisplayName).IsRequired().HasMaxLength(255);
             entity.Property(e => e.MonthlyPriceUsd).HasPrecision(18, 2);
@@ -457,10 +467,123 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.PlacementPolicy)
                 .IsRequired().HasMaxLength(20).HasDefaultValue("shared");
+
+            // Story 34-1 — versioning columns. Defaults backfill the 3 seeded
+            // rows on migrate: Version=1, Status='active'.
+            entity.Property(e => e.Version).HasDefaultValue(1);
+            entity.Property(e => e.Status)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("active");
+            entity.Property(e => e.IsCustom).HasDefaultValue(false);
+            entity.Property(e => e.BillingInterval)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("monthly");
+
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            entity.HasIndex(e => e.Slug).IsUnique();
+            // Story 34-1 — the legacy single-column UNIQUE(Slug) is replaced
+            // by UNIQUE(Slug, Version) (a slug now has multiple version rows)
+            // plus a partial unique index pinning exactly one 'active' version
+            // per slug — the immutability invariant in SQL.
+            entity.HasIndex(e => new { e.Slug, e.Version })
+                .HasDatabaseName("UX_plans_Slug_Version").IsUnique();
+            entity.HasIndex(e => e.Slug)
+                .HasDatabaseName("UX_plans_OneActivePerSlug")
+                .HasFilter("\"Status\" = 'active'").IsUnique();
+
+            // Self-referencing version chain. RESTRICT — a superseded version
+            // must not be hard-deleted out from under its successor's pointer.
+            entity.HasOne<Plan>()
+                .WithMany()
+                .HasForeignKey(e => e.SupersedesPlanId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ── PlanFeature / PlanEntitlement / PlanPrice (Story 34-1) ──
+        //
+        // The typed price-book children. Configured here (alongside Plan) so
+        // the whole plan aggregate's mapping lives in one place — splitting a
+        // single aggregate's config across files is the failure mode the
+        // story explicitly forbids. All FK to plans(Id) with RESTRICT (a plan
+        // version a tenant references must never be hard-deleted), each with a
+        // natural-key unique index.
+        modelBuilder.Entity<PlanFeature>(entity =>
+        {
+            entity.ToTable("plan_features");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.FeatureKey).IsRequired().HasMaxLength(128);
+            entity.Property(e => e.StringValue).HasMaxLength(512);
+
+            entity.HasIndex(e => new { e.PlanId, e.FeatureKey })
+                .HasDatabaseName("UX_plan_features_PlanId_FeatureKey").IsUnique();
+
+            entity.HasOne<Plan>()
+                .WithMany(p => p.Features)
+                .HasForeignKey(e => e.PlanId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PlanEntitlement>(entity =>
+        {
+            entity.ToTable("plan_entitlements", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_plan_entitlements_period",
+                    "\"Period\" IN ('monthly','total')");
+                t.HasCheckConstraint(
+                    "ck_plan_entitlements_overage",
+                    "\"OverageMode\" IN ('block','allow','meter')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+
+            // Persist the metric key as its snake_case text — never the
+            // unstable ordinal (Story 34-1 AC5). The converter is the single
+            // source of the wire/DB contract shared with metering/enforcement.
+            entity.Property(e => e.MetricKey)
+                .HasConversion(
+                    k => k.ToMetricString(),
+                    s => EntitlementMetricKeyExtensions.Parse(s))
+                .HasColumnType("text")
+                .IsRequired();
+            entity.Property(e => e.Period)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("monthly");
+            entity.Property(e => e.OverageMode)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("block");
+
+            entity.HasIndex(e => new { e.PlanId, e.MetricKey })
+                .HasDatabaseName("UX_plan_entitlements_PlanId_MetricKey").IsUnique();
+
+            entity.HasOne<Plan>()
+                .WithMany(p => p.Entitlements)
+                .HasForeignKey(e => e.PlanId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PlanPrice>(entity =>
+        {
+            entity.ToTable("plan_prices", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_plan_prices_mode",
+                    "\"PricingMode\" IN ('platform_provided','byok')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.PricingMode)
+                .IsRequired().HasMaxLength(32).HasDefaultValue("platform_provided");
+            entity.Property(e => e.RecurringUsd).HasPrecision(20, 4);
+            entity.Property(e => e.SeatUsd).HasPrecision(20, 4);
+            entity.Property(e => e.MeteredComponent)
+                .HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+
+            entity.HasIndex(e => new { e.PlanId, e.PricingMode })
+                .HasDatabaseName("UX_plan_prices_PlanId_PricingMode").IsUnique();
+
+            entity.HasOne<Plan>()
+                .WithMany(p => p.Prices)
+                .HasForeignKey(e => e.PlanId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // ── PlatformEvent (Story 28-6) ──
@@ -753,6 +876,12 @@ internal static class TammaModelConfiguration
             modelBuilder.Ignore<GitHubInstallationRepo>();
             modelBuilder.Ignore<GitHubWebhookDelivery>();
             modelBuilder.Ignore<Plan>();
+            // Story 34-1 — the typed price-book children are CP-resident; keep
+            // them out of the tenant model graph (Plan's navigations would
+            // otherwise pull them in via convention).
+            modelBuilder.Ignore<PlanFeature>();
+            modelBuilder.Ignore<PlanEntitlement>();
+            modelBuilder.Ignore<PlanPrice>();
             modelBuilder.Ignore<PlatformEvent>();
             modelBuilder.Ignore<PlatformQueuedTask>();
             modelBuilder.Ignore<PlatformEmailOutboxMessage>();

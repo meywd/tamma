@@ -74,6 +74,24 @@ public class ControlPlaneDbContext : DbContext
     // and system-scope mail that must flow before or after a tenant DB
     // exists. The Plans table owns the subscription-plan catalogue.
     public DbSet<Plan> Plans => Set<Plan>();
+
+    /// <summary>
+    /// Story 34-1 — typed feature flags per plan version (replaces the opaque
+    /// <c>Plan.Quotas</c> JSON for capability flags). CP-resident.
+    /// </summary>
+    public DbSet<PlanFeature> PlanFeatures => Set<PlanFeature>();
+
+    /// <summary>
+    /// Story 34-1 — typed quota entitlements per plan version. CP-resident.
+    /// </summary>
+    public DbSet<PlanEntitlement> PlanEntitlements => Set<PlanEntitlement>();
+
+    /// <summary>
+    /// Story 34-1 — recurring + per-seat + metered pricing per plan version,
+    /// split by BYOK vs platform-provided pricing mode. CP-resident.
+    /// </summary>
+    public DbSet<PlanPrice> PlanPrices => Set<PlanPrice>();
+
     public DbSet<PlatformEvent> PlatformEvents => Set<PlatformEvent>();
     public DbSet<PlatformQueuedTask> PlatformQueuedTasks => Set<PlatformQueuedTask>();
     public DbSet<PlatformEmailOutboxMessage> PlatformEmailOutbox => Set<PlatformEmailOutboxMessage>();
