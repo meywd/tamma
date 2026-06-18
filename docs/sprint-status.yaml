@@ -1,5 +1,5 @@
 # generated: 2025-10-29
-# updated: 2026-06-16 (full codebase audit: 32 epics re-verified against code; superseded items flagged; +25 discovered stories)
+# updated: 2026-06-17 (added Epics 32/34/35/36/37 — 59 drafted stories for agents/pricing/billing/analytics/audit; Epic 20 superseded)
 # project: Tamma
 # project_key: Tamma
 # tracking_system: file-system
@@ -271,11 +271,11 @@ development_status:
   epic-19-retrospective: optional
 
   epic-20: contexted
-  20-1-stripe-integration-plan-model: drafted       # No Stripe SDK or customer-create. Plan.cs catalogue exists but is tenancy placement (Epic 28), not the Stripe plan/customer model.
-  20-2-subscription-management: drafted             # No subscription CRUD, checkout, portal, or webhook handler. Spec only.
-  20-3-usage-metering: drafted                      # No usage metering: no meter events, capture hooks, or aggregation. Spec only.
-  20-4-usage-limits-enforcement: drafted            # No limit enforcement. Plan.Quotas JSON defined but unused by any billing/orchestrator check.
-  20-5-billing-dashboard: drafted                   # No billing dashboard UI in dashboard or dashboard-user. Spec only.
+  20-1-stripe-integration-plan-model: superseded       # No Stripe SDK or customer-create. Plan.cs catalogue exists but is tenancy placement (Epic 28), not the Stripe plan/customer model.  → superseded by Epic 34 (plan model) + 35-1 (Stripe)
+  20-2-subscription-management: superseded             # No subscription CRUD, checkout, portal, or webhook handler. Spec only.  → superseded by Epic 35-4 (subscription lifecycle)
+  20-3-usage-metering: superseded                      # No usage metering: no meter events, capture hooks, or aggregation. Spec only.  → superseded by Epic 35-3 (metering) + 32-9 (usage producer) + Epic 36 (analytics)
+  20-4-usage-limits-enforcement: superseded            # No limit enforcement. Plan.Quotas JSON defined but unused by any billing/orchestrator check.  → superseded by Epic 34-6 (entitlements) + 35-6 (enforcement)
+  20-5-billing-dashboard: superseded                   # No billing dashboard UI in dashboard or dashboard-user. Spec only.  → superseded by Epic 35-11 (billing dashboard) + 36-6 (analytics dashboard)
   epic-20-retrospective: optional
 
   epic-21: contexted
@@ -413,4 +413,79 @@ development_status:
   # Epic 33 (Per-Tenant Identity Providers) is explicitly DEFERRED per docs/stories/epic-33/README.md
   # Forward-looking stub only — no stories drafted; will be scoped when an enterprise SSO trigger fires
   epic-33-retrospective: optional
+
+
+  epic-32: contexted   # NEW Agents — entities, managed execution, benchmarking & learning (added 2026-06-17; all stories drafted)
+  32-1-agent-entity-model-and-versioned-saved-config: drafted # Agent Entity Model & Versioned Saved Config (public/private) [P0]
+  32-2-agent-registry-resolution-and-rbac-api: drafted # Agent Registry, Resolution & RBAC API [P0]
+  32-3-per-tenant-provider-credential-resolution: drafted # Per-Tenant Provider Credential Resolution (BYOK → platform) [P0]
+  32-4-saas-provider-auth-gating-api-key-only: drafted # SaaS Provider Auth Gating — API-key only (CLI/token providers single-user only) [P0]
+  32-5-managed-agent-execution-layer: drafted         # Managed Agent Execution Layer (IManagedAgent over IAIProvider) [P0]
+  32-6-agent-action-trail-in-tenant-store: drafted    # Agent Action Trail (DCB events tagged agent_id) in Tenant Store [P0]
+  32-7-multi-agent-design-review-panels-in-elsa: drafted # Multi-Agent Design/Review Panels in Elsa (strategy-driven) [P1]
+  32-8-outcome-capture-and-bug-taxonomy-at-review-gate: drafted # Outcome Capture & Bug Taxonomy at Review/Gate [P1]
+  32-9-cost-basis-plus-margin-metering-and-byok-pricing-model: drafted # Cost-Basis-Plus-Margin Metering & BYOK Pricing Model (re-targets Epic 20) [P1]
+  32-10-benchmark-projections-and-leaderboards: drafted # Benchmark Projections & Leaderboards (per agent/provider/prompt, per-tenant) [P1]
+  32-11-learning-persistence-and-auto-learning-into-rag: drafted # Learning Persistence & Auto-Learning into RAG [P1]
+  32-12-agent-personas-and-persona-aware-benchmarking: drafted # Agent Personas & Persona-Aware Benchmarking [P2]
+  32-13-agent-management-and-benchmark-dashboards: drafted # Agent Management & Benchmark Dashboards (admin public + tenant private) [P2]
+  32-14-a-b-experiment-framework-for-agents: drafted  # A/B Experiment Framework for Agents (Phase 2: cohorts, significance, rollout/rollback) [P2]
+  epic-32-retrospective: optional
+
+  epic-34: contexted   # NEW Pricing, Plans & Entitlements (added 2026-06-17; all stories drafted)
+  34-1-plan-and-price-book-catalog-data-model: drafted # Plan & Price-Book Catalog Data Model [P0]
+  34-2-plan-catalog-admin-api-and-custom-enterprise-plans: drafted # Plan Catalog Admin API & Custom Enterprise Plans [P0]
+  34-3-byok-vs-platform-provided-pricing-mode: drafted # BYOK vs Platform-Provided Pricing Mode (per-provider, secret-cabinet wired) [P0]
+  34-4-per-tenant-plan-assignment-and-lifecycle: drafted # Per-Tenant Plan Assignment & Lifecycle [P0]
+  34-5-cost-price-markup-engine: drafted              # Cost->Price Markup Engine (platform-provided usage) [P0]
+  34-6-entitlement-and-quota-resolution-service: drafted # Entitlement & Quota Resolution Service [P0]
+  34-7-trials-credits-and-promo-codes: drafted        # Trials, Credits & Promo Codes [P1]
+  34-8-pricing-audit-events-and-reproducibility: drafted # Pricing Audit, Events & Reproducibility [P1]
+  34-9-pricing-and-plan-management-dashboards: drafted # Pricing & Plan Management Dashboards [P1]
+  34-10-epic-20-decommission-and-pricing-contract-migration: drafted # Epic 20 Decommission & Pricing Contract Migration [P0]
+  epic-34-retrospective: optional
+
+  epic-35: contexted   # NEW Billing & Payments (C#) — supersedes Epic 20 (added 2026-06-17; all stories drafted)
+  35-1-stripe-integration-foundation-billing-plan-catalog-and-custo: drafted # Stripe Integration Foundation, Billing Plan Catalog & Customer Mapping (C#) [P0]
+  35-2-byok-vs-platform-provided-billing-mode-and-per-tenant-provid: drafted # BYOK vs Platform-Provided Billing Mode & Per-Tenant Provider Key Cabinet Integration [P0]
+  35-3-byok-aware-usage-metering-and-stripe-meter-event-reporting: drafted # BYOK-Aware Usage Metering & Stripe Meter Event Reporting [P0]
+  35-4-subscription-lifecycle-create-upgrade-downgrade-cancel-trial: drafted # Subscription Lifecycle — Create, Upgrade/Downgrade, Cancel, Trial & Proration [P0]
+  35-5-stripe-webhook-ingestion-idempotency-and-billing-event-proje: drafted # Stripe Webhook Ingestion, Idempotency & Billing Event Projection [P0]
+  35-6-plan-quota-and-usage-limit-enforcement: drafted # Plan Quota & Usage-Limit Enforcement (BYOK-Aware) [P0]
+  35-7-payment-methods-and-self-service-stripe-billing-portal: drafted # Payment Methods & Self-Service Stripe Billing Portal [P1]
+  35-8-invoicing-failed-payment-dunning-and-recovery: drafted # Invoicing, Failed-Payment Dunning & Recovery [P0]
+  35-9-tax-calculation-and-compliance: drafted        # Tax Calculation & Compliance (Stripe Tax / VAT) [P1]
+  35-10-credits-and-prepaid-wallet-ledger: drafted    # Credits & Prepaid Wallet Ledger [P2]
+  35-11-tenant-billing-dashboard-and-admin-billing-console: drafted # Tenant Billing Dashboard (dashboard-user) & Admin Billing Console (dashboard) [P1]
+  35-12-billing-audit-reconciliation-and-revenue-analytics: drafted # Billing Audit, Reconciliation & Revenue Analytics [P1]
+  epic-35-retrospective: optional
+
+  epic-36: contexted   # NEW Analytics & Reporting Platform (added 2026-06-17; all stories drafted)
+  36-1-dimensional-analytics-projection-schema-and-store: drafted # Dimensional Analytics Projection Schema & Store [P0]
+  36-2-dcb-to-analytics-projection-pipeline: drafted  # DCB-to-Analytics Projection Pipeline (Dimensional Rollup) [P0]
+  36-3-tenant-usage-analytics-api: drafted            # Tenant Usage Analytics API [P0]
+  36-4-cost-and-spend-analytics-api: drafted          # Cost & Spend Analytics API (BYOK vs Platform) [P0]
+  36-5-agent-and-tenant-performance-rollups-api: drafted # Agent & Tenant Performance Rollups API (consume Epic 32) [P1]
+  36-6-tenant-analytics-dashboard-ui: drafted         # Tenant Analytics Dashboard UI [P1]
+  36-7-pricing-cost-basis-and-platform-margin-model: drafted # Pricing / Cost-Basis & Platform Margin Model [P0]
+  36-8-analytics-exports: drafted                     # Analytics Exports (CSV / PDF) [P1]
+  36-9-scheduled-reports-and-delivery: drafted        # Scheduled Reports & Delivery [P2]
+  36-10-platform-business-analytics: drafted          # Platform Business Analytics (Owner-Only: MRR, Churn, Conversion) [P1]
+  36-11-analytics-event-catalog-backfill-and-reconciliation: drafted # Analytics Event Catalog, Backfill & Reconciliation [P2]
+  epic-36-retrospective: optional
+
+  epic-37: contexted   # NEW Audit, Compliance & Data Governance (added 2026-06-17; all stories drafted)
+  37-1-sensitive-action-audit-taxonomy-and-curated-audit-record-pro: drafted # Sensitive-Action Audit Taxonomy & Curated Audit-Record Projection [P0]
+  37-2-tamper-evident-hash-chain-over-audit-records: drafted # Tamper-Evident Hash-Chain over Audit Records [P0]
+  37-3-audit-query-search-and-filter-api: drafted     # Audit Query, Search & Filter API [P0]
+  37-4-signed-audit-export-with-integrity-manifest: drafted # Signed Audit Export (JSON/CSV) with Integrity Manifest [P1]
+  37-5-audit-retention-policies-and-tamper-aware-pruning: drafted # Audit Retention Policies & Tamper-Aware Pruning [P1]
+  37-6-legal-hold: drafted                            # Legal Hold [P1]
+  37-7-gdpr-dsar-data-subject-access-export: drafted  # GDPR DSAR — Data Subject Access Export [P1]
+  37-8-gdpr-right-to-erasure-with-crypto-shredding-and-audit-preser: drafted # GDPR Right-to-Erasure with Crypto-Shredding & Audit Preservation [P1]
+  37-9-consent-and-data-processing-logging: drafted   # Consent & Data-Processing Logging [P2]
+  37-10-sensitive-action-audit-emission-coverage: drafted # Sensitive-Action Audit Emission Coverage (BYOK, Billing/Plan, Auth/Login, Agent Actions) [P0]
+  37-11-soc2-aligned-control-mapping-and-evidence-pack: drafted # SOC2-Aligned Control Mapping & Evidence Pack [P2]
+  37-12-admin-and-tenant-audit-dashboard-ui: drafted  # Admin & Tenant Audit Dashboard UI [P1]
+  epic-37-retrospective: optional
 
