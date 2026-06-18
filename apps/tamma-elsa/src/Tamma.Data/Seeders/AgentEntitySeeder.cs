@@ -64,12 +64,16 @@ public static class AgentEntitySeeder
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        // Existing public handles for this seed set — skip those.
+        // Existing public (Name, Role) pairs for this seed set — skip those. The
+        // key must match the partial unique index on (Name, Role) so the
+        // idempotency check and the DB constraint can't diverge.
         var existing = await context.Agents
             .Where(a => a.Visibility == AgentVisibility.Public)
-            .Select(a => a.Name)
+            .Select(a => new { a.Name, a.Role })
             .ToListAsync(cancellationToken);
-        var existingSet = existing.ToHashSet(StringComparer.Ordinal);
+        var existingSet = existing
+            .Select(a => (a.Name, a.Role))
+            .ToHashSet();
 
         var now = DateTime.UtcNow;
         var inserted = 0;
@@ -77,7 +81,7 @@ public static class AgentEntitySeeder
         foreach (var seed in s_seedAgents)
         {
             var handle = $"tamma-{seed.Role}";
-            if (existingSet.Contains(handle))
+            if (existingSet.Contains((handle, seed.Role)))
             {
                 continue;
             }

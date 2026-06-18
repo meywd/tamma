@@ -275,7 +275,11 @@ public sealed class AgentRepository : IAgentRepository
         string type, Agent agent, int? version, CancellationToken ct)
     {
         _ = ct;
-        var mode = agent.OwnerUserId is not null ? "single-user" : "saas";
+        // Public agents are platform-owned (both owner columns NULL) — tag them
+        // "platform", not "saas". Private agents: OwnerUserId → single-user, else SaaS.
+        var mode = agent.Visibility == AgentVisibility.Public
+            ? "platform"
+            : (agent.OwnerUserId is not null ? "single-user" : "saas");
 
         var tags = new Dictionary<string, object?>
         {

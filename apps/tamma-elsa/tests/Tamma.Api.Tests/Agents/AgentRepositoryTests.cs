@@ -119,6 +119,8 @@ public class AgentRepositoryTests
             tags["version"].GetInt32().Should().Be(1);
             tags["visibility"].GetString().Should().Be("public");
             tags["role"].GetString().Should().Be("architect");
+            tags["mode"].GetString().Should().Be(
+                "platform", "a public agent is platform-owned, not a saas tenant agent");
             evt.TenantId.Should().BeNull("public agents emit to the platform feed");
         }
     }

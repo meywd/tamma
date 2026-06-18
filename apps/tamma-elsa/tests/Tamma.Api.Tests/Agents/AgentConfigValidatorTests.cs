@@ -219,4 +219,16 @@ public class AgentConfigValidatorTests
         valid.Should().BeFalse();
         errors.Should().ContainMatch("*maxFetchSizeBytes*");
     }
+
+    [Test]
+    public void Legacy_BlockedCommandPatterns_NestedQuantifier_IsRejected()
+    {
+        // ReDoS regression: a catastrophic-backtracking pattern "(a+)+" must be
+        // rejected by the ReDosGuard the validator routes blockedCommandPatterns
+        // through (finding 014).
+        var json = """{ "security": { "blockedCommandPatterns": ["(a+)+"] } }""";
+        var (valid, errors) = Validate(json);
+        valid.Should().BeFalse();
+        errors.Should().ContainMatch("*nested-quantifier*");
+    }
 }
