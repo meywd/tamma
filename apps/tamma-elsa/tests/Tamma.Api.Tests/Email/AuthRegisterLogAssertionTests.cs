@@ -99,11 +99,15 @@ public class AuthRegisterLogAssertionTests
             DisplayName: "Test User");
 
         // ── Act ──
+        // Story 35-1 — billing hook deps. NullBillingProvider is a complete
+        // no-op (single-user), so registration behaviour is unchanged.
         await AuthEndpoints.Register(
             req, userRepo.Object, passwordSvc.Object,
             tenantRepo.Object, membershipRepo.Object,
             bootstrapRepo.Object,
-            emailSvc.Object, config, _loggerFactory);
+            emailSvc.Object, config, _loggerFactory,
+            new Tamma.Api.Services.Billing.NullBillingProvider(),
+            Mock.Of<Tamma.Data.Repositories.IPlatformQueuedTaskRepository>());
 
         // ── Assert ──
         _logProvider.Messages.Should().Contain(

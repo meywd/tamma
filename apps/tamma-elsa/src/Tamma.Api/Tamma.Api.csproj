@@ -39,6 +39,13 @@
          ConnectionStrings:Redis is configured, the Redis-backed backend
          kicks in so multi-pod deployments share a window counter. -->
     <PackageReference Include="StackExchange.Redis" Version="2.12.14" />
+    <!-- Story 35-1 (Epic 35 billing foundation): Stripe customer mapping +
+         Product/Price/Meter catalog. v51.2.0 is the latest stable and supports
+         .NET 8 (netstandard2.0 / netcore). All Stripe service classes
+         (CustomerService / ProductService / PriceService / Billing.MeterService)
+         are non-sealed with virtual *Async methods, so tests mock at the
+         service-interface boundary — no live Stripe in CI. -->
+    <PackageReference Include="Stripe.net" Version="51.2.0" />
   </ItemGroup>
 
   <ItemGroup>

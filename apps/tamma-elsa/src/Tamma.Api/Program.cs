@@ -897,6 +897,13 @@ builder.Services.AddSingleton<
 // worker itself is hosted-service singleton + registry singleton.
 builder.Services.AddPlatformTaskWorker(builder.Configuration);
 
+// Story 35-1 — Epic 35 billing foundation. Mode-aware: StripeBillingProvider
+// in SaaS, NullBillingProvider in single-user. Registers the catalog reader,
+// the cabinet-resolving Stripe client factory, BillingOptions, and the
+// billing.customer.create retry handler (IPlatformTaskHandler). The Stripe key
+// resolves through the Epic 29 cabinet — never raw env in production (AC5).
+builder.Services.AddTammaBilling(builder.Configuration);
+
 // Unified-tenancy Phase 4 — `tenant.move` platform-task handler. Drives
 // ITenantMoveService.MoveAsync for tasks enqueued by
 // POST /api/admin/tenants/{tenantId}/move; on failure it stamps the
@@ -1160,6 +1167,16 @@ if (Tamma.Api.Services.Secrets.Stopgap.MigrateSecretsCommand.ShouldRun(args))
 {
     var exitCode = await Tamma.Api.Services.Secrets.Stopgap
         .MigrateSecretsCommand.RunAsync(app.Services);
+    return exitCode;
+}
+
+// Story 35-1 — `dotnet run --project Tamma.Api -- seed-billing` idempotently
+// syncs the Stripe Product/Price/Meter catalog into billing_plan_prices and
+// exits. Single-user prints "billing is SaaS-only" and exits 0.
+if (Tamma.Api.Services.Billing.SeedBillingCommand.ShouldRun(args))
+{
+    var exitCode = await Tamma.Api.Services.Billing
+        .SeedBillingCommand.RunAsync(app.Services);
     return exitCode;
 }
 
@@ -2038,6 +2055,7 @@ using (var scope = app.Services.CreateScope())
                 DROP TABLE IF EXISTS
                     admin_impersonations,
                     agents, agent_versions,
+                    billing_customers, billing_plan_prices,
                     alert_delivery_attempts, alert_channels, alerts,
                     alert_evaluator_cursor, alert_rules,
                     api_keys, agent_configs, budget_configs, domain_events,

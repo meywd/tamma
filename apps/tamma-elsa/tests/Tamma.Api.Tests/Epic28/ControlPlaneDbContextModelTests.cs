@@ -102,13 +102,20 @@ public class ControlPlaneDbContextModelTests
             // (no performance columns — those stay tenant-scoped).
             "agents",
             "agent_versions",
+            // Story 35-1 — Epic 35 billing foundation. CP-resident: the
+            // tenant→Stripe customer mapping (keyed by tenant) + the
+            // slug→Stripe-ids catalog (platform-global). Definition/binding
+            // only — usage/metering data is owned by later Epic 35 stories.
+            "billing_customers",
+            "billing_plan_prices",
         }, because: "Story 28-1 PR D (Decision #4) — enumerate every "
             + "CP-resident table; the 11 + 4 mentorship tenant-resident "
             + "entities have moved to TenantDbContext. Story 31-2 adds "
             + "tenant_platform_installations; Story 31-7 adds "
             + "platform_webhook_deliveries. Unified-tenancy Phase 0 adds "
             + "tenant_databases. Story 32-1 adds agents + agent_versions. "
-            + "Story 34-1 adds plan_features + plan_entitlements + plan_prices.");
+            + "Story 34-1 adds plan_features + plan_entitlements + plan_prices. "
+            + "Story 35-1 adds billing_customers + billing_plan_prices.");
     }
 
     // ── Story 32-1 — agent entity model shape ──

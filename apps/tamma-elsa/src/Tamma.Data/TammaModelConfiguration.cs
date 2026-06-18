@@ -839,6 +839,81 @@ internal static class TammaModelConfiguration
     }
 
     /// <summary>
+    /// Story 35-1 — billing foundation entities. The tenant→Stripe customer
+    /// mapping (<c>billing_customers</c>, unique <c>TenantId</c>) and the
+    /// slug→Stripe-ids catalog (<c>billing_plan_prices</c>, unique
+    /// <c>PlanSlug</c>). CP-resident; configured in the shared single source so
+    /// the model graph and the additive migration stay aligned.
+    /// </summary>
+    public static void ConfigureBillingEntities(ModelBuilder modelBuilder)
+    {
+        // ── BillingCustomer (tenant → Stripe customer) ──
+        modelBuilder.Entity<BillingCustomer>(entity =>
+        {
+            entity.ToTable("billing_customers", t =>
+            {
+                // Text domain for the persisted BillingMode member name.
+                t.HasCheckConstraint(
+                    "ck_billing_customers_mode",
+                    "\"BillingMode\" IN ('PlatformProvided','Byok')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.BillingMode)
+                .IsRequired().HasMaxLength(32).HasDefaultValue("PlatformProvided");
+            entity.Property(e => e.DefaultCurrency)
+                .IsRequired().HasMaxLength(3).HasDefaultValue("usd");
+            entity.Property(e => e.TaxStatus)
+                .IsRequired().HasMaxLength(32).HasDefaultValue("none");
+            entity.Property(e => e.StripeCustomerId).HasMaxLength(255);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // Exactly one customer mapping per tenant (AC1 / AC12).
+            entity.HasIndex(e => e.TenantId)
+                .HasDatabaseName("UX_billing_customers_TenantId")
+                .IsUnique();
+
+            // Stripe customer ids are globally unique once assigned. Partial so
+            // the null-until-acked retry rows don't collide on NULL.
+            entity.HasIndex(e => e.StripeCustomerId)
+                .HasDatabaseName("UX_billing_customers_StripeCustomerId")
+                .HasFilter("\"StripeCustomerId\" IS NOT NULL")
+                .IsUnique();
+
+            // Tenant purge cascades the billing mapping.
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── BillingPlanPrice (slug → Stripe ids catalog) ──
+        modelBuilder.Entity<BillingPlanPrice>(entity =>
+        {
+            entity.ToTable("billing_plan_prices");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.PlanSlug).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.StripeProductId).HasMaxLength(255);
+            entity.Property(e => e.StripePriceId).HasMaxLength(255);
+            entity.Property(e => e.TokensInputMeterId).HasMaxLength(255);
+            entity.Property(e => e.TokensInputPriceId).HasMaxLength(255);
+            entity.Property(e => e.TokensOutputMeterId).HasMaxLength(255);
+            entity.Property(e => e.TokensOutputPriceId).HasMaxLength(255);
+            entity.Property(e => e.SeatsMeterId).HasMaxLength(255);
+            entity.Property(e => e.SeatsPriceId).HasMaxLength(255);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // One catalog row per slug — the seed upserts on this key.
+            entity.HasIndex(e => e.PlanSlug)
+                .HasDatabaseName("UX_billing_plan_prices_PlanSlug")
+                .IsUnique();
+        });
+    }
+
+    /// <summary>
     /// Configure the per-tenant entity graph. <paramref name="fixedTenantId"/>
     /// is non-null when invoked from <see cref="TenantDbContext"/> — the
     /// query filter binds directly to that tenant (fail-closed, no ambient

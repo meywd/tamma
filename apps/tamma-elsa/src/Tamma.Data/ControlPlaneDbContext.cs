@@ -425,6 +425,25 @@ public class ControlPlaneDbContext : DbContext
     /// </summary>
     public DbSet<AgentVersion> AgentVersions => Set<AgentVersion>();
 
+    // ── Story 35-1 — billing foundation (Epic 35) ──
+    //
+    // The tenant→Stripe customer mapping + the slug→Stripe-ids catalog are
+    // CP-resident: billing is a cross-cutting platform concern, the catalog is
+    // platform-global, and the customer binding is keyed by tenant (not
+    // tenant-resident business data). SaaS only — single-user never writes here.
+
+    /// <summary>
+    /// Story 35-1 — one row per tenant binding it to its Stripe customer.
+    /// Unique <c>TenantId</c>; see <see cref="Entities.BillingCustomer"/>.
+    /// </summary>
+    public DbSet<BillingCustomer> BillingCustomers => Set<BillingCustomer>();
+
+    /// <summary>
+    /// Story 35-1 — slug→Stripe Product/Price/Meter id catalog. Unique
+    /// <c>PlanSlug</c>; platform-global. See <see cref="Entities.BillingPlanPrice"/>.
+    /// </summary>
+    public DbSet<BillingPlanPrice> BillingPlanPrices => Set<BillingPlanPrice>();
+
     // Story 28-1 PR D: the 11 + 4 mentorship tenant-resident entities
     // (AgentConfig, PromptOverride, ProviderHealth, ProviderDiagnostic,
     // SanitizationRule, WorkflowDefinition, WorkflowInstance, DomainEvent,
@@ -501,6 +520,11 @@ public class ControlPlaneDbContext : DbContext
         // Story 32-1 — first-class agent entities. CP-resident, configured in
         // the shared single source so the model graph + migration stay aligned.
         TammaModelConfiguration.ConfigureAgentEntities(modelBuilder);
+
+        // Story 35-1 — billing customer mapping + Stripe catalog. CP-resident,
+        // configured in the shared single source so the model graph + migration
+        // stay aligned (same convention as the agent entities above).
+        TammaModelConfiguration.ConfigureBillingEntities(modelBuilder);
     }
 
     /// <summary>

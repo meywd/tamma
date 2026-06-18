@@ -217,7 +217,9 @@ public static class AuthEndpoints
         IPlatformBootstrapRepository bootstrapRepo,
         [FromServices] IEmailService emailService,
         [FromServices] IConfiguration config,
-        [FromServices] ILoggerFactory loggerFactory)
+        [FromServices] ILoggerFactory loggerFactory,
+        [FromServices] Tamma.Api.Services.Billing.IBillingProvider billing,
+        [FromServices] Tamma.Data.Repositories.IPlatformQueuedTaskRepository platformTasks)
     {
         if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.Password))
             return Results.BadRequest(new { error = "Email and password are required" });
@@ -281,6 +283,13 @@ public static class AuthEndpoints
         });
         await membershipRepo.AddAsync(tenant.Id, user.Id, "owner");
         await userRepo.UpdateActiveTenantAsync(user.Id, tenant.Id);
+
+        // Story 35-1 (AC6) — non-blocking Stripe customer mapping on the
+        // registration tenant-create path (same hook as OrgEndpoints.CreateOrg).
+        // Single-user → no-op; SaaS Stripe failure → enqueue retry, never block
+        // registration.
+        await Tamma.Api.Services.Billing.BillingTenantCreateHook.RunAsync(
+            billing, platformTasks, loggerFactory, tenant, user.Email);
 
         var verifyUrl = BuildVerificationUrl(config, verificationToken);
         // Story 28-1 PR B — registration verification email is
