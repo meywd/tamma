@@ -6,6 +6,7 @@ using Moq;
 using NUnit.Framework;
 using Tamma.Api.Services.Billing;
 using Tamma.Api.Services.Billing.Tasks;
+using Tamma.Api.Tests.Infrastructure;
 using Tamma.Core.Billing;
 using Tamma.Data;
 using Tamma.Data.Entities;
@@ -88,6 +89,65 @@ public class BillingTenantCreateHookTests
         enqueued.Should().NotBeNull();
         enqueued!.Type.Should().Be(CreateBillingCustomerTaskHandler.TaskTypeName);
         enqueued.TenantId.Should().Be(tenant.Id);
+    }
+
+    [Test]
+    public async Task Saas_Cancellation_Rethrows_Does_Not_Swallow_Or_Enqueue()
+    {
+        var tenant = NewTenant();
+        var billing = new Mock<IBillingProvider>();
+        billing.SetupGet(b => b.IsEnabled).Returns(true);
+        billing.Setup(b => b.CreateCustomerAsync(
+                tenant.Id, It.IsAny<CustomerDescriptor>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException("request aborted"));
+
+        // Strict — any enqueue would fail the test. A cancellation must NOT be
+        // laundered into a "Stripe failed" WARN + spurious retry.
+        var tasks = new Mock<IPlatformQueuedTaskRepository>(MockBehavior.Strict);
+
+        var act = async () => await BillingTenantCreateHook.RunAsync(
+            billing.Object, tasks.Object, LoggerFactory, tenant, "owner@example.com");
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        tasks.VerifyNoOtherCalls();
+    }
+
+    [Test]
+    public async Task Saas_Unexpected_NonStripe_Error_Enqueues_But_Logs_At_Error_Distinctly()
+    {
+        var tenant = NewTenant();
+        var billing = new Mock<IBillingProvider>();
+        billing.SetupGet(b => b.IsEnabled).Returns(true);
+        // A genuine defect (not a Stripe/transient failure).
+        billing.Setup(b => b.CreateCustomerAsync(
+                tenant.Id, It.IsAny<CustomerDescriptor>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new NullReferenceException("bug in row-persist"));
+
+        PlatformQueuedTask? enqueued = null;
+        var tasks = new Mock<IPlatformQueuedTaskRepository>();
+        tasks.Setup(t => t.EnqueueAsync(
+                It.IsAny<PlatformQueuedTask>(), It.IsAny<CancellationToken>()))
+            .Callback<PlatformQueuedTask, CancellationToken>((task, _) => enqueued = task)
+            .ReturnsAsync((PlatformQueuedTask task, CancellationToken _) => task);
+
+        using var captured = new CapturingLoggerProvider();
+        using var factory = Microsoft.Extensions.Logging.LoggerFactory.Create(b => b.AddProvider(captured));
+
+        // Tenant-create must STILL not be blocked — the guarantee holds for all
+        // errors — but the defect must be surfaced distinctly.
+        var act = async () => await BillingTenantCreateHook.RunAsync(
+            billing.Object, tasks.Object, factory, tenant, "owner@example.com");
+        await act.Should().NotThrowAsync();
+
+        enqueued.Should().NotBeNull("the never-block guarantee holds for unexpected errors too");
+
+        var errorEntries = captured.Entries.Where(e => e.Level == LogLevel.Error).ToList();
+        errorEntries.Should().ContainSingle(
+            "the unexpected error is surfaced at ERROR, not buried under a Stripe WARN");
+        errorEntries[0].Message.Should().Contain("Unexpected (non-Stripe) error");
+        captured.Entries.Should().NotContain(
+            e => e.Level == LogLevel.Warning && e.Message.Contains("Stripe customer create failed"),
+            "a real defect must NOT masquerade as a Stripe-shaped WARN");
     }
 }
 

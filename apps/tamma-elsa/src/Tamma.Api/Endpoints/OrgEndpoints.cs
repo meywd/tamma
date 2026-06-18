@@ -87,11 +87,15 @@ public static class OrgEndpoints
             name = tenant.Name,
         });
 
-        // Story 35-1 (AC6) — non-blocking Stripe customer mapping. SaaS only:
-        // NullBillingProvider.IsEnabled is false in single-user so this is a
-        // complete no-op (no row, no event, no Stripe call). On Stripe failure
-        // we DO NOT block tenant creation — a billing.customer.create retry task
-        // is enqueued and the BillingCustomer row persists (null id) on retry.
+        // Story 35-1 (AC6) — non-blocking Stripe customer mapping. This runs
+        // AFTER the tenant-create commit and the TENANT.CREATED.SUCCESS event
+        // above, with NO enclosing transaction, so a billing failure can never
+        // roll the tenant back. SaaS only: NullBillingProvider.IsEnabled is false
+        // in single-user so this is a complete no-op (no row, no event, no Stripe
+        // call). Happy path persists a BillingCustomer row with a non-null
+        // StripeCustomerId. On Stripe failure we DO NOT block tenant creation — a
+        // billing.customer.create retry task is enqueued and the retry handler
+        // creates/fills the row on a later attempt.
         var owner = await userRepo.GetByIdAsync(userId.Value);
         await Tamma.Api.Services.Billing.BillingTenantCreateHook.RunAsync(
             billing, platformTasks, loggerFactory, tenant, owner?.Email);

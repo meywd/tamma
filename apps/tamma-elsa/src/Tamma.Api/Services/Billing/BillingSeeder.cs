@@ -231,9 +231,29 @@ public sealed class BillingSeeder
 
     private async Task<string> CreateProductAsync(string slug, CancellationToken ct)
     {
+        var productId = $"tamma-plan-{slug}";
+
+        // Get-or-create. The Product uses a FIXED id, so if the control-plane DB
+        // was reset but Stripe still holds the product (and the 24h idempotency
+        // window has lapsed), a bare CreateAsync would 400 "resource already
+        // exists" instead of replaying. Probe by id first and reuse it if present;
+        // only create when Stripe reports it absent (404 / resource_missing).
+        try
+        {
+            var existing = await _stripe.Products.GetAsync(productId, null, null, ct)
+                .ConfigureAwait(false);
+            _logger.LogDebug(
+                "Reusing existing Stripe product {ProductId} for slug {Slug}.", productId, slug);
+            return existing.Id;
+        }
+        catch (StripeException ex) when (ex.HttpStatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            // Not present in Stripe — fall through to create.
+        }
+
         var options = new ProductCreateOptions
         {
-            Id = $"tamma-plan-{slug}",
+            Id = productId,
             Name = $"Tamma {char.ToUpperInvariant(slug[0])}{slug[1..]}",
             Description = $"Tamma {slug} plan",
             Metadata = new Dictionary<string, string> { ["tammaPlanSlug"] = slug },

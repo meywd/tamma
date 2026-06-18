@@ -15,8 +15,11 @@ namespace Tamma.Api.Services.Billing;
 /// production a null/blank key (e.g. dev fallback enabled but no value present)
 /// is a hard boot error rather than serving 500s on first request.
 ///
-/// <para>The resolved key is cached in-process for the lifetime of the factory
-/// and is NEVER logged.</para>
+/// <para>The factory is registered as a SINGLETON (see
+/// <c>BillingServiceCollectionExtensions</c>) so the resolved key is cached
+/// in-process and read at most once per process; the <see cref="SemaphoreSlim"/>
+/// gate then serialises the one-time resolve across concurrent first callers.
+/// The key value is NEVER logged.</para>
 /// </summary>
 public interface IStripeServicesFactory
 {

@@ -32,9 +32,16 @@ public static class BillingServiceCollectionExtensions
         services.TryAddSingleton<TimeProvider>(TimeProvider.System);
 
         // Catalog reader + Stripe client factory are mode-agnostic singletons
-        // (the catalog is platform-global; the factory caches the resolved key).
+        // (the catalog is platform-global; the factory caches the resolved key
+        // ONCE per process). The factory MUST be a singleton so its in-process key
+        // cache and SemaphoreSlim gate live for the whole process — at a scoped
+        // lifetime the key would be re-resolved every request and the gate would
+        // be pointless. Lifetime-safe: the factory captures only the root
+        // IServiceProvider + singletons (BillingOptions, IHostEnvironment, logger)
+        // and lazily resolves the singleton IRuntimeSecretResolver — nothing scoped
+        // is captured.
         services.TryAddSingleton<IBillingCatalog, BillingCatalog>();
-        services.TryAddScoped<IStripeServicesFactory, StripeClientFactory>();
+        services.TryAddSingleton<IStripeServicesFactory, StripeClientFactory>();
 
         // Mode-gated provider selection. Resolve the mode from the registered
         // ITammaModeProvider so detection stays in one place.

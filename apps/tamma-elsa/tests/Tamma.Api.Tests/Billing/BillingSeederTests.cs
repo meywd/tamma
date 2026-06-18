@@ -33,6 +33,7 @@ public class BillingSeederTests
         public List<MeterCreateOptions> MeterCalls { get; } = new();
 
         public int ProductCreates;
+        public int ProductGets;
         public int PriceCreates;
         public int MeterCreates;
 
@@ -46,6 +47,18 @@ public class BillingSeederTests
             bundle.SetupGet(s => s.Meters).Returns(Meters.Object);
             // Customers unused by the seeder.
             Services = bundle.Object;
+
+            // Default: the product is NOT yet in Stripe → the get-or-create probe
+            // 404s and the seeder falls through to CreateAsync. (The "DB reset but
+            // Stripe still has the product" path overrides this per-test below.)
+            Products.Setup(p => p.GetAsync(
+                    It.IsAny<string>(), It.IsAny<ProductGetOptions>(),
+                    It.IsAny<RequestOptions>(), It.IsAny<CancellationToken>()))
+                .Callback(() => ProductGets++)
+                .ThrowsAsync(new StripeException
+                {
+                    HttpStatusCode = System.Net.HttpStatusCode.NotFound,
+                });
 
             Products.Setup(p => p.CreateAsync(
                     It.IsAny<ProductCreateOptions>(), It.IsAny<RequestOptions>(),
@@ -129,6 +142,37 @@ public class BillingSeederTests
         byEvent.Should().ContainKey("tamma.platform_tokens_input").WhoseValue.Should().Be("sum");
         byEvent.Should().ContainKey("tamma.platform_tokens_output").WhoseValue.Should().Be("sum");
         byEvent.Should().ContainKey("tamma.seats").WhoseValue.Should().Be("last");
+    }
+
+    [Test]
+    public async Task DbReset_But_Stripe_Has_Product_Reuses_It_Does_Not_Throw()
+    {
+        var h = new Harness();
+        await using var db = NewDb(nameof(DbReset_But_Stripe_Has_Product_Reuses_It_Does_Not_Throw));
+
+        // Simulate a control-plane DB reset where Stripe STILL holds every
+        // tamma-plan-{slug} product but the 24h idempotency window has lapsed: the
+        // get-or-create probe FINDS the product, so the seeder reuses it instead
+        // of issuing a CreateAsync that would 400 "resource already exists".
+        h.Products.Setup(p => p.GetAsync(
+                It.IsAny<string>(), It.IsAny<ProductGetOptions>(),
+                It.IsAny<RequestOptions>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string id, ProductGetOptions _, RequestOptions _, CancellationToken _) =>
+            {
+                h.ProductGets++;
+                return new Product { Id = id };
+            });
+
+        var act = async () => await h.NewSeeder(db).SyncAsync();
+        await act.Should().NotThrowAsync();
+
+        h.ProductGets.Should().Be(3, "the get-or-create probe runs once per slug");
+        h.ProductCreates.Should().Be(0, "the product is reused, never re-created");
+
+        var rows = await db.BillingPlanPrices.AsNoTracking().ToListAsync();
+        rows.Select(r => r.StripeProductId).Should()
+            .BeEquivalentTo(new[] { "tamma-plan-free", "tamma-plan-team", "tamma-plan-enterprise" },
+                "the reused product id is the fixed tamma-plan-{slug} id");
     }
 
     [Test]

@@ -2,11 +2,19 @@ namespace Tamma.Data.Entities;
 
 /// <summary>
 /// Story 35-1 — the tenant → Stripe customer mapping. Exactly one row per
-/// tenant (unique <see cref="TenantId"/>); created inside the tenant-create
-/// transaction (SaaS only). When Stripe is unreachable at create time the row
-/// still persists with <see cref="StripeCustomerId"/> = null and a
-/// <c>billing.customer.create</c> retry task is enqueued — tenant creation is
-/// never blocked on Stripe.
+/// tenant (unique <see cref="TenantId"/>), SaaS only. The mapping is written by
+/// <c>BillingTenantCreateHook</c>, which runs AFTER the tenant-create commit and
+/// the <c>TENANT.CREATED.SUCCESS</c> event — NOT inside the tenant-create
+/// transaction — so a billing failure can never roll the tenant back. On the
+/// happy path the row is created with a non-null <see cref="StripeCustomerId"/>.
+/// When Stripe is unreachable at create time no row is written here; a
+/// <c>billing.customer.create</c> retry task is enqueued and the retry handler
+/// creates (or fills in) the row on a later attempt — tenant creation is never
+/// blocked on Stripe.
+///
+/// <para>The <see cref="StripeCustomerId"/> can still be null for a row created
+/// by a retry attempt that itself reached Stripe but had not yet acked the
+/// customer id; the next retry fills it in.</para>
 ///
 /// <para>CP-resident (control plane): the customer binding is a cross-cutting
 /// billing concern keyed by tenant, not tenant-resident business data. In
@@ -21,8 +29,10 @@ public class BillingCustomer
     public Guid TenantId { get; set; }
 
     /// <summary>
-    /// Stripe customer id (<c>cus_...</c>). Null until Stripe acknowledges the
-    /// create — the retry handler fills it in on a later attempt.
+    /// Stripe customer id (<c>cus_...</c>). Non-null on the happy path (the row
+    /// is only written after Stripe acks the customer). Nullable so a row created
+    /// by a partially-failed retry can persist without an id; the retry handler
+    /// fills it in on a later attempt.
     /// </summary>
     public string? StripeCustomerId { get; set; }
 
