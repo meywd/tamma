@@ -62,6 +62,11 @@ public class TenantDbContext : DbContext
     public DbSet<EmailOutboxMessage> EmailOutbox => Set<EmailOutboxMessage>();
     public DbSet<BudgetConfig> BudgetConfigs => Set<BudgetConfig>();
 
+    // Story 36-1 — per-tenant dimensional analytics fact tables (hourly +
+    // daily roll-up). Schema-only; Story 36-2 owns population.
+    public DbSet<AnalyticsUsageHourly> AnalyticsUsageHourly => Set<AnalyticsUsageHourly>();
+    public DbSet<AnalyticsUsageDaily> AnalyticsUsageDaily => Set<AnalyticsUsageDaily>();
+
     /// <summary>
     /// Tenant-scoped API keys (Story 28-7). The tenant DB api_keys table
     /// is locked to <c>Scope = 'tenant'</c> via a CHECK constraint; user /

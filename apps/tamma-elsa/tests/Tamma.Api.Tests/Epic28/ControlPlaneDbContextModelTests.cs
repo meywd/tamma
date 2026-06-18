@@ -210,6 +210,35 @@ public class ControlPlaneDbContextModelTests
         versionProps.Should().NotIntersectWith(forbidden);
     }
 
+    // ── Story 36-1 — CP analytics table is untouched; the tenant-only
+    //    analytics_usage_* fact tables never leak onto the control plane. ──
+
+    [Test]
+    public void Cp_Still_Maps_PlatformAnalyticsHourly_AndNot_AnalyticsUsageTables()
+    {
+        using var ctx = CreateContext();
+
+        var tables = ctx.Model.GetEntityTypes()
+            .Select(t => t.GetTableName())
+            .Where(n => n is not null)
+            .ToHashSet()!;
+
+        // Story 28-10's owner-only fleet-wide fact table stays put.
+        tables.Should().Contain("platform_analytics_hourly",
+            "Story 36-1 leaves the control-plane analytics table entirely intact");
+
+        // Story 36-1's per-tenant fact tables are tenant-resident only — they
+        // must NOT appear on the control-plane model graph.
+        tables.Should().NotContain("analytics_usage_hourly",
+            "analytics_usage_* are per-tenant — they live only on TenantDbContext");
+        tables.Should().NotContain("analytics_usage_daily",
+            "analytics_usage_* are per-tenant — they live only on TenantDbContext");
+
+        // And the CP context never even knows the CLR types.
+        ctx.Model.FindEntityType(typeof(AnalyticsUsageHourly)).Should().BeNull();
+        ctx.Model.FindEntityType(typeof(AnalyticsUsageDaily)).Should().BeNull();
+    }
+
     [Test]
     public void Tenant_Carries_ShadowProperties_ForEpic28Columns()
     {

@@ -1384,6 +1384,125 @@ internal static class TammaModelConfiguration
             // No query filter — the outbox is shared infra; tenant scoping is
             // explicit in the repository APIs.
         });
+
+        // ── Analytics usage fact tables (Story 36-1) ──
+        // Per-tenant dimensional usage/cost/performance store. Schema-only here
+        // (Story 36-2 owns population). Mirrors ConfigurePlatformAnalyticsHourly
+        // (Story 28-10) for defaults/precision; uses the prompt_overrides /
+        // conventions NULLS NOT DISTINCT pattern for the idempotent business key.
+        ConfigureAnalyticsUsageEntities(modelBuilder, fixedTenantId);
+    }
+
+    /// <summary>
+    /// Story 36-1 — maps the two per-tenant dimensional analytics fact tables
+    /// (<c>analytics_usage_hourly</c> + <c>analytics_usage_daily</c>). The two
+    /// share an identical dimension + measure contract; only the time bucket
+    /// column differs (<c>Hour</c> vs <c>Day</c>), so a single shared inner
+    /// configurator is applied to both — no drift.
+    ///
+    /// <para>Defaults/precision mirror <c>ConfigurePlatformAnalyticsHourly</c>
+    /// (Story 28-10): <c>gen_random_uuid()</c> PK, <c>timestamp with time
+    /// zone</c> bucket, <c>HasDefaultValue(0L)</c> counters,
+    /// <c>HasPrecision(20,4).HasDefaultValue(0m)</c> costs, <c>now()</c> write
+    /// timestamp. <see cref="CostBasis"/> is persisted as lowercase text
+    /// (<c>byok</c>/<c>platform</c>). The breakdown index and the NULLS NOT
+    /// DISTINCT unique business-key index follow the prompt_overrides /
+    /// conventions precedent.</para>
+    ///
+    /// <para>No <c>TenantId</c> column — tenancy is the schema (Doc 01 §1.4);
+    /// <see cref="ApplyTenantFilter{T}"/> is the deliberate no-op (the accessor
+    /// lambda returns <c>null</c> because there is nothing to filter on).</para>
+    /// </summary>
+    private static void ConfigureAnalyticsUsageEntities(
+        ModelBuilder modelBuilder, Guid? fixedTenantId)
+    {
+        // Lowercase byok/platform text — keeps the discriminator uniform in
+        // ad-hoc SQL and round-trips identically on InMemory and Npgsql.
+        var costBasisConverter = new ValueConverter<CostBasis, string>(
+            v => v.ToString().ToLowerInvariant(),
+            s => Enum.Parse<CostBasis>(s, true));
+
+        modelBuilder.Entity<AnalyticsUsageHourly>(entity =>
+        {
+            entity.ToTable("analytics_usage_hourly");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Hour).HasColumnType("timestamp with time zone");
+            ConfigureAnalyticsUsageShared(entity, costBasisConverter);
+
+            // Breakdown index (AC6) — "by provider / agent / workflow / cost-basis".
+            entity.HasIndex(e => new
+                { e.Hour, e.Provider, e.AgentId, e.WorkflowDefinitionId, e.CostBasis })
+                .HasDatabaseName("IX_analytics_usage_hourly_breakdown");
+
+            // Idempotent business key (AC7) — full dimension tuple,
+            // NULLS NOT DISTINCT so NULL AgentId/WorkflowDefinitionId/RepoId
+            // dedupe to one row per bucket (same pattern as prompt_overrides /
+            // conventions; PG15+, production PG17).
+            entity.HasIndex(e => new
+                { e.Hour, e.Provider, e.AgentId, e.WorkflowDefinitionId, e.RepoId, e.CostBasis })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("UX_analytics_usage_hourly_dims");
+
+            // No TenantId column — schema is the isolation plane. The filter is
+            // the established no-op; the accessor returns null (nothing to filter).
+            ApplyTenantFilter<AnalyticsUsageHourly>(entity, fixedTenantId, _ => null);
+        });
+
+        modelBuilder.Entity<AnalyticsUsageDaily>(entity =>
+        {
+            entity.ToTable("analytics_usage_daily");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Day).HasColumnType("timestamp with time zone");
+            ConfigureAnalyticsUsageShared(entity, costBasisConverter);
+
+            entity.HasIndex(e => new
+                { e.Day, e.Provider, e.AgentId, e.WorkflowDefinitionId, e.CostBasis })
+                .HasDatabaseName("IX_analytics_usage_daily_breakdown");
+
+            entity.HasIndex(e => new
+                { e.Day, e.Provider, e.AgentId, e.WorkflowDefinitionId, e.RepoId, e.CostBasis })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("UX_analytics_usage_daily_dims");
+
+            ApplyTenantFilter<AnalyticsUsageDaily>(entity, fixedTenantId, _ => null);
+        });
+    }
+
+    /// <summary>
+    /// Story 36-1 — the dimension + measure mapping shared verbatim by
+    /// <c>analytics_usage_hourly</c> and <c>analytics_usage_daily</c>. The
+    /// bucket column (<c>Hour</c>/<c>Day</c>) and the indexes are configured by
+    /// each caller; everything else (dimensions, measures, defaults, CostBasis
+    /// conversion) lives here so the two tables can never drift.
+    /// </summary>
+    private static void ConfigureAnalyticsUsageShared<T>(
+        Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<T> entity,
+        ValueConverter<CostBasis, string> costBasisConverter)
+        where T : class
+    {
+        // Dimensions.
+        entity.Property("Provider").IsRequired().HasMaxLength(100);
+        entity.Property("AgentId").HasMaxLength(200);
+        entity.Property("RepoId").HasMaxLength(400);
+        entity.Property(typeof(CostBasis), "CostBasis")
+            .HasConversion(costBasisConverter)
+            .IsRequired()
+            .HasMaxLength(20);
+
+        // Measures — counters default 0L, costs decimal(20,4) default 0m.
+        entity.Property("TokensIn").HasDefaultValue(0L);
+        entity.Property("TokensOut").HasDefaultValue(0L);
+        entity.Property("WorkflowsStarted").HasDefaultValue(0L);
+        entity.Property("WorkflowsCompleted").HasDefaultValue(0L);
+        entity.Property("WorkflowsFailed").HasDefaultValue(0L);
+        entity.Property("AgentDispatches").HasDefaultValue(0L);
+        entity.Property("CostUsd").HasPrecision(20, 4).HasDefaultValue(0m);
+        entity.Property("PlatformBilledUsd").HasPrecision(20, 4).HasDefaultValue(0m);
+        entity.Property("ComputedAt").HasDefaultValueSql("now()");
     }
 
     /// <summary>
