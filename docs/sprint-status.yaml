@@ -461,7 +461,7 @@ development_status:
   epic-35-retrospective: optional
 
   epic-36: contexted   # NEW Analytics & Reporting Platform (added 2026-06-17; all stories drafted)
-  36-1-dimensional-analytics-projection-schema-and-store: drafted # Dimensional Analytics Projection Schema & Store [P0]
+  36-1-dimensional-analytics-projection-schema-and-store: done # Dimensional Analytics Projection Schema & Store [P0]
   36-2-dcb-to-analytics-projection-pipeline: drafted  # DCB-to-Analytics Projection Pipeline (Dimensional Rollup) [P0]
   36-3-tenant-usage-analytics-api: drafted            # Tenant Usage Analytics API [P0]
   36-4-cost-and-spend-analytics-api: drafted          # Cost & Spend Analytics API (BYOK vs Platform) [P0]
