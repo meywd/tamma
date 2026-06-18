@@ -49,6 +49,17 @@ public static class Permissions
         // with admin+owner reach keeps the picker accessible to
         // tenant admins per the Epic 31 RBAC plan.
         ["platforms:manage"] = ["admin", "owner"],
+        // Story 32-1 — first-class agent entity management. Mirrors
+        // prompts:manage / conventions:manage: CLAUDE.md "Prompt Store
+        // Architecture / RBAC" (agents follow the same tenant-scoped RBAC)
+        // requires create/publish/archive of a PRIVATE agent to be reachable
+        // by tenant_owner OR tenant_admin (member → 403). Public-agent writes
+        // are additionally gated by the platform-admin claim in the handler.
+        // The owner-only settings:manage would 403 every tenant_admin, so the
+        // dedicated agents:manage permission grants admin+owner reach.
+        // Single-user mode is unaffected — every signed-up user is auto-owner
+        // of their personal tenant.
+        ["agents:manage"] = ["admin", "owner"],
     };
 
     public static bool HasPermission(string? role, string? permission)

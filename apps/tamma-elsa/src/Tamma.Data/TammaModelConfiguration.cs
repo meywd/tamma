@@ -630,6 +630,92 @@ internal static class TammaModelConfiguration
     }
 
     /// <summary>
+    /// Story 32-1 — configure the two CP-resident agent-entity tables
+    /// (<c>agents</c> + <c>agent_versions</c>). Called ONLY from
+    /// <see cref="ControlPlaneDbContext"/> (these are control-plane-resident;
+    /// they are NOT added to <see cref="TenantDbContext"/> — no
+    /// <c>omitTenantIdColumn</c>/<c>isTenantContext</c> branches).
+    ///
+    /// <para>The <c>ck_agents_visibility_ownership</c> CHECK mirrors
+    /// <c>ck_prompt_overrides_principal_xor</c>: it ties the
+    /// <see cref="Entities.AgentVisibility"/> discriminator (stored as int via
+    /// <c>HasConversion&lt;int&gt;()</c>) to the owner columns —
+    /// public (0) ⇒ no owner; private (1) ⇒ exactly one of tenant/user owner.
+    /// The numeric literals <c>0</c>/<c>1</c> are load-bearing and match the
+    /// enum ordinals.</para>
+    /// </summary>
+    public static void ConfigureAgentEntities(ModelBuilder modelBuilder)
+    {
+        // ── Agent (identity) ──
+        modelBuilder.Entity<Agent>(entity =>
+        {
+            entity.ToTable("agents", t =>
+            {
+                // Visibility ⇄ ownership invariant (mirrors
+                // ck_prompt_overrides_principal_xor). Visibility is stored as
+                // int: 0 = Public, 1 = Private. A private agent never has both
+                // owner columns set, and never both null; a public agent has
+                // neither.
+                t.HasCheckConstraint(
+                    "ck_agents_visibility_ownership",
+                    "(\"Visibility\" = 0 AND \"OwnerTenantId\" IS NULL AND \"OwnerUserId\" IS NULL) " +
+                    "OR (\"Visibility\" = 1 AND \"OwnerTenantId\" IS NOT NULL AND \"OwnerUserId\" IS NULL) " +
+                    "OR (\"Visibility\" = 1 AND \"OwnerUserId\" IS NOT NULL AND \"OwnerTenantId\" IS NULL)");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(128);
+            entity.Property(e => e.Role).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.Visibility).HasConversion<int>();
+            entity.Property(e => e.Status).HasConversion<int>().HasDefaultValue(AgentStatus.Active);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // Public handles unique on (Name, Role).
+            entity.HasIndex(e => new { e.Name, e.Role })
+                .IsUnique()
+                .HasFilter("\"Visibility\" = 0")
+                .HasDatabaseName("IX_agents_public_name_role");
+
+            // Private handles unique per owner — two tenants may each own a
+            // private agent named "atlas" without colliding.
+            entity.HasIndex(e => new { e.OwnerTenantId, e.Name })
+                .IsUnique()
+                .HasFilter("\"Visibility\" = 1 AND \"OwnerTenantId\" IS NOT NULL")
+                .HasDatabaseName("IX_agents_private_tenant_name");
+            entity.HasIndex(e => new { e.OwnerUserId, e.Name })
+                .IsUnique()
+                .HasFilter("\"Visibility\" = 1 AND \"OwnerUserId\" IS NOT NULL")
+                .HasDatabaseName("IX_agents_private_user_name");
+        });
+
+        // ── AgentVersion (immutable config snapshot) ──
+        modelBuilder.Entity<AgentVersion>(entity =>
+        {
+            entity.ToTable("agent_versions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.ConfigJson)
+                .HasColumnType("jsonb")
+                .HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+
+            // Monotonic, non-duplicated versions per agent. Also the
+            // concurrency guard: a double-publish loses the second INSERT.
+            entity.HasIndex(e => new { e.AgentId, e.Version })
+                .IsUnique()
+                .HasDatabaseName("IX_agent_versions_agent_version");
+
+            // Versions are immutable audit history — archive, never
+            // cascade-delete.
+            entity.HasOne(e => e.Agent)
+                .WithMany(a => a.Versions)
+                .HasForeignKey(e => e.AgentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    /// <summary>
     /// Configure the per-tenant entity graph. <paramref name="fixedTenantId"/>
     /// is non-null when invoked from <see cref="TenantDbContext"/> — the
     /// query filter binds directly to that tenant (fail-closed, no ambient

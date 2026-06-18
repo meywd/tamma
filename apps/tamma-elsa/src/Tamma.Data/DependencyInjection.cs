@@ -139,6 +139,11 @@ public static class DependencyInjection
         // Scoped because it leans on ControlPlaneDbContext.
         services.AddScoped<IPlatformBootstrapRepository, PlatformBootstrapRepository>();
 
+        // Story 32-1 — CP-resident agent identity + versioning repository.
+        // Resolves against ControlPlaneDbContext (definitions are CP-resident);
+        // distinct from the tenant-scoped IAgentConfigRepository below.
+        services.AddScoped<IAgentRepository, AgentRepository>();
+
         // Tenant-scoped repositories (use ITenantDbContextFactory internally).
         services.AddScoped<IAgentConfigRepository, AgentConfigRepository>();
         services.AddScoped<IPromptRepository, PromptRepository>();

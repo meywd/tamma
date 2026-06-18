@@ -1036,6 +1036,16 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("platforms:manage"));
         });
+        // Story 32-1 — first-class agent entity writes (create/publish/archive).
+        // Mirrors PromptManage/ConventionManage: tenant_owner OR tenant_admin
+        // reach so member-role SaaS callers hit 403 at the policy. Public-agent
+        // writes are additionally gated by the platform-admin claim inside the
+        // handler (CreateAgent / CanWriteAgent).
+        options.AddPolicy("AgentManage", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("agents:manage"));
+        });
         options.AddPolicy("WorkflowsView", p =>
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
@@ -1112,7 +1122,7 @@ else if (builder.Environment.IsDevelopment())
             .Build();
         // Register all named policies with permissive default
         foreach (var name in new[] { "AdminAccess", "OwnerAccess", "PlatformOwnerAccess", "MemberAccess", "SettingsView",
-            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
+            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
             "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny" })
         {
             options.AddPolicy(name, p => p.AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement()));
@@ -1687,6 +1697,24 @@ agents.MapPost("/config/validate", AgentEndpoints.ValidateConfig);
 agents.MapGet("/{role}/resolve", AgentEndpoints.ResolveAgent);
 agents.MapPost("/resolve-for-phase", AgentEndpoints.ResolveForPhase);
 
+// ── Story 32-1 — first-class agent entities (/api/v1/agents) ──
+// Reads inherit the group's SettingsView gate; writes use AgentManage
+// (tenant_owner/tenant_admin → member 403). Public-agent writes are
+// additionally gated by the platform-admin claim inside the handlers. The
+// legacy GET/PUT /config endpoints above are untouched (cutover is later in
+// the epic). :guid constraints keep the {id} routes from colliding with the
+// {role}/resolve route.
+agents.MapGet("/", AgentEndpoints.ListAgents);
+agents.MapPost("/", AgentEndpoints.CreateAgent)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agents.MapGet("/{id:guid}", AgentEndpoints.GetAgent);
+agents.MapGet("/{id:guid}/versions", AgentEndpoints.ListVersions);
+agents.MapGet("/{id:guid}/versions/{version:int}", AgentEndpoints.GetVersion);
+agents.MapPost("/{id:guid}/versions", AgentEndpoints.PublishVersion)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agents.MapPost("/{id:guid}/archive", AgentEndpoints.ArchiveAgent)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+
 // ── Prompts ──
 // CLAUDE.md "Prompt Store Architecture > API" defines /defaults as the canonical
 // read-only system-default URL. Both /system (legacy TS naming) and /defaults
@@ -1990,6 +2018,7 @@ using (var scope = app.Services.CreateScope())
             dbContext.Database.ExecuteSqlRaw(@"
                 DROP TABLE IF EXISTS
                     admin_impersonations,
+                    agents, agent_versions,
                     alert_delivery_attempts, alert_channels, alerts,
                     alert_evaluator_cursor, alert_rules,
                     api_keys, agent_configs, budget_configs, domain_events,
@@ -2028,6 +2057,11 @@ using (var scope = app.Services.CreateScope())
         // doc contract says "invoked once at API startup after migrations
         // apply" — this is that call site.
         await Tamma.Data.Seeders.PlansSeeder.SeedAsync(dbContext);
+
+        // Story 32-1 — public/system agent definitions (one per role with the
+        // tamma-<role> handle + Version=1). Insert-missing-only; no-op on
+        // re-run. CP-resident; coexists with the Elsa-store AgentSeeder.
+        await Tamma.Data.Seeders.AgentEntitySeeder.SeedAsync(dbContext);
 
         // tenant_databases: register the central DB as pool member #1
         // (unified-tenancy Phase 2) so single-user/dev and SaaS share one

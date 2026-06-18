@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Tamma.Api.Dtos.Agents;
 
 public record UpdateAgentConfigRequest(object Config);
@@ -34,3 +36,81 @@ public record ResolveForPhaseRequest(
 
 public record AgentConfigResponse(object Config, string Source, int Version);
 public record ResolvedAgentResponse(string Provider, string Model, object Config);
+
+// ── Story 32-1 — first-class agent entity DTOs ──
+// Distinct from the legacy agent_configs DTOs above; the new /api/v1/agents
+// surface manages identity-bearing, versioned agent definitions.
+
+/// <summary>
+/// Create-agent request. <c>Visibility</c> is <c>"public"</c> or
+/// <c>"private"</c>; the owner columns are derived server-side from the process
+/// mode (SaaS → tenant; single-user → user). <c>Config</c> is the saved-config
+/// snapshot validated before any write.
+/// </summary>
+public sealed record CreateAgentRequest(
+    string Name,
+    string Role,
+    string Visibility,
+    JsonElement Config,
+    string? Notes);
+
+/// <summary>Publish a new immutable version of an existing agent.</summary>
+public sealed record PublishVersionRequest(
+    JsonElement Config,
+    string? Notes);
+
+/// <summary>List/summary projection of an <c>Agent</c>.</summary>
+public sealed record AgentSummary(
+    Guid Id,
+    string Name,
+    string Role,
+    string Visibility,
+    string Status,
+    Guid? OwnerTenantId,
+    Guid? OwnerUserId,
+    Guid? CurrentVersionId);
+
+/// <summary>Full agent detail (summary + version list).</summary>
+public sealed record AgentDetail(
+    Guid Id,
+    string Name,
+    string Role,
+    string Visibility,
+    string Status,
+    Guid? OwnerTenantId,
+    Guid? OwnerUserId,
+    Guid? CurrentVersionId,
+    DateTime CreatedAt,
+    DateTime UpdatedAt,
+    IReadOnlyList<AgentVersionSummary> Versions);
+
+/// <summary>Lightweight version row (no config body).</summary>
+public sealed record AgentVersionSummary(
+    Guid Id,
+    int Version,
+    string? Notes,
+    DateTime CreatedAt);
+
+/// <summary>Full version detail including the config snapshot.</summary>
+public sealed record AgentVersionDetail(
+    Guid Id,
+    Guid AgentId,
+    int Version,
+    JsonElement Config,
+    string? Notes,
+    DateTime CreatedAt);
+
+/// <summary>201 response for create.</summary>
+public sealed record CreateAgentResponse(
+    Guid Id,
+    string Name,
+    string Role,
+    string Visibility,
+    string Status,
+    int CurrentVersion);
+
+/// <summary>200 response for publish-version.</summary>
+public sealed record PublishVersionResponse(
+    Guid Id,
+    int Version,
+    DateTime CreatedAt);

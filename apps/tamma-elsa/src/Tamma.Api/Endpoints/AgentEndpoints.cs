@@ -1,10 +1,10 @@
 using System.Security.Claims;
 using Tamma.Api.Auth;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Tamma.Api.Dtos.Agents;
 using Tamma.Api.Services.Agents;
-using Tamma.Api.Services.Security;
+using Tamma.Api.Services.PromptStore;
+using Tamma.Core;
 using Tamma.Data;
 using Tamma.Data.Repositories;
 using Tamma.Data.Entities;
@@ -194,255 +194,387 @@ public static class AgentEndpoints
     }
 
     // -----------------------------------------------------------------------
+    // Story 32-1 — first-class agent entity CRUD (/api/v1/agents)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// POST <c>/api/v1/agents</c> — create a first-class agent + its Version=1
+    /// snapshot. <c>visibility</c> drives the gate: <c>public</c> requires the
+    /// platform-admin claim (else 403); <c>private</c> derives the owner from
+    /// the process mode (SaaS → tenant; single-user → user). Member-role
+    /// callers are rejected by the <c>AgentManage</c> policy before reaching
+    /// here; the public-write gate is enforced in-handler.
+    /// </summary>
+    public static async Task<IResult> CreateAgent(
+        CreateAgentRequest req,
+        IAgentRepository agents,
+        ClaimsPrincipal principal,
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider)
+    {
+        if (string.IsNullOrWhiteSpace(req.Name))
+        {
+            return Results.BadRequest(new { error = "invalid_request", detail = "name is required." });
+        }
+
+        // Role must be a taxonomy-valid wire string (normalize legacy aliases).
+        string canonicalRole;
+        try
+        {
+            canonicalRole = AgentRoleExtensions.Parse(req.Role).ToWire();
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.BadRequest(new { error = "invalid_role", detail = ex.Message });
+        }
+
+        if (!TryParseVisibility(req.Visibility, out var visibility))
+        {
+            return Results.BadRequest(new
+            {
+                error = "invalid_visibility",
+                detail = "visibility must be 'public' or 'private'.",
+            });
+        }
+
+        var configJson = req.Config.ValueKind == JsonValueKind.Undefined
+            ? "{}"
+            : req.Config.GetRawText();
+        var (valid, errors) = AgentConfigValidator.Validate(configJson);
+        if (!valid)
+        {
+            return Results.BadRequest(new { valid = false, errors });
+        }
+
+        var agent = new Agent
+        {
+            Name = req.Name,
+            Role = canonicalRole,
+            Visibility = visibility,
+        };
+
+        if (visibility == AgentVisibility.Public)
+        {
+            // Public agents are platform-owned. Defence-in-depth: the route is
+            // gated, but a private-owner could otherwise sneak a public create
+            // through the AgentManage policy. Require platform-admin here.
+            if (!IsPlatformAdmin(principal))
+            {
+                return Results.Json(
+                    new { error = "forbidden", detail = "public agents require platform admin." },
+                    statusCode: StatusCodes.Status403Forbidden);
+            }
+        }
+        else
+        {
+            // Private — derive the owner from the process mode (CLAUDE.md
+            // "Universal rule"). SaaS → tenant; single-user → user.
+            if (modeProvider.Mode == TammaMode.SaaS)
+            {
+                if (tenantContext.TenantId is not Guid tid)
+                {
+                    return Results.BadRequest(new
+                    {
+                        error = "no_tenant_context",
+                        detail = "a private agent in SaaS mode requires tenant context.",
+                    });
+                }
+                agent.OwnerTenantId = tid;
+            }
+            else
+            {
+                if (principal.GetUserId() is not Guid uid)
+                {
+                    return Results.BadRequest(new
+                    {
+                        error = "no_user_context",
+                        detail = "a private agent in single-user mode requires a user id.",
+                    });
+                }
+                agent.OwnerUserId = uid;
+            }
+        }
+
+        try
+        {
+            var created = await agents.CreateAsync(
+                agent, configJson, req.Notes, principal.GetUserId());
+
+            return Results.Created($"/api/v1/agents/{created.Id}", new CreateAgentResponse(
+                created.Id, created.Name, created.Role,
+                VisibilityWire(created.Visibility), StatusWire(created.Status),
+                CurrentVersion: 1));
+        }
+        catch (TammaError ex)
+        {
+            return Results.BadRequest(new { error = ex.Code, detail = ex.Message });
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            return Results.Conflict(new
+            {
+                error = "agent_name_conflict",
+                detail = "an agent with this name/role already exists for this scope.",
+            });
+        }
+    }
+
+    /// <summary>
+    /// POST <c>/api/v1/agents/{id}/versions</c> — publish a new immutable
+    /// version. RBAC matches the agent's ownership (public → platform admin;
+    /// private → owning tenant/user).
+    /// </summary>
+    public static async Task<IResult> PublishVersion(
+        Guid id,
+        PublishVersionRequest req,
+        IAgentRepository agents,
+        ClaimsPrincipal principal,
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider)
+    {
+        var agent = await agents.GetByIdAsync(id);
+        if (agent is null || !CanSeeAgent(agent, principal, tenantContext, modeProvider))
+        {
+            // 404 (not 403) for an agent the caller cannot see — avoid leaking existence.
+            return Results.NotFound();
+        }
+        if (!CanWriteAgent(agent, principal, tenantContext, modeProvider))
+        {
+            return Results.Json(
+                new { error = "forbidden", detail = "not permitted to publish for this agent." },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        var configJson = req.Config.ValueKind == JsonValueKind.Undefined
+            ? "{}"
+            : req.Config.GetRawText();
+        var (valid, errors) = AgentConfigValidator.Validate(configJson);
+        if (!valid)
+        {
+            return Results.BadRequest(new { valid = false, errors });
+        }
+
+        try
+        {
+            var version = await agents.PublishVersionAsync(
+                id, configJson, req.Notes, principal.GetUserId());
+            if (version is null)
+            {
+                return Results.NotFound();
+            }
+            return Results.Ok(new PublishVersionResponse(
+                version.Id, version.Version, version.CreatedAt));
+        }
+        catch (TammaError ex)
+        {
+            return Results.BadRequest(new { error = ex.Code, detail = ex.Message });
+        }
+    }
+
+    /// <summary>POST <c>/api/v1/agents/{id}/archive</c>.</summary>
+    public static async Task<IResult> ArchiveAgent(
+        Guid id,
+        IAgentRepository agents,
+        ClaimsPrincipal principal,
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider)
+    {
+        var agent = await agents.GetByIdAsync(id);
+        if (agent is null || !CanSeeAgent(agent, principal, tenantContext, modeProvider))
+        {
+            return Results.NotFound();
+        }
+        if (!CanWriteAgent(agent, principal, tenantContext, modeProvider))
+        {
+            return Results.Json(
+                new { error = "forbidden", detail = "not permitted to archive this agent." },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        var archived = await agents.ArchiveAsync(id, principal.GetUserId());
+        return archived is null
+            ? Results.NotFound()
+            : Results.Ok(new { id = archived.Id, status = StatusWire(archived.Status) });
+    }
+
+    /// <summary>
+    /// GET <c>/api/v1/agents</c> — list visible agents (all public ∪ the
+    /// caller's own private). Cross-tenant private agents are never returned.
+    /// </summary>
+    public static async Task<IResult> ListAgents(
+        IAgentRepository agents,
+        ClaimsPrincipal principal,
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider)
+    {
+        var (tenantId, userId) = ResolvePrincipalScope(principal, tenantContext, modeProvider);
+        var visible = await agents.ListVisibleAsync(tenantId, userId);
+        var summaries = visible.Select(ToSummary).ToList();
+        return Results.Ok(summaries);
+    }
+
+    /// <summary>
+    /// GET <c>/api/v1/agents/{id}</c> — a private agent not owned by the caller
+    /// returns 404 (not 403, to avoid leaking existence).
+    /// </summary>
+    public static async Task<IResult> GetAgent(
+        Guid id,
+        IAgentRepository agents,
+        ClaimsPrincipal principal,
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider)
+    {
+        var agent = await agents.GetByIdAsync(id);
+        if (agent is null || !CanSeeAgent(agent, principal, tenantContext, modeProvider))
+        {
+            return Results.NotFound();
+        }
+
+        var versions = await agents.ListVersionsAsync(id);
+        return Results.Ok(new AgentDetail(
+            agent.Id, agent.Name, agent.Role,
+            VisibilityWire(agent.Visibility), StatusWire(agent.Status),
+            agent.OwnerTenantId, agent.OwnerUserId, agent.CurrentVersionId,
+            agent.CreatedAt, agent.UpdatedAt,
+            versions.Select(v => new AgentVersionSummary(v.Id, v.Version, v.Notes, v.CreatedAt)).ToList()));
+    }
+
+    /// <summary>GET <c>/api/v1/agents/{id}/versions</c>.</summary>
+    public static async Task<IResult> ListVersions(
+        Guid id,
+        IAgentRepository agents,
+        ClaimsPrincipal principal,
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider)
+    {
+        var agent = await agents.GetByIdAsync(id);
+        if (agent is null || !CanSeeAgent(agent, principal, tenantContext, modeProvider))
+        {
+            return Results.NotFound();
+        }
+        var versions = await agents.ListVersionsAsync(id);
+        return Results.Ok(versions
+            .Select(v => new AgentVersionSummary(v.Id, v.Version, v.Notes, v.CreatedAt))
+            .ToList());
+    }
+
+    /// <summary>GET <c>/api/v1/agents/{id}/versions/{version}</c>.</summary>
+    public static async Task<IResult> GetVersion(
+        Guid id,
+        int version,
+        IAgentRepository agents,
+        ClaimsPrincipal principal,
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider)
+    {
+        var agent = await agents.GetByIdAsync(id);
+        if (agent is null || !CanSeeAgent(agent, principal, tenantContext, modeProvider))
+        {
+            return Results.NotFound();
+        }
+        var ver = await agents.GetVersionAsync(id, version);
+        if (ver is null)
+        {
+            return Results.NotFound();
+        }
+
+        using var doc = JsonDocument.Parse(ver.ConfigJson);
+        return Results.Ok(new AgentVersionDetail(
+            ver.Id, ver.AgentId, ver.Version, doc.RootElement.Clone(),
+            ver.Notes, ver.CreatedAt));
+    }
+
+    // -----------------------------------------------------------------------
+    // Story 32-1 — visibility / RBAC helpers
+    // -----------------------------------------------------------------------
+
+    private static AgentSummary ToSummary(Agent a) => new(
+        a.Id, a.Name, a.Role, VisibilityWire(a.Visibility), StatusWire(a.Status),
+        a.OwnerTenantId, a.OwnerUserId, a.CurrentVersionId);
+
+    private static string VisibilityWire(AgentVisibility v)
+        => v == AgentVisibility.Public ? "public" : "private";
+
+    private static string StatusWire(AgentStatus s)
+        => s == AgentStatus.Archived ? "archived" : "active";
+
+    private static bool TryParseVisibility(string? raw, out AgentVisibility visibility)
+    {
+        switch (raw?.Trim().ToLowerInvariant())
+        {
+            case "public": visibility = AgentVisibility.Public; return true;
+            case "private": visibility = AgentVisibility.Private; return true;
+            default: visibility = default; return false;
+        }
+    }
+
+    private static bool IsPlatformAdmin(ClaimsPrincipal principal)
+        => string.Equals(
+            principal.FindFirst("platformRole")?.Value, "platform_admin", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Resolve the caller's private-agent principal scope from the process
+    /// mode. SaaS → (tenantId, null); single-user → (null, userId).
+    /// </summary>
+    private static (Guid? TenantId, Guid? UserId) ResolvePrincipalScope(
+        ClaimsPrincipal principal, ITenantContext tenantContext, ITammaModeProvider modeProvider)
+        => modeProvider.Mode == TammaMode.SaaS
+            ? (tenantContext.TenantId, (Guid?)null)
+            : ((Guid?)null, principal.GetUserId());
+
+    /// <summary>
+    /// Visibility check for reads: any public agent, or a private agent owned
+    /// by the caller's scope. Mirrors <c>IAgentRepository.ListVisibleAsync</c>.
+    /// </summary>
+    private static bool CanSeeAgent(
+        Agent agent, ClaimsPrincipal principal,
+        ITenantContext tenantContext, ITammaModeProvider modeProvider)
+    {
+        if (agent.Visibility == AgentVisibility.Public)
+        {
+            return true;
+        }
+        var (tenantId, userId) = ResolvePrincipalScope(principal, tenantContext, modeProvider);
+        return (tenantId is not null && agent.OwnerTenantId == tenantId) ||
+               (userId is not null && agent.OwnerUserId == userId);
+    }
+
+    /// <summary>
+    /// Write check: public agents require platform admin; private agents
+    /// require the caller to own the agent in the current scope. (Member-role
+    /// callers are already 403'd by the AgentManage route policy.)
+    /// </summary>
+    private static bool CanWriteAgent(
+        Agent agent, ClaimsPrincipal principal,
+        ITenantContext tenantContext, ITammaModeProvider modeProvider)
+    {
+        if (agent.Visibility == AgentVisibility.Public)
+        {
+            return IsPlatformAdmin(principal);
+        }
+        var (tenantId, userId) = ResolvePrincipalScope(principal, tenantContext, modeProvider);
+        return (tenantId is not null && agent.OwnerTenantId == tenantId) ||
+               (userId is not null && agent.OwnerUserId == userId);
+    }
+
+    private static bool IsUniqueViolation(Microsoft.EntityFrameworkCore.DbUpdateException ex)
+        => ex.InnerException is Npgsql.PostgresException pg &&
+           pg.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation;
+
+    // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// Provider name regex from Story 9-1 AC 6 / TS validateAgentsConfig:
-    /// <c>^[a-z0-9][a-z0-9_-]{0,63}$</c>.
-    /// </summary>
-    private static readonly Regex ProviderNameRegex =
-        new("^[a-z0-9][a-z0-9_-]{0,63}$",
-            RegexOptions.Compiled | RegexOptions.CultureInvariant);
-
-    /// <summary>
     /// Schema- AND semantic-level validation. Returns (valid, errors).
     /// Tolerant of empty configs (valid — fall through to platform defaults).
-    /// Finding 014: enforces provider regex, budget range [0,100], ReDoS
-    /// guard on blockedCommandPatterns, maxFetchSizeBytes range [0, 1 GiB],
-    /// and prototype-pollution rejection on every key.
+    ///
+    /// <para>Story 32-1 — the rules were extracted into the shared
+    /// <see cref="AgentConfigValidator"/> so the legacy <c>config</c> surface
+    /// and the new Epic 32 agent-version surface validate identically (Finding
+    /// 014 provider regex / budget range / ReDoS / prototype-pollution guards
+    /// apply to both). This thin shim preserves the existing call sites.</para>
     /// </summary>
     private static (bool Valid, string[] Errors) ValidateConfigShape(string configJson)
-    {
-        var errors = new List<string>();
-
-        JsonDocument doc;
-        try
-        {
-            doc = JsonDocument.Parse(configJson);
-        }
-        catch (JsonException ex)
-        {
-            return (false, new[] { $"Invalid JSON: {ex.Message}" });
-        }
-
-        using (doc)
-        {
-            var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object)
-            {
-                errors.Add("Root must be a JSON object.");
-                return (false, errors.ToArray());
-            }
-
-            // ── Roles ────────────────────────────────────────────────────────
-            if (root.TryGetProperty("roles", out var roles))
-            {
-                if (roles.ValueKind != JsonValueKind.Object)
-                {
-                    errors.Add("'roles' must be an object.");
-                    return (false, errors.ToArray());
-                }
-
-                foreach (var prop in roles.EnumerateObject())
-                {
-                    if (RolePhaseMap.ForbiddenKeys.Contains(prop.Name))
-                    {
-                        errors.Add($"Forbidden role key: '{prop.Name}'.");
-                        continue;
-                    }
-                    var roleKnown = RolePhaseMap.ValidRoles.Contains(prop.Name) ||
-                                    RolePhaseMap.LegacyRoleAliases.ContainsKey(prop.Name);
-                    if (!roleKnown)
-                    {
-                        errors.Add(
-                            $"Unknown role '{prop.Name}'. Valid: " +
-                            string.Join(", ", RolePhaseMap.ValidRoles) + ".");
-                        continue;
-                    }
-                    if (prop.Value.ValueKind != JsonValueKind.Object) continue;
-
-                    ValidateRoleSemantics(prop.Name, prop.Value, errors);
-                }
-            }
-
-            // ── defaults.providerChain (legacy TS shape) ────────────────────
-            if (root.TryGetProperty("defaults", out var defaults) &&
-                defaults.ValueKind == JsonValueKind.Object &&
-                defaults.TryGetProperty("providerChain", out var defChain))
-            {
-                ValidateProviderChain("defaults.providerChain", defChain, errors);
-            }
-
-            // ── chains (canonical 2D shape) ─────────────────────────────────
-            if (root.TryGetProperty("chains", out var chains) &&
-                chains.ValueKind == JsonValueKind.Object)
-            {
-                foreach (var prop in chains.EnumerateObject())
-                {
-                    if (RolePhaseMap.ForbiddenKeys.Contains(prop.Name))
-                    {
-                        errors.Add($"Forbidden chain key: '{prop.Name}'.");
-                        continue;
-                    }
-                    if (prop.Value.ValueKind == JsonValueKind.Array)
-                    {
-                        ValidateProviderChain($"chains.{prop.Name}", prop.Value, errors);
-                    }
-                    else if (prop.Value.ValueKind == JsonValueKind.Object)
-                    {
-                        foreach (var actionProp in prop.Value.EnumerateObject())
-                        {
-                            if (actionProp.Value.ValueKind != JsonValueKind.Array) continue;
-                            ValidateProviderChain(
-                                $"chains.{prop.Name}.{actionProp.Name}",
-                                actionProp.Value, errors);
-                        }
-                    }
-                }
-            }
-
-            // ── security branch (blockedCommandPatterns + maxFetchSizeBytes) ─
-            if (root.TryGetProperty("security", out var security) &&
-                security.ValueKind == JsonValueKind.Object)
-            {
-                ValidateSecurity(security, errors);
-            }
-        }
-
-        return (errors.Count == 0, errors.ToArray());
-    }
-
-    private static void ValidateRoleSemantics(string role, JsonElement obj, List<string> errors)
-    {
-        // provider name regex
-        if (obj.TryGetProperty("provider", out var prov) &&
-            prov.ValueKind == JsonValueKind.String)
-        {
-            var name = prov.GetString() ?? string.Empty;
-            if (!ProviderNameRegex.IsMatch(name))
-            {
-                errors.Add(
-                    $"roles.{role}.provider '{name}' must match /^[a-z0-9][a-z0-9_-]{{0,63}}$/.");
-            }
-        }
-
-        // maxBudgetUsd range [0, 100], finite
-        if (obj.TryGetProperty("maxBudgetUsd", out var budget) &&
-            budget.ValueKind == JsonValueKind.Number)
-        {
-            if (!budget.TryGetDouble(out var budgetVal) || double.IsNaN(budgetVal) ||
-                double.IsInfinity(budgetVal))
-            {
-                errors.Add($"roles.{role}.maxBudgetUsd must be a finite number.");
-            }
-            else if (budgetVal < 0 || budgetVal > 100)
-            {
-                errors.Add($"roles.{role}.maxBudgetUsd must be in [0, 100] (got {budgetVal}).");
-            }
-        }
-
-        // permissionMode whitelist
-        if (obj.TryGetProperty("permissionMode", out var mode) &&
-            mode.ValueKind == JsonValueKind.String)
-        {
-            var modeVal = mode.GetString();
-            if (modeVal is not ("default" or "acceptEdits" or "bypassPermissions"))
-            {
-                errors.Add(
-                    $"roles.{role}.permissionMode must be one of " +
-                    "default | acceptEdits | bypassPermissions.");
-            }
-        }
-
-        // providerChain shape
-        if (obj.TryGetProperty("providerChain", out var chain) &&
-            chain.ValueKind == JsonValueKind.Array)
-        {
-            ValidateProviderChain($"roles.{role}.providerChain", chain, errors);
-        }
-    }
-
-    private static void ValidateProviderChain(string label, JsonElement arr, List<string> errors)
-    {
-        if (arr.GetArrayLength() == 0)
-        {
-            errors.Add($"{label}: chain must not be empty.");
-            return;
-        }
-        var i = 0;
-        foreach (var entry in arr.EnumerateArray())
-        {
-            if (entry.ValueKind != JsonValueKind.Object)
-            {
-                errors.Add($"{label}[{i}]: entry must be an object.");
-                i++;
-                continue;
-            }
-            if (!entry.TryGetProperty("provider", out var prov) ||
-                prov.ValueKind != JsonValueKind.String)
-            {
-                errors.Add($"{label}[{i}]: missing 'provider' string field.");
-                i++;
-                continue;
-            }
-            var name = prov.GetString() ?? string.Empty;
-            if (!ProviderNameRegex.IsMatch(name))
-            {
-                errors.Add(
-                    $"{label}[{i}].provider '{name}' must match " +
-                    "/^[a-z0-9][a-z0-9_-]{0,63}$/.");
-            }
-            i++;
-        }
-    }
-
-    private static void ValidateSecurity(JsonElement sec, List<string> errors)
-    {
-        if (sec.TryGetProperty("maxFetchSizeBytes", out var fetch))
-        {
-            if (fetch.ValueKind != JsonValueKind.Number ||
-                !fetch.TryGetInt64(out var bytes))
-            {
-                errors.Add("security.maxFetchSizeBytes must be a number.");
-            }
-            else if (bytes < 0 || bytes > 1L * 1024 * 1024 * 1024)
-            {
-                errors.Add(
-                    $"security.maxFetchSizeBytes must be in [0, 1 GiB] (got {bytes}).");
-            }
-        }
-
-        if (sec.TryGetProperty("blockedCommandPatterns", out var patterns) &&
-            patterns.ValueKind == JsonValueKind.Array)
-        {
-            if (patterns.GetArrayLength() > ReDosGuard.MaxPatternCount)
-            {
-                errors.Add(
-                    $"security.blockedCommandPatterns count {patterns.GetArrayLength()} " +
-                    $"exceeds max {ReDosGuard.MaxPatternCount}.");
-            }
-            var i = 0;
-            foreach (var entry in patterns.EnumerateArray())
-            {
-                if (entry.ValueKind != JsonValueKind.String)
-                {
-                    errors.Add($"security.blockedCommandPatterns[{i}]: must be a string.");
-                    i++;
-                    continue;
-                }
-                try
-                {
-                    ReDosGuard.Validate(
-                        $"security.blockedCommandPatterns[{i}]",
-                        entry.GetString() ?? string.Empty);
-                }
-                catch (ArgumentException ex)
-                {
-                    errors.Add(ex.Message);
-                }
-                i++;
-            }
-        }
-    }
+        => AgentConfigValidator.Validate(configJson);
 }

@@ -167,6 +167,26 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<AlertEvaluatorCursor> AlertEvaluatorCursors =>
         Set<AlertEvaluatorCursor>();
 
+    // ── Story 32-1 — first-class agent entities (Epic 32 foundation) ──
+    //
+    // Agent definitions (public/system + private/tenant-or-user-owned) are
+    // CP-resident: visibility/identity is a control-plane concern and public
+    // agents are shared cross-tenant. ALL performance/action data stays
+    // tenant-scoped in later Epic 32 stories — these tables are definition-only.
+
+    /// <summary>
+    /// Story 32-1 — first-class agent identities (replaces the anonymous
+    /// role-keyed <see cref="AgentConfig"/> blob as the canonical Epic 32
+    /// join key). CP-resident; see <see cref="Entities.Agent"/>.
+    /// </summary>
+    public DbSet<Agent> Agents => Set<Agent>();
+
+    /// <summary>
+    /// Story 32-1 — immutable, monotonically-versioned saved-config snapshots
+    /// per agent. Insert-only; see <see cref="Entities.AgentVersion"/>.
+    /// </summary>
+    public DbSet<AgentVersion> AgentVersions => Set<AgentVersion>();
+
     // Story 28-1 PR D: the 11 + 4 mentorship tenant-resident entities
     // (AgentConfig, PromptOverride, ProviderHealth, ProviderDiagnostic,
     // SanitizationRule, WorkflowDefinition, WorkflowInstance, DomainEvent,
@@ -239,6 +259,10 @@ public class ControlPlaneDbContext : DbContext
         ConfigureTenantPlatformInstallations(modelBuilder);
         ConfigurePlatformWebhookDeliveries(modelBuilder);
         ConfigureTenantDatabases(modelBuilder);
+
+        // Story 32-1 — first-class agent entities. CP-resident, configured in
+        // the shared single source so the model graph + migration stay aligned.
+        TammaModelConfiguration.ConfigureAgentEntities(modelBuilder);
     }
 
     /// <summary>
