@@ -6,9 +6,11 @@ namespace Tamma.Api.Extensions;
 /// <summary>
 /// Story 34-1 — DI registration for the plan price-book catalog. Single
 /// entry-point so <c>Program.cs</c> wires it with one call. Both services are
-/// scoped (they depend on the scoped <c>ControlPlaneDbContext</c>); the read
-/// service is registered behind its interface, the version editor as a
-/// concrete type (Story 34-2 resolves it directly from the admin endpoint).
+/// scoped (they depend on the scoped <c>ControlPlaneDbContext</c>) and are
+/// registered behind their interfaces — the read service as
+/// <see cref="IPlanCatalogService"/> and the version editor as
+/// <see cref="IPlanVersionEditor"/> (Story 34-2 resolves the latter from the
+/// admin write endpoint).
 /// </summary>
 public static class PricingServiceCollectionExtensions
 {
@@ -21,7 +23,7 @@ public static class PricingServiceCollectionExtensions
         services.TryAddSingleton(TimeProvider.System);
 
         services.TryAddScoped<IPlanCatalogService, PlanCatalogService>();
-        services.TryAddScoped<PlanVersionEditor>();
+        services.TryAddScoped<IPlanVersionEditor, PlanVersionEditor>();
 
         return services;
     }

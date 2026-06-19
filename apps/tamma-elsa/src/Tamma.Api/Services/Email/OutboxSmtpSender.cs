@@ -33,8 +33,10 @@ public sealed class OutboxSmtpSenderOptions
     /// that assert outbox-row state (e.g. <c>AuthRegisterTxnIdIntegrationTests
     /// .Register_OutboxRowPersistedWithMatchingTxnId</c>) flake when the
     /// loop races the test and flips <c>status="pending"</c> to
-    /// <c>"sent"</c> / <c>"failed"</c> before the assertion runs. The
-    /// shared <c>ApiTestFixture</c> opts out via <see cref="HostedServiceGateExtensions.DisableRacyHostedServices"/>.
+    /// <c>"sent"</c> / <c>"failed"</c> before the assertion runs. The shared
+    /// test fixture (and <c>AuthRegisterTxnIdIntegrationTests</c>'s own derived
+    /// host) opt out via the <c>AlertHostedServiceTestExtensions
+    /// .DisableAlertHostedServices</c> helper, which sets this flag false.
     /// Mirrors the existing <c>BuiltInAlertRuleSeederOptions.RunOnStartup</c>
     /// gate pattern.
     /// </summary>

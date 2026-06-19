@@ -120,6 +120,10 @@ public static class TenantConnectionPoolServiceCollectionExtensions
                     // Must match ControlPlaneDesignTimeDbContextFactory and DependencyInjection.cs
                     // (unified-tenancy Phase 0 reconciliation).
                     npgsql.MigrationsHistoryTable("__ControlPlaneMigrationsHistory"));
+                // Story 35-1 follow-up — suppress the required-navigation/query-filter
+                // advisory on the POOLED options too. Must be on the options builder,
+                // never OnConfiguring (EF forbids OnConfiguring when pooling is on).
+                ControlPlaneDbContext.ConfigureControlPlaneWarnings(opts);
             });
         }
 

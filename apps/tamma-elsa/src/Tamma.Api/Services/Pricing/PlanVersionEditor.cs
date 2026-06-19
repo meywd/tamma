@@ -35,7 +35,7 @@ namespace Tamma.Api.Services.Pricing;
 /// SaaS the endpoint (34-2) gates this on <c>PlatformOwnerAccess</c> (the
 /// price book is platform-scoped admin work, not a per-tenant owner gate).</para>
 /// </summary>
-public sealed class PlanVersionEditor
+public sealed class PlanVersionEditor : IPlanVersionEditor
 {
     private const string WorkflowVersion = "1.0.0";
 

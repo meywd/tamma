@@ -35,6 +35,15 @@ public sealed class AuditProjector : IAuditProjector
     /// classification could not be resolved at all (no catalog descriptor).</summary>
     public const string UnclassifiedTargetType = "unclassified";
 
+    /// <summary>Dedicated marker for the <c>category</c> of a quarantine row whose
+    /// event has no catalog descriptor (so the real <see cref="AuditCategory"/>
+    /// cannot be derived). Distinct from <see cref="UnclassifiedTargetType"/> —
+    /// the category and target-type columns are different dimensions and must not
+    /// share one sentinel constant, even though their fallback spelling is the
+    /// same. Not an <see cref="AuditCategory"/> member: it is a sentinel reserved
+    /// for the descriptor-missing quarantine path only.</summary>
+    public const string UnclassifiedCategory = "unclassified";
+
     /// <inheritdoc />
     public AuditRecord? TryBuildRecord(
         RawAuditEvent rawEvent, AuditOwnershipMode mode, Guid? singleUserOwnerId)
@@ -114,7 +123,7 @@ public sealed class AuditProjector : IAuditProjector
             ActionCode = descriptor?.ActionCode ?? rawEvent.Type,
             Category = descriptor is not null
                 ? descriptor.Category.ToString().ToLowerInvariant()
-                : UnclassifiedTargetType,
+                : UnclassifiedCategory,
             Severity = descriptor is not null
                 ? descriptor.Severity.ToString().ToLowerInvariant()
                 : "warning",

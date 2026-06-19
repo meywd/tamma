@@ -66,15 +66,13 @@ public static class PlansSeeder
             // v1 plan (Story 28-1 shipped the bare plan rows; 34-1 backfills
             // the typed children). The Story 34-1 immutability interceptor on
             // ControlPlaneDbContext would otherwise (correctly) reject adding a
-            // child to an active plan, so suppress it for just this save.
-            context.SuppressPlanImmutabilityGuard = true;
-            try
+            // child to an active plan, so suppress it for just this save. The
+            // disposable scope guarantees the suppression is restored on exit
+            // (even on exception) and can never leak across a pooled-context
+            // lease — there is no settable flag to leave dangling.
+            using (context.SuppressPlanImmutabilityGuard())
             {
                 await context.SaveChangesAsync(cancellationToken);
-            }
-            finally
-            {
-                context.SuppressPlanImmutabilityGuard = false;
             }
         }
     }

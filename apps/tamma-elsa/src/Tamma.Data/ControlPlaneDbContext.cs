@@ -42,26 +42,125 @@ public class ControlPlaneDbContext : DbContext
     // version editor performs is allowed; children of a freshly-Added active
     // plan (the new version's rows) are allowed.
 
+    // Story 34-1 follow-up — leak-proof immutability-guard suppression.
+    //
+    // The context is POOLED in production (AddPooledDbContextFactory /
+    // AddTenantConnectionPool). EF's pool reset only clears state it knows about
+    // (the ChangeTracker, the connection, IResettableService services) — it does
+    // NOT clear a custom bool field on the derived context. A plain settable
+    // `SuppressPlanImmutabilityGuard = true` left dangling (e.g. by a caller that
+    // forgot a finally, or an exception that skipped the reset) would silently
+    // ride the pooled instance into the NEXT lease and disable the guard for an
+    // unrelated caller. So the suppression is exposed ONLY as a disposable scope:
+    // the caller writes `using var _ = ctx.SuppressPlanImmutabilityGuard();` and
+    // the scope's Dispose ALWAYS restores the prior value — even on exception,
+    // because `using` is a try/finally — so a caller physically cannot leave it
+    // set and it can never ride a pooled instance into the next lease. There is
+    // no public setter at all: the only way to flip the flag is to open (and
+    // therefore, via `using`, automatically close) a scope.
+    private bool _suppressPlanImmutabilityGuard;
+
     /// <summary>
     /// Story 34-1 — escape hatch for the trusted <c>PlansSeeder</c> system-
-    /// defaults populate path ONLY. The seeder does insert-missing-only
-    /// backfill of children onto an already-active v1 plan (Story 28-1 shipped
-    /// the bare plan rows; 34-1 backfills the typed children), which the
-    /// immutability interceptor would otherwise (correctly) reject. The seeder
-    /// sets this for the duration of its save and resets it in a finally. No
-    /// user-facing or request-handling code should ever set it.
+    /// defaults populate path ONLY. The seeder does insert-missing-only backfill
+    /// of children onto an already-active v1 plan (Story 28-1 shipped the bare
+    /// plan rows; 34-1 backfills the typed children), which the immutability
+    /// interceptor would otherwise (correctly) reject.
+    ///
+    /// <para>Returns a disposable scope that suppresses the guard for its
+    /// lifetime and restores the prior value on <see cref="IDisposable.Dispose"/>
+    /// — guaranteed, even on exception, via <c>using</c>. There is intentionally
+    /// no public setter: a caller physically cannot leave the flag stuck on,
+    /// which keeps the guard leak-proof across pooled-context reuse. No
+    /// user-facing or request-handling code should ever open this scope.</para>
     /// </summary>
-    public bool SuppressPlanImmutabilityGuard { get; set; }
+    public IDisposable SuppressPlanImmutabilityGuard()
+        => new PlanImmutabilityGuardSuppressionScope(this);
+
+    private sealed class PlanImmutabilityGuardSuppressionScope : IDisposable
+    {
+        private readonly ControlPlaneDbContext _ctx;
+        private readonly bool _previous;
+        private bool _disposed;
+
+        public PlanImmutabilityGuardSuppressionScope(ControlPlaneDbContext ctx)
+        {
+            _ctx = ctx;
+            _previous = ctx._suppressPlanImmutabilityGuard;
+            ctx._suppressPlanImmutabilityGuard = true;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _ctx._suppressPlanImmutabilityGuard = _previous;
+        }
+    }
+
+    /// <summary>
+    /// Story 35-1 follow-up — resolve the
+    /// <c>PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning</c>
+    /// advisory cleanly. Apply this from EVERY <see cref="DbContextOptions{TContext}"/>
+    /// builder seam that constructs a <see cref="ControlPlaneDbContext"/>: the DI
+    /// factory (<c>AddTammaData</c>), the pooled factory (<c>AddTenantConnectionPool</c>),
+    /// and the design-time factory used by <c>ef migrations</c>.
+    ///
+    /// <para><b>What fires it.</b> <c>Tenant</c> and <c>User</c> carry a
+    /// soft-delete query filter (<c>DeletedAt == null</c>). Their REQUIRED
+    /// dependents — <c>BillingCustomer</c> (Story 35-1), plus the pre-existing
+    /// <c>TenantMembership</c>, <c>UserInvite</c>, <c>RefreshToken</c>,
+    /// <c>PasswordResetToken</c> — have a non-nullable FK (so EF marks the nav
+    /// <c>IsRequired()</c>) but NO soft-delete column of their own, so they carry
+    /// no matching filter. EF warns that an <c>Include</c> of the filtered
+    /// principal could yield a null required navigation. That is an ACCEPTED
+    /// pattern here: the dependents are hard-deleted on cascade when the tenant/
+    /// user is HARD-deleted; while a principal is merely SOFT-deleted the
+    /// dependent legitimately still exists and an <c>Include</c> returning null is
+    /// the correct, intended behaviour.</para>
+    ///
+    /// <para><b>Why suppress, and why on the OPTIONS builder (not
+    /// <c>OnModelCreating</c>/<c>TammaModelConfiguration</c>, and NOT
+    /// <c>OnConfiguring</c>).</b> The two model-level alternatives both fail the
+    /// Wave-1 constraints: (1) adding a matching query filter is impossible —
+    /// these dependents have no <c>DeletedAt</c> column; (2) marking the
+    /// navigation <c>.IsRequired(false)</c> would make the FK column nullable, i.e.
+    /// a SCHEMA change + a new migration, which the cascade-preservation
+    /// constraint forbids. So the only constraint-satisfying resolution is to
+    /// ignore this one advisory. <c>ConfigureWarnings</c> is a
+    /// <see cref="DbContextOptionsBuilder"/> API — a <c>ModelBuilder</c> has no
+    /// warning surface, so it CANNOT live in <c>TammaModelConfiguration</c>. It
+    /// also CANNOT live in an <c>OnConfiguring</c> override: this context is
+    /// registered through <c>AddPooledDbContextFactory</c> in production, and EF
+    /// throws <c>"'OnConfiguring' cannot be used to modify DbContextOptions when
+    /// DbContext pooling is enabled"</c>. The options-builder seam is the only
+    /// place that is both pooling-safe AND applies uniformly to all five
+    /// relationships. Schema, cascade behaviour, and query semantics are
+    /// untouched; <c>has-pending-model-changes</c> stays clean.</para>
+    /// </summary>
+    public static void ConfigureControlPlaneWarnings(DbContextOptionsBuilder optionsBuilder)
+    {
+        ArgumentNullException.ThrowIfNull(optionsBuilder);
+        optionsBuilder.ConfigureWarnings(w =>
+            w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId
+                .PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning));
+    }
 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
-        if (!SuppressPlanImmutabilityGuard)
+        if (!_suppressPlanImmutabilityGuard)
         {
-            EnforcePlanImmutability(resolveUntrackedPlanStatus: ids =>
-                Plans.AsNoTracking()
-                    .Where(p => ids.Contains(p.Id))
+            // Compute the untracked-owning-plan id set ONCE, then resolve its
+            // statuses synchronously and pass both through to the enforcer.
+            var untrackedIds = CollectUntrackedOwningPlanIds();
+            var untrackedStatus = untrackedIds.Count == 0
+                ? new Dictionary<Guid, string>()
+                : Plans.AsNoTracking()
+                    .Where(p => untrackedIds.Contains(p.Id))
                     .Select(p => new { p.Id, p.Status })
-                    .ToDictionary(x => x.Id, x => x.Status));
+                    .ToDictionary(x => x.Id, x => x.Status);
+
+            EnforcePlanImmutability(untrackedStatus);
         }
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
@@ -70,28 +169,35 @@ public class ControlPlaneDbContext : DbContext
         bool acceptAllChangesOnSuccess,
         CancellationToken cancellationToken = default)
     {
-        if (!SuppressPlanImmutabilityGuard)
+        if (!_suppressPlanImmutabilityGuard)
         {
-            var untracked = await ResolvePlanGuardUntrackedAsync(cancellationToken);
-            EnforcePlanImmutability(resolveUntrackedPlanStatus: _ => untracked);
+            // Compute the untracked-owning-plan id set ONCE here (the async path
+            // previously computed it both in the pre-pass AND again inside
+            // EnforcePlanImmutability). Resolve statuses via the async DB lookup,
+            // then pass the SAME id set + status map into the synchronous enforcer
+            // so it never recomputes or blocks on the DB.
+            var untrackedIds = CollectUntrackedOwningPlanIds();
+            var untrackedStatus = await ResolveUntrackedPlanStatusAsync(
+                untrackedIds, cancellationToken);
+
+            EnforcePlanImmutability(untrackedStatus);
         }
         return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
     /// <summary>
-    /// Async pre-pass for <see cref="SaveChangesAsync(bool, CancellationToken)"/>:
-    /// loads the status of any owning plan referenced by a changed child row
-    /// that isn't already in the ChangeTracker, so the synchronous
-    /// <see cref="EnforcePlanImmutability"/> body never blocks on the DB.
+    /// Async resolution of the owning-plan statuses for a pre-computed set of
+    /// untracked plan ids — used by <see cref="SaveChangesAsync(bool, CancellationToken)"/>
+    /// so the synchronous <see cref="EnforcePlanImmutability"/> body never blocks
+    /// on the DB. Empty input ⇒ no query.
     /// </summary>
-    private async Task<Dictionary<Guid, string>> ResolvePlanGuardUntrackedAsync(
-        CancellationToken ct)
+    private async Task<Dictionary<Guid, string>> ResolveUntrackedPlanStatusAsync(
+        HashSet<Guid> untrackedIds, CancellationToken ct)
     {
-        var ids = CollectUntrackedOwningPlanIds();
-        if (ids.Count == 0) return new Dictionary<Guid, string>();
+        if (untrackedIds.Count == 0) return new Dictionary<Guid, string>();
 
         var rows = await Plans.AsNoTracking()
-            .Where(p => ids.Contains(p.Id))
+            .Where(p => untrackedIds.Contains(p.Id))
             .Select(p => new { p.Id, p.Status })
             .ToListAsync(ct);
         return rows.ToDictionary(x => x.Id, x => x.Status);
@@ -131,11 +237,15 @@ public class ControlPlaneDbContext : DbContext
     /// Story 34-1 AC6 — throws <c>PLAN.VERSION.IMMUTABLE</c> (High) when the
     /// pending change set mutates an immutable plan version or its children.
     /// </summary>
-    /// <param name="resolveUntrackedPlanStatus">
-    /// Resolves the DB status of owning plans not in the ChangeTracker.
+    /// <param name="untrackedStatus">
+    /// DB status of the owning plans of changed child rows that are NOT
+    /// represented by a tracked <see cref="Plan"/> entry. The caller computes the
+    /// id set ONCE (<see cref="CollectUntrackedOwningPlanIds"/>) and resolves the
+    /// statuses (synchronously for <see cref="SaveChanges"/>, via an async DB
+    /// lookup for <see cref="SaveChangesAsync(bool, CancellationToken)"/>).
     /// </param>
     private void EnforcePlanImmutability(
-        Func<HashSet<Guid>, IReadOnlyDictionary<Guid, string>> resolveUntrackedPlanStatus)
+        IReadOnlyDictionary<Guid, string> untrackedStatus)
     {
         // 1. Direct Plan mutations.
         foreach (var entry in ChangeTracker.Entries<Plan>())
@@ -157,14 +267,12 @@ public class ControlPlaneDbContext : DbContext
                 originalStatus, entry.Entity.Id, "plan");
         }
 
-        // 2. Child mutations (insert / update / delete).
+        // 2. Child mutations (insert / update / delete). The untracked-owning-plan
+        // ids + their DB statuses were computed ONCE by the caller and passed in
+        // as untrackedStatus (the async path used to recompute the id set here as
+        // well — see Fix #4).
         var trackedPlanStatus = ChangeTracker.Entries<Plan>()
             .ToDictionary(e => e.Entity.Id, e => (e.State, e.Entity.Status));
-
-        var untrackedIds = CollectUntrackedOwningPlanIds();
-        var untrackedStatus = untrackedIds.Count == 0
-            ? new Dictionary<Guid, string>()
-            : resolveUntrackedPlanStatus(untrackedIds);
 
         EnforceChildren<PlanFeature>(e => e.PlanId, trackedPlanStatus, untrackedStatus);
         EnforceChildren<PlanEntitlement>(e => e.PlanId, trackedPlanStatus, untrackedStatus);

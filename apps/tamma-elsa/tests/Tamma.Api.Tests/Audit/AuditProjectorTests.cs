@@ -235,4 +235,35 @@ public class AuditProjectorTests
         single.UserId.Should().Be(ownerId);
         single.TenantId.Should().BeNull();
     }
+
+    // ── C2 — quarantine of an event with NO catalog descriptor ──
+    //
+    // When the descriptor itself is missing (a build failure with no
+    // classification), Category must use its OWN dedicated sentinel constant
+    // (UnclassifiedCategory) — NOT the target-type sentinel. The two columns are
+    // different dimensions and must not be wired to one constant, even though
+    // both currently spell "unclassified": a future divergence in either spelling
+    // must not silently desync the other. This test pins the two constants to the
+    // two columns independently so the cosmetic reuse can't creep back.
+    [Test]
+    public void Quarantine_Record_NoDescriptor_Uses_Dedicated_Category_And_TargetType_Constants()
+    {
+        // WORKFLOW.STEP_COMPLETED is intentionally NOT in SensitiveActionCatalog
+        // (see NonCatalog_Event_Yields_Null), so the descriptor resolves to null
+        // and the quarantine builder takes its fallback branch.
+        var raw = Raw("WORKFLOW.STEP_COMPLETED", tenantId: Guid.NewGuid());
+
+        var rec = _projector.BuildQuarantineRecord(raw, AuditOwnershipMode.SaaS, null);
+
+        // Category comes from the category-dimension constant — proven by binding
+        // the assertion to that exact constant, not the target-type one.
+        rec.Category.Should().Be(AuditProjector.UnclassifiedCategory);
+        // TargetType comes from the target-type-dimension constant.
+        rec.TargetType.Should().Be(AuditProjector.UnclassifiedTargetType);
+        // No catalog descriptor → ActionCode degrades to the raw event type.
+        rec.ActionCode.Should().Be("WORKFLOW.STEP_COMPLETED");
+        // Still a quarantine row: failure outcome + safe placeholder payload.
+        rec.Outcome.Should().Be("failure");
+        rec.PayloadJson.Should().Be(AuditProjector.QuarantinePayload);
+    }
 }

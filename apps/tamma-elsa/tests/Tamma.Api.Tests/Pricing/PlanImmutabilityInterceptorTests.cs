@@ -260,6 +260,32 @@ public class PlanImmutabilityInterceptorTests
         await act.Should().NotThrowAsync("children of a draft plan are freely insertable");
     }
 
+    // (d2) The ONLY permitted change to an immutable active row is the pure
+    // active→deprecated flip (Status + UpdatedAt). A SaveChanges that flips the
+    // status AND piggy-backs another column change is NOT a controlled flip —
+    // it must throw so an attacker can't smuggle a price edit through the
+    // deprecation path. Single SaveChanges, both changes staged together.
+    [Test]
+    public async Task DeprecationFlip_With_Smuggled_Field_Change_Throws()
+    {
+        await using var ctx = NewContext();
+        var plan = await ctx.Plans.FirstAsync(p => p.Slug == "team" && p.Status == "active");
+
+        // Flip status active→deprecated AND also change another column in the
+        // SAME unit of work. The interceptor's IsControlledDeprecationFlip only
+        // tolerates Status + UpdatedAt, so this must be rejected.
+        plan.Status = "deprecated";
+        plan.MonthlyPriceUsd = 12345m;
+
+        var act = async () => await ctx.SaveChangesAsync();
+        var ex = (await act.Should().ThrowAsync<TammaError>(
+            "flipping status while also mutating another field is not a controlled "
+            + "deprecation flip — it must be rejected"))
+            .Which;
+        ex.Code.Should().Be("PLAN.VERSION.IMMUTABLE");
+        ex.Severity.Should().Be(TammaErrorSeverity.High);
+    }
+
     // (e) The editor's version-create + deprecate-flip succeeds THROUGH the
     // interceptor (the controlled active→deprecated flip + the new active
     // plan's children are both allowed).
