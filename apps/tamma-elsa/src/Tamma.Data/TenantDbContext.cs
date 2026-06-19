@@ -67,6 +67,11 @@ public class TenantDbContext : DbContext
     public DbSet<AnalyticsUsageHourly> AnalyticsUsageHourly => Set<AnalyticsUsageHourly>();
     public DbSet<AnalyticsUsageDaily> AnalyticsUsageDaily => Set<AnalyticsUsageDaily>();
 
+    // Story 37-1 — tenant-scope curated audit trail, materialized from this
+    // tenant's domain_events stream by the AuditProjector. Platform-scope rows
+    // live in the CP audit_records.
+    public DbSet<AuditRecord> AuditRecords => Set<AuditRecord>();
+
     /// <summary>
     /// Tenant-scoped API keys (Story 28-7). The tenant DB api_keys table
     /// is locked to <c>Scope = 'tenant'</c> via a CHECK constraint; user /

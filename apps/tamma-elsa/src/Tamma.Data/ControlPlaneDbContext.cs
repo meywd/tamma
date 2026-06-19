@@ -444,6 +444,19 @@ public class ControlPlaneDbContext : DbContext
     /// </summary>
     public DbSet<BillingPlanPrice> BillingPlanPrices => Set<BillingPlanPrice>();
 
+    /// <summary>
+    /// Story 37-1 — platform-scope curated audit trail. Tenant-scope rows live
+    /// in the per-tenant schema's <c>audit_records</c>; these are the
+    /// platform/lifecycle rows (impersonation, tenant provision/move, etc.).
+    /// </summary>
+    public DbSet<AuditRecord> AuditRecords => Set<AuditRecord>();
+
+    /// <summary>
+    /// Story 37-1 — the audit projector's resume cursor (mirrors
+    /// <see cref="AlertEvaluatorCursor"/>). CP-resident; one row per projector.
+    /// </summary>
+    public DbSet<AuditProjectorCursor> AuditProjectorCursors => Set<AuditProjectorCursor>();
+
     // Story 28-1 PR D: the 11 + 4 mentorship tenant-resident entities
     // (AgentConfig, PromptOverride, ProviderHealth, ProviderDiagnostic,
     // SanitizationRule, WorkflowDefinition, WorkflowInstance, DomainEvent,
@@ -525,6 +538,14 @@ public class ControlPlaneDbContext : DbContext
         // configured in the shared single source so the model graph + migration
         // stay aligned (same convention as the agent entities above).
         TammaModelConfiguration.ConfigureBillingEntities(modelBuilder);
+
+        // Story 37-1 — platform-scope curated audit trail + the projector cursor.
+        // audit_records carries the SAME shape as the tenant-schema table; the
+        // CP build hosts platform-scope rows (impersonation, tenant lifecycle).
+        // The cursor is CP-resident (mirrors alert_evaluator_cursor) — the single
+        // projector resumes both streams from one row.
+        TammaModelConfiguration.ConfigureAuditEntities(modelBuilder, fixedTenantId: null);
+        TammaModelConfiguration.ConfigureAuditProjectorCursor(modelBuilder);
     }
 
     /// <summary>

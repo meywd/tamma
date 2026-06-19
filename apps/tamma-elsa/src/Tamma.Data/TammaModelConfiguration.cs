@@ -914,6 +914,115 @@ internal static class TammaModelConfiguration
     }
 
     /// <summary>
+    /// Story 37-1 — configure the curated <c>audit_records</c> read-model table.
+    /// Called from BOTH <see cref="ControlPlaneDbContext"/> (platform-scope
+    /// audit) and <see cref="TenantDbContext"/> (tenant-scope audit) so the
+    /// single config source applies to both model builds — there is exactly one
+    /// physical <c>audit_records</c> shape, materialized into either the CP or a
+    /// tenant schema by the projector.
+    ///
+    /// <para>Mirrors <c>prompt_overrides</c>: the
+    /// <c>ck_audit_records_principal_xor</c> CHECK ties exactly one of
+    /// (<c>UserId</c>, <c>TenantId</c>) to non-null. The UNIQUE
+    /// <c>SourceEventId</c> index is the idempotency key (one curated row per raw
+    /// event — AC8). The <c>SourceSequenceNumber</c> index gives Story 37-2 a
+    /// deterministic chain order. The reserved <c>RecordHash</c>/<c>PrevRecordHash</c>
+    /// columns are nullable and left null by this story.</para>
+    /// </summary>
+    public static void ConfigureAuditEntities(
+        ModelBuilder modelBuilder, Guid? fixedTenantId = null)
+    {
+        modelBuilder.Entity<AuditRecord>(entity =>
+        {
+            entity.ToTable("audit_records", t =>
+            {
+                // Per-mode ownership invariant (mirrors ck_prompt_overrides_principal_xor):
+                // UserId and TenantId are mutually exclusive — never BOTH set.
+                //   single-user → UserId set, TenantId null;
+                //   SaaS tenant-scope → TenantId set, UserId null;
+                //   SaaS platform-scope → BOTH null (a control-plane platform row,
+                //     e.g. impersonation against the platform — AC11). This third
+                //     case is why the CHECK is "not both" rather than strict XOR:
+                //     a platform action has no tenant AND no single-user owner, yet
+                //     AC11 mandates it land in the CP audit_records with tenant_id
+                //     null. The "never a tenant's view" isolation (AC14) is then
+                //     enforced by physical placement (CP schema) + the TenantId
+                //     filter on tenant reads, not by the ownership columns.
+                t.HasCheckConstraint(
+                    "ck_audit_records_principal_xor",
+                    "NOT (\"UserId\" IS NOT NULL AND \"TenantId\" IS NOT NULL)");
+                // Outcome is a closed enum — a buggy projector can't stash junk.
+                t.HasCheckConstraint(
+                    "ck_audit_records_outcome",
+                    "\"Outcome\" IN ('success','failure','denied')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.ActionCode).IsRequired().HasMaxLength(128);
+            entity.Property(e => e.Category).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.Severity).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.ActorEmailSnapshot).HasMaxLength(320);
+            entity.Property(e => e.TargetType).HasMaxLength(64);
+            entity.Property(e => e.TargetId).HasMaxLength(255);
+            entity.Property(e => e.Outcome)
+                .IsRequired().HasMaxLength(16).HasDefaultValue("success");
+            entity.Property(e => e.IpAddress).HasMaxLength(64);
+            entity.Property(e => e.UserAgent).HasMaxLength(512);
+            entity.Property(e => e.OccurredAt).HasColumnType("timestamp with time zone");
+            entity.Property(e => e.PayloadJson)
+                .HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+            // Reserved for Story 37-2 — nullable, never populated here.
+            entity.Property(e => e.RecordHash).HasMaxLength(128);
+            entity.Property(e => e.PrevRecordHash).HasMaxLength(128);
+
+            // Idempotency key — one curated row per raw event (AC8). The
+            // projector inserts-if-absent; a re-scan after a crash is a no-op.
+            entity.HasIndex(e => e.SourceEventId)
+                .IsUnique()
+                .HasDatabaseName("UX_audit_records_SourceEventId");
+            // Replay / 37-2 chain order.
+            entity.HasIndex(e => e.SourceSequenceNumber)
+                .HasDatabaseName("IX_audit_records_SourceSequenceNumber");
+            // Tenant query hot path (Story 37-10).
+            entity.HasIndex(e => new { e.TenantId, e.OccurredAt })
+                .HasDatabaseName("IX_audit_records_TenantId_OccurredAt");
+            // Single-user query hot path.
+            entity.HasIndex(e => new { e.UserId, e.OccurredAt })
+                .HasDatabaseName("IX_audit_records_UserId_OccurredAt");
+            // Category/severity compliance filter (Story 37-10).
+            entity.HasIndex(e => new { e.Category, e.OccurredAt })
+                .HasDatabaseName("IX_audit_records_Category_OccurredAt");
+
+            // Tenant-context defence-in-depth: same no-op filter seam every
+            // tenant-resident table uses. The per-tenant schema + connection is
+            // the real isolation plane (Doc 01 §1.4); the explicit TenantId
+            // predicate in the repository carries the transitional shared-DB
+            // phase. AC14's isolation proof is the schema + the UserId/TenantId
+            // routing, not a query filter.
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
+        });
+    }
+
+    /// <summary>
+    /// Story 37-1 — configure the <c>audit_projector_cursor</c> table. Lives in
+    /// the control plane only (mirrors <see cref="AlertEvaluatorCursor"/>): the
+    /// single projector resumes both the tenant-domain and platform streams
+    /// from one CP-resident cursor row.
+    /// </summary>
+    public static void ConfigureAuditProjectorCursor(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AuditProjectorCursor>(entity =>
+        {
+            entity.ToTable("audit_projector_cursor");
+            entity.HasKey(e => e.ProjectorId);
+            entity.Property(e => e.ProjectorId).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.LastDomainSequenceNumber).HasDefaultValue(0L);
+            entity.Property(e => e.LastPlatformSequenceNumber).HasDefaultValue(0L);
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+        });
+    }
+
+    /// <summary>
     /// Configure the per-tenant entity graph. <paramref name="fixedTenantId"/>
     /// is non-null when invoked from <see cref="TenantDbContext"/> — the
     /// query filter binds directly to that tenant (fail-closed, no ambient
@@ -1391,6 +1500,12 @@ internal static class TammaModelConfiguration
         // (Story 28-10) for defaults/precision; uses the prompt_overrides /
         // conventions NULLS NOT DISTINCT pattern for the idempotent business key.
         ConfigureAnalyticsUsageEntities(modelBuilder, fixedTenantId);
+
+        // ── Curated audit records (Story 37-1) ──
+        // Tenant-scope curated audit trail materialized from the tenant
+        // domain_events stream. The SAME table shape is also configured on the
+        // CP context for platform-scope rows — one physical schema, two homes.
+        ConfigureAuditEntities(modelBuilder, fixedTenantId);
     }
 
     /// <summary>

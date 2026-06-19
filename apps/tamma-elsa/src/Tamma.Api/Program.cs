@@ -809,6 +809,12 @@ builder.Services.AddTammaAlerts();
 // DCB event stream and emits AlertPayloads through IAlertSink.
 builder.Services.AddTammaAlertRuleEngine();
 
+// Story 37-1 — curated audit-record projection: catalog-driven projector,
+// insert-if-absent repository, lag metric, and the background host. READS the
+// DCB stream and materializes audit_records (never writes raw events). The
+// background loop is opt-in (AuditProjectorOptions.RunOnStartup defaults false).
+builder.Services.AddTammaAuditProjection();
+
 // Story 34-1 — plan price-book catalog: read-only IPlanCatalogService +
 // the PlanVersionEditor (immutable, versioned plan management). CP-resident;
 // platform-owned in both modes.
@@ -2055,6 +2061,7 @@ using (var scope = app.Services.CreateScope())
                 DROP TABLE IF EXISTS
                     admin_impersonations,
                     agents, agent_versions,
+                    audit_records, audit_projector_cursor,
                     billing_customers, billing_plan_prices,
                     alert_delivery_attempts, alert_channels, alerts,
                     alert_evaluator_cursor, alert_rules,
