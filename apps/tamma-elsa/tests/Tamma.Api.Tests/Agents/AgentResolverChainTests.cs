@@ -380,7 +380,10 @@ public class AgentResolverChainTests
             using var tags = JsonDocument.Parse(selectEvents[0].Tags!);
             tags.RootElement.GetProperty("agentId").GetString().Should().Be(pub.Id.ToString());
             tags.RootElement.GetProperty("role").GetString().Should().Be("developer");
-            tags.RootElement.GetProperty("source").GetString().Should().Be("system-public");
+            // 32-2 review #2: SELECTING a public agent stores/emits the provenance
+            // the resolver stamps for it — "tenant-public" — not "system-public"
+            // (which is reserved for the unselected system-default fallback).
+            tags.RootElement.GetProperty("source").GetString().Should().Be("tenant-public");
         }
     }
 

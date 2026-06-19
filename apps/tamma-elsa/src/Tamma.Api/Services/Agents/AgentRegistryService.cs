@@ -72,10 +72,34 @@ public sealed class AgentRegistryService : IAgentRegistryService
         // matches (one per role from AgentEntitySeeder, handle "tamma-<role>").
         // Public agents are visible to every principal; pass null scope.
         var visible = await _agents.ListVisibleAsync(tenantId: null, userId: null, ct);
-        return visible.FirstOrDefault(a =>
-            a.Visibility == AgentVisibility.Public &&
-            a.Status == AgentStatus.Active &&
-            string.Equals(a.Role, role, StringComparison.Ordinal));
+        var candidates = visible
+            .Where(a =>
+                a.Visibility == AgentVisibility.Public &&
+                a.Status == AgentStatus.Active &&
+                string.Equals(a.Role, role, StringComparison.Ordinal))
+            .OrderBy(a => a.Name, StringComparer.Ordinal)
+            .ToList();
+
+        var chosen = candidates.FirstOrDefault();
+        if (candidates.Count > 1)
+        {
+            // The seeder ships exactly one tamma-<role> public agent, so this is
+            // unambiguous today. A platform owner adding a second public agent
+            // for the same role would silently shift the default — make the
+            // ambiguity observable rather than picking blind.
+            _logger?.LogWarning(
+                "agent.system_default.ambiguous role={Role} count={Count} chosenAgentId={ChosenAgentId} — "
+                + "more than one active public agent matches this role; picked the first by name (ordinal)",
+                role, candidates.Count, chosen?.Id);
+        }
+        else if (chosen is not null)
+        {
+            _logger?.LogDebug(
+                "agent.system_default.chosen role={Role} chosenAgentId={ChosenAgentId}",
+                role, chosen.Id);
+        }
+
+        return chosen;
     }
 
     /// <inheritdoc />
@@ -181,13 +205,15 @@ public sealed class AgentRegistryService : IAgentRegistryService
     }
 
     /// <summary>
-    /// Recompute provenance at resolve/select time — never trust a stored hint.
-    /// A public agent ⇒ <c>system-public</c>; an own-private agent ⇒
-    /// <c>tenant-private</c>. (<c>tenant-public</c> is the wire term for a
-    /// principal SELECTING a public agent; the resolver stamps that variant.)
+    /// Provenance hint stored on a role selection. Must match the source the
+    /// resolver (<c>AgentResolverService</c>) stamps for that same selection so
+    /// the two read surfaces agree: a principal SELECTING a public agent ⇒
+    /// <c>tenant-public</c> (NOT <c>system-public</c> — that label is reserved
+    /// for the system-default fallback, which is not a selection); an own-private
+    /// agent ⇒ <c>tenant-private</c>.
     /// </summary>
     private string ProvenanceFor(Agent agent)
-        => agent.Visibility == AgentVisibility.Public ? "system-public" : "tenant-private";
+        => agent.Visibility == AgentVisibility.Public ? "tenant-public" : "tenant-private";
 
     private async Task AppendSelectionEventAsync(
         AgentRoleSelection sel, string source, CancellationToken ct)

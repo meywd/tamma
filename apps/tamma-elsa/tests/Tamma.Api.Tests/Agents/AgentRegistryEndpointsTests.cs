@@ -5,6 +5,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 using Tamma.Api.Dtos.Agents;
@@ -223,6 +224,152 @@ public class AgentRegistryEndpointsTests
     }
 
     [Test]
+    public async Task SelectForRole_PublicAgent_StoredHintMatchesResolvedSource_TenantPublic()
+    {
+        // Review follow-up (32-2 #2): a principal SELECTING a public agent must
+        // store the SAME provenance the resolver stamps for it — "tenant-public"
+        // — so GET /role-selections and Resolve agree (not "system-public").
+        var s = BuildStack(TammaMode.SaaS, TenantA, null);
+        await using (s.Ctx)
+        {
+            var pub = await SeedPublicAsync(s.Agents, "developer", "tamma-developer");
+
+            var sel = await AgentEndpoints.SelectForRole(
+                "developer", new SelectRoleRequest(pub.Id), s.Registry, s.Principal);
+            var (selStatus, selBody) = await ExecuteAsync(sel);
+            selStatus.Should().Be(StatusCodes.Status200OK);
+            // PUT response carries the stored hint.
+            selBody.GetProperty("visibility").GetString().Should().Be("tenant-public");
+
+            // GET /role-selections reports the stored hint.
+            var (listStatus, listBody) = await ExecuteAsync(
+                await AgentEndpoints.GetRoleSelections(s.Registry));
+            listStatus.Should().Be(StatusCodes.Status200OK);
+            var stored = listBody.EnumerateArray()
+                .Single(e => e.GetProperty("role").GetString() == "developer")
+                .GetProperty("visibility").GetString();
+
+            // Resolve reports the live source.
+            var (resStatus, resBody) = await ExecuteAsync(
+                await AgentEndpoints.Resolve("developer", null, s.Resolver));
+            resStatus.Should().Be(StatusCodes.Status200OK);
+            var resolvedSource = resBody.GetProperty("source").GetString();
+
+            resolvedSource.Should().Be("tenant-public");
+            stored.Should().Be(resolvedSource,
+                "the stored selection hint must match the resolved source for the same selection");
+        }
+    }
+
+    [Test]
+    public async Task SelectForRole_LoserOfFirstTimeRace_ReReadsAndUpdates_NoConflict_LastWriterWins()
+    {
+        // Review follow-up (32-2 #1), DETERMINISTIC half: the loser path is forced
+        // by hand. repoB reads null (no row yet), THEN a competing writer commits
+        // the winner row, THEN repoB saves → unique (TenantId,UserId,Role)
+        // violation. The repo must catch it, re-read the winner, and UPDATE it
+        // (no raw DbUpdateException → no 500). Final value = repoB's later write.
+        Guid agentWinner, agentLoserWrite;
+        await using (var seed = NewContext())
+        {
+            var repo = new AgentRepository(seed, new CapturingEvents());
+            agentWinner = (await repo.CreateAsync(
+                new Agent { Name = "atlas-w", Role = "developer", Visibility = AgentVisibility.Private, OwnerTenantId = TenantA },
+                Cfg, null, null)).Id;
+            agentLoserWrite = (await repo.CreateAsync(
+                new Agent { Name = "atlas-l", Role = "developer", Visibility = AgentVisibility.Private, OwnerTenantId = TenantA },
+                Cfg, null, null)).Id;
+        }
+
+        var tenantContext = new TenantContext();
+        tenantContext.SetTenantId(TenantA);
+
+        // A factory that, on its FIRST CreateAsync, hands back a context whose
+        // SaveChanges is guaranteed to lose: we pre-commit the winner row through
+        // a SEPARATE connection AFTER the repo's read but BEFORE its save, by
+        // wrapping the read so the insert lands in between.
+        var factory = new BarrierTenantFactory(_connectionString, async () =>
+        {
+            // Competing writer commits the winner row while repoB sits between its
+            // read (already returned null) and its save.
+            await using var competitor = NewContext();
+            competitor.AgentRoleSelections.Add(new AgentRoleSelection
+            {
+                Id = Guid.NewGuid(), TenantId = TenantA, UserId = null, Role = "developer",
+                AgentId = agentWinner, Visibility = "tenant-private",
+                CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            });
+            await competitor.SaveChangesAsync();
+        });
+
+        await using var ctxB = NewContext();
+        var repoB = new AgentSelectionRepository(ctxB, factory, tenantContext);
+
+        var (entity, wasCreated) = await repoB.UpsertByTenantAsync(
+            TenantA, "developer", agentLoserWrite, "tenant-private", null);
+
+        wasCreated.Should().BeFalse("the loser re-reads and updates the winner's existing row");
+        entity.AgentId.Should().Be(agentLoserWrite, "last-writer-wins: repoB's value survives");
+
+        await using var verify = NewContext();
+        var rows = await verify.AgentRoleSelections.IgnoreQueryFilters()
+            .Where(s => s.TenantId == TenantA && s.Role == "developer").ToListAsync();
+        rows.Should().ContainSingle("exactly one selection per (tenant, role) survives the race");
+        rows.Single().AgentId.Should().Be(agentLoserWrite);
+    }
+
+    [Test]
+    public async Task SelectForRole_ConcurrentFirstTimeSelects_SameRole_OneRow_NoConflict()
+    {
+        // Review follow-up (32-2 #1), STRESS half: two genuinely concurrent
+        // first-time selects for the same (principal, role). Whichever loses the
+        // INSERT race re-reads→updates rather than throwing. Looped to make the
+        // race reliably surface; the invariant (one row, no throw) holds every run.
+        Guid agentA, agentB;
+        await using (var seed = NewContext())
+        {
+            var repo = new AgentRepository(seed, new CapturingEvents());
+            agentA = (await repo.CreateAsync(
+                new Agent { Name = "atlas-a", Role = "developer", Visibility = AgentVisibility.Private, OwnerTenantId = TenantA },
+                Cfg, null, null)).Id;
+            agentB = (await repo.CreateAsync(
+                new Agent { Name = "atlas-b", Role = "developer", Visibility = AgentVisibility.Private, OwnerTenantId = TenantA },
+                Cfg, null, null)).Id;
+        }
+
+        var tenantContext = new TenantContext();
+        tenantContext.SetTenantId(TenantA);
+        var factory = new SameDbTenantFactory(_connectionString);
+
+        for (var i = 0; i < 5; i++)
+        {
+            await using (var reset = NewContext())
+            {
+                await reset.Database.ExecuteSqlRawAsync("TRUNCATE agent_role_selections CASCADE;");
+            }
+
+            await using var ctxA = NewContext();
+            await using var ctxB = NewContext();
+            var repoA = new AgentSelectionRepository(ctxA, factory, tenantContext);
+            var repoB = new AgentSelectionRepository(ctxB, factory, tenantContext);
+
+            var taskA = repoA.UpsertByTenantAsync(TenantA, "developer", agentA, "tenant-private", null);
+            var taskB = repoB.UpsertByTenantAsync(TenantA, "developer", agentB, "tenant-private", null);
+
+            Func<Task> act = async () => await Task.WhenAll(taskA, taskB);
+            await act.Should().NotThrowAsync(
+                "the upsert must absorb the unique-violation race rather than surfacing a 500");
+
+            await using var verify = NewContext();
+            var rows = await verify.AgentRoleSelections.IgnoreQueryFilters()
+                .Where(s => s.TenantId == TenantA && s.Role == "developer").ToListAsync();
+            rows.Should().ContainSingle("exactly one selection per (tenant, role) survives the race");
+            new[] { agentA, agentB }.Should().Contain(rows.Single().AgentId,
+                "the surviving row holds one of the two concurrently-written agents");
+        }
+    }
+
+    [Test]
     public async Task SelectForRole_BadRole_Returns400()
     {
         var s = BuildStack(TammaMode.SaaS, TenantA, null);
@@ -248,6 +395,47 @@ public class AgentRegistryEndpointsTests
             var (status, body) = await ExecuteAsync(sel);
             status.Should().Be(StatusCodes.Status404NotFound);
             body.GetProperty("error").GetString().Should().Be("agent_not_found");
+        }
+    }
+
+    [Test]
+    public async Task GetSystemDefaultPublic_MultipleActivePublicForRole_PicksFirstByName_WarnsOnAmbiguity()
+    {
+        // Review follow-up (32-2 #3): adding a second active public agent for the
+        // same role must NOT silently shift the default — keep the deterministic
+        // first-by-name pick, but log a WARN so the ambiguity is observable.
+        var logProvider = new Infrastructure.CapturingLoggerProvider();
+        using var loggerFactory = LoggerFactory.Create(b => b.AddProvider(logProvider));
+
+        var cpCtx = NewContext();
+        var events = new CapturingEvents();
+        var agentRepo = new AgentRepository(cpCtx, events);
+        var tenantContext = new TenantContext();
+        tenantContext.SetTenantId(TenantA);
+        var factory = new SameDbTenantFactory(_connectionString);
+        var selectionRepo = new AgentSelectionRepository(cpCtx, factory, tenantContext);
+        var registry = new AgentRegistryService(
+            agentRepo, selectionRepo, events, new StubMode(TammaMode.SaaS),
+            tenantContext, new HttpContextAccessor { HttpContext = new DefaultHttpContext() },
+            loggerFactory.CreateLogger<AgentRegistryService>());
+
+        await using (cpCtx)
+        {
+            // Two active public agents for the same role; "alpha" < "tamma" ordinal.
+            await SeedPublicAsync(agentRepo, "developer", "tamma-developer");
+            var alpha = await SeedPublicAsync(agentRepo, "developer", "alpha-developer");
+
+            var chosen = await registry.GetSystemDefaultPublicAsync("developer");
+
+            chosen.Should().NotBeNull("ambiguity must not throw — keep a deterministic pick");
+            chosen!.Id.Should().Be(alpha.Id, "first-by-name (ordinal) is the deterministic winner");
+
+            var warn = logProvider.Entries.Should().ContainSingle(e =>
+                e.Level == LogLevel.Warning &&
+                e.Message.Contains("agent.system_default.ambiguous")).Subject;
+            warn.Message.Should().Contain("developer");
+            warn.Message.Should().Contain("count=2");
+            warn.Message.Should().Contain(alpha.Id.ToString());
         }
     }
 
@@ -337,6 +525,46 @@ public class AgentRegistryEndpointsTests
             Guid tenantId, CancellationToken cancellationToken = default)
             => ValueTask.FromResult(new TenantDbContext(
                 new DbContextOptionsBuilder<TenantDbContext>().UseNpgsql(conn).Options, tenantId));
+    }
+
+    /// <summary>
+    /// Factory whose context fires <paramref name="afterFirstRead"/> exactly once,
+    /// right after the FIRST reader (SELECT) completes — i.e. between the upsert's
+    /// existing-row read and its INSERT save. Used to deterministically interleave
+    /// a competing writer so the upsert's unique-violation catch path is exercised.
+    /// </summary>
+    private sealed class BarrierTenantFactory(string conn, Func<Task> afterFirstRead)
+        : ITenantDbContextFactory
+    {
+        public ValueTask<TenantDbContext> CreateAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+        {
+            var options = new DbContextOptionsBuilder<TenantDbContext>()
+                .UseNpgsql(conn)
+                .AddInterceptors(new FirstReadBarrierInterceptor(afterFirstRead))
+                .Options;
+            return ValueTask.FromResult(new TenantDbContext(options, tenantId));
+        }
+
+        private sealed class FirstReadBarrierInterceptor(Func<Task> afterFirstRead)
+            : Microsoft.EntityFrameworkCore.Diagnostics.DbCommandInterceptor
+        {
+            private int _fired;
+
+            public override async ValueTask<System.Data.Common.DbDataReader>
+                ReaderExecutedAsync(
+                    System.Data.Common.DbCommand command,
+                    Microsoft.EntityFrameworkCore.Diagnostics.CommandExecutedEventData eventData,
+                    System.Data.Common.DbDataReader result,
+                    CancellationToken cancellationToken = default)
+            {
+                if (Interlocked.Exchange(ref _fired, 1) == 0)
+                {
+                    await afterFirstRead();
+                }
+                return result;
+            }
+        }
     }
 
     private sealed class CapturingEvents : IEventRepository

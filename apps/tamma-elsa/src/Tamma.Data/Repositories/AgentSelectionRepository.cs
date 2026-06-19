@@ -31,19 +31,14 @@ public sealed class AgentSelectionRepository(
             .Where(s => s.UserId == userId && s.TenantId == default(Guid?))
             .ToListAsync(ct);
 
-    public async Task<(AgentRoleSelection Entity, bool WasCreated)> UpsertByUserAsync(
+    public Task<(AgentRoleSelection Entity, bool WasCreated)> UpsertByUserAsync(
         Guid userId, string role, Guid agentId, string visibility,
         Guid? updatedBy, CancellationToken ct = default)
-    {
-        var existing = await cpDb.AgentRoleSelections
-            .FirstOrDefaultAsync(
-                s => s.UserId == userId && s.TenantId == default(Guid?) && s.Role == role, ct);
-        var result = ApplyUpsert(
-            cpDb.AgentRoleSelections, existing,
-            tenantId: null, userId: userId, role, agentId, visibility, updatedBy);
-        await cpDb.SaveChangesAsync(ct);
-        return result;
-    }
+        => UpsertAsync(
+            cpDb,
+            () => cpDb.AgentRoleSelections.FirstOrDefaultAsync(
+                s => s.UserId == userId && s.TenantId == default(Guid?) && s.Role == role, ct),
+            tenantId: null, userId: userId, role, agentId, visibility, updatedBy, ct);
 
     // ───────────────────────── SaaS mode ────────────────────────────────
 
@@ -70,14 +65,11 @@ public sealed class AgentSelectionRepository(
         Guid? updatedBy, CancellationToken ct = default)
     {
         await using var db = await tenantDbFactory.CreateAsync(RequireAmbient(), ct);
-        var existing = await db.AgentRoleSelections.IgnoreQueryFilters()
-            .FirstOrDefaultAsync(
-                s => s.TenantId == tenantId && s.UserId == default(Guid?) && s.Role == role, ct);
-        var result = ApplyUpsert(
-            db.AgentRoleSelections, existing,
-            tenantId: tenantId, userId: null, role, agentId, visibility, updatedBy);
-        await db.SaveChangesAsync(ct);
-        return result;
+        return await UpsertAsync(
+            db,
+            () => db.AgentRoleSelections.IgnoreQueryFilters().FirstOrDefaultAsync(
+                s => s.TenantId == tenantId && s.UserId == default(Guid?) && s.Role == role, ct),
+            tenantId: tenantId, userId: null, role, agentId, visibility, updatedBy, ct);
     }
 
     // ── helpers ──
@@ -86,6 +78,50 @@ public sealed class AgentSelectionRepository(
         ?? throw new InvalidOperationException(
             "AgentSelectionRepository (SaaS path) requires an ambient tenant id to "
             + "route the per-tenant connection.");
+
+    /// <summary>
+    /// Read-then-write upsert that is resilient to a concurrent first-time
+    /// insert race. Two concurrent first-time selects for the same
+    /// <c>(principal, role)</c> both read <c>null</c>; one INSERT wins, the loser
+    /// hits the unique <c>(TenantId, UserId, Role)</c> violation as a
+    /// <see cref="DbUpdateException"/>. We catch the Postgres unique-violation
+    /// (scoped precisely to <see cref="Npgsql.PostgresErrorCodes.UniqueViolation"/>,
+    /// same as <c>AgentRepository.PublishVersionAsync</c>), detach the failed
+    /// insert, re-read the now-present row, and UPDATE it. Selection is
+    /// idempotent: last-writer-wins is the correct outcome.
+    /// </summary>
+    private static async Task<(AgentRoleSelection Entity, bool WasCreated)> UpsertAsync(
+        DbContext db,
+        Func<Task<AgentRoleSelection?>> readExisting,
+        Guid? tenantId, Guid? userId, string role, Guid agentId, string visibility,
+        Guid? updatedBy, CancellationToken ct)
+    {
+        var existing = await readExisting();
+        var (entity, wasCreated) = ApplyUpsert(
+            db.Set<AgentRoleSelection>(), existing,
+            tenantId, userId, role, agentId, visibility, updatedBy);
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return (entity, wasCreated);
+        }
+        catch (DbUpdateException ex) when (wasCreated && IsUniqueViolation(ex))
+        {
+            // We lost a first-time-insert race; the winner's row now exists.
+            // Detach our orphaned insert, re-read the winner, and update it.
+            db.Entry(entity).State = EntityState.Detached;
+            var winner = await readExisting()
+                ?? throw new InvalidOperationException(
+                    "AgentSelectionRepository upsert hit a unique-violation but the "
+                    + "conflicting selection row could not be re-read.");
+            ApplyUpsert(
+                db.Set<AgentRoleSelection>(), winner,
+                tenantId, userId, role, agentId, visibility, updatedBy);
+            await db.SaveChangesAsync(ct);
+            return (winner, false);
+        }
+    }
 
     private static (AgentRoleSelection Entity, bool WasCreated) ApplyUpsert(
         DbSet<AgentRoleSelection> set,
@@ -117,4 +153,8 @@ public sealed class AgentSelectionRepository(
         set.Add(row);
         return (row, true);
     }
+
+    private static bool IsUniqueViolation(DbUpdateException ex)
+        => ex.InnerException is Npgsql.PostgresException pg &&
+           pg.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation;
 }
