@@ -1757,6 +1757,34 @@ agents.MapPost("/{id:guid}/versions", AgentEndpoints.PublishVersion)
 agents.MapPost("/{id:guid}/archive", AgentEndpoints.ArchiveAgent)
     .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
 
+// ── Story 32-2 — entity-aware registry / resolution surface (/api/agents) ──
+// Distinct from the legacy /api/v1/agents group above (which stays byte-for-byte
+// working). Reads (list / get-one / resolve / role-selection reads) under
+// MemberAccess (any member); writes (create / version / archive / rollback /
+// role-selection upsert) under AgentManage (admin+owner → member 403). Public-
+// agent mutation is additionally gated in-handler by the platform-admin claim.
+var agentsV2 = app.MapGroup("/api/agents")
+    .RequireAuthorization("MemberAccess")
+    .RequireRateLimiting("ConfigRead");
+// Reads
+agentsV2.MapGet("/", AgentEndpoints.ListAgents);
+agentsV2.MapGet("/resolve", AgentEndpoints.Resolve);
+agentsV2.MapGet("/role-selections", AgentEndpoints.GetRoleSelections);
+agentsV2.MapGet("/{id:guid}", AgentEndpoints.GetAgent);
+agentsV2.MapGet("/{id:guid}/versions", AgentEndpoints.ListVersions);
+agentsV2.MapGet("/{id:guid}/versions/{version:int}", AgentEndpoints.GetVersion);
+// Writes
+agentsV2.MapPost("/", AgentEndpoints.CreateAgent)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agentsV2.MapPost("/{id:guid}/versions", AgentEndpoints.PublishVersion)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agentsV2.MapPost("/{id:guid}/archive", AgentEndpoints.ArchiveAgent)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agentsV2.MapPost("/{id:guid}/rollback", AgentEndpoints.RollbackVersion)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agentsV2.MapPut("/role-selections/{role}", AgentEndpoints.SelectForRole)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+
 // ── Prompts ──
 // CLAUDE.md "Prompt Store Architecture > API" defines /defaults as the canonical
 // read-only system-default URL. Both /system (legacy TS naming) and /defaults
@@ -2060,7 +2088,7 @@ using (var scope = app.Services.CreateScope())
             dbContext.Database.ExecuteSqlRaw(@"
                 DROP TABLE IF EXISTS
                     admin_impersonations,
-                    agents, agent_versions,
+                    agents, agent_versions, agent_role_selections,
                     audit_records, audit_projector_cursor,
                     billing_customers, billing_plan_prices,
                     alert_delivery_attempts, alert_channels, alerts,

@@ -54,4 +54,35 @@ public interface IAgentResolverService
     Task<ResolvedAgentConfig> ResolveForPhaseAsync(
         Guid? tenantId, string phase, string role,
         Dtos.Agents.TaskOverrides? overrides);
+
+    /// <summary>
+    /// Story 32-2 — resolve the EFFECTIVE first-class agent for the calling
+    /// principal + <paramref name="role"/> via the deterministic precedence
+    /// chain (private selection → public selection → system-default public →
+    /// FAIL LOUD). Returns an enriched <see cref="ResolvedAgentConfig"/> carrying
+    /// <see cref="ResolvedAgentConfig.AgentId"/>,
+    /// <see cref="ResolvedAgentConfig.AgentVersion"/> and an extended
+    /// <see cref="ResolvedAgentConfig.Source"/> (<c>tenant-private</c> /
+    /// <c>tenant-public</c> / <c>system-public</c>).
+    ///
+    /// <para><b>Never returns a blank/empty config.</b> The fourth branch emits
+    /// <c>AGENT.RESOLVE.FAILED</c>, best-effort records a <c>MISSING_CONFIG</c>
+    /// gap, then throws <see cref="Tamma.Core.TammaError"/>
+    /// <c>AGENT.RESOLVE.NO_DEFAULT</c> (severity High) — mirroring the
+    /// prompt/convention fail-loud rule.</para>
+    /// </summary>
+    /// <exception cref="ArgumentException">Unknown role.</exception>
+    /// <exception cref="Tamma.Core.TammaError">No agent resolvable
+    /// (<c>AGENT.RESOLVE.NO_DEFAULT</c>).</exception>
+    Task<ResolvedAgentConfig> ResolveForRoleAsync(string role, CancellationToken ct = default);
+
+    /// <summary>
+    /// Story 32-2 — same precedence chain as <see cref="ResolveForRoleAsync"/>
+    /// plus phase-eligibility validation
+    /// (<see cref="RolePhaseMap.IsRoleEligibleForPhase"/>). Unknown phase or an
+    /// ineligible (phase, role) pair throws <see cref="ArgumentException"/>
+    /// before any resolution attempt.
+    /// </summary>
+    Task<ResolvedAgentConfig> ResolveForRoleAndPhaseAsync(
+        string phase, string role, CancellationToken ct = default);
 }

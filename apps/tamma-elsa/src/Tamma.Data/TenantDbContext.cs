@@ -51,6 +51,9 @@ public class TenantDbContext : DbContext
     // ── Tenant-scoped entities ──
     public DbSet<AgentConfig> AgentConfigs => Set<AgentConfig>();
     public DbSet<PromptOverride> PromptOverrides => Set<PromptOverride>();
+    // Story 32-2 — SaaS tenant-keyed role→agent selections (the single-user
+    // user-keyed rows live on the CP context). Same table shape, two homes.
+    public DbSet<AgentRoleSelection> AgentRoleSelections => Set<AgentRoleSelection>();
     public DbSet<Convention> Conventions => Set<Convention>();
     public DbSet<ProviderHealth> ProviderHealths => Set<ProviderHealth>();
     public DbSet<ProviderDiagnostic> ProviderDiagnostics => Set<ProviderDiagnostic>();

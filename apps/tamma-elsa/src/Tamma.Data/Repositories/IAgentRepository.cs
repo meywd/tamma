@@ -51,9 +51,28 @@ public interface IAgentRepository
     /// </summary>
     Task<Agent?> ArchiveAsync(Guid agentId, Guid? updatedBy, CancellationToken ct = default);
 
+    /// <summary>
+    /// Story 32-2 — rollback: repoint <see cref="Agent.CurrentVersionId"/> at an
+    /// EXISTING prior version (no new snapshot is inserted; history stays
+    /// immutable). Appends <c>AGENT.VERSION_PUBLISHED.SUCCESS</c> tagged
+    /// <c>activated=rollback</c> only on a real pointer move. Returns the
+    /// re-activated <see cref="AgentVersion"/>, or <c>null</c> if the agent or
+    /// the target version does not exist.
+    /// </summary>
+    Task<AgentVersion?> SetActiveVersionAsync(
+        Guid agentId, int version, Guid? updatedBy, CancellationToken ct = default);
+
     Task<Agent?> GetByIdAsync(Guid agentId, CancellationToken ct = default);
 
     Task<AgentVersion?> GetVersionAsync(Guid agentId, int version, CancellationToken ct = default);
+
+    /// <summary>
+    /// Story 32-2 — the agent's CURRENTLY-ACTIVE version (the one
+    /// <see cref="Agent.CurrentVersionId"/> points at). After a rollback this is
+    /// the re-activated prior version, not the highest version number. Returns
+    /// <c>null</c> if the agent has no active-version pointer.
+    /// </summary>
+    Task<AgentVersion?> GetActiveVersionAsync(Guid agentId, CancellationToken ct = default);
 
     Task<IReadOnlyList<AgentVersion>> ListVersionsAsync(Guid agentId, CancellationToken ct = default);
 

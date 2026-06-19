@@ -485,6 +485,148 @@ public static class AgentEndpoints
     }
 
     // -----------------------------------------------------------------------
+    // Story 32-2 — entity-aware registry / resolution surface (/api/agents)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// GET <c>/api/agents/resolve?role=&amp;phase=</c> — resolve the EFFECTIVE
+    /// first-class agent for the calling principal + role via the 32-2
+    /// precedence chain. Returns the enriched <see cref="ResolvedAgentConfig"/>
+    /// (carrying <c>AgentId</c>/<c>AgentVersion</c>/extended <c>Source</c>).
+    /// Unknown role/phase → 400; unresolvable (no selection + no system default)
+    /// → 404 with code <c>agent_resolve_no_default</c> (the fail-loud branch
+    /// NEVER returns a blank config).
+    /// </summary>
+    public static async Task<IResult> Resolve(
+        string? role,
+        string? phase,
+        IAgentResolverService resolver)
+    {
+        if (string.IsNullOrWhiteSpace(role))
+        {
+            return Results.BadRequest(new { error = "invalid_request", detail = "role is required." });
+        }
+
+        try
+        {
+            var resolved = string.IsNullOrWhiteSpace(phase)
+                ? await resolver.ResolveForRoleAsync(role)
+                : await resolver.ResolveForRoleAndPhaseAsync(phase, role);
+            return Results.Ok(resolved);
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.BadRequest(new { error = "invalid_role", detail = ex.Message });
+        }
+        catch (TammaError ex) when (ex.Code == "AGENT.RESOLVE.NO_DEFAULT")
+        {
+            // No blank config — fail loud. 404: no agent resolvable for the role.
+            return Results.Json(
+                new { error = "agent_resolve_no_default", detail = ex.Message },
+                statusCode: StatusCodes.Status404NotFound);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Problem(ex.Message, statusCode: 500);
+        }
+    }
+
+    /// <summary>
+    /// PUT <c>/api/agents/role-selections/{role}</c> — select which agent serves
+    /// a role for the calling principal. The target must be in (public ∪ own
+    /// private) — a cross-tenant/non-existent target returns 404 (no existence
+    /// leak). Member-role callers are 403'd by the <c>AgentManage</c> route
+    /// policy before reaching here.
+    /// </summary>
+    public static async Task<IResult> SelectForRole(
+        string role,
+        SelectRoleRequest req,
+        IAgentRegistryService registry,
+        ClaimsPrincipal principal)
+    {
+        var canonicalRole = RolePhaseMap.NormalizeRole(role);
+        if (!RolePhaseMap.ValidRoles.Contains(canonicalRole))
+        {
+            return Results.BadRequest(new
+            {
+                error = "invalid_role",
+                detail = $"Unknown role '{role}'.",
+            });
+        }
+
+        try
+        {
+            var selection = await registry.SelectForRoleAsync(
+                canonicalRole, req.AgentId, principal.GetUserId());
+            return Results.Ok(new AgentRoleSelectionResponse(
+                selection.Role, selection.AgentId, selection.Visibility));
+        }
+        catch (TammaError ex) when (ex.Code == "AGENT.SELECT.NOT_FOUND")
+        {
+            // 404 (not 403) — never leak the existence of another tenant's agent.
+            return Results.NotFound(new { error = "agent_not_found", detail = ex.Message });
+        }
+        catch (TammaError ex)
+        {
+            return Results.BadRequest(new { error = ex.Code, detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// GET <c>/api/agents/role-selections</c> — the calling principal's current
+    /// role→agent selection map.
+    /// </summary>
+    public static async Task<IResult> GetRoleSelections(IAgentRegistryService registry)
+    {
+        var selections = await registry.GetRoleSelectionsAsync();
+        var response = selections.Values
+            .Select(s => new AgentRoleSelectionResponse(s.Role, s.AgentId, s.Visibility))
+            .OrderBy(s => s.Role, StringComparer.Ordinal)
+            .ToList();
+        return Results.Ok(response);
+    }
+
+    /// <summary>
+    /// POST <c>/api/agents/{id}/rollback</c> — rollback (AC 13): repoint the
+    /// agent's active version at an EXISTING prior version (no new snapshot). The
+    /// subsequent resolve returns that version's config. RBAC matches the agent's
+    /// ownership (public → platform admin; private → owning tenant/user); same
+    /// 404/403 discipline as publish.
+    /// </summary>
+    public static async Task<IResult> RollbackVersion(
+        Guid id,
+        RollbackVersionRequest req,
+        IAgentRepository agents,
+        ClaimsPrincipal principal,
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider)
+    {
+        var agent = await agents.GetByIdAsync(id);
+        if (agent is null || !CanSeeAgent(agent, principal, tenantContext, modeProvider))
+        {
+            return Results.NotFound();
+        }
+        if (!CanWriteAgent(agent, principal, tenantContext, modeProvider))
+        {
+            return Results.Json(
+                new { error = "forbidden", detail = "not permitted to roll back this agent." },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        var version = await agents.SetActiveVersionAsync(id, req.Version, principal.GetUserId());
+        if (version is null)
+        {
+            // Agent exists (checked above) ⇒ the target version doesn't.
+            return Results.NotFound(new
+            {
+                error = "version_not_found",
+                detail = $"agent {id} has no version {req.Version}.",
+            });
+        }
+        return Results.Ok(new PublishVersionResponse(version.Id, version.Version, version.CreatedAt));
+    }
+
+    // -----------------------------------------------------------------------
     // Story 32-1 — visibility / RBAC helpers
     // -----------------------------------------------------------------------
 

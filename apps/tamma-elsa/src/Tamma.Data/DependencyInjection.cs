@@ -148,6 +148,10 @@ public static class DependencyInjection
         // distinct from the tenant-scoped IAgentConfigRepository below.
         services.AddScoped<IAgentRepository, AgentRepository>();
 
+        // Story 32-2 — role→agent selections. Dual-scoped (CP for single-user;
+        // tenant schema for SaaS), routed internally by the ambient principal.
+        services.AddScoped<IAgentSelectionRepository, AgentSelectionRepository>();
+
         // Tenant-scoped repositories (use ITenantDbContextFactory internally).
         services.AddScoped<IAgentConfigRepository, AgentConfigRepository>();
         services.AddScoped<IPromptRepository, PromptRepository>();

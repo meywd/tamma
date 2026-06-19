@@ -198,6 +198,44 @@ public sealed class AgentRepository : IAgentRepository
         return agent;
     }
 
+    public async Task<AgentVersion?> SetActiveVersionAsync(
+        Guid agentId, int version, Guid? updatedBy, CancellationToken ct = default)
+    {
+        var agent = await _db.Agents.FirstOrDefaultAsync(a => a.Id == agentId, ct);
+        if (agent is null)
+        {
+            return null;
+        }
+
+        var target = await _db.AgentVersions
+            .FirstOrDefaultAsync(v => v.AgentId == agentId && v.Version == version, ct);
+        if (target is null)
+        {
+            return null;
+        }
+
+        // Idempotent — re-activating the already-active version is a no-op with
+        // no event (events only on real transitions).
+        if (agent.CurrentVersionId == target.Id)
+        {
+            return target;
+        }
+
+        agent.CurrentVersionId = target.Id;
+        agent.UpdatedAt = DateTime.UtcNow;
+        agent.UpdatedBy = updatedBy;
+        await _db.SaveChangesAsync(ct);
+
+        _logger?.LogInformation(
+            "agent.version_rollback agentId={AgentId} reactivatedVersion={Version}",
+            agentId, target.Version);
+
+        await AppendAgentEventAsync(
+            "AGENT.VERSION_PUBLISHED.SUCCESS", agent, target.Version, ct, activated: "rollback");
+
+        return target;
+    }
+
     public Task<Agent?> GetByIdAsync(Guid agentId, CancellationToken ct = default)
         => _db.Agents.FirstOrDefaultAsync(a => a.Id == agentId, ct);
 
@@ -205,6 +243,19 @@ public sealed class AgentRepository : IAgentRepository
         Guid agentId, int version, CancellationToken ct = default)
         => _db.AgentVersions
             .FirstOrDefaultAsync(v => v.AgentId == agentId && v.Version == version, ct);
+
+    public async Task<AgentVersion?> GetActiveVersionAsync(
+        Guid agentId, CancellationToken ct = default)
+    {
+        var agent = await _db.Agents
+            .FirstOrDefaultAsync(a => a.Id == agentId, ct);
+        if (agent?.CurrentVersionId is not Guid versionId)
+        {
+            return null;
+        }
+        return await _db.AgentVersions
+            .FirstOrDefaultAsync(v => v.Id == versionId, ct);
+    }
 
     public async Task<IReadOnlyList<AgentVersion>> ListVersionsAsync(
         Guid agentId, CancellationToken ct = default)
@@ -272,7 +323,7 @@ public sealed class AgentRepository : IAgentRepository
     /// (<c>platform_events</c>). Tags carry the agent shape per the design.
     /// </summary>
     private async Task AppendAgentEventAsync(
-        string type, Agent agent, int? version, CancellationToken ct)
+        string type, Agent agent, int? version, CancellationToken ct, string? activated = null)
     {
         _ = ct;
         // Public agents are platform-owned (both owner columns NULL) — tag them
@@ -289,6 +340,7 @@ public sealed class AgentRepository : IAgentRepository
             ["mode"] = mode,
         };
         if (version is int v) tags["version"] = v;
+        if (activated is not null) tags["activated"] = activated;
         if (agent.OwnerTenantId is Guid otid) tags["ownerTenantId"] = otid.ToString();
         if (agent.OwnerUserId is Guid ouid) tags["ownerUserId"] = ouid.ToString();
 
