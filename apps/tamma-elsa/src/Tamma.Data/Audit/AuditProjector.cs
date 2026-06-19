@@ -27,6 +27,14 @@ public sealed class AuditProjector : IAuditProjector
     private static readonly string[] IpKeys = { "ipAddress", "ip", "clientIp" };
     private static readonly string[] UserAgentKeys = { "userAgent", "ua" };
 
+    /// <summary>Safe placeholder payload written on the quarantine row (C2) —
+    /// NEVER the raw / un-redacted <c>Data</c>/<c>Tags</c>.</summary>
+    public const string QuarantinePayload = "{\"_projection_error\":\"redaction_failed\"}";
+
+    /// <summary>Generic marker for the <c>target_type</c> when an event's
+    /// classification could not be resolved at all (no catalog descriptor).</summary>
+    public const string UnclassifiedTargetType = "unclassified";
+
     /// <inheritdoc />
     public AuditRecord? TryBuildRecord(
         RawAuditEvent rawEvent, AuditOwnershipMode mode, Guid? singleUserOwnerId)
@@ -56,8 +64,10 @@ public sealed class AuditProjector : IAuditProjector
             SourceEventId = rawEvent.Id,
             SourceSequenceNumber = rawEvent.SequenceNumber,
             // AC10 — redact the projected payload BEFORE it ever becomes a row.
-            // If the redactor throws, the exception propagates so the host
-            // fails the row and does NOT advance the cursor past it.
+            // If the redactor throws, the exception propagates; the host then
+            // builds a QUARANTINE row (BuildQuarantineRecord) keyed by the same
+            // source_event_id with a safe placeholder payload, so the action is
+            // still recorded (never dropped) and the cursor can advance (C2).
             PayloadJson = CredentialRedactor.Clean(ProjectPayload(rawEvent)),
             // Reserved for Story 37-2 — left null here (AC12).
             RecordHash = null,
@@ -66,6 +76,94 @@ public sealed class AuditProjector : IAuditProjector
 
         AssignOwnership(record, rawEvent, mode, singleUserOwnerId);
         return record;
+    }
+
+    /// <inheritdoc />
+    public AuditRecord BuildQuarantineRecord(
+        RawAuditEvent rawEvent, AuditOwnershipMode mode, Guid? singleUserOwnerId)
+    {
+        ArgumentNullException.ThrowIfNull(rawEvent);
+
+        // C2 — quarantine, do NOT drop and do NOT halt. Classification keys off
+        // the (already-parsed) event type + tags/data, which is the part that did
+        // NOT throw — the redaction of the PAYLOAD is what failed. So we reuse the
+        // known-safe classifiable fields and substitute a SAFE placeholder payload;
+        // the raw Data/Tags NEVER reach the row. If even the descriptor is missing
+        // (a build failure with no classification), fall back to a generic marker.
+        var descriptor = SensitiveActionCatalog.Resolve(rawEvent.Type);
+
+        // Field extraction parses JSON only; it does not run the redactor, so it
+        // is safe to retry here. Guard it anyway so a pathological-JSON throw can't
+        // turn the quarantine itself into a poison pill — degrade to empty maps.
+        Dictionary<string, JsonElement> tags;
+        Dictionary<string, JsonElement> data;
+        try
+        {
+            tags = ParseObject(rawEvent.Tags);
+            data = ParseObject(rawEvent.Data);
+        }
+        catch
+        {
+            tags = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+            data = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var record = new AuditRecord
+        {
+            Id = Guid.NewGuid(),
+            ActionCode = descriptor?.ActionCode ?? rawEvent.Type,
+            Category = descriptor is not null
+                ? descriptor.Category.ToString().ToLowerInvariant()
+                : UnclassifiedTargetType,
+            Severity = descriptor is not null
+                ? descriptor.Severity.ToString().ToLowerInvariant()
+                : "warning",
+            ActorUserId = SafeResolveGuid(tags, data, ActorIdKeys),
+            ActorEmailSnapshot = SafeResolveString(tags, data, ActorEmailKeys),
+            TargetType = descriptor is not null
+                ? SafeResolveTargetType(tags, data, descriptor.TargetTypeHint)
+                : UnclassifiedTargetType,
+            TargetId = SafeResolveString(tags, data, TargetIdKeys),
+            // The action could not be fully materialized — record it as a failure.
+            Outcome = "failure",
+            IpAddress = SafeResolveString(tags, data, IpKeys),
+            UserAgent = SafeResolveString(tags, data, UserAgentKeys),
+            OccurredAt = DateTime.SpecifyKind(rawEvent.CreatedAt, DateTimeKind.Utc),
+            SourceEventId = rawEvent.Id,
+            SourceSequenceNumber = rawEvent.SequenceNumber,
+            // SAFE placeholder — never the raw/un-redacted payload (C2).
+            PayloadJson = QuarantinePayload,
+            RecordHash = null,
+            PrevRecordHash = null,
+        };
+
+        AssignOwnership(record, rawEvent, mode, singleUserOwnerId);
+        return record;
+    }
+
+    // Quarantine field extraction must never itself throw — wrap the resolvers.
+    private static string? SafeResolveString(
+        IReadOnlyDictionary<string, JsonElement> tags,
+        IReadOnlyDictionary<string, JsonElement> data, string[] keys)
+    {
+        try { return ResolveString(tags, data, keys); }
+        catch { return null; }
+    }
+
+    private static Guid? SafeResolveGuid(
+        IReadOnlyDictionary<string, JsonElement> tags,
+        IReadOnlyDictionary<string, JsonElement> data, string[] keys)
+    {
+        try { return ResolveGuid(tags, data, keys); }
+        catch { return null; }
+    }
+
+    private static string SafeResolveTargetType(
+        IReadOnlyDictionary<string, JsonElement> tags,
+        IReadOnlyDictionary<string, JsonElement> data, string hint)
+    {
+        try { return ResolveTargetType(tags, data, hint); }
+        catch { return hint; }
     }
 
     /// <summary>

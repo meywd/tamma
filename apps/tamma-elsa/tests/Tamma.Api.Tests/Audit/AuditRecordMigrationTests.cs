@@ -79,6 +79,65 @@ public class AuditRecordMigrationTests
         tables.Should().Contain("audit_projector_cursor");
     }
 
+    // ── C1 — the cursor table is keyed per-(ProjectorId, TenantId) ──
+
+    [Test]
+    public async Task Cursor_Table_Has_TenantId_Column_In_Composite_PrimaryKey()
+    {
+        await using var conn = await OpenAsync();
+
+        // The TenantId column exists (uuid, not null — it is a key column).
+        var cols = await QueryStringsAsync(conn,
+            "SELECT column_name FROM information_schema.columns "
+            + "WHERE table_schema='public' AND table_name='audit_projector_cursor';");
+        cols.Should().Contain("TenantId",
+            "C1 — the domain cursor is tracked per tenant");
+
+        // The primary key is the composite (ProjectorId, TenantId).
+        var pkCols = await QueryStringsAsync(conn,
+            """
+            SELECT a.attname
+            FROM   pg_index i
+            JOIN   pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+            WHERE  i.indrelid = 'public.audit_projector_cursor'::regclass AND i.indisprimary;
+            """);
+        pkCols.Should().BeEquivalentTo(new[] { "ProjectorId", "TenantId" },
+            "the cursor primary key must be the composite (ProjectorId, TenantId)");
+    }
+
+    [Test]
+    public async Task Cursor_Table_Allows_One_Row_Per_Tenant_Same_Projector()
+    {
+        await using var conn = await OpenAsync();
+        var ta = Guid.NewGuid();
+        var tb = Guid.NewGuid();
+
+        // Two tenants under the same projector id — both rows must be accepted
+        // (independent per-tenant domain high-water marks).
+        (await InsertCursorRow(conn, "default", ta, 5)).Should().Be(1);
+        (await InsertCursorRow(conn, "default", tb, 1)).Should().Be(1);
+
+        // The same (projector, tenant) twice violates the composite PK.
+        var act = async () => await InsertCursorRow(conn, "default", ta, 9);
+        var ex = await act.Should().ThrowAsync<PostgresException>();
+        ex.Which.SqlState.Should().Be("23505"); // unique_violation
+    }
+
+    private static async Task<int> InsertCursorRow(
+        NpgsqlConnection conn, string projectorId, Guid tenantId, long lastDomainSeq)
+    {
+        await using var cmd = new NpgsqlCommand(
+            """
+            INSERT INTO audit_projector_cursor
+              ("ProjectorId","TenantId","LastDomainSequenceNumber","LastPlatformSequenceNumber","UpdatedAt")
+            VALUES (@pid, @tid, @seq, 0, now());
+            """, conn);
+        cmd.Parameters.AddWithValue("pid", projectorId);
+        cmd.Parameters.AddWithValue("tid", tenantId);
+        cmd.Parameters.AddWithValue("seq", lastDomainSeq);
+        return await cmd.ExecuteNonQueryAsync();
+    }
+
     [Test]
     public async Task Migration_Creates_The_XOR_And_Outcome_Check_Constraints()
     {

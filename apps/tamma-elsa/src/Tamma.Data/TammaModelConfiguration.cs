@@ -1005,17 +1005,27 @@ internal static class TammaModelConfiguration
 
     /// <summary>
     /// Story 37-1 — configure the <c>audit_projector_cursor</c> table. Lives in
-    /// the control plane only (mirrors <see cref="AlertEvaluatorCursor"/>): the
-    /// single projector resumes both the tenant-domain and platform streams
-    /// from one CP-resident cursor row.
+    /// the control plane only.
+    ///
+    /// <para><b>C1 fix — per-tenant domain cursor</b>: the key is the composite
+    /// <c>(ProjectorId, TenantId)</c>. Each tenant's <c>domain_events</c> stream
+    /// is an independent per-schema BIGSERIAL, so each tenant tracks its OWN
+    /// <c>LastDomainSequenceNumber</c> on its own row. The global CP
+    /// <c>platform_events</c> stream is tracked on the distinguished
+    /// <see cref="AuditProjectorCursor.PlatformSentinel"/> row (all-zero
+    /// <c>TenantId</c>), which also carries the single-user / shared-DB
+    /// <c>cp.domain_events</c> fallback.</para>
     /// </summary>
     public static void ConfigureAuditProjectorCursor(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<AuditProjectorCursor>(entity =>
         {
             entity.ToTable("audit_projector_cursor");
-            entity.HasKey(e => e.ProjectorId);
+            // Composite key: one domain high-water mark per tenant; the platform
+            // stream lives on the all-zero sentinel row.
+            entity.HasKey(e => new { e.ProjectorId, e.TenantId });
             entity.Property(e => e.ProjectorId).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.TenantId).IsRequired();
             entity.Property(e => e.LastDomainSequenceNumber).HasDefaultValue(0L);
             entity.Property(e => e.LastPlatformSequenceNumber).HasDefaultValue(0L);
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");

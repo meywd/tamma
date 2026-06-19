@@ -195,4 +195,44 @@ public class AuditProjectorTests
         rec.OccurredAt.Should().Be(raw.CreatedAt);
         rec.OccurredAt.Kind.Should().Be(DateTimeKind.Utc);
     }
+
+    // ── C2 — quarantine record: safe placeholder, never plaintext ──
+
+    [Test]
+    public void Quarantine_Record_Has_Failure_Outcome_Safe_Payload_And_Same_SourceId()
+    {
+        const string plaintext = "tamma_sk_DEADBEEF0123456789";
+        var raw = Raw("SECRET.REVEAL", tenantId: Guid.NewGuid(),
+            data: new { apiKey = plaintext });
+
+        var rec = _projector.BuildQuarantineRecord(raw, AuditOwnershipMode.SaaS, null);
+
+        // Idempotency key preserved so a quarantine row dedups like any other.
+        rec.SourceEventId.Should().Be(raw.Id);
+        rec.SourceSequenceNumber.Should().Be(raw.SequenceNumber);
+        // Classifiable fields survive (the redaction of the PAYLOAD is what failed).
+        rec.ActionCode.Should().Be("SECRET.REVEAL");
+        rec.Category.Should().Be("secret");
+        rec.Outcome.Should().Be("failure");
+        // The raw/un-redacted payload must NEVER appear; only the safe placeholder.
+        rec.PayloadJson.Should().Be(AuditProjector.QuarantinePayload);
+        rec.PayloadJson.Should().NotContain(plaintext);
+        rec.PayloadJson.Should().Contain("redaction_failed");
+    }
+
+    [Test]
+    public void Quarantine_Record_Routes_Ownership_Per_Mode()
+    {
+        var tenantId = Guid.NewGuid();
+        var saas = _projector.BuildQuarantineRecord(
+            Raw("SECRET.REVEAL", tenantId: tenantId), AuditOwnershipMode.SaaS, null);
+        saas.TenantId.Should().Be(tenantId);
+        saas.UserId.Should().BeNull();
+
+        var ownerId = Guid.NewGuid();
+        var single = _projector.BuildQuarantineRecord(
+            Raw("SECRET.REVEAL", tenantId: tenantId), AuditOwnershipMode.SingleUser, ownerId);
+        single.UserId.Should().Be(ownerId);
+        single.TenantId.Should().BeNull();
+    }
 }

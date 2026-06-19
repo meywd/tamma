@@ -16,13 +16,14 @@ namespace Tamma.Data.Migrations.ControlPlane
                 columns: table => new
                 {
                     ProjectorId = table.Column<string>(type: "character varying(64)", maxLength: 64, nullable: false),
+                    TenantId = table.Column<Guid>(type: "uuid", nullable: false),
                     LastDomainSequenceNumber = table.Column<long>(type: "bigint", nullable: false, defaultValue: 0L),
                     LastPlatformSequenceNumber = table.Column<long>(type: "bigint", nullable: false, defaultValue: 0L),
                     UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false, defaultValueSql: "now()")
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_audit_projector_cursor", x => x.ProjectorId);
+                    table.PrimaryKey("PK_audit_projector_cursor", x => new { x.ProjectorId, x.TenantId });
                 });
 
             migrationBuilder.CreateTable(

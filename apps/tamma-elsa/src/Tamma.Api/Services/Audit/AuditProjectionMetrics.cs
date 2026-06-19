@@ -25,6 +25,7 @@ public sealed class AuditProjectionMetrics : IDisposable
     public const string MeterName = "Tamma.AuditProjection";
 
     private readonly Meter _meter;
+    private readonly Counter<long> _projectionFailures;
     private long _lag;
 
     public AuditProjectionMetrics()
@@ -36,6 +37,16 @@ public sealed class AuditProjectionMetrics : IDisposable
             unit: "{event}",
             description: "Raw DCB events not yet materialized into audit_records "
                 + "(0 when the curated trail is fully caught up).");
+
+        // C2 — counts events whose normal projection (redaction / build) failed
+        // and were QUARANTINED (a safe placeholder row written, cursor advanced).
+        // A non-zero rate means ops should inspect a poison-pill / pathological
+        // payload — the action was still recorded, never silently dropped.
+        _projectionFailures = _meter.CreateCounter<long>(
+            "tamma.audit.projection_failures",
+            unit: "{event}",
+            description: "Raw DCB events that failed normal projection and were "
+                + "quarantined (safe placeholder row written; action still audited).");
     }
 
     /// <summary>Current lag (raw events still awaiting projection).</summary>
@@ -43,6 +54,9 @@ public sealed class AuditProjectionMetrics : IDisposable
 
     /// <summary>Record the projector's latest lag after a batch.</summary>
     public void RecordLag(long lag) => Interlocked.Exchange(ref _lag, lag < 0 ? 0 : lag);
+
+    /// <summary>C2 — count one quarantined (failed-redaction) event.</summary>
+    public void RecordProjectionFailure() => _projectionFailures.Add(1);
 
     public void Dispose() => _meter.Dispose();
 }

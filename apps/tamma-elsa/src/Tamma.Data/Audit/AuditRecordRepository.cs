@@ -44,15 +44,18 @@ public sealed class AuditRecordRepository : IAuditRecordRepository
 
     /// <inheritdoc />
     public async Task<AuditProjectorCursor> LoadCursorAsync(
-        ControlPlaneDbContext cp, string projectorId, CancellationToken ct = default)
+        ControlPlaneDbContext cp, string projectorId, Guid tenantId,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(cp);
         var row = await cp.AuditProjectorCursors.AsNoTracking()
-            .FirstOrDefaultAsync(c => c.ProjectorId == projectorId, ct)
+            .FirstOrDefaultAsync(
+                c => c.ProjectorId == projectorId && c.TenantId == tenantId, ct)
             .ConfigureAwait(false);
         return row ?? new AuditProjectorCursor
         {
             ProjectorId = projectorId,
+            TenantId = tenantId,
             LastDomainSequenceNumber = 0L,
             LastPlatformSequenceNumber = 0L,
         };
@@ -62,6 +65,7 @@ public sealed class AuditRecordRepository : IAuditRecordRepository
     public async Task SaveCursorAsync(
         ControlPlaneDbContext cp,
         string projectorId,
+        Guid tenantId,
         long lastDomainSeq,
         long lastPlatformSeq,
         DateTime updatedAt,
@@ -69,13 +73,15 @@ public sealed class AuditRecordRepository : IAuditRecordRepository
     {
         ArgumentNullException.ThrowIfNull(cp);
         var existing = await cp.AuditProjectorCursors
-            .FirstOrDefaultAsync(c => c.ProjectorId == projectorId, ct)
+            .FirstOrDefaultAsync(
+                c => c.ProjectorId == projectorId && c.TenantId == tenantId, ct)
             .ConfigureAwait(false);
         if (existing is null)
         {
             cp.AuditProjectorCursors.Add(new AuditProjectorCursor
             {
                 ProjectorId = projectorId,
+                TenantId = tenantId,
                 LastDomainSequenceNumber = lastDomainSeq,
                 LastPlatformSequenceNumber = lastPlatformSeq,
                 UpdatedAt = updatedAt,

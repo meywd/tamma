@@ -117,13 +117,17 @@ public class AuditProjectorIntegrationTests
     // ── Build a DI scope wired with the projector + a per-test mode ──
 
     private ServiceProvider BuildServices(
-        TammaMode mode, bool runOnStartup = false, Guid? singleUserId = null)
+        TammaMode mode, bool runOnStartup = false, Guid? singleUserId = null,
+        IAuditProjector? projectorOverride = null)
     {
         var services = new ServiceCollection();
         services.AddDbContext<ControlPlaneDbContext>(o => o.UseNpgsql(_cs));
         services.AddSingleton<ITammaModeProvider>(new FixedModeProvider(mode));
         services.AddSingleton<ITenantDbContextFactory>(new SearchPathTenantFactory(_cs));
-        services.AddSingleton<IAuditProjector, AuditProjector>();
+        if (projectorOverride is not null)
+            services.AddSingleton(projectorOverride);
+        else
+            services.AddSingleton<IAuditProjector, AuditProjector>();
         services.AddSingleton<IAuditRecordRepository, AuditRecordRepository>();
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<AuditProjectionMetrics>();
@@ -366,6 +370,95 @@ public class AuditProjectorIntegrationTests
         metrics.Lag.Should().Be(0);
     }
 
+    // ════════════════════ C1 — per-tenant cursor (regression) ════════════════════
+
+    [Test]
+    public async Task TenantB_FirstEvent_Is_Projected_After_TenantA_Advances_The_Cursor()
+    {
+        // Reproduces the C1 data-loss bug: each tenant's domain_events is an
+        // INDEPENDENT per-schema BIGSERIAL. Tenant A emits several events so the
+        // OLD shared cursor would advance well past 1; then tenant B emits its
+        // FIRST sensitive event (sequence 1 in B's schema). Under the old shared
+        // cursor, B's event would be read with WHERE SequenceNumber > <A's max>
+        // and NEVER projected. With per-tenant cursors, B's event MUST project.
+
+        // Tenant A: 5 catalog events → advances A's stream to sequence 5.
+        for (var i = 0; i < 5; i++)
+            await SeedDomainEvent("SECRET.REVEAL", _tenantA);
+
+        await using (var sp1 = BuildServices(TammaMode.SaaS))
+            await Svc(sp1).ProcessOnceAsync(default);
+
+        (await CountTenant(_tenantA, _schemaA)).Should().Be(5, "tenant-A's five events projected");
+
+        // Now tenant B emits its FIRST event (sequence 1 in B's schema).
+        await SeedDomainEvent("SECRET.REVEAL", _tenantB);
+
+        await using (var sp2 = BuildServices(TammaMode.SaaS))
+            await Svc(sp2).ProcessOnceAsync(default);
+
+        (await CountTenant(_tenantB, _schemaB)).Should().Be(1,
+            "tenant-B's low-sequence first event MUST project — the per-tenant cursor "
+            + "tracks B independently of how far A advanced (C1 regression)");
+
+        // Sanity: the per-tenant cursor rows are tracked separately.
+        await using var cp = NewCp();
+        var aCursor = await cp.AuditProjectorCursors.AsNoTracking()
+            .SingleOrDefaultAsync(c => c.TenantId == _tenantA);
+        var bCursor = await cp.AuditProjectorCursors.AsNoTracking()
+            .SingleOrDefaultAsync(c => c.TenantId == _tenantB);
+        aCursor.Should().NotBeNull();
+        bCursor.Should().NotBeNull();
+        aCursor!.LastDomainSequenceNumber.Should().BeGreaterThan(0);
+        bCursor!.LastDomainSequenceNumber.Should().BeGreaterThan(0);
+    }
+
+    // ════════════════════ C2 — failed-redaction quarantine ════════════════════
+
+    [Test]
+    public async Task Failed_Redaction_Quarantines_The_Event_And_The_Cursor_Advances()
+    {
+        // Seed three catalog events in order; the projector for the MIDDLE one
+        // throws on build/redact (injected failing projector). The middle event
+        // must be QUARANTINED (a failure-outcome row with a SAFE placeholder
+        // payload, NO plaintext), the failure metric must fire, the cursor must
+        // advance past it, and the events AFTER it must still project (no stall).
+        const string plaintext = "tamma_sk_POISONPILL0123456789";
+        await SeedDomainEvent("SECRET.WRITE", _tenantA, data: new { apiKey = "first" });
+        await SeedDomainEvent("SECRET.REVEAL", _tenantA, data: new { apiKey = plaintext });
+        await SeedDomainEvent("SECRET.READ", _tenantA, data: new { apiKey = "third" });
+
+        // Inject a projector that throws on the SECRET.REVEAL event only (it
+        // delegates the quarantine build to the REAL projector so the safe-payload
+        // path is exercised end to end).
+        var failing = new FailingOnTypeProjector("SECRET.REVEAL");
+        await using var sp = BuildServices(TammaMode.SaaS, projectorOverride: failing);
+
+        var inserted = await Svc(sp).ProcessOnceAsync(default);
+
+        // All three rows present: two normal + one quarantine.
+        (await CountTenant(_tenantA, _schemaA)).Should().Be(3,
+            "the failing event is quarantined (not dropped); the others project normally");
+        inserted.Should().Be(3);
+
+        await using var ta = NewTenant(_tenantA, _schemaA);
+        var rows = await ta.AuditRecords.OrderBy(r => r.SourceSequenceNumber).ToListAsync();
+
+        var quarantined = rows.Single(r => r.ActionCode == "SECRET.REVEAL");
+        quarantined.Outcome.Should().Be("failure", "a failed projection is recorded as a failure");
+        quarantined.PayloadJson.Should().NotContain(plaintext,
+            "the raw/un-redacted payload must NEVER reach the quarantine row");
+        quarantined.PayloadJson.Should().Contain("redaction_failed",
+            "the quarantine row carries the safe placeholder payload");
+
+        // The good neighbours are normal success rows.
+        rows.Where(r => r.ActionCode != "SECRET.REVEAL")
+            .Should().OnlyContain(r => r.Outcome == "success");
+
+        // The failure counter fired exactly once.
+        failing.ThrowCount.Should().Be(1);
+    }
+
     // ── snapshot/raw helpers ──
 
     private async Task<List<string>> SnapshotTenant(Guid tenantId, string schema)
@@ -415,6 +508,31 @@ public class AuditProjectorIntegrationTests
     private sealed class FixedModeProvider(TammaMode mode) : ITammaModeProvider
     {
         public TammaMode Mode { get; } = mode;
+    }
+
+    /// <summary>A projector that throws on a chosen event type to force the C2
+    /// quarantine path; everything else (including the quarantine build) delegates
+    /// to the REAL projector so the safe-payload behaviour is exercised genuinely.</summary>
+    private sealed class FailingOnTypeProjector(string failOnType) : IAuditProjector
+    {
+        private readonly AuditProjector _real = new();
+        public int ThrowCount { get; private set; }
+
+        public AuditRecord? TryBuildRecord(
+            RawAuditEvent rawEvent, AuditOwnershipMode mode, Guid? singleUserOwnerId)
+        {
+            if (string.Equals(rawEvent.Type, failOnType, StringComparison.Ordinal))
+            {
+                ThrowCount++;
+                throw new InvalidOperationException(
+                    "simulated redaction failure (e.g. RegexMatchTimeoutException)");
+            }
+            return _real.TryBuildRecord(rawEvent, mode, singleUserOwnerId);
+        }
+
+        public AuditRecord BuildQuarantineRecord(
+            RawAuditEvent rawEvent, AuditOwnershipMode mode, Guid? singleUserOwnerId) =>
+            _real.BuildQuarantineRecord(rawEvent, mode, singleUserOwnerId);
     }
 
     /// <summary>A factory that builds a TenantDbContext bound to the tenant's

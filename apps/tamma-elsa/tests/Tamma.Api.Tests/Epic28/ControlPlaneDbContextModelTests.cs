@@ -108,6 +108,13 @@ public class ControlPlaneDbContextModelTests
             // only — usage/metering data is owned by later Epic 35 stories.
             "billing_customers",
             "billing_plan_prices",
+            // Story 37-1 — curated audit-record read-model + the per-(projector,
+            // tenant) cursor. audit_records is mapped on BOTH contexts (the CP
+            // build materializes platform-scope + single-user rows); the cursor
+            // is CP-only (the projector resumes per-tenant domain streams from
+            // CP-resident high-water marks).
+            "audit_records",
+            "audit_projector_cursor",
         }, because: "Story 28-1 PR D (Decision #4) — enumerate every "
             + "CP-resident table; the 11 + 4 mentorship tenant-resident "
             + "entities have moved to TenantDbContext. Story 31-2 adds "
@@ -115,7 +122,8 @@ public class ControlPlaneDbContextModelTests
             + "platform_webhook_deliveries. Unified-tenancy Phase 0 adds "
             + "tenant_databases. Story 32-1 adds agents + agent_versions. "
             + "Story 34-1 adds plan_features + plan_entitlements + plan_prices. "
-            + "Story 35-1 adds billing_customers + billing_plan_prices.");
+            + "Story 35-1 adds billing_customers + billing_plan_prices. "
+            + "Story 37-1 adds audit_records + audit_projector_cursor.");
     }
 
     // ── Story 32-1 — agent entity model shape ──

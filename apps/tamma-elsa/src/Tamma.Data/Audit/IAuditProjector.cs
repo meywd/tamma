@@ -42,6 +42,19 @@ public interface IAuditProjector
     /// <see cref="AuditOwnershipMode.SingleUser"/> so the row can be keyed.</param>
     AuditRecord? TryBuildRecord(
         RawAuditEvent rawEvent, AuditOwnershipMode mode, Guid? singleUserOwnerId);
+
+    /// <summary>
+    /// C2 — build a <b>quarantine</b> record for an event whose normal projection
+    /// (redaction / build) FAILED. The row carries the known-safe classifiable
+    /// fields (action_code / category / severity when resolvable, else a generic
+    /// "unclassified" marker), the same <c>source_event_id</c> (so idempotency
+    /// holds), <c>outcome = "failure"</c>, correct per-mode ownership, and a SAFE
+    /// placeholder payload — NEVER the raw / un-redacted <c>Data</c>/<c>Tags</c>.
+    /// Persisting this row lets the cursor advance past a poison-pill event so the
+    /// audit trail progresses, while still recording that the action occurred.
+    /// </summary>
+    AuditRecord BuildQuarantineRecord(
+        RawAuditEvent rawEvent, AuditOwnershipMode mode, Guid? singleUserOwnerId);
 }
 
 /// <summary>

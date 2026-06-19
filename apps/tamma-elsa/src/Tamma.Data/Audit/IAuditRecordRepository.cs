@@ -23,20 +23,29 @@ public interface IAuditRecordRepository
         DbContext context, AuditRecord record, CancellationToken ct = default);
 
     /// <summary>
-    /// Load the projector cursor from the control-plane store (creating an
-    /// at-zero in-memory default when no row exists yet). Cursor is always
-    /// CP-resident (mirrors <c>alert_evaluator_cursor</c>).
+    /// Load one projector cursor row from the control-plane store, keyed by
+    /// <c>(projectorId, tenantId)</c>. Pass
+    /// <see cref="AuditProjectorCursor.PlatformSentinel"/> for the platform /
+    /// shared-DB row, or a real tenant id for that tenant's per-schema domain
+    /// stream. Creates an at-zero in-memory default when no row exists yet. The
+    /// cursor table is always CP-resident (C1: one domain high-water mark per
+    /// tenant, the platform stream on the sentinel row).
     /// </summary>
     Task<AuditProjectorCursor> LoadCursorAsync(
-        ControlPlaneDbContext cp, string projectorId, CancellationToken ct = default);
+        ControlPlaneDbContext cp, string projectorId, Guid tenantId,
+        CancellationToken ct = default);
 
     /// <summary>
-    /// Upsert the projector cursor's per-stream high-water marks into the
-    /// control-plane store.
+    /// Upsert one projector cursor row's high-water marks into the control-plane
+    /// store, keyed by <c>(projectorId, tenantId)</c>. For a per-tenant row only
+    /// <paramref name="lastDomainSeq"/> advances; for the
+    /// <see cref="AuditProjectorCursor.PlatformSentinel"/> row both the
+    /// platform-stream and shared-DB domain-fallback marks advance.
     /// </summary>
     Task SaveCursorAsync(
         ControlPlaneDbContext cp,
         string projectorId,
+        Guid tenantId,
         long lastDomainSeq,
         long lastPlatformSeq,
         DateTime updatedAt,

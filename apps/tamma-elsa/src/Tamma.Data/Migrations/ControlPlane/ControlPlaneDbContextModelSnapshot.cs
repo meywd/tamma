@@ -606,6 +606,9 @@ namespace Tamma.Data.Migrations.ControlPlane
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<long>("LastDomainSequenceNumber")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bigint")
@@ -621,7 +624,7 @@ namespace Tamma.Data.Migrations.ControlPlane
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("now()");
 
-                    b.HasKey("ProjectorId");
+                    b.HasKey("ProjectorId", "TenantId");
 
                     b.ToTable("audit_projector_cursor", (string)null);
                 });

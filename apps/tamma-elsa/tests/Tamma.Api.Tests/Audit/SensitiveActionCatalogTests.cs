@@ -142,4 +142,39 @@ public class SensitiveActionCatalogTests
         SensitiveActionCatalog.Resolve("WORKFLOW.STEP_COMPLETED").Should().BeNull();
         SensitiveActionCatalog.Resolve(null).Should().BeNull();
     }
+
+    // ── M1 — duplicate const VALUE detection ──
+
+    [Test]
+    public void Const_Event_Type_Values_Are_All_Distinct()
+    {
+        // The static ctor builds ByCode via map[code] = ... (indexer), so two
+        // public const fields that accidentally carry the SAME string value would
+        // SILENTLY overwrite / mis-classify with no signal. Reflect over the public
+        // const string fields and assert there are no duplicate values, AND that
+        // the built dictionary's Count equals the distinct code count (i.e. the
+        // map was built without a silent collision).
+        var constValues = typeof(SensitiveActionCatalog)
+            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(f => f.IsLiteral && !f.IsInitOnly && f.FieldType == typeof(string))
+            .Select(f => (string)f.GetRawConstantValue()!)
+            .ToList();
+
+        constValues.Should().NotBeEmpty("the catalog defines its codes as public consts");
+
+        var distinct = constValues.Distinct(StringComparer.Ordinal).ToList();
+        constValues.Should().HaveCount(distinct.Count,
+            "no two const action-code values may collide (the static ctor's indexer "
+            + "would silently overwrite the earlier classification)");
+
+        // Every distinct const value is a key, and the dictionary has exactly that
+        // many entries — proof the indexer never silently merged two codes into one.
+        SensitiveActionCatalog.ByCode.Count.Should().Be(distinct.Count,
+            "ByCode.Count must equal the distinct const code count — no silent collision");
+        foreach (var value in distinct)
+        {
+            SensitiveActionCatalog.ByCode.Should().ContainKey(value,
+                $"every const code '{value}' must be catalogued");
+        }
+    }
 }
