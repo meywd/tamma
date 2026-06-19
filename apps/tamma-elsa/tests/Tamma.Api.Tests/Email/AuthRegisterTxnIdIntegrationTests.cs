@@ -7,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using Tamma.Api.Services.Email;
+using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
 
 namespace Tamma.Api.Tests.Email;
@@ -50,6 +51,19 @@ public class AuthRegisterTxnIdIntegrationTests
     {
         return ApiTestFixture.Factory.WithWebHostBuilder(b =>
         {
+            // Determinism guard (Story 28-6 follow-up): explicitly gate the
+            // racy BackgroundService loops in THIS derived host instead of
+            // relying on the base fixture's DisableAlertHostedServices being
+            // inherited through WithWebHostBuilder. The OutboxSmtpSender poll
+            // loop, if live, claims the freshly-persisted pending row and
+            // mutates its Status / Attempts / NextAttemptAt (or deletes it on
+            // terminal failure) within the 5s poll window — exactly the
+            // active→pending→failed transition that flaked the Status
+            // assertion below. Gating it makes the producer the SOLE writer of
+            // the row for the lifetime of the assertion. ProcessOnceAsync stays
+            // public for the email tests that DO want to drive delivery.
+            b.DisableAlertHostedServices();
+
             b.ConfigureAppConfiguration((_, config) =>
             {
                 config.AddInMemoryCollection(new Dictionary<string, string?>
@@ -77,9 +91,10 @@ public class AuthRegisterTxnIdIntegrationTests
         });
         response.StatusCode.Should().Be(HttpStatusCode.Created);
 
-        // Give any scoped async work a moment to flush to Postgres.
-        await Task.Delay(50);
-
+        // The QUEUED event + outbox row are written synchronously inside the
+        // request (Register awaits emailService.SendAsync before 201), and the
+        // sender is gated off (CreateClient), so both are stable by now — no
+        // flush delay or background-loop race to wait out.
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 
@@ -124,8 +139,13 @@ public class AuthRegisterTxnIdIntegrationTests
             password = "Sup3rSecure!",
         });
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        await Task.Delay(50);
 
+        // No Task.Delay needed: AuthEndpoints.Register awaits
+        // emailService.SendAsync BEFORE it returns 201, so the platform-outbox
+        // row is durably persisted by the time the response is observed. With
+        // the OutboxSmtpSender gated off (see CreateClient), the producer is the
+        // SOLE writer of this row — so Status="pending" is a stable invariant,
+        // not a value we happened to read before a background loop flipped it.
         using var scope = ApiTestFixture.Factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<ControlPlaneDbContext>();
 

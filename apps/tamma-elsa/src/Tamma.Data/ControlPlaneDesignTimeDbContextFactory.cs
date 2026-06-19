@@ -16,11 +16,14 @@ public class ControlPlaneDesignTimeDbContextFactory : IDesignTimeDbContextFactor
         var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__ControlPlane")
             ?? "Host=localhost;Port=5432;Database=tamma_control;Username=tamma;Password=tamma";
 
-        var options = new DbContextOptionsBuilder<ControlPlaneDbContext>()
+        var optionsBuilder = new DbContextOptionsBuilder<ControlPlaneDbContext>()
             .UseNpgsql(connectionString, npgsql =>
-                npgsql.MigrationsHistoryTable("__ControlPlaneMigrationsHistory"))
-            .Options;
+                npgsql.MigrationsHistoryTable("__ControlPlaneMigrationsHistory"));
+        // Story 35-1 follow-up — keep `ef migrations has-pending-model-changes`
+        // output clean by suppressing the required-navigation/query-filter
+        // advisory on the design-time options too (same seam as runtime DI).
+        ControlPlaneDbContext.ConfigureControlPlaneWarnings(optionsBuilder);
 
-        return new ControlPlaneDbContext(options);
+        return new ControlPlaneDbContext(optionsBuilder.Options);
     }
 }

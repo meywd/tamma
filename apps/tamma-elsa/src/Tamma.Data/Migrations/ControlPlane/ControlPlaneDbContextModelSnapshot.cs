@@ -86,6 +86,118 @@ namespace Tamma.Data.Migrations.ControlPlane
                         });
                 });
 
+            modelBuilder.Entity("Tamma.Data.Entities.Agent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CurrentVersionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<Guid?>("OwnerTenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("OwnerUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("Status")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Visibility")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name", "Role")
+                        .IsUnique()
+                        .HasDatabaseName("IX_agents_public_name_role")
+                        .HasFilter("\"Visibility\" = 0");
+
+                    b.HasIndex("OwnerTenantId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("IX_agents_private_tenant_name")
+                        .HasFilter("\"Visibility\" = 1 AND \"OwnerTenantId\" IS NOT NULL");
+
+                    b.HasIndex("OwnerUserId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("IX_agents_private_user_name")
+                        .HasFilter("\"Visibility\" = 1 AND \"OwnerUserId\" IS NOT NULL");
+
+                    b.ToTable("agents", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_agents_visibility_ownership", "(\"Visibility\" = 0 AND \"OwnerTenantId\" IS NULL AND \"OwnerUserId\" IS NULL) OR (\"Visibility\" = 1 AND \"OwnerTenantId\" IS NOT NULL AND \"OwnerUserId\" IS NULL) OR (\"Visibility\" = 1 AND \"OwnerUserId\" IS NOT NULL AND \"OwnerTenantId\" IS NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.AgentVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<Guid>("AgentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ConfigJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValueSql("'{}'::jsonb");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AgentId", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("IX_agent_versions_agent_version");
+
+                    b.ToTable("agent_versions", (string)null);
+                });
+
             modelBuilder.Entity("Tamma.Data.Entities.Alert", b =>
                 {
                     b.Property<Guid>("Id")
@@ -488,6 +600,267 @@ namespace Tamma.Data.Migrations.ControlPlane
                         });
                 });
 
+            modelBuilder.Entity("Tamma.Data.Entities.AuditProjectorCursor", b =>
+                {
+                    b.Property<string>("ProjectorId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("LastDomainSequenceNumber")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<long>("LastPlatformSequenceNumber")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("ProjectorId", "TenantId");
+
+                    b.ToTable("audit_projector_cursor", (string)null);
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.AuditRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("ActionCode")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("ActorEmailSnapshot")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<Guid?>("ActorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("success");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValueSql("'{}'::jsonb");
+
+                    b.Property<string>("PrevRecordHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("RecordHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Severity")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<Guid>("SourceEventId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("SourceSequenceNumber")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("TargetId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("TargetType")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceEventId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_audit_records_SourceEventId");
+
+                    b.HasIndex("SourceSequenceNumber")
+                        .HasDatabaseName("IX_audit_records_SourceSequenceNumber");
+
+                    b.HasIndex("Category", "OccurredAt")
+                        .HasDatabaseName("IX_audit_records_Category_OccurredAt");
+
+                    b.HasIndex("TenantId", "OccurredAt")
+                        .HasDatabaseName("IX_audit_records_TenantId_OccurredAt");
+
+                    b.HasIndex("UserId", "OccurredAt")
+                        .HasDatabaseName("IX_audit_records_UserId_OccurredAt");
+
+                    b.ToTable("audit_records", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_audit_records_outcome", "\"Outcome\" IN ('success','failure','denied')");
+
+                            t.HasCheckConstraint("ck_audit_records_principal_xor", "NOT (\"UserId\" IS NOT NULL AND \"TenantId\" IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.BillingCustomer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("BillingMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("PlatformProvided");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("DefaultCurrency")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)")
+                        .HasDefaultValue("usd");
+
+                    b.Property<string>("StripeCustomerId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("TaxStatus")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("none");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StripeCustomerId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_billing_customers_StripeCustomerId")
+                        .HasFilter("\"StripeCustomerId\" IS NOT NULL");
+
+                    b.HasIndex("TenantId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_billing_customers_TenantId");
+
+                    b.ToTable("billing_customers", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_billing_customers_mode", "\"BillingMode\" IN ('PlatformProvided','Byok')");
+                        });
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.BillingPlanPrice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("PlanSlug")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SeatsMeterId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("SeatsPriceId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("StripePriceId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("StripeProductId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("TokensInputMeterId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("TokensInputPriceId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("TokensOutputMeterId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("TokensOutputPriceId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlanSlug")
+                        .IsUnique()
+                        .HasDatabaseName("UX_billing_plan_prices_PlanSlug");
+
+                    b.ToTable("billing_plan_prices", (string)null);
+                });
+
             modelBuilder.Entity("Tamma.Data.Entities.GitHubInstallation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -719,7 +1092,15 @@ namespace Tamma.Data.Migrations.ControlPlane
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("BillingInterval")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("monthly");
 
                     b.Property<DateTime>("CreatedAt")
                         .ValueGeneratedOnAdd()
@@ -735,6 +1116,11 @@ namespace Tamma.Data.Migrations.ControlPlane
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")
                         .HasDefaultValue(true);
+
+                    b.Property<bool>("IsCustom")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false);
 
                     b.Property<decimal>("MonthlyPriceUsd")
                         .HasPrecision(18, 2)
@@ -758,19 +1144,165 @@ namespace Tamma.Data.Migrations.ControlPlane
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("active");
+
+                    b.Property<Guid?>("SupersedesPlanId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("UpdatedAt")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("timestamp with time zone")
                         .HasDefaultValueSql("now()");
 
+                    b.Property<int>("Version")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
                     b.HasKey("Id");
 
                     b.HasIndex("Slug")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasDatabaseName("UX_plans_OneActivePerSlug")
+                        .HasFilter("\"Status\" = 'active'");
+
+                    b.HasIndex("SupersedesPlanId");
+
+                    b.HasIndex("Slug", "Version")
+                        .IsUnique()
+                        .HasDatabaseName("UX_plans_Slug_Version");
 
                     b.ToTable("plans", null, t =>
                         {
+                            t.HasCheckConstraint("ck_plans_billing_interval", "\"BillingInterval\" IN ('monthly','annual')");
+
                             t.HasCheckConstraint("ck_plans_placement_policy", "\"PlacementPolicy\" IN ('shared','dedicated')");
+
+                            t.HasCheckConstraint("ck_plans_status", "\"Status\" IN ('active','deprecated','draft')");
+                        });
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.PlanEntitlement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<long?>("LimitValue")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("MetricKey")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("OverageMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("block");
+
+                    b.Property<string>("Period")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("monthly");
+
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlanId", "MetricKey")
+                        .IsUnique()
+                        .HasDatabaseName("UX_plan_entitlements_PlanId_MetricKey");
+
+                    b.ToTable("plan_entitlements", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_plan_entitlements_overage", "\"OverageMode\" IN ('block','allow','meter')");
+
+                            t.HasCheckConstraint("ck_plan_entitlements_period", "\"Period\" IN ('monthly','total')");
+                        });
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.PlanFeature", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<bool?>("BoolValue")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("FeatureKey")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("StringValue")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlanId", "FeatureKey")
+                        .IsUnique()
+                        .HasDatabaseName("UX_plan_features_PlanId_FeatureKey");
+
+                    b.ToTable("plan_features", (string)null);
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.PlanPrice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("MeteredComponent")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValueSql("'{}'::jsonb");
+
+                    b.Property<Guid>("PlanId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("PricingMode")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasDefaultValue("platform_provided");
+
+                    b.Property<decimal>("RecurringUsd")
+                        .HasPrecision(20, 4)
+                        .HasColumnType("numeric(20,4)");
+
+                    b.Property<decimal>("SeatUsd")
+                        .HasPrecision(20, 4)
+                        .HasColumnType("numeric(20,4)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PlanId", "PricingMode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_plan_prices_PlanId_PricingMode");
+
+                    b.ToTable("plan_prices", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_plan_prices_mode", "\"PricingMode\" IN ('platform_provided','byok')");
                         });
                 });
 
@@ -1806,6 +2338,17 @@ namespace Tamma.Data.Migrations.ControlPlane
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
+            modelBuilder.Entity("Tamma.Data.Entities.AgentVersion", b =>
+                {
+                    b.HasOne("Tamma.Data.Entities.Agent", "Agent")
+                        .WithMany("Versions")
+                        .HasForeignKey("AgentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Agent");
+                });
+
             modelBuilder.Entity("Tamma.Data.Entities.AlertDeliveryAttempt", b =>
                 {
                     b.HasOne("Tamma.Data.Entities.Alert", null)
@@ -1828,6 +2371,17 @@ namespace Tamma.Data.Migrations.ControlPlane
                         .HasForeignKey("UserId");
                 });
 
+            modelBuilder.Entity("Tamma.Data.Entities.BillingCustomer", b =>
+                {
+                    b.HasOne("Tamma.Data.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("Tamma.Data.Entities.GitHubInstallationRepo", b =>
                 {
                     b.HasOne("Tamma.Data.Entities.GitHubInstallation", "Installation")
@@ -1848,6 +2402,41 @@ namespace Tamma.Data.Migrations.ControlPlane
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.Plan", b =>
+                {
+                    b.HasOne("Tamma.Data.Entities.Plan", null)
+                        .WithMany()
+                        .HasForeignKey("SupersedesPlanId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.PlanEntitlement", b =>
+                {
+                    b.HasOne("Tamma.Data.Entities.Plan", null)
+                        .WithMany("Entitlements")
+                        .HasForeignKey("PlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.PlanFeature", b =>
+                {
+                    b.HasOne("Tamma.Data.Entities.Plan", null)
+                        .WithMany("Features")
+                        .HasForeignKey("PlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.PlanPrice", b =>
+                {
+                    b.HasOne("Tamma.Data.Entities.Plan", null)
+                        .WithMany("Prices")
+                        .HasForeignKey("PlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Tamma.Data.Entities.PlatformBootstrap", b =>
@@ -1929,9 +2518,23 @@ namespace Tamma.Data.Migrations.ControlPlane
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("Tamma.Data.Entities.Agent", b =>
+                {
+                    b.Navigation("Versions");
+                });
+
             modelBuilder.Entity("Tamma.Data.Entities.GitHubInstallation", b =>
                 {
                     b.Navigation("Repos");
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.Plan", b =>
+                {
+                    b.Navigation("Entitlements");
+
+                    b.Navigation("Features");
+
+                    b.Navigation("Prices");
                 });
 
             modelBuilder.Entity("Tamma.Data.Entities.Tenant", b =>

@@ -59,6 +59,10 @@ public class ControlPlaneDbContextModelTests
             "github_installation_repos",
             "github_webhook_deliveries",
             "plans",
+            // Story 34-1 — typed price-book children of plans.
+            "plan_features",
+            "plan_entitlements",
+            "plan_prices",
             "platform_events",
             "platform_queued_tasks",
             "platform_email_outbox",
@@ -92,12 +96,155 @@ public class ControlPlaneDbContextModelTests
             // shared-pool and dedicated DB instances. Each tenant row
             // references one of these via DatabaseId.
             "tenant_databases",
+            // Story 32-1 — first-class agent entities (Epic 32 foundation).
+            // CP-resident: public agents are shared cross-tenant and
+            // visibility/identity is a control-plane concern. Definition-only
+            // (no performance columns — those stay tenant-scoped).
+            "agents",
+            "agent_versions",
+            // Story 35-1 — Epic 35 billing foundation. CP-resident: the
+            // tenant→Stripe customer mapping (keyed by tenant) + the
+            // slug→Stripe-ids catalog (platform-global). Definition/binding
+            // only — usage/metering data is owned by later Epic 35 stories.
+            "billing_customers",
+            "billing_plan_prices",
+            // Story 37-1 — curated audit-record read-model + the per-(projector,
+            // tenant) cursor. audit_records is mapped on BOTH contexts (the CP
+            // build materializes platform-scope + single-user rows); the cursor
+            // is CP-only (the projector resumes per-tenant domain streams from
+            // CP-resident high-water marks).
+            "audit_records",
+            "audit_projector_cursor",
         }, because: "Story 28-1 PR D (Decision #4) — enumerate every "
             + "CP-resident table; the 11 + 4 mentorship tenant-resident "
             + "entities have moved to TenantDbContext. Story 31-2 adds "
             + "tenant_platform_installations; Story 31-7 adds "
             + "platform_webhook_deliveries. Unified-tenancy Phase 0 adds "
-            + "tenant_databases.");
+            + "tenant_databases. Story 32-1 adds agents + agent_versions. "
+            + "Story 34-1 adds plan_features + plan_entitlements + plan_prices. "
+            + "Story 35-1 adds billing_customers + billing_plan_prices. "
+            + "Story 37-1 adds audit_records + audit_projector_cursor.");
+    }
+
+    // ── Story 32-1 — agent entity model shape ──
+
+    [Test]
+    public void Agents_Has_VisibilityOwnership_CheckConstraint()
+    {
+        using var ctx = CreateContext();
+
+        // CHECK constraints are stripped from the runtime read-optimized model;
+        // they only live on the design-time model.
+        var designModel = Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions
+            .GetService<Microsoft.EntityFrameworkCore.Metadata.IDesignTimeModel>(ctx).Model;
+        var agent = designModel.FindEntityType(typeof(Agent))!;
+        var check = agent.GetCheckConstraints()
+            .FirstOrDefault(c => c.Name == "ck_agents_visibility_ownership");
+
+        check.Should().NotBeNull(
+            "Story 32-1 ties Visibility to the owner columns via a CHECK "
+            + "(mirrors ck_prompt_overrides_principal_xor)");
+        // Public = 0 ⇒ no owner; Private = 1 ⇒ exactly one owner.
+        check!.Sql.Should().Contain("\"Visibility\" = 0");
+        check.Sql.Should().Contain("\"Visibility\" = 1");
+    }
+
+    [Test]
+    public void Agents_Has_PublicAndPrivate_PartialUniqueIndexes()
+    {
+        using var ctx = CreateContext();
+
+        var agent = ctx.Model.FindEntityType(typeof(Agent))!;
+        var indexes = agent.GetIndexes().ToList();
+
+        var publicNameRole = indexes.Single(i =>
+            i.GetDatabaseName() == "IX_agents_public_name_role");
+        publicNameRole.IsUnique.Should().BeTrue();
+        publicNameRole.GetFilter().Should().Be("\"Visibility\" = 0");
+        publicNameRole.Properties.Select(p => p.Name)
+            .Should().Equal("Name", "Role");
+
+        var privateTenant = indexes.Single(i =>
+            i.GetDatabaseName() == "IX_agents_private_tenant_name");
+        privateTenant.IsUnique.Should().BeTrue();
+        privateTenant.GetFilter().Should()
+            .Be("\"Visibility\" = 1 AND \"OwnerTenantId\" IS NOT NULL");
+
+        var privateUser = indexes.Single(i =>
+            i.GetDatabaseName() == "IX_agents_private_user_name");
+        privateUser.IsUnique.Should().BeTrue();
+        privateUser.GetFilter().Should()
+            .Be("\"Visibility\" = 1 AND \"OwnerUserId\" IS NOT NULL");
+    }
+
+    [Test]
+    public void AgentVersions_Has_AgentVersion_UniqueIndex_And_RestrictFk()
+    {
+        using var ctx = CreateContext();
+
+        var version = ctx.Model.FindEntityType(typeof(AgentVersion))!;
+
+        var unique = version.GetIndexes()
+            .Single(i => i.GetDatabaseName() == "IX_agent_versions_agent_version");
+        unique.IsUnique.Should().BeTrue(
+            "monotonic, non-duplicated versions per agent + the concurrency guard");
+        unique.Properties.Select(p => p.Name).Should().Equal("AgentId", "Version");
+
+        var fk = version.GetForeignKeys()
+            .Single(k => k.PrincipalEntityType.ClrType == typeof(Agent));
+        fk.DeleteBehavior.Should().Be(DeleteBehavior.Restrict,
+            "versions are immutable audit history — archive, never cascade-delete");
+    }
+
+    [Test]
+    public void Agents_And_AgentVersions_HaveNo_PerformanceColumns()
+    {
+        using var ctx = CreateContext();
+
+        // Story 32-1 non-goal: performance/action data is ALWAYS tenant-scoped
+        // (later Epic 32 stories). These CP entities are definition-only.
+        var forbidden = new[]
+        {
+            "SuccessRate", "AvgIterations", "BugCount", "CostUsd", "Latency",
+            "TokensIn", "TokensOut", "SuccessCount", "FailureCount",
+        };
+
+        var agentProps = ctx.Model.FindEntityType(typeof(Agent))!
+            .GetProperties().Select(p => p.Name).ToHashSet();
+        var versionProps = ctx.Model.FindEntityType(typeof(AgentVersion))!
+            .GetProperties().Select(p => p.Name).ToHashSet();
+
+        agentProps.Should().NotIntersectWith(forbidden);
+        versionProps.Should().NotIntersectWith(forbidden);
+    }
+
+    // ── Story 36-1 — CP analytics table is untouched; the tenant-only
+    //    analytics_usage_* fact tables never leak onto the control plane. ──
+
+    [Test]
+    public void Cp_Still_Maps_PlatformAnalyticsHourly_AndNot_AnalyticsUsageTables()
+    {
+        using var ctx = CreateContext();
+
+        var tables = ctx.Model.GetEntityTypes()
+            .Select(t => t.GetTableName())
+            .Where(n => n is not null)
+            .ToHashSet()!;
+
+        // Story 28-10's owner-only fleet-wide fact table stays put.
+        tables.Should().Contain("platform_analytics_hourly",
+            "Story 36-1 leaves the control-plane analytics table entirely intact");
+
+        // Story 36-1's per-tenant fact tables are tenant-resident only — they
+        // must NOT appear on the control-plane model graph.
+        tables.Should().NotContain("analytics_usage_hourly",
+            "analytics_usage_* are per-tenant — they live only on TenantDbContext");
+        tables.Should().NotContain("analytics_usage_daily",
+            "analytics_usage_* are per-tenant — they live only on TenantDbContext");
+
+        // And the CP context never even knows the CLR types.
+        ctx.Model.FindEntityType(typeof(AnalyticsUsageHourly)).Should().BeNull();
+        ctx.Model.FindEntityType(typeof(AnalyticsUsageDaily)).Should().BeNull();
     }
 
     [Test]

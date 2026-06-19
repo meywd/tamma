@@ -440,7 +440,7 @@ internal static class TammaModelConfiguration
             entity.HasIndex(e => new { e.InstallationId, e.ReceivedAt });
         });
 
-        // ── Plan (Story 28-1) ──
+        // ── Plan (Story 28-1; extended by Story 34-1 — versioned price-book) ──
         modelBuilder.Entity<Plan>(entity =>
         {
             entity.ToTable("plans", t =>
@@ -448,8 +448,18 @@ internal static class TammaModelConfiguration
                 t.HasCheckConstraint(
                     "ck_plans_placement_policy",
                     "\"PlacementPolicy\" IN ('shared','dedicated')");
+                // Story 34-1 — pin the version-lifecycle + billing cadence to
+                // their closed enums so a buggy write path can't stash an
+                // unknown value the catalog can't reason about.
+                t.HasCheckConstraint(
+                    "ck_plans_status",
+                    "\"Status\" IN ('active','deprecated','draft')");
+                t.HasCheckConstraint(
+                    "ck_plans_billing_interval",
+                    "\"BillingInterval\" IN ('monthly','annual')");
             });
             entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.Slug).IsRequired().HasMaxLength(64);
             entity.Property(e => e.DisplayName).IsRequired().HasMaxLength(255);
             entity.Property(e => e.MonthlyPriceUsd).HasPrecision(18, 2);
@@ -457,10 +467,123 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.IsActive).HasDefaultValue(true);
             entity.Property(e => e.PlacementPolicy)
                 .IsRequired().HasMaxLength(20).HasDefaultValue("shared");
+
+            // Story 34-1 — versioning columns. Defaults backfill the 3 seeded
+            // rows on migrate: Version=1, Status='active'.
+            entity.Property(e => e.Version).HasDefaultValue(1);
+            entity.Property(e => e.Status)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("active");
+            entity.Property(e => e.IsCustom).HasDefaultValue(false);
+            entity.Property(e => e.BillingInterval)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("monthly");
+
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            entity.HasIndex(e => e.Slug).IsUnique();
+            // Story 34-1 — the legacy single-column UNIQUE(Slug) is replaced
+            // by UNIQUE(Slug, Version) (a slug now has multiple version rows)
+            // plus a partial unique index pinning exactly one 'active' version
+            // per slug — the immutability invariant in SQL.
+            entity.HasIndex(e => new { e.Slug, e.Version })
+                .HasDatabaseName("UX_plans_Slug_Version").IsUnique();
+            entity.HasIndex(e => e.Slug)
+                .HasDatabaseName("UX_plans_OneActivePerSlug")
+                .HasFilter("\"Status\" = 'active'").IsUnique();
+
+            // Self-referencing version chain. RESTRICT — a superseded version
+            // must not be hard-deleted out from under its successor's pointer.
+            entity.HasOne<Plan>()
+                .WithMany()
+                .HasForeignKey(e => e.SupersedesPlanId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ── PlanFeature / PlanEntitlement / PlanPrice (Story 34-1) ──
+        //
+        // The typed price-book children. Configured here (alongside Plan) so
+        // the whole plan aggregate's mapping lives in one place — splitting a
+        // single aggregate's config across files is the failure mode the
+        // story explicitly forbids. All FK to plans(Id) with RESTRICT (a plan
+        // version a tenant references must never be hard-deleted), each with a
+        // natural-key unique index.
+        modelBuilder.Entity<PlanFeature>(entity =>
+        {
+            entity.ToTable("plan_features");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.FeatureKey).IsRequired().HasMaxLength(128);
+            entity.Property(e => e.StringValue).HasMaxLength(512);
+
+            entity.HasIndex(e => new { e.PlanId, e.FeatureKey })
+                .HasDatabaseName("UX_plan_features_PlanId_FeatureKey").IsUnique();
+
+            entity.HasOne<Plan>()
+                .WithMany(p => p.Features)
+                .HasForeignKey(e => e.PlanId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PlanEntitlement>(entity =>
+        {
+            entity.ToTable("plan_entitlements", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_plan_entitlements_period",
+                    "\"Period\" IN ('monthly','total')");
+                t.HasCheckConstraint(
+                    "ck_plan_entitlements_overage",
+                    "\"OverageMode\" IN ('block','allow','meter')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+
+            // Persist the metric key as its snake_case text — never the
+            // unstable ordinal (Story 34-1 AC5). The converter is the single
+            // source of the wire/DB contract shared with metering/enforcement.
+            entity.Property(e => e.MetricKey)
+                .HasConversion(
+                    k => k.ToMetricString(),
+                    s => EntitlementMetricKeyExtensions.Parse(s))
+                .HasColumnType("text")
+                .IsRequired();
+            entity.Property(e => e.Period)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("monthly");
+            entity.Property(e => e.OverageMode)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("block");
+
+            entity.HasIndex(e => new { e.PlanId, e.MetricKey })
+                .HasDatabaseName("UX_plan_entitlements_PlanId_MetricKey").IsUnique();
+
+            entity.HasOne<Plan>()
+                .WithMany(p => p.Entitlements)
+                .HasForeignKey(e => e.PlanId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<PlanPrice>(entity =>
+        {
+            entity.ToTable("plan_prices", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_plan_prices_mode",
+                    "\"PricingMode\" IN ('platform_provided','byok')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.PricingMode)
+                .IsRequired().HasMaxLength(32).HasDefaultValue("platform_provided");
+            entity.Property(e => e.RecurringUsd).HasPrecision(20, 4);
+            entity.Property(e => e.SeatUsd).HasPrecision(20, 4);
+            entity.Property(e => e.MeteredComponent)
+                .HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+
+            entity.HasIndex(e => new { e.PlanId, e.PricingMode })
+                .HasDatabaseName("UX_plan_prices_PlanId_PricingMode").IsUnique();
+
+            entity.HasOne<Plan>()
+                .WithMany(p => p.Prices)
+                .HasForeignKey(e => e.PlanId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // ── PlatformEvent (Story 28-6) ──
@@ -630,6 +753,286 @@ internal static class TammaModelConfiguration
     }
 
     /// <summary>
+    /// Story 32-1 — configure the two CP-resident agent-entity tables
+    /// (<c>agents</c> + <c>agent_versions</c>). Called ONLY from
+    /// <see cref="ControlPlaneDbContext"/> (these are control-plane-resident;
+    /// they are NOT added to <see cref="TenantDbContext"/> — no
+    /// <c>omitTenantIdColumn</c>/<c>isTenantContext</c> branches).
+    ///
+    /// <para>The <c>ck_agents_visibility_ownership</c> CHECK mirrors
+    /// <c>ck_prompt_overrides_principal_xor</c>: it ties the
+    /// <see cref="Entities.AgentVisibility"/> discriminator (stored as int via
+    /// <c>HasConversion&lt;int&gt;()</c>) to the owner columns —
+    /// public (0) ⇒ no owner; private (1) ⇒ exactly one of tenant/user owner.
+    /// The numeric literals <c>0</c>/<c>1</c> are load-bearing and match the
+    /// enum ordinals.</para>
+    /// </summary>
+    public static void ConfigureAgentEntities(ModelBuilder modelBuilder)
+    {
+        // ── Agent (identity) ──
+        modelBuilder.Entity<Agent>(entity =>
+        {
+            entity.ToTable("agents", t =>
+            {
+                // Visibility ⇄ ownership invariant (mirrors
+                // ck_prompt_overrides_principal_xor). Visibility is stored as
+                // int: 0 = Public, 1 = Private. A private agent never has both
+                // owner columns set, and never both null; a public agent has
+                // neither.
+                t.HasCheckConstraint(
+                    "ck_agents_visibility_ownership",
+                    "(\"Visibility\" = 0 AND \"OwnerTenantId\" IS NULL AND \"OwnerUserId\" IS NULL) " +
+                    "OR (\"Visibility\" = 1 AND \"OwnerTenantId\" IS NOT NULL AND \"OwnerUserId\" IS NULL) " +
+                    "OR (\"Visibility\" = 1 AND \"OwnerUserId\" IS NOT NULL AND \"OwnerTenantId\" IS NULL)");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(128);
+            entity.Property(e => e.Role).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.Visibility).HasConversion<int>();
+            entity.Property(e => e.Status).HasConversion<int>().HasDefaultValue(AgentStatus.Active);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // Public handles unique on (Name, Role).
+            entity.HasIndex(e => new { e.Name, e.Role })
+                .IsUnique()
+                .HasFilter("\"Visibility\" = 0")
+                .HasDatabaseName("IX_agents_public_name_role");
+
+            // Private handles unique per owner — two tenants may each own a
+            // private agent named "atlas" without colliding.
+            entity.HasIndex(e => new { e.OwnerTenantId, e.Name })
+                .IsUnique()
+                .HasFilter("\"Visibility\" = 1 AND \"OwnerTenantId\" IS NOT NULL")
+                .HasDatabaseName("IX_agents_private_tenant_name");
+            entity.HasIndex(e => new { e.OwnerUserId, e.Name })
+                .IsUnique()
+                .HasFilter("\"Visibility\" = 1 AND \"OwnerUserId\" IS NOT NULL")
+                .HasDatabaseName("IX_agents_private_user_name");
+        });
+
+        // ── AgentVersion (immutable config snapshot) ──
+        modelBuilder.Entity<AgentVersion>(entity =>
+        {
+            entity.ToTable("agent_versions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.ConfigJson)
+                .HasColumnType("jsonb")
+                .HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+
+            // Monotonic, non-duplicated versions per agent. Also the
+            // concurrency guard: a double-publish loses the second INSERT.
+            entity.HasIndex(e => new { e.AgentId, e.Version })
+                .IsUnique()
+                .HasDatabaseName("IX_agent_versions_agent_version");
+
+            // Versions are immutable audit history — archive, never
+            // cascade-delete.
+            entity.HasOne(e => e.Agent)
+                .WithMany(a => a.Versions)
+                .HasForeignKey(e => e.AgentId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    /// <summary>
+    /// Story 35-1 — billing foundation entities. The tenant→Stripe customer
+    /// mapping (<c>billing_customers</c>, unique <c>TenantId</c>) and the
+    /// slug→Stripe-ids catalog (<c>billing_plan_prices</c>, unique
+    /// <c>PlanSlug</c>). CP-resident; configured in the shared single source so
+    /// the model graph and the additive migration stay aligned.
+    /// </summary>
+    public static void ConfigureBillingEntities(ModelBuilder modelBuilder)
+    {
+        // ── BillingCustomer (tenant → Stripe customer) ──
+        modelBuilder.Entity<BillingCustomer>(entity =>
+        {
+            entity.ToTable("billing_customers", t =>
+            {
+                // Text domain for the persisted BillingMode member name.
+                t.HasCheckConstraint(
+                    "ck_billing_customers_mode",
+                    "\"BillingMode\" IN ('PlatformProvided','Byok')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.BillingMode)
+                .IsRequired().HasMaxLength(32).HasDefaultValue("PlatformProvided");
+            entity.Property(e => e.DefaultCurrency)
+                .IsRequired().HasMaxLength(3).HasDefaultValue("usd");
+            entity.Property(e => e.TaxStatus)
+                .IsRequired().HasMaxLength(32).HasDefaultValue("none");
+            entity.Property(e => e.StripeCustomerId).HasMaxLength(255);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // Exactly one customer mapping per tenant (AC1 / AC12).
+            entity.HasIndex(e => e.TenantId)
+                .HasDatabaseName("UX_billing_customers_TenantId")
+                .IsUnique();
+
+            // Stripe customer ids are globally unique once assigned. Partial so
+            // the null-until-acked retry rows don't collide on NULL.
+            entity.HasIndex(e => e.StripeCustomerId)
+                .HasDatabaseName("UX_billing_customers_StripeCustomerId")
+                .HasFilter("\"StripeCustomerId\" IS NOT NULL")
+                .IsUnique();
+
+            // Tenant purge cascades the billing mapping.
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── BillingPlanPrice (slug → Stripe ids catalog) ──
+        modelBuilder.Entity<BillingPlanPrice>(entity =>
+        {
+            entity.ToTable("billing_plan_prices");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.PlanSlug).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.StripeProductId).HasMaxLength(255);
+            entity.Property(e => e.StripePriceId).HasMaxLength(255);
+            entity.Property(e => e.TokensInputMeterId).HasMaxLength(255);
+            entity.Property(e => e.TokensInputPriceId).HasMaxLength(255);
+            entity.Property(e => e.TokensOutputMeterId).HasMaxLength(255);
+            entity.Property(e => e.TokensOutputPriceId).HasMaxLength(255);
+            entity.Property(e => e.SeatsMeterId).HasMaxLength(255);
+            entity.Property(e => e.SeatsPriceId).HasMaxLength(255);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // One catalog row per slug — the seed upserts on this key.
+            entity.HasIndex(e => e.PlanSlug)
+                .HasDatabaseName("UX_billing_plan_prices_PlanSlug")
+                .IsUnique();
+        });
+    }
+
+    /// <summary>
+    /// Story 37-1 — configure the curated <c>audit_records</c> read-model table.
+    /// Called from BOTH <see cref="ControlPlaneDbContext"/> (platform-scope
+    /// audit) and <see cref="TenantDbContext"/> (tenant-scope audit) so the
+    /// single config source applies to both model builds — there is exactly one
+    /// physical <c>audit_records</c> shape, materialized into either the CP or a
+    /// tenant schema by the projector.
+    ///
+    /// <para>Mirrors <c>prompt_overrides</c>: the
+    /// <c>ck_audit_records_principal_xor</c> CHECK ties exactly one of
+    /// (<c>UserId</c>, <c>TenantId</c>) to non-null. The UNIQUE
+    /// <c>SourceEventId</c> index is the idempotency key (one curated row per raw
+    /// event — AC8). The <c>SourceSequenceNumber</c> index gives Story 37-2 a
+    /// deterministic chain order. The reserved <c>RecordHash</c>/<c>PrevRecordHash</c>
+    /// columns are nullable and left null by this story.</para>
+    /// </summary>
+    public static void ConfigureAuditEntities(
+        ModelBuilder modelBuilder, Guid? fixedTenantId = null)
+    {
+        modelBuilder.Entity<AuditRecord>(entity =>
+        {
+            entity.ToTable("audit_records", t =>
+            {
+                // Per-mode ownership invariant (mirrors ck_prompt_overrides_principal_xor):
+                // UserId and TenantId are mutually exclusive — never BOTH set.
+                //   single-user → UserId set, TenantId null;
+                //   SaaS tenant-scope → TenantId set, UserId null;
+                //   SaaS platform-scope → BOTH null (a control-plane platform row,
+                //     e.g. impersonation against the platform — AC11). This third
+                //     case is why the CHECK is "not both" rather than strict XOR:
+                //     a platform action has no tenant AND no single-user owner, yet
+                //     AC11 mandates it land in the CP audit_records with tenant_id
+                //     null. The "never a tenant's view" isolation (AC14) is then
+                //     enforced by physical placement (CP schema) + the TenantId
+                //     filter on tenant reads, not by the ownership columns.
+                t.HasCheckConstraint(
+                    "ck_audit_records_principal_xor",
+                    "NOT (\"UserId\" IS NOT NULL AND \"TenantId\" IS NOT NULL)");
+                // Outcome is a closed enum — a buggy projector can't stash junk.
+                t.HasCheckConstraint(
+                    "ck_audit_records_outcome",
+                    "\"Outcome\" IN ('success','failure','denied')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.ActionCode).IsRequired().HasMaxLength(128);
+            entity.Property(e => e.Category).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.Severity).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.ActorEmailSnapshot).HasMaxLength(320);
+            entity.Property(e => e.TargetType).HasMaxLength(64);
+            entity.Property(e => e.TargetId).HasMaxLength(255);
+            entity.Property(e => e.Outcome)
+                .IsRequired().HasMaxLength(16).HasDefaultValue("success");
+            entity.Property(e => e.IpAddress).HasMaxLength(64);
+            entity.Property(e => e.UserAgent).HasMaxLength(512);
+            entity.Property(e => e.OccurredAt).HasColumnType("timestamp with time zone");
+            entity.Property(e => e.PayloadJson)
+                .HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+            // Reserved for Story 37-2 — nullable, never populated here.
+            entity.Property(e => e.RecordHash).HasMaxLength(128);
+            entity.Property(e => e.PrevRecordHash).HasMaxLength(128);
+
+            // Idempotency key — one curated row per raw event (AC8). The
+            // projector inserts-if-absent; a re-scan after a crash is a no-op.
+            entity.HasIndex(e => e.SourceEventId)
+                .IsUnique()
+                .HasDatabaseName("UX_audit_records_SourceEventId");
+            // Replay / 37-2 chain order.
+            entity.HasIndex(e => e.SourceSequenceNumber)
+                .HasDatabaseName("IX_audit_records_SourceSequenceNumber");
+            // Tenant query hot path (Story 37-10).
+            entity.HasIndex(e => new { e.TenantId, e.OccurredAt })
+                .HasDatabaseName("IX_audit_records_TenantId_OccurredAt");
+            // Single-user query hot path.
+            entity.HasIndex(e => new { e.UserId, e.OccurredAt })
+                .HasDatabaseName("IX_audit_records_UserId_OccurredAt");
+            // Category/severity compliance filter (Story 37-10).
+            entity.HasIndex(e => new { e.Category, e.OccurredAt })
+                .HasDatabaseName("IX_audit_records_Category_OccurredAt");
+
+            // Tenant-context defence-in-depth: same no-op filter seam every
+            // tenant-resident table uses. The per-tenant schema + connection is
+            // the real isolation plane (Doc 01 §1.4); the explicit TenantId
+            // predicate in the repository carries the transitional shared-DB
+            // phase. AC14's isolation proof is the schema + the UserId/TenantId
+            // routing, not a query filter.
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
+        });
+    }
+
+    /// <summary>
+    /// Story 37-1 — configure the <c>audit_projector_cursor</c> table. Lives in
+    /// the control plane only.
+    ///
+    /// <para><b>C1 fix — per-tenant domain cursor</b>: the key is the composite
+    /// <c>(ProjectorId, TenantId)</c>. Each tenant's <c>domain_events</c> stream
+    /// is an independent per-schema BIGSERIAL, so each tenant tracks its OWN
+    /// <c>LastDomainSequenceNumber</c> on its own row. The global CP
+    /// <c>platform_events</c> stream is tracked on the distinguished
+    /// <see cref="AuditProjectorCursor.PlatformSentinel"/> row (all-zero
+    /// <c>TenantId</c>), which also carries the single-user / shared-DB
+    /// <c>cp.domain_events</c> fallback.</para>
+    /// </summary>
+    public static void ConfigureAuditProjectorCursor(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AuditProjectorCursor>(entity =>
+        {
+            entity.ToTable("audit_projector_cursor");
+            // Composite key: one domain high-water mark per tenant; the platform
+            // stream lives on the all-zero sentinel row.
+            entity.HasKey(e => new { e.ProjectorId, e.TenantId });
+            entity.Property(e => e.ProjectorId).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.TenantId).IsRequired();
+            entity.Property(e => e.LastDomainSequenceNumber).HasDefaultValue(0L);
+            entity.Property(e => e.LastPlatformSequenceNumber).HasDefaultValue(0L);
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+        });
+    }
+
+    /// <summary>
     /// Configure the per-tenant entity graph. <paramref name="fixedTenantId"/>
     /// is non-null when invoked from <see cref="TenantDbContext"/> — the
     /// query filter binds directly to that tenant (fail-closed, no ambient
@@ -667,6 +1070,12 @@ internal static class TammaModelConfiguration
             modelBuilder.Ignore<GitHubInstallationRepo>();
             modelBuilder.Ignore<GitHubWebhookDelivery>();
             modelBuilder.Ignore<Plan>();
+            // Story 34-1 — the typed price-book children are CP-resident; keep
+            // them out of the tenant model graph (Plan's navigations would
+            // otherwise pull them in via convention).
+            modelBuilder.Ignore<PlanFeature>();
+            modelBuilder.Ignore<PlanEntitlement>();
+            modelBuilder.Ignore<PlanPrice>();
             modelBuilder.Ignore<PlatformEvent>();
             modelBuilder.Ignore<PlatformQueuedTask>();
             modelBuilder.Ignore<PlatformEmailOutboxMessage>();
@@ -1094,6 +1503,131 @@ internal static class TammaModelConfiguration
             // No query filter — the outbox is shared infra; tenant scoping is
             // explicit in the repository APIs.
         });
+
+        // ── Analytics usage fact tables (Story 36-1) ──
+        // Per-tenant dimensional usage/cost/performance store. Schema-only here
+        // (Story 36-2 owns population). Mirrors ConfigurePlatformAnalyticsHourly
+        // (Story 28-10) for defaults/precision; uses the prompt_overrides /
+        // conventions NULLS NOT DISTINCT pattern for the idempotent business key.
+        ConfigureAnalyticsUsageEntities(modelBuilder, fixedTenantId);
+
+        // ── Curated audit records (Story 37-1) ──
+        // Tenant-scope curated audit trail materialized from the tenant
+        // domain_events stream. The SAME table shape is also configured on the
+        // CP context for platform-scope rows — one physical schema, two homes.
+        ConfigureAuditEntities(modelBuilder, fixedTenantId);
+    }
+
+    /// <summary>
+    /// Story 36-1 — maps the two per-tenant dimensional analytics fact tables
+    /// (<c>analytics_usage_hourly</c> + <c>analytics_usage_daily</c>). The two
+    /// share an identical dimension + measure contract; only the time bucket
+    /// column differs (<c>Hour</c> vs <c>Day</c>), so a single shared inner
+    /// configurator is applied to both — no drift.
+    ///
+    /// <para>Defaults/precision mirror <c>ConfigurePlatformAnalyticsHourly</c>
+    /// (Story 28-10): <c>gen_random_uuid()</c> PK, <c>timestamp with time
+    /// zone</c> bucket, <c>HasDefaultValue(0L)</c> counters,
+    /// <c>HasPrecision(20,4).HasDefaultValue(0m)</c> costs, <c>now()</c> write
+    /// timestamp. <see cref="CostBasis"/> is persisted as lowercase text
+    /// (<c>byok</c>/<c>platform</c>). The breakdown index and the NULLS NOT
+    /// DISTINCT unique business-key index follow the prompt_overrides /
+    /// conventions precedent.</para>
+    ///
+    /// <para>No <c>TenantId</c> column — tenancy is the schema (Doc 01 §1.4);
+    /// <see cref="ApplyTenantFilter{T}"/> is the deliberate no-op (the accessor
+    /// lambda returns <c>null</c> because there is nothing to filter on).</para>
+    /// </summary>
+    private static void ConfigureAnalyticsUsageEntities(
+        ModelBuilder modelBuilder, Guid? fixedTenantId)
+    {
+        // Lowercase byok/platform text — keeps the discriminator uniform in
+        // ad-hoc SQL and round-trips identically on InMemory and Npgsql.
+        var costBasisConverter = new ValueConverter<CostBasis, string>(
+            v => v.ToString().ToLowerInvariant(),
+            s => Enum.Parse<CostBasis>(s, true));
+
+        modelBuilder.Entity<AnalyticsUsageHourly>(entity =>
+        {
+            entity.ToTable("analytics_usage_hourly");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Hour).HasColumnType("timestamp with time zone");
+            ConfigureAnalyticsUsageShared(entity, costBasisConverter);
+
+            // Breakdown index (AC6) — "by provider / agent / workflow / cost-basis".
+            entity.HasIndex(e => new
+                { e.Hour, e.Provider, e.AgentId, e.WorkflowDefinitionId, e.CostBasis })
+                .HasDatabaseName("IX_analytics_usage_hourly_breakdown");
+
+            // Idempotent business key (AC7) — full dimension tuple,
+            // NULLS NOT DISTINCT so NULL AgentId/WorkflowDefinitionId/RepoId
+            // dedupe to one row per bucket (same pattern as prompt_overrides /
+            // conventions; PG15+, production PG17).
+            entity.HasIndex(e => new
+                { e.Hour, e.Provider, e.AgentId, e.WorkflowDefinitionId, e.RepoId, e.CostBasis })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("UX_analytics_usage_hourly_dims");
+
+            // No TenantId column — schema is the isolation plane. The filter is
+            // the established no-op; the accessor returns null (nothing to filter).
+            ApplyTenantFilter<AnalyticsUsageHourly>(entity, fixedTenantId, _ => null);
+        });
+
+        modelBuilder.Entity<AnalyticsUsageDaily>(entity =>
+        {
+            entity.ToTable("analytics_usage_daily");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Day).HasColumnType("timestamp with time zone");
+            ConfigureAnalyticsUsageShared(entity, costBasisConverter);
+
+            entity.HasIndex(e => new
+                { e.Day, e.Provider, e.AgentId, e.WorkflowDefinitionId, e.CostBasis })
+                .HasDatabaseName("IX_analytics_usage_daily_breakdown");
+
+            entity.HasIndex(e => new
+                { e.Day, e.Provider, e.AgentId, e.WorkflowDefinitionId, e.RepoId, e.CostBasis })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("UX_analytics_usage_daily_dims");
+
+            ApplyTenantFilter<AnalyticsUsageDaily>(entity, fixedTenantId, _ => null);
+        });
+    }
+
+    /// <summary>
+    /// Story 36-1 — the dimension + measure mapping shared verbatim by
+    /// <c>analytics_usage_hourly</c> and <c>analytics_usage_daily</c>. The
+    /// bucket column (<c>Hour</c>/<c>Day</c>) and the indexes are configured by
+    /// each caller; everything else (dimensions, measures, defaults, CostBasis
+    /// conversion) lives here so the two tables can never drift.
+    /// </summary>
+    private static void ConfigureAnalyticsUsageShared<T>(
+        Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<T> entity,
+        ValueConverter<CostBasis, string> costBasisConverter)
+        where T : class
+    {
+        // Dimensions.
+        entity.Property("Provider").IsRequired().HasMaxLength(100);
+        entity.Property("AgentId").HasMaxLength(200);
+        entity.Property("RepoId").HasMaxLength(400);
+        entity.Property(typeof(CostBasis), "CostBasis")
+            .HasConversion(costBasisConverter)
+            .IsRequired()
+            .HasMaxLength(20);
+
+        // Measures — counters default 0L, costs decimal(20,4) default 0m.
+        entity.Property("TokensIn").HasDefaultValue(0L);
+        entity.Property("TokensOut").HasDefaultValue(0L);
+        entity.Property("WorkflowsStarted").HasDefaultValue(0L);
+        entity.Property("WorkflowsCompleted").HasDefaultValue(0L);
+        entity.Property("WorkflowsFailed").HasDefaultValue(0L);
+        entity.Property("AgentDispatches").HasDefaultValue(0L);
+        entity.Property("CostUsd").HasPrecision(20, 4).HasDefaultValue(0m);
+        entity.Property("PlatformBilledUsd").HasPrecision(20, 4).HasDefaultValue(0m);
+        entity.Property("ComputedAt").HasDefaultValueSql("now()");
     }
 
     /// <summary>

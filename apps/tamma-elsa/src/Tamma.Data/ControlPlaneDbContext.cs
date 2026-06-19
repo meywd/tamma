@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Tamma.Core;
 using Tamma.Core.Entities;
 using Tamma.Core.Enums;
 using Tamma.Data.Entities;
@@ -27,6 +29,332 @@ public class ControlPlaneDbContext : DbContext
     public ControlPlaneDbContext(DbContextOptions<ControlPlaneDbContext> options)
         : base(options)
     {
+    }
+
+    // ── Story 34-1 (AC6) — plan-immutability SaveChanges interceptor ──
+    //
+    // EnforcePlanImmutability scans the ChangeTracker before EVERY save and
+    // throws PLAN.VERSION.IMMUTABLE for any mutation of an active/deprecated
+    // Plan row or its child PlanFeature/PlanEntitlement/PlanPrice rows. The
+    // application-level guard in PlanVersionEditor is no longer the only line
+    // of defence: a raw db.Plans.First(active).MonthlyPriceUsd = 999; SaveChanges
+    // now fails LOUD here. The single controlled active→deprecated flip the
+    // version editor performs is allowed; children of a freshly-Added active
+    // plan (the new version's rows) are allowed.
+
+    // Story 34-1 follow-up — leak-proof immutability-guard suppression.
+    //
+    // The context is POOLED in production (AddPooledDbContextFactory /
+    // AddTenantConnectionPool). EF's pool reset only clears state it knows about
+    // (the ChangeTracker, the connection, IResettableService services) — it does
+    // NOT clear a custom bool field on the derived context. A plain settable
+    // `SuppressPlanImmutabilityGuard = true` left dangling (e.g. by a caller that
+    // forgot a finally, or an exception that skipped the reset) would silently
+    // ride the pooled instance into the NEXT lease and disable the guard for an
+    // unrelated caller. So the suppression is exposed ONLY as a disposable scope:
+    // the caller writes `using var _ = ctx.SuppressPlanImmutabilityGuard();` and
+    // the scope's Dispose ALWAYS restores the prior value — even on exception,
+    // because `using` is a try/finally — so a caller physically cannot leave it
+    // set and it can never ride a pooled instance into the next lease. There is
+    // no public setter at all: the only way to flip the flag is to open (and
+    // therefore, via `using`, automatically close) a scope.
+    private bool _suppressPlanImmutabilityGuard;
+
+    /// <summary>
+    /// Story 34-1 — escape hatch for the trusted <c>PlansSeeder</c> system-
+    /// defaults populate path ONLY. The seeder does insert-missing-only backfill
+    /// of children onto an already-active v1 plan (Story 28-1 shipped the bare
+    /// plan rows; 34-1 backfills the typed children), which the immutability
+    /// interceptor would otherwise (correctly) reject.
+    ///
+    /// <para>Returns a disposable scope that suppresses the guard for its
+    /// lifetime and restores the prior value on <see cref="IDisposable.Dispose"/>
+    /// — guaranteed, even on exception, via <c>using</c>. There is intentionally
+    /// no public setter: a caller physically cannot leave the flag stuck on,
+    /// which keeps the guard leak-proof across pooled-context reuse. No
+    /// user-facing or request-handling code should ever open this scope.</para>
+    /// </summary>
+    public IDisposable SuppressPlanImmutabilityGuard()
+        => new PlanImmutabilityGuardSuppressionScope(this);
+
+    private sealed class PlanImmutabilityGuardSuppressionScope : IDisposable
+    {
+        private readonly ControlPlaneDbContext _ctx;
+        private readonly bool _previous;
+        private bool _disposed;
+
+        public PlanImmutabilityGuardSuppressionScope(ControlPlaneDbContext ctx)
+        {
+            _ctx = ctx;
+            _previous = ctx._suppressPlanImmutabilityGuard;
+            ctx._suppressPlanImmutabilityGuard = true;
+        }
+
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _ctx._suppressPlanImmutabilityGuard = _previous;
+        }
+    }
+
+    /// <summary>
+    /// Story 35-1 follow-up — resolve the
+    /// <c>PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning</c>
+    /// advisory cleanly. Apply this from EVERY <see cref="DbContextOptions{TContext}"/>
+    /// builder seam that constructs a <see cref="ControlPlaneDbContext"/>: the DI
+    /// factory (<c>AddTammaData</c>), the pooled factory (<c>AddTenantConnectionPool</c>),
+    /// and the design-time factory used by <c>ef migrations</c>.
+    ///
+    /// <para><b>What fires it.</b> <c>Tenant</c> and <c>User</c> carry a
+    /// soft-delete query filter (<c>DeletedAt == null</c>). Their REQUIRED
+    /// dependents — <c>BillingCustomer</c> (Story 35-1), plus the pre-existing
+    /// <c>TenantMembership</c>, <c>UserInvite</c>, <c>RefreshToken</c>,
+    /// <c>PasswordResetToken</c> — have a non-nullable FK (so EF marks the nav
+    /// <c>IsRequired()</c>) but NO soft-delete column of their own, so they carry
+    /// no matching filter. EF warns that an <c>Include</c> of the filtered
+    /// principal could yield a null required navigation. That is an ACCEPTED
+    /// pattern here: the dependents are hard-deleted on cascade when the tenant/
+    /// user is HARD-deleted; while a principal is merely SOFT-deleted the
+    /// dependent legitimately still exists and an <c>Include</c> returning null is
+    /// the correct, intended behaviour.</para>
+    ///
+    /// <para><b>Why suppress, and why on the OPTIONS builder (not
+    /// <c>OnModelCreating</c>/<c>TammaModelConfiguration</c>, and NOT
+    /// <c>OnConfiguring</c>).</b> The two model-level alternatives both fail the
+    /// Wave-1 constraints: (1) adding a matching query filter is impossible —
+    /// these dependents have no <c>DeletedAt</c> column; (2) marking the
+    /// navigation <c>.IsRequired(false)</c> would make the FK column nullable, i.e.
+    /// a SCHEMA change + a new migration, which the cascade-preservation
+    /// constraint forbids. So the only constraint-satisfying resolution is to
+    /// ignore this one advisory. <c>ConfigureWarnings</c> is a
+    /// <see cref="DbContextOptionsBuilder"/> API — a <c>ModelBuilder</c> has no
+    /// warning surface, so it CANNOT live in <c>TammaModelConfiguration</c>. It
+    /// also CANNOT live in an <c>OnConfiguring</c> override: this context is
+    /// registered through <c>AddPooledDbContextFactory</c> in production, and EF
+    /// throws <c>"'OnConfiguring' cannot be used to modify DbContextOptions when
+    /// DbContext pooling is enabled"</c>. The options-builder seam is the only
+    /// place that is both pooling-safe AND applies uniformly to all five
+    /// relationships. Schema, cascade behaviour, and query semantics are
+    /// untouched; <c>has-pending-model-changes</c> stays clean.</para>
+    /// </summary>
+    public static void ConfigureControlPlaneWarnings(DbContextOptionsBuilder optionsBuilder)
+    {
+        ArgumentNullException.ThrowIfNull(optionsBuilder);
+        optionsBuilder.ConfigureWarnings(w =>
+            w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.CoreEventId
+                .PossibleIncorrectRequiredNavigationWithQueryFilterInteractionWarning));
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        if (!_suppressPlanImmutabilityGuard)
+        {
+            // Compute the untracked-owning-plan id set ONCE, then resolve its
+            // statuses synchronously and pass both through to the enforcer.
+            var untrackedIds = CollectUntrackedOwningPlanIds();
+            var untrackedStatus = untrackedIds.Count == 0
+                ? new Dictionary<Guid, string>()
+                : Plans.AsNoTracking()
+                    .Where(p => untrackedIds.Contains(p.Id))
+                    .Select(p => new { p.Id, p.Status })
+                    .ToDictionary(x => x.Id, x => x.Status);
+
+            EnforcePlanImmutability(untrackedStatus);
+        }
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override async Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_suppressPlanImmutabilityGuard)
+        {
+            // Compute the untracked-owning-plan id set ONCE here (the async path
+            // previously computed it both in the pre-pass AND again inside
+            // EnforcePlanImmutability). Resolve statuses via the async DB lookup,
+            // then pass the SAME id set + status map into the synchronous enforcer
+            // so it never recomputes or blocks on the DB.
+            var untrackedIds = CollectUntrackedOwningPlanIds();
+            var untrackedStatus = await ResolveUntrackedPlanStatusAsync(
+                untrackedIds, cancellationToken);
+
+            EnforcePlanImmutability(untrackedStatus);
+        }
+        return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    /// <summary>
+    /// Async resolution of the owning-plan statuses for a pre-computed set of
+    /// untracked plan ids — used by <see cref="SaveChangesAsync(bool, CancellationToken)"/>
+    /// so the synchronous <see cref="EnforcePlanImmutability"/> body never blocks
+    /// on the DB. Empty input ⇒ no query.
+    /// </summary>
+    private async Task<Dictionary<Guid, string>> ResolveUntrackedPlanStatusAsync(
+        HashSet<Guid> untrackedIds, CancellationToken ct)
+    {
+        if (untrackedIds.Count == 0) return new Dictionary<Guid, string>();
+
+        var rows = await Plans.AsNoTracking()
+            .Where(p => untrackedIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.Status })
+            .ToListAsync(ct);
+        return rows.ToDictionary(x => x.Id, x => x.Status);
+    }
+
+    /// <summary>
+    /// Owning-plan ids of changed child rows that are NOT represented by a
+    /// tracked <see cref="Plan"/> entry — these need a DB status lookup.
+    /// </summary>
+    private HashSet<Guid> CollectUntrackedOwningPlanIds()
+    {
+        var trackedPlanIds = new HashSet<Guid>(
+            ChangeTracker.Entries<Plan>().Select(e => e.Entity.Id));
+
+        var needed = new HashSet<Guid>();
+        foreach (var planId in EnumerateChangedChildOwningPlanIds())
+        {
+            if (!trackedPlanIds.Contains(planId)) needed.Add(planId);
+        }
+        return needed;
+    }
+
+    private IEnumerable<Guid> EnumerateChangedChildOwningPlanIds()
+    {
+        foreach (var e in ChangeTracker.Entries<PlanFeature>())
+            if (e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                yield return e.Entity.PlanId;
+        foreach (var e in ChangeTracker.Entries<PlanEntitlement>())
+            if (e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                yield return e.Entity.PlanId;
+        foreach (var e in ChangeTracker.Entries<PlanPrice>())
+            if (e.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                yield return e.Entity.PlanId;
+    }
+
+    /// <summary>
+    /// Story 34-1 AC6 — throws <c>PLAN.VERSION.IMMUTABLE</c> (High) when the
+    /// pending change set mutates an immutable plan version or its children.
+    /// </summary>
+    /// <param name="untrackedStatus">
+    /// DB status of the owning plans of changed child rows that are NOT
+    /// represented by a tracked <see cref="Plan"/> entry. The caller computes the
+    /// id set ONCE (<see cref="CollectUntrackedOwningPlanIds"/>) and resolves the
+    /// statuses (synchronously for <see cref="SaveChanges"/>, via an async DB
+    /// lookup for <see cref="SaveChangesAsync(bool, CancellationToken)"/>).
+    /// </param>
+    private void EnforcePlanImmutability(
+        IReadOnlyDictionary<Guid, string> untrackedStatus)
+    {
+        // 1. Direct Plan mutations.
+        foreach (var entry in ChangeTracker.Entries<Plan>())
+        {
+            if (entry.State != EntityState.Modified) continue;
+
+            var originalStatus = entry.OriginalValues.GetValue<string>(nameof(Plan.Status));
+            if (originalStatus is not ("active" or "deprecated")) continue;
+
+            // The ONLY permitted change to an immutable row is the controlled
+            // active→deprecated flip the version editor performs: Status flips
+            // active→deprecated and nothing else changes except UpdatedAt.
+            if (IsControlledDeprecationFlip(entry, originalStatus))
+            {
+                continue;
+            }
+
+            ThrowImmutable(entry.Entity.Slug, entry.Entity.Version,
+                originalStatus, entry.Entity.Id, "plan");
+        }
+
+        // 2. Child mutations (insert / update / delete). The untracked-owning-plan
+        // ids + their DB statuses were computed ONCE by the caller and passed in
+        // as untrackedStatus (the async path used to recompute the id set here as
+        // well — see Fix #4).
+        var trackedPlanStatus = ChangeTracker.Entries<Plan>()
+            .ToDictionary(e => e.Entity.Id, e => (e.State, e.Entity.Status));
+
+        EnforceChildren<PlanFeature>(e => e.PlanId, trackedPlanStatus, untrackedStatus);
+        EnforceChildren<PlanEntitlement>(e => e.PlanId, trackedPlanStatus, untrackedStatus);
+        EnforceChildren<PlanPrice>(e => e.PlanId, trackedPlanStatus, untrackedStatus);
+    }
+
+    private void EnforceChildren<TChild>(
+        Func<TChild, Guid> planIdSelector,
+        IReadOnlyDictionary<Guid, (EntityState State, string Status)> trackedPlanStatus,
+        IReadOnlyDictionary<Guid, string> untrackedStatus)
+        where TChild : class
+    {
+        foreach (var entry in ChangeTracker.Entries<TChild>())
+        {
+            if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted))
+                continue;
+
+            var planId = planIdSelector(entry.Entity);
+
+            // The new version's children attach to a freshly-Added active plan
+            // — those are part of creating a new immutable version, so allow.
+            if (trackedPlanStatus.TryGetValue(planId, out var tracked))
+            {
+                if (tracked.State == EntityState.Added) continue;
+                if (tracked.Status is "active" or "deprecated")
+                {
+                    ThrowImmutable("(child)", null, tracked.Status, planId, typeof(TChild).Name);
+                }
+                continue;
+            }
+
+            // Owning plan not tracked — use the DB status. A child of an
+            // already-persisted active/deprecated plan is immutable.
+            if (untrackedStatus.TryGetValue(planId, out var dbStatus)
+                && dbStatus is "active" or "deprecated")
+            {
+                ThrowImmutable("(child)", null, dbStatus, planId, typeof(TChild).Name);
+            }
+        }
+    }
+
+    /// <summary>
+    /// True iff this Modified Plan entry is the controlled active→deprecated
+    /// flip the version editor performs: Status changes from <c>active</c> to
+    /// <c>deprecated</c> and no other property changes except <c>UpdatedAt</c>.
+    /// </summary>
+    private static bool IsControlledDeprecationFlip(
+        EntityEntry<Plan> entry, string originalStatus)
+    {
+        if (originalStatus != "active") return false;
+        if (entry.Entity.Status != "deprecated") return false;
+
+        foreach (var prop in entry.Properties)
+        {
+            if (!prop.IsModified) continue;
+            var name = prop.Metadata.Name;
+            if (name is nameof(Plan.Status) or nameof(Plan.UpdatedAt)) continue;
+            // Any other modified column means this is NOT a pure flip.
+            return false;
+        }
+        return true;
+    }
+
+    private static void ThrowImmutable(
+        string slug, int? version, string status, Guid planId, string entityKind)
+    {
+        var versionLabel = version is null ? string.Empty : $" v{version}";
+        throw new TammaError(
+            "PLAN.VERSION.IMMUTABLE",
+            $"Plan '{slug}'{versionLabel} is {status} and immutable — its {entityKind} rows "
+            + "cannot be inserted, updated, or deleted in place. Create a new version "
+            + "via PlanVersionEditor instead.",
+            new Dictionary<string, object?>
+            {
+                ["slug"] = slug,
+                ["version"] = version,
+                ["status"] = status,
+                ["planId"] = planId.ToString("D"),
+                ["entityKind"] = entityKind,
+            },
+            retryable: false,
+            severity: TammaErrorSeverity.High);
     }
 
     // ── Control-plane entities (Doc 01 §1.2 — exactly 14 tables) ──
@@ -74,6 +402,24 @@ public class ControlPlaneDbContext : DbContext
     // and system-scope mail that must flow before or after a tenant DB
     // exists. The Plans table owns the subscription-plan catalogue.
     public DbSet<Plan> Plans => Set<Plan>();
+
+    /// <summary>
+    /// Story 34-1 — typed feature flags per plan version (replaces the opaque
+    /// <c>Plan.Quotas</c> JSON for capability flags). CP-resident.
+    /// </summary>
+    public DbSet<PlanFeature> PlanFeatures => Set<PlanFeature>();
+
+    /// <summary>
+    /// Story 34-1 — typed quota entitlements per plan version. CP-resident.
+    /// </summary>
+    public DbSet<PlanEntitlement> PlanEntitlements => Set<PlanEntitlement>();
+
+    /// <summary>
+    /// Story 34-1 — recurring + per-seat + metered pricing per plan version,
+    /// split by BYOK vs platform-provided pricing mode. CP-resident.
+    /// </summary>
+    public DbSet<PlanPrice> PlanPrices => Set<PlanPrice>();
+
     public DbSet<PlatformEvent> PlatformEvents => Set<PlatformEvent>();
     public DbSet<PlatformQueuedTask> PlatformQueuedTasks => Set<PlatformQueuedTask>();
     public DbSet<PlatformEmailOutboxMessage> PlatformEmailOutbox => Set<PlatformEmailOutboxMessage>();
@@ -167,6 +513,58 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<AlertEvaluatorCursor> AlertEvaluatorCursors =>
         Set<AlertEvaluatorCursor>();
 
+    // ── Story 32-1 — first-class agent entities (Epic 32 foundation) ──
+    //
+    // Agent definitions (public/system + private/tenant-or-user-owned) are
+    // CP-resident: visibility/identity is a control-plane concern and public
+    // agents are shared cross-tenant. ALL performance/action data stays
+    // tenant-scoped in later Epic 32 stories — these tables are definition-only.
+
+    /// <summary>
+    /// Story 32-1 — first-class agent identities (replaces the anonymous
+    /// role-keyed <see cref="AgentConfig"/> blob as the canonical Epic 32
+    /// join key). CP-resident; see <see cref="Entities.Agent"/>.
+    /// </summary>
+    public DbSet<Agent> Agents => Set<Agent>();
+
+    /// <summary>
+    /// Story 32-1 — immutable, monotonically-versioned saved-config snapshots
+    /// per agent. Insert-only; see <see cref="Entities.AgentVersion"/>.
+    /// </summary>
+    public DbSet<AgentVersion> AgentVersions => Set<AgentVersion>();
+
+    // ── Story 35-1 — billing foundation (Epic 35) ──
+    //
+    // The tenant→Stripe customer mapping + the slug→Stripe-ids catalog are
+    // CP-resident: billing is a cross-cutting platform concern, the catalog is
+    // platform-global, and the customer binding is keyed by tenant (not
+    // tenant-resident business data). SaaS only — single-user never writes here.
+
+    /// <summary>
+    /// Story 35-1 — one row per tenant binding it to its Stripe customer.
+    /// Unique <c>TenantId</c>; see <see cref="Entities.BillingCustomer"/>.
+    /// </summary>
+    public DbSet<BillingCustomer> BillingCustomers => Set<BillingCustomer>();
+
+    /// <summary>
+    /// Story 35-1 — slug→Stripe Product/Price/Meter id catalog. Unique
+    /// <c>PlanSlug</c>; platform-global. See <see cref="Entities.BillingPlanPrice"/>.
+    /// </summary>
+    public DbSet<BillingPlanPrice> BillingPlanPrices => Set<BillingPlanPrice>();
+
+    /// <summary>
+    /// Story 37-1 — platform-scope curated audit trail. Tenant-scope rows live
+    /// in the per-tenant schema's <c>audit_records</c>; these are the
+    /// platform/lifecycle rows (impersonation, tenant provision/move, etc.).
+    /// </summary>
+    public DbSet<AuditRecord> AuditRecords => Set<AuditRecord>();
+
+    /// <summary>
+    /// Story 37-1 — the audit projector's resume cursor (mirrors
+    /// <see cref="AlertEvaluatorCursor"/>). CP-resident; one row per projector.
+    /// </summary>
+    public DbSet<AuditProjectorCursor> AuditProjectorCursors => Set<AuditProjectorCursor>();
+
     // Story 28-1 PR D: the 11 + 4 mentorship tenant-resident entities
     // (AgentConfig, PromptOverride, ProviderHealth, ProviderDiagnostic,
     // SanitizationRule, WorkflowDefinition, WorkflowInstance, DomainEvent,
@@ -239,6 +637,23 @@ public class ControlPlaneDbContext : DbContext
         ConfigureTenantPlatformInstallations(modelBuilder);
         ConfigurePlatformWebhookDeliveries(modelBuilder);
         ConfigureTenantDatabases(modelBuilder);
+
+        // Story 32-1 — first-class agent entities. CP-resident, configured in
+        // the shared single source so the model graph + migration stay aligned.
+        TammaModelConfiguration.ConfigureAgentEntities(modelBuilder);
+
+        // Story 35-1 — billing customer mapping + Stripe catalog. CP-resident,
+        // configured in the shared single source so the model graph + migration
+        // stay aligned (same convention as the agent entities above).
+        TammaModelConfiguration.ConfigureBillingEntities(modelBuilder);
+
+        // Story 37-1 — platform-scope curated audit trail + the projector cursor.
+        // audit_records carries the SAME shape as the tenant-schema table; the
+        // CP build hosts platform-scope rows (impersonation, tenant lifecycle).
+        // The cursor is CP-resident (mirrors alert_evaluator_cursor) — the single
+        // projector resumes both streams from one row.
+        TammaModelConfiguration.ConfigureAuditEntities(modelBuilder, fixedTenantId: null);
+        TammaModelConfiguration.ConfigureAuditProjectorCursor(modelBuilder);
     }
 
     /// <summary>

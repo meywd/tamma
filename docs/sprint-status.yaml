@@ -416,7 +416,7 @@ development_status:
 
 
   epic-32: contexted   # NEW Agents — entities, managed execution, benchmarking & learning (added 2026-06-17; all stories drafted)
-  32-1-agent-entity-model-and-versioned-saved-config: drafted # Agent Entity Model & Versioned Saved Config (public/private) [P0]
+  32-1-agent-entity-model-and-versioned-saved-config: done # Agent Entity Model & Versioned Saved Config (public/private) [P0]
   32-2-agent-registry-resolution-and-rbac-api: drafted # Agent Registry, Resolution & RBAC API [P0]
   32-3-per-tenant-provider-credential-resolution: drafted # Per-Tenant Provider Credential Resolution (BYOK → platform) [P0]
   32-4-saas-provider-auth-gating-api-key-only: drafted # SaaS Provider Auth Gating — API-key only (CLI/token providers single-user only) [P0]
@@ -433,7 +433,7 @@ development_status:
   epic-32-retrospective: optional
 
   epic-34: contexted   # NEW Pricing, Plans & Entitlements (added 2026-06-17; all stories drafted)
-  34-1-plan-and-price-book-catalog-data-model: drafted # Plan & Price-Book Catalog Data Model [P0]
+  34-1-plan-and-price-book-catalog-data-model: done # Plan & Price-Book Catalog Data Model [P0]
   34-2-plan-catalog-admin-api-and-custom-enterprise-plans: drafted # Plan Catalog Admin API & Custom Enterprise Plans [P0]
   34-3-byok-vs-platform-provided-pricing-mode: drafted # BYOK vs Platform-Provided Pricing Mode (per-provider, secret-cabinet wired) [P0]
   34-4-per-tenant-plan-assignment-and-lifecycle: drafted # Per-Tenant Plan Assignment & Lifecycle [P0]
@@ -446,7 +446,7 @@ development_status:
   epic-34-retrospective: optional
 
   epic-35: contexted   # NEW Billing & Payments (C#) — supersedes Epic 20 (added 2026-06-17; all stories drafted)
-  35-1-stripe-integration-foundation-billing-plan-catalog-and-custo: drafted # Stripe Integration Foundation, Billing Plan Catalog & Customer Mapping (C#) [P0]
+  35-1-stripe-integration-foundation-billing-plan-catalog-and-custo: done # Stripe Integration Foundation, Billing Plan Catalog & Customer Mapping (C#) [P0]
   35-2-byok-vs-platform-provided-billing-mode-and-per-tenant-provid: drafted # BYOK vs Platform-Provided Billing Mode & Per-Tenant Provider Key Cabinet Integration [P0]
   35-3-byok-aware-usage-metering-and-stripe-meter-event-reporting: drafted # BYOK-Aware Usage Metering & Stripe Meter Event Reporting [P0]
   35-4-subscription-lifecycle-create-upgrade-downgrade-cancel-trial: drafted # Subscription Lifecycle — Create, Upgrade/Downgrade, Cancel, Trial & Proration [P0]
@@ -461,7 +461,7 @@ development_status:
   epic-35-retrospective: optional
 
   epic-36: contexted   # NEW Analytics & Reporting Platform (added 2026-06-17; all stories drafted)
-  36-1-dimensional-analytics-projection-schema-and-store: drafted # Dimensional Analytics Projection Schema & Store [P0]
+  36-1-dimensional-analytics-projection-schema-and-store: done # Dimensional Analytics Projection Schema & Store [P0]
   36-2-dcb-to-analytics-projection-pipeline: drafted  # DCB-to-Analytics Projection Pipeline (Dimensional Rollup) [P0]
   36-3-tenant-usage-analytics-api: drafted            # Tenant Usage Analytics API [P0]
   36-4-cost-and-spend-analytics-api: drafted          # Cost & Spend Analytics API (BYOK vs Platform) [P0]
@@ -475,7 +475,7 @@ development_status:
   epic-36-retrospective: optional
 
   epic-37: contexted   # NEW Audit, Compliance & Data Governance (added 2026-06-17; all stories drafted)
-  37-1-sensitive-action-audit-taxonomy-and-curated-audit-record-pro: drafted # Sensitive-Action Audit Taxonomy & Curated Audit-Record Projection [P0]
+  37-1-sensitive-action-audit-taxonomy-and-curated-audit-record-pro: done # Sensitive-Action Audit Taxonomy & Curated Audit-Record Projection [P0]
   37-2-tamper-evident-hash-chain-over-audit-records: drafted # Tamper-Evident Hash-Chain over Audit Records [P0]
   37-3-audit-query-search-and-filter-api: drafted     # Audit Query, Search & Filter API [P0]
   37-4-signed-audit-export-with-integrity-manifest: drafted # Signed Audit Export (JSON/CSV) with Integrity Manifest [P1]

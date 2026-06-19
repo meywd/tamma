@@ -348,6 +348,190 @@ namespace Tamma.Data.Migrations.Tenant
                     b.ToTable("agent_configs", (string)null);
                 });
 
+            modelBuilder.Entity("Tamma.Data.Entities.AnalyticsUsageDaily", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<long>("AgentDispatches")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<string>("AgentId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("ComputedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("CostBasis")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<decimal>("CostUsd")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(20, 4)
+                        .HasColumnType("numeric(20,4)")
+                        .HasDefaultValue(0m);
+
+                    b.Property<DateTime>("Day")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("PlatformBilledUsd")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(20, 4)
+                        .HasColumnType("numeric(20,4)")
+                        .HasDefaultValue(0m);
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("RepoId")
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
+                    b.Property<long>("TokensIn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<long>("TokensOut")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<Guid?>("WorkflowDefinitionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("WorkflowsCompleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<long>("WorkflowsFailed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<long>("WorkflowsStarted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Day", "Provider", "AgentId", "WorkflowDefinitionId", "CostBasis")
+                        .HasDatabaseName("IX_analytics_usage_daily_breakdown");
+
+                    b.HasIndex("Day", "Provider", "AgentId", "WorkflowDefinitionId", "RepoId", "CostBasis")
+                        .IsUnique()
+                        .HasDatabaseName("UX_analytics_usage_daily_dims");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("Day", "Provider", "AgentId", "WorkflowDefinitionId", "RepoId", "CostBasis"), false);
+
+                    b.ToTable("analytics_usage_daily", (string)null);
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.AnalyticsUsageHourly", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<long>("AgentDispatches")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<string>("AgentId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime>("ComputedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("CostBasis")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<decimal>("CostUsd")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(20, 4)
+                        .HasColumnType("numeric(20,4)")
+                        .HasDefaultValue(0m);
+
+                    b.Property<DateTime>("Hour")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal>("PlatformBilledUsd")
+                        .ValueGeneratedOnAdd()
+                        .HasPrecision(20, 4)
+                        .HasColumnType("numeric(20,4)")
+                        .HasDefaultValue(0m);
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("RepoId")
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)");
+
+                    b.Property<long>("TokensIn")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<long>("TokensOut")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<Guid?>("WorkflowDefinitionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("WorkflowsCompleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<long>("WorkflowsFailed")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.Property<long>("WorkflowsStarted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(0L);
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Hour", "Provider", "AgentId", "WorkflowDefinitionId", "CostBasis")
+                        .HasDatabaseName("IX_analytics_usage_hourly_breakdown");
+
+                    b.HasIndex("Hour", "Provider", "AgentId", "WorkflowDefinitionId", "RepoId", "CostBasis")
+                        .IsUnique()
+                        .HasDatabaseName("UX_analytics_usage_hourly_dims");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("Hour", "Provider", "AgentId", "WorkflowDefinitionId", "RepoId", "CostBasis"), false);
+
+                    b.ToTable("analytics_usage_hourly", (string)null);
+                });
+
             modelBuilder.Entity("Tamma.Data.Entities.ApiKey", b =>
                 {
                     b.Property<Guid>("Id")
@@ -414,6 +598,113 @@ namespace Tamma.Data.Migrations.Tenant
                     b.ToTable("api_keys", null, t =>
                         {
                             t.HasCheckConstraint("ck_api_keys_tenant_scope", "\"Scope\" = 'tenant'");
+                        });
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.AuditRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("ActionCode")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("ActorEmailSnapshot")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<Guid?>("ActorUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("success");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValueSql("'{}'::jsonb");
+
+                    b.Property<string>("PrevRecordHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("RecordHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Severity")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<Guid>("SourceEventId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("SourceSequenceNumber")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("TargetId")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)");
+
+                    b.Property<string>("TargetType")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("UserAgent")
+                        .HasMaxLength(512)
+                        .HasColumnType("character varying(512)");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceEventId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_audit_records_SourceEventId");
+
+                    b.HasIndex("SourceSequenceNumber")
+                        .HasDatabaseName("IX_audit_records_SourceSequenceNumber");
+
+                    b.HasIndex("Category", "OccurredAt")
+                        .HasDatabaseName("IX_audit_records_Category_OccurredAt");
+
+                    b.HasIndex("TenantId", "OccurredAt")
+                        .HasDatabaseName("IX_audit_records_TenantId_OccurredAt");
+
+                    b.HasIndex("UserId", "OccurredAt")
+                        .HasDatabaseName("IX_audit_records_UserId_OccurredAt");
+
+                    b.ToTable("audit_records", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_audit_records_outcome", "\"Outcome\" IN ('success','failure','denied')");
+
+                            t.HasCheckConstraint("ck_audit_records_principal_xor", "NOT (\"UserId\" IS NOT NULL AND \"TenantId\" IS NOT NULL)");
                         });
                 });
 

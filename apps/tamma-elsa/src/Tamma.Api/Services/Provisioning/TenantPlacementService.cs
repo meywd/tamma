@@ -56,9 +56,15 @@ public sealed class TenantPlacementService : ITenantPlacementService
 
         // Plan lookup is tenant→system→error: a tenant whose plan slug has
         // no plans row is a configuration fault — never default silently.
-        var plan = await db.Plans.FirstOrDefaultAsync(p => p.Slug == tenant.Plan, ct)
+        // Story 34-1 made a slug a multi-version chain (active + deprecated
+        // rows), so the lookup MUST pin Status == "active" — otherwise it can
+        // return a deprecated row with a stale PlacementPolicy in undefined
+        // order. The partial unique index UX_plans_OneActivePerSlug guarantees
+        // exactly one active row per slug.
+        var plan = await db.Plans
+                .FirstOrDefaultAsync(p => p.Slug == tenant.Plan && p.Status == "active", ct)
             ?? throw new InvalidOperationException(
-                $"No plans row for slug '{tenant.Plan}' (tenant '{tenantId}') — placement "
+                $"No active plans row for slug '{tenant.Plan}' (tenant '{tenantId}') — placement "
                 + "requires plans.PlacementPolicy; seed or repair the plans table.");
 
         var slug = plan.Slug;

@@ -41,6 +41,14 @@ public class OrgEndpointHandlerTests
     private InMemoryEmailService _emailInbox = null!;
     private DeleteConfirmationService _confirmation = null!;
     private ITenantProvisioningService _provisioning = null!;
+    // Story 35-1 — the tenant-create hook deps. The fixture runs single-user
+    // (no Tamma:Mode/shared-secret), so billing is the NullBillingProvider no-op;
+    // these are wired so the (unchanged) tenant-create behaviour still holds.
+    private Tamma.Api.Services.Billing.IBillingProvider _billing = null!;
+    private IPlatformQueuedTaskRepository _platformTasks = null!;
+#pragma warning disable NUnit1032 // Owned by the DI scope (_scope), disposed there.
+    private ILoggerFactory _loggerFactory = null!;
+#pragma warning restore NUnit1032
 
     [SetUp]
     public async Task Setup()
@@ -55,6 +63,9 @@ public class OrgEndpointHandlerTests
         _events = _scope.ServiceProvider.GetRequiredService<IEventRepository>();
         _publisher = _scope.ServiceProvider.GetRequiredService<Tamma.Data.Abstractions.IPlatformEventPublisher>();
         _provisioning = _scope.ServiceProvider.GetRequiredService<ITenantProvisioningService>();
+        _billing = _scope.ServiceProvider.GetRequiredService<Tamma.Api.Services.Billing.IBillingProvider>();
+        _platformTasks = _scope.ServiceProvider.GetRequiredService<IPlatformQueuedTaskRepository>();
+        _loggerFactory = _scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
         _emailInbox = new InMemoryEmailService();
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -104,7 +115,8 @@ public class OrgEndpointHandlerTests
         var user = await CreateUser();
         var result = await OrgEndpoints.CreateOrg(
             new CreateOrgRequest("Acme", "admin"),
-            _tenantRepo, _membershipRepo, _userRepo, _events, _provisioning, Principal(user.Id));
+            _tenantRepo, _membershipRepo, _userRepo, _events, _provisioning,
+            _billing, _platformTasks, _loggerFactory, Principal(user.Id));
 
         // BadRequest result type
         result.Should().BeAssignableTo<IResult>();
@@ -118,7 +130,8 @@ public class OrgEndpointHandlerTests
         var user = await CreateUser();
         var result = await OrgEndpoints.CreateOrg(
             new CreateOrgRequest("A", "acme-corp"),
-            _tenantRepo, _membershipRepo, _userRepo, _events, _provisioning, Principal(user.Id));
+            _tenantRepo, _membershipRepo, _userRepo, _events, _provisioning,
+            _billing, _platformTasks, _loggerFactory, Principal(user.Id));
         var status = await ExecuteAndGetStatus(result);
         status.Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -129,7 +142,8 @@ public class OrgEndpointHandlerTests
         var user = await CreateUser();
         var result = await OrgEndpoints.CreateOrg(
             new CreateOrgRequest("Acme", "my.org"),  // '.' never valid in slug
-            _tenantRepo, _membershipRepo, _userRepo, _events, _provisioning, Principal(user.Id));
+            _tenantRepo, _membershipRepo, _userRepo, _events, _provisioning,
+            _billing, _platformTasks, _loggerFactory, Principal(user.Id));
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status400BadRequest);
     }
 
@@ -141,7 +155,8 @@ public class OrgEndpointHandlerTests
 
         var result = await OrgEndpoints.CreateOrg(
             new CreateOrgRequest("Acme Two", "acme-corp"),
-            _tenantRepo, _membershipRepo, _userRepo, _events, _provisioning, Principal(user.Id));
+            _tenantRepo, _membershipRepo, _userRepo, _events, _provisioning,
+            _billing, _platformTasks, _loggerFactory, Principal(user.Id));
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status409Conflict);
     }
 
@@ -151,7 +166,8 @@ public class OrgEndpointHandlerTests
         var user = await CreateUser();
         var result = await OrgEndpoints.CreateOrg(
             new CreateOrgRequest("Acme Inc.", "acme-corp"),
-            _tenantRepo, _membershipRepo, _userRepo, _events, _provisioning, Principal(user.Id));
+            _tenantRepo, _membershipRepo, _userRepo, _events, _provisioning,
+            _billing, _platformTasks, _loggerFactory, Principal(user.Id));
         (await ExecuteAndGetStatus(result)).Should().Be(StatusCodes.Status201Created);
 
         var refreshed = await _userRepo.GetByIdAsync(user.Id);

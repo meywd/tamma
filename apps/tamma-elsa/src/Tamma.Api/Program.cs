@@ -809,6 +809,17 @@ builder.Services.AddTammaAlerts();
 // DCB event stream and emits AlertPayloads through IAlertSink.
 builder.Services.AddTammaAlertRuleEngine();
 
+// Story 37-1 — curated audit-record projection: catalog-driven projector,
+// insert-if-absent repository, lag metric, and the background host. READS the
+// DCB stream and materializes audit_records (never writes raw events). The
+// background loop is opt-in (AuditProjectorOptions.RunOnStartup defaults false).
+builder.Services.AddTammaAuditProjection();
+
+// Story 34-1 — plan price-book catalog: read-only IPlanCatalogService +
+// the PlanVersionEditor (immutable, versioned plan management). CP-resident;
+// platform-owned in both modes.
+builder.Services.AddPlanCatalog();
+
 // Wave C.4 §4 — per-process health monitor for TammaApiClient.
 // Singleton so the rolling 5-min failure window is shared across every
 // call site. Fires PLATFORM.API.UNHEALTHY via IAlertEventEmitter when
@@ -891,6 +902,13 @@ builder.Services.AddSingleton<
 // each capability owner (e.g. webhook routing in Story 28-7); the
 // worker itself is hosted-service singleton + registry singleton.
 builder.Services.AddPlatformTaskWorker(builder.Configuration);
+
+// Story 35-1 — Epic 35 billing foundation. Mode-aware: StripeBillingProvider
+// in SaaS, NullBillingProvider in single-user. Registers the catalog reader,
+// the cabinet-resolving Stripe client factory, BillingOptions, and the
+// billing.customer.create retry handler (IPlatformTaskHandler). The Stripe key
+// resolves through the Epic 29 cabinet — never raw env in production (AC5).
+builder.Services.AddTammaBilling(builder.Configuration);
 
 // Unified-tenancy Phase 4 — `tenant.move` platform-task handler. Drives
 // ITenantMoveService.MoveAsync for tasks enqueued by
@@ -1036,6 +1054,16 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("platforms:manage"));
         });
+        // Story 32-1 — first-class agent entity writes (create/publish/archive).
+        // Mirrors PromptManage/ConventionManage: tenant_owner OR tenant_admin
+        // reach so member-role SaaS callers hit 403 at the policy. Public-agent
+        // writes are additionally gated by the platform-admin claim inside the
+        // handler (CreateAgent / CanWriteAgent).
+        options.AddPolicy("AgentManage", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("agents:manage"));
+        });
         options.AddPolicy("WorkflowsView", p =>
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
@@ -1112,7 +1140,7 @@ else if (builder.Environment.IsDevelopment())
             .Build();
         // Register all named policies with permissive default
         foreach (var name in new[] { "AdminAccess", "OwnerAccess", "PlatformOwnerAccess", "MemberAccess", "SettingsView",
-            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
+            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
             "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny" })
         {
             options.AddPolicy(name, p => p.AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement()));
@@ -1145,6 +1173,16 @@ if (Tamma.Api.Services.Secrets.Stopgap.MigrateSecretsCommand.ShouldRun(args))
 {
     var exitCode = await Tamma.Api.Services.Secrets.Stopgap
         .MigrateSecretsCommand.RunAsync(app.Services);
+    return exitCode;
+}
+
+// Story 35-1 — `dotnet run --project Tamma.Api -- seed-billing` idempotently
+// syncs the Stripe Product/Price/Meter catalog into billing_plan_prices and
+// exits. Single-user prints "billing is SaaS-only" and exits 0.
+if (Tamma.Api.Services.Billing.SeedBillingCommand.ShouldRun(args))
+{
+    var exitCode = await Tamma.Api.Services.Billing
+        .SeedBillingCommand.RunAsync(app.Services);
     return exitCode;
 }
 
@@ -1348,6 +1386,20 @@ admin.MapGet("/analytics/summary", AdminAnalyticsEndpoints.GetSummary)
 admin.MapGet("/analytics/tenants", AdminAnalyticsEndpoints.GetTopTenants)
     .RequireAuthorization("PlatformOwnerAccess");
 admin.MapGet("/analytics/events", AdminAnalyticsEndpoints.GetEventHistogram)
+    .RequireAuthorization("PlatformOwnerAccess");
+
+// Story 34-1 — read-only plan price-book endpoints. PlatformOwnerAccess: the
+// price book is platform-GLOBAL (incl. BYOK-vs-platform pricing) in both modes
+// with no per-tenant override layer, so it is platform-scoped admin work — like
+// the adjacent /analytics routes above. OwnerAccess would let every
+// personal-tenant owner read the whole platform price book (Finding C1). The
+// write (create/deprecate version) endpoints are Story 34-2 — this story ships
+// only the three reads + the tested PlanVersionEditor.
+admin.MapGet("/plans", Tamma.Api.Endpoints.Admin.PlanCatalogEndpoints.ListActive)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapGet("/plans/{slug}", Tamma.Api.Endpoints.Admin.PlanCatalogEndpoints.GetActiveBySlug)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapGet("/plans/{slug}/versions", Tamma.Api.Endpoints.Admin.PlanCatalogEndpoints.GetVersions)
     .RequireAuthorization("PlatformOwnerAccess");
 
 // Story 28-11 — platform-admin tenant-status UX. List + detail surface the
@@ -1687,6 +1739,24 @@ agents.MapPost("/config/validate", AgentEndpoints.ValidateConfig);
 agents.MapGet("/{role}/resolve", AgentEndpoints.ResolveAgent);
 agents.MapPost("/resolve-for-phase", AgentEndpoints.ResolveForPhase);
 
+// ── Story 32-1 — first-class agent entities (/api/v1/agents) ──
+// Reads inherit the group's SettingsView gate; writes use AgentManage
+// (tenant_owner/tenant_admin → member 403). Public-agent writes are
+// additionally gated by the platform-admin claim inside the handlers. The
+// legacy GET/PUT /config endpoints above are untouched (cutover is later in
+// the epic). :guid constraints keep the {id} routes from colliding with the
+// {role}/resolve route.
+agents.MapGet("/", AgentEndpoints.ListAgents);
+agents.MapPost("/", AgentEndpoints.CreateAgent)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agents.MapGet("/{id:guid}", AgentEndpoints.GetAgent);
+agents.MapGet("/{id:guid}/versions", AgentEndpoints.ListVersions);
+agents.MapGet("/{id:guid}/versions/{version:int}", AgentEndpoints.GetVersion);
+agents.MapPost("/{id:guid}/versions", AgentEndpoints.PublishVersion)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agents.MapPost("/{id:guid}/archive", AgentEndpoints.ArchiveAgent)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+
 // ── Prompts ──
 // CLAUDE.md "Prompt Store Architecture > API" defines /defaults as the canonical
 // read-only system-default URL. Both /system (legacy TS naming) and /defaults
@@ -1990,6 +2060,9 @@ using (var scope = app.Services.CreateScope())
             dbContext.Database.ExecuteSqlRaw(@"
                 DROP TABLE IF EXISTS
                     admin_impersonations,
+                    agents, agent_versions,
+                    audit_records, audit_projector_cursor,
+                    billing_customers, billing_plan_prices,
                     alert_delivery_attempts, alert_channels, alerts,
                     alert_evaluator_cursor, alert_rules,
                     api_keys, agent_configs, budget_configs, domain_events,
@@ -1999,7 +2072,8 @@ using (var scope = app.Services.CreateScope())
                     platform_webhook_deliveries,
                     junior_developers, kek_rotations,
                     mentorship_events, mentorship_sessions,
-                    password_reset_tokens, plans,
+                    password_reset_tokens,
+                    plan_features, plan_entitlements, plan_prices, plans,
                     platform_analytics_hourly,
                     platform_api_key_index,
                     platform_bootstrap,
@@ -2028,6 +2102,11 @@ using (var scope = app.Services.CreateScope())
         // doc contract says "invoked once at API startup after migrations
         // apply" — this is that call site.
         await Tamma.Data.Seeders.PlansSeeder.SeedAsync(dbContext);
+
+        // Story 32-1 — public/system agent definitions (one per role with the
+        // tamma-<role> handle + Version=1). Insert-missing-only; no-op on
+        // re-run. CP-resident; coexists with the Elsa-store AgentSeeder.
+        await Tamma.Data.Seeders.AgentEntitySeeder.SeedAsync(dbContext);
 
         // tenant_databases: register the central DB as pool member #1
         // (unified-tenancy Phase 2) so single-user/dev and SaaS share one

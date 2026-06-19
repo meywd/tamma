@@ -358,6 +358,57 @@ public class TenantMoveServiceTests
     }
 
     [Test]
+    public async Task Move_MultiVersionSlug_ResolvesActiveVersionsPlacementPolicy()
+    {
+        // Story 34-1 regression — tier-eligibility for a move must key off the
+        // ACTIVE plan version, not a deprecated one picked in undefined order.
+        // Setup: deprecate the seeded free v1 (stale PlacementPolicy='shared')
+        // and add an active free v2 with PlacementPolicy='dedicated'; make the
+        // target row dedicated-eligible. If the lookup resolved the deprecated
+        // v1 ('shared') the move would bounce off the eligibility check against
+        // the dedicated target; resolving the active v2 ('dedicated') lets it
+        // proceed. A completed move proves v2 was used.
+        var tenantId = await SeedAsync();
+
+        await using (var cp = await _factory.CreateDbContextAsync())
+        {
+            // Flip seeded free v1 → deprecated (the controlled flip the
+            // immutability interceptor allows). The seeded free plan already
+            // carries the STALE policy ('shared'), so the flip is Status-only.
+            var v1 = await cp.Plans.FirstAsync(p => p.Slug == "free" && p.Status == "active");
+            v1.PlacementPolicy.Should().Be("shared", "seeded free plan is the stale 'shared' policy");
+            v1.Status = "deprecated";
+            v1.UpdatedAt = DateTime.UtcNow;
+
+            // Add an active v2 carrying the LIVE policy.
+            cp.Plans.Add(new Plan
+            {
+                Id = Guid.NewGuid(), Slug = "free", DisplayName = "Free v2",
+                Version = v1.Version + 1, Status = "active", BillingInterval = "monthly",
+                MonthlyPriceUsd = 0m, PlacementPolicy = "dedicated",
+                SupersedesPlanId = v1.Id,
+                CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+            });
+
+            // Make the target a dedicated, empty, dedicated-eligible row.
+            var target = await cp.TenantDatabases.SingleAsync(d => d.Id == TargetDbId);
+            target.PlacementClass = "dedicated";
+            target.TierEligibility = ["free", "team", "enterprise"];
+            target.TenantCount = 0;
+            await cp.SaveChangesAsync();
+        }
+
+        var act = async () => await CreateService().MoveAsync(tenantId, TargetDbId);
+        await act.Should().NotThrowAsync(
+            "the move must resolve the ACTIVE free v2 (PlacementPolicy='dedicated') and "
+            + "accept the dedicated target — not bounce off the deprecated v1 ('shared')");
+
+        var (status, databaseId, _) = await ReadTenantAsync(tenantId);
+        status.Should().Be("active");
+        databaseId.Should().Be(TargetDbId, "the move completed onto the dedicated target");
+    }
+
+    [Test]
     public async Task Move_Rejects_TargetNotActive()
     {
         var tenantId = await SeedAsync(targetStatus: "retired");

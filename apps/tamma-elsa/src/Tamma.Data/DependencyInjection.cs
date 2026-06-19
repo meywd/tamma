@@ -77,6 +77,10 @@ public static class DependencyInjection
                 // Must match ControlPlaneDesignTimeDbContextFactory — one history table
                 // for design-time and runtime (unified-tenancy Phase 0 reconciliation).
                 npgsql.MigrationsHistoryTable("__ControlPlaneMigrationsHistory"));
+            // Story 35-1 follow-up — suppress the required-navigation/query-filter
+            // advisory at the options-builder seam (pooling-safe; see
+            // ControlPlaneDbContext.ConfigureControlPlaneWarnings).
+            ControlPlaneDbContext.ConfigureControlPlaneWarnings(options);
         });
         services.AddScoped(sp =>
             sp.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>()
@@ -138,6 +142,11 @@ public static class DependencyInjection
         // PF-S9 — single-row sentinel that pins the bootstrap superadmin.
         // Scoped because it leans on ControlPlaneDbContext.
         services.AddScoped<IPlatformBootstrapRepository, PlatformBootstrapRepository>();
+
+        // Story 32-1 — CP-resident agent identity + versioning repository.
+        // Resolves against ControlPlaneDbContext (definitions are CP-resident);
+        // distinct from the tenant-scoped IAgentConfigRepository below.
+        services.AddScoped<IAgentRepository, AgentRepository>();
 
         // Tenant-scoped repositories (use ITenantDbContextFactory internally).
         services.AddScoped<IAgentConfigRepository, AgentConfigRepository>();

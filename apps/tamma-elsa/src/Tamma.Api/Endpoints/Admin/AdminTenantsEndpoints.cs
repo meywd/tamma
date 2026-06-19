@@ -131,8 +131,12 @@ public static class AdminTenantsEndpoints
 
         if (!string.IsNullOrWhiteSpace(plan))
         {
+            // Story 34-1: a slug is now a multi-version chain (active +
+            // deprecated). Pin Status == "active" so the slug→Id resolution
+            // is deterministic (UX_plans_OneActivePerSlug guarantees one
+            // active row) and tenant filtering keys off the live version's Id.
             var planId = await db.Plans
-                .Where(p => p.Slug == plan)
+                .Where(p => p.Slug == plan && p.Status == "active")
                 .Select(p => (Guid?)p.Id)
                 .FirstOrDefaultAsync(ct);
             if (planId is null)
