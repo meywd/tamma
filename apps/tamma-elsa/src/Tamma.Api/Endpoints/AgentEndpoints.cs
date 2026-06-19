@@ -398,18 +398,93 @@ public static class AgentEndpoints
     }
 
     /// <summary>
-    /// GET <c>/api/v1/agents</c> — list visible agents (all public ∪ the
-    /// caller's own private). Cross-tenant private agents are never returned.
+    /// GET <c>/api/agents</c> (and legacy <c>/api/v1/agents</c>) — list visible
+    /// agents (all public ∪ the caller's own private). Cross-tenant private
+    /// agents are never returned.
+    ///
+    /// <para>Story 32-2 AC5 — optional <c>?role=&amp;visibility=&amp;status=</c>
+    /// filters NARROW the visibility-scoped set; they never widen it. The
+    /// visibility scoping (<see cref="ResolvePrincipalScope"/> →
+    /// <see cref="IAgentRepository.ListVisibleAsync"/>) runs FIRST, so a filter
+    /// can only ever subset a tenant's own public ∪ own-private rows — another
+    /// tenant's private agent can never surface, even with <c>visibility=private</c>.
+    /// An absent/empty parameter means "no filter on that dimension". An unknown
+    /// <c>role</c> → 400 (consistent with AC12's role validation); an unknown
+    /// <c>visibility</c>/<c>status</c> wire string → 400.</para>
     /// </summary>
     public static async Task<IResult> ListAgents(
         IAgentRepository agents,
         ClaimsPrincipal principal,
         ITenantContext tenantContext,
-        ITammaModeProvider modeProvider)
+        ITammaModeProvider modeProvider,
+        string? role = null,
+        string? visibility = null,
+        string? status = null)
     {
+        // Bind the wire params into the documented filter DTO + validate. Absent
+        // / empty dimensions stay null (no filter). Validation mirrors the write
+        // surface: unknown role/visibility/status → 400 before any DB read.
+        var filter = new AgentListFilter(
+            Role: string.IsNullOrWhiteSpace(role) ? null : role,
+            Visibility: string.IsNullOrWhiteSpace(visibility) ? null : visibility,
+            Status: string.IsNullOrWhiteSpace(status) ? null : status);
+
+        string? roleFilter = null;
+        if (filter.Role is not null)
+        {
+            // Normalize legacy aliases then validate against the canonical set —
+            // same discipline as AC12's SelectForRole role validation.
+            var canonicalRole = RolePhaseMap.NormalizeRole(filter.Role);
+            if (!RolePhaseMap.ValidRoles.Contains(canonicalRole))
+            {
+                return Results.BadRequest(new
+                {
+                    error = "invalid_role",
+                    detail = $"Unknown role '{filter.Role}'.",
+                });
+            }
+            roleFilter = canonicalRole;
+        }
+
+        AgentVisibility? visibilityFilter = null;
+        if (filter.Visibility is not null)
+        {
+            if (!TryParseVisibility(filter.Visibility, out var v))
+            {
+                return Results.BadRequest(new
+                {
+                    error = "invalid_visibility",
+                    detail = "visibility must be 'public' or 'private'.",
+                });
+            }
+            visibilityFilter = v;
+        }
+
+        AgentStatus? statusFilter = null;
+        if (filter.Status is not null)
+        {
+            if (!TryParseStatus(filter.Status, out var s))
+            {
+                return Results.BadRequest(new
+                {
+                    error = "invalid_status",
+                    detail = "status must be 'active' or 'archived'.",
+                });
+            }
+            statusFilter = s;
+        }
+
         var (tenantId, userId) = ResolvePrincipalScope(principal, tenantContext, modeProvider);
+        // Visibility scoping FIRST — the filters below only NARROW this set, so
+        // cross-tenant isolation is structurally preserved.
         var visible = await agents.ListVisibleAsync(tenantId, userId);
-        var summaries = visible.Select(ToSummary).ToList();
+
+        var filtered = visible.Where(a =>
+            (roleFilter is null || string.Equals(a.Role, roleFilter, StringComparison.Ordinal)) &&
+            (visibilityFilter is null || a.Visibility == visibilityFilter) &&
+            (statusFilter is null || a.Status == statusFilter));
+
+        var summaries = filtered.Select(ToSummary).ToList();
         return Results.Ok(summaries);
     }
 
@@ -647,6 +722,16 @@ public static class AgentEndpoints
             case "public": visibility = AgentVisibility.Public; return true;
             case "private": visibility = AgentVisibility.Private; return true;
             default: visibility = default; return false;
+        }
+    }
+
+    private static bool TryParseStatus(string? raw, out AgentStatus status)
+    {
+        switch (raw?.Trim().ToLowerInvariant())
+        {
+            case "active": status = AgentStatus.Active; return true;
+            case "archived": status = AgentStatus.Archived; return true;
+            default: status = default; return false;
         }
     }
 

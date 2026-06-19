@@ -1767,6 +1767,9 @@ var agentsV2 = app.MapGroup("/api/agents")
     .RequireAuthorization("MemberAccess")
     .RequireRateLimiting("ConfigRead");
 // Reads
+// AC5 — optional ?role=&visibility=&status= query filters bind automatically
+// onto ListAgents' trailing string? params; they NARROW the visibility-scoped
+// set (never widen it). Unknown role/visibility/status → 400.
 agentsV2.MapGet("/", AgentEndpoints.ListAgents);
 agentsV2.MapGet("/resolve", AgentEndpoints.Resolve);
 agentsV2.MapGet("/role-selections", AgentEndpoints.GetRoleSelections);
