@@ -417,7 +417,7 @@ development_status:
 
   epic-32: contexted   # NEW Agents — entities, managed execution, benchmarking & learning (added 2026-06-17; all stories drafted)
   32-1-agent-entity-model-and-versioned-saved-config: done # Agent Entity Model & Versioned Saved Config (public/private) [P0]
-  32-2-agent-registry-resolution-and-rbac-api: drafted # Agent Registry, Resolution & RBAC API [P0]
+  32-2-agent-registry-resolution-and-rbac-api: done # Agent Registry, Resolution & RBAC API [P0]
   32-3-per-tenant-provider-credential-resolution: done # Per-Tenant Provider Credential Resolution (BYOK → platform) [P0]
   32-4-saas-provider-auth-gating-api-key-only: drafted # SaaS Provider Auth Gating — API-key only (CLI/token providers single-user only) [P0]
   32-5-managed-agent-execution-layer: drafted         # Managed Agent Execution Layer (IManagedAgent over IAIProvider) [P0]
