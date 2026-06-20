@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Serilog;
 using Serilog.Sinks.OpenSearch;
 using Tamma.Activities.AI;
+using Tamma.Activities.LlmCall.Credentials;
 using Tamma.Activities.Security;
 using Tamma.ElsaServer.Workflows;
 
@@ -261,6 +262,19 @@ builder.Services.AddSingleton<IErrorRedactor, ErrorRedactor>();
 builder.Services.Configure<ProviderAllowlistOptions>(
     builder.Configuration.GetSection("Security:ProviderAllowlist"));
 builder.Services.AddSingleton<ProviderAllowlist>();
+
+// Story 32-3 — provider-credential resolution for CallLlmInlineActivity.
+// CRITICAL: the activity executes in THIS (Elsa engine) process, which does
+// NOT reference Tamma.Api, so the cabinet-backed DefaultProviderCredential
+// Resolver (BYOK) is unreachable here. Without a resolver registered, the
+// activity bound a null resolver and sent an EMPTY ApiKey — a hard regression
+// to no-auth. AddEngineProviderCredentialResolution wires the config-backed
+// platform-key resolver (ConfigPlatformProviderCredentialResolver) so the
+// platform key from LlmProviders:<provider>:ApiKey (or the legacy
+// <Provider>:ApiKey slot) flows through to the outbound call (AC12), and the
+// resolver fails closed (never an empty key) when no key is configured.
+// SaaS BYOK resolution stays owned by Tamma.Api's cabinet-backed resolver.
+builder.Services.AddEngineProviderCredentialResolution();
 
 // Tool call validation (Story 11.3 — allowlist enforcement, ActionGate)
 builder.Services.Configure<ActionGateOptions>(
