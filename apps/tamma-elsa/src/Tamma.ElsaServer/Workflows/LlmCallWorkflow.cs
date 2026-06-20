@@ -529,7 +529,8 @@ public class LlmCallWorkflow : WorkflowBase
                                                             budgetStateVar,
                                                             workflowOutputVar,
                                                             enableToolLoopVar,
-                                                            toolLoopConfigJsonVar)
+                                                            toolLoopConfigJsonVar,
+                                                            tenantIdVar)
                                                     }
                                                 }, "Budget OK")
                                             }, "Budget Exhausted?")
@@ -752,7 +753,8 @@ public class LlmCallWorkflow : WorkflowBase
         Variable<string> budgetStateVar,
         Variable<string> workflowOutputVar,
         Variable<bool> enableToolLoopVar,
-        Variable<string> toolLoopConfigJsonVar)
+        Variable<string> toolLoopConfigJsonVar,
+        Variable<string> tenantIdVar)
     {
         var whileLoop = new While((string?)null);
         whileLoop.Id = "RetryLoop";
@@ -890,7 +892,10 @@ public class LlmCallWorkflow : WorkflowBase
                     ToolsJsonProp = new(context => resolvedToolsJsonVar.Get(context)),
                     AttemptNumberProp = new(context => attemptNumberVar.Get(context)),
                     EnableToolLoopProp = new(context => enableToolLoopVar.Get(context)),
-                    ToolLoopConfigJsonProp = new(context => toolLoopConfigJsonVar.Get(context))
+                    ToolLoopConfigJsonProp = new(context => toolLoopConfigJsonVar.Get(context)),
+                    // Story 32-3 (AC3) — thread the tenant id for BYOK credential
+                    // resolution (same pattern as the prompt/convention steps).
+                    TenantIdProp = new(context => tenantIdVar.Get(context))
                 }, "Call LLM"),
                 WithLabel(new RecordDiagnosticsInlineActivity
                 {

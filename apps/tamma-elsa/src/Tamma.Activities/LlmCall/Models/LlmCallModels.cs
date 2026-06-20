@@ -147,6 +147,16 @@ public class ProviderAttemptDiagnostic
 
     /// <summary>Whether this attempt was skipped due to budget exhaustion.</summary>
     public bool BudgetExhausted { get; set; }
+
+    /// <summary>
+    /// Story 32-3 (AC4) — where the provider API key came from for this attempt:
+    /// <c>"byok"</c> (the tenant's own key) or <c>"platform"</c> (the
+    /// platform-provided key). Null when the resolver was not wired (legacy
+    /// platform/config path) or the attempt never reached credential
+    /// resolution. NEVER the key itself — pricing/billing/benchmarking
+    /// (Epics 34/35, 32-9/32-10) branch on this tag.
+    /// </summary>
+    public string? CredentialSource { get; set; }
 }
 
 // ============================================================

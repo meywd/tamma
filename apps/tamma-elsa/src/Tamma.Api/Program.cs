@@ -451,6 +451,13 @@ if (!string.IsNullOrWhiteSpace(
     builder.Services.AddTammaSecretReveal(builder.Configuration);
 }
 
+// Story 32-3 — BYOK→platform provider-credential resolver + cache invalidator.
+// Registered AFTER the secrets wiring so the cabinet-backed BYOK reader is
+// chosen when the SecretsDbContext factory is present (else the Null reader
+// degrades cleanly to the platform path). The resolver is the canonical owner
+// of provider-key resolution into the LLM call path (CallLlmInlineActivity).
+builder.Services.AddProviderCredentialResolution();
+
 // Story 31-2: platform routing resolver. Exposes IPlatformResolver as a
 // scoped service over a singleton driver cache and the Epic 29 secret
 // store seam. Drivers themselves (GitHub 31-3, Gitea 31-4, ...) ship in
@@ -1755,6 +1762,18 @@ agents.MapGet("/{id:guid}/versions/{version:int}", AgentEndpoints.GetVersion);
 agents.MapPost("/{id:guid}/versions", AgentEndpoints.PublishVersion)
     .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
 agents.MapPost("/{id:guid}/archive", AgentEndpoints.ArchiveAgent)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+
+// ── Story 32-3 — tenant-admin BYOK provider-credential management ──
+// GET list (metadata only) inherits the group's SettingsView gate; the
+// register/rotate/delete mutations are AgentManage (tenant_owner/tenant_admin →
+// member 403). Response bodies never carry the raw key (reveal-once token only).
+agents.MapGet("/providers", ProviderCredentialEndpoints.ListProviders);
+agents.MapPost("/providers/{provider}/credential", ProviderCredentialEndpoints.RegisterCredential)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agents.MapPost("/providers/{provider}/credential/rotate", ProviderCredentialEndpoints.RotateCredential)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agents.MapDelete("/providers/{provider}/credential", ProviderCredentialEndpoints.DeleteCredential)
     .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
 
 // ── Story 32-2 — entity-aware registry / resolution surface (/api/agents) ──

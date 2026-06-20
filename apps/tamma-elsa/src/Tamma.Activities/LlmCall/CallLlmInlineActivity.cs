@@ -8,10 +8,12 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.LlmCall.Credentials;
 using Tamma.Activities.LlmCall.Models;
 using Tamma.Activities.LlmCall.Tools;
 using Tamma.Activities.Security;
 using Tamma.Activities.ToolExecution;
+using Tamma.Core;
 
 namespace Tamma.Activities.LlmCall;
 
@@ -53,6 +55,15 @@ public class CallLlmInlineActivity : CodeActivity
     [Input(Description = "Tool loop configuration JSON (serialized ToolLoopConfig)")]
     public Input<string?> ToolLoopConfigJsonProp { get; set; } = default!;
 
+    /// <summary>
+    /// Story 32-3 (AC3) — tenant id (GUID string) for BYOK credential
+    /// resolution. Threaded from <c>LlmCallWorkflow</c>'s existing
+    /// <c>TenantId</c> variable. Empty / whitespace ⇒ single-user / platform
+    /// scope (<c>tenantId == null</c>).
+    /// </summary>
+    [Input(Description = "Tenant id (GUID string) for BYOK credential resolution; empty = single-user/platform")]
+    public Input<string?> TenantIdProp { get; set; } = new((string?)null);
+
     private readonly IHttpClientFactory? _httpClientFactory;
     private readonly IConfiguration? _configuration;
     private readonly ILogger<CallLlmInlineActivity>? _logger;
@@ -62,9 +73,10 @@ public class CallLlmInlineActivity : CodeActivity
     private readonly ContextCompactor? _contextCompactor;
     private readonly ToolLoopEventEmitter? _eventEmitter;
     private readonly ParallelToolExecutor? _parallelExecutor;
+    private readonly IProviderCredentialResolver? _credentialResolver;
 
     [JsonConstructor]
-    public CallLlmInlineActivity() : this(null, null, null, null, null, null, null, null, null)
+    public CallLlmInlineActivity() : this(null, null, null, null, null, null, null, null, null, null)
     {
     }
 
@@ -77,7 +89,8 @@ public class CallLlmInlineActivity : CodeActivity
         IToolCallValidator? toolCallValidator = null,
         ContextCompactor? contextCompactor = null,
         ToolLoopEventEmitter? eventEmitter = null,
-        ParallelToolExecutor? parallelExecutor = null)
+        ParallelToolExecutor? parallelExecutor = null,
+        IProviderCredentialResolver? credentialResolver = null)
     {
         _logger = logger;
         _httpClientFactory = httpClientFactory;
@@ -88,6 +101,7 @@ public class CallLlmInlineActivity : CodeActivity
         _contextCompactor = contextCompactor;
         _eventEmitter = eventEmitter;
         _parallelExecutor = parallelExecutor;
+        _credentialResolver = credentialResolver;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -102,6 +116,9 @@ public class CallLlmInlineActivity : CodeActivity
 
         var input = ParseInput(inputJson);
 
+        // Story 32-3 (AC3) — tenant context for BYOK credential resolution.
+        var tenantId = ParseTenantId(TenantIdProp.Get(context));
+
         // Sanitize prompts before LLM call (defense-in-depth against prompt injection)
         var systemPrompt = SanitizePrompts(context, providerName, systemPromptRaw, input);
 
@@ -112,7 +129,7 @@ public class CallLlmInlineActivity : CodeActivity
             var model = input.ModelOverrides.TryGetValue(providerName, out var mo)
                 ? mo
                 : GetDefaultModel(providerName);
-            await SingleTurnCall(context, input, providerName, systemPrompt, toolsJson, attemptNumber, model);
+            await SingleTurnCall(context, input, providerName, systemPrompt, toolsJson, attemptNumber, model, tenantId);
             return;
         }
 
@@ -120,7 +137,6 @@ public class CallLlmInlineActivity : CodeActivity
         var loopModel = input.ModelOverrides.TryGetValue(providerName, out var mo2)
             ? mo2
             : GetDefaultModel(providerName);
-        var providerConfig = LoadProviderConfig(providerName);
         var loopConfig = ParseToolLoopConfig(toolLoopConfigJson);
         var tools = DeserializeResolvedTools(toolsJson);
 
@@ -144,8 +160,20 @@ public class CallLlmInlineActivity : CodeActivity
             context.WorkflowExecutionContext.Id, providerName, loopModel, loopConfig.MaxSteps,
             loopConfig.AllowedTools?.Length ?? 0);
 
+        // Story 32-3 — resolved BYOK/platform source for the diagnostic tag.
+        // Set inside the try (after resolution) so a fail-closed credential
+        // error surfaces as a failed diagnostic, never a leaked exception.
+        string? credentialSource = null;
+
         try
         {
+            // Resolve provider config + the API key (BYOK→platform) just before
+            // the call. A PROVIDER_CREDENTIAL_UNAVAILABLE TammaError thrown here
+            // is caught below as a failed attempt so the provider chain advances.
+            var (providerConfig, source) =
+                await LoadProviderConfigWithKeyAsync(providerName, tenantId, context.CancellationToken);
+            credentialSource = source;
+
             var (response, totalTokens, turns, exhausted) = await AgenticToolLoop(
                 context, providerName, providerConfig, loopModel, systemPrompt,
                 input.UserPrompt, input.MaxTokens, input.Temperature, tools, loopConfig);
@@ -170,7 +198,8 @@ public class CallLlmInlineActivity : CodeActivity
                 DurationMs = sw.ElapsedMilliseconds,
                 StartedAtUtc = startedAt,
                 PromptTokens = response.PromptTokens,
-                CompletionTokens = response.CompletionTokens
+                CompletionTokens = response.CompletionTokens,
+                CredentialSource = credentialSource
             };
 
             context.SetVariable("LastDiagnostic", JsonSerializer.Serialize(diagnostic));
@@ -186,6 +215,7 @@ public class CallLlmInlineActivity : CodeActivity
         catch (Exception ex)
         {
             sw.Stop();
+            // NOTE: never log ex with a key — TammaError messages are key-free.
             _logger?.LogError(ex, "Agentic tool loop failed for {Provider}", providerName);
 
             var diagnostic = new ProviderAttemptDiagnostic
@@ -194,9 +224,12 @@ public class CallLlmInlineActivity : CodeActivity
                 Model = loopModel,
                 AttemptNumber = attemptNumber,
                 Succeeded = false,
-                ErrorMessage = $"Tool loop error: {ex.Message}",
+                ErrorMessage = ex is TammaError te
+                    ? $"{te.Code}: {te.Message}"
+                    : $"Tool loop error: {ex.Message}",
                 DurationMs = sw.ElapsedMilliseconds,
-                StartedAtUtc = startedAt
+                StartedAtUtc = startedAt,
+                CredentialSource = credentialSource
             };
 
             context.SetVariable("LastDiagnostic", JsonSerializer.Serialize(diagnostic));
@@ -273,10 +306,12 @@ public class CallLlmInlineActivity : CodeActivity
         string systemPrompt,
         string? toolsJson,
         int attemptNumber,
-        string model)
+        string model,
+        Guid? tenantId)
     {
         var startedAt = DateTime.UtcNow;
         var sw = System.Diagnostics.Stopwatch.StartNew();
+        string? credentialSource = null;
 
         // Apply exponential backoff delay for retry attempts (skip first attempt)
         if (attemptNumber > 1)
@@ -295,7 +330,12 @@ public class CallLlmInlineActivity : CodeActivity
             var httpClient = _httpClientFactory?.CreateClient($"llm-{providerName}")
                              ?? new HttpClient();
 
-            var providerConfig = LoadProviderConfig(providerName);
+            // Resolve provider config + the API key (BYOK→platform) just before
+            // the call. A PROVIDER_CREDENTIAL_UNAVAILABLE TammaError thrown here
+            // is caught below as a failed attempt so the provider chain advances.
+            var (providerConfig, source) =
+                await LoadProviderConfigWithKeyAsync(providerName, tenantId, context.CancellationToken);
+            credentialSource = source;
             httpClient.Timeout = TimeSpan.FromSeconds(providerConfig.TimeoutSeconds);
 
             NormalizedLlmResponse response;
@@ -353,7 +393,8 @@ public class CallLlmInlineActivity : CodeActivity
                 DurationMs = sw.ElapsedMilliseconds,
                 StartedAtUtc = startedAt,
                 PromptTokens = response.PromptTokens,
-                CompletionTokens = response.CompletionTokens
+                CompletionTokens = response.CompletionTokens,
+                CredentialSource = credentialSource
             };
 
             context.SetVariable("LastDiagnostic", JsonSerializer.Serialize(diagnostic));
@@ -370,11 +411,16 @@ public class CallLlmInlineActivity : CodeActivity
                 AttemptNumber = attemptNumber,
                 Succeeded = false,
                 HttpStatusCode = 0,
+                // TammaError messages (incl. PROVIDER_CREDENTIAL_UNAVAILABLE) are
+                // key-free by construction — safe to surface here.
                 ErrorMessage = ex is TaskCanceledException
                     ? "Request timed out"
-                    : $"Error: {ex.Message}",
+                    : ex is TammaError te
+                        ? $"{te.Code}: {te.Message}"
+                        : $"Error: {ex.Message}",
                 DurationMs = sw.ElapsedMilliseconds,
-                StartedAtUtc = startedAt
+                StartedAtUtc = startedAt,
+                CredentialSource = credentialSource
             };
 
             context.SetVariable("LastDiagnostic", JsonSerializer.Serialize(diagnostic));
@@ -1260,7 +1306,7 @@ public class CallLlmInlineActivity : CodeActivity
     // Single-Turn LLM Call Methods (preserved from original)
     // =======================================================================
 
-    private async Task<NormalizedLlmResponse> CallAnthropicMessages(
+    internal async Task<NormalizedLlmResponse> CallAnthropicMessages(
         HttpClient httpClient, LlmProviderConfig config, string model,
         string systemPrompt, string userPrompt, int maxTokens, double temperature,
         string? toolsJson)
@@ -1321,7 +1367,7 @@ public class CallLlmInlineActivity : CodeActivity
         return ParseAnthropicResponse(result, statusCode, model);
     }
 
-    private async Task<NormalizedLlmResponse> CallOpenAiCompatible(
+    internal async Task<NormalizedLlmResponse> CallOpenAiCompatible(
         HttpClient httpClient, LlmProviderConfig config, string model,
         string systemPrompt, string userPrompt, int maxTokens, double temperature,
         string? toolsJson)
@@ -1395,6 +1441,13 @@ public class CallLlmInlineActivity : CodeActivity
     // Helpers
     // =======================================================================
 
+    /// <summary>
+    /// Load the provider's NON-secret config (BaseUrl / DefaultModel /
+    /// TimeoutSeconds). Story 32-3 (AC3): this NO LONGER reads the API key —
+    /// the key is resolved separately via <see cref="IProviderCredentialResolver"/>
+    /// in <see cref="LoadProviderConfigWithKeyAsync"/>. <see cref="LlmProviderConfig.ApiKey"/>
+    /// is always left empty here so the resolver is the single key source.
+    /// </summary>
     private LlmProviderConfig LoadProviderConfig(string providerName)
     {
         // Validate provider name against allowlist
@@ -1409,7 +1462,7 @@ public class CallLlmInlineActivity : CodeActivity
         {
             var config = new LlmProviderConfig { Name = providerName };
             config.BaseUrl = section["BaseUrl"] ?? "";
-            config.ApiKey = section["ApiKey"] ?? "";
+            // ApiKey deliberately NOT read here — resolved via IProviderCredentialResolver.
             config.DefaultModel = section["DefaultModel"] ?? "";
             if (int.TryParse(section["TimeoutSeconds"], out var t)) config.TimeoutSeconds = t;
             return config;
@@ -1421,25 +1474,67 @@ public class CallLlmInlineActivity : CodeActivity
             {
                 Name = providerName,
                 BaseUrl = "https://api.anthropic.com",
-                ApiKey = _configuration?["Anthropic:ApiKey"] ?? "",
                 DefaultModel = _configuration?["Anthropic:Model"] ?? "claude-sonnet-4-20250514"
             },
             "openai" => new LlmProviderConfig
             {
                 Name = providerName,
                 BaseUrl = "https://api.openai.com",
-                ApiKey = _configuration?["OpenAI:ApiKey"] ?? "",
                 DefaultModel = "gpt-4o"
             },
             "openrouter" => new LlmProviderConfig
             {
                 Name = providerName,
                 BaseUrl = "https://openrouter.ai/api",
-                ApiKey = _configuration?["OpenRouter:ApiKey"] ?? "",
                 DefaultModel = "anthropic/claude-sonnet-4-20250514"
             },
             _ => new LlmProviderConfig { Name = providerName }
         };
+    }
+
+    /// <summary>
+    /// Story 32-3 (AC3) — load the provider config and populate its API key via
+    /// the <see cref="IProviderCredentialResolver"/> (BYOK→platform). Returns
+    /// the config plus the resolved <c>credentialSource</c> tag
+    /// (<c>"byok"</c> | <c>"platform"</c>) for the diagnostic.
+    ///
+    /// <para>When the resolver is not wired (e.g. the standalone Elsa engine
+    /// with no cabinet) the config's ApiKey is left empty and the source is
+    /// null — the legacy platform/config call path (AC12) where the operator's
+    /// config supplies the key directly. The fail-closed
+    /// <c>PROVIDER_CREDENTIAL_UNAVAILABLE</c> guarantee applies whenever the
+    /// resolver IS wired.</para>
+    /// </summary>
+    internal async Task<(LlmProviderConfig Config, string? CredentialSource)>
+        LoadProviderConfigWithKeyAsync(
+            string providerName, Guid? tenantId, CancellationToken ct)
+    {
+        var config = LoadProviderConfig(providerName); // BaseUrl / DefaultModel / Timeout only
+
+        if (_credentialResolver is null)
+        {
+            // No resolver wired — legacy platform path. The HTTP callers treat an
+            // empty ApiKey as "no auth header"; behaviour is identical to today
+            // for deployments that never set a per-tenant key.
+            return (config, null);
+        }
+
+        var cred = await _credentialResolver.ResolveAsync(tenantId, providerName, ct)
+            .ConfigureAwait(false);
+
+        // Plaintext used immediately for the outbound header; never stored/logged.
+        config.ApiKey = cred.ApiKey;
+        return (config, cred.Source.ToString().ToLowerInvariant());
+    }
+
+    /// <summary>
+    /// Parse the <c>TenantIdProp</c> string into a <see cref="Guid"/>. Empty /
+    /// whitespace / unparseable ⇒ null (single-user / platform scope).
+    /// </summary>
+    private static Guid? ParseTenantId(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        return Guid.TryParse(raw.Trim(), out var g) ? g : null;
     }
 
     private string GetDefaultModel(string providerName)
