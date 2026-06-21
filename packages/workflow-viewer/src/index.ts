@@ -14,8 +14,14 @@ export { WorkflowViewer, default } from './WorkflowViewer';
 export type { WorkflowViewerProps } from './WorkflowViewer';
 export { NodeDetailPanel } from './NodeDetailPanel';
 export type { NodeDetailPanelProps } from './NodeDetailPanel';
+export { WorkflowMap } from './WorkflowMap';
+export type { WorkflowMapProps } from './WorkflowMap';
+export { StationDetailPopup } from './StationDetailPopup';
+export type { StationDetailPopupProps } from './StationDetailPopup';
 export { buildGraph } from './layout';
 export type { LaidOutGraph } from './layout';
+export { buildMapLayout } from './mapLayout';
+export type { MapLayout, MapStation, MapRail } from './mapLayout';
 export { KIND_DESCRIPTORS, KIND_ORDER, kindOf } from './kinds';
 export type { KindDescriptor } from './kinds';
 export type {
@@ -25,5 +31,6 @@ export type {
   WorkflowEdge,
   WorkflowPort,
   WorkflowApiDetail,
+  WorkflowCodeRef,
   WorkflowNodeKind,
 } from './types';

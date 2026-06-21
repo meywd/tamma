@@ -43,6 +43,8 @@ const REPO_ROOT = join(__dirname, '..', '..', '..');
 const WORKFLOWS_DIR = join(REPO_ROOT, 'apps', 'tamma-elsa', 'src', 'Tamma.ElsaServer', 'Workflows');
 const ACTIVITIES_DIR = join(REPO_ROOT, 'apps', 'tamma-elsa', 'src', 'Tamma.Activities');
 const WIKI_DIR = join(REPO_ROOT, 'wiki');
+// Base for the "open on GitHub" permalinks emitted into node.code.githubUrl.
+const GITHUB_BLOB_BASE = 'https://github.com/Tam-ma/tamma/blob/main';
 
 /** Resolve the output path: CLI arg > env var > package-local default. */
 function resolveOutFile() {
@@ -75,6 +77,54 @@ function collectCs(dir) {
 /** Strip C# string escapes minimally for display. */
 function unesc(s) {
   return s.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+}
+
+/** Repo-relative POSIX path for an absolute file under the repo root. */
+function repoRel(absPath) {
+  return absPath.slice(REPO_ROOT.length + 1).split('\\').join('/');
+}
+
+/** 1-based line number of a character offset within a source string. */
+function lineAtOffset(src, offset) {
+  if (offset < 0) return undefined;
+  let line = 1;
+  for (let i = 0; i < offset && i < src.length; i++) {
+    if (src[i] === '\n') line++;
+  }
+  return line;
+}
+
+/**
+ * Build a sanitized code reference for an activity class found in `src`/`file`.
+ * Returns { file, line, namespace, githubUrl, snippet } or undefined.
+ * IMPORTANT: any C# text surfaced here is run through stripDocTags so no raw
+ * `<...>` can ever reach the (React-escaped) consumer.
+ */
+function codeRefFor(src, file, className) {
+  const decl = src.search(
+    new RegExp(`public\\s+(?:sealed\\s+|abstract\\s+|static\\s+|partial\\s+)*class\\s+${className}\\b`),
+  );
+  if (decl < 0) return undefined;
+  const line = lineAtOffset(src, decl);
+  const nsM = src.match(/^\s*namespace\s+([\w.]+)/m);
+  const namespace = nsM ? nsM[1] : undefined;
+  const relPath = repoRel(file);
+
+  // Cheap snippet: the class declaration line plus a few following lines,
+  // doc-tag-stripped and length-capped. Never includes method bodies.
+  const declLineStart = src.lastIndexOf('\n', decl) + 1;
+  const lines = src.slice(declLineStart).split('\n').slice(0, 4);
+  const snippetRaw = lines.join('\n');
+  const snippet = stripDocTags(snippetRaw).slice(0, 300).trimEnd();
+
+  const ref = {
+    file: relPath,
+    githubUrl: `${GITHUB_BLOB_BASE}/${relPath}${line ? `#L${line}` : ''}`,
+  };
+  if (line) ref.line = line;
+  if (namespace) ref.namespace = stripDocTags(namespace);
+  if (snippet) ref.snippet = snippet;
+  return ref;
 }
 
 /**
@@ -263,6 +313,7 @@ function buildActivityRegistry() {
       const summary = extractClassSummary(src, className);
       const kind = detectActivityKind(src, className, apiHints);
       const target = dispatchTargetOf(src);
+      const code = codeRefFor(src, file, className);
 
       registry[className] = {
         className,
@@ -277,6 +328,7 @@ function buildActivityRegistry() {
         interactions,
         apiHints,
         dispatchTarget: target,
+        code,
       };
     }
   }
@@ -592,6 +644,12 @@ function parseWorkflow(src, registry) {
     if (subTarget) node.subWorkflowId = subTarget;
     if (meta?.apiHints?.length) {
       node.api = apiDetail(meta, n);
+    }
+    // Source reference for the "Code" tab — only when the node maps to a real
+    // activity class we found a file for (built-in Elsa control nodes /
+    // synthetic dispatch nodes have no resolvable source).
+    if (meta?.code) {
+      node.code = meta.code;
     }
     nodeById[n.id] = node;
     return node;

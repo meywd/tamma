@@ -374,9 +374,20 @@ export default function WorkflowDetailPage() {
           @tamma/workflow-viewer). Renders nothing if no metadata for this slug. */}
       {slug && (
         <div>
-          <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-4">
-            {flowSection ? flowSection.heading : 'Workflow Diagram'}
-          </h2>
+          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+            <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider">
+              {flowSection ? flowSection.heading : 'Workflow Diagram'}
+            </h2>
+            <Link
+              to={`/workflows/${slug}/map`}
+              className="inline-flex items-center gap-1.5 text-[12px] text-blue-400 hover:text-blue-300 border border-blue-500/30 hover:border-blue-500/50 rounded-md px-2.5 py-1.5 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+              </svg>
+              Map view
+            </Link>
+          </div>
           <WorkflowDiagram slug={slug} />
         </div>
       )}
