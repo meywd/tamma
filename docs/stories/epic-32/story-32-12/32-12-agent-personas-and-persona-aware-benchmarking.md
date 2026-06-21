@@ -1,4 +1,4 @@
-# Story 32-12: Agent Personas & Persona-Aware Benchmarking
+# Story 32-12: Persona-Aware Benchmarking
 
 Status: drafted
 
@@ -6,7 +6,7 @@ Status: drafted
 
 **ALL contributors MUST read and follow the comprehensive development process:**
 
-[BEFORE_YOU_CODE.md](../../../guides/BEFORE_YOU_CODE.md)
+[BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
 
 This mandatory guide includes the 7-Phase Development Workflow (Read → Research → Break Down → TDD → Quality Gates → Failure Handling), Knowledge Base usage (`.dev/` directory), TRACE/DEBUG logging requirements, Test-Driven Development, 100% critical-path coverage, and build-success enforcement.
 
@@ -14,60 +14,80 @@ This mandatory guide includes the 7-Phase Development Workflow (Read → Researc
 
 ## User Story
 
-As a **tenant owner/admin (SaaS) or self-hosted user (single-user)**,
-I want **named, reusable personas — styling/behavior variants (tone, verbosity, risk-tolerance, review-strictness) that compose onto an existing agent without forking its provider config — and the ability to benchmark personas like-vs-like within a role**,
-So that **a single agent definition (e.g. the public `tamma-reviewer`) can be run under two personas (`atlas` and `nova`) on my own work, and my per-tenant leaderboards tell me which *style* performs best for my context — finding the right voice for the job without cloning a dozen near-identical agents**.
+As a **tenant owner/admin (SaaS) or self-hosted user (single-user) choosing which named system persona to trust with a given role**,
+I want **per-tenant benchmark leaderboards keyed by the named cross-role PERSONA-agent (`claude`/`gemini`/`codegpt`) — paired with its provider, model, prompt-version, and `credentialSource` — so I can compare, on my own work, "which persona is the best reviewer for me?" like-vs-like within a role**,
+So that **I can pick the best-performing persona for each role on real downstream quality and cost (success rate, iterations-to-done, defect rate, latency, cost basis), certain my per-persona performance data never leaks to another tenant or to the platform owner who curates the public persona catalogue**.
+
+> **Vocabulary reframe (v2.0.0, 2026-06-21).** In the locked agent model (`docs/superpowers/specs/2026-06-20-epic-32-revised-agent-architecture.md` §3.0), **PERSONA = the named, cross-role public/system agent** (`claude`/`gemini`/`codegpt`) that presets `{provider, model, config}` — the entity reframed by **Story 32-15** (the former per-role `tamma-<role>` concept). It is **NOT** a style/tone overlay. The old style/voice idea (`atlas`/`nova` tone/verbosity within a role) is split out to optional sibling **Story 32-19 "Agent style/voice variants"** (a *variant*/style profile, never a *persona*). This story therefore **adds no new entity** and introduces **no style-overlay framing** — it is purely the persona-aware *benchmarking* dimension over the named persona-agent identity.
 
 ## Priority
 
-P2 — A refinement layer on top of the first-class agent stack. Agents (32-1), resolution (32-2), and the action trail (32-6) must exist first; personas add a second benchmarking *dimension* (style) orthogonal to the agent/provider/prompt/version dimensions 32-10 already slices. Valuable, not foundational: workflows run fine without personas; personas make style a measurable, tunable knob.
+P1 — the persona-aware read-model payoff of the Epic 32 tracking stack, riding directly on the 32-10 benchmark projection. 32-6 captures the action trail, 32-8 scores outcomes + classifies defects, 32-9 emits usage/cost, 32-10 folds them into per-agent/provider/prompt/**persona** leaderboards; this story makes the **persona dimension** correct under the locked model (keyed by the 32-15 persona-agent `AgentId`/`AgentName`, not a style row) and adds the persona-comparison facets a tenant reads to pick a persona per role. Valuable, not foundational: 32-10 already ships a `persona` dimension; this story populates it with the right identity + facets and the comparison API.
+
+## Context
+
+### What 32-10 already ships (the substrate)
+
+Story 32-10 (`docs/stories/epic-32/story-32-10/32-10-benchmark-projections-and-leaderboards.md`) ships `BenchmarkProjectionService` — an idempotent, `SequenceNumber`-cursor-tracked fold over the resolving tenant's `domain_events` that materialises **per-agent / per-provider / per-prompt / per-persona** `BenchmarkProjection` rows in the tenant's own `t_<hex>` schema, plus a member-readable leaderboard API (`GET /api/v1/orgs/{tenantId}/agents/leaderboard?dimension=…`). Its `persona` dimension already exists with `DimensionKey = personaId`, but 32-10 explicitly defers the *semantics* to this story: "Story 32-12 enriches persona attribution. This story ships the dimension; 32-12 populates richer persona semantics."
+
+### What "persona" means now (the reframe this story implements)
+
+Under the locked model, the `persona` dimension's `DimensionKey` is the **named persona-agent's identity** — the public `Agent` (`claude`/`gemini`/`codegpt`) that 32-15 seeds with `Role = NULL`, an explicit `provider`+`model`, and prompts from the Epic 27 store. So:
+
+| | Old 32-12 (superseded) | This rewrite (locked model) |
+|---|---|---|
+| **Persona** | a style/tone overlay (`atlas`/`nova`) *within* one role | the **named cross-role system agent** (`claude`/`gemini`/`codegpt`) from 32-15 |
+| **New entity** | a `Persona` table (style + prompt-fragment) | **none** — persona IS the public `Agent`; benchmark rides 32-10's projection |
+| **Benchmark key** | `(role, personaId)` where persona = style | `(role, personaAgentId)` where persona = the public agent + its provider/model/prompt-version/credentialSource |
+| **Style/voice** | conflated into "persona" | split out → **32-19** style/voice variants |
+
+The **action trail (32-6)** already tags each `AGENT.TASK.*` / `AGENT.ITERATION.COMPLETED` / `AGENT.PANEL.AGGREGATED` event with `agentId`/`agentVersion`/`provider`/`promptRef` (32-6/32-15). For a public persona, `agentId` **is** the persona's identity. This story makes the **persona-aware view** of that data first-class: it pins the persona dimension to the persona-agent identity (not a style row), adds `credentialSource` and prompt-version as benchmark facets, and exposes the persona-comparison query so "`claude` vs `gemini` as my reviewer" is answerable like-vs-like.
+
+### Explicitly out of scope (referenced, not implemented)
+
+- **The persona entity + seeding** (`Agent.Role` nullable, named cross-role personas, Epic-27 prompt wiring) — **Story 32-15**. This story consumes the persona-agent identity; it does not define personas.
+- **Per-tenant persona enablement** (`TenantAgentEnablement`) — **Story 32-16**. Only enabled personas appear in a tenant's leaderboard (a persona the tenant never enabled has no runs).
+- **The base benchmark projection + leaderboard API + tenant isolation + k-anonymity admin rollup** — **Story 32-10**. This story extends its `persona` dimension; it does not rebuild the fold.
+- **Agent style/voice variants** (the `atlas`/`nova` tone/verbosity overlay, formerly mis-modelled as "persona") — **Story 32-19** (NEW optional sibling). A *variant* is a style profile composed onto a persona-agent; it is a different feature with its own visibility/XOR/index discipline and (eventually) its own benchmark facet. **Not built here.**
 
 ## Acceptance Criteria
 
-1. **Persona entity.** A new EF Core entity `Persona` exists in `apps/tamma-elsa/src/Tamma.Data/Entities/Persona.cs` with: `Id` (Guid PK), `Name` (stable handle, e.g. `atlas`), `Role` (the `AgentRole` wire string the persona is scoped to — a persona is a *named variant within a role*, mirroring the design-of-record's "personas are named variants within a role"), `Visibility` (reuses the `AgentVisibility` enum from 32-1: `public|private`), `OwnerTenantId` (Guid?), `OwnerUserId` (Guid?), `Status` (reuses `AgentStatus`: `active|archived`), `StyleJson` (jsonb — the style/behavior trait bag: `tone`, `verbosity`, `riskTolerance`, `reviewStrictness`, …), `SystemPromptFragmentRef` (string? — a Prompt-Store fragment key, never inline secret content), `CreatedAt`/`CreatedBy`, `UpdatedAt`/`UpdatedBy`. It is **control-plane-resident** for public personas and tenant-owned for private personas, exactly mirroring the `Agent` ownership model from 32-1.
+1. **Persona = the named persona-agent identity (no new entity).** The benchmark `persona` dimension's `DimensionKey` is the **public persona-agent's identity** — `AgentId` (immutable) with `AgentName` (the stable handle `claude`/`gemini`/`codegpt` from 32-15) as the human-readable label. This story adds **no** `Persona` table, no `PersonaComposer`, and no style-overlay row. It rides 32-10's existing `BenchmarkProjection`/`BenchmarkProjectionCursor` tenant entities. (If 32-10's `persona` dimension still keyed a style row, this story corrects it to the persona-agent identity; if it is already keyed by `agentId`, this story leaves the shape and adds the facets in AC2/AC5.)
 
-2. **Ownership invariants mirror Agent (32-1).** A `CHECK` constraint `ck_personas_visibility_ownership` enforces: `Visibility='public' ⇒ OwnerTenantId IS NULL AND OwnerUserId IS NULL`; `Visibility='private'` in SaaS ⇒ `OwnerTenantId IS NOT NULL AND OwnerUserId IS NULL`; `Visibility='private'` in single-user ⇒ `OwnerUserId IS NOT NULL AND OwnerTenantId IS NULL` — the same exactly-one-principal XOR pattern as `ck_agents_visibility_ownership` / `ck_prompt_overrides_principal_xor`. A unique partial index `IX_personas_public_name_role` on `(Name, Role) WHERE Visibility='public'` and per-owner private indexes (`(OwnerTenantId, Name, Role)` and `(OwnerUserId, Name, Role)` filtered on `Visibility='private'`) let two tenants each own a private persona named `atlas` for the same role without collision. Configured **only** in `TammaModelConfiguration.cs` (the single source of model config), with one additive migration under `apps/tamma-elsa/src/Tamma.Data/Migrations/ControlPlane/`.
+2. **Persona benchmark facets include provider, model, prompt-version, and credentialSource.** A persona's benchmark row (or its readable detail) carries, alongside the 32-10 metrics, the **dimensions that disambiguate a persona's runs**: `provider` and `model` (from the persona-agent's resolved config — 32-15), `agentVersion` (the pinned persona version), `promptRef`/prompt-version (the Epic-27 prompt that produced the run — 32-6), and **`credentialSource ∈ {byok, platform}`** (from 32-3, surfaced on the run by 32-5/32-9). These ride as **flat-string sub-keys / facets on the persona projection** so "`claude` on BYOK Anthropic vs `claude` on platform Anthropic" and "`claude` under prompt v3 vs v4" are distinguishable within the persona. No raw config, prompt body, or key is ever a facet value.
 
-3. **Multiple personas per role with the *same* agent.** Two distinct active personas (e.g. `atlas` and `nova`) may both target `role=reviewer` and both compose onto the same resolved reviewer agent, each producing a different `ResolvedAgentConfig` (different style params + prompt fragment) **without forking the underlying agent definition or provider config**. A test seeds one reviewer agent + two reviewer personas and asserts both resolve to the same `AgentId`/`AgentVersion` but distinct effective system prompts / style.
+3. **Per-tenant scoping is absolute (design ownership rule).** Persona performance/action data is **ALWAYS tenant-scoped** — every persona benchmark row lives in the resolving tenant's `t_<hex>` schema, written/read only through `ITenantDbContextFactory` (32-10's isolation backbone), and carries `TenantId` = the resolving tenant. Two tenants both running public persona `claude` build **separate, private** persona profiles; the platform owner who curates `claude` sees neither. There is **no cross-tenant and no platform-admin read path** for a tenant's per-persona rows (the only admin view is 32-10's k-anonymous, public-agent-only fleet rollup — owned there, not extended here). **Explicitly tested.**
 
-4. **Stable persona name is the benchmark join key.** `Persona.Id` is the immutable identity and `Persona.Name` (within a role) is the stable, human-readable handle used as the join key for all per-persona metrics — exactly as `Agent.Id`/`Name` is for agents. Editing a persona's `StyleJson` or `SystemPromptFragmentRef` does **not** create a new persona identity, so a persona's benchmark history survives style edits (consistent with 32-1's "stable identity, dynamic config" premise). Persona edits are captured as an audit event (AC 8), not a new entity.
+4. **Persona-comparison is like-vs-like within a role.** The leaderboard's `persona` dimension ranks personas **within a single role** for the calling tenant: "which persona has the best success rate / fewest functional defects / lowest cost basis as my **reviewer**?" compares `claude` vs `gemini` vs `codegpt` **scoped to `role=reviewer`**, never a reviewer-run against an architect-run. The query pairs the persona key with its `role` so cross-role comparison is structurally impossible (a persona used for two roles yields two separate per-role rows). Ranking reuses 32-10's deterministic tie-break chain (`successRate` desc → `avgIterationsToDone` asc → `avgCostBasisUsd` asc → key asc) and its `minRuns` min-sample guard (provisional rows in `belowThreshold`, never silently ranked).
 
-5. **Persona composes at resolution time (no agent mutation).** `IAgentResolverService` gains an optional `personaId` parameter — `ResolveForRoleAsync(string role, Guid? personaId = null, …)` (and the phase variant). When a `personaId` is supplied, the resolver: (a) loads the persona and validates it is visible to the principal (public ∪ own private) AND its `Role` matches the requested role; (b) merges the persona's `StyleJson` (temperature/verbosity/etc.) and prompt fragment **onto** the already-resolved `ResolvedAgentConfig` returning a **new** object (never mutating the agent's pinned version, per CLAUDE.md state-immutability rule); (c) stamps `PersonaId`/`PersonaName` onto the returned config. A persona that does not match the role, or is not visible, is rejected (400/404) — it is **never** silently dropped.
+5. **Persona-aware leaderboard query facets.** The 32-10 leaderboard endpoint `GET /api/v1/orgs/{tenantId}/agents/leaderboard` accepts the persona dimension plus role + facet filters: `?dimension=persona&role=reviewer&window=30d` ranks personas as that role; optional `?personaId=` returns one persona's detail (its facet breakdown across provider/model/promptVersion/credentialSource); optional `&credentialSource=byok|platform` and `&promptVersion=` narrow the comparison. The response is **member-readable** (any tenant member); there is no tenant mutation surface for persona benchmark rows (they are derived). The endpoint shape is identical between modes — the auth/tenant filter (`RequireTenantMembershipFilter`) scopes the read to the caller's tenant.
 
-6. **Prompt composition reuses Epic 27 layering and never falls back to empty/plain.** The persona's `SystemPromptFragmentRef` is resolved through the existing Prompt Store (`PromptStoreService.ResolveRoleActionAsync` for single-user / `ResolveRoleActionForTenantAsync` for SaaS) and the resolved fragment is **appended** to the agent's system prompt in a deterministic order: `system role identity → role+action template → persona fragment`. The persona fragment layers *on top of* the existing prompt resolution; it never replaces it. If a non-null `SystemPromptFragmentRef` cannot be resolved, the resolver fails loud with a `TammaError` (mirroring `PromptStoreService.NoPromptError` / `feedback_resolution_no_empty_fallback`) — it must **never** fall back to an empty or plain persona fragment.
+6. **The fold consumes only existing trail tags — no new source event family.** This story adds **no** new `AGENT.*` source event. It folds the same 32-6/32-8/32-9 events 32-10 already folds; the persona dimension's `dimensionKeyFor` reads `agentId` (the persona-agent identity) from the event `Tags`, and the facet sub-keys (`provider`, `model`, `agentVersion`, `promptRef`, `credentialSource`) from the same flat tags 32-6/32-9 already emit. Where a trail tag is missing (e.g. `credentialSource` on a pre-32-5 run), the facet degrades to an explicit `unknown`/`null` bucket — **never silently merged** into a populated facet (no-empty-fallback discipline; fail-loud on a malformed key, degrade-explicitly on an absent one).
 
-7. **Persona is recorded on every run + action-trail entry as a tag.** The 32-6 action-trail tag builder is extended so every `AGENT.TASK.*` / `AGENT.ITERATION.COMPLETED` / `AGENT.PANEL.AGGREGATED` / `REVIEW.BUG.RECORDED` event (and the `AgentRunResult` it derives from) carries a `personaId` and `personaName` tag (flat string values, empty/absent when no persona was applied — agents run persona-free by default). This is the substrate that lets 32-10 compute per-persona leaderboards; the tag is populated from the same shared trail-tag builder so every emission site is consistent, with no raw `StyleJson` or prompt content in the tag.
+7. **Idempotent, cursor-tracked, replayable (32-10 contract preserved).** Persona projection folds are idempotent with the **per-`(dimension, dimensionKey, window)` `SequenceNumber` cursor** 32-10 defines; re-folding the same events is a no-op; a full `RebuildAsync` (cursor reset → replay from 0) produces byte-identical persona rows to the incremental path. **Per-tenant cursor rule:** the cursor is the tenant-schema `domain_events.SequenceNumber` (an independent per-schema `BIGSERIAL`); the persona projection cursor is composite-keyed including `TenantId` — there is **no shared global cursor across tenants** (compliance/billing/audit-grade isolation). Adding the persona facets does **not** change the cursor mechanics.
 
-8. **DCB lifecycle + application events.** Events follow `AGGREGATE.ACTION.STATUS` and are appended via `IEventRepository.AppendAsync`: `PERSONA.CREATED.SUCCESS` (on create), `PERSONA.UPDATED.SUCCESS` (on style/fragment edit), `PERSONA.ARCHIVED.SUCCESS` (on archive), and `AGENT.PERSONA_APPLIED.SUCCESS` (each time a persona is composed onto an agent at resolution) with `Tags` `{ personaId, personaName, agentId, agentVersion, role, mode }`. `Metadata` carries `{ workflowVersion: "1.0.0", eventSource: "system" }`. Events fire only after a real state transition / real composition (no "lie" events). For private/SaaS personas `DomainEvent.TenantId` is the `OwnerTenantId` (or the resolving tenant for `AGENT.PERSONA_APPLIED`); for public personas it is NULL (platform feed).
+8. **DCB lifecycle events for the persona projection (no source events).** Persona-projection lifecycle reuses 32-10's `BENCHMARK.PROJECTION.UPDATED` / `BENCHMARK.PROJECTION.REBUILT` event family (tagged `{ tenantId, dimension: "persona", window }`); this story emits **no new** persona-specific source event and **no** "lie" event for an empty fold. Events land in the resolving tenant's store (`TenantId` set); persona-projection events are never cross-tenant and never on the control plane.
 
-9. **Persona-aware leaderboards compare personas within a role.** The 32-10 benchmark projection gains a **persona slice**: per-tenant leaderboards can group by `(role, personaId)` so the question "which reviewer *persona* has the best success rate / fewest functional bugs / lowest cost on my work?" is answerable, comparing `atlas` vs `nova` **like-vs-like within the reviewer role** (never reviewer-persona vs architect-persona). Since 32-10's story file does not yet exist, this story defines the persona dimension contract (the `personaId`/`personaName` trail tags from AC 7 + a `groupBy=persona` / `?personaId=` query facet) that 32-10 consumes; the projection slice is delivered here against the 32-6 trail, and 32-10 surfaces it in its leaderboard API.
+9. **No new control-plane table; no DROP-list / model-contract churn.** This story adds **no** control-plane table (the persona IS the 32-15 public `Agent`, already in the CP DROP list + `ControlPlaneDbContextModelTests`). The persona benchmark rows are the 32-10 **tenant-schema** `BenchmarkProjection`/`BenchmarkProjectionCursor` entities (owned by the per-tenant `EfTenantDbMigrator`, NOT the CP DROP list). So: **nothing** is appended to `Program.cs`'s startup-reset "Wiping Tamma-managed public-schema tables" DROP list, and `ControlPlaneDbContextModelTests.Model_Has_ExpectedControlPlaneEntities` is **not** touched. If facets require a column on the tenant `BenchmarkProjection` entity, it is an additive **Tenant** migration (single linear snapshot), `has-pending-model-changes` reports none.
 
-10. **Per-mode public/private ownership (mandatory two-scoping-model answer).** In **single-user** mode "public" personas are the shipped system personas (read-only); the sole user owns/creates private personas (`OwnerUserId` set, `OwnerTenantId` NULL); their persona benchmarks are the user's. In **SaaS** mode public personas are platform-owned (control-plane resident, every tenant may *use* but not edit), and private personas are tenant-owned (`OwnerTenantId` set, in the tenant's `t_<hex>` data plane for benchmark data). A tenant's usable persona set = **all public personas ∪ its own private personas**. Performance/benchmark data per persona is **always tenant-scoped** — two tenants running public persona `atlas` build separate, private profiles; the platform owner who owns `atlas` sees neither.
+10. **No regression on the base leaderboard.** The agent/provider/prompt dimensions and their leaderboard shape are byte-for-byte unchanged; a non-persona leaderboard query returns exactly what 32-10 returns. The persona dimension's metric values (successRate, iterations, defect-by-category, p50/p95, cost basis / billable) are computed by the **same 32-10 reducer** — this story only refines the dimension key + adds facets, never re-derives the metrics or re-implements the fold. The full `Tamma.Api.Tests` suite stays green.
 
-11. **RBAC mirrors agents.** Persona reads (`GET`) are allowed to any tenant member (SaaS) / the sole user (single-user). Private-persona create/update/archive/select require `tenant_owner`/`tenant_admin` (the existing `AgentManage` = `agents:manage` policy, or a sibling `personas:manage`); a SaaS `member` gets **403**. Public-persona mutation requires `PlatformOwnerAccess`; a tenant attempting `visibility:public` create/version gets **403** (`persona_public_write_forbidden`). Cross-tenant private read returns **404** (not 403, to avoid existence leak), mirroring 32-1/32-2.
-
-12. **Persona CRUD endpoints wired + RBAC-gated.** New handlers on `AgentEndpoints.cs` (or a colocated `PersonaEndpoints.cs`) mapped in `Program.cs` under `/api/personas`: `GET /api/personas` (list public ∪ own private; filters `?role=&visibility=&status=`), `POST /api/personas` (create; private ⇒ `AgentManage`/owner, public ⇒ `PlatformOwnerAccess`), `GET /api/personas/{id}` (get one | 404), `PUT /api/personas/{id}` (edit style/fragment), `POST /api/personas/{id}/archive`. The `resolve` surface from 32-2 (`GET /api/agents/resolve?role=&phase=`) accepts an optional `&personaId=` so workflows can request a persona-composed config. The endpoint shape is identical between modes — the auth middleware decides which owner column (`OwnerUserId` vs `OwnerTenantId`) applies based on mode + caller identity (Prompt Store precedent).
-
-13. **No empty/plain fallback, ever.** A requested persona that is unresolvable (unknown id, archived, role-mismatch, cross-tenant, or unresolvable prompt fragment) is a hard `TammaError` / 4xx — the resolver **never** returns the bare agent config "as if no persona were requested" and **never** returns a blank persona fragment (`feedback_resolution_no_empty_fallback`). Requesting *no* persona (`personaId == null`) is the legitimate persona-free path and returns the plain resolved agent config unchanged.
-
-14. **No regression.** Persona-free resolution is byte-for-byte unchanged: `IAgentResolverService.ResolveForRoleAsync(role)` / `ResolveForPhaseAsync(phase, role)` with no `personaId` return exactly what they returned before; the legacy `/api/v1/agents/*` routes and JSONB path are untouched. The new migration applies cleanly, `dotnet ef migrations has-pending-model-changes` reports **none**, and the full `Tamma.Api.Tests` suite stays green.
-
-15. **Tests** cover: persona composition into the resolved config (style merge + fragment append order, agent version unchanged); two personas / one agent / same role producing distinct configs; persona tagging on the action trail; the per-persona benchmark dimension (group-by-persona leaderboard within a role); RBAC/visibility matrix (member 403 on write, tenant public-write 403, cross-tenant 404); the no-empty-fallback failures (unknown persona, role mismatch, unresolvable fragment); per-mode principal derivation; and DCB event emission / no-emission-on-failure.
+11. **Tests** cover: persona dimension key = the persona-agent `AgentId`/`AgentName` (NOT a style row); facet breakdown by provider/model/promptVersion/credentialSource (BYOK vs platform `claude` distinguished; prompt v3 vs v4 distinguished); like-vs-like within-a-role comparison (a persona used as reviewer and architect yields two separate per-role rows; an architect-role persona never appears in the reviewer leaderboard); per-tenant isolation (tenant B's persona rows never appear in tenant A's leaderboard; platform admin denied per-tenant); incremental-vs-rebuild equivalence on the persona dimension; absent-facet explicit-`unknown` bucketing (no silent merge); min-sample guard on persona rows; and `BENCHMARK.PROJECTION.*` emission with `dimension:"persona"` (no new source event, no-emission-on-empty-fold).
 
 ## Technical Design
 
-### Architectural placement (per the Epic 32 design of record)
+### Architectural placement (per the locked model)
 
-Per `docs/superpowers/specs/2026-06-17-agent-entities-benchmarking-design.md`: **the Agent is the entity**; personas are a *named styling/behavior layer above* an agent, scoped to a role, that composes at resolution time. A persona is NOT a new provider config and NOT a fork of an agent — it is a thin, reusable overlay (style params + a prompt fragment) that rides on top of an already-resolved `ResolvedAgentConfig`. Benchmarking is like-vs-like: persona `atlas` vs persona `nova` **within the reviewer role**, on the tenant's own data, never cross-role and never cross-tenant.
+Per `docs/superpowers/specs/2026-06-20-epic-32-revised-agent-architecture.md` §3.0/§3.4: **persona = the named cross-role public/system `Agent`** (32-15). Benchmarking is a **read model derived from the tenant's DCB event stream**, owned by **32-10**; this story is the **persona-aware refinement** of that read model. It introduces no entity, no provider config, no style overlay — it keys the `persona` dimension on the persona-agent identity and adds the facets that make a persona's runs comparable like-vs-like within a role, on the tenant's own data.
 
-Ownership & data scoping reuse the design's key rule verbatim, one layer up:
+Ownership & data scoping (the design's load-bearing rule, applied to persona benchmarks):
 
 | Concern | Scope |
 |---|---|
-| **Persona definition** | Public/system (platform-owned, control-plane, usable by every tenant) **OR** private/tenant-owned (control-plane row keyed to the owner; usable only by it). Shipped defaults are public. |
-| **Persona performance/benchmark data** | **ALWAYS tenant-scoped** — the tenant that generated it owns it; never cross-tenant; platform admin who owns a public persona sees none of any tenant's per-persona metrics. |
+| **Persona definition** | Public/system — the named cross-role `Agent` curated by the platform owner (`PlatformOwnerAccess`), seeded by 32-15, usable by every tenant that **enables** it (32-16). Not owned/edited by tenants. |
+| **Persona performance/benchmark data** | **ALWAYS tenant-scoped** — the tenant that generated it owns it; lives in its `t_<hex>` schema; never cross-tenant; the platform owner who curates a public persona sees **none** of any tenant's per-persona metrics. |
 
-Story 32-1 (Agent/AgentVersion entities, `AgentVisibility`/`AgentStatus` enums, `IAgentRepository`, the visibility/ownership CHECK + per-owner partial-index pattern) and Story 32-2 (`IAgentResolverService.ResolveForRoleAsync`, the enriched `ResolvedAgentConfig` with `AgentId`/`AgentVersion`/`Source`, the `AgentManage` policy, the `/api/agents` route group) are **prerequisites**; the Agent entity is in-flight, so it is referenced **by interface** here. Every place a 32-1/32-2 field is depended on but not yet confirmed shipped is marked **(coordinate with 32-1/32-2)**.
+Story 32-10 (the `BenchmarkProjectionService`, the `persona` dimension, the leaderboard API, the `SequenceNumber` cursor, tenant isolation, and the k-anonymous admin rollup) and Story 32-15 (the persona-agent identity — `AgentId`/`AgentName`, `provider`/`model`) are **hard prerequisites**; both are referenced **by interface** and **by event-tag contract**.
 
 ### C# namespace / file structure
 
@@ -75,271 +95,191 @@ Story 32-1 (Agent/AgentVersion entities, `AgentVisibility`/`AgentStatus` enums, 
 apps/tamma-elsa/src/
   Tamma.Data/
     Entities/
-      Persona.cs                       # NEW — control-plane entity (style overlay, role-scoped)
-                                       #   reuses AgentVisibility / AgentStatus enums (32-1)
-    ControlPlaneDbContext.cs           # MODIFY — add DbSet<Persona>
-    TammaModelConfiguration.cs         # MODIFY — Persona config: CHECK + partial unique indexes
-    Repositories/
-      IPersonaRepository.cs            # NEW — Create/Update/Archive/GetById/ListVisible
-      PersonaRepository.cs             # NEW
-    Migrations/ControlPlane/
-      <ts>_AddPersonaEntity.cs         # NEW — additive migration (+ Designer + snapshot)
+      BenchmarkProjection.cs            # REUSE (32-10) — persona dimension row; OPTIONAL additive facet cols
+                                        #   (Provider, Model, AgentVersion, PromptRef, CredentialSource)
+      BenchmarkProjectionCursor.cs      # REUSE (32-10) — per-(dimension,key,window) SequenceNumber cursor
+    TammaModelConfiguration.cs          # MODIFY (only if AC2 facets need additive tenant columns)
+    Migrations/Tenant/
+      <ts>_AddPersonaBenchmarkFacets.cs # NEW (only if AC2 facets are persisted columns; additive, Tenant ctx)
   Tamma.Api/
     Services/Agents/
-      AgentResolverService.cs          # MODIFY — personaId overload: compose style + fragment
-      IAgentResolverService.cs         # MODIFY — add optional personaId param
-      ResolvedAgentConfig.cs           # MODIFY — add PersonaId/PersonaName (additive)
-      PersonaComposer.cs               # NEW — pure merge: persona StyleJson + fragment → config
-      PersonaEventTypes.cs             # NEW — PERSONA.* / AGENT.PERSONA_APPLIED.* constants
-    Services/PromptStore/
-      PromptStoreService.cs            # REUSE — resolve SystemPromptFragmentRef (no change to API)
+      BenchmarkProjectionService.cs     # MODIFY — persona dimensionKeyFor = agentId; facet sub-keys;
+                                        #   GetLeaderboardAsync persona role+facet filters
+      IBenchmarkProjectionService.cs    # MODIFY (only if the persona-comparison read needs a new method)
+      PersonaBenchmarkFacets.cs         # NEW — pure facet extraction from flat trail Tags (provider/model/
+                                        #   agentVersion/promptRef/credentialSource); unknown-bucket policy
     Endpoints/
-      AgentEndpoints.cs                # MODIFY — persona CRUD handlers (or new PersonaEndpoints.cs)
+      AgentLeaderboardEndpoints.cs      # MODIFY (32-10) — persona dimension: ?role=, ?personaId=,
+                                        #   &credentialSource=, &promptVersion= facets
     Dtos/Agents/
-      PersonaDtos.cs                   # NEW — request/response records
-    Program.cs                         # MODIFY — map /api/personas, RBAC, DI, &personaId= on resolve
+      BenchmarkDtos.cs                  # MODIFY (32-10) — PersonaLeaderboardRow + facet breakdown DTO
+    Program.cs                          # MODIFY — (no new route group; facet query params on the 32-10 route)
 ```
 
-### `Persona` entity (sketch)
+> **No new entity, no new service.** The persona-aware view is a **refinement of 32-10's `persona` dimension** plus a pure facet-extraction helper. If the facets (provider/model/promptVersion/credentialSource) are computed at query time from the folded sub-keys, even the additive tenant columns are unnecessary — prefer the no-schema-change path and persist facets only if query-time aggregation is too costly.
+
+### Persona dimension key + facets (the only genuinely new logic)
 
 ```csharp
-// Tamma.Data/Entities/Persona.cs — control-plane entity; reuses 32-1 enums
-public class Persona
+// In BenchmarkProjectionService.dimensionKeyFor — persona = the persona-AGENT identity.
+// (Locked model: persona = the named public Agent from 32-15, NOT a style row.)
+string DimensionKeyFor(string dimension, IReadOnlyDictionary<string, string> tags) => dimension switch
 {
-    public Guid Id { get; set; }
-    public string Name { get; set; } = null!;             // stable handle, e.g. "atlas"
-    public string Role { get; set; } = null!;             // AgentRole wire string — persona is role-scoped
-    public AgentVisibility Visibility { get; set; }        // reuse 32-1 enum: Public | Private
-    public Guid? OwnerTenantId { get; set; }               // set iff Private + SaaS
-    public Guid? OwnerUserId { get; set; }                 // set iff Private + SingleUser
-    public AgentStatus Status { get; set; } = AgentStatus.Active;  // reuse 32-1 enum
-    public string StyleJson { get; set; } = "{}";          // jsonb: tone, verbosity, riskTolerance, reviewStrictness
-    public string? SystemPromptFragmentRef { get; set; }   // Prompt-Store fragment key (never inline secrets)
-    public DateTime CreatedAt { get; set; }
-    public Guid? CreatedBy { get; set; }
-    public DateTime UpdatedAt { get; set; }
-    public Guid? UpdatedBy { get; set; }
-}
+    "agent"    => tags["agentId"],
+    "provider" => tags["provider"],
+    "prompt"   => tags["promptRef"],
+    "persona"  => tags["agentId"],   // a public persona's agentId IS its persona identity (32-15)
+    _ => throw new TammaError("BENCHMARK.DIMENSION.INVALID", $"Unknown dimension '{dimension}'.",
+                              retryable: false, severity: Severity.High)
+};
 ```
-
-> The persona carries **no** provider/model/credential fields — those are the agent's. A persona is purely a style overlay + an optional prompt fragment, by design credential-agnostic and provider-agnostic, so the same persona can ride any agent of the matching role.
-
-### EF model configuration (in `TammaModelConfiguration.cs`, mirroring `Agent` from 32-1)
 
 ```csharp
-modelBuilder.Entity<Persona>(entity =>
-{
-    entity.ToTable("personas", t =>
-    {
-        t.HasCheckConstraint(
-            "ck_personas_visibility_ownership",
-            "(\"Visibility\" = 0 AND \"OwnerTenantId\" IS NULL AND \"OwnerUserId\" IS NULL) " +     // 0 = Public
-            "OR (\"Visibility\" = 1 AND \"OwnerTenantId\" IS NOT NULL AND \"OwnerUserId\" IS NULL) " + // 1 = Private/SaaS
-            "OR (\"Visibility\" = 1 AND \"OwnerUserId\" IS NOT NULL AND \"OwnerTenantId\" IS NULL)");
-    });
-    entity.HasKey(e => e.Id);
-    entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
-    entity.Property(e => e.Name).IsRequired().HasMaxLength(128);
-    entity.Property(e => e.Role).IsRequired().HasMaxLength(64);
-    entity.Property(e => e.Visibility).HasConversion<int>();
-    entity.Property(e => e.Status).HasConversion<int>().HasDefaultValue(AgentStatus.Active);
-    entity.Property(e => e.StyleJson).HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
-    entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
-    entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+// PersonaBenchmarkFacets — pure extraction of the disambiguating facets from the SAME flat trail tags.
+// Absent facet => explicit "unknown" bucket (never silently merged into a populated facet).
+public sealed record PersonaFacets(
+    string Provider, string Model, int AgentVersion, string PromptRef, string CredentialSource);
 
-    // Public persona handles unique on (Name, Role)
-    entity.HasIndex(e => new { e.Name, e.Role })
-        .IsUnique().HasFilter("\"Visibility\" = 0")
-        .HasDatabaseName("IX_personas_public_name_role");
-    // Private persona handles unique per owner within a role
-    entity.HasIndex(e => new { e.OwnerTenantId, e.Name, e.Role })
-        .IsUnique().HasFilter("\"Visibility\" = 1 AND \"OwnerTenantId\" IS NOT NULL")
-        .HasDatabaseName("IX_personas_private_tenant_name_role");
-    entity.HasIndex(e => new { e.OwnerUserId, e.Name, e.Role })
-        .IsUnique().HasFilter("\"Visibility\" = 1 AND \"OwnerUserId\" IS NOT NULL")
-        .HasDatabaseName("IX_personas_private_user_name_role");
-});
+public static PersonaFacets Extract(IReadOnlyDictionary<string, string> tags) => new(
+    Provider:         tags.GetValueOrDefault("provider",         "unknown"),
+    Model:            tags.GetValueOrDefault("model",            "unknown"),
+    AgentVersion:     int.TryParse(tags.GetValueOrDefault("agentVersion"), out var v) ? v : 0,
+    PromptRef:        tags.GetValueOrDefault("promptRef",        "unknown"),
+    CredentialSource: tags.GetValueOrDefault("credentialSource", "unknown"));   // byok | platform | unknown
 ```
 
-### Resolver extension — persona composition
+The persona row's **identity** is `(role, agentId)` (like-vs-like within a role, AC4); the **facets** sub-slice that identity so a tenant can ask "is `claude` better for me on BYOK Anthropic than on the platform key?" or "did prompt v4 regress `claude`'s defect rate?" without ever comparing across roles or tenants.
 
-`IAgentResolverService` (extend; `personaId` is optional and defaults to today's behaviour):
+### Persona-comparison leaderboard (extends the 32-10 endpoint)
 
-```csharp
-// Add an optional personaId to the 32-2 resolve methods (additive, non-breaking).
-Task<ResolvedAgentConfig> ResolveForRoleAsync(
-    string role, Guid? personaId = null, CancellationToken ct = default);
+```
+GET /api/v1/orgs/{tenantId}/agents/leaderboard?dimension=persona&role=reviewer&window=30d
+      -> 200 { dimension:"persona", role:"reviewer", window:"30d",
+               ranked:[ { personaId, personaName, provider, model, successRate, avgIterationsToDone,
+                          defectRateByCategory, latencyP50Ms, latencyP95Ms, avgCostBasisUsd,
+                          avgBillableUsd, runCount } ... ],   // ordered by 32-10 tie-break chain
+               belowThreshold:[ ... ] }                       // runCount < minRuns (32-10 guard)
 
-Task<ResolvedAgentConfig> ResolveForRoleAndPhaseAsync(
-    string phase, string role, Guid? personaId = null, CancellationToken ct = default);
+GET …?dimension=persona&personaId={agentId}&role=reviewer&window=30d
+      -> 200 { personaId, personaName, role:"reviewer",
+               facets:[ { provider, model, promptVersion, credentialSource, ...metrics, runCount } ... ] }
+
+GET …?dimension=persona&role=reviewer&credentialSource=byok            // facet filter
+GET …?dimension=persona&role=reviewer&promptVersion=v4                 // facet filter
 ```
 
-Composition flow (no agent mutation — returns a new object):
+All reads are member-scoped by `RequireTenantMembershipFilter` to the caller's tenant (32-10). A tenant requesting another tenant's path → 403/404 (32-10's isolation, unchanged). The platform owner has **no** per-tenant persona route (the only cross-tenant view is 32-10's k-anonymous public-agent fleet rollup).
 
-```csharp
-public async Task<ResolvedAgentConfig> ResolveForRoleAsync(
-    string role, Guid? personaId, CancellationToken ct)
-{
-    // 1. Resolve the agent exactly as 32-2 does (precedence chain; fail-loud on no agent).
-    var resolved = await ResolveAgentForRoleAsync(role, ct);
-    if (personaId is null) return resolved;          // legitimate persona-free path (unchanged)
+### Source events (consumed, not produced)
 
-    // 2. Load + validate the persona (visible to principal AND role matches).
-    var persona = await _personas.GetVisibleAsync(personaId.Value, _principal.Resolve(), ct)
-        ?? throw new TammaError("PERSONA.RESOLVE.NOT_FOUND", ..., severity: High);   // 404, not silent
-    if (!string.Equals(persona.Role, role, StringComparison.Ordinal))
-        throw new TammaError("PERSONA.ROLE_MISMATCH", ..., severity: High);          // 400, not silent
+This story produces **no** source event. It folds the persona dimension from the same families 32-10 folds:
 
-    // 3. Resolve the prompt fragment via Epic 27 store; fail-loud if non-null & unresolvable.
-    var fragment = persona.SystemPromptFragmentRef is null
-        ? null
-        : await ResolveFragmentOrThrow(persona.SystemPromptFragmentRef, role, ct);  // NEVER empty fallback
+| Source event | Producer | Persona-fold contribution |
+|---|---|---|
+| `AGENT.TASK.SUCCESS`/`.FAILED`/`.PARTIAL` | 32-6 | persona key = `agentId`; run latency; success numerator/denominator; provider/model/credentialSource facets |
+| `AGENT.OUTCOME.RECORDED` | 32-8 | `iterationsToDone` for the persona's `avgIterationsToDone` |
+| `AGENT.DEFECT.RECORDED` | 32-8 | per-category defect rate for the persona (`BugCategory` wire strings) |
+| `AGENT.ITERATION.COMPLETED` / `AGENT.PANEL.AGGREGATED` | 32-6/32-7 | iteration fallback; panel persona attribution |
+| `AGENT.USAGE.RECORDED` | 32-9 / 32-5 | `costBasisUsd`/`billableUsd`; **`credentialSource`** facet; provider/model facets |
 
-    // 4. Pure merge: style params + appended fragment → NEW ResolvedAgentConfig.
-    var composed = PersonaComposer.Compose(resolved, persona, fragment);
-    composed = composed with { PersonaId = persona.Id, PersonaName = persona.Name };
+> The `credentialSource` facet (AC2) is the only facet that depends on 32-5/32-9 (the call-LLM endpoint surfaces `credentialSource` on the run, 32-9 tags it on `AGENT.USAGE.RECORDED`). Until those land, the facet degrades to the explicit `unknown` bucket (AC6), backfilled on the next rebuild once the tag exists — **never** silently merged.
 
-    // 5. Audit the composition (real event, after a real compose).
-    await _events.AppendAsync(AgentPersonaApplied(persona, resolved, role), ct);
-    return composed;
-}
-```
-
-`PersonaComposer.Compose` is pure and deterministic:
-- **Style merge:** persona `StyleJson` overrides the agent's style-adjacent fields it explicitly sets (e.g. `temperature`, verbosity hints), leaving provider/model/budget/tools untouched (a persona styles, it does not re-provider).
-- **Prompt append order:** `system role identity → role+action template → persona fragment` — the persona fragment is *appended* to the already-resolved `SystemPrompt`, never replacing it (AC 6). Order is fixed and tested.
-- Returns a brand-new `ResolvedAgentConfig`; the input is never mutated (CLAUDE.md state-immutability rule).
-
-### `ResolvedAgentConfig` (additive)
-
-```csharp
-// Tamma.Api/Services/Agents/ResolvedAgentConfig.cs — ADDITIVE fields only
-public class ResolvedAgentConfig
-{
-    // ... all existing fields unchanged (Role, Handle, Provider, Model, Temperature,
-    //     MaxTokens, TokenBudget, Tools, SystemPrompt, Source, Phase, MaxBudgetUsd,
-    //     PermissionMode, AllowedTools, and the 32-2 AgentId/AgentVersion) ...
-
-    /// <summary>Persona composed onto this config (32-12). Null = persona-free run.</summary>
-    public Guid? PersonaId { get; init; }
-
-    /// <summary>Stable persona handle — the benchmark join key (e.g. "atlas").</summary>
-    public string? PersonaName { get; init; }
-}
-```
-
-### Benchmark slice (the persona dimension)
-
-The action trail (32-6) is the substrate. This story:
-1. Extends the **shared trail-tag builder** so every trail event + `AgentRunResult` carries `personaId`/`personaName` (flat strings; absent ⇒ persona-free). This is the join key 32-10 groups on.
-2. Delivers a **per-persona projection facet** over the 32-6 trail: aggregate success rate, avg iterations-to-done, bug-counts-by-type, cost, and latency grouped by `(role, personaId)` for the calling tenant only. This answers "best reviewer *persona* on my work."
-3. Defines the **dimension contract** 32-10 consumes (the leaderboard API gains `?groupBy=persona` / `?personaId=` facets). 32-10's story file does not yet exist; this story owns the persona tags + the projection slice, and 32-10 surfaces them in its leaderboard endpoint. Like-vs-like is enforced by always pairing `personaId` with its `role` — persona comparisons are scoped within a role, never across roles, never across tenants.
-
-### DCB events (NEW)
+### DCB lifecycle (reuses 32-10's family)
 
 | Event | When | Tags |
 |---|---|---|
-| `PERSONA.CREATED.SUCCESS` | new `Persona` committed | `personaId, personaName, role, visibility, ownerTenantId?, ownerUserId?, mode` |
-| `PERSONA.UPDATED.SUCCESS` | style/fragment edited | `personaId, personaName, role, visibility, mode` |
-| `PERSONA.ARCHIVED.SUCCESS` | `Status` → archived | `personaId, personaName, role, visibility, mode` |
-| `AGENT.PERSONA_APPLIED.SUCCESS` | persona composed onto an agent at resolution | `personaId, personaName, agentId, agentVersion, role, mode` |
+| `BENCHMARK.PROJECTION.UPDATED` | persona fold advances the cursor | `{ tenantId, dimension: "persona", window, rowsUpdated }` |
+| `BENCHMARK.PROJECTION.REBUILT` | persona dimension rebuilt (cursor reset → replay) | `{ tenantId, dimension: "persona", window }` |
 
-Appended via `IEventRepository.AppendAsync(DomainEvent { Type, TenantId, Tags, Metadata, Data, CreatedAt })` into the same store the rest of Epic 32 uses (`SequenceNumber` total-order cursor is server-assigned). Private/SaaS persona lifecycle events carry `TenantId = OwnerTenantId`; public-persona lifecycle events carry `TenantId = NULL` (platform feed); `AGENT.PERSONA_APPLIED` carries the *resolving* tenant's id (the run is the tenant's, even for a public persona — consistent with the design's "data is always tenant-scoped").
-
-### API shape
-
-```
-GET    /api/personas                  → 200 [PersonaSummary]   (public ∪ own private; ?role=&visibility=&status=)
-POST   /api/personas                  → 201 PersonaResponse     (private ⇒ AgentManage/owner; public ⇒ PlatformOwnerAccess; member ⇒ 403)
-GET    /api/personas/{id}             → 200 PersonaDetail | 404 (cross-tenant private ⇒ 404)
-PUT    /api/personas/{id}             → 200 PersonaResponse      (same ownership rule; emits PERSONA.UPDATED.SUCCESS)
-POST   /api/personas/{id}/archive     → 200 { id, status: "archived" }
-GET    /api/agents/resolve?role=&phase=&personaId=   → 200 ResolvedAgentConfig (persona composed) | 400 role-mismatch | 404 persona-not-found
-```
-
-Per-mode + per-tenant handling reuses the 32-2 endpoint conventions: public-scope writes gated by `PlatformOwnerAccess`; private-scope writes derive principal columns from `ITammaModeProvider` + `ITenantContext`/`ClaimsPrincipal` (SaaS ⇒ `OwnerTenantId`; single-user ⇒ `OwnerUserId`); member-role SaaS callers get 403 on writes; cross-tenant private read ⇒ 404.
+No persona-specific source event; no event on an empty fold. Appended via the tenant `IEventRepository` into the resolving tenant's store (`TenantId` set) — never the control plane, never cross-tenant.
 
 ### Per-mode ownership (mandatory two-scoping-model answer)
 
 | Question | single-user | SaaS |
 |---|---|---|
-| Who owns a **private** persona? | The sole user (`OwnerUserId`; `OwnerTenantId` NULL). | The tenant (`OwnerTenantId`); `tenant_owner`/`tenant_admin` edit, `member` read-only. |
-| Who owns a **public** persona? | Shipped system personas (read-only to the user). | Platform owner (`PlatformOwnerAccess`); CP-resident; every tenant may *use* but not edit. |
-| Who can apply a persona to a run? | The user. | Any member (apply ≈ read of the persona + resolve); editing the persona needs owner/admin. |
-| Where do per-persona benchmarks live? | The user's data — `user_id`-keyed. | The tenant's `t_<hex>` data plane; never cross-tenant. |
-| Resolution / benchmark principal | `user_id` | `tenant_id` |
-| Mode source | `ITammaModeProvider` (process-stable) | same |
+| Who owns a **persona** (the definition)? | The platform — personas are public `Agent`s (`PlatformOwnerAccess` to curate); the sole user uses an enabled subset. | The platform — same public personas, shared cross-tenant; tenants enable a subset (32-16), never edit. |
+| Who owns the **per-persona benchmark data**? | The sole user — their instance, their dataset (`UserId`-keyed tenant). | The tenant that generated it — **always** tenant-scoped; one persona definition → many independent per-tenant datasets. |
+| Who reads the persona leaderboard? | The user (member-read). | Any tenant member (`MemberAccess` + `RequireTenantMembershipFilter`) for their own tenant only. |
+| Can a platform admin read a tenant's persona benchmark? | N/A (sole user). | **No.** Per-persona rows are structurally unreachable cross-tenant; the only admin view is 32-10's k-anonymous **public-agent** fleet rollup — never a single tenant's persona row, never a tenant id. |
+| Where do persona projection rows + cursors live? | The single tenant store (`t_<hex>`). | The originating tenant's `t_<hex>` schema (per-tenant routing via `ITenantDbContextFactory`); per-tenant `SequenceNumber` cursor. |
+| Mode source | `ITammaModeProvider` (`TammaMode.cs`) — process-stable. | same |
 
 ### Integration points
 
-- **`Agent` / `AgentVersion` / `AgentVisibility` / `AgentStatus` / `IAgentRepository`** (32-1, in-flight) — persona reuses the enums + the visibility/ownership CHECK + per-owner partial-index pattern; referenced **by interface**.
-- **`IAgentResolverService` / `ResolvedAgentConfig`** (`Tamma.Api/Services/Agents/`) — the resolver gains the optional `personaId`; `ResolvedAgentConfig` gains `PersonaId`/`PersonaName` (additive).
-- **`AgentEndpoints.cs`** (`apps/tamma-elsa/src/Tamma.Api/Endpoints/AgentEndpoints.cs`) — persona CRUD handlers + `&personaId=` on resolve.
-- **`PromptStoreService`** (`apps/tamma-elsa/src/Tamma.Api/Services/PromptStore/PromptStoreService.cs`) — `ResolveRoleActionAsync` / `ResolveRoleActionForTenantAsync` resolve the persona fragment through the existing Epic 27 layering; no Prompt-Store API change.
-- **`RolePhaseMap` / `AgentRole`** (`Tamma.Core/Agents/`) — persona `Role` validated on create/resolve.
-- **`IEventRepository`** (`Tamma.Data/Repositories/EventRepository.cs`) + **`DomainEvent`** (`Tamma.Data/Entities/DomainEvent.cs`) — DCB emission.
-- **`ITammaModeProvider`** (`Tamma.Api/Services/PromptStore/TammaMode.cs`) + **`ITenantContext`** + `ClaimsPrincipal` — per-mode principal derivation.
-- **Action trail (32-6)** (`AGENT.TASK.*` etc.) — extended tag builder carries `personaId`/`personaName`.
-- **Benchmark leaderboards (32-10)** — consumes the persona dimension contract defined here.
-- **Auth policies** (`Program.cs`): `PlatformOwnerAccess`, `AgentManage` (`agents:manage`), member read access — the 32-2 precedent.
+- **Story 32-10** (`BenchmarkProjectionService`, `BenchmarkProjection`/`BenchmarkProjectionCursor`, the leaderboard API, the `SequenceNumber` cursor, tenant isolation, the k-anonymous admin rollup) — this story refines its `persona` dimension key and adds facets + the persona-comparison query. **Hard prerequisite; by interface.**
+- **Story 32-15** (persona reframe + seeding) — supplies the persona-agent identity (`AgentId`/`AgentName`, nullable `Role`, explicit `provider`/`model`); for a public persona, `agentId` (trail tag) **is** the persona identity. **Hard prerequisite; by event-tag contract.**
+- **Story 32-16** (per-tenant enablement) — only enabled personas have runs in a tenant; the persona leaderboard naturally reflects the enabled set.
+- **Story 32-6** (action trail) — the `agentId`/`agentVersion`/`provider`/`promptRef` flat tags this story keys + facets on. **By tag contract.**
+- **Story 32-9 / 32-5** (usage/cost + call-LLM) — surface `credentialSource` + `costBasisUsd`/`billableUsd` on `AGENT.USAGE.RECORDED`; the `credentialSource` facet (AC2) consumes them, degrading to `unknown` until they land.
+- **`ITenantDbContextFactory` / `IEventRepository`** — the structural isolation plane + the cursor-paged, tenant-scoped, null-tenant-guarded read (32-10).
+- **`RequireTenantMembershipFilter` + `/api/v1/orgs/{tenantId}`** — the member-readable tenant-path the leaderboard rides (32-10).
+- **`ITammaModeProvider`** (`Tamma.Api/Services/PromptStore/TammaMode.cs`) — per-mode principal derivation.
 
 ## Dependencies
 
-- **Prerequisite**: Story 32-1 (Agent entity model & versioned saved config) — provides `Agent`/`AgentVersion`, the `AgentVisibility`/`AgentStatus` enums the persona reuses, and the visibility/ownership CHECK + per-owner partial-index pattern. **In-flight — reference by interface.**
-- **Prerequisite**: Story 32-2 (Agent registry, resolution & RBAC API) — provides `IAgentResolverService.ResolveForRoleAsync`, the enriched `ResolvedAgentConfig` (`AgentId`/`AgentVersion`/`Source`), the `AgentManage` policy, the `/api/agents` route group, and the no-empty-fallback resolution discipline this story extends.
-- **Prerequisite / consumer**: Story 32-10 (Benchmark projections & leaderboards) — defines the leaderboard surface; this story supplies the **persona dimension** (trail tags + group-by-persona projection) it slices on. 32-10's story file does not yet exist; coordinate the leaderboard query facet (`?groupBy=persona` / `?personaId=`) at integration.
-- **Reuses**: Story 32-6 (action trail — extended with persona tags), Epic 27 (Prompt Store — fragment resolution + the RBAC/per-mode model mirrored), Epic 28 (schema-per-tenant — structural isolation of private personas + per-persona benchmark data).
-- **Design of record**: `docs/superpowers/specs/2026-06-17-agent-entities-benchmarking-design.md` (Epic 32 design — "the Agent is the entity; personas are named variants within a role; benchmark like-vs-like").
-- **Related project rule**: `feedback_resolution_no_empty_fallback` — persona/fragment resolution is fail-loud, never empty/plain.
+**Internal (hard prerequisites):**
+
+- **Story 32-10** (Benchmark projections & leaderboards) — owns the fold, the `persona` dimension, the leaderboard API, the `SequenceNumber` cursor, tenant isolation, and the k-anonymous admin rollup. This story extends its persona dimension; it does **not** rebuild the projection engine.
+- **Story 32-15** (Persona reframe + seeding) — defines the persona-agent identity (`AgentId`/`AgentName`, `provider`/`model`) this story keys on. Without it there is no "persona" to benchmark.
+
+**Internal (consumed by tag contract / soft-degrade):**
+
+- **Story 32-6** (Agent action trail) — the `agentId`/`agentVersion`/`provider`/`promptRef` tags the persona fold reads.
+- **Story 32-8** (Outcome capture & bug taxonomy) — outcome/defect events the persona metrics fold.
+- **Story 32-9** (Agent usage & cost emission) + **Story 32-5** (Call-LLM endpoint) — surface `credentialSource` + cost on the run; the `credentialSource` facet degrades to `unknown` until they land (no parallel event invented).
+- **Story 32-16** (Per-tenant enablement) — constrains which personas a tenant runs (and thus benchmarks).
+
+**Consumers / related (downstream, not blockers):**
+
+- **Story 32-13** (Agent management & benchmark dashboards) — surfaces the persona-comparison leaderboard + facet breakdown in the UI.
+- **Story 32-14** (A/B experiment framework) — may compare two personas as an experiment arm using this dimension.
+
+**Related sibling (split-out, NOT a dependency):**
+
+- **Story 32-19** (Agent style/voice variants — NEW) — the `atlas`/`nova` style/voice overlay formerly mis-modelled as "persona." A *variant* is a style profile composed onto a persona-agent (its own visibility/XOR/index discipline). If 32-19 ships its own variant benchmark facet, it aligns with this dimension; **not built or assumed here**.
+
+**Design of record:** `docs/superpowers/specs/2026-06-20-epic-32-revised-agent-architecture.md` (§3.0 reframe table, §3.1 persona = system-agent entity, §3.4 disposition of 32-12).
+
+**Related project rule:** `feedback_resolution_no_empty_fallback` — facet/dimension resolution fails loud on a malformed key and degrades to an **explicit** `unknown` bucket on an absent one; it never silently merges into a populated facet.
 
 ## Testing Strategy
 
-Tests are xUnit under `apps/tamma-elsa/tests/Tamma.Api.Tests/Agents/` (and `Personas/`). Docker-bound suites run via `sg docker -c "dotnet test ..."` (see `reference_dotnet_test_docker`). TDD: write the failing test first.
+Tests are xUnit under `apps/tamma-elsa/tests/Tamma.Api.Tests/Agents/`. Docker-bound suites run via `sg docker -c "dotnet test ..."` (see `reference_dotnet_test_docker`). TDD: write the failing test first.
 
-1. **Composition** (`PersonaComposerTests` / `AgentResolverServiceTests`): a persona's `StyleJson` overrides only style-adjacent fields (temperature/verbosity), leaving provider/model/budget/tools untouched; the fragment is *appended* to the agent system prompt in the fixed order `role identity → role+action → persona fragment`; the input `ResolvedAgentConfig` and the agent's pinned version are unmodified (immutability); `PersonaId`/`PersonaName` stamped on the output.
-2. **Two personas / one agent / same role** (`AgentResolverServiceTests`): seed one reviewer agent + personas `atlas` and `nova` (both `role=reviewer`); resolve under each — both return the same `AgentId`/`AgentVersion`, distinct effective `SystemPrompt`/style. Proves no agent fork.
-3. **Persona tagging on the trail** (`PersonaTrailTaggingTests`): a persona-composed run's `AGENT.TASK.*` / `AGENT.ITERATION.COMPLETED` / `REVIEW.BUG.RECORDED` events carry `personaId`/`personaName`; a persona-free run carries empty/absent persona tags; no raw `StyleJson`/prompt content in tags (redaction).
-4. **Per-persona benchmark dimension** (`PersonaLeaderboardProjectionTests`): seed trail rows for `atlas` and `nova` under `role=reviewer`; the group-by-`(role, personaId)` projection ranks them within the reviewer role on success rate / bug counts / cost; an architect-role persona never appears in the reviewer leaderboard (like-vs-like); tenant B's rows never appear in tenant A's projection (isolation).
-5. **RBAC / visibility matrix** (`PersonaEndpointsTests`, in-process `WebApplicationFactory`): member create/update/archive → 403; tenant `POST /api/personas {visibility:public}` → 403 `persona_public_write_forbidden`; platform owner public create → 201; cross-tenant `GET /api/personas/{B-private-id}` → 404; `GET /api/personas` from A never returns B's private rows.
-6. **No empty/plain fallback** (`AgentResolverServiceTests`): unknown `personaId` → `PERSONA.RESOLVE.NOT_FOUND` 404; persona role-mismatch → `PERSONA.ROLE_MISMATCH` 400; non-null `SystemPromptFragmentRef` that the Prompt Store can't resolve → `TammaError` (no blank fragment); `personaId == null` → plain resolved config (legitimate persona-free path).
-7. **Per-mode principal derivation** (`[Theory]` over `TammaMode.SingleUser`/`SaaS`): single-user private create sets `OwnerUserId`/null tenant; SaaS sets `OwnerTenantId`/null user; CHECK rejects public-with-owner / private-with-no-owner / private-with-both.
-8. **DCB events** (`PersonaEventsTests`): create/update/archive emit exactly one `PERSONA.*` event each with correct tags; a composed resolution emits one `AGENT.PERSONA_APPLIED.SUCCESS` with `{personaId, agentId, role}`; a validation/resolution failure leaves the event store untouched (no-emission-on-failure).
-9. **Migration + no regression** (`ControlPlaneDbContextModelTests` extended): migration applies, `has-pending-model-changes` → none, the `personas` table/indexes/CHECK exist; persona-free resolution and the legacy `/api/v1/agents/*` routes stay byte-for-byte green.
+1. **Persona dimension key = persona-agent identity** (`BenchmarkProjectionServiceTests`): a fold over a fixture stream where `agentId` is the public `claude` persona produces a persona row keyed by that `agentId`/`AgentName` — **not** a style row; assert the key equals the 32-15 persona-agent identity, never a tone/verbosity value.
+2. **Facet breakdown** (`PersonaBenchmarkFacetsTests` / `BenchmarkProjectionServiceTests`): runs of persona `claude` split by `credentialSource` (`byok` vs `platform`) yield distinct facet buckets with the same `personaId`; prompt v3 vs v4 (`promptRef`) split distinctly; same for provider/model; no raw config/prompt/key appears in any facet value.
+3. **Like-vs-like within a role** (`BenchmarkLeaderboardEndpointsTests`): persona `claude` used as `reviewer` and as `architect` yields two separate per-role rows; `?dimension=persona&role=reviewer` ranks `claude`/`gemini`/`codegpt` only as reviewer; an architect-role persona row never appears in the reviewer leaderboard.
+4. **Per-tenant isolation** (`BenchmarkIsolationTests`, docker-bound): seed persona rows for tenant A and B; `GET …/orgs/{B}/…?dimension=persona` returns only B's; a member of A hitting B's path → 403/404; a platform owner has no per-tenant persona route; a public persona run by A leaves persona rows only in A's schema.
+5. **Incremental-vs-rebuild equivalence on the persona dimension** (`BenchmarkProjectionServiceTests`): fold persona events, fold again (cursor skip → no double-count), then `RebuildAsync` (reset → replay) → byte-identical persona rows + facets; the per-tenant composite cursor never crosses tenants.
+6. **Absent-facet explicit bucketing** (`PersonaBenchmarkFacetsTests`): a pre-32-5 run with no `credentialSource` tag lands in an explicit `unknown` facet, **never** merged into `byok`/`platform`; a malformed `dimension` throws `BENCHMARK.DIMENSION.INVALID` (no silent fallback).
+7. **Min-sample guard on persona rows** (`BenchmarkLeaderboardEndpointsTests`): a persona with `runCount < minRuns` lands in `belowThreshold`, never `ranked` (32-10 guard reused).
+8. **DCB lifecycle** (`BenchmarkProjectionServiceTests`): a persona fold emits `BENCHMARK.PROJECTION.UPDATED` with `dimension:"persona"`; a rebuild emits `BENCHMARK.PROJECTION.REBUILT`; an empty fold emits nothing; **no** new persona-specific source event exists (grep proves it).
+9. **No regression** (`BenchmarkProjectionServiceTests` / `BenchmarkLeaderboardEndpointsTests`): agent/provider/prompt dimensions + their leaderboard shape unchanged; persona metric values come from the same 32-10 reducer (assert identical numbers for the same runs); no CP table added; `has-pending-model-changes` reports none; the `Tamma.Api.Tests` suite stays green.
 
-**Coverage**: critical paths (composition merge, fragment-fail-loud, ownership guard, event emission, persona tagging) → 100%; entity/repository line ≥ 80%.
+**Coverage**: critical paths (persona dimension key, facet extraction + unknown-bucket, like-vs-like role scoping, tenant isolation, cursor idempotency) → 100%; supporting line ≥ 80%.
 
 ## Estimated Effort
 
-4-5 days
+2-3 days (a refinement of 32-10's persona dimension + facet extraction + the comparison query — no new entity, no new fold, no new service).
 
 ## Files Created / Modified
 
 | File | Action |
 |------|--------|
-| `apps/tamma-elsa/src/Tamma.Data/Entities/Persona.cs` | Create |
-| `apps/tamma-elsa/src/Tamma.Data/Repositories/IPersonaRepository.cs` | Create |
-| `apps/tamma-elsa/src/Tamma.Data/Repositories/PersonaRepository.cs` | Create |
-| `apps/tamma-elsa/src/Tamma.Data/Migrations/ControlPlane/<ts>_AddPersonaEntity.cs` (+ `.Designer.cs`, snapshot) | Create |
-| `apps/tamma-elsa/src/Tamma.Api/Services/Agents/PersonaComposer.cs` | Create |
-| `apps/tamma-elsa/src/Tamma.Api/Services/Agents/PersonaEventTypes.cs` | Create |
-| `apps/tamma-elsa/src/Tamma.Api/Dtos/Agents/PersonaDtos.cs` | Create |
-| `apps/tamma-elsa/tests/Tamma.Api.Tests/Personas/PersonaComposerTests.cs` | Create |
-| `apps/tamma-elsa/tests/Tamma.Api.Tests/Personas/PersonaEndpointsTests.cs` | Create |
-| `apps/tamma-elsa/tests/Tamma.Api.Tests/Personas/PersonaEventsTests.cs` | Create |
-| `apps/tamma-elsa/tests/Tamma.Api.Tests/Personas/PersonaLeaderboardProjectionTests.cs` | Create |
-| `apps/tamma-elsa/tests/Tamma.Api.Tests/Personas/PersonaTrailTaggingTests.cs` | Create |
-| `apps/tamma-elsa/src/Tamma.Data/Entities/Persona.cs` style/visibility reuse of `AgentVisibility`/`AgentStatus` (32-1) | Reference (coordinate with 32-1) |
-| `apps/tamma-elsa/src/Tamma.Data/ControlPlaneDbContext.cs` | Modify (add `DbSet<Persona>`) |
-| `apps/tamma-elsa/src/Tamma.Data/TammaModelConfiguration.cs` | Modify (Persona entity config: CHECK + partial indexes) |
-| `apps/tamma-elsa/src/Tamma.Api/Services/Agents/AgentResolverService.cs` | Modify (personaId compose path) |
-| `apps/tamma-elsa/src/Tamma.Api/Services/Agents/IAgentResolverService.cs` | Modify (optional `personaId` param) |
-| `apps/tamma-elsa/src/Tamma.Api/Services/Agents/ResolvedAgentConfig.cs` | Modify (add `PersonaId`/`PersonaName`) |
-| `apps/tamma-elsa/src/Tamma.Api/Endpoints/AgentEndpoints.cs` | Modify (persona CRUD handlers + `&personaId=` on resolve) |
-| `apps/tamma-elsa/src/Tamma.Api/Program.cs` | Modify (map `/api/personas`, RBAC, DI `IPersonaRepository`) |
-| `apps/tamma-elsa/tests/Tamma.Api.Tests/Agents/AgentResolverServiceTests.cs` | Modify (persona composition + no-fallback cases) |
-| `apps/tamma-elsa/tests/Tamma.Api.Tests/Epic28/ControlPlaneDbContextModelTests.cs` | Modify (assert `personas` table/indexes/CHECK) |
+| `apps/tamma-elsa/src/Tamma.Api/Services/Agents/PersonaBenchmarkFacets.cs` | Create (pure facet extraction + unknown-bucket policy) |
+| `apps/tamma-elsa/tests/Tamma.Api.Tests/Agents/PersonaBenchmarkFacetsTests.cs` | Create |
+| `apps/tamma-elsa/tests/Tamma.Api.Tests/Agents/PersonaLeaderboardTests.cs` | Create (persona key, like-vs-like, facets, min-sample) |
+| `apps/tamma-elsa/src/Tamma.Api/Services/Agents/BenchmarkProjectionService.cs` | Modify (32-10) — persona `dimensionKeyFor` = `agentId`; facet sub-keys; persona role+facet read |
+| `apps/tamma-elsa/src/Tamma.Api/Services/Agents/IBenchmarkProjectionService.cs` | Modify (32-10) — only if the persona-comparison read needs a new method signature |
+| `apps/tamma-elsa/src/Tamma.Api/Endpoints/AgentLeaderboardEndpoints.cs` | Modify (32-10) — persona `?role=`, `?personaId=`, `&credentialSource=`, `&promptVersion=` facets |
+| `apps/tamma-elsa/src/Tamma.Api/Dtos/Agents/BenchmarkDtos.cs` | Modify (32-10) — `PersonaLeaderboardRow` + facet-breakdown DTO |
+| `apps/tamma-elsa/src/Tamma.Data/Entities/BenchmarkProjection.cs` | Modify (32-10) — ONLY if AC2 facets are persisted columns (else query-time; no change) |
+| `apps/tamma-elsa/src/Tamma.Data/TammaModelConfiguration.cs` | Modify — ONLY if persisted facet columns are added (additive, tenant entity) |
+| `apps/tamma-elsa/src/Tamma.Data/Migrations/Tenant/<ts>_AddPersonaBenchmarkFacets.cs` | Create — ONLY if persisted facet columns are added (additive **Tenant** migration) |
+| `apps/tamma-elsa/tests/Tamma.Api.Tests/Agents/BenchmarkIsolationTests.cs` | Modify (32-10) — add persona-dimension isolation case |
+| `apps/tamma-elsa/tests/Tamma.Api.Tests/Agents/BenchmarkProjectionServiceTests.cs` | Modify (32-10) — add persona key + equivalence + lifecycle cases |
 
-> The 32-6 shared trail-tag builder is extended to carry `personaId`/`personaName`; the exact file lands when 32-6 is implemented — coordinate so the persona tags are added to the single shared builder rather than per emission site.
+> **Prefer the no-schema-change path:** compute the facets at query time from the folded sub-keys. Persist facet columns (the last three rows) **only** if query-time aggregation proves too costly. Either way, this is a **Tenant** migration (owned by `EfTenantDbMigrator`), never a control-plane table — so the `Program.cs` DROP list and `ControlPlaneDbContextModelTests` are untouched.
 
 ## Dev Notes
 
@@ -347,48 +287,86 @@ Tests are xUnit under `apps/tamma-elsa/tests/Tamma.Api.Tests/Agents/` (and `Pers
 
 Before implementing this story, ensure you have:
 
-1. Read [BEFORE_YOU_CODE.md](../../../guides/BEFORE_YOU_CODE.md)
+1. Read [BEFORE_YOU_CODE.md](../../BEFORE_YOU_CODE.md)
 2. Searched `.dev/` for related spikes, bugs, findings, decisions (esp. `feedback_resolution_no_empty_fallback`)
-3. Read the Epic 32 design of record: `docs/superpowers/specs/2026-06-17-agent-entities-benchmarking-design.md`
-4. Confirmed which `Agent`/`AgentVersion` fields and which enums (`AgentVisibility`/`AgentStatus`) Story 32-1 actually shipped, and which resolve methods + `ResolvedAgentConfig` fields Story 32-2 shipped — every **(coordinate with 32-1/32-2)** marker must be reconciled before coding
-5. Reviewed the Prompt Store RBAC + per-mode precedent (`PromptEndpoints.cs`, `PromptManage`) and the 32-1/32-2 agent ownership/visibility pattern this mirrors
+3. Read the design of record §3.0 (the reframe table — persona = named cross-role system agent) and §3.4 (disposition of 32-12 — rewrite + split the style overlay to 32-19) IN FULL
+4. Read **32-10** (the benchmark projection + leaderboard + `persona` dimension + cursor + isolation you extend) and **32-15** (the persona-agent identity you key on) — confirm 32-10's `persona` dimension key and `BenchmarkProjection` shape before refining them
+5. Confirmed which trail tags 32-6/32-9 actually emit (`agentId`/`agentVersion`/`provider`/`promptRef`/`credentialSource`) so the facet extraction reads real keys
 6. Planned the TDD approach (Red-Green-Refactor)
 
 ### Key design decisions
 
-- **A persona is an overlay, not a fork.** The whole point is one agent definition, many styles — so the persona carries no provider/model/credential fields and composes at resolution time into a *new* `ResolvedAgentConfig`. Cloning an agent to change its tone would defeat the benchmark ("which style?" becomes unanswerable like-vs-like). This is the design-of-record's "personas are named variants within a role."
-- **Stable name is the join key.** Persona benchmark history must survive style edits, exactly as agent history survives config edits (32-1). Edit ⇒ `PERSONA.UPDATED.SUCCESS` audit event, never a new identity.
-- **Role-scoped so comparisons are like-vs-like.** A persona is bound to a role; leaderboards group by `(role, personaId)`. Comparing a reviewer persona to an architect persona is meaningless, so the model forbids it structurally.
-- **Fail loud, never plain.** A requested-but-unresolvable persona (or fragment) is a hard error — the load-bearing project rule. The only "no persona" path is an explicit `personaId == null`, which returns the plain agent config unchanged.
-- **Reuse 32-1 enums + the ownership/visibility pattern wholesale.** Personas mirror agents byte-for-byte on visibility, ownership XOR CHECK, per-owner partial indexes, and 404-not-403 cross-tenant reads. Do not invent a parallel ownership model.
-- **Data is always tenant-scoped.** Even running a *public* persona, the per-persona benchmark data belongs to the resolving tenant — the platform owner who authored the public persona sees none of any tenant's per-persona metrics.
+- **Persona = the named system agent, NOT a style overlay.** This is the whole reframe (design §3.0/§3.4). The persona dimension keys on the 32-15 persona-agent identity (`AgentId`/`AgentName` = `claude`/`gemini`/`codegpt`). The old "style/tone variant within a role" is a **different** feature, split out to 32-19. No `Persona` table, no `PersonaComposer`, no `StyleJson` here.
+- **No new entity; ride 32-10.** Benchmarking already exists; this is a persona-aware *refinement* of 32-10's `persona` dimension + facets + the comparison query. Building a parallel projection would fork the read model — forbidden.
+- **Facets disambiguate a persona's runs.** Provider/model/promptVersion/`credentialSource` are flat-string facets so "`claude` on BYOK vs platform" and "`claude` under prompt v3 vs v4" are answerable within one persona, without comparing across roles or tenants.
+- **Like-vs-like within a role.** A persona is cross-role (32-15), but a comparison is always scoped to **one role** — `(role, agentId)` — so "best reviewer persona" is meaningful and "reviewer vs architect" is structurally impossible.
+- **Data is always tenant-scoped.** Even for a *public* persona, the per-persona benchmark belongs to the resolving tenant; the platform owner who curates the persona sees none of any tenant's per-persona metrics (design ownership rule). The only cross-tenant view is 32-10's k-anonymous public-agent fleet rollup — owned there.
+- **Fail loud on malformed, explicit-unknown on absent.** A bad `dimension` throws; an absent facet tag buckets to an explicit `unknown` (never silently merged) — `feedback_resolution_no_empty_fallback`, applied to projection facets.
 
-### Migration discipline (Epic 28 conventions)
+### Codebase gotchas (baked into the AC)
 
-- `personas` is an **additive** table — a normal `dotnet ef migrations add AddPersonaEntity --context ControlPlaneDbContext`, not a baseline CHECK edit.
-- After adding, run `dotnet ef migrations has-pending-model-changes --context ControlPlaneDbContext` → must report none.
-- Mirror entity config **only** in `TammaModelConfiguration.cs` (the single source); the snapshot/Designer are generated, not hand-edited.
-- Run C# tests with `sg docker -c "dotnet test ..."` (session docker group is stale; build needs no wrapper).
+- **No control-plane table → no DROP list / no model-contract churn.** The persona is the 32-15 public `Agent` (already CP-registered); the benchmark rows are 32-10's **tenant-schema** entities (owned by `EfTenantDbMigrator`). So nothing is appended to `Program.cs`'s "Wiping Tamma-managed public-schema tables" DROP list, and `ControlPlaneDbContextModelTests` is not edited (AC9).
+- **Per-tenant cursor rule.** The fold cursor is the tenant-schema `domain_events.SequenceNumber` (an independent per-schema `BIGSERIAL`); the persona projection cursor is composite-keyed including `TenantId` — **no shared global cursor across tenants** (32-10's rule, reaffirmed for the persona dimension). Compliance/billing/audit-grade isolation depends on it.
+- **`PlatformOwnerAccess`, never `OwnerAccess`.** Persona-catalogue curation (32-15) is `PlatformOwnerAccess`; persona *benchmark reads* are tenant-member (`MemberAccess` + `RequireTenantMembershipFilter`). There is no platform-global persona-benchmark admin route here (the k-anonymous public-agent rollup is 32-10's).
+- **Sequential migration discipline.** If facets are persisted, it is a single additive **Tenant** migration on the existing linear snapshot (not a branch); `has-pending-model-changes` → none.
 
 ### Edge cases
 
-- Persona whose `Role` differs from the requested role → `PERSONA.ROLE_MISMATCH` 400 (never composed onto a mismatched agent).
-- Archived persona requested at resolve → treat as not-found (404); a persona archived mid-flight does not retroactively rewrite past trail tags.
-- `SystemPromptFragmentRef = null` → no fragment append; style merge still applies (a style-only persona is valid).
-- Public persona name collision with an existing handle → 409 (partial unique index), no event.
-- Two tenants each own a private persona `atlas`/`reviewer` → allowed (per-owner partial index); benchmarks stay separate.
+- A persona used for two roles (cross-role by design) → two separate per-role rows; a comparison always names a role, so the rows never collide.
+- A run with no `credentialSource` tag (pre-32-5) → explicit `unknown` facet bucket; backfilled on the next rebuild once 32-5/32-9 land (never silently merged into `byok`/`platform`).
+- A persona a tenant never enabled (32-16) → zero runs → absent from the tenant's leaderboard (no synthetic row).
+- Two tenants both running public persona `claude` → separate per-tenant rows; neither sees the other; the platform owner sees neither (only the k-anonymous fleet rollup, 32-10).
+- A persona archived in 32-15 mid-window → its historical persona rows are unchanged (the fold is over immutable trail events); no retroactive rewrite.
+
+### Migration discipline (Epic 28 conventions, only if facets are persisted)
+
+- Facet columns (if added) are an **additive Tenant** migration: `dotnet ef migrations add AddPersonaBenchmarkFacets` against the **Tenant** context (the `InitialTenant` baseline exists — additive, not a baseline edit), `has-pending-model-changes` → none.
+- Mirror entity config **only** in `TammaModelConfiguration.cs`; the snapshot/Designer are generated, not hand-edited.
+- Tenant-schema tables do **not** go in the `Program.cs` DROP list (the per-tenant `EfTenantDbMigrator` owns them) and do **not** touch `ControlPlaneDbContextModelTests`.
+- Run C# tests with `sg docker -c "dotnet test ..."` (session docker group is stale; build needs no wrapper).
+
+## Risks & Mitigations
+
+| Risk | Severity | Mitigation |
+|------|----------|------------|
+| Persona dimension still keyed by a style row (old model leaks through) | High | AC1 pins the key to the 32-15 persona-agent `AgentId`; explicit test asserts the key is the persona-agent identity, never a tone/verbosity value; no `Persona`/`StyleJson` type exists. |
+| Cross-tenant leakage of per-persona performance data | Critical | Reuse 32-10's structural isolation (`ITenantDbContextFactory`, null-tenant-guarded reads, no cross-tenant route, per-tenant composite cursor); explicit isolation test incl. platform-admin-denied. |
+| A facet silently merges absent values (no-empty-fallback regression) | High | Absent facet → explicit `unknown` bucket; malformed dimension → throw; facet-bucketing test asserts no silent merge. |
+| Reimplementing the 32-10 fold/metrics (drift) | High | This story keys + facets only; metrics come from the same 32-10 reducer; assert identical numbers for the same runs; no second fold. |
+| `credentialSource` facet depends on un-landed 32-5/32-9 | Medium | Facet degrades to explicit `unknown`, backfilled on rebuild once the tag exists; align the tag name with 32-9 before merge; never invent a parallel usage event. |
+| Cross-role persona comparison sneaks in | Medium | Persona key is `(role, agentId)`; the comparison query always names a role; test asserts an architect-role persona never appears in the reviewer leaderboard. |
+| Accidental CP table / DROP-list churn | Medium | AC9: no CP table (persona = 32-15 public `Agent`; rows are tenant-schema 32-10 entities); facets (if persisted) are a Tenant migration; `ControlPlaneDbContextModelTests` untouched. |
+
+## Success Metrics
+
+- [ ] The persona benchmark dimension is keyed by the 32-15 persona-agent identity (`AgentId`/`AgentName`); grep finds no `Persona`/`StyleJson`/`PersonaComposer` type introduced by this story.
+- [ ] A tenant can rank `claude`/`gemini`/`codegpt` as a reviewer (like-vs-like within a role) and drill into one persona's provider/model/promptVersion/`credentialSource` facets — on its own data only.
+- [ ] Persona benchmark data is provably tenant-scoped (isolation suite green; platform admin denied per-tenant; the only cross-tenant view is 32-10's k-anonymous public-agent rollup).
+- [ ] Incremental and full-rebuild persona rows are byte-identical; the per-tenant composite cursor never crosses tenants.
+- [ ] No control-plane table added; `has-pending-model-changes` reports none; the `Tamma.Api.Tests` suite is green.
+
+## Related
+
+- Design of record: `docs/superpowers/specs/2026-06-20-epic-32-revised-agent-architecture.md` (§3.0 reframe table; §3.1 persona = named cross-role system agent; §3.4 disposition of 32-12 — rewrite + split style overlay to 32-19)
+- Re-plan: `docs/superpowers/plans/2026-06-20-epic-32-37-replan.md` (story disposition + sequence)
+- Implementation plan: `docs/superpowers/plans/2026-06-21-32-12-persona-aware-benchmarking-plan.md`
+- Prerequisites: `docs/stories/epic-32/story-32-10/32-10-benchmark-projections-and-leaderboards.md` (the projection + leaderboard + persona dimension + cursor + isolation this story extends), `docs/stories/epic-32/story-32-15/32-15-persona-reframe-and-seeding.md` (the persona-agent identity)
+- Sibling stories: 32-6 (action trail), 32-8 (outcome/defect), 32-9 (usage/cost), 32-5 (call-LLM), 32-16 (enablement), 32-13 (dashboards), 32-14 (A/B), **32-19** (style/voice variants — the split-out style overlay; NOT a dependency)
 
 ## Logging Requirements
 
-- **INFO**: persona created / updated / archived (`personaId, personaName, role, visibility`), persona applied at resolution (`personaId, agentId, role, mode`).
-- **DEBUG**: composition merge summary (which style fields overridden, fragment appended yes/no — never the fragment body), visibility-scoped persona list resolved (`count, mode, tenantId?`).
-- **WARN**: requested persona not visible / role-mismatch surfaced as 404/400 (`personaId, requestedRole, personaRole`), member-role 403 on write, tenant public-write 403.
-- **ERROR**: non-null `SystemPromptFragmentRef` unresolvable (fail-loud — `personaId, fragmentRef`), event append failure after a real compose, migration/DB write failure.
-- **Structured context**: include `{ personaId, personaName, agentId, agentVersion, role, mode, tenantId }` where applicable.
-- **Credential safety**: personas are credential-agnostic and provider-agnostic by design (style + fragment ref only); never log raw `StyleJson` if it could carry sensitive hints and never log resolved fragment bodies.
+- **INFO**: persona projection fold completed (`tenantId, dimension:"persona", window, rowsUpdated, lastSequenceNumber`); persona leaderboard served (`tenantId, role, window, rankedCount, belowThresholdCount`); persona detail served (`tenantId, personaId, role, facetCount`).
+- **DEBUG**: per-persona fold step (`personaId, role, facet sub-key, sequenceNumber`); facet bucketing (which facet, `unknown`-bucket yes/no — never the underlying value if sensitive).
+- **WARN**: absent facet tag bucketed to `unknown` (`personaId, facet` — surfaced, not silently dropped); persona leaderboard requested with an unknown dimension/role; min-sample-suppressed persona row (`personaId, runCount, minRuns`).
+- **ERROR**: malformed dimension key (`BENCHMARK.DIMENSION.INVALID`), projection-write failure after retries (the run is unaffected — 32-10 non-blocking contract), repository/migration failure.
+- **Structured context**: include `{ tenantId, dimension:"persona", personaId, personaName, role, provider, model, promptRef, credentialSource, window, sequenceNumber, runCount }` where applicable.
+- **Credential / privacy safety**: persona benchmarking is **credential-agnostic** — `credentialSource` is the **label** `byok`/`platform`/`unknown` only; **never** log, store, or surface a raw API key, prompt body, or `ConfigJson`. NEVER log a tenant id inside any cross-tenant path (there is none for persona benchmarks); the persona leaderboard payload is key-free and prompt-body-free by contract.
 
 ## Change Log
 
 | Date       | Version | Changes                | Author |
 | ---------- | ------- | ---------------------- | ------ |
-| 2026-06-17 | 1.0.0   | Initial story creation | Claude |
+| 2026-06-17 | 1.0.0   | Initial story creation — "persona = style/tone overlay within a role" (`atlas`/`nova`), a new `Persona` entity + `PersonaComposer` + style-aware benchmarking. | Claude |
+| 2026-06-21 | 2.0.0   | **Vocabulary reframe to the locked model** (design §3.0/§3.4). "Persona" everywhere now = the **named cross-role public/system agent** (`claude`/`gemini`/`codegpt`) from sibling **32-15** — keyed by the persona-agent `AgentId`/`AgentName`, NOT a style overlay. The style/voice overlay (`atlas`/`nova` tone/verbosity) is **split out to new optional sibling 32-19 "Agent style/voice variants"** (a *variant*, not a persona) and all style-overlay-as-persona framing is removed. **No new entity** — the persona-aware benchmark now **rides 32-10's** existing `persona` dimension: refines its dimension key to the persona-agent identity, adds **provider/model/prompt-version/`credentialSource` facets**, and exposes the like-vs-like-within-a-role persona-comparison query. Per-tenant scoping (data ALWAYS tenant-scoped), the per-tenant `SequenceNumber` cursor rule, the no-CP-table/no-DROP-list/no-model-contract-churn gotchas, and the no-empty-fallback (explicit-`unknown` bucket) discipline are made explicit. The dropped `Persona` table, `PersonaComposer`, `StyleJson`, persona CRUD endpoints, and the persona-composition resolver path are removed (those belonged to the superseded style model / now 32-15 + 32-19). | Claude |
+</content>
+</invoke>

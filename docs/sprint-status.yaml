@@ -419,17 +419,28 @@ development_status:
   32-1-agent-entity-model-and-versioned-saved-config: done # Agent Entity Model & Versioned Saved Config (public/private) [P0]
   32-2-agent-registry-resolution-and-rbac-api: done # Agent Registry, Resolution & RBAC API [P0]
   32-3-per-tenant-provider-credential-resolution: done # Per-Tenant Provider Credential Resolution (BYOK → platform) [P0]
-  32-4-saas-provider-auth-gating-api-key-only: drafted # SaaS Provider Auth Gating — API-key only (CLI/token providers single-user only) [P0]
-  32-5-managed-agent-execution-layer: drafted         # Managed Agent Execution Layer (IManagedAgent over IAIProvider) [P0]
+  32-4-saas-provider-auth-gating-api-key-only: drafted # SaaS Provider Gate — now the gate STAGE of the call-LLM endpoint (REFRAMED 2026-06-21) [P0]
+  32-5-managed-agent-execution-layer: drafted         # Call-LLM Endpoint + Managed Execution (POST /api/v1/llm/call; lynchpin) (REFRAMED 2026-06-21) [P0]
   32-6-agent-action-trail-in-tenant-store: drafted    # Agent Action Trail (DCB events tagged agent_id) in Tenant Store [P0]
   32-7-multi-agent-design-review-panels-in-elsa: drafted # Multi-Agent Design/Review Panels in Elsa (strategy-driven) [P1]
   32-8-outcome-capture-and-bug-taxonomy-at-review-gate: drafted # Outcome Capture & Bug Taxonomy at Review/Gate [P1]
   32-9-cost-basis-plus-margin-metering-and-byok-pricing-model: drafted # Cost-Basis-Plus-Margin Metering & BYOK Pricing Model (re-targets Epic 20) [P1]
   32-10-benchmark-projections-and-leaderboards: drafted # Benchmark Projections & Leaderboards (per agent/provider/prompt, per-tenant) [P1]
   32-11-learning-persistence-and-auto-learning-into-rag: drafted # Learning Persistence & Auto-Learning into RAG [P1]
-  32-12-agent-personas-and-persona-aware-benchmarking: drafted # Agent Personas & Persona-Aware Benchmarking [P2]
+  32-12-agent-personas-and-persona-aware-benchmarking: drafted # Persona-Aware Benchmarking (persona = named system agent; style overlay split to 32-19) (REFRAMED 2026-06-21) [P2]
   32-13-agent-management-and-benchmark-dashboards: drafted # Agent Management & Benchmark Dashboards (admin public + tenant private) [P2]
   32-14-a-b-experiment-framework-for-agents: drafted  # A/B Experiment Framework for Agents (Phase 2: cohorts, significance, rollout/rollback) [P2]
+  # --- Architecture-pivot stories (added 2026-06-21; see docs/superpowers/specs/2026-06-20-epic-32-revised-agent-architecture.md) ---
+  32-15-persona-reframe-and-seeding: drafted          # Persona Reframe & Seeding (named cross-role personas; amends 32-1) [P0]
+  32-16-per-tenant-agent-enablement: drafted          # Per-Tenant Agent/Persona Enablement (TenantAgentEnablement) [P0]
+  32-17-custom-agent-prompts: drafted                 # Custom-Agent Prompts (ConfigJson.prompts; custom prompts ⇔ custom agent) [P0]
+  32-18-registry-enablement-gate-and-prompt-source: drafted # Registry Enablement Gate & Epic-27 Prompt Source (amends 32-2) [P0]
+  32-19-agent-style-voice-variants: drafted           # Agent Style/Voice Variants (optional overlay; split from 32-12) [P2]
+  32-20-interactive-question-back: drafted            # Interactive Question-Back (request_input tool + IQuestionRouter) [P1]
+  32-21-mcp-and-plugin-tool-sourcing: drafted         # MCP & Plugin Tool Sourcing (C#) [P1]
+  32-22-prompt-and-response-cache: drafted            # Prompt & Response Cache (server-side) [P2]
+  32-23-streaming-run-tap: drafted                    # Streaming Run Tap (SSE for dashboard/CLI) [P1]
+  32-24-csharp-harness-cli-adapter: drafted           # C# Harness/CLI Agent Adapter (single-user local, DEFERRED) [P3]
   epic-32-retrospective: optional
 
   epic-34: contexted   # NEW Pricing, Plans & Entitlements (added 2026-06-17; all stories drafted)
@@ -443,6 +454,7 @@ development_status:
   34-8-pricing-audit-events-and-reproducibility: drafted # Pricing Audit, Events & Reproducibility [P1]
   34-9-pricing-and-plan-management-dashboards: drafted # Pricing & Plan Management Dashboards [P1]
   34-10-epic-20-decommission-and-pricing-contract-migration: drafted # Epic 20 Decommission & Pricing Contract Migration [P0]
+  34-11-provider-cost-price-book: drafted             # Provider Cost Price-Book (Provider + ProviderModelPrice cost entities behind IProviderPricingService; before 34-5) (added 2026-06-21) [P0]
   epic-34-retrospective: optional
 
   epic-35: contexted   # NEW Billing & Payments (C#) — supersedes Epic 20 (added 2026-06-17; all stories drafted)
@@ -488,4 +500,11 @@ development_status:
   37-11-soc2-aligned-control-mapping-and-evidence-pack: drafted # SOC2-Aligned Control Mapping & Evidence Pack [P2]
   37-12-admin-and-tenant-audit-dashboard-ui: drafted  # Admin & Tenant Audit Dashboard UI [P1]
   epic-37-retrospective: optional
+
+  epic-38: contexted   # NEW Step → Internal-API Mediation (non-LLM) — Epic-32 follow-up (added 2026-06-21; all stories drafted)
+  38-1-git-platform-step-mediation: drafted           # Git-Platform Step Mediation (Class A) [P1]
+  38-2-agent-dispatch-step-mediation: drafted         # Agent-Dispatch Step Mediation (Class C) [P1]
+  38-3-slack-notifications-step-mediation: drafted    # Slack/Notifications Step Mediation (Class D) + Billing enforce-by-design [P2]
+  38-4-build-time-guardrail-analyzer: drafted         # Build-Time Guardrail Analyzer (rule-1 enforcement) [P1]
+  epic-38-retrospective: optional
 

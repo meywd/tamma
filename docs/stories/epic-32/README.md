@@ -38,17 +38,27 @@ Epic 32 is the canonical owner of the agent entity, execution, and tracking mode
 | 32-1 | Agent Entity Model & Versioned Saved Config (public/private) | P0 | drafted | 4-5 days |
 | 32-2 | Agent Registry, Resolution & RBAC API | P0 | drafted | 4-5 days |
 | 32-3 | Per-Tenant Provider Credential Resolution (BYOK → platform) | P0 | drafted | 4-5 days |
-| 32-4 | SaaS Provider Auth Gating — API-key only (CLI/token providers single-user only) | P0 | drafted | 2-3 days |
-| 32-5 | Managed Agent Execution Layer (`IManagedAgent` over `IAIProvider`) | P0 | drafted | 5-6 days |
+| 32-4 | SaaS Provider Gate — gate STAGE of the call-LLM endpoint *(reframed 2026-06-21)* | P0 | drafted | 2-3 days |
+| 32-5 | Call-LLM Endpoint + Managed Execution (`POST /api/v1/llm/call`; lynchpin) *(reframed 2026-06-21)* | P0 | drafted | 6-8 days |
 | 32-6 | Agent Action Trail (DCB events tagged `agent_id`) in Tenant Store | P0 | drafted | 4-5 days |
 | 32-7 | Multi-Agent Design/Review Panels in Elsa (strategy-driven) | P1 | drafted | 5-6 days |
 | 32-8 | Outcome Capture & Bug Taxonomy at Review/Gate | P1 | drafted | 3-4 days |
 | 32-9 | Cost-Basis-Plus-Margin Metering & BYOK Pricing Model (re-targets Epic 20) | P1 | drafted | 4-5 days |
 | 32-10 | Benchmark Projections & Leaderboards (per agent/provider/prompt, per-tenant) | P1 | drafted | 4-5 days |
 | 32-11 | Learning Persistence & Auto-Learning into RAG | P1 | drafted | 4-5 days |
-| 32-12 | Agent Personas & Persona-Aware Benchmarking | P2 | drafted | 3-4 days |
+| 32-12 | Persona-Aware Benchmarking *(reframed 2026-06-21: persona = named system agent)* | P2 | drafted | 3-4 days |
 | 32-13 | Agent Management & Benchmark Dashboards (admin public + tenant private) | P2 | drafted | 4-5 days |
 | 32-14 | A/B Experiment Framework for Agents (Phase 2: cohorts, significance, rollout/rollback) | P2 | drafted | 5-6 days |
+| 32-15 | Persona Reframe & Seeding (named cross-role personas; amends 32-1) *(2026-06-21)* | P0 | drafted | 3-4 days |
+| 32-16 | Per-Tenant Agent/Persona Enablement (`TenantAgentEnablement`) *(2026-06-21)* | P0 | drafted | 3-4 days |
+| 32-17 | Custom-Agent Prompts (`ConfigJson.prompts`; custom prompts ⇔ custom agent) *(2026-06-21)* | P0 | drafted | 2-3 days |
+| 32-18 | Registry Enablement Gate & Epic-27 Prompt Source (amends 32-2) *(2026-06-21)* | P0 | drafted | 3-4 days |
+| 32-19 | Agent Style/Voice Variants (optional overlay; split from 32-12) *(2026-06-21)* | P2 | drafted | 3-4 days |
+| 32-20 | Interactive Question-Back (`request_input` + `IQuestionRouter`) *(2026-06-21)* | P1 | drafted | 5-6 days |
+| 32-21 | MCP & Plugin Tool Sourcing (C#) *(2026-06-21)* | P1 | drafted | 5-6 days |
+| 32-22 | Prompt & Response Cache (server-side) *(2026-06-21)* | P2 | drafted | 3-4 days |
+| 32-23 | Streaming Run Tap (SSE for dashboard/CLI) *(2026-06-21)* | P1 | drafted | 3-4 days |
+| 32-24 | C# Harness/CLI Agent Adapter (single-user local, **DEFERRED**) *(2026-06-21)* | P3 | drafted | 5-6 days |
 
 ## Architecture
 
@@ -270,7 +280,8 @@ Estimated: 12-15 days
 
 ## Reference Documents
 
-- [Epic 32 Design of Record — Agent Entities, Personas, Benchmarking & Learning](../../superpowers/specs/2026-06-17-agent-entities-benchmarking-design.md)
+- **[Epic 32 Revised Agent Architecture (Design of Record, 2026-06-20)](../../superpowers/specs/2026-06-20-epic-32-revised-agent-architecture.md)** — supersedes the persona/agent + credential portions below: steps never call providers (call-LLM endpoint), persona = named cross-role system agent, provider cost entity, per-tenant enablement, BYOK-per-provider. See also the [managed-LLM execution deep dive](../../superpowers/specs/2026-06-20-managed-llm-execution-deep-dive.md) and the [re-plan](../../superpowers/plans/2026-06-20-epic-32-37-replan.md).
+- [Epic 32 Design of Record — Agent Entities, Personas, Benchmarking & Learning (2026-06-17, partially superseded)](../../superpowers/specs/2026-06-17-agent-entities-benchmarking-design.md)
 - [Story 32-1 — Agent Entity Model & Versioned Saved Config](./story-32-1/32-1-agent-entity-model-and-versioned-saved-config.md)
 - [Story 32-2 — Agent Registry, Resolution & RBAC API](./story-32-2/32-2-agent-registry-resolution-and-rbac-api.md)
 - [Story 32-3 — Per-Tenant Provider Credential Resolution (BYOK → platform)](./story-32-3/32-3-per-tenant-provider-credential-resolution.md)
