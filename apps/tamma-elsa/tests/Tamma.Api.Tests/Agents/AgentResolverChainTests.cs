@@ -79,7 +79,9 @@ public class AgentResolverChainTests
     /// here we validate the discriminator-column routing, mirroring how
     /// audit/prompt repos test the shared-DB transitional phase).
     /// </summary>
-    private Harness BuildHarness(TammaMode mode, Guid? tenantId, Guid? userId)
+    private Harness BuildHarness(
+        TammaMode mode, Guid? tenantId, Guid? userId, string defaultPersonaName = "tamma-developer",
+        IPersonaPromptResolver? personaPrompts = null)
     {
         var cpCtx = NewContext();
         var events = new CapturingEvents();
@@ -97,16 +99,24 @@ public class AgentResolverChainTests
             HttpContext = new DefaultHttpContext { User = Principal(userId) },
         };
 
+        // Story 32-15 — the system default is now the configured DEFAULT PERSONA
+        // (by name, role-independent). These chain tests seed tamma-<role> public
+        // rows, so point the default persona at the seeded handle the test uses.
+        var personaOptions = Microsoft.Extensions.Options.Options.Create(
+            new DefaultPersonaOptions { DefaultPersonaName = defaultPersonaName });
+
         var registry = new AgentRegistryService(
             agentRepo, selectionRepo, events, modeProvider, tenantContext, httpAccessor,
-            NullLogger<AgentRegistryService>.Instance);
+            personaOptions, NullLogger<AgentRegistryService>.Instance);
 
         // The legacy JSONB repo is never exercised by the entity-aware chain; a
-        // real instance is wired so the full constructor is satisfied.
+        // real instance is wired so the full constructor is satisfied. Story
+        // 32-15 — a stub persona prompt resolver supplies the PUBLIC branch's
+        // system prompt (persona = prompt-free; prompt comes from the seam).
         var legacyRepo = new AgentConfigRepository(factory);
         var resolver = new AgentResolverService(
             legacyRepo, null, NullLogger<AgentResolverService>.Instance,
-            registry, agentRepo, events);
+            registry, agentRepo, events, null, personaPrompts ?? new StubPersonaPrompts());
 
         return new Harness(resolver, registry, agentRepo, events, cpCtx);
     }
@@ -147,7 +157,9 @@ public class AgentResolverChainTests
     [Test]
     public async Task Resolve_NoSelection_FallsToSystemDefaultPublic()
     {
-        var h = BuildHarness(TammaMode.SaaS, TenantA, null);
+        // Story 32-15 — the default is the configured persona (by name). Point it
+        // at the seeded handle so the role-independent default resolves.
+        var h = BuildHarness(TammaMode.SaaS, TenantA, null, defaultPersonaName: "tamma-architect");
         await using (h.Ctx)
         {
             var pub = await SeedPublicAsync(h.Agents, "architect", "tamma-architect");
@@ -387,11 +399,144 @@ public class AgentResolverChainTests
         }
     }
 
+    // ── Story 32-15 — persona prompt sourced from the IPersonaPromptResolver seam ──
+
+    [Test]
+    public async Task Resolve_PublicPersona_PromptComesFromSeam_NotFromConfig()
+    {
+        // The persona's ConfigJson carries NO prompt; MaterialiseAsync's public
+        // branch sources the system prompt from the IPersonaPromptResolver seam.
+        var capturing = new CapturingPersonaPrompts("[SEAM PROMPT]");
+        var h = BuildHarness(TammaMode.SaaS, TenantA, null,
+            defaultPersonaName: "claude", personaPrompts: capturing);
+        await using (h.Ctx)
+        {
+            // Persona-style public agent: Role=NULL, prompt-free config.
+            var persona = await h.Agents.CreateAsync(
+                new Agent { Name = "claude", Role = null, Visibility = AgentVisibility.Public },
+                """{ "provider": "anthropic", "model": "claude-sonnet-4-20250514" }""", "seed", null);
+
+            var resolved = await h.Resolver.ResolveForRoleAsync("architect");
+
+            resolved.AgentId.Should().Be(persona.Id);
+            resolved.Source.Should().Be("system-public");
+            resolved.SystemPrompt.Should().Be("[SEAM PROMPT]",
+                "the persona prompt comes from the Epic 27 seam, not the prompt-free config");
+            capturing.LastRole.Should().Be("architect");
+            capturing.CallCount.Should().Be(1, "the public branch invokes the seam exactly once");
+        }
+    }
+
+    [Test]
+    public async Task Resolve_PublicPersona_SeamFailsLoud_Propagates()
+    {
+        // Epic 27 returns nothing for (role, action) → the seam throws
+        // PROMPT_UNRESOLVED; MaterialiseAsync must NOT swallow it into an
+        // empty/plain prompt.
+        var failing = new ThrowingPersonaPrompts();
+        var h = BuildHarness(TammaMode.SaaS, TenantA, null,
+            defaultPersonaName: "claude", personaPrompts: failing);
+        await using (h.Ctx)
+        {
+            await h.Agents.CreateAsync(
+                new Agent { Name = "claude", Role = null, Visibility = AgentVisibility.Public },
+                """{ "provider": "anthropic", "model": "claude-sonnet-4-20250514" }""", "seed", null);
+
+            Func<Task> act = async () => await h.Resolver.ResolveForRoleAsync("architect");
+            (await act.Should().ThrowAsync<TammaError>())
+                .Which.Code.Should().Be("PROMPT_UNRESOLVED");
+        }
+    }
+
+    [Test]
+    public async Task Resolve_StampsAgentIdAndVersion_AndMergesDefault()
+    {
+        // Merge + stamp are preserved (Story 32-2 behaviour kept through 32-15).
+        var h = BuildHarness(TammaMode.SaaS, TenantA, null, defaultPersonaName: "claude");
+        await using (h.Ctx)
+        {
+            var persona = await h.Agents.CreateAsync(
+                new Agent { Name = "claude", Role = null, Visibility = AgentVisibility.Public },
+                """{ "provider": "openai", "model": "gpt-4o" }""", "seed", null);
+
+            var resolved = await h.Resolver.ResolveForRoleAsync("developer");
+
+            resolved.AgentId.Should().Be(persona.Id);
+            resolved.AgentVersion.Should().Be(1);
+            resolved.Provider.Should().Be("openai", "the persona config overrides the role default");
+            resolved.Model.Should().Be("gpt-4o");
+        }
+    }
+
+    [Test]
+    public async Task EndToEnd_SeedPersonas_ResolveConfiguredDefault()
+    {
+        // AC15 — seed the named personas (with the price book), set the default
+        // to "gemini", and resolve any role → the gemini persona with its
+        // explicit provider+model, prompt from the Epic 27 seam.
+        await using (var seedCtx = NewContext())
+        {
+            await seedCtx.Database.ExecuteSqlRawAsync(
+                "TRUNCATE provider_model_prices, providers CASCADE;");
+            await Tamma.Data.Seeders.ProviderPricingSeeder.SeedAsync(seedCtx);
+            await Tamma.Data.Seeders.AgentEntitySeeder.SeedAsync(seedCtx);
+        }
+
+        var h = BuildHarness(TammaMode.SaaS, TenantA, null, defaultPersonaName: "gemini");
+        await using (h.Ctx)
+        {
+            var resolved = await h.Resolver.ResolveForRoleAsync("architect");
+
+            resolved.Source.Should().Be("system-public");
+            resolved.Handle.Should().Be("gemini");
+            resolved.Provider.Should().Be("google");
+            resolved.Model.Should().Be("gemini-1.5-pro");
+            resolved.SystemPrompt.Should().NotBeNullOrWhiteSpace("prompt comes from the Epic 27 seam");
+        }
+
+        // Clean up the price rows we seeded so the shared fixture stays tidy.
+        await using var cleanup = NewContext();
+        await cleanup.Database.ExecuteSqlRawAsync(
+            "TRUNCATE provider_model_prices, providers CASCADE;");
+    }
+
     // ── test doubles ──
 
     private sealed class StubMode(TammaMode mode) : ITammaModeProvider
     {
         public TammaMode Mode { get; } = mode;
+    }
+
+    private sealed class CapturingPersonaPrompts(string prompt) : IPersonaPromptResolver
+    {
+        public int CallCount { get; private set; }
+        public string? LastRole { get; private set; }
+        public Task<string> ResolveAsync(
+            Principal principal, string role, string? action, CancellationToken ct = default)
+        {
+            CallCount++;
+            LastRole = role;
+            return Task.FromResult(prompt);
+        }
+    }
+
+    private sealed class ThrowingPersonaPrompts : IPersonaPromptResolver
+    {
+        public Task<string> ResolveAsync(
+            Principal principal, string role, string? action, CancellationToken ct = default)
+            => throw new TammaError("PROMPT_UNRESOLVED", "no prompt", retryable: false,
+                severity: TammaErrorSeverity.High);
+    }
+
+    /// <summary>Story 32-15 — supplies the PUBLIC branch's system prompt (a
+    /// persona is prompt-free; its prompt comes from this seam). Returns a
+    /// non-empty deterministic prompt so the chain tests' public resolution
+    /// succeeds without standing up the full Epic 27 store.</summary>
+    private sealed class StubPersonaPrompts : IPersonaPromptResolver
+    {
+        public Task<string> ResolveAsync(
+            Principal principal, string role, string? action, CancellationToken ct = default)
+            => Task.FromResult($"[persona system prompt for role={role}]");
     }
 
     /// <summary>Tenant factory that hands back a TenantDbContext bound to the

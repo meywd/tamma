@@ -74,7 +74,9 @@ public class AgentRegistryEndpointsTests
 
     private const string Cfg = """{ "provider": "anthropic", "model": "claude-sonnet-4" }""";
 
-    private Stack BuildStack(TammaMode mode, Guid? tenantId, Guid? userId, bool platformAdmin = false)
+    private Stack BuildStack(
+        TammaMode mode, Guid? tenantId, Guid? userId, bool platformAdmin = false,
+        string defaultPersonaName = "tamma-developer")
     {
         var cpCtx = NewContext();
         var events = new CapturingEvents();
@@ -92,12 +94,17 @@ public class AgentRegistryEndpointsTests
             HttpContext = new DefaultHttpContext { User = principal },
         };
 
+        // Story 32-15 — the system default is the configured default PERSONA (by
+        // name, role-independent). Point it at the handle the test seeds.
+        var personaOptions = Microsoft.Extensions.Options.Options.Create(
+            new DefaultPersonaOptions { DefaultPersonaName = defaultPersonaName });
+
         var registry = new AgentRegistryService(
             agentRepo, selectionRepo, events, modeProvider, tenantContext, httpAccessor,
-            NullLogger<AgentRegistryService>.Instance);
+            personaOptions, NullLogger<AgentRegistryService>.Instance);
         var resolver = new AgentResolverService(
             new AgentConfigRepository(factory), null, NullLogger<AgentResolverService>.Instance,
-            registry, agentRepo, events);
+            registry, agentRepo, events, null, new StubPersonaPrompts());
 
         return new Stack(
             agentRepo, registry, resolver, principal, tenantContext, modeProvider, cpCtx);
@@ -141,6 +148,11 @@ public class AgentRegistryEndpointsTests
     private async Task<Agent> SeedPublicAsync(AgentRepository repo, string role, string handle)
         => await repo.CreateAsync(
             new Agent { Name = handle, Role = role, Visibility = AgentVisibility.Public }, Cfg, null, null);
+
+    /// <summary>Story 32-15 — seed a named cross-role PUBLIC persona (Role=NULL).</summary>
+    private async Task<Agent> SeedPersonaAsync(AgentRepository repo, string name)
+        => await repo.CreateAsync(
+            new Agent { Name = name, Role = null, Visibility = AgentVisibility.Public }, Cfg, null, null);
 
     private async Task<Agent> SeedTenantPrivateAsync(AgentRepository repo, Guid tenantId, string role, string name)
         => await repo.CreateAsync(
@@ -399,11 +411,12 @@ public class AgentRegistryEndpointsTests
     }
 
     [Test]
-    public async Task GetSystemDefaultPublic_MultipleActivePublicForRole_PicksFirstByName_WarnsOnAmbiguity()
+    public async Task GetSystemDefaultPublic_ReturnsConfiguredPersona_RoleIndependent_NoAmbiguityWarning()
     {
-        // Review follow-up (32-2 #3): adding a second active public agent for the
-        // same role must NOT silently shift the default — keep the deterministic
-        // first-by-name pick, but log a WARN so the ambiguity is observable.
+        // Story 32-15 — public agents are cross-role PERSONAS, so the system
+        // default is the configured default persona (by name), resolved REGARDLESS
+        // of role. The old per-role ">1 public agent for this role" ambiguity
+        // warning is DELETED — seeding several public personas must NOT log it.
         var logProvider = new Infrastructure.CapturingLoggerProvider();
         using var loggerFactory = LoggerFactory.Create(b => b.AddProvider(logProvider));
 
@@ -414,28 +427,58 @@ public class AgentRegistryEndpointsTests
         tenantContext.SetTenantId(TenantA);
         var factory = new SameDbTenantFactory(_connectionString);
         var selectionRepo = new AgentSelectionRepository(cpCtx, factory, tenantContext);
+        var personaOptions = Microsoft.Extensions.Options.Options.Create(
+            new DefaultPersonaOptions { DefaultPersonaName = "claude" });
         var registry = new AgentRegistryService(
             agentRepo, selectionRepo, events, new StubMode(TammaMode.SaaS),
             tenantContext, new HttpContextAccessor { HttpContext = new DefaultHttpContext() },
-            loggerFactory.CreateLogger<AgentRegistryService>());
+            personaOptions, loggerFactory.CreateLogger<AgentRegistryService>());
 
         await using (cpCtx)
         {
-            // Two active public agents for the same role; "alpha" < "tamma" ordinal.
-            await SeedPublicAsync(agentRepo, "developer", "tamma-developer");
-            var alpha = await SeedPublicAsync(agentRepo, "developer", "alpha-developer");
+            // Several public personas (Role=NULL, cross-role).
+            var claude = await SeedPersonaAsync(agentRepo, "claude");
+            await SeedPersonaAsync(agentRepo, "gemini");
+            await SeedPersonaAsync(agentRepo, "codegpt");
 
-            var chosen = await registry.GetSystemDefaultPublicAsync("developer");
+            // Resolves the configured persona for ANY role — never role-matches.
+            foreach (var role in new[] { "developer", "architect", "tester" })
+            {
+                var chosen = await registry.GetSystemDefaultPublicAsync(role);
+                chosen.Should().NotBeNull();
+                chosen!.Id.Should().Be(claude.Id,
+                    "the configured default persona is returned regardless of role");
+            }
 
-            chosen.Should().NotBeNull("ambiguity must not throw — keep a deterministic pick");
-            chosen!.Id.Should().Be(alpha.Id, "first-by-name (ordinal) is the deterministic winner");
+            logProvider.Entries.Should().NotContain(e =>
+                e.Message.Contains("agent.system_default.ambiguous"),
+                "the per-role ambiguity warning is deleted in Story 32-15");
+        }
+    }
 
-            var warn = logProvider.Entries.Should().ContainSingle(e =>
-                e.Level == LogLevel.Warning &&
-                e.Message.Contains("agent.system_default.ambiguous")).Subject;
-            warn.Message.Should().Contain("developer");
-            warn.Message.Should().Contain("count=2");
-            warn.Message.Should().Contain(alpha.Id.ToString());
+    [Test]
+    public async Task GetSystemDefaultPublic_ConfiguredPersonaAbsent_FailsLoud()
+    {
+        var cpCtx = NewContext();
+        var events = new CapturingEvents();
+        var agentRepo = new AgentRepository(cpCtx, events);
+        var tenantContext = new TenantContext();
+        tenantContext.SetTenantId(TenantA);
+        var factory = new SameDbTenantFactory(_connectionString);
+        var selectionRepo = new AgentSelectionRepository(cpCtx, factory, tenantContext);
+        var personaOptions = Microsoft.Extensions.Options.Options.Create(
+            new DefaultPersonaOptions { DefaultPersonaName = "claude" });
+        var registry = new AgentRegistryService(
+            agentRepo, selectionRepo, events, new StubMode(TammaMode.SaaS),
+            tenantContext, new HttpContextAccessor { HttpContext = new DefaultHttpContext() },
+            personaOptions, NullLogger<AgentRegistryService>.Instance);
+
+        await using (cpCtx)
+        {
+            // No persona seeded — fail loud, never an empty/plain fallback.
+            Func<Task> act = async () => await registry.GetSystemDefaultPublicAsync("developer");
+            (await act.Should().ThrowAsync<TammaError>())
+                .Which.Code.Should().Be("AGENT_DEFAULT_PERSONA_MISSING");
         }
     }
 
@@ -517,6 +560,15 @@ public class AgentRegistryEndpointsTests
     private sealed class StubMode(TammaMode mode) : ITammaModeProvider
     {
         public TammaMode Mode { get; } = mode;
+    }
+
+    /// <summary>Story 32-15 — supplies the PUBLIC branch's system prompt so
+    /// persona resolution succeeds without the full Epic 27 store.</summary>
+    private sealed class StubPersonaPrompts : IPersonaPromptResolver
+    {
+        public Task<string> ResolveAsync(
+            Principal principal, string role, string? action, CancellationToken ct = default)
+            => Task.FromResult($"[persona system prompt for role={role}]");
     }
 
     private sealed class SameDbTenantFactory(string conn) : ITenantDbContextFactory

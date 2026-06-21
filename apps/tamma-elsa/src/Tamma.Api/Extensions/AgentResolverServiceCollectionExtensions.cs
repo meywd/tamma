@@ -26,11 +26,21 @@ public static class AgentResolverServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddAgentResolverServices(this IServiceCollection services)
     {
+        // Story 32-15 — bind Tamma:Agents:DefaultPersonaName (default "claude")
+        // for the configured-default-persona resolution.
+        services.AddOptions<DefaultPersonaOptions>()
+            .Configure<IConfiguration>((opts, cfg) =>
+                cfg.GetSection(DefaultPersonaOptions.SectionPath).Bind(opts));
+
         services.AddScoped<IAgentRegistryService, AgentRegistryService>();
+
+        // Story 32-15 — the persona/public prompt seam over the Epic 27 store.
+        services.AddScoped<IPersonaPromptResolver, PersonaPromptResolver>();
 
         // Use the Story 32-2 full constructor so the entity-aware resolve
         // methods have their collaborators. The missing-config recorder is
         // optional (the epic may not be merged) — resolved as null if unregistered.
+        // Story 32-15 wires the persona prompt seam for the public branch.
         services.AddScoped<IAgentResolverService>(sp => new AgentResolverService(
             sp.GetRequiredService<IAgentConfigRepository>(),
             sp.GetService<IConfiguration>(),
@@ -38,7 +48,8 @@ public static class AgentResolverServiceCollectionExtensions
             sp.GetRequiredService<IAgentRegistryService>(),
             sp.GetRequiredService<IAgentRepository>(),
             sp.GetRequiredService<IEventRepository>(),
-            sp.GetService<IMissingConfigRecorder>()));
+            sp.GetService<IMissingConfigRecorder>(),
+            sp.GetRequiredService<IPersonaPromptResolver>()));
         return services;
     }
 }

@@ -788,17 +788,21 @@ internal static class TammaModelConfiguration
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.Name).IsRequired().HasMaxLength(128);
-            entity.Property(e => e.Role).IsRequired().HasMaxLength(64);
+            // Story 32-15 — Role is NULLABLE (no .IsRequired()). Public personas
+            // are cross-role (Role = NULL); private agents may still bind a role.
+            entity.Property(e => e.Role).HasMaxLength(64);
             entity.Property(e => e.Visibility).HasConversion<int>();
             entity.Property(e => e.Status).HasConversion<int>().HasDefaultValue(AgentStatus.Active);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            // Public handles unique on (Name, Role).
-            entity.HasIndex(e => new { e.Name, e.Role })
+            // Story 32-15 — public handles are globally unique on (Name) alone:
+            // a persona is cross-role, so (Name, Role) is no longer the public
+            // identity. Replaces the old IX_agents_public_name_role.
+            entity.HasIndex(e => e.Name)
                 .IsUnique()
                 .HasFilter("\"Visibility\" = 0")
-                .HasDatabaseName("IX_agents_public_name_role");
+                .HasDatabaseName("IX_agents_public_name");
 
             // Private handles unique per owner — two tenants may each own a
             // private agent named "atlas" without colliding.

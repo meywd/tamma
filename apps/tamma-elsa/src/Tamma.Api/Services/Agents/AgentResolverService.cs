@@ -36,6 +36,12 @@ public sealed class AgentResolverService : IAgentResolverService
     private readonly IEventRepository? _events;
     private readonly IMissingConfigRecorder? _missingConfig;
 
+    // Story 32-15 — the persona/public prompt seam (reads Epic 27, fail-loud).
+    // The PUBLIC branch of MaterialiseAsync calls this (not an inline prompt
+    // store resolve). Null only on the legacy constructors that never reach the
+    // public branch.
+    private readonly IPersonaPromptResolver? _personaPrompts;
+
     public AgentResolverService(
         IAgentConfigRepository repo,
         ILogger<AgentResolverService> logger)
@@ -54,6 +60,9 @@ public sealed class AgentResolverService : IAgentResolverService
     /// <summary>
     /// Story 32-2 — full constructor wiring the entity-aware resolution chain.
     /// The missing-config recorder is optional (the epic may not be merged).
+    /// Story 32-15 adds the <see cref="IPersonaPromptResolver"/> persona/public
+    /// prompt seam (optional so the 32-2 chain tests can omit it; the public
+    /// branch fails loud if it is reached without the seam wired).
     /// </summary>
     public AgentResolverService(
         IAgentConfigRepository repo,
@@ -62,13 +71,15 @@ public sealed class AgentResolverService : IAgentResolverService
         IAgentRegistryService registry,
         IAgentRepository agents,
         IEventRepository events,
-        IMissingConfigRecorder? missingConfig = null)
+        IMissingConfigRecorder? missingConfig = null,
+        IPersonaPromptResolver? personaPrompts = null)
         : this(repo, configuration, logger)
     {
         _registry = registry;
         _agents = agents;
         _events = events;
         _missingConfig = missingConfig;
+        _personaPrompts = personaPrompts;
     }
 
     // -----------------------------------------------------------------------
@@ -300,8 +311,24 @@ public sealed class AgentResolverService : IAgentResolverService
             }
         }
 
-        // Branch 3: system-default public agent for the role.
-        var systemDefault = await _registry.GetSystemDefaultPublicAsync(role, ct);
+        // Branch 3: system-default public PERSONA (Story 32-15 — the configured
+        // default persona, role-independent). GetSystemDefaultPublicAsync itself
+        // fails loud (AGENT_DEFAULT_PERSONA_MISSING) when the configured persona
+        // is not seeded; we treat that as "no system default" so the resolver
+        // still emits the mandatory AGENT.RESOLVE.FAILED audit event and throws
+        // its canonical no-default error (32-2 AC9 contract preserved).
+        Agent? systemDefault = null;
+        try
+        {
+            systemDefault = await _registry.GetSystemDefaultPublicAsync(role, ct);
+        }
+        catch (TammaError ex) when (ex.Code == "AGENT_DEFAULT_PERSONA_MISSING")
+        {
+            _logger.LogWarning(
+                "agent.resolve.default_persona_missing role={Role} — no configured default persona seeded",
+                role);
+        }
+
         if (systemDefault is not null)
         {
             var materialised = await MaterialiseAsync(systemDefault, role, phase, "system-public", ct);
@@ -354,6 +381,14 @@ public sealed class AgentResolverService : IAgentResolverService
             // which fails loud on the (now-default) required fields if needed.
         }
 
+        // Story 32-15 — the system/role prompt source depends on visibility.
+        // PUBLIC (persona): the persona is prompt-free; its prompt comes from the
+        // Epic 27 store via the IPersonaPromptResolver seam, keyed
+        // (principal, role, action). PRIVATE (custom agent): its own embedded
+        // prompts — the parallel ICustomAgentPromptResolver seam owned by 32-17.
+        // Both fail loud (no empty/plain fallback).
+        var systemPrompt = await ResolvePromptSourceAsync(agent, role, phase, resolved, ct);
+
         // The agent's stable handle wins over the merged handle (identity).
         var enriched = new ResolvedAgentConfig
         {
@@ -365,7 +400,7 @@ public sealed class AgentResolverService : IAgentResolverService
             MaxTokens = resolved.MaxTokens,
             TokenBudget = resolved.TokenBudget,
             Tools = resolved.Tools,
-            SystemPrompt = resolved.SystemPrompt,
+            SystemPrompt = systemPrompt,
             Source = source,
             Phase = phase,
             MaxBudgetUsd = resolved.MaxBudgetUsd,
@@ -377,6 +412,48 @@ public sealed class AgentResolverService : IAgentResolverService
 
         ValidateResolved(enriched);
         return enriched;
+    }
+
+    /// <summary>
+    /// Story 32-15 — resolve the system/role prompt for the materialised config
+    /// by VISIBILITY. PUBLIC personas → the <see cref="IPersonaPromptResolver"/>
+    /// seam (Epic 27, fail-loud); PRIVATE/custom agents → their own embedded
+    /// prompts (the <c>ICustomAgentPromptResolver</c> seam owned by Story 32-17,
+    /// not implemented here). The merged config's prompt is NOT used for a
+    /// persona — personas are prompt-free.
+    /// </summary>
+    private async Task<string> ResolvePromptSourceAsync(
+        Agent agent, string role, string? action, ResolvedAgentConfig merged, CancellationToken ct)
+    {
+        _logger.LogDebug(
+            "agent.materialise.prompt_source visibility={Visibility} role={Role} action={Action}",
+            agent.Visibility, role, action ?? "(role-system)");
+
+        if (agent.Visibility == AgentVisibility.Public)
+        {
+            // PERSONA → IPersonaPromptResolver → Epic 27 store. Fail loud if the
+            // seam is not wired (a persona MUST source its prompt from Epic 27,
+            // never from its prompt-free config).
+            if (_personaPrompts is null)
+            {
+                throw new InvalidOperationException(
+                    "A public persona's prompt must be resolved via IPersonaPromptResolver "
+                    + "(Story 32-15), but no resolver is wired. Use the full "
+                    + "AgentResolverService constructor with the persona prompt seam.");
+            }
+            var (tenantId, userId) = _registry!.ResolvePrincipal();
+            var principal = new Principal(tenantId, userId);
+            // The entity-aware resolve path is role-based (no Epic 27 action), so
+            // we resolve the role-system (identity preamble) prompt; the seam is
+            // fail-loud internally (PROMPT_UNRESOLVED) — no empty/plain fallback.
+            return await _personaPrompts.ResolveAsync(principal, role, action: null, ct);
+        }
+
+        // PRIVATE/custom agent → SEAM for Story 32-17 (ICustomAgentPromptResolver).
+        // 32-17 wires merged.SystemPrompt from the custom agent's ConfigJson.prompts
+        // here. Until then the merged config's prompt is used (unchanged behaviour
+        // for the 32-2 private path); 32-17 replaces this branch with its seam.
+        return merged.SystemPrompt;
     }
 
     /// <summary>
