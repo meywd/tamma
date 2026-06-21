@@ -573,6 +573,21 @@ public class ControlPlaneDbContext : DbContext
     /// </summary>
     public DbSet<AuditProjectorCursor> AuditProjectorCursors => Set<AuditProjectorCursor>();
 
+    /// <summary>
+    /// Story 34-11 — the provider COST identity (platform-global, NOT
+    /// tenant-scoped). Promotes the frozen <c>ProviderPricingService</c> rate
+    /// sheet to a first-class, admin-editable entity behind the unchanged
+    /// <c>IProviderPricingService</c> seam.
+    /// </summary>
+    public DbSet<Provider> Providers => Set<Provider>();
+
+    /// <summary>
+    /// Story 34-11 — per-model versioned COST rows (USD-per-1M). Immutable +
+    /// EffectiveFrom-windowed: an edit supersedes rather than mutates so a usage
+    /// event prices under the rate active at its OccurredAt (reproducible).
+    /// </summary>
+    public DbSet<ProviderModelPrice> ProviderModelPrices => Set<ProviderModelPrice>();
+
     // Story 28-1 PR D: the 11 + 4 mentorship tenant-resident entities
     // (AgentConfig, PromptOverride, ProviderHealth, ProviderDiagnostic,
     // SanitizationRule, WorkflowDefinition, WorkflowInstance, DomainEvent,
@@ -668,6 +683,105 @@ public class ControlPlaneDbContext : DbContext
         // projector resumes both streams from one row.
         TammaModelConfiguration.ConfigureAuditEntities(modelBuilder, fixedTenantId: null);
         TammaModelConfiguration.ConfigureAuditProjectorCursor(modelBuilder);
+
+        // Story 34-11 — provider COST price-book. CP-resident, platform-global
+        // (no TenantId): cost is the provider's published rate, identical for
+        // every tenant. Mirrors the ConfigurePlans versioning pattern.
+        ConfigureProviders(modelBuilder);
+        ConfigureProviderModelPrices(modelBuilder);
+    }
+
+    /// <summary>
+    /// Story 34-11 — <c>providers</c> table. Platform-global cost identity. The
+    /// unique <c>Key</c> is the canonical provider handle; CHECKs pin
+    /// <c>AuthModel</c>/<c>Status</c> to their closed enums. No tenant column —
+    /// cost is mode- and tenant-independent (design §4.4).
+    /// </summary>
+    private static void ConfigureProviders(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Provider>(entity =>
+        {
+            entity.ToTable("providers", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_providers_auth_model",
+                    "\"AuthModel\" IN ('api-key','cli-token')");
+                t.HasCheckConstraint(
+                    "ck_providers_status",
+                    "\"Status\" IN ('active','retired')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Key).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.DisplayName).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.AuthModel)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("api-key");
+            entity.Property(e => e.Status)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("active");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // Canonical provider key is the natural key the cost resolver
+            // (and the FK from provider_model_prices) joins on.
+            entity.HasIndex(e => e.Key)
+                .HasDatabaseName("UX_providers_Key").IsUnique();
+        });
+    }
+
+    /// <summary>
+    /// Story 34-11 — <c>provider_model_prices</c> table. The immutability
+    /// invariant lives in SQL: a partial unique index
+    /// <c>UX_provider_model_prices_OneActivePerModel</c> on
+    /// <c>(ProviderKey, Model) WHERE "Status" = 'active'</c> guarantees exactly
+    /// one active row per model (mirrors <c>UX_plans_OneActivePerSlug</c>). The
+    /// window index supports the EffectiveFrom-windowed resolution. FK
+    /// <c>ProviderKey → providers.Key</c> with RESTRICT (a referenced cost
+    /// identity must never be hard-deleted out from under its price rows).
+    /// </summary>
+    private static void ConfigureProviderModelPrices(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ProviderModelPrice>(entity =>
+        {
+            entity.ToTable("provider_model_prices", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_provider_model_prices_status",
+                    "\"Status\" IN ('active','superseded')");
+                t.HasCheckConstraint(
+                    "ck_provider_model_prices_source",
+                    "\"Source\" IN ('seed','admin')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.ProviderKey).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Model).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.InputUsdPer1M).HasColumnType("decimal(20,8)");
+            entity.Property(e => e.OutputUsdPer1M).HasColumnType("decimal(20,8)");
+            entity.Property(e => e.CacheReadUsdPer1M).HasColumnType("decimal(20,8)");
+            entity.Property(e => e.CacheWriteUsdPer1M).HasColumnType("decimal(20,8)");
+            entity.Property(e => e.Status)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("active");
+            entity.Property(e => e.Source)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("seed");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // Exactly one active price per (ProviderKey, Model) — the
+            // immutability invariant in SQL (mirrors UX_plans_OneActivePerSlug).
+            entity.HasIndex(e => new { e.ProviderKey, e.Model })
+                .HasDatabaseName("UX_provider_model_prices_OneActivePerModel")
+                .HasFilter("\"Status\" = 'active'").IsUnique();
+
+            // Resolution-window lookup (provider+model, ordered by EffectiveFrom).
+            entity.HasIndex(e => new { e.ProviderKey, e.Model, e.EffectiveFrom })
+                .HasDatabaseName("IX_provider_model_prices_Window");
+
+            entity.HasOne<Provider>()
+                .WithMany(p => p.Prices)
+                .HasForeignKey(e => e.ProviderKey)
+                .HasPrincipalKey(p => p.Key)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
     }
 
     /// <summary>

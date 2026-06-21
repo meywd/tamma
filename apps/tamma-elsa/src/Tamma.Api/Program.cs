@@ -847,6 +847,14 @@ builder.Services.AddScoped<
     Tamma.Api.Services.Analytics.IPlatformAnalyticsService,
     Tamma.Api.Services.Analytics.PlatformAnalyticsService>();
 
+// Story 34-11 — swap the frozen ProviderPricingService for the DB-backed
+// DbProviderPricingService behind the unchanged IProviderPricingService seam
+// (a one-line DI change; zero downstream consumer edits). Must run AFTER
+// AddProviderSessionServices (which TryAdds the frozen impl) so this explicit
+// registration wins. The frozen class stays resolvable as the seed source +
+// boot fallback.
+builder.Services.AddDbProviderPricing();
+
 // Story 28-8 AC3 — short-TTL tenant status cache (per-pod, in-memory).
 // Cuts CP round-trips in TenantContextMiddleware on hot tenant requests.
 // Cluster-wide invalidation (RabbitMQ pub/sub) is a future enhancement —
@@ -1407,6 +1415,26 @@ admin.MapGet("/plans", Tamma.Api.Endpoints.Admin.PlanCatalogEndpoints.ListActive
 admin.MapGet("/plans/{slug}", Tamma.Api.Endpoints.Admin.PlanCatalogEndpoints.GetActiveBySlug)
     .RequireAuthorization("PlatformOwnerAccess");
 admin.MapGet("/plans/{slug}/versions", Tamma.Api.Endpoints.Admin.PlanCatalogEndpoints.GetVersions)
+    .RequireAuthorization("PlatformOwnerAccess");
+
+// Story 34-11 — provider COST price-book admin CRUD. PlatformOwnerAccess: the
+// cost book is platform-GLOBAL in both modes (no per-tenant override layer), so
+// it is platform-scoped admin work — NOT OwnerAccess (which admits every
+// personal-tenant owner, Finding C1). Mutations emit PROVIDER.* DCB events.
+admin.MapGet("/providers",
+        Tamma.Api.Endpoints.Admin.AdminProviderPricingEndpoints.ListProviders)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapPost("/providers",
+        Tamma.Api.Endpoints.Admin.AdminProviderPricingEndpoints.RegisterProvider)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapPatch("/providers/{key}",
+        Tamma.Api.Endpoints.Admin.AdminProviderPricingEndpoints.UpdateProvider)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapGet("/providers/{key}/prices",
+        Tamma.Api.Endpoints.Admin.AdminProviderPricingEndpoints.ListPrices)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapPut("/providers/{key}/prices",
+        Tamma.Api.Endpoints.Admin.AdminProviderPricingEndpoints.VersionPrice)
     .RequireAuthorization("PlatformOwnerAccess");
 
 // Story 28-11 — platform-admin tenant-status UX. List + detail surface the
@@ -2124,6 +2152,7 @@ using (var scope = app.Services.CreateScope())
                     mentorship_events, mentorship_sessions,
                     password_reset_tokens,
                     plan_features, plan_entitlements, plan_prices, plans,
+                    provider_model_prices, providers,
                     platform_analytics_hourly,
                     platform_api_key_index,
                     platform_bootstrap,
@@ -2157,6 +2186,12 @@ using (var scope = app.Services.CreateScope())
         // tamma-<role> handle + Version=1). Insert-missing-only; no-op on
         // re-run. CP-resident; coexists with the Elsa-store AgentSeeder.
         await Tamma.Data.Seeders.AgentEntitySeeder.SeedAsync(dbContext);
+
+        // Story 34-11 — provider COST price-book. Ports the frozen
+        // ProviderPricingService rate sheet into providers + provider_model_prices
+        // as v1 seed rows (Source='seed', Status='active'). Insert-missing-only;
+        // no-op on re-run and never reverts a Source='admin' (re-priced) row.
+        await Tamma.Data.Seeders.ProviderPricingSeeder.SeedAsync(dbContext);
 
         // tenant_databases: register the central DB as pool member #1
         // (unified-tenancy Phase 2) so single-user/dev and SaaS share one

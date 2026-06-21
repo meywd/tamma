@@ -165,6 +165,10 @@ public class PlatformOwnerAccessPolicyTests
         // PlatformOwnerAccess, not OwnerAccess (Finding C1): a tenant-owner
         // who is not a platform admin must NOT be able to read it.
         "/api/admin/plans",
+        // Story 34-11 — the provider COST price-book is platform-global in both
+        // modes (no per-tenant override layer). Same Finding-C1 gate: a
+        // tenant-owner who is not a platform admin must NOT read or edit it.
+        "/api/admin/providers",
     };
 
     [Test]

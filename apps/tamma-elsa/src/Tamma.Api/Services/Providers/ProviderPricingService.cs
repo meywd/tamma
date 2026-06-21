@@ -13,6 +13,15 @@ namespace Tamma.Api.Services.Providers;
 /// </para>
 ///
 /// <para>
+/// Story 34-11 — this class is RETAINED as the deterministic SEED SOURCE
+/// (consumed by <c>ProviderPricingSeeder</c>) and the boot fallback when the
+/// DB cost table is empty. The registered runtime impl is now
+/// <see cref="DbProviderPricingService"/>; both share the
+/// <see cref="ProviderRateLookup"/> alias-map + lookup algorithm so they
+/// cannot drift (the parity test pins byte-identical <c>Compute</c> output).
+/// </para>
+///
+/// <para>
 /// Lookup is case-insensitive on both provider key and model id. Provider
 /// keys are also normalised against a small alias map so callers using the
 /// older <c>anthropic-claude</c> handle still resolve to the same Anthropic
@@ -21,137 +30,117 @@ namespace Tamma.Api.Services.Providers;
 /// </summary>
 public sealed class ProviderPricingService : IProviderPricingService
 {
-    private readonly record struct Rate(decimal InputPerToken, decimal OutputPerToken);
+    /// <summary>Per-(provider, model) USD-per-token rates. Exposed to the seeder (Story 34-11).</summary>
+    public static readonly FrozenDictionary<string, FrozenDictionary<string, ProviderRateLookup.Rate>> Pricing =
+        BuildTable();
 
     /// <summary>
-    /// Provider alias normalisation. Maps every accepted handle to the
-    /// canonical provider key used in <see cref="s_pricing"/>. Unrecognised
-    /// keys are passed through untouched so explicit additions to the table
-    /// still resolve.
+    /// Story 34-11 — the AuthModel each seeded provider carries (feeds 32-4
+    /// SaaS-eligibility). <c>claude-code</c> is the CLI harness (<c>cli-token</c>);
+    /// every other provider authenticates with an API key.
     /// </summary>
-    private static readonly FrozenDictionary<string, string> s_aliases =
+    public static readonly FrozenDictionary<string, string> AuthModels =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["anthropic"] = "anthropic",
-            ["anthropic-claude"] = "anthropic",
-            ["claude"] = "anthropic",
-            ["claude-code"] = "claude-code",
-            ["openai"] = "openai",
-            ["github-copilot"] = "openai",      // Copilot is an OpenAI front-end
-            ["gemini"] = "google",
-            ["google"] = "google",
-            ["openrouter"] = "openrouter",
-            ["local"] = "local",
-            ["ollama"] = "local",
-            ["lmstudio"] = "local",
+            ["anthropic"] = "api-key",
+            ["openai"] = "api-key",
+            ["google"] = "api-key",
+            ["openrouter"] = "api-key",
+            ["local"] = "api-key",
+            ["claude-code"] = "cli-token",
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Per-(provider, model) USD-per-token rates.</summary>
-    private static readonly FrozenDictionary<string, FrozenDictionary<string, Rate>> s_pricing =
-        BuildTable();
+    /// <summary>Display names for the seeded providers (Story 34-11).</summary>
+    public static readonly FrozenDictionary<string, string> DisplayNames =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["anthropic"] = "Anthropic",
+            ["openai"] = "OpenAI",
+            ["google"] = "Google",
+            ["openrouter"] = "OpenRouter",
+            ["local"] = "Local",
+            ["claude-code"] = "Claude Code",
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     public decimal Compute(string provider, string? model, int inputTokens, int outputTokens)
     {
         if (string.IsNullOrWhiteSpace(provider)) return 0m;
         if (!TryGetRate(provider, model, out var rate)) return 0m;
-
-        var inTok = inputTokens < 0 ? 0 : inputTokens;
-        var outTok = outputTokens < 0 ? 0 : outputTokens;
-
-        return (rate.InputPerToken * inTok) + (rate.OutputPerToken * outTok);
+        return ProviderRateLookup.Cost(rate, inputTokens, outputTokens);
     }
 
     public bool IsKnown(string provider, string? model)
         => TryGetRate(provider, model, out _);
 
-    private static bool TryGetRate(string provider, string? model, out Rate rate)
+    private static bool TryGetRate(string provider, string? model, out ProviderRateLookup.Rate rate)
     {
         rate = default;
-        var canonical = s_aliases.TryGetValue(provider, out var aliased) ? aliased : provider;
-        if (!s_pricing.TryGetValue(canonical, out var modelMap)) return false;
-
-        // Resolve "default" or null to the provider's first model.
-        var lookupModel = string.IsNullOrWhiteSpace(model) || model == "default"
-            ? modelMap.Keys.FirstOrDefault()
-            : model;
-        if (lookupModel is null) return false;
-
-        if (modelMap.TryGetValue(lookupModel, out rate)) return true;
-
-        // Loose match: if caller passed e.g. "claude-sonnet-4" and the table
-        // has "claude-sonnet-4-20250514", match on the prefix. Picks the first
-        // entry whose key starts with the requested model id.
-        foreach (var (key, value) in modelMap)
-        {
-            if (key.StartsWith(lookupModel, StringComparison.OrdinalIgnoreCase))
-            {
-                rate = value;
-                return true;
-            }
-        }
-        return false;
+        var canonical = ProviderRateLookup.Canonicalize(provider);
+        if (!Pricing.TryGetValue(canonical, out var modelMap)) return false;
+        return ProviderRateLookup.TryGetRate(provider, model, modelMap, out rate);
     }
 
-    private static FrozenDictionary<string, FrozenDictionary<string, Rate>> BuildTable()
+    private static FrozenDictionary<string, FrozenDictionary<string, ProviderRateLookup.Rate>> BuildTable()
     {
         // Helper: USD-per-1M tokens → USD-per-token.
-        static decimal Per(double per1M) => (decimal)(per1M / 1_000_000.0);
+        static ProviderRateLookup.Rate R(double in1M, double out1M) =>
+            new((decimal)(in1M / 1_000_000.0), (decimal)(out1M / 1_000_000.0));
 
-        var anthropic = new Dictionary<string, Rate>(StringComparer.OrdinalIgnoreCase)
+        var anthropic = new Dictionary<string, ProviderRateLookup.Rate>(StringComparer.OrdinalIgnoreCase)
         {
-            ["claude-sonnet-4-20250514"] = new(Per(3.00), Per(15.00)),
-            ["claude-opus-4-20250514"] = new(Per(15.00), Per(75.00)),
-            ["claude-3-5-sonnet-20241022"] = new(Per(3.00), Per(15.00)),
-            ["claude-3-5-haiku-20241022"] = new(Per(0.80), Per(4.00)),
-            ["claude-3-opus-20240229"] = new(Per(15.00), Per(75.00)),
-            ["claude-3-sonnet-20240229"] = new(Per(3.00), Per(15.00)),
-            ["claude-3-haiku-20240307"] = new(Per(0.25), Per(1.25)),
+            ["claude-sonnet-4-20250514"] = R(3.00, 15.00),
+            ["claude-opus-4-20250514"] = R(15.00, 75.00),
+            ["claude-3-5-sonnet-20241022"] = R(3.00, 15.00),
+            ["claude-3-5-haiku-20241022"] = R(0.80, 4.00),
+            ["claude-3-opus-20240229"] = R(15.00, 75.00),
+            ["claude-3-sonnet-20240229"] = R(3.00, 15.00),
+            ["claude-3-haiku-20240307"] = R(0.25, 1.25),
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-        var openai = new Dictionary<string, Rate>(StringComparer.OrdinalIgnoreCase)
+        var openai = new Dictionary<string, ProviderRateLookup.Rate>(StringComparer.OrdinalIgnoreCase)
         {
-            ["gpt-4o"] = new(Per(2.50), Per(10.00)),
-            ["gpt-4o-mini"] = new(Per(0.15), Per(0.60)),
-            ["gpt-4-turbo"] = new(Per(10.00), Per(30.00)),
-            ["gpt-4"] = new(Per(30.00), Per(60.00)),
-            ["gpt-3.5-turbo"] = new(Per(0.50), Per(1.50)),
-            ["o1-preview"] = new(Per(15.00), Per(60.00)),
-            ["o1-mini"] = new(Per(3.00), Per(12.00)),
+            ["gpt-4o"] = R(2.50, 10.00),
+            ["gpt-4o-mini"] = R(0.15, 0.60),
+            ["gpt-4-turbo"] = R(10.00, 30.00),
+            ["gpt-4"] = R(30.00, 60.00),
+            ["gpt-3.5-turbo"] = R(0.50, 1.50),
+            ["o1-preview"] = R(15.00, 60.00),
+            ["o1-mini"] = R(3.00, 12.00),
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-        var google = new Dictionary<string, Rate>(StringComparer.OrdinalIgnoreCase)
+        var google = new Dictionary<string, ProviderRateLookup.Rate>(StringComparer.OrdinalIgnoreCase)
         {
-            ["gemini-1.5-pro"] = new(Per(1.25), Per(5.00)),
-            ["gemini-1.5-flash"] = new(Per(0.075), Per(0.30)),
-            ["gemini-2.0-flash"] = new(Per(0.10), Per(0.40)),
+            ["gemini-1.5-pro"] = R(1.25, 5.00),
+            ["gemini-1.5-flash"] = R(0.075, 0.30),
+            ["gemini-2.0-flash"] = R(0.10, 0.40),
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
         // OpenRouter shares model identifiers with vendor/model paths.
-        var openrouter = new Dictionary<string, Rate>(StringComparer.OrdinalIgnoreCase)
+        var openrouter = new Dictionary<string, ProviderRateLookup.Rate>(StringComparer.OrdinalIgnoreCase)
         {
-            ["anthropic/claude-3.5-sonnet"] = new(Per(3.00), Per(15.00)),
-            ["anthropic/claude-3-opus"] = new(Per(15.00), Per(75.00)),
-            ["anthropic/claude-3-haiku"] = new(Per(0.25), Per(1.25)),
-            ["openai/gpt-4o"] = new(Per(2.50), Per(10.00)),
-            ["openai/gpt-4o-mini"] = new(Per(0.15), Per(0.60)),
-            ["meta-llama/llama-3.1-405b-instruct"] = new(Per(2.70), Per(2.70)),
-            ["meta-llama/llama-3.1-70b-instruct"] = new(Per(0.52), Per(0.75)),
-            ["meta-llama/llama-3.1-8b-instruct"] = new(Per(0.055), Per(0.055)),
-            ["mistralai/mistral-large"] = new(Per(2.00), Per(6.00)),
-            ["mistralai/mixtral-8x7b-instruct"] = new(Per(0.24), Per(0.24)),
+            ["anthropic/claude-3.5-sonnet"] = R(3.00, 15.00),
+            ["anthropic/claude-3-opus"] = R(15.00, 75.00),
+            ["anthropic/claude-3-haiku"] = R(0.25, 1.25),
+            ["openai/gpt-4o"] = R(2.50, 10.00),
+            ["openai/gpt-4o-mini"] = R(0.15, 0.60),
+            ["meta-llama/llama-3.1-405b-instruct"] = R(2.70, 2.70),
+            ["meta-llama/llama-3.1-70b-instruct"] = R(0.52, 0.75),
+            ["meta-llama/llama-3.1-8b-instruct"] = R(0.055, 0.055),
+            ["mistralai/mistral-large"] = R(2.00, 6.00),
+            ["mistralai/mixtral-8x7b-instruct"] = R(0.24, 0.24),
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
         // claude-code uses Anthropic pricing.
         var claudeCode = anthropic;
 
         // Local models bill at zero.
-        var local = new Dictionary<string, Rate>(StringComparer.OrdinalIgnoreCase)
+        var local = new Dictionary<string, ProviderRateLookup.Rate>(StringComparer.OrdinalIgnoreCase)
         {
             ["local"] = new(0m, 0m),
             ["default"] = new(0m, 0m),
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-        return new Dictionary<string, FrozenDictionary<string, Rate>>(StringComparer.OrdinalIgnoreCase)
+        return new Dictionary<string, FrozenDictionary<string, ProviderRateLookup.Rate>>(StringComparer.OrdinalIgnoreCase)
         {
             ["anthropic"] = anthropic,
             ["openai"] = openai,
