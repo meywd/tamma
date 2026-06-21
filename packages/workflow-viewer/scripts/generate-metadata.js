@@ -77,6 +77,23 @@ function unesc(s) {
   return s.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
 }
 
+/**
+ * Strip XML-doc / HTML tags from doc-comment text in an injection-safe way.
+ * A single-pass `.replace(/<[^>]+>/g, '')` is incomplete: a nested/reconstituting
+ * input like `<scr<script>ipt>` survives one pass (CodeQL js/incomplete-multi-
+ * character-sanitization). So we loop until the string is stable, then drop any
+ * residual stray angle brackets — guaranteeing the result can never contain a
+ * `<tag` fragment regardless of how the consumer renders it.
+ */
+function stripDocTags(s) {
+  let prev;
+  do {
+    prev = s;
+    s = s.replace(/<[^<>]*>/g, '');
+  } while (s !== prev);
+  return s.replace(/[<>]/g, '');
+}
+
 /** Pull the leading /// <summary> ... </summary> doc comment for a class. */
 function extractClassSummary(src, className) {
   const idx = src.indexOf(`class ${className}`);
@@ -98,13 +115,10 @@ function extractClassSummary(src, className) {
       break;
     }
   }
-  const text = docLines
+  const joined = docLines
     .filter((l) => !l.includes('<summary>') && !l.includes('</summary>'))
-    .join(' ')
-    .replace(/<[^>]+>/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return text;
+    .join(' ');
+  return stripDocTags(joined).replace(/\s+/g, ' ').trim();
 }
 
 // ---------------------------------------------------------------------------
