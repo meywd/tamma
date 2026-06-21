@@ -35,11 +35,11 @@ Epic 32 is the canonical owner of the agent entity, execution, and tracking mode
 
 | Story | Title | Priority | Status | Est. Effort |
 |-------|-------|----------|--------|-------------|
-| 32-1 | Agent Entity Model & Versioned Saved Config (public/private) | P0 | drafted | 4-5 days |
-| 32-2 | Agent Registry, Resolution & RBAC API | P0 | drafted | 4-5 days |
-| 32-3 | Per-Tenant Provider Credential Resolution (BYOK → platform) | P0 | drafted | 4-5 days |
+| 32-1 | Agent Entity Model & Versioned Saved Config (public/private) | P0 | done | 4-5 days |
+| 32-2 | Agent Registry, Resolution & RBAC API | P0 | done | 4-5 days |
+| 32-3 | Per-Tenant Provider Credential Resolution (BYOK → platform) | P0 | done | 4-5 days |
 | 32-4 | SaaS Provider Gate — gate STAGE of the call-LLM endpoint *(reframed 2026-06-21)* | P0 | drafted | 2-3 days |
-| 32-5 | Call-LLM Endpoint + Managed Execution (`POST /api/v1/llm/call`; lynchpin) *(reframed 2026-06-21)* | P0 | drafted | 6-8 days |
+| 32-5 | Call-LLM Endpoint + Managed Execution (`POST /api/v1/llm/call`; lynchpin) *(reframed 2026-06-21)* | P0 | drafted | 8-10 days |
 | 32-6 | Agent Action Trail (DCB events tagged `agent_id`) in Tenant Store | P0 | drafted | 4-5 days |
 | 32-7 | Multi-Agent Design/Review Panels in Elsa (strategy-driven) | P1 | drafted | 5-6 days |
 | 32-8 | Outcome Capture & Bug Taxonomy at Review/Gate | P1 | drafted | 3-4 days |

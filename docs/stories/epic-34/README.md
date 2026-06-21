@@ -78,7 +78,7 @@ USD credits, and promo codes (Story 34-7) layer on top of the resolved plan pric
 | 34-8 | Pricing Audit, Events & Reproducibility | P1 | drafted | 3-4 days |
 | 34-9 | Pricing & Plan Management Dashboards | P1 | drafted | 4-5 days |
 | 34-10 | Epic 20 Decommission & Pricing Contract Migration | P0 | drafted | 3-4 days |
-| 34-11 | Provider Cost Price-Book (`Provider` + `ProviderModelPrice` cost entities behind `IProviderPricingService`; before 34-5) *(2026-06-21)* | P0 | drafted | 3-4 days |
+| 34-11 | Provider Cost Price-Book (`Provider` + `ProviderModelPrice` cost entities behind `IProviderPricingService`; before 34-5) *(2026-06-21)* | P0 | drafted | 4-5 days |
 
 ## Architecture
 

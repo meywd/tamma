@@ -259,7 +259,7 @@ apps/tamma-elsa/src/Tamma.Api/Endpoints/
 
 ### EF migrations
 
-**None.** This story adds no entity and no column. It edits service/resolver logic only. The `TenantAgentEnablement` table is owned by **32-16**; the nullable-`Agent.Role` migration + persona seeder are owned by **32-15**. `dotnet ef migrations has-pending-model-changes` MUST report none after this story (AC 11). Because no public/control-plane table is added here, the **Program.cs startup-reset DROP list** does NOT change (32-16 appends `tenant_agent_enablement` to it if it is CP-resident).
+**None.** This story adds no entity and no column. It edits service/resolver logic only. The `TenantAgentEnablement` table is owned by **32-16**; the nullable-`Agent.Role` migration + persona seeder are owned by **32-15**. `dotnet ef migrations has-pending-model-changes` MUST report none after this story (AC 11). Because no public/control-plane table is added here, the **Program.cs startup-reset DROP list** does NOT change (32-16 appends its CP-resident `tenant_agent_enablements` table to it).
 
 ### DCB events
 
