@@ -8,12 +8,18 @@ import EpicsPage from './components/EpicsPage';
 import EpicDetailPage from './components/EpicDetailPage';
 import WorkflowsPage from './components/WorkflowsPage';
 import WorkflowDetailPage from './components/WorkflowDetailPage';
+import WorkflowMapPage from './components/WorkflowMapPage';
 import StoriesPage from './components/StoriesPage';
 import StoryDetailPage from './components/StoryDetailPage';
 
 export default function App() {
   return (
     <Routes>
+      {/* Immersive, full-bleed subway/transit map view — rendered OUTSIDE the
+          wiki <Layout> chrome (no sidebar/header) so the page is only the
+          diagram + the floating popup. */}
+      <Route path="workflows/:slug/map" element={<WorkflowMapPage />} />
+
       <Route element={<Layout />}>
         <Route index element={<HomePage />} />
         <Route path="roadmap" element={<RoadmapPage />} />

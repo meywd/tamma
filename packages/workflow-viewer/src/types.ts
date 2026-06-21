@@ -32,6 +32,23 @@ export interface WorkflowApiDetail {
   purpose: string;
 }
 
+/**
+ * Resolved source-code reference for a node (the "Code" tab). Present only when
+ * the metadata generator could map the node's backing activity class to a file.
+ */
+export interface WorkflowCodeRef {
+  /** Repo-relative path (e.g. `apps/tamma-elsa/src/Tamma.Activities/Foo.cs`). */
+  file: string;
+  /** 1-based line of the class declaration, if found. */
+  line?: number;
+  /** C# namespace of the activity class, if found. */
+  namespace?: string;
+  /** Permalink to the file (and line) on GitHub. */
+  githubUrl?: string;
+  /** Short, sanitized snippet around the declaration (doc-tag stripped). */
+  snippet?: string;
+}
+
 /** A node in a workflow graph (one Elsa activity / control-flow node). */
 export interface WorkflowNode {
   /** Stable id (the activity `Id` literal from the C# builder). */
@@ -60,6 +77,8 @@ export interface WorkflowNode {
   subWorkflowResolves?: boolean;
   /** For `api-call` nodes: the endpoint detail panel content. */
   api?: WorkflowApiDetail;
+  /** Resolved backing source file/line (the "Code" tab). */
+  code?: WorkflowCodeRef;
 }
 
 /** A directed edge between two nodes, optionally labelled by an outcome. */

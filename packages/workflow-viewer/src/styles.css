@@ -94,10 +94,12 @@
 }
 
 /* --- Legend --- */
+/* Anchored top-left so it never overlaps the React Flow <Controls> (which sit
+   bottom-left and include the fit-view / "fullscreen" button). */
 .twv-legend {
   position: absolute;
   left: 10px;
-  bottom: 10px;
+  top: 10px;
   display: flex;
   flex-wrap: wrap;
   gap: 8px 12px;
@@ -235,4 +237,326 @@
 @media (max-width: 720px) {
   .twv-root { flex-direction: column; }
   .twv-panel { flex-basis: auto; max-width: none; max-height: 360px; border-left: 0; border-top: 1px solid #27272a; }
+}
+
+/* =========================================================================
+   Subway / transit MAP view (<WorkflowMap />). Static, mobile-first,
+   vertical-scroll. No zoom, no pan. All class names prefixed `twv-map-` /
+   `twv-station` / `twv-popup`.
+   ========================================================================= */
+
+.twv-map-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  background: #0c0c0e;
+  color: #e4e4e7;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The only scroll surface — vertical only, never horizontal. */
+.twv-map-scroll {
+  flex: 1 1 auto;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.twv-map-canvas {
+  position: relative;
+  width: 100%;
+  min-height: 100%;
+}
+
+.twv-map-rails {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.twv-map-rail-label {
+  position: absolute;
+  transform: translateY(-50%);
+  z-index: 2;
+  font-size: 9px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: rgba(9, 9, 11, 0.92);
+  border: 1px solid #27272a;
+  color: #d4d4d8;
+  white-space: nowrap;
+  pointer-events: none;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Station card --- */
+.twv-station {
+  position: absolute;
+  z-index: 3;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 56px;
+  padding: 6px 8px;
+  border-radius: 12px;
+  background: var(--twv-bg, rgba(82, 82, 91, 0.18));
+  border: 1.5px solid color-mix(in srgb, var(--twv-accent, #a1a1aa) 55%, transparent);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+  color: #e4e4e7;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.08s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.twv-station:hover { border-color: var(--twv-accent, #a1a1aa); }
+.twv-station:active { transform: scale(0.97); }
+.twv-station:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--twv-accent, #a1a1aa) 50%, transparent);
+}
+.twv-station[data-selected='true'] {
+  border-color: var(--twv-accent, #a1a1aa);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--twv-accent, #a1a1aa) 65%, transparent),
+    0 3px 12px rgba(0, 0, 0, 0.5);
+}
+
+/* Sub-workflow "interchange" look: double-ring dot + dashed border accent. */
+.twv-station[data-sub='true'] {
+  border-style: dashed;
+}
+
+.twv-station-dot {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #0c0c0e;
+  border: 2px solid var(--twv-accent, #a1a1aa);
+  color: var(--twv-accent, #a1a1aa);
+}
+.twv-station[data-sub='true'] .twv-station-dot {
+  box-shadow: 0 0 0 2px #0c0c0e, 0 0 0 3.5px var(--twv-accent, #a1a1aa);
+}
+.twv-station-dot svg { width: 14px; height: 14px; }
+
+.twv-station-label {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.15;
+  color: #e4e4e7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+/* Compact (narrow-lane) stations: stack a small dot above a wider, 3-line
+   label so the name stays legible even when many lanes share a phone width. */
+.twv-station[data-compact='true'] {
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px 4px;
+  align-items: stretch;
+}
+.twv-station[data-compact='true'] .twv-station-dot {
+  width: 18px;
+  height: 18px;
+  border-width: 1.5px;
+  align-self: center;
+}
+.twv-station[data-compact='true'] .twv-station-dot svg { width: 11px; height: 11px; }
+.twv-station[data-compact='true'] .twv-station-label {
+  font-size: 9.5px;
+  line-height: 1.1;
+  text-align: center;
+  -webkit-line-clamp: 3;
+}
+.twv-station[data-compact='true'] .twv-station-badge {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  margin: 0;
+  font-size: 10px;
+}
+
+.twv-station-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 12px;
+  line-height: 1;
+  color: #93c5fd;
+}
+.twv-station-badge-api { color: #6ee7b7; font-weight: 700; }
+
+/* --- Map legend (static strip at the top of the immersive page) --- */
+.twv-map-legend {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 8px 12px;
+  border-top: 1px solid #1f1f23;
+  background: rgba(9, 9, 11, 0.95);
+  font-size: 10px;
+  color: #a1a1aa;
+}
+
+/* =========================================================================
+   Floating detail POPUP (full-screen on phones, centred modal on desktop).
+   ========================================================================= */
+
+.twv-popup-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+.twv-popup-backdrop[data-variant='modal'] {
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+}
+.twv-popup-backdrop[data-variant='fullscreen'] {
+  background: #0a0a0c;
+}
+
+.twv-popup {
+  display: flex;
+  flex-direction: column;
+  background: #0a0a0c;
+  color: #e4e4e7;
+  border: 1px solid #27272a;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+}
+/* Centred modal on desktop. */
+.twv-popup[data-variant='modal'] {
+  width: 100%;
+  max-width: 510px;
+  max-height: 75vh;
+  border-radius: 16px;
+  overflow: hidden;
+}
+/* Full-screen overlay on phones. */
+.twv-popup[data-variant='fullscreen'] {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+}
+
+.twv-popup-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid #1f1f23;
+}
+.twv-popup-title { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.twv-popup-title-text { min-width: 0; }
+.twv-popup-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin: -6px -6px 0 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #a1a1aa;
+  cursor: pointer;
+}
+.twv-popup-close:hover { background: rgba(255, 255, 255, 0.06); color: #fafafa; }
+/* On full-screen the close button is fixed top-right for easy thumb reach. */
+.twv-popup[data-variant='fullscreen'] .twv-popup-close {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 1;
+}
+
+.twv-popup-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid #1f1f23;
+}
+.twv-popup-tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #71717a;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 12px;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  border-radius: 6px 6px 0 0;
+}
+.twv-popup-tab:hover:not(:disabled) { color: #d4d4d8; }
+.twv-popup-tab[data-active='true'] { color: #fafafa; border-bottom-color: #60a5fa; }
+.twv-popup-tab:disabled { color: #3f3f46; cursor: not-allowed; }
+
+.twv-popup-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 14px 16px 28px;
+}
+
+.twv-code-gh {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #93c5fd;
+  text-decoration: none;
+  padding: 4px 9px;
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.1);
+}
+.twv-code-gh:hover { background: rgba(59, 130, 246, 0.2); }
+.twv-code-snippet {
+  margin: 0;
+  padding: 10px 12px;
+  background: #09090b;
+  border: 1px solid #1f1f23;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #d4d4d8;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  white-space: pre;
 }
