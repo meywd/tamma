@@ -58,15 +58,34 @@ const workflowMeta: Record<string, { description: string; icon: string }> = {
   },
 };
 
+interface DatasetWorkflow {
+  id: string;
+  inventoryId?: string;
+  name: string;
+  description: string;
+  wikiPage?: string | null;
+}
+
 export default function WorkflowsPage() {
   const [workflows, setWorkflows] = useState<WorkflowCard[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     document.title = 'Workflows \u2014 Tamma Docs';
-    fetch('/content/manifest.json')
-      .then(async (r) => r.json())
-      .then((data: ManifestEntry[]) => {
+    Promise.all([
+      fetch('/content/manifest.json').then(async (r) => r.json() as Promise<ManifestEntry[]>),
+      fetch('/workflows.json')
+        .then(async (r) => (r.ok ? ((await r.json()) as { workflows: DatasetWorkflow[] }) : null))
+        .catch(() => null),
+    ])
+      .then(([data, dataset]) => {
+        // Index generated metadata by wiki slug for richer descriptions.
+        const descBySlug = new Map<string, string>();
+        for (const w of dataset?.workflows ?? []) {
+          const slug = w.wikiPage ? w.wikiPage.replace(/^Workflow-/, '').toLowerCase() : (w.inventoryId ?? w.id);
+          if (w.description) descBySlug.set(slug, w.description);
+        }
+
         const workflowEntries = data.filter((e) => e.section === 'Workflows');
         const cards: WorkflowCard[] = workflowEntries.map((entry) => {
           const slug = entry.path.replace('/workflows/', '');
@@ -75,7 +94,7 @@ export default function WorkflowsPage() {
           return {
             name,
             slug: entry.path,
-            description: meta?.description || name,
+            description: meta?.description || descBySlug.get(slug) || name,
             icon: meta?.icon || 'M13 10V3L4 14h7v7l9-11h-7z',
           };
         });

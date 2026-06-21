@@ -14,6 +14,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync, statSync, cpSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, basename, dirname, relative, extname } from 'node:path';
 
 // Paths relative to apps/wiki-site/
@@ -21,6 +22,17 @@ const REPO_ROOT = join(import.meta.dirname, '..', '..', '..');
 const WIKI_DIR = join(REPO_ROOT, 'wiki');
 const STORIES_DIR = join(REPO_ROOT, 'docs', 'stories');
 const OUTPUT_DIR = join(import.meta.dirname, '..', 'public', 'content');
+const PUBLIC_DIR = join(import.meta.dirname, '..', 'public');
+// The @tamma/workflow-viewer metadata generator (static parser of the C# Elsa
+// workflow builders) — emits the dataset consumed by <WorkflowViewer />.
+const WORKFLOW_METADATA_GENERATOR = join(
+  REPO_ROOT,
+  'packages',
+  'workflow-viewer',
+  'scripts',
+  'generate-metadata.js',
+);
+const WORKFLOW_METADATA_OUT = join(PUBLIC_DIR, 'workflows.json');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -377,6 +389,34 @@ function syncWorkflows(): void {
   }
 }
 
+/**
+ * Regenerate the workflow metadata dataset (public/workflows.json) by invoking
+ * the @tamma/workflow-viewer static parser. This keeps the diagram metadata in
+ * lockstep with the C# Elsa workflow source on every dev/build.
+ */
+function syncWorkflowMetadata(): void {
+  console.log('Generating workflow metadata (public/workflows.json)...');
+  if (!existsSync(WORKFLOW_METADATA_GENERATOR)) {
+    console.warn(`  SKIP: generator not found at ${WORKFLOW_METADATA_GENERATOR}`);
+    return;
+  }
+  try {
+    const out = execFileSync(
+      process.execPath,
+      [WORKFLOW_METADATA_GENERATOR, WORKFLOW_METADATA_OUT],
+      { cwd: REPO_ROOT, encoding: 'utf-8' },
+    );
+    // Surface the generator's summary lines.
+    out
+      .split('\n')
+      .filter((l) => l.trim())
+      .forEach((l) => console.log(`  ${l}`));
+  } catch (err) {
+    console.error('  ERROR: workflow metadata generation failed:', (err as Error).message);
+    throw err;
+  }
+}
+
 function main(): void {
   console.log('=== Tamma Wiki Content Sync ===\n');
   console.log(`Repo root:   ${REPO_ROOT}`);
@@ -389,6 +429,7 @@ function main(): void {
   syncWikiEpics();
   syncWorkflows();
   syncStories();
+  syncWorkflowMetadata();
 
   // Count output files
   let count = 0;

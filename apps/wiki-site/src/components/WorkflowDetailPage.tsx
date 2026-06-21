@@ -67,45 +67,6 @@ function parseTableData(content: string): { headers: string[]; rows: string[][] 
   return { headers, rows };
 }
 
-function extractFlowDiagram(content: string): string | null {
-  const match = content.match(/```[\s\S]*?\n([\s\S]*?)```/);
-  return match ? match[1] : null;
-}
-
-interface FlowStep {
-  id: string;
-  label: string;
-  type: 'process' | 'decision' | 'terminal' | 'start';
-}
-
-function parseFlowSteps(diagram: string): FlowStep[] {
-  const steps: FlowStep[] = [];
-  const seen = new Set<string>();
-
-  // Match box patterns: +------+ / | text | / +------+
-  const boxRegex = /\|\s*(.+?)\s*\|/g;
-  let match;
-  while ((match = boxRegex.exec(diagram)) !== null) {
-    const label = match[1].trim();
-    // Skip divider-only lines (e.g. lines of dashes)
-    if (label.match(/^[-+]+$/) || label === '') continue;
-    // Skip labels that are just arrows or separators
-    if (label.match(/^[v^|<>]+$/)) continue;
-
-    const key = label.replace(/\s+/g, ' ').toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    let type: FlowStep['type'] = 'process';
-    if (label.match(/\?$/)) type = 'decision';
-    else if (label.match(/finish|end|stop|terminate/i)) type = 'terminal';
-    else if (label.match(/init|start|load|begin/i)) type = 'start';
-
-    steps.push({ id: key, label, type });
-  }
-  return steps;
-}
-
 function extractRelatedWorkflows(content: string): Array<{ name: string; slug: string }> {
   const links: Array<{ name: string; slug: string }> = [];
   const seen = new Set<string>();
@@ -248,9 +209,6 @@ export default function WorkflowDetailPage() {
     () => sections.find((s) => s.heading.toLowerCase().includes('flow') || s.heading.toLowerCase().includes('diagram')),
     [sections]
   );
-  const flowDiagram = useMemo(() => (flowSection ? extractFlowDiagram(flowSection.content) : null), [flowSection]);
-  const flowSteps = useMemo(() => (flowDiagram ? parseFlowSteps(flowDiagram) : []), [flowDiagram]);
-
   // Find configuration section
   const configSection = useMemo(
     () =>
@@ -412,15 +370,14 @@ export default function WorkflowDetailPage() {
         )}
       </div>
 
-      {/* Flow Diagram */}
-      {flowSection && slug && (
+      {/* Interactive workflow diagram (rendered from generated metadata via
+          @tamma/workflow-viewer). Renders nothing if no metadata for this slug. */}
+      {slug && (
         <div>
           <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-4">
-            {flowSection.heading}
+            {flowSection ? flowSection.heading : 'Workflow Diagram'}
           </h2>
-
-          {/* Mermaid flow diagram */}
-          <WorkflowDiagram slug={slug} flowSteps={flowSteps} />
+          <WorkflowDiagram slug={slug} />
         </div>
       )}
 

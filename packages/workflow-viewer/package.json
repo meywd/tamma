@@ -1,0 +1,40 @@
+{
+  "name": "@tamma/workflow-viewer",
+  "version": "0.1.0",
+  "description": "Presentational React + React Flow component that renders interactive Tamma workflow diagrams from workflow metadata.",
+  "type": "module",
+  "license": "SEE LICENSE IN ../../LICENSE",
+  "sideEffects": [
+    "*.css"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./scripts/generate-metadata.js": "./scripts/generate-metadata.js"
+  },
+  "files": [
+    "src",
+    "scripts"
+  ],
+  "scripts": {
+    "generate": "node scripts/generate-metadata.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@dagrejs/dagre": "^3.0.0",
+    "@xyflow/react": "^12.0.0",
+    "react": "^18.0.0 || ^19.0.0",
+    "react-dom": "^18.0.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@dagrejs/dagre": "^3.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@xyflow/react": "^12.10.2",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "typescript": "^6.0.3"
+  }
+}

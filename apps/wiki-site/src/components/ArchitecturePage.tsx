@@ -3,8 +3,8 @@ import { Link } from 'react-router';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import WorkflowDiagram from './WorkflowDiagram';
-import type { WorkflowDef } from './WorkflowDiagram';
+import { WorkflowViewer } from '@tamma/workflow-viewer';
+import { ARCHITECTURE_DIAGRAMS } from './architectureDiagrams';
 import InlineMarkdown from './InlineMarkdown';
 
 // --- Types ---
@@ -749,16 +749,28 @@ export default function ArchitecturePage() {
       {/* Component Diagram */}
       <ComponentDiagram layers={architectureLayers} />
 
-      {/* Architecture Flow — React Flow */}
+      {/* Architecture Flow — rendered via @tamma/workflow-viewer */}
       <div>
         <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-3">Autonomous Development Flow</h2>
-        <WorkflowDiagram slug="architecture-flow" />
+        <div className="my-4" style={{ height: 600 }}>
+          <WorkflowViewer
+            metadata={[ARCHITECTURE_DIAGRAMS['architecture-flow']]}
+            workflowId="architecture-flow"
+            fill
+          />
+        </div>
       </div>
 
-      {/* Security Pipeline — React Flow */}
+      {/* Security Pipeline — rendered via @tamma/workflow-viewer */}
       <div>
         <h2 className="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-3">Security Pipeline</h2>
-        <WorkflowDiagram slug="security-pipeline" />
+        <div className="my-4" style={{ height: 600 }}>
+          <WorkflowViewer
+            metadata={[ARCHITECTURE_DIAGRAMS['security-pipeline']]}
+            workflowId="security-pipeline"
+            fill
+          />
+        </div>
       </div>
 
       {/* Collapsible Sections */}
