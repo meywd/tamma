@@ -119,6 +119,12 @@ public class ControlPlaneDbContextModelTests
             // CP-resident high-water marks).
             "audit_records",
             "audit_projector_cursor",
+            // Story 34-11 — provider COST price-book. Platform-global (no
+            // TenantId): cost is the provider's published rate, identical for
+            // every tenant. Promotes the frozen ProviderPricingService rate
+            // sheet behind the unchanged IProviderPricingService seam.
+            "providers",
+            "provider_model_prices",
         }, because: "Story 28-1 PR D (Decision #4) — enumerate every "
             + "CP-resident table; the 11 + 4 mentorship tenant-resident "
             + "entities have moved to TenantDbContext. Story 31-2 adds "
@@ -128,7 +134,104 @@ public class ControlPlaneDbContextModelTests
             + "Story 32-2 adds agent_role_selections. "
             + "Story 34-1 adds plan_features + plan_entitlements + plan_prices. "
             + "Story 35-1 adds billing_customers + billing_plan_prices. "
-            + "Story 37-1 adds audit_records + audit_projector_cursor.");
+            + "Story 37-1 adds audit_records + audit_projector_cursor. "
+            + "Story 34-11 adds providers + provider_model_prices.");
+    }
+
+    // ── Story 34-11 — provider cost price-book model shape ──
+
+    [Test]
+    public void Provider_And_ProviderModelPrice_Have_No_TenantOrUser_Column()
+    {
+        using var ctx = CreateContext();
+
+        // AC3 — cost is the provider's published rate, GLOBAL in both modes.
+        // Neither cost entity may carry a tenant/user scope column.
+        var forbidden = new[] { "TenantId", "UserId", "OwnerTenantId", "OwnerUserId" };
+
+        var providerProps = ctx.Model.FindEntityType(typeof(Provider))!
+            .GetProperties().Select(p => p.Name).ToHashSet();
+        var priceProps = ctx.Model.FindEntityType(typeof(ProviderModelPrice))!
+            .GetProperties().Select(p => p.Name).ToHashSet();
+
+        providerProps.Should().NotIntersectWith(forbidden,
+            "Story 34-11 AC3 — the cost identity is platform-global, never tenant-scoped");
+        priceProps.Should().NotIntersectWith(forbidden,
+            "Story 34-11 AC3 — the cost rate is platform-global, never tenant-scoped");
+    }
+
+    [Test]
+    public void Provider_Key_Is_Unique()
+    {
+        using var ctx = CreateContext();
+
+        var provider = ctx.Model.FindEntityType(typeof(Provider))!;
+        var keyIndex = provider.GetIndexes()
+            .FirstOrDefault(i => i.Properties.Count == 1 && i.Properties[0].Name == "Key");
+
+        keyIndex.Should().NotBeNull("the canonical provider key is the natural key");
+        keyIndex!.IsUnique.Should().BeTrue();
+    }
+
+    [Test]
+    public void Provider_Has_AuthModel_And_Status_CheckConstraints()
+    {
+        using var ctx = CreateContext();
+
+        var designModel = Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions
+            .GetService<Microsoft.EntityFrameworkCore.Metadata.IDesignTimeModel>(ctx).Model;
+        var provider = designModel.FindEntityType(typeof(Provider))!;
+        var checks = provider.GetCheckConstraints().Select(c => c.Name).ToHashSet();
+
+        checks.Should().Contain("ck_providers_auth_model");
+        checks.Should().Contain("ck_providers_status");
+    }
+
+    [Test]
+    public void ProviderModelPrice_Has_OneActivePerModel_PartialUniqueIndex()
+    {
+        using var ctx = CreateContext();
+
+        var price = ctx.Model.FindEntityType(typeof(ProviderModelPrice))!;
+        var oneActive = price.GetIndexes()
+            .Single(i => i.GetDatabaseName() == "UX_provider_model_prices_OneActivePerModel");
+
+        oneActive.IsUnique.Should().BeTrue("AC4 — exactly one active price per (ProviderKey, Model)");
+        oneActive.GetFilter().Should().Be("\"Status\" = 'active'");
+        oneActive.Properties.Select(p => p.Name).Should().Equal("ProviderKey", "Model");
+    }
+
+    [Test]
+    public void ProviderModelPrice_Has_Window_Index_And_RestrictFk()
+    {
+        using var ctx = CreateContext();
+
+        var price = ctx.Model.FindEntityType(typeof(ProviderModelPrice))!;
+
+        var window = price.GetIndexes()
+            .Single(i => i.GetDatabaseName() == "IX_provider_model_prices_Window");
+        window.Properties.Select(p => p.Name)
+            .Should().Equal(new[] { "ProviderKey", "Model", "EffectiveFrom" },
+                because: "AC5 — EffectiveFrom-windowed resolution lookup");
+
+        var fk = price.GetForeignKeys()
+            .Single(k => k.PrincipalEntityType.ClrType == typeof(Provider));
+        fk.DeleteBehavior.Should().Be(DeleteBehavior.Restrict,
+            "a referenced cost identity must never be hard-deleted out from under its prices");
+    }
+
+    [Test]
+    public void ProviderModelPrice_Has_Status_And_Source_CheckConstraints()
+    {
+        using var ctx = CreateContext();
+
+        var designModel = Microsoft.EntityFrameworkCore.Infrastructure.AccessorExtensions
+            .GetService<Microsoft.EntityFrameworkCore.Metadata.IDesignTimeModel>(ctx).Model;
+        var price = designModel.FindEntityType(typeof(ProviderModelPrice))!;
+        var checks = price.GetCheckConstraints().Select(c => c.Name).ToHashSet();
+
+        checks.Should().Contain("ck_provider_model_prices_status");
+        checks.Should().Contain("ck_provider_model_prices_source");
     }
 
     // ── Story 32-1 — agent entity model shape ──
