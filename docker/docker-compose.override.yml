@@ -21,10 +21,6 @@ services:
     ports:
       - "5000:5000"
 
-  tamma-api-dotnet:
-    ports:
-      - "3000:3000"
-
   tamma-api:
     ports:
       - "3100:3100"
