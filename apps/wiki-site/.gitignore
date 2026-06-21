@@ -12,3 +12,6 @@ node_modules/
 .wrangler/
 .dev.vars
 public/content/
+# Generated workflow metadata (produced by scripts/sync-content.ts via
+# @tamma/workflow-viewer's generate-metadata.js on every dev/build).
+public/workflows.json

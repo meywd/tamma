@@ -1,0 +1,238 @@
+/* Scoped styles for @tamma/workflow-viewer. Dark theme, self-contained so the
+   package does not depend on the host app's Tailwind config. All class names
+   are prefixed `twv-` to avoid collisions. */
+
+.twv-root {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  background: #0c0c0e;
+  border: 1px solid #27272a;
+  border-radius: 12px;
+  overflow: hidden;
+  color: #e4e4e7;
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+.twv-canvas-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+}
+
+.twv-empty {
+  padding: 2rem;
+  text-align: center;
+  color: #71717a;
+}
+
+/* --- Node --- */
+.twv-node {
+  width: 210px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--twv-bg, rgba(82, 82, 91, 0.18));
+  border: 1px solid color-mix(in srgb, var(--twv-accent, #a1a1aa) 45%, transparent);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.twv-node[data-selected='true'] {
+  border-color: var(--twv-accent, #a1a1aa);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--twv-accent, #a1a1aa) 60%, transparent);
+}
+.twv-node-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.twv-node-icon {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  color: var(--twv-accent, #a1a1aa);
+}
+.twv-node-label {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  color: #e4e4e7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.twv-node-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.twv-tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #a1a1aa;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.twv-tag-link { color: #93c5fd; border-color: rgba(96, 165, 250, 0.35); }
+.twv-tag-api { color: #6ee7b7; border-color: rgba(52, 211, 153, 0.35); }
+.twv-tag-start { color: #86efac; border-color: rgba(34, 197, 94, 0.35); }
+
+.twv-handle {
+  width: 7px !important;
+  height: 7px !important;
+  background: #52525b !important;
+  border: 0 !important;
+}
+
+/* --- Legend --- */
+.twv-legend {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  max-width: 70%;
+  padding: 6px 10px;
+  background: rgba(9, 9, 11, 0.85);
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  font-size: 10px;
+  color: #a1a1aa;
+  z-index: 5;
+}
+.twv-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.twv-legend-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+/* --- React Flow control/minimap theming --- */
+.twv-controls button {
+  background: #18181b !important;
+  border-color: #27272a !important;
+  color: #a1a1aa !important;
+}
+.twv-controls button:hover { background: #27272a !important; }
+.twv-minimap { background: #09090b !important; border: 1px solid #27272a !important; border-radius: 8px; }
+
+/* --- Detail panel --- */
+.twv-panel {
+  flex: 0 0 360px;
+  max-width: 360px;
+  border-left: 1px solid #27272a;
+  background: #0a0a0c;
+  display: flex;
+  flex-direction: column;
+  max-height: 100%;
+  overflow: hidden;
+}
+.twv-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #1f1f23;
+}
+.twv-panel-title { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.twv-panel-kind-dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; flex: 0 0 auto; }
+.twv-panel-name { font-size: 15px; font-weight: 600; color: #fafafa; line-height: 1.25; }
+.twv-panel-class { font-size: 11px; color: #71717a; font-family: ui-monospace, SFMono-Regular, monospace; }
+.twv-panel-close {
+  background: transparent;
+  border: 0;
+  color: #71717a;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.twv-panel-close:hover { color: #e4e4e7; }
+.twv-panel-body { padding: 14px 16px; overflow-y: auto; }
+.twv-panel-badges { display: flex; gap: 6px; margin-bottom: 10px; }
+.twv-panel-desc { font-size: 13px; color: #a1a1aa; line-height: 1.5; margin: 0 0 14px; }
+.twv-panel-empty { font-size: 12px; color: #71717a; font-style: italic; }
+
+.twv-section { margin-bottom: 16px; }
+.twv-section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #71717a;
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.twv-ports { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.twv-port {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid #1f1f23;
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+.twv-port-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.twv-port-name { font-size: 12px; font-weight: 500; color: #e4e4e7; }
+.twv-port-type {
+  font-size: 11px;
+  color: #fbbf24;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  background: rgba(245, 158, 11, 0.1);
+  padding: 1px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.twv-port-desc { font-size: 11px; color: #a1a1aa; margin-top: 4px; line-height: 1.45; }
+
+.twv-chips, .twv-panel-badges { display: flex; flex-wrap: wrap; gap: 5px; }
+.twv-chip {
+  font-size: 11px;
+  color: #d4d4d8;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid #27272a;
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+
+.twv-interactions { list-style: disc; margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.twv-interactions li { font-size: 12px; color: #a1a1aa; line-height: 1.4; }
+
+.twv-kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
+.twv-kv-key { font-size: 11px; color: #71717a; }
+.twv-kv-val { font-size: 12px; color: #d4d4d8; margin: 0; word-break: break-word; }
+.twv-mono { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; }
+
+.twv-subwf { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.twv-subwf code {
+  font-size: 12px;
+  color: #93c5fd;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(96, 165, 250, 0.25);
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.twv-subwf-link {
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(96, 165, 250, 0.35);
+  color: #bfdbfe;
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.twv-subwf-link:hover { background: rgba(59, 130, 246, 0.22); }
+.twv-subwf-unresolved { font-size: 11px; color: #71717a; }
+
+/* Stack panel below the canvas on narrow screens. */
+@media (max-width: 720px) {
+  .twv-root { flex-direction: column; }
+  .twv-panel { flex-basis: auto; max-width: none; max-height: 360px; border-left: 0; border-top: 1px solid #27272a; }
+}
