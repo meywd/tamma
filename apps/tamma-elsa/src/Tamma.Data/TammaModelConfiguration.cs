@@ -839,6 +839,59 @@ internal static class TammaModelConfiguration
     }
 
     /// <summary>
+    /// Story 32-2 — configure the <c>agent_role_selections</c> table (which
+    /// <see cref="Agent"/> serves a role for a principal). Dual-resident: this
+    /// SAME table shape is configured on BOTH the CP context (single-user
+    /// user-keyed rows) and every tenant context (SaaS tenant-keyed rows),
+    /// mirroring <see cref="ConfigureAuditEntities"/> and the
+    /// <c>prompt_overrides</c> dual-scoping model. <paramref name="fixedTenantId"/>
+    /// is the tenant-context discriminator (NULL on the CP build); it only feeds
+    /// the no-op <see cref="ApplyTenantFilter{T}"/> seam — isolation is the
+    /// per-tenant connection, not a baked-in filter.
+    ///
+    /// <para>The <c>ck_agent_role_selections_principal_xor</c> CHECK ties exactly
+    /// one of (<c>UserId</c>, <c>TenantId</c>) to non-null (mirrors
+    /// <c>ck_prompt_overrides_principal_xor</c>). The unique index on
+    /// <c>(TenantId, UserId, Role)</c> uses NULLS NOT DISTINCT so the
+    /// (null, uid, role) and (tid, null, role) row spaces are disjoint and both
+    /// halves dedupe on null — one selection per <c>(principal, role)</c>.</para>
+    /// </summary>
+    public static void ConfigureAgentRoleSelections(
+        ModelBuilder modelBuilder, Guid? fixedTenantId = null)
+    {
+        modelBuilder.Entity<AgentRoleSelection>(entity =>
+        {
+            entity.ToTable("agent_role_selections", t =>
+            {
+                // Exactly one of user_id / tenant_id is non-null (mirrors
+                // ck_prompt_overrides_principal_xor).
+                t.HasCheckConstraint(
+                    "ck_agent_role_selections_principal_xor",
+                    "(\"UserId\" IS NOT NULL AND \"TenantId\" IS NULL) " +
+                    "OR (\"UserId\" IS NULL AND \"TenantId\" IS NOT NULL)");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Role).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.AgentId).IsRequired();
+            entity.Property(e => e.Visibility).IsRequired().HasMaxLength(32);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // One selection per (principal, role). NULLS NOT DISTINCT (PG15+;
+            // production runs PG17) so a single (null, uid, role) or
+            // (tid, null, role) row is unique across the repeated NULL halves —
+            // same pattern as prompt_overrides / conventions.
+            entity.HasIndex(e => new { e.TenantId, e.UserId, e.Role })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("IX_agent_role_selections_TenantId_UserId_Role");
+
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
+        });
+    }
+
+    /// <summary>
     /// Story 35-1 — billing foundation entities. The tenant→Stripe customer
     /// mapping (<c>billing_customers</c>, unique <c>TenantId</c>) and the
     /// slug→Stripe-ids catalog (<c>billing_plan_prices</c>, unique
@@ -1516,6 +1569,12 @@ internal static class TammaModelConfiguration
         // domain_events stream. The SAME table shape is also configured on the
         // CP context for platform-scope rows — one physical schema, two homes.
         ConfigureAuditEntities(modelBuilder, fixedTenantId);
+
+        // ── Agent role selections (Story 32-2) ──
+        // SaaS tenant-keyed role→agent selections. The SAME table shape is also
+        // configured on the CP context for single-user user-keyed rows — one
+        // physical schema, two homes (mirrors audit_records / prompt_overrides).
+        ConfigureAgentRoleSelections(modelBuilder, fixedTenantId);
     }
 
     /// <summary>

@@ -533,6 +533,14 @@ public class ControlPlaneDbContext : DbContext
     /// </summary>
     public DbSet<AgentVersion> AgentVersions => Set<AgentVersion>();
 
+    /// <summary>
+    /// Story 32-2 — role→agent selections. On the CP context this holds the
+    /// single-user (user-keyed) rows; the SAME table also lives in every tenant
+    /// schema for SaaS (tenant-keyed) rows. See
+    /// <see cref="Entities.AgentRoleSelection"/>.
+    /// </summary>
+    public DbSet<AgentRoleSelection> AgentRoleSelections => Set<AgentRoleSelection>();
+
     // ── Story 35-1 — billing foundation (Epic 35) ──
     //
     // The tenant→Stripe customer mapping + the slug→Stripe-ids catalog are
@@ -641,6 +649,12 @@ public class ControlPlaneDbContext : DbContext
         // Story 32-1 — first-class agent entities. CP-resident, configured in
         // the shared single source so the model graph + migration stay aligned.
         TammaModelConfiguration.ConfigureAgentEntities(modelBuilder);
+
+        // Story 32-2 — agent_role_selections. Dual-resident (CP for single-user
+        // user-keyed rows; tenant schema for SaaS tenant-keyed rows — same SAME
+        // shape on both, mirroring audit_records). fixedTenantId: null = the CP
+        // build.
+        TammaModelConfiguration.ConfigureAgentRoleSelections(modelBuilder, fixedTenantId: null);
 
         // Story 35-1 — billing customer mapping + Stripe catalog. CP-resident,
         // configured in the shared single source so the model graph + migration

@@ -37,6 +37,9 @@ public class TenantDbContextModelTests
         tableNames.Should().Contain(new[]
         {
             "agent_configs",
+            // Story 32-2 — SaaS tenant-keyed role→agent selections (dual-resident
+            // with the CP single-user rows).
+            "agent_role_selections",
             "prompt_overrides",
             "conventions",
             "provider_health",

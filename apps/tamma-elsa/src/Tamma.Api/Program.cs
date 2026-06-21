@@ -451,6 +451,13 @@ if (!string.IsNullOrWhiteSpace(
     builder.Services.AddTammaSecretReveal(builder.Configuration);
 }
 
+// Story 32-3 — BYOK→platform provider-credential resolver + cache invalidator.
+// Registered AFTER the secrets wiring so the cabinet-backed BYOK reader is
+// chosen when the SecretsDbContext factory is present (else the Null reader
+// degrades cleanly to the platform path). The resolver is the canonical owner
+// of provider-key resolution into the LLM call path (CallLlmInlineActivity).
+builder.Services.AddProviderCredentialResolution();
+
 // Story 31-2: platform routing resolver. Exposes IPlatformResolver as a
 // scoped service over a singleton driver cache and the Epic 29 secret
 // store seam. Drivers themselves (GitHub 31-3, Gitea 31-4, ...) ship in
@@ -1757,6 +1764,49 @@ agents.MapPost("/{id:guid}/versions", AgentEndpoints.PublishVersion)
 agents.MapPost("/{id:guid}/archive", AgentEndpoints.ArchiveAgent)
     .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
 
+// ── Story 32-3 — tenant-admin BYOK provider-credential management ──
+// GET list (metadata only) inherits the group's SettingsView gate; the
+// register/rotate/delete mutations are AgentManage (tenant_owner/tenant_admin →
+// member 403). Response bodies never carry the raw key (reveal-once token only).
+agents.MapGet("/providers", ProviderCredentialEndpoints.ListProviders);
+agents.MapPost("/providers/{provider}/credential", ProviderCredentialEndpoints.RegisterCredential)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agents.MapPost("/providers/{provider}/credential/rotate", ProviderCredentialEndpoints.RotateCredential)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agents.MapDelete("/providers/{provider}/credential", ProviderCredentialEndpoints.DeleteCredential)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+
+// ── Story 32-2 — entity-aware registry / resolution surface (/api/agents) ──
+// Distinct from the legacy /api/v1/agents group above (which stays byte-for-byte
+// working). Reads (list / get-one / resolve / role-selection reads) under
+// MemberAccess (any member); writes (create / version / archive / rollback /
+// role-selection upsert) under AgentManage (admin+owner → member 403). Public-
+// agent mutation is additionally gated in-handler by the platform-admin claim.
+var agentsV2 = app.MapGroup("/api/agents")
+    .RequireAuthorization("MemberAccess")
+    .RequireRateLimiting("ConfigRead");
+// Reads
+// AC5 — optional ?role=&visibility=&status= query filters bind automatically
+// onto ListAgents' trailing string? params; they NARROW the visibility-scoped
+// set (never widen it). Unknown role/visibility/status → 400.
+agentsV2.MapGet("/", AgentEndpoints.ListAgents);
+agentsV2.MapGet("/resolve", AgentEndpoints.Resolve);
+agentsV2.MapGet("/role-selections", AgentEndpoints.GetRoleSelections);
+agentsV2.MapGet("/{id:guid}", AgentEndpoints.GetAgent);
+agentsV2.MapGet("/{id:guid}/versions", AgentEndpoints.ListVersions);
+agentsV2.MapGet("/{id:guid}/versions/{version:int}", AgentEndpoints.GetVersion);
+// Writes
+agentsV2.MapPost("/", AgentEndpoints.CreateAgent)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agentsV2.MapPost("/{id:guid}/versions", AgentEndpoints.PublishVersion)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agentsV2.MapPost("/{id:guid}/archive", AgentEndpoints.ArchiveAgent)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agentsV2.MapPost("/{id:guid}/rollback", AgentEndpoints.RollbackVersion)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agentsV2.MapPut("/role-selections/{role}", AgentEndpoints.SelectForRole)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+
 // ── Prompts ──
 // CLAUDE.md "Prompt Store Architecture > API" defines /defaults as the canonical
 // read-only system-default URL. Both /system (legacy TS naming) and /defaults
@@ -2060,7 +2110,7 @@ using (var scope = app.Services.CreateScope())
             dbContext.Database.ExecuteSqlRaw(@"
                 DROP TABLE IF EXISTS
                     admin_impersonations,
-                    agents, agent_versions,
+                    agents, agent_versions, agent_role_selections,
                     audit_records, audit_projector_cursor,
                     billing_customers, billing_plan_prices,
                     alert_delivery_attempts, alert_channels, alerts,

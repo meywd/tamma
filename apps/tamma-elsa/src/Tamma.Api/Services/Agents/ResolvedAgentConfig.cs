@@ -37,8 +37,27 @@ public class ResolvedAgentConfig
     /// <summary>System prompt / role identity preamble.</summary>
     public string SystemPrompt { get; init; } = string.Empty;
 
-    /// <summary>Provenance: "platform-default" or "tenant-override".</summary>
+    /// <summary>
+    /// Provenance. Legacy JSONB path: <c>"platform-default"</c> |
+    /// <c>"tenant-override"</c>. Story 32-2 entity-aware path extends the value
+    /// set with <c>"tenant-private"</c> | <c>"tenant-public"</c> |
+    /// <c>"system-public"</c> (which agent in the precedence chain produced the
+    /// config). Both legacy values remain valid.
+    /// </summary>
     public string Source { get; init; } = "platform-default";
+
+    /// <summary>
+    /// Story 32-2 — stable identity of the agent that produced this config.
+    /// Null only on the legacy JSONB path (backward compatibility) — the
+    /// entity-aware resolve methods always stamp it.
+    /// </summary>
+    public Guid? AgentId { get; init; }
+
+    /// <summary>
+    /// Story 32-2 — the pinned/active config version of the resolved agent.
+    /// Null only on the legacy JSONB path.
+    /// </summary>
+    public int? AgentVersion { get; init; }
 
     /// <summary>Optional phase context (set by <see cref="IAgentResolverService.ResolveForPhaseAsync"/>).</summary>
     public string? Phase { get; init; }

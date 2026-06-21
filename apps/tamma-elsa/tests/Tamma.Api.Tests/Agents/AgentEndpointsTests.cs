@@ -310,6 +310,280 @@ public class AgentEndpointsTests
         }
     }
 
+    // ── Story 32-2 AC5 — list filters (?role=&visibility=&status=) ──
+
+    /// <summary>
+    /// Seed a fixed mix for the filter tests: one public + several own-private
+    /// (different roles, one archived) for tenant A, plus a tenant-B private the
+    /// caller must NEVER see. Returns the tenant-A admin principal.
+    /// </summary>
+    private async Task<ClaimsPrincipal> SeedFilterFixtureAsync(IAgentRepository repo)
+    {
+        var pa = Principal(Guid.NewGuid(), platformAdmin: true);
+        var adminA = Principal(Guid.NewGuid());
+
+        // public architect (visible to everyone)
+        await ExecuteAsync(await AgentEndpoints.CreateAgent(
+            new CreateAgentRequest("pub-architect", "architect", "public", ValidConfig, null),
+            repo, pa, TenantCtx(), Mode(TammaMode.SaaS)));
+
+        // own-private architect (active)
+        await ExecuteAsync(await AgentEndpoints.CreateAgent(
+            new CreateAgentRequest("a-architect", "architect", "private", ValidConfig, null),
+            repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS)));
+
+        // own-private developer (active)
+        await ExecuteAsync(await AgentEndpoints.CreateAgent(
+            new CreateAgentRequest("a-developer", "developer", "private", ValidConfig, null),
+            repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS)));
+
+        // own-private tester, then archived
+        var testerCreated = await ExecuteAsync(await AgentEndpoints.CreateAgent(
+            new CreateAgentRequest("a-tester", "tester", "private", ValidConfig, null),
+            repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS)));
+        await ExecuteAsync(await AgentEndpoints.ArchiveAgent(
+            testerCreated.Body.GetProperty("id").GetGuid(), repo, adminA,
+            TenantCtx(TenantA), Mode(TammaMode.SaaS)));
+
+        // tenant-B private architect — must never surface for tenant A
+        await ExecuteAsync(await AgentEndpoints.CreateAgent(
+            new CreateAgentRequest("b-architect", "architect", "private", ValidConfig, null),
+            repo, Principal(Guid.NewGuid()), TenantCtx(TenantB), Mode(TammaMode.SaaS)));
+
+        return adminA;
+    }
+
+    private static List<string> Names(JsonElement body)
+        => body.EnumerateArray().Select(e => e.GetProperty("name").GetString()!).ToList();
+
+    [Test]
+    public async Task ListAgents_NoFilters_StillReturns_Public_Union_OwnPrivate()
+    {
+        var (repo, ctx) = BuildRepo();
+        await using (ctx)
+        {
+            var adminA = await SeedFilterFixtureAsync(repo);
+            var list = await AgentEndpoints.ListAgents(
+                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS));
+            var (status, body) = await ExecuteAsync(list);
+
+            status.Should().Be(StatusCodes.Status200OK);
+            var names = Names(body);
+            names.Should().BeEquivalentTo(
+                new[] { "pub-architect", "a-architect", "a-developer", "a-tester" });
+            names.Should().NotContain("b-architect");
+        }
+    }
+
+    [Test]
+    public async Task ListAgents_FilterByRole_ReturnsOnlyThatRole()
+    {
+        var (repo, ctx) = BuildRepo();
+        await using (ctx)
+        {
+            var adminA = await SeedFilterFixtureAsync(repo);
+            var list = await AgentEndpoints.ListAgents(
+                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), role: "developer");
+            var (status, body) = await ExecuteAsync(list);
+
+            status.Should().Be(StatusCodes.Status200OK);
+            Names(body).Should().BeEquivalentTo(new[] { "a-developer" });
+        }
+    }
+
+    [Test]
+    public async Task ListAgents_FilterByRole_NeverSurfacesAnotherTenantsPrivate()
+    {
+        var (repo, ctx) = BuildRepo();
+        await using (ctx)
+        {
+            var adminA = await SeedFilterFixtureAsync(repo);
+            // architect role matches a-architect (own private), pub-architect
+            // (public), AND b-architect (tenant B private) — but B must be scoped out.
+            var list = await AgentEndpoints.ListAgents(
+                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), role: "architect");
+            var (status, body) = await ExecuteAsync(list);
+
+            status.Should().Be(StatusCodes.Status200OK);
+            var names = Names(body);
+            names.Should().BeEquivalentTo(new[] { "pub-architect", "a-architect" });
+            names.Should().NotContain("b-architect",
+                "role filter must apply AFTER visibility scoping — never widen to another tenant");
+        }
+    }
+
+    [Test]
+    public async Task ListAgents_FilterByVisibilityPrivate_ReturnsOnlyOwnPrivate()
+    {
+        var (repo, ctx) = BuildRepo();
+        await using (ctx)
+        {
+            var adminA = await SeedFilterFixtureAsync(repo);
+            var list = await AgentEndpoints.ListAgents(
+                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), visibility: "private");
+            var (status, body) = await ExecuteAsync(list);
+
+            status.Should().Be(StatusCodes.Status200OK);
+            var names = Names(body);
+            // own private only — never public, never tenant B's private.
+            names.Should().BeEquivalentTo(new[] { "a-architect", "a-developer", "a-tester" });
+            names.Should().NotContain("pub-architect");
+            names.Should().NotContain("b-architect");
+        }
+    }
+
+    [Test]
+    public async Task ListAgents_FilterByVisibilityPublic_ReturnsOnlyPublic()
+    {
+        var (repo, ctx) = BuildRepo();
+        await using (ctx)
+        {
+            var adminA = await SeedFilterFixtureAsync(repo);
+            var list = await AgentEndpoints.ListAgents(
+                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), visibility: "public");
+            var (status, body) = await ExecuteAsync(list);
+
+            status.Should().Be(StatusCodes.Status200OK);
+            Names(body).Should().BeEquivalentTo(new[] { "pub-architect" });
+        }
+    }
+
+    [Test]
+    public async Task ListAgents_FilterByStatusArchived_ReturnsOnlyArchived()
+    {
+        var (repo, ctx) = BuildRepo();
+        await using (ctx)
+        {
+            var adminA = await SeedFilterFixtureAsync(repo);
+            var list = await AgentEndpoints.ListAgents(
+                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), status: "archived");
+            var (status, body) = await ExecuteAsync(list);
+
+            status.Should().Be(StatusCodes.Status200OK);
+            Names(body).Should().BeEquivalentTo(new[] { "a-tester" });
+        }
+    }
+
+    [Test]
+    public async Task ListAgents_FilterByStatusActive_ExcludesArchived()
+    {
+        var (repo, ctx) = BuildRepo();
+        await using (ctx)
+        {
+            var adminA = await SeedFilterFixtureAsync(repo);
+            var list = await AgentEndpoints.ListAgents(
+                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), status: "active");
+            var (status, body) = await ExecuteAsync(list);
+
+            status.Should().Be(StatusCodes.Status200OK);
+            var names = Names(body);
+            names.Should().BeEquivalentTo(new[] { "pub-architect", "a-architect", "a-developer" });
+            names.Should().NotContain("a-tester");
+        }
+    }
+
+    [Test]
+    public async Task ListAgents_CombinedFilters_AndTogether()
+    {
+        var (repo, ctx) = BuildRepo();
+        await using (ctx)
+        {
+            var adminA = await SeedFilterFixtureAsync(repo);
+            // private AND architect AND active → only a-architect.
+            var list = await AgentEndpoints.ListAgents(
+                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS),
+                role: "architect", visibility: "private", status: "active");
+            var (status, body) = await ExecuteAsync(list);
+
+            status.Should().Be(StatusCodes.Status200OK);
+            Names(body).Should().BeEquivalentTo(new[] { "a-architect" });
+        }
+    }
+
+    [Test]
+    public async Task ListAgents_UnknownRole_Returns400()
+    {
+        var (repo, ctx) = BuildRepo();
+        await using (ctx)
+        {
+            var adminA = await SeedFilterFixtureAsync(repo);
+            var list = await AgentEndpoints.ListAgents(
+                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), role: "wizard");
+            var (status, body) = await ExecuteAsync(list);
+
+            status.Should().Be(StatusCodes.Status400BadRequest);
+            body.GetProperty("error").GetString().Should().Be("invalid_role");
+        }
+    }
+
+    [Test]
+    public async Task ListAgents_UnknownVisibility_Returns400()
+    {
+        var (repo, ctx) = BuildRepo();
+        await using (ctx)
+        {
+            var adminA = await SeedFilterFixtureAsync(repo);
+            var list = await AgentEndpoints.ListAgents(
+                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), visibility: "secret");
+            var (status, body) = await ExecuteAsync(list);
+
+            status.Should().Be(StatusCodes.Status400BadRequest);
+            body.GetProperty("error").GetString().Should().Be("invalid_visibility");
+        }
+    }
+
+    [Test]
+    public async Task ListAgents_UnknownStatus_Returns400()
+    {
+        var (repo, ctx) = BuildRepo();
+        await using (ctx)
+        {
+            var adminA = await SeedFilterFixtureAsync(repo);
+            var list = await AgentEndpoints.ListAgents(
+                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), status: "deleted");
+            var (status, body) = await ExecuteAsync(list);
+
+            status.Should().Be(StatusCodes.Status400BadRequest);
+            body.GetProperty("error").GetString().Should().Be("invalid_status");
+        }
+    }
+
+    [Test]
+    public async Task ListAgents_EmptyFilterStrings_TreatedAsNoFilter()
+    {
+        var (repo, ctx) = BuildRepo();
+        await using (ctx)
+        {
+            var adminA = await SeedFilterFixtureAsync(repo);
+            // Empty/whitespace params must NOT 400 and must NOT narrow.
+            var list = await AgentEndpoints.ListAgents(
+                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS),
+                role: "", visibility: "  ", status: null);
+            var (status, body) = await ExecuteAsync(list);
+
+            status.Should().Be(StatusCodes.Status200OK);
+            Names(body).Should().BeEquivalentTo(
+                new[] { "pub-architect", "a-architect", "a-developer", "a-tester" });
+        }
+    }
+
+    [Test]
+    public async Task ListAgents_FilterByRole_NormalizesLegacyAlias()
+    {
+        var (repo, ctx) = BuildRepo();
+        await using (ctx)
+        {
+            var adminA = await SeedFilterFixtureAsync(repo);
+            // 'implementer' is a legacy alias for 'developer' (RolePhaseMap).
+            var list = await AgentEndpoints.ListAgents(
+                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), role: "implementer");
+            var (status, body) = await ExecuteAsync(list);
+
+            status.Should().Be(StatusCodes.Status200OK);
+            Names(body).Should().BeEquivalentTo(new[] { "a-developer" });
+        }
+    }
+
     // ── Cross-tenant isolation: GET {id} for another tenant's private → 404 ──
 
     [Test]

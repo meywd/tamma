@@ -2,6 +2,8 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Api.Dtos.Agents;
+using Tamma.Core;
+using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Services.Agents;
@@ -13,12 +15,26 @@ namespace Tamma.Api.Services.Agents;
 /// Port of <c>RoleBasedAgentResolver</c> from the deleted TS providers
 /// package (Story 9-8), plus the 3-level config merge from
 /// <c>ConfigService.ts</c> (Epic 19 Phase 3 deletion).
+///
+/// <para>Story 32-2 adds the entity-aware resolve methods
+/// (<see cref="ResolveForRoleAsync"/> / <see cref="ResolveForRoleAndPhaseAsync"/>)
+/// over the Story 32-1 agent entities. The legacy JSONB path
+/// (<see cref="ResolveAsync"/> + <see cref="ResolveForPhaseAsync"/>) is
+/// UNTOUCHED — the registry/agent collaborators are optional so the legacy
+/// constructors (and their tests) keep compiling and running.</para>
 /// </summary>
 public sealed class AgentResolverService : IAgentResolverService
 {
     private readonly IAgentConfigRepository _repo;
     private readonly IConfiguration? _configuration;
     private readonly ILogger<AgentResolverService> _logger;
+
+    // Story 32-2 — entity-aware resolution collaborators. Null on the legacy
+    // constructors (the JSONB path never touches them).
+    private readonly IAgentRegistryService? _registry;
+    private readonly IAgentRepository? _agents;
+    private readonly IEventRepository? _events;
+    private readonly IMissingConfigRecorder? _missingConfig;
 
     public AgentResolverService(
         IAgentConfigRepository repo,
@@ -33,6 +49,26 @@ public sealed class AgentResolverService : IAgentResolverService
         _repo = repo;
         _configuration = configuration;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Story 32-2 — full constructor wiring the entity-aware resolution chain.
+    /// The missing-config recorder is optional (the epic may not be merged).
+    /// </summary>
+    public AgentResolverService(
+        IAgentConfigRepository repo,
+        IConfiguration? configuration,
+        ILogger<AgentResolverService> logger,
+        IAgentRegistryService registry,
+        IAgentRepository agents,
+        IEventRepository events,
+        IMissingConfigRecorder? missingConfig = null)
+        : this(repo, configuration, logger)
+    {
+        _registry = registry;
+        _agents = agents;
+        _events = events;
+        _missingConfig = missingConfig;
     }
 
     // -----------------------------------------------------------------------
@@ -185,6 +221,232 @@ public sealed class AgentResolverService : IAgentResolverService
             PermissionMode = clampedPermissionMode,
             AllowedTools = clampedTools,
         };
+    }
+
+    // -----------------------------------------------------------------------
+    // Story 32-2 — entity-aware resolution chain
+    // -----------------------------------------------------------------------
+
+    /// <inheritdoc />
+    public async Task<ResolvedAgentConfig> ResolveForRoleAsync(
+        string role, CancellationToken ct = default)
+        => await ResolveEntityAsync(role, phase: null, ct);
+
+    /// <inheritdoc />
+    public async Task<ResolvedAgentConfig> ResolveForRoleAndPhaseAsync(
+        string phase, string role, CancellationToken ct = default)
+    {
+        phase = RolePhaseMap.NormalizePhase(phase);
+        role = RolePhaseMap.NormalizeRole(role);
+        RolePhaseMap.AssertValidPhase(phase);
+        RolePhaseMap.AssertValidRole(role);
+
+        if (!RolePhaseMap.IsRoleEligibleForPhase(phase, role))
+        {
+            throw new ArgumentException(
+                $"Role '{role}' is not eligible for phase '{phase}'. Eligible roles: " +
+                string.Join(", ", RolePhaseMap.GetEligibleRolesForPhase(phase)) + ".",
+                nameof(role));
+        }
+
+        return await ResolveEntityAsync(role, phase, ct);
+    }
+
+    /// <summary>
+    /// The 4-branch precedence chain (AC 3). NEVER returns an empty/plain
+    /// config: the 4th branch emits <c>AGENT.RESOLVE.FAILED</c>, best-effort
+    /// records a <c>MISSING_CONFIG</c> gap, then throws.
+    /// </summary>
+    private async Task<ResolvedAgentConfig> ResolveEntityAsync(
+        string role, string? phase, CancellationToken ct)
+    {
+        role = RolePhaseMap.NormalizeRole(role);
+        RolePhaseMap.AssertValidRole(role);
+
+        if (_registry is null || _agents is null || _events is null)
+        {
+            throw new InvalidOperationException(
+                "Entity-aware agent resolution requires the Story 32-2 collaborators "
+                + "(IAgentRegistryService / IAgentRepository / IEventRepository). Use the "
+                + "full AgentResolverService constructor.");
+        }
+
+        // Branches 1+2: the principal's selection (private OR public target).
+        var selections = await _registry.GetRoleSelectionsAsync(ct);
+        if (selections.TryGetValue(role, out var sel))
+        {
+            // Recompute provenance at resolve time — a stale/archived/cross-scope
+            // target degrades to the system default rather than resolving stale.
+            var selected = await _registry.ResolveUsableAgentAsync(sel.AgentId, ct);
+            if (selected is { Status: AgentStatus.Active })
+            {
+                var source = selected.Visibility == AgentVisibility.Public
+                    ? "tenant-public"   // principal SELECTED a public agent
+                    : "tenant-private"; // principal's own private agent
+                var materialised = await MaterialiseAsync(selected, role, phase, source, ct);
+                if (materialised is not null)
+                {
+                    _logger.LogDebug(
+                        "agent.resolve.selection role={Role} agentId={AgentId} source={Source}",
+                        role, selected.Id, source);
+                    return materialised;
+                }
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "agent.resolve.stale_selection role={Role} staleAgentId={StaleAgentId} — degrading to system default",
+                    role, sel.AgentId);
+            }
+        }
+
+        // Branch 3: system-default public agent for the role.
+        var systemDefault = await _registry.GetSystemDefaultPublicAsync(role, ct);
+        if (systemDefault is not null)
+        {
+            var materialised = await MaterialiseAsync(systemDefault, role, phase, "system-public", ct);
+            if (materialised is not null)
+            {
+                _logger.LogDebug(
+                    "agent.resolve.system_default role={Role} agentId={AgentId}",
+                    role, systemDefault.Id);
+                return materialised;
+            }
+        }
+
+        // Branch 4: NO empty/plain fallback — fail loud.
+        await FailLoudAsync(role, phase, ct);
+        // Unreachable — FailLoudAsync always throws.
+        throw new InvalidOperationException("unreachable");
+    }
+
+    /// <summary>
+    /// Materialise an agent's ACTIVE version config into a
+    /// <see cref="ResolvedAgentConfig"/>, reusing the legacy merge + validation
+    /// so <c>CallLlmActivity</c> sees the same shape. The agent's saved-config
+    /// JSON is treated as an override on top of the role's platform default;
+    /// <see cref="ResolvedAgentConfig.AgentId"/>/<c>AgentVersion</c>/<c>Source</c>
+    /// are stamped. Returns <c>null</c> if the agent has no active version (so
+    /// the caller can degrade to the next branch).
+    /// </summary>
+    private async Task<ResolvedAgentConfig?> MaterialiseAsync(
+        Agent agent, string role, string? phase, string source, CancellationToken ct)
+    {
+        var version = await _agents!.GetActiveVersionAsync(agent.Id, ct);
+        if (version is null)
+        {
+            return null;
+        }
+
+        var resolved = DefaultAgentConfig.ForRole(role);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(version.ConfigJson);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object)
+            {
+                resolved = MergeOverride(resolved, doc.RootElement);
+            }
+        }
+        catch (JsonException)
+        {
+            // A corrupt snapshot is a real fault — fall through to validation,
+            // which fails loud on the (now-default) required fields if needed.
+        }
+
+        // The agent's stable handle wins over the merged handle (identity).
+        var enriched = new ResolvedAgentConfig
+        {
+            Role = role,
+            Handle = string.IsNullOrWhiteSpace(agent.Name) ? resolved.Handle : agent.Name,
+            Provider = resolved.Provider,
+            Model = resolved.Model,
+            Temperature = resolved.Temperature,
+            MaxTokens = resolved.MaxTokens,
+            TokenBudget = resolved.TokenBudget,
+            Tools = resolved.Tools,
+            SystemPrompt = resolved.SystemPrompt,
+            Source = source,
+            Phase = phase,
+            MaxBudgetUsd = resolved.MaxBudgetUsd,
+            PermissionMode = resolved.PermissionMode,
+            AllowedTools = resolved.AllowedTools,
+            AgentId = agent.Id,
+            AgentVersion = version.Version,
+        };
+
+        ValidateResolved(enriched);
+        return enriched;
+    }
+
+    /// <summary>
+    /// AC 9 — the no-empty-fallback path. Emits <c>AGENT.RESOLVE.FAILED</c>
+    /// (mandatory), best-effort records a <c>MISSING_CONFIG</c> gap (optional),
+    /// then throws <see cref="TammaError"/>. Mirrors
+    /// <c>PromptStoreService.NoPromptError</c> / <c>ConventionStore</c>.
+    /// </summary>
+    private async Task FailLoudAsync(string role, string? phase, CancellationToken ct)
+    {
+        var (tenantId, _) = _registry!.ResolvePrincipal();
+        var tags = new Dictionary<string, object?>
+        {
+            ["role"] = role,
+            ["phase"] = phase,
+            ["source"] = "none",
+            ["mode"] = tenantId is not null ? "saas" : "single-user",
+        };
+
+        await _events!.AppendAsync(new DomainEvent
+        {
+            Id = Guid.NewGuid(),
+            Type = AgentEventTypes.ResolveFailed,
+            // A missing SYSTEM default is platform-scope (TenantId null); a
+            // tenant-scope resolve carries the ambient tenant.
+            TenantId = tenantId,
+            Tags = JsonSerializer.Serialize(tags),
+            Metadata = JsonSerializer.Serialize(new
+            {
+                workflowVersion = "1.0.0",
+                eventSource = "system",
+            }),
+            Data = JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["role"] = role,
+                ["phase"] = phase,
+            }),
+            CreatedAt = DateTime.UtcNow,
+        });
+
+        if (_missingConfig is not null)
+        {
+            try
+            {
+                await _missingConfig.RecordAsync(
+                    domain: "agent",
+                    configKey: $"role:{role}",
+                    scope: "system",
+                    context: new Dictionary<string, object?> { ["role"] = role, ["phase"] = phase },
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                // Best-effort — a recorder failure must not mask the TammaError.
+                _logger.LogWarning(ex,
+                    "agent.resolve.missing_config_record_failed role={Role}", role);
+            }
+        }
+
+        _logger.LogError(
+            "AGENT.RESOLVE.FAILED role={Role} phase={Phase} — no agent resolvable", role, phase);
+
+        throw new TammaError(
+            "AGENT.RESOLVE.NO_DEFAULT",
+            $"No agent resolvable for role '{role}': no selection and no system-default public agent. "
+            + "Resolution is private-selection → public-selection → system-default → error; "
+            + "there is no empty/plain fallback.",
+            new Dictionary<string, object?> { ["role"] = role, ["phase"] = phase },
+            retryable: false,
+            severity: TammaErrorSeverity.High);
     }
 
     // -----------------------------------------------------------------------
