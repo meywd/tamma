@@ -63,7 +63,7 @@ public sealed record PublishVersionRequest(
 public sealed record AgentSummary(
     Guid Id,
     string Name,
-    string Role,
+    string? Role,
     string Visibility,
     string Status,
     Guid? OwnerTenantId,
@@ -74,7 +74,7 @@ public sealed record AgentSummary(
 public sealed record AgentDetail(
     Guid Id,
     string Name,
-    string Role,
+    string? Role,
     string Visibility,
     string Status,
     Guid? OwnerTenantId,
@@ -104,7 +104,7 @@ public sealed record AgentVersionDetail(
 public sealed record CreateAgentResponse(
     Guid Id,
     string Name,
-    string Role,
+    string? Role,
     string Visibility,
     string Status,
     int CurrentVersion);
