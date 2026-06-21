@@ -39,8 +39,14 @@ public class Agent
     /// <c>RolePhaseMap.NormalizeRole</c> / <c>AgentRoleExtensions.Parse</c> on
     /// create). A benchmarking attribute, NOT a primary key — the Agent, not
     /// the role, is the tracked entity.
+    ///
+    /// <para>Story 32-15 — NULLABLE. Public agents are now named cross-role
+    /// PERSONAS (<c>claude</c>/<c>gemini</c>/<c>codegpt</c>) usable for ANY role,
+    /// so a public persona carries <c>Role = NULL</c> (role is a selection-time
+    /// concern, not a baked-in identity column). Private/custom agents MAY still
+    /// carry a non-null role-binding (their behaviour is unchanged).</para>
     /// </summary>
-    public string Role { get; set; } = null!;
+    public string? Role { get; set; }
 
     /// <summary>Public (system) vs private (tenant/user-owned). See <see cref="AgentVisibility"/>.</summary>
     public AgentVisibility Visibility { get; set; }

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Tamma.Api.Auth;
 using Tamma.Api.Services.PromptStore;
 using Tamma.Core;
@@ -28,6 +29,7 @@ public sealed class AgentRegistryService : IAgentRegistryService
     private readonly ITammaModeProvider _mode;
     private readonly ITenantContext _tenantContext;
     private readonly IHttpContextAccessor _httpContext;
+    private readonly DefaultPersonaOptions _defaultPersona;
     private readonly ILogger<AgentRegistryService>? _logger;
 
     public AgentRegistryService(
@@ -37,6 +39,7 @@ public sealed class AgentRegistryService : IAgentRegistryService
         ITammaModeProvider mode,
         ITenantContext tenantContext,
         IHttpContextAccessor httpContext,
+        IOptions<DefaultPersonaOptions>? defaultPersona = null,
         ILogger<AgentRegistryService>? logger = null)
     {
         _agents = agents;
@@ -45,6 +48,7 @@ public sealed class AgentRegistryService : IAgentRegistryService
         _mode = mode;
         _tenantContext = tenantContext;
         _httpContext = httpContext;
+        _defaultPersona = defaultPersona?.Value ?? new DefaultPersonaOptions();
         _logger = logger;
     }
 
@@ -68,38 +72,34 @@ public sealed class AgentRegistryService : IAgentRegistryService
     /// <inheritdoc />
     public async Task<Agent?> GetSystemDefaultPublicAsync(string role, CancellationToken ct = default)
     {
-        // The system default for a role is the shipped public agent whose Role
-        // matches (one per role from AgentEntitySeeder, handle "tamma-<role>").
-        // Public agents are visible to every principal; pass null scope.
-        var visible = await _agents.ListVisibleAsync(tenantId: null, userId: null, ct);
-        var candidates = visible
-            .Where(a =>
-                a.Visibility == AgentVisibility.Public &&
-                a.Status == AgentStatus.Active &&
-                string.Equals(a.Role, role, StringComparison.Ordinal))
-            .OrderBy(a => a.Name, StringComparer.Ordinal)
-            .ToList();
+        // Story 32-15 — public agents are named cross-role PERSONAS, so the
+        // system default is the platform-configured DEFAULT PERSONA, resolved by
+        // handle among public agents REGARDLESS of role (the old "public agent
+        // whose Role==role" lookup + the >1-per-role ambiguity warning are gone).
+        var name = _defaultPersona.DefaultPersonaName;
+        var persona = await _agents.GetPublicByNameAsync(name, ct);
 
-        var chosen = candidates.FirstOrDefault();
-        if (candidates.Count > 1)
+        if (persona is null || persona.Status != AgentStatus.Active)
         {
-            // The seeder ships exactly one tamma-<role> public agent, so this is
-            // unambiguous today. A platform owner adding a second public agent
-            // for the same role would silently shift the default — make the
-            // ambiguity observable rather than picking blind.
+            // FAIL LOUD — no empty/plain fallback (feedback_resolution_no_empty_fallback).
             _logger?.LogWarning(
-                "agent.system_default.ambiguous role={Role} count={Count} chosenAgentId={ChosenAgentId} — "
-                + "more than one active public agent matches this role; picked the first by name (ordinal)",
-                role, candidates.Count, chosen?.Id);
-        }
-        else if (chosen is not null)
-        {
-            _logger?.LogDebug(
-                "agent.system_default.chosen role={Role} chosenAgentId={ChosenAgentId}",
-                role, chosen.Id);
+                "agent.default_persona.missing personaName={PersonaName} role={Role} — "
+                + "configured default persona is not seeded/active; failing loud",
+                name, role);
+            throw new TammaError(
+                "AGENT_DEFAULT_PERSONA_MISSING",
+                $"Configured default persona '{name}' is not seeded (or not active); "
+                + $"cannot resolve a default for role '{role}'. There is no empty/plain fallback.",
+                new Dictionary<string, object?> { ["personaName"] = name, ["role"] = role },
+                retryable: false,
+                severity: TammaErrorSeverity.High);
         }
 
-        return chosen;
+        _logger?.LogInformation(
+            "agent.default_persona.resolved personaName={PersonaName} agentId={AgentId} role={Role}",
+            persona.Name, persona.Id, role);
+
+        return persona;
     }
 
     /// <inheritdoc />

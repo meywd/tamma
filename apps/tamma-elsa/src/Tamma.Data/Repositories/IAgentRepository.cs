@@ -84,4 +84,14 @@ public interface IAgentRepository
     /// </summary>
     Task<IReadOnlyList<Agent>> ListVisibleAsync(
         Guid? tenantId, Guid? userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Story 32-15 — fetch the single PUBLIC agent (persona) with the given
+    /// <paramref name="name"/> (case-sensitive handle match), regardless of
+    /// role. Public persona handles are globally unique (IX_agents_public_name),
+    /// so this returns at most one row. Returns <c>null</c> when no public
+    /// persona by that name exists. Backs the configured-default-persona lookup
+    /// (<c>GetSystemDefaultPublicAsync</c>).
+    /// </summary>
+    Task<Agent?> GetPublicByNameAsync(string name, CancellationToken ct = default);
 }

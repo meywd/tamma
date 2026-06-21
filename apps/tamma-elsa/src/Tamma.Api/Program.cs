@@ -2182,16 +2182,27 @@ using (var scope = app.Services.CreateScope())
         // apply" — this is that call site.
         await Tamma.Data.Seeders.PlansSeeder.SeedAsync(dbContext);
 
-        // Story 32-1 — public/system agent definitions (one per role with the
-        // tamma-<role> handle + Version=1). Insert-missing-only; no-op on
-        // re-run. CP-resident; coexists with the Elsa-store AgentSeeder.
-        await Tamma.Data.Seeders.AgentEntitySeeder.SeedAsync(dbContext);
-
         // Story 34-11 — provider COST price-book. Ports the frozen
         // ProviderPricingService rate sheet into providers + provider_model_prices
         // as v1 seed rows (Source='seed', Status='active'). Insert-missing-only;
         // no-op on re-run and never reverts a Source='admin' (re-priced) row.
+        //
+        // MUST run before the persona seeder below: Story 32-15's persona
+        // seeder validates each persona's (provider, model) against the active
+        // price rows this seeder writes (the in-data IsKnown guard).
         await Tamma.Data.Seeders.ProviderPricingSeeder.SeedAsync(dbContext);
+
+        // Story 32-15 — public/system PERSONAS (named cross-role agents:
+        // claude/gemini/codegpt, Role=NULL, explicit provider+model, no prompts).
+        // Insert-missing-only (keyed by Name); no-op on re-run and never reverts
+        // an admin edit. Archives any legacy tamma-<role> public rows (AC11).
+        // Emits AGENT.CREATED.SUCCESS / AGENT.ARCHIVED.SUCCESS on real writes.
+        await Tamma.Data.Seeders.AgentEntitySeeder.SeedAsync(
+            dbContext,
+            scope.ServiceProvider.GetRequiredService<Tamma.Data.Repositories.IPlatformEventRepository>(),
+            scope.ServiceProvider.GetRequiredService<
+                Microsoft.Extensions.Logging.ILoggerFactory>()
+                .CreateLogger("Tamma.Data.Seeders.AgentEntitySeeder"));
 
         // tenant_databases: register the central DB as pool member #1
         // (unified-tenancy Phase 2) so single-user/dev and SaaS share one

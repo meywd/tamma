@@ -265,12 +265,18 @@ public class ControlPlaneDbContextModelTests
         var agent = ctx.Model.FindEntityType(typeof(Agent))!;
         var indexes = agent.GetIndexes().ToList();
 
-        var publicNameRole = indexes.Single(i =>
+        // Story 32-15 — the public unique index drops Role: a persona is
+        // cross-role, so public handles are globally unique on (Name) alone.
+        var publicName = indexes.Single(i =>
+            i.GetDatabaseName() == "IX_agents_public_name");
+        publicName.IsUnique.Should().BeTrue();
+        publicName.GetFilter().Should().Be("\"Visibility\" = 0");
+        publicName.Properties.Select(p => p.Name)
+            .Should().Equal("Name");
+
+        // The old (Name, Role) public index is GONE (Story 32-15).
+        indexes.Should().NotContain(i =>
             i.GetDatabaseName() == "IX_agents_public_name_role");
-        publicNameRole.IsUnique.Should().BeTrue();
-        publicNameRole.GetFilter().Should().Be("\"Visibility\" = 0");
-        publicNameRole.Properties.Select(p => p.Name)
-            .Should().Equal("Name", "Role");
 
         var privateTenant = indexes.Single(i =>
             i.GetDatabaseName() == "IX_agents_private_tenant_name");
@@ -283,6 +289,21 @@ public class ControlPlaneDbContextModelTests
         privateUser.IsUnique.Should().BeTrue();
         privateUser.GetFilter().Should()
             .Be("\"Visibility\" = 1 AND \"OwnerUserId\" IS NOT NULL");
+    }
+
+    [Test]
+    public void Agents_Role_Is_Nullable()
+    {
+        using var ctx = CreateContext();
+
+        // Story 32-15 — Role becomes nullable: public personas are cross-role
+        // (Role = NULL). The strict model contract must reflect the nullable
+        // column so a regression to required is caught.
+        var roleProp = ctx.Model.FindEntityType(typeof(Agent))!
+            .FindProperty(nameof(Agent.Role))!;
+        roleProp.IsNullable.Should().BeTrue(
+            "Story 32-15 makes Agent.Role nullable for cross-role public personas");
+        roleProp.GetMaxLength().Should().Be(64, "the HasMaxLength(64) cap is kept");
     }
 
     [Test]

@@ -282,6 +282,10 @@ public sealed class AgentRepository : IAgentRepository
         return result;
     }
 
+    public Task<Agent?> GetPublicByNameAsync(string name, CancellationToken ct = default)
+        => _db.Agents.FirstOrDefaultAsync(
+            a => a.Visibility == AgentVisibility.Public && a.Name == name, ct);
+
     // ── helpers ──
 
     private async Task<int> NextVersionAsync(Guid agentId, CancellationToken ct)
