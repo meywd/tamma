@@ -161,6 +161,7 @@ public class ControlPlaneDbContext : DbContext
                     .ToDictionary(x => x.Id, x => x.Status);
 
             EnforcePlanImmutability(untrackedStatus);
+            EnforceProviderPriceImmutability();
         }
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
@@ -181,6 +182,7 @@ public class ControlPlaneDbContext : DbContext
                 untrackedIds, cancellationToken);
 
             EnforcePlanImmutability(untrackedStatus);
+            EnforceProviderPriceImmutability();
         }
         return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
@@ -352,6 +354,83 @@ public class ControlPlaneDbContext : DbContext
                 ["status"] = status,
                 ["planId"] = planId.ToString("D"),
                 ["entityKind"] = entityKind,
+            },
+            retryable: false,
+            severity: TammaErrorSeverity.High);
+    }
+
+    /// <summary>
+    /// Story 34-11 (I1) — the AUTHORITATIVE provider-cost immutability guard,
+    /// mirroring <see cref="EnforcePlanImmutability"/>. Throws
+    /// <c>PROVIDER.PRICE.IMMUTABLE</c> for ANY content mutation of an
+    /// already-<c>superseded</c> <see cref="ProviderModelPrice"/> row — a raw EF
+    /// <c>UPDATE</c> that bypasses the admin endpoint must STILL fail loud, not
+    /// succeed silently. The ONLY permitted change to an immutable row is the
+    /// controlled <c>active → superseded</c> flip the <c>VersionPrice</c> path
+    /// performs (Status + UpdatedAt only); anything else is rejected.
+    /// <para>No DB lookup needed — <see cref="ProviderModelPrice"/> has no child
+    /// rows and the original status is available from the change-tracker.</para>
+    /// </summary>
+    private void EnforceProviderPriceImmutability()
+    {
+        foreach (var entry in ChangeTracker.Entries<ProviderModelPrice>())
+        {
+            if (entry.State != EntityState.Modified) continue;
+
+            var originalStatus = entry.OriginalValues.GetValue<string>(nameof(ProviderModelPrice.Status));
+
+            // An already-superseded row is fully immutable: any modification throws.
+            if (originalStatus == "superseded")
+            {
+                ThrowPriceImmutable(entry.Entity, originalStatus);
+                continue;
+            }
+
+            // An active row may ONLY undergo the controlled active→superseded flip
+            // (Status + UpdatedAt). Any other field change — including smuggling a
+            // rate edit through the supersede path — is rejected.
+            if (originalStatus == "active")
+            {
+                if (IsControlledSupersedeFlip(entry)) continue;
+                ThrowPriceImmutable(entry.Entity, originalStatus);
+            }
+        }
+    }
+
+    /// <summary>
+    /// True iff this Modified <see cref="ProviderModelPrice"/> entry is the
+    /// controlled <c>active → superseded</c> flip: Status changes from
+    /// <c>active</c> to <c>superseded</c> and no other property changes except
+    /// <c>UpdatedAt</c> (mirrors <see cref="IsControlledDeprecationFlip"/>).
+    /// </summary>
+    private static bool IsControlledSupersedeFlip(EntityEntry<ProviderModelPrice> entry)
+    {
+        if (entry.Entity.Status != "superseded") return false;
+
+        foreach (var prop in entry.Properties)
+        {
+            if (!prop.IsModified) continue;
+            var name = prop.Metadata.Name;
+            if (name is nameof(ProviderModelPrice.Status) or nameof(ProviderModelPrice.UpdatedAt))
+                continue;
+            // Any other modified column means this is NOT a pure flip.
+            return false;
+        }
+        return true;
+    }
+
+    private static void ThrowPriceImmutable(ProviderModelPrice price, string status)
+    {
+        throw new TammaError(
+            "PROVIDER.PRICE.IMMUTABLE",
+            $"Provider cost price {price.Id:D} ({price.ProviderKey}/{price.Model}) is "
+            + $"{status} and immutable — version a new price instead of editing it in place.",
+            new Dictionary<string, object?>
+            {
+                ["priceId"] = price.Id.ToString("D"),
+                ["providerKey"] = price.ProviderKey,
+                ["model"] = price.Model,
+                ["status"] = status,
             },
             retryable: false,
             severity: TammaErrorSeverity.High);

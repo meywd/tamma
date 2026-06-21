@@ -25,24 +25,43 @@ public static class ProviderPricingServiceCollectionExtensions
         // deterministic seed source + DbProviderPricingService's boot fallback.
         services.TryAddSingleton<ProviderPricingService>();
 
-        // The EffectiveFrom-windowed resolver (used by the metering path).
-        services.TryAddSingleton<IProviderCostResolver, ProviderCostResolver>();
+        // The EffectiveFrom-windowed resolver (used by the metering path). Register
+        // the concrete singleton ONCE, then expose it on both interfaces so the
+        // SAME instance is the cost resolver AND a cost-cache invalidator (C1).
+        services.TryAddSingleton<ProviderCostResolver>();
+        services.TryAddSingleton<IProviderCostResolver>(
+            sp => sp.GetRequiredService<ProviderCostResolver>());
 
         // THE SWAP: replace any prior IProviderPricingService registration
         // (TryAddSingleton from AddProviderSessionServices) with the DB-backed
-        // impl. The interface contract is unchanged.
+        // impl. The interface contract is unchanged. Register the concrete
+        // singleton ONCE and project it onto IProviderPricingService so the SAME
+        // live instance is what an admin write invalidates (C1) — registering a
+        // second factory would invalidate a DIFFERENT instance than the one
+        // serving Compute.
         var existing = services.FirstOrDefault(d => d.ServiceType == typeof(IProviderPricingService));
         if (existing is not null)
         {
             services.Remove(existing);
         }
-        services.AddSingleton<IProviderPricingService>(sp =>
+        services.AddSingleton<DbProviderPricingService>(sp =>
             new DbProviderPricingService(
                 sp.GetRequiredService<IServiceScopeFactory>(),
                 sp.GetRequiredService<IProviderCostResolver>(),
                 sp.GetRequiredService<TimeProvider>(),
                 sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<DbProviderPricingService>>(),
                 sp.GetRequiredService<ProviderPricingService>()));
+        services.AddSingleton<IProviderPricingService>(
+            sp => sp.GetRequiredService<DbProviderPricingService>());
+
+        // C1 — both snapshot holders are cost-cache invalidators. The admin
+        // endpoints resolve IEnumerable<IProviderCostCacheInvalidator> and flush
+        // EVERY snapshot on a pricing/eligibility mutation, so a live Compute is
+        // never stale after a re-price.
+        services.AddSingleton<IProviderCostCacheInvalidator>(
+            sp => sp.GetRequiredService<ProviderCostResolver>());
+        services.AddSingleton<IProviderCostCacheInvalidator>(
+            sp => sp.GetRequiredService<DbProviderPricingService>());
 
         return services;
     }

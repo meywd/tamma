@@ -81,6 +81,7 @@ public static class AdminProviderPricingEndpoints
     public static async Task<IResult> RegisterProvider(
         RegisterProviderRequest body,
         ControlPlaneDbContext db,
+        IEnumerable<IProviderCostCacheInvalidator> costCaches,
         IPlatformEventPublisher publisher,
         ClaimsPrincipal principal,
         TimeProvider time,
@@ -116,6 +117,8 @@ public static class AdminProviderPricingEndpoints
         db.Providers.Add(provider);
         await db.SaveChangesAsync(ct);
 
+        InvalidateAll(costCaches);
+
         await publisher.AppendAndPublishAsync(
             BuildEvent(ProviderPricingEventTypes.Registered, principal, new Dictionary<string, string?>
             {
@@ -132,6 +135,7 @@ public static class AdminProviderPricingEndpoints
         string key,
         UpdateProviderRequest body,
         ControlPlaneDbContext db,
+        IEnumerable<IProviderCostCacheInvalidator> costCaches,
         IPlatformEventPublisher publisher,
         ClaimsPrincipal principal,
         TimeProvider time,
@@ -160,6 +164,10 @@ public static class AdminProviderPricingEndpoints
 
         await db.SaveChangesAsync(ct);
 
+        // A status flip (e.g. active→retired) changes provider eligibility — flush
+        // every cost cache so a downstream read never sees stale eligibility.
+        InvalidateAll(costCaches);
+
         await publisher.AppendAndPublishAsync(
             BuildEvent(ProviderPricingEventTypes.StatusChanged, principal, new Dictionary<string, string?>
             {
@@ -177,7 +185,7 @@ public static class AdminProviderPricingEndpoints
         string key,
         VersionPriceRequest body,
         ControlPlaneDbContext db,
-        IProviderCostResolver resolver,
+        IEnumerable<IProviderCostCacheInvalidator> costCaches,
         IPlatformEventPublisher publisher,
         ClaimsPrincipal principal,
         TimeProvider time,
@@ -188,12 +196,28 @@ public static class AdminProviderPricingEndpoints
             return Results.BadRequest(new { error = "model_required" });
         }
 
+        // I2 — never accept a negative rate (a malformed/typo'd admin write
+        // must not poison the cost basis with a negative cost).
+        if (HasNegativeRate(body, out var badField))
+        {
+            return Results.BadRequest(new { error = "negative_rate", field = badField });
+        }
+
         var canonical = ProviderRateLookup.Canonicalize(key);
 
-        var providerExists = await db.Providers.AnyAsync(p => p.Key == canonical, ct);
-        if (!providerExists)
+        var provider = await db.Providers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Key == canonical, ct);
+        if (provider is null)
         {
             return Results.NotFound(new { error = "provider_not_found", key = canonical });
+        }
+
+        // I2 — refuse to version a price on a retired provider (its cost identity
+        // is no longer live; re-activate it via PATCH before re-pricing).
+        if (provider.Status == "retired")
+        {
+            return Results.Conflict(new { error = "provider_retired", key = canonical });
         }
 
         var now = time.GetUtcNow().UtcDateTime;
@@ -252,7 +276,7 @@ public static class AdminProviderPricingEndpoints
             if (tx is not null) await tx.DisposeAsync();
         }
 
-        resolver.Invalidate();
+        InvalidateAll(costCaches);
 
         await publisher.AppendAndPublishAsync(
             BuildEvent(ProviderPricingEventTypes.PriceVersioned, principal, new Dictionary<string, string?>
@@ -300,6 +324,32 @@ public static class AdminProviderPricingEndpoints
                 retryable: false,
                 severity: TammaErrorSeverity.High);
         }
+    }
+
+    /// <summary>
+    /// I2 — true if any provided rate is negative. Out-params the offending field
+    /// name for a precise 400 body. A <c>null</c> cache rate is allowed (reserved
+    /// columns); only a present-and-negative value is rejected.
+    /// </summary>
+    private static bool HasNegativeRate(VersionPriceRequest body, out string field)
+    {
+        if (body.InputUsdPer1M < 0m) { field = nameof(body.InputUsdPer1M); return true; }
+        if (body.OutputUsdPer1M < 0m) { field = nameof(body.OutputUsdPer1M); return true; }
+        if (body.CacheReadUsdPer1M is < 0m) { field = nameof(body.CacheReadUsdPer1M); return true; }
+        if (body.CacheWriteUsdPer1M is < 0m) { field = nameof(body.CacheWriteUsdPer1M); return true; }
+        field = string.Empty;
+        return false;
+    }
+
+    /// <summary>
+    /// C1 — flush every registered cost-cache snapshot (the live
+    /// <see cref="DbProviderPricingService"/> AND the
+    /// <see cref="IProviderCostResolver"/>) so an admin write is reflected
+    /// immediately with no TTL-length stale window.
+    /// </summary>
+    private static void InvalidateAll(IEnumerable<IProviderCostCacheInvalidator> caches)
+    {
+        foreach (var cache in caches) cache.Invalidate();
     }
 
     private static PlatformEvent BuildEvent(

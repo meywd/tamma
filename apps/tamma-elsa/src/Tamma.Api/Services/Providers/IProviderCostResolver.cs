@@ -13,7 +13,7 @@ namespace Tamma.Api.Services.Providers;
 /// shared <see cref="ProviderRateLookup"/>: alias normalization,
 /// <c>null</c>/<c>"default"</c> → first model, exact then loose-prefix match.</para>
 /// </summary>
-public interface IProviderCostResolver
+public interface IProviderCostResolver : IProviderCostCacheInvalidator
 {
     /// <summary>
     /// Resolve the currently-<c>active</c> price row for <c>(provider, model)</c>,
@@ -31,6 +31,5 @@ public interface IProviderCostResolver
     Task<ProviderModelPrice?> ResolveAtAsync(
         string provider, string? model, DateTime atTimestamp, CancellationToken ct = default);
 
-    /// <summary>Invalidate any cached snapshot (called on an admin write).</summary>
-    void Invalidate();
+    // Invalidate() is inherited from IProviderCostCacheInvalidator.
 }

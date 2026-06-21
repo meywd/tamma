@@ -77,6 +77,12 @@ public class AdminProviderPricingEndpointsTests
             _sp.GetRequiredService<IServiceScopeFactory>(), TimeProvider.System,
             NullLogger<ProviderCostResolver>.Instance, TimeSpan.Zero);
 
+    // The admin write paths take IEnumerable<IProviderCostCacheInvalidator> (C1):
+    // every snapshot holder is flushed on a mutation. A fresh resolver is a valid
+    // (no-op-here) invalidator for the endpoint-level tests.
+    private IProviderCostCacheInvalidator[] NewCaches() =>
+        new IProviderCostCacheInvalidator[] { NewResolver() };
+
     private static ClaimsPrincipal Actor(string userId = "user-34-11", string email = "owner@tamma.dev") =>
         new(new ClaimsIdentity(new[]
         {
@@ -103,7 +109,7 @@ public class AdminProviderPricingEndpointsTests
             var result = await AdminProviderPricingEndpoints.VersionPrice(
                 "anthropic",
                 new VersionPriceRequest("claude-sonnet-4-20250514", 6.00m, 18.00m),
-                db, NewResolver(), publisher, Actor(), TimeProvider.System, default);
+                db, NewCaches(), publisher, Actor(), TimeProvider.System, default);
 
             AssertStatus(result, StatusCodes.Status200OK);
         }
@@ -136,7 +142,7 @@ public class AdminProviderPricingEndpointsTests
             await AdminProviderPricingEndpoints.VersionPrice(
                 "anthropic",
                 new VersionPriceRequest("claude-sonnet-4-20250514", 6.00m, 18.00m),
-                db, NewResolver(), publisher, Actor(), TimeProvider.System, default);
+                db, NewCaches(), publisher, Actor(), TimeProvider.System, default);
         }
 
         var evt = publisher.Events.Should().ContainSingle(e =>
@@ -161,7 +167,7 @@ public class AdminProviderPricingEndpointsTests
             await AdminProviderPricingEndpoints.VersionPrice(
                 "claude",
                 new VersionPriceRequest("claude-3-haiku-20240307", 0.30m, 1.50m),
-                db, NewResolver(), publisher, Actor(), TimeProvider.System, default);
+                db, NewCaches(), publisher, Actor(), TimeProvider.System, default);
         }
 
         await using var verify = NewContext();
@@ -184,7 +190,7 @@ public class AdminProviderPricingEndpointsTests
         await AdminProviderPricingEndpoints.VersionPrice(
             "anthropic",
             new VersionPriceRequest("claude-sonnet-4-20250514", 6.00m, 18.00m),
-            db, NewResolver(), new RecordingPlatformEventPublisher(),
+            db, NewCaches(), new RecordingPlatformEventPublisher(),
             Actor(), TimeProvider.System, default);
 
         var superseded = await db.ProviderModelPrices.AsNoTracking()
@@ -228,7 +234,7 @@ public class AdminProviderPricingEndpointsTests
         {
             var result = await AdminProviderPricingEndpoints.RegisterProvider(
                 new RegisterProviderRequest("xai", "xAI", "api-key"),
-                db, publisher, Actor(), TimeProvider.System, default);
+                db, NewCaches(), publisher, Actor(), TimeProvider.System, default);
             AssertStatus(result, StatusCodes.Status201Created);
         }
 
@@ -246,12 +252,127 @@ public class AdminProviderPricingEndpointsTests
             await AdminProviderPricingEndpoints.UpdateProvider(
                 "openai",
                 new UpdateProviderRequest(Status: "retired"),
-                db, publisher, Actor(), TimeProvider.System, default);
+                db, NewCaches(), publisher, Actor(), TimeProvider.System, default);
         }
 
         await using var verify = NewContext();
         (await verify.Providers.SingleAsync(p => p.Key == "openai")).Status.Should().Be("retired");
         publisher.Events.Should().Contain(e => e.Type == ProviderPricingEventTypes.StatusChanged);
+    }
+
+    // I2 — a negative rate must be rejected with 400 (a typo'd admin write must
+    // not poison the cost basis with a negative cost).
+    [Test]
+    public async Task VersionPrice_NegativeInputRate_Returns400()
+    {
+        await using var db = NewContext();
+        var result = await AdminProviderPricingEndpoints.VersionPrice(
+            "anthropic",
+            new VersionPriceRequest("claude-sonnet-4-20250514", -1.00m, 18.00m),
+            db, NewCaches(), new RecordingPlatformEventPublisher(),
+            Actor(), TimeProvider.System, default);
+
+        AssertStatus(result, StatusCodes.Status400BadRequest);
+
+        // Nothing was versioned — the seed row is still the sole active row.
+        await using var verify = NewContext();
+        (await verify.ProviderModelPrices.CountAsync(p =>
+            p.ProviderKey == "anthropic" && p.Model == "claude-sonnet-4-20250514"))
+            .Should().Be(1, "a rejected write must not insert a row");
+    }
+
+    [Test]
+    public async Task VersionPrice_NegativeCacheRate_Returns400()
+    {
+        await using var db = NewContext();
+        var result = await AdminProviderPricingEndpoints.VersionPrice(
+            "anthropic",
+            new VersionPriceRequest(
+                "claude-sonnet-4-20250514", 3.00m, 15.00m, CacheWriteUsdPer1M: -0.50m),
+            db, NewCaches(), new RecordingPlatformEventPublisher(),
+            Actor(), TimeProvider.System, default);
+
+        AssertStatus(result, StatusCodes.Status400BadRequest);
+    }
+
+    // I2 — versioning a price on a RETIRED provider must be rejected (409): its
+    // cost identity is no longer live.
+    [Test]
+    public async Task VersionPrice_OnRetiredProvider_Returns409()
+    {
+        // Retire openai first.
+        await using (var db = NewContext())
+        {
+            await AdminProviderPricingEndpoints.UpdateProvider(
+                "openai", new UpdateProviderRequest(Status: "retired"),
+                db, NewCaches(), new RecordingPlatformEventPublisher(),
+                Actor(), TimeProvider.System, default);
+        }
+
+        await using var ctx = NewContext();
+        var result = await AdminProviderPricingEndpoints.VersionPrice(
+            "openai",
+            new VersionPriceRequest("gpt-4o", 1.00m, 2.00m),
+            ctx, NewCaches(), new RecordingPlatformEventPublisher(),
+            Actor(), TimeProvider.System, default);
+
+        AssertStatus(result, StatusCodes.Status409Conflict);
+    }
+
+    // I1 — the AUTHORITATIVE immutability guard lives at the DbContext SaveChanges
+    // interceptor (mirrors the Plan EnforcePlanImmutability sibling), NOT only at
+    // the pre-flight EnsureMutableOrThrow helper. A raw EF UPDATE of a superseded
+    // ProviderModelPrice row (bypassing the admin endpoint entirely) must STILL
+    // fail loud with PROVIDER.PRICE.IMMUTABLE.
+    [Test]
+    public async Task DirectMutation_Of_Superseded_Price_Throws_Immutable()
+    {
+        // Version once so a superseded row exists.
+        await using (var db = NewContext())
+        {
+            await AdminProviderPricingEndpoints.VersionPrice(
+                "anthropic",
+                new VersionPriceRequest("claude-sonnet-4-20250514", 6.00m, 18.00m),
+                db, NewCaches(), new RecordingPlatformEventPublisher(),
+                Actor(), TimeProvider.System, default);
+        }
+
+        await using var ctx = NewContext();
+        var superseded = await ctx.ProviderModelPrices.FirstAsync(p =>
+            p.ProviderKey == "anthropic"
+            && p.Model == "claude-sonnet-4-20250514"
+            && p.Status == "superseded");
+
+        // Tamper with the content of an already-superseded (immutable) row.
+        superseded.InputUsdPer1M = 0.01m;
+
+        var act = async () => await ctx.SaveChangesAsync();
+        (await act.Should().ThrowAsync<TammaError>(
+            "a content mutation of a superseded cost row must be rejected at the interceptor"))
+            .Which.Code.Should().Be("PROVIDER.PRICE.IMMUTABLE");
+    }
+
+    // I1 — the legitimate supersede flip (active→superseded) the VersionPrice path
+    // performs must STILL be allowed through the interceptor (otherwise versioning
+    // would be impossible).
+    [Test]
+    public async Task LegitimateSupersedeFlip_Is_Allowed_Through_Interceptor()
+    {
+        await using var db = NewContext();
+        var act = async () => await AdminProviderPricingEndpoints.VersionPrice(
+            "anthropic",
+            new VersionPriceRequest("claude-sonnet-4-20250514", 6.00m, 18.00m),
+            db, NewCaches(), new RecordingPlatformEventPublisher(),
+            Actor(), TimeProvider.System, default);
+
+        await act.Should().NotThrowAsync(
+            "the controlled active→superseded flip + new active insert must clear the interceptor");
+
+        await using var verify = NewContext();
+        (await verify.ProviderModelPrices.CountAsync(p =>
+            p.ProviderKey == "anthropic"
+            && p.Model == "claude-sonnet-4-20250514"
+            && p.Status == "active")).Should().Be(1, "exactly one active after the flip");
     }
 
     [Test]
@@ -262,12 +383,25 @@ public class AdminProviderPricingEndpointsTests
             await AdminProviderPricingEndpoints.VersionPrice(
                 "anthropic",
                 new VersionPriceRequest("claude-sonnet-4-20250514", 6.00m, 18.00m),
-                db, NewResolver(), new RecordingPlatformEventPublisher(),
+                db, NewCaches(), new RecordingPlatformEventPublisher(),
                 Actor(), TimeProvider.System, default);
         }
 
         await using var db2 = NewContext();
         var result = await AdminProviderPricingEndpoints.ListPrices("anthropic", db2, default);
         AssertStatus(result, StatusCodes.Status200OK);
+
+        // M3 — assert the response BODY actually carries BOTH the active (admin)
+        // and the superseded (seed) rows for the versioned model, not just 200.
+        var value = ((IValueHttpResult)result).Value!;
+        var pricesProp = value.GetType().GetProperty("prices")!;
+        var prices = (System.Collections.IEnumerable)pricesProp.GetValue(value)!;
+        var versioned = prices.Cast<ProviderModelPrice>()
+            .Where(p => p.Model == "claude-sonnet-4-20250514")
+            .ToList();
+
+        versioned.Should().HaveCount(2, "the body must contain both the seed + admin rows");
+        versioned.Should().Contain(p => p.Status == "active" && p.Source == "admin");
+        versioned.Should().Contain(p => p.Status == "superseded" && p.Source == "seed");
     }
 }

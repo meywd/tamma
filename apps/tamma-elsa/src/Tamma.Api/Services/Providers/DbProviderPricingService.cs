@@ -25,10 +25,16 @@ namespace Tamma.Api.Services.Providers;
 /// silently prices at 0 (consistent with <c>feedback_resolution_no_empty_fallback</c>).</para>
 ///
 /// <para>Holds a short-lived in-memory snapshot of active rows (per-provider
-/// per-token rate maps) invalidated on an admin write via
-/// <see cref="IProviderCostResolver.Invalidate"/> + its own TTL.</para>
+/// per-token rate maps). The snapshot is cleared in TWO ways: (1) its own TTL
+/// expiry on the next read, and (2) an explicit <see cref="Invalidate"/> call —
+/// this service implements <see cref="IProviderCostCacheInvalidator"/>, so the
+/// admin endpoints invalidate it (alongside the resolver's separate snapshot)
+/// on EVERY pricing/eligibility mutation. Before the C1 fix this service had no
+/// <c>Invalidate()</c> and the admin write only cleared the resolver's distinct
+/// snapshot, so a live <c>Compute</c> kept returning the OLD rate for up to the
+/// TTL after a re-price — that stale window is now closed.</para>
 /// </summary>
-public sealed class DbProviderPricingService : IProviderPricingService
+public sealed class DbProviderPricingService : IProviderPricingService, IProviderCostCacheInvalidator
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IProviderCostResolver _resolver;
@@ -78,6 +84,23 @@ public sealed class DbProviderPricingService : IProviderPricingService
         if (string.IsNullOrWhiteSpace(provider)) return false;
         if (TryGetRate(provider, model, out _, out var usedFallback)) return true;
         return usedFallback && _frozenFallback.IsKnown(provider, model);
+    }
+
+    /// <summary>
+    /// C1 fix — clear the live active-row snapshot + reset its expiry under the
+    /// gate so the very next <see cref="Compute"/>/<see cref="IsKnown"/> re-reads
+    /// the table. Called by the admin endpoints on every pricing/eligibility
+    /// mutation so a re-priced model is reflected immediately (no TTL-length
+    /// stale window).
+    /// </summary>
+    public void Invalidate()
+    {
+        lock (_gate)
+        {
+            _snapshot = null;
+            _snapshotExpiresAt = default;
+        }
+        _logger.LogDebug("DbProviderPricingService cost snapshot invalidated");
     }
 
     /// <summary>

@@ -1,9 +1,12 @@
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
+using Tamma.Api.Endpoints.Admin;
 using Tamma.Api.Services.Providers;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Seeders;
 using Testcontainers.PostgreSql;
@@ -190,4 +193,54 @@ public class DbProviderPricingServiceTests
             new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc));
         cost.Should().Be(0m);
     }
+
+    // C1 (regression) — with a NON-ZERO snapshot TTL, an admin re-price through
+    // VersionPrice must invalidate the live IProviderPricingService snapshot so
+    // the very next Compute reflects the NEW rate (NOT the cached old one). The
+    // pre-fix bug: VersionPrice only invalidated the resolver's separate
+    // _activeSnapshot, leaving DbProviderPricingService._snapshot stale for the
+    // whole TTL window.
+    [Test]
+    public async Task VersionPrice_Invalidates_LiveCompute_Snapshot_Immediately()
+    {
+        var scopeFactory = _sp.GetRequiredService<IServiceScopeFactory>();
+        // Long TTL so the snapshot will NOT auto-refresh during the test — only
+        // an explicit Invalidate() can clear it.
+        var ttl = TimeSpan.FromMinutes(30);
+        var resolver = new ProviderCostResolver(
+            scopeFactory, TimeProvider.System,
+            NullLogger<ProviderCostResolver>.Instance, ttl);
+        var svc = new DbProviderPricingService(
+            scopeFactory, resolver, TimeProvider.System,
+            NullLogger<DbProviderPricingService>.Instance,
+            new ProviderPricingService(), ttl);
+
+        // Warm the snapshot at the seed rate ($3/1M in, $15/1M out → $3.00 for 1M in).
+        svc.Compute("anthropic", "claude-sonnet-4-20250514", 1_000_000, 0)
+            .Should().Be(3.00m, "seed rate before the re-price");
+
+        // Admin re-prices to $9/1M in via the real endpoint. The endpoint must
+        // invalidate every cost cache (resolver AND the live pricing service).
+        var invalidators = new IProviderCostCacheInvalidator[] { resolver, svc };
+        await using (var db = NewContext())
+        {
+            var result = await AdminProviderPricingEndpoints.VersionPrice(
+                "anthropic",
+                new VersionPriceRequest("claude-sonnet-4-20250514", 9.00m, 18.00m),
+                db, invalidators, new RecordingPlatformEventPublisher(),
+                Actor(), TimeProvider.System, default);
+            ((IStatusCodeHttpResult)result).StatusCode.Should().Be(StatusCodes.Status200OK);
+        }
+
+        // The very next Compute must reflect the NEW rate, not the stale snapshot.
+        svc.Compute("anthropic", "claude-sonnet-4-20250514", 1_000_000, 0)
+            .Should().Be(9.00m, "VersionPrice must invalidate the live Compute snapshot");
+    }
+
+    private static System.Security.Claims.ClaimsPrincipal Actor() =>
+        new(new System.Security.Claims.ClaimsIdentity(new[]
+        {
+            new System.Security.Claims.Claim(
+                System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub, "user-c1"),
+        }, "test"));
 }

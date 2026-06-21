@@ -14,7 +14,12 @@ namespace Tamma.Data.Entities;
 /// </summary>
 public class Provider
 {
-    /// <summary>UUIDv7 — server default <c>gen_random_uuid()</c>; the seeder bakes deterministic ids.</summary>
+    /// <summary>
+    /// Primary key. New rows get a v4 GUID — the DB default is
+    /// <c>gen_random_uuid()</c> (UUIDv4) and admin inserts use
+    /// <c>Guid.NewGuid()</c> (UUIDv4). ONLY the seeder bakes deterministic,
+    /// UUIDv7-shaped ids (for insert-missing-only idempotency).
+    /// </summary>
     public Guid Id { get; set; }
 
     /// <summary>Canonical provider key: <c>anthropic|openai|google|openrouter|local|claude-code</c>. Unique.</summary>
