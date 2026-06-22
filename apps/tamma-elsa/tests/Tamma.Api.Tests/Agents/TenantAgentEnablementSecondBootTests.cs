@@ -47,6 +47,16 @@ public class TenantAgentEnablementSecondBootTests
         => new(new DbContextOptionsBuilder<ControlPlaneDbContext>()
             .UseNpgsql(_connectionString).Options);
 
+    // TEST-FIDELITY LIMITATION (Story 32-16 review): this test wipes via
+    // "DROP SCHEMA public CASCADE" — a SUPERSET of the Program.cs startup wipe.
+    // It faithfully proves a clean second Migrate() succeeds, but because it does
+    // not replay the exact Program.cs DROP-list LITERAL, it would NOT catch a
+    // future edit that drops `tenant_agent_enablements` from that literal (the
+    // wipe block lives in Program.cs Main top-level statements as a raw SQL string,
+    // not a reachable constant/collection a test could assert against). If that
+    // DROP list is ever refactored into a named constant/list, add a direct
+    // `.Should().Contain("tenant_agent_enablements")` assertion here. Until then,
+    // the prod regression surfaces as a 42P07 on the second real host boot.
     [Test]
     public async Task SecondBoot_AfterWipe_DoesNotThrow_RelationAlreadyExists()
     {

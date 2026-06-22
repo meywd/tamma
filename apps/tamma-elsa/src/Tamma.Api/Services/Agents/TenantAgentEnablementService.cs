@@ -283,6 +283,18 @@ public sealed class TenantAgentEnablementService : ITenantAgentEnablementService
     /// <paramref name="enabled"/> flag. Idempotent: re-running with the same flag
     /// touches the same single row (no duplicate). Returns whether a row was
     /// created plus the persisted row.
+    ///
+    /// <para><b>Concurrent-insert race.</b> Two concurrent first-time enable calls
+    /// for the same <c>(principal, agentId)</c> both read <c>null</c>; one INSERT
+    /// wins, the loser hits the unique <c>(TenantId, UserId, AgentId)</c> violation
+    /// as a <see cref="DbUpdateException"/>. We catch the Postgres unique-violation
+    /// (scoped precisely to <see cref="Npgsql.PostgresErrorCodes.UniqueViolation"/>,
+    /// same as <see cref="AgentSelectionRepository"/> /
+    /// <c>AgentRepository.PublishVersionAsync</c>), detach the orphaned insert,
+    /// re-read the now-present row, and UPDATE it. Enablement is idempotent:
+    /// last-writer-wins is the correct outcome — without this the loser would
+    /// throw an unhandled <see cref="DbUpdateException"/> (a 500, since it is not a
+    /// <c>TammaError</c>), contradicting the "idempotent" contract.</para>
     /// </summary>
     private async Task<(bool Created, TenantAgentEnablement Row)> UpsertEnabledAsync(
         Principal principal, Guid agentId, bool enabled, CancellationToken ct)
@@ -313,9 +325,32 @@ public sealed class TenantAgentEnablementService : ITenantAgentEnablementService
             UpdatedBy = actingUser,
         };
         _db.TenantAgentEnablements.Add(row);
-        await _db.SaveChangesAsync(ct);
-        return (true, row);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+            return (true, row);
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            // We lost a first-time-insert race; the winner's row now exists.
+            // Detach our orphaned insert, re-read the winner, and UPDATE it.
+            _db.Entry(row).State = EntityState.Detached;
+            var winner = await FindRowAsync(principal, agentId, ct)
+                ?? throw new InvalidOperationException(
+                    "TenantAgentEnablementService upsert hit a unique-violation but the "
+                    + "conflicting enablement row could not be re-read.");
+            winner.Enabled = enabled;
+            winner.UpdatedAt = DateTime.UtcNow;
+            winner.UpdatedBy = actingUser;
+            await _db.SaveChangesAsync(ct);
+            return (false, winner);
+        }
     }
+
+    private static bool IsUniqueViolation(DbUpdateException ex)
+        => ex.InnerException is Npgsql.PostgresException pg &&
+           pg.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation;
 
     private Task<TenantAgentEnablement?> FindRowAsync(Principal principal, Guid agentId, CancellationToken ct)
         => _db.TenantAgentEnablements.FirstOrDefaultAsync(

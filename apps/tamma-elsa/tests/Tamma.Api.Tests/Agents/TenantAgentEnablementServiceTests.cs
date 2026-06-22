@@ -157,6 +157,46 @@ public class TenantAgentEnablementServiceTests
     }
 
     [Test]
+    public async Task EnableAsync_ConcurrentFirstTimeInsert_LoserUpdates_NoUnhandledDbUpdateException()
+    {
+        // Pre-stage a public persona via an independent context so BOTH racing
+        // services see it in the catalog.
+        Guid claudeId;
+        await using (var seedCtx = NewContext())
+        {
+            var claude = await SeedPersonaAsync(new AgentRepository(seedCtx, new CapturingEvents()), "claude");
+            claudeId = claude.Id;
+        }
+
+        // Two independent services (independent contexts/connections) for the SAME
+        // principal+agent — the exact shape of two concurrent first-time enable calls.
+        var a = BuildService(TammaMode.SaaS, TenantA, null);
+        var b = BuildService(TammaMode.SaaS, TenantA, null);
+        await using (a.Ctx)
+        await using (b.Ctx)
+        {
+            // Both read null (empty table), both attempt the first-time INSERT; the
+            // unique (TenantId, UserId, AgentId) index makes exactly one win. The
+            // loser MUST recover via the unique-violation catch (detach → re-read →
+            // UPDATE), NOT escape as an unhandled DbUpdateException.
+            Func<Task> race = async () => await Task.WhenAll(
+                a.Service.EnableAsync(claudeId),
+                b.Service.EnableAsync(claudeId));
+
+            await race.Should().NotThrowAsync<DbUpdateException>(
+                "the upsert race loser recovers to an UPDATE (no unhandled DbUpdateException)");
+
+            await using var verify = NewContext();
+            (await verify.TenantAgentEnablements.CountAsync(
+                    r => r.TenantId == TenantA && r.AgentId == claudeId))
+                .Should().Be(1, "exactly one enablement row survives the race");
+            (await verify.TenantAgentEnablements.SingleAsync(
+                    r => r.TenantId == TenantA && r.AgentId == claudeId))
+                .Enabled.Should().BeTrue("both racers intended enabled=true");
+        }
+    }
+
+    [Test]
     public async Task EnableAsync_Reenable_IsIdempotent_SingleRow()
     {
         var s = BuildService(TammaMode.SaaS, TenantA, null);
