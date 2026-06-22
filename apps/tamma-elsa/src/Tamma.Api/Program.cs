@@ -481,22 +481,54 @@ builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IBudgetGuard,
     Tamma.Api.Services.Agents.PerCallBudgetGuard>();
 builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.ILlmCallResponseMapper,
     Tamma.Api.Services.Agents.LlmCallResponseMapper>();
-// The runner's provider-side collaborators (sanitizer/registry/validator/
-// compactor/parallel-executor) are all OPTIONAL and are fully wired in the API
-// by T4; until then resolve them best-effort via GetService so the host's
-// build-time DI validation stays green with the minimal T3 wiring.
-builder.Services.TryAddScoped<Tamma.Activities.LlmCall.IInlineToolLoopRunner>(sp =>
-    new Tamma.Activities.LlmCall.InlineToolLoopRunner(
-        sp.GetService<ILogger<Tamma.Activities.LlmCall.InlineToolLoopRunner>>(),
-        sp.GetService<IHttpClientFactory>(),
-        sp.GetService<IConfiguration>(),
-        sp.GetService<Tamma.Activities.Security.IContentSanitizer>(),
-        sp.GetService<Tamma.Activities.LlmCall.Tools.IToolExecutorRegistry>(),
-        sp.GetService<Tamma.Activities.Security.IToolCallValidator>(),
-        sp.GetService<Tamma.Activities.LlmCall.Tools.ContextCompactor>(),
-        sp.GetService<Tamma.Activities.ToolExecution.ToolLoopEventEmitter>(),
-        sp.GetService<Tamma.Activities.ToolExecution.ParallelToolExecutor>(),
-        sp.GetService<Tamma.Activities.LlmCall.Credentials.IProviderCredentialResolver>()));
+
+// Story 32-5 (T4) — provider-side DI for the server-side tool loop, FORMALIZED
+// in the API process (replacing T3's best-effort GetService factory). The loop
+// (extracted verbatim into InlineToolLoopRunner) now executes HERE, where the
+// request-scoped key is resolved, so its collaborators must resolve fully at
+// host startup. These registrations mirror the engine's (ElsaServer/Program.cs);
+// the engine-side copies are deleted in T6 (the engine holds no key after
+// cutover). Lifetimes match the engine: built-in tool executors + registry +
+// sanitizer + action-gate + validator + compactor are singletons (stateless /
+// config-only); the runner is scoped so each call gets a fresh request-scoped
+// provider config.
+builder.Services.Configure<Tamma.Activities.Security.ActionGateOptions>(
+    builder.Configuration.GetSection("Security:ActionGate"));
+builder.Services.TryAddSingleton<Tamma.Activities.Security.IContentSanitizer,
+    Tamma.Activities.Security.ContentSanitizer>();
+builder.Services.TryAddSingleton<Tamma.Activities.Security.ActionGate>();
+builder.Services.TryAddSingleton<Tamma.Activities.Security.IToolCallValidator,
+    Tamma.Activities.Security.ToolCallValidator>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor,
+    Tamma.Activities.LlmCall.Tools.FileReadTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor,
+    Tamma.Activities.LlmCall.Tools.FileWriteTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor,
+    Tamma.Activities.LlmCall.Tools.SearchCodeTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor,
+    Tamma.Activities.LlmCall.Tools.ShellExecuteTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor,
+    Tamma.Activities.LlmCall.Tools.GitOperationsTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor,
+    Tamma.Activities.LlmCall.Tools.RunTestsTool>();
+builder.Services.TryAddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutorRegistry,
+    Tamma.Activities.LlmCall.Tools.ToolExecutorRegistry>();
+builder.Services.TryAddSingleton<Tamma.Activities.LlmCall.Tools.ContextCompactor>();
+// ToolLoopEventEmitter + ParallelToolExecutor: the runner accepts them as
+// optional (nullable) deps and the engine never registered them either (the
+// buffered-only path doesn't emit a live tool-loop event stream — that's the
+// deferred streaming-run-tap follow-on). Register them anyway so the server-side
+// loop is fully wired (their only hard dep is ILogger; the emitter's sink
+// defaults to the no-op NullToolLoopEventSink when none is registered).
+builder.Services.TryAddSingleton<Tamma.Activities.ToolExecution.ToolLoopEventEmitter>();
+builder.Services.TryAddSingleton<Tamma.Activities.ToolExecution.ParallelToolExecutor>();
+// The extracted runner — the SINGLE home of the loop (no fork). Scoped so each
+// call binds a request-scoped provider config. Its IProviderCredentialResolver
+// dep is the cabinet-backed DefaultProviderCredentialResolver (registered above
+// via AddProviderCredentialResolution) — but the loop never re-resolves: the key
+// is set on the provider config ManagedAgent hands it.
+builder.Services.AddScoped<Tamma.Activities.LlmCall.IInlineToolLoopRunner,
+    Tamma.Activities.LlmCall.InlineToolLoopRunner>();
 builder.Services.AddScoped<Tamma.Api.Services.Agents.IManagedAgent,
     Tamma.Api.Services.Agents.ManagedAgent>();
 
@@ -2128,6 +2160,19 @@ app.MapPost("/api/webhooks/{platform}", WebhookEndpoints.Receive)
 
 // ── SaaS (API key auth) ──
 app.MapPost("/api/v1/llm/chat", SaaSEndpoints.LlmChat).RequireAuthorization();
+
+// ── Story 32-5 (T4) — the call-LLM mediation endpoint (sequence step F) ──
+// Internal/engine-only: the engine's CallLlmInlineActivity thin client posts an
+// LlmCallRequest here over the SAME auth plane as the other TammaApiClient
+// callbacks (Bearer Tamma:ApiToken, authenticated by the platform JwtBearer/
+// ApiKey chain via the default policy — exactly like /api/v1/llm/chat above). A
+// missing/invalid bearer ⇒ 401 from the auth pipeline before the handler. The
+// handler delegates to IManagedAgent.RunAsync and maps via ToHttpResult under
+// the §2.4 status discipline (200 / 200 success:false +httpStatusCode / 400 /
+// 403; NEVER a raw 5xx).
+app.MapPost("/api/v1/llm/call", LlmCallEndpoints.CallLlm)
+    .RequireAuthorization()
+    .WithName("CallLlm");
 app.MapPost("/api/v1/workflows/{id}/status", SaaSEndpoints.UpdateWorkflowStatus).RequireAuthorization();
 app.MapPost("/api/v1/workflows/{id}/result", SaaSEndpoints.PostWorkflowResult).RequireAuthorization();
 app.MapPost("/api/v1/installations/{id}/rotate-key", SaaSEndpoints.RotateInstallationKey).RequireAuthorization();
