@@ -16,14 +16,19 @@ namespace Tamma.Api.Services.Agents;
 ///     <c>LOOP_EXHAUSTED</c>) ⇒ HTTP 200 + <c>success:false</c>, with
 ///     <see cref="LlmCallResponse.HttpStatusCode"/> PRESERVED so the engine's
 ///     <c>RetryCheck</c> + circuit breaker keep working.</description></item>
-///   <item><description><c>SAAS_PROVIDER_NOT_ALLOWED</c> (gate denial of a
-///     CLI-token / unknown provider in SaaS) ⇒ HTTP 400.</description></item>
-///   <item><description><c>TENANT_NOT_ENTITLED</c> (entitlement rejection) ⇒
-///     HTTP 403.</description></item>
+///   <item><description><b>Finding C-1</b> — gate denials are TERMINAL and must
+///     not be retried, but the only caller is the engine via
+///     <c>TammaApiClient.PostAsync</c>, which NULLS any non-2xx body. So a gate
+///     denial rides inside HTTP 200 + <c>success:false</c> too, carrying a
+///     NON-transient <see cref="LlmCallResponse.HttpStatusCode"/> in the BODY:
+///     <c>400</c> for <c>SAAS_PROVIDER_NOT_ALLOWED</c>, <c>403</c> for
+///     <c>TENANT_NOT_ENTITLED</c>. Neither value is in <c>RetryCheck</c>'s
+///     transient set <c>{0,429,502,503,504}</c>, so the engine receives a real
+///     body and STOPS.</description></item>
 /// </list>
-/// <para>NEVER a raw 5xx — a raw 5xx is nulled by
+/// <para>NEVER a raw non-2xx — any non-2xx is nulled by
 /// <c>TammaApiClient.PostAsync</c> and would silently break the retry / breaker
-/// boundary.</para>
+/// boundary (Finding C-1).</para>
 /// </summary>
 public interface ILlmCallResponseMapper
 {
@@ -32,8 +37,10 @@ public interface ILlmCallResponseMapper
     /// copied). Used on every path — success and failure.</summary>
     LlmCallResponse ToResponse(AgentRunResult run);
 
-    /// <summary>Map the producer record to the §2.4 HTTP result (200 success /
-    /// 200 success:false +preserved httpStatusCode / 400 / 403). Never 5xx.</summary>
+    /// <summary>Map the producer record to the §2.4 HTTP result. Every outcome is
+    /// HTTP 200: success / success:false with the (preserved or stamped)
+    /// non-transient httpStatusCode in the body — gate denials carry 400/403 in the
+    /// body (Finding C-1), never as the HTTP status. Never a raw non-2xx.</summary>
     IResult ToHttpResult(AgentRunResult run);
 }
 

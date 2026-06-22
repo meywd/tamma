@@ -56,6 +56,12 @@ public sealed class ManagedAgent : IManagedAgent
     private readonly IProviderMarkupEngine _markup;       // 34-5 (interim seam)
     private readonly IUsageEmitter _usage;                // 32-9 (interim seam)
     private readonly IEventRepository _events;
+    // Finding I-3 — the SAME input sanitizer the legacy CallLlmInlineActivity ran
+    // (Tamma.Activities.Security.IContentSanitizer.SanitizeInput): injection
+    // detection + HTML strip + null/zero-width removal on the rendered system
+    // prompt + the user prompt BEFORE the provider call. Optional (null ⇒ skip,
+    // matching the legacy `if (_sanitizer == null) return raw;`).
+    private readonly Tamma.Activities.Security.IContentSanitizer? _sanitizer;
     private readonly ILogger<ManagedAgent> _logger;
 
     // NOTE: the process mode (single-user vs SaaS) is NOT a dependency here — the
@@ -72,7 +78,8 @@ public sealed class ManagedAgent : IManagedAgent
         IProviderMarkupEngine markup,
         IUsageEmitter usage,
         IEventRepository events,
-        ILogger<ManagedAgent> logger)
+        ILogger<ManagedAgent> logger,
+        Tamma.Activities.Security.IContentSanitizer? sanitizer = null)
     {
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _budget = budget ?? throw new ArgumentNullException(nameof(budget));
@@ -84,6 +91,10 @@ public sealed class ManagedAgent : IManagedAgent
         _usage = usage ?? throw new ArgumentNullException(nameof(usage));
         _events = events ?? throw new ArgumentNullException(nameof(events));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        // Optional (Finding I-3): when absent, prompts pass through unsanitized —
+        // identical to the legacy `if (_sanitizer == null) return raw;`. It is
+        // DI-registered in the API host (Program.cs), so production always has it.
+        _sanitizer = sanitizer;
     }
 
     /// <inheritdoc />
@@ -138,8 +149,18 @@ public sealed class ManagedAgent : IManagedAgent
                     $"agent resolution failed: {ex.Message}", httpStatus: null, ct).ConfigureAwait(false);
             }
 
-            ctx.Provider = resolved.Provider;
-            ctx.Model = ResolveModel(request, resolved);
+            // Finding I-1 — honour the workflow's per-iteration provider override.
+            // The role resolves the prompt/tools/budget/model-preference; but when
+            // the request names an explicit provider (the ForEach<provider> chain),
+            // THAT provider is the one this call runs against — so the gate, the
+            // credential resolution, and the runner all key off it, making the
+            // chain meaningful again. When no override is given, the role-resolved
+            // provider stands. The model follows the provider: an explicit
+            // request.Model wins; else the resolved model if it belongs to the
+            // chosen provider; else the chosen provider's own default model
+            // (never a model from a different provider).
+            ctx.Provider = ResolveProvider(request, resolved);
+            ctx.Model = ResolveModel(request, resolved, ctx.Provider);
             ctx.AgentId = resolved.AgentId;
             ctx.Version = resolved.AgentVersion ?? 0;
 
@@ -217,6 +238,15 @@ public sealed class ManagedAgent : IManagedAgent
             await EmitAsync(AgentRunEventTypes.Started, ctx, failureCode: null, ct)
                 .ConfigureAwait(false);
 
+            // ── 5b. (Finding I-3) sanitize the input prompts SERVER-SIDE before the
+            //     provider call — the same defence-in-depth the legacy activity ran
+            //     (SanitizePrompts → injection detection + HTML strip + null/
+            //     zero-width removal). The runner sanitizes tool OUTPUTS; the INPUT
+            //     system+user prompts are sanitized HERE so a poisoned rendered
+            //     prompt never reaches the provider. ──
+            var systemPrompt = SanitizeInputPrompt(resolved.SystemPrompt, "SystemPrompt", ctx);
+            var userPrompt = SanitizeInputPrompt(request.Prompt, "UserPrompt", ctx);
+
             // ── 6. provider call via the extracted runner (request-scoped key) ──
             var providerConfig = new LlmProviderConfig
             {
@@ -231,8 +261,8 @@ public sealed class ManagedAgent : IManagedAgent
                     provider: ctx.Provider,
                     providerConfig: providerConfig,
                     model: ctx.Model,
-                    systemPrompt: resolved.SystemPrompt,
-                    userPrompt: request.Prompt,
+                    systemPrompt: systemPrompt,
+                    userPrompt: userPrompt,
                     maxTokens: request.Params.MaxTokens,
                     temperature: request.Params.Temperature,
                     tools: ToResolvedTools(request, resolved),
@@ -476,8 +506,70 @@ public sealed class ManagedAgent : IManagedAgent
     // pure helpers
     // -----------------------------------------------------------------------
 
-    private static string ResolveModel(ManagedAgentRequest request, ResolvedAgentConfig resolved)
-        => !string.IsNullOrWhiteSpace(request.Model) ? request.Model! : resolved.Model;
+    /// <summary>
+    /// Finding I-3 — sanitize one INPUT prompt before the provider call (the same
+    /// <c>SanitizeInput</c> the legacy <c>CallLlmInlineActivity.SanitizePrompts</c>
+    /// ran: injection detection + HTML strip + null/zero-width removal). When the
+    /// sanitizer is absent (null) the raw text passes through, matching the
+    /// legacy `if (_sanitizer == null) return raw;`. Detected injection patterns
+    /// are logged at WARN with a COUNT only (never the prompt body — it may carry
+    /// secrets), mirroring the legacy log.
+    /// </summary>
+    private string SanitizeInputPrompt(string? raw, string field, RunContext ctx)
+    {
+        if (_sanitizer is null || string.IsNullOrEmpty(raw))
+        {
+            return raw ?? string.Empty;
+        }
+
+        var result = _sanitizer.SanitizeInput(raw);
+        if (result.Warnings.Count > 0)
+        {
+            _logger.LogWarning(
+                "Injection pattern detected in {Field} for managed run; patterns matched: {Count}, "
+                + "provider={Provider}, role={Role}, correlationId={CorrelationId}, tenantId={TenantId}",
+                field, result.Warnings.Count, ctx.Provider, ctx.Role, ctx.CorrelationId, ctx.TenantId);
+        }
+
+        return result.Result;
+    }
+
+    /// <summary>Finding I-1 — the provider this call runs against: the explicit
+    /// <see cref="ManagedAgentRequest.Provider"/> override (the workflow's
+    /// per-iteration provider) when set, else the role-resolved provider.</summary>
+    private static string ResolveProvider(ManagedAgentRequest request, ResolvedAgentConfig resolved)
+        => !string.IsNullOrWhiteSpace(request.Provider) ? request.Provider!.Trim() : resolved.Provider;
+
+    /// <summary>
+    /// Finding I-1 — pick the model for <paramref name="chosenProvider"/>:
+    /// an explicit <see cref="ManagedAgentRequest.Model"/> wins; else the resolved
+    /// model IF the chosen provider is the role-resolved provider (i.e. no
+    /// override, or the override matches); else the chosen provider's OWN default
+    /// model (reusing the runner's legacy <c>LoadProviderConfig</c>/
+    /// <c>GetDefaultModel</c>) — never a model that belongs to a different
+    /// provider. When the runner has no default for the provider it falls back to
+    /// the resolved model rather than an empty string.
+    /// </summary>
+    private string ResolveModel(ManagedAgentRequest request, ResolvedAgentConfig resolved, string chosenProvider)
+    {
+        if (!string.IsNullOrWhiteSpace(request.Model))
+        {
+            return request.Model!;
+        }
+
+        var providerMatchesResolved = string.Equals(
+            chosenProvider, resolved.Provider, StringComparison.OrdinalIgnoreCase);
+        if (providerMatchesResolved)
+        {
+            return resolved.Model;
+        }
+
+        // Override provider differs from the role-resolved one — the resolved model
+        // is a model for a DIFFERENT provider, so use the override provider's own
+        // default (legacy GetDefaultModel). Guard against an empty default.
+        var providerDefault = _runner.GetDefaultModel(chosenProvider);
+        return string.IsNullOrWhiteSpace(providerDefault) ? resolved.Model : providerDefault;
+    }
 
     private static IReadOnlyList<ResolvedTool>? ToResolvedTools(
         ManagedAgentRequest request, ResolvedAgentConfig resolved)

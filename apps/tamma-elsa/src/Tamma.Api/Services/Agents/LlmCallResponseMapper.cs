@@ -62,14 +62,24 @@ public sealed class LlmCallResponseMapper : ILlmCallResponseMapper
             return Results.Ok(body);
         }
 
-        // Gate denials are the ONLY non-200 outcomes — everything else is an
-        // expected EXECUTION failure that MUST ride inside a 200 envelope so the
-        // engine's RetryCheck/circuit-breaker keep working (a raw 5xx is nulled
-        // by TammaApiClient.PostAsync). NEVER a 5xx.
+        // Finding C-1 — EVERY failure (gate denials included) rides inside a 200
+        // envelope. The endpoint's ONLY caller is the engine via
+        // TammaApiClient.PostAsync, which returns null for any non-2xx response.
+        // A gate denial returned as a raw HTTP 400/403 would therefore be nulled →
+        // the shim would write httpStatusCode 0 (transient) → RetryCheck would
+        // RETRY a TERMINAL denial. So gate denials are encoded the §2.4 way:
+        // HTTP 200 + success:false + a NON-transient httpStatusCode carried in the
+        // BODY (400 for SAAS_PROVIDER_NOT_ALLOWED, 403 for TENANT_NOT_ENTITLED) —
+        // neither value is in RetryCheck's transient set {0, 429, 502, 503, 504},
+        // so the engine receives a real body and STOPS. NEVER a raw 4xx/5xx.
         return run.FailureCode switch
         {
-            AgentRunFailureCodes.SaasProviderNotAllowed => Results.Json(body, statusCode: 400),
-            AgentRunFailureCodes.TenantNotEntitled => Results.Json(body, statusCode: 403),
+            // Gate denials — terminal, non-retryable. Body status 400/403 stamped
+            // if the producer left it null (both are non-transient ⇒ RetryCheck stops).
+            AgentRunFailureCodes.SaasProviderNotAllowed =>
+                Results.Ok(WithBodyStatus(body, body.HttpStatusCode ?? 400)),
+            AgentRunFailureCodes.TenantNotEntitled =>
+                Results.Ok(WithBodyStatus(body, body.HttpStatusCode ?? 403)),
             // AGENT_UNRESOLVED (config/validation: no enabled default, unresolved
             // custom prompt, unknown role) is engine-internal — never a raw 4xx/5xx
             // on the wire. It rides inside a 200 success:false envelope, but the

@@ -172,7 +172,9 @@ public class CallLlmInlineActivityThinClientTests
             correlationId: "wf-instance-123");
 
         req.Role.Should().Be("developer");
-        req.Persona.Should().Be("anthropic", "the per-iteration provider name maps to Persona");
+        req.Provider.Should().Be("anthropic",
+            "Finding I-1 — the per-iteration provider maps to the explicit Provider override (the provider KEY), so the API honours the workflow's ForEach<provider> chain");
+        req.Persona.Should().BeNull("the per-iteration provider is NOT a persona — that dead mapping is removed (I-1)");
         req.Action.Should().Be("implement-feature");
         req.Prompt.Should().Be("fix the bug");
         req.Model.Should().Be("claude-opus-4");
@@ -184,7 +186,8 @@ public class CallLlmInlineActivityThinClientTests
         req.Params.BudgetCapUsd.Should().Be(1.5m);
         req.TenantId.Should().Be(Guid.Parse("22222222-2222-2222-2222-222222222222"));
         req.CorrelationId.Should().Be("wf-instance-123");
-        req.Variables.Should().ContainKey("systemPrompt").WhoseValue.Should().Be("You are a dev");
+        req.Variables.Should().NotContainKey("systemPrompt",
+            "Finding I-1 — the API renders the prompt authoritatively (Epic 27); the engine forwards no system prompt");
     }
 
     [Test]
@@ -402,6 +405,34 @@ public class CallLlmInlineActivityThinClientTests
         var json = JsonSerializer.Serialize(transport.Diagnostic);
 
         RetryCheckPredicate(json).Should().BeTrue("a transport/5xx null body maps to 0 → transient → retry");
+        SuccessCheckPredicate(json).Should().BeFalse();
+    }
+
+    [TestCase("SAAS_PROVIDER_NOT_ALLOWED", 400)]
+    [TestCase("TENANT_NOT_ENTITLED", 403)]
+    public void RetryCheck_Over_GateDenialDiagnostic_DoesNotRetry(string failureCode, int httpStatus)
+    {
+        // Finding C-1 — a gate denial now arrives as a real HTTP-200 body (NOT a
+        // nulled non-2xx) carrying success:false + a NON-transient httpStatusCode
+        // (400/403). The shim maps that into LastDiagnostic.HttpStatusCode, and
+        // RetryCheck must STOP (the denial is terminal). Before C-1 the denial was
+        // a raw 400/403 → PostAsync nulled it → BuildTransportFailure wrote a
+        // transient 0 → RetryCheck wrongly RETRIED a terminal denial.
+        var denial = CallLlmInlineActivity.MapResponseToVariables(
+            new LlmCallApiResponse
+            {
+                Success = false,
+                FailureCode = failureCode,
+                FailureReason = "gate denied",
+                HttpStatusCode = httpStatus,
+            },
+            "anthropic", "claude-sonnet-4", attemptNumber: 1, durationMs: 5, StartedAt);
+        var json = JsonSerializer.Serialize(denial.Diagnostic);
+
+        denial.Diagnostic.HttpStatusCode.Should().Be(httpStatus,
+            "the non-transient gate status flows through from the body");
+        RetryCheckPredicate(json).Should().BeFalse(
+            $"{failureCode} ({httpStatus}) is terminal — RetryCheck must STOP, not retry");
         SuccessCheckPredicate(json).Should().BeFalse();
     }
 

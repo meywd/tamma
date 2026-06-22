@@ -34,6 +34,13 @@ public sealed record ManagedAgentRequest
     /// <summary>System persona name (drives Epic 27 persona prompt resolution).</summary>
     public string? Persona { get; init; }
 
+    /// <summary>Explicit provider override (the provider KEY — <c>anthropic</c> /
+    /// <c>openai</c> / <c>openrouter</c>). Finding I-1: when set, the API honours
+    /// it as the provider for this call (the workflow's per-iteration provider
+    /// chain), resolving the credential for THIS provider and choosing the model
+    /// for it. <c>null</c> ⇒ use the role-resolved provider.</summary>
+    public string? Provider { get; init; }
+
     /// <summary>The role to serve. Always set.</summary>
     public required string Role { get; init; }
 
@@ -89,6 +96,7 @@ public sealed record ManagedAgentRequest
             TenantId = authoritativeTenantId,
             AgentId = request.AgentId,
             Persona = request.Persona,
+            Provider = request.Provider,
             Role = request.Role,
             Action = request.Action,
             Phase = request.Phase,

@@ -185,23 +185,56 @@ public class LlmCallResponseMapperTests
     }
 
     [Test]
-    public void ToHttpResult_SaasProviderNotAllowed_Is400()
+    public void ToHttpResult_SaasProviderNotAllowed_Is200SuccessFalse_With400InBody_NonRetryable()
     {
+        // Finding C-1 — a gate denial is TERMINAL but the only caller (the engine
+        // via TammaApiClient.PostAsync) NULLS any non-2xx body, which would make the
+        // shim write a transient httpStatusCode 0 → RetryCheck would RETRY a
+        // terminal denial. So the denial rides inside HTTP 200 + success:false with
+        // a NON-transient 400 in the BODY (400 ∉ {0,429,502,503,504} ⇒ RetryCheck
+        // stops). The producer left httpStatusCode null here; the mapper stamps 400.
         var run = FailRun(AgentRunFailureCodes.SaasProviderNotAllowed, httpStatus: null);
 
         var result = _mapper.ToHttpResult(run);
 
-        StatusOf(result).Should().Be(400);
+        StatusOf(result).Should().Be(200, "a gate denial must not be a raw non-2xx (C-1)");
+        var body = BodyOf(result);
+        body.Success.Should().BeFalse();
+        body.FailureCode.Should().Be(AgentRunFailureCodes.SaasProviderNotAllowed);
+        body.HttpStatusCode.Should().Be(400, "the non-transient gate status rides in the body");
+        new[] { 0, 429, 502, 503, 504 }.Should().NotContain(body.HttpStatusCode!.Value,
+            "SAAS_PROVIDER_NOT_ALLOWED must not match RetryCheck's transient set — it is terminal");
     }
 
     [Test]
-    public void ToHttpResult_TenantNotEntitled_Is403()
+    public void ToHttpResult_SaasProviderNotAllowed_PreservesProducerBodyStatus()
     {
+        // When the producer (ManagedAgent) already stamped the gate status (400),
+        // the mapper preserves it rather than re-stamping.
+        var run = FailRun(AgentRunFailureCodes.SaasProviderNotAllowed, httpStatus: 400);
+
+        var result = _mapper.ToHttpResult(run);
+
+        StatusOf(result).Should().Be(200);
+        BodyOf(result).HttpStatusCode.Should().Be(400);
+    }
+
+    [Test]
+    public void ToHttpResult_TenantNotEntitled_Is200SuccessFalse_With403InBody_NonRetryable()
+    {
+        // Finding C-1 — same terminal-but-readable encoding for an entitlement
+        // rejection: HTTP 200 + success:false + a non-transient 403 in the body.
         var run = FailRun(AgentRunFailureCodes.TenantNotEntitled, httpStatus: null);
 
         var result = _mapper.ToHttpResult(run);
 
-        StatusOf(result).Should().Be(403);
+        StatusOf(result).Should().Be(200, "a gate denial must not be a raw non-2xx (C-1)");
+        var body = BodyOf(result);
+        body.Success.Should().BeFalse();
+        body.FailureCode.Should().Be(AgentRunFailureCodes.TenantNotEntitled);
+        body.HttpStatusCode.Should().Be(403, "the non-transient gate status rides in the body");
+        new[] { 0, 429, 502, 503, 504 }.Should().NotContain(body.HttpStatusCode!.Value,
+            "TENANT_NOT_ENTITLED must not match RetryCheck's transient set — it is terminal");
     }
 
     [Test]

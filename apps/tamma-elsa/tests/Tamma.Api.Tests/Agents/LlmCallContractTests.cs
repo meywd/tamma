@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using FluentAssertions;
 using NUnit.Framework;
 using Tamma.Activities.LlmCall.Credentials;
@@ -407,5 +408,244 @@ public class LlmCallContractTests
         AgentRunEventTypes.Started.Should().Be("AGENT.RUN.STARTED");
         AgentRunEventTypes.Success.Should().Be("AGENT.RUN.SUCCESS");
         AgentRunEventTypes.Failed.Should().Be("AGENT.RUN.FAILED");
+    }
+
+    // ---------------------------------------------------------------
+    // Finding I-2 — pin the dual-DTO wire contract (engine ⇆ API)
+    // ---------------------------------------------------------------
+    //
+    // There are TWO record sets on the wire: the engine's Tamma.Activities
+    // LlmCallApiRequest/Response (with [JsonPropertyName] camelCase) and the API's
+    // Tamma.Api LlmCallRequest/Response (serialized under JsonNamingPolicy.CamelCase).
+    // They must stay byte-compatible. These round-trip tests serialize one side
+    // exactly as it goes over the wire and deserialize into the OTHER, asserting
+    // every field survives — catching future drift between the two sets.
+
+    /// <summary>The API host's serializer policy (Program.cs ConfigureHttpJsonOptions):
+    /// CamelCase naming + case-insensitive.</summary>
+    private static readonly JsonSerializerOptions ApiOpts = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+    };
+
+    /// <summary>The engine client's serializer policy (TammaApiClient.JsonOpts):
+    /// case-insensitive; the [JsonPropertyName] attributes drive the camelCase
+    /// names on the engine DTOs.</summary>
+    private static readonly JsonSerializerOptions EngineOpts = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
+    [Test]
+    public void WireContract_EngineRequest_DeserializesInto_ApiRequest_EveryFieldSurvives()
+    {
+        var tenantId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
+        var engineReq = new LlmCallApiRequest
+        {
+            TenantId = tenantId,
+            AgentId = agentId,
+            Persona = "claude",
+            Provider = "openrouter",
+            Role = "code_reviewer",
+            Action = "review",
+            Phase = "review_phase",
+            Prompt = "review this",
+            Variables = new Dictionary<string, object?> { ["k"] = "v" },
+            Model = "anthropic/claude-sonnet-4",
+            Tools = new[] { "read_file", "write_file" },
+            EnableToolLoop = true,
+            ToolLoopConfig = new ToolLoopConfig { MaxSteps = 9 },
+            Params = new LlmCallApiParams { MaxTokens = 8000, Temperature = 0.2, BudgetCapUsd = 1.5m },
+            CorrelationId = "corr-1",
+        };
+
+        // Engine serializes (its [JsonPropertyName] camelCase) → API deserializes
+        // (CamelCase policy). Every field must survive the boundary.
+        var json = JsonSerializer.Serialize(engineReq, EngineOpts);
+        var apiReq = JsonSerializer.Deserialize<LlmCallRequest>(json, ApiOpts);
+
+        apiReq.Should().NotBeNull();
+        apiReq!.TenantId.Should().Be(tenantId);
+        apiReq.AgentId.Should().Be(agentId);
+        apiReq.Persona.Should().Be("claude");
+        apiReq.Provider.Should().Be("openrouter", "Finding I-1's provider override must survive the wire");
+        apiReq.Role.Should().Be("code_reviewer");
+        apiReq.Action.Should().Be("review");
+        apiReq.Phase.Should().Be("review_phase");
+        apiReq.Prompt.Should().Be("review this");
+        apiReq.Variables.Should().ContainKey("k");
+        apiReq.Model.Should().Be("anthropic/claude-sonnet-4");
+        apiReq.Tools.Should().Equal("read_file", "write_file");
+        apiReq.EnableToolLoop.Should().BeTrue();
+        apiReq.ToolLoopConfig!.MaxSteps.Should().Be(9);
+        apiReq.Params.MaxTokens.Should().Be(8000);
+        apiReq.Params.Temperature.Should().Be(0.2);
+        apiReq.Params.BudgetCapUsd.Should().Be(1.5m);
+        apiReq.CorrelationId.Should().Be("corr-1");
+    }
+
+    [Test]
+    public void WireContract_ApiRequest_DeserializesInto_EngineRequest_EveryFieldSurvives()
+    {
+        var tenantId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
+        var apiReq = new LlmCallRequest
+        {
+            TenantId = tenantId,
+            AgentId = agentId,
+            Persona = "gemini",
+            Provider = "openai",
+            Role = "developer",
+            Action = "implement",
+            Phase = "impl",
+            Prompt = "build it",
+            Variables = new Dictionary<string, object?> { ["x"] = "1" },
+            Model = "gpt-4o",
+            Tools = new[] { "write_file" },
+            EnableToolLoop = true,
+            ToolLoopConfig = new ToolLoopConfig { MaxSteps = 4 },
+            Params = new LlmCallParams { MaxTokens = 2048, Temperature = 0.1, BudgetCapUsd = 0.25m },
+            CorrelationId = "corr-z",
+        };
+
+        // API serializes (CamelCase policy) → engine deserializes (its [JsonPropertyName]).
+        var json = JsonSerializer.Serialize(apiReq, ApiOpts);
+        var engineReq = JsonSerializer.Deserialize<LlmCallApiRequest>(json, EngineOpts);
+
+        engineReq.Should().NotBeNull();
+        engineReq!.TenantId.Should().Be(tenantId);
+        engineReq.AgentId.Should().Be(agentId);
+        engineReq.Persona.Should().Be("gemini");
+        engineReq.Provider.Should().Be("openai");
+        engineReq.Role.Should().Be("developer");
+        engineReq.Action.Should().Be("implement");
+        engineReq.Phase.Should().Be("impl");
+        engineReq.Prompt.Should().Be("build it");
+        engineReq.Variables.Should().ContainKey("x");
+        engineReq.Model.Should().Be("gpt-4o");
+        engineReq.Tools.Should().Equal("write_file");
+        engineReq.EnableToolLoop.Should().BeTrue();
+        engineReq.ToolLoopConfig!.MaxSteps.Should().Be(4);
+        engineReq.Params.MaxTokens.Should().Be(2048);
+        engineReq.Params.Temperature.Should().Be(0.1);
+        engineReq.Params.BudgetCapUsd.Should().Be(0.25m);
+        engineReq.CorrelationId.Should().Be("corr-z");
+    }
+
+    [Test]
+    public void WireContract_ApiResponse_DeserializesInto_EngineResponse_EveryFieldSurvives()
+    {
+        var agentId = Guid.NewGuid();
+        var apiResp = new LlmCallResponse
+        {
+            Success = false,
+            Text = "partial",
+            Usage = new UsageDto
+            {
+                PromptTokens = 120, CompletionTokens = 60, TotalTokens = 180,
+                ToolLoopTokens = 180, ToolLoopTurns = 3, ToolLoopExhausted = true,
+            },
+            CredentialSource = "platform",
+            ProviderUsed = "anthropic",
+            ModelUsed = "claude-sonnet-4",
+            Cost = new CostDto { ProviderCostUsd = 0.003m, PriceUsd = 0.004m, Currency = "USD" },
+            ToolCalls = new[] { new ToolCallDto { Name = "read_file", Id = "tc-1", ArgumentsJson = "{\"p\":\"a\"}" } },
+            AgentId = agentId,
+            AgentVersion = 5,
+            Role = "developer",
+            CorrelationId = "corr-r",
+            DurationMs = 1234,
+            FailureCode = "PROVIDER_ERROR",
+            FailureReason = "upstream 503",
+            HttpStatusCode = 503,
+        };
+
+        // API serializes (CamelCase) → engine deserializes (its [JsonPropertyName]).
+        var json = JsonSerializer.Serialize(apiResp, ApiOpts);
+        var engineResp = JsonSerializer.Deserialize<LlmCallApiResponse>(json, EngineOpts);
+
+        engineResp.Should().NotBeNull();
+        engineResp!.Success.Should().BeFalse();
+        engineResp.Text.Should().Be("partial");
+        engineResp.Usage.PromptTokens.Should().Be(120);
+        engineResp.Usage.CompletionTokens.Should().Be(60);
+        engineResp.Usage.TotalTokens.Should().Be(180);
+        engineResp.Usage.ToolLoopTokens.Should().Be(180);
+        engineResp.Usage.ToolLoopTurns.Should().Be(3);
+        engineResp.Usage.ToolLoopExhausted.Should().BeTrue();
+        engineResp.CredentialSource.Should().Be("platform");
+        engineResp.ProviderUsed.Should().Be("anthropic");
+        engineResp.ModelUsed.Should().Be("claude-sonnet-4");
+        engineResp.Cost.ProviderCostUsd.Should().Be(0.003m);
+        engineResp.Cost.PriceUsd.Should().Be(0.004m);
+        engineResp.Cost.Currency.Should().Be("USD");
+        engineResp.ToolCalls.Should().ContainSingle();
+        engineResp.ToolCalls[0].Name.Should().Be("read_file");
+        engineResp.ToolCalls[0].Id.Should().Be("tc-1");
+        engineResp.ToolCalls[0].ArgumentsJson.Should().Be("{\"p\":\"a\"}");
+        engineResp.AgentId.Should().Be(agentId);
+        engineResp.AgentVersion.Should().Be(5);
+        engineResp.Role.Should().Be("developer");
+        engineResp.CorrelationId.Should().Be("corr-r");
+        engineResp.DurationMs.Should().Be(1234);
+        engineResp.FailureCode.Should().Be("PROVIDER_ERROR");
+        engineResp.FailureReason.Should().Be("upstream 503");
+        engineResp.HttpStatusCode.Should().Be(503);
+    }
+
+    [Test]
+    public void WireContract_EngineResponse_DeserializesInto_ApiResponse_EveryFieldSurvives()
+    {
+        var agentId = Guid.NewGuid();
+        var engineResp = new LlmCallApiResponse
+        {
+            Success = true,
+            Text = "done",
+            Usage = new LlmCallUsageDto
+            {
+                PromptTokens = 10, CompletionTokens = 5, TotalTokens = 15,
+                ToolLoopTokens = 15, ToolLoopTurns = 1, ToolLoopExhausted = false,
+            },
+            CredentialSource = "byok",
+            ProviderUsed = "openai",
+            ModelUsed = "gpt-4o",
+            Cost = new LlmCallCostDto { ProviderCostUsd = 0.001m, PriceUsd = 0m, Currency = "USD" },
+            ToolCalls = new[] { new LlmCallToolCallDto { Name = "write_file", Id = "tc-9", ArgumentsJson = "{}" } },
+            AgentId = agentId,
+            AgentVersion = 2,
+            Role = "code_reviewer",
+            CorrelationId = "corr-e",
+            DurationMs = 99,
+        };
+
+        // Engine serializes ([JsonPropertyName] camelCase) → API deserializes (CamelCase policy).
+        var json = JsonSerializer.Serialize(engineResp, EngineOpts);
+        var apiResp = JsonSerializer.Deserialize<LlmCallResponse>(json, ApiOpts);
+
+        apiResp.Should().NotBeNull();
+        apiResp!.Success.Should().BeTrue();
+        apiResp.Text.Should().Be("done");
+        apiResp.Usage.PromptTokens.Should().Be(10);
+        apiResp.Usage.CompletionTokens.Should().Be(5);
+        apiResp.Usage.TotalTokens.Should().Be(15);
+        apiResp.Usage.ToolLoopTokens.Should().Be(15);
+        apiResp.Usage.ToolLoopTurns.Should().Be(1);
+        apiResp.Usage.ToolLoopExhausted.Should().BeFalse();
+        apiResp.CredentialSource.Should().Be("byok");
+        apiResp.ProviderUsed.Should().Be("openai");
+        apiResp.ModelUsed.Should().Be("gpt-4o");
+        apiResp.Cost.ProviderCostUsd.Should().Be(0.001m);
+        apiResp.Cost.PriceUsd.Should().Be(0m);
+        apiResp.Cost.Currency.Should().Be("USD");
+        apiResp.ToolCalls.Should().ContainSingle();
+        apiResp.ToolCalls[0].Name.Should().Be("write_file");
+        apiResp.ToolCalls[0].Id.Should().Be("tc-9");
+        apiResp.AgentId.Should().Be(agentId);
+        apiResp.AgentVersion.Should().Be(2);
+        apiResp.Role.Should().Be("code_reviewer");
+        apiResp.CorrelationId.Should().Be("corr-e");
+        apiResp.DurationMs.Should().Be(99);
     }
 }

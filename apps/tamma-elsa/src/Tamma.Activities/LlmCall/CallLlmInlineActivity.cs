@@ -138,10 +138,11 @@ public class CallLlmInlineActivity : CodeActivity
         var correlationId = context.WorkflowExecutionContext.Id;
 
         // Map the activity's Input<> props → the wire request. The per-iteration
-        // provider name maps to Persona (the named cross-role agent the call
-        // should adopt for this provider attempt); the API resolves the concrete
-        // provider/model/credential server-side. The system prompt is forwarded
-        // as a template variable so the API's prompt renderer can honour it.
+        // provider name (the ForEach<provider> chain in LlmCallWorkflow) maps to
+        // the explicit Provider OVERRIDE the API honours for THIS call (Finding
+        // I-1) — it is the provider KEY (anthropic/openai/openrouter), NOT a
+        // persona. The API renders the prompt authoritatively (Epic 27), so the
+        // engine forwards NO system prompt.
         var request = BuildLlmCallRequest(
             input, providerName, systemPrompt, toolsJson, model,
             enableToolLoop, toolLoopConfig, tenantIdRaw, correlationId);
@@ -202,25 +203,24 @@ public class CallLlmInlineActivity : CodeActivity
         string? tenantIdRaw,
         string correlationId)
     {
+        // Finding I-1 — the API renders the prompt AUTHORITATIVELY (Epic 27,
+        // (principal, role, action) resolution). The engine forwards NO system
+        // prompt: the dead `variables["systemPrompt"]` mapping is gone, and
+        // `systemPrompt` is now ignored here (the param is retained only because
+        // the workflow still wires SystemPromptProp; it carries no authority). The
+        // per-iteration provider maps to the explicit Provider OVERRIDE the API
+        // honours, NOT to Persona.
+        _ = systemPrompt;
         var tools = DeserializeResolvedTools(toolsJson)?.Select(t => t.Name).ToList();
-
-        var variables = new Dictionary<string, object?>();
-        if (!string.IsNullOrEmpty(systemPrompt))
-        {
-            // Forward the resolved system prompt so the API renderer can honour an
-            // explicit engine-side override. The API's own tenant→system prompt
-            // resolution remains authoritative when this is absent.
-            variables["systemPrompt"] = systemPrompt;
-        }
 
         return new LlmCallApiRequest
         {
             TenantId = ParseTenantId(tenantIdRaw),
-            Persona = string.IsNullOrWhiteSpace(providerName) ? null : providerName,
+            Provider = string.IsNullOrWhiteSpace(providerName) ? null : providerName,
             Role = string.IsNullOrWhiteSpace(input.Role) ? "assistant" : input.Role,
             Action = string.IsNullOrWhiteSpace(input.OperationName) ? null : input.OperationName,
             Prompt = input.UserPrompt,
-            Variables = variables,
+            Variables = new Dictionary<string, object?>(),
             Model = model,
             Tools = tools is { Count: > 0 } ? tools : null,
             EnableToolLoop = enableToolLoop,

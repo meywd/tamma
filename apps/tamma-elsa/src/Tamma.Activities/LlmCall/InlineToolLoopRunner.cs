@@ -1195,9 +1195,12 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     }
 
     /// <summary>
-    /// Resolve the default model for a provider (BaseUrl / DefaultModel / Timeout only).
+    /// Resolve the default model for a provider (BaseUrl / DefaultModel / Timeout
+    /// only). Public per <see cref="IInlineToolLoopRunner.GetDefaultModel"/>
+    /// (Finding I-1) so <c>ManagedAgent</c> can pick the override provider's own
+    /// default model instead of a role-resolved model for a different provider.
     /// </summary>
-    internal string GetDefaultModel(string providerName)
+    public string GetDefaultModel(string providerName)
     {
         return LoadProviderConfig(providerName).DefaultModel;
     }

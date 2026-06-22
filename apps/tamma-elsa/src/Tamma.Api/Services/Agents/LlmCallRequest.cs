@@ -43,6 +43,20 @@ public sealed record LlmCallRequest
     /// <c>"codegpt"</c>). Drives Epic 27 persona prompt resolution (32-15).</summary>
     public string? Persona { get; init; }
 
+    /// <summary>
+    /// Explicit provider override (the provider KEY — <c>"anthropic"</c> /
+    /// <c>"openai"</c> / <c>"openrouter"</c>, NOT a persona name). Finding I-1.
+    ///
+    /// <para>The workflow OWNS the provider chain (<c>LlmCallWorkflow.BuildRetryLoop</c>
+    /// → <c>ForEach&lt;provider&gt;</c> invokes the endpoint ONCE per provider per
+    /// attempt). When the per-iteration provider is set here, the API honours it as
+    /// the provider for THIS call — resolving the credential for THIS provider and
+    /// choosing the model accordingly — so the chain is meaningful again (each
+    /// iteration tries the next provider via the API). When <c>null</c>, the
+    /// provider resolved by <see cref="Role"/> is used.</para>
+    /// </summary>
+    public string? Provider { get; init; }
+
     /// <summary>One of the 8 valid roles — drives Epic 27 prompt resolution.
     /// Required: the role is the minimal anchor every managed run carries.</summary>
     public required string Role { get; init; }

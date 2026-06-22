@@ -145,6 +145,12 @@ public sealed record LlmCallApiRequest
     [JsonPropertyName("tenantId")] public Guid? TenantId { get; init; }
     [JsonPropertyName("agentId")] public Guid? AgentId { get; init; }
     [JsonPropertyName("persona")] public string? Persona { get; init; }
+
+    /// <summary>Finding I-1 — explicit provider override (the provider KEY:
+    /// <c>anthropic</c>/<c>openai</c>/<c>openrouter</c>, NOT a persona). The shim
+    /// populates this from the workflow's per-iteration provider so the API honours
+    /// the <c>ForEach&lt;provider&gt;</c> chain.</summary>
+    [JsonPropertyName("provider")] public string? Provider { get; init; }
     [JsonPropertyName("role")] public string Role { get; init; } = string.Empty;
     [JsonPropertyName("action")] public string? Action { get; init; }
     [JsonPropertyName("phase")] public string? Phase { get; init; }

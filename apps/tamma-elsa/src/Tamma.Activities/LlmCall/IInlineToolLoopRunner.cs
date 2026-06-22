@@ -38,6 +38,18 @@ public interface IInlineToolLoopRunner
         ToolLoopConfig loopConfig,
         string correlationId,
         CancellationToken ct);
+
+    /// <summary>
+    /// Finding I-1 — the provider's default model (the same
+    /// <c>LoadProviderConfig</c>/<c>GetDefaultModel</c> logic the legacy activity
+    /// used, now owned by the runner). <c>ManagedAgent</c> calls this when the
+    /// workflow's per-iteration provider override differs from the role-resolved
+    /// provider, so the role's model is not applicable to the override provider —
+    /// it must run that provider with ITS default model, never a foreign one.
+    /// Returns an empty string for an unknown / non-allowlisted provider (the
+    /// runner's own behaviour).
+    /// </summary>
+    string GetDefaultModel(string provider);
 }
 
 /// <summary>

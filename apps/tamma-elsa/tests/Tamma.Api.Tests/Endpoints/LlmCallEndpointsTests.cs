@@ -313,8 +313,13 @@ public class LlmCallEndpointsTests
     }
 
     [Test]
-    public async Task Post_SaasProviderNotAllowed_Returns400()
+    public async Task Post_SaasProviderNotAllowed_Returns200SuccessFalse_With400InBody_NotRaw4xx()
     {
+        // Finding C-1 — a gate denial is TERMINAL, but the only caller (the engine
+        // via TammaApiClient.PostAsync) NULLS any non-2xx body. A raw HTTP 400 would
+        // be nulled → the shim would write a transient httpStatusCode 0 → RetryCheck
+        // would RETRY a terminal denial. So the denial rides inside HTTP 200 +
+        // success:false with the non-transient 400 carried in the BODY.
         _managed.Next = new AgentRunResult
         {
             Success = false,
@@ -329,15 +334,20 @@ public class LlmCallEndpointsTests
         using var client = AuthedClient();
         var resp = await client.PostAsJsonAsync(Route, MinimalRequestBody());
 
-        resp.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        resp.StatusCode.Should().Be(HttpStatusCode.OK,
+            "a gate denial must NOT be a raw non-2xx — PostAsync would null it and RetryCheck would retry a terminal denial (C-1)");
         var body = await resp.Content.ReadFromJsonAsync<LlmCallResponse>();
         body!.Success.Should().BeFalse();
         body.FailureCode.Should().Be(AgentRunFailureCodes.SaasProviderNotAllowed);
+        body.HttpStatusCode.Should().Be(400, "the non-transient gate status rides in the body");
+        new[] { 0, 429, 502, 503, 504 }.Should().NotContain(body.HttpStatusCode!.Value,
+            "the gate denial must be non-transient so RetryCheck STOPS");
     }
 
     [Test]
-    public async Task Post_TenantNotEntitled_Returns403()
+    public async Task Post_TenantNotEntitled_Returns200SuccessFalse_With403InBody_NotRaw4xx()
     {
+        // Finding C-1 — same terminal-but-readable encoding for an entitlement reject.
         _managed.Next = new AgentRunResult
         {
             Success = false,
@@ -352,10 +362,14 @@ public class LlmCallEndpointsTests
         using var client = AuthedClient();
         var resp = await client.PostAsJsonAsync(Route, MinimalRequestBody());
 
-        resp.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        resp.StatusCode.Should().Be(HttpStatusCode.OK,
+            "a gate denial must NOT be a raw non-2xx — PostAsync would null it and RetryCheck would retry (C-1)");
         var body = await resp.Content.ReadFromJsonAsync<LlmCallResponse>();
         body!.Success.Should().BeFalse();
         body.FailureCode.Should().Be(AgentRunFailureCodes.TenantNotEntitled);
+        body.HttpStatusCode.Should().Be(403, "the non-transient gate status rides in the body");
+        new[] { 0, 429, 502, 503, 504 }.Should().NotContain(body.HttpStatusCode!.Value,
+            "the gate denial must be non-transient so RetryCheck STOPS");
     }
 
     [Test]
