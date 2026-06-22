@@ -164,10 +164,26 @@ export function buildMapLayout(workflow: WorkflowMetadata): MapLayout {
     }
   }
 
-  // ---- compact lanes to a dense 0..N-1 range, then centre the busiest column.
-  const usedLanes = [...new Set(raw.map((r) => r.rawLane))].sort((a, b) => a - b);
-  const dense = new Map(usedLanes.map((l, i) => [l, i] as const));
-  for (const r of raw) r.lane = dense.get(r.rawLane) ?? 0;
+  // ---- compact lanes, then CENTRE the trunk so branches fan to BOTH sides.
+  // Trunk = the lane carrying the most stations (the spine). The trunk takes the
+  // centre column; the remaining lanes alternate to its right and left
+  // (+1, -1, +2, -2, …). This stops every branch piling up on one side (a
+  // left-anchored, right-only fan) and instead fans the map symmetrically about
+  // a centred trunk — less width, less clutter.
+  const laneCounts = new Map<number, number>();
+  for (const r of raw) laneCounts.set(r.rawLane, (laneCounts.get(r.rawLane) ?? 0) + 1);
+  const usedLanes = [...laneCounts.keys()];
+  const trunk = usedLanes
+    .slice()
+    .sort((a, b) => (laneCounts.get(b)! - laneCounts.get(a)!) || a - b)[0]!;
+  const others = usedLanes.filter((l) => l !== trunk).sort((a, b) => a - b);
+  const signed = new Map<number, number>([[trunk, 0]]);
+  others.forEach((l, i) => {
+    const step = Math.floor(i / 2) + 1;
+    signed.set(l, i % 2 === 0 ? step : -step); // +1, -1, +2, -2, …
+  });
+  const minSigned = Math.min(0, ...signed.values());
+  for (const r of raw) r.lane = (signed.get(r.rawLane) ?? 0) - minSigned;
 
   const laneCount = usedLanes.length;
   const stations: MapStation[] = raw.map((r) => ({ node: r.node, row: r.row, lane: r.lane }));

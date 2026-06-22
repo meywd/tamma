@@ -310,7 +310,11 @@
   height: 56px;
   padding: 6px 8px;
   border-radius: 12px;
-  background: var(--twv-bg, rgba(82, 82, 91, 0.18));
+  /* OPAQUE card: a solid base under the per-kind tint so the rails (drawn
+     behind, z-index 1) are occluded by the card body and only show BETWEEN
+     stations — not bleeding through a translucent card body. */
+  background-color: #16161b;
+  background-image: linear-gradient(var(--twv-bg, transparent), var(--twv-bg, transparent));
   border: 1.5px solid color-mix(in srgb, var(--twv-accent, #a1a1aa) 55%, transparent);
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
   color: #e4e4e7;
