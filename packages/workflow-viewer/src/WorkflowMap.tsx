@@ -4,6 +4,7 @@ import './styles.css';
 import type { WorkflowDataset, WorkflowMetadata, WorkflowNode } from './types';
 import { buildMapLayout, type MapLayout } from './mapLayout';
 import { StationDetailPopup } from './StationDetailPopup';
+import { LinkDetailPopup } from './LinkDetailPopup';
 import { kindOf, KIND_ORDER, KIND_DESCRIPTORS } from './kinds';
 
 export interface WorkflowMapProps {
@@ -89,11 +90,36 @@ export function WorkflowMap({
     return workflow.nodes.find((n) => n.id === stepId);
   }, [stepId, workflow]);
 
+  // A clicked rail/link opens its own transition panel (NOT the target step).
+  const [selectedRailId, setSelectedRailId] = useState<string | null>(null);
+  // A selected step and a selected link are mutually exclusive.
+  useEffect(() => {
+    if (stepId) setSelectedRailId(null);
+  }, [stepId]);
+
   const handleStationClick = useCallback(
-    (id: string) => onStepChange?.(id === stepId ? null : id),
+    (id: string) => {
+      setSelectedRailId(null);
+      onStepChange?.(id === stepId ? null : id);
+    },
     [onStepChange, stepId],
   );
   const handleClose = useCallback(() => onStepChange?.(null), [onStepChange]);
+  const handleRailClick = useCallback(
+    (railId: string) => {
+      onStepChange?.(null); // close any open step panel
+      setSelectedRailId((cur) => (cur === railId ? null : railId));
+    },
+    [onStepChange],
+  );
+  const handleLinkClose = useCallback(() => setSelectedRailId(null), []);
+  const handleGoToStep = useCallback(
+    (id: string) => {
+      setSelectedRailId(null);
+      onStepChange?.(id);
+    },
+    [onStepChange],
+  );
   const handleOpenSub = useCallback(
     (targetId: string) => onNavigate?.(targetId),
     [onNavigate],
@@ -114,6 +140,9 @@ export function WorkflowMap({
 
   const geom = computeGeometry(layout, width);
   const kindsPresent = new Set(workflow.nodes.map((n) => n.kind));
+  const selectedRail = selectedRailId
+    ? geom.railPaths.find((rp) => rp.id === selectedRailId)
+    : undefined;
 
   return (
     <div className="twv-map-root">
@@ -161,12 +190,13 @@ export function WorkflowMap({
                   opacity={rp.isBackEdge ? 0.85 : 0.95}
                   markerEnd="url(#twv-rail-arrow)"
                 />
-                {/* wide invisible hit area — click a line to open the step it leads to */}
+                {/* wide invisible hit area — click a line to open its transition panel */}
                 <path
                   className="twv-rail-hit"
                   d={rp.d}
                   fill="none"
-                  onClick={() => onStepChange?.(rp.to)}
+                  data-selected={rp.id === selectedRailId ? 'true' : 'false'}
+                  onClick={() => handleRailClick(rp.id)}
                 >
                   <title>{rp.title}</title>
                 </path>
@@ -247,6 +277,17 @@ export function WorkflowMap({
           subWorkflowHref={subWorkflowHref}
         />
       )}
+
+      {selectedRail && !selectedNode && (
+        <LinkDetailPopup
+          source={{ id: selectedRail.from, name: selectedRail.fromName }}
+          target={{ id: selectedRail.to, name: selectedRail.toName }}
+          trigger={selectedRail.trigger}
+          color={selectedRail.color}
+          onClose={handleLinkClose}
+          onGoToStep={handleGoToStep}
+        />
+      )}
     </div>
   );
 }
@@ -272,9 +313,17 @@ interface RailPath {
   d: string;
   color: string;
   isBackEdge: boolean;
-  /** Destination node id — clicking the rail opens this step. */
+  /** Source node id of the transition. */
+  from: string;
+  /** Destination node id of the transition. */
   to: string;
-  /** Tooltip, e.g. "Valid → Gather Context". */
+  /** Source step display name. */
+  fromName: string;
+  /** Target step display name. */
+  toName: string;
+  /** Trigger / branch condition, when the edge is conditional. */
+  trigger?: string;
+  /** Hover tooltip, e.g. "Validate → Gather Context  ·  when: Valid". */
   title: string;
 }
 interface RailLabel {
@@ -358,7 +407,11 @@ function computeGeometry(layout: MapLayout, width: number): Geometry {
       d,
       color,
       isBackEdge: rail.isBackEdge,
+      from: rail.from,
       to: rail.to,
+      fromName: a.node.name,
+      toName: b.node.name,
+      ...(trigger ? { trigger } : {}),
       title: trigger
         ? `${a.node.name} → ${b.node.name}  ·  when: ${trigger}`
         : `${a.node.name} → ${b.node.name}`,
