@@ -34,6 +34,16 @@ public static class AgentResolverServiceCollectionExtensions
 
         services.AddScoped<IAgentRegistryService, AgentRegistryService>();
 
+        // Story 32-16 — per-tenant agent/persona enablement (catalog membership).
+        // ONE implementation backs BOTH the write/admin service AND the read-only
+        // reader seam 32-18 injects; register the reader against the same scoped
+        // instance so the gate and the API share one source of truth.
+        services.AddScoped<TenantAgentEnablementService>();
+        services.AddScoped<ITenantAgentEnablementService>(
+            sp => sp.GetRequiredService<TenantAgentEnablementService>());
+        services.AddScoped<ITenantAgentEnablementReader>(
+            sp => sp.GetRequiredService<TenantAgentEnablementService>());
+
         // Story 32-15 — the persona/public prompt seam over the Epic 27 store.
         services.AddScoped<IPersonaPromptResolver, PersonaPromptResolver>();
 

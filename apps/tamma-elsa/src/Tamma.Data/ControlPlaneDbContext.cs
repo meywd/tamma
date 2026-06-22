@@ -620,6 +620,16 @@ public class ControlPlaneDbContext : DbContext
     /// </summary>
     public DbSet<AgentRoleSelection> AgentRoleSelections => Set<AgentRoleSelection>();
 
+    /// <summary>
+    /// Story 32-16 — per-tenant agent/persona ENABLEMENT (catalog membership:
+    /// which PUBLIC personas a principal exposes). CP-resident in BOTH modes
+    /// (SaaS rows keyed by <c>TenantId</c>, single-user rows by <c>UserId</c>) —
+    /// it gates the CP-resident public agent catalog and is not a
+    /// <c>t_&lt;hex&gt;</c> tenant-private row. See
+    /// <see cref="Entities.TenantAgentEnablement"/>.
+    /// </summary>
+    public DbSet<TenantAgentEnablement> TenantAgentEnablements => Set<TenantAgentEnablement>();
+
     // ── Story 35-1 — billing foundation (Epic 35) ──
     //
     // The tenant→Stripe customer mapping + the slug→Stripe-ids catalog are
@@ -749,6 +759,12 @@ public class ControlPlaneDbContext : DbContext
         // shape on both, mirroring audit_records). fixedTenantId: null = the CP
         // build.
         TammaModelConfiguration.ConfigureAgentRoleSelections(modelBuilder, fixedTenantId: null);
+
+        // Story 32-16 — per-tenant agent/persona enablement (catalog membership).
+        // CP-resident in BOTH modes (gates the CP public agent catalog; keyed by
+        // tenant id / user id, not per t_<hex>) — configured ONLY here, never on
+        // the tenant context.
+        TammaModelConfiguration.ConfigureTenantAgentEnablements(modelBuilder);
 
         // Story 35-1 — billing customer mapping + Stripe catalog. CP-resident,
         // configured in the shared single source so the model graph + migration

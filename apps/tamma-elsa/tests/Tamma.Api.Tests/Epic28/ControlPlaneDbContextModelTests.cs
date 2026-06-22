@@ -106,6 +106,11 @@ public class ControlPlaneDbContextModelTests
             // build holds single-user user-keyed rows; tenant build holds SaaS
             // tenant-keyed rows). Same dual-resident pattern as audit_records.
             "agent_role_selections",
+            // Story 32-16 — per-tenant agent/persona enablement (catalog
+            // membership). CP-resident in BOTH modes (gates the CP public agent
+            // catalog; keyed by tenant id / user id, not per t_<hex>) — so it is
+            // mapped ONLY on the CP context, not the tenant context.
+            "tenant_agent_enablements",
             // Story 35-1 — Epic 35 billing foundation. CP-resident: the
             // tenant→Stripe customer mapping (keyed by tenant) + the
             // slug→Stripe-ids catalog (platform-global). Definition/binding
@@ -132,6 +137,7 @@ public class ControlPlaneDbContextModelTests
             + "platform_webhook_deliveries. Unified-tenancy Phase 0 adds "
             + "tenant_databases. Story 32-1 adds agents + agent_versions. "
             + "Story 32-2 adds agent_role_selections. "
+            + "Story 32-16 adds tenant_agent_enablements. "
             + "Story 34-1 adds plan_features + plan_entitlements + plan_prices. "
             + "Story 35-1 adds billing_customers + billing_plan_prices. "
             + "Story 37-1 adds audit_records + audit_projector_cursor. "

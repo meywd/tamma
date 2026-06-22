@@ -1835,6 +1835,18 @@ agentsV2.MapPost("/{id:guid}/rollback", AgentEndpoints.RollbackVersion)
 agentsV2.MapPut("/role-selections/{role}", AgentEndpoints.SelectForRole)
     .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
 
+// ── Story 32-16 — per-tenant agent/persona enablement (catalog membership) ──
+// GET (catalog view) inherits the group's MemberAccess gate — any member may
+// read. PUT/DELETE (enable/disable a public persona for THIS tenant's catalog)
+// are AgentManage (tenant_owner/tenant_admin → member 403). Public-catalog
+// management (creating/retiring personas) stays PlatformOwnerAccess and is NOT
+// in this group.
+agentsV2.MapGet("/enablement", AgentEndpoints.ListEnablement);
+agentsV2.MapPut("/{agentId:guid}/enablement", AgentEndpoints.SetEnablement)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agentsV2.MapDelete("/{agentId:guid}/enablement", AgentEndpoints.DisableEnablement)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+
 // ── Prompts ──
 // CLAUDE.md "Prompt Store Architecture > API" defines /defaults as the canonical
 // read-only system-default URL. Both /system (legacy TS naming) and /defaults
@@ -2139,6 +2151,7 @@ using (var scope = app.Services.CreateScope())
                 DROP TABLE IF EXISTS
                     admin_impersonations,
                     agents, agent_versions, agent_role_selections,
+                    tenant_agent_enablements,
                     audit_records, audit_projector_cursor,
                     billing_customers, billing_plan_prices,
                     alert_delivery_attempts, alert_channels, alerts,
