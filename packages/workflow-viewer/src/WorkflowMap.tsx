@@ -17,6 +17,13 @@ export interface WorkflowMapProps {
   onStepChange?: (stepId: string | null) => void;
   /** Called when the user opens a sub-workflow (its map). */
   onNavigate?: (workflowId: string, stepId?: string) => void;
+  /**
+   * Real href for a sub-workflow's page, so the popup's name pill is a true
+   * `<a>` link (middle/ctrl-click opens a new tab). Returns undefined when the
+   * target isn't in the dataset. If omitted, the pill falls back to in-app
+   * navigation only.
+   */
+  subWorkflowHref?: (workflowId: string) => string | undefined;
 }
 
 function normalizeDataset(
@@ -43,6 +50,7 @@ export function WorkflowMap({
   stepId,
   onStepChange,
   onNavigate,
+  subWorkflowHref,
 }: WorkflowMapProps) {
   const workflows = useMemo(() => normalizeDataset(metadata), [metadata]);
 
@@ -209,6 +217,7 @@ export function WorkflowMap({
           node={selectedNode}
           onClose={handleClose}
           onOpenSubWorkflow={handleOpenSub}
+          subWorkflowHref={subWorkflowHref}
         />
       )}
     </div>

@@ -105,6 +105,20 @@ export default function WorkflowMapPage() {
     [dataset, navigate],
   );
 
+  // Real href for a sub-workflow's map page, so the popup's name pill is a true
+  // <a> link (middle/ctrl-click → new tab). Same resolution as handleNavigate.
+  const subWorkflowHref = useCallback(
+    (targetWorkflowId: string): string | undefined => {
+      if (!dataset) return undefined;
+      const target = dataset.workflows.find(
+        (w) => w.id === targetWorkflowId || w.inventoryId === targetWorkflowId,
+      );
+      if (!target) return undefined;
+      return `/workflows/${wikiSlugFor(target)}/map`;
+    },
+    [dataset],
+  );
+
   return (
     <div className="fixed inset-0 flex flex-col bg-[#0c0c0e] text-zinc-200">
       {/* Minimal fixed top bar */}
@@ -157,6 +171,7 @@ export default function WorkflowMapPage() {
             stepId={stepId}
             onStepChange={handleStepChange}
             onNavigate={handleNavigate}
+            subWorkflowHref={subWorkflowHref}
           />
         )}
       </div>

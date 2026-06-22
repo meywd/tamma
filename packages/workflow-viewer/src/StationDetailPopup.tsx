@@ -6,8 +6,14 @@ export interface StationDetailPopupProps {
   node: WorkflowNode;
   /** Called when the popup is dismissed (X, backdrop, or Esc). */
   onClose: () => void;
-  /** Follow a sub-workflow link. Host decides how to navigate. */
+  /** Follow a sub-workflow link (plain left-click → in-app navigate). */
   onOpenSubWorkflow?: (workflowId: string) => void;
+  /**
+   * Real href for a sub-workflow's page, so the name pill is a true `<a>` link:
+   * plain click navigates in-app, middle/ctrl/cmd-click opens a new tab natively.
+   * Returns undefined when the target isn't in the dataset.
+   */
+  subWorkflowHref?: ((workflowId: string) => string | undefined) | undefined;
 }
 
 type Tab = 'overview' | 'api' | 'code';
@@ -30,6 +36,7 @@ export function StationDetailPopup({
   node,
   onClose,
   onOpenSubWorkflow,
+  subWorkflowHref,
 }: StationDetailPopupProps) {
   const k = kindOf(node.kind);
   const isApi = node.kind === 'api-call' || Boolean(node.api);
@@ -115,7 +122,7 @@ export function StationDetailPopup({
         </div>
 
         <div className="twv-popup-body">
-          {tab === 'overview' && <OverviewTab node={node} onOpenSubWorkflow={onOpenSubWorkflow} k={k} />}
+          {tab === 'overview' && <OverviewTab node={node} onOpenSubWorkflow={onOpenSubWorkflow} subWorkflowHref={subWorkflowHref} k={k} />}
           {tab === 'api' && <ApiTab node={node} />}
           {tab === 'code' && <CodeTab node={node} hasCode={hasCode} />}
         </div>
@@ -155,10 +162,12 @@ function TabButton({
 function OverviewTab({
   node,
   onOpenSubWorkflow,
+  subWorkflowHref,
   k,
 }: {
   node: WorkflowNode;
   onOpenSubWorkflow?: ((workflowId: string) => void) | undefined;
+  subWorkflowHref?: ((workflowId: string) => string | undefined) | undefined;
   k: ReturnType<typeof kindOf>;
 }) {
   const empty =
@@ -181,18 +190,11 @@ function OverviewTab({
       {node.subWorkflowId && (
         <Section title="Sub-workflow">
           <div className="twv-subwf">
-            <code>{node.subWorkflowId}</code>
-            {node.subWorkflowResolves && onOpenSubWorkflow ? (
-              <button
-                type="button"
-                className="twv-subwf-link"
-                onClick={() => onOpenSubWorkflow(node.subWorkflowId!)}
-              >
-                Open map →
-              </button>
-            ) : (
-              <span className="twv-subwf-unresolved">(not in dataset)</span>
-            )}
+            <SubWorkflowPill
+              workflowId={node.subWorkflowId}
+              href={node.subWorkflowResolves ? subWorkflowHref?.(node.subWorkflowId) : undefined}
+              onOpen={onOpenSubWorkflow}
+            />
           </div>
         </Section>
       )}
@@ -299,6 +301,47 @@ function CodeTab({ node, hasCode }: { node: WorkflowNode; hasCode: boolean }) {
         </Section>
       )}
     </>
+  );
+}
+
+/**
+ * The sub-workflow NAME pill — a real link when the target resolves.
+ * Plain left-click navigates in-app (via `onOpen`); middle-click and
+ * ctrl/cmd/shift-click open a new tab natively (the `<a href>` default).
+ * Unresolvable targets render as a plain, non-clickable pill.
+ */
+function SubWorkflowPill({
+  workflowId,
+  href,
+  onOpen,
+}: {
+  workflowId: string;
+  href?: string | undefined;
+  onOpen?: ((workflowId: string) => void) | undefined;
+}) {
+  if (href) {
+    return (
+      <a
+        className="twv-subwf-pill"
+        href={href}
+        title={`Open ${workflowId}`}
+        onClick={(e) => {
+          // Let the browser handle modified / non-left clicks → new tab/window.
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+          e.preventDefault();
+          onOpen?.(workflowId);
+        }}
+      >
+        <code>{workflowId}</code>
+        <span className="twv-subwf-arrow" aria-hidden="true">→</span>
+      </a>
+    );
+  }
+  return (
+    <span className="twv-subwf-pill twv-subwf-pill-disabled" title="Not in this dataset">
+      <code>{workflowId}</code>
+      <span className="twv-subwf-unresolved">(not in dataset)</span>
+    </span>
   );
 }
 
