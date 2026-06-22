@@ -131,6 +131,21 @@ export function WorkflowMap({
             preserveAspectRatio="none"
             aria-hidden="true"
           >
+            <defs>
+              {/* Direction arrowhead — inherits each rail's stroke colour. */}
+              <marker
+                id="twv-rail-arrow"
+                viewBox="0 0 10 10"
+                refX="8.5"
+                refY="5"
+                markerWidth="7"
+                markerHeight="7"
+                markerUnits="userSpaceOnUse"
+                orient="auto"
+              >
+                <path d="M0.5 0.5 L9 5 L0.5 9.5 z" fill="context-stroke" />
+              </marker>
+            </defs>
             {geom.railPaths.map((rp) => (
               <g key={rp.id}>
                 <path
@@ -140,8 +155,9 @@ export function WorkflowMap({
                   strokeWidth={rp.isBackEdge ? 2 : 3}
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  strokeDasharray={rp.isBackEdge ? '5 5' : undefined}
-                  opacity={rp.isBackEdge ? 0.7 : 0.9}
+                  strokeDasharray={rp.isBackEdge ? '6 5' : undefined}
+                  opacity={rp.isBackEdge ? 0.85 : 0.95}
+                  markerEnd="url(#twv-rail-arrow)"
                 />
               </g>
             ))}
@@ -316,7 +332,7 @@ function computeGeometry(layout: MapLayout, width: number): Geometry {
     const b = byId.get(rail.to);
     if (!a || !b) continue;
     const color = LINE_COLORS[rail.line % LINE_COLORS.length]!;
-    const { d, labelX, labelY } = orthogonalPath(a, b, rail.isBackEdge);
+    const { d, labelX, labelY } = orthogonalPath(a, b, rail.isBackEdge, w);
     railPaths.push({ id: rail.id, d, color, isBackEdge: rail.isBackEdge });
     if (rail.label) {
       railLabels.push({ id: rail.id, label: rail.label, x: labelX, y: labelY });
@@ -339,28 +355,32 @@ function orthogonalPath(
   a: StationGeom,
   b: StationGeom,
   isBackEdge: boolean,
+  maxX: number,
 ): { d: string; labelX: number; labelY: number } {
   const startY = a.cy + STATION_H / 2;
   const endY = b.cy - STATION_H / 2;
 
   if (isBackEdge) {
-    // Loop-back: exit the right side of `a`, run up the gutter, re-enter `b`'s
-    // right side. Bow out beyond both stations so the line reads as a return.
-    const ax = a.cx;
-    const bx = b.cx;
-    const gutter = Math.max(ax, bx) + 46;
+    // Loop-back (retry/return): exit the RIGHT EDGE of `a`, run vertically in a
+    // side gutter, and re-enter the RIGHT EDGE of `b`. Dashed styling + the
+    // arrowhead show the return direction. The gutter sits just outside the
+    // wider of the two cards and is clamped to the canvas so it never overflows.
+    const aRight = a.cx + a.width / 2;
+    const bRight = b.cx + b.width / 2;
+    const gutter = Math.min(maxX - 6, Math.max(aRight, bRight) + 22);
     const ay = a.cy;
     const by = b.cy;
-    const r = CORNER;
+    const r = Math.min(CORNER, Math.abs(ay - by) / 2);
+    const up = ay > by ? -1 : 1; // vertical direction a → b
     const d = [
-      `M ${ax} ${ay}`,
+      `M ${aRight} ${ay}`,
       `H ${gutter - r}`,
-      `Q ${gutter} ${ay} ${gutter} ${ay - Math.sign(ay - by) * r}`,
-      `V ${by + Math.sign(ay - by) * r}`,
+      `Q ${gutter} ${ay} ${gutter} ${ay + up * r}`,
+      `V ${by - up * r}`,
       `Q ${gutter} ${by} ${gutter - r} ${by}`,
-      `H ${bx}`,
+      `H ${bRight}`,
     ].join(' ');
-    return { d, labelX: gutter + 6, labelY: (ay + by) / 2 };
+    return { d, labelX: Math.min(gutter + 4, maxX - 44), labelY: (ay + by) / 2 };
   }
 
   if (Math.abs(a.cx - b.cx) < 1) {
