@@ -231,6 +231,20 @@ builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutorRegist
 // deployments.
 builder.Services.AddSingleton<Tamma.Activities.AgentDispatch.IGitHubActionsClient,
     Tamma.Activities.AgentDispatch.NullGitHubActionsClient>();
+
+// Engine has no control-plane platform_events sink. The tenant-lifecycle
+// activities (TenantLifecycleActivity / CleanupStepActivity /
+// EmitCleanupTerminalEventActivity) resolve IPlatformEventPublisher via
+// GetRequiredService — without a registration that THROWS in the engine and
+// aborts CreateTenant/DeleteTenant/CleanUpFailedTenant workflows. The Null
+// seam (mirrors NullGitHubActionsClient above) lets those workflows complete;
+// the per-step platform telemetry is a best-effort no-op (logged at WARN)
+// until a sibling POST /api/engine/platform-events callback lands (FOLLOW-UP).
+// This is DISTINCT from the tenant domain_events drain, which now flows
+// through POST /api/engine/events + the event-persistence middleware below.
+Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions
+    .TryAddSingleton<Tamma.Data.Abstractions.IPlatformEventPublisher,
+        Tamma.Activities.TenantLifecycle.NullPlatformEventPublisher>(builder.Services);
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentDispatchService,
     Tamma.Activities.AgentDispatch.AgentDispatchService>();
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentMonitorService,
@@ -295,6 +309,16 @@ builder.Services.AddHostedService<Tamma.ElsaServer.WorkflowSeeder>();
 builder.Services.AddHostedService<Tamma.ElsaServer.AgentSeeder>();
 
 var app = builder.Build();
+
+// Durable DCB-event persistence — drain the in-process tamma:events transient
+// list to the API's POST /api/engine/events (-> tenant domain_events) after
+// each activity executes. TammaEventEmitter (TammaActivity.cs) appended events
+// into a write-only list that nothing drained, and the event repositories
+// aren't registered here (the engine can't reference Tamma.Api), so the audit
+// trail never persisted. This middleware closes that gap: incremental per-
+// activity flush, cursor-based dedup, retry-on-failure, never throws.
+app.Services.ConfigureDefaultActivityExecutionPipeline(pipeline =>
+    pipeline.Use(Tamma.Activities.Core.EventPersistenceMiddleware.Create()));
 
 app.UseCors();
 app.UseRouting();

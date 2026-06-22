@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Tamma.Activities.LlmCall.Models;
@@ -112,4 +113,32 @@ public record TaskExecuteResult(
     [property: JsonPropertyName("costUsd")] decimal CostUsd,
     [property: JsonPropertyName("durationMs")] long DurationMs,
     [property: JsonPropertyName("error")] string? Error
+);
+
+/// <summary>
+/// POST body for <c>/api/engine/events</c> — a BATCH of DCB events the Elsa
+/// engine drained from its in-process <c>tamma:events</c> transient list.
+/// The API persists each into the caller's tenant <c>domain_events</c>.
+/// </summary>
+public record AppendEventsRequest(
+    [property: JsonPropertyName("events")] IReadOnlyList<EngineEventRecord> Events
+);
+
+/// <summary>
+/// Wire projection of one engine <c>TammaEvent</c> (see
+/// <c>Tamma.Activities.Core.TammaEvent</c>). camelCase to match the API DTO
+/// (<c>Tamma.Api.Dtos.Engine.EngineEventRecord</c>).
+/// </summary>
+public record EngineEventRecord(
+    [property: JsonPropertyName("eventType")] string EventType,
+    [property: JsonPropertyName("status")] string? Status,
+    [property: JsonPropertyName("error")] string? Error,
+    [property: JsonPropertyName("timestamp")] DateTime? Timestamp,
+    [property: JsonPropertyName("durationMs")] double? DurationMs,
+    [property: JsonPropertyName("activityId")] string? ActivityId,
+    [property: JsonPropertyName("activityName")] string? ActivityName,
+    [property: JsonPropertyName("workflowInstanceId")] string? WorkflowInstanceId,
+    [property: JsonPropertyName("issueNumber")] int? IssueNumber,
+    [property: JsonPropertyName("data")] JsonElement? Data,
+    [property: JsonPropertyName("tags")] IReadOnlyDictionary<string, string?>? Tags
 );

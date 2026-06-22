@@ -23,6 +23,14 @@ public class TammaEvent
     public string? ActivityName { get; set; }
     public string? WorkflowInstanceId { get; set; }
     public Dictionary<string, object?> Data { get; set; } = new();
+
+    /// <summary>
+    /// Optional flexible JSONB-style tags (issueId / prId / userId / mode /
+    /// provider / ...) carried onto the persisted <c>domain_events</c> row by
+    /// the durable drain. Distinct from <see cref="Data"/> (the structured
+    /// payload): tags are the queryable DCB index keys.
+    /// </summary>
+    public Dictionary<string, object?>? Tags { get; set; }
 }
 
 // ============================================

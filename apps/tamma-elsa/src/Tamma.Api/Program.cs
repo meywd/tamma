@@ -2042,6 +2042,12 @@ engine.MapPost("/trigger-ci", EngineEndpoints.TriggerCi).RequireAuthorization("W
 engine.MapPost("/execute-task", EngineEndpoints.ExecuteTask).RequireAuthorization("WorkflowsManage");
 engine.MapPost("/cycle-result", EngineEndpoints.PostCycleResult).RequireAuthorization("WorkflowsManage");
 engine.MapGet("/cycle-results", EngineEndpoints.GetCycleResults);
+// Generic engine→domain_events DCB-event append. The Elsa engine drains its
+// in-process tamma:events list here so the audit trail persists (previously
+// the events were written to a write-only transient list nothing drained).
+// TODO(security): tighten engine callbacks to an engine-service-only policy
+// (see the EngineServiceOnly work on the 32-5 branch).
+engine.MapPost("/events", EngineEndpoints.AppendEvents).RequireAuthorization("WorkflowsManage");
 // Audit finding 002 — `agent-available` is a GET liveness probe (no body),
 // not a POST registration call. The previous wiring as POST silently drifted
 // from the TS contract.
