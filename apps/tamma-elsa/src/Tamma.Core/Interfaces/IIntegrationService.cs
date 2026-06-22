@@ -44,6 +44,20 @@ public interface IGitHubIntegrationService
     /// <summary>Create a pull request</summary>
     Task<IntegrationResult<GitHubPullRequestResult>> CreateGitHubPullRequestAsync(string repository, CreatePullRequestRequest request);
 
+    /// <summary>
+    /// Find an existing OPEN pull request for the given <paramref name="headBranch"/>
+    /// → <paramref name="baseBranch"/> pair. Returns <c>Data == null</c> (with
+    /// <c>Success == true</c>) when none exists. Backs Story 2.8 AC8 idempotency —
+    /// a re-run of <c>SingleIssueCycle</c> must reuse / update the open PR instead
+    /// of double-opening or hard-failing on a 422 "A pull request already exists".
+    /// </summary>
+    Task<IntegrationResult<GitHubPullRequestRef?>> GetGitHubOpenPullRequestForBranchAsync(string repository, string headBranch, string baseBranch);
+
+    /// <summary>
+    /// Update an existing pull request's title / body / labels (idempotent reuse path).
+    /// </summary>
+    Task<IntegrationResult<GitHubPullRequestResult>> UpdateGitHubPullRequestAsync(string repository, int pullRequestNumber, CreatePullRequestRequest request);
+
     /// <summary>Merge a pull request</summary>
     Task<IntegrationResult<GitHubMergeResult>> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber);
 
@@ -130,6 +144,12 @@ public interface IIntegrationService
     /// <summary>Create a pull request</summary>
     Task<GitHubPullRequestResult> CreateGitHubPullRequestAsync(string repository, CreatePullRequestRequest request);
 
+    /// <summary>Find an existing OPEN PR for head→base (null when none)</summary>
+    Task<GitHubPullRequestRef?> GetGitHubOpenPullRequestForBranchAsync(string repository, string headBranch, string baseBranch);
+
+    /// <summary>Update an existing pull request's title / body / labels</summary>
+    Task<GitHubPullRequestResult> UpdateGitHubPullRequestAsync(string repository, int pullRequestNumber, CreatePullRequestRequest request);
+
     /// <summary>Merge a pull request</summary>
     Task<GitHubMergeResult> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber);
 
@@ -195,6 +215,14 @@ public class CreatePullRequestRequest
     public string Base { get; set; } = "main";
     public List<string> Reviewers { get; set; } = new();
     public List<string> Labels { get; set; } = new();
+
+    /// <summary>
+    /// Open the PR in draft mode (GitHub <c>draft: true</c>). Story 2.8 —
+    /// the ADL opens a draft PR up front and flips it to ready after CI /
+    /// review pass. Threaded from <c>SingleIssueCycleWorkflow</c>'s
+    /// <c>["draft"]=true</c> through the create path to the GitHub REST payload.
+    /// </summary>
+    public bool IsDraft { get; set; }
 }
 
 public class GitHubPullRequestResult
@@ -210,6 +238,19 @@ public class GitHubMergeResult
     public bool Success { get; set; }
     public string? MergeSha { get; set; }
     public string? Error { get; set; }
+}
+
+/// <summary>
+/// Lightweight reference to an existing pull request — returned by the
+/// idempotency lookup (<see cref="IGitHubIntegrationService.GetGitHubOpenPullRequestForBranchAsync"/>).
+/// </summary>
+public class GitHubPullRequestRef
+{
+    public int Number { get; set; }
+    public string Url { get; set; } = string.Empty;
+    public string State { get; set; } = "open";
+    public string Title { get; set; } = string.Empty;
+    public bool IsDraft { get; set; }
 }
 
 public class GitHubFileChange

@@ -86,6 +86,22 @@ public class IntegrationService : IIntegrationService
             : new GitHubPullRequestResult { Success = false, Error = result.Error };
     }
 
+    public async Task<GitHubPullRequestRef?> GetGitHubOpenPullRequestForBranchAsync(string repository, string headBranch, string baseBranch)
+    {
+        var result = await _github.GetGitHubOpenPullRequestForBranchAsync(repository, headBranch, baseBranch);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Error);
+        return result.Data;
+    }
+
+    public async Task<GitHubPullRequestResult> UpdateGitHubPullRequestAsync(string repository, int pullRequestNumber, CreatePullRequestRequest request)
+    {
+        var result = await _github.UpdateGitHubPullRequestAsync(repository, pullRequestNumber, request);
+        return result.Success
+            ? result.Data!
+            : new GitHubPullRequestResult { Success = false, Error = result.Error };
+    }
+
     public async Task<GitHubMergeResult> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber)
     {
         var result = await _github.MergeGitHubPullRequestAsync(repository, pullRequestNumber);

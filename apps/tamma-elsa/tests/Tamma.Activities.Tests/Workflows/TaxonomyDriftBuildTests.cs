@@ -109,6 +109,7 @@ public class TaxonomyDriftBuildTests
         "MentorshipWorkflow",
         "PlanGenerationWorkflow",
         "PlanReviewWorkflow",
+        "PullRequestWorkflow",
         "ReviewFixWorkflow",
         "TaskCreationWorkflow",
         "TaskReviewWorkflow",
