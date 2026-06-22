@@ -348,16 +348,23 @@ function computeGeometry(layout: MapLayout, width: number): Geometry {
     if (!a || !b) continue;
     const color = LINE_COLORS[rail.line % LINE_COLORS.length]!;
     const { d, labelX, labelY } = orthogonalPath(a, b, rail.isBackEdge, w);
+    // Link info: always name the source AND target step; surface the trigger
+    // (branch condition / event) only when it adds information — a trigger that
+    // just repeats the target step name is noise, so drop it.
+    const trigger =
+      rail.label && rail.label !== b.node.name ? rail.label : undefined;
     railPaths.push({
       id: rail.id,
       d,
       color,
       isBackEdge: rail.isBackEdge,
       to: rail.to,
-      title: rail.label ? `${rail.label} → ${b.node.name}` : `→ ${b.node.name}`,
+      title: trigger
+        ? `${a.node.name} → ${b.node.name}  ·  when: ${trigger}`
+        : `${a.node.name} → ${b.node.name}`,
     });
-    if (rail.label) {
-      railLabels.push({ id: rail.id, label: rail.label, x: labelX, y: labelY });
+    if (trigger) {
+      railLabels.push({ id: rail.id, label: trigger, x: labelX, y: labelY });
     }
   }
 
