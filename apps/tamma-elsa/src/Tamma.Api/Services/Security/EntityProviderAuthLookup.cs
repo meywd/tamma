@@ -48,9 +48,12 @@ public sealed class EntityProviderAuthLookup : IProviderAuthLookup
 
         // Read only the AuthModel string for the provider key (case-insensitive).
         // No tenant scope — provider cost/auth identity is platform-global (34-11).
+        // Only ACTIVE providers are SaaS-eligible: a `retired` provider must
+        // resolve to null (unknown → fail-closed deny), mirroring 34-11's
+        // DbProviderPricingService which filters `Status == "active"`.
         var authModel = await db.Providers
             .AsNoTracking()
-            .Where(p => EF.Functions.ILike(p.Key, name))
+            .Where(p => p.Status == "active" && EF.Functions.ILike(p.Key, name))
             .Select(p => p.AuthModel)
             .FirstOrDefaultAsync(ct);
 

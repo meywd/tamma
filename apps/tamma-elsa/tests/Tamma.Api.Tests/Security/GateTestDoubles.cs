@@ -38,9 +38,16 @@ internal sealed class StubMode(TammaMode mode) : ITammaModeProvider
 internal sealed class FakeAuthLookup : IProviderAuthLookup
 {
     private readonly IReadOnlyDictionary<string, ProviderAuthModel?> _map;
+    private readonly Func<Exception>? _throwFactory;
     public List<string?> Calls { get; } = new();
 
-    public FakeAuthLookup(IReadOnlyDictionary<string, ProviderAuthModel?> map) => _map = map;
+    public FakeAuthLookup(
+        IReadOnlyDictionary<string, ProviderAuthModel?> map,
+        Func<Exception>? throwFactory = null)
+    {
+        _map = map;
+        _throwFactory = throwFactory;
+    }
 
     /// <summary>Convenience: anthropic=api-key, claude-code=cli-token, everything else unknown.</summary>
     public static FakeAuthLookup Default() => new(new Dictionary<string, ProviderAuthModel?>(
@@ -55,24 +62,43 @@ internal sealed class FakeAuthLookup : IProviderAuthLookup
         ["zen-mcp"] = ProviderAuthModel.CliToken,
     });
 
+    /// <summary>A lookup that throws the supplied exception on every call (simulates a transient DB/seam failure).</summary>
+    public static FakeAuthLookup Throwing(Func<Exception> throwFactory) =>
+        new(new Dictionary<string, ProviderAuthModel?>(StringComparer.OrdinalIgnoreCase), throwFactory);
+
     public Task<ProviderAuthModel?> AuthModelAsync(string? providerName, CancellationToken ct = default)
     {
         Calls.Add(providerName);
+        if (_throwFactory is not null)
+            throw _throwFactory();
         if (providerName is not null && _map.TryGetValue(providerName.Trim(), out var model))
             return Task.FromResult(model);
         return Task.FromResult<ProviderAuthModel?>(null);
     }
 }
 
-/// <summary>An entitlement double returning a fixed verdict; records calls.</summary>
-internal sealed class FakeEntitlement(bool entitled) : ITenantProviderEntitlement
+/// <summary>An entitlement double returning a fixed verdict; records calls. Can be configured to throw.</summary>
+internal sealed class FakeEntitlement : ITenantProviderEntitlement
 {
+    private readonly bool _entitled;
+    private readonly Func<Exception>? _throwFactory;
     public List<(Guid? TenantId, string Provider)> Calls { get; } = new();
+
+    public FakeEntitlement(bool entitled, Func<Exception>? throwFactory = null)
+    {
+        _entitled = entitled;
+        _throwFactory = throwFactory;
+    }
+
+    /// <summary>An entitlement check that throws the supplied exception (simulates an Epic-34 engine failure).</summary>
+    public static FakeEntitlement Throwing(Func<Exception> throwFactory) => new(entitled: true, throwFactory);
 
     public Task<bool> IsTenantEntitledAsync(Guid? tenantId, string providerName, CancellationToken ct = default)
     {
         Calls.Add((tenantId, providerName));
-        return Task.FromResult(entitled);
+        if (_throwFactory is not null)
+            throw _throwFactory();
+        return Task.FromResult(_entitled);
     }
 }
 

@@ -59,7 +59,36 @@ public sealed class SaaSProviderGate : ISaaSProviderGate
         }
 
         // 2. SaaS: classify the provider (fail-closed on unknown).
-        var authModel = await _authLookup.AuthModelAsync(ctx.ProviderName, ct);
+        //    AC4: eligibility that CANNOT be determined (the entity read throws —
+        //    a transient Npgsql/DbException, the future Epic-34 lookup, etc.) ⇒
+        //    DENY, never a leaked 500 and never a silent allow. Cancellation is
+        //    NOT a denial — it must propagate.
+        ProviderAuthModel? authModel;
+        try
+        {
+            authModel = await _authLookup.AuthModelAsync(ctx.ProviderName, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // a cancellation is not a gate denial — let it propagate.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "SaaS provider gate could not determine eligibility (lookup failed); "
+                + "failing closed (deny). provider={Provider}, role={Role}, action={Action}, "
+                + "tenantId={TenantId}",
+                ctx.ProviderName, ctx.Role, ctx.Action, ctx.TenantId);
+
+            await EmitGatedAsync(ctx, authModel: null, "ELIGIBILITY_UNAVAILABLE", ct);
+            return new ProviderGateDecision(
+                false,
+                ProviderGateOutcome.SaasProviderNotAllowed,
+                Reason: "Provider eligibility could not be determined; denied.",
+                AuthModel: null,
+                HttpStatusHint: 400);
+        }
+
         if (authModel is null || authModel == ProviderAuthModel.CliToken)
         {
             var reason = authModel is null ? "PROVIDER_UNKNOWN" : "CLI_TOKEN_PROVIDER";
@@ -92,7 +121,40 @@ public sealed class SaaSProviderGate : ISaaSProviderGate
 
         // 3. SaaS auth / entitlement (Epic 34 seam). Provider is api-key — is the
         //    tenant entitled to the managed-LLM path for it?
-        if (!await _entitlement.IsTenantEntitledAsync(ctx.TenantId, ctx.ProviderName, ct))
+        //    AC4: an entitlement check that THROWS means we cannot determine the
+        //    tenant is entitled ⇒ fail-closed DENY (never a silent allow, never a
+        //    leaked 500). We map this to SaasProviderNotAllowed/400 (reason
+        //    ENTITLEMENT_UNAVAILABLE) rather than TenantNotEntitled/403: 403 is a
+        //    DETERMINED "not entitled" verdict, whereas a thrown exception is an
+        //    UNDETERMINED eligibility — the same §2.4 "could not determine ⇒ 400"
+        //    category as a lookup failure above. Cancellation still propagates.
+        bool entitled;
+        try
+        {
+            entitled = await _entitlement.IsTenantEntitledAsync(ctx.TenantId, ctx.ProviderName, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // a cancellation is not a gate denial — let it propagate.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "SaaS provider gate could not determine entitlement (check failed); "
+                + "failing closed (deny). provider={Provider}, role={Role}, action={Action}, "
+                + "tenantId={TenantId}",
+                ctx.ProviderName, ctx.Role, ctx.Action, ctx.TenantId);
+
+            await EmitGatedAsync(ctx, authModel, "ENTITLEMENT_UNAVAILABLE", ct);
+            return new ProviderGateDecision(
+                false,
+                ProviderGateOutcome.SaasProviderNotAllowed,
+                Reason: "Tenant entitlement could not be determined; denied.",
+                AuthModel: authModel,
+                HttpStatusHint: 400);
+        }
+
+        if (!entitled)
         {
             _logger.LogInformation(
                 "SaaS provider gated: provider={Provider}, authModel=api-key, "

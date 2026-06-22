@@ -202,6 +202,89 @@ public class SaaSProviderGateTests
         _metrics.GatedTotal.Should().Be(1);
     }
 
+    // ── Fail-closed on a lookup/entitlement exception (AC4) ─────────────
+
+    [Test]
+    public async Task SaaS_lookup_exception_fails_closed_400_with_one_event_and_metric()
+    {
+        var ctx = Ctx("anthropic");
+        var throwingLookup = FakeAuthLookup.Throwing(
+            () => new InvalidOperationException("simulated transient DB failure"));
+        var gate = GateTestHelpers.Build(
+            new StubMode(TammaMode.SaaS), throwingLookup, new FakeEntitlement(true), _events, _metrics);
+
+        // Must NOT throw — a lookup failure is a typed fail-closed DENY, never a 500.
+        var decision = await gate.InspectAsync(ctx);
+
+        decision.Allowed.Should().BeFalse();
+        decision.Outcome.Should().Be(ProviderGateOutcome.SaasProviderNotAllowed);
+        decision.HttpStatusHint.Should().Be(400);
+        decision.AuthModel.Should().BeNull("eligibility could not be determined");
+
+        _events.Appended.Should().ContainSingle();
+        using var data = JsonDocument.Parse(_events.Appended[0].Data);
+        data.RootElement.GetProperty("reason").GetString().Should().Be("ELIGIBILITY_UNAVAILABLE");
+        data.RootElement.GetProperty("authModel").GetString().Should().Be("unknown");
+
+        _metrics.GatedTotal.Should().Be(1);
+    }
+
+    [Test]
+    public async Task SaaS_entitlement_exception_fails_closed_400_with_one_event_and_metric()
+    {
+        var ctx = Ctx("anthropic"); // api-key provider — reaches the entitlement check
+        var throwingEntitlement = FakeEntitlement.Throwing(
+            () => new InvalidOperationException("simulated entitlement-engine failure"));
+        var gate = GateTestHelpers.Build(
+            new StubMode(TammaMode.SaaS), _lookup, throwingEntitlement, _events, _metrics);
+
+        // Must NOT throw — an entitlement failure means we cannot determine the
+        // tenant is entitled ⇒ fail-closed DENY (400), never a 500.
+        var decision = await gate.InspectAsync(ctx);
+
+        decision.Allowed.Should().BeFalse();
+        decision.Outcome.Should().Be(ProviderGateOutcome.SaasProviderNotAllowed);
+        decision.HttpStatusHint.Should().Be(400);
+        // The provider classified as api-key before the entitlement check threw.
+        decision.AuthModel.Should().Be(ProviderAuthModel.ApiKey);
+
+        _events.Appended.Should().ContainSingle();
+        using var data = JsonDocument.Parse(_events.Appended[0].Data);
+        data.RootElement.GetProperty("reason").GetString().Should().Be("ENTITLEMENT_UNAVAILABLE");
+        data.RootElement.GetProperty("authModel").GetString().Should().Be("api-key");
+
+        _metrics.GatedTotal.Should().Be(1);
+    }
+
+    [Test]
+    public async Task SaaS_lookup_cancellation_propagates_and_is_not_a_denial()
+    {
+        var cancelledLookup = FakeAuthLookup.Throwing(() => new OperationCanceledException());
+        var gate = GateTestHelpers.Build(
+            new StubMode(TammaMode.SaaS), cancelledLookup, new FakeEntitlement(true), _events, _metrics);
+
+        // A cancellation is NOT a gate denial — it must propagate, not become a DENY.
+        var act = async () => await gate.InspectAsync(Ctx("anthropic"));
+        await act.Should().ThrowAsync<OperationCanceledException>();
+
+        _events.Appended.Should().BeEmpty("a cancellation emits no gated event");
+        _metrics.GatedTotal.Should().Be(0, "a cancellation increments no gated metric");
+    }
+
+    [Test]
+    public async Task SaaS_entitlement_cancellation_propagates_and_is_not_a_denial()
+    {
+        var cancelledEntitlement = FakeEntitlement.Throwing(() => new TaskCanceledException());
+        var gate = GateTestHelpers.Build(
+            new StubMode(TammaMode.SaaS), _lookup, cancelledEntitlement, _events, _metrics);
+
+        var act = async () => await gate.InspectAsync(Ctx("anthropic"));
+        await act.Should().ThrowAsync<OperationCanceledException>();
+
+        _events.Appended.Should().BeEmpty("a cancellation emits no gated event");
+        _metrics.GatedTotal.Should().Be(0, "a cancellation increments no gated metric");
+    }
+
     // ── Never throws to signal a denial ─────────────────────────────────
 
     [TestCase(TammaMode.SaaS, "claude-code")]

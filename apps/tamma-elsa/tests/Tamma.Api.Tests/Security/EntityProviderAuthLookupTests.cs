@@ -70,6 +70,12 @@ public class EntityProviderAuthLookupTests
             {
                 Id = Guid.NewGuid(), Key = "claude-code", DisplayName = "Claude Code",
                 AuthModel = "cli-token", Status = "active", CreatedAt = now, UpdatedAt = now,
+            },
+            new Provider
+            {
+                // A retired api-key provider — must NOT classify as ApiKey (fail-closed).
+                Id = Guid.NewGuid(), Key = "retired-openai", DisplayName = "Retired OpenAI",
+                AuthModel = "api-key", Status = "retired", CreatedAt = now, UpdatedAt = now,
             });
         await ctx.SaveChangesAsync();
     }
@@ -99,6 +105,16 @@ public class EntityProviderAuthLookupTests
     public async Task Unknown_key_resolves_to_null_failclosed()
     {
         var model = await NewLookup().AuthModelAsync("not-a-provider");
+        model.Should().BeNull();
+    }
+
+    [Test]
+    public async Task Retired_provider_resolves_to_null_failclosed()
+    {
+        // A retired api-key provider must resolve to null (unknown → SaaS deny),
+        // never classify as ApiKey — the active-status filter (matching 34-11's
+        // DbProviderPricingService Status == "active") is load-bearing here.
+        var model = await NewLookup().AuthModelAsync("retired-openai");
         model.Should().BeNull();
     }
 
