@@ -71,6 +71,9 @@ public sealed class AgentRegistryService : IAgentRegistryService
             : ((Guid?)null, CurrentUserId());
 
     /// <inheritdoc />
+    public bool IsEnablementGateActive => _enablement is not null;
+
+    /// <inheritdoc />
     public async Task<Agent?> ResolveUsableAgentAsync(Guid agentId, CancellationToken ct = default)
     {
         var agent = await _agents.GetByIdAsync(agentId, ct);

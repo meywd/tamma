@@ -65,8 +65,10 @@ public sealed record PublishVersionRequest(
 /// public persona (own-private agents are implicitly enabled). It is
 /// <c>null</c> on the default member listing (which already filters to
 /// <c>enabled(public) ∪ own-private</c>, so a flag is redundant) and is set only
-/// on the admin <c>?includeDisabled=true</c> view, where the full catalog is
-/// returned and the flag tells the admin what they could enable.
+/// on the admin <c>?includeDisabled=true</c> view, which ADDITIONALLY surfaces
+/// DISABLED public personas (still subject to any <c>visibility</c>/<c>status</c>
+/// query filters — not a literally-unfiltered catalog) so the flag tells the
+/// admin what they could enable.
 /// </remarks>
 public sealed record AgentSummary(
     Guid Id,

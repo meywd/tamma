@@ -379,11 +379,14 @@ public sealed class AgentResolverService : IAgentResolverService
         }
 
         // Branch 4: NO empty/plain fallback — fail loud. Story 32-18 — when the
-        // enablement-aware lookup returned NULL (the principal has enabled nothing
-        // AND has no own-private agent for the role), distinguish the failure as
-        // AGENT.RESOLVE.NO_ENABLED_DEFAULT; the legacy seam-less "configured persona
-        // not seeded" path keeps the canonical AGENT.RESOLVE.NO_DEFAULT code.
-        var noEnabledDefault = systemDefault is null && !configuredPersonaMissing;
+        // ENABLEMENT GATE is active, the principal DID have an enabled default
+        // (whether the lookup returned NULL because nothing is enabled, OR returned
+        // a non-null enabled default that could not MATERIALISE because it has no
+        // active version): in every such case surface AGENT.RESOLVE.NO_ENABLED_DEFAULT.
+        // The canonical AGENT.RESOLVE.NO_DEFAULT is reserved for the legacy seam-less
+        // path (gate unwired) and the configured-persona-unseeded case
+        // (configuredPersonaMissing) — neither changes behaviour here.
+        var noEnabledDefault = !configuredPersonaMissing && _registry.IsEnablementGateActive;
         await FailLoudAsync(role, action, noEnabledDefault, ct);
         // Unreachable — FailLoudAsync always throws.
         throw new InvalidOperationException("unreachable");

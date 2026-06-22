@@ -13,10 +13,14 @@ namespace Tamma.Api.Dtos.Agents;
 /// <c>RolePhaseMap.ValidRoles</c> wire string.
 /// </summary>
 /// <remarks>
-/// Story 32-18 — <see cref="IncludeDisabled"/> (owner/admin only) returns the
-/// FULL public catalog (not just the enabled set) with an <c>enabled</c> flag per
-/// row, so an admin can see what they could enable. Members never see disabled
-/// public personas; the flag is ignored for non-admin callers.
+/// Story 32-18 — <see cref="IncludeDisabled"/> (owner/admin only) ADDITIONALLY
+/// surfaces DISABLED public personas (which the member view hides) with an
+/// <c>enabled</c> flag per row, so an admin can see what they could enable. The
+/// result is still subject to any <see cref="Visibility"/>/<see cref="Status"/>
+/// query filters — it is NOT a literally-unfiltered catalog (e.g.
+/// <c>?includeDisabled=true&amp;status=active</c> returns only active rows).
+/// Members never see disabled public personas; the flag is ignored for non-admin
+/// callers.
 /// </remarks>
 public sealed record AgentListFilter(
     string? Role = null,

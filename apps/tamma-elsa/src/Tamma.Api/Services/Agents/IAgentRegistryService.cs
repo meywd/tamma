@@ -27,6 +27,16 @@ public interface IAgentRegistryService
     (Guid? TenantId, Guid? UserId) ResolvePrincipal();
 
     /// <summary>
+    /// Story 32-18 — true when the per-tenant ENABLEMENT GATE (32-16 read seam) is
+    /// wired (production ALWAYS wires it via DI). The resolver consumes this to pick
+    /// the accurate fail-loud code: when the gate is active, a fail-loud after a
+    /// non-null-but-unmaterialisable enabled default is <c>AGENT.RESOLVE.NO_ENABLED_DEFAULT</c>
+    /// (the principal HAD an enabled default); when the gate is unwired (legacy
+    /// seam-less test harnesses), the canonical <c>AGENT.RESOLVE.NO_DEFAULT</c> stays.
+    /// </summary>
+    bool IsEnablementGateActive { get; }
+
+    /// <summary>
     /// Resolve an agent the caller may USE: an ENABLED public persona (32-18 gate
     /// over 32-16), or a private agent owned by the caller's scope (implicitly
     /// enabled). Returns <c>null</c> for a non-existent id, a cross-scope private

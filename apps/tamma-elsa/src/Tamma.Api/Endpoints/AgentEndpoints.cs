@@ -507,9 +507,11 @@ public static class AgentEndpoints
                 ? enabledPublicIds.Contains(a.Id)
                 : true; // own-private ⇒ implicitly enabled (visibility scoping already ran)
 
-        // ?includeDisabled=true is owner/admin-only and returns the FULL catalog
-        // with an `enabled` flag per row. Members never see disabled public
-        // personas, so the flag is ignored for them.
+        // ?includeDisabled=true is owner/admin-only and ADDITIONALLY surfaces
+        // disabled public personas (which the member view hides) with an `enabled`
+        // flag per row — still subject to the visibility/status filters applied
+        // above (it is NOT a literally-unfiltered catalog). Members never see
+        // disabled public personas, so the flag is ignored for them.
         if (filter.IncludeDisabled && IsTenantAdminOrOwner(principal))
         {
             var full = filtered.Select(a => ToSummary(a) with { Enabled = IsEnabled(a) }).ToList();
