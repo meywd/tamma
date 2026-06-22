@@ -855,6 +855,34 @@ builder.Services.AddScoped<
 // boot fallback.
 builder.Services.AddDbProviderPricing();
 
+// Story 32-4 — SaaS provider gate (composition step 1 of the 32-5 call-LLM
+// endpoint). In SaaS it denies cli-token (harness) + unknown providers
+// fail-closed (typed → HTTP 400) and un-entitled tenants (typed → 403); in
+// single-user it is a hard no-op. The gate is a pure service over existing
+// seams (mode + provider-auth lookup + entitlement + events + metrics) — NO EF
+// migration, NO new table, NO credential/secret dependency.
+//
+//   * IProviderAuthLookup → EntityProviderAuthLookup reads the 34-11
+//     Provider.AuthModel column (canonical source, now landed). To revert to
+//     the interim static allowlist, swap this ONE line for:
+//         builder.Services.AddSingleton<IProviderAuthLookup, StaticProviderAuthLookup>();
+//     The ProviderGateDecision / ISaaSProviderGate contract is identical for
+//     both (contract-neutral; pinned by the 34-11 swap matrix test).
+//   * ITenantProviderEntitlement → permissive default (every tenant entitled to
+//     every api-key provider). Replace with Epic 34's entitlement engine (DI
+//     swap) to activate the 403 TenantNotEntitled path; this story owns only
+//     the typed surfacing of the result, not the entitlement rules.
+builder.Services.AddScoped<
+    Tamma.Api.Services.Security.IProviderAuthLookup,
+    Tamma.Api.Services.Security.EntityProviderAuthLookup>();
+builder.Services.AddSingleton<
+    Tamma.Api.Services.Security.ITenantProviderEntitlement,
+    Tamma.Api.Services.Security.PermissiveTenantProviderEntitlement>();
+builder.Services.AddSingleton<Tamma.Api.Services.Security.ProviderGatingMetrics>();
+builder.Services.AddScoped<
+    Tamma.Api.Services.Security.ISaaSProviderGate,
+    Tamma.Api.Services.Security.SaaSProviderGate>();
+
 // Story 28-8 AC3 — short-TTL tenant status cache (per-pod, in-memory).
 // Cuts CP round-trips in TenantContextMiddleware on hot tenant requests.
 // Cluster-wide invalidation (RabbitMQ pub/sub) is a future enhancement —
