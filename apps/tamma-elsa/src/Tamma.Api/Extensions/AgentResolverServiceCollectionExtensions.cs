@@ -47,10 +47,16 @@ public static class AgentResolverServiceCollectionExtensions
         // Story 32-15 — the persona/public prompt seam over the Epic 27 store.
         services.AddScoped<IPersonaPromptResolver, PersonaPromptResolver>();
 
+        // Story 32-17 — the custom/private prompt seam. Resolves from the prompt
+        // set the resolver threads in from the already-loaded version (no repo
+        // re-read); byRoleAction → system → ERROR, fail-loud.
+        services.AddScoped<ICustomAgentPromptResolver, CustomAgentPromptResolver>();
+
         // Use the Story 32-2 full constructor so the entity-aware resolve
         // methods have their collaborators. The missing-config recorder is
         // optional (the epic may not be merged) — resolved as null if unregistered.
-        // Story 32-15 wires the persona prompt seam for the public branch.
+        // Story 32-15 wires the persona prompt seam for the public branch;
+        // Story 32-17 wires the custom prompt seam for the private/custom branch.
         services.AddScoped<IAgentResolverService>(sp => new AgentResolverService(
             sp.GetRequiredService<IAgentConfigRepository>(),
             sp.GetService<IConfiguration>(),
@@ -59,7 +65,8 @@ public static class AgentResolverServiceCollectionExtensions
             sp.GetRequiredService<IAgentRepository>(),
             sp.GetRequiredService<IEventRepository>(),
             sp.GetService<IMissingConfigRecorder>(),
-            sp.GetRequiredService<IPersonaPromptResolver>()));
+            sp.GetRequiredService<IPersonaPromptResolver>(),
+            sp.GetRequiredService<ICustomAgentPromptResolver>()));
         return services;
     }
 }

@@ -81,7 +81,8 @@ public class AgentResolverChainTests
     /// </summary>
     private Harness BuildHarness(
         TammaMode mode, Guid? tenantId, Guid? userId, string defaultPersonaName = "tamma-developer",
-        IPersonaPromptResolver? personaPrompts = null)
+        IPersonaPromptResolver? personaPrompts = null,
+        ICustomAgentPromptResolver? customPrompts = null)
     {
         var cpCtx = NewContext();
         var events = new CapturingEvents();
@@ -114,9 +115,14 @@ public class AgentResolverChainTests
         // 32-15 — a stub persona prompt resolver supplies the PUBLIC branch's
         // system prompt (persona = prompt-free; prompt comes from the seam).
         var legacyRepo = new AgentConfigRepository(factory);
+        // Story 32-17 — the custom/private prompt seam. Default to the REAL
+        // CustomAgentPromptResolver, which resolves from the prompt set the
+        // resolver threads in from the already-loaded version (no repo re-read).
         var resolver = new AgentResolverService(
             legacyRepo, null, NullLogger<AgentResolverService>.Instance,
-            registry, agentRepo, events, null, personaPrompts ?? new StubPersonaPrompts());
+            registry, agentRepo, events, null, personaPrompts ?? new StubPersonaPrompts(),
+            customPrompts ?? new CustomAgentPromptResolver(
+                NullLogger<CustomAgentPromptResolver>.Instance));
 
         return new Harness(resolver, registry, agentRepo, events, cpCtx);
     }
@@ -498,6 +504,254 @@ public class AgentResolverChainTests
         await using var cleanup = NewContext();
         await cleanup.Database.ExecuteSqlRawAsync(
             "TRUNCATE provider_model_prices, providers CASCADE;");
+    }
+
+    // ── Story 32-17 — custom/private prompt-source branch ──
+
+    private const string CustomCfg = """
+        {
+          "provider": "anthropic",
+          "model": "claude-sonnet-4",
+          "prompts": {
+            "system": "ATLAS SYSTEM PROMPT",
+            "byRoleAction": { "developer:implement-feature": "ATLAS IMPLEMENT PROMPT" }
+          }
+        }
+        """;
+
+    [Test]
+    public async Task Resolve_CustomPrivateAgent_PromptFromOwnPrompts_PersonaSeamNotConsulted()
+    {
+        var persona = new CountingPersonaPrompts("[SHOULD NOT BE USED]");
+        var h = BuildHarness(TammaMode.SaaS, TenantA, null, personaPrompts: persona);
+        await using (h.Ctx)
+        {
+            var priv = await h.Agents.CreateAsync(
+                new Agent { Name = "atlas", Role = "developer", Visibility = AgentVisibility.Private, OwnerTenantId = TenantA },
+                CustomCfg, "seed", null);
+            await h.Registry.SelectForRoleAsync("developer", priv.Id, null);
+
+            // (phase, role) → action non-null so byRoleAction can match.
+            var resolved = await h.Resolver.ResolveForRoleAndPhaseAsync("implement-feature", "developer");
+
+            resolved.AgentId.Should().Be(priv.Id);
+            resolved.Source.Should().Be("tenant-private");
+            resolved.SystemPrompt.Should().Be("ATLAS IMPLEMENT PROMPT",
+                "byRoleAction wins over system on the custom branch");
+            resolved.PromptSource.Should().Be(AgentPromptSource.CustomAgent);
+            persona.CallCount.Should().Be(0, "the custom branch NEVER consults the Epic 27 persona seam");
+        }
+    }
+
+    [Test]
+    public async Task Resolve_CustomPrivateAgent_RoleOnly_FallsToSystem()
+    {
+        var persona = new CountingPersonaPrompts("[SHOULD NOT BE USED]");
+        var h = BuildHarness(TammaMode.SaaS, TenantA, null, personaPrompts: persona);
+        await using (h.Ctx)
+        {
+            var priv = await h.Agents.CreateAsync(
+                new Agent { Name = "atlas", Role = "developer", Visibility = AgentVisibility.Private, OwnerTenantId = TenantA },
+                CustomCfg, "seed", null);
+            await h.Registry.SelectForRoleAsync("developer", priv.Id, null);
+
+            // Role-only resolution (action null) → no byRoleAction key → system.
+            var resolved = await h.Resolver.ResolveForRoleAsync("developer");
+
+            resolved.SystemPrompt.Should().Be("ATLAS SYSTEM PROMPT");
+            resolved.PromptSource.Should().Be(AgentPromptSource.CustomAgent);
+            persona.CallCount.Should().Be(0);
+        }
+    }
+
+    [Test]
+    public async Task Resolve_CustomPrivateAgent_NoMatch_FailsLoud_PersonaSeamNotConsulted()
+    {
+        var persona = new CountingPersonaPrompts("[SHOULD NOT BE USED]");
+        var h = BuildHarness(TammaMode.SaaS, TenantA, null, personaPrompts: persona);
+        await using (h.Ctx)
+        {
+            // Prompts block carries ONLY a byRoleAction for developer:implement-feature
+            // and no system → a request for a different action fails loud.
+            const string onlyRoleAction = """
+                {
+                  "provider": "anthropic", "model": "claude-sonnet-4",
+                  "prompts": { "byRoleAction": { "developer:implement-feature": "ONLY THIS" } }
+                }
+                """;
+            var priv = await h.Agents.CreateAsync(
+                new Agent { Name = "atlas", Role = "developer", Visibility = AgentVisibility.Private, OwnerTenantId = TenantA },
+                onlyRoleAction, "seed", null);
+            await h.Registry.SelectForRoleAsync("developer", priv.Id, null);
+
+            Func<Task> act = async () =>
+                await h.Resolver.ResolveForRoleAndPhaseAsync("write-tests", "developer");
+
+            // I1 — the custom leg fails loud with TammaError (symmetric with the
+            // persona leg's PROMPT_UNRESOLVED), not a bespoke exception type.
+            (await act.Should().ThrowAsync<TammaError>())
+                .Which.Code.Should().Be("CUSTOM_PROMPT_UNRESOLVED");
+            persona.CallCount.Should().Be(0,
+                "a custom-branch no-resolve NEVER falls through to the Epic 27 persona seam");
+        }
+    }
+
+    [Test]
+    public async Task Resolve_PrivateAgent_EmptyPromptsBlock_DelegatesToPersonaBranch()
+    {
+        var persona = new CountingPersonaPrompts("[PERSONA PROMPT]");
+        var h = BuildHarness(TammaMode.SaaS, TenantA, null, personaPrompts: persona);
+        await using (h.Ctx)
+        {
+            // Private agent with an EMPTY prompts block → custom branch NOT
+            // entered → delegates to the 32-15 persona/Epic-27 branch.
+            const string emptyPrompts = """
+                { "provider": "anthropic", "model": "claude-sonnet-4", "prompts": {} }
+                """;
+            var priv = await h.Agents.CreateAsync(
+                new Agent { Name = "atlas", Role = "developer", Visibility = AgentVisibility.Private, OwnerTenantId = TenantA },
+                emptyPrompts, "seed", null);
+            await h.Registry.SelectForRoleAsync("developer", priv.Id, null);
+
+            var resolved = await h.Resolver.ResolveForRoleAsync("developer");
+
+            resolved.SystemPrompt.Should().Be("[PERSONA PROMPT]");
+            resolved.PromptSource.Should().Be(AgentPromptSource.Epic27Store);
+            persona.CallCount.Should().Be(1, "an empty prompts block delegates to the persona seam");
+        }
+    }
+
+    [Test]
+    public async Task Resolve_PrivateAgent_NoPromptsKey_DelegatesToPersonaBranch()
+    {
+        var persona = new CountingPersonaPrompts("[PERSONA PROMPT]");
+        var h = BuildHarness(TammaMode.SaaS, TenantA, null, personaPrompts: persona);
+        await using (h.Ctx)
+        {
+            // Private agent with NO prompts key at all → persona branch.
+            var priv = await SeedTenantPrivateAsync(h.Agents, TenantA, "developer", "atlas");
+            await h.Registry.SelectForRoleAsync("developer", priv.Id, null);
+
+            var resolved = await h.Resolver.ResolveForRoleAsync("developer");
+
+            resolved.PromptSource.Should().Be(AgentPromptSource.Epic27Store);
+            persona.CallCount.Should().Be(1);
+        }
+    }
+
+    [Test]
+    public async Task Resolve_CustomPrivateAgent_NoTemplateBody_InEmittedEvents()
+    {
+        var h = BuildHarness(TammaMode.SaaS, TenantA, null);
+        await using (h.Ctx)
+        {
+            var priv = await h.Agents.CreateAsync(
+                new Agent { Name = "atlas", Role = "developer", Visibility = AgentVisibility.Private, OwnerTenantId = TenantA },
+                CustomCfg, "seed", null);
+            await h.Registry.SelectForRoleAsync("developer", priv.Id, null);
+            h.Events.Captured.Clear();
+
+            var resolved = await h.Resolver.ResolveForRoleAndPhaseAsync("implement-feature", "developer");
+            resolved.SystemPrompt.Should().Be("ATLAS IMPLEMENT PROMPT");
+
+            // AC7 — no resolution event from the resolver carries a template body
+            // in its Tags or Data (the resolver doesn't emit on success; assert it
+            // stays that way and that nothing leaked the body).
+            foreach (var evt in h.Events.Captured)
+            {
+                (evt.Tags ?? "").Should().NotContain("ATLAS IMPLEMENT PROMPT");
+                (evt.Data ?? "").Should().NotContain("ATLAS IMPLEMENT PROMPT");
+                (evt.Tags ?? "").Should().NotContain("ATLAS SYSTEM PROMPT");
+                (evt.Data ?? "").Should().NotContain("ATLAS SYSTEM PROMPT");
+            }
+        }
+    }
+
+    // ── C2 — the loaded prompt set is THREADED into the custom seam (no re-read) ──
+
+    [Test]
+    public async Task Resolve_CustomBranch_ThreadsLoadedPromptSet_IntoSeam_NoReRead()
+    {
+        // A capturing custom resolver records the AgentPromptSet it is handed. The
+        // resolver itself does NO repository read (its only collaborator is a
+        // logger) — MaterialiseAsync parses the set ONCE from the loaded version
+        // and threads it in. Proving the seam receives the loaded version's
+        // prompts (not a fresh re-fetch) closes the stale/torn-read window.
+        var capturing = new CapturingCustomPrompts("CAPTURED");
+        var persona = new CountingPersonaPrompts("[SHOULD NOT BE USED]");
+        var h = BuildHarness(TammaMode.SaaS, TenantA, null,
+            personaPrompts: persona, customPrompts: capturing);
+        await using (h.Ctx)
+        {
+            var priv = await h.Agents.CreateAsync(
+                new Agent { Name = "atlas", Role = "developer", Visibility = AgentVisibility.Private, OwnerTenantId = TenantA },
+                CustomCfg, "seed", null);
+            await h.Registry.SelectForRoleAsync("developer", priv.Id, null);
+
+            var resolved = await h.Resolver.ResolveForRoleAndPhaseAsync("implement-feature", "developer");
+
+            resolved.SystemPrompt.Should().Be("CAPTURED");
+            resolved.PromptSource.Should().Be(AgentPromptSource.CustomAgent);
+            capturing.CallCount.Should().Be(1);
+            capturing.LastAgentId.Should().Be(priv.Id);
+            // The threaded set is the SAME prompts parsed from the loaded version —
+            // it carries the active version's byRoleAction cell, not a re-fetch.
+            capturing.LastPrompts.Should().NotBeNull();
+            capturing.LastPrompts!.ByRoleAction.Should().ContainKey("developer:implement-feature");
+            capturing.LastPrompts!.ByRoleAction!["developer:implement-feature"]
+                .Should().Be("ATLAS IMPLEMENT PROMPT");
+            persona.CallCount.Should().Be(0);
+        }
+    }
+
+    [Test]
+    public async Task Resolve_PublicPersona_PromptSourceTag_IsEpic27Store()
+    {
+        var persona = new CapturingPersonaPrompts("[SEAM PROMPT]");
+        var h = BuildHarness(TammaMode.SaaS, TenantA, null,
+            defaultPersonaName: "claude", personaPrompts: persona);
+        await using (h.Ctx)
+        {
+            await h.Agents.CreateAsync(
+                new Agent { Name = "claude", Role = null, Visibility = AgentVisibility.Public },
+                """{ "provider": "anthropic", "model": "claude-sonnet-4-20250514" }""", "seed", null);
+
+            var resolved = await h.Resolver.ResolveForRoleAsync("architect");
+
+            resolved.PromptSource.Should().Be(AgentPromptSource.Epic27Store);
+        }
+    }
+
+    /// <summary>C2 — captures the AgentPromptSet the resolver threads into the
+    /// custom seam (proving the loaded version's prompts are passed, not re-read).
+    /// The real <see cref="CustomAgentPromptResolver"/> has no repo at all; this
+    /// double records what it was handed and returns a deterministic prompt.</summary>
+    private sealed class CapturingCustomPrompts(string prompt) : ICustomAgentPromptResolver
+    {
+        public int CallCount { get; private set; }
+        public Guid LastAgentId { get; private set; }
+        public AgentPromptSet? LastPrompts { get; private set; }
+        public Task<string> ResolveAsync(
+            Guid agentId, AgentPromptSet prompts, string role, string? action, CancellationToken ct = default)
+        {
+            CallCount++;
+            LastAgentId = agentId;
+            LastPrompts = prompts;
+            return Task.FromResult(prompt);
+        }
+    }
+
+    /// <summary>Counts invocations so a test can assert the persona seam is (not)
+    /// consulted, while still supplying a deterministic prompt when it IS used.</summary>
+    private sealed class CountingPersonaPrompts(string prompt) : IPersonaPromptResolver
+    {
+        public int CallCount { get; private set; }
+        public Task<string> ResolveAsync(
+            Principal principal, string role, string? action, CancellationToken ct = default)
+        {
+            CallCount++;
+            return Task.FromResult(prompt);
+        }
     }
 
     // ── test doubles ──

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Tamma.Api.Services.Security;
+using Tamma.Data.Entities;
 
 namespace Tamma.Api.Services.Agents;
 
@@ -135,6 +136,123 @@ public static class AgentConfigValidator
         }
 
         return (errors.Count == 0, errors.ToArray());
+    }
+
+    /// <summary>
+    /// Story 32-17 — visibility-aware validation. Runs the base shape rules
+    /// (the visibility-agnostic <see cref="Validate(string)"/> overload) and
+    /// then layers the <c>prompts</c>-block invariants (AC2/AC3):
+    /// <list type="bullet">
+    ///   <item><see cref="AgentVisibility.Public"/> + a NON-EMPTY <c>prompts</c>
+    ///     block → <c>PROMPTS_NOT_ALLOWED_ON_PUBLIC</c> (rule 4 — personas are
+    ///     prompt-free).</item>
+    ///   <item>any NON-EMPTY <c>prompts</c> block (public or private): each
+    ///     <c>byRoleAction</c> key must parse as a valid <c>"&lt;role&gt;:&lt;action&gt;"</c>
+    ///     taxonomy cell (else <c>PROMPTS_INVALID_KEY</c>), each template value
+    ///     must be non-empty after trim (else <c>PROMPTS_EMPTY_TEMPLATE</c>), and
+    ///     prototype-pollution keys are rejected (<c>PROMPTS_PROTO_POLLUTION</c>,
+    ///     reusing the 32-1 <see cref="RolePhaseMap.ForbiddenKeys"/> guard).</item>
+    /// </list>
+    /// A <c>prompts</c> object that parses but is wholly empty is treated as
+    /// absent (allowed for both visibilities). The same overload backs BOTH the
+    /// create and publish-version write paths so the invariant holds on both.
+    /// </summary>
+    public static (bool Valid, string[] Errors) Validate(string configJson, AgentVisibility visibility)
+    {
+        var (baseValid, baseErrors) = Validate(configJson);
+        var errors = new List<string>(baseErrors);
+
+        // The prompts block is parsed best-effort; only a present-and-non-empty
+        // block triggers the new rules. (Malformed JSON already failed above.)
+        var prompts = AgentPromptSet.TryRead(configJson);
+        if (prompts is { IsEmpty: false })
+        {
+            ValidatePromptSet(prompts, visibility, errors);
+        }
+
+        return (errors.Count == 0, errors.ToArray());
+    }
+
+    /// <summary>
+    /// Story 32-17 — the <c>prompts</c>-block content rules (AC2/AC3). Called
+    /// only for a present-and-non-empty <see cref="AgentPromptSet"/>.
+    /// </summary>
+    private static void ValidatePromptSet(
+        AgentPromptSet prompts, AgentVisibility visibility, List<string> errors)
+    {
+        // AC2 — public personas are prompt-free (rule 4).
+        if (visibility == AgentVisibility.Public)
+        {
+            errors.Add(
+                "PROMPTS_NOT_ALLOWED_ON_PUBLIC: public personas are prompt-free (Epic 32 rule 4); "
+                + "custom prompts require a private agent.");
+        }
+
+        // AC3 — content rules on byRoleAction (key taxonomy + non-empty template
+        // + prototype-pollution guard). The 'system' fallback is a free-form
+        // string; it is already known non-empty (IsEmpty was false) when present.
+        if (prompts.ByRoleAction is null)
+        {
+            return;
+        }
+
+        foreach (var (key, template) in prompts.ByRoleAction)
+        {
+            // Prototype-pollution keys first (reuse the 32-1 guard).
+            if (RolePhaseMap.ForbiddenKeys.Contains(key))
+            {
+                errors.Add($"PROMPTS_PROTO_POLLUTION: forbidden byRoleAction key '{key}'.");
+                continue;
+            }
+
+            // Key must parse as a valid "<role>:<action>" taxonomy cell.
+            if (!IsValidRoleActionKey(key))
+            {
+                errors.Add(
+                    $"PROMPTS_INVALID_KEY: byRoleAction key '{key}' must be a valid "
+                    + "\"<role>:<action>\" taxonomy cell.");
+            }
+
+            // Template value must be non-empty after trim (no-empty-fallback).
+            if (string.IsNullOrWhiteSpace(template))
+            {
+                errors.Add(
+                    $"PROMPTS_EMPTY_TEMPLATE: byRoleAction['{key}'] template must be a "
+                    + "non-empty string.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// True when <paramref name="key"/> is <c>"&lt;role&gt;:&lt;action&gt;"</c>
+    /// with both tokens valid per the Epic 27 taxonomy AND the pair an eligible
+    /// cell (e.g. <c>developer:deploy</c> — known tokens, no cell — is rejected).
+    /// Mirrors <c>RoleActionParsing.TryParsePair</c> without the HTTP boundary.
+    /// </summary>
+    private static bool IsValidRoleActionKey(string key)
+    {
+        var sep = key.IndexOf(':');
+        if (sep <= 0 || sep >= key.Length - 1)
+        {
+            return false;
+        }
+
+        var roleToken = key[..sep];
+        var actionToken = key[(sep + 1)..];
+
+        string roleWire;
+        string actionWire;
+        try
+        {
+            roleWire = AgentRoleExtensions.Parse(roleToken).ToWire();
+            actionWire = AgentActionExtensions.Parse(actionToken).ToWire();
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+
+        return RolePhaseMap.IsRoleEligibleForPhase(actionWire, roleWire);
     }
 
     /// <summary>
