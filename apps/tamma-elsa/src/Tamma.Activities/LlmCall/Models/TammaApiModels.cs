@@ -113,3 +113,111 @@ public record TaskExecuteResult(
     [property: JsonPropertyName("durationMs")] long DurationMs,
     [property: JsonPropertyName("error")] string? Error
 );
+
+// ============================================================
+// Story 32-5 (T5): call-LLM wire models
+//
+// These records mirror the JSON shapes of Tamma.Api's
+// LlmCallRequest / LlmCallResponse (Services/Agents) for the
+// engine→API mediation endpoint POST /api/v1/llm/call.
+//
+// They live in Tamma.Activities (not Tamma.Api) because the
+// reference graph runs Tamma.Api → Tamma.Activities, so the
+// engine client cannot see Tamma.Api's types. This mirrors the
+// established pattern above (AgentResolveResult etc.): the
+// engine-side wire DTOs carry [JsonPropertyName] camelCase
+// attributes that match the API's CamelCase serialization
+// (Program.cs ConfigureHttpJsonOptions → JsonNamingPolicy.CamelCase).
+// The Tamma.Api.Tests LlmCallContractTests guard the API side; the
+// shared ToolLoopConfig type (below) is the single source of truth
+// for that one nested shape.
+// ============================================================
+
+/// <summary>
+/// Engine→API wire request for <c>POST /api/v1/llm/call</c>. Mirrors
+/// <c>Tamma.Api.Services.Agents.LlmCallRequest</c>. Carries NO provider key —
+/// the API resolves the credential server-side. The body <c>tenantId</c> is
+/// retained for parity but carries no server-side authority (the endpoint uses
+/// the auth-derived tenant from <c>X-Tenant-Id</c>; Finding C1).
+/// </summary>
+public sealed record LlmCallApiRequest
+{
+    [JsonPropertyName("tenantId")] public Guid? TenantId { get; init; }
+    [JsonPropertyName("agentId")] public Guid? AgentId { get; init; }
+    [JsonPropertyName("persona")] public string? Persona { get; init; }
+    [JsonPropertyName("role")] public string Role { get; init; } = string.Empty;
+    [JsonPropertyName("action")] public string? Action { get; init; }
+    [JsonPropertyName("phase")] public string? Phase { get; init; }
+    [JsonPropertyName("prompt")] public string Prompt { get; init; } = string.Empty;
+    [JsonPropertyName("variables")] public Dictionary<string, object?> Variables { get; init; } = new();
+    [JsonPropertyName("model")] public string? Model { get; init; }
+    [JsonPropertyName("tools")] public IReadOnlyList<string>? Tools { get; init; }
+    [JsonPropertyName("enableToolLoop")] public bool EnableToolLoop { get; init; }
+    [JsonPropertyName("toolLoopConfig")] public ToolLoopConfig? ToolLoopConfig { get; init; }
+    [JsonPropertyName("params")] public LlmCallApiParams Params { get; init; } = new();
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// Inference parameters carried by <see cref="LlmCallApiRequest.Params"/>.
+/// Mirrors <c>Tamma.Api.Services.Agents.LlmCallParams</c>.
+/// </summary>
+public sealed record LlmCallApiParams
+{
+    [JsonPropertyName("maxTokens")] public int MaxTokens { get; init; } = 4096;
+    [JsonPropertyName("temperature")] public double Temperature { get; init; } = 0.7;
+    [JsonPropertyName("budgetCapUsd")] public decimal BudgetCapUsd { get; init; }
+}
+
+/// <summary>
+/// Engine→API wire response for <c>POST /api/v1/llm/call</c>. Mirrors
+/// <c>Tamma.Api.Services.Agents.LlmCallResponse</c>. KEY-FREE: only the
+/// <see cref="CredentialSource"/> LABEL is ever present — never the key.
+/// </summary>
+public sealed record LlmCallApiResponse
+{
+    [JsonPropertyName("success")] public bool Success { get; init; }
+    [JsonPropertyName("text")] public string? Text { get; init; }
+    [JsonPropertyName("usage")] public LlmCallUsageDto Usage { get; init; } = new();
+    [JsonPropertyName("credentialSource")] public string? CredentialSource { get; init; }
+    [JsonPropertyName("providerUsed")] public string? ProviderUsed { get; init; }
+    [JsonPropertyName("modelUsed")] public string? ModelUsed { get; init; }
+    [JsonPropertyName("cost")] public LlmCallCostDto Cost { get; init; } = new();
+    [JsonPropertyName("toolCalls")] public IReadOnlyList<LlmCallToolCallDto> ToolCalls { get; init; }
+        = Array.Empty<LlmCallToolCallDto>();
+    [JsonPropertyName("agentId")] public Guid? AgentId { get; init; }
+    [JsonPropertyName("agentVersion")] public int AgentVersion { get; init; }
+    [JsonPropertyName("role")] public string? Role { get; init; }
+    [JsonPropertyName("correlationId")] public string? CorrelationId { get; init; }
+    [JsonPropertyName("durationMs")] public long DurationMs { get; init; }
+    [JsonPropertyName("failureCode")] public string? FailureCode { get; init; }
+    [JsonPropertyName("failureReason")] public string? FailureReason { get; init; }
+    [JsonPropertyName("httpStatusCode")] public int? HttpStatusCode { get; init; }
+}
+
+/// <summary>Token usage projection. Mirrors <c>Tamma.Api.Services.Agents.UsageDto</c>.</summary>
+public sealed record LlmCallUsageDto
+{
+    [JsonPropertyName("promptTokens")] public int PromptTokens { get; init; }
+    [JsonPropertyName("completionTokens")] public int CompletionTokens { get; init; }
+    [JsonPropertyName("totalTokens")] public int TotalTokens { get; init; }
+    [JsonPropertyName("toolLoopTokens")] public int ToolLoopTokens { get; init; }
+    [JsonPropertyName("toolLoopTurns")] public int ToolLoopTurns { get; init; }
+    [JsonPropertyName("toolLoopExhausted")] public bool ToolLoopExhausted { get; init; }
+}
+
+/// <summary>Metered cost. Mirrors <c>Tamma.Api.Services.Agents.CostDto</c>.</summary>
+public sealed record LlmCallCostDto
+{
+    [JsonPropertyName("providerCostUsd")] public decimal ProviderCostUsd { get; init; }
+    [JsonPropertyName("priceUsd")] public decimal PriceUsd { get; init; }
+    [JsonPropertyName("currency")] public string Currency { get; init; } = "USD";
+}
+
+/// <summary>A key-free tool-call summary. Mirrors <c>Tamma.Api.Services.Agents.ToolCallDto</c>.</summary>
+public sealed record LlmCallToolCallDto
+{
+    [JsonPropertyName("name")] public string Name { get; init; } = string.Empty;
+    [JsonPropertyName("id")] public string Id { get; init; } = string.Empty;
+    [JsonPropertyName("argumentsJson")] public string ArgumentsJson { get; init; } = "{}";
+}

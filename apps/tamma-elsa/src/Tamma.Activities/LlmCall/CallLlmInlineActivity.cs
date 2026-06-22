@@ -1,5 +1,3 @@
-using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Elsa.Extensions;
@@ -8,28 +6,38 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Tamma.Activities.LlmCall.Credentials;
 using Tamma.Activities.LlmCall.Models;
-using Tamma.Activities.LlmCall.Tools;
 using Tamma.Activities.Security;
-using Tamma.Activities.ToolExecution;
-using Tamma.Core;
 
 namespace Tamma.Activities.LlmCall;
 
 /// <summary>
-/// Inline activity that performs the actual LLM HTTP call.
-/// Writes results to workflow variables "LastDiagnostic" and "LastResponse".
-/// This is used inside the Sequence-based retry loop of LlmCallWorkflow.
+/// Story 32-5 (AC5/AC6) — THIN CLIENT over the managed execution endpoint.
 ///
-/// When EnableToolLoop is true, executes a multi-turn agentic loop:
-///   call LLM -> parse tool calls -> execute tools -> feed results back -> repeat
-/// until the LLM produces a text-only response or maxSteps is reached.
+/// <para>This activity used to hold a provider key, build the Anthropic/OpenAI
+/// request, perform the external provider HTTP call, and run a full agentic tool
+/// loop IN THE ENGINE PROCESS. After the Epic 32
+/// pivot it owns NONE of that: a workflow step never calls an external provider.
+/// It maps its <see cref="Input{T}"/> props into an <see cref="LlmCallApiRequest"/>,
+/// sends it via <see cref="TammaApiClient.CallLlmAsync"/> to
+/// <c>POST /api/v1/llm/call</c> (which holds the credential, gates, runs the loop
+/// server-side, and meters), and writes the result back into the SAME workflow
+/// variables it wrote before — <c>LastDiagnostic</c> (a
+/// <see cref="ProviderAttemptDiagnostic"/>), <c>LastResponse</c> (a
+/// <see cref="NormalizedLlmResponse"/>), and
+/// <c>ToolLoopTokens</c>/<c>ToolLoopTurns</c>/<c>ToolLoopExhausted</c> — so
+/// <c>LlmCallWorkflow.cs</c>'s <c>BuildRetryLoop</c>/<c>RetryCheck</c>/
+/// <c>SkipIfSucceeded</c>/circuit-breaker keep working byte-for-byte (AC6).</para>
+///
+/// <para><b>No key, no HTTP-to-provider, no tool loop here.</b>
+/// <c>enableToolLoop</c> + <c>toolLoopConfig</c> are passed THROUGH to the
+/// endpoint (executed server-side), never locally. The engine resolver/runner DI
+/// removal + the eight other in-engine callers are T6.</para>
 /// </summary>
 [Activity(
     "Tamma.LlmCall",
     "Call LLM Inline",
-    "Execute HTTP call to LLM provider (inline for Sequence-based workflows)",
+    "Send a managed LLM call to POST /api/v1/llm/call (inline for Sequence-based workflows)",
     Kind = ActivityKind.Task
 )]
 public class CallLlmInlineActivity : CodeActivity
@@ -56,416 +64,302 @@ public class CallLlmInlineActivity : CodeActivity
     public Input<string?> ToolLoopConfigJsonProp { get; set; } = default!;
 
     /// <summary>
-    /// Story 32-3 (AC3) — tenant id (GUID string) for BYOK credential
-    /// resolution. Threaded from <c>LlmCallWorkflow</c>'s existing
-    /// <c>TenantId</c> variable. Empty / whitespace ⇒ single-user / platform
-    /// scope (<c>tenantId == null</c>).
+    /// Story 32-3 (AC3) — tenant id (GUID string) threaded from
+    /// <c>LlmCallWorkflow</c>'s existing <c>TenantId</c> variable. It is sent as
+    /// the <c>X-Tenant-Id</c> header — the authoritative scope the endpoint
+    /// asserts (Finding C1). Empty / whitespace ⇒ single-user / platform scope.
     /// </summary>
     [Input(Description = "Tenant id (GUID string) for BYOK credential resolution; empty = single-user/platform")]
     public Input<string?> TenantIdProp { get; set; } = new((string?)null);
 
-    private readonly IHttpClientFactory? _httpClientFactory;
-    private readonly IConfiguration? _configuration;
     private readonly ILogger<CallLlmInlineActivity>? _logger;
-    private readonly IContentSanitizer? _sanitizer;
-    private readonly IToolExecutorRegistry? _toolRegistry;
-    private readonly IToolCallValidator? _toolCallValidator;
-    private readonly ContextCompactor? _contextCompactor;
-    private readonly ToolLoopEventEmitter? _eventEmitter;
-    private readonly ParallelToolExecutor? _parallelExecutor;
-    private readonly IProviderCredentialResolver? _credentialResolver;
-
-    // Story 32-5 (AC4) — the agentic tool loop + its provider-call/config helpers
-    // were extracted VERBATIM into InlineToolLoopRunner. The activity still runs
-    // the runner LOCALLY (the cutover to the API endpoint is T5/T6). When a runner
-    // is not DI-injected (the [JsonConstructor]/test ctors), one is built lazily
-    // from this activity's own collaborators so behaviour is identical.
-    private InlineToolLoopRunner? _toolLoop;
+    private readonly TammaApiClient? _apiClient;
 
     [JsonConstructor]
-    public CallLlmInlineActivity() : this(null, null, null, null, null, null, null, null, null, null)
+    public CallLlmInlineActivity() : this(null, null)
     {
-    }
-
-    public CallLlmInlineActivity(
-        ILogger<CallLlmInlineActivity>? logger,
-        IHttpClientFactory? httpClientFactory,
-        IConfiguration? configuration,
-        IContentSanitizer? sanitizer,
-        IToolExecutorRegistry? toolRegistry = null,
-        IToolCallValidator? toolCallValidator = null,
-        ContextCompactor? contextCompactor = null,
-        ToolLoopEventEmitter? eventEmitter = null,
-        ParallelToolExecutor? parallelExecutor = null,
-        IProviderCredentialResolver? credentialResolver = null,
-        InlineToolLoopRunner? toolLoop = null)
-    {
-        _logger = logger;
-        _httpClientFactory = httpClientFactory;
-        _configuration = configuration;
-        _sanitizer = sanitizer;
-        _toolRegistry = toolRegistry;
-        _toolCallValidator = toolCallValidator;
-        _contextCompactor = contextCompactor;
-        _eventEmitter = eventEmitter;
-        _parallelExecutor = parallelExecutor;
-        _credentialResolver = credentialResolver;
-        _toolLoop = toolLoop;
     }
 
     /// <summary>
-    /// The extracted tool-loop runner. Uses the DI-injected instance when present;
-    /// otherwise builds one from this activity's own collaborators (single home of
-    /// the loop — no fork). Constructed lazily so the [JsonConstructor] path works.
+    /// Sanitizer-compatible constructor preserved for the existing
+    /// <c>CallLlmInlineActivitySanitizationTests</c> regression net. The
+    /// provider-side collaborators (http factory, configuration, sanitizer, tool
+    /// registry, validator, compactor, event emitter, parallel executor,
+    /// credential resolver, loop runner) are NO LONGER USED by the shim — they are
+    /// accepted and ignored so callers/tests that still pass them keep compiling
+    /// (the engine-side DI removal is T6). The shim resolves its only collaborator,
+    /// <see cref="TammaApiClient"/>, from the activity execution context.
     /// </summary>
-    private InlineToolLoopRunner ToolLoop =>
-        _toolLoop ??= new InlineToolLoopRunner(
-            logger: null,
-            httpClientFactory: _httpClientFactory,
-            configuration: _configuration,
-            sanitizer: _sanitizer,
-            toolRegistry: _toolRegistry,
-            toolCallValidator: _toolCallValidator,
-            contextCompactor: _contextCompactor,
-            eventEmitter: _eventEmitter,
-            parallelExecutor: _parallelExecutor,
-            credentialResolver: _credentialResolver);
+    public CallLlmInlineActivity(
+        ILogger<CallLlmInlineActivity>? logger,
+        IHttpClientFactory? httpClientFactory,
+        IConfiguration? configuration = null,
+        IContentSanitizer? sanitizer = null,
+        object? toolRegistry = null,
+        object? toolCallValidator = null,
+        object? contextCompactor = null,
+        object? eventEmitter = null,
+        object? parallelExecutor = null,
+        object? credentialResolver = null,
+        object? toolLoop = null)
+    {
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// DI constructor used by the engine host. Takes the
+    /// <see cref="TammaApiClient"/> the shim delegates to. (Resolution from the
+    /// activity execution context is the fallback when this ctor is not used —
+    /// e.g. the <see cref="JsonConstructorAttribute"/> path.)
+    /// </summary>
+    public CallLlmInlineActivity(
+        ILogger<CallLlmInlineActivity>? logger,
+        TammaApiClient? apiClient)
+    {
+        _logger = logger;
+        _apiClient = apiClient;
+    }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var inputJson = InputJsonProp.Get(context);
         var providerName = ProviderNameProp.Get(context);
-        var systemPromptRaw = SystemPromptProp.Get(context);
+        var systemPrompt = SystemPromptProp.Get(context);
         var toolsJson = ToolsJsonProp.Get(context);
         var attemptNumber = AttemptNumberProp.Get(context);
         var enableToolLoop = EnableToolLoopProp.Get(context);
         var toolLoopConfigJson = ToolLoopConfigJsonProp.Get(context);
+        var tenantIdRaw = TenantIdProp.Get(context);
 
         var input = ParseInput(inputJson);
+        var toolLoopConfig = ParseToolLoopConfig(toolLoopConfigJson);
 
-        // Story 32-3 (AC3) — tenant context for BYOK credential resolution.
-        var tenantId = ParseTenantId(TenantIdProp.Get(context));
+        var model = input.ModelOverrides.TryGetValue(providerName, out var mo) ? mo : null;
+        var correlationId = context.WorkflowExecutionContext.Id;
 
-        // Sanitize prompts before LLM call (defense-in-depth against prompt injection)
-        var systemPrompt = SanitizePrompts(context, providerName, systemPromptRaw, input);
+        // Map the activity's Input<> props → the wire request. The per-iteration
+        // provider name maps to Persona (the named cross-role agent the call
+        // should adopt for this provider attempt); the API resolves the concrete
+        // provider/model/credential server-side. The system prompt is forwarded
+        // as a template variable so the API's prompt renderer can honour it.
+        var request = BuildLlmCallRequest(
+            input, providerName, systemPrompt, toolsJson, model,
+            enableToolLoop, toolLoopConfig, tenantIdRaw, correlationId);
 
-        // ======== Backward-compatible guard ========
-        // When EnableToolLoop is false, execute the EXACT existing single-turn code path.
-        if (!enableToolLoop)
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var tenantHeader = string.IsNullOrWhiteSpace(tenantIdRaw) ? null : tenantIdRaw!.Trim();
+
+        var startedAt = DateTime.UtcNow;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        var response = await apiClient.CallLlmAsync(request, tenantHeader, context.CancellationToken)
+            .ConfigureAwait(false);
+        sw.Stop();
+
+        // A null response is a transport / raw-5xx failure (PostAsync nulled it).
+        // Treat it as a transient failure (httpStatusCode 0) so RetryCheck retries
+        // — never a successful empty result.
+        if (response is null)
         {
-            var model = input.ModelOverrides.TryGetValue(providerName, out var mo)
-                ? mo
-                : ToolLoop.GetDefaultModel(providerName);
-            await SingleTurnCall(context, input, providerName, systemPrompt, toolsJson, attemptNumber, model, tenantId);
+            _logger?.LogWarning(
+                "call-LLM returned no body (transport/5xx) for provider {Provider}, workflow {WorkflowInstanceId}",
+                providerName, correlationId);
+
+            WriteVariables(
+                context,
+                BuildTransportFailure(providerName, model, attemptNumber, sw.ElapsedMilliseconds, startedAt));
             return;
         }
 
-        // ======== Agentic Tool Loop ========
-        var loopModel = input.ModelOverrides.TryGetValue(providerName, out var mo2)
-            ? mo2
-            : ToolLoop.GetDefaultModel(providerName);
-        var loopConfig = ParseToolLoopConfig(toolLoopConfigJson);
-        var tools = DeserializeResolvedTools(toolsJson);
+        WriteVariables(
+            context,
+            MapResponseToVariables(response, providerName, model, attemptNumber, sw.ElapsedMilliseconds, startedAt));
 
-        // If no tools from the workflow, use registered tool executors' definitions
-        if ((tools == null || tools.Count == 0) && _toolRegistry != null)
-        {
-            var allowedExecutors = _toolRegistry.GetAllowed(loopConfig.AllowedTools);
-            tools = allowedExecutors.Select(e => new ResolvedTool
-            {
-                Name = e.ToolName,
-                Description = e.Description,
-                InputSchema = e.InputSchema
-            }).ToList();
-        }
-
-        var startedAt = DateTime.UtcNow;
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-
-        _logger?.LogInformation(
-            "Tool loop entered: WorkflowInstanceId={WorkflowInstanceId}, Provider={Provider}, Model={Model}, MaxSteps={MaxSteps}, AllowedToolCount={AllowedToolCount}",
-            context.WorkflowExecutionContext.Id, providerName, loopModel, loopConfig.MaxSteps,
-            loopConfig.AllowedTools?.Length ?? 0);
-
-        // Story 32-3 — resolved BYOK/platform source for the diagnostic tag.
-        // Set inside the try (after resolution) so a fail-closed credential
-        // error surfaces as a failed diagnostic, never a leaked exception.
-        string? credentialSource = null;
-
-        try
-        {
-            // Resolve provider config + the API key (BYOK→platform) just before
-            // the call. A PROVIDER_CREDENTIAL_UNAVAILABLE TammaError thrown here
-            // is caught below as a failed attempt so the provider chain advances.
-            var (providerConfig, source) =
-                await ToolLoop.LoadProviderConfigWithKeyAsync(providerName, tenantId, context.CancellationToken);
-            credentialSource = source;
-
-            // Story 32-5 (AC4) — delegate to the extracted runner (run LOCALLY).
-            var loop = await ToolLoop.RunAsync(
-                providerName, providerConfig, loopModel, systemPrompt,
-                input.UserPrompt, input.MaxTokens, input.Temperature, tools,
-                enableToolLoop: true, loopConfig,
-                correlationId: context.WorkflowExecutionContext.Id, context.CancellationToken);
-            var response = loop.Response;
-            var totalTokens = loop.InputTokens + loop.OutputTokens;
-            var turns = loop.Turns;
-            var exhausted = loop.Exhausted;
-
-            sw.Stop();
-
-            // Output sanitization: strip HTML/zero-width from LLM response before storage
-            if (_sanitizer != null && response.ResponseText != null)
-            {
-                var outputResult = _sanitizer.SanitizeOutput(response.ResponseText);
-                response.ResponseText = outputResult.Result;
-            }
-
-            var diagnostic = new ProviderAttemptDiagnostic
-            {
-                ProviderName = providerName,
-                Model = loopModel,
-                AttemptNumber = attemptNumber,
-                Succeeded = response.Success,
-                HttpStatusCode = response.HttpStatusCode,
-                ErrorMessage = response.ErrorMessage,
-                DurationMs = sw.ElapsedMilliseconds,
-                StartedAtUtc = startedAt,
-                PromptTokens = response.PromptTokens,
-                CompletionTokens = response.CompletionTokens,
-                CredentialSource = credentialSource
-            };
-
-            context.SetVariable("LastDiagnostic", JsonSerializer.Serialize(diagnostic));
-            context.SetVariable("LastResponse", JsonSerializer.Serialize(response));
-            context.SetVariable("ToolLoopTokens", totalTokens);
-            context.SetVariable("ToolLoopTurns", turns);
-            context.SetVariable("ToolLoopExhausted", exhausted);
-
-            _logger?.LogDebug(
-                "Tool loop output written: WorkflowInstanceId={WorkflowInstanceId}, ToolLoopTokens={ToolLoopTokens}, ToolLoopTurns={ToolLoopTurns}",
-                context.WorkflowExecutionContext.Id, totalTokens, turns);
-        }
-        catch (Exception ex)
-        {
-            sw.Stop();
-            // NOTE: never log ex with a key — TammaError messages are key-free.
-            _logger?.LogError(ex, "Agentic tool loop failed for {Provider}", providerName);
-
-            var diagnostic = new ProviderAttemptDiagnostic
-            {
-                ProviderName = providerName,
-                Model = loopModel,
-                AttemptNumber = attemptNumber,
-                Succeeded = false,
-                ErrorMessage = ex is TammaError te
-                    ? $"{te.Code}: {te.Message}"
-                    : $"Tool loop error: {ex.Message}",
-                DurationMs = sw.ElapsedMilliseconds,
-                StartedAtUtc = startedAt,
-                CredentialSource = credentialSource
-            };
-
-            context.SetVariable("LastDiagnostic", JsonSerializer.Serialize(diagnostic));
-            context.SetVariable("LastResponse", JsonSerializer.Serialize(new NormalizedLlmResponse
-            {
-                Success = false,
-                ErrorMessage = diagnostic.ErrorMessage
-            }));
-        }
+        _logger?.LogDebug(
+            "call-LLM result written: workflow {WorkflowInstanceId}, provider {Provider}, success {Success}, "
+            + "httpStatus {HttpStatus}, toolLoopTokens {ToolLoopTokens}",
+            correlationId, providerName, response.Success,
+            response.HttpStatusCode, response.Usage.ToolLoopTokens);
     }
 
     // =======================================================================
-    // Prompt Sanitization
+    // Pure, testable mapping helpers (no Elsa context required)
     // =======================================================================
 
     /// <summary>
-    /// Sanitize system and user prompts using the content sanitizer if available.
+    /// Map the activity's input props into the wire <see cref="LlmCallApiRequest"/>.
+    /// Static + context-free so it is unit-testable (the convention used by
+    /// <see cref="ResolvePromptFromRegistryActivity.CallResolveAsync"/>).
     /// </summary>
-    private string SanitizePrompts(
-        ActivityExecutionContext context, string providerName,
-        string systemPromptRaw, LlmCallWorkflowInput input)
-    {
-        if (_sanitizer == null)
-            return systemPromptRaw;
-
-        var totalPatterns = 0;
-
-        var systemResult = _sanitizer.SanitizeInput(systemPromptRaw);
-        var systemPrompt = systemResult.Result;
-        if (systemResult.Warnings.Count > 0)
-        {
-            totalPatterns += systemResult.Warnings.Count;
-            _logger?.LogWarning(
-                "Injection pattern detected in SystemPrompt for CallLlmInlineActivity, patterns matched: {Count}, workflow: {WorkflowInstanceId}",
-                systemResult.Warnings.Count, context.WorkflowExecutionContext.Id);
-        }
-
-        if (!string.IsNullOrEmpty(input.UserPrompt))
-        {
-            var userResult = _sanitizer.SanitizeInput(input.UserPrompt);
-            input.UserPrompt = userResult.Result;
-            if (userResult.Warnings.Count > 0)
-            {
-                totalPatterns += userResult.Warnings.Count;
-                _logger?.LogWarning(
-                    "Injection pattern detected in UserPrompt for CallLlmInlineActivity, patterns matched: {Count}, workflow: {WorkflowInstanceId}",
-                    userResult.Warnings.Count, context.WorkflowExecutionContext.Id);
-            }
-        }
-        else
-        {
-            _logger?.LogDebug("Sanitization skipped for UserPrompt in CallLlmInlineActivity (empty/null input)");
-        }
-
-        if (totalPatterns > 0)
-            _logger?.LogInformation(
-                "Total injection patterns detected per LLM call: {TotalPatternsMatched}, activity=CallLlmInlineActivity, provider={Provider}, workflow: {WorkflowInstanceId}",
-                totalPatterns, providerName, context.WorkflowExecutionContext.Id);
-
-        return systemPrompt;
-    }
-
-    // =======================================================================
-    // Single-Turn Call (existing behavior, zero changes)
-    // =======================================================================
-
-    /// <summary>
-    /// Existing single-turn LLM call. Zero changes from the pre-tool-loop implementation.
-    /// </summary>
-    private async Task SingleTurnCall(
-        ActivityExecutionContext context,
+    public static LlmCallApiRequest BuildLlmCallRequest(
         LlmCallWorkflowInput input,
         string providerName,
-        string systemPrompt,
+        string? systemPrompt,
         string? toolsJson,
-        int attemptNumber,
-        string model,
-        Guid? tenantId)
+        string? model,
+        bool enableToolLoop,
+        ToolLoopConfig toolLoopConfig,
+        string? tenantIdRaw,
+        string correlationId)
     {
-        var startedAt = DateTime.UtcNow;
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        string? credentialSource = null;
+        var tools = DeserializeResolvedTools(toolsJson)?.Select(t => t.Name).ToList();
 
-        // Apply exponential backoff delay for retry attempts (skip first attempt)
-        if (attemptNumber > 1)
+        var variables = new Dictionary<string, object?>();
+        if (!string.IsNullOrEmpty(systemPrompt))
         {
-            var baseDelay = 1000;
-            var maxDelay = 30000;
-            var delay = Math.Min(baseDelay * (int)Math.Pow(2, attemptNumber - 1), maxDelay);
-            _logger?.LogInformation(
-                "Retry backoff: waiting {Delay}ms before attempt {Attempt} for {Provider}",
-                delay, attemptNumber, providerName);
-            await Task.Delay(delay);
+            // Forward the resolved system prompt so the API renderer can honour an
+            // explicit engine-side override. The API's own tenant→system prompt
+            // resolution remains authoritative when this is absent.
+            variables["systemPrompt"] = systemPrompt;
         }
 
-        try
+        return new LlmCallApiRequest
         {
-            var httpClient = _httpClientFactory?.CreateClient($"llm-{providerName}")
-                             ?? new HttpClient();
-
-            // Resolve provider config + the API key (BYOK→platform) just before
-            // the call. A PROVIDER_CREDENTIAL_UNAVAILABLE TammaError thrown here
-            // is caught below as a failed attempt so the provider chain advances.
-            // The provider-call/config helpers now live on the shared runner (AC4).
-            var (providerConfig, source) =
-                await ToolLoop.LoadProviderConfigWithKeyAsync(providerName, tenantId, context.CancellationToken);
-            credentialSource = source;
-            httpClient.Timeout = TimeSpan.FromSeconds(providerConfig.TimeoutSeconds);
-
-            NormalizedLlmResponse response;
-
-            if (providerName.Equals("anthropic", StringComparison.OrdinalIgnoreCase))
+            TenantId = ParseTenantId(tenantIdRaw),
+            Persona = string.IsNullOrWhiteSpace(providerName) ? null : providerName,
+            Role = string.IsNullOrWhiteSpace(input.Role) ? "assistant" : input.Role,
+            Action = string.IsNullOrWhiteSpace(input.OperationName) ? null : input.OperationName,
+            Prompt = input.UserPrompt,
+            Variables = variables,
+            Model = model,
+            Tools = tools is { Count: > 0 } ? tools : null,
+            EnableToolLoop = enableToolLoop,
+            ToolLoopConfig = enableToolLoop ? toolLoopConfig : null,
+            Params = new LlmCallApiParams
             {
-                response = await ToolLoop.CallAnthropicMessages(httpClient, providerConfig, model,
-                    systemPrompt, input.UserPrompt, input.MaxTokens, input.Temperature, toolsJson);
-            }
-            else
-            {
-                response = await ToolLoop.CallOpenAiCompatible(httpClient, providerConfig, model,
-                    systemPrompt, input.UserPrompt, input.MaxTokens, input.Temperature, toolsJson);
-            }
-
-            sw.Stop();
-
-            // Output sanitization: strip HTML/zero-width from LLM response before storage
-            if (_sanitizer != null && response.ResponseText != null)
-            {
-                var outputResult = _sanitizer.SanitizeOutput(response.ResponseText);
-                response.ResponseText = outputResult.Result;
-            }
-
-            // Tool call validation (Story 11.3): validate tool calls in single-turn response
-            if (_toolCallValidator != null && response.ToolCalls != null && response.ToolCalls.Count > 0)
-            {
-                var allowedNames = GetAllowedToolNames(toolsJson);
-                foreach (var tc in response.ToolCalls)
-                {
-                    var vr = _toolCallValidator.Validate(tc, allowedNames);
-                    if (vr.IsValid)
-                    {
-                        tc.ArgumentsJson = vr.SanitizedArgumentsJson ?? tc.ArgumentsJson;
-                    }
-                    else
-                    {
-                        _logger?.LogWarning(
-                            "Tool call '{ToolName}' rejected in single-turn path: {Error}",
-                            tc.ToolName, vr.ErrorMessage);
-                        response.Success = false;
-                        response.ErrorMessage = $"Tool call validation failed: {vr.ErrorMessage}";
-                    }
-                }
-            }
-
-            var diagnostic = new ProviderAttemptDiagnostic
-            {
-                ProviderName = providerName,
-                Model = model,
-                AttemptNumber = attemptNumber,
-                Succeeded = response.Success,
-                HttpStatusCode = response.HttpStatusCode,
-                ErrorMessage = response.ErrorMessage,
-                DurationMs = sw.ElapsedMilliseconds,
-                StartedAtUtc = startedAt,
-                PromptTokens = response.PromptTokens,
-                CompletionTokens = response.CompletionTokens,
-                CredentialSource = credentialSource
-            };
-
-            context.SetVariable("LastDiagnostic", JsonSerializer.Serialize(diagnostic));
-            context.SetVariable("LastResponse", JsonSerializer.Serialize(response));
-        }
-        catch (Exception ex)
-        {
-            sw.Stop();
-
-            var diagnostic = new ProviderAttemptDiagnostic
-            {
-                ProviderName = providerName,
-                Model = model,
-                AttemptNumber = attemptNumber,
-                Succeeded = false,
-                HttpStatusCode = 0,
-                // TammaError messages (incl. PROVIDER_CREDENTIAL_UNAVAILABLE) are
-                // key-free by construction — safe to surface here.
-                ErrorMessage = ex is TaskCanceledException
-                    ? "Request timed out"
-                    : ex is TammaError te
-                        ? $"{te.Code}: {te.Message}"
-                        : $"Error: {ex.Message}",
-                DurationMs = sw.ElapsedMilliseconds,
-                StartedAtUtc = startedAt,
-                CredentialSource = credentialSource
-            };
-
-            context.SetVariable("LastDiagnostic", JsonSerializer.Serialize(diagnostic));
-            context.SetVariable("LastResponse", JsonSerializer.Serialize(new NormalizedLlmResponse
-            {
-                Success = false,
-                ErrorMessage = diagnostic.ErrorMessage
-            }));
-        }
+                MaxTokens = input.MaxTokens,
+                Temperature = input.Temperature,
+                BudgetCapUsd = input.BudgetCapUsd,
+            },
+            CorrelationId = correlationId,
+        };
     }
+
+    /// <summary>
+    /// Project the wire <see cref="LlmCallApiResponse"/> into the SAME workflow
+    /// variable shapes the legacy local path produced: a
+    /// <see cref="ProviderAttemptDiagnostic"/> (for <c>LastDiagnostic</c>), a
+    /// <see cref="NormalizedLlmResponse"/> (for <c>LastResponse</c>), and the three
+    /// tool-loop counters. Static + context-free so it is unit-testable.
+    ///
+    /// <para><b>HttpStatusCode (load-bearing for RetryCheck).</b> When the API body
+    /// omits an upstream status it is derived: success ⇒ 200 (not in the transient
+    /// set), failure ⇒ 0 (transient → RetryCheck advances). A preserved upstream
+    /// status (429/502/503/504/0) flows through unchanged.</para>
+    /// </summary>
+    public static MappedLlmVariables MapResponseToVariables(
+        LlmCallApiResponse response,
+        string providerName,
+        string? model,
+        int attemptNumber,
+        long durationMs,
+        DateTime startedAtUtc)
+    {
+        var httpStatus = response.HttpStatusCode ?? (response.Success ? 200 : 0);
+
+        var diagnostic = new ProviderAttemptDiagnostic
+        {
+            ProviderName = providerName,
+            Model = response.ModelUsed ?? model,
+            AttemptNumber = attemptNumber,
+            Succeeded = response.Success,
+            HttpStatusCode = httpStatus,
+            ErrorMessage = response.Success
+                ? null
+                : ComposeFailureMessage(response.FailureCode, response.FailureReason),
+            DurationMs = durationMs,
+            StartedAtUtc = startedAtUtc,
+            PromptTokens = response.Usage.PromptTokens,
+            CompletionTokens = response.Usage.CompletionTokens,
+            CredentialSource = response.CredentialSource,
+        };
+
+        var normalized = new NormalizedLlmResponse
+        {
+            Success = response.Success,
+            ResponseText = response.Text,
+            Model = response.ModelUsed ?? model,
+            PromptTokens = response.Usage.PromptTokens,
+            CompletionTokens = response.Usage.CompletionTokens,
+            HttpStatusCode = httpStatus,
+            ErrorMessage = response.Success
+                ? null
+                : ComposeFailureMessage(response.FailureCode, response.FailureReason),
+            ToolCalls = response.ToolCalls.Count == 0
+                ? null
+                : response.ToolCalls
+                    .Select(tc => new LlmToolCall { Id = tc.Id, ToolName = tc.Name, ArgumentsJson = tc.ArgumentsJson })
+                    .ToList(),
+        };
+
+        return new MappedLlmVariables(
+            diagnostic,
+            normalized,
+            response.Usage.ToolLoopTokens,
+            response.Usage.ToolLoopTurns,
+            response.Usage.ToolLoopExhausted);
+    }
+
+    /// <summary>
+    /// The fail-closed variables for a transport / raw-5xx (null body) result:
+    /// a failed diagnostic with the transient <c>httpStatusCode 0</c> so RetryCheck
+    /// advances, plus an unsuccessful empty response.
+    /// </summary>
+    public static MappedLlmVariables BuildTransportFailure(
+        string providerName,
+        string? model,
+        int attemptNumber,
+        long durationMs,
+        DateTime startedAtUtc)
+    {
+        const string message = "call-LLM endpoint unavailable (no response body)";
+        var diagnostic = new ProviderAttemptDiagnostic
+        {
+            ProviderName = providerName,
+            Model = model,
+            AttemptNumber = attemptNumber,
+            Succeeded = false,
+            HttpStatusCode = 0,
+            ErrorMessage = message,
+            DurationMs = durationMs,
+            StartedAtUtc = startedAtUtc,
+        };
+        var normalized = new NormalizedLlmResponse
+        {
+            Success = false,
+            HttpStatusCode = 0,
+            ErrorMessage = message,
+        };
+        return new MappedLlmVariables(diagnostic, normalized, 0, 0, false);
+    }
+
+    /// <summary>
+    /// Write the mapped variables to the workflow context using the SAME
+    /// serialization the legacy path used (default <see cref="JsonSerializer"/> ⇒
+    /// PascalCase), so <c>RetryCheck</c>/<c>SuccessCheck</c>/the success-output
+    /// builder deserialize them byte-compatibly.
+    /// </summary>
+    private static void WriteVariables(ActivityExecutionContext context, MappedLlmVariables v)
+    {
+        context.SetVariable("LastDiagnostic", JsonSerializer.Serialize(v.Diagnostic));
+        context.SetVariable("LastResponse", JsonSerializer.Serialize(v.Response));
+        context.SetVariable("ToolLoopTokens", v.ToolLoopTokens);
+        context.SetVariable("ToolLoopTurns", v.ToolLoopTurns);
+        context.SetVariable("ToolLoopExhausted", v.ToolLoopExhausted);
+    }
+
+    private static string ComposeFailureMessage(string? failureCode, string? failureReason)
+    {
+        if (!string.IsNullOrEmpty(failureCode) && !string.IsNullOrEmpty(failureReason))
+            return $"{failureCode}: {failureReason}";
+        if (!string.IsNullOrEmpty(failureReason)) return failureReason!;
+        if (!string.IsNullOrEmpty(failureCode)) return failureCode!;
+        return "LLM call failed";
+    }
+
+    // =======================================================================
+    // Parsing helpers (carried over verbatim from the legacy activity)
+    // =======================================================================
 
     /// <summary>
     /// Parse the <c>TenantIdProp</c> string into a <see cref="Guid"/>. Empty /
@@ -497,24 +391,18 @@ public class CallLlmInlineActivity : CodeActivity
         try { return JsonSerializer.Deserialize<List<ResolvedTool>>(json); }
         catch { return null; }
     }
-
-    /// <summary>
-    /// Extract the list of allowed tool names from the serialized tools JSON.
-    /// Used by tool call validation in the single-turn code path.
-    /// </summary>
-    private static IReadOnlyList<string> GetAllowedToolNames(string? toolsJson)
-    {
-        if (string.IsNullOrWhiteSpace(toolsJson))
-            return Array.Empty<string>();
-
-        try
-        {
-            var tools = JsonSerializer.Deserialize<List<ResolvedTool>>(toolsJson);
-            return tools?.Select(t => t.Name).ToList() ?? new List<string>();
-        }
-        catch
-        {
-            return Array.Empty<string>();
-        }
-    }
 }
+
+/// <summary>
+/// Story 32-5 (AC5) — the mapped workflow-variable bundle the shim writes from a
+/// wire <see cref="LlmCallApiResponse"/>. Returned by
+/// <see cref="CallLlmInlineActivity.MapResponseToVariables"/> /
+/// <see cref="CallLlmInlineActivity.BuildTransportFailure"/> so the mapping is
+/// unit-testable without an Elsa context.
+/// </summary>
+public sealed record MappedLlmVariables(
+    ProviderAttemptDiagnostic Diagnostic,
+    NormalizedLlmResponse Response,
+    int ToolLoopTokens,
+    int ToolLoopTurns,
+    bool ToolLoopExhausted);
