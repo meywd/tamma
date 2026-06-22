@@ -1,11 +1,14 @@
 using System.Security.Claims;
+using Microsoft.Extensions.Options;
 using Tamma.Api.Auth;
 using System.Text.Json;
+using Tamma.Api.Services.Agents;
 using Tamma.Api.Services.PromptStore;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
+using Tamma.Data.Seeders;
 
 namespace Tamma.Api.Middleware;
 
@@ -172,6 +175,27 @@ public class EnsurePersonalTenantMiddleware(RequestDelegate next)
         var provisioning = context.RequestServices
             .GetRequiredService<ITenantProvisioningService>();
         await provisioning.ProvisionAsync(tenant.Id, context.RequestAborted);
+
+        // Story 32-16 (AC10) — seed the fresh single-user principal with the
+        // platform default persona enabled (insert-missing-only) so the catalog
+        // is usable out of the box. Single-user enablement is USER-keyed (the sole
+        // user is the principal), so seed by userId — not tenant.Id. Best-effort:
+        // a seed failure must not break first-login (the seeder is idempotent and
+        // a missing default persona is WARN-logged + skipped inside the seeder).
+        try
+        {
+            var cpDb = context.RequestServices.GetRequiredService<ControlPlaneDbContext>();
+            var personaName = context.RequestServices
+                .GetRequiredService<IOptions<DefaultPersonaOptions>>().Value.DefaultPersonaName;
+            await TenantEnablementSeeder.SeedDefaultPersonaAsync(
+                cpDb, personaName, tenantId: null, userId: userId, logger: logger,
+                cancellationToken: context.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Failed to seed default-persona enablement for user {UserId} (non-fatal)", userId);
+        }
 
         try
         {

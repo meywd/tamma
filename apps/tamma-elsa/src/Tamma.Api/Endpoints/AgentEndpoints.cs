@@ -661,6 +661,87 @@ public static class AgentEndpoints
         return Results.Ok(response);
     }
 
+    // -----------------------------------------------------------------------
+    // Story 32-16 — per-tenant agent/persona enablement (catalog membership)
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// GET <c>/api/agents/enablement</c> — the calling principal's enablement
+    /// catalog view: every visible public persona with its <c>enabled</c> flag,
+    /// plus own-private agents marked implicitly enabled. Reads are NOT gated —
+    /// any tenant member may read (the group's <c>MemberAccess</c> gate applies).
+    /// </summary>
+    public static async Task<IResult> ListEnablement(ITenantAgentEnablementService svc)
+    {
+        var states = await svc.ListAsync();
+        var response = states.Select(AgentEnablementResponse.From).ToList();
+        return Results.Ok(response);
+    }
+
+    /// <summary>
+    /// PUT <c>/api/agents/{agentId}/enablement</c> — enable (<c>{enabled:true}</c>)
+    /// or disable (<c>{enabled:false}</c>) a public persona for the calling
+    /// principal's catalog. Member-role callers are 403'd by the
+    /// <c>AgentManage</c> route policy before reaching here. A target the principal
+    /// cannot see → 404 (existence-leak-safe); disabling an own private/custom
+    /// agent → 409.
+    /// </summary>
+    public static async Task<IResult> SetEnablement(
+        Guid agentId,
+        SetEnablementRequest req,
+        ITenantAgentEnablementService svc)
+    {
+        try
+        {
+            var state = req.Enabled
+                ? await svc.EnableAsync(agentId)
+                : await svc.DisableAsync(agentId);
+            return Results.Ok(AgentEnablementResponse.From(state));
+        }
+        catch (TammaError ex) when (ex.Code == "AGENT.ENABLEMENT.NOT_FOUND")
+        {
+            // 404 (not 403) — never leak the existence of another tenant's agent.
+            return Results.NotFound(new { error = "agent_not_found", detail = ex.Message });
+        }
+        catch (TammaError ex) when (ex.Code == "AGENT.ENABLEMENT.PRIVATE_NOT_DISABLEABLE")
+        {
+            return Results.Conflict(new { error = "private_not_disableable", detail = ex.Message });
+        }
+        catch (TammaError ex)
+        {
+            return Results.BadRequest(new { error = ex.Code, detail = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// DELETE <c>/api/agents/{agentId}/enablement</c> — disable a public persona
+    /// for the calling principal's catalog (alias for
+    /// <c>PUT … {enabled:false}</c>). Same 404/409 discipline as
+    /// <see cref="SetEnablement"/>.
+    /// </summary>
+    public static async Task<IResult> DisableEnablement(
+        Guid agentId,
+        ITenantAgentEnablementService svc)
+    {
+        try
+        {
+            var state = await svc.DisableAsync(agentId);
+            return Results.Ok(AgentEnablementResponse.From(state));
+        }
+        catch (TammaError ex) when (ex.Code == "AGENT.ENABLEMENT.NOT_FOUND")
+        {
+            return Results.NotFound(new { error = "agent_not_found", detail = ex.Message });
+        }
+        catch (TammaError ex) when (ex.Code == "AGENT.ENABLEMENT.PRIVATE_NOT_DISABLEABLE")
+        {
+            return Results.Conflict(new { error = "private_not_disableable", detail = ex.Message });
+        }
+        catch (TammaError ex)
+        {
+            return Results.BadRequest(new { error = ex.Code, detail = ex.Message });
+        }
+    }
+
     /// <summary>
     /// POST <c>/api/agents/{id}/rollback</c> — rollback (AC 13): repoint the
     /// agent's active version at an EXISTING prior version (no new snapshot). The

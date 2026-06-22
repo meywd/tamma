@@ -896,6 +896,52 @@ internal static class TammaModelConfiguration
     }
 
     /// <summary>
+    /// Story 32-16 — configure the <c>tenant_agent_enablements</c> table (which
+    /// PUBLIC personas a principal exposes in its usable catalog). CP-resident in
+    /// BOTH modes (it gates the CP-resident public <see cref="Agent"/> catalog and
+    /// is keyed by tenant id / user id, never per <c>t_&lt;hex&gt;</c>), so —
+    /// unlike <see cref="ConfigureAgentRoleSelections"/> — it is configured ONLY on
+    /// the CP context (no tenant-context variant).
+    ///
+    /// <para>The <c>ck_tenant_agent_enablements_principal_xor</c> CHECK ties
+    /// exactly one of (<c>UserId</c>, <c>TenantId</c>) to non-null (mirrors
+    /// <c>ck_agent_role_selections_principal_xor</c>). The unique index on
+    /// <c>(TenantId, UserId, AgentId)</c> uses NULLS NOT DISTINCT so the
+    /// (null, uid, agent) and (tid, null, agent) row spaces are disjoint and both
+    /// halves dedupe on null — one row per <c>(principal, agent)</c>.</para>
+    /// </summary>
+    public static void ConfigureTenantAgentEnablements(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<TenantAgentEnablement>(entity =>
+        {
+            entity.ToTable("tenant_agent_enablements", t =>
+            {
+                // Exactly one of user_id / tenant_id is non-null (mirrors
+                // ck_agent_role_selections_principal_xor).
+                t.HasCheckConstraint(
+                    "ck_tenant_agent_enablements_principal_xor",
+                    "(\"UserId\" IS NOT NULL AND \"TenantId\" IS NULL) " +
+                    "OR (\"UserId\" IS NULL AND \"TenantId\" IS NOT NULL)");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.AgentId).IsRequired();
+            entity.Property(e => e.Enabled).IsRequired();
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // One row per (principal, agent). NULLS NOT DISTINCT (PG15+;
+            // production runs PG17) so a single (null, uid, agent) or
+            // (tid, null, agent) row is unique across the repeated NULL halves —
+            // same pattern as agent_role_selections / prompt_overrides.
+            entity.HasIndex(e => new { e.TenantId, e.UserId, e.AgentId })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("IX_tenant_agent_enablements_TenantId_UserId_AgentId");
+        });
+    }
+
+    /// <summary>
     /// Story 35-1 — billing foundation entities. The tenant→Stripe customer
     /// mapping (<c>billing_customers</c>, unique <c>TenantId</c>) and the
     /// slug→Stripe-ids catalog (<c>billing_plan_prices</c>, unique
