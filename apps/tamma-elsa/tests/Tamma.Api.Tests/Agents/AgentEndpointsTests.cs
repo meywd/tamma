@@ -218,6 +218,102 @@ public class AgentEndpointsTests
         }
     }
 
+    // ── Story 32-17 — public-must-be-prompt-free (AC2), create + publish ──
+
+    private static readonly JsonElement PromptedConfig =
+        Config("""
+            {
+              "provider": "anthropic", "model": "claude-sonnet-4",
+              "prompts": { "system": "House prompt." }
+            }
+            """);
+
+    [Test]
+    public async Task CreateAgent_Public_WithPrompts_Returns400_NoRow_NoEvent()
+    {
+        var ctx = NewContext();
+        var events = new CapturingEventRepository();
+        IAgentRepository repo = new AgentRepository(ctx, events);
+        await using (ctx)
+        {
+            var pa = Principal(Guid.NewGuid(), platformAdmin: true);
+            var req = new CreateAgentRequest("tamma-architect", "architect", "public", PromptedConfig, null);
+
+            var create = await AgentEndpoints.CreateAgent(
+                req, repo, pa, TenantCtx(), Mode(TammaMode.SaaS));
+            var (status, body) = await ExecuteAsync(create);
+
+            status.Should().Be(StatusCodes.Status400BadRequest);
+            body.GetProperty("errors").EnumerateArray()
+                .Select(e => e.GetString()).Should()
+                .Contain(s => s!.Contains("PROMPTS_NOT_ALLOWED_ON_PUBLIC"));
+            (await ctx.Agents.CountAsync()).Should().Be(0, "rejected create writes no row");
+            events.Captured.Should().BeEmpty("rejected create emits no event");
+        }
+    }
+
+    [Test]
+    public async Task CreateAgent_Private_WithPrompts_Succeeds()
+    {
+        var (repo, ctx) = BuildRepo();
+        await using (ctx)
+        {
+            var req = new CreateAgentRequest("atlas", "architect", "private", PromptedConfig, null);
+            var create = await AgentEndpoints.CreateAgent(
+                req, repo, Principal(Guid.NewGuid()), TenantCtx(TenantA), Mode(TammaMode.SaaS));
+            var (status, _) = await ExecuteAsync(create);
+
+            status.Should().Be(StatusCodes.Status201Created, "a private agent may carry prompts");
+        }
+    }
+
+    [Test]
+    public async Task PublishVersion_Public_WithPrompts_Returns400_NoNewVersion()
+    {
+        var (repo, ctx) = BuildRepo();
+        await using (ctx)
+        {
+            var pa = Principal(Guid.NewGuid(), platformAdmin: true);
+            var created = await ExecuteAsync(await AgentEndpoints.CreateAgent(
+                new CreateAgentRequest("tamma-architect", "architect", "public", ValidConfig, null),
+                repo, pa, TenantCtx(), Mode(TammaMode.SaaS)));
+            var id = created.Body.GetProperty("id").GetGuid();
+
+            // A later version trying to smuggle prompts onto a PUBLIC persona is rejected.
+            var pub = await AgentEndpoints.PublishVersion(
+                id, new PublishVersionRequest(PromptedConfig, "smuggle"),
+                repo, pa, TenantCtx(), Mode(TammaMode.SaaS));
+            var (status, body) = await ExecuteAsync(pub);
+
+            status.Should().Be(StatusCodes.Status400BadRequest);
+            body.GetProperty("errors").EnumerateArray()
+                .Select(e => e.GetString()).Should()
+                .Contain(s => s!.Contains("PROMPTS_NOT_ALLOWED_ON_PUBLIC"));
+            (await ctx.AgentVersions.CountAsync()).Should().Be(1, "the rejected publish wrote no new version");
+        }
+    }
+
+    [Test]
+    public async Task PublishVersion_Private_WithPrompts_Succeeds()
+    {
+        var (repo, ctx) = BuildRepo();
+        await using (ctx)
+        {
+            var admin = Principal(Guid.NewGuid());
+            var created = await ExecuteAsync(await AgentEndpoints.CreateAgent(
+                new CreateAgentRequest("atlas", "architect", "private", ValidConfig, null),
+                repo, admin, TenantCtx(TenantA), Mode(TammaMode.SaaS)));
+            var id = created.Body.GetProperty("id").GetGuid();
+
+            var pub = await AgentEndpoints.PublishVersion(
+                id, new PublishVersionRequest(PromptedConfig, "v2 with prompts"),
+                repo, admin, TenantCtx(TenantA), Mode(TammaMode.SaaS));
+            var (status, _) = await ExecuteAsync(pub);
+
+            status.Should().Be(StatusCodes.Status200OK, "a private agent may publish prompts");
+        }
+    }
+
     [Test]
     public async Task CreateAgent_InvalidRole_Returns400()
     {
@@ -670,6 +766,8 @@ public class AgentEndpointsTests
     private sealed class CapturingEventRepository : IEventRepository
     {
         private readonly ConcurrentQueue<DomainEvent> _events = new();
+        /// <summary>Story 32-17 — read access for the "no event on rejection" assertion.</summary>
+        public IReadOnlyCollection<DomainEvent> Captured => _events;
         public Task<DomainEvent> AppendAsync(DomainEvent evt)
         {
             _events.Enqueue(evt);

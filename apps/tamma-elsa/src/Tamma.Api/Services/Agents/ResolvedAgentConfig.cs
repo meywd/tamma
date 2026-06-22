@@ -83,4 +83,16 @@ public class ResolvedAgentConfig
     /// never add tools the role didn't already have.
     /// </summary>
     public IReadOnlyList<string>? AllowedTools { get; init; }
+
+    /// <summary>
+    /// Story 32-17 — provenance of the resolved <see cref="SystemPrompt"/>:
+    /// <see cref="AgentPromptSource.CustomAgent"/> when it came from a private
+    /// agent's own embedded <c>ConfigJson.prompts</c> (32-17 branch);
+    /// <see cref="AgentPromptSource.Epic27Store"/> when it came from the Epic 27
+    /// store via the persona/public branch (32-15). Null only on the legacy
+    /// JSONB resolve paths that don't go through <c>MaterialiseAsync</c>. The
+    /// managed run (32-5) tags <c>promptSource</c> from this — the template body
+    /// is NEVER tagged/logged, only this source label and the role:action key.
+    /// </summary>
+    public AgentPromptSource? PromptSource { get; init; }
 }

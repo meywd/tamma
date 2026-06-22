@@ -240,7 +240,10 @@ public static class AgentEndpoints
         var configJson = req.Config.ValueKind == JsonValueKind.Undefined
             ? "{}"
             : req.Config.GetRawText();
-        var (valid, errors) = AgentConfigValidator.Validate(configJson);
+        // Story 32-17 — visibility-aware validation: a public persona carrying a
+        // populated prompts block is rejected (PROMPTS_NOT_ALLOWED_ON_PUBLIC)
+        // before any row/event is written; private agents may carry prompts.
+        var (valid, errors) = AgentConfigValidator.Validate(configJson, visibility);
         if (!valid)
         {
             return Results.BadRequest(new { valid = false, errors });
@@ -348,7 +351,10 @@ public static class AgentEndpoints
         var configJson = req.Config.ValueKind == JsonValueKind.Undefined
             ? "{}"
             : req.Config.GetRawText();
-        var (valid, errors) = AgentConfigValidator.Validate(configJson);
+        // Story 32-17 — AC2 applies to publish-version too: validate the new
+        // version's config against the EXISTING agent's visibility so a public
+        // persona can't smuggle prompts in via a later version.
+        var (valid, errors) = AgentConfigValidator.Validate(configJson, agent.Visibility);
         if (!valid)
         {
             return Results.BadRequest(new { valid = false, errors });
