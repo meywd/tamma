@@ -147,8 +147,10 @@ export function WorkflowMap({
               </marker>
             </defs>
             {geom.railPaths.map((rp) => (
-              <g key={rp.id}>
+              <g key={rp.id} className="twv-rail">
+                {/* visible rail — decorative; clicks are handled by the hit path */}
                 <path
+                  className="twv-rail-line"
                   d={rp.d}
                   fill="none"
                   stroke={rp.color}
@@ -159,6 +161,15 @@ export function WorkflowMap({
                   opacity={rp.isBackEdge ? 0.85 : 0.95}
                   markerEnd="url(#twv-rail-arrow)"
                 />
+                {/* wide invisible hit area — click a line to open the step it leads to */}
+                <path
+                  className="twv-rail-hit"
+                  d={rp.d}
+                  fill="none"
+                  onClick={() => onStepChange?.(rp.to)}
+                >
+                  <title>{rp.title}</title>
+                </path>
               </g>
             ))}
           </svg>
@@ -261,6 +272,10 @@ interface RailPath {
   d: string;
   color: string;
   isBackEdge: boolean;
+  /** Destination node id — clicking the rail opens this step. */
+  to: string;
+  /** Tooltip, e.g. "Valid → Gather Context". */
+  title: string;
 }
 interface RailLabel {
   id: string;
@@ -333,7 +348,14 @@ function computeGeometry(layout: MapLayout, width: number): Geometry {
     if (!a || !b) continue;
     const color = LINE_COLORS[rail.line % LINE_COLORS.length]!;
     const { d, labelX, labelY } = orthogonalPath(a, b, rail.isBackEdge, w);
-    railPaths.push({ id: rail.id, d, color, isBackEdge: rail.isBackEdge });
+    railPaths.push({
+      id: rail.id,
+      d,
+      color,
+      isBackEdge: rail.isBackEdge,
+      to: rail.to,
+      title: rail.label ? `${rail.label} → ${b.node.name}` : `→ ${b.node.name}`,
+    });
     if (rail.label) {
       railLabels.push({ id: rail.id, label: rail.label, x: labelX, y: labelY });
     }

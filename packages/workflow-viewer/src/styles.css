@@ -289,9 +289,18 @@
   position: absolute;
   inset: 0;
   width: 100%;
-  pointer-events: none;
   z-index: 1;
 }
+/* The visible rail is decorative; a wide transparent hit-path takes the clicks.
+   Stations sit above (z-index 3), so a rail is only clickable in the gaps. */
+.twv-rail-line { pointer-events: none; }
+.twv-rail-hit {
+  stroke: transparent;
+  stroke-width: 16;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+.twv-rail:hover .twv-rail-line { opacity: 1; stroke-width: 4.5; }
 
 .twv-map-rail-label {
   position: absolute;
