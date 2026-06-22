@@ -19,16 +19,16 @@ namespace Tamma.Activities.Tests.LlmCall;
 [TestFixture]
 public class AgenticToolLoopTests
 {
-    private CallLlmInlineActivity _activity = null!;
+    private InlineToolLoopRunner _activity = null!;
     private Mock<IToolExecutorRegistry> _registryMock = null!;
-    private Mock<ILogger<CallLlmInlineActivity>> _loggerMock = null!;
+    private Mock<ILogger<InlineToolLoopRunner>> _loggerMock = null!;
 
     [SetUp]
     public void SetUp()
     {
         _registryMock = new Mock<IToolExecutorRegistry>();
-        _loggerMock = new Mock<ILogger<CallLlmInlineActivity>>();
-        _activity = new CallLlmInlineActivity(
+        _loggerMock = new Mock<ILogger<InlineToolLoopRunner>>();
+        _activity = new InlineToolLoopRunner(
             _loggerMock.Object, null, null, null, _registryMock.Object);
     }
 
@@ -40,7 +40,7 @@ public class AgenticToolLoopTests
     public void EnableToolLoopFalse_ConstructorWithRegistry_DoesNotThrow()
     {
         // Verify that adding IToolExecutorRegistry to constructor does not break anything
-        var action = () => new CallLlmInlineActivity(null, null, null, null, _registryMock.Object);
+        var action = () => new InlineToolLoopRunner(null, null, null, null, _registryMock.Object);
         action.Should().NotThrow();
     }
 
@@ -48,7 +48,7 @@ public class AgenticToolLoopTests
     public void NullToolRegistry_ConstructorStillWorks()
     {
         // When IToolExecutorRegistry is null, the activity should still be constructible
-        var action = () => new CallLlmInlineActivity(null, null, null, null, null);
+        var action = () => new InlineToolLoopRunner(null, null, null, null, null);
         action.Should().NotThrow();
     }
 
@@ -64,7 +64,7 @@ public class AgenticToolLoopTests
     public void Constructor_WithAllDependencies_DoesNotThrow()
     {
         var sanitizer = new ContentSanitizer();
-        var action = () => new CallLlmInlineActivity(
+        var action = () => new InlineToolLoopRunner(
             _loggerMock.Object, null, null, sanitizer, _registryMock.Object);
         action.Should().NotThrow();
     }
@@ -85,7 +85,7 @@ public class AgenticToolLoopTests
         });
         var element = JsonSerializer.Deserialize<JsonElement>(json);
 
-        var result = CallLlmInlineActivity.ParseAnthropicResponse(element, 200, "fallback");
+        var result = InlineToolLoopRunner.ParseAnthropicResponse(element, 200, "fallback");
 
         result.StopReason.Should().Be(StopReason.EndTurn);
         result.Success.Should().BeTrue();
@@ -108,7 +108,7 @@ public class AgenticToolLoopTests
         });
         var element = JsonSerializer.Deserialize<JsonElement>(json);
 
-        var result = CallLlmInlineActivity.ParseAnthropicResponse(element, 200, "fallback");
+        var result = InlineToolLoopRunner.ParseAnthropicResponse(element, 200, "fallback");
 
         result.StopReason.Should().Be(StopReason.ToolUse);
         result.ToolCalls.Should().NotBeNull();
@@ -130,7 +130,7 @@ public class AgenticToolLoopTests
         });
         var element = JsonSerializer.Deserialize<JsonElement>(json);
 
-        var result = CallLlmInlineActivity.ParseAnthropicResponse(element, 200, "fallback");
+        var result = InlineToolLoopRunner.ParseAnthropicResponse(element, 200, "fallback");
 
         result.StopReason.Should().Be(StopReason.MaxTokens);
     }
@@ -146,7 +146,7 @@ public class AgenticToolLoopTests
         });
         var element = JsonSerializer.Deserialize<JsonElement>(json);
 
-        var result = CallLlmInlineActivity.ParseAnthropicResponse(element, 200, "fallback");
+        var result = InlineToolLoopRunner.ParseAnthropicResponse(element, 200, "fallback");
 
         result.StopReason.Should().Be(StopReason.EndTurn);
     }
@@ -161,7 +161,7 @@ public class AgenticToolLoopTests
         });
         var element = JsonSerializer.Deserialize<JsonElement>(json);
 
-        var result = CallLlmInlineActivity.ParseAnthropicResponse(element, 200, "fallback");
+        var result = InlineToolLoopRunner.ParseAnthropicResponse(element, 200, "fallback");
 
         result.StopReason.Should().Be(StopReason.Unknown);
     }
@@ -188,7 +188,7 @@ public class AgenticToolLoopTests
         });
         var element = JsonSerializer.Deserialize<JsonElement>(json);
 
-        var result = CallLlmInlineActivity.ParseOpenAiResponse(element, 200, "fallback");
+        var result = InlineToolLoopRunner.ParseOpenAiResponse(element, 200, "fallback");
 
         result.StopReason.Should().Be(StopReason.EndTurn);
         result.Success.Should().BeTrue();
@@ -221,7 +221,7 @@ public class AgenticToolLoopTests
         """;
         var element = JsonSerializer.Deserialize<JsonElement>(json);
 
-        var result = CallLlmInlineActivity.ParseOpenAiResponse(element, 200, "fallback");
+        var result = InlineToolLoopRunner.ParseOpenAiResponse(element, 200, "fallback");
 
         result.StopReason.Should().Be(StopReason.ToolUse);
         result.ToolCalls.Should().NotBeNull();
@@ -247,7 +247,7 @@ public class AgenticToolLoopTests
         });
         var element = JsonSerializer.Deserialize<JsonElement>(json);
 
-        var result = CallLlmInlineActivity.ParseOpenAiResponse(element, 200, "fallback");
+        var result = InlineToolLoopRunner.ParseOpenAiResponse(element, 200, "fallback");
 
         result.StopReason.Should().Be(StopReason.MaxTokens);
     }
@@ -269,7 +269,7 @@ public class AgenticToolLoopTests
         });
         var element = JsonSerializer.Deserialize<JsonElement>(json);
 
-        var result = CallLlmInlineActivity.ParseOpenAiResponse(element, 200, "fallback");
+        var result = InlineToolLoopRunner.ParseOpenAiResponse(element, 200, "fallback");
 
         result.StopReason.Should().Be(StopReason.EndTurn);
     }
@@ -803,7 +803,7 @@ public class AgenticToolLoopTests
         });
         var element = JsonSerializer.Deserialize<JsonElement>(json);
 
-        var result = CallLlmInlineActivity.ParseAnthropicResponse(element, 200, "fallback");
+        var result = InlineToolLoopRunner.ParseAnthropicResponse(element, 200, "fallback");
 
         result.ToolCalls.Should().HaveCount(2);
         result.ToolCalls![0].Id.Should().Be("t1");
@@ -823,7 +823,7 @@ public class AgenticToolLoopTests
         });
         var element = JsonSerializer.Deserialize<JsonElement>(json);
 
-        var result = CallLlmInlineActivity.ParseAnthropicResponse(element, 200, "fallback");
+        var result = InlineToolLoopRunner.ParseAnthropicResponse(element, 200, "fallback");
 
         result.ToolCalls.Should().BeNull();
     }
@@ -853,7 +853,7 @@ public class AgenticToolLoopTests
         """;
         var element = JsonSerializer.Deserialize<JsonElement>(json);
 
-        var result = CallLlmInlineActivity.ParseOpenAiResponse(element, 200, "fallback");
+        var result = InlineToolLoopRunner.ParseOpenAiResponse(element, 200, "fallback");
 
         result.ToolCalls.Should().HaveCount(2);
         result.ToolCalls![0].Id.Should().Be("c1");
@@ -866,7 +866,7 @@ public class AgenticToolLoopTests
         var json = """{ "choices": [], "usage": { "prompt_tokens": 0, "completion_tokens": 0 } }""";
         var element = JsonSerializer.Deserialize<JsonElement>(json);
 
-        var result = CallLlmInlineActivity.ParseOpenAiResponse(element, 200, "fallback");
+        var result = InlineToolLoopRunner.ParseOpenAiResponse(element, 200, "fallback");
 
         result.StopReason.Should().Be(StopReason.Unknown);
     }

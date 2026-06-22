@@ -29,8 +29,8 @@ namespace Tamma.Activities.Tests.LlmCall;
 [TestFixture]
 public class AgenticToolLoopIntegrationTests
 {
-    private CallLlmInlineActivity _activity = null!;
-    private Mock<ILogger<CallLlmInlineActivity>> _activityLoggerMock = null!;
+    private InlineToolLoopRunner _activity = null!;
+    private Mock<ILogger<InlineToolLoopRunner>> _activityLoggerMock = null!;
     private ToolExecutorRegistry _registry = null!;
     private Mock<ILogger<ToolExecutorRegistry>> _registryLoggerMock = null!;
     private ContextCompactor _compactor = null!;
@@ -39,7 +39,7 @@ public class AgenticToolLoopIntegrationTests
     [SetUp]
     public void SetUp()
     {
-        _activityLoggerMock = new Mock<ILogger<CallLlmInlineActivity>>();
+        _activityLoggerMock = new Mock<ILogger<InlineToolLoopRunner>>();
         _registryLoggerMock = new Mock<ILogger<ToolExecutorRegistry>>();
         _compactorLoggerMock = new Mock<ILogger<ContextCompactor>>();
         _compactor = new ContextCompactor(_compactorLoggerMock.Object);
@@ -63,7 +63,7 @@ public class AgenticToolLoopIntegrationTests
         string userPrompt = "Help me with this task.")
     {
         var config = loopConfig ?? new ToolLoopConfig();
-        var activity = new CallLlmInlineActivity(
+        var activity = new InlineToolLoopRunner(
             _activityLoggerMock.Object, null, null, null, toolRegistry);
 
         var messages = new List<ConversationMessage>
@@ -97,7 +97,7 @@ public class AgenticToolLoopIntegrationTests
             // Parse the scripted response
             var scripted = scriptedResponses[responseIndex++];
             var responseElement = JsonSerializer.Deserialize<JsonElement>(scripted.ResponseJson);
-            var response = CallLlmInlineActivity.ParseAnthropicResponse(
+            var response = InlineToolLoopRunner.ParseAnthropicResponse(
                 responseElement, scripted.StatusCode, "claude-sonnet-4-20250514");
 
             lastResponse = response;
@@ -193,7 +193,7 @@ public class AgenticToolLoopIntegrationTests
         string userPrompt = "Help me with this task.")
     {
         var config = loopConfig ?? new ToolLoopConfig();
-        var activity = new CallLlmInlineActivity(
+        var activity = new InlineToolLoopRunner(
             _activityLoggerMock.Object, null, null, null, toolRegistry);
 
         var messages = new List<ConversationMessage>
@@ -224,7 +224,7 @@ public class AgenticToolLoopIntegrationTests
 
             var scripted = scriptedResponses[responseIndex++];
             var responseElement = JsonSerializer.Deserialize<JsonElement>(scripted.ResponseJson);
-            var response = CallLlmInlineActivity.ParseOpenAiResponse(
+            var response = InlineToolLoopRunner.ParseOpenAiResponse(
                 responseElement, scripted.StatusCode, "gpt-4o");
 
             lastResponse = response;
@@ -1001,7 +1001,7 @@ public class AgenticToolLoopIntegrationTests
         var responseElement = JsonSerializer.Deserialize<JsonElement>(responseJson);
 
         // Act: Parse as single-turn (no loop execution)
-        var response = CallLlmInlineActivity.ParseAnthropicResponse(
+        var response = InlineToolLoopRunner.ParseAnthropicResponse(
             responseElement, 200, "claude-sonnet-4-20250514");
 
         // Assert: Tool calls are in the response data but not executed
@@ -1081,7 +1081,7 @@ public class AgenticToolLoopIntegrationTests
         anthropicResult.TotalToolCalls.Should().Be(1);
 
         // Verify the body builder produces correct Anthropic format
-        var activity = new CallLlmInlineActivity(
+        var activity = new InlineToolLoopRunner(
             _activityLoggerMock.Object, null, null, null, registry);
 
         var messages = new List<ConversationMessage>
@@ -1175,7 +1175,7 @@ public class AgenticToolLoopIntegrationTests
         openAiResult.TotalToolCalls.Should().Be(1);
 
         // Verify the body builder produces correct OpenAI format
-        var activity = new CallLlmInlineActivity(
+        var activity = new InlineToolLoopRunner(
             _activityLoggerMock.Object, null, null, null, registry);
 
         var messages = new List<ConversationMessage>
@@ -1475,7 +1475,7 @@ public class AgenticToolLoopIntegrationTests
     public void AnthropicBodyBuilder_MultiTurnWithToolResults_CorrectBatching()
     {
         // Arrange: Full conversation with parallel tool calls
-        var activity = new CallLlmInlineActivity(
+        var activity = new InlineToolLoopRunner(
             _activityLoggerMock.Object, null, null, null, null);
 
         var messages = new List<ConversationMessage>
@@ -1618,7 +1618,7 @@ public class AgenticToolLoopIntegrationTests
         toolResults[1].Content.Should().Contain("y.txt");
 
         // Verify OpenAI body format for tool results
-        var activity = new CallLlmInlineActivity(
+        var activity = new InlineToolLoopRunner(
             _activityLoggerMock.Object, null, null, null, registry);
         var body = activity.BuildOpenAiMultiTurnBody(result.Messages, "gpt-4o", 4096, 0.7, tools);
         var apiMessages = body["messages"] as List<object>;

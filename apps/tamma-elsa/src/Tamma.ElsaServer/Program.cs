@@ -285,6 +285,16 @@ builder.Services.AddSingleton<IToolCallValidator, ToolCallValidator>();
 // Context compaction for long-running tool loops (Story 12.3)
 builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.ContextCompactor>();
 
+// Story 32-5 (AC4) — the extracted agentic tool-loop runner. CallLlmInlineActivity
+// delegates to it LOCALLY in the engine (the cutover to the API endpoint is T5/T6).
+// It is the SINGLE home of the loop (no fork). Registered as a transient so each
+// activation gets a runner bound to the engine's already-registered collaborators
+// (sanitizer / registry / validator / compactor / parallel-executor / credential
+// resolver). DI relocation to Tamma.Api is deferred to T4/T6.
+builder.Services.AddTransient<Tamma.Activities.LlmCall.IInlineToolLoopRunner,
+    Tamma.Activities.LlmCall.InlineToolLoopRunner>();
+builder.Services.AddTransient<Tamma.Activities.LlmCall.InlineToolLoopRunner>();
+
 // Health checks
 builder.Services.AddHealthChecks();
 

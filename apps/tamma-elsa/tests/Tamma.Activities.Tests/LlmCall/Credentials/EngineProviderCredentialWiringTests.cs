@@ -119,26 +119,27 @@ public class EngineProviderCredentialWiringTests
     [Test]
     public async Task ActivityBoundToEngineResolver_GetsPlatformKey_NotEmpty()
     {
-        // End-to-end: the activity, constructed with the engine host's resolver,
-        // populates a NON-empty ApiKey. This proves the fix at the seam the
-        // defect lived at (LoadProviderConfigWithKeyAsync's null-resolver branch
-        // sent an empty key in production).
+        // End-to-end: the shared runner (Story 32-5 (AC4) moved
+        // LoadProviderConfigWithKeyAsync here verbatim), constructed with the
+        // engine host's resolver, populates a NON-empty ApiKey. This proves the
+        // fix at the seam the defect lived at (the null-resolver branch sent an
+        // empty key in production).
         using var provider = BuildEngineContainer(new Dictionary<string, string?>
         {
             ["LlmProviders:openai:ApiKey"] = "PLATFORM-OPENAI-KEY",
         });
         var resolver = provider.GetRequiredService<IProviderCredentialResolver>();
 
-        var activity = new CallLlmInlineActivity(
+        var runner = new InlineToolLoopRunner(
             logger: null, httpClientFactory: null, configuration: null, sanitizer: null,
             toolRegistry: null, toolCallValidator: null, contextCompactor: null,
             eventEmitter: null, parallelExecutor: null, credentialResolver: resolver);
 
-        var (config, source) = await activity.LoadProviderConfigWithKeyAsync(
+        var (config, source) = await runner.LoadProviderConfigWithKeyAsync(
             "openai", tenantId: null, CancellationToken.None);
 
         config.ApiKey.Should().Be("PLATFORM-OPENAI-KEY",
-            "with the engine resolver wired the activity no longer sends an empty key");
+            "with the engine resolver wired the runner no longer sends an empty key");
         source.Should().Be("platform");
     }
 }
