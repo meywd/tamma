@@ -39,6 +39,23 @@ public sealed record AgentRunResult
     /// <summary>Provider cost basis in USD (<c>IProviderPricingService.Compute</c>).</summary>
     public decimal CostUsd { get; init; }
 
+    /// <summary>Billed price in USD — 34-5 markup on the platform leg, <c>0</c>
+    /// on the BYOK leg (rule 7). Distinct from <see cref="CostUsd"/> (the raw
+    /// basis, identical across both legs). 34-5 supplies the markup; until then
+    /// platform == basis (interim passthrough).</summary>
+    public decimal PriceUsd { get; init; }
+
+    /// <summary>Cumulative tokens across all tool-loop turns (0 if the loop was
+    /// not enabled).</summary>
+    public int ToolLoopTokens { get; init; }
+
+    /// <summary>Number of tool-loop iterations (0 if the loop was not enabled).</summary>
+    public int ToolLoopTurns { get; init; }
+
+    /// <summary>Whether the loop exhausted <c>maxSteps</c> without a final
+    /// response.</summary>
+    public bool ToolLoopExhausted { get; init; }
+
     /// <summary>Total wall-clock duration of the run, in milliseconds.</summary>
     public long DurationMs { get; init; }
 

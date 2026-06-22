@@ -371,7 +371,10 @@ public class LlmCallContractTests
                 continue;
             }
 
-            if (prop.Name is "InputTokens" or "OutputTokens" && prop.PropertyType == typeof(int))
+            // Token COUNT fields (int) are not secret-bearing — same carve-out
+            // as UsageDto.ToolLoopTokens in the response-shape guard above.
+            if (prop.Name is "InputTokens" or "OutputTokens" or "ToolLoopTokens"
+                && prop.PropertyType == typeof(int))
             {
                 continue;
             }

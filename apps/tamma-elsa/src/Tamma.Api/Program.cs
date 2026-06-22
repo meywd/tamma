@@ -458,6 +458,48 @@ if (!string.IsNullOrWhiteSpace(
 // of provider-key resolution into the LLM call path (CallLlmInlineActivity).
 builder.Services.AddProviderCredentialResolution();
 
+// Story 32-5 (T3): the managed execution layer behind POST /api/v1/llm/call.
+// ManagedAgent composes the rule-2 sequence (resolve+enablement+prompt → gate →
+// budget → credential → STARTED → runner → meter → terminal) and the mapper
+// projects AgentRunResult → LlmCallResponse + the §2.4 HTTP-status decision.
+// The endpoint mapping itself is T4; here we register the services so the host
+// resolves the whole chain at startup.
+//
+// The 34-5 markup engine and 32-9 usage emitter are not yet landed: the
+// interim seams (PassthroughProviderMarkupEngine = byok⇒0 / platform⇒basis;
+// NullUsageEmitter = no-op, the AGENT.RUN.* DCB events remain the durable
+// signal) ship the SAFE default until those stories replace them behind the
+// same interfaces. IBudgetGuard is the per-call fail-closed gate (32-9 backs
+// running-spend later). InlineToolLoopRunner is the extracted T2 runner shared
+// from Tamma.Activities; its provider-side collaborators (sanitizer/registry/
+// validator/compactor) are all optional and are fully wired in the API in T4.
+builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IProviderMarkupEngine,
+    Tamma.Api.Services.Agents.PassthroughProviderMarkupEngine>();
+builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IUsageEmitter,
+    Tamma.Api.Services.Agents.NullUsageEmitter>();
+builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IBudgetGuard,
+    Tamma.Api.Services.Agents.PerCallBudgetGuard>();
+builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.ILlmCallResponseMapper,
+    Tamma.Api.Services.Agents.LlmCallResponseMapper>();
+// The runner's provider-side collaborators (sanitizer/registry/validator/
+// compactor/parallel-executor) are all OPTIONAL and are fully wired in the API
+// by T4; until then resolve them best-effort via GetService so the host's
+// build-time DI validation stays green with the minimal T3 wiring.
+builder.Services.TryAddScoped<Tamma.Activities.LlmCall.IInlineToolLoopRunner>(sp =>
+    new Tamma.Activities.LlmCall.InlineToolLoopRunner(
+        sp.GetService<ILogger<Tamma.Activities.LlmCall.InlineToolLoopRunner>>(),
+        sp.GetService<IHttpClientFactory>(),
+        sp.GetService<IConfiguration>(),
+        sp.GetService<Tamma.Activities.Security.IContentSanitizer>(),
+        sp.GetService<Tamma.Activities.LlmCall.Tools.IToolExecutorRegistry>(),
+        sp.GetService<Tamma.Activities.Security.IToolCallValidator>(),
+        sp.GetService<Tamma.Activities.LlmCall.Tools.ContextCompactor>(),
+        sp.GetService<Tamma.Activities.ToolExecution.ToolLoopEventEmitter>(),
+        sp.GetService<Tamma.Activities.ToolExecution.ParallelToolExecutor>(),
+        sp.GetService<Tamma.Activities.LlmCall.Credentials.IProviderCredentialResolver>()));
+builder.Services.AddScoped<Tamma.Api.Services.Agents.IManagedAgent,
+    Tamma.Api.Services.Agents.ManagedAgent>();
+
 // Story 31-2: platform routing resolver. Exposes IPlatformResolver as a
 // scoped service over a singleton driver cache and the Epic 29 secret
 // store seam. Drivers themselves (GitHub 31-3, Gitea 31-4, ...) ship in
