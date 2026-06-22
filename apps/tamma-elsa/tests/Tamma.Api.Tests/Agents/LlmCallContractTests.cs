@@ -121,10 +121,14 @@ public class LlmCallContractTests
     // ---------------------------------------------------------------
 
     [Test]
-    public void ManagedAgentRequest_From_DerivesTenantFromBodyWhenPresent()
+    public void ManagedAgentRequest_From_BodyTenant_CannotOverrideAuthoritativeTenant()
     {
+        // Finding C1 — even when the body names a DIFFERENT tenant, the
+        // auth-derived (authoritative) tenant wins. The body tenantId carries
+        // no server-side authority, so a caller cannot be gated / budgeted /
+        // credentialed as a tenant other than its authenticated scope.
         var bodyTenant = Guid.NewGuid();
-        var headerTenant = Guid.NewGuid();
+        var authoritativeTenant = Guid.NewGuid();
         var req = new LlmCallRequest
         {
             TenantId = bodyTenant,
@@ -133,15 +137,17 @@ public class LlmCallContractTests
             CorrelationId = "c",
         };
 
-        var mapped = ManagedAgentRequest.From(req, headerTenant);
+        var mapped = ManagedAgentRequest.From(req, authoritativeTenant);
 
-        mapped.TenantId.Should().Be(bodyTenant, "body TenantId takes precedence over the header arg");
+        mapped.TenantId.Should().Be(authoritativeTenant,
+            "the auth-derived tenant is authoritative; the body tenantId never overrides it (C1)");
+        mapped.TenantId.Should().NotBe(bodyTenant);
     }
 
     [Test]
-    public void ManagedAgentRequest_From_FallsBackToHeaderTenant()
+    public void ManagedAgentRequest_From_UsesAuthoritativeTenant_IgnoringBody()
     {
-        var headerTenant = Guid.NewGuid();
+        var authoritativeTenant = Guid.NewGuid();
         var req = new LlmCallRequest
         {
             TenantId = null,
@@ -150,19 +156,27 @@ public class LlmCallContractTests
             CorrelationId = "c",
         };
 
-        var mapped = ManagedAgentRequest.From(req, headerTenant);
+        var mapped = ManagedAgentRequest.From(req, authoritativeTenant);
 
-        mapped.TenantId.Should().Be(headerTenant, "when the body omits TenantId, the header arg is used");
+        mapped.TenantId.Should().Be(authoritativeTenant, "the auth-derived tenant is the scope");
     }
 
     [Test]
-    public void ManagedAgentRequest_From_BothNull_StaysNull()
+    public void ManagedAgentRequest_From_NullAuthoritative_StaysNull_EvenIfBodySet()
     {
-        var req = new LlmCallRequest { Role = "developer", Prompt = "p", CorrelationId = "c" };
+        // A platform/single-user request (no authenticated tenant) must NOT
+        // pick up a tenant from the body — null authoritative ⇒ null scope.
+        var req = new LlmCallRequest
+        {
+            TenantId = Guid.NewGuid(),
+            Role = "developer",
+            Prompt = "p",
+            CorrelationId = "c",
+        };
 
         var mapped = ManagedAgentRequest.From(req, null);
 
-        mapped.TenantId.Should().BeNull("single-user / platform scope");
+        mapped.TenantId.Should().BeNull("single-user / platform scope; body tenantId is ignored (C1)");
     }
 
     [Test]

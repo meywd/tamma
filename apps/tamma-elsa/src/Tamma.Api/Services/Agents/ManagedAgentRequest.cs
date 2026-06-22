@@ -7,16 +7,25 @@ namespace Tamma.Api.Services.Agents;
 /// mapped one-to-one from the wire <see cref="LlmCallRequest"/> by
 /// <see cref="From"/>. It exists so the composition layer
 /// (<c>ManagedAgent</c>, T3) never depends on HTTP-binding concerns — the
-/// endpoint owns the <c>X-Tenant-Id</c>-vs-body tenant precedence and produces a
-/// fully-resolved request.
+/// endpoint owns tenant resolution and produces a fully-resolved request.
 ///
 /// <para>Per CLAUDE.md's two-scoping rule, <see cref="TenantId"/> == null means
 /// single-user / platform scope; a non-null value is the SaaS tenant.</para>
+///
+/// <para><b>Finding C1 (cross-tenant credential spoofing).</b>
+/// <see cref="TenantId"/> is the AUTHORITATIVE, auth-derived tenant — it is
+/// the scope used by the SaaS gate, the budget guard, and the credential
+/// resolver (BYOK key / platform fallback). It is NEVER taken from the wire
+/// body: a caller could otherwise name any tenant GUID in
+/// <see cref="LlmCallRequest.TenantId"/> and be gated / budgeted / credentialed
+/// as that tenant. <see cref="From"/> derives it from the authenticated
+/// principal (the endpoint's <c>ITenantContext</c>), not from the request.</para>
 /// </summary>
 public sealed record ManagedAgentRequest
 {
-    /// <summary>Resolved tenant scope (body wins, else the header arg). <c>null</c>
-    /// ⇒ single-user / platform.</summary>
+    /// <summary>Authoritative, auth-derived tenant scope. <c>null</c>
+    /// ⇒ single-user / platform. NEVER sourced from the wire body
+    /// (see <see cref="From"/> / Finding C1).</summary>
     public Guid? TenantId { get; init; }
 
     /// <summary>Explicit custom/persona agent; <c>null</c> ⇒ resolve by role.</summary>
@@ -60,16 +69,24 @@ public sealed record ManagedAgentRequest
     public required string CorrelationId { get; init; }
 
     /// <summary>
-    /// Pure mapping from the wire request to the internal request. Tenant
-    /// precedence (AC1): the body's <see cref="LlmCallRequest.TenantId"/> wins
-    /// when present, otherwise the <paramref name="headerTenantId"/> derived from
-    /// <c>X-Tenant-Id</c>; both null ⇒ single-user / platform. Every other field
-    /// is carried forward verbatim. No behaviour beyond the mapping.
+    /// Pure mapping from the wire request to the internal request. The tenant
+    /// scope is the <paramref name="authoritativeTenantId"/> derived from the
+    /// authenticated principal (the endpoint's <c>ITenantContext</c>, populated
+    /// by <c>TenantContextMiddleware</c> from the service principal's
+    /// <c>X-Tenant-Id</c>/claims) — <c>null</c> ⇒ single-user / platform.
+    ///
+    /// <para><b>Finding C1.</b> The body's
+    /// <see cref="LlmCallRequest.TenantId"/> is INTENTIONALLY IGNORED for the
+    /// trust-bearing scope: it must never be able to override the authenticated
+    /// tenant (gate / budget / credential resolution all key off
+    /// <see cref="TenantId"/>). The wire field is retained on the record so the
+    /// thin client may still send it, but it carries no server-side authority.
+    /// Every other field is carried forward verbatim.</para>
     /// </summary>
-    public static ManagedAgentRequest From(LlmCallRequest request, Guid? headerTenantId) =>
+    public static ManagedAgentRequest From(LlmCallRequest request, Guid? authoritativeTenantId) =>
         new()
         {
-            TenantId = request.TenantId ?? headerTenantId,
+            TenantId = authoritativeTenantId,
             AgentId = request.AgentId,
             Persona = request.Persona,
             Role = request.Role,

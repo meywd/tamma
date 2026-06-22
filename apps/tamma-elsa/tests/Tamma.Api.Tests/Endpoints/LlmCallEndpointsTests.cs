@@ -15,6 +15,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using NUnit.Framework;
+using Tamma.Api.Auth;
 using Tamma.Api.Services.Agents;
 using Tamma.Api.Tests.Infrastructure;
 using Tamma.Data;
@@ -22,31 +23,37 @@ using Tamma.Data;
 namespace Tamma.Api.Tests.Endpoints;
 
 /// <summary>
-/// Story 32-5 (T4, AC1/AC7) — HTTP tests for <c>POST /api/v1/llm/call</c> via
-/// <see cref="WebApplicationFactory{TEntryPoint}"/>. The endpoint is engine-only
-/// (same auth plane as the other <c>TammaApiClient</c> callbacks: a Bearer token
-/// authenticated by the platform auth chain). A missing/invalid bearer ⇒ 401
-/// BEFORE the handler runs.
+/// Story 32-5 (T4, AC1/AC7 + Findings C1/C2) — HTTP tests for
+/// <c>POST /api/v1/llm/call</c> via <see cref="WebApplicationFactory{TEntryPoint}"/>.
+/// The endpoint is engine/service-only (Finding C2): it requires the typed
+/// <see cref="ServiceAuthPrincipal"/> that <c>ApiKeyAuthHandler</c> mints for a
+/// service-scope key. A missing/invalid bearer ⇒ 401; a non-engine (user)
+/// principal ⇒ 403; both BEFORE the handler runs.
 ///
 /// <para>The whole composition (<see cref="IManagedAgent"/>) is replaced by a
 /// capturing fake so these tests exercise ONLY the endpoint: auth, the
-/// <c>X-Tenant-Id</c>-vs-body tenant derivation, request binding, and the §2.4
-/// status mapping (200 success / 200 success:false + preserved httpStatusCode /
-/// 400 SAAS_PROVIDER_NOT_ALLOWED / 403 / 401 — NEVER a raw 5xx).</para>
+/// auth-derived tenant scope (Finding C1 — the body tenantId can NEVER override
+/// it), request binding, and the §2.4 status mapping (200 success / 200
+/// success:false + preserved httpStatusCode / 400 SAAS_PROVIDER_NOT_ALLOWED /
+/// 403 / 401 — NEVER a raw 5xx).</para>
 ///
 /// <para>The shared Postgres-backed <see cref="ApiTestFixture"/> boots in the
-/// permissive-dev auth branch (no <c>Jwt:Secret</c>), so to assert a REAL 401
-/// from the auth scheme we replace the authentication scheme + the default
-/// authorization policy in <c>ConfigureTestServices</c> with a deterministic
-/// test bearer scheme + a <c>RequireAuthenticatedUser</c> default policy. This
-/// reproduces production's "default policy authenticates across the
-/// JwtBearer/ApiKey schemes and requires a user" contract without minting a real
-/// token or hitting the DB-backed <c>ApiKeyAuthHandler</c>.</para>
+/// permissive-dev auth branch (no <c>Jwt:Secret</c>), so to assert the REAL
+/// 401/403 gating we replace the authentication scheme + register the production
+/// <c>EngineServiceOnly</c> policy (the real <see cref="ServicePrincipalRequirement"/>
+/// + <see cref="ServicePrincipalHandler"/>) in <c>ConfigureTestServices</c>. The
+/// in-test scheme mints a <see cref="ServiceAuthPrincipal"/> on
+/// <c>HttpContext.Items</c> for the engine token (so the service-only policy
+/// passes) and a bare user identity for a "user JWT" token (so the policy 403s),
+/// reproducing production without the DB-backed <c>ApiKeyAuthHandler</c>.</para>
 /// </summary>
 [TestFixture]
 public class LlmCallEndpointsTests
 {
     private const string TestBearer = "engine-callback-token";
+    // A non-engine principal: authenticates fine but is NOT a service principal,
+    // so the EngineServiceOnly policy must reject it (Finding C2 → 403).
+    private const string UserBearer = "tenant-user-token";
     private const string Route = "/api/v1/llm/call";
 
     private WebApplicationFactory<Program> _factory = null!;
@@ -77,22 +84,36 @@ public class LlmCallEndpointsTests
                 services.RemoveAll<ITenantContext>();
                 services.AddScoped<ITenantContext>(_ => _tenantContext);
 
-                // Deterministic engine-callback auth: a Bearer scheme that
-                // authenticates the fixed TestBearer and a default policy that
-                // requires an authenticated user. This is the SAME plane as the
-                // production default policy (authenticate-then-require-user); it
-                // simply uses an in-test scheme instead of the DB-backed ApiKey
-                // handler so the test is hermetic and the 401 is produced by the
-                // pipeline (not a handler-level guard).
+                // Deterministic auth: an in-test Bearer scheme that recognises
+                // two tokens — the engine token (mints a ServiceAuthPrincipal on
+                // HttpContext.Items, like ApiKeyAuthHandler does for a service
+                // key) and a user token (a bare authenticated identity, NO
+                // service principal). Any other / missing token ⇒ 401.
                 services.AddAuthentication(TestEngineAuthHandler.SchemeName)
                     .AddScheme<AuthenticationSchemeOptions, TestEngineAuthHandler>(
                         TestEngineAuthHandler.SchemeName, _ => { });
+
+                // The ServicePrincipalHandler needs IHttpContextAccessor to read
+                // the typed principal off HttpContext.Items.
+                services.AddHttpContextAccessor();
+                services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler,
+                    ServicePrincipalHandler>();
+
                 services.AddAuthorization(options =>
                 {
                     options.DefaultPolicy = new AuthorizationPolicyBuilder()
                         .AddAuthenticationSchemes(TestEngineAuthHandler.SchemeName)
                         .RequireAuthenticatedUser()
                         .Build();
+                    // Register the PRODUCTION EngineServiceOnly policy (the real
+                    // ServicePrincipalRequirement) so the route's gate is the one
+                    // under test — not the dev-permissive AllowAnonymous stub.
+                    options.AddPolicy("EngineServiceOnly", p =>
+                    {
+                        p.AddAuthenticationSchemes(TestEngineAuthHandler.SchemeName);
+                        p.RequireAuthenticatedUser();
+                        p.AddRequirements(new ServicePrincipalRequirement());
+                    });
                 });
             });
         });
@@ -166,21 +187,47 @@ public class LlmCallEndpointsTests
     }
 
     [Test]
-    public async Task Post_BodyTenantId_WinsOverHeader()
+    public async Task Post_BodyTenantId_CannotOverride_AuthenticatedTenant()
     {
-        var headerTenant = Guid.NewGuid();
-        var bodyTenant = Guid.NewGuid();
-        _tenantContext.SetTenantId(headerTenant);
+        // Finding C1 — a request whose body tenantId differs from the
+        // authenticated tenant must use the AUTHENTICATED tenant for the
+        // gate/budget/credential path. The body value carries no authority.
+        var authenticatedTenant = Guid.NewGuid();
+        var spoofedTenant = Guid.NewGuid();
+        _tenantContext.SetTenantId(authenticatedTenant);
         _managed.Next = SuccessRun();
 
         using var client = AuthedClient();
-        client.DefaultRequestHeaders.Add("X-Tenant-Id", headerTenant.ToString());
+        client.DefaultRequestHeaders.Add("X-Tenant-Id", authenticatedTenant.ToString());
 
-        var resp = await client.PostAsJsonAsync(Route, MinimalRequestBody(tenantId: bodyTenant));
+        var resp = await client.PostAsJsonAsync(Route, MinimalRequestBody(tenantId: spoofedTenant));
 
         resp.StatusCode.Should().Be(HttpStatusCode.OK);
-        _managed.LastRequest!.TenantId.Should().Be(bodyTenant,
-            "the body's tenantId wins over the header per ManagedAgentRequest.From");
+        _managed.LastRequest!.TenantId.Should().Be(authenticatedTenant,
+            "the authenticated tenant is authoritative; the body tenantId never overrides it (C1)");
+        _managed.LastRequest!.TenantId.Should().NotBe(spoofedTenant,
+            "a caller cannot be credentialed/gated/budgeted as a tenant it names in the body");
+    }
+
+    // -----------------------------------------------------------------------
+    // C2 — engine/service-only: a non-engine (user) principal is rejected
+    // -----------------------------------------------------------------------
+
+    [Test]
+    public async Task Post_NonEnginePrincipal_Returns403_HandlerNotReached()
+    {
+        // A genuine authenticated tenant user (NOT a service principal) must be
+        // rejected by the EngineServiceOnly policy — the endpoint drives
+        // arbitrary LLM spend + tool execution and is engine-only (C2).
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", UserBearer);
+
+        var resp = await client.PostAsJsonAsync(Route, MinimalRequestBody());
+
+        resp.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _managed.LastRequest.Should().BeNull(
+            "the handler must not run for a non-engine principal (rejected at the policy)");
     }
 
     // -----------------------------------------------------------------------
@@ -458,8 +505,11 @@ public class LlmCallEndpointsTests
         public void ClearTenantId() => _tenantId = null;
     }
 
-    /// <summary>A deterministic Bearer scheme: authenticates the fixed
-    /// <see cref="TestBearer"/>, fails (⇒ 401) for any other / missing token.</summary>
+    /// <summary>A deterministic Bearer scheme: authenticates <see cref="TestBearer"/>
+    /// as the ENGINE (mints a <see cref="ServiceAuthPrincipal"/> on
+    /// HttpContext.Items, like <c>ApiKeyAuthHandler</c> does for a service key)
+    /// and <see cref="UserBearer"/> as a NON-engine tenant user (bare identity,
+    /// no service principal). Any other / missing token ⇒ 401.</summary>
     private sealed class TestEngineAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
     {
         public const string SchemeName = "TestEngine";
@@ -480,13 +530,42 @@ public class LlmCallEndpointsTests
                 return Task.FromResult(AuthenticateResult.NoResult());
 
             var token = value["Bearer ".Length..].Trim();
-            if (!string.Equals(token, TestBearer, StringComparison.Ordinal))
-                return Task.FromResult(AuthenticateResult.Fail("Invalid engine token"));
 
-            var identity = new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, "tamma-engine") }, SchemeName);
-            var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName);
-            return Task.FromResult(AuthenticateResult.Success(ticket));
+            if (string.Equals(token, TestBearer, StringComparison.Ordinal))
+            {
+                // Engine / service principal — mirror ApiKeyAuthHandler: stamp a
+                // ServiceAuthPrincipal on HttpContext.Items so EngineServiceOnly
+                // passes.
+                Context.SetAuthPrincipal(new ServiceAuthPrincipal(
+                    KeyId: Guid.NewGuid(),
+                    ServiceName: "tamma-engine",
+                    Permissions: Array.Empty<string>(),
+                    TenantId: null));
+                var identity = new ClaimsIdentity(
+                    new[]
+                    {
+                        new Claim(ClaimTypes.NameIdentifier, "tamma-engine"),
+                        new Claim("scope", "service"),
+                    }, SchemeName);
+                var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName);
+                return Task.FromResult(AuthenticateResult.Success(ticket));
+            }
+
+            if (string.Equals(token, UserBearer, StringComparison.Ordinal))
+            {
+                // A real, authenticated tenant USER — NO ServiceAuthPrincipal is
+                // set. EngineServiceOnly must 403 this (Finding C2).
+                var identity = new ClaimsIdentity(
+                    new[]
+                    {
+                        new Claim(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString()),
+                        new Claim("role", "owner"),
+                    }, SchemeName);
+                var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName);
+                return Task.FromResult(AuthenticateResult.Success(ticket));
+            }
+
+            return Task.FromResult(AuthenticateResult.Fail("Invalid token"));
         }
     }
 }

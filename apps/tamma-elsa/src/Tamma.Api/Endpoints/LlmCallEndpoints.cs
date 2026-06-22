@@ -14,14 +14,23 @@ namespace Tamma.Api.Endpoints;
 /// runs the agentic tool loop server-side, meters cost, and returns a key-free
 /// <see cref="LlmCallResponse"/>.
 ///
-/// <para><b>Auth.</b> The route is registered under the platform default policy
-/// (the SAME plane as the other <c>TammaApiClient</c> callbacks —
-/// agent-resolve / chain-resolve / diagnostics / provider-session and the
-/// SaaS <c>/api/v1/llm/chat</c> callback). The engine sends
+/// <para><b>Auth (Finding C2 — engine/service-only).</b> The route is registered
+/// under the <c>EngineServiceOnly</c> policy, which requires the typed
+/// <c>ServiceAuthPrincipal</c> that <c>ApiKeyAuthHandler</c> mints for a
+/// <c>service</c>-scope key. The engine sends
 /// <c>Authorization: Bearer &lt;Tamma:ApiToken&gt;</c> (via
-/// <c>TammaEngineAuthHandler</c>), authenticated by the platform JwtBearer/ApiKey
-/// chain. A missing/invalid bearer ⇒ HTTP 401 produced by the auth pipeline
-/// BEFORE this handler runs.</para>
+/// <c>TammaEngineAuthHandler</c>); that token is a service-scope key, so it
+/// satisfies the policy. A user JWT authenticates but never produces a
+/// <c>ServiceAuthPrincipal</c> ⇒ HTTP 403. A missing/invalid bearer ⇒ HTTP 401,
+/// both produced by the auth pipeline BEFORE this handler runs.</para>
+///
+/// <para><b>Tenant scope (Finding C1).</b> The acting tenant is the
+/// auth-derived <see cref="ITenantContext"/> value (set by
+/// <c>TenantContextMiddleware</c> from the service principal's
+/// <c>X-Tenant-Id</c>/claims) — NEVER the request body. The body
+/// <c>tenantId</c> carries no server-side authority, so a caller cannot be
+/// gated / budgeted / credentialed as a tenant other than the one its
+/// authenticated scope grants.</para>
 ///
 /// <para><b>Status discipline (AC7 — load-bearing).</b> The handler delegates to
 /// <see cref="IManagedAgent.RunAsync"/> (which ALWAYS returns a typed
@@ -39,9 +48,10 @@ public static class LlmCallEndpoints
 {
     /// <summary>
     /// Handle <c>POST /api/v1/llm/call</c>. Binds an <see cref="LlmCallRequest"/>,
-    /// derives the tenant from <c>X-Tenant-Id</c> (via <see cref="ITenantContext"/>)
-    /// when the body omits it, runs the managed agent, and maps the result to the
-    /// §2.4 HTTP envelope — never a raw 5xx.
+    /// takes the acting tenant from the auth-derived <see cref="ITenantContext"/>
+    /// (Finding C1 — the body <c>tenantId</c> can never override it), runs the
+    /// managed agent, and maps the result to the §2.4 HTTP envelope — never a raw
+    /// 5xx.
     /// </summary>
     public static async Task<IResult> CallLlm(
         LlmCallRequest request,
@@ -53,11 +63,14 @@ public static class LlmCallEndpoints
     {
         var logger = loggerFactory.CreateLogger("Tamma.Api.Endpoints.LlmCallEndpoints");
 
-        // Body tenant wins; else the X-Tenant-Id-derived ambient tenant. Both
-        // null ⇒ single-user / platform scope (ManagedAgentRequest.From applies
-        // the precedence).
-        var headerTenantId = tenantContext.TenantId;
-        var managedRequest = ManagedAgentRequest.From(request, headerTenantId);
+        // Finding C1 — the AUTHORITATIVE tenant is the auth-derived ambient
+        // tenant (ITenantContext, populated by TenantContextMiddleware from the
+        // authenticated service principal's X-Tenant-Id/claims). The body's
+        // tenantId is intentionally NOT consulted: it must never be able to name
+        // a different tenant for the gate / budget / credential path. null ⇒
+        // single-user / platform scope.
+        var authoritativeTenantId = tenantContext.TenantId;
+        var managedRequest = ManagedAgentRequest.From(request, authoritativeTenantId);
 
         logger.LogInformation(
             "call-LLM received: correlationId={CorrelationId}, role={Role}, persona={Persona}, "

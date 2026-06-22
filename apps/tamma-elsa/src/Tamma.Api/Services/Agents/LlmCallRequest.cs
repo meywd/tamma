@@ -7,9 +7,10 @@ namespace Tamma.Api.Services.Agents;
 /// <c>POST /api/v1/llm/call</c> (<c>LlmCallEndpoints</c>). The engine's
 /// ~80-line <c>CallLlmInlineActivity</c> thin client maps its current
 /// <c>Input&lt;&gt;</c> props into this record and sends it via
-/// <c>TammaApiClient.CallLlmAsync</c>. The handler derives <see cref="TenantId"/>
-/// from the <c>X-Tenant-Id</c> header when the body omits it, then delegates to
-/// <see cref="IManagedAgent.RunAsync"/> (via <see cref="ManagedAgentRequest.From"/>).
+/// <c>TammaApiClient.CallLlmAsync</c>. The handler ignores any body
+/// <see cref="TenantId"/> and instead uses the auth-derived tenant
+/// (Finding C1), then delegates to <see cref="IManagedAgent.RunAsync"/> (via
+/// <see cref="ManagedAgentRequest.From"/>).
 ///
 /// <para>This record carries NO provider API key — the engine holds no key. The
 /// key is resolved server-side inside <c>Tamma.Api</c> (32-3 cabinet,
@@ -19,9 +20,15 @@ namespace Tamma.Api.Services.Agents;
 public sealed record LlmCallRequest
 {
     /// <summary>
-    /// Tenant scope. <c>null</c> ⇒ single-user / platform scope. Also derived
-    /// from the <c>X-Tenant-Id</c> header by the endpoint when the body omits it
-    /// (see <see cref="ManagedAgentRequest.From"/>).
+    /// Tenant scope as sent by the thin client. <c>null</c> ⇒ single-user /
+    /// platform scope.
+    ///
+    /// <para><b>Finding C1.</b> This field carries NO server-side authority: the
+    /// endpoint uses the auth-derived tenant (<c>ITenantContext</c>), NOT this
+    /// value, for the gate / budget / credential path. It cannot override the
+    /// authenticated scope (cross-tenant spoofing). Retained on the wire so the
+    /// thin client may still send it, but it is ignored by
+    /// <see cref="ManagedAgentRequest.From"/>.</para>
     /// </summary>
     public Guid? TenantId { get; init; }
 

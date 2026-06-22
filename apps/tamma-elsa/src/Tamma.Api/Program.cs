@@ -1090,6 +1090,8 @@ if (!string.IsNullOrEmpty(jwtSecret))
     builder.Services.AddScoped<IAuthorizationHandler, SelfOrPermissionHandler>();
     // Story 28-R2 / C1 — handler for the new PlatformOwnerAccess policy.
     builder.Services.AddScoped<IAuthorizationHandler, PlatformPermissionHandler>();
+    // Story 32-5 / Finding C2 — handler for the engine/service-only policy.
+    builder.Services.AddScoped<IAuthorizationHandler, ServicePrincipalHandler>();
 
     builder.Services.AddAuthorization(options =>
     {
@@ -1229,6 +1231,19 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.RequireAuthenticatedUser();
         });
+        // Story 32-5 / Finding C2 — engine/service-only gate for the internal
+        // LLM-mediation endpoint (POST /api/v1/llm/call). Requires the typed
+        // ServiceAuthPrincipal that ApiKeyAuthHandler mints for a service-scope
+        // key (the engine's Tamma:ApiToken). A user JWT authenticates but never
+        // produces a ServiceAuthPrincipal, so it is rejected with 403 — the
+        // endpoint drives arbitrary LLM spend + tool execution and must be
+        // reachable by the engine ONLY, not any authenticated tenant user.
+        options.AddPolicy("EngineServiceOnly", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.RequireAuthenticatedUser();
+            p.AddRequirements(new ServicePrincipalRequirement());
+        });
     });
 }
 else if (builder.Environment.IsDevelopment())
@@ -1258,7 +1273,7 @@ else if (builder.Environment.IsDevelopment())
         // Register all named policies with permissive default
         foreach (var name in new[] { "AdminAccess", "OwnerAccess", "PlatformOwnerAccess", "MemberAccess", "SettingsView",
             "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
-            "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny" })
+            "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny", "EngineServiceOnly" })
         {
             options.AddPolicy(name, p => p.AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement()));
         }
@@ -2162,16 +2177,19 @@ app.MapPost("/api/webhooks/{platform}", WebhookEndpoints.Receive)
 app.MapPost("/api/v1/llm/chat", SaaSEndpoints.LlmChat).RequireAuthorization();
 
 // ── Story 32-5 (T4) — the call-LLM mediation endpoint (sequence step F) ──
-// Internal/engine-only: the engine's CallLlmInlineActivity thin client posts an
-// LlmCallRequest here over the SAME auth plane as the other TammaApiClient
-// callbacks (Bearer Tamma:ApiToken, authenticated by the platform JwtBearer/
-// ApiKey chain via the default policy — exactly like /api/v1/llm/chat above). A
-// missing/invalid bearer ⇒ 401 from the auth pipeline before the handler. The
-// handler delegates to IManagedAgent.RunAsync and maps via ToHttpResult under
-// the §2.4 status discipline (200 / 200 success:false +httpStatusCode / 400 /
-// 403; NEVER a raw 5xx).
+// Internal/engine-only (Finding C2): the engine's CallLlmInlineActivity thin
+// client posts an LlmCallRequest here as the service-scope Tamma:ApiToken
+// (Bearer, authenticated by the platform ApiKey chain → ServiceAuthPrincipal).
+// The EngineServiceOnly policy requires that typed service principal, so a user
+// JWT — which authenticates but never produces a ServiceAuthPrincipal — is
+// rejected with 403 (the endpoint drives arbitrary LLM spend + tool execution
+// and must be engine-only, unlike the broad default the rest of the callbacks
+// ride). A missing/invalid bearer ⇒ 401 from the auth pipeline before the
+// handler. The handler delegates to IManagedAgent.RunAsync and maps via
+// ToHttpResult under the §2.4 status discipline (200 / 200 success:false
+// +httpStatusCode / 400 / 403; NEVER a raw 5xx).
 app.MapPost("/api/v1/llm/call", LlmCallEndpoints.CallLlm)
-    .RequireAuthorization()
+    .RequireAuthorization("EngineServiceOnly")
     .WithName("CallLlm");
 app.MapPost("/api/v1/workflows/{id}/status", SaaSEndpoints.UpdateWorkflowStatus).RequireAuthorization();
 app.MapPost("/api/v1/workflows/{id}/result", SaaSEndpoints.PostWorkflowResult).RequireAuthorization();
