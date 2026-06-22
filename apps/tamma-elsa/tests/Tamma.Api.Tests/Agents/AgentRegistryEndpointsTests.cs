@@ -101,7 +101,7 @@ public class AgentRegistryEndpointsTests
 
         var registry = new AgentRegistryService(
             agentRepo, selectionRepo, events, modeProvider, tenantContext, httpAccessor,
-            personaOptions, NullLogger<AgentRegistryService>.Instance);
+            personaOptions, enablement: null, NullLogger<AgentRegistryService>.Instance);
         var resolver = new AgentResolverService(
             new AgentConfigRepository(factory), null, NullLogger<AgentResolverService>.Instance,
             registry, agentRepo, events, null, new StubPersonaPrompts());
@@ -432,7 +432,7 @@ public class AgentRegistryEndpointsTests
         var registry = new AgentRegistryService(
             agentRepo, selectionRepo, events, new StubMode(TammaMode.SaaS),
             tenantContext, new HttpContextAccessor { HttpContext = new DefaultHttpContext() },
-            personaOptions, loggerFactory.CreateLogger<AgentRegistryService>());
+            personaOptions, enablement: null, loggerFactory.CreateLogger<AgentRegistryService>());
 
         await using (cpCtx)
         {
@@ -471,7 +471,7 @@ public class AgentRegistryEndpointsTests
         var registry = new AgentRegistryService(
             agentRepo, selectionRepo, events, new StubMode(TammaMode.SaaS),
             tenantContext, new HttpContextAccessor { HttpContext = new DefaultHttpContext() },
-            personaOptions, NullLogger<AgentRegistryService>.Instance);
+            personaOptions, enablement: null, NullLogger<AgentRegistryService>.Instance);
 
         await using (cpCtx)
         {

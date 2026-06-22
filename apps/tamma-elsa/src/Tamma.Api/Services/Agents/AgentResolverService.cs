@@ -250,8 +250,8 @@ public sealed class AgentResolverService : IAgentResolverService
 
     /// <inheritdoc />
     public async Task<ResolvedAgentConfig> ResolveForRoleAsync(
-        string role, CancellationToken ct = default)
-        => await ResolveEntityAsync(role, phase: null, ct);
+        string role, string? action = null, CancellationToken ct = default)
+        => await ResolveEntityAsync(role, action, ct);
 
     /// <inheritdoc />
     public async Task<ResolvedAgentConfig> ResolveForRoleAndPhaseAsync(
@@ -270,6 +270,7 @@ public sealed class AgentResolverService : IAgentResolverService
                 nameof(role));
         }
 
+        // The phase doubles as the Epic-27 action key for the prompt source.
         return await ResolveEntityAsync(role, phase, ct);
     }
 
@@ -277,9 +278,17 @@ public sealed class AgentResolverService : IAgentResolverService
     /// The 4-branch precedence chain (AC 3). NEVER returns an empty/plain
     /// config: the 4th branch emits <c>AGENT.RESOLVE.FAILED</c>, best-effort
     /// records a <c>MISSING_CONFIG</c> gap, then throws.
+    ///
+    /// <para>Story 32-18 — the precedence is now ENABLEMENT-AWARE: a stored
+    /// selection that points at a persona the principal has since DISABLED
+    /// degrades to the enabled default (emitting <c>AGENT.RESOLVE.DEGRADED</c>),
+    /// it is never resolved; the system-default branch returns the tenant's
+    /// ENABLED default persona (or null ⇒ fail loud
+    /// <c>AGENT.RESOLVE.NO_ENABLED_DEFAULT</c>). The <paramref name="action"/> is
+    /// the Epic-27 action key threaded into the prompt source.</para>
     /// </summary>
     private async Task<ResolvedAgentConfig> ResolveEntityAsync(
-        string role, string? phase, CancellationToken ct)
+        string role, string? action, CancellationToken ct)
     {
         role = RolePhaseMap.NormalizeRole(role);
         RolePhaseMap.AssertValidRole(role);
@@ -296,22 +305,36 @@ public sealed class AgentResolverService : IAgentResolverService
         var selections = await _registry.GetRoleSelectionsAsync(ct);
         if (selections.TryGetValue(role, out var sel))
         {
-            // Recompute provenance at resolve time — a stale/archived/cross-scope
-            // target degrades to the system default rather than resolving stale.
-            var selected = await _registry.ResolveUsableAgentAsync(sel.AgentId, ct);
-            if (selected is { Status: AgentStatus.Active })
+            // Fetch the raw target so we can distinguish:
+            //   - usable (enabled public OR own-private)  ⇒ resolve it;
+            //   - active+visible but NOT usable (a persona the tenant DISABLED
+            //     after selecting it) ⇒ DEGRADE (AGENT.RESOLVE.DEGRADED), never
+            //     resolve the disabled persona;
+            //   - archived / missing / cross-scope ⇒ stale-selection WARN, degrade.
+            var target = await _agents.GetByIdAsync(sel.AgentId, ct);
+            if (target is { Status: AgentStatus.Active } && await _registry.CanUseAsync(target, ct))
             {
-                var source = selected.Visibility == AgentVisibility.Public
+                var source = target.Visibility == AgentVisibility.Public
                     ? "tenant-public"   // principal SELECTED a public agent
                     : "tenant-private"; // principal's own private agent
-                var materialised = await MaterialiseAsync(selected, role, phase, source, ct);
+                var materialised = await MaterialiseAsync(target, role, action, source, ct);
                 if (materialised is not null)
                 {
                     _logger.LogDebug(
                         "agent.resolve.selection role={Role} agentId={AgentId} source={Source}",
-                        role, selected.Id, source);
+                        role, target.Id, source);
                     return materialised;
                 }
+            }
+            else if (target is { Status: AgentStatus.Active, Visibility: AgentVisibility.Public })
+            {
+                // Story 32-18 — a now-DISABLED public persona. Degrade to the
+                // enabled default with an auditable WARN, never resolve it.
+                _logger.LogWarning(
+                    "agent.resolve.degraded role={Role} staleAgentId={StaleAgentId} — "
+                    + "selected persona no longer enabled; degrading to enabled default",
+                    role, sel.AgentId);
+                await AppendDegradedEventAsync(role, sel.AgentId, ct);
             }
             else
             {
@@ -321,19 +344,23 @@ public sealed class AgentResolverService : IAgentResolverService
             }
         }
 
-        // Branch 3: system-default public PERSONA (Story 32-15 — the configured
-        // default persona, role-independent). GetSystemDefaultPublicAsync itself
-        // fails loud (AGENT_DEFAULT_PERSONA_MISSING) when the configured persona
-        // is not seeded; we treat that as "no system default" so the resolver
-        // still emits the mandatory AGENT.RESOLVE.FAILED audit event and throws
-        // its canonical no-default error (32-2 AC9 contract preserved).
+        // Branch 3: the tenant's ENABLED default persona (Story 32-18 over 32-15).
+        // GetSystemDefaultPublicAsync returns the configured default persona IF
+        // enabled, else the principal's enabled default (32-16), else NULL when the
+        // tenant has enabled nothing. A null here is the fail-loud signal — there
+        // is NO empty/plain fallback. (The legacy seam-less path may still throw
+        // AGENT_DEFAULT_PERSONA_MISSING when a configured persona is unseeded;
+        // treat that as "no default" so the canonical fail-loud event still fires.)
         Agent? systemDefault = null;
+        var configuredPersonaMissing = false;
         try
         {
             systemDefault = await _registry.GetSystemDefaultPublicAsync(role, ct);
         }
         catch (TammaError ex) when (ex.Code == "AGENT_DEFAULT_PERSONA_MISSING")
         {
+            // Legacy (seam-less) path only: a configured persona was not seeded.
+            configuredPersonaMissing = true;
             _logger.LogWarning(
                 "agent.resolve.default_persona_missing role={Role} — no configured default persona seeded",
                 role);
@@ -341,7 +368,7 @@ public sealed class AgentResolverService : IAgentResolverService
 
         if (systemDefault is not null)
         {
-            var materialised = await MaterialiseAsync(systemDefault, role, phase, "system-public", ct);
+            var materialised = await MaterialiseAsync(systemDefault, role, action, "system-public", ct);
             if (materialised is not null)
             {
                 _logger.LogDebug(
@@ -351,8 +378,13 @@ public sealed class AgentResolverService : IAgentResolverService
             }
         }
 
-        // Branch 4: NO empty/plain fallback — fail loud.
-        await FailLoudAsync(role, phase, ct);
+        // Branch 4: NO empty/plain fallback — fail loud. Story 32-18 — when the
+        // enablement-aware lookup returned NULL (the principal has enabled nothing
+        // AND has no own-private agent for the role), distinguish the failure as
+        // AGENT.RESOLVE.NO_ENABLED_DEFAULT; the legacy seam-less "configured persona
+        // not seeded" path keeps the canonical AGENT.RESOLVE.NO_DEFAULT code.
+        var noEnabledDefault = systemDefault is null && !configuredPersonaMissing;
+        await FailLoudAsync(role, action, noEnabledDefault, ct);
         // Unreachable — FailLoudAsync always throws.
         throw new InvalidOperationException("unreachable");
     }
@@ -367,7 +399,7 @@ public sealed class AgentResolverService : IAgentResolverService
     /// the caller can degrade to the next branch).
     /// </summary>
     private async Task<ResolvedAgentConfig?> MaterialiseAsync(
-        Agent agent, string role, string? phase, string source, CancellationToken ct)
+        Agent agent, string role, string? action, string source, CancellationToken ct)
     {
         var version = await _agents!.GetActiveVersionAsync(agent.Id, ct);
         if (version is null)
@@ -399,7 +431,7 @@ public sealed class AgentResolverService : IAgentResolverService
         // via the 32-15 IPersonaPromptResolver seam. Both fail loud (no
         // empty/plain fallback).
         var (systemPrompt, promptSource) =
-            await ResolvePromptSourceAsync(agent, version, role, phase, ct);
+            await ResolvePromptSourceAsync(agent, version, role, action, ct);
 
         // The agent's stable handle wins over the merged handle (identity).
         var enriched = new ResolvedAgentConfig
@@ -414,7 +446,7 @@ public sealed class AgentResolverService : IAgentResolverService
             Tools = resolved.Tools,
             SystemPrompt = systemPrompt,
             Source = source,
-            Phase = phase,
+            Phase = action,
             MaxBudgetUsd = resolved.MaxBudgetUsd,
             PermissionMode = resolved.PermissionMode,
             AllowedTools = resolved.AllowedTools,
@@ -494,10 +526,12 @@ public sealed class AgentResolverService : IAgentResolverService
         }
         var (tenantId, userId) = _registry!.ResolvePrincipal();
         var principal = new Principal(tenantId, userId);
-        // The entity-aware resolve path is role-based (no Epic 27 action), so we
-        // resolve the role-system (identity preamble) prompt; the seam is
-        // fail-loud internally (PROMPT_UNRESOLVED) — no empty/plain fallback.
-        var personaPrompt = await _personaPrompts.ResolveAsync(principal, role, action: null, ct);
+        // Story 32-18 — thread the Epic-27 ACTION key (AC7): the persona prompt
+        // resolves at (principal, role, action). When action is null the seam
+        // resolves the role-system (identity preamble) / action-default branch.
+        // The seam is fail-loud internally (PROMPT_UNRESOLVED) — no empty/plain
+        // fallback.
+        var personaPrompt = await _personaPrompts.ResolveAsync(principal, role, action, ct);
         return (personaPrompt, AgentPromptSource.Epic27Store);
     }
 
@@ -506,8 +540,14 @@ public sealed class AgentResolverService : IAgentResolverService
     /// (mandatory), best-effort records a <c>MISSING_CONFIG</c> gap (optional),
     /// then throws <see cref="TammaError"/>. Mirrors
     /// <c>PromptStoreService.NoPromptError</c> / <c>ConventionStore</c>.
+    ///
+    /// <para>Story 32-18 — when <paramref name="noEnabledDefault"/> is true the
+    /// failure is "the principal enabled no usable persona", thrown as
+    /// <c>AGENT.RESOLVE.NO_ENABLED_DEFAULT</c>; otherwise the canonical 32-2
+    /// <c>AGENT.RESOLVE.NO_DEFAULT</c>.</para>
     /// </summary>
-    private async Task FailLoudAsync(string role, string? phase, CancellationToken ct)
+    private async Task FailLoudAsync(
+        string role, string? phase, bool noEnabledDefault, CancellationToken ct)
     {
         var (tenantId, _) = _registry!.ResolvePrincipal();
         var tags = new Dictionary<string, object?>
@@ -559,7 +599,21 @@ public sealed class AgentResolverService : IAgentResolverService
         }
 
         _logger.LogError(
-            "AGENT.RESOLVE.FAILED role={Role} phase={Phase} — no agent resolvable", role, phase);
+            "AGENT.RESOLVE.FAILED role={Role} phase={Phase} noEnabledDefault={NoEnabledDefault} — no agent resolvable",
+            role, phase, noEnabledDefault);
+
+        if (noEnabledDefault)
+        {
+            throw new TammaError(
+                AgentEventTypes.NoEnabledDefault,
+                $"No enabled agent resolvable for role '{role}': the principal has enabled no "
+                + "usable persona and has no own-private agent for the role. Resolution is "
+                + "private-selection → enabled-public-selection → enabled-default-persona → error; "
+                + "there is no empty/plain fallback.",
+                new Dictionary<string, object?> { ["role"] = role, ["phase"] = phase },
+                retryable: false,
+                severity: TammaErrorSeverity.High);
+        }
 
         throw new TammaError(
             "AGENT.RESOLVE.NO_DEFAULT",
@@ -569,6 +623,44 @@ public sealed class AgentResolverService : IAgentResolverService
             new Dictionary<string, object?> { ["role"] = role, ["phase"] = phase },
             retryable: false,
             severity: TammaErrorSeverity.High);
+    }
+
+    /// <summary>
+    /// Story 32-18 — emit <c>AGENT.RESOLVE.DEGRADED</c> (WARN-level) when a stored
+    /// selection pointed at a persona the principal has since DISABLED, so the
+    /// disablement-driven degrade is auditable. Tags
+    /// <c>{ role, staleAgentId, fallbackSource, mode }</c>.
+    /// </summary>
+    private async Task AppendDegradedEventAsync(string role, Guid staleAgentId, CancellationToken ct)
+    {
+        _ = ct;
+        var (tenantId, _) = _registry!.ResolvePrincipal();
+        var tags = new Dictionary<string, object?>
+        {
+            ["role"] = role,
+            ["staleAgentId"] = staleAgentId.ToString(),
+            ["fallbackSource"] = "system-public",
+            ["mode"] = tenantId is not null ? "saas" : "single-user",
+        };
+
+        await _events!.AppendAsync(new DomainEvent
+        {
+            Id = Guid.NewGuid(),
+            Type = AgentEventTypes.ResolveDegraded,
+            TenantId = tenantId,
+            Tags = JsonSerializer.Serialize(tags),
+            Metadata = JsonSerializer.Serialize(new
+            {
+                workflowVersion = "1.0.0",
+                eventSource = "system",
+            }),
+            Data = JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["role"] = role,
+                ["staleAgentId"] = staleAgentId.ToString(),
+            }),
+            CreatedAt = DateTime.UtcNow,
+        });
     }
 
     // -----------------------------------------------------------------------

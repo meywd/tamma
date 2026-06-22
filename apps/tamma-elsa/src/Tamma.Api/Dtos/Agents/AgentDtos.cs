@@ -60,6 +60,14 @@ public sealed record PublishVersionRequest(
     string? Notes);
 
 /// <summary>List/summary projection of an <c>Agent</c>.</summary>
+/// <remarks>
+/// Story 32-18 — <see cref="Enabled"/> is the per-tenant enablement flag for a
+/// public persona (own-private agents are implicitly enabled). It is
+/// <c>null</c> on the default member listing (which already filters to
+/// <c>enabled(public) ∪ own-private</c>, so a flag is redundant) and is set only
+/// on the admin <c>?includeDisabled=true</c> view, where the full catalog is
+/// returned and the flag tells the admin what they could enable.
+/// </remarks>
 public sealed record AgentSummary(
     Guid Id,
     string Name,
@@ -68,7 +76,8 @@ public sealed record AgentSummary(
     string Status,
     Guid? OwnerTenantId,
     Guid? OwnerUserId,
-    Guid? CurrentVersionId);
+    Guid? CurrentVersionId,
+    bool? Enabled = null);
 
 /// <summary>Full agent detail (summary + version list).</summary>
 public sealed record AgentDetail(

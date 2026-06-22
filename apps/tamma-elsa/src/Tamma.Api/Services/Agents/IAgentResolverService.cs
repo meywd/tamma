@@ -70,11 +70,22 @@ public interface IAgentResolverService
     /// gap, then throws <see cref="Tamma.Core.TammaError"/>
     /// <c>AGENT.RESOLVE.NO_DEFAULT</c> (severity High) — mirroring the
     /// prompt/convention fail-loud rule.</para>
+    ///
+    /// <para>Story 32-18 — the optional <paramref name="action"/> is the Epic-27
+    /// action key threaded through to the persona prompt source
+    /// (<c>IPersonaPromptResolver</c>) and the custom-agent prompt source
+    /// (<c>ICustomAgentPromptResolver</c>), so the persona prompt resolves at
+    /// <c>(principal, role, action)</c> — matching the <c>LlmCallRequest.action</c>
+    /// the call-LLM endpoint (32-5) passes. When <c>null</c>, the role-system
+    /// (identity preamble) / action-default branch is used (still tenant→system→
+    /// error, never empty).</para>
     /// </summary>
     /// <exception cref="ArgumentException">Unknown role.</exception>
     /// <exception cref="Tamma.Core.TammaError">No agent resolvable
-    /// (<c>AGENT.RESOLVE.NO_DEFAULT</c>).</exception>
-    Task<ResolvedAgentConfig> ResolveForRoleAsync(string role, CancellationToken ct = default);
+    /// (<c>AGENT.RESOLVE.NO_DEFAULT</c> or, when the tenant has enabled nothing,
+    /// <c>AGENT.RESOLVE.NO_ENABLED_DEFAULT</c>).</exception>
+    Task<ResolvedAgentConfig> ResolveForRoleAsync(
+        string role, string? action = null, CancellationToken ct = default);
 
     /// <summary>
     /// Story 32-2 — same precedence chain as <see cref="ResolveForRoleAsync"/>

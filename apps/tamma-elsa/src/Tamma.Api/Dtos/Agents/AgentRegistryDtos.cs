@@ -12,10 +12,17 @@ namespace Tamma.Api.Dtos.Agents;
 /// <c>active</c>/<c>archived</c>); role is a canonical
 /// <c>RolePhaseMap.ValidRoles</c> wire string.
 /// </summary>
+/// <remarks>
+/// Story 32-18 — <see cref="IncludeDisabled"/> (owner/admin only) returns the
+/// FULL public catalog (not just the enabled set) with an <c>enabled</c> flag per
+/// row, so an admin can see what they could enable. Members never see disabled
+/// public personas; the flag is ignored for non-admin callers.
+/// </remarks>
 public sealed record AgentListFilter(
     string? Role = null,
     string? Visibility = null,
-    string? Status = null);
+    string? Status = null,
+    bool IncludeDisabled = false);
 
 /// <summary>
 /// Body for <c>PUT /api/agents/role-selections/{role}</c> — which agent (public
