@@ -212,25 +212,37 @@
 .twv-mono { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; }
 
 .twv-subwf { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.twv-subwf code {
-  font-size: 12px;
-  color: #93c5fd;
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(96, 165, 250, 0.25);
-  padding: 2px 7px;
-  border-radius: 5px;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-}
-.twv-subwf-link {
+/* The sub-workflow NAME pill is itself the link (an <a>): click navigates,
+   middle/ctrl-click opens a new tab. */
+.twv-subwf-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
   background: rgba(59, 130, 246, 0.12);
   border: 1px solid rgba(96, 165, 250, 0.35);
-  color: #bfdbfe;
-  font-size: 12px;
-  padding: 3px 9px;
   border-radius: 6px;
+  padding: 4px 9px;
   cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
-.twv-subwf-link:hover { background: rgba(59, 130, 246, 0.22); }
+.twv-subwf-pill code {
+  font-size: 12px;
+  color: #bfdbfe;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.twv-subwf-arrow { color: #93c5fd; font-size: 13px; line-height: 1; }
+.twv-subwf-pill:hover { background: rgba(59, 130, 246, 0.24); border-color: rgba(96, 165, 250, 0.6); }
+.twv-subwf-pill:focus-visible { outline: 2px solid #60a5fa; outline-offset: 2px; }
+.twv-subwf-pill-disabled {
+  background: rgba(82, 82, 91, 0.12);
+  border-color: rgba(82, 82, 91, 0.3);
+  cursor: default;
+}
+.twv-subwf-pill-disabled code { color: #a1a1aa; }
 .twv-subwf-unresolved { font-size: 11px; color: #71717a; }
 
 /* Stack panel below the canvas on narrow screens. */
