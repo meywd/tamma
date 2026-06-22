@@ -108,7 +108,7 @@ public class AgentResolverChainTests
 
         var registry = new AgentRegistryService(
             agentRepo, selectionRepo, events, modeProvider, tenantContext, httpAccessor,
-            personaOptions, NullLogger<AgentRegistryService>.Instance);
+            personaOptions, enablement: null, NullLogger<AgentRegistryService>.Instance);
 
         // The legacy JSONB repo is never exercised by the entity-aware chain; a
         // real instance is wired so the full constructor is satisfied. Story

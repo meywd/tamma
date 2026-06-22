@@ -1,7 +1,11 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Tamma.Api.Services.Agents;
+using Tamma.Api.Services.PromptStore;
+using Tamma.Data;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Extensions;
@@ -32,17 +36,32 @@ public static class AgentResolverServiceCollectionExtensions
             .Configure<IConfiguration>((opts, cfg) =>
                 cfg.GetSection(DefaultPersonaOptions.SectionPath).Bind(opts));
 
-        services.AddScoped<IAgentRegistryService, AgentRegistryService>();
-
         // Story 32-16 — per-tenant agent/persona enablement (catalog membership).
         // ONE implementation backs BOTH the write/admin service AND the read-only
         // reader seam 32-18 injects; register the reader against the same scoped
-        // instance so the gate and the API share one source of truth.
+        // instance so the gate and the API share one source of truth. Registered
+        // BEFORE the registry so the registry's enablement-gate constructor
+        // dependency resolves.
         services.AddScoped<TenantAgentEnablementService>();
         services.AddScoped<ITenantAgentEnablementService>(
             sp => sp.GetRequiredService<TenantAgentEnablementService>());
         services.AddScoped<ITenantAgentEnablementReader>(
             sp => sp.GetRequiredService<TenantAgentEnablementService>());
+
+        // Story 32-2 + 32-18 — the registry layers the per-tenant enablement gate
+        // (32-16 read seam) over selection/resolution. Use an explicit factory so
+        // the optional enablement reader is wired (the convenience constructor's
+        // optional params would otherwise leave it null and bypass the gate).
+        services.AddScoped<IAgentRegistryService>(sp => new AgentRegistryService(
+            sp.GetRequiredService<IAgentRepository>(),
+            sp.GetRequiredService<IAgentSelectionRepository>(),
+            sp.GetRequiredService<IEventRepository>(),
+            sp.GetRequiredService<ITammaModeProvider>(),
+            sp.GetRequiredService<ITenantContext>(),
+            sp.GetRequiredService<IHttpContextAccessor>(),
+            sp.GetService<IOptions<DefaultPersonaOptions>>(),
+            sp.GetRequiredService<ITenantAgentEnablementReader>(),
+            sp.GetService<ILogger<AgentRegistryService>>()));
 
         // Story 32-15 — the persona/public prompt seam over the Epic 27 store.
         services.AddScoped<IPersonaPromptResolver, PersonaPromptResolver>();

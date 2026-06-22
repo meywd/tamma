@@ -101,6 +101,42 @@ public class AgentEndpointsTests
     private static JsonElement Config(string json)
         => JsonDocument.Parse(json).RootElement.Clone();
 
+    /// <summary>
+    /// Story 32-18 — these Story 32-1/32-2 list tests assert the role/visibility/
+    /// status FILTERS and cross-tenant isolation, NOT the per-tenant enablement
+    /// gate (that is pinned by AgentEnablementGate(Endpoints)Tests). They feed an
+    /// "all public enabled" reader (every live public persona enabled) so the
+    /// visibility/filter behaviour they target is unaffected by the new gate.
+    /// </summary>
+    private static Tamma.Api.Services.Agents.ITenantAgentEnablementReader AllEnabled(
+        IAgentRepository repo)
+        => new AllPublicEnabledReader(repo);
+
+    private sealed class AllPublicEnabledReader(IAgentRepository repo)
+        : Tamma.Api.Services.Agents.ITenantAgentEnablementReader
+    {
+        public Task<bool> IsEnabledForPrincipalAsync(
+            Guid agentId, Tamma.Api.Services.Agents.Principal principal, CancellationToken ct = default)
+            => Task.FromResult(true);
+
+        public async Task<IReadOnlyList<Guid>> ListEnabledPublicAgentIdsAsync(
+            Tamma.Api.Services.Agents.Principal principal, CancellationToken ct = default)
+        {
+            // Every live (active, public) persona is "enabled" for this fake — the
+            // endpoint intersects this with the visibility-scoped rows, preserving
+            // the pre-gate list behaviour these filter tests assert.
+            var all = await repo.ListVisibleAsync(principal.TenantId, principal.UserId, ct);
+            return all
+                .Where(a => a.Visibility == AgentVisibility.Public && a.Status == AgentStatus.Active)
+                .Select(a => a.Id)
+                .ToList();
+        }
+
+        public Task<Guid?> GetEnabledDefaultPersonaIdAsync(
+            Tamma.Api.Services.Agents.Principal principal, CancellationToken ct = default)
+            => Task.FromResult((Guid?)null);
+    }
+
     private static readonly JsonElement ValidConfig =
         Config("""{ "provider": "anthropic", "model": "claude-sonnet-4" }""");
 
@@ -395,7 +431,7 @@ public class AgentEndpointsTests
                 repo, Principal(Guid.NewGuid()), TenantCtx(TenantB), Mode(TammaMode.SaaS)));
 
             var list = await AgentEndpoints.ListAgents(
-                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS));
+                repo, AllEnabled(repo), adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS));
             var (status, body) = await ExecuteAsync(list);
             status.Should().Be(StatusCodes.Status200OK);
 
@@ -460,7 +496,7 @@ public class AgentEndpointsTests
         {
             var adminA = await SeedFilterFixtureAsync(repo);
             var list = await AgentEndpoints.ListAgents(
-                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS));
+                repo, AllEnabled(repo), adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS));
             var (status, body) = await ExecuteAsync(list);
 
             status.Should().Be(StatusCodes.Status200OK);
@@ -479,7 +515,7 @@ public class AgentEndpointsTests
         {
             var adminA = await SeedFilterFixtureAsync(repo);
             var list = await AgentEndpoints.ListAgents(
-                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), role: "developer");
+                repo, AllEnabled(repo), adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), role: "developer");
             var (status, body) = await ExecuteAsync(list);
 
             status.Should().Be(StatusCodes.Status200OK);
@@ -497,7 +533,7 @@ public class AgentEndpointsTests
             // architect role matches a-architect (own private), pub-architect
             // (public), AND b-architect (tenant B private) — but B must be scoped out.
             var list = await AgentEndpoints.ListAgents(
-                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), role: "architect");
+                repo, AllEnabled(repo), adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), role: "architect");
             var (status, body) = await ExecuteAsync(list);
 
             status.Should().Be(StatusCodes.Status200OK);
@@ -516,7 +552,7 @@ public class AgentEndpointsTests
         {
             var adminA = await SeedFilterFixtureAsync(repo);
             var list = await AgentEndpoints.ListAgents(
-                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), visibility: "private");
+                repo, AllEnabled(repo), adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), visibility: "private");
             var (status, body) = await ExecuteAsync(list);
 
             status.Should().Be(StatusCodes.Status200OK);
@@ -536,7 +572,7 @@ public class AgentEndpointsTests
         {
             var adminA = await SeedFilterFixtureAsync(repo);
             var list = await AgentEndpoints.ListAgents(
-                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), visibility: "public");
+                repo, AllEnabled(repo), adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), visibility: "public");
             var (status, body) = await ExecuteAsync(list);
 
             status.Should().Be(StatusCodes.Status200OK);
@@ -552,7 +588,7 @@ public class AgentEndpointsTests
         {
             var adminA = await SeedFilterFixtureAsync(repo);
             var list = await AgentEndpoints.ListAgents(
-                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), status: "archived");
+                repo, AllEnabled(repo), adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), status: "archived");
             var (status, body) = await ExecuteAsync(list);
 
             status.Should().Be(StatusCodes.Status200OK);
@@ -568,7 +604,7 @@ public class AgentEndpointsTests
         {
             var adminA = await SeedFilterFixtureAsync(repo);
             var list = await AgentEndpoints.ListAgents(
-                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), status: "active");
+                repo, AllEnabled(repo), adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), status: "active");
             var (status, body) = await ExecuteAsync(list);
 
             status.Should().Be(StatusCodes.Status200OK);
@@ -587,7 +623,7 @@ public class AgentEndpointsTests
             var adminA = await SeedFilterFixtureAsync(repo);
             // private AND architect AND active → only a-architect.
             var list = await AgentEndpoints.ListAgents(
-                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS),
+                repo, AllEnabled(repo), adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS),
                 role: "architect", visibility: "private", status: "active");
             var (status, body) = await ExecuteAsync(list);
 
@@ -604,7 +640,7 @@ public class AgentEndpointsTests
         {
             var adminA = await SeedFilterFixtureAsync(repo);
             var list = await AgentEndpoints.ListAgents(
-                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), role: "wizard");
+                repo, AllEnabled(repo), adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), role: "wizard");
             var (status, body) = await ExecuteAsync(list);
 
             status.Should().Be(StatusCodes.Status400BadRequest);
@@ -620,7 +656,7 @@ public class AgentEndpointsTests
         {
             var adminA = await SeedFilterFixtureAsync(repo);
             var list = await AgentEndpoints.ListAgents(
-                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), visibility: "secret");
+                repo, AllEnabled(repo), adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), visibility: "secret");
             var (status, body) = await ExecuteAsync(list);
 
             status.Should().Be(StatusCodes.Status400BadRequest);
@@ -636,7 +672,7 @@ public class AgentEndpointsTests
         {
             var adminA = await SeedFilterFixtureAsync(repo);
             var list = await AgentEndpoints.ListAgents(
-                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), status: "deleted");
+                repo, AllEnabled(repo), adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), status: "deleted");
             var (status, body) = await ExecuteAsync(list);
 
             status.Should().Be(StatusCodes.Status400BadRequest);
@@ -653,7 +689,7 @@ public class AgentEndpointsTests
             var adminA = await SeedFilterFixtureAsync(repo);
             // Empty/whitespace params must NOT 400 and must NOT narrow.
             var list = await AgentEndpoints.ListAgents(
-                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS),
+                repo, AllEnabled(repo), adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS),
                 role: "", visibility: "  ", status: null);
             var (status, body) = await ExecuteAsync(list);
 
@@ -672,7 +708,7 @@ public class AgentEndpointsTests
             var adminA = await SeedFilterFixtureAsync(repo);
             // 'implementer' is a legacy alias for 'developer' (RolePhaseMap).
             var list = await AgentEndpoints.ListAgents(
-                repo, adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), role: "implementer");
+                repo, AllEnabled(repo), adminA, TenantCtx(TenantA), Mode(TammaMode.SaaS), role: "implementer");
             var (status, body) = await ExecuteAsync(list);
 
             status.Should().Be(StatusCodes.Status200OK);

@@ -420,12 +420,14 @@ public static class AgentEndpoints
     /// </summary>
     public static async Task<IResult> ListAgents(
         IAgentRepository agents,
+        ITenantAgentEnablementReader enablement,
         ClaimsPrincipal principal,
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider,
         string? role = null,
         string? visibility = null,
-        string? status = null)
+        string? status = null,
+        bool includeDisabled = false)
     {
         // Bind the wire params into the documented filter DTO + validate. Absent
         // / empty dimensions stay null (no filter). Validation mirrors the write
@@ -433,7 +435,8 @@ public static class AgentEndpoints
         var filter = new AgentListFilter(
             Role: string.IsNullOrWhiteSpace(role) ? null : role,
             Visibility: string.IsNullOrWhiteSpace(visibility) ? null : visibility,
-            Status: string.IsNullOrWhiteSpace(status) ? null : status);
+            Status: string.IsNullOrWhiteSpace(status) ? null : status,
+            IncludeDisabled: includeDisabled);
 
         string? roleFilter = null;
         if (filter.Role is not null)
@@ -488,9 +491,37 @@ public static class AgentEndpoints
         var filtered = visible.Where(a =>
             (roleFilter is null || string.Equals(a.Role, roleFilter, StringComparison.Ordinal)) &&
             (visibilityFilter is null || a.Visibility == visibilityFilter) &&
-            (statusFilter is null || a.Status == statusFilter));
+            (statusFilter is null || a.Status == statusFilter))
+            .ToList();
 
-        var summaries = filtered.Select(ToSummary).ToList();
+        // Story 32-18 — ENABLEMENT-AWARE listing. The default member view is
+        // enabled(public) ∪ own-private; disabled public personas are hidden. A
+        // single batch read (32-16 ListEnabledPublicAgentIdsAsync) gives the
+        // enabled set; own-private agents are implicitly enabled (no row).
+        var principalRecord = new Principal(tenantId, userId);
+        var enabledPublicIds =
+            (await enablement.ListEnabledPublicAgentIdsAsync(principalRecord)).ToHashSet();
+
+        bool IsEnabled(Agent a) =>
+            a.Visibility == AgentVisibility.Public
+                ? enabledPublicIds.Contains(a.Id)
+                : true; // own-private ⇒ implicitly enabled (visibility scoping already ran)
+
+        // ?includeDisabled=true is owner/admin-only and ADDITIONALLY surfaces
+        // disabled public personas (which the member view hides) with an `enabled`
+        // flag per row — still subject to the visibility/status filters applied
+        // above (it is NOT a literally-unfiltered catalog). Members never see
+        // disabled public personas, so the flag is ignored for them.
+        if (filter.IncludeDisabled && IsTenantAdminOrOwner(principal))
+        {
+            var full = filtered.Select(a => ToSummary(a) with { Enabled = IsEnabled(a) }).ToList();
+            return Results.Ok(full);
+        }
+
+        var summaries = filtered
+            .Where(IsEnabled)
+            .Select(ToSummary)
+            .ToList();
         return Results.Ok(summaries);
     }
 
@@ -581,7 +612,8 @@ public static class AgentEndpoints
     public static async Task<IResult> Resolve(
         string? role,
         string? phase,
-        IAgentResolverService resolver)
+        IAgentResolverService resolver,
+        string? action = null)
     {
         if (string.IsNullOrWhiteSpace(role))
         {
@@ -590,14 +622,25 @@ public static class AgentEndpoints
 
         try
         {
+            // Story 32-18 — a phase (which doubles as the Epic-27 action) takes the
+            // phase-eligibility path; otherwise the role-based path threads the
+            // optional ?action= key to the persona prompt source.
             var resolved = string.IsNullOrWhiteSpace(phase)
-                ? await resolver.ResolveForRoleAsync(role)
+                ? await resolver.ResolveForRoleAsync(role, string.IsNullOrWhiteSpace(action) ? null : action)
                 : await resolver.ResolveForRoleAndPhaseAsync(phase, role);
             return Results.Ok(resolved);
         }
         catch (ArgumentException ex)
         {
             return Results.BadRequest(new { error = "invalid_role", detail = ex.Message });
+        }
+        catch (TammaError ex) when (ex.Code == AgentEventTypes.NoEnabledDefault)
+        {
+            // Story 32-18 — the principal has enabled no usable persona. No blank
+            // config — fail loud. 404: no enabled agent resolvable for the role.
+            return Results.Json(
+                new { error = "agent_no_enabled_default", detail = ex.Message },
+                statusCode: StatusCodes.Status404NotFound);
         }
         catch (TammaError ex) when (ex.Code == "AGENT.RESOLVE.NO_DEFAULT")
         {
@@ -646,6 +689,13 @@ public static class AgentEndpoints
         {
             // 404 (not 403) — never leak the existence of another tenant's agent.
             return Results.NotFound(new { error = "agent_not_found", detail = ex.Message });
+        }
+        catch (TammaError ex) when (ex.Code == AgentEventTypes.SelectNotEnabled)
+        {
+            // Story 32-18 — 409: the persona exists (it is in the catalog) but is
+            // not enabled for the principal — a state conflict, not a missing
+            // resource.
+            return Results.Conflict(new { error = "agent_not_enabled", detail = ex.Message });
         }
         catch (TammaError ex)
         {
@@ -825,6 +875,29 @@ public static class AgentEndpoints
     private static bool IsPlatformAdmin(ClaimsPrincipal principal)
         => string.Equals(
             principal.FindFirst("platformRole")?.Value, "platform_admin", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Story 32-18 — true if the caller is a tenant owner/admin (or platform
+    /// admin / service key), i.e. holds the <c>agents:manage</c> permission. Used
+    /// to gate the <c>?includeDisabled=true</c> full-catalog list view (members
+    /// never see disabled public personas). Mirrors <see cref="PermissionHandler"/>:
+    /// the per-tenant <c>role</c> claim against the <see cref="Permissions"/>
+    /// matrix, an API-key <c>permission</c> claim, or the platform-admin claim.
+    /// </summary>
+    private static bool IsTenantAdminOrOwner(ClaimsPrincipal principal)
+    {
+        var role = principal.FindFirst(ClaimTypes.Role)?.Value;
+        if (Permissions.HasPermission(role, "agents:manage"))
+        {
+            return true;
+        }
+        var perms = principal.FindAll("permission").Select(c => c.Value).ToList();
+        if (perms.Contains("agents:manage") || perms.Contains("*"))
+        {
+            return true;
+        }
+        return IsPlatformAdmin(principal);
+    }
 
     /// <summary>
     /// Resolve the caller's private-agent principal scope from the process
