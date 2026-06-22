@@ -136,6 +136,58 @@ public class EngineAppendEventsEndpointTests
     }
 
     [Test]
+    public async Task AppendEvents_RetryAfterMidBatchFailure_DoesNotDuplicate()
+    {
+        // C2: a mid-batch failure makes the engine drain re-POST the FULL batch
+        // (cursor stays put). The events that DID persist on the first attempt
+        // carry a stable per-event id, so the idempotent append must treat the
+        // re-send as a no-op — NO duplicate audit rows.
+        var tenantId = Guid.NewGuid();
+        await EnsureTenantProvisionedAsync(tenantId);
+
+        var ids = Enumerable.Range(0, 5).Select(_ => Guid.NewGuid()).ToArray();
+
+        // First attempt: event index 2 has an empty eventType — rejected
+        // per-event, so the handler returns 502 (partial_append_failure). The 4
+        // VALID events (indices 0,1,3,4) ARE persisted with their stable ids.
+        var first = new AppendEventsRequest(new List<EngineEventRecord>
+        {
+            BuildRecord("EVT.ZERO", id: ids[0]),
+            BuildRecord("EVT.ONE", id: ids[1]),
+            BuildRecord("", id: ids[2]),            // bad — forces a mid-batch failure
+            BuildRecord("EVT.THREE", id: ids[3]),
+            BuildRecord("EVT.FOUR", id: ids[4]),
+        });
+
+        var firstResult = await EngineEndpoints.AppendEvents(first, _events, TenantCtx(tenantId));
+        (await ReadAsync(firstResult)).Status.Should().Be(StatusCodes.Status502BadGateway);
+        (await _events.QueryAsync(tenantId, null, null, 50)).Should().HaveCount(4,
+            "the 4 valid events persist; only the empty-type one is rejected");
+
+        // Retry: the engine re-sends the SAME batch (same stable ids). The bad
+        // record is fixed (now a valid type) so all 5 are valid this time.
+        var retry = new AppendEventsRequest(new List<EngineEventRecord>
+        {
+            BuildRecord("EVT.ZERO", id: ids[0]),
+            BuildRecord("EVT.ONE", id: ids[1]),
+            BuildRecord("EVT.TWO", id: ids[2]),     // the previously-bad one, now fixed
+            BuildRecord("EVT.THREE", id: ids[3]),
+            BuildRecord("EVT.FOUR", id: ids[4]),
+        });
+
+        var retryResult = await EngineEndpoints.AppendEvents(retry, _events, TenantCtx(tenantId));
+        (await ReadAsync(retryResult)).Status.Should().Be(StatusCodes.Status201Created);
+
+        var stored = await _events.QueryAsync(tenantId, null, null, 50);
+        stored.Should().HaveCount(5, "the 4 re-sent events must NOT duplicate; only EVT.TWO is newly added");
+        stored.Select(e => e.Id).Should().BeEquivalentTo(ids, "every row keeps its stable engine-minted id");
+        stored.Select(e => e.Type).Should().BeEquivalentTo(new[]
+        {
+            "EVT.ZERO", "EVT.ONE", "EVT.TWO", "EVT.THREE", "EVT.FOUR",
+        });
+    }
+
+    [Test]
     public async Task AppendEvents_DoesNotLeakAcrossTenants()
     {
         var tenantA = Guid.NewGuid();
@@ -170,8 +222,9 @@ public class EngineAppendEventsEndpointTests
         string? workflowInstanceId = null,
         int? issueNumber = null,
         JsonElement? data = null,
-        Dictionary<string, string?>? tags = null) =>
-        new(eventType, status, error, DateTime.UtcNow, durationMs,
+        Dictionary<string, string?>? tags = null,
+        Guid? id = null) =>
+        new(id ?? Guid.NewGuid(), eventType, status, error, DateTime.UtcNow, durationMs,
             activityId, activityName, workflowInstanceId, issueNumber, data, tags);
 
     private static ITenantContext TenantCtx(Guid tenantId)

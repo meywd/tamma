@@ -117,6 +117,7 @@ public record AppendEventsRequest(
 /// <c>CreatedAt</c>.
 /// </summary>
 public record EngineEventRecord(
+    Guid Id,
     string EventType,
     string? Status,
     string? Error,

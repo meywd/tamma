@@ -130,6 +130,7 @@ public record AppendEventsRequest(
 /// (<c>Tamma.Api.Dtos.Engine.EngineEventRecord</c>).
 /// </summary>
 public record EngineEventRecord(
+    [property: JsonPropertyName("id")] Guid Id,
     [property: JsonPropertyName("eventType")] string EventType,
     [property: JsonPropertyName("status")] string? Status,
     [property: JsonPropertyName("error")] string? Error,

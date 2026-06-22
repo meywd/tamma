@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 
 namespace Tamma.Api.Auth;
 
@@ -102,6 +103,53 @@ public class PlatformPermissionHandler : AuthorizationHandler<PlatformPermission
         // contract). Story 16-7 explicitly minted these as owner-scoped, so
         // honouring them here keeps Elsa→API + BFF→API flows working.
         var permClaims = context.User.FindAll("permission").Select(c => c.Value).ToList();
+        if (permClaims.Contains("*"))
+        {
+            context.Succeed(requirement);
+        }
+
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// Requirement that the caller is the ENGINE / a platform service principal —
+/// NOT a tenant user. Used to gate the engine→API callbacks
+/// (<c>POST /api/engine/events</c>) so a tenant owner/admin (who holds
+/// <c>workflows:manage</c>) cannot forge audit events into another stream.
+/// </summary>
+public class ServicePrincipalRequirement : IAuthorizationRequirement;
+
+/// <summary>
+/// Authorization handler for <see cref="ServicePrincipalRequirement"/>. Succeeds
+/// ONLY for a service-scope credential — recognised by the platform-wide
+/// <c>permission</c> claim <c>"*"</c> that <see cref="ApiKeyAuthHandler"/> mints
+/// for service keys (the same escape hatch <see cref="PlatformPermissionHandler"/>
+/// honours), or a resolved <see cref="ServiceAuthPrincipal"/> on the request.
+///
+/// <para>Tenant owners/admins authenticate with user-scope keys whose claims
+/// carry per-tenant permissions (e.g. <c>workflows:manage</c>) but NEVER
+/// <c>"*"</c>, so they fail this requirement — closing the audit-event forgery
+/// vector (I4). The engine drains with its platform service token and passes.
+/// </para>
+/// </summary>
+public class ServicePrincipalHandler(IHttpContextAccessor httpContextAccessor)
+    : AuthorizationHandler<ServicePrincipalRequirement>
+{
+    protected override Task HandleRequirementAsync(
+        AuthorizationHandlerContext context,
+        ServicePrincipalRequirement requirement)
+    {
+        // A resolved ServiceAuthPrincipal is the authoritative signal.
+        if (httpContextAccessor.HttpContext?.GetAuthPrincipal() is ServiceAuthPrincipal)
+        {
+            context.Succeed(requirement);
+            return Task.CompletedTask;
+        }
+
+        // Platform service-key escape hatch — the "*" permission claim is only
+        // ever minted for service/platform keys, never for a tenant role.
+        var permClaims = context.User.FindAll("permission").Select(c => c.Value);
         if (permClaims.Contains("*"))
         {
             context.Succeed(requirement);

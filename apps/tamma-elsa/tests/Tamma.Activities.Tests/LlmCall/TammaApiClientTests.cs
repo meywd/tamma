@@ -198,11 +198,12 @@ public class TammaApiClientTests
         var handler = new StubHttpMessageHandler(HttpStatusCode.Created, "{\"ok\":true,\"persisted\":2}");
         var client = BuildClient(handler);
 
+        var id1 = Guid.NewGuid();
         var events = new List<EngineEventRecord>
         {
-            new("CODE.GENERATED.SUCCESS", "success", null, DateTime.UtcNow, 12.5,
+            new(id1, "CODE.GENERATED.SUCCESS", "success", null, DateTime.UtcNow, 12.5,
                 "act-1", "GenerateCode", "wf-1", 42, null, null),
-            new("CODE.GENERATED.FAILED", "error", "boom", DateTime.UtcNow, 3.0,
+            new(Guid.NewGuid(), "CODE.GENERATED.FAILED", "error", "boom", DateTime.UtcNow, 3.0,
                 "act-2", "GenerateCode", "wf-1", 42, null, null),
         };
 
@@ -221,6 +222,8 @@ public class TammaApiClientTests
         body.GetProperty("events").GetArrayLength().Should().Be(2);
         body.GetProperty("events")[0].GetProperty("eventType").GetString().Should().Be("CODE.GENERATED.SUCCESS");
         body.GetProperty("events")[0].GetProperty("workflowInstanceId").GetString().Should().Be("wf-1");
+        // Stable per-event id is on the wire (C2 — drives idempotent append).
+        body.GetProperty("events")[0].GetProperty("id").GetGuid().Should().Be(id1);
     }
 
     [Test]
@@ -232,7 +235,7 @@ public class TammaApiClientTests
 
         var ok = await client.AppendEventsAsync(new List<EngineEventRecord>
         {
-            new("A", "success", null, DateTime.UtcNow, null, null, null, "wf", null, null, null),
+            new(Guid.NewGuid(), "A", "success", null, DateTime.UtcNow, null, null, null, "wf", null, null, null),
         });
 
         ok.Should().BeFalse("a non-2xx must signal the drain to NOT advance its cursor");
@@ -246,7 +249,7 @@ public class TammaApiClientTests
 
         var ok = await client.AppendEventsAsync(new List<EngineEventRecord>
         {
-            new("A", "success", null, DateTime.UtcNow, null, null, null, "wf", null, null, null),
+            new(Guid.NewGuid(), "A", "success", null, DateTime.UtcNow, null, null, null, "wf", null, null, null),
         });
 
         ok.Should().BeFalse();

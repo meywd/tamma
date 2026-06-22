@@ -739,6 +739,13 @@ public static class EngineEndpoints
 
                 await eventRepo.AppendAsync(new DomainEvent
                 {
+                    // Stable id minted by the engine at emit time (carried on
+                    // the wire). The idempotent append (ON CONFLICT (Id) DO
+                    // NOTHING) makes a retry of an already-persisted event a
+                    // no-op, so a partial-batch failure + full-batch retry can
+                    // never duplicate audit rows (C2). Guard against a missing
+                    // id (older engine) by minting one server-side.
+                    Id = e.Id == Guid.Empty ? Guid.NewGuid() : e.Id,
                     Type = e.EventType,
                     TenantId = tc.TenantId,
                     IssueNumber = e.IssueNumber,
@@ -763,8 +770,12 @@ public static class EngineEndpoints
             {
                 // Per-event failure — collect and continue so a single bad
                 // row doesn't lose the rest of the batch. The engine retries
-                // the whole batch (idempotency is acceptable: domain_events is
-                // append-only and the drain cursor stays put on a non-2xx).
+                // the WHOLE batch on a non-2xx (the drain cursor stays put),
+                // which re-sends the events that DID persist on this call.
+                // That re-send is safe ONLY because AppendAsync is idempotent
+                // on the stable per-event Id (ON CONFLICT DO NOTHING) — append-
+                // only WITHOUT an idempotency key is exactly what would
+                // duplicate those rows (C2).
                 failures.Add(new { index = i, error = ex.GetType().Name });
             }
         }

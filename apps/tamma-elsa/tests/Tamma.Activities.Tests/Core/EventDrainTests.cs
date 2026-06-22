@@ -114,6 +114,34 @@ public class EventDrainTests
     }
 
     [Test]
+    public async Task FlushAsync_CapsTheBatch_AndDrainsTheRemainderOnSuccessiveFlushes()
+    {
+        // I3 — during an outage the pending backlog grows; FlushAsync must cap
+        // the per-call slice so the POST payload stays bounded, then drain the
+        // rest over successive flushes (cursor advances by the sent slice).
+        var props = NewProps(Event("A"), Event("B"), Event("C"), Event("D"), Event("E"));
+        var batches = new List<List<string>>();
+
+        Task<bool> Flush(IReadOnlyList<TammaEvent> p)
+        {
+            batches.Add(p.Select(e => e.EventType).ToList());
+            return Task.FromResult(true);
+        }
+
+        var sent1 = await EventDrain.FlushAsync(props, Flush, maxBatch: 2);
+        var sent2 = await EventDrain.FlushAsync(props, Flush, maxBatch: 2);
+        var sent3 = await EventDrain.FlushAsync(props, Flush, maxBatch: 2);
+
+        sent1.Should().Be(2);
+        sent2.Should().Be(2);
+        sent3.Should().Be(1, "only one event remains after two capped flushes");
+        batches[0].Should().BeEquivalentTo(new[] { "A", "B" });
+        batches[1].Should().BeEquivalentTo(new[] { "C", "D" });
+        batches[2].Should().BeEquivalentTo(new[] { "E" });
+        props[EventDrain.CursorKey].Should().Be(5);
+    }
+
+    [Test]
     public async Task FlushAsync_NoNewEvents_IsNoOp()
     {
         var props = NewProps(Event("A"));
