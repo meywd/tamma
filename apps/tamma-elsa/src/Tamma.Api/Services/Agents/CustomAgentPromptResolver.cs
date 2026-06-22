@@ -1,21 +1,26 @@
 using Microsoft.Extensions.Logging;
-using Tamma.Data.Entities;
-using Tamma.Data.Repositories;
+using Tamma.Core;
 
 namespace Tamma.Api.Services.Agents;
 
 /// <summary>
-/// Story 32-17 — default <see cref="ICustomAgentPromptResolver"/>. Reads a
-/// custom (private) agent's ACTIVE version <c>ConfigJson.prompts</c> and resolves
-/// the system/role prompt in the order <c>byRoleAction["&lt;role&gt;:&lt;action&gt;"]</c>
-/// → <c>system</c> → ERROR.
+/// Story 32-17 — default <see cref="ICustomAgentPromptResolver"/>. Resolves a
+/// custom (private) agent's system/role prompt from the ALREADY-LOADED
+/// <see cref="AgentPromptSet"/> (parsed by the caller from the version it
+/// materialised against) in the order
+/// <c>byRoleAction["&lt;role&gt;:&lt;action&gt;"]</c> → <c>system</c> → ERROR.
+///
+/// <para><b>No extra read.</b> The caller threads in the SAME prompt set it
+/// parsed from the loaded version, so this resolver never re-fetches the active
+/// version — a concurrent publish/rollback between the branch decision and the
+/// prompt read cannot tear the resolution.</para>
 ///
 /// <para><b>Fail-loud, never empty/plain.</b> A non-empty prompts block commits
 /// the agent to this branch; when neither a matching role:action template nor a
-/// system fallback resolves, it throws
-/// <see cref="CustomPromptUnresolvedException"/>. It NEVER returns an empty/plain
-/// prompt and NEVER consults the Epic 27 store
-/// (<c>feedback_resolution_no_empty_fallback</c>).</para>
+/// system fallback resolves, it throws a <see cref="TammaError"/> with
+/// <c>Code == "CUSTOM_PROMPT_UNRESOLVED"</c> (symmetric with the persona leg's
+/// <c>PROMPT_UNRESOLVED</c>). It NEVER returns an empty/plain prompt and NEVER
+/// consults the Epic 27 store (<c>feedback_resolution_no_empty_fallback</c>).</para>
 ///
 /// <para><b>Content safety:</b> logs only the source label and the
 /// <c>&lt;role&gt;:&lt;action&gt;</c> key — NEVER a prompt template body or the
@@ -23,35 +28,33 @@ namespace Tamma.Api.Services.Agents;
 /// </summary>
 public sealed class CustomAgentPromptResolver : ICustomAgentPromptResolver
 {
-    private readonly IAgentRepository _agents;
+    /// <summary>Stable machine-readable error code (32-5 FailureCode).</summary>
+    public const string ErrorCode = "CUSTOM_PROMPT_UNRESOLVED";
+
     private readonly ILogger<CustomAgentPromptResolver>? _logger;
 
-    public CustomAgentPromptResolver(
-        IAgentRepository agents,
-        ILogger<CustomAgentPromptResolver>? logger = null)
+    public CustomAgentPromptResolver(ILogger<CustomAgentPromptResolver>? logger = null)
     {
-        _agents = agents;
         _logger = logger;
     }
 
     /// <inheritdoc />
-    public async Task<string> ResolveAsync(
-        Agent agent, string role, string? action, CancellationToken ct = default)
+    public Task<string> ResolveAsync(
+        Guid agentId, AgentPromptSet prompts, string role, string? action, CancellationToken ct = default)
     {
-        var version = await _agents.GetActiveVersionAsync(agent.Id, ct);
-        var promptSet = AgentPromptSet.TryRead(version?.ConfigJson);
+        _ = ct;
 
-        // The caller (MaterialiseAsync) only routes here when the agent is
-        // private with a NON-EMPTY prompts block; defend against a racing
-        // version flip leaving an empty/absent set — that is still a no-resolve,
-        // and on the custom path a no-resolve is a hard error, never a fallback.
-        if (promptSet is null || promptSet.IsEmpty)
+        // The caller (MaterialiseAsync) only routes here when the agent is private
+        // with a NON-EMPTY prompts block; defend against an empty/absent set being
+        // passed anyway — that is still a no-resolve, and on the custom path a
+        // no-resolve is a hard error, never a fallback.
+        if (prompts.IsEmpty)
         {
             _logger?.LogWarning(
                 "agent.custom_prompt.unresolved agentId={AgentId} role={Role} action={Action} "
                 + "promptSource=custom-agent reason=empty-or-absent-prompts",
-                agent.Id, role, action ?? "(role-system)");
-            throw new CustomPromptUnresolvedException(agent.Id, role, action);
+                agentId, role, action ?? "(role-system)");
+            throw Unresolved(agentId, role, action);
         }
 
         var key = $"{role}:{action}";
@@ -59,32 +62,57 @@ public sealed class CustomAgentPromptResolver : ICustomAgentPromptResolver
         // (a) byRoleAction["<role>:<action>"] — only meaningful when an action is
         // present; the role-system (action == null) path never has a key.
         if (!string.IsNullOrEmpty(action) &&
-            promptSet.ByRoleAction is not null &&
-            promptSet.ByRoleAction.TryGetValue(key, out var template) &&
+            prompts.ByRoleAction is not null &&
+            prompts.ByRoleAction.TryGetValue(key, out var template) &&
             !string.IsNullOrWhiteSpace(template))
         {
             _logger?.LogDebug(
                 "agent.custom_prompt.resolved agentId={AgentId} role={Role} action={Action} "
                 + "promptSource=custom-agent match=byRoleAction",
-                agent.Id, role, action);
-            return template;
+                agentId, role, action);
+            return Task.FromResult(template);
         }
 
         // (b) system fallback.
-        if (!string.IsNullOrWhiteSpace(promptSet.System))
+        if (!string.IsNullOrWhiteSpace(prompts.System))
         {
             _logger?.LogDebug(
                 "agent.custom_prompt.resolved agentId={AgentId} role={Role} action={Action} "
                 + "promptSource=custom-agent match=system",
-                agent.Id, role, action ?? "(role-system)");
-            return promptSet.System!;
+                agentId, role, action ?? "(role-system)");
+            return Task.FromResult(prompts.System!);
         }
 
         // (c) ERROR — fail loud, never empty/plain, never fall through to Epic 27.
         _logger?.LogWarning(
             "agent.custom_prompt.unresolved agentId={AgentId} role={Role} action={Action} "
             + "promptSource=custom-agent reason=no-match",
-            agent.Id, role, action ?? "(role-system)");
-        throw new CustomPromptUnresolvedException(agent.Id, role, action);
+            agentId, role, action ?? "(role-system)");
+        throw Unresolved(agentId, role, action);
+    }
+
+    /// <summary>
+    /// The fail-loud signal for the custom (private) prompt branch — a
+    /// <see cref="TammaError"/> mirroring the persona leg's <c>PROMPT_UNRESOLVED</c>
+    /// (32-5 maps the Code → FailureCode the same way). Carries only the agentId +
+    /// the <c>"&lt;role&gt;:&lt;action&gt;"</c> key — NEVER a prompt template body.
+    /// </summary>
+    private static TammaError Unresolved(Guid agentId, string role, string? action)
+    {
+        var roleActionKey = $"{role}:{action ?? "(role-system)"}";
+        return new TammaError(
+            ErrorCode,
+            $"Custom agent '{agentId}' carries a non-empty prompts block but resolved "
+            + $"neither byRoleAction['{roleActionKey}'] nor a system fallback; there is no "
+            + "empty/plain fallback and the Epic 27 store is never consulted on the custom path.",
+            new Dictionary<string, object?>
+            {
+                ["agentId"] = agentId,
+                ["role"] = role,
+                ["action"] = action,
+                ["roleActionKey"] = roleActionKey,
+            },
+            retryable: false,
+            severity: TammaErrorSeverity.High);
     }
 }

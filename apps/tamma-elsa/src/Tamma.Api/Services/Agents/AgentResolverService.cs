@@ -399,7 +399,7 @@ public sealed class AgentResolverService : IAgentResolverService
         // via the 32-15 IPersonaPromptResolver seam. Both fail loud (no
         // empty/plain fallback).
         var (systemPrompt, promptSource) =
-            await ResolvePromptSourceAsync(agent, version, role, phase, resolved, ct);
+            await ResolvePromptSourceAsync(agent, version, role, phase, ct);
 
         // The agent's stable handle wins over the merged handle (identity).
         var enriched = new ResolvedAgentConfig
@@ -443,12 +443,15 @@ public sealed class AgentResolverService : IAgentResolverService
     /// only the custom leg + the selector, never the Epic 27 leg.</para>
     /// </summary>
     private async Task<(string SystemPrompt, AgentPromptSource Source)> ResolvePromptSourceAsync(
-        Agent agent, AgentVersion version, string role, string? action,
-        ResolvedAgentConfig merged, CancellationToken ct)
+        Agent agent, AgentVersion version, string role, string? action, CancellationToken ct)
     {
         // The discriminator: a private agent's OWN non-empty prompts commit it to
         // the custom branch. (A public persona never carries prompts — the
         // validator rejects that — and an empty/absent block delegates to persona.)
+        // Parse the prompt set ONCE from the SAME loaded version this method was
+        // called with; the resolved set is threaded into the custom seam so the
+        // branch decision and the prompt read see the same version (no stale/torn
+        // re-fetch between two GetActiveVersionAsync round-trips).
         var promptSet = agent.Visibility == AgentVisibility.Private
             ? AgentPromptSet.TryRead(version.ConfigJson)
             : null;
@@ -457,8 +460,8 @@ public sealed class AgentResolverService : IAgentResolverService
         {
             // ── CUSTOM / PRIVATE branch (Story 32-17, via ICustomAgentPromptResolver) ──
             //    byRoleAction["<role>:<action>"] → system → ERROR. The seam fails
-            //    loud (CustomPromptUnresolvedException) — NEVER empty/plain, NEVER
-            //    fall through to Epic 27.
+            //    loud (TammaError CUSTOM_PROMPT_UNRESOLVED) — NEVER empty/plain,
+            //    NEVER fall through to Epic 27.
             _logger.LogDebug(
                 "agent.materialise.prompt_source branch=custom-agent agentId={AgentId} role={Role} action={Action}",
                 agent.Id, role, action ?? "(role-system)");
@@ -471,7 +474,7 @@ public sealed class AgentResolverService : IAgentResolverService
                     + "Use the full AgentResolverService constructor with the custom prompt seam.");
             }
 
-            var customPrompt = await _customAgentPrompts.ResolveAsync(agent, role, action, ct);
+            var customPrompt = await _customAgentPrompts.ResolveAsync(agent.Id, promptSet, role, action, ct);
             return (customPrompt, AgentPromptSource.CustomAgent);
         }
 

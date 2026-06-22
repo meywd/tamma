@@ -158,12 +158,20 @@ public class AgentConfigValidatorPromptsTests
     }
 
     [Test]
-    public void Private_ValidLegacyRoleAlias_Accepted()
+    public void Private_ValidLegacyRoleAlias_Accepted_And_Canonicalized()
     {
-        // "implementer" is a legacy alias for "developer"; key should normalize.
+        // "implementer" is a legacy alias for "developer". C1 — the key is now
+        // CANONICALIZED at read time so STORE and the resolver's LOOKUP agree:
+        // it validates AND the parsed set exposes the canonical key, not the alias.
         var json = """{ "prompts": { "byRoleAction": { "implementer:implement-feature": "Go." } } }""";
         var (valid, errors) = Validate(json, AgentVisibility.Private);
         valid.Should().BeTrue(string.Join("; ", errors));
+
+        // The canonicalization is what makes this safe: a key written with an alias
+        // is stored under the canonical wire form the resolver looks up.
+        var set = AgentPromptSet.TryRead(json)!;
+        set.ByRoleAction.Should().ContainKey("developer:implement-feature");
+        set.ByRoleAction.Should().NotContainKey("implementer:implement-feature");
     }
 
     // ── the 32-1 shape rules still apply through the new overload ──

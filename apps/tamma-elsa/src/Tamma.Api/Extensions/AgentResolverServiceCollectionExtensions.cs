@@ -47,8 +47,9 @@ public static class AgentResolverServiceCollectionExtensions
         // Story 32-15 — the persona/public prompt seam over the Epic 27 store.
         services.AddScoped<IPersonaPromptResolver, PersonaPromptResolver>();
 
-        // Story 32-17 — the custom/private prompt seam over the agent's own
-        // embedded ConfigJson.prompts (byRoleAction → system → ERROR, fail-loud).
+        // Story 32-17 — the custom/private prompt seam. Resolves from the prompt
+        // set the resolver threads in from the already-loaded version (no repo
+        // re-read); byRoleAction → system → ERROR, fail-loud.
         services.AddScoped<ICustomAgentPromptResolver, CustomAgentPromptResolver>();
 
         // Use the Story 32-2 full constructor so the entity-aware resolve

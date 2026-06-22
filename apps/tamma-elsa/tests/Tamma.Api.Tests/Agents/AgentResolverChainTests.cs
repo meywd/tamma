@@ -116,13 +116,13 @@ public class AgentResolverChainTests
         // system prompt (persona = prompt-free; prompt comes from the seam).
         var legacyRepo = new AgentConfigRepository(factory);
         // Story 32-17 — the custom/private prompt seam. Default to the REAL
-        // CustomAgentPromptResolver over the same agent repo so the custom branch
-        // reads the agent's own embedded prompts end-to-end.
+        // CustomAgentPromptResolver, which resolves from the prompt set the
+        // resolver threads in from the already-loaded version (no repo re-read).
         var resolver = new AgentResolverService(
             legacyRepo, null, NullLogger<AgentResolverService>.Instance,
             registry, agentRepo, events, null, personaPrompts ?? new StubPersonaPrompts(),
             customPrompts ?? new CustomAgentPromptResolver(
-                agentRepo, NullLogger<CustomAgentPromptResolver>.Instance));
+                NullLogger<CustomAgentPromptResolver>.Instance));
 
         return new Harness(resolver, registry, agentRepo, events, cpCtx);
     }
@@ -587,7 +587,9 @@ public class AgentResolverChainTests
             Func<Task> act = async () =>
                 await h.Resolver.ResolveForRoleAndPhaseAsync("write-tests", "developer");
 
-            (await act.Should().ThrowAsync<CustomPromptUnresolvedException>())
+            // I1 — the custom leg fails loud with TammaError (symmetric with the
+            // persona leg's PROMPT_UNRESOLVED), not a bespoke exception type.
+            (await act.Should().ThrowAsync<TammaError>())
                 .Which.Code.Should().Be("CUSTOM_PROMPT_UNRESOLVED");
             persona.CallCount.Should().Be(0,
                 "a custom-branch no-resolve NEVER falls through to the Epic 27 persona seam");
@@ -665,6 +667,43 @@ public class AgentResolverChainTests
         }
     }
 
+    // ── C2 — the loaded prompt set is THREADED into the custom seam (no re-read) ──
+
+    [Test]
+    public async Task Resolve_CustomBranch_ThreadsLoadedPromptSet_IntoSeam_NoReRead()
+    {
+        // A capturing custom resolver records the AgentPromptSet it is handed. The
+        // resolver itself does NO repository read (its only collaborator is a
+        // logger) — MaterialiseAsync parses the set ONCE from the loaded version
+        // and threads it in. Proving the seam receives the loaded version's
+        // prompts (not a fresh re-fetch) closes the stale/torn-read window.
+        var capturing = new CapturingCustomPrompts("CAPTURED");
+        var persona = new CountingPersonaPrompts("[SHOULD NOT BE USED]");
+        var h = BuildHarness(TammaMode.SaaS, TenantA, null,
+            personaPrompts: persona, customPrompts: capturing);
+        await using (h.Ctx)
+        {
+            var priv = await h.Agents.CreateAsync(
+                new Agent { Name = "atlas", Role = "developer", Visibility = AgentVisibility.Private, OwnerTenantId = TenantA },
+                CustomCfg, "seed", null);
+            await h.Registry.SelectForRoleAsync("developer", priv.Id, null);
+
+            var resolved = await h.Resolver.ResolveForRoleAndPhaseAsync("implement-feature", "developer");
+
+            resolved.SystemPrompt.Should().Be("CAPTURED");
+            resolved.PromptSource.Should().Be(AgentPromptSource.CustomAgent);
+            capturing.CallCount.Should().Be(1);
+            capturing.LastAgentId.Should().Be(priv.Id);
+            // The threaded set is the SAME prompts parsed from the loaded version —
+            // it carries the active version's byRoleAction cell, not a re-fetch.
+            capturing.LastPrompts.Should().NotBeNull();
+            capturing.LastPrompts!.ByRoleAction.Should().ContainKey("developer:implement-feature");
+            capturing.LastPrompts!.ByRoleAction!["developer:implement-feature"]
+                .Should().Be("ATLAS IMPLEMENT PROMPT");
+            persona.CallCount.Should().Be(0);
+        }
+    }
+
     [Test]
     public async Task Resolve_PublicPersona_PromptSourceTag_IsEpic27Store()
     {
@@ -680,6 +719,25 @@ public class AgentResolverChainTests
             var resolved = await h.Resolver.ResolveForRoleAsync("architect");
 
             resolved.PromptSource.Should().Be(AgentPromptSource.Epic27Store);
+        }
+    }
+
+    /// <summary>C2 — captures the AgentPromptSet the resolver threads into the
+    /// custom seam (proving the loaded version's prompts are passed, not re-read).
+    /// The real <see cref="CustomAgentPromptResolver"/> has no repo at all; this
+    /// double records what it was handed and returns a deterministic prompt.</summary>
+    private sealed class CapturingCustomPrompts(string prompt) : ICustomAgentPromptResolver
+    {
+        public int CallCount { get; private set; }
+        public Guid LastAgentId { get; private set; }
+        public AgentPromptSet? LastPrompts { get; private set; }
+        public Task<string> ResolveAsync(
+            Guid agentId, AgentPromptSet prompts, string role, string? action, CancellationToken ct = default)
+        {
+            CallCount++;
+            LastAgentId = agentId;
+            LastPrompts = prompts;
+            return Task.FromResult(prompt);
         }
     }
 

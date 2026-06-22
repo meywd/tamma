@@ -2,45 +2,40 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 using Tamma.Api.Services.Agents;
-using Tamma.Data.Entities;
-using Tamma.Data.Repositories;
+using Tamma.Core;
 
 namespace Tamma.Api.Tests.Agents;
 
 /// <summary>
 /// Story 32-17 (T3/AC5) — the custom prompt resolution order
 /// <c>byRoleAction["role:action"] → system → ERROR</c>, fail-loud, never
-/// empty/plain. Drives <see cref="CustomAgentPromptResolver"/> over a fake
-/// <see cref="IAgentRepository"/> that returns a canned active version.
+/// empty/plain. Drives <see cref="CustomAgentPromptResolver"/> over the
+/// ALREADY-LOADED <see cref="AgentPromptSet"/> the caller threads in (the
+/// resolver does NO repository read — C2 fix).
 /// </summary>
 [TestFixture]
 public class CustomAgentPromptResolverTests
 {
-    private static Agent PrivateAgent(Guid id) => new()
-    {
-        Id = id,
-        Name = "atlas",
-        Visibility = AgentVisibility.Private,
-        OwnerTenantId = Guid.NewGuid(),
-    };
+    private static CustomAgentPromptResolver Resolver()
+        => new(NullLogger<CustomAgentPromptResolver>.Instance);
 
-    private static CustomAgentPromptResolver Resolver(string configJson)
-        => new(new FakeAgents(configJson), NullLogger<CustomAgentPromptResolver>.Instance);
+    private static AgentPromptSet Set(string configJson) =>
+        AgentPromptSet.TryRead(configJson)
+        ?? throw new InvalidOperationException("test config had no prompts block");
 
     [Test]
     public async Task ByRoleAction_Wins_Over_System()
     {
-        var cfg = """
+        var set = Set("""
             {
               "prompts": {
                 "system": "SYSTEM FALLBACK",
                 "byRoleAction": { "developer:implement-feature": "ROLE-ACTION PROMPT" }
               }
             }
-            """;
-        var agent = PrivateAgent(Guid.NewGuid());
+            """);
 
-        var text = await Resolver(cfg).ResolveAsync(agent, "developer", "implement-feature");
+        var text = await Resolver().ResolveAsync(Guid.NewGuid(), set, "developer", "implement-feature");
 
         text.Should().Be("ROLE-ACTION PROMPT");
     }
@@ -48,19 +43,18 @@ public class CustomAgentPromptResolverTests
     [Test]
     public async Task System_Used_When_NoMatchingRoleAction()
     {
-        var cfg = """
+        var set = Set("""
             {
               "prompts": {
                 "system": "SYSTEM FALLBACK",
                 "byRoleAction": { "developer:implement-feature": "ROLE-ACTION PROMPT" }
               }
             }
-            """;
-        var agent = PrivateAgent(Guid.NewGuid());
+            """);
 
         // role:action present in block but the REQUESTED (tester, write-tests)
         // has no entry → fall to system.
-        var text = await Resolver(cfg).ResolveAsync(agent, "tester", "write-tests");
+        var text = await Resolver().ResolveAsync(Guid.NewGuid(), set, "tester", "write-tests");
 
         text.Should().Be("SYSTEM FALLBACK");
     }
@@ -68,10 +62,9 @@ public class CustomAgentPromptResolverTests
     [Test]
     public async Task System_Used_When_ActionNull_AndNoRoleActionApplies()
     {
-        var cfg = """{ "prompts": { "system": "SYSTEM FALLBACK" } }""";
-        var agent = PrivateAgent(Guid.NewGuid());
+        var set = Set("""{ "prompts": { "system": "SYSTEM FALLBACK" } }""");
 
-        var text = await Resolver(cfg).ResolveAsync(agent, "developer", action: null);
+        var text = await Resolver().ResolveAsync(Guid.NewGuid(), set, "developer", action: null);
 
         text.Should().Be("SYSTEM FALLBACK");
     }
@@ -79,20 +72,22 @@ public class CustomAgentPromptResolverTests
     [Test]
     public async Task NoMatch_NoSystem_FailsLoud_NeverEmpty()
     {
-        var cfg = """
+        var set = Set("""
             { "prompts": { "byRoleAction": { "developer:implement-feature": "X" } } }
-            """;
-        var agent = PrivateAgent(Guid.NewGuid());
+            """);
+        var agentId = Guid.NewGuid();
 
         // Requested (tester, write-tests) has no entry and there is no system →
         // CUSTOM_PROMPT_UNRESOLVED, never an empty/plain prompt.
         Func<Task> act = async () =>
-            await Resolver(cfg).ResolveAsync(agent, "tester", "write-tests");
+            await Resolver().ResolveAsync(agentId, set, "tester", "write-tests");
 
-        var ex = (await act.Should().ThrowAsync<CustomPromptUnresolvedException>()).Which;
+        var ex = (await act.Should().ThrowAsync<TammaError>()).Which;
         ex.Code.Should().Be("CUSTOM_PROMPT_UNRESOLVED");
-        ex.AgentId.Should().Be(agent.Id);
-        ex.RoleActionKey.Should().Be("tester:write-tests");
+        ex.Context["agentId"].Should().Be(agentId);
+        ex.Context["roleActionKey"].Should().Be("tester:write-tests");
+        ex.Severity.Should().Be(TammaErrorSeverity.High);
+        ex.Retryable.Should().BeFalse();
         // The exception message must NOT carry any template body.
         ex.Message.Should().NotContain("X");
     }
@@ -103,38 +98,74 @@ public class CustomAgentPromptResolverTests
         // The resolver is only entered with a non-empty block by MaterialiseAsync,
         // but defends against a racing version flip: an empty/absent block on the
         // custom path is still a no-resolve, never a silent fallback.
-        var agent = PrivateAgent(Guid.NewGuid());
+        var set = Set("""{ "prompts": {} }""");
 
         Func<Task> act = async () =>
-            await Resolver("""{ "prompts": {} }""").ResolveAsync(agent, "developer", "implement-feature");
+            await Resolver().ResolveAsync(Guid.NewGuid(), set, "developer", "implement-feature");
 
-        await act.Should().ThrowAsync<CustomPromptUnresolvedException>();
+        (await act.Should().ThrowAsync<TammaError>())
+            .Which.Code.Should().Be("CUSTOM_PROMPT_UNRESOLVED");
     }
 
-    private sealed class FakeAgents(string configJson) : IAgentRepository
-    {
-        public Task<AgentVersion?> GetActiveVersionAsync(Guid agentId, CancellationToken ct = default)
-            => Task.FromResult<AgentVersion?>(new AgentVersion
-            {
-                Id = Guid.NewGuid(),
-                AgentId = agentId,
-                Version = 1,
-                ConfigJson = configJson,
-            });
+    // ── C1 — alias/non-canonical byRoleAction key round-trips ──────────────────
 
-        // Unused surface — throw so an accidental call is loud.
-        public Task<Agent> CreateAsync(Agent agent, string firstVersionConfigJson, string? notes, Guid? createdBy, CancellationToken ct = default)
-            => throw new NotSupportedException();
-        public Task<AgentVersion?> PublishVersionAsync(Guid agentId, string configJson, string? notes, Guid? updatedBy, CancellationToken ct = default)
-            => throw new NotSupportedException();
-        public Task<Agent?> ArchiveAsync(Guid agentId, Guid? updatedBy, CancellationToken ct = default)
-            => throw new NotSupportedException();
-        public Task<AgentVersion?> SetActiveVersionAsync(Guid agentId, int version, Guid? updatedBy, CancellationToken ct = default)
-            => throw new NotSupportedException();
-        public Task<Agent?> GetByIdAsync(Guid agentId, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<AgentVersion?> GetVersionAsync(Guid agentId, int version, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<IReadOnlyList<AgentVersion>> ListVersionsAsync(Guid agentId, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<IReadOnlyList<Agent>> ListVisibleAsync(Guid? tenantId, Guid? userId, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Agent?> GetPublicByNameAsync(string name, CancellationToken ct = default) => throw new NotSupportedException();
+    [Test]
+    public async Task LegacyAliasKey_RoundTrips_ToCanonicalLookup()
+    {
+        // STORED with a legacy ROLE alias ("implementer" → "developer"); the
+        // resolver looks up the canonical (developer:implement-feature). Before the
+        // C1 fix this silently MISSED (ordinal "developer:implement-feature" !=
+        // stored "implementer:implement-feature") and fell to system/ERROR.
+        var set = Set("""
+            { "prompts": { "byRoleAction": { "implementer:implement-feature": "ALIAS PROMPT" } } }
+            """);
+
+        var text = await Resolver().ResolveAsync(
+            Guid.NewGuid(), set, "developer", "implement-feature");
+
+        text.Should().Be("ALIAS PROMPT",
+            "an aliased stored key must canonicalize so the canonical lookup hits it");
+    }
+
+    [Test]
+    public async Task LegacyActionAliasKey_RoundTrips_ToCanonicalLookup()
+    {
+        // STORED with a legacy ACTION/phase alias AND a role alias
+        // ("implementer:CODE_GENERATION" → "developer:implement-feature").
+        var set = Set("""
+            { "prompts": { "byRoleAction": { "implementer:CODE_GENERATION": "LEGACY CELL PROMPT" } } }
+            """);
+
+        var text = await Resolver().ResolveAsync(
+            Guid.NewGuid(), set, "developer", "implement-feature");
+
+        text.Should().Be("LEGACY CELL PROMPT",
+            "a legacy role+action alias key must canonicalize for the canonical lookup");
+    }
+
+    [Test]
+    public void Canonicalization_Stores_Under_CanonicalKey()
+    {
+        // The parsed set exposes the canonical key directly (store-side proof).
+        var set = Set("""
+            { "prompts": { "byRoleAction": { "implementer:CODE_GENERATION": "P" } } }
+            """);
+
+        set.ByRoleAction.Should().ContainKey("developer:implement-feature");
+        set.ByRoleAction.Should().NotContainKey("implementer:CODE_GENERATION");
+    }
+
+    [Test]
+    public void Canonicalization_UnparseableKey_PreservedVerbatim_ForValidator()
+    {
+        // A key that does NOT parse (no colon / unknown token) is kept raw so the
+        // write-time validator can reject it (PROMPTS_INVALID_KEY); TryRead never
+        // throws and never drops it.
+        var set = Set("""
+            { "prompts": { "byRoleAction": { "bogus-no-colon": "P", "wizard:nope": "Q" } } }
+            """);
+
+        set.ByRoleAction.Should().ContainKey("bogus-no-colon");
+        set.ByRoleAction.Should().ContainKey("wizard:nope");
     }
 }
