@@ -7,7 +7,6 @@ using Tamma.Activities.LlmCall;
 using Tamma.Activities.LlmCall.Credentials;
 using Tamma.Activities.LlmCall.Models;
 using Tamma.Api.Services.Agents;
-using Tamma.Api.Services.PromptStore;
 using Tamma.Api.Services.Providers;
 using Tamma.Api.Services.Security;
 using Tamma.Data.Entities;
@@ -37,7 +36,6 @@ public class ManagedAgentTests
     private IProviderMarkupEngine _markup = null!;
     private RecordingUsageEmitter _usage = null!;
     private RecordingEventRepository _events = null!;
-    private Mock<ITammaModeProvider> _mode = null!;
     private ManagedAgent _sut = null!;
 
     [SetUp]
@@ -52,12 +50,10 @@ public class ManagedAgentTests
         _markup = new PassthroughProviderMarkupEngine();
         _usage = new RecordingUsageEmitter();
         _events = new RecordingEventRepository();
-        _mode = new Mock<ITammaModeProvider>();
-        _mode.SetupGet(m => m.Mode).Returns(TammaMode.SaaS);
 
         _sut = new ManagedAgent(
             _gate.Object, _budget.Object, _resolver.Object, _credentials.Object,
-            _runner.Object, _pricing.Object, _markup, _usage, _events, _mode.Object,
+            _runner.Object, _pricing.Object, _markup, _usage, _events,
             NullLogger<ManagedAgent>.Instance);
     }
 
@@ -319,7 +315,7 @@ public class ManagedAgentTests
     }
 
     [Test]
-    public async Task RunAsync_ResolverThrowsNoEnabledDefault_FailsClosed_NotLost()
+    public async Task RunAsync_ResolverThrowsNoEnabledDefault_FailsWith_AgentUnresolved_NonRetryable()
     {
         _resolver
             .Setup(r => r.ResolveForRoleAsync("developer", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
@@ -330,7 +326,78 @@ public class ManagedAgentTests
         var run = await _sut.RunAsync(Req(Guid.NewGuid(), "developer"));
 
         run.Success.Should().BeFalse("a resolution failure produces a run record, never a throw (AC10)");
-        run.FailureCode.Should().NotBeNullOrEmpty();
+        run.FailureCode.Should().Be(AgentRunFailureCodes.AgentUnresolved,
+            "a config failure is NOT a credential/provider problem");
+        run.HttpStatusCode.Should().Be(422,
+            "422 is not in RetryCheck's transient set {0,429,502,503,504}, so the engine won't retry a config failure");
+        new[] { 0, 429, 502, 503, 504 }.Should().NotContain(run.HttpStatusCode!.Value,
+            "AGENT_UNRESOLVED must be non-retryable");
+        _runner.VerifyNoOtherCalls();
+        AssertExactlyOneTerminalFailed();
+    }
+
+    [Test]
+    public async Task RunAsync_ResolverThrowsUnknownRole_FailsWith_AgentUnresolved_NotProviderError()
+    {
+        // An unknown role surfaces as an ArgumentException from the resolver — a
+        // config/validation error, NOT a provider failure.
+        _resolver
+            .Setup(r => r.ResolveForRoleAsync("bogus-role", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ArgumentException("unknown role 'bogus-role'", "role"));
+
+        var run = await _sut.RunAsync(Req(Guid.NewGuid(), "bogus-role"));
+
+        run.Success.Should().BeFalse();
+        run.FailureCode.Should().Be(AgentRunFailureCodes.AgentUnresolved);
+        run.FailureCode.Should().NotBe(AgentRunFailureCodes.ProviderError,
+            "an unknown role is a config error, not a provider failure");
+        run.HttpStatusCode.Should().Be(422);
+        _runner.VerifyNoOtherCalls();
+        AssertExactlyOneTerminalFailed();
+    }
+
+    // -------------------------------------------------------------------
+    // Credential safety on the exception-message path (defensive guard)
+    // -------------------------------------------------------------------
+
+    [Test]
+    public async Task RunAsync_RunnerThrowsWithKeyInMessage_KeyNeverLeaksAnywhere()
+    {
+        SetupResolve(Guid.NewGuid(), "anthropic", "claude-sonnet-4");
+        SetupGateAllow();
+        SetupBudgetWithin();
+        SetupCredential(CredentialSource.Platform);
+        // A (theoretical) runner that leaks the key into its exception message.
+        // The runner contract forbids this, but credential safety is load-bearing:
+        // the key must NOT escape into the caller-facing FailureReason / response /
+        // any emitted event payload even if a collaborator misbehaves.
+        _runner
+            .Setup(r => r.RunAsync(It.IsAny<string>(), It.IsAny<LlmProviderConfig>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<double>(), It.IsAny<IReadOnlyList<ResolvedTool>?>(), It.IsAny<bool>(),
+                It.IsAny<ToolLoopConfig>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException($"upstream rejected key {TestApiKey} (401)"));
+
+        var run = await _sut.RunAsync(Req(Guid.NewGuid(), "developer"));
+
+        run.Success.Should().BeFalse();
+        run.FailureCode.Should().Be(AgentRunFailureCodes.ProviderError);
+
+        // The key must appear nowhere the caller or audit trail can read.
+        (run.FailureReason ?? string.Empty).Should().NotContain(TestApiKey,
+            "the runner's exception message must not leak the key into the caller-facing reason");
+
+        var response = new LlmCallResponseMapper().ToResponse(run);
+        System.Text.Json.JsonSerializer.Serialize(response).Should().NotContain(TestApiKey,
+            "the projected LlmCallResponse must not carry the key");
+
+        var runJson = System.Text.Json.JsonSerializer.Serialize(run);
+        runJson.Should().NotContain(TestApiKey);
+        foreach (var evt in _events.Appended)
+        {
+            (evt.Tags + evt.Data + evt.Metadata).Should().NotContain(TestApiKey);
+        }
+
         AssertExactlyOneTerminalFailed();
     }
 

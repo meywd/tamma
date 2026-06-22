@@ -50,6 +50,13 @@ public static class AgentRunFailureCodes
     /// <summary>No usable credential (provider never called; retryable:false).</summary>
     public const string CredentialUnavailable = "PROVIDER_CREDENTIAL_UNAVAILABLE";
 
+    /// <summary>The agent/prompt could not be resolved — no enabled default, an
+    /// unresolved custom-agent prompt, or an unknown role. This is a CONFIG /
+    /// VALIDATION failure (no provider call happens), NOT a credential or provider
+    /// problem; retryable:false. The mapper rides it inside a 200 envelope with an
+    /// httpStatusCode (422) the engine's RetryCheck will NOT retry.</summary>
+    public const string AgentUnresolved = "AGENT_UNRESOLVED";
+
     /// <summary>Over budget / budget could not be evaluated (loop never invoked).</summary>
     public const string BudgetExceeded = "BUDGET_EXCEEDED";
 

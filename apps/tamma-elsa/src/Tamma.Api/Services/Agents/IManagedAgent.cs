@@ -3,11 +3,13 @@ namespace Tamma.Api.Services.Agents;
 /// <summary>
 /// Story 32-5 — the managed execution contract behind
 /// <c>POST /api/v1/llm/call</c>. <see cref="RunAsync"/> composes the locked
-/// rule-2 sequence entirely inside <c>Tamma.Api</c> (design §2.6): gate (32-4) →
-/// resolve agent + per-tenant enablement (32-2/32-18/32-16) → resolve credential
-/// BYOK→platform (32-3 cabinet) → render prompt (Epic 27 / custom-agent 32-17) →
-/// provider call via the extracted <c>IInlineToolLoopRunner</c> (request-scoped
-/// key) → meter (34-11 cost + 34-5 markup + 32-9 usage) → return.
+/// rule-2 sequence entirely inside <c>Tamma.Api</c> (design §2.6): resolve agent +
+/// per-tenant enablement + render prompt (32-2/32-18/32-16, Epic 27 / custom-agent
+/// 32-17) → gate (32-4) → budget → resolve credential BYOK→platform (32-3 cabinet)
+/// → provider call via the extracted <c>IInlineToolLoopRunner</c> (request-scoped
+/// key) → meter (34-11 cost + 34-5 markup + 32-9 usage) → return. Resolve runs
+/// BEFORE the gate because the gate (and credential) key off the resolved provider
+/// name, which is unknown until resolution.
 ///
 /// <para><b>Distinct from CLI providers.</b> <see cref="IManagedAgent"/> is the
 /// customization layer ABOVE the LLM API (provider + model + prompt + tools +

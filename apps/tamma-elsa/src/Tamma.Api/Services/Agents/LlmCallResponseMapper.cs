@@ -70,10 +70,24 @@ public sealed class LlmCallResponseMapper : ILlmCallResponseMapper
         {
             AgentRunFailureCodes.SaasProviderNotAllowed => Results.Json(body, statusCode: 400),
             AgentRunFailureCodes.TenantNotEntitled => Results.Json(body, statusCode: 403),
+            // AGENT_UNRESOLVED (config/validation: no enabled default, unresolved
+            // custom prompt, unknown role) is engine-internal — never a raw 4xx/5xx
+            // on the wire. It rides inside a 200 success:false envelope, but the
+            // body carries an httpStatusCode of 422 (Unprocessable Entity), which
+            // is NOT in RetryCheck's transient set {0, 429, 502, 503, 504}, so the
+            // engine will NOT retry a config failure against the same provider.
+            AgentRunFailureCodes.AgentUnresolved => Results.Ok(WithBodyStatus(body, 422)),
             // PROVIDER_ERROR / PROVIDER_CREDENTIAL_UNAVAILABLE / BUDGET_EXCEEDED /
             // LOOP_EXHAUSTED / anything else ⇒ 200 success:false (+ preserved
             // httpStatusCode inside the body).
             _ => Results.Ok(body),
         };
     }
+
+    /// <summary>Return a copy of <paramref name="body"/> with its
+    /// <see cref="LlmCallResponse.HttpStatusCode"/> set to <paramref name="status"/>.
+    /// Used to stamp the non-retryable 422 on an AGENT_UNRESOLVED body even when the
+    /// producer left it null — the wire envelope stays 200 success:false.</summary>
+    private static LlmCallResponse WithBodyStatus(LlmCallResponse body, int status)
+        => body with { HttpStatusCode = status };
 }

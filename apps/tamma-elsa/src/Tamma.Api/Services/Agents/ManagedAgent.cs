@@ -4,7 +4,6 @@ using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall;
 using Tamma.Activities.LlmCall.Credentials;
 using Tamma.Activities.LlmCall.Models;
-using Tamma.Api.Services.PromptStore;
 using Tamma.Api.Services.Providers;
 using Tamma.Api.Services.Security;
 using Tamma.Core;
@@ -57,8 +56,11 @@ public sealed class ManagedAgent : IManagedAgent
     private readonly IProviderMarkupEngine _markup;       // 34-5 (interim seam)
     private readonly IUsageEmitter _usage;                // 32-9 (interim seam)
     private readonly IEventRepository _events;
-    private readonly ITammaModeProvider _mode;
     private readonly ILogger<ManagedAgent> _logger;
+
+    // NOTE: the process mode (single-user vs SaaS) is NOT a dependency here — the
+    // ONLY mode decision in this composition lives inside ISaaSProviderGate (32-4),
+    // which reads ITammaModeProvider itself. ManagedAgent never branches on mode.
 
     public ManagedAgent(
         ISaaSProviderGate gate,
@@ -70,7 +72,6 @@ public sealed class ManagedAgent : IManagedAgent
         IProviderMarkupEngine markup,
         IUsageEmitter usage,
         IEventRepository events,
-        ITammaModeProvider mode,
         ILogger<ManagedAgent> logger)
     {
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
@@ -82,7 +83,6 @@ public sealed class ManagedAgent : IManagedAgent
         _markup = markup ?? throw new ArgumentNullException(nameof(markup));
         _usage = usage ?? throw new ArgumentNullException(nameof(usage));
         _events = events ?? throw new ArgumentNullException(nameof(events));
-        _mode = mode ?? throw new ArgumentNullException(nameof(mode));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -118,9 +118,19 @@ public sealed class ManagedAgent : IManagedAgent
             catch (OperationCanceledException) { throw; }
             catch (TammaError ex)
             {
-                // No enabled default / unresolved prompt etc. — fail-closed, never empty.
-                return await FailAsync(ctx, sw, MapResolveFailureCode(ex.Code),
-                    ex.Message, httpStatus: null, ct).ConfigureAwait(false);
+                // No enabled default / unresolved prompt / custom-prompt-unresolved —
+                // a CONFIG fail-closed (no provider call), NOT a credential problem.
+                // ⇒ AGENT_UNRESOLVED (non-retryable, 422 inside a 200 envelope).
+                return await FailAsync(ctx, sw, AgentRunFailureCodes.AgentUnresolved,
+                    ex.Message, httpStatus: 422, ct).ConfigureAwait(false);
+            }
+            catch (ArgumentException ex)
+            {
+                // An unknown role / bad argument from the resolver is a config /
+                // validation error — NOT a provider failure. ⇒ AGENT_UNRESOLVED.
+                return await FailAsync(ctx, sw, AgentRunFailureCodes.AgentUnresolved,
+                    $"agent resolution rejected the request: {ex.Message}",
+                    httpStatus: 422, ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -235,8 +245,18 @@ public sealed class ManagedAgent : IManagedAgent
             catch (Exception ex)
             {
                 // An unexpected runner throw is still a typed run record (not lost).
+                // CREDENTIAL SAFETY (load-bearing): the request-scoped key is on the
+                // providerConfig handed to the runner, so a misbehaving runner COULD
+                // echo it into ex.Message. We therefore NEVER interpolate the raw
+                // collaborator exception message into the caller-facing FailureReason
+                // (which is returned to the caller AND logged); the full detail is
+                // captured server-side via the structured ERROR log below.
+                _logger.LogError(ex,
+                    "Inline tool-loop runner threw; failing the run as PROVIDER_ERROR. "
+                    + "provider={Provider}, role={Role}, correlationId={CorrelationId}, tenantId={TenantId}",
+                    ctx.Provider, ctx.Role, ctx.CorrelationId, ctx.TenantId);
                 return await FailTerminalAsync(ctx, sw, AgentRunFailureCodes.ProviderError,
-                    $"provider call failed: {ex.Message}", httpStatus: 0,
+                    "provider call failed", httpStatus: 0,
                     inTok: 0, outTok: 0, toolLoopTokens: 0, turns: 0, exhausted: false, ct)
                     .ConfigureAwait(false);
             }
@@ -326,7 +346,10 @@ public sealed class ManagedAgent : IManagedAgent
 
     /// <summary>Build the failed record, emit exactly one terminal FAILED, and
     /// return. Used for every failure path (pre- and post-loop) so the
-    /// "exactly one terminal AGENT.RUN.* per run" invariant always holds.</summary>
+    /// "exactly one terminal AGENT.RUN.* per run" invariant always holds.
+    /// <para>No <c>IUsageEmitter</c> record is emitted on failure paths — that is
+    /// a deliberate 32-9-era decision: the durable signal for a metered-but-failed
+    /// run is the terminal <c>AGENT.RUN.FAILED</c> DCB event, not a usage row.</para></summary>
     private async Task<AgentRunResult> FailTerminalAsync(
         RunContext ctx, Stopwatch sw, string failureCode, string reason, int? httpStatus,
         int inTok, int outTok, int toolLoopTokens, int turns, bool exhausted, CancellationToken ct)
@@ -471,17 +494,6 @@ public sealed class ManagedAgent : IManagedAgent
 
         return names.Select(n => new ResolvedTool { Name = n }).ToList();
     }
-
-    private static string MapResolveFailureCode(string tammaErrorCode)
-        => tammaErrorCode switch
-        {
-            // No usable agent/prompt is a credential-class fail-closed (no
-            // provider call happens) — retryable:false, surfaced as a managed
-            // failure the engine should NOT retry against the same provider.
-            "AGENT.RESOLVE.NO_DEFAULT" => AgentRunFailureCodes.CredentialUnavailable,
-            "AGENT.RESOLVE.NO_ENABLED_DEFAULT" => AgentRunFailureCodes.CredentialUnavailable,
-            _ => AgentRunFailureCodes.CredentialUnavailable,
-        };
 
     /// <summary>Mutable carrier for the identity stamped as composition advances
     /// — so a failure at any step still produces a fully-tagged terminal event.</summary>

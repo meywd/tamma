@@ -166,6 +166,25 @@ public class LlmCallResponseMapperTests
     }
 
     [Test]
+    public void ToHttpResult_AgentUnresolved_Is200SuccessFalse_WithNonRetryable422InBody()
+    {
+        // Even if the producer left httpStatusCode null, the mapper stamps 422 so
+        // the engine's RetryCheck (transient set {0,429,502,503,504}) won't retry a
+        // config failure — while the wire envelope stays a 200 success:false.
+        var run = FailRun(AgentRunFailureCodes.AgentUnresolved, httpStatus: null);
+
+        var result = _mapper.ToHttpResult(run);
+
+        StatusOf(result).Should().Be(200, "engine-internal: never a raw 4xx/5xx on the wire");
+        var body = BodyOf(result);
+        body.Success.Should().BeFalse();
+        body.FailureCode.Should().Be("AGENT_UNRESOLVED");
+        body.HttpStatusCode.Should().Be(422);
+        new[] { 0, 429, 502, 503, 504 }.Should().NotContain(body.HttpStatusCode!.Value,
+            "AGENT_UNRESOLVED must not match RetryCheck's transient set");
+    }
+
+    [Test]
     public void ToHttpResult_SaasProviderNotAllowed_Is400()
     {
         var run = FailRun(AgentRunFailureCodes.SaasProviderNotAllowed, httpStatus: null);
@@ -192,6 +211,7 @@ public class LlmCallResponseMapperTests
         {
             AgentRunFailureCodes.ProviderError,
             AgentRunFailureCodes.CredentialUnavailable,
+            AgentRunFailureCodes.AgentUnresolved,
             AgentRunFailureCodes.BudgetExceeded,
             AgentRunFailureCodes.LoopExhausted,
             AgentRunFailureCodes.SaasProviderNotAllowed,
