@@ -25,11 +25,6 @@ function loadDataset(): Promise<WorkflowDataset> {
   return datasetCache;
 }
 
-function wikiSlugFor(w: WorkflowMetadata): string {
-  if (w.wikiPage) return w.wikiPage.replace(/^Workflow-/, '').toLowerCase();
-  return w.inventoryId ?? w.id;
-}
-
 function resolveWorkflow(
   dataset: WorkflowDataset,
   slug: string,
@@ -98,7 +93,11 @@ export default function WorkflowMapPage() {
         (w) => w.id === targetWorkflowId || w.inventoryId === targetWorkflowId,
       );
       if (!target) return;
-      const targetSlug = wikiSlugFor(target);
+      // Navigate by the target's UNIQUE id, not a wikiPage-derived slug: many
+      // sub-workflows share one wikiPage (e.g. several dispatch targets are all
+      // documented on "Workflow-Single-Issue-Cycle"), so a wikiPage slug would
+      // collapse them all back to the parent. The map route resolves by id first.
+      const targetSlug = target.id;
       const search = targetStep ? `?step=${encodeURIComponent(targetStep)}` : '';
       navigate(`/workflows/${targetSlug}/map${search}`);
     },
@@ -114,7 +113,9 @@ export default function WorkflowMapPage() {
         (w) => w.id === targetWorkflowId || w.inventoryId === targetWorkflowId,
       );
       if (!target) return undefined;
-      return `/workflows/${wikiSlugFor(target)}/map`;
+      // Use the unique id (see handleNavigate): a wikiPage slug would collapse
+      // sub-workflows sharing one wiki page back onto the parent.
+      return `/workflows/${target.id}/map`;
     },
     [dataset],
   );
