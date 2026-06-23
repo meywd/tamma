@@ -113,6 +113,21 @@ public class RotateSecretSagaActivity : TammaAsyncActivity
             // In unit-test harnesses the emitter is usually absent and
             // the runner degrades to RotationAuditEmitter-only.
             context.GetService<IAlertEventEmitter>());
+
+        // Open the ambient drain scope so the engine-side
+        // DrainRotationAuditEmitter can reach this workflow's tamma:events list
+        // (it isn't passed the ActivityExecutionContext). The events appended
+        // by the saga's per-step audit emits then ride the durable DCB drain
+        // (EventPersistenceMiddleware) to domain_events. The scope is restored
+        // on dispose so it never leaks across runs. A no-op for non-drain
+        // emitters (the Api-side RotationAuditEmitter ignores the ambient).
+        var drainEvents = GetOrCreateDrainEvents(context);
+        using var drainScope = RotationAuditDrainScope.Begin(
+            drainEvents,
+            activityId: Id,
+            activityName: Name ?? nameof(RotateSecretSagaActivity),
+            workflowInstanceId: context.WorkflowExecutionContext.Id);
+
         var outcome = await runner.ExecuteAsync(
             state,
             suppliedPlaintext: NewPlaintext.Get(context),
@@ -123,6 +138,25 @@ public class RotateSecretSagaActivity : TammaAsyncActivity
         NewVersionNumber?.Set(context, state.NewVersionNumber);
         OldVersionNumber?.Set(context, state.PreviousVersionNumber);
         Error?.Set(context, state.Error ?? string.Empty);
+    }
+
+    /// <summary>
+    /// Resolve (or create) the workflow's <c>tamma:events</c> transient list —
+    /// the exact list <see cref="EventPersistenceMiddleware"/> drains. Using the
+    /// same key (<see cref="EventDrain.EventsKey"/>) and instance means the
+    /// rotation audit events appended via the ambient drain scope are flushed by
+    /// the standard per-activity / workflow-completion drain alongside the
+    /// activity's own lifecycle events.
+    /// </summary>
+    private static List<TammaEvent> GetOrCreateDrainEvents(ActivityExecutionContext context)
+    {
+        var props = context.WorkflowExecutionContext.TransientProperties;
+        if (!props.TryGetValue(EventDrain.EventsKey, out var raw) || raw is not List<TammaEvent> list)
+        {
+            list = new List<TammaEvent>();
+            props[EventDrain.EventsKey] = list;
+        }
+        return list;
     }
 
     internal static string OutcomeLabel(SagaOutcome outcome) => outcome switch
