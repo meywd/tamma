@@ -31,12 +31,19 @@ namespace Tamma.ElsaServer.Workflows;
 /// makes the load-bearing guarantees graph-enforced:</para>
 ///
 /// <list type="bullet">
-///   <item><description><b>Graph-enforced iteration bound</b> — a
-///     <see cref="FlowDecision"/> caps the fix loop (<c>&gt;=MaxIterations</c> →
-///     escalate terminal), mirroring the merge-approval test-loop cap and
-///     <c>PlanMaxRevisions</c>/<c>TaskMaxRevisions</c>. Over the cap the workflow
-///     ESCALATES (loud, <c>REVIEW_FIX.ESCALATED</c>, <c>success=false</c>) instead of
-///     spinning forever or reporting a silent success.</description></item>
+///   <item><description><b>Forward-installed iteration-bound scaffolding</b> — an
+///     <c>Iteration</c> counter, a <c>MaxIterations</c> cap <see cref="FlowDecision"/>
+///     (<c>&gt;=MaxIterations</c> → <c>REVIEW_FIX.ESCALATED</c> failure terminal), and
+///     the escalate edge are wired AHEAD of the verify→regenerate retry loop they are
+///     meant to bound. There is NO back-edge today — the connections are strictly
+///     forward, so each invocation runs the analyze→generate→apply path at most once
+///     and the counter only ever reaches 1; the <c>&gt;=MaxIterations</c> cap therefore
+///     does NOT fire at runtime yet (it is structure, not yet a live loop guard). The
+///     escalate path becomes load-bearing only once the verify loop-back lands (the
+///     real file-write / verify / CI-retrigger step, deferred to Epic 38) and feeds a
+///     failed verification back to <c>IncrementIteration</c>. The cap mirrors the
+///     <c>PlanMaxRevisions</c>/<c>TaskMaxRevisions</c> / merge-approval test-loop bound
+///     so the eventual loop bounds out the same way.</description></item>
 ///   <item><description><b>Explicit error / exhaustion path</b> —
 ///     <c>AnalyzeReview</c>'s <c>Error</c> outcome and a failed <c>llm-call</c>
 ///     (<c>success=false</c>, read from the dispatch result) each route to a loud
@@ -87,10 +94,15 @@ namespace Tamma.ElsaServer.Workflows;
 public class ReviewFixWorkflow : WorkflowBase
 {
     /// <summary>
-    /// Max fix-generation attempts before escalating — mirrors PlanMaxRevisions /
+    /// Forward-installed cap on fix-generation attempts, mirroring PlanMaxRevisions /
     /// TaskMaxRevisions (&gt;=3) in SingleIssueCycleWorkflow and the merge-approval
-    /// test-loop cap, so the fix loop can never spin forever.
+    /// test-loop cap. NOTE: this cap is scaffolding — the verify→regenerate back-edge
+    /// it would bound does not exist yet (deferred to Epic 38), so today the counter
+    /// only reaches 1 and the <c>&gt;=MaxIterations</c> check never trips at runtime.
+    /// It becomes the live loop bound once the verify loop-back is wired.
     /// </summary>
+    // TODO(Epic 38): wire the verify→regenerate back-edge (failed verification →
+    // IncrementIteration) that this cap is meant to bound; until then there is no loop.
     private const int MaxIterations = 3;
 
     protected override void Build(IWorkflowBuilder builder)
@@ -185,8 +197,11 @@ public class ReviewFixWorkflow : WorkflowBase
         hasActionable.SetDisplayText("Has Actionable?");
 
         // ================================================================
-        // 3. Graph-enforced iteration bound — increment then cap-check BEFORE
-        //    generating fixes. Over the cap → escalate (loud), never loop forever.
+        // 3. Iteration-bound scaffolding — increment then cap-check BEFORE generating
+        //    fixes. This is forward-installed for the verify→regenerate retry loop
+        //    (deferred to Epic 38); with no back-edge today the counter only reaches 1,
+        //    so the >=MaxIterations cap is structure, not a live runtime guard yet. The
+        //    escalate path goes load-bearing once the verify loop-back lands.
         // ================================================================
         var incrementIteration = new SetVariable
         {
@@ -224,7 +239,7 @@ public class ReviewFixWorkflow : WorkflowBase
                 ["agentRole"] = AgentRole.Developer.ToWire(),
                 ["action"] = AgentAction.AddressReviewComments.ToWire(),
                 ["taskPrompt"] = $"Apply fixes for the following review comments:\n{SecurityHelpers.SanitizeForPrompt(analysisJsonVar.Get(ctx))}",
-                ["sessionId"] = $"adl-review-fix-{ctx.GetInput<int>("prNumber")}",
+                ["sessionId"] = $"adl-review-fix-{prNumberVar.Get(ctx)}",
                 ["tenantId"] = tenantIdVar.Get(ctx),
             }),
             WaitForCompletion = new(true),
@@ -409,12 +424,12 @@ public class ReviewFixWorkflow : WorkflowBase
                 // ── No actionable comments → genuine success (nothing to fix) ──
                 ConnectOutcome(hasActionable, "False", outputSuccess),
 
-                // ── Actionable → graph-enforced loop bound ──
+                // ── Actionable → iteration-bound scaffolding (forward-only today) ──
                 ConnectOutcome(hasActionable, "True", incrementIteration),
                 Connect(incrementIteration, maxIterations),
-                ConnectOutcome(maxIterations, "True", emitEscalated),   // over cap → loud escalate
+                ConnectOutcome(maxIterations, "True", emitEscalated),   // over cap → loud escalate (only reachable once the Epic-38 verify back-edge exists)
                 Connect(emitEscalated, outputFailure),
-                ConnectOutcome(maxIterations, "False", generateFixes),  // under cap → generate
+                ConnectOutcome(maxIterations, "False", generateFixes),  // under cap → generate (always taken today: counter==1)
 
                 // ── Generate fixes → read success → branch ──
                 Connect(generateFixes, extractGenerateSuccess),
