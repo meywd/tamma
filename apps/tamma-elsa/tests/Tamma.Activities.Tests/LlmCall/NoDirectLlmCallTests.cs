@@ -5,6 +5,7 @@ using NUnit.Framework;
 using Tamma.Activities.AI;
 using Tamma.Activities.Debug;
 using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 using Tamma.Activities.TDD;
 using Tamma.Api.Services.Agents; // RolePhaseMap (compiled into Tamma.Core)
 
@@ -62,8 +63,15 @@ public class NoDirectLlmCallTests
     private static readonly Regex ProviderChatCompletionsCall =
         new(@"""[^""\s<>]*/v1/chat/completions", RegexOptions.Compiled);
 
+    // Anthropic legacy text-completions endpoint.
+    private static readonly Regex ProviderCompleteCall =
+        new(@"""[^""\s<>]*/v1/complete", RegexOptions.Compiled);
+
     // A named provider HttpClient (IHttpClientFactory.CreateClient("anthropic"…)) —
     // catches an SDK/named-client provider call whose URL never appears inline.
+    // Belt-and-suspenders: the URL-literal and *:ApiKey scans are the PRIMARY
+    // defense. This is best-effort (a provider name list, and the real runner uses
+    // an interpolated CreateClient($"llm-{provider}") that no literal regex matches).
     private static readonly Regex ProviderNamedHttpClient =
         new(@"CreateClient\(\s*""(?:anthropic|openai|openrouter|gemini|google-gemini|claude|azure-openai|zai|z\.ai)""",
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -111,6 +119,20 @@ public class NoDirectLlmCallTests
     }
 
     [Test]
+    public void TammaActivities_HasNoDirectProviderCompleteCall_OutsideRunnerAndWireClient()
+    {
+        var offenders = ActivitiesSourceFiles()
+            .Where(f => !IsAllowedProviderCallFile(f.Relative))
+            .Where(f => ProviderCompleteCall.IsMatch(f.Text))
+            .Select(f => f.Relative)
+            .ToList();
+
+        offenders.Should().BeEmpty(
+            "no in-engine caller may reference the legacy /v1/complete provider endpoint. "
+            + "Offending files: " + string.Join(", ", offenders));
+    }
+
+    [Test]
     public void TammaActivities_DoesNotCreateNamedProviderHttpClient_OutsideRunnerAndWireClient()
     {
         var offenders = ActivitiesSourceFiles()
@@ -152,6 +174,7 @@ public class NoDirectLlmCallTests
         {
             if (ProviderMessagesCall.IsMatch(text)
                 || ProviderChatCompletionsCall.IsMatch(text)
+                || ProviderCompleteCall.IsMatch(text)
                 || ProviderNamedHttpClient.IsMatch(text)
                 || ApiKeyConfigRead.IsMatch(text)
                 || EnvApiKeyRead.IsMatch(text)
@@ -246,9 +269,12 @@ public class NoDirectLlmCallTests
     private static readonly Regex MediatedCallRole =
         new(@"CompleteAsync\(\s*[A-Za-z_]\w*\s*,\s*""([^""]+)""", RegexOptions.Compiled);
 
-    // The MediatedLlmText blank-role default literal: IsNullOrWhiteSpace(role) ? "<role>" : role
+    // A blank-role default: IsNullOrWhiteSpace(<role-var>) ? "<role>" : … — matches
+    // MediatedLlmText's `role` param AND CallLlmInlineActivity's `input.Role` (and
+    // LlmCallWorkflow's). Scoped to role-named variables so it can't match an
+    // unrelated string default (e.g. IsNullOrWhiteSpace(name) ? "x").
     private static readonly Regex BlankRoleDefault =
-        new(@"IsNullOrWhiteSpace\(role\)\s*\?\s*""([^""]+)""", RegexOptions.Compiled);
+        new(@"IsNullOrWhiteSpace\(\s*(?:role|[\w.]*Role)\s*\)\s*\?\s*""([^""]+)""", RegexOptions.Compiled);
 
     // LlmCallApiRequest.Role = "<role>" — scanned ONLY in CallLlmActivity.cs,
     // which contains no chat-message Role literals (system/user/assistant/tool).
@@ -260,20 +286,31 @@ public class NoDirectLlmCallTests
     {
         var roles = new HashSet<string>(StringComparer.Ordinal);
 
-        // (1) every MediatedLlmText.CompleteAsync(context, "<role>", …) call site.
+        // (1) every MediatedLlmText.CompleteAsync(context, "<role>", …) call site
+        //     AND every blank-role default (IsNullOrWhiteSpace(<role>) ? "<role>")
+        //     across Tamma.Activities — covers MediatedLlmText + CallLlmInlineActivity.
         foreach (var (_, text) in ActivitiesSourceFiles())
+        {
             foreach (Match m in MediatedCallRole.Matches(text))
                 roles.Add(m.Groups[1].Value);
+            foreach (Match m in BlankRoleDefault.Matches(text))
+                roles.Add(m.Groups[1].Value);
+        }
 
-        // (2) the MediatedLlmText blank-role default.
-        var mediated = ReadFile(Path.Combine(ActivitiesSrcDir(), "LlmCall", "MediatedLlmText.cs"));
-        foreach (Match m in BlankRoleDefault.Matches(mediated))
-            roles.Add(m.Groups[1].Value);
-
-        // (3) CallLlmActivity's LlmCallApiRequest.Role (file has no chat-message roles).
+        // (2) CallLlmActivity's LlmCallApiRequest.Role (file has no chat-message roles).
         var callLlm = ReadFile(Path.Combine(ActivitiesSrcDir(), "LlmCall", "CallLlmActivity.cs"));
         foreach (Match m in RequestRoleAssignment.Matches(callLlm))
             roles.Add(m.Groups[1].Value);
+
+        // (3) the engine's LlmCallWorkflow role default (lives in Tamma.ElsaServer,
+        //     sends its request to the same endpoint via CallLlmInlineActivity).
+        var workflow = ReadFile(Path.Combine(ElsaServerSrcDir(), "Workflows", "LlmCallWorkflow.cs"));
+        foreach (Match m in BlankRoleDefault.Matches(workflow))
+            roles.Add(m.Groups[1].Value);
+
+        // (4) the LlmCallWorkflowInput.Role default value, read reflectively — robust
+        //     against the literal moving (this is the documented public default).
+        roles.Add(new LlmCallWorkflowInput().Role);
 
         roles.Should().NotBeEmpty(
             "the scan must discover the cut-over role literals; an empty set means a regex broke");

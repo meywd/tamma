@@ -150,7 +150,10 @@ public class CallLlmActivity : Activity
         };
 
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
-        var tenantHeader = string.IsNullOrWhiteSpace(tenantIdRaw) ? null : tenantIdRaw!.Trim();
+        // Coerce to a canonical Guid string for the authoritative X-Tenant-Id header
+        // (a non-Guid value ⇒ platform scope), consistent with both the request body
+        // above and MediatedLlmText — rather than forwarding a raw, unvalidated string.
+        var tenantHeader = ParseTenantId(tenantIdRaw)?.ToString();
 
         var startedAt = DateTime.UtcNow;
         var sw = System.Diagnostics.Stopwatch.StartNew();

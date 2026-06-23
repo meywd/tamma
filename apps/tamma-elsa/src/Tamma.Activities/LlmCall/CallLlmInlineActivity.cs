@@ -217,7 +217,8 @@ public class CallLlmInlineActivity : CodeActivity
         {
             TenantId = ParseTenantId(tenantIdRaw),
             Provider = string.IsNullOrWhiteSpace(providerName) ? null : providerName,
-            Role = string.IsNullOrWhiteSpace(input.Role) ? "assistant" : input.Role,
+            // Canonical AgentRole wire default — the endpoint 422s on an unknown role.
+            Role = string.IsNullOrWhiteSpace(input.Role) ? "developer" : input.Role,
             Action = string.IsNullOrWhiteSpace(input.OperationName) ? null : input.OperationName,
             Prompt = input.UserPrompt,
             Variables = new Dictionary<string, object?>(),
