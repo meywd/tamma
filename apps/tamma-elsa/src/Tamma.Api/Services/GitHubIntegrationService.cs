@@ -46,10 +46,16 @@ public class GitHubIntegrationService : IGitHubIntegrationService
             // Resolve the base SHA. With an explicit base, resolve THAT ref and do
             // NOT silently fall back to an unrelated branch (no false success).
             // Without one, use the default-branch behaviour (main → master).
+            // Use the EXACT-MATCH singular `git/ref/heads/{ref}` endpoint — it
+            // returns a single ref object on an exact hit and a real 404 on a
+            // miss. The plural `git/refs/heads/{ref}` is the prefix-matching
+            // list form: it 200s with a JSON ARRAY for any ref a sibling STARTS
+            // WITH (e.g. `develop` when `develop-2` exists), which both breaks
+            // the single-object parse below and masks a true miss.
             string sha;
             if (!string.IsNullOrWhiteSpace(baseBranch))
             {
-                var baseResponse = await httpClient.GetAsync($"/repos/{repository}/git/refs/heads/{Uri.EscapeDataString(baseBranch)}");
+                var baseResponse = await httpClient.GetAsync($"/repos/{repository}/git/ref/heads/{Uri.EscapeDataString(baseBranch)}");
                 if (baseResponse.StatusCode == HttpStatusCode.NotFound)
                 {
                     _logger.LogError("Base branch {Base} not found in {Repo}", baseBranch, repository);
@@ -64,9 +70,9 @@ public class GitHubIntegrationService : IGitHubIntegrationService
             }
             else
             {
-                var refsResponse = await httpClient.GetAsync($"/repos/{repository}/git/refs/heads/main");
+                var refsResponse = await httpClient.GetAsync($"/repos/{repository}/git/ref/heads/main");
                 if (!refsResponse.IsSuccessStatusCode)
-                    refsResponse = await httpClient.GetAsync($"/repos/{repository}/git/refs/heads/master");
+                    refsResponse = await httpClient.GetAsync($"/repos/{repository}/git/ref/heads/master");
                 if (refsResponse.StatusCode == HttpStatusCode.NotFound)
                     return IntegrationResult<GitHubBranchResult>.Fail("base_branch_not_found: main/master");
                 refsResponse.EnsureSuccessStatusCode();
@@ -116,7 +122,12 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
         try
         {
-            var response = await httpClient.GetAsync($"/repos/{repository}/git/refs/heads/{Uri.EscapeDataString(branchName)}");
+            // Exact-match singular `git/ref/heads/{branch}` — single object on an
+            // exact hit, 404 on a true miss. The plural prefix-matching form would
+            // 200 on a sibling ref (e.g. `adl/42-auth` when only `adl/42-auth-2`
+            // exists) → a false conflict / bogus suffix. This 200/404 contract is
+            // exactly what the branches below are coded against.
+            var response = await httpClient.GetAsync($"/repos/{repository}/git/ref/heads/{Uri.EscapeDataString(branchName)}");
             if (response.StatusCode == HttpStatusCode.NotFound)
                 return IntegrationResult<bool>.Ok(false);
             if (response.IsSuccessStatusCode)

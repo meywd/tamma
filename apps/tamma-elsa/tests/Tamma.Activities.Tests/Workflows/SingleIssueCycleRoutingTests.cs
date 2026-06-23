@@ -458,6 +458,91 @@ public class SingleIssueCycleRoutingTests
             "escalated (incl. a failed merge) must reach the error terminal");
     }
 
+    // ================================================================
+    // IMPORTANT-5 — the cycle gates createPR on the branch step's success.
+    // A failed branch creation routes to a loud terminal (no doomed PR with an
+    // empty head, no false "branch created" notification). Both outcomes reach a
+    // Finish terminal (no dangling edge / deadlock).
+    // ================================================================
+
+    [Test]
+    public void BranchOutcomeSwitch_HasTwoCases_CreatedFailed()
+    {
+        var sw = _flowchart.Activities
+            .OfType<FlowSwitch>()
+            .FirstOrDefault(fs => fs.Id == "BranchOutcomeSwitch");
+
+        sw.Should().NotBeNull("the cycle must switch on the branch-creation success flag");
+        var caseNames = sw!.Cases.Select(c => c.Label).ToList();
+        caseNames.Should().Contain("Created");
+        caseNames.Should().Contain("Failed");
+    }
+
+    [Test]
+    public void ExtractBranch_FeedsTheBranchOutcomeSwitch()
+    {
+        // The branch result must be captured (ExtractBranch) and routed through
+        // the switch — never wired unconditionally to createPR.
+        _flowchart.Connections.Any(c =>
+            c.Source.Activity.Id == "ExtractBranch" &&
+            c.Target.Activity.Id == "BranchOutcomeSwitch")
+            .Should().BeTrue("the branch result must branch on success");
+    }
+
+    [Test]
+    public void BranchSuccess_ReachesCreatePr_AndNotifyBranchCreated()
+    {
+        var created = ReachableFromPort("BranchOutcomeSwitch", "Created");
+        created.Should().Contain("CreatePR", "a successful branch must continue to PR creation");
+        created.Should().Contain("NotifyBranchCreated", "a successful branch fires the branch-created notify");
+    }
+
+    [Test]
+    public void BranchFailure_DoesNotReachCreatePr_NorFalseBranchNotify()
+    {
+        // The load-bearing gate: a failed branch must NEVER reach createPR (a
+        // doomed PR with an empty head) nor fire the false "branch created" notify.
+        var failed = ReachableFromPort("BranchOutcomeSwitch", "Failed");
+        failed.Should().NotContain("CreatePR",
+            "a failed branch must not invoke createPR with an empty head");
+        failed.Should().NotContain("NotifyBranchCreated",
+            "a failed branch must not emit a false 'branch created' notification");
+    }
+
+    [Test]
+    public void BranchFailure_ReachesLoudErrorTerminal()
+    {
+        // The failure path must reach a loud terminal (ReportError) and Finish —
+        // no dangling edge, no deadlock.
+        var failed = ReachableFromPort("BranchOutcomeSwitch", "Failed");
+        failed.Should().Contain("ReportError", "a failed branch must reach the error terminal");
+        failed.Should().Contain("Finish", "the failure path must terminate at Finish (no dangling edge)");
+    }
+
+    [Test]
+    public void CreatePr_HasNoUnconditionalEdgeFromExtractBranch()
+    {
+        // Regression guard for IMPORTANT-5: the old unconditional
+        // ExtractBranch → CreatePR / NotifyBranchCreated edges must be gone.
+        _flowchart.Connections.Any(c =>
+            c.Source.Activity.Id == "ExtractBranch" &&
+            c.Target.Activity.Id == "CreatePR")
+            .Should().BeFalse("createPR must be gated on branch success, not wired unconditionally");
+        _flowchart.Connections.Any(c =>
+            c.Source.Activity.Id == "ExtractBranch" &&
+            c.Target.Activity.Id == "NotifyBranchCreated")
+            .Should().BeFalse("the branch-created notify must be gated on success");
+
+        // Every edge into CreatePR originates at the Created branch outcome.
+        var intoPr = _flowchart.Connections
+            .Where(c => c.Target.Activity.Id == "CreatePR")
+            .ToList();
+        intoPr.Should().NotBeEmpty();
+        intoPr.Should().OnlyContain(c =>
+            c.Source.Activity.Id == "BranchOutcomeSwitch" && c.Source.Port == "Created",
+            "createPR may only be reached via the Created branch outcome");
+    }
+
     [Test]
     public void OldBinaryApprovalGate_IsRetiredFromTheCycle()
     {

@@ -104,7 +104,7 @@ public class CreateBranchActivity : Activity
         if (github is null)
         {
             _logger?.LogError("GitHub integration service unavailable — cannot create branch for issue #{Issue}", issueNumber);
-            ErrorCode.Set(context, "github_service_unavailable");
+            ErrorCode.Set(context, "github-service-unavailable");
             Error.Set(context, "GitHub integration service unavailable");
             await context.CompleteActivityWithOutcomesAsync("Error");
             return;

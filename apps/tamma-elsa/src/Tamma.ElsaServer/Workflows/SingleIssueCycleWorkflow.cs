@@ -63,6 +63,13 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var tasksJson = builder.WithVariable<string>("TasksJson", "");
         var taskReviewDecision = builder.WithVariable<string>("TaskReviewDecision", "");
         var branchName = builder.WithVariable<string>("BranchName", "");
+        // Branch-creation gating (IMPORTANT-5): the cycle must NOT proceed to
+        // createPR on a failed branch (empty head → doomed PR + false "branch
+        // created" notify). The branch sub-workflow reports success / errorCode /
+        // exitReason; we capture them to route a loud terminal on failure.
+        var branchSuccess = builder.WithVariable<bool>("BranchSuccess", false);
+        var branchErrorCode = builder.WithVariable<string>("BranchErrorCode", "");
+        var branchErrorReason = builder.WithVariable<string>("BranchErrorReason", "");
         var prNumber = builder.WithVariable<int>("PRNumber", 0);
         var prUrl = builder.WithVariable<string>("PRUrl", "");
         var exitReason = builder.WithVariable<string>("ExitReason", "");
@@ -374,10 +381,42 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var extractBranch = Assign(branchName, ctx =>
         {
             var result = subResult.Get(ctx);
+
+            // Capture the branch step's success + failure classification so the
+            // gate below can route a loud terminal (never a doomed PR). An
+            // unreadable/absent result is treated as failure (no false success).
+            var success = result != null
+                && result.TryGetValue("success", out var s)
+                && s is true;
+            branchSuccess.Set(ctx, success);
+            branchErrorCode.Set(ctx, result?.GetValueOrDefault("errorCode")?.ToString() ?? "branch-creation-failed");
+            branchErrorReason.Set(ctx, result?.GetValueOrDefault("exitReason")?.ToString() ?? "branch creation failed");
+
             if (result != null && result.TryGetValue("branchName", out var b))
                 return (object)(b?.ToString() ?? "");
             return (object)"";
         }, "ExtractBranch", "Extract Branch");
+
+        // Gate the cycle on the branch step's success (IMPORTANT-5). Only a
+        // created branch proceeds to createPR + the branch-created notify; a
+        // failure routes to a loud terminal (no empty-head PR, no false notify).
+        // Defaults to "Failed" so an unreadable result can never slip into PR
+        // creation.
+        var branchOutcomeSwitch = new FlowSwitch
+        {
+            Id = "BranchOutcomeSwitch",
+            Name = "Branch Outcome",
+            Cases =
+            {
+                new FlowSwitchCase("Created", ctx => branchSuccess.Get(ctx)),
+                new FlowSwitchCase("Failed", ctx => true), // failure + any unreadable result
+            },
+        };
+        branchOutcomeSwitch.SetDisplayText("Branch Outcome");
+
+        var notifyBranchFailed = NotifyIssue("NotifyBranchFailed", repository, issueNumber,
+            "❌ Branch creation failed. Needs human attention.",
+            new[] { "tamma-error", "needs-human" }, new[] { "tamma-processing" });
 
         // ================================================================
         // 8. Create PR (draft, with implementation plan .md files)
@@ -776,7 +815,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 createDeferredIssues, createSplitIssues,
                 createTasks, extractTasks,
                 reviewTasks, extractTaskReview, taskReviewOutcome,
-                createBranch, extractBranch,
+                createBranch, extractBranch, branchOutcomeSwitch, notifyBranchFailed,
                 createPR, extractPR,
                 createTestCases,
                 initTaskLoop, hasMoreTasks, extractCurrentTask, tddForTask, incrementTask,
@@ -876,10 +915,20 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ConnectOutcome(taskReviewOutcome, "NeedsHuman", notifyNeedsHuman),
                 ConnectOutcome(taskReviewOutcome, "NeedsHuman", reportNeedsHuman),
 
-                // 7. Create Branch → notify + Create Draft PR (parallel)
+                // 7. Create Branch → capture result → gate on success (IMPORTANT-5).
+                //    The branch step must succeed before the cycle proceeds to PR
+                //    creation; a failure routes to a loud terminal (no empty-head
+                //    PR, no false "branch created" notify). Both outcomes reach Finish.
                 Connect(createBranch, extractBranch),
-                Connect(extractBranch, notifyBranchCreated),
-                Connect(extractBranch, createPR),
+                Connect(extractBranch, branchOutcomeSwitch),
+
+                // Created → notify + Create Draft PR (parallel)
+                ConnectOutcome(branchOutcomeSwitch, "Created", notifyBranchCreated),
+                ConnectOutcome(branchOutcomeSwitch, "Created", createPR),
+
+                // Failed → loud human-handoff/error terminal (never PR creation)
+                ConnectOutcome(branchOutcomeSwitch, "Failed", notifyBranchFailed),
+                ConnectOutcome(branchOutcomeSwitch, "Failed", reportError),
 
                 // 8. Create Draft PR → 9. Create Test Cases
                 Connect(createPR, extractPR),
