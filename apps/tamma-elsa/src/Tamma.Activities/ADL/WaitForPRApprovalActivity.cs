@@ -12,6 +12,17 @@ namespace Tamma.Activities.ADL;
 /// Bookmark-based activity that blocks until a PR is approved.
 /// Resumed by a GitHub webhook (pull_request_review.submitted with state=approved)
 /// or by polling the PR status.
+///
+/// <para><b>Retained — not currently wired into <c>single-issue-cycle</c>.</b> The
+/// binary approve/merge gate this activity drove was replaced by the richer
+/// merge/test/reject <c>merge-approval</c> gate (<see cref="WaitForMergeApprovalActivity"/>).
+/// It is kept for the <c>pull_request_review</c> webhook-resume seam: the merge gate
+/// resumes on the tenant+repo-scoped
+/// <c>adl-merge-approval-{tenant}-{repo}-{issue}-{pr}</c> bookmark via the
+/// <c>POST /api/adl/merge-approval/resume</c> resume endpoint, and a future
+/// webhook → <c>{decision}</c> mapping can reuse this activity's binary
+/// <c>pr-approval-{pr}</c> bookmark shape if the platform ever drives the gate
+/// straight from a review event. Do not delete without retiring that seam.</para>
 /// </summary>
 [Activity(
     "Tamma.ADL",

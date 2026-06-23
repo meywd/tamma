@@ -342,4 +342,174 @@ public class SingleIssueCycleRoutingTests
         tddForTask!.TimeoutMinutes.Should().NotBeNull(
             "TimeoutMinutes input must be configured for the TDD task (30 minutes default)");
     }
+
+    // ================================================================
+    // Merge-Approval Gate wiring — the cycle now routes the merge step through
+    // the 3-way merge/test/reject gate (was an unwired skeleton)
+    // ================================================================
+
+    [Test]
+    public void TddLoopDone_DispatchesMergeApprovalGate()
+    {
+        // The merge step must run through the merge-approval gate sub-workflow,
+        // not the bare binary WaitForPRApprovalActivity it replaced.
+        var gate = _flowchart.Activities
+            .OfType<DispatchWorkflow>()
+            .FirstOrDefault(d => d.Id == "MergeApprovalGate");
+
+        gate.Should().NotBeNull("the cycle must dispatch the merge-approval gate");
+        ReadDefinitionId(gate!).Should().Be("merge-approval",
+            "the merge gate must dispatch the merge-approval workflow (previously orphaned)");
+
+        _flowchart.Connections.Any(c =>
+            c.Source.Activity.Id == "HasMoreTasks" &&
+            c.Source.Port == "False" &&
+            c.Target.Activity.Id == "MergeApprovalGate")
+            .Should().BeTrue("the gate must be entered when the TDD loop is done");
+    }
+
+    [Test]
+    public void MergeApprovalGate_WaitsForCompletion_ThenBranchesOnOutcome()
+    {
+        var gate = _flowchart.Activities
+            .OfType<DispatchWorkflow>()
+            .First(d => d.Id == "MergeApprovalGate");
+
+        // The cycle must block on the human decision + the gate's action, not race
+        // ahead fire-and-forget.
+        ReadWaitForCompletion(gate).Should().BeTrue(
+            "the cycle must wait for the merge-approval gate to complete");
+
+        // CRITICAL-1: the gate must NOT connect unconditionally to WaitForPRMerged.
+        // It must flow into ExtractGateOutcome → GateOutcomeSwitch and branch.
+        _flowchart.Connections.Any(c =>
+            c.Source.Activity.Id == "MergeApprovalGate" &&
+            c.Target.Activity.Id == "WaitForPRMerged")
+            .Should().BeFalse(
+                "the gate must NOT connect directly to WaitForPRMerged — reject/escalate " +
+                "would then hang the cycle forever on a merge webhook that never fires");
+
+        _flowchart.Connections.Any(c =>
+            c.Source.Activity.Id == "MergeApprovalGate" &&
+            c.Target.Activity.Id == "ExtractGateOutcome")
+            .Should().BeTrue("the gate result must be captured for branching");
+        _flowchart.Connections.Any(c =>
+            c.Source.Activity.Id == "ExtractGateOutcome" &&
+            c.Target.Activity.Id == "GateOutcomeSwitch")
+            .Should().BeTrue("the cycle must branch on the gate outcome");
+    }
+
+    // ================================================================
+    // CRITICAL-1 — the cycle branches on the gate `outcome`. ONLY merge reaches
+    // WaitForPRMerged; reject/escalate reach loud terminals → no deadlock.
+    // ================================================================
+
+    [Test]
+    public void GateOutcomeSwitch_HasThreeCases_MergeRejectEscalated()
+    {
+        var sw = _flowchart.Activities
+            .OfType<FlowSwitch>()
+            .FirstOrDefault(fs => fs.Id == "GateOutcomeSwitch");
+
+        sw.Should().NotBeNull("the cycle must switch on the gate outcome");
+        var caseNames = sw!.Cases.Select(c => c.Label).ToList();
+        caseNames.Should().Contain("Merge");
+        caseNames.Should().Contain("Reject");
+        caseNames.Should().Contain("Escalated");
+    }
+
+    [Test]
+    public void GateOutcome_OnlyMerge_ReachesWaitForPRMerged()
+    {
+        // The merge outcome is the ONLY path to the merge-webhook wait.
+        _flowchart.Connections.Any(c =>
+            c.Source.Activity.Id == "GateOutcomeSwitch" &&
+            c.Source.Port == "Merge" &&
+            c.Target.Activity.Id == "WaitForPRMerged")
+            .Should().BeTrue("merge outcome must wait for the real merge webhook");
+
+        // Exactly one edge into WaitForPRMerged, and it is the merge case (no
+        // unconditional / non-merge edge can reach the hang point).
+        var intoWait = _flowchart.Connections
+            .Where(c => c.Target.Activity.Id == "WaitForPRMerged")
+            .ToList();
+        intoWait.Should().HaveCount(1, "only the merge outcome may reach WaitForPRMerged");
+        intoWait[0].Source.Activity.Id.Should().Be("GateOutcomeSwitch");
+        intoWait[0].Source.Port.Should().Be("Merge");
+    }
+
+    [Test]
+    public void GateOutcome_NonMerge_DoesNotReachWaitForPRMerged_NoDeadlock()
+    {
+        // The load-bearing no-deadlock guarantee: from a reject/escalate outcome
+        // the cycle must NOT be able to reach WaitForPRMerged (which blocks on a
+        // pr-merged webhook that never fires for a non-merge).
+        foreach (var port in new[] { "Reject", "Escalated" })
+        {
+            var reach = ReachableFromPort("GateOutcomeSwitch", port);
+            reach.Should().NotContain("WaitForPRMerged",
+                $"the '{port}' outcome must NEVER reach WaitForPRMerged (would hang forever)");
+        }
+
+        // reject → human-handoff terminal; escalated → error terminal (loud).
+        ReachableFromPort("GateOutcomeSwitch", "Reject").Should().Contain("ReportNeedsHuman",
+            "reject must reach the human-handoff terminal");
+        ReachableFromPort("GateOutcomeSwitch", "Escalated").Should().Contain("ReportError",
+            "escalated (incl. a failed merge) must reach the error terminal");
+    }
+
+    [Test]
+    public void OldBinaryApprovalGate_IsRetiredFromTheCycle()
+    {
+        // The prior bare WaitForPRApprovalActivity gate and its fire-and-forget
+        // "DispatchMerge" node must no longer be in the cycle — exactly one gate.
+        _flowchart.Activities.Any(a => a.Id == "WaitForPRApproval")
+            .Should().BeFalse("the binary approval gate is replaced by the merge-approval gate");
+        _flowchart.Activities.Any(a => a.Id == "DispatchMerge")
+            .Should().BeFalse("the fire-and-forget merge dispatch is now inside the merge-approval gate");
+    }
+
+    /// <summary>Forward-reachable activity ids starting from a specific
+    /// outcome port of a source node.</summary>
+    private HashSet<string> ReachableFromPort(string sourceId, string port)
+    {
+        var seen = new HashSet<string>();
+        var queue = new Queue<string>();
+        foreach (var c in _flowchart.Connections.Where(c =>
+            c.Source.Activity.Id == sourceId && c.Source.Port == port))
+        {
+            if (seen.Add(c.Target.Activity.Id)) queue.Enqueue(c.Target.Activity.Id);
+        }
+        while (queue.Count > 0)
+        {
+            var id = queue.Dequeue();
+            foreach (var c in _flowchart.Connections.Where(c => c.Source.Activity.Id == id))
+            {
+                if (c.Target.Activity.Id is { } t && seen.Add(t)) queue.Enqueue(t);
+            }
+        }
+        return seen;
+    }
+
+    private static string? ReadDefinitionId(DispatchWorkflow dispatch)
+    {
+        var prop = typeof(DispatchWorkflow).GetProperty("WorkflowDefinitionId");
+        var value = prop?.GetValue(dispatch);
+        var expression = value?.GetType().GetProperty("Expression")?.GetValue(value)
+            as Elsa.Expressions.Models.Expression;
+        return expression?.Value?.ToString();
+    }
+
+    private static bool ReadWaitForCompletion(DispatchWorkflow dispatch)
+    {
+        // WaitForCompletion is an Input<bool> whose literal is carried on the
+        // expression value; a configured `new(true)` exposes "True"/"true"/True.
+        var value = dispatch.WaitForCompletion?.Expression?.Value;
+        return value switch
+        {
+            bool b => b,
+            string s => bool.TryParse(s, out var r) && r,
+            _ => false,
+        };
+    }
 }

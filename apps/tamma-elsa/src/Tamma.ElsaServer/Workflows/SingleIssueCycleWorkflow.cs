@@ -539,35 +539,81 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         dispatchCodeReview.SetDisplayText("Dispatch Code Review");
 
         // ================================================================
-        // 11b. Wait for PR Approval (bookmark — blocks until approved)
+        // 11b-12. Merge-Approval Gate (sub-workflow — the human APPROVAL_GATE)
+        //
+        // Replaces the prior bare WaitForPRApprovalActivity (binary approve) +
+        // fire-and-forget "merge" dispatch with the 3-way merge/test/reject gate
+        // (merge-approval), delivering the PRD test/merge decision point and the
+        // FR-19/FR-34 audit trail. On the Merge decision the gate dispatches the
+        // SAME "merge" workflow (WaitForCompletion=true) the loop used before; on
+        // Test it re-runs CI then re-decides; on Reject/Invalid it labels/escalates.
+        // We wait for the gate so the cycle does not race ahead of the human.
+        //
+        // CRITICAL: the cycle MUST branch on the gate's `outcome` output. Only the
+        // "merge" outcome may reach WaitForPRMerged (which blocks on a
+        // `pr-merged-{pr}` webhook that fires ONLY on a real merge). reject /
+        // escalated finish at a loud human-handoff / error terminal — wiring those
+        // into WaitForPRMerged would hang the cycle forever (no webhook will ever
+        // fire), leaving the issue stuck `tamma-processing` with no terminal
+        // reported to the orchestrator.
         // ================================================================
-        var waitForApproval = new WaitForPRApprovalActivity
+        var mergeApprovalGate = new DispatchWorkflow
         {
-            Id = "WaitForPRApproval",
-            Name = "Wait for PR Approval",
-            Repository = new Input<string>(ctx => repository.Get(ctx)),
-            PRNumber = new Input<int>(ctx => prNumber.Get(ctx)),
-        };
-        waitForApproval.SetDisplayText("Wait for PR Approval");
-
-        // ================================================================
-        // 12. Dispatch Merge (fire & forget — handles merge, CI on main, conflicts)
-        // ================================================================
-        var dispatchMerge = new DispatchWorkflow
-        {
-            Id = "DispatchMerge",
-            Name = "Dispatch Merge",
-            WorkflowDefinitionId = new("merge"),
+            Id = "MergeApprovalGate",
+            Name = "Merge Approval Gate",
+            WorkflowDefinitionId = new("merge-approval"),
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["repository"] = repository.Get(ctx),
                 ["prNumber"] = prNumber.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
+                ["prUrl"] = prUrl.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
-            WaitForCompletion = new(false), // fire & forget
+            WaitForCompletion = new(true), // block until the human decides + the gate acts
+            Result = new(subResult),       // capture the gate's outputs (incl. `outcome`)
         };
-        dispatchMerge.SetDisplayText("Dispatch Merge");
+        mergeApprovalGate.SetDisplayText("Merge Approval Gate");
+
+        // Gate outcome: "merge" | "reject" | "escalated" (MergeApprovalWorkflow's
+        // `outcome` output). Defaults to "escalated" when the gate returns nothing
+        // parseable so an unreadable result is treated as a loud non-merge (never a
+        // silent merge), keeping the cycle on a terminal path.
+        var gateOutcome = builder.WithVariable<string>("GateOutcome", "escalated");
+        var extractGateOutcome = Assign(gateOutcome, ctx =>
+        {
+            var result = subResult.Get(ctx);
+            if (result != null && result.TryGetValue("outcome", out var o))
+            {
+                var token = o?.ToString();
+                if (!string.IsNullOrWhiteSpace(token)) return (object)token;
+            }
+            return (object)"escalated";
+        }, "ExtractGateOutcome", "Extract Gate Outcome");
+
+        // Branch the cycle on the gate outcome. ONLY "merge" continues to
+        // WaitForPRMerged; everything else reaches a loud terminal.
+        var gateOutcomeSwitch = new FlowSwitch
+        {
+            Id = "GateOutcomeSwitch",
+            Name = "Gate Outcome",
+            Cases =
+            {
+                new FlowSwitchCase("Merge", ctx => gateOutcome.Get(ctx) == "merge"),
+                new FlowSwitchCase("Reject", ctx => gateOutcome.Get(ctx) == "reject"),
+                new FlowSwitchCase("Escalated", ctx => true), // escalated + any unknown
+            },
+        };
+        gateOutcomeSwitch.SetDisplayText("Gate Outcome");
+
+        // Non-merge terminals: reject = human handoff; escalated = error report.
+        var notifyMergeRejected = NotifyIssue("NotifyMergeRejected", repository, issueNumber,
+            "🚫 PR rejected at the merge-approval gate. Needs human follow-up.",
+            new[] { "tamma-rejected", "needs-human" }, new[] { "tamma-processing" });
+        var notifyMergeEscalated = NotifyIssue("NotifyMergeEscalated", repository, issueNumber,
+            "⚠️ Merge-approval gate escalated (failed merge / invalid decision). Needs human attention.",
+            new[] { "tamma-error", "needs-human" }, new[] { "tamma-processing" });
 
         // ================================================================
         // 13. Wait for PR Merged (bookmark — blocks until merged)
@@ -731,8 +777,10 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 createPR, extractPR,
                 createTestCases,
                 initTaskLoop, hasMoreTasks, extractCurrentTask, tddForTask, incrementTask,
-                dispatchCodeReview, waitForApproval,
-                dispatchMerge, waitForMerged, closeIssue, deploymentPipeline,
+                dispatchCodeReview, mergeApprovalGate,
+                extractGateOutcome, gateOutcomeSwitch,
+                notifyMergeRejected, notifyMergeEscalated,
+                waitForMerged, closeIssue, deploymentPipeline,
                 // Notifications (fire-and-forget)
                 notifyProcessing, notifyInvalid, notifyContextDone,
                 notifyPlanDone, notifyPlanApproved,
@@ -848,14 +896,32 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ConnectOutcome(tddForTask, "Failed", incrementTask),
                 Connect(incrementTask, hasMoreTasks), // loop back
 
-                // TDD Loop done → notify + dispatch code review + wait for approval (parallel)
+                // TDD Loop done → notify + dispatch code review + merge-approval gate (parallel)
                 ConnectOutcome(hasMoreTasks, "False", notifyTddDone),
                 ConnectOutcome(hasMoreTasks, "False", dispatchCodeReview),
-                ConnectOutcome(hasMoreTasks, "False", waitForApproval),
+                ConnectOutcome(hasMoreTasks, "False", mergeApprovalGate),
 
-                // 11. PR Approved → Dispatch Merge + Wait for Merged (parallel)
-                Connect(waitForApproval, dispatchMerge),
-                Connect(waitForApproval, waitForMerged),
+                // 11b-12. Merge-Approval Gate (human merge/test/reject + acts on it)
+                //         → branch on the gate `outcome`. ONLY merge → WaitForPRMerged.
+                //         The gate dispatches the real "merge" workflow on approval;
+                //         the loop then blocks on the merge webhook via waitForMerged
+                //         before closing the issue. reject / escalated must NEVER reach
+                //         waitForMerged (no webhook would ever fire → permanent hang) —
+                //         they finish at a loud human-handoff / error terminal instead.
+                Connect(mergeApprovalGate, extractGateOutcome),
+                Connect(extractGateOutcome, gateOutcomeSwitch),
+
+                // merge → wait for the real merge webhook (the only path to success)
+                ConnectOutcome(gateOutcomeSwitch, "Merge", waitForMerged),
+
+                // reject → human-handoff terminal (loud), never waitForMerged
+                ConnectOutcome(gateOutcomeSwitch, "Reject", notifyMergeRejected),
+                ConnectOutcome(gateOutcomeSwitch, "Reject", reportNeedsHuman),
+
+                // escalated (incl. a failed merge sub-workflow, CRITICAL-2) → error
+                // terminal (loud), never waitForMerged
+                ConnectOutcome(gateOutcomeSwitch, "Escalated", notifyMergeEscalated),
+                ConnectOutcome(gateOutcomeSwitch, "Escalated", reportError),
 
                 // 13. Merged → Close Issue + Deployment Pipeline (parallel)
                 Connect(waitForMerged, closeIssue),

@@ -380,6 +380,25 @@ app.UseWorkflows();
 app.UseStaticFiles();
 app.MapHealthChecks("/health");
 
+// IMPORTANT-2 — in-process resume seam for the merge-approval human gate.
+// Tamma.Api's tenant-scoped, RBAC-gated POST /api/adl/merge-approval/resume
+// forwards here; this endpoint looks up the gate's tenant+repo-scoped named
+// bookmark and runs the owning instance with the {decision,feedback,approver}
+// payload injected as input.
+//
+// SECURITY C3 — this is an engine control surface (it can drive a real merge).
+// It MUST NOT be drivable unauthenticated from the public internet. We require
+// an authenticated caller: the only legitimate caller is the Tamma.Api→engine
+// hop, which presents the Elsa admin API key (Authorization: ApiKey ...) that
+// UseAdminApiKey() validates into an authenticated principal. Anonymous public
+// callers fail .RequireAuthorization() with 401. The route is ALSO excluded
+// from the public nginx /elsa/api/ block (internal hop only) — defense in depth.
+// The C1/C2 tenant/repo constraints are enforced inside the handler via the
+// bookmark name.
+app.MapPost("/elsa/api/adl/merge-approval/resume",
+    Tamma.ElsaServer.Endpoints.MergeApprovalResumeEndpoint.Resume)
+    .RequireAuthorization();
+
 app.UseSerilogRequestLogging();
 
 Log.Information("Tamma ELSA Server starting up...");

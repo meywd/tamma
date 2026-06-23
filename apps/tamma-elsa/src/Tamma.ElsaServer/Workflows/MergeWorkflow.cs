@@ -34,8 +34,19 @@ public class MergeWorkflow : WorkflowBase
         };
         mergePr.SetDisplayText("Merge PR");
 
+        // CRITICAL-2 — the merge activity's typed `Error` outcome used to be
+        // SWALLOWED: a single portless Connect(mergePr, setSuccess) only matches
+        // the activity's first/default outcome, so on Error the flow stalled and
+        // `success` was never emitted. The merge-approval gate reads `success` and
+        // routes a failed merge to its loud escalate terminal (instead of the
+        // success terminal, which would hang the cycle on a merge webhook that
+        // never fires). So set `success` EXPLICITLY on BOTH outcomes:
+        //   Merged → success = (mergeSha non-empty)
+        //   Error  → success = false  (and mergeSha stays empty)
         var setSuccess = new SetVariable { Id = "SetMergeSuccess", Name = "Set Success", Variable = successVar, Value = new Input<object?>(ctx => (object)!string.IsNullOrEmpty(mergeShaVar.Get(ctx))) };
         setSuccess.SetDisplayText("Set Success");
+        var setFailure = new SetVariable { Id = "SetMergeFailure", Name = "Set Failure", Variable = successVar, Value = new Input<object?>(_ => (object)false) };
+        setFailure.SetDisplayText("Set Failure");
         var outputSuccess = new SetOutput { Id = "OutputSuccess", Name = "Output Success", OutputName = new("success"), OutputValue = new(ctx => (object)successVar.Get(ctx)) };
         outputSuccess.SetDisplayText("Output Success");
         var outputMergeSha = new SetOutput { Id = "OutputMergeSha", Name = "Output Merge SHA", OutputName = new("mergeSha"), OutputValue = new(ctx => (object)(mergeShaVar.Get(ctx) ?? "")) };
@@ -46,11 +57,16 @@ public class MergeWorkflow : WorkflowBase
             Id = "MergeFlowchart",
             Name = "Merge Flowchart",
             Start = mergePr,
-            Activities = { mergePr, setSuccess, outputSuccess, outputMergeSha },
+            Activities = { mergePr, setSuccess, setFailure, outputSuccess, outputMergeSha },
             Connections =
             {
-                Connect(mergePr, setSuccess),
+                // Merged → success flag → emit outputs
+                ConnectOutcome(mergePr, "Merged", setSuccess),
                 Connect(setSuccess, outputSuccess),
+                // Error → explicit success=false → emit the SAME outputs (so the
+                // gate reads success=false rather than a never-set output).
+                ConnectOutcome(mergePr, "Error", setFailure),
+                Connect(setFailure, outputSuccess),
                 Connect(outputSuccess, outputMergeSha)
             }
         };
@@ -58,4 +74,7 @@ public class MergeWorkflow : WorkflowBase
 
     private static FlowConnection Connect(IActivity source, IActivity target)
         => new(new FlowEndpoint(source), new FlowEndpoint(target));
+
+    private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
+        => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
 }
