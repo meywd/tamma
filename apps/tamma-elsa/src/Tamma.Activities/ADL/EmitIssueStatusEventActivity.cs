@@ -98,6 +98,12 @@ public class EmitIssueStatusEventActivity : Activity
         };
         if (tenantId is not null) tags["tenantId"] = tenantId.Value.ToString("D");
 
+        // A degraded (callback-unavailable) no-op still emits a SUCCESS event. Lift
+        // the degraded flag from Data into a QUERYABLE tag so a consumer filtering
+        // on event TYPE can exclude these no-ops — otherwise a degrade reads as a
+        // genuine success (the Data-only flag is non-indexed). Kept in Data too.
+        if (IsDegraded(data)) tags["degraded"] = "true";
+
         return new TammaEvent
         {
             EventType = type,
@@ -106,6 +112,26 @@ public class EmitIssueStatusEventActivity : Activity
             Data = data is null
                 ? new Dictionary<string, object?>()
                 : new Dictionary<string, object?>(data),
+        };
+    }
+
+    /// <summary>
+    /// True when the event payload flags a degraded no-op. Tolerates both a direct
+    /// <see cref="bool"/> (in-process dictionary) and a <see cref="JsonElement"/>
+    /// (the payload arrives via <see cref="ParseData"/> in the running workflow).
+    /// </summary>
+    private static bool IsDegraded(IReadOnlyDictionary<string, object?>? data)
+    {
+        if (data is null || !data.TryGetValue("degraded", out var raw) || raw is null)
+            return false;
+        return raw switch
+        {
+            bool b => b,
+            System.Text.Json.JsonElement je => je.ValueKind == System.Text.Json.JsonValueKind.True
+                || (je.ValueKind == System.Text.Json.JsonValueKind.String
+                    && bool.TryParse(je.GetString(), out var pb) && pb),
+            string s => bool.TryParse(s, out var sb) && sb,
+            _ => false,
         };
     }
 

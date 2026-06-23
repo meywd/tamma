@@ -144,7 +144,10 @@ public class UpdateIssueStatusWorkflow : WorkflowBase
             {
                 WithLabel(new SetOutput { Id = "OutFailSuccess", OutputName = new("success"), OutputValue = new(_ => (object)false) }, "Output success=false"),
                 WithLabel(new SetOutput { Id = "OutFailErrorCode", OutputName = new("errorCode"), OutputValue = new(ctx => (object)(errorCodeVar.Get(ctx) ?? "issue-update-failed")) }, "Output errorCode"),
-                WithLabel(new SetOutput { Id = "OutFailReason", OutputName = new("exitReason"), OutputValue = new(_ => (object)"issue-update-failed") }, "Output exitReason"),
+                // Surface the activity's rich human Error reason (not a duplicate of
+                // errorCode) so callers/observability see WHY it failed; fall back to
+                // the stable constant only when no reason was captured.
+                WithLabel(new SetOutput { Id = "OutFailReason", OutputName = new("exitReason"), OutputValue = new(ctx => (object)(NullIfBlank(errorVar.Get(ctx)) ?? "issue-update-failed")) }, "Output exitReason"),
             }
         };
         failureOutputs.SetDisplayText("Failure Outputs");
@@ -198,6 +201,9 @@ public class UpdateIssueStatusWorkflow : WorkflowBase
 
     private static string[]? NullIfEmpty(string[]? labels)
         => labels is { Length: > 0 } ? labels : null;
+
+    private static string? NullIfBlank(string? s)
+        => string.IsNullOrWhiteSpace(s) ? null : s;
 
     private static long ElapsedMs(long startedAtTicks)
     {

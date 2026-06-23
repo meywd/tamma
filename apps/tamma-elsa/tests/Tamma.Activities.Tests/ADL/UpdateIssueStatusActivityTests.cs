@@ -300,6 +300,36 @@ public class UpdateIssueStatusActivityTests
     }
 
     [Test]
+    public void BuildTammaEvent_DegradedSuccess_AddsDegradedTag_NotJustData()
+    {
+        // A degraded (callback-unavailable) no-op still emits a SUCCESS event. A
+        // consumer filtering on event TYPE would miscount it as a real success
+        // unless the degraded flag is a QUERYABLE tag — not buried in Data only.
+        var evt = EmitIssueStatusEventActivity.BuildTammaEvent(
+            IssueStatusEvents.UpdatedSuccess, issueNumber: 8, repository: "o/r",
+            tenantId: null,
+            data: new Dictionary<string, object?> { ["message"] = "noop", ["degraded"] = true });
+
+        evt.Tags.Should().NotBeNull();
+        evt.Tags!.Should().ContainKey("degraded");
+        evt.Tags["degraded"].Should().Be("true", "the degraded flag must be indexed/queryable as a tag");
+        // still present in Data (non-indexed payload retained).
+        evt.Data.Should().ContainKey("degraded");
+    }
+
+    [Test]
+    public void BuildTammaEvent_NonDegradedSuccess_DoesNotAddDegradedTag()
+    {
+        var evt = EmitIssueStatusEventActivity.BuildTammaEvent(
+            IssueStatusEvents.UpdatedSuccess, issueNumber: 8, repository: "o/r",
+            tenantId: null,
+            data: new Dictionary<string, object?> { ["message"] = "ok", ["degraded"] = false });
+
+        evt.Tags!.Should().NotContainKey("degraded",
+            "a genuine (non-degraded) success must NOT carry the degraded tag");
+    }
+
+    [Test]
     public void IssueStatusEvents_ParseTenantId_HandlesEmptyAndValid()
     {
         IssueStatusEvents.ParseTenantId(null).Should().BeNull();
