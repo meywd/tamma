@@ -249,6 +249,124 @@ public class GitHubIntegrationServiceTests
     }
 
     // ================================================================
+    // BranchExistsAsync — exact-match SINGULAR git/ref endpoint (review I-1/I-2)
+    //
+    // The prefix-matching PLURAL `git/refs/heads/{ref}` endpoint returns 200 + a
+    // JSON ARRAY for any ref another ref STARTS WITH (e.g. `adl/42-auth` when only
+    // `adl/42-auth-2` exists) — a false conflict + an array that breaks the
+    // single-object parse. The SINGULAR `git/ref/heads/{branch}` endpoint is the
+    // exact-match form: a single object on a hit, a real 404 on a miss — exactly
+    // the 200/404 contract this code is written against.
+    // ================================================================
+
+    // The branch slug carries a '/', which the service URL-escapes to %2F; the
+    // request's AbsolutePath keeps that encoded, so route registration mirrors it.
+    private const string BranchPathSingular = "/repos/o/r/git/ref/heads/adl%2F42-auth";
+
+    [Test]
+    public async Task BranchExists_HitsSingularExactMatchEndpoint_NotPluralPrefixEndpoint()
+    {
+        _handler.OnGet(BranchPathSingular,
+            """{ "ref": "refs/heads/adl/42-auth", "object": { "sha": "abc123" } }""");
+
+        var result = await CreateService().BranchExistsAsync("o/r", "adl/42-auth");
+
+        result.Success.Should().BeTrue();
+        result.Data.Should().BeTrue("a 200 single-object response means the branch exists");
+
+        // The request must go to the SINGULAR `git/ref/...` (exact match), never
+        // the prefix-matching PLURAL `git/refs/...`.
+        var req = _handler.RequireRequest(HttpMethod.Get, BranchPathSingular);
+        req.Path.Should().Contain("/git/ref/heads/");
+        req.Path.Should().NotContain("/git/refs/heads/",
+            "the plural prefix-matching endpoint would 200 on sibling refs (false conflict)");
+    }
+
+    [Test]
+    public async Task BranchExists_404_ReturnsOkFalse()
+    {
+        // Exact-match miss → 404 → Ok(false), free to create.
+        _handler.OnGet(BranchPathSingular, "Not Found", HttpStatusCode.NotFound);
+
+        var result = await CreateService().BranchExistsAsync("o/r", "adl/42-auth");
+
+        result.Success.Should().BeTrue();
+        result.Data.Should().BeFalse("a true 404 from the exact-match endpoint means absent");
+    }
+
+    [Test]
+    public async Task BranchExists_5xx_ReturnsFail_NotAbsent()
+    {
+        // A transient 5xx is an error — NOT "absent → free to create".
+        _handler.OnGet(BranchPathSingular, "boom", HttpStatusCode.ServiceUnavailable);
+
+        var result = await CreateService().BranchExistsAsync("o/r", "adl/42-auth");
+
+        result.Success.Should().BeFalse("a 5xx must surface as an error, never as absent");
+    }
+
+    // ================================================================
+    // Base-ref SHA resolution (CreateGitHubBranchAsync, explicit base) — must use
+    // the SINGULAR exact-match endpoint and parse the single object.
+    // ================================================================
+
+    [Test]
+    public async Task CreateBranch_ExplicitBase_ResolvesShaViaSingularExactEndpoint()
+    {
+        _handler.OnGet("/repos/o/r/git/ref/heads/develop",
+            """{ "ref": "refs/heads/develop", "object": { "sha": "base-sha-777" } }""");
+        _handler.OnPost("/repos/o/r/git/refs",
+            """{ "ref": "refs/heads/adl/9", "object": { "sha": "new-sha" } }""");
+
+        var result = await CreateService().CreateGitHubBranchAsync("o/r", "adl/9", "develop");
+
+        result.Success.Should().BeTrue();
+        result.Data!.BaseSha.Should().Be("base-sha-777", "the single-object base ref must parse cleanly");
+
+        var req = _handler.RequireRequest(HttpMethod.Get, "/repos/o/r/git/ref/heads/develop");
+        req.Path.Should().Contain("/git/ref/heads/");
+        req.Path.Should().NotContain("/git/refs/heads/");
+
+        // The create POST must carry the SHA resolved from the exact base ref.
+        var create = _handler.RequireRequest(HttpMethod.Post, "/repos/o/r/git/refs");
+        var body = JsonDocument.Parse(create.Body).RootElement;
+        body.GetProperty("sha").GetString().Should().Be("base-sha-777");
+        body.GetProperty("ref").GetString().Should().Be("refs/heads/adl/9");
+    }
+
+    [Test]
+    public async Task CreateBranch_ExplicitBase_404_ReturnsBaseBranchNotFound()
+    {
+        _handler.OnGet("/repos/o/r/git/ref/heads/nope", "Not Found", HttpStatusCode.NotFound);
+
+        var result = await CreateService().CreateGitHubBranchAsync("o/r", "adl/9", "nope");
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Contain("base_branch_not_found",
+            "a true 404 on the exact base ref is a missing-base failure (no fall-through)");
+    }
+
+    [Test]
+    public async Task CreateBranch_DefaultBase_ResolvesMainViaSingularExactEndpoint()
+    {
+        // Default-branch path (no explicit base) must also use the singular
+        // exact-match endpoint (main → master fallback).
+        _handler.OnGet("/repos/o/r/git/ref/heads/main",
+            """{ "ref": "refs/heads/main", "object": { "sha": "main-sha-1" } }""");
+        _handler.OnPost("/repos/o/r/git/refs",
+            """{ "ref": "refs/heads/adl/9", "object": { "sha": "new-sha" } }""");
+
+        var result = await CreateService().CreateGitHubBranchAsync("o/r", "adl/9");
+
+        result.Success.Should().BeTrue();
+        result.Data!.BaseSha.Should().Be("main-sha-1");
+
+        var req = _handler.RequireRequest(HttpMethod.Get, "/repos/o/r/git/ref/heads/main");
+        req.Path.Should().Contain("/git/ref/heads/");
+        req.Path.Should().NotContain("/git/refs/heads/");
+    }
+
+    // ================================================================
     // Route-aware fake handler
     // ================================================================
 
