@@ -2,10 +2,12 @@ using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
+using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using Tamma.Activities.ADL;
+using Tamma.ElsaServer.Workflows.Helpers;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
@@ -21,11 +23,22 @@ namespace Tamma.ElsaServer.Workflows;
 /// IssueTriageWorkflow dispatches one per item (fire & forget);
 /// Elsa queues subsequent dispatches until the current one finishes.
 ///
+/// <para>Build-out (completeness audit 2026-06-22): the panel sub-workflow is now
+/// fail-closed and reports a <c>panelStatus</c> (<c>ok</c>/<c>partial</c>/
+/// <c>failed</c>). This cycle <b>honours</b> that signal: a <c>failed</c> panel
+/// (too few panellists produced a usable assessment) routes to a loud
+/// non-applying terminal — the PO decision is skipped and NO labels are applied
+/// off a wholly-failed panel. Previously the cycle marched straight from the
+/// panel to PO + label application regardless of panel health, so a fully-failed
+/// panel still labelled the item (silent false success downstream).</para>
+///
 /// Flow:
 ///   Init → Gather Context (llm-call) → Panel Review (llm-call x4)
-///   → PO Decision (llm-call) → Apply Labels & Comment → Finish
+///   → Extract Panel Result + Status → Panel Usable?
+///       ├─ True (ok/partial)  → PO Decision (llm-call) → Apply Labels → Finish
+///       └─ False (failed)     → Mark Skipped (no labels)              → Finish
 ///
-/// Inputs: repository, itemJson
+/// Inputs: repository, itemJson, tenantId
 /// </summary>
 public class TriageItemCycleWorkflow : WorkflowBase
 {
@@ -41,8 +54,13 @@ public class TriageItemCycleWorkflow : WorkflowBase
         // ================================================================
         var repository = builder.WithVariable<string>("Repository", "");
         var itemJson = builder.WithVariable<string>("ItemJson", "");
+        var tenantId = builder.WithVariable<string>("TenantId", "");
         var contextJson = builder.WithVariable<string>("ContextJson", "");
         var panelResultJson = builder.WithVariable<string>("PanelResultJson", "");
+        // Panel health signal from the (fail-closed) panel sub-workflow:
+        // "ok" / "partial" => usable; "failed" => below quorum, do NOT apply labels.
+        var panelStatus = builder.WithVariable<string>(
+            "PanelStatus", TriagePanelAggregationHelper.StatusFailed);
         var poDecisionJson = builder.WithVariable<string>("PODecisionJson", "");
         var subResult = builder.WithVariable<IDictionary<string, object>?>();
 
@@ -57,6 +75,7 @@ public class TriageItemCycleWorkflow : WorkflowBase
             {
                 var repo = ctx.GetInput<string>("repository") ?? "";
                 itemJson.Set(ctx, ctx.GetInput<string>("itemJson") ?? "");
+                tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
                 return (object)repo;
             })
         };
@@ -108,6 +127,7 @@ public class TriageItemCycleWorkflow : WorkflowBase
                 ["repository"] = repository.Get(ctx),
                 ["itemJson"] = itemJson.Get(ctx),
                 ["contextJson"] = contextJson.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -122,12 +142,56 @@ public class TriageItemCycleWorkflow : WorkflowBase
             Value = new Input<object?>(ctx =>
             {
                 var result = subResult.Get(ctx);
+
+                // Read the panel-health signal first. Absence is treated as a
+                // FAILED panel (fail-closed): if the sub-workflow did not report
+                // a status we must NOT assume success and apply labels.
+                var status = TriagePanelAggregationHelper.StatusFailed;
+                if (result != null && result.TryGetValue("panelStatus", out var st))
+                {
+                    var s = st?.ToString();
+                    if (!string.IsNullOrWhiteSpace(s)) status = s!;
+                }
+                panelStatus.Set(ctx, status);
+
                 if (result != null && result.TryGetValue("panelResultJson", out var p))
                     return (object)(p?.ToString() ?? "");
                 return (object)"";
             })
         };
         extractPanelResult.SetDisplayText("Extract Panel Result");
+
+        // ================================================================
+        // 3a. Panel Usable? — honour the panel's fail-closed signal. A "failed"
+        //     panel (below quorum) routes to a non-applying terminal; "ok" /
+        //     "partial" proceed to the PO decision + label application.
+        // ================================================================
+        var panelUsable = new FlowDecision(ctx =>
+            panelStatus.Get(ctx) != TriagePanelAggregationHelper.StatusFailed)
+        { Id = "PanelUsable", Name = "Panel Usable?" };
+        panelUsable.SetDisplayText("Panel Usable?");
+
+        // Failed-panel terminal — record the skip on the workflow outputs so the
+        // caller/audit sees a LOUD non-applying outcome (no labels applied off a
+        // wholly-failed panel). The panel sub-workflow already emitted
+        // TRIAGE.PANEL.FAILED to the durable drain.
+        var markSkipped = new SetOutput
+        {
+            Id = "MarkSkipped",
+            Name = "Mark Triage Skipped",
+            OutputName = new("triageSkipped"),
+            OutputValue = new(_ => (object)true),
+        };
+        markSkipped.SetDisplayText("Mark Triage Skipped");
+
+        var outSkipReason = new SetOutput
+        {
+            Id = "OutSkipReason",
+            Name = "Output Skip Reason",
+            OutputName = new("skipReason"),
+            OutputValue = new(_ => (object)"panel-failed"),
+        };
+        outSkipReason.SetDisplayText("Output Skip Reason");
 
         // ================================================================
         // 4. PO Decision (priority, labels, automation level)
@@ -194,8 +258,11 @@ public class TriageItemCycleWorkflow : WorkflowBase
                 init,
                 gatherContext, extractContext,
                 panelReview, extractPanelResult,
+                panelUsable,
                 poDecision, extractDecision,
-                applyLabels, finish,
+                applyLabels,
+                markSkipped, outSkipReason,
+                finish,
             },
             Connections =
             {
@@ -203,14 +270,26 @@ public class TriageItemCycleWorkflow : WorkflowBase
                 Connect(gatherContext, extractContext),
                 Connect(extractContext, panelReview),
                 Connect(panelReview, extractPanelResult),
-                Connect(extractPanelResult, poDecision),
+                Connect(extractPanelResult, panelUsable),
+
+                // Usable (ok/partial) → PO decision → apply labels → finish.
+                ConnectOutcome(panelUsable, "True", poDecision),
                 Connect(poDecision, extractDecision),
                 Connect(extractDecision, applyLabels),
                 Connect(applyLabels, finish),
+
+                // Failed (below quorum) → mark skipped (NO labels) → finish.
+                // The False edge never falls through to the apply-labels path.
+                ConnectOutcome(panelUsable, "False", markSkipped),
+                Connect(markSkipped, outSkipReason),
+                Connect(outSkipReason, finish),
             }
         };
     }
 
     private static FlowConnection Connect(IActivity source, IActivity target)
         => new(new FlowEndpoint(source), new FlowEndpoint(target));
+
+    private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
+        => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
 }
