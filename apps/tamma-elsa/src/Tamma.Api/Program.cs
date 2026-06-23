@@ -1090,7 +1090,8 @@ if (!string.IsNullOrEmpty(jwtSecret))
     builder.Services.AddScoped<IAuthorizationHandler, SelfOrPermissionHandler>();
     // Story 28-R2 / C1 — handler for the new PlatformOwnerAccess policy.
     builder.Services.AddScoped<IAuthorizationHandler, PlatformPermissionHandler>();
-    // Story 32-5 / Finding C2 — handler for the engine/service-only policy.
+    // I4 / Story 32-5 Finding C2 — handler for the EngineServiceOnly policy
+    // (service-principal-only: engine→API callbacks + POST /api/v1/llm/call).
     builder.Services.AddScoped<IAuthorizationHandler, ServicePrincipalHandler>();
 
     builder.Services.AddAuthorization(options =>
@@ -1193,6 +1194,21 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("workflows:manage"));
         });
+        // I4 / Story 32-5 Finding C2 — engine/service-principal-only gate. Used
+        // by the engine→API callback (POST /api/engine/events) AND the internal
+        // LLM-mediation endpoint (POST /api/v1/llm/call). Distinct from
+        // WorkflowsManage (which maps to ["admin","owner"] and so is reachable by
+        // any tenant owner/admin → audit-event forgery / unauthorized LLM spend).
+        // EngineServiceOnly succeeds only for the typed ServiceAuthPrincipal that
+        // ApiKeyAuthHandler mints for a service-scope key (the engine's drain
+        // token / Tamma:ApiToken). A user JWT authenticates but never produces a
+        // ServiceAuthPrincipal, so it is rejected with 403.
+        options.AddPolicy("EngineServiceOnly", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.RequireAuthenticatedUser();
+            p.AddRequirements(new ServicePrincipalRequirement());
+        });
         // Story 16-5 AC 7: DELETE /api/workflows/* must be owner-only.
         // workflows:delete maps to ["owner"] in the permission matrix.
         options.AddPolicy("WorkflowsDelete", p =>
@@ -1230,19 +1246,6 @@ if (!string.IsNullOrEmpty(jwtSecret))
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.RequireAuthenticatedUser();
-        });
-        // Story 32-5 / Finding C2 — engine/service-only gate for the internal
-        // LLM-mediation endpoint (POST /api/v1/llm/call). Requires the typed
-        // ServiceAuthPrincipal that ApiKeyAuthHandler mints for a service-scope
-        // key (the engine's Tamma:ApiToken). A user JWT authenticates but never
-        // produces a ServiceAuthPrincipal, so it is rejected with 403 — the
-        // endpoint drives arbitrary LLM spend + tool execution and must be
-        // reachable by the engine ONLY, not any authenticated tenant user.
-        options.AddPolicy("EngineServiceOnly", p =>
-        {
-            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
-            p.RequireAuthenticatedUser();
-            p.AddRequirements(new ServicePrincipalRequirement());
         });
     });
 }
@@ -2131,6 +2134,12 @@ engine.MapPost("/trigger-ci", EngineEndpoints.TriggerCi).RequireAuthorization("W
 engine.MapPost("/execute-task", EngineEndpoints.ExecuteTask).RequireAuthorization("WorkflowsManage");
 engine.MapPost("/cycle-result", EngineEndpoints.PostCycleResult).RequireAuthorization("WorkflowsManage");
 engine.MapGet("/cycle-results", EngineEndpoints.GetCycleResults);
+// Generic engine→domain_events DCB-event append. The Elsa engine drains its
+// in-process tamma:events list here so the audit trail persists (previously
+// the events were written to a write-only transient list nothing drained).
+// Gated to EngineServiceOnly (service principal) — NOT WorkflowsManage, which
+// every tenant owner/admin holds and would let them forge audit events (I4).
+engine.MapPost("/events", EngineEndpoints.AppendEvents).RequireAuthorization("EngineServiceOnly");
 // Audit finding 002 — `agent-available` is a GET liveness probe (no body),
 // not a POST registration call. The previous wiring as POST silently drifted
 // from the TS contract.
@@ -2148,6 +2157,16 @@ workflows.MapPost("/instances/{id}/cancel", WorkflowEndpoints.CancelInstance).Re
 // (workflows:delete -> ["owner"]). Cancel stays admin/owner via WorkflowsManage.
 workflows.MapDelete("/instances/{id}", WorkflowEndpoints.DeleteInstance).RequireAuthorization("WorkflowsDelete");
 workflows.MapGet("/instances/{id}/events", WorkflowEndpoints.GetInstanceEvents);
+
+// ── ADL human gates (IMPORTANT-2) ──
+// Lets a human DRIVE the merge-approval gate of the autonomous loop. Resumes the
+// tenant+repo-scoped adl-merge-approval-{tenant}-{repo}-{issue}-{pr} bookmark via
+// the engine, injecting the {decision,feedback,approver} payload (approver is
+// derived server-side from the caller — I2). WorkflowsManage = tenant owner/admin
+// (members 403). SECURITY C1 — the handler threads the caller's ambient tenant id
+// so a caller can only resume a gate in its OWN tenant (cross-tenant → 404).
+var adl = app.MapGroup("/api/adl").RequireAuthorization("WorkflowsManage");
+adl.MapPost("/merge-approval/resume", AdlEndpoints.ResumeMergeApproval);
 
 // ── GitHub App (no auth, webhook signature verification) ──
 // Audit finding 017 — webhook gets the GitHubWebhook policy (300/min). The

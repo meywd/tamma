@@ -219,6 +219,60 @@ public class TammaApiClient
         }
     }
 
+    // ----- DCB event append --------------------------------------------
+
+    /// <summary>
+    /// Persist a BATCH of DCB events to the caller's tenant
+    /// <c>domain_events</c> via <c>POST /api/engine/events</c>. Used by the
+    /// engine's activity-execution middleware to drain the in-process
+    /// <c>tamma:events</c> list into the durable audit trail.
+    ///
+    /// <para>Returns <c>true</c> only on a fully-successful append (2xx). A
+    /// partial-batch failure (the API returns 502 with a
+    /// <c>partial_append_failure</c> body) and any transport failure both
+    /// return <c>false</c> so the caller does NOT advance its drain cursor
+    /// and retries the batch next flush. <see cref="RecordHealthAsync"/>
+    /// pipes the observed response into the shared health monitor exactly
+    /// like every other call site.</para>
+    /// </summary>
+    public async Task<bool> AppendEventsAsync(
+        IReadOnlyList<Models.EngineEventRecord> events,
+        Guid? tenantId = null,
+        CancellationToken ct = default)
+    {
+        if (events is null || events.Count == 0)
+            return true; // nothing to flush — a successful no-op.
+
+        var url = $"{_baseUrl}/api/engine/events";
+        var body = new Models.AppendEventsRequest(events);
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = JsonContent.Create(body, options: JsonOpts),
+            };
+            AddTenantHeader(request, tenantId?.ToString());
+            using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            await RecordHealthAsync(
+                response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
+                .ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Tamma API POST /api/engine/events returned {Status} for {Count} events",
+                    (int)response.StatusCode, events.Count);
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex, "Tamma API POST /api/engine/events failed");
+            await RecordHealthAsync(false, null, ex.GetType().Name, ct).ConfigureAwait(false);
+            return false;
+        }
+    }
+
     // ----- Helpers ------------------------------------------------------
 
     private async Task<T?> GetAsync<T>(

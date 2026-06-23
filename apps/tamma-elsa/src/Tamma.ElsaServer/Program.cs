@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Serilog;
 using Serilog.Sinks.OpenSearch;
 using Tamma.Activities.AI;
+using Tamma.Activities.Core;
 using Tamma.Activities.LlmCall.Credentials;
 using Tamma.Activities.Security;
 using Tamma.ElsaServer.Workflows;
@@ -113,6 +114,20 @@ builder.Services.AddElsa(elsa =>
     // (Story 28-10) activities too without an extra call.
     elsa.AddActivitiesFrom<ClaudeAnalysisActivity>();
 
+    // Durable DCB-event persistence — drain the in-process tamma:events
+    // transient list to POST /api/engine/events (-> tenant domain_events).
+    // CRITICAL: this APPENDS the drain to the FULL Elsa default activity- and
+    // workflow-execution pipelines (re-installing the activity invoker that
+    // actually runs activities) instead of REPLACING the pipeline. The old
+    // app.Services.ConfigureDefaultActivityExecutionPipeline(p => p.Use(...))
+    // wiring called IActivityExecutionPipeline.Setup, which discarded the
+    // invoker and turned every workflow into a silent no-op (it also mutated
+    // only the root-scope pipeline, never the per-run scoped one). This call
+    // runs from the AppFeature configurator, which Elsa invokes LAST — after
+    // ElsaFeature's own WithDefaultActivityExecutionPipeline() — so it is the
+    // authoritative final pipeline. See EventPersistencePipelineExtensions.
+    elsa.UseWorkflows(workflows => workflows.UseTammaEventPersistence());
+
     // Register all code-first WorkflowBase subclasses from the ElsaServer
     // assembly. HourlyAnalyticsRollupWorkflow (Story 28-10) is picked up
     // by the same assembly sweep as LlmCallWorkflow.
@@ -177,6 +192,32 @@ builder.Services.AddCors(options =>
 // HttpClientFactory — used by activities that call external APIs (e.g. UpdateCodeIndexActivity, CallLlmInlineActivity)
 builder.Services.AddHttpClient();
 
+// GitHub integration service — required by the ADL PR / branch / review
+// activities (CreatePullRequestActivity, CreateBranchActivity, …) so the
+// pull-request workflow can actually open / reuse a PR inside the engine.
+//
+// The engine does NOT reference Tamma.Api (where the production
+// GitHubIntegrationService lives — see the Octokit / credential notes
+// below), so it can't register that concrete type here. The PR activities
+// are DI-tolerant: they resolve IGitHubIntegrationService via
+// context.GetService<T>() and, when absent, surface an explicit `Error`
+// outcome (no silent false success) rather than throwing. In the production
+// composition the GitHub work routes through the Tamma.Api process (consistent
+// with the agent-architecture pivot: engine steps delegate external API calls
+// to tamma-api). The named "github" HttpClient is still registered so any
+// in-process IGitHubIntegrationService picked up via DI gets a configured
+// client.
+builder.Services.AddHttpClient("github", client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["GitHub:ApiBaseUrl"] ?? "https://api.github.com");
+    var token = builder.Configuration["GitHub:Token"];
+    if (!string.IsNullOrWhiteSpace(token))
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Tamma-Engine");
+    client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+});
+
 // Story 9-11: Tamma API client — used by simplified activities to delegate
 // agent config, health, diagnostics, and provider execution to the central
 // Fastify/ASP.NET API plane.
@@ -231,6 +272,35 @@ builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutorRegist
 // deployments.
 builder.Services.AddSingleton<Tamma.Activities.AgentDispatch.IGitHubActionsClient,
     Tamma.Activities.AgentDispatch.NullGitHubActionsClient>();
+
+// Engine has no control-plane platform_events sink. The tenant-lifecycle
+// activities (TenantLifecycleActivity / CleanupStepActivity /
+// EmitCleanupTerminalEventActivity) resolve IPlatformEventPublisher via
+// GetRequiredService — without a registration that THROWS in the engine and
+// aborts CreateTenant/DeleteTenant/CleanUpFailedTenant workflows. The Null
+// seam (mirrors NullGitHubActionsClient above) lets those workflows complete;
+// the per-step platform telemetry is a best-effort no-op (logged at WARN)
+// until a sibling POST /api/engine/platform-events callback lands (FOLLOW-UP).
+// This is DISTINCT from the tenant domain_events drain, which now flows
+// through POST /api/engine/events + the event-persistence middleware below.
+Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions
+    .TryAddSingleton<Tamma.Data.Abstractions.IPlatformEventPublisher,
+        Tamma.Activities.TenantLifecycle.NullPlatformEventPublisher>(builder.Services);
+
+// Story 29-6 — engine-side rotation audit emitter. RotateSecretWorkflow runs
+// HERE (the engine), and RotateSecretSagaActivity resolves
+// IRotationAuditEmitter via GetRequiredService. The concrete RotationAuditEmitter
+// lives in Tamma.Api (it forwards to IPlatformEventPublisher) and can't be
+// referenced from the engine — so without this registration the resolve threw
+// "No service for type IRotationAuditEmitter" and crashed the saga, losing the
+// audit trail. DrainRotationAuditEmitter maps each rotation event to a
+// TammaEvent on the workflow's tamma:events list (via the ambient
+// RotationAuditDrainScope the saga opens) so the events ride the durable DCB
+// drain (EventPersistenceMiddleware) → POST /api/engine/events → domain_events,
+// matching the EventType + tag keys the Api-side emitter produces.
+builder.Services.AddSingleton<Tamma.Activities.SecretsRotation.Contracts.IRotationAuditEmitter,
+    Tamma.Activities.SecretsRotation.Activities.DrainRotationAuditEmitter>();
+
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentDispatchService,
     Tamma.Activities.AgentDispatch.AgentDispatchService>();
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentMonitorService,
@@ -306,6 +376,11 @@ builder.Services.AddHostedService<Tamma.ElsaServer.AgentSeeder>();
 
 var app = builder.Build();
 
+// NB: the DCB-event drain is wired at AddElsa build time via
+// elsa.UseWorkflows(w => w.UseTammaEventPersistence()) above — it must APPEND
+// to the Elsa default activity/workflow pipelines, not replace them, or the
+// activity invoker is dropped and every workflow becomes a no-op.
+
 app.UseCors();
 app.UseRouting();
 app.UseAuthentication();
@@ -314,6 +389,25 @@ app.UseWorkflowsApi();
 app.UseWorkflows();
 app.UseStaticFiles();
 app.MapHealthChecks("/health");
+
+// IMPORTANT-2 — in-process resume seam for the merge-approval human gate.
+// Tamma.Api's tenant-scoped, RBAC-gated POST /api/adl/merge-approval/resume
+// forwards here; this endpoint looks up the gate's tenant+repo-scoped named
+// bookmark and runs the owning instance with the {decision,feedback,approver}
+// payload injected as input.
+//
+// SECURITY C3 — this is an engine control surface (it can drive a real merge).
+// It MUST NOT be drivable unauthenticated from the public internet. We require
+// an authenticated caller: the only legitimate caller is the Tamma.Api→engine
+// hop, which presents the Elsa admin API key (Authorization: ApiKey ...) that
+// UseAdminApiKey() validates into an authenticated principal. Anonymous public
+// callers fail .RequireAuthorization() with 401. The route is ALSO excluded
+// from the public nginx /elsa/api/ block (internal hop only) — defense in depth.
+// The C1/C2 tenant/repo constraints are enforced inside the handler via the
+// bookmark name.
+app.MapPost("/elsa/api/adl/merge-approval/resume",
+    Tamma.ElsaServer.Endpoints.MergeApprovalResumeEndpoint.Resume)
+    .RequireAuthorization();
 
 app.UseSerilogRequestLogging();
 

@@ -184,6 +184,14 @@ services:
       ConnectionStrings__TammaDb: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=${POSTGRES_USER:-tamma};Password=${POSTGRES_PASSWORD}"
       ConnectionStrings__TammaAppDb: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-tamma};Username=tamma_app;Password=${TAMMA_APP_DB_PASSWORD:-}"
       ElsaServer__Url: http://elsa-server:5000
+      # Tamma.Api → Elsa engine hop (ElsaWorkflowService reads Elsa:ServerUrl /
+      # Elsa:ApiKey). The hop goes container-to-container, bypassing nginx.
+      Elsa__ServerUrl: http://elsa-server:5000
+      # SECURITY C3 — the engine's merge-approval resume seam now requires an
+      # authenticated caller. The legitimate hop authenticates by presenting the
+      # Elsa admin API key (Authorization: ApiKey ...). Must equal the key the
+      # engine accepts (the same value nginx injects as ELSA_ADMIN_API_KEY).
+      Elsa__ApiKey: ${ELSA_ADMIN_API_KEY:-}
       TAMMA_SERVICE_API_KEY: ${TAMMA_SERVICE_API_KEY:-}
       Jwt__Secret: ${JWT_SECRET:-tamma-internal-jwt-secret-change-in-production}
       GitHub__AppId: ${GITHUB_APP_ID:?GITHUB_APP_ID is required}

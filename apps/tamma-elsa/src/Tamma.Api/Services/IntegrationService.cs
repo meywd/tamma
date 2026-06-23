@@ -70,6 +70,22 @@ public class IntegrationService : IIntegrationService
             : new GitHubBranchResult { Success = false, Error = result.Error };
     }
 
+    public async Task<GitHubBranchResult> CreateGitHubBranchAsync(string repository, string branchName, string? baseBranch)
+    {
+        var result = await _github.CreateGitHubBranchAsync(repository, branchName, baseBranch);
+        return result.Success
+            ? result.Data!
+            : new GitHubBranchResult { Success = false, Error = result.Error };
+    }
+
+    public async Task<bool> BranchExistsAsync(string repository, string branchName)
+    {
+        var result = await _github.BranchExistsAsync(repository, branchName);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Error);
+        return result.Data;
+    }
+
     public async Task<List<GitHubCommit>> GetGitHubCommitsAsync(string repository, string branch, DateTime? since = null)
     {
         var result = await _github.GetGitHubCommitsAsync(repository, branch, since);
@@ -86,12 +102,44 @@ public class IntegrationService : IIntegrationService
             : new GitHubPullRequestResult { Success = false, Error = result.Error };
     }
 
+    public async Task<GitHubPullRequestRef?> GetGitHubOpenPullRequestForBranchAsync(string repository, string headBranch, string baseBranch)
+    {
+        var result = await _github.GetGitHubOpenPullRequestForBranchAsync(repository, headBranch, baseBranch);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Error);
+        return result.Data;
+    }
+
+    public async Task<GitHubPullRequestResult> UpdateGitHubPullRequestAsync(string repository, int pullRequestNumber, CreatePullRequestRequest request)
+    {
+        var result = await _github.UpdateGitHubPullRequestAsync(repository, pullRequestNumber, request);
+        return result.Success
+            ? result.Data!
+            : new GitHubPullRequestResult { Success = false, Error = result.Error };
+    }
+
     public async Task<GitHubMergeResult> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber)
     {
         var result = await _github.MergeGitHubPullRequestAsync(repository, pullRequestNumber);
         return result.Success
             ? result.Data!
             : new GitHubMergeResult { Success = false, Error = result.Error };
+    }
+
+    public async Task<GitHubMergeResult> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber, string mergeStrategy)
+    {
+        var result = await _github.MergeGitHubPullRequestAsync(repository, pullRequestNumber, mergeStrategy);
+        return result.Success
+            ? result.Data!
+            : new GitHubMergeResult { Success = false, Error = result.Error };
+    }
+
+    public async Task<GitHubPullRequestDetail> GetGitHubPullRequestAsync(string repository, int pullRequestNumber)
+    {
+        var result = await _github.GetGitHubPullRequestAsync(repository, pullRequestNumber);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Error);
+        return result.Data!;
     }
 
     public async Task<List<GitHubFileChange>> GetGitHubFileChangesAsync(string repository, string branch)

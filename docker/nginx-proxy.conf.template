@@ -282,6 +282,19 @@ server {
         return 302 /oauth2/start?rd=$scheme://$http_host$request_uri;
     }
 
+    # ----- SECURITY C3 — internal-hop-only ADL control surface -----
+    # The merge-approval resume seam (POST /elsa/api/adl/merge-approval/resume)
+    # can drive a real merge. It is reached ONLY container-to-container by the
+    # Tamma.Api→engine hop (http://elsa-server:5000), which presents the Elsa
+    # admin API key directly — it must NEVER be reachable from the public
+    # internet. The general /elsa/api/ block below injects the admin API key for
+    # any dashboard admin/owner (of ANY tenant) who can pass /auth/role-check,
+    # which would let them bypass Tamma.Api's tenant scoping entirely. This more
+    # specific prefix wins nginx's longest-match and hard-blocks the path.
+    location /elsa/api/adl/ {
+        return 404;
+    }
+
     # ----- ELSA Server API: RBAC-gated, API key injected -----
     location /elsa/api/ {
         auth_request /auth/role-check;

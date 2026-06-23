@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
@@ -62,6 +63,13 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var tasksJson = builder.WithVariable<string>("TasksJson", "");
         var taskReviewDecision = builder.WithVariable<string>("TaskReviewDecision", "");
         var branchName = builder.WithVariable<string>("BranchName", "");
+        // Branch-creation gating (IMPORTANT-5): the cycle must NOT proceed to
+        // createPR on a failed branch (empty head → doomed PR + false "branch
+        // created" notify). The branch sub-workflow reports success / errorCode /
+        // exitReason; we capture them to route a loud terminal on failure.
+        var branchSuccess = builder.WithVariable<bool>("BranchSuccess", false);
+        var branchErrorCode = builder.WithVariable<string>("BranchErrorCode", "");
+        var branchErrorReason = builder.WithVariable<string>("BranchErrorReason", "");
         var prNumber = builder.WithVariable<int>("PRNumber", 0);
         var prUrl = builder.WithVariable<string>("PRUrl", "");
         var exitReason = builder.WithVariable<string>("ExitReason", "");
@@ -361,6 +369,9 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["issueNumber"] = issueNumber.Get(ctx),
                 ["baseBranch"] = baseBranch.Get(ctx),
                 ["workItemJson"] = workItemJson.Get(ctx),
+                // Thread the tenant so BRANCH.CREATED.* events are tenant-scoped
+                // in the durable DCB drain (single-user → empty → platform-scope).
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -370,10 +381,42 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var extractBranch = Assign(branchName, ctx =>
         {
             var result = subResult.Get(ctx);
+
+            // Capture the branch step's success + failure classification so the
+            // gate below can route a loud terminal (never a doomed PR). An
+            // unreadable/absent result is treated as failure (no false success).
+            var success = result != null
+                && result.TryGetValue("success", out var s)
+                && s is true;
+            branchSuccess.Set(ctx, success);
+            branchErrorCode.Set(ctx, result?.GetValueOrDefault("errorCode")?.ToString() ?? "branch-creation-failed");
+            branchErrorReason.Set(ctx, result?.GetValueOrDefault("exitReason")?.ToString() ?? "branch creation failed");
+
             if (result != null && result.TryGetValue("branchName", out var b))
                 return (object)(b?.ToString() ?? "");
             return (object)"";
         }, "ExtractBranch", "Extract Branch");
+
+        // Gate the cycle on the branch step's success (IMPORTANT-5). Only a
+        // created branch proceeds to createPR + the branch-created notify; a
+        // failure routes to a loud terminal (no empty-head PR, no false notify).
+        // Defaults to "Failed" so an unreadable result can never slip into PR
+        // creation.
+        var branchOutcomeSwitch = new FlowSwitch
+        {
+            Id = "BranchOutcomeSwitch",
+            Name = "Branch Outcome",
+            Cases =
+            {
+                new FlowSwitchCase("Created", ctx => branchSuccess.Get(ctx)),
+                new FlowSwitchCase("Failed", ctx => true), // failure + any unreadable result
+            },
+        };
+        branchOutcomeSwitch.SetDisplayText("Branch Outcome");
+
+        var notifyBranchFailed = NotifyIssue("NotifyBranchFailed", repository, issueNumber,
+            "❌ Branch creation failed. Needs human attention.",
+            new[] { "tamma-error", "needs-human" }, new[] { "tamma-processing" });
 
         // ================================================================
         // 8. Create PR (draft, with implementation plan .md files)
@@ -389,7 +432,9 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["branchName"] = branchName.Get(ctx),
                 ["baseBranch"] = baseBranch.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
+                ["issueTitle"] = ExtractWorkItemTitle(workItemJson.Get(ctx)),
                 ["planJson"] = planJson.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
                 ["draft"] = true,
             }),
             WaitForCompletion = new(true),
@@ -536,35 +581,81 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         dispatchCodeReview.SetDisplayText("Dispatch Code Review");
 
         // ================================================================
-        // 11b. Wait for PR Approval (bookmark — blocks until approved)
+        // 11b-12. Merge-Approval Gate (sub-workflow — the human APPROVAL_GATE)
+        //
+        // Replaces the prior bare WaitForPRApprovalActivity (binary approve) +
+        // fire-and-forget "merge" dispatch with the 3-way merge/test/reject gate
+        // (merge-approval), delivering the PRD test/merge decision point and the
+        // FR-19/FR-34 audit trail. On the Merge decision the gate dispatches the
+        // SAME "merge" workflow (WaitForCompletion=true) the loop used before; on
+        // Test it re-runs CI then re-decides; on Reject/Invalid it labels/escalates.
+        // We wait for the gate so the cycle does not race ahead of the human.
+        //
+        // CRITICAL: the cycle MUST branch on the gate's `outcome` output. Only the
+        // "merge" outcome may reach WaitForPRMerged (which blocks on a
+        // `pr-merged-{pr}` webhook that fires ONLY on a real merge). reject /
+        // escalated finish at a loud human-handoff / error terminal — wiring those
+        // into WaitForPRMerged would hang the cycle forever (no webhook will ever
+        // fire), leaving the issue stuck `tamma-processing` with no terminal
+        // reported to the orchestrator.
         // ================================================================
-        var waitForApproval = new WaitForPRApprovalActivity
+        var mergeApprovalGate = new DispatchWorkflow
         {
-            Id = "WaitForPRApproval",
-            Name = "Wait for PR Approval",
-            Repository = new Input<string>(ctx => repository.Get(ctx)),
-            PRNumber = new Input<int>(ctx => prNumber.Get(ctx)),
-        };
-        waitForApproval.SetDisplayText("Wait for PR Approval");
-
-        // ================================================================
-        // 12. Dispatch Merge (fire & forget — handles merge, CI on main, conflicts)
-        // ================================================================
-        var dispatchMerge = new DispatchWorkflow
-        {
-            Id = "DispatchMerge",
-            Name = "Dispatch Merge",
-            WorkflowDefinitionId = new("merge"),
+            Id = "MergeApprovalGate",
+            Name = "Merge Approval Gate",
+            WorkflowDefinitionId = new("merge-approval"),
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["repository"] = repository.Get(ctx),
                 ["prNumber"] = prNumber.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
+                ["prUrl"] = prUrl.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
-            WaitForCompletion = new(false), // fire & forget
+            WaitForCompletion = new(true), // block until the human decides + the gate acts
+            Result = new(subResult),       // capture the gate's outputs (incl. `outcome`)
         };
-        dispatchMerge.SetDisplayText("Dispatch Merge");
+        mergeApprovalGate.SetDisplayText("Merge Approval Gate");
+
+        // Gate outcome: "merge" | "reject" | "escalated" (MergeApprovalWorkflow's
+        // `outcome` output). Defaults to "escalated" when the gate returns nothing
+        // parseable so an unreadable result is treated as a loud non-merge (never a
+        // silent merge), keeping the cycle on a terminal path.
+        var gateOutcome = builder.WithVariable<string>("GateOutcome", "escalated");
+        var extractGateOutcome = Assign(gateOutcome, ctx =>
+        {
+            var result = subResult.Get(ctx);
+            if (result != null && result.TryGetValue("outcome", out var o))
+            {
+                var token = o?.ToString();
+                if (!string.IsNullOrWhiteSpace(token)) return (object)token;
+            }
+            return (object)"escalated";
+        }, "ExtractGateOutcome", "Extract Gate Outcome");
+
+        // Branch the cycle on the gate outcome. ONLY "merge" continues to
+        // WaitForPRMerged; everything else reaches a loud terminal.
+        var gateOutcomeSwitch = new FlowSwitch
+        {
+            Id = "GateOutcomeSwitch",
+            Name = "Gate Outcome",
+            Cases =
+            {
+                new FlowSwitchCase("Merge", ctx => gateOutcome.Get(ctx) == "merge"),
+                new FlowSwitchCase("Reject", ctx => gateOutcome.Get(ctx) == "reject"),
+                new FlowSwitchCase("Escalated", ctx => true), // escalated + any unknown
+            },
+        };
+        gateOutcomeSwitch.SetDisplayText("Gate Outcome");
+
+        // Non-merge terminals: reject = human handoff; escalated = error report.
+        var notifyMergeRejected = NotifyIssue("NotifyMergeRejected", repository, issueNumber,
+            "🚫 PR rejected at the merge-approval gate. Needs human follow-up.",
+            new[] { "tamma-rejected", "needs-human" }, new[] { "tamma-processing" });
+        var notifyMergeEscalated = NotifyIssue("NotifyMergeEscalated", repository, issueNumber,
+            "⚠️ Merge-approval gate escalated (failed merge / invalid decision). Needs human attention.",
+            new[] { "tamma-error", "needs-human" }, new[] { "tamma-processing" });
 
         // ================================================================
         // 13. Wait for PR Merged (bookmark — blocks until merged)
@@ -724,12 +815,14 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 createDeferredIssues, createSplitIssues,
                 createTasks, extractTasks,
                 reviewTasks, extractTaskReview, taskReviewOutcome,
-                createBranch, extractBranch,
+                createBranch, extractBranch, branchOutcomeSwitch, notifyBranchFailed,
                 createPR, extractPR,
                 createTestCases,
                 initTaskLoop, hasMoreTasks, extractCurrentTask, tddForTask, incrementTask,
-                dispatchCodeReview, waitForApproval,
-                dispatchMerge, waitForMerged, closeIssue, deploymentPipeline,
+                dispatchCodeReview, mergeApprovalGate,
+                extractGateOutcome, gateOutcomeSwitch,
+                notifyMergeRejected, notifyMergeEscalated,
+                waitForMerged, closeIssue, deploymentPipeline,
                 // Notifications (fire-and-forget)
                 notifyProcessing, notifyInvalid, notifyContextDone,
                 notifyPlanDone, notifyPlanApproved,
@@ -822,10 +915,20 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ConnectOutcome(taskReviewOutcome, "NeedsHuman", notifyNeedsHuman),
                 ConnectOutcome(taskReviewOutcome, "NeedsHuman", reportNeedsHuman),
 
-                // 7. Create Branch → notify + Create Draft PR (parallel)
+                // 7. Create Branch → capture result → gate on success (IMPORTANT-5).
+                //    The branch step must succeed before the cycle proceeds to PR
+                //    creation; a failure routes to a loud terminal (no empty-head
+                //    PR, no false "branch created" notify). Both outcomes reach Finish.
                 Connect(createBranch, extractBranch),
-                Connect(extractBranch, notifyBranchCreated),
-                Connect(extractBranch, createPR),
+                Connect(extractBranch, branchOutcomeSwitch),
+
+                // Created → notify + Create Draft PR (parallel)
+                ConnectOutcome(branchOutcomeSwitch, "Created", notifyBranchCreated),
+                ConnectOutcome(branchOutcomeSwitch, "Created", createPR),
+
+                // Failed → loud human-handoff/error terminal (never PR creation)
+                ConnectOutcome(branchOutcomeSwitch, "Failed", notifyBranchFailed),
+                ConnectOutcome(branchOutcomeSwitch, "Failed", reportError),
 
                 // 8. Create Draft PR → 9. Create Test Cases
                 Connect(createPR, extractPR),
@@ -845,14 +948,32 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ConnectOutcome(tddForTask, "Failed", incrementTask),
                 Connect(incrementTask, hasMoreTasks), // loop back
 
-                // TDD Loop done → notify + dispatch code review + wait for approval (parallel)
+                // TDD Loop done → notify + dispatch code review + merge-approval gate (parallel)
                 ConnectOutcome(hasMoreTasks, "False", notifyTddDone),
                 ConnectOutcome(hasMoreTasks, "False", dispatchCodeReview),
-                ConnectOutcome(hasMoreTasks, "False", waitForApproval),
+                ConnectOutcome(hasMoreTasks, "False", mergeApprovalGate),
 
-                // 11. PR Approved → Dispatch Merge + Wait for Merged (parallel)
-                Connect(waitForApproval, dispatchMerge),
-                Connect(waitForApproval, waitForMerged),
+                // 11b-12. Merge-Approval Gate (human merge/test/reject + acts on it)
+                //         → branch on the gate `outcome`. ONLY merge → WaitForPRMerged.
+                //         The gate dispatches the real "merge" workflow on approval;
+                //         the loop then blocks on the merge webhook via waitForMerged
+                //         before closing the issue. reject / escalated must NEVER reach
+                //         waitForMerged (no webhook would ever fire → permanent hang) —
+                //         they finish at a loud human-handoff / error terminal instead.
+                Connect(mergeApprovalGate, extractGateOutcome),
+                Connect(extractGateOutcome, gateOutcomeSwitch),
+
+                // merge → wait for the real merge webhook (the only path to success)
+                ConnectOutcome(gateOutcomeSwitch, "Merge", waitForMerged),
+
+                // reject → human-handoff terminal (loud), never waitForMerged
+                ConnectOutcome(gateOutcomeSwitch, "Reject", notifyMergeRejected),
+                ConnectOutcome(gateOutcomeSwitch, "Reject", reportNeedsHuman),
+
+                // escalated (incl. a failed merge sub-workflow, CRITICAL-2) → error
+                // terminal (loud), never waitForMerged
+                ConnectOutcome(gateOutcomeSwitch, "Escalated", notifyMergeEscalated),
+                ConnectOutcome(gateOutcomeSwitch, "Escalated", reportError),
 
                 // 13. Merged → Close Issue + Deployment Pipeline (parallel)
                 Connect(waitForMerged, closeIssue),
@@ -901,6 +1022,33 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         };
         dispatch.SetDisplayText($"Notify: {message[..Math.Min(message.Length, 30)]}");
         return dispatch;
+    }
+
+    /// <summary>
+    /// Best-effort extraction of the work item's title from the work-item JSON
+    /// so the PR step can render <c>[ADL] #n: {title}</c>. Returns "" when the
+    /// JSON is absent / malformed / has no title field (the PR step degrades to
+    /// a title-less form rather than failing).
+    /// </summary>
+    private static string ExtractWorkItemTitle(string? workItemJson)
+    {
+        if (string.IsNullOrWhiteSpace(workItemJson)) return "";
+        try
+        {
+            using var doc = JsonDocument.Parse(workItemJson);
+            foreach (var name in new[] { "title", "Title", "name", "Name" })
+            {
+                if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                    doc.RootElement.TryGetProperty(name, out var v) &&
+                    v.ValueKind == JsonValueKind.String)
+                    return v.GetString() ?? "";
+            }
+            return "";
+        }
+        catch
+        {
+            return "";
+        }
     }
 
     private static SetVariable Assign(Variable variable, Func<Elsa.Expressions.Models.ExpressionExecutionContext, object?> valueFunc, string id, string name)

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Tamma.Core.Interfaces;
@@ -23,7 +24,10 @@ public class GitHubIntegrationService : IGitHubIntegrationService
         _logger = logger;
     }
 
-    public async Task<IntegrationResult<GitHubBranchResult>> CreateGitHubBranchAsync(string repository, string branchName)
+    public Task<IntegrationResult<GitHubBranchResult>> CreateGitHubBranchAsync(string repository, string branchName)
+        => CreateGitHubBranchAsync(repository, branchName, baseBranch: null);
+
+    public async Task<IntegrationResult<GitHubBranchResult>> CreateGitHubBranchAsync(string repository, string branchName, string? baseBranch)
     {
         var httpClient = _httpClientFactory.CreateClient("github");
         var token = _configuration["GitHub:Token"];
@@ -35,18 +39,47 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
         try
         {
-            _logger.LogInformation("Creating branch {Branch} in {Repo}", branchName, repository);
+            _logger.LogInformation(
+                "Creating branch {Branch} in {Repo} from base {Base}",
+                branchName, repository, string.IsNullOrWhiteSpace(baseBranch) ? "<default>" : baseBranch);
 
-            // Get default branch SHA
-            var refsResponse = await httpClient.GetAsync($"/repos/{repository}/git/refs/heads/main");
-            if (!refsResponse.IsSuccessStatusCode)
+            // Resolve the base SHA. With an explicit base, resolve THAT ref and do
+            // NOT silently fall back to an unrelated branch (no false success).
+            // Without one, use the default-branch behaviour (main → master).
+            // Use the EXACT-MATCH singular `git/ref/heads/{ref}` endpoint — it
+            // returns a single ref object on an exact hit and a real 404 on a
+            // miss. The plural `git/refs/heads/{ref}` is the prefix-matching
+            // list form: it 200s with a JSON ARRAY for any ref a sibling STARTS
+            // WITH (e.g. `develop` when `develop-2` exists), which both breaks
+            // the single-object parse below and masks a true miss.
+            string sha;
+            if (!string.IsNullOrWhiteSpace(baseBranch))
             {
-                refsResponse = await httpClient.GetAsync($"/repos/{repository}/git/refs/heads/master");
-            }
-            refsResponse.EnsureSuccessStatusCode();
+                var baseResponse = await httpClient.GetAsync($"/repos/{repository}/git/ref/heads/{Uri.EscapeDataString(baseBranch)}");
+                if (baseResponse.StatusCode == HttpStatusCode.NotFound)
+                {
+                    _logger.LogError("Base branch {Base} not found in {Repo}", baseBranch, repository);
+                    return IntegrationResult<GitHubBranchResult>.Fail($"base_branch_not_found: {baseBranch}");
+                }
+                if (!baseResponse.IsSuccessStatusCode)
+                    return IntegrationResult<GitHubBranchResult>.Fail(
+                        $"{(int)baseResponse.StatusCode}: failed to resolve base {baseBranch}");
 
-            var refData = await refsResponse.Content.ReadFromJsonAsync<JsonElement>();
-            var sha = refData.GetProperty("object").GetProperty("sha").GetString()!;
+                var baseData = await baseResponse.Content.ReadFromJsonAsync<JsonElement>();
+                sha = baseData.GetProperty("object").GetProperty("sha").GetString()!;
+            }
+            else
+            {
+                var refsResponse = await httpClient.GetAsync($"/repos/{repository}/git/ref/heads/main");
+                if (!refsResponse.IsSuccessStatusCode)
+                    refsResponse = await httpClient.GetAsync($"/repos/{repository}/git/ref/heads/master");
+                if (refsResponse.StatusCode == HttpStatusCode.NotFound)
+                    return IntegrationResult<GitHubBranchResult>.Fail("base_branch_not_found: main/master");
+                refsResponse.EnsureSuccessStatusCode();
+
+                var refData = await refsResponse.Content.ReadFromJsonAsync<JsonElement>();
+                sha = refData.GetProperty("object").GetProperty("sha").GetString()!;
+            }
 
             // Create the branch
             var createPayload = new
@@ -55,13 +88,24 @@ public class GitHubIntegrationService : IGitHubIntegrationService
                 sha
             };
             var createResponse = await httpClient.PostAsJsonAsync($"/repos/{repository}/git/refs", createPayload);
-            createResponse.EnsureSuccessStatusCode();
+            if (!createResponse.IsSuccessStatusCode)
+            {
+                // Surface the status code + body so the activity can classify the
+                // failure (permission / already-exists / protected-base) rather
+                // than collapsing every error into a bare throw.
+                var body = await createResponse.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Failed to create branch {Branch} in {Repo}: {Status} {Body}",
+                    branchName, repository, (int)createResponse.StatusCode, body);
+                return IntegrationResult<GitHubBranchResult>.Fail($"{(int)createResponse.StatusCode}: {body}");
+            }
 
             var result = new GitHubBranchResult
             {
                 Success = true,
                 BranchName = branchName,
-                BranchUrl = $"https://github.com/{repository}/tree/{branchName}"
+                BranchUrl = $"https://github.com/{repository}/tree/{branchName}",
+                BaseSha = sha
             };
             return IntegrationResult<GitHubBranchResult>.Ok(result);
         }
@@ -69,6 +113,35 @@ public class GitHubIntegrationService : IGitHubIntegrationService
         {
             _logger.LogError(ex, "Failed to create GitHub branch {Branch}", branchName);
             return IntegrationResult<GitHubBranchResult>.Fail(ex.Message);
+        }
+    }
+
+    public async Task<IntegrationResult<bool>> BranchExistsAsync(string repository, string branchName)
+    {
+        var httpClient = _httpClientFactory.CreateClient("github");
+
+        try
+        {
+            // Exact-match singular `git/ref/heads/{branch}` — single object on an
+            // exact hit, 404 on a true miss. The plural prefix-matching form would
+            // 200 on a sibling ref (e.g. `adl/42-auth` when only `adl/42-auth-2`
+            // exists) → a false conflict / bogus suffix. This 200/404 contract is
+            // exactly what the branches below are coded against.
+            var response = await httpClient.GetAsync($"/repos/{repository}/git/ref/heads/{Uri.EscapeDataString(branchName)}");
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                return IntegrationResult<bool>.Ok(false);
+            if (response.IsSuccessStatusCode)
+                return IntegrationResult<bool>.Ok(true);
+
+            // Any other status (403/5xx/...) is an error — NOT "absent", so we
+            // never mistake a transient failure for a free-to-create branch.
+            var body = await response.Content.ReadAsStringAsync();
+            return IntegrationResult<bool>.Fail($"{(int)response.StatusCode}: {body}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to check branch existence {Branch} in {Repo}", branchName, repository);
+            return IntegrationResult<bool>.Fail(ex.Message);
         }
     }
 
@@ -125,17 +198,25 @@ public class GitHubIntegrationService : IGitHubIntegrationService
                 title = request.Title,
                 body = request.Body,
                 head = request.Head,
-                @base = request.Base
+                @base = request.Base,
+                draft = request.IsDraft
             };
 
             var response = await httpClient.PostAsJsonAsync($"/repos/{repository}/pulls", payload);
             response.EnsureSuccessStatusCode();
 
             var pr = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var prNumber = pr.GetProperty("number").GetInt32();
+
+            // Best-effort post-create metadata: labels + reviewers. Failures here
+            // MUST NOT fail PR creation (Story 2.8 AC3 — degrade gracefully).
+            await TryAddLabelsAsync(httpClient, repository, prNumber, request.Labels);
+            await TryRequestReviewersAsync(httpClient, repository, prNumber, request.Reviewers);
+
             var result = new GitHubPullRequestResult
             {
                 Success = true,
-                Number = pr.GetProperty("number").GetInt32(),
+                Number = prNumber,
                 Url = pr.GetProperty("html_url").GetString() ?? ""
             };
             return IntegrationResult<GitHubPullRequestResult>.Ok(result);
@@ -147,24 +228,148 @@ public class GitHubIntegrationService : IGitHubIntegrationService
         }
     }
 
-    public async Task<IntegrationResult<GitHubMergeResult>> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber)
+    public async Task<IntegrationResult<GitHubPullRequestRef?>> GetGitHubOpenPullRequestForBranchAsync(string repository, string headBranch, string baseBranch)
     {
         var httpClient = _httpClientFactory.CreateClient("github");
 
         try
         {
-            _logger.LogInformation("Merging PR #{Number} in {Repo}", pullRequestNumber, repository);
+            // GitHub's `head` filter wants `owner:branch`. Derive the owner from
+            // the `owner/repo` repository string so a fork-less same-repo PR matches.
+            var owner = repository.Contains('/') ? repository.Split('/')[0] : "";
+            var headFilter = string.IsNullOrEmpty(owner) ? headBranch : $"{owner}:{headBranch}";
+            var url = $"/repos/{repository}/pulls?state=open&head={Uri.EscapeDataString(headFilter)}&base={Uri.EscapeDataString(baseBranch)}&per_page=1";
 
-            var payload = new { merge_method = "squash" };
+            var response = await httpClient.GetAsync(url);
+            response.EnsureSuccessStatusCode();
+
+            var data = await response.Content.ReadFromJsonAsync<JsonElement>();
+            foreach (var pr in data.EnumerateArray())
+            {
+                return IntegrationResult<GitHubPullRequestRef?>.Ok(new GitHubPullRequestRef
+                {
+                    Number = pr.GetProperty("number").GetInt32(),
+                    Url = pr.GetProperty("html_url").GetString() ?? "",
+                    State = pr.GetProperty("state").GetString() ?? "open",
+                    Title = pr.GetProperty("title").GetString() ?? "",
+                    IsDraft = pr.TryGetProperty("draft", out var d) && d.ValueKind == JsonValueKind.True
+                });
+            }
+
+            return IntegrationResult<GitHubPullRequestRef?>.Ok(null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to look up open PR for {Repo} {Head}->{Base}", repository, headBranch, baseBranch);
+            return IntegrationResult<GitHubPullRequestRef?>.Fail(ex.Message);
+        }
+    }
+
+    public async Task<IntegrationResult<GitHubPullRequestResult>> UpdateGitHubPullRequestAsync(string repository, int pullRequestNumber, CreatePullRequestRequest request)
+    {
+        var httpClient = _httpClientFactory.CreateClient("github");
+
+        try
+        {
+            _logger.LogInformation("Updating PR #{Number} in {Repo}", pullRequestNumber, repository);
+
+            var payload = new { title = request.Title, body = request.Body };
+            var response = await httpClient.PatchAsJsonAsync($"/repos/{repository}/pulls/{pullRequestNumber}", payload);
+            response.EnsureSuccessStatusCode();
+
+            var pr = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+            await TryAddLabelsAsync(httpClient, repository, pullRequestNumber, request.Labels);
+            await TryRequestReviewersAsync(httpClient, repository, pullRequestNumber, request.Reviewers);
+
+            return IntegrationResult<GitHubPullRequestResult>.Ok(new GitHubPullRequestResult
+            {
+                Success = true,
+                Number = pr.GetProperty("number").GetInt32(),
+                Url = pr.GetProperty("html_url").GetString() ?? ""
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to update GitHub PR #{Number} in {Repo}", pullRequestNumber, repository);
+            return IntegrationResult<GitHubPullRequestResult>.Fail(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Best-effort label assignment. Reviewer / label failures must not fail PR
+    /// creation (Story 2.8 AC3) — log a warning and continue.
+    /// </summary>
+    private async Task TryAddLabelsAsync(HttpClient httpClient, string repository, int prNumber, List<string> labels)
+    {
+        if (labels is not { Count: > 0 }) return;
+        try
+        {
+            // Labels are attached via the shared issues endpoint (a PR IS an issue).
+            var resp = await httpClient.PostAsJsonAsync(
+                $"/repos/{repository}/issues/{prNumber}/labels", new { labels });
+            if (!resp.IsSuccessStatusCode)
+                _logger.LogWarning("Label assignment for PR #{Number} returned {Status}", prNumber, resp.StatusCode);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to add labels to PR #{Number} (continuing)", prNumber);
+        }
+    }
+
+    /// <summary>
+    /// Best-effort reviewer assignment. Failures must not fail PR creation.
+    /// </summary>
+    private async Task TryRequestReviewersAsync(HttpClient httpClient, string repository, int prNumber, List<string> reviewers)
+    {
+        if (reviewers is not { Count: > 0 }) return;
+        try
+        {
+            var resp = await httpClient.PostAsJsonAsync(
+                $"/repos/{repository}/pulls/{prNumber}/requested_reviewers", new { reviewers });
+            if (!resp.IsSuccessStatusCode)
+                _logger.LogWarning("Reviewer request for PR #{Number} returned {Status}", prNumber, resp.StatusCode);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to request reviewers for PR #{Number} (continuing)", prNumber);
+        }
+    }
+
+    public Task<IntegrationResult<GitHubMergeResult>> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber)
+        => MergeGitHubPullRequestAsync(repository, pullRequestNumber, "squash");
+
+    public async Task<IntegrationResult<GitHubMergeResult>> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber, string mergeStrategy)
+    {
+        var httpClient = _httpClientFactory.CreateClient("github");
+
+        try
+        {
+            var method = NormalizeMergeMethod(mergeStrategy);
+            _logger.LogInformation(
+                "Merging PR #{Number} in {Repo} (method {Method})", pullRequestNumber, repository, method);
+
+            var payload = new { merge_method = method };
             var response = await httpClient.PutAsJsonAsync(
                 $"/repos/{repository}/pulls/{pullRequestNumber}/merge", payload);
-            response.EnsureSuccessStatusCode();
+            if (!response.IsSuccessStatusCode)
+            {
+                // Surface the status code + body so the merge activity can classify
+                // the failure (409 conflict / 403 permission / 405 not-mergeable /
+                // 422 branch-protected) rather than collapsing every error into a
+                // bare throw → blind Error outcome.
+                var body = await response.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Failed to merge PR #{Number} in {Repo}: {Status} {Body}",
+                    pullRequestNumber, repository, (int)response.StatusCode, body);
+                return IntegrationResult<GitHubMergeResult>.Fail($"{(int)response.StatusCode}: {body}");
+            }
 
             var data = await response.Content.ReadFromJsonAsync<JsonElement>();
             var result = new GitHubMergeResult
             {
-                Success = data.GetProperty("merged").GetBoolean(),
-                MergeSha = data.GetProperty("sha").GetString() ?? ""
+                Success = data.TryGetProperty("merged", out var m) && m.GetBoolean(),
+                MergeSha = data.TryGetProperty("sha", out var s) ? s.GetString() ?? "" : ""
             };
             return IntegrationResult<GitHubMergeResult>.Ok(result);
         }
@@ -172,6 +377,65 @@ public class GitHubIntegrationService : IGitHubIntegrationService
         {
             _logger.LogError(ex, "Failed to merge GitHub PR #{Number}", pullRequestNumber);
             return IntegrationResult<GitHubMergeResult>.Fail(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Map a Tamma merge strategy (<c>merge | squash | rebase</c>) to GitHub's
+    /// <c>merge_method</c>; an unknown / empty value falls back to <c>squash</c>
+    /// (the platform default).
+    /// </summary>
+    internal static string NormalizeMergeMethod(string? strategy)
+        => (strategy ?? "").Trim().ToLowerInvariant() switch
+        {
+            "merge" => "merge",
+            "rebase" => "rebase",
+            _ => "squash",
+        };
+
+    public async Task<IntegrationResult<GitHubPullRequestDetail>> GetGitHubPullRequestAsync(string repository, int pullRequestNumber)
+    {
+        var httpClient = _httpClientFactory.CreateClient("github");
+
+        try
+        {
+            var response = await httpClient.GetAsync($"/repos/{repository}/pulls/{pullRequestNumber}");
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Failed to read PR #{Number} in {Repo}: {Status} {Body}",
+                    pullRequestNumber, repository, (int)response.StatusCode, body);
+                return IntegrationResult<GitHubPullRequestDetail>.Fail($"{(int)response.StatusCode}: {body}");
+            }
+
+            var pr = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var detail = new GitHubPullRequestDetail
+            {
+                Number = pr.TryGetProperty("number", out var n) ? n.GetInt32() : pullRequestNumber,
+                State = pr.TryGetProperty("state", out var st) ? st.GetString() ?? "open" : "open",
+                Merged = pr.TryGetProperty("merged", out var mg) && mg.ValueKind == JsonValueKind.True,
+                MergeCommitSha = pr.TryGetProperty("merge_commit_sha", out var ms) && ms.ValueKind == JsonValueKind.String
+                    ? ms.GetString() : null,
+                // `mergeable` is true/false/null (null = GitHub still computing).
+                Mergeable = pr.TryGetProperty("mergeable", out var ma)
+                    ? ma.ValueKind switch
+                    {
+                        JsonValueKind.True => true,
+                        JsonValueKind.False => false,
+                        _ => (bool?)null,
+                    }
+                    : null,
+                MergeableState = pr.TryGetProperty("mergeable_state", out var mst) && mst.ValueKind == JsonValueKind.String
+                    ? mst.GetString() : null,
+                IsDraft = pr.TryGetProperty("draft", out var d) && d.ValueKind == JsonValueKind.True,
+            };
+            return IntegrationResult<GitHubPullRequestDetail>.Ok(detail);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to read GitHub PR #{Number} in {Repo}", pullRequestNumber, repository);
+            return IntegrationResult<GitHubPullRequestDetail>.Fail(ex.Message);
         }
     }
 

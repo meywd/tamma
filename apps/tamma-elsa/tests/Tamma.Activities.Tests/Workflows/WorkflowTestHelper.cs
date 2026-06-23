@@ -61,6 +61,13 @@ public static class WorkflowTestHelper
 
         mockBuilder.SetupGet(b => b.Variables).Returns(variables);
 
+        // WorkflowOptions — return a real, stable instance so workflows that set
+        // builder.WorkflowOptions.* (e.g. the merge-approval gate's
+        // IncidentStrategyType, SECURITY I1) don't NRE during Build(), and so the
+        // value is inspectable afterwards.
+        var workflowOptions = new WorkflowOptions();
+        mockBuilder.SetupGet(b => b.WorkflowOptions).Returns(workflowOptions);
+
         // WithVariable<T>() — no args
         mockBuilder.Setup(b => b.WithVariable<string>())
             .Returns(() => { var v = new Variable<string>(); variables.Add(v); return v; });

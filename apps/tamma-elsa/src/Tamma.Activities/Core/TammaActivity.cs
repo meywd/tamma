@@ -14,6 +14,17 @@ namespace Tamma.Activities.Core;
 /// </summary>
 public class TammaEvent
 {
+    /// <summary>
+    /// Stable per-event id minted at emit time (UUID v4 — net8 has no
+    /// <c>Guid.CreateVersion7</c>). Carried through the wire DTO to
+    /// <c>DomainEvent.Id</c> so the durable append is idempotent: a retry of an
+    /// already-persisted event (the drain re-sends the whole pending slice on
+    /// any non-2xx) is a no-op (<c>ON CONFLICT (Id) DO NOTHING</c>) instead of
+    /// a duplicate audit row. Without this the at-least-once drain duplicates
+    /// events whenever a batch partially fails (C2).
+    /// </summary>
+    public Guid Id { get; set; } = Guid.NewGuid();
+
     public string EventType { get; set; } = string.Empty;
     public string Status { get; set; } = "success";
     public string? Error { get; set; }
@@ -23,6 +34,14 @@ public class TammaEvent
     public string? ActivityName { get; set; }
     public string? WorkflowInstanceId { get; set; }
     public Dictionary<string, object?> Data { get; set; } = new();
+
+    /// <summary>
+    /// Optional flexible JSONB-style tags (issueId / prId / userId / mode /
+    /// provider / ...) carried onto the persisted <c>domain_events</c> row by
+    /// the durable drain. Distinct from <see cref="Data"/> (the structured
+    /// payload): tags are the queryable DCB index keys.
+    /// </summary>
+    public Dictionary<string, object?>? Tags { get; set; }
 }
 
 // ============================================

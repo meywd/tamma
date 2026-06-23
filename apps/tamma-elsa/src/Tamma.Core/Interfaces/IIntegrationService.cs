@@ -35,8 +35,27 @@ public interface ISlackIntegrationService
 /// </summary>
 public interface IGitHubIntegrationService
 {
-    /// <summary>Create a GitHub branch</summary>
+    /// <summary>Create a GitHub branch from the repo default branch (main → master).</summary>
     Task<IntegrationResult<GitHubBranchResult>> CreateGitHubBranchAsync(string repository, string branchName);
+
+    /// <summary>
+    /// Create a GitHub branch cut from an explicit <paramref name="baseBranch"/>
+    /// (Story 2.4 AC2). The base SHA is resolved from the given base ref; if the
+    /// base is explicitly supplied and missing this FAILS (<c>base_branch_not_found</c>)
+    /// rather than silently cutting from an unrelated branch (no false success).
+    /// The resolved base SHA is surfaced on <see cref="GitHubBranchResult.BaseSha"/>
+    /// for the audit event. When <paramref name="baseBranch"/> is null/empty the
+    /// default-branch behaviour (main → master) is used.
+    /// </summary>
+    Task<IntegrationResult<GitHubBranchResult>> CreateGitHubBranchAsync(string repository, string branchName, string? baseBranch);
+
+    /// <summary>
+    /// Returns whether a branch (ref <c>heads/{branchName}</c>) already exists
+    /// (Story 2.4 — idempotency / conflict handling + post-create validation):
+    /// <c>Ok(true)</c> exists, <c>Ok(false)</c> absent, <c>Fail</c> on API error
+    /// (so a transient lookup failure is NOT mistaken for "absent").
+    /// </summary>
+    Task<IntegrationResult<bool>> BranchExistsAsync(string repository, string branchName);
 
     /// <summary>Get recent commits from a branch</summary>
     Task<IntegrationResult<List<GitHubCommit>>> GetGitHubCommitsAsync(string repository, string branch, DateTime? since = null);
@@ -44,8 +63,41 @@ public interface IGitHubIntegrationService
     /// <summary>Create a pull request</summary>
     Task<IntegrationResult<GitHubPullRequestResult>> CreateGitHubPullRequestAsync(string repository, CreatePullRequestRequest request);
 
-    /// <summary>Merge a pull request</summary>
+    /// <summary>
+    /// Find an existing OPEN pull request for the given <paramref name="headBranch"/>
+    /// → <paramref name="baseBranch"/> pair. Returns <c>Data == null</c> (with
+    /// <c>Success == true</c>) when none exists. Backs Story 2.8 AC8 idempotency —
+    /// a re-run of <c>SingleIssueCycle</c> must reuse / update the open PR instead
+    /// of double-opening or hard-failing on a 422 "A pull request already exists".
+    /// </summary>
+    Task<IntegrationResult<GitHubPullRequestRef?>> GetGitHubOpenPullRequestForBranchAsync(string repository, string headBranch, string baseBranch);
+
+    /// <summary>
+    /// Update an existing pull request's title / body / labels (idempotent reuse path).
+    /// </summary>
+    Task<IntegrationResult<GitHubPullRequestResult>> UpdateGitHubPullRequestAsync(string repository, int pullRequestNumber, CreatePullRequestRequest request);
+
+    /// <summary>Merge a pull request (squash strategy — back-compat overload).</summary>
     Task<IntegrationResult<GitHubMergeResult>> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber);
+
+    /// <summary>
+    /// Merge a pull request with an explicit <paramref name="mergeStrategy"/>
+    /// (<c>merge | squash | rebase</c>; Story 2-10 — configurable strategy). The
+    /// strategy is mapped to GitHub's <c>merge_method</c>; an unknown value falls
+    /// back to <c>squash</c>. Replaces the previously hardcoded squash-only merge.
+    /// </summary>
+    Task<IntegrationResult<GitHubMergeResult>> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber, string mergeStrategy);
+
+    /// <summary>
+    /// Read a pull request's lifecycle state (Story 2-10 — idempotency +
+    /// pre-merge readiness). Surfaces <c>State</c> (open/closed), <c>Merged</c>,
+    /// the <c>MergeCommitSha</c> when already merged, and the GitHub
+    /// <c>Mergeable</c> / <c>MergeableState</c> conflict signals. <c>Mergeable</c>
+    /// is <c>null</c> when GitHub has not finished computing it (the caller must
+    /// treat unknown as "not yet confirmed mergeable", never proceed blind).
+    /// Returns <c>Fail</c> on API error (never a fabricated state).
+    /// </summary>
+    Task<IntegrationResult<GitHubPullRequestDetail>> GetGitHubPullRequestAsync(string repository, int pullRequestNumber);
 
     /// <summary>Get file changes from a branch</summary>
     Task<IntegrationResult<List<GitHubFileChange>>> GetGitHubFileChangesAsync(string repository, string branch);
@@ -124,14 +176,32 @@ public interface IIntegrationService
     /// <summary>Create a GitHub branch</summary>
     Task<GitHubBranchResult> CreateGitHubBranchAsync(string repository, string branchName);
 
+    /// <summary>Create a GitHub branch cut from an explicit base branch</summary>
+    Task<GitHubBranchResult> CreateGitHubBranchAsync(string repository, string branchName, string? baseBranch);
+
+    /// <summary>Returns whether a branch already exists</summary>
+    Task<bool> BranchExistsAsync(string repository, string branchName);
+
     /// <summary>Get recent commits from a branch</summary>
     Task<List<GitHubCommit>> GetGitHubCommitsAsync(string repository, string branch, DateTime? since = null);
 
     /// <summary>Create a pull request</summary>
     Task<GitHubPullRequestResult> CreateGitHubPullRequestAsync(string repository, CreatePullRequestRequest request);
 
-    /// <summary>Merge a pull request</summary>
+    /// <summary>Find an existing OPEN PR for head→base (null when none)</summary>
+    Task<GitHubPullRequestRef?> GetGitHubOpenPullRequestForBranchAsync(string repository, string headBranch, string baseBranch);
+
+    /// <summary>Update an existing pull request's title / body / labels</summary>
+    Task<GitHubPullRequestResult> UpdateGitHubPullRequestAsync(string repository, int pullRequestNumber, CreatePullRequestRequest request);
+
+    /// <summary>Merge a pull request (squash strategy — back-compat overload).</summary>
     Task<GitHubMergeResult> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber);
+
+    /// <summary>Merge a pull request with an explicit strategy (merge | squash | rebase).</summary>
+    Task<GitHubMergeResult> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber, string mergeStrategy);
+
+    /// <summary>Read a pull request's lifecycle state (idempotency / pre-merge readiness).</summary>
+    Task<GitHubPullRequestDetail> GetGitHubPullRequestAsync(string repository, int pullRequestNumber);
 
     /// <summary>Get file changes from a branch</summary>
     Task<List<GitHubFileChange>> GetGitHubFileChangesAsync(string repository, string branch);
@@ -173,6 +243,14 @@ public class GitHubBranchResult
     public bool Success { get; set; }
     public string? BranchName { get; set; }
     public string? BranchUrl { get; set; }
+
+    /// <summary>
+    /// The SHA of the base ref the branch was cut from (Story 2.4 AC4 — surfaced
+    /// in the <c>BRANCH.CREATED.SUCCESS</c> event/log). Null when not resolved
+    /// (e.g. a failed create) or on the legacy default-branch path.
+    /// </summary>
+    public string? BaseSha { get; set; }
+
     public string? Error { get; set; }
 }
 
@@ -195,6 +273,14 @@ public class CreatePullRequestRequest
     public string Base { get; set; } = "main";
     public List<string> Reviewers { get; set; } = new();
     public List<string> Labels { get; set; } = new();
+
+    /// <summary>
+    /// Open the PR in draft mode (GitHub <c>draft: true</c>). Story 2.8 —
+    /// the ADL opens a draft PR up front and flips it to ready after CI /
+    /// review pass. Threaded from <c>SingleIssueCycleWorkflow</c>'s
+    /// <c>["draft"]=true</c> through the create path to the GitHub REST payload.
+    /// </summary>
+    public bool IsDraft { get; set; }
 }
 
 public class GitHubPullRequestResult
@@ -210,6 +296,55 @@ public class GitHubMergeResult
     public bool Success { get; set; }
     public string? MergeSha { get; set; }
     public string? Error { get; set; }
+}
+
+/// <summary>
+/// Pull-request lifecycle detail returned by
+/// <see cref="IGitHubIntegrationService.GetGitHubPullRequestAsync"/> — backs
+/// Story 2-10 idempotency (already-merged → skip re-merge) and the pre-merge
+/// readiness/conflict gate.
+/// </summary>
+public class GitHubPullRequestDetail
+{
+    public int Number { get; set; }
+
+    /// <summary>open | closed.</summary>
+    public string State { get; set; } = "open";
+
+    /// <summary>True when the PR has already been merged.</summary>
+    public bool Merged { get; set; }
+
+    /// <summary>The merge commit SHA when <see cref="Merged"/> is true.</summary>
+    public string? MergeCommitSha { get; set; }
+
+    /// <summary>
+    /// GitHub's <c>mergeable</c> flag: <c>true</c> = no conflicts, <c>false</c> =
+    /// conflicts, <c>null</c> = not yet computed (GitHub is still calculating —
+    /// the caller must NOT treat unknown as mergeable).
+    /// </summary>
+    public bool? Mergeable { get; set; }
+
+    /// <summary>
+    /// GitHub's <c>mergeable_state</c> (e.g. <c>clean</c>, <c>dirty</c>,
+    /// <c>blocked</c>, <c>behind</c>, <c>unstable</c>, <c>unknown</c>). Surfaced
+    /// for the readiness gate's blocking-reason message.
+    /// </summary>
+    public string? MergeableState { get; set; }
+
+    public bool IsDraft { get; set; }
+}
+
+/// <summary>
+/// Lightweight reference to an existing pull request — returned by the
+/// idempotency lookup (<see cref="IGitHubIntegrationService.GetGitHubOpenPullRequestForBranchAsync"/>).
+/// </summary>
+public class GitHubPullRequestRef
+{
+    public int Number { get; set; }
+    public string Url { get; set; } = string.Empty;
+    public string State { get; set; } = "open";
+    public string Title { get; set; } = string.Empty;
+    public bool IsDraft { get; set; }
 }
 
 public class GitHubFileChange

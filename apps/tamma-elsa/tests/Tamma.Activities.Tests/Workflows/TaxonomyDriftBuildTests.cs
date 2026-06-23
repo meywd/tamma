@@ -109,6 +109,7 @@ public class TaxonomyDriftBuildTests
         "MentorshipWorkflow",
         "PlanGenerationWorkflow",
         "PlanReviewWorkflow",
+        "PullRequestWorkflow",
         "ReviewFixWorkflow",
         "TaskCreationWorkflow",
         "TaskReviewWorkflow",
@@ -142,15 +143,12 @@ public class TaxonomyDriftBuildTests
     private static readonly IReadOnlyDictionary<(string Workflow, string DispatchId), (string Role, string Action)>
         NonMaterializableSupplement = new Dictionary<(string, string), (string, string)>
         {
-            // ReviewFixWorkflow: ["sessionId"] = $"…{ctx.GetInput<int>("prNumber")}".
-            // Emits agentRole=developer, action=address-review-comments as constants.
-            // MANUAL-SYNC: this (role, action) pair must be kept in lockstep with the
-            // dispatch constants in ReviewFixWorkflow.cs (currently
-            // AgentRole.Developer.ToWire() / AgentAction.AddressReviewComments.ToWire()).
-            // The sync guard (NonMaterializableSupplement_StaysInSyncWithReality) only
-            // verifies the (workflow, dispatchId) KEY exists — it does NOT re-read the
-            // pair from source — so if those constants change, update this pair by hand.
-            [("ReviewFixWorkflow", "DispatchFixGeneration")] = ("developer", "address-review-comments"),
+            // (empty) — every dispatched (role, action) pair is now reflectable from the
+            // workflow source. ReviewFixWorkflow.DispatchFixGeneration was previously listed
+            // here (its sessionId/dispatch constants weren't reflectable), but the ReviewFix
+            // build-out made it materialise normally, so the manual supplement is no longer
+            // needed. The NonMaterializableSupplement_StaysInSyncWithReality guard enforces
+            // that this stays empty until a genuinely non-reflectable dispatch reappears.
         };
 
     private sealed record DispatchPair(string Workflow, string DispatchId, string Role, string Action);
