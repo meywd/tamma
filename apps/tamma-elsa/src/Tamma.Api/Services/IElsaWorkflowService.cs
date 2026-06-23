@@ -25,14 +25,22 @@ public interface IElsaWorkflowService
 
     /// <summary>
     /// IMPORTANT-2 — resume the <c>merge-approval</c> human gate suspended on the
-    /// <c>adl-merge-approval-{issue}-{pr}</c> bookmark, injecting the
+    /// tenant+repo-scoped bookmark
+    /// <c>adl-merge-approval-{tenant}-{repo}-{issue}-{pr}</c>, injecting the
     /// <c>{decision, feedback, approver}</c> payload as workflow input. Forwards
     /// to the engine's in-process resume endpoint (which owns
     /// <c>IBookmarkStore</c>/<c>IWorkflowRuntime</c>). Returns the resolved
     /// workflow instance id on success.
+    ///
+    /// <para>SECURITY C1/C2 — <paramref name="tenantId"/> and
+    /// <paramref name="repository"/> scope the bookmark lookup. The caller
+    /// (<c>AdlEndpoints</c>) supplies the AMBIENT tenant id, so the engine can
+    /// only ever resolve a gate in that tenant; a cross-tenant attempt resolves
+    /// no bookmark (GateNotFound).</para>
     /// </summary>
     Task<MergeApprovalResumeResult> ResumeMergeApprovalAsync(
-        int issueNumber, int prNumber, string decision, string? feedback, string? approver);
+        int issueNumber, int prNumber, string? tenantId, string? repository,
+        string decision, string? feedback, string? approver);
 }
 
 /// <summary>Outcome of a merge-approval gate resume.</summary>

@@ -337,6 +337,39 @@ public class MergeApprovalWorkflowTests
     }
 
     // ================================================================
+    // SECURITY I1 — fail-closed on internal fault (no-deadlock last hole)
+    // ================================================================
+
+    [Test]
+    public void Workflow_SeedsEscalatedOutcomeBeforeAnythingThatCanFault()
+    {
+        // The flowchart must START by setting outcome="escalated" so a later
+        // fault (with continue-with-incidents) that stops the flow before a
+        // terminal still yields a parseable, fail-closed outcome the cycle routes
+        // to reportError — never a silent merge, never a stuck instance.
+        _flowchart.Start.Should().NotBeNull();
+        ((Elsa.Workflows.IActivity)_flowchart.Start!).Id.Should().Be("DefaultOutcome",
+            "the fail-closed default outcome must be set before any faultable activity");
+
+        var defaultOutcome = _flowchart.Activities
+            .OfType<SetOutput>()
+            .FirstOrDefault(a => a.Id == "DefaultOutcome");
+        defaultOutcome.Should().NotBeNull("a DefaultOutcome SetOutput node must seed the outcome");
+
+        HasEdge("DefaultOutcome", null, "ReadInputs").Should().BeTrue(
+            "the default-outcome node must flow into ReadInputs");
+    }
+
+    [Test]
+    public void Workflow_UsesContinueWithIncidentsStrategy_SoAFaultDoesNotHaltSilently()
+    {
+        var builder = WorkflowTestHelper.BuildWorkflow(new MergeApprovalWorkflow());
+        builder.Object.WorkflowOptions.IncidentStrategyType
+            .Should().Be(typeof(Elsa.Workflows.IncidentStrategies.ContinueWithIncidentsStrategy),
+                "a faulted gate must not halt the workflow with an incident and produce no outcome");
+    }
+
+    // ================================================================
     // Helpers
     // ================================================================
 

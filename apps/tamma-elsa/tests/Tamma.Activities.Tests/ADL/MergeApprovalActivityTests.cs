@@ -139,4 +139,55 @@ public class MergeApprovalActivityTests
         var g = Guid.NewGuid();
         MergeApprovalEvents.ParseTenantId(g.ToString()).Should().Be(g);
     }
+
+    // ================================================================
+    // SECURITY C2 — BookmarkName uniqueness / determinism
+    // ================================================================
+
+    [Test]
+    public void BookmarkName_IncludesTenantAndRepo_NoCrossTenantCollision()
+    {
+        var tA = Guid.NewGuid().ToString();
+        var tB = Guid.NewGuid().ToString();
+
+        // Same issue/PR, different tenant → DISTINCT names (the C2 collision the
+        // old `adl-merge-approval-{issue}-{pr}` name had).
+        WaitForMergeApprovalActivity.BookmarkName(tA, "octo/repo", 5, 5)
+            .Should().NotBe(WaitForMergeApprovalActivity.BookmarkName(tB, "octo/repo", 5, 5));
+
+        // Same issue/PR + tenant, different repo → DISTINCT names too.
+        WaitForMergeApprovalActivity.BookmarkName(tA, "octo/repo", 5, 5)
+            .Should().NotBe(WaitForMergeApprovalActivity.BookmarkName(tA, "octo/other", 5, 5));
+    }
+
+    [Test]
+    public void BookmarkName_IsDeterministic_SameInputsSameName()
+    {
+        var t = Guid.NewGuid().ToString();
+        WaitForMergeApprovalActivity.BookmarkName(t, "Octo/Repo", 5, 7)
+            .Should().Be(WaitForMergeApprovalActivity.BookmarkName(t, "Octo/Repo", 5, 7),
+                "suspend-side and resume-side must compute identical names");
+    }
+
+    [Test]
+    public void BookmarkName_NormalizesSeparators_SoSegmentsCannotForgeAName()
+    {
+        // A repo whose chars include the '-' delimiter must not be able to alias a
+        // different (tenant, repo, issue, pr) tuple. Normalisation maps '-' and '/'
+        // to '_', so a crafted segment can't smuggle in extra delimiters.
+        var t = Guid.NewGuid().ToString();
+        var crafted = WaitForMergeApprovalActivity.BookmarkName(t, "a-b-9-9", 5, 5);
+        crafted.Should().Contain("a_b_9_9");
+        crafted.Should().EndWith("-5-5");
+    }
+
+    [TestCase(null, "none")]
+    [TestCase("", "none")]
+    [TestCase("   ", "none")]
+    [TestCase("Octo/Repo", "octo_repo")]
+    [TestCase("a-b", "a_b")]
+    public void NormalizeSegment_LowersAndReplacesDelimiters(string? input, string expected)
+    {
+        WaitForMergeApprovalActivity.NormalizeSegment(input).Should().Be(expected);
+    }
 }

@@ -2079,10 +2079,12 @@ workflows.MapDelete("/instances/{id}", WorkflowEndpoints.DeleteInstance).Require
 workflows.MapGet("/instances/{id}/events", WorkflowEndpoints.GetInstanceEvents);
 
 // ── ADL human gates (IMPORTANT-2) ──
-// Lets a human DRIVE the merge-approval gate of the autonomous loop. Resumes
-// the adl-merge-approval-{issue}-{pr} bookmark via the engine, injecting the
-// {decision,feedback,approver} payload. WorkflowsManage = tenant owner/admin
-// (members 403) — driving a merge decision is a workflow-management action.
+// Lets a human DRIVE the merge-approval gate of the autonomous loop. Resumes the
+// tenant+repo-scoped adl-merge-approval-{tenant}-{repo}-{issue}-{pr} bookmark via
+// the engine, injecting the {decision,feedback,approver} payload (approver is
+// derived server-side from the caller — I2). WorkflowsManage = tenant owner/admin
+// (members 403). SECURITY C1 — the handler threads the caller's ambient tenant id
+// so a caller can only resume a gate in its OWN tenant (cross-tenant → 404).
 var adl = app.MapGroup("/api/adl").RequireAuthorization("WorkflowsManage");
 adl.MapPost("/merge-approval/resume", AdlEndpoints.ResumeMergeApproval);
 

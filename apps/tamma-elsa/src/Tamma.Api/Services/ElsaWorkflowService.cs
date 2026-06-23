@@ -259,15 +259,16 @@ public partial class ElsaWorkflowService : IElsaWorkflowService
 
     /// <summary>
     /// IMPORTANT-2 — forward a merge-approval gate resume to the engine's
-    /// in-process resume endpoint, which looks up the
-    /// <c>adl-merge-approval-{issue}-{pr}</c> bookmark and runs the owning
-    /// instance with <c>{decision, feedback, approver}</c> injected as input.
+    /// in-process resume endpoint, which looks up the tenant+repo-scoped
+    /// <c>adl-merge-approval-{tenant}-{repo}-{issue}-{pr}</c> bookmark and runs the
+    /// owning instance with <c>{decision, feedback, approver}</c> injected as input.
     /// A 404 from the engine (no gate waiting) is surfaced as
     /// <see cref="MergeApprovalResumeResult.GateNotFound"/> rather than thrown,
     /// so the controller can map it to a 404 for the caller.
     /// </summary>
     public async Task<MergeApprovalResumeResult> ResumeMergeApprovalAsync(
-        int issueNumber, int prNumber, string decision, string? feedback, string? approver)
+        int issueNumber, int prNumber, string? tenantId, string? repository,
+        string decision, string? feedback, string? approver)
     {
         _logger.LogInformation(
             "Resuming merge-approval gate for issue #{Issue} PR #{Pr} (decision={Decision})",
@@ -279,6 +280,9 @@ public partial class ElsaWorkflowService : IElsaWorkflowService
         {
             issueNumber,
             prNumber,
+            // SECURITY C1/C2 — tenant + repo scope the engine's bookmark lookup.
+            tenantId,
+            repository,
             decision,
             feedback,
             approver,

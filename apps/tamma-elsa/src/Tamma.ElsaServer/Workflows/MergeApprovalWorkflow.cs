@@ -2,6 +2,7 @@ using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
+using Elsa.Workflows.IncidentStrategies;
 using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
@@ -60,6 +61,21 @@ public class MergeApprovalWorkflow : WorkflowBase
         builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Human merge/test/reject gate — branches on the decision, acts on it, and audits every edge";
 
+        // SECURITY I1 (fail-closed on internal fault) — the cycle reads this
+        // workflow's `outcome` output and ONLY routes "merge" forward to the
+        // pr-merged webhook bookmark; "escalated" (and anything unparseable) goes
+        // to a loud reportError terminal. If an activity in here THROWS, Elsa's
+        // default FaultStrategy would HALT the instance with an incident and
+        // produce NO `outcome`, leaving the cycle stuck on `tamma-processing`
+        // with no loud terminal (the last no-deadlock hole). Mirror the
+        // CleanUpFailedTenantWorkflow precedent: continue-with-incidents so a
+        // faulted activity doesn't halt the workflow, AND seed the `outcome`
+        // output to "escalated" up front (below at ReadInputs) so a fault that
+        // stops the flow before a terminal still yields a parseable, fail-closed
+        // outcome the cycle routes to reportError. The happy-path terminals
+        // overwrite it with the real outcome.
+        builder.WorkflowOptions.IncidentStrategyType = typeof(ContinueWithIncidentsStrategy);
+
         // ================================================================
         // Variables
         // ================================================================
@@ -86,6 +102,23 @@ public class MergeApprovalWorkflow : WorkflowBase
         // TaskMaxRevisions (>=3) in SingleIssueCycleWorkflow so an unbounded
         // test → gate → test loop can never spin forever.
         const int MaxTestIterations = 3;
+
+        // ================================================================
+        // 0. SECURITY I1 — seed the fail-closed default outcome
+        // ================================================================
+        // Set `outcome = "escalated"` BEFORE anything that can fault. If a later
+        // activity throws (and continue-with-incidents stops the flow before a
+        // terminal OutputsSequence runs), the workflow output still carries
+        // "escalated", which the cycle routes to its loud reportError terminal —
+        // never a silent "merge", never a stuck instance. The happy-path
+        // terminals below overwrite this with the real outcome.
+        var defaultOutcome = new SetOutput
+        {
+            Id = "DefaultOutcome",
+            OutputName = new("outcome"),
+            OutputValue = new(_ => (object)"escalated"),
+        };
+        defaultOutcome.SetDisplayText("Default Outcome = escalated");
 
         // ================================================================
         // 1. Read inputs
@@ -117,6 +150,10 @@ public class MergeApprovalWorkflow : WorkflowBase
             IssueNumber = new Input<int>(ctx => issueNumberVar.Get(ctx)),
             PrNumber = new Input<int>(ctx => prNumberVar.Get(ctx)),
             PrUrl = new Input<string?>(ctx => prUrlVar.Get(ctx)),
+            // SECURITY C2 — tenant + repo fold into the bookmark name so the gate
+            // is globally unique and a cross-tenant/cross-repo resume can't target it.
+            TenantId = new Input<string?>(ctx => tenantIdVar.Get(ctx)),
+            Repository = new Input<string?>(ctx => repository.Get(ctx)),
             BreakingChange = new Input<bool>(ctx => breakingChangeVar.Get(ctx)),
             Decision = new Output<string?>(decisionVar),
             Feedback = new Output<string?>(feedbackVar),
@@ -300,10 +337,10 @@ public class MergeApprovalWorkflow : WorkflowBase
         {
             Id = "MergeApprovalFlowchart",
             Name = "Merge Approval Flowchart",
-            Start = readInputs,
+            Start = defaultOutcome,
             Activities =
             {
-                readInputs, waitMerge,
+                defaultOutcome, readInputs, waitMerge,
                 emitMergeRequested, dispatchMerge,
                 extractMergeSuccess, mergeSucceededCheck,
                 emitMerged, mergeOutputs, emitMergeFailed,
@@ -315,6 +352,7 @@ public class MergeApprovalWorkflow : WorkflowBase
             },
             Connections =
             {
+                Connect(defaultOutcome, readInputs),
                 Connect(readInputs, waitMerge),
 
                 // ── Merge → emit MERGE.REQUESTED → dispatch merge → READ success ──
