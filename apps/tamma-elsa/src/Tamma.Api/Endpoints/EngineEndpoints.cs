@@ -667,6 +667,138 @@ public static class EngineEndpoints
         }));
     }
 
+    // ─── Generic DCB event append — durable engine→domain_events bridge ───────
+
+    /// <summary>
+    /// Generic engine event-append callback. Accepts a BATCH of
+    /// <see cref="AppendEventsRequest.Events"/> the Elsa engine drained from
+    /// its in-process <c>tamma:events</c> transient list and persists each one
+    /// into the caller's tenant <c>domain_events</c> via
+    /// <see cref="IEventRepository.AppendAsync"/>.
+    ///
+    /// <para>The engine (<c>Tamma.ElsaServer</c>) cannot reference
+    /// <c>Tamma.Api</c> and registers neither <see cref="IEventRepository"/>
+    /// nor <c>IPlatformEventPublisher</c>, so workflow activities have no
+    /// in-process durable sink — this is the API callback that closes the
+    /// audit trail. It mirrors <see cref="PostCycleResult"/>, the one existing
+    /// engine→<c>domain_events</c> path.</para>
+    ///
+    /// <para>Tenant is resolved from <see cref="ITenantContext"/> (the
+    /// <c>X-Tenant-Id</c> the engine sends). Partial-batch handling: every
+    /// well-formed event that persists is counted; per-event failures are
+    /// collected and reported so the engine can retry the whole batch (the
+    /// drain cursor only advances on a 2xx). An empty <c>eventType</c> is
+    /// rejected per-event, not for the whole batch.</para>
+    /// </summary>
+    public static async Task<IResult> AppendEvents(
+        AppendEventsRequest req, IEventRepository eventRepo, ITenantContext tc)
+    {
+        if (req.Events is null || req.Events.Count == 0)
+            return Results.BadRequest(new { error = "events array is required and must be non-empty" });
+
+        var persisted = 0;
+        var failures = new List<object>();
+
+        for (var i = 0; i < req.Events.Count; i++)
+        {
+            var e = req.Events[i];
+
+            if (string.IsNullOrWhiteSpace(e.EventType))
+            {
+                failures.Add(new { index = i, error = "eventType is required" });
+                continue;
+            }
+
+            try
+            {
+                // Project TammaEvent → DomainEvent. The activity/workflow
+                // identifiers + status + duration land in Tags so the audit
+                // trail is queryable by workflow instance / activity. Tenant
+                // is injected into Tags too (defence-in-depth — the row's
+                // TenantId column is the authoritative scope, set by the repo).
+                var tags = new Dictionary<string, string?>();
+                if (e.Tags is not null)
+                {
+                    foreach (var kv in e.Tags)
+                        tags[kv.Key] = kv.Value;
+                }
+                if (tc.TenantId is Guid tid && tid != Guid.Empty)
+                    tags["tenantId"] = tid.ToString();
+                if (!string.IsNullOrEmpty(e.WorkflowInstanceId))
+                    tags["workflowInstanceId"] = e.WorkflowInstanceId;
+                if (!string.IsNullOrEmpty(e.ActivityId))
+                    tags["activityId"] = e.ActivityId;
+                if (!string.IsNullOrEmpty(e.ActivityName))
+                    tags["activityName"] = e.ActivityName;
+                if (!string.IsNullOrEmpty(e.Status))
+                    tags["status"] = e.Status;
+                if (e.DurationMs is double d)
+                    tags["durationMs"] = d.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (e.Timestamp is DateTime ts)
+                    tags["emittedAt"] = ts.ToUniversalTime().ToString("O");
+
+                await eventRepo.AppendAsync(new DomainEvent
+                {
+                    // Stable id minted by the engine at emit time (carried on
+                    // the wire). The idempotent append (ON CONFLICT (Id) DO
+                    // NOTHING) makes a retry of an already-persisted event a
+                    // no-op, so a partial-batch failure + full-batch retry can
+                    // never duplicate audit rows (C2). Guard against a missing
+                    // id (older engine) by minting one server-side.
+                    Id = e.Id == Guid.Empty ? Guid.NewGuid() : e.Id,
+                    Type = e.EventType,
+                    TenantId = tc.TenantId,
+                    IssueNumber = e.IssueNumber,
+                    Tags = JsonSerializer.Serialize(tags),
+                    Metadata = JsonSerializer.Serialize(new
+                    {
+                        workflowVersion = "1.0.0",
+                        eventSource = "system",
+                        error = e.Error,
+                    }),
+                    Data = e.Data is JsonElement data && data.ValueKind != JsonValueKind.Undefined
+                        ? data.GetRawText()
+                        : "{}",
+                    // CreatedAt is stamped server-side by the repository for a
+                    // monotonic store clock; the engine timestamp is preserved
+                    // in Tags so time-travel can reconstruct emit order.
+                });
+
+                persisted++;
+            }
+            catch (Exception ex)
+            {
+                // Per-event failure — collect and continue so a single bad
+                // row doesn't lose the rest of the batch. The engine retries
+                // the WHOLE batch on a non-2xx (the drain cursor stays put),
+                // which re-sends the events that DID persist on this call.
+                // That re-send is safe ONLY because AppendAsync is idempotent
+                // on the stable per-event Id (ON CONFLICT DO NOTHING) — append-
+                // only WITHOUT an idempotency key is exactly what would
+                // duplicate those rows (C2).
+                failures.Add(new { index = i, error = ex.GetType().Name });
+            }
+        }
+
+        if (failures.Count > 0)
+        {
+            // Typed partial-failure error. 207-style semantics over a 502 so
+            // the engine drain treats the batch as not-fully-persisted and
+            // retries (cursor unchanged) — see EventPersistenceActivityMiddleware.
+            return Results.Json(new
+            {
+                error = "partial_append_failure",
+                persisted,
+                failed = failures.Count,
+                failures,
+            }, statusCode: StatusCodes.Status502BadGateway);
+        }
+
+        return Results.Created(
+            "/api/engine/events",
+            new { ok = true, persisted, storedAt = DateTime.UtcNow });
+    }
+
     // ─── Agent availability — finding 002 ─────────────────────────────────────
 
     /// <summary>

@@ -1016,6 +1016,8 @@ if (!string.IsNullOrEmpty(jwtSecret))
     builder.Services.AddScoped<IAuthorizationHandler, SelfOrPermissionHandler>();
     // Story 28-R2 / C1 — handler for the new PlatformOwnerAccess policy.
     builder.Services.AddScoped<IAuthorizationHandler, PlatformPermissionHandler>();
+    // I4 — handler for EngineServiceOnly (service-principal-only engine callbacks).
+    builder.Services.AddScoped<IAuthorizationHandler, ServicePrincipalHandler>();
 
     builder.Services.AddAuthorization(options =>
     {
@@ -1116,6 +1118,16 @@ if (!string.IsNullOrEmpty(jwtSecret))
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("workflows:manage"));
+        });
+        // I4 — engine→API callback gate. Distinct from WorkflowsManage (which
+        // maps to ["admin","owner"] and so is reachable by any tenant
+        // owner/admin → audit-event forgery). EngineServiceOnly succeeds only
+        // for a platform service principal (the engine's drain token), so a
+        // tenant user cannot POST forged audit events into a stream.
+        options.AddPolicy("EngineServiceOnly", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new ServicePrincipalRequirement());
         });
         // Story 16-5 AC 7: DELETE /api/workflows/* must be owner-only.
         // workflows:delete maps to ["owner"] in the permission matrix.
@@ -2042,6 +2054,12 @@ engine.MapPost("/trigger-ci", EngineEndpoints.TriggerCi).RequireAuthorization("W
 engine.MapPost("/execute-task", EngineEndpoints.ExecuteTask).RequireAuthorization("WorkflowsManage");
 engine.MapPost("/cycle-result", EngineEndpoints.PostCycleResult).RequireAuthorization("WorkflowsManage");
 engine.MapGet("/cycle-results", EngineEndpoints.GetCycleResults);
+// Generic engine→domain_events DCB-event append. The Elsa engine drains its
+// in-process tamma:events list here so the audit trail persists (previously
+// the events were written to a write-only transient list nothing drained).
+// Gated to EngineServiceOnly (service principal) — NOT WorkflowsManage, which
+// every tenant owner/admin holds and would let them forge audit events (I4).
+engine.MapPost("/events", EngineEndpoints.AppendEvents).RequireAuthorization("EngineServiceOnly");
 // Audit finding 002 — `agent-available` is a GET liveness probe (no body),
 // not a POST registration call. The previous wiring as POST silently drifted
 // from the TS contract.

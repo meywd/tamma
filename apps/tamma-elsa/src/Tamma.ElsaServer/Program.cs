@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Serilog;
 using Serilog.Sinks.OpenSearch;
 using Tamma.Activities.AI;
+using Tamma.Activities.Core;
 using Tamma.Activities.LlmCall.Credentials;
 using Tamma.Activities.Security;
 using Tamma.ElsaServer.Workflows;
@@ -112,6 +113,20 @@ builder.Services.AddElsa(elsa =>
     // assembly, so ClaudeAnalysisActivity brings along the Analytics
     // (Story 28-10) activities too without an extra call.
     elsa.AddActivitiesFrom<ClaudeAnalysisActivity>();
+
+    // Durable DCB-event persistence — drain the in-process tamma:events
+    // transient list to POST /api/engine/events (-> tenant domain_events).
+    // CRITICAL: this APPENDS the drain to the FULL Elsa default activity- and
+    // workflow-execution pipelines (re-installing the activity invoker that
+    // actually runs activities) instead of REPLACING the pipeline. The old
+    // app.Services.ConfigureDefaultActivityExecutionPipeline(p => p.Use(...))
+    // wiring called IActivityExecutionPipeline.Setup, which discarded the
+    // invoker and turned every workflow into a silent no-op (it also mutated
+    // only the root-scope pipeline, never the per-run scoped one). This call
+    // runs from the AppFeature configurator, which Elsa invokes LAST — after
+    // ElsaFeature's own WithDefaultActivityExecutionPipeline() — so it is the
+    // authoritative final pipeline. See EventPersistencePipelineExtensions.
+    elsa.UseWorkflows(workflows => workflows.UseTammaEventPersistence());
 
     // Register all code-first WorkflowBase subclasses from the ElsaServer
     // assembly. HourlyAnalyticsRollupWorkflow (Story 28-10) is picked up
@@ -231,6 +246,20 @@ builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutorRegist
 // deployments.
 builder.Services.AddSingleton<Tamma.Activities.AgentDispatch.IGitHubActionsClient,
     Tamma.Activities.AgentDispatch.NullGitHubActionsClient>();
+
+// Engine has no control-plane platform_events sink. The tenant-lifecycle
+// activities (TenantLifecycleActivity / CleanupStepActivity /
+// EmitCleanupTerminalEventActivity) resolve IPlatformEventPublisher via
+// GetRequiredService — without a registration that THROWS in the engine and
+// aborts CreateTenant/DeleteTenant/CleanUpFailedTenant workflows. The Null
+// seam (mirrors NullGitHubActionsClient above) lets those workflows complete;
+// the per-step platform telemetry is a best-effort no-op (logged at WARN)
+// until a sibling POST /api/engine/platform-events callback lands (FOLLOW-UP).
+// This is DISTINCT from the tenant domain_events drain, which now flows
+// through POST /api/engine/events + the event-persistence middleware below.
+Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions
+    .TryAddSingleton<Tamma.Data.Abstractions.IPlatformEventPublisher,
+        Tamma.Activities.TenantLifecycle.NullPlatformEventPublisher>(builder.Services);
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentDispatchService,
     Tamma.Activities.AgentDispatch.AgentDispatchService>();
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentMonitorService,
@@ -295,6 +324,11 @@ builder.Services.AddHostedService<Tamma.ElsaServer.WorkflowSeeder>();
 builder.Services.AddHostedService<Tamma.ElsaServer.AgentSeeder>();
 
 var app = builder.Build();
+
+// NB: the DCB-event drain is wired at AddElsa build time via
+// elsa.UseWorkflows(w => w.UseTammaEventPersistence()) above — it must APPEND
+// to the Elsa default activity/workflow pipelines, not replace them, or the
+// activity invoker is dropped and every workflow becomes a no-op.
 
 app.UseCors();
 app.UseRouting();
