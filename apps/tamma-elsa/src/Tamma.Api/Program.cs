@@ -458,6 +458,80 @@ if (!string.IsNullOrWhiteSpace(
 // of provider-key resolution into the LLM call path (CallLlmInlineActivity).
 builder.Services.AddProviderCredentialResolution();
 
+// Story 32-5 (T3): the managed execution layer behind POST /api/v1/llm/call.
+// ManagedAgent composes the rule-2 sequence (resolve+enablement+prompt → gate →
+// budget → credential → STARTED → runner → meter → terminal) and the mapper
+// projects AgentRunResult → LlmCallResponse + the §2.4 HTTP-status decision.
+// The endpoint mapping itself is T4; here we register the services so the host
+// resolves the whole chain at startup.
+//
+// The 34-5 markup engine and 32-9 usage emitter are not yet landed: the
+// interim seams (PassthroughProviderMarkupEngine = byok⇒0 / platform⇒basis;
+// NullUsageEmitter = no-op, the AGENT.RUN.* DCB events remain the durable
+// signal) ship the SAFE default until those stories replace them behind the
+// same interfaces. IBudgetGuard is the per-call fail-closed gate (32-9 backs
+// running-spend later). InlineToolLoopRunner is the extracted T2 runner shared
+// from Tamma.Activities; its provider-side collaborators (sanitizer/registry/
+// validator/compactor) are all optional and are fully wired in the API in T4.
+builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IProviderMarkupEngine,
+    Tamma.Api.Services.Agents.PassthroughProviderMarkupEngine>();
+builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IUsageEmitter,
+    Tamma.Api.Services.Agents.NullUsageEmitter>();
+builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IBudgetGuard,
+    Tamma.Api.Services.Agents.PerCallBudgetGuard>();
+builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.ILlmCallResponseMapper,
+    Tamma.Api.Services.Agents.LlmCallResponseMapper>();
+
+// Story 32-5 (T4) — provider-side DI for the server-side tool loop, FORMALIZED
+// in the API process (replacing T3's best-effort GetService factory). The loop
+// (extracted verbatim into InlineToolLoopRunner) now executes HERE, where the
+// request-scoped key is resolved, so its collaborators must resolve fully at
+// host startup. These registrations mirror the engine's (ElsaServer/Program.cs);
+// the engine-side copies are deleted in T6 (the engine holds no key after
+// cutover). Lifetimes match the engine: built-in tool executors + registry +
+// sanitizer + action-gate + validator + compactor are singletons (stateless /
+// config-only); the runner is scoped so each call gets a fresh request-scoped
+// provider config.
+builder.Services.Configure<Tamma.Activities.Security.ActionGateOptions>(
+    builder.Configuration.GetSection("Security:ActionGate"));
+builder.Services.TryAddSingleton<Tamma.Activities.Security.IContentSanitizer,
+    Tamma.Activities.Security.ContentSanitizer>();
+builder.Services.TryAddSingleton<Tamma.Activities.Security.ActionGate>();
+builder.Services.TryAddSingleton<Tamma.Activities.Security.IToolCallValidator,
+    Tamma.Activities.Security.ToolCallValidator>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor,
+    Tamma.Activities.LlmCall.Tools.FileReadTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor,
+    Tamma.Activities.LlmCall.Tools.FileWriteTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor,
+    Tamma.Activities.LlmCall.Tools.SearchCodeTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor,
+    Tamma.Activities.LlmCall.Tools.ShellExecuteTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor,
+    Tamma.Activities.LlmCall.Tools.GitOperationsTool>();
+builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor,
+    Tamma.Activities.LlmCall.Tools.RunTestsTool>();
+builder.Services.TryAddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutorRegistry,
+    Tamma.Activities.LlmCall.Tools.ToolExecutorRegistry>();
+builder.Services.TryAddSingleton<Tamma.Activities.LlmCall.Tools.ContextCompactor>();
+// ToolLoopEventEmitter + ParallelToolExecutor: the runner accepts them as
+// optional (nullable) deps and the engine never registered them either (the
+// buffered-only path doesn't emit a live tool-loop event stream — that's the
+// deferred streaming-run-tap follow-on). Register them anyway so the server-side
+// loop is fully wired (their only hard dep is ILogger; the emitter's sink
+// defaults to the no-op NullToolLoopEventSink when none is registered).
+builder.Services.TryAddSingleton<Tamma.Activities.ToolExecution.ToolLoopEventEmitter>();
+builder.Services.TryAddSingleton<Tamma.Activities.ToolExecution.ParallelToolExecutor>();
+// The extracted runner — the SINGLE home of the loop (no fork). Scoped so each
+// call binds a request-scoped provider config. Its IProviderCredentialResolver
+// dep is the cabinet-backed DefaultProviderCredentialResolver (registered above
+// via AddProviderCredentialResolution) — but the loop never re-resolves: the key
+// is set on the provider config ManagedAgent hands it.
+builder.Services.AddScoped<Tamma.Activities.LlmCall.IInlineToolLoopRunner,
+    Tamma.Activities.LlmCall.InlineToolLoopRunner>();
+builder.Services.AddScoped<Tamma.Api.Services.Agents.IManagedAgent,
+    Tamma.Api.Services.Agents.ManagedAgent>();
+
 // Story 31-2: platform routing resolver. Exposes IPlatformResolver as a
 // scoped service over a singleton driver cache and the Epic 29 secret
 // store seam. Drivers themselves (GitHub 31-3, Gitea 31-4, ...) ship in
@@ -1016,7 +1090,8 @@ if (!string.IsNullOrEmpty(jwtSecret))
     builder.Services.AddScoped<IAuthorizationHandler, SelfOrPermissionHandler>();
     // Story 28-R2 / C1 — handler for the new PlatformOwnerAccess policy.
     builder.Services.AddScoped<IAuthorizationHandler, PlatformPermissionHandler>();
-    // I4 — handler for EngineServiceOnly (service-principal-only engine callbacks).
+    // I4 / Story 32-5 Finding C2 — handler for the EngineServiceOnly policy
+    // (service-principal-only: engine→API callbacks + POST /api/v1/llm/call).
     builder.Services.AddScoped<IAuthorizationHandler, ServicePrincipalHandler>();
 
     builder.Services.AddAuthorization(options =>
@@ -1119,14 +1194,19 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("workflows:manage"));
         });
-        // I4 — engine→API callback gate. Distinct from WorkflowsManage (which
-        // maps to ["admin","owner"] and so is reachable by any tenant
-        // owner/admin → audit-event forgery). EngineServiceOnly succeeds only
-        // for a platform service principal (the engine's drain token), so a
-        // tenant user cannot POST forged audit events into a stream.
+        // I4 / Story 32-5 Finding C2 — engine/service-principal-only gate. Used
+        // by the engine→API callback (POST /api/engine/events) AND the internal
+        // LLM-mediation endpoint (POST /api/v1/llm/call). Distinct from
+        // WorkflowsManage (which maps to ["admin","owner"] and so is reachable by
+        // any tenant owner/admin → audit-event forgery / unauthorized LLM spend).
+        // EngineServiceOnly succeeds only for the typed ServiceAuthPrincipal that
+        // ApiKeyAuthHandler mints for a service-scope key (the engine's drain
+        // token / Tamma:ApiToken). A user JWT authenticates but never produces a
+        // ServiceAuthPrincipal, so it is rejected with 403.
         options.AddPolicy("EngineServiceOnly", p =>
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.RequireAuthenticatedUser();
             p.AddRequirements(new ServicePrincipalRequirement());
         });
         // Story 16-5 AC 7: DELETE /api/workflows/* must be owner-only.
@@ -1196,7 +1276,7 @@ else if (builder.Environment.IsDevelopment())
         // Register all named policies with permissive default
         foreach (var name in new[] { "AdminAccess", "OwnerAccess", "PlatformOwnerAccess", "MemberAccess", "SettingsView",
             "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
-            "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny" })
+            "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny", "EngineServiceOnly" })
         {
             options.AddPolicy(name, p => p.AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement()));
         }
@@ -2114,6 +2194,22 @@ app.MapPost("/api/webhooks/{platform}", WebhookEndpoints.Receive)
 
 // ── SaaS (API key auth) ──
 app.MapPost("/api/v1/llm/chat", SaaSEndpoints.LlmChat).RequireAuthorization();
+
+// ── Story 32-5 (T4) — the call-LLM mediation endpoint (sequence step F) ──
+// Internal/engine-only (Finding C2): the engine's CallLlmInlineActivity thin
+// client posts an LlmCallRequest here as the service-scope Tamma:ApiToken
+// (Bearer, authenticated by the platform ApiKey chain → ServiceAuthPrincipal).
+// The EngineServiceOnly policy requires that typed service principal, so a user
+// JWT — which authenticates but never produces a ServiceAuthPrincipal — is
+// rejected with 403 (the endpoint drives arbitrary LLM spend + tool execution
+// and must be engine-only, unlike the broad default the rest of the callbacks
+// ride). A missing/invalid bearer ⇒ 401 from the auth pipeline before the
+// handler. The handler delegates to IManagedAgent.RunAsync and maps via
+// ToHttpResult under the §2.4 status discipline (200 / 200 success:false
+// +httpStatusCode / 400 / 403; NEVER a raw 5xx).
+app.MapPost("/api/v1/llm/call", LlmCallEndpoints.CallLlm)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("CallLlm");
 app.MapPost("/api/v1/workflows/{id}/status", SaaSEndpoints.UpdateWorkflowStatus).RequireAuthorization();
 app.MapPost("/api/v1/workflows/{id}/result", SaaSEndpoints.PostWorkflowResult).RequireAuthorization();
 app.MapPost("/api/v1/installations/{id}/rotate-key", SaaSEndpoints.RotateInstallationKey).RequireAuthorization();

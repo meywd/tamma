@@ -86,6 +86,35 @@ public class TammaApiClient
         return PostAsync<AgentResolveResult>(url, request, tenantId, ct);
     }
 
+    // ----- Managed LLM Call (Story 32-5 — the mediation endpoint) ------
+
+    /// <summary>
+    /// Story 32-5 (AC5) — POST the engine→API <see cref="LlmCallApiRequest"/> to
+    /// the single managed execution endpoint <c>POST /api/v1/llm/call</c> and
+    /// return the key-free <see cref="LlmCallApiResponse"/>.
+    ///
+    /// <para>Uses the shared <see cref="PostAsync{T}"/> path so the request gets
+    /// the engine bearer (configured <c>Tamma:ApiToken</c>), the
+    /// <c>X-Tenant-Id</c> header (<paramref name="tenantId"/> — the authoritative
+    /// scope the endpoint asserts; the body <c>tenantId</c> carries no authority,
+    /// Finding C1), and per-call health recording.</para>
+    ///
+    /// <para>The endpoint upholds AC7's status discipline: an expected execution
+    /// failure rides inside an HTTP 200 envelope with <c>success:false</c> and the
+    /// upstream <c>httpStatusCode</c> preserved, so the engine receives a real
+    /// body (never nulled by a raw 5xx). A genuine transport / 5xx failure returns
+    /// <c>null</c> per the existing contract; the shim treats that as a transient
+    /// (httpStatusCode 0) failure so the workflow's RetryCheck advances.</para>
+    /// </summary>
+    public Task<LlmCallApiResponse?> CallLlmAsync(
+        LlmCallApiRequest request,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/llm/call";
+        return PostAsync<LlmCallApiResponse>(url, request, tenantId, ct);
+    }
+
     // ----- Provider Health ---------------------------------------------
 
     public Task<ProviderHealthStatus?> GetProviderHealthAsync(

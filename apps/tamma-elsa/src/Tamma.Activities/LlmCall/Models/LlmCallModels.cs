@@ -15,8 +15,13 @@ public class LlmCallWorkflowInput
     /// <summary>Logical operation name for diagnostics and prompt resolution (e.g. "code_review", "blocker_diagnosis").</summary>
     public string OperationName { get; set; } = string.Empty;
 
-    /// <summary>The role / persona the LLM should adopt (e.g. "mentor", "code_reviewer").</summary>
-    public string Role { get; set; } = "assistant";
+    /// <summary>
+    /// The agent role driving server-side prompt/persona resolution. MUST be a
+    /// canonical AgentRole wire (e.g. "developer", "senior_developer", "tester",
+    /// "architect") or a RolePhaseMap alias (e.g. "implementer", "reviewer") —
+    /// the call-LLM endpoint's AgentResolverService 422s on an unknown role.
+    /// </summary>
+    public string Role { get; set; } = "developer";
 
     /// <summary>User-supplied prompt content (the "user message").</summary>
     public string UserPrompt { get; set; } = string.Empty;

@@ -12,10 +12,11 @@ using Tamma.Activities.LlmCall.Models;
 namespace Tamma.Activities.Tests.LlmCall;
 
 /// <summary>
-/// Story 32-3 Phase 3 / Phase 5 — credential resolution wired into
-/// <see cref="CallLlmInlineActivity"/>, including the load-bearing redaction
-/// test (AC5): the resolved BYOK key reaches the outbound HTTP header ONLY and
-/// is absent from the resulting diagnostic.
+/// Story 32-3 Phase 3 / Phase 5 — credential resolution in the shared
+/// <see cref="InlineToolLoopRunner"/> (Story 32-5 (AC4) moved the provider-call /
+/// config helpers here verbatim from <c>CallLlmInlineActivity</c>), including the
+/// load-bearing redaction test (AC5): the resolved BYOK key reaches the outbound
+/// HTTP header ONLY and is absent from the resulting diagnostic.
 /// </summary>
 [TestFixture]
 public class CallLlmInlineCredentialTests
@@ -27,9 +28,9 @@ public class CallLlmInlineCredentialTests
     [Test]
     public async Task LoadProviderConfigWithKey_NoResolver_LeavesApiKeyEmpty_LegacyPath()
     {
-        var activity = new CallLlmInlineActivity(); // no resolver
+        var runner = new InlineToolLoopRunner(null, null, null, null); // no resolver
 
-        var (config, source) = await activity.LoadProviderConfigWithKeyAsync(
+        var (config, source) = await runner.LoadProviderConfigWithKeyAsync(
             "anthropic", tenantId: null, CancellationToken.None);
 
         config.ApiKey.Should().BeEmpty("the resolver is the only key source; legacy path leaves it blank");
@@ -50,10 +51,10 @@ public class CallLlmInlineCredentialTests
             ["LlmProviders:anthropic:ApiKey"] = "SHOULD-NEVER-BE-READ",
             ["Anthropic:ApiKey"] = "SHOULD-NEVER-BE-READ-EITHER",
         });
-        var activity = new CallLlmInlineActivity(
-            NullLogger<CallLlmInlineActivity>.Instance, null, config, null);
+        var runner = new InlineToolLoopRunner(
+            NullLogger<InlineToolLoopRunner>.Instance, null, config, null);
 
-        var (cfg, source) = await activity.LoadProviderConfigWithKeyAsync(
+        var (cfg, source) = await runner.LoadProviderConfigWithKeyAsync(
             "anthropic", tenantId: null, CancellationToken.None);
 
         cfg.ApiKey.Should().BeEmpty();
@@ -68,10 +69,10 @@ public class CallLlmInlineCredentialTests
     {
         var resolver = new FakeResolver(new ProviderCredential(
             Sentinel, CredentialSource.Byok, "tenant:abc:provider/anthropic/api-key", 1));
-        var activity = NewActivity(resolver);
+        var runner = NewRunner(resolver);
         var tenant = Guid.NewGuid();
 
-        var (config, source) = await activity.LoadProviderConfigWithKeyAsync(
+        var (config, source) = await runner.LoadProviderConfigWithKeyAsync(
             "anthropic", tenant, CancellationToken.None);
 
         config.ApiKey.Should().Be(Sentinel);
@@ -85,9 +86,9 @@ public class CallLlmInlineCredentialTests
     {
         var resolver = new FakeResolver(new ProviderCredential(
             "PLATFORM-KEY", CredentialSource.Platform, "platform:anthropic/api-key", null));
-        var activity = NewActivity(resolver);
+        var runner = NewRunner(resolver);
 
-        var (config, source) = await activity.LoadProviderConfigWithKeyAsync(
+        var (config, source) = await runner.LoadProviderConfigWithKeyAsync(
             "anthropic", tenantId: null, CancellationToken.None);
 
         config.ApiKey.Should().Be("PLATFORM-KEY");
@@ -100,9 +101,9 @@ public class CallLlmInlineCredentialTests
     public async Task LoadProviderConfigWithKey_ResolverThrows_PropagatesTammaError()
     {
         var resolver = new ThrowingResolver();
-        var activity = NewActivity(resolver);
+        var runner = NewRunner(resolver);
 
-        var act = async () => await activity.LoadProviderConfigWithKeyAsync(
+        var act = async () => await runner.LoadProviderConfigWithKeyAsync(
             "anthropic", Guid.NewGuid(), CancellationToken.None);
 
         await act.Should().ThrowAsync<Tamma.Core.TammaError>()
@@ -117,17 +118,17 @@ public class CallLlmInlineCredentialTests
         var resolver = new FakeResolver(new ProviderCredential(
             Sentinel, CredentialSource.Byok, "tenant:abc:provider/anthropic/api-key", 1));
         var capture = new CapturingHandler(AnthropicSuccessBody());
-        var activity = NewActivity(resolver);
+        var runner = NewRunner(resolver);
         var tenant = Guid.NewGuid();
 
         // 1) Resolve (BYOK) → config carries the sentinel.
-        var (config, source) = await activity.LoadProviderConfigWithKeyAsync(
+        var (config, source) = await runner.LoadProviderConfigWithKeyAsync(
             "anthropic", tenant, CancellationToken.None);
         source.Should().Be("byok");
 
         // 2) Make the call with a capturing handler.
         using var http = new HttpClient(capture);
-        var response = await activity.CallAnthropicMessages(
+        var response = await runner.CallAnthropicMessages(
             http, config, "claude-sonnet-4-20250514", "system", "user", 256, 0.7, null);
 
         // 3) Sentinel is in x-api-key ONLY.
@@ -155,13 +156,13 @@ public class CallLlmInlineCredentialTests
         var resolver = new FakeResolver(new ProviderCredential(
             Sentinel, CredentialSource.Byok, "tenant:abc:provider/openai/api-key", 1));
         var capture = new CapturingHandler(OpenAiSuccessBody());
-        var activity = NewActivity(resolver);
+        var runner = NewRunner(resolver);
 
-        var (config, _) = await activity.LoadProviderConfigWithKeyAsync(
+        var (config, _) = await runner.LoadProviderConfigWithKeyAsync(
             "openai", Guid.NewGuid(), CancellationToken.None);
 
         using var http = new HttpClient(capture);
-        await activity.CallOpenAiCompatible(
+        await runner.CallOpenAiCompatible(
             http, config, "gpt-4o", "system", "user", 256, 0.7, null);
 
         capture.SentAuthorizationHeader.Should().Be($"Bearer {Sentinel}");
@@ -171,8 +172,8 @@ public class CallLlmInlineCredentialTests
 
     // ─────────────────────────────────────────────────────────────────────
 
-    private static CallLlmInlineActivity NewActivity(IProviderCredentialResolver resolver) =>
-        new(NullLogger<CallLlmInlineActivity>.Instance, null, null, null,
+    private static InlineToolLoopRunner NewRunner(IProviderCredentialResolver resolver) =>
+        new(NullLogger<InlineToolLoopRunner>.Instance, null, null, null,
             null, null, null, null, null, resolver);
 
     private static string AnthropicSuccessBody() => """

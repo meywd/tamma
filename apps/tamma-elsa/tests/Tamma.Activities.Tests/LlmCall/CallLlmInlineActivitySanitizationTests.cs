@@ -8,6 +8,21 @@ using Tamma.Activities.Security;
 
 namespace Tamma.Activities.Tests.LlmCall;
 
+/// <summary>
+/// Story 32-5 — sanitizer regression net for the LlmCall path.
+///
+/// <para><b>Finding I-3 (relocation note).</b> Before the Epic-32 pivot, the
+/// engine-side <c>CallLlmInlineActivity</c> ran <c>SanitizePrompts</c> (injection
+/// detection + HTML strip) on the system + user prompt BEFORE the provider call.
+/// After the pivot the activity is a thin client that forwards to
+/// <c>POST /api/v1/llm/call</c> and holds NO provider logic, so INPUT-prompt
+/// sanitization now happens SERVER-SIDE in <c>ManagedAgent</c> (verified by
+/// <c>ManagedAgentTests.RunAsync_SanitizesInputPrompts_BeforeProviderCall</c>) — the
+/// real coverage was RELOCATED there, not weakened. This file retains the
+/// collaborator-level behaviour checks (the <see cref="ContentSanitizer"/> the
+/// server-side path uses is the SAME one) plus the shim's sanitizer-compatible
+/// constructors (so callers/tests that still pass a sanitizer keep compiling).</para>
+/// </summary>
 [TestFixture]
 public class CallLlmInlineActivitySanitizationTests
 {

@@ -190,7 +190,10 @@ public class LlmCallWorkflow : WorkflowBase
                     return dictRole;
                 }
 
-                return input.Role ?? "assistant";
+                // Default to a canonical AgentRole wire — the call-LLM endpoint
+                // 422s on a non-canonical/unaliased role. (Empty-safe, not just
+                // null-safe: input.Role is non-nullable and may be "".)
+                return string.IsNullOrWhiteSpace(input.Role) ? "developer" : input.Role;
             })
         };
         initInputs.SetDisplayText("Initialize Inputs");

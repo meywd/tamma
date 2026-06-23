@@ -4,9 +4,9 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Tamma.Activities.LlmCall;
 using Tamma.Activities.TDD.Models;
 
 namespace Tamma.Activities.TDD;
@@ -16,6 +16,11 @@ namespace Tamma.Activities.TDD;
 /// Part of the RED phase in the TDD cycle.
 /// Calls LLM with role=tester to write tests that should initially fail.
 /// Skill-level adaptation: L1-2 get detailed templates, L4-5 get high-level specs.
+///
+/// <para>Story 32-5 (AC9): the LLM call routes through the mediated call-LLM
+/// endpoint (<see cref="MediatedLlmText"/>) — the engine holds NO provider key
+/// and makes no direct <c>/v1/messages</c> call. The mock path remains for
+/// tests. The output contract (<see cref="TestGenerationResult"/>) is unchanged.</para>
 /// </summary>
 [Activity(
     "Tamma.TDD",
@@ -93,22 +98,11 @@ public class WriteTestsActivity : CodeActivity<TestGenerationResult>
         {
             var prompt = BuildTestPrompt(taskDescription, taskFiles, codeContext, skillLevel, isRewrite, previousTestCode);
 
-            var callbackUrl = _configuration?["Engine:CallbackUrl"];
             var useMock = _configuration?.GetValue<bool>("Anthropic:UseMock") ?? false;
 
-            string response;
-            if (useMock)
-            {
-                response = SimulateTestGeneration(taskDescription, taskFiles, isRewrite);
-            }
-            else if (!string.IsNullOrEmpty(callbackUrl))
-            {
-                response = await CallEngineCallback(callbackUrl, prompt);
-            }
-            else
-            {
-                response = await CallLlm(prompt);
-            }
+            var response = useMock
+                ? SimulateTestGeneration(taskDescription, taskFiles, isRewrite)
+                : await MediatedLlmText.CompleteAsync(context, "tester", prompt, context.CancellationToken);
 
             var result = ParseTestGenerationResponse(response, taskFiles);
 
@@ -184,46 +178,6 @@ Write tests that:
 4. Follow the project's existing test patterns
 
 Respond with JSON: {{""testCode"": ""..."", ""testFiles"": [""...""], ""testCount"": N}}";
-    }
-
-    private async Task<string> CallEngineCallback(string callbackUrl, string prompt)
-    {
-        var httpClient = _httpClientFactory!.CreateClient();
-        var requestBody = new { prompt, role = "tester" };
-        var response = await httpClient.PostAsJsonAsync(
-            $"{callbackUrl.TrimEnd('/')}/api/engine/execute-task", requestBody);
-        response.EnsureSuccessStatusCode();
-        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return result.GetProperty("output").GetString() ?? "{}";
-    }
-
-    private async Task<string> CallLlm(string prompt)
-    {
-        var httpClient = _httpClientFactory!.CreateClient("anthropic");
-        var model = _configuration!["Anthropic:Model"] ?? "claude-sonnet-4-20250514";
-
-        var requestBody = new
-        {
-            model,
-            max_tokens = 4096,
-            system = "You are a TDD test writer. Generate tests that will fail initially and only pass once the correct implementation is in place.",
-            messages = new[] { new { role = "user", content = prompt } }
-        };
-
-        var response = await httpClient.PostAsJsonAsync("/v1/messages", requestBody);
-        response.EnsureSuccessStatusCode();
-
-        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var contentArray = result.GetProperty("content");
-        foreach (var block in contentArray.EnumerateArray())
-        {
-            if (block.GetProperty("type").GetString() == "text")
-            {
-                return block.GetProperty("text").GetString() ?? "{}";
-            }
-        }
-
-        return "{}";
     }
 
     private static string SimulateTestGeneration(string taskDescription, List<string> taskFiles, bool isRewrite)

@@ -7,15 +7,21 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Net.Http.Json;
 using Tamma.Activities.ADL.Models;
+using Tamma.Activities.LlmCall;
 
 namespace Tamma.Activities.ADL;
 
 /// <summary>
 /// Applies fixes for review comments using AI-generated code changes.
-/// Calls the LLM (mock/callback/direct modes, same pattern as WriteImplementationActivity)
-/// to generate fixes based on review comments, then returns the result.
+/// Generates fixes based on review comments, then returns the result.
+///
+/// <para>Story 32-5 (AC9): when the parent workflow does not pre-supply a fix
+/// response (the DispatchWorkflow llm-call path via <see cref="LlmFixResponse"/>),
+/// the internal LLM call routes through the mediated call-LLM endpoint
+/// (<see cref="MediatedLlmText"/>) — the engine holds NO provider key. The mock
+/// path remains for tests; the output contract (<see cref="ReviewFixResult"/>) is
+/// unchanged.</para>
 ///
 /// Outcomes:
 ///   - Fixed: fixes generated successfully
@@ -102,23 +108,13 @@ public class ApplyReviewFixesActivity : Activity
             }
             else
             {
-                // Generate fixes internally (mock/callback/direct LLM)
+                // Generate fixes internally (mock for tests, else mediated call-LLM)
                 var prompt = BuildFixPrompt(analysis, repository, branchName);
                 var useMock = _configuration?.GetValue<bool>("Anthropic:UseMock") ?? false;
-                var callbackUrl = _configuration?["Engine:CallbackUrl"];
 
-                if (useMock)
-                {
-                    response = SimulateFixGeneration(analysis);
-                }
-                else if (!string.IsNullOrEmpty(callbackUrl))
-                {
-                    response = await CallEngineCallback(callbackUrl, prompt);
-                }
-                else
-                {
-                    response = await CallLlm(prompt);
-                }
+                response = useMock
+                    ? SimulateFixGeneration(analysis)
+                    : await MediatedLlmText.CompleteAsync(context, "implementer", prompt, context.CancellationToken);
             }
 
             var result = ParseFixResponse(response, analysis);
@@ -193,46 +189,6 @@ Respond with valid JSON:
     }}
   ]
 }}";
-    }
-
-    private async Task<string> CallEngineCallback(string callbackUrl, string prompt)
-    {
-        var httpClient = _httpClientFactory!.CreateClient();
-        var requestBody = new { prompt, role = "implementer" };
-        var response = await httpClient.PostAsJsonAsync(
-            $"{callbackUrl.TrimEnd('/')}/api/engine/execute-task", requestBody);
-        response.EnsureSuccessStatusCode();
-        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return result.GetProperty("output").GetString() ?? "{}";
-    }
-
-    private async Task<string> CallLlm(string prompt)
-    {
-        var httpClient = _httpClientFactory!.CreateClient("anthropic");
-        var model = _configuration!["Anthropic:Model"] ?? "claude-sonnet-4-20250514";
-
-        var requestBody = new
-        {
-            model,
-            max_tokens = 4096,
-            system = "You are a code fix assistant. Apply targeted fixes for code review comments. Keep changes minimal and focused. Respond with valid JSON only.",
-            messages = new[] { new { role = "user", content = prompt } }
-        };
-
-        var response = await httpClient.PostAsJsonAsync("/v1/messages", requestBody);
-        response.EnsureSuccessStatusCode();
-
-        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var contentArray = result.GetProperty("content");
-        foreach (var block in contentArray.EnumerateArray())
-        {
-            if (block.GetProperty("type").GetString() == "text")
-            {
-                return block.GetProperty("text").GetString() ?? "{}";
-            }
-        }
-
-        return "{}";
     }
 
     internal static string SimulateFixGeneration(ReviewAnalysisResult analysis)

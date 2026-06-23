@@ -4,9 +4,9 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Tamma.Activities.LlmCall;
 using Tamma.Activities.TDD.Models;
 
 namespace Tamma.Activities.TDD;
@@ -15,6 +15,10 @@ namespace Tamma.Activities.TDD;
 /// ELSA activity that generates the minimum implementation to make failing tests pass.
 /// Part of the GREEN phase in the TDD cycle.
 /// Calls LLM with role=implementer to write code that satisfies the tests.
+///
+/// <para>Story 32-5 (AC9): the LLM call routes through the mediated call-LLM
+/// endpoint (<see cref="MediatedLlmText"/>) — no direct provider key/HTTP in the
+/// engine. The mock path remains for tests; the output contract is unchanged.</para>
 /// </summary>
 [Activity(
     "Tamma.TDD",
@@ -87,22 +91,11 @@ public class WriteImplementationActivity : CodeActivity<ImplementationResult>
         {
             var prompt = BuildImplementationPrompt(taskDescription, testCode, testFailureOutput, codeContext, skillLevel);
 
-            var callbackUrl = _configuration?["Engine:CallbackUrl"];
             var useMock = _configuration?.GetValue<bool>("Anthropic:UseMock") ?? false;
 
-            string response;
-            if (useMock)
-            {
-                response = SimulateImplementation(taskDescription);
-            }
-            else if (!string.IsNullOrEmpty(callbackUrl))
-            {
-                response = await CallEngineCallback(callbackUrl, prompt);
-            }
-            else
-            {
-                response = await CallLlm(prompt);
-            }
+            var response = useMock
+                ? SimulateImplementation(taskDescription)
+                : await MediatedLlmText.CompleteAsync(context, "implementer", prompt, context.CancellationToken);
 
             var result = ParseImplementationResponse(response);
 
@@ -159,46 +152,6 @@ Requirements:
 4. Keep the implementation simple and focused
 
 Respond with JSON: {{""implementationCode"": ""..."", ""implementationFiles"": [""...""]}}";
-    }
-
-    private async Task<string> CallEngineCallback(string callbackUrl, string prompt)
-    {
-        var httpClient = _httpClientFactory!.CreateClient();
-        var requestBody = new { prompt, role = "implementer" };
-        var response = await httpClient.PostAsJsonAsync(
-            $"{callbackUrl.TrimEnd('/')}/api/engine/execute-task", requestBody);
-        response.EnsureSuccessStatusCode();
-        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return result.GetProperty("output").GetString() ?? "{}";
-    }
-
-    private async Task<string> CallLlm(string prompt)
-    {
-        var httpClient = _httpClientFactory!.CreateClient("anthropic");
-        var model = _configuration!["Anthropic:Model"] ?? "claude-sonnet-4-20250514";
-
-        var requestBody = new
-        {
-            model,
-            max_tokens = 4096,
-            system = "You are a TDD implementer. Write the minimum code needed to make failing tests pass. Keep it simple and focused.",
-            messages = new[] { new { role = "user", content = prompt } }
-        };
-
-        var response = await httpClient.PostAsJsonAsync("/v1/messages", requestBody);
-        response.EnsureSuccessStatusCode();
-
-        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var contentArray = result.GetProperty("content");
-        foreach (var block in contentArray.EnumerateArray())
-        {
-            if (block.GetProperty("type").GetString() == "text")
-            {
-                return block.GetProperty("text").GetString() ?? "{}";
-            }
-        }
-
-        return "{}";
     }
 
     private static string SimulateImplementation(string taskDescription)

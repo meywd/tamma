@@ -250,16 +250,10 @@ builder.Services.AddSingleton<Tamma.Activities.LlmCall.TammaApiHealthMonitor>(sp
         new Tamma.Activities.LlmCall.ScopedAlertEventEmitter(sp),
         sp.GetService<TimeProvider>()));
 
-// Tool execution services — used by the agentic tool loop in CallLlmInlineActivity (Story 12.1)
-// All tools are stateless singletons. The registry (also Singleton) captures them via
-// IEnumerable<IToolExecutor>, so they must share the same lifetime to avoid a captive dependency.
-builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.FileReadTool>();
-builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.FileWriteTool>();
-builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.SearchCodeTool>();
-builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.ShellExecuteTool>();
-builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.GitOperationsTool>();
-builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutor, Tamma.Activities.LlmCall.Tools.RunTestsTool>();
-builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.IToolExecutorRegistry, Tamma.Activities.LlmCall.Tools.ToolExecutorRegistry>();
+// Story 32-5 (AC9) — the agentic tool-loop tool catalog (IToolExecutor* +
+// IToolExecutorRegistry) was REMOVED from the engine. The loop now runs in
+// Tamma.Api (where the request-scoped provider key is resolved), so the tool
+// executors are registered there, not here.
 
 // ─── Epic 19: Agent dispatch services (stories 19-2 / 3 / 4 / 5) ───────
 //
@@ -324,8 +318,11 @@ builder.Services.AddOptions<Tamma.Activities.TenantLifecycle.TenantBackupOptions
             .GetSection(Tamma.Activities.TenantLifecycle.TenantBackupOptions.SectionName)
             .Bind(opts));
 
-// Security services (Epic 11 — LLM injection hardening)
-builder.Services.AddSingleton<IContentSanitizer, ContentSanitizer>();
+// Security services (Epic 11 — LLM injection hardening).
+// Story 32-5 (AC9): IContentSanitizer was REMOVED from the engine — input-prompt
+// sanitization runs SERVER-SIDE in ManagedAgent (Tamma.Api), where the tool loop
+// now executes. IErrorRedactor is KEPT — RecordDiagnostics* and the tenant
+// cleanup classifier (engine-resident) still redact error strings with it.
 builder.Services.AddSingleton<IErrorRedactor, ErrorRedactor>();
 
 // Provider allowlist (Story 11.5 — fail-closed guards)
@@ -333,27 +330,22 @@ builder.Services.Configure<ProviderAllowlistOptions>(
     builder.Configuration.GetSection("Security:ProviderAllowlist"));
 builder.Services.AddSingleton<ProviderAllowlist>();
 
-// Story 32-3 — provider-credential resolution for CallLlmInlineActivity.
-// CRITICAL: the activity executes in THIS (Elsa engine) process, which does
-// NOT reference Tamma.Api, so the cabinet-backed DefaultProviderCredential
-// Resolver (BYOK) is unreachable here. Without a resolver registered, the
-// activity bound a null resolver and sent an EMPTY ApiKey — a hard regression
-// to no-auth. AddEngineProviderCredentialResolution wires the config-backed
-// platform-key resolver (ConfigPlatformProviderCredentialResolver) so the
-// platform key from LlmProviders:<provider>:ApiKey (or the legacy
-// <Provider>:ApiKey slot) flows through to the outbound call (AC12), and the
-// resolver fails closed (never an empty key) when no key is configured.
-// SaaS BYOK resolution stays owned by Tamma.Api's cabinet-backed resolver.
-builder.Services.AddEngineProviderCredentialResolution();
-
-// Tool call validation (Story 11.3 — allowlist enforcement, ActionGate)
-builder.Services.Configure<ActionGateOptions>(
-    builder.Configuration.GetSection("Security:ActionGate"));
-builder.Services.AddSingleton<ActionGate>();
-builder.Services.AddSingleton<IToolCallValidator, ToolCallValidator>();
-
-// Context compaction for long-running tool loops (Story 12.3)
-builder.Services.AddSingleton<Tamma.Activities.LlmCall.Tools.ContextCompactor>();
+// Story 32-5 (AC9) — the engine holds NO LLM provider key.
+//
+// The 32-3 engine credential-resolver wiring was DELETED here: after the Epic-32
+// pivot a workflow STEP never calls an external provider. Every LLM call routes
+// through POST /api/v1/llm/call in Tamma.Api (via TammaApiClient.CallLlmAsync),
+// which holds the request-scoped credential, gates, runs the agentic tool loop
+// server-side, and meters. The CallLlm activities and the TDD/ADL/Debug/AI
+// callers are thin clients over that endpoint.
+//
+// Consequently the provider-side collaborators that only ever fed the in-engine
+// loop are NO LONGER registered in the engine — they live in the API process
+// where the runner now executes: the content sanitizer, the tool-call validator
+// + action gate, the tool-executor catalog + registry, the context compactor,
+// and the tool-loop runner. (IErrorRedactor is KEPT — it is still used by
+// RecordDiagnostics* and the tenant-lifecycle cleanup path. ProviderAllowlist is
+// KEPT — LlmCallWorkflow still filters the provider chain through it; no key.)
 
 // Health checks
 builder.Services.AddHealthChecks();
