@@ -35,8 +35,27 @@ public interface ISlackIntegrationService
 /// </summary>
 public interface IGitHubIntegrationService
 {
-    /// <summary>Create a GitHub branch</summary>
+    /// <summary>Create a GitHub branch from the repo default branch (main → master).</summary>
     Task<IntegrationResult<GitHubBranchResult>> CreateGitHubBranchAsync(string repository, string branchName);
+
+    /// <summary>
+    /// Create a GitHub branch cut from an explicit <paramref name="baseBranch"/>
+    /// (Story 2.4 AC2). The base SHA is resolved from the given base ref; if the
+    /// base is explicitly supplied and missing this FAILS (<c>base_branch_not_found</c>)
+    /// rather than silently cutting from an unrelated branch (no false success).
+    /// The resolved base SHA is surfaced on <see cref="GitHubBranchResult.BaseSha"/>
+    /// for the audit event. When <paramref name="baseBranch"/> is null/empty the
+    /// default-branch behaviour (main → master) is used.
+    /// </summary>
+    Task<IntegrationResult<GitHubBranchResult>> CreateGitHubBranchAsync(string repository, string branchName, string? baseBranch);
+
+    /// <summary>
+    /// Returns whether a branch (ref <c>heads/{branchName}</c>) already exists
+    /// (Story 2.4 — idempotency / conflict handling + post-create validation):
+    /// <c>Ok(true)</c> exists, <c>Ok(false)</c> absent, <c>Fail</c> on API error
+    /// (so a transient lookup failure is NOT mistaken for "absent").
+    /// </summary>
+    Task<IntegrationResult<bool>> BranchExistsAsync(string repository, string branchName);
 
     /// <summary>Get recent commits from a branch</summary>
     Task<IntegrationResult<List<GitHubCommit>>> GetGitHubCommitsAsync(string repository, string branch, DateTime? since = null);
@@ -138,6 +157,12 @@ public interface IIntegrationService
     /// <summary>Create a GitHub branch</summary>
     Task<GitHubBranchResult> CreateGitHubBranchAsync(string repository, string branchName);
 
+    /// <summary>Create a GitHub branch cut from an explicit base branch</summary>
+    Task<GitHubBranchResult> CreateGitHubBranchAsync(string repository, string branchName, string? baseBranch);
+
+    /// <summary>Returns whether a branch already exists</summary>
+    Task<bool> BranchExistsAsync(string repository, string branchName);
+
     /// <summary>Get recent commits from a branch</summary>
     Task<List<GitHubCommit>> GetGitHubCommitsAsync(string repository, string branch, DateTime? since = null);
 
@@ -193,6 +218,14 @@ public class GitHubBranchResult
     public bool Success { get; set; }
     public string? BranchName { get; set; }
     public string? BranchUrl { get; set; }
+
+    /// <summary>
+    /// The SHA of the base ref the branch was cut from (Story 2.4 AC4 — surfaced
+    /// in the <c>BRANCH.CREATED.SUCCESS</c> event/log). Null when not resolved
+    /// (e.g. a failed create) or on the legacy default-branch path.
+    /// </summary>
+    public string? BaseSha { get; set; }
+
     public string? Error { get; set; }
 }
 

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Tamma.Core.Interfaces;
@@ -23,7 +24,10 @@ public class GitHubIntegrationService : IGitHubIntegrationService
         _logger = logger;
     }
 
-    public async Task<IntegrationResult<GitHubBranchResult>> CreateGitHubBranchAsync(string repository, string branchName)
+    public Task<IntegrationResult<GitHubBranchResult>> CreateGitHubBranchAsync(string repository, string branchName)
+        => CreateGitHubBranchAsync(repository, branchName, baseBranch: null);
+
+    public async Task<IntegrationResult<GitHubBranchResult>> CreateGitHubBranchAsync(string repository, string branchName, string? baseBranch)
     {
         var httpClient = _httpClientFactory.CreateClient("github");
         var token = _configuration["GitHub:Token"];
@@ -35,18 +39,41 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
         try
         {
-            _logger.LogInformation("Creating branch {Branch} in {Repo}", branchName, repository);
+            _logger.LogInformation(
+                "Creating branch {Branch} in {Repo} from base {Base}",
+                branchName, repository, string.IsNullOrWhiteSpace(baseBranch) ? "<default>" : baseBranch);
 
-            // Get default branch SHA
-            var refsResponse = await httpClient.GetAsync($"/repos/{repository}/git/refs/heads/main");
-            if (!refsResponse.IsSuccessStatusCode)
+            // Resolve the base SHA. With an explicit base, resolve THAT ref and do
+            // NOT silently fall back to an unrelated branch (no false success).
+            // Without one, use the default-branch behaviour (main → master).
+            string sha;
+            if (!string.IsNullOrWhiteSpace(baseBranch))
             {
-                refsResponse = await httpClient.GetAsync($"/repos/{repository}/git/refs/heads/master");
-            }
-            refsResponse.EnsureSuccessStatusCode();
+                var baseResponse = await httpClient.GetAsync($"/repos/{repository}/git/refs/heads/{Uri.EscapeDataString(baseBranch)}");
+                if (baseResponse.StatusCode == HttpStatusCode.NotFound)
+                {
+                    _logger.LogError("Base branch {Base} not found in {Repo}", baseBranch, repository);
+                    return IntegrationResult<GitHubBranchResult>.Fail($"base_branch_not_found: {baseBranch}");
+                }
+                if (!baseResponse.IsSuccessStatusCode)
+                    return IntegrationResult<GitHubBranchResult>.Fail(
+                        $"{(int)baseResponse.StatusCode}: failed to resolve base {baseBranch}");
 
-            var refData = await refsResponse.Content.ReadFromJsonAsync<JsonElement>();
-            var sha = refData.GetProperty("object").GetProperty("sha").GetString()!;
+                var baseData = await baseResponse.Content.ReadFromJsonAsync<JsonElement>();
+                sha = baseData.GetProperty("object").GetProperty("sha").GetString()!;
+            }
+            else
+            {
+                var refsResponse = await httpClient.GetAsync($"/repos/{repository}/git/refs/heads/main");
+                if (!refsResponse.IsSuccessStatusCode)
+                    refsResponse = await httpClient.GetAsync($"/repos/{repository}/git/refs/heads/master");
+                if (refsResponse.StatusCode == HttpStatusCode.NotFound)
+                    return IntegrationResult<GitHubBranchResult>.Fail("base_branch_not_found: main/master");
+                refsResponse.EnsureSuccessStatusCode();
+
+                var refData = await refsResponse.Content.ReadFromJsonAsync<JsonElement>();
+                sha = refData.GetProperty("object").GetProperty("sha").GetString()!;
+            }
 
             // Create the branch
             var createPayload = new
@@ -55,13 +82,24 @@ public class GitHubIntegrationService : IGitHubIntegrationService
                 sha
             };
             var createResponse = await httpClient.PostAsJsonAsync($"/repos/{repository}/git/refs", createPayload);
-            createResponse.EnsureSuccessStatusCode();
+            if (!createResponse.IsSuccessStatusCode)
+            {
+                // Surface the status code + body so the activity can classify the
+                // failure (permission / already-exists / protected-base) rather
+                // than collapsing every error into a bare throw.
+                var body = await createResponse.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Failed to create branch {Branch} in {Repo}: {Status} {Body}",
+                    branchName, repository, (int)createResponse.StatusCode, body);
+                return IntegrationResult<GitHubBranchResult>.Fail($"{(int)createResponse.StatusCode}: {body}");
+            }
 
             var result = new GitHubBranchResult
             {
                 Success = true,
                 BranchName = branchName,
-                BranchUrl = $"https://github.com/{repository}/tree/{branchName}"
+                BranchUrl = $"https://github.com/{repository}/tree/{branchName}",
+                BaseSha = sha
             };
             return IntegrationResult<GitHubBranchResult>.Ok(result);
         }
@@ -69,6 +107,30 @@ public class GitHubIntegrationService : IGitHubIntegrationService
         {
             _logger.LogError(ex, "Failed to create GitHub branch {Branch}", branchName);
             return IntegrationResult<GitHubBranchResult>.Fail(ex.Message);
+        }
+    }
+
+    public async Task<IntegrationResult<bool>> BranchExistsAsync(string repository, string branchName)
+    {
+        var httpClient = _httpClientFactory.CreateClient("github");
+
+        try
+        {
+            var response = await httpClient.GetAsync($"/repos/{repository}/git/refs/heads/{Uri.EscapeDataString(branchName)}");
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                return IntegrationResult<bool>.Ok(false);
+            if (response.IsSuccessStatusCode)
+                return IntegrationResult<bool>.Ok(true);
+
+            // Any other status (403/5xx/...) is an error — NOT "absent", so we
+            // never mistake a transient failure for a free-to-create branch.
+            var body = await response.Content.ReadAsStringAsync();
+            return IntegrationResult<bool>.Fail($"{(int)response.StatusCode}: {body}");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to check branch existence {Branch} in {Repo}", branchName, repository);
+            return IntegrationResult<bool>.Fail(ex.Message);
         }
     }
 

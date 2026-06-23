@@ -362,6 +362,9 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["issueNumber"] = issueNumber.Get(ctx),
                 ["baseBranch"] = baseBranch.Get(ctx),
                 ["workItemJson"] = workItemJson.Get(ctx),
+                // Thread the tenant so BRANCH.CREATED.* events are tenant-scoped
+                // in the durable DCB drain (single-user → empty → platform-scope).
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),

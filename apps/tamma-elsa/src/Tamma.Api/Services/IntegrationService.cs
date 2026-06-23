@@ -70,6 +70,22 @@ public class IntegrationService : IIntegrationService
             : new GitHubBranchResult { Success = false, Error = result.Error };
     }
 
+    public async Task<GitHubBranchResult> CreateGitHubBranchAsync(string repository, string branchName, string? baseBranch)
+    {
+        var result = await _github.CreateGitHubBranchAsync(repository, branchName, baseBranch);
+        return result.Success
+            ? result.Data!
+            : new GitHubBranchResult { Success = false, Error = result.Error };
+    }
+
+    public async Task<bool> BranchExistsAsync(string repository, string branchName)
+    {
+        var result = await _github.BranchExistsAsync(repository, branchName);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Error);
+        return result.Data;
+    }
+
     public async Task<List<GitHubCommit>> GetGitHubCommitsAsync(string repository, string branch, DateTime? since = null)
     {
         var result = await _github.GetGitHubCommitsAsync(repository, branch, since);
