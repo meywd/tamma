@@ -539,35 +539,33 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         dispatchCodeReview.SetDisplayText("Dispatch Code Review");
 
         // ================================================================
-        // 11b. Wait for PR Approval (bookmark — blocks until approved)
+        // 11b-12. Merge-Approval Gate (sub-workflow — the human APPROVAL_GATE)
+        //
+        // Replaces the prior bare WaitForPRApprovalActivity (binary approve) +
+        // fire-and-forget "merge" dispatch with the 3-way merge/test/reject gate
+        // (merge-approval), delivering the PRD test/merge decision point and the
+        // FR-19/FR-34 audit trail. On the Merge decision the gate dispatches the
+        // SAME "merge" workflow (WaitForCompletion=true) the loop used before; on
+        // Test it re-runs CI then re-decides; on Reject/Invalid it labels/escalates.
+        // We wait for the gate so the cycle does not race ahead of the human.
         // ================================================================
-        var waitForApproval = new WaitForPRApprovalActivity
+        var mergeApprovalGate = new DispatchWorkflow
         {
-            Id = "WaitForPRApproval",
-            Name = "Wait for PR Approval",
-            Repository = new Input<string>(ctx => repository.Get(ctx)),
-            PRNumber = new Input<int>(ctx => prNumber.Get(ctx)),
-        };
-        waitForApproval.SetDisplayText("Wait for PR Approval");
-
-        // ================================================================
-        // 12. Dispatch Merge (fire & forget — handles merge, CI on main, conflicts)
-        // ================================================================
-        var dispatchMerge = new DispatchWorkflow
-        {
-            Id = "DispatchMerge",
-            Name = "Dispatch Merge",
-            WorkflowDefinitionId = new("merge"),
+            Id = "MergeApprovalGate",
+            Name = "Merge Approval Gate",
+            WorkflowDefinitionId = new("merge-approval"),
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["repository"] = repository.Get(ctx),
                 ["prNumber"] = prNumber.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
+                ["prUrl"] = prUrl.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
-            WaitForCompletion = new(false), // fire & forget
+            WaitForCompletion = new(true), // block until the human decides + the gate acts
         };
-        dispatchMerge.SetDisplayText("Dispatch Merge");
+        mergeApprovalGate.SetDisplayText("Merge Approval Gate");
 
         // ================================================================
         // 13. Wait for PR Merged (bookmark — blocks until merged)
@@ -731,8 +729,8 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 createPR, extractPR,
                 createTestCases,
                 initTaskLoop, hasMoreTasks, extractCurrentTask, tddForTask, incrementTask,
-                dispatchCodeReview, waitForApproval,
-                dispatchMerge, waitForMerged, closeIssue, deploymentPipeline,
+                dispatchCodeReview, mergeApprovalGate,
+                waitForMerged, closeIssue, deploymentPipeline,
                 // Notifications (fire-and-forget)
                 notifyProcessing, notifyInvalid, notifyContextDone,
                 notifyPlanDone, notifyPlanApproved,
@@ -848,14 +846,16 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ConnectOutcome(tddForTask, "Failed", incrementTask),
                 Connect(incrementTask, hasMoreTasks), // loop back
 
-                // TDD Loop done → notify + dispatch code review + wait for approval (parallel)
+                // TDD Loop done → notify + dispatch code review + merge-approval gate (parallel)
                 ConnectOutcome(hasMoreTasks, "False", notifyTddDone),
                 ConnectOutcome(hasMoreTasks, "False", dispatchCodeReview),
-                ConnectOutcome(hasMoreTasks, "False", waitForApproval),
+                ConnectOutcome(hasMoreTasks, "False", mergeApprovalGate),
 
-                // 11. PR Approved → Dispatch Merge + Wait for Merged (parallel)
-                Connect(waitForApproval, dispatchMerge),
-                Connect(waitForApproval, waitForMerged),
+                // 11b-12. Merge-Approval Gate (human merge/test/reject + acts on it)
+                //         → Wait for Merged. The gate dispatches the real "merge"
+                //         workflow on approval; the loop still blocks on the merge
+                //         webhook via waitForMerged before closing the issue.
+                Connect(mergeApprovalGate, waitForMerged),
 
                 // 13. Merged → Close Issue + Deployment Pipeline (parallel)
                 Connect(waitForMerged, closeIssue),

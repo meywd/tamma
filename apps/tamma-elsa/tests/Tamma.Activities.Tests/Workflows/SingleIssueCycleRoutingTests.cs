@@ -342,4 +342,80 @@ public class SingleIssueCycleRoutingTests
         tddForTask!.TimeoutMinutes.Should().NotBeNull(
             "TimeoutMinutes input must be configured for the TDD task (30 minutes default)");
     }
+
+    // ================================================================
+    // Merge-Approval Gate wiring — the cycle now routes the merge step through
+    // the 3-way merge/test/reject gate (was an unwired skeleton)
+    // ================================================================
+
+    [Test]
+    public void TddLoopDone_DispatchesMergeApprovalGate()
+    {
+        // The merge step must run through the merge-approval gate sub-workflow,
+        // not the bare binary WaitForPRApprovalActivity it replaced.
+        var gate = _flowchart.Activities
+            .OfType<DispatchWorkflow>()
+            .FirstOrDefault(d => d.Id == "MergeApprovalGate");
+
+        gate.Should().NotBeNull("the cycle must dispatch the merge-approval gate");
+        ReadDefinitionId(gate!).Should().Be("merge-approval",
+            "the merge gate must dispatch the merge-approval workflow (previously orphaned)");
+
+        _flowchart.Connections.Any(c =>
+            c.Source.Activity.Id == "HasMoreTasks" &&
+            c.Source.Port == "False" &&
+            c.Target.Activity.Id == "MergeApprovalGate")
+            .Should().BeTrue("the gate must be entered when the TDD loop is done");
+    }
+
+    [Test]
+    public void MergeApprovalGate_WaitsForCompletion_ThenWaitsForMerged()
+    {
+        var gate = _flowchart.Activities
+            .OfType<DispatchWorkflow>()
+            .First(d => d.Id == "MergeApprovalGate");
+
+        // The cycle must block on the human decision + the gate's action, not race
+        // ahead fire-and-forget.
+        ReadWaitForCompletion(gate).Should().BeTrue(
+            "the cycle must wait for the merge-approval gate to complete");
+
+        _flowchart.Connections.Any(c =>
+            c.Source.Activity.Id == "MergeApprovalGate" &&
+            c.Target.Activity.Id == "WaitForPRMerged")
+            .Should().BeTrue("after the gate, the cycle still blocks on the merge webhook");
+    }
+
+    [Test]
+    public void OldBinaryApprovalGate_IsRetiredFromTheCycle()
+    {
+        // The prior bare WaitForPRApprovalActivity gate and its fire-and-forget
+        // "DispatchMerge" node must no longer be in the cycle — exactly one gate.
+        _flowchart.Activities.Any(a => a.Id == "WaitForPRApproval")
+            .Should().BeFalse("the binary approval gate is replaced by the merge-approval gate");
+        _flowchart.Activities.Any(a => a.Id == "DispatchMerge")
+            .Should().BeFalse("the fire-and-forget merge dispatch is now inside the merge-approval gate");
+    }
+
+    private static string? ReadDefinitionId(DispatchWorkflow dispatch)
+    {
+        var prop = typeof(DispatchWorkflow).GetProperty("WorkflowDefinitionId");
+        var value = prop?.GetValue(dispatch);
+        var expression = value?.GetType().GetProperty("Expression")?.GetValue(value)
+            as Elsa.Expressions.Models.Expression;
+        return expression?.Value?.ToString();
+    }
+
+    private static bool ReadWaitForCompletion(DispatchWorkflow dispatch)
+    {
+        // WaitForCompletion is an Input<bool> whose literal is carried on the
+        // expression value; a configured `new(true)` exposes "True"/"true"/True.
+        var value = dispatch.WaitForCompletion?.Expression?.Value;
+        return value switch
+        {
+            bool b => b,
+            string s => bool.TryParse(s, out var r) && r,
+            _ => false,
+        };
+    }
 }
