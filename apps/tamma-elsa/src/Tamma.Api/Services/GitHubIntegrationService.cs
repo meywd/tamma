@@ -336,24 +336,40 @@ public class GitHubIntegrationService : IGitHubIntegrationService
         }
     }
 
-    public async Task<IntegrationResult<GitHubMergeResult>> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber)
+    public Task<IntegrationResult<GitHubMergeResult>> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber)
+        => MergeGitHubPullRequestAsync(repository, pullRequestNumber, "squash");
+
+    public async Task<IntegrationResult<GitHubMergeResult>> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber, string mergeStrategy)
     {
         var httpClient = _httpClientFactory.CreateClient("github");
 
         try
         {
-            _logger.LogInformation("Merging PR #{Number} in {Repo}", pullRequestNumber, repository);
+            var method = NormalizeMergeMethod(mergeStrategy);
+            _logger.LogInformation(
+                "Merging PR #{Number} in {Repo} (method {Method})", pullRequestNumber, repository, method);
 
-            var payload = new { merge_method = "squash" };
+            var payload = new { merge_method = method };
             var response = await httpClient.PutAsJsonAsync(
                 $"/repos/{repository}/pulls/{pullRequestNumber}/merge", payload);
-            response.EnsureSuccessStatusCode();
+            if (!response.IsSuccessStatusCode)
+            {
+                // Surface the status code + body so the merge activity can classify
+                // the failure (409 conflict / 403 permission / 405 not-mergeable /
+                // 422 branch-protected) rather than collapsing every error into a
+                // bare throw → blind Error outcome.
+                var body = await response.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Failed to merge PR #{Number} in {Repo}: {Status} {Body}",
+                    pullRequestNumber, repository, (int)response.StatusCode, body);
+                return IntegrationResult<GitHubMergeResult>.Fail($"{(int)response.StatusCode}: {body}");
+            }
 
             var data = await response.Content.ReadFromJsonAsync<JsonElement>();
             var result = new GitHubMergeResult
             {
-                Success = data.GetProperty("merged").GetBoolean(),
-                MergeSha = data.GetProperty("sha").GetString() ?? ""
+                Success = data.TryGetProperty("merged", out var m) && m.GetBoolean(),
+                MergeSha = data.TryGetProperty("sha", out var s) ? s.GetString() ?? "" : ""
             };
             return IntegrationResult<GitHubMergeResult>.Ok(result);
         }
@@ -361,6 +377,65 @@ public class GitHubIntegrationService : IGitHubIntegrationService
         {
             _logger.LogError(ex, "Failed to merge GitHub PR #{Number}", pullRequestNumber);
             return IntegrationResult<GitHubMergeResult>.Fail(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Map a Tamma merge strategy (<c>merge | squash | rebase</c>) to GitHub's
+    /// <c>merge_method</c>; an unknown / empty value falls back to <c>squash</c>
+    /// (the platform default).
+    /// </summary>
+    internal static string NormalizeMergeMethod(string? strategy)
+        => (strategy ?? "").Trim().ToLowerInvariant() switch
+        {
+            "merge" => "merge",
+            "rebase" => "rebase",
+            _ => "squash",
+        };
+
+    public async Task<IntegrationResult<GitHubPullRequestDetail>> GetGitHubPullRequestAsync(string repository, int pullRequestNumber)
+    {
+        var httpClient = _httpClientFactory.CreateClient("github");
+
+        try
+        {
+            var response = await httpClient.GetAsync($"/repos/{repository}/pulls/{pullRequestNumber}");
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Failed to read PR #{Number} in {Repo}: {Status} {Body}",
+                    pullRequestNumber, repository, (int)response.StatusCode, body);
+                return IntegrationResult<GitHubPullRequestDetail>.Fail($"{(int)response.StatusCode}: {body}");
+            }
+
+            var pr = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var detail = new GitHubPullRequestDetail
+            {
+                Number = pr.TryGetProperty("number", out var n) ? n.GetInt32() : pullRequestNumber,
+                State = pr.TryGetProperty("state", out var st) ? st.GetString() ?? "open" : "open",
+                Merged = pr.TryGetProperty("merged", out var mg) && mg.ValueKind == JsonValueKind.True,
+                MergeCommitSha = pr.TryGetProperty("merge_commit_sha", out var ms) && ms.ValueKind == JsonValueKind.String
+                    ? ms.GetString() : null,
+                // `mergeable` is true/false/null (null = GitHub still computing).
+                Mergeable = pr.TryGetProperty("mergeable", out var ma)
+                    ? ma.ValueKind switch
+                    {
+                        JsonValueKind.True => true,
+                        JsonValueKind.False => false,
+                        _ => (bool?)null,
+                    }
+                    : null,
+                MergeableState = pr.TryGetProperty("mergeable_state", out var mst) && mst.ValueKind == JsonValueKind.String
+                    ? mst.GetString() : null,
+                IsDraft = pr.TryGetProperty("draft", out var d) && d.ValueKind == JsonValueKind.True,
+            };
+            return IntegrationResult<GitHubPullRequestDetail>.Ok(detail);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to read GitHub PR #{Number} in {Repo}", pullRequestNumber, repository);
+            return IntegrationResult<GitHubPullRequestDetail>.Fail(ex.Message);
         }
     }
 

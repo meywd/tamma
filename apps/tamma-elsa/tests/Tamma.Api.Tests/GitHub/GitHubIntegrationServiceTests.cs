@@ -367,6 +367,144 @@ public class GitHubIntegrationServiceTests
     }
 
     // ================================================================
+    // MergeGitHubPullRequestAsync — configurable strategy → merge_method (Story 2-10)
+    // ================================================================
+
+    [Test]
+    public async Task Merge_DefaultOverload_UsesSquashMethod_ToMergeRoute()
+    {
+        _handler.OnPut("/repos/o/r/pulls/7/merge",
+            """{ "merged": true, "sha": "merge-sha-1" }""");
+
+        var result = await CreateService().MergeGitHubPullRequestAsync("o/r", 7);
+
+        result.Success.Should().BeTrue();
+        result.Data!.MergeSha.Should().Be("merge-sha-1");
+
+        var req = _handler.RequireRequest(HttpMethod.Put, "/repos/o/r/pulls/7/merge");
+        JsonDocument.Parse(req.Body).RootElement
+            .GetProperty("merge_method").GetString().Should().Be("squash");
+    }
+
+    [Test]
+    public async Task Merge_RebaseStrategy_MapsToMergeMethodRebase()
+    {
+        _handler.OnPut("/repos/o/r/pulls/9/merge",
+            """{ "merged": true, "sha": "s" }""");
+
+        var result = await CreateService().MergeGitHubPullRequestAsync("o/r", 9, "rebase");
+
+        result.Success.Should().BeTrue();
+        var req = _handler.RequireRequest(HttpMethod.Put, "/repos/o/r/pulls/9/merge");
+        JsonDocument.Parse(req.Body).RootElement
+            .GetProperty("merge_method").GetString().Should().Be("rebase");
+    }
+
+    [Test]
+    public async Task Merge_UnknownStrategy_FallsBackToSquash()
+    {
+        _handler.OnPut("/repos/o/r/pulls/9/merge", """{ "merged": true, "sha": "s" }""");
+
+        await CreateService().MergeGitHubPullRequestAsync("o/r", 9, "nonsense");
+
+        var req = _handler.RequireRequest(HttpMethod.Put, "/repos/o/r/pulls/9/merge");
+        JsonDocument.Parse(req.Body).RootElement
+            .GetProperty("merge_method").GetString().Should().Be("squash");
+    }
+
+    [Test]
+    public async Task Merge_Conflict_ReturnsFailWithStatusBody_NotThrow()
+    {
+        // A 409 merge conflict must surface as a classifiable Fail (status-prefixed
+        // body), NOT an EnsureSuccessStatusCode throw → blind Error.
+        _handler.OnPut("/repos/o/r/pulls/7/merge", "Merge conflict", HttpStatusCode.Conflict);
+
+        var result = await CreateService().MergeGitHubPullRequestAsync("o/r", 7, "squash");
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().StartWith("409");
+    }
+
+    [Test]
+    public void NormalizeMergeMethod_MapsStrategies()
+    {
+        GitHubIntegrationService.NormalizeMergeMethod("merge").Should().Be("merge");
+        GitHubIntegrationService.NormalizeMergeMethod("REBASE").Should().Be("rebase");
+        GitHubIntegrationService.NormalizeMergeMethod("squash").Should().Be("squash");
+        GitHubIntegrationService.NormalizeMergeMethod("x").Should().Be("squash");
+        GitHubIntegrationService.NormalizeMergeMethod(null).Should().Be("squash");
+    }
+
+    // ================================================================
+    // GetGitHubPullRequestAsync — exact-match pulls/{n} endpoint (Story 2-10
+    // idempotency + pre-merge readiness)
+    // ================================================================
+
+    [Test]
+    public async Task GetPr_ParsesStateMergedMergeableAndSha()
+    {
+        _handler.OnGet("/repos/o/r/pulls/7",
+            """
+            {
+              "number": 7, "state": "closed", "merged": true,
+              "merge_commit_sha": "merged-sha-1",
+              "mergeable": true, "mergeable_state": "clean", "draft": false
+            }
+            """);
+
+        var result = await CreateService().GetGitHubPullRequestAsync("o/r", 7);
+
+        result.Success.Should().BeTrue();
+        result.Data!.Number.Should().Be(7);
+        result.Data.State.Should().Be("closed");
+        result.Data.Merged.Should().BeTrue();
+        result.Data.MergeCommitSha.Should().Be("merged-sha-1");
+        result.Data.Mergeable.Should().BeTrue();
+        result.Data.MergeableState.Should().Be("clean");
+
+        var req = _handler.RequireRequest(HttpMethod.Get, "/repos/o/r/pulls/7");
+        req.Path.Should().Be("/repos/o/r/pulls/7");
+    }
+
+    [Test]
+    public async Task GetPr_MergeableNull_WhenGitHubStillComputing()
+    {
+        // GitHub returns `mergeable: null` while computing — must surface as null
+        // (not false / not true), so the caller never treats unknown as mergeable.
+        _handler.OnGet("/repos/o/r/pulls/8",
+            """{ "number": 8, "state": "open", "merged": false, "mergeable": null }""");
+
+        var result = await CreateService().GetGitHubPullRequestAsync("o/r", 8);
+
+        result.Success.Should().BeTrue();
+        result.Data!.Mergeable.Should().BeNull();
+        result.Data.Merged.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task GetPr_DirtyConflict_MergeableFalse()
+    {
+        _handler.OnGet("/repos/o/r/pulls/8",
+            """{ "number": 8, "state": "open", "merged": false, "mergeable": false, "mergeable_state": "dirty" }""");
+
+        var result = await CreateService().GetGitHubPullRequestAsync("o/r", 8);
+
+        result.Success.Should().BeTrue();
+        result.Data!.Mergeable.Should().BeFalse();
+        result.Data.MergeableState.Should().Be("dirty");
+    }
+
+    [Test]
+    public async Task GetPr_HttpError_ReturnsFail()
+    {
+        _handler.OnGet("/repos/o/r/pulls/8", "nope", HttpStatusCode.InternalServerError);
+
+        var result = await CreateService().GetGitHubPullRequestAsync("o/r", 8);
+
+        result.Success.Should().BeFalse("a 5xx must surface as an error, never a fabricated state");
+    }
+
+    // ================================================================
     // Route-aware fake handler
     // ================================================================
 
@@ -391,6 +529,9 @@ public class GitHubIntegrationServiceTests
 
         public void OnPatch(string path, string body, HttpStatusCode status = HttpStatusCode.OK)
             => _routes[("PATCH", path)] = (status, body);
+
+        public void OnPut(string path, string body, HttpStatusCode status = HttpStatusCode.OK)
+            => _routes[("PUT", path)] = (status, body);
 
         public CapturedRequest RequireRequest(HttpMethod method, string path)
         {

@@ -77,8 +77,27 @@ public interface IGitHubIntegrationService
     /// </summary>
     Task<IntegrationResult<GitHubPullRequestResult>> UpdateGitHubPullRequestAsync(string repository, int pullRequestNumber, CreatePullRequestRequest request);
 
-    /// <summary>Merge a pull request</summary>
+    /// <summary>Merge a pull request (squash strategy — back-compat overload).</summary>
     Task<IntegrationResult<GitHubMergeResult>> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber);
+
+    /// <summary>
+    /// Merge a pull request with an explicit <paramref name="mergeStrategy"/>
+    /// (<c>merge | squash | rebase</c>; Story 2-10 — configurable strategy). The
+    /// strategy is mapped to GitHub's <c>merge_method</c>; an unknown value falls
+    /// back to <c>squash</c>. Replaces the previously hardcoded squash-only merge.
+    /// </summary>
+    Task<IntegrationResult<GitHubMergeResult>> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber, string mergeStrategy);
+
+    /// <summary>
+    /// Read a pull request's lifecycle state (Story 2-10 — idempotency +
+    /// pre-merge readiness). Surfaces <c>State</c> (open/closed), <c>Merged</c>,
+    /// the <c>MergeCommitSha</c> when already merged, and the GitHub
+    /// <c>Mergeable</c> / <c>MergeableState</c> conflict signals. <c>Mergeable</c>
+    /// is <c>null</c> when GitHub has not finished computing it (the caller must
+    /// treat unknown as "not yet confirmed mergeable", never proceed blind).
+    /// Returns <c>Fail</c> on API error (never a fabricated state).
+    /// </summary>
+    Task<IntegrationResult<GitHubPullRequestDetail>> GetGitHubPullRequestAsync(string repository, int pullRequestNumber);
 
     /// <summary>Get file changes from a branch</summary>
     Task<IntegrationResult<List<GitHubFileChange>>> GetGitHubFileChangesAsync(string repository, string branch);
@@ -175,8 +194,14 @@ public interface IIntegrationService
     /// <summary>Update an existing pull request's title / body / labels</summary>
     Task<GitHubPullRequestResult> UpdateGitHubPullRequestAsync(string repository, int pullRequestNumber, CreatePullRequestRequest request);
 
-    /// <summary>Merge a pull request</summary>
+    /// <summary>Merge a pull request (squash strategy — back-compat overload).</summary>
     Task<GitHubMergeResult> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber);
+
+    /// <summary>Merge a pull request with an explicit strategy (merge | squash | rebase).</summary>
+    Task<GitHubMergeResult> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber, string mergeStrategy);
+
+    /// <summary>Read a pull request's lifecycle state (idempotency / pre-merge readiness).</summary>
+    Task<GitHubPullRequestDetail> GetGitHubPullRequestAsync(string repository, int pullRequestNumber);
 
     /// <summary>Get file changes from a branch</summary>
     Task<List<GitHubFileChange>> GetGitHubFileChangesAsync(string repository, string branch);
@@ -271,6 +296,42 @@ public class GitHubMergeResult
     public bool Success { get; set; }
     public string? MergeSha { get; set; }
     public string? Error { get; set; }
+}
+
+/// <summary>
+/// Pull-request lifecycle detail returned by
+/// <see cref="IGitHubIntegrationService.GetGitHubPullRequestAsync"/> — backs
+/// Story 2-10 idempotency (already-merged → skip re-merge) and the pre-merge
+/// readiness/conflict gate.
+/// </summary>
+public class GitHubPullRequestDetail
+{
+    public int Number { get; set; }
+
+    /// <summary>open | closed.</summary>
+    public string State { get; set; } = "open";
+
+    /// <summary>True when the PR has already been merged.</summary>
+    public bool Merged { get; set; }
+
+    /// <summary>The merge commit SHA when <see cref="Merged"/> is true.</summary>
+    public string? MergeCommitSha { get; set; }
+
+    /// <summary>
+    /// GitHub's <c>mergeable</c> flag: <c>true</c> = no conflicts, <c>false</c> =
+    /// conflicts, <c>null</c> = not yet computed (GitHub is still calculating —
+    /// the caller must NOT treat unknown as mergeable).
+    /// </summary>
+    public bool? Mergeable { get; set; }
+
+    /// <summary>
+    /// GitHub's <c>mergeable_state</c> (e.g. <c>clean</c>, <c>dirty</c>,
+    /// <c>blocked</c>, <c>behind</c>, <c>unstable</c>, <c>unknown</c>). Surfaced
+    /// for the readiness gate's blocking-reason message.
+    /// </summary>
+    public string? MergeableState { get; set; }
+
+    public bool IsDraft { get; set; }
 }
 
 /// <summary>
