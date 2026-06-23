@@ -132,12 +132,13 @@ public class EmitMergeApprovalEventActivity : Activity
     }
 
     /// <summary>
-    /// Rejected / invalid / escalated transitions are loud (error-status) audit
-    /// rows — they are NOT a false success. Merge / test / merge-requested are
-    /// normal progress.
+    /// Rejected / invalid / escalated / failed-merge transitions are loud
+    /// (error-status) audit rows — they are NOT a false success. Merge / test /
+    /// merge-requested are normal progress.
     /// </summary>
     public static bool IsFailureEvent(string type)
         => type is MergeApprovalEvents.DecisionRejected
                 or MergeApprovalEvents.DecisionInvalid
-                or MergeApprovalEvents.Escalated;
+                or MergeApprovalEvents.Escalated
+                or MergeApprovalEvents.MergeFailed;
 }

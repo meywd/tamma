@@ -2078,6 +2078,14 @@ workflows.MapPost("/instances/{id}/cancel", WorkflowEndpoints.CancelInstance).Re
 workflows.MapDelete("/instances/{id}", WorkflowEndpoints.DeleteInstance).RequireAuthorization("WorkflowsDelete");
 workflows.MapGet("/instances/{id}/events", WorkflowEndpoints.GetInstanceEvents);
 
+// ── ADL human gates (IMPORTANT-2) ──
+// Lets a human DRIVE the merge-approval gate of the autonomous loop. Resumes
+// the adl-merge-approval-{issue}-{pr} bookmark via the engine, injecting the
+// {decision,feedback,approver} payload. WorkflowsManage = tenant owner/admin
+// (members 403) — driving a merge decision is a workflow-management action.
+var adl = app.MapGroup("/api/adl").RequireAuthorization("WorkflowsManage");
+adl.MapPost("/merge-approval/resume", AdlEndpoints.ResumeMergeApproval);
+
 // ── GitHub App (no auth, webhook signature verification) ──
 // Audit finding 017 — webhook gets the GitHubWebhook policy (300/min). The
 // install callback shares OAuthStart's 60/min cap; legitimate installs are

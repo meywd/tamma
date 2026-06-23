@@ -115,8 +115,91 @@ public class MergeApprovalWorkflowTests
         ReadDefinitionId(dispatch!).Should().Be("merge",
             "the gate must dispatch the existing merge workflow on approval");
 
-        HasEdge("DispatchMerge", null, "MergeOutputs").Should().BeTrue();
+        // CRITICAL-2: the merge dispatch must read its `success` output and branch
+        // — a successful merge reaches the merge/success terminal, a failed one
+        // does NOT.
+        HasEdge("DispatchMerge", null, "ExtractMergeSuccess").Should().BeTrue(
+            "the gate must read the merge sub-workflow's success output");
+        HasEdge("ExtractMergeSuccess", null, "MergeSucceeded").Should().BeTrue();
+        HasEdge("MergeSucceeded", "True", "EmitMerged").Should().BeTrue();
+        HasEdge("EmitMerged", null, "MergeOutputs").Should().BeTrue();
         HasEdge("MergeOutputs", null, "Finish").Should().BeTrue();
+    }
+
+    // ================================================================
+    // CRITICAL-2 — a failed merge sub-workflow surfaces loudly (MERGE.FAILED +
+    // ESCALATED) and routes to the escalate terminal (outcome="escalated"), NEVER
+    // the merge/success terminal (which would hang the cycle on a merge webhook).
+    // ================================================================
+
+    [Test]
+    public void MergeFailure_RoutesToEscalateTerminal_NotMergeSuccess()
+    {
+        HasEdge("MergeSucceeded", "False", "EmitMergeFailed").Should().BeTrue(
+            "a failed merge (success=false) must emit a loud MERGE.FAILED event");
+        HasEdge("EmitMergeFailed", null, "EmitEscalated").Should().BeTrue(
+            "a failed merge must funnel into the escalate terminal");
+
+        var failureReach = Reachable("EmitMergeFailed");
+        // A failed merge must NOT reach the merge/success outputs (outcome="merge").
+        failureReach.Should().NotContain("MergeOutputs",
+            "a failed merge must never reach the merge/success terminal");
+        failureReach.Should().NotContain("EmitMerged");
+        // It MUST reach the escalate outputs (outcome="escalated") so the cycle's
+        // GateOutcomeSwitch routes it to reportError (and never to WaitForPRMerged).
+        failureReach.Should().Contain("EscalateOutputs",
+            "a failed merge must reach the escalate terminal (outcome=escalated)");
+    }
+
+    [Test]
+    public void MergeFailed_IsAFailureEvent_ErrorStatus()
+    {
+        // The MERGE.FAILED audit row must be loud (error status), not a false success.
+        EmitMergeApprovalEventActivity.IsFailureEvent(MergeApprovalEvents.MergeFailed)
+            .Should().BeTrue("MERGE.FAILED must be an error-status audit event");
+    }
+
+    // ================================================================
+    // CRITICAL-3 — the Test → gate → test loop is iteration-capped; over the cap
+    // it escalates instead of spinning forever.
+    // ================================================================
+
+    [Test]
+    public void TestLoop_IsBounded_IncrementsThenChecksCap()
+    {
+        HasEdge("WaitMergeApproval", "Test", "EmitTestDecision").Should().BeTrue();
+        HasEdge("EmitTestDecision", null, "IncrementTestIteration").Should().BeTrue(
+            "each Test decision must increment the iteration counter");
+        HasEdge("IncrementTestIteration", null, "TestMaxIterations").Should().BeTrue(
+            "after incrementing, the loop must check the iteration cap");
+    }
+
+    [Test]
+    public void TestLoop_UnderCap_RunsCiThenLoopsBackToGate()
+    {
+        HasEdge("TestMaxIterations", "False", "EmitTestRequested").Should().BeTrue(
+            "under the cap the gate re-runs CI");
+        var dispatch = _flowchart.Activities
+            .OfType<DispatchWorkflow>()
+            .FirstOrDefault(d => d.Id == "DispatchTesting");
+        dispatch.Should().NotBeNull();
+        ReadDefinitionId(dispatch!).Should().Be("ci-with-debug-retry");
+        HasEdge("DispatchTesting", null, "WaitMergeApproval").Should().BeTrue(
+            "under the cap the loop returns to the gate for a re-decision");
+    }
+
+    [Test]
+    public void TestLoop_OverCap_EscalatesNotLoops()
+    {
+        HasEdge("TestMaxIterations", "True", "EmitEscalated").Should().BeTrue(
+            "over the iteration cap the test loop must escalate (loud), not loop forever");
+
+        // Over the cap must reach the escalate terminal and must NOT re-run CI /
+        // loop back to the gate.
+        var overCapReach = ReachableFromPort("TestMaxIterations", "True");
+        overCapReach.Should().Contain("EscalateOutputs");
+        overCapReach.Should().NotContain("DispatchTesting",
+            "the cap path must not re-run CI");
     }
 
     // ================================================================
@@ -126,7 +209,10 @@ public class MergeApprovalWorkflowTests
     [Test]
     public void TestOutcome_EmitsTestRequested_RunsCi_ThenLoopsBackToGate()
     {
-        HasEdge("WaitMergeApproval", "Test", "EmitTestRequested").Should().BeTrue();
+        // The Test edge now goes through the bounded loop (DECISION.TEST →
+        // increment → cap check → TEST_REQUESTED → CI → back to gate).
+        HasEdge("WaitMergeApproval", "Test", "EmitTestDecision").Should().BeTrue();
+        HasEdge("TestMaxIterations", "False", "EmitTestRequested").Should().BeTrue();
         HasEdge("EmitTestRequested", null, "DispatchTesting").Should().BeTrue();
 
         var dispatch = _flowchart.Activities
@@ -168,17 +254,21 @@ public class MergeApprovalWorkflowTests
     [Test]
     public void InvalidOutcome_Escalates_NotSilentRejectOrMerge()
     {
-        HasEdge("WaitMergeApproval", "Invalid", "EmitEscalated").Should().BeTrue(
-            "an unknown/empty decision must emit MERGE_APPROVAL.ESCALATED — never silently reject");
+        // Invalid now emits DECISION.INVALID first, then funnels into the shared
+        // escalate terminal — it ESCALATES, it does NOT loop back to the gate.
+        HasEdge("WaitMergeApproval", "Invalid", "EmitInvalid").Should().BeTrue(
+            "an unknown/empty decision must emit MERGE_APPROVAL.DECISION.INVALID — never silently reject");
+        HasEdge("EmitInvalid", null, "EmitEscalated").Should().BeTrue();
         HasEdge("EmitEscalated", null, "NotifyEscalated").Should().BeTrue();
         HasEdge("NotifyEscalated", null, "EscalateOutputs").Should().BeTrue();
         HasEdge("EscalateOutputs", null, "Finish").Should().BeTrue();
 
-        var invalidReach = Reachable("EmitEscalated");
+        var invalidReach = Reachable("EmitInvalid");
         invalidReach.Should().NotContain("DispatchMerge");
         invalidReach.Should().NotContain("MergeOutputs");
-        // Invalid must NOT be folded into the Reject path either — it is a loud,
-        // distinct escalation.
+        // Invalid must NOT loop back to the gate (would let a malformed payload
+        // re-arm the suspend forever) and must NOT be folded into the Reject path.
+        invalidReach.Should().NotContain("WaitMergeApproval");
         invalidReach.Should().NotContain("NotifyRejected");
     }
 
@@ -198,6 +288,25 @@ public class MergeApprovalWorkflowTests
         emitIds.Should().Contain("EmitTestRequested");
         emitIds.Should().Contain("EmitRejected");
         emitIds.Should().Contain("EmitEscalated");
+    }
+
+    // ================================================================
+    // MINOR-1 — the DECISION.MERGED / DECISION.TEST / DECISION.INVALID constants
+    // are now actually emitted on their matching edges (no dead constants).
+    // ================================================================
+
+    [Test]
+    public void DecisionConstants_AreEmittedOnTheirEdges()
+    {
+        var emitIds = _flowchart.Activities
+            .OfType<EmitMergeApprovalEventActivity>()
+            .Select(a => a.Id)
+            .ToList();
+
+        emitIds.Should().Contain("EmitMerged", "DECISION.MERGED must be emitted on the successful-merge edge");
+        emitIds.Should().Contain("EmitTestDecision", "DECISION.TEST must be emitted on the test edge");
+        emitIds.Should().Contain("EmitInvalid", "DECISION.INVALID must be emitted on the invalid edge");
+        emitIds.Should().Contain("EmitMergeFailed", "MERGE.FAILED must be emitted on a failed merge");
     }
 
     // ================================================================
@@ -250,6 +359,28 @@ public class MergeApprovalWorkflowTests
             {
                 var t = c.Target.Activity.Id;
                 if (t != null && seen.Add(t)) queue.Enqueue(t);
+            }
+        }
+        return seen;
+    }
+
+    /// <summary>Forward-reachable activity ids starting from a specific outcome
+    /// port of a source node.</summary>
+    private HashSet<string> ReachableFromPort(string sourceId, string port)
+    {
+        var seen = new HashSet<string>();
+        var queue = new Queue<string>();
+        foreach (var c in _flowchart.Connections.Where(c =>
+            c.Source.Activity.Id == sourceId && c.Source.Port == port))
+        {
+            if (c.Target.Activity.Id is { } t && seen.Add(t)) queue.Enqueue(t);
+        }
+        while (queue.Count > 0)
+        {
+            var id = queue.Dequeue();
+            foreach (var c in _flowchart.Connections.Where(c => c.Source.Activity.Id == id))
+            {
+                if (c.Target.Activity.Id is { } t && seen.Add(t)) queue.Enqueue(t);
             }
         }
         return seen;

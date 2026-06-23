@@ -62,6 +62,16 @@ public class WaitForMergeApprovalActivity : TammaOutcomeActivity
     [Input(Description = "PR URL")]
     public Input<string?> PrUrl { get; set; } = default!;
 
+    /// <summary>
+    /// Whether the PR carries a breaking change. Threaded into the gate's audit
+    /// <c>start</c> data for forward-compatible audit (IMPORTANT-1 / FR-34). The
+    /// ENFORCEMENT arm (mandatory-approver policy on breaking changes, FR-34) is
+    /// deferred — this only records the signal so it is queryable now and the
+    /// enforcement can light up later without an audit-schema change.
+    /// </summary>
+    [Input(Description = "Whether the PR carries a breaking change (audit signal; enforcement deferred)")]
+    public Input<bool> BreakingChange { get; set; } = new(false);
+
     [Output(Description = "Approval decision (merge|test|reject|invalid)")]
     public Output<string?> Decision { get; set; } = default!;
 
@@ -144,6 +154,8 @@ public class WaitForMergeApprovalActivity : TammaOutcomeActivity
         ["issueNumber"] = IssueNumber.Get(context),
         ["prNumber"] = PrNumber.Get(context),
         ["prUrl"] = PrUrl.Get(context) ?? "",
+        // IMPORTANT-1 — forward-compatible audit signal; enforcement (FR-34) deferred.
+        ["breakingChange"] = BreakingChange.Get(context),
     };
 
     public override Dictionary<string, object?> BuildEndData(ActivityExecutionContext context) => new()

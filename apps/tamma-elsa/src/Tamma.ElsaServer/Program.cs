@@ -365,6 +365,13 @@ app.UseWorkflows();
 app.UseStaticFiles();
 app.MapHealthChecks("/health");
 
+// IMPORTANT-2 — in-process resume seam for the merge-approval human gate.
+// Tamma.Api's RBAC-gated POST /api/adl/{instanceId}/merge-approval forwards
+// here; this endpoint looks up the gate's named bookmark and runs the owning
+// instance with the {decision,feedback,approver} payload injected as input.
+app.MapPost("/elsa/api/adl/merge-approval/resume",
+    Tamma.ElsaServer.Endpoints.MergeApprovalResumeEndpoint.Resume);
+
 app.UseSerilogRequestLogging();
 
 Log.Information("Tamma ELSA Server starting up...");

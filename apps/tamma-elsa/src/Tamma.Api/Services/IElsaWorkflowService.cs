@@ -22,7 +22,24 @@ public interface IElsaWorkflowService
 
     /// <summary>Send a signal to a workflow</summary>
     Task SendSignalAsync(string instanceId, string signalName, object? payload = null);
+
+    /// <summary>
+    /// IMPORTANT-2 — resume the <c>merge-approval</c> human gate suspended on the
+    /// <c>adl-merge-approval-{issue}-{pr}</c> bookmark, injecting the
+    /// <c>{decision, feedback, approver}</c> payload as workflow input. Forwards
+    /// to the engine's in-process resume endpoint (which owns
+    /// <c>IBookmarkStore</c>/<c>IWorkflowRuntime</c>). Returns the resolved
+    /// workflow instance id on success.
+    /// </summary>
+    Task<MergeApprovalResumeResult> ResumeMergeApprovalAsync(
+        int issueNumber, int prNumber, string decision, string? feedback, string? approver);
 }
+
+/// <summary>Outcome of a merge-approval gate resume.</summary>
+public sealed record MergeApprovalResumeResult(
+    bool Resumed,
+    bool GateNotFound,
+    string? WorkflowInstanceId);
 
 /// <summary>
 /// Workflow status information

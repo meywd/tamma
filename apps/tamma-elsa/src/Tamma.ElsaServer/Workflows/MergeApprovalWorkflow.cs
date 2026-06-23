@@ -33,10 +33,17 @@ namespace Tamma.ElsaServer.Workflows;
 ///
 /// Flow:
 ///   ReadInputs → WaitMergeApproval (bookmark)
-///     ├─ Merge   → EmitMergeRequested → DispatchMerge → MergeOutputs → Finish
-///     ├─ Test    → EmitTestRequested  → DispatchTesting (ci-with-debug-retry) → (loop back to WaitMergeApproval)
-///     ├─ Reject  → EmitRejected → NotifyRejected → RejectOutputs → Finish
-///     └─ Invalid → EmitEscalated → NotifyEscalated → EscalateOutputs → Finish
+///     ├─ Merge   → EmitMergeRequested → DispatchMerge → (read `success`)
+///     │             ├─ success → EmitMerged → MergeOutputs (outcome="merge") → Finish
+///     │             └─ failure → EmitMergeFailed → [escalate terminal] (outcome="escalated")
+///     ├─ Test    → EmitTestDecision → increment → cap check (>=3)
+///     │             ├─ under cap → EmitTestRequested → DispatchTesting (ci-with-debug-retry) → loop back to gate
+///     │             └─ over cap  → [escalate terminal] (outcome="escalated")
+///     ├─ Reject  → EmitRejected → NotifyRejected → RejectOutputs (outcome="reject") → Finish
+///     └─ Invalid → EmitInvalid → [escalate terminal] (outcome="escalated")
+///
+///   [escalate terminal] = EmitEscalated → NotifyEscalated → EscalateOutputs → Finish
+///   (shared by Invalid, a failed merge, and an exceeded test-loop cap)
 ///
 /// <para>Deferred (reported for confirmation): breaking-change detection +
 /// mandatory-approval enforcement (FR-34), mode-aware approver policy (FR-32),
@@ -62,10 +69,23 @@ public class MergeApprovalWorkflow : WorkflowBase
         var prNumberVar = builder.WithVariable<int>("PrNumber", 0);
         var prUrlVar = builder.WithVariable<string>("PrUrl", "");
         var tenantIdVar = builder.WithVariable<string>("TenantId", "");
+        var breakingChangeVar = builder.WithVariable<bool>("BreakingChange", false);
 
         var decisionVar = builder.WithVariable<string>("Decision", "");
         var feedbackVar = builder.WithVariable<string>("Feedback", "");
         var approverVar = builder.WithVariable<string>("Approver", "");
+
+        // Result of the dispatched merge sub-workflow (CRITICAL-2) + the test loop
+        // iteration counter (CRITICAL-3). subResult captures any DispatchWorkflow
+        // outputs; mergeSuccessVar is the `success` flag the merge workflow emits.
+        var subResult = builder.WithVariable<IDictionary<string, object>?>();
+        var mergeSuccessVar = builder.WithVariable<bool>("MergeSuccess", false);
+        var testIterationCountVar = builder.WithVariable<int>("TestIterationCount", 0);
+
+        // Max test re-runs before escalating — mirrors PlanMaxRevisions /
+        // TaskMaxRevisions (>=3) in SingleIssueCycleWorkflow so an unbounded
+        // test → gate → test loop can never spin forever.
+        const int MaxTestIterations = 3;
 
         // ================================================================
         // 1. Read inputs
@@ -82,6 +102,7 @@ public class MergeApprovalWorkflow : WorkflowBase
                 prNumberVar.Set(ctx, ctx.GetInput<int>("prNumber"));
                 prUrlVar.Set(ctx, ctx.GetInput<string>("prUrl") ?? "");
                 tenantIdVar.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
+                breakingChangeVar.Set(ctx, ctx.GetInput<bool>("breakingChange"));
                 return (object)repo;
             })
         };
@@ -96,6 +117,7 @@ public class MergeApprovalWorkflow : WorkflowBase
             IssueNumber = new Input<int>(ctx => issueNumberVar.Get(ctx)),
             PrNumber = new Input<int>(ctx => prNumberVar.Get(ctx)),
             PrUrl = new Input<string?>(ctx => prUrlVar.Get(ctx)),
+            BreakingChange = new Input<bool>(ctx => breakingChangeVar.Get(ctx)),
             Decision = new Output<string?>(decisionVar),
             Feedback = new Output<string?>(feedbackVar),
             Approver = new Output<string?>(approverVar),
@@ -122,19 +144,90 @@ public class MergeApprovalWorkflow : WorkflowBase
                 ["issueNumber"] = issueNumberVar.Get(ctx),
             }),
             WaitForCompletion = new(true),
+            Result = new(subResult), // CRITICAL-2 — read the merge `success` output
         };
         dispatchMerge.SetDisplayText("Dispatch Merge");
+
+        // CRITICAL-2 — a swallowed merge failure used to route to the merge/success
+        // terminal anyway (the cycle then hung on a `pr-merged` webhook that never
+        // fires). Read the dispatched merge workflow's `success` output and branch:
+        // success → MergeOutputs (outcome="merge"); failure → the escalate terminal
+        // (loud, error-status MERGE.FAILED + ESCALATED events) with outcome="escalated".
+        var extractMergeSuccess = Assign(mergeSuccessVar, ctx =>
+        {
+            var result = subResult.Get(ctx);
+            if (result != null && result.TryGetValue("success", out var s))
+            {
+                return (object)(s switch
+                {
+                    bool b => b,
+                    string str => bool.TryParse(str, out var r) && r,
+                    _ => false,
+                });
+            }
+            // No readable success flag → treat as a failed merge (never a silent
+            // success). The cycle's CRITICAL-1 switch routes escalated → reportError.
+            return (object)false;
+        }, "ExtractMergeSuccess", "Extract Merge Success");
+
+        var mergeSucceededCheck = new FlowDecision(ctx => mergeSuccessVar.Get(ctx))
+        {
+            Id = "MergeSucceeded",
+            Name = "Merge Succeeded?",
+        };
+        mergeSucceededCheck.SetDisplayText("Merge Succeeded?");
+
+        var emitMergeFailed = EmitGateEvent(
+            "EmitMergeFailed", "Emit MERGE.FAILED",
+            MergeApprovalEvents.MergeFailed,
+            issueNumberVar, prNumberVar, tenantIdVar, decisionVar, approverVar, feedbackVar);
+
+        // MINOR-1 — emit the DECISION.MERGED audit event on the successful-merge
+        // edge (the constant existed but was never emitted).
+        var emitMerged = EmitGateEvent(
+            "EmitMerged", "Emit MERGE_APPROVAL.DECISION.MERGED",
+            MergeApprovalEvents.DecisionMerged,
+            issueNumberVar, prNumberVar, tenantIdVar, decisionVar, approverVar, feedbackVar);
 
         var mergeOutputs = OutputsSequence(
             "MergeOutputs", "Merge Outputs", "merge", decisionVar, feedbackVar, approverVar);
 
         // ================================================================
-        // 3b. Test path — emit TEST_REQUESTED → dispatch testing → loop back to the gate
+        // 3b. Test path — emit DECISION.TEST → cap check → TEST_REQUESTED →
+        //     dispatch testing → loop back to the gate (bounded, CRITICAL-3)
         // ================================================================
+        // MINOR-1 — emit the DECISION.TEST audit event on the test edge (the
+        // constant existed but was never emitted). TEST_REQUESTED stays the
+        // dispatch-time event below.
+        var emitTestDecision = EmitGateEvent(
+            "EmitTestDecision", "Emit MERGE_APPROVAL.DECISION.TEST",
+            MergeApprovalEvents.DecisionTest,
+            issueNumberVar, prNumberVar, tenantIdVar, decisionVar, approverVar, feedbackVar);
+
         var emitTestRequested = EmitGateEvent(
             "EmitTestRequested", "Emit MERGE_APPROVAL.TEST_REQUESTED",
             MergeApprovalEvents.TestRequested,
             issueNumberVar, prNumberVar, tenantIdVar, decisionVar, approverVar, feedbackVar);
+
+        // CRITICAL-3 — bound the test → gate → test loop. Increment a counter on
+        // every Test decision and cap it (mirrors PlanMaxRevisions / TaskMaxRevisions
+        // >=3 in SingleIssueCycleWorkflow). Over the cap → escalate (loud) instead of
+        // re-running CI forever.
+        var incrementTestIteration = new SetVariable
+        {
+            Id = "IncrementTestIteration", Name = "Increment Test Iteration",
+            Variable = testIterationCountVar,
+            Value = new Input<object?>(ctx => (object)(testIterationCountVar.Get(ctx) + 1)),
+        };
+        incrementTestIteration.SetDisplayText("Increment Test Iteration");
+
+        var testMaxIterationsCheck = new FlowDecision(
+            ctx => testIterationCountVar.Get(ctx) >= MaxTestIterations)
+        {
+            Id = "TestMaxIterations",
+            Name = "Test Max Iterations?",
+        };
+        testMaxIterationsCheck.SetDisplayText("Test Max Iterations?");
 
         // The platform has no standalone "testing" definition; the loop's
         // test/CI sub-workflow is "ci-with-debug-retry" (the build-out spec lists
@@ -173,9 +266,17 @@ public class MergeApprovalWorkflow : WorkflowBase
             "RejectOutputs", "Reject Outputs", "reject", decisionVar, feedbackVar, approverVar);
 
         // ================================================================
-        // 3d. Invalid path — emit ESCALATED → notify owners → terminal (loud)
-        //     Unknown / empty decision NEVER silently rejects a good PR.
+        // 3d. Invalid path — emit DECISION.INVALID → ESCALATED → notify owners →
+        //     terminal (loud). Unknown / empty decision NEVER silently rejects a
+        //     good PR — and it ESCALATES (it does NOT loop back to the gate).
         // ================================================================
+        // MINOR-1 — emit the DECISION.INVALID audit event on the invalid edge
+        // (the constant existed but was never emitted) before escalating.
+        var emitInvalid = EmitGateEvent(
+            "EmitInvalid", "Emit MERGE_APPROVAL.DECISION.INVALID",
+            MergeApprovalEvents.DecisionInvalid,
+            issueNumberVar, prNumberVar, tenantIdVar, decisionVar, approverVar, feedbackVar);
+
         var emitEscalated = EmitGateEvent(
             "EmitEscalated", "Emit MERGE_APPROVAL.ESCALATED",
             MergeApprovalEvents.Escalated,
@@ -203,36 +304,58 @@ public class MergeApprovalWorkflow : WorkflowBase
             Activities =
             {
                 readInputs, waitMerge,
-                emitMergeRequested, dispatchMerge, mergeOutputs,
+                emitMergeRequested, dispatchMerge,
+                extractMergeSuccess, mergeSucceededCheck,
+                emitMerged, mergeOutputs, emitMergeFailed,
+                emitTestDecision, incrementTestIteration, testMaxIterationsCheck,
                 emitTestRequested, dispatchTesting,
                 emitRejected, notifyRejected, rejectOutputs,
-                emitEscalated, notifyEscalated, escalateOutputs,
+                emitInvalid, emitEscalated, notifyEscalated, escalateOutputs,
                 finish,
             },
             Connections =
             {
                 Connect(readInputs, waitMerge),
 
-                // Merge → emit → dispatch merge → success outputs → finish
+                // ── Merge → emit MERGE.REQUESTED → dispatch merge → READ success ──
+                // CRITICAL-2: branch on the merge sub-workflow's `success` output.
+                //   success → DECISION.MERGED → merge outputs → finish
+                //   failure → MERGE.FAILED → escalate terminal (loud), never success
                 ConnectOutcome(waitMerge, "Merge", emitMergeRequested),
                 Connect(emitMergeRequested, dispatchMerge),
-                Connect(dispatchMerge, mergeOutputs),
+                Connect(dispatchMerge, extractMergeSuccess),
+                Connect(extractMergeSuccess, mergeSucceededCheck),
+                ConnectOutcome(mergeSucceededCheck, "True", emitMerged),
+                Connect(emitMerged, mergeOutputs),
                 Connect(mergeOutputs, finish),
+                ConnectOutcome(mergeSucceededCheck, "False", emitMergeFailed),
+                Connect(emitMergeFailed, emitEscalated), // funnel into the loud escalate terminal
 
-                // Test → emit → dispatch testing → LOOP BACK to the gate for a re-decision
-                ConnectOutcome(waitMerge, "Test", emitTestRequested),
+                // ── Test → emit DECISION.TEST → increment → CAP CHECK ──
+                // CRITICAL-3: bounded loop. Under the cap → TEST_REQUESTED → re-run
+                // CI → loop back to the gate. At/over the cap → escalate (loud).
+                ConnectOutcome(waitMerge, "Test", emitTestDecision),
+                Connect(emitTestDecision, incrementTestIteration),
+                Connect(incrementTestIteration, testMaxIterationsCheck),
+                ConnectOutcome(testMaxIterationsCheck, "False", emitTestRequested),
                 Connect(emitTestRequested, dispatchTesting),
-                Connect(dispatchTesting, waitMerge),
+                Connect(dispatchTesting, waitMerge), // loop back to the gate for a re-decision
+                ConnectOutcome(testMaxIterationsCheck, "True", emitEscalated), // cap → escalate
 
-                // Reject → emit → label/comment → reject outputs → finish (NOT success)
+                // ── Reject → emit → label/comment → reject outputs → finish (NOT success) ──
                 ConnectOutcome(waitMerge, "Reject", emitRejected),
                 Connect(emitRejected, notifyRejected),
                 Connect(notifyRejected, rejectOutputs),
                 Connect(rejectOutputs, finish),
 
-                // Invalid → emit ESCALATED → notify owners → escalate outputs → finish
-                // (explicit failure terminal — no silent reject, no fall-through to success)
-                ConnectOutcome(waitMerge, "Invalid", emitEscalated),
+                // ── Invalid → emit DECISION.INVALID → ESCALATED → notify → outputs → finish ──
+                // (explicit failure terminal — no silent reject, no fall-through to success,
+                //  no loop back to the gate)
+                ConnectOutcome(waitMerge, "Invalid", emitInvalid),
+                Connect(emitInvalid, emitEscalated),
+
+                // Shared loud escalate terminal (invalid decision / failed merge /
+                // test-loop cap exceeded) → notify owners → escalate outputs → finish
                 Connect(emitEscalated, notifyEscalated),
                 Connect(notifyEscalated, escalateOutputs),
                 Connect(escalateOutputs, finish),
@@ -261,6 +384,20 @@ public class MergeApprovalWorkflow : WorkflowBase
         };
         emit.SetDisplayText(label);
         return emit;
+    }
+
+    /// <summary>
+    /// A <see cref="SetVariable"/> node that assigns <paramref name="valueFunc"/>
+    /// to <paramref name="variable"/> — mirrors the cycle's Assign helper.
+    /// </summary>
+    private static SetVariable Assign(
+        Variable variable,
+        Func<Elsa.Expressions.Models.ExpressionExecutionContext, object?> valueFunc,
+        string id, string name)
+    {
+        var sv = new SetVariable { Id = id, Name = name, Variable = variable, Value = new Input<object?>(valueFunc) };
+        sv.SetDisplayText(name);
+        return sv;
     }
 
     /// <summary>

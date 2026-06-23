@@ -32,13 +32,19 @@ namespace Tamma.Activities.ADL;
 ///     rejected the PR.</description></item>
 ///   <item><description><c>MERGE_APPROVAL.DECISION.INVALID</c> — the resume
 ///     payload carried an unknown / empty decision. Emitted instead of silently
-///     defaulting to "reject" (no-silent-failure rule). Routes back to the gate
-///     for a valid re-decision.</description></item>
+///     defaulting to "reject" (no-silent-failure rule). The gate ESCALATES on
+///     this (the parent routes the <c>Invalid</c> outcome to the escalate
+///     terminal) — it does NOT loop back to the gate.</description></item>
 ///   <item><description><c>MERGE_APPROVAL.ESCALATED</c> — the gate escalated to
-///     owners (e.g. an invalid decision needing human attention, or a
-///     breaking-change merge attempted without an authorised approver).</description></item>
+///     owners (e.g. an invalid decision needing human attention, a failed merge
+///     sub-workflow, or a breaking-change merge attempted without an authorised
+///     approver).</description></item>
 ///   <item><description><c>MERGE.REQUESTED</c> — on approval the gate dispatched
 ///     the <c>merge</c> workflow.</description></item>
+///   <item><description><c>MERGE.FAILED</c> — the dispatched <c>merge</c>
+///     workflow reported <c>success=false</c>. Loud (error-status) — the gate
+///     escalates instead of routing to the merge/success terminal (which would
+///     hang the cycle on a merge webhook that never fires).</description></item>
 ///   <item><description><c>MERGE_APPROVAL.TEST_REQUESTED</c> — on the test
 ///     decision the gate dispatched the testing sub-workflow before re-deciding.</description></item>
 /// </list>
@@ -56,6 +62,7 @@ public static class MergeApprovalEvents
     public const string DecisionInvalid = "MERGE_APPROVAL.DECISION.INVALID";
     public const string Escalated = "MERGE_APPROVAL.ESCALATED";
     public const string MergeRequested = "MERGE.REQUESTED";
+    public const string MergeFailed = "MERGE.FAILED";
     public const string TestRequested = "MERGE_APPROVAL.TEST_REQUESTED";
 
     /// <summary>
