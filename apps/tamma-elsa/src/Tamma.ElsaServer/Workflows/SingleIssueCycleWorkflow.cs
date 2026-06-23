@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
@@ -389,7 +390,9 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["branchName"] = branchName.Get(ctx),
                 ["baseBranch"] = baseBranch.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
+                ["issueTitle"] = ExtractWorkItemTitle(workItemJson.Get(ctx)),
                 ["planJson"] = planJson.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
                 ["draft"] = true,
             }),
             WaitForCompletion = new(true),
@@ -901,6 +904,33 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         };
         dispatch.SetDisplayText($"Notify: {message[..Math.Min(message.Length, 30)]}");
         return dispatch;
+    }
+
+    /// <summary>
+    /// Best-effort extraction of the work item's title from the work-item JSON
+    /// so the PR step can render <c>[ADL] #n: {title}</c>. Returns "" when the
+    /// JSON is absent / malformed / has no title field (the PR step degrades to
+    /// a title-less form rather than failing).
+    /// </summary>
+    private static string ExtractWorkItemTitle(string? workItemJson)
+    {
+        if (string.IsNullOrWhiteSpace(workItemJson)) return "";
+        try
+        {
+            using var doc = JsonDocument.Parse(workItemJson);
+            foreach (var name in new[] { "title", "Title", "name", "Name" })
+            {
+                if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                    doc.RootElement.TryGetProperty(name, out var v) &&
+                    v.ValueKind == JsonValueKind.String)
+                    return v.GetString() ?? "";
+            }
+            return "";
+        }
+        catch
+        {
+            return "";
+        }
     }
 
     private static SetVariable Assign(Variable variable, Func<Elsa.Expressions.Models.ExpressionExecutionContext, object?> valueFunc, string id, string name)

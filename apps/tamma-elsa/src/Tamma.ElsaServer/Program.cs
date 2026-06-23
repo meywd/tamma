@@ -192,6 +192,32 @@ builder.Services.AddCors(options =>
 // HttpClientFactory — used by activities that call external APIs (e.g. UpdateCodeIndexActivity, CallLlmInlineActivity)
 builder.Services.AddHttpClient();
 
+// GitHub integration service — required by the ADL PR / branch / review
+// activities (CreatePullRequestActivity, CreateBranchActivity, …) so the
+// pull-request workflow can actually open / reuse a PR inside the engine.
+//
+// The engine does NOT reference Tamma.Api (where the production
+// GitHubIntegrationService lives — see the Octokit / credential notes
+// below), so it can't register that concrete type here. The PR activities
+// are DI-tolerant: they resolve IGitHubIntegrationService via
+// context.GetService<T>() and, when absent, surface an explicit `Error`
+// outcome (no silent false success) rather than throwing. In the production
+// composition the GitHub work routes through the Tamma.Api process (consistent
+// with the agent-architecture pivot: engine steps delegate external API calls
+// to tamma-api). The named "github" HttpClient is still registered so any
+// in-process IGitHubIntegrationService picked up via DI gets a configured
+// client.
+builder.Services.AddHttpClient("github", client =>
+{
+    client.BaseAddress = new Uri(builder.Configuration["GitHub:ApiBaseUrl"] ?? "https://api.github.com");
+    var token = builder.Configuration["GitHub:Token"];
+    if (!string.IsNullOrWhiteSpace(token))
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("Tamma-Engine");
+    client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+});
+
 // Story 9-11: Tamma API client — used by simplified activities to delegate
 // agent config, health, diagnostics, and provider execution to the central
 // Fastify/ASP.NET API plane.
