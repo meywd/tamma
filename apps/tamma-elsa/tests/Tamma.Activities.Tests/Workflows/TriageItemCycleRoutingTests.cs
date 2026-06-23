@@ -43,6 +43,69 @@ public class TriageItemCycleRoutingTests
         HasEdge("ExtractPanelResult", null, "PanelUsable").Should().BeTrue();
     }
 
+    // ================================================================
+    // Context-gathering fail-closed signal (TriageContextGathering build-out)
+    // ================================================================
+
+    [Test]
+    public void ContextGatheredGate_Exists_AfterExtractingContext()
+    {
+        _flowchart.Activities.OfType<FlowDecision>()
+            .Any(d => d.Id == "ContextGathered")
+            .Should().BeTrue("the cycle must gate on the context stage's fail-closed signal");
+
+        HasEdge("ExtractContext", null, "ContextGathered").Should().BeTrue();
+    }
+
+    [Test]
+    public void GatheredContext_ProceedsToPanelReview()
+    {
+        HasEdge("ContextGathered", "True", "PanelReview").Should().BeTrue();
+    }
+
+    [Test]
+    public void FailedContext_SkipsPanelAndLabels_RoutesToLoudTerminal()
+    {
+        // False (no context gathered) → set reason → mark skipped → finish. It must
+        // NOT reach the panel review, PO decision, or label-application activity
+        // (no panel over phantom context, no silent labelling).
+        HasEdge("ContextGathered", "False", "SetContextFailedReason").Should().BeTrue();
+        HasEdge("SetContextFailedReason", null, "MarkSkipped").Should().BeTrue();
+
+        var falseTargets = _flowchart.Connections
+            .Where(c => c.Source.Activity.Id == "ContextGathered" && c.Source.Port == "False")
+            .Select(c => c.Target.Activity.Id)
+            .ToList();
+
+        falseTargets.Should().NotContain("PanelReview");
+        falseTargets.Should().NotContain("PODecision");
+        falseTargets.Should().NotContain("ApplyLabels");
+    }
+
+    [Test]
+    public void ContextGatheredGate_HasNoUnconditionalFallthrough()
+    {
+        var fromGate = _flowchart.Connections
+            .Where(c => c.Source.Activity.Id == "ContextGathered")
+            .ToList();
+
+        fromGate.Should().NotBeEmpty();
+        fromGate.Should().OnlyContain(c => c.Source.Port == "True" || c.Source.Port == "False");
+    }
+
+    [Test]
+    public void ContextDispatch_ThreadsTenantId()
+    {
+        // The cycle forwards tenantId to the context sub-workflow so a tenant-scoped
+        // caller's TRIAGE.CONTEXT.* events carry the tenant tag (durable drain reads
+        // the TenantId variable, which the sub-workflow stamps from this input).
+        var dispatch = _flowchart.Activities
+            .OfType<DispatchWorkflow>()
+            .FirstOrDefault(d => d.Id == "GatherTriageContext");
+        dispatch.Should().NotBeNull();
+        ReadDefinitionId(dispatch!).Should().Be("triage-context-gathering");
+    }
+
     [Test]
     public void UsablePanel_ProceedsToPoDecisionAndLabels()
     {
@@ -55,10 +118,11 @@ public class TriageItemCycleRoutingTests
     [Test]
     public void FailedPanel_SkipsLabelApplication_RoutesToLoudTerminal()
     {
-        // False (failed panel) → mark skipped → finish. It must NOT reach the PO
-        // decision or the label-application activity (no silent labelling off a
-        // wholly-failed panel).
-        HasEdge("PanelUsable", "False", "MarkSkipped").Should().BeTrue();
+        // False (failed panel) → set reason → mark skipped → finish. It must NOT
+        // reach the PO decision or the label-application activity (no silent
+        // labelling off a wholly-failed panel).
+        HasEdge("PanelUsable", "False", "SetPanelFailedReason").Should().BeTrue();
+        HasEdge("SetPanelFailedReason", null, "MarkSkipped").Should().BeTrue();
         HasEdge("MarkSkipped", null, "OutSkipReason").Should().BeTrue();
         HasEdge("OutSkipReason", null, "Finish").Should().BeTrue();
 
