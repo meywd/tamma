@@ -138,7 +138,9 @@ public class CallLlmActivity : Activity
         {
             TenantId = ParseTenantId(tenantIdRaw),
             Provider = string.IsNullOrWhiteSpace(providerName) ? null : providerName,
-            Role = "assistant",
+            // "developer" is a canonical AgentRole wire — the API's resolver 422s on
+            // a non-canonical/unaliased role. (Was "assistant", which is neither.)
+            Role = "developer",
             Prompt = userPrompt,
             Model = string.IsNullOrWhiteSpace(modelOverride) ? null : modelOverride,
             Tools = tools is { Count: > 0 } ? tools : null,

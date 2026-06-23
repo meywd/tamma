@@ -41,7 +41,11 @@ internal static class MediatedLlmText
 
         var request = new LlmCallApiRequest
         {
-            Role = string.IsNullOrWhiteSpace(role) ? "assistant" : role,
+            // Default to a canonical AgentRole wire ("developer") — the API's
+            // AgentResolverService 422s on a non-canonical/unaliased role, so a
+            // blank-role default of "assistant" (neither canonical nor aliased)
+            // would fail every such call.
+            Role = string.IsNullOrWhiteSpace(role) ? "developer" : role,
             Prompt = prompt,
             EnableToolLoop = false,
             CorrelationId = context.WorkflowExecutionContext.Id,
@@ -77,20 +81,27 @@ internal static class MediatedLlmText
     }
 
     /// <summary>
-    /// Resolve the tenant scope (X-Tenant-Id) from the workflow's ambient
-    /// <c>TenantId</c> variable when present. Empty / unset ⇒ single-user /
-    /// platform scope (the endpoint resolves the platform credential).
+    /// Resolve the tenant scope (X-Tenant-Id) from the workflow's ambient tenant
+    /// variable. Mirrors the established convention used by
+    /// <c>EventPersistenceMiddleware</c> / <c>CheckBudgetActivity</c>: read
+    /// <c>TenantId</c> (legacy fallback <c>AccountId</c>) as an <c>object</c> —
+    /// it may be stamped as a <see cref="Guid"/> or a string — and coerce to a
+    /// canonical Guid string. An empty / unset / non-Guid value ⇒ platform scope
+    /// (the endpoint resolves the platform credential). Reading as <c>object?</c>
+    /// (not <c>string?</c>) is deliberate: a Guid-typed variable previously failed
+    /// the typed read and was silently swallowed to platform scope.
     /// </summary>
     private static string? ResolveTenantId(ActivityExecutionContext context)
     {
-        try
-        {
-            var raw = context.GetVariable<string?>("TenantId");
-            return string.IsNullOrWhiteSpace(raw) ? null : raw!.Trim();
-        }
-        catch
-        {
-            return null;
-        }
+        var raw = context.GetVariable<object?>("TenantId")
+                  ?? context.GetVariable<object?>("AccountId");
+        return CoerceTenantId(raw);
     }
+
+    private static string? CoerceTenantId(object? raw) => raw switch
+    {
+        Guid g when g != Guid.Empty => g.ToString(),
+        string s when Guid.TryParse(s, out var p) && p != Guid.Empty => p.ToString(),
+        _ => null,
+    };
 }

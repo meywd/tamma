@@ -103,7 +103,12 @@ public class AIDiagnosisActivity : CodeActivity<DiagnosisResult>
         try
         {
             var prompt = BuildDiagnosisPrompt(mode, errorCtx, codeCtx, gitCtx, testCtx, reproCtx, previousCtx);
-            var response = await MediatedLlmText.CompleteAsync(context, "debugger", prompt, context.CancellationToken);
+            // Role MUST be a canonical AgentRole wire (or a RolePhaseMap alias) — the
+            // API's AgentResolverService runs AssertValidRole and 422s on an unknown
+            // role. Diagnosis is a senior analytical task, so it resolves the
+            // senior_developer agent/prompt (Epic-27). The free-text "debugger" label
+            // is NOT a valid role and was rejected on every non-mock call.
+            var response = await MediatedLlmText.CompleteAsync(context, "senior_developer", prompt, context.CancellationToken);
             var result = ParseDiagnosisResponse(response);
 
             _logger?.LogInformation(
