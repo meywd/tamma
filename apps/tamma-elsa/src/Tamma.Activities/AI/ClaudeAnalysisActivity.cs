@@ -4,11 +4,9 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Net;
-using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Tamma.Activities.LlmCall;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -16,11 +14,15 @@ using Tamma.Data.Repositories;
 namespace Tamma.Activities.AI;
 
 /// <summary>
-/// ELSA activity to call Claude API for intelligent analysis of code, responses, and situations.
-/// Supports three modes:
-///   1. Real Claude API (default when Anthropic:ApiKey is set)
-///   2. Engine callback (when Engine:CallbackUrl is set — uses the TS engine's full agent toolchain)
-///   3. Mock mode (when Anthropic:UseMock=true — for testing)
+/// ELSA activity to call Claude for intelligent analysis of code, responses, and situations.
+/// Supports two modes:
+///   1. Mediated LLM call (default — routes through POST /api/v1/llm/call)
+///   2. Mock mode (when Anthropic:UseMock=true — for testing)
+///
+/// <para>Story 32-5 (AC9): the LLM call routes through the mediated call-LLM
+/// endpoint (<see cref="MediatedLlmText"/>) — the engine holds NO provider key
+/// and makes no direct <c>/v1/messages</c> call. The output contract
+/// (<see cref="ClaudeAnalysisOutput"/>) is unchanged.</para>
 /// </summary>
 [Activity(
     "Tamma.AI",
@@ -87,25 +89,14 @@ public class ClaudeAnalysisActivity : CodeActivity<ClaudeAnalysisOutput>
             var systemPrompt = GetSystemPrompt(analysisType, skillLevel);
             var userPrompt = GetUserPrompt(analysisType, content, additionalContext);
 
-            string response;
-            var callbackUrl = _configuration!["Engine:CallbackUrl"];
-            var useMock = _configuration.GetValue<bool>("Anthropic:UseMock");
+            var useMock = _configuration?.GetValue<bool>("Anthropic:UseMock") ?? false;
 
-            if (useMock)
-            {
-                // Mock mode for testing
-                response = SimulateClaudeResponse(analysisType);
-            }
-            else if (!string.IsNullOrEmpty(callbackUrl))
-            {
-                // Callback mode — delegate to TS engine
-                response = await CallEngineCallback(callbackUrl, systemPrompt, userPrompt, analysisType);
-            }
-            else
-            {
-                // Direct Claude API call
-                response = await CallClaudeApi(systemPrompt, userPrompt);
-            }
+            // The composed system+user prompt is this legacy activity's authoritative
+            // instruction; route it through the mediated call-LLM endpoint.
+            var response = useMock
+                ? SimulateClaudeResponse(analysisType)
+                : await MediatedLlmText.CompleteAsync(
+                    context, "reviewer", $"{systemPrompt}\n\n{userPrompt}", context.CancellationToken);
 
             var result = ParseResponse(response, analysisType);
 
@@ -134,95 +125,6 @@ public class ClaudeAnalysisActivity : CodeActivity<ClaudeAnalysisOutput>
                 FallbackUsed = true
             });
         }
-    }
-
-    /// <summary>
-    /// Call the Claude Messages API directly.
-    /// </summary>
-    private async Task<string> CallClaudeApi(string systemPrompt, string userPrompt)
-    {
-        var httpClient = _httpClientFactory!.CreateClient("anthropic");
-        var model = _configuration!["Anthropic:Model"] ?? "claude-sonnet-4-20250514";
-
-        var requestBody = new
-        {
-            model,
-            max_tokens = 4096,
-            system = systemPrompt,
-            messages = new[]
-            {
-                new { role = "user", content = userPrompt }
-            }
-        };
-
-        const int maxRetries = 3;
-        for (var attempt = 0; attempt < maxRetries; attempt++)
-        {
-            var response = await httpClient.PostAsJsonAsync("/v1/messages", requestBody);
-
-            var statusCode = (int)response.StatusCode;
-            if (response.StatusCode == HttpStatusCode.TooManyRequests
-                || statusCode == 502 || statusCode == 503 || statusCode == 504)
-            {
-                TimeSpan retryAfter;
-                if (response.Headers.TryGetValues("Retry-After", out var retryValues)
-                    && int.TryParse(retryValues.FirstOrDefault(), out var retrySeconds)
-                    && retrySeconds > 0)
-                {
-                    retryAfter = TimeSpan.FromSeconds(retrySeconds);
-                }
-                else
-                {
-                    retryAfter = TimeSpan.FromSeconds(5 * (attempt + 1));
-                }
-
-                _logger?.LogWarning(
-                    "Claude API returned {StatusCode}, retrying after {RetryAfter}s (attempt {Attempt}/{Max})",
-                    statusCode, retryAfter.TotalSeconds, attempt + 1, maxRetries);
-                await Task.Delay(retryAfter);
-                continue;
-            }
-
-            response.EnsureSuccessStatusCode();
-
-            var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var contentArray = result.GetProperty("content");
-
-            // Extract text from the first content block
-            foreach (var block in contentArray.EnumerateArray())
-            {
-                if (block.GetProperty("type").GetString() == "text")
-                {
-                    return block.GetProperty("text").GetString() ?? "{}";
-                }
-            }
-
-            return "{}";
-        }
-
-        throw new InvalidOperationException("Claude API request failed after max retries");
-    }
-
-    /// <summary>
-    /// Call the TS engine callback to use the full agent toolchain.
-    /// </summary>
-    private async Task<string> CallEngineCallback(
-        string callbackUrl, string systemPrompt, string userPrompt, AnalysisType type)
-    {
-        var httpClient = _httpClientFactory!.CreateClient();
-
-        var requestBody = new
-        {
-            prompt = $"{systemPrompt}\n\n{userPrompt}",
-            analysisType = type.ToString()
-        };
-
-        var response = await httpClient.PostAsJsonAsync(
-            $"{callbackUrl.TrimEnd('/')}/api/engine/execute-task", requestBody);
-        response.EnsureSuccessStatusCode();
-
-        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return result.GetProperty("output").GetString() ?? "{}";
     }
 
     private string GetSystemPrompt(AnalysisType type, int skillLevel)

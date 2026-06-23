@@ -4,10 +4,10 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Tamma.Activities.Debug.Models;
+using Tamma.Activities.LlmCall;
 
 namespace Tamma.Activities.Debug;
 
@@ -15,6 +15,13 @@ namespace Tamma.Activities.Debug;
 /// AI diagnosis activity: calls LLM (role=debugger) to generate ranked root cause hypotheses.
 /// Sends all gathered debug context plus previous failed attempts (if retrying) to the LLM.
 /// Returns a DiagnosisResult with ranked hypotheses.
+///
+/// <para>Story 32-5 (AC9): the LLM call routes through the mediated call-LLM
+/// endpoint (<see cref="MediatedLlmText"/>) — the engine holds NO provider key
+/// and makes no direct <c>/v1/messages</c> call. There is NO simulated path (a
+/// fabricated diagnosis would poison the audit trail / debug loop), and a textless
+/// mediated response throws rather than fabricating. The output contract
+/// (<see cref="DiagnosisResult"/>) is unchanged.</para>
 /// </summary>
 [Activity(
     "Tamma.Debug",
@@ -96,7 +103,7 @@ public class AIDiagnosisActivity : CodeActivity<DiagnosisResult>
         try
         {
             var prompt = BuildDiagnosisPrompt(mode, errorCtx, codeCtx, gitCtx, testCtx, reproCtx, previousCtx);
-            var response = await CallLlm(prompt);
+            var response = await MediatedLlmText.CompleteAsync(context, "debugger", prompt, context.CancellationToken);
             var result = ParseDiagnosisResponse(response);
 
             _logger?.LogInformation(
@@ -204,65 +211,6 @@ public class AIDiagnosisActivity : CodeActivity<DiagnosisResult>
 }");
 
         return sb.ToString();
-    }
-
-    private async Task<string> CallLlm(string prompt)
-    {
-        // No mock path: simulated diagnosis responses with fake hypotheses, fake
-        // confidence scores and fake "affected_files" were leaking into audit
-        // events and corrupting the debug-loop trail. All diagnoses now route
-        // through the real engine callback or direct Anthropic API.
-        // See: feat/wave-b cleanup.
-        if (_httpClientFactory == null)
-        {
-            throw new InvalidOperationException(
-                "AIDiagnosisActivity requires IHttpClientFactory; no simulated fallback is permitted.");
-        }
-
-        var callbackUrl = _configuration?["Engine:CallbackUrl"];
-        if (!string.IsNullOrEmpty(callbackUrl))
-        {
-            var client = _httpClientFactory.CreateClient();
-            var requestBody = new
-            {
-                prompt,
-                analysisType = "debugging_diagnosis",
-                role = "debugger"
-            };
-
-            var response = await client.PostAsJsonAsync(
-                $"{callbackUrl.TrimEnd('/')}/api/engine/execute-task", requestBody);
-            response.EnsureSuccessStatusCode();
-
-            var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-            return result.GetProperty("output").GetString() ?? "{}";
-        }
-
-        // Direct API call (when no engine callback is configured)
-        var directClient = _httpClientFactory.CreateClient("anthropic");
-        var model = _configuration?["Anthropic:Model"] ?? "claude-sonnet-4-20250514";
-
-        var directRequestBody = new
-        {
-            model,
-            max_tokens = 4096,
-            system = "You are an expert debugging specialist. Analyze the provided context and generate ranked root cause hypotheses in JSON format.",
-            messages = new[] { new { role = "user", content = prompt } }
-        };
-
-        var directResponse = await directClient.PostAsJsonAsync("/v1/messages", directRequestBody);
-        directResponse.EnsureSuccessStatusCode();
-
-        var directResult = await directResponse.Content.ReadFromJsonAsync<JsonElement>();
-        var contentArray = directResult.GetProperty("content");
-        foreach (var block in contentArray.EnumerateArray())
-        {
-            if (block.GetProperty("type").GetString() == "text")
-                return block.GetProperty("text").GetString() ?? "{}";
-        }
-
-        throw new InvalidOperationException(
-            "Anthropic API response contained no text block; refusing to fabricate a diagnosis.");
     }
 
     private DiagnosisResult ParseDiagnosisResponse(string response)

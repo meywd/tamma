@@ -4,9 +4,9 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Tamma.Activities.LlmCall;
 using Tamma.Activities.TDD.Models;
 
 namespace Tamma.Activities.TDD;
@@ -16,6 +16,10 @@ namespace Tamma.Activities.TDD;
 /// Part of the REFACTOR phase in the TDD cycle.
 /// Calls LLM with role=reviewer to identify improvements.
 /// Returns suggestions with confidence scores; the workflow decides whether to apply them.
+///
+/// <para>Story 32-5 (AC9): the LLM call routes through the mediated call-LLM
+/// endpoint (<see cref="MediatedLlmText"/>) — no direct provider key/HTTP in the
+/// engine. The mock path remains for tests; the output contract is unchanged.</para>
 /// </summary>
 [Activity(
     "Tamma.TDD",
@@ -83,22 +87,11 @@ public class AnalyzeCodeActivity : CodeActivity<RefactoringAnalysis>
         {
             var prompt = BuildAnalysisPrompt(testCode, implementationCode, skillLevel);
 
-            var callbackUrl = _configuration?["Engine:CallbackUrl"];
             var useMock = _configuration?.GetValue<bool>("Anthropic:UseMock") ?? false;
 
-            string response;
-            if (useMock)
-            {
-                response = SimulateAnalysis();
-            }
-            else if (!string.IsNullOrEmpty(callbackUrl))
-            {
-                response = await CallEngineCallback(callbackUrl, prompt);
-            }
-            else
-            {
-                response = await CallLlm(prompt);
-            }
+            var response = useMock
+                ? SimulateAnalysis()
+                : await MediatedLlmText.CompleteAsync(context, "reviewer", prompt, context.CancellationToken);
 
             var result = ParseAnalysisResponse(response, confidenceThreshold);
 
@@ -160,46 +153,6 @@ Respond with JSON:
         }}
     ]
 }}";
-    }
-
-    private async Task<string> CallEngineCallback(string callbackUrl, string prompt)
-    {
-        var httpClient = _httpClientFactory!.CreateClient();
-        var requestBody = new { prompt, role = "reviewer" };
-        var response = await httpClient.PostAsJsonAsync(
-            $"{callbackUrl.TrimEnd('/')}/api/engine/execute-task", requestBody);
-        response.EnsureSuccessStatusCode();
-        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return result.GetProperty("output").GetString() ?? "{}";
-    }
-
-    private async Task<string> CallLlm(string prompt)
-    {
-        var httpClient = _httpClientFactory!.CreateClient("anthropic");
-        var model = _configuration!["Anthropic:Model"] ?? "claude-sonnet-4-20250514";
-
-        var requestBody = new
-        {
-            model,
-            max_tokens = 4096,
-            system = "You are a code reviewer specializing in identifying safe refactoring opportunities after a TDD green phase.",
-            messages = new[] { new { role = "user", content = prompt } }
-        };
-
-        var response = await httpClient.PostAsJsonAsync("/v1/messages", requestBody);
-        response.EnsureSuccessStatusCode();
-
-        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var contentArray = result.GetProperty("content");
-        foreach (var block in contentArray.EnumerateArray())
-        {
-            if (block.GetProperty("type").GetString() == "text")
-            {
-                return block.GetProperty("text").GetString() ?? "{}";
-            }
-        }
-
-        return "{}";
     }
 
     private static string SimulateAnalysis()
