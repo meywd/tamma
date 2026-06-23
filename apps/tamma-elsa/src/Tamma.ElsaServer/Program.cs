@@ -286,6 +286,21 @@ builder.Services.AddSingleton<Tamma.Activities.AgentDispatch.IGitHubActionsClien
 Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions
     .TryAddSingleton<Tamma.Data.Abstractions.IPlatformEventPublisher,
         Tamma.Activities.TenantLifecycle.NullPlatformEventPublisher>(builder.Services);
+
+// Story 29-6 — engine-side rotation audit emitter. RotateSecretWorkflow runs
+// HERE (the engine), and RotateSecretSagaActivity resolves
+// IRotationAuditEmitter via GetRequiredService. The concrete RotationAuditEmitter
+// lives in Tamma.Api (it forwards to IPlatformEventPublisher) and can't be
+// referenced from the engine — so without this registration the resolve threw
+// "No service for type IRotationAuditEmitter" and crashed the saga, losing the
+// audit trail. DrainRotationAuditEmitter maps each rotation event to a
+// TammaEvent on the workflow's tamma:events list (via the ambient
+// RotationAuditDrainScope the saga opens) so the events ride the durable DCB
+// drain (EventPersistenceMiddleware) → POST /api/engine/events → domain_events,
+// matching the EventType + tag keys the Api-side emitter produces.
+builder.Services.AddSingleton<Tamma.Activities.SecretsRotation.Contracts.IRotationAuditEmitter,
+    Tamma.Activities.SecretsRotation.Activities.DrainRotationAuditEmitter>();
+
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentDispatchService,
     Tamma.Activities.AgentDispatch.AgentDispatchService>();
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentMonitorService,
