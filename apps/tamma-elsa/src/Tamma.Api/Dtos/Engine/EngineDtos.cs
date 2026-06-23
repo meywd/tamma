@@ -92,3 +92,40 @@ public record CycleResultRequest(
     string? Error,
     long? DurationMs,
     JsonElement? Metadata);
+
+/// <summary>
+/// Engine DCB-event-append shape. One <see cref="EngineEventRecord"/> per
+/// <c>TammaEvent</c> the engine drained from its in-process
+/// <c>tamma:events</c> transient list. Persisted to the caller's tenant
+/// <c>domain_events</c> via <see cref="Tamma.Data.Repositories.IEventRepository"/>.
+///
+/// <para>The engine emits these events into a write-only transient list that
+/// nothing previously drained, and the event repositories are not registered
+/// inside <c>Tamma.ElsaServer</c> (it can't reference <c>Tamma.Api</c>). This
+/// callback is the durable engine→store bridge — mirrors
+/// <see cref="CycleResultRequest"/> / <c>PostCycleResult</c>, the one existing
+/// engine→<c>domain_events</c> path.</para>
+/// </summary>
+public record AppendEventsRequest(
+    List<EngineEventRecord> Events);
+
+/// <summary>
+/// Wire projection of one engine <c>TammaEvent</c>. <c>eventType</c> becomes
+/// <see cref="Tamma.Data.Entities.DomainEvent.Type"/>; the activity/workflow
+/// identifiers + <c>status</c> + <c>duration</c> become tenant-scoped
+/// <c>Tags</c>; <c>data</c> is the structured payload; <c>timestamp</c> becomes
+/// <c>CreatedAt</c>.
+/// </summary>
+public record EngineEventRecord(
+    Guid Id,
+    string EventType,
+    string? Status,
+    string? Error,
+    DateTime? Timestamp,
+    double? DurationMs,
+    string? ActivityId,
+    string? ActivityName,
+    string? WorkflowInstanceId,
+    int? IssueNumber,
+    JsonElement? Data,
+    Dictionary<string, string?>? Tags);

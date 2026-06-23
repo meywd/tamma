@@ -193,6 +193,81 @@ public class TammaApiClientTests
     }
 
     [Test]
+    public async Task AppendEventsAsync_PostsBatch_ToEngineEvents_AndReturnsTrueOnOk()
+    {
+        var handler = new StubHttpMessageHandler(HttpStatusCode.Created, "{\"ok\":true,\"persisted\":2}");
+        var client = BuildClient(handler);
+
+        var id1 = Guid.NewGuid();
+        var events = new List<EngineEventRecord>
+        {
+            new(id1, "CODE.GENERATED.SUCCESS", "success", null, DateTime.UtcNow, 12.5,
+                "act-1", "GenerateCode", "wf-1", 42, null, null),
+            new(Guid.NewGuid(), "CODE.GENERATED.FAILED", "error", "boom", DateTime.UtcNow, 3.0,
+                "act-2", "GenerateCode", "wf-1", 42, null, null),
+        };
+
+        var ok = await client.AppendEventsAsync(events, tenantId: Guid.Parse("11111111-1111-1111-1111-111111111111"));
+
+        ok.Should().BeTrue();
+        handler.LastRequest!.Method.Should().Be(HttpMethod.Post);
+        handler.LastRequest.RequestUri!.AbsolutePath.Should().Be("/api/engine/events");
+        handler.LastRequest.Headers.TryGetValues("X-Tenant-Id", out var tenant).Should().BeTrue();
+        tenant!.Single().Should().Be("11111111-1111-1111-1111-111111111111");
+
+        // The wire body carries the camelCase batch shape. The handler reads
+        // the body before the (using-scoped) request Content is disposed.
+        handler.LastBody.Should().NotBeNull();
+        var body = JsonDocument.Parse(handler.LastBody!).RootElement;
+        body.GetProperty("events").GetArrayLength().Should().Be(2);
+        body.GetProperty("events")[0].GetProperty("eventType").GetString().Should().Be("CODE.GENERATED.SUCCESS");
+        body.GetProperty("events")[0].GetProperty("workflowInstanceId").GetString().Should().Be("wf-1");
+        // Stable per-event id is on the wire (C2 — drives idempotent append).
+        body.GetProperty("events")[0].GetProperty("id").GetGuid().Should().Be(id1);
+    }
+
+    [Test]
+    public async Task AppendEventsAsync_ReturnsFalse_OnPartialFailure502()
+    {
+        var handler = new StubHttpMessageHandler(
+            HttpStatusCode.BadGateway, "{\"error\":\"partial_append_failure\",\"persisted\":1,\"failed\":1}");
+        var client = BuildClient(handler);
+
+        var ok = await client.AppendEventsAsync(new List<EngineEventRecord>
+        {
+            new(Guid.NewGuid(), "A", "success", null, DateTime.UtcNow, null, null, null, "wf", null, null, null),
+        });
+
+        ok.Should().BeFalse("a non-2xx must signal the drain to NOT advance its cursor");
+    }
+
+    [Test]
+    public async Task AppendEventsAsync_ReturnsFalse_OnNetworkError()
+    {
+        var handler = new StubHttpMessageHandler(new HttpRequestException("down"));
+        var client = BuildClient(handler);
+
+        var ok = await client.AppendEventsAsync(new List<EngineEventRecord>
+        {
+            new(Guid.NewGuid(), "A", "success", null, DateTime.UtcNow, null, null, null, "wf", null, null, null),
+        });
+
+        ok.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task AppendEventsAsync_EmptyBatch_IsSuccessfulNoOp_AndSendsNoRequest()
+    {
+        var handler = new StubHttpMessageHandler(HttpStatusCode.Created, "{}");
+        var client = BuildClient(handler);
+
+        var ok = await client.AppendEventsAsync(new List<EngineEventRecord>());
+
+        ok.Should().BeTrue();
+        handler.LastRequest.Should().BeNull("an empty batch must not hit the network");
+    }
+
+    [Test]
     public async Task DisposeProviderAsync_SendsDelete_AndReturnsFalseOnFailure()
     {
         var handler = new StubHttpMessageHandler(HttpStatusCode.InternalServerError, "{}");
@@ -245,6 +320,10 @@ public class TammaApiClientTests
 
         public HttpRequestMessage? LastRequest { get; private set; }
 
+        /// <summary>Request body captured BEFORE the using-scoped request
+        /// (and its Content) is disposed by the client method.</summary>
+        public string? LastBody { get; private set; }
+
         public StubHttpMessageHandler(HttpStatusCode status, string json)
         {
             _response = new HttpResponseMessage(status)
@@ -258,13 +337,15 @@ public class TammaApiClientTests
             _exception = exception;
         }
 
-        protected override Task<HttpResponseMessage> SendAsync(
+        protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             LastRequest = request;
+            if (request.Content is not null)
+                LastBody = await request.Content.ReadAsStringAsync(cancellationToken);
             if (_exception is not null) throw _exception;
-            return Task.FromResult(_response!);
+            return _response!;
         }
     }
 }

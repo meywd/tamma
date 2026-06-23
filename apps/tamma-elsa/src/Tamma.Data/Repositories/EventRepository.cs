@@ -1,5 +1,6 @@
 using Tamma.Data.Abstractions;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
@@ -81,10 +82,40 @@ public class EventRepository(
 
         evt.TenantId = tid;
         await using var db = await tenantDbFactory.CreateAsync(tid.Value);
+
+        // Idempotent append on the stable per-event Id. The engine's at-least-
+        // once drain re-sends the entire pending slice on any non-2xx, so the
+        // events that DID persist in a partially-failed batch arrive again on
+        // retry. Without dedup that produces duplicate audit rows (C2). When
+        // the caller supplies a non-empty Id we treat a re-send as a no-op:
+        // a cheap pre-check keeps the common path off the exception machinery,
+        // and the PRIMARY KEY closes the concurrent-insert race below. An empty
+        // Id keeps the legacy behaviour (server gen_random_uuid() default).
+        if (evt.Id != Guid.Empty)
+        {
+            var exists = await db.DomainEvents.AsNoTracking()
+                .IgnoreQueryFilters()
+                .AnyAsync(e => e.Id == evt.Id);
+            if (exists) return evt;
+        }
+
         db.DomainEvents.Add(evt);
-        await db.SaveChangesAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (evt.Id != Guid.Empty && IsUniqueViolation(ex))
+        {
+            // A concurrent re-send won the race — the row already exists. Detach
+            // the rejected entry and treat the append as the no-op it is.
+            db.Entry(evt).State = EntityState.Detached;
+        }
         return evt;
     }
+
+    private static bool IsUniqueViolation(DbUpdateException ex) =>
+        ex.InnerException is PostgresException pg &&
+        pg.SqlState == PostgresErrorCodes.UniqueViolation;
 
     public async Task<DomainEvent?> GetByIdAsync(Guid id)
     {
