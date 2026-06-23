@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities.Flowchart.Attributes;
@@ -238,6 +239,16 @@ public class CreatePullRequestActivity : Activity
         => $"[ADL] #{issueNumber}: {issueTitle}".TrimEnd(':', ' ');
 
     /// <summary>
+    /// True when <paramref name="body"/> already references <c>#{issueNumber}</c>
+    /// as a whole token. Word-boundary (no surrounding digit) so <c>#5</c> is not
+    /// matched inside <c>#55</c> / <c>#512</c> — otherwise the auto-close keyword
+    /// would be wrongly suppressed for low issue numbers.
+    /// </summary>
+    public static bool HasIssueReference(string? body, int issueNumber)
+        => !string.IsNullOrEmpty(body)
+           && Regex.IsMatch(body, $@"(?<!\d)#{issueNumber}(?!\d)");
+
+    /// <summary>
     /// Compose the PR body. Prefers the AI-generated description (from the
     /// call-LLM mediation); falls back to a deterministic structured body when
     /// the AI body is empty. Either way the change + test summaries are appended
@@ -257,7 +268,10 @@ public class CreatePullRequestActivity : Activity
             sb.Append(aiBody.Trim());
             sb.Append("\n\n");
             // Ensure the issue-close keyword is present even if the AI omitted it.
-            if (!aiBody.Contains($"#{issueNumber}"))
+            // Word-boundary match so `#5` isn't considered present inside `#55`
+            // / `#512` (which would wrongly suppress the auto-close for low
+            // issue numbers).
+            if (!HasIssueReference(aiBody, issueNumber))
                 sb.Append($"Closes #{issueNumber}\n\n");
         }
         else

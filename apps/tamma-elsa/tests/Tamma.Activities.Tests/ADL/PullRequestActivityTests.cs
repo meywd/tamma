@@ -5,16 +5,16 @@ using Moq;
 using NUnit.Framework;
 using Tamma.Activities.ADL;
 using Tamma.Core.Interfaces;
-using Tamma.Data.Entities;
-using Tamma.Data.Repositories;
 
 namespace Tamma.Activities.Tests.ADL;
 
 /// <summary>
 /// Story 2.8 build-out — unit coverage for the PR-creation activity's pure
 /// helpers (body composition, deterministic fallback, smart labels, error
-/// classification, change-summary derivation), the new <c>EmitPrEventActivity</c>
-/// + the <c>PrEvents</c> DCB builder. Follows the codebase pattern of testing
+/// classification, change-summary derivation) and <c>EmitPrEventActivity</c>'s
+/// DCB mapping (<c>BuildTammaEvent</c> — the <c>TammaEvent</c> pushed into the
+/// workflow's <c>tamma:events</c> list, which the engine event drain persists
+/// durably to <c>domain_events</c>). Follows the codebase pattern of testing
 /// the testable static logic (running a full Elsa ActivityExecutionContext is
 /// avoided — see EmitCleanupTerminalEventActivityTests).
 /// </summary>
@@ -49,11 +49,10 @@ public class PullRequestActivityTests
     }
 
     [Test]
-    public void EmitPrEventActivity_WithDependencies_ShouldNotThrow()
+    public void EmitPrEventActivity_WithLogger_ShouldNotThrow()
     {
         var logger = new Mock<ILogger<EmitPrEventActivity>>();
-        var events = new Mock<IEventRepository>();
-        Action act = () => new EmitPrEventActivity(logger.Object, events.Object);
+        Action act = () => new EmitPrEventActivity(logger.Object);
         act.Should().NotThrow();
     }
 
@@ -101,6 +100,42 @@ public class PullRequestActivityTests
             changeSummary: null, testSummary: null);
 
         body.Should().Contain("Closes #55");
+    }
+
+    [Test]
+    public void BuildBody_IssueRefInsideLargerNumber_DoesNotSuppressClose()
+    {
+        // The AI body mentions #55 but the issue is #5 — a substring match would
+        // wrongly think #5 is present and skip the auto-close. Word-boundary
+        // match must still add "Closes #5".
+        var body = CreatePullRequestActivity.BuildBody(
+            5, "Relates to #55 and #512 but not this issue", planJson: null,
+            changeSummary: null, testSummary: null);
+
+        body.Should().Contain("Closes #5");
+    }
+
+    [Test]
+    public void BuildBody_ExactIssueRefPresent_DoesNotDuplicateClose()
+    {
+        var body = CreatePullRequestActivity.BuildBody(
+            5, "Closes #5 as part of the auth work", planJson: null,
+            changeSummary: null, testSummary: null);
+
+        // #5 is already referenced as a whole token → no extra "Closes #5" appended.
+        System.Text.RegularExpressions.Regex.Matches(body, @"(?<!\d)#5(?!\d)")
+            .Count.Should().Be(1);
+    }
+
+    [Test]
+    public void HasIssueReference_WordBoundary_MatchesWholeTokenOnly()
+    {
+        CreatePullRequestActivity.HasIssueReference("see #5 here", 5).Should().BeTrue();
+        CreatePullRequestActivity.HasIssueReference("see #55 here", 5).Should().BeFalse();
+        CreatePullRequestActivity.HasIssueReference("see #512 here", 5).Should().BeFalse();
+        CreatePullRequestActivity.HasIssueReference("ref #55", 55).Should().BeTrue();
+        CreatePullRequestActivity.HasIssueReference(null, 5).Should().BeFalse();
+        CreatePullRequestActivity.HasIssueReference("", 5).Should().BeFalse();
     }
 
     // ================================================================
@@ -285,40 +320,51 @@ public class PullRequestActivityTests
     }
 
     // ================================================================
-    // PrEvents — DCB builder
+    // EmitPrEventActivity.BuildTammaEvent — DCB mapping onto the drain
     // ================================================================
 
     [Test]
-    public void PrEvents_BuildEvent_SetsTypeIssueAndTags()
+    public void BuildTammaEvent_SuccessType_SetsTypeStatusTagsAndData()
     {
-        var evt = PrEvents.BuildEvent(
+        var evt = EmitPrEventActivity.BuildTammaEvent(
             PrEvents.CreatedSuccess, issueNumber: 12, repository: "o/r",
             prNumber: 34, tenantId: null,
             data: new Dictionary<string, object?> { ["url"] = "https://x/pull/34", ["isDraft"] = true });
 
-        evt.Type.Should().Be("PR.CREATED.SUCCESS");
-        evt.IssueNumber.Should().Be(12);
-        evt.Tags.Should().Contain("\"issueNumber\":\"12\"");
-        evt.Tags.Should().Contain("\"repository\":\"o/r\"");
-        evt.Tags.Should().Contain("\"prNumber\":\"34\"");
-        evt.Data.Should().Contain("url");
-        evt.Metadata.Should().Contain("eventSource");
+        evt.EventType.Should().Be("PR.CREATED.SUCCESS");
+        evt.Status.Should().Be("success");
+        evt.Tags.Should().NotBeNull();
+        evt.Tags!["issueId"].Should().Be("12");
+        evt.Tags["issueNumber"].Should().Be("12");
+        evt.Tags["repository"].Should().Be("o/r");
+        evt.Tags["prNumber"].Should().Be("34");
+        evt.Tags.Should().NotContainKey("tenantId");
+        evt.Data.Should().ContainKey("url");
+        evt.Data.Should().ContainKey("isDraft");
     }
 
     [Test]
-    public void PrEvents_BuildEvent_WithTenant_SetsTenantId()
+    public void BuildTammaEvent_FailedType_SetsErrorStatus_OmitsZeroPrNumber()
+    {
+        var evt = EmitPrEventActivity.BuildTammaEvent(
+            PrEvents.CreatedFailed, issueNumber: 7, repository: "o/r",
+            prNumber: 0, tenantId: null, data: null);
+
+        evt.EventType.Should().Be("PR.CREATED.FAILED");
+        evt.Status.Should().Be("error");
+        // A failed create reports no PR number — the tag must be absent (no false success).
+        evt.Tags!.Should().NotContainKey("prNumber");
+        evt.Data.Should().BeEmpty();
+    }
+
+    [Test]
+    public void BuildTammaEvent_WithTenant_SetsTenantIdTag()
     {
         var tenant = Guid.NewGuid();
-        var evt = PrEvents.BuildEvent(PrEvents.CreatedFailed, 1, "o/r", tenantId: tenant);
-        evt.TenantId.Should().Be(tenant);
-        evt.Tags.Should().Contain(tenant.ToString());
-    }
+        var evt = EmitPrEventActivity.BuildTammaEvent(
+            PrEvents.CreatedFailed, 1, "o/r", prNumber: 0, tenantId: tenant, data: null);
 
-    [Test]
-    public void PrEvents_BuildEvent_EmptyType_Throws()
-    {
-        Action act = () => PrEvents.BuildEvent("", 1, "o/r");
-        act.Should().Throw<ArgumentException>();
+        evt.Tags!["tenantId"].Should().Be(tenant.ToString("D"));
     }
 
     [Test]

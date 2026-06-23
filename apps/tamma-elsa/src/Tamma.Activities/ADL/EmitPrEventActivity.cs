@@ -4,25 +4,25 @@ using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Tamma.Data.Repositories;
+using Tamma.Activities.Core;
 
 namespace Tamma.Activities.ADL;
 
 /// <summary>
-/// Emits a <c>PR.*</c> DCB event (Story 2.8 AC6 / FR-20) into <c>domain_events</c>
-/// via <see cref="IEventRepository"/>, modelled on
-/// <c>TenantLifecycle/EmitDeletedSuccessActivity</c>.
+/// Emits a <c>PR.*</c> DCB event (Story 2.8 AC6 / FR-20) for the audit trail by
+/// appending a <see cref="TammaEvent"/> to the workflow's <c>tamma:events</c>
+/// transient list via <see cref="TammaEventEmitter.Emit"/>. The merged engine
+/// event drain (<c>EventPersistenceMiddleware</c> + <c>EventDrain</c>) flushes
+/// that list <i>durably</i> to the tenant <c>domain_events</c> store after this
+/// activity runs — the drain resolves the tenant from the workflow scope (the
+/// PR workflow stamps a <c>TenantId</c> variable). The event therefore persists
+/// without this activity holding any DB / repository dependency of its own
+/// (none is registered in the Elsa engine — the prior direct
+/// <c>IEventRepository</c> wiring was inert, silently dropping every PR event).
 ///
 /// <para>On the success transition it also increments the
 /// <c>prs_created_total</c> OTel counter (epics.md:1486).</para>
-///
-/// <para>FR-19e — observability failures MUST NOT block PR creation. The event
-/// append is best-effort: if <see cref="IEventRepository"/> is not registered in
-/// the host (the Elsa engine does not register it today) or the append throws,
-/// the activity logs a warning and completes normally. The PR has already been
-/// created; failing here would defeat the whole point of the failure edge.</para>
 /// </summary>
 [Activity(
     "Tamma.ADL",
@@ -47,7 +47,6 @@ public class EmitPrEventActivity : Activity
     public static long PrsCreatedTotal => Interlocked.Read(ref _prsCreatedTotal);
 
     private readonly ILogger<EmitPrEventActivity>? _logger;
-    private readonly IEventRepository? _events;
 
     [Input(Description = "Event type — PR.CREATED.SUCCESS or PR.CREATED.FAILED")]
     public Input<string> EventType { get; set; } = default!;
@@ -70,13 +69,12 @@ public class EmitPrEventActivity : Activity
     [JsonConstructor]
     public EmitPrEventActivity() { }
 
-    public EmitPrEventActivity(ILogger<EmitPrEventActivity> logger, IEventRepository events)
+    public EmitPrEventActivity(ILogger<EmitPrEventActivity> logger)
     {
         _logger = logger;
-        _events = events;
     }
 
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var type = EventType.Get(context) ?? PrEvents.CreatedFailed;
         var issueNumber = IssueNumber.Get(context);
@@ -87,44 +85,57 @@ public class EmitPrEventActivity : Activity
 
         var data = ParseData(dataJson);
 
-        // Metric first — it must fire even if the durable append is unavailable.
+        // Metric first — it must fire on the success transition.
         if (type == PrEvents.CreatedSuccess)
             RecordCreated(repository, data);
 
-        // Resolve the repository from DI when constructed by Elsa (the
-        // [Activity] sweep uses the parameterless ctor, leaving _events null).
-        var events = _events ?? context.GetService<IEventRepository>();
-        if (events is null)
-        {
-            _logger?.LogWarning(
-                "PR event {Type} not persisted (IEventRepository unavailable) — issue #{Issue} pr #{Pr}",
-                type, issueNumber, prNumber);
-            return;
-        }
+        // Build the DCB event and hand it to the emitter; the engine drain
+        // flushes tamma:events durably to domain_events after this activity.
+        var evt = BuildTammaEvent(type, issueNumber, repository, prNumber, tenantId, data);
+        TammaEventEmitter.Emit(context, this, _logger, evt);
 
-        try
-        {
-            var evt = PrEvents.BuildEvent(
-                type,
-                issueNumber,
-                repository,
-                prNumber > 0 ? prNumber : null,
-                tenantId,
-                data);
+        _logger?.LogInformation(
+            "Emitted {Type} for issue #{Issue} pr #{Pr} in {Repo}",
+            type, issueNumber, prNumber, repository);
 
-            await events.AppendAsync(evt);
+        return default;
+    }
 
-            _logger?.LogInformation(
-                "Emitted {Type} for issue #{Issue} pr #{Pr} in {Repo}",
-                type, issueNumber, prNumber, repository);
-        }
-        catch (Exception ex)
+    /// <summary>
+    /// Map the PR event inputs onto a <see cref="TammaEvent"/> — the same DCB
+    /// shape <see cref="PrEvents.BuildEvent"/> built for the (now-removed)
+    /// repository path, expressed as the engine's transient-list event so the
+    /// merged drain persists it. Tags carry the queryable DCB index keys
+    /// (<c>issueId</c>/<c>issueNumber</c>/<c>repository</c>/<c>prNumber</c>/
+    /// <c>tenantId</c>); <c>Data</c> carries the metrics payload. Exposed for
+    /// unit testing the mapping. Pure (no Elsa context).
+    /// </summary>
+    public static TammaEvent BuildTammaEvent(
+        string type,
+        int issueNumber,
+        string repository,
+        int prNumber,
+        Guid? tenantId,
+        IReadOnlyDictionary<string, object?>? data)
+    {
+        var tags = new Dictionary<string, object?>
         {
-            // FR-19e — never block PR creation on an audit-emit failure.
-            _logger?.LogWarning(ex,
-                "Failed to persist PR event {Type} (continuing) — issue #{Issue}",
-                type, issueNumber);
-        }
+            ["issueId"] = issueNumber.ToString(),
+            ["issueNumber"] = issueNumber.ToString(),
+            ["repository"] = repository,
+        };
+        if (prNumber > 0) tags["prNumber"] = prNumber.ToString();
+        if (tenantId is not null) tags["tenantId"] = tenantId.Value.ToString("D");
+
+        return new TammaEvent
+        {
+            EventType = type,
+            Status = type == PrEvents.CreatedFailed ? "error" : "success",
+            Tags = tags,
+            Data = data is null
+                ? new Dictionary<string, object?>()
+                : new Dictionary<string, object?>(data),
+        };
     }
 
     private void RecordCreated(string repository, IReadOnlyDictionary<string, object?>? data)
