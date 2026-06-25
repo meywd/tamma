@@ -3,10 +3,12 @@ using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
-using Elsa.Workflows.Management.Activities.SetOutput;
+using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
+using Elsa.Workflows.Runtime.Activities;
 using Tamma.Activities.Review;
 using Tamma.Activities.Review.Models;
+using Tamma.Api.Services.Agents;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
@@ -14,20 +16,25 @@ using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// Code Review sub-workflow.
+/// Code Review sub-workflow (Story 7-1D). Manages the full PR lifecycle for the mentorship
+/// engine:
+///   1. Bind inputs + resolve CodeReview:* config (defect #1 / #9)
+///   2. Validate inputs (story/repo/junior present, ≥1 reviewer) → specific failure (#3)
+///   3. Create PR → emit CODE_REVIEW.PR_CREATED.* (#8)
+///   4. Request review → monitor (bookmark)
+///   5. Approved → CI-gated, strategy-aware, retry-once merge (#5) → structured result (#6)
+///   6. ChangesRequested → AnalyzeChanges + GenerateGuidance via mediated llm-call (#4)
+///      → deliver → wait for fixes (bookmark) → re-request → loop (≤ max)
+///   7. Max iterations / timeout / guidance-failure → escalate (bookmark) → resolve→merge,
+///      reject→fail
 ///
-/// Manages the full PR lifecycle:
-///   1. Create PR
-///   2. Request review
-///   3. Monitor review (bookmark: waits for webhook)
-///   4. If approved  -> merge and complete
-///   5. If changes requested -> deliver guidance -> wait for fixes (bookmark)
-///      -> re-request review -> loop back to monitor (max 5 iterations)
-///   6. If max iterations or timeout -> escalate (bookmark: waits for senior)
-///      -> resolved -> merge, rejected -> fail
+/// Every terminal path produces a structured <see cref="CodeReviewWorkflowResult"/> via
+/// BuildResult and emits the matching CODE_REVIEW.* DCB event. The pre-existing
+/// MentorshipEvent rows are retained (written inside the activities).
 ///
-/// This is a code-first IWorkflow using the Flowchart composite activity
-/// with bookmark-based waiting for external events.
+/// LLM is reached ONLY through DispatchWorkflow("llm-call") — no in-engine provider call.
+/// The fix-guidance roles are canonical (reviewer normalises to senior_developer): the
+/// call-LLM endpoint 422s on unknown roles.
 /// </summary>
 public class CodeReviewWorkflow : WorkflowBase
 {
@@ -41,7 +48,7 @@ public class CodeReviewWorkflow : WorkflowBase
         builder.DefinitionId = "code-review";
         builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Manages the full PR lifecycle from creation through review, " +
-                              "fix guidance, and merge with bookmark-based waiting.";
+                              "mediated-LLM fix guidance, and CI-gated merge with bookmark-based waiting.";
 
         // ============================================
         // Workflow variables
@@ -50,29 +57,116 @@ public class CodeReviewWorkflow : WorkflowBase
         var sessionIdGuid = builder.WithVariable<Guid>("SessionIdGuid", Guid.Empty);
         var storyId = builder.WithVariable<string>("StoryId", "");
         var juniorId = builder.WithVariable<string>("JuniorId", "");
+        var tenantId = builder.WithVariable<string>("TenantId", "");
+        var repositoryUrl = builder.WithVariable<string>("RepositoryUrl", "");
+        var branchName = builder.WithVariable<string>("BranchName", "");
+        var baseBranch = builder.WithVariable<string>("BaseBranch", "main");
+        var reviewerIdsJson = builder.WithVariable<string>("ReviewerIdsJson", "");
+        var resolvedReviewers = builder.WithVariable<string>("ResolvedReviewers", "");
+        var skillLevel = builder.WithVariable<int>("SkillLevel", 3);
         var prNumber = builder.WithVariable<int>("PRNumber", 0);
         var prUrl = builder.WithVariable<string>("PRUrl", "");
         var iteration = builder.WithVariable<int>("Iteration", 0);
         var maxIterations = builder.WithVariable<int>("MaxIterations", 5);
+        var maxIterationsInput = builder.WithVariable<int>("MaxIterationsInput", 0);
+        var mergeStrategyInput = builder.WithVariable<string>("MergeStrategyInput", "");
         var reviewCommentsJson = builder.WithVariable<string>("ReviewCommentsJson", "[]");
+        var analysisText = builder.WithVariable<string>("AnalysisText", "");
+        var guidanceText = builder.WithVariable<string>("GuidanceText", "");
+        var validationError = builder.WithVariable<string>("ValidationError", "");
+        var escalationResolution = builder.WithVariable<string>("EscalationResolution", "");
+        var mergeShaVar = builder.WithVariable<string>("MergeSha", "");
+
+        // Config-resolved variables (filled by BindConfig)
         var mergeStrategy = builder.WithVariable<MergeStrategy>("MergeStrategy", MergeStrategy.Squash);
+        var reviewTimeoutHours = builder.WithVariable<int>("ReviewTimeoutHours", 24);
+        var fixTimeoutHours = builder.WithVariable<int>("FixTimeoutHours", 1);
+        var verifyCi = builder.WithVariable<bool>("VerifyCIBeforeMerge", true);
+        var deleteBranch = builder.WithVariable<bool>("DeleteBranchAfterMerge", true);
+
+        // LLM dispatch result holders
+        var analyzeResult = builder.WithVariable<IDictionary<string, object>?>();
+        var guidanceResult = builder.WithVariable<IDictionary<string, object>?>();
 
         // ============================================
-        // Activities
+        // 0. Bind inputs (defect #1) — mirror AssessmentWorkflow input binding
         // ============================================
+        var bindInputs = new SetVariable
+        {
+            Id = "BindInputs",
+            Name = "Bind Inputs",
+            Variable = sessionId,
+            Value = new(ctx =>
+            {
+                var sid = ctx.GetInput<string>("SessionId") ?? ctx.GetInput<string>("sessionId") ?? "";
+                sessionIdGuid.Set(ctx, Guid.TryParse(sid, out var g) ? g : Guid.Empty);
+                storyId.Set(ctx, ctx.GetInput<string>("StoryId") ?? ctx.GetInput<string>("storyId") ?? "");
+                juniorId.Set(ctx, ctx.GetInput<string>("JuniorId") ?? ctx.GetInput<string>("juniorId") ?? "");
+                tenantId.Set(ctx, ctx.GetInput<string>("TenantId") ?? ctx.GetInput<string>("tenantId") ?? "");
+                repositoryUrl.Set(ctx, ctx.GetInput<string>("RepositoryUrl") ?? ctx.GetInput<string>("repositoryUrl") ?? "");
+                var story = ctx.GetInput<string>("StoryId") ?? ctx.GetInput<string>("storyId") ?? "";
+                baseBranch.Set(ctx, ctx.GetInput<string>("BaseBranch") ?? ctx.GetInput<string>("baseBranch") ?? "main");
+                branchName.Set(ctx,
+                    ctx.GetInput<string>("BranchName") ?? ctx.GetInput<string>("branchName")
+                    ?? (string.IsNullOrEmpty(story) ? "" : $"feature/{story}"));
+                reviewerIdsJson.Set(ctx, ctx.GetInput<string>("ReviewerIds") ?? ctx.GetInput<string>("reviewerIds") ?? "");
+                skillLevel.Set(ctx, Math.Max(1, ctx.GetInput<int>("SkillLevel")));
+                maxIterationsInput.Set(ctx, ctx.GetInput<int>("MaxIterations"));
+                mergeStrategyInput.Set(ctx, ctx.GetInput<string>("MergeStrategy") ?? ctx.GetInput<string>("mergeStrategy") ?? "");
+                return sid;
+            })
+        };
+        bindInputs.SetDisplayText("Bind Inputs");
 
-        // 1. Create the pull request
+        // ============================================
+        // 0b. Resolve CodeReview:* config (#9)
+        // ============================================
+        var bindConfig = new BindCodeReviewConfigActivity
+        {
+            Id = "BindConfig",
+            Name = "Bind Code Review Config",
+            MaxIterationsInput = Expr<int>(ctx => maxIterationsInput.Get(ctx)),
+            MergeStrategyInput = Expr<string?>(ctx => mergeStrategyInput.Get(ctx)),
+            MaxIterations = new(maxIterations),
+            MergeStrategy = new(mergeStrategy),
+            ReviewTimeoutHours = new(reviewTimeoutHours),
+            FixTimeoutHours = new(fixTimeoutHours),
+            VerifyCIBeforeMerge = new(verifyCi),
+            DeleteBranchAfterMerge = new(deleteBranch)
+        };
+        bindConfig.SetDisplayText("Bind Code Review Config");
+
+        // ============================================
+        // 1. Validate inputs (#3)
+        // ============================================
+        var validateInputs = new ValidateCodeReviewInputsActivity
+        {
+            Id = "ValidateInputs",
+            Name = "Validate Inputs",
+            StoryId = Expr<string?>(ctx => storyId.Get(ctx)),
+            RepositoryUrl = Expr<string?>(ctx => repositoryUrl.Get(ctx)),
+            JuniorId = Expr<string?>(ctx => juniorId.Get(ctx)),
+            ReviewerIdsJson = Expr<string?>(ctx => reviewerIdsJson.Get(ctx)),
+            ErrorMessage = new(validationError),
+            ResolvedReviewers = new(resolvedReviewers)
+        };
+        validateInputs.SetDisplayText("Validate Inputs");
+
+        // ============================================
+        // 2. Create PR
+        // ============================================
         var createPR = new CreatePRActivity
         {
             Id = "CreatePR",
             SessionId = Expr<Guid>(ctx => sessionIdGuid.Get(ctx)),
             StoryId = Expr<string>(ctx => storyId.Get(ctx)),
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
+            BaseBranch = Expr<string>(ctx => baseBranch.Get(ctx)),
+            HeadBranch = Expr<string?>(ctx => branchName.Get(ctx)),
             Name = "Create Pull Request"
         };
         createPR.SetDisplayText("Create Pull Request");
 
-        // 2. Check if PR creation succeeded — use workflow variable to track
         var storePRResult = new SetVariable
         {
             Id = "StorePRResult",
@@ -95,7 +189,18 @@ public class CodeReviewWorkflow : WorkflowBase
         { Id = "PRCreatedCheck", Name = "PR Created?" };
         prCreatedCheck.SetDisplayText("PR Created?");
 
+        // DCB event: PR created success / failed
+        var emitPrCreated = EmitEvent("EmitPrCreated", "Emit PR Created",
+            CodeReviewEvents.PrCreatedSuccess, sessionId, storyId, juniorId, tenantId,
+            prNumber, prUrl, iteration, mergeShaVar, new((string?)null));
+        var emitPrFailed = EmitEvent("EmitPrFailed", "Emit PR Failed",
+            CodeReviewEvents.PrCreatedFailed, sessionId, storyId, juniorId, tenantId,
+            prNumber, prUrl, iteration, mergeShaVar,
+            new("PR creation failed (story/repository not resolvable)"));
+
+        // ============================================
         // 3. Request review
+        // ============================================
         var requestReview = new RequestReviewActivity
         {
             Id = "RequestReview",
@@ -103,22 +208,25 @@ public class CodeReviewWorkflow : WorkflowBase
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             StoryId = Expr<string>(ctx => storyId.Get(ctx)),
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
+            Reviewers = Expr<string?>(ctx => resolvedReviewers.Get(ctx)),
             Name = "Request Code Review"
         };
         requestReview.SetDisplayText("Request Code Review");
 
+        // ============================================
         // 4. Monitor review (bookmark-based)
+        // ============================================
         var monitorReview = new MonitorReviewActivity
         {
             Id = "MonitorReview",
             SessionId = Expr<string>(ctx => sessionId.Get(ctx)),
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
-            TimeoutHours = new(24),
+            TimeoutHours = Expr<int>(ctx => reviewTimeoutHours.Get(ctx)),
             Name = "Monitor Review Status"
         };
         monitorReview.SetDisplayText("Monitor Review Status");
 
-        // 5. Store review comments when changes are requested
+        // 5. Store review comments when changes requested
         var storeReviewComments = new SetVariable
         {
             Id = "StoreReviewComments",
@@ -128,9 +236,7 @@ public class CodeReviewWorkflow : WorkflowBase
             {
                 var review = monitorReview.GetOutput<ReviewResult?>(ctx, "ReviewResult");
                 if (review?.Comments != null && review.Comments.Count > 0)
-                {
                     return System.Text.Json.JsonSerializer.Serialize(review.Comments);
-                }
                 return "[]";
             })
         };
@@ -146,7 +252,82 @@ public class CodeReviewWorkflow : WorkflowBase
         };
         incrementIteration.SetDisplayText("Increment Review Iteration");
 
-        // 7. Deliver fix guidance
+        // DCB event: iteration started
+        var emitIteration = EmitEvent("EmitIteration", "Emit Iteration Started",
+            CodeReviewEvents.IterationStarted, sessionId, storyId, juniorId, tenantId,
+            prNumber, prUrl, iteration, mergeShaVar, new((string?)null));
+
+        // ============================================
+        // 7. AC7 mediated LLM (#4): AnalyzeChanges (role=senior_developer / code-review)
+        // ============================================
+        var analyzeChanges = new DispatchWorkflow
+        {
+            Id = "AnalyzeChanges",
+            Name = "Analyze Changes (LLM)",
+            WorkflowDefinitionId = new("llm-call"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["role"] = Tamma.Api.Services.Agents.AgentRole.SeniorDeveloper.ToWire(),
+                ["action"] = Tamma.Api.Services.Agents.AgentAction.CodeReview.ToWire(),
+                ["tenantId"] = tenantId.Get(ctx) ?? "",
+                ["variables"] = new Dictionary<string, object>
+                {
+                    ["reviewCommentsJson"] = reviewCommentsJson.Get(ctx) ?? "[]",
+                    ["prompt"] = "Identify what needs fixing based on these code review comments. " +
+                                 "Be specific and concrete about each required change.",
+                },
+                ["enableTools"] = false,
+            }),
+            WaitForCompletion = new(true),
+            Result = new(analyzeResult)
+        };
+        analyzeChanges.SetDisplayText("Analyze Changes (LLM)");
+
+        var storeAnalysis = new SetVariable
+        {
+            Id = "StoreAnalysis",
+            Name = "Store Analysis",
+            Variable = analysisText,
+            Value = Expr<object?>(ctx => (object)(ExtractLlmResponse(analyzeResult.Get(ctx)) ?? ""))
+        };
+        storeAnalysis.SetDisplayText("Store Analysis");
+
+        // GenerateGuidance (role=senior_developer / mentor-feedback, skill-level aware)
+        var generateGuidance = new DispatchWorkflow
+        {
+            Id = "GenerateGuidance",
+            Name = "Generate Guidance (LLM)",
+            WorkflowDefinitionId = new("llm-call"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["role"] = Tamma.Api.Services.Agents.AgentRole.SeniorDeveloper.ToWire(),
+                ["action"] = Tamma.Api.Services.Agents.AgentAction.MentorFeedback.ToWire(),
+                ["tenantId"] = tenantId.Get(ctx) ?? "",
+                ["variables"] = new Dictionary<string, object>
+                {
+                    ["analysis"] = analysisText.Get(ctx) ?? "",
+                    ["skillLevel"] = skillLevel.Get(ctx),
+                    ["prompt"] = $"Explain to a Level {skillLevel.Get(ctx)} developer how to address the " +
+                                 "following review analysis. Be encouraging, concrete, and teach the " +
+                                 "underlying concept: {analysis}",
+                },
+                ["enableTools"] = false,
+            }),
+            WaitForCompletion = new(true),
+            Result = new(guidanceResult)
+        };
+        generateGuidance.SetDisplayText("Generate Guidance (LLM)");
+
+        var storeGuidance = new SetVariable
+        {
+            Id = "StoreGuidance",
+            Name = "Store Guidance",
+            Variable = guidanceText,
+            Value = Expr<object?>(ctx => (object)(ExtractLlmResponse(guidanceResult.Get(ctx)) ?? ""))
+        };
+        storeGuidance.SetDisplayText("Store Guidance");
+
+        // 8. Deliver guidance (formats + delivers the mediated-LLM output)
         var deliverGuidance = new DeliverGuidanceActivity
         {
             Id = "DeliverGuidance",
@@ -155,23 +336,33 @@ public class CodeReviewWorkflow : WorkflowBase
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             Iteration = Expr<int>(ctx => iteration.Get(ctx)),
             ReviewCommentsJson = Expr<string>(ctx => reviewCommentsJson.Get(ctx)),
+            GuidanceText = Expr<string?>(ctx => guidanceText.Get(ctx)),
             Name = "Deliver Fix Guidance"
         };
         deliverGuidance.SetDisplayText("Deliver Fix Guidance");
 
-        // 8. Wait for fixes (bookmark-based)
+        var emitGuidanceDelivered = EmitEvent("EmitGuidanceDelivered", "Emit Guidance Delivered",
+            CodeReviewEvents.GuidanceDeliveredSuccess, sessionId, storyId, juniorId, tenantId,
+            prNumber, prUrl, iteration, mergeShaVar, new((string?)null));
+
+        var emitGuidanceFailed = EmitEvent("EmitGuidanceFailed", "Emit Guidance Failed",
+            CodeReviewEvents.GuidanceDeliveredFailed, sessionId, storyId, juniorId, tenantId,
+            prNumber, prUrl, iteration, mergeShaVar,
+            new("Mediated-LLM guidance could not be generated/delivered; escalating."));
+
+        // 9. Wait for fixes (bookmark-based) — fix timeout (#9 drift fix)
         var waitForFixes = new WaitForFixesActivity
         {
             Id = "WaitForFixes",
             SessionId = Expr<string>(ctx => sessionId.Get(ctx)),
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             Iteration = Expr<int>(ctx => iteration.Get(ctx)),
-            TimeoutHours = new(24),
+            TimeoutHours = Expr<int>(ctx => fixTimeoutHours.Get(ctx)),
             Name = "Wait for Fix Submission"
         };
         waitForFixes.SetDisplayText("Wait for Fix Submission");
 
-        // 9. Re-request review
+        // 10. Re-request review
         var reRequestReview = new ReRequestReviewActivity
         {
             Id = "ReRequestReview",
@@ -185,12 +376,12 @@ public class CodeReviewWorkflow : WorkflowBase
         };
         reRequestReview.SetDisplayText("Re-Request Code Review");
 
-        // 10. Check if max iterations reached
+        // 11. Max iterations check (authoritative guard — #11 dedup)
         var maxIterationsCheck = new FlowDecision(ctx => iteration.Get(ctx) >= maxIterations.Get(ctx))
         { Id = "MaxIterationsCheck", Name = "Max Iterations Reached?" };
         maxIterationsCheck.SetDisplayText("Max Iterations Reached?");
 
-        // 11. Merge and complete
+        // 12. Merge and complete (CI-gated, strategy-aware, retry-once, branch-delete — #5)
         var mergeAndComplete = new MergeAndCompleteReviewActivity
         {
             Id = "MergeAndComplete",
@@ -198,13 +389,33 @@ public class CodeReviewWorkflow : WorkflowBase
             StoryId = Expr<string>(ctx => storyId.Get(ctx)),
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
+            HeadBranch = Expr<string?>(ctx => branchName.Get(ctx)),
             Strategy = Expr<MergeStrategy>(ctx => mergeStrategy.Get(ctx)),
             TotalIterations = Expr<int>(ctx => iteration.Get(ctx)),
+            VerifyCIBeforeMerge = Expr<bool>(ctx => verifyCi.Get(ctx)),
+            DeleteBranchAfterMerge = Expr<bool>(ctx => deleteBranch.Get(ctx)),
             Name = "Merge and Complete Review"
         };
         mergeAndComplete.SetDisplayText("Merge and Complete Review");
 
-        // 12. Escalate review (max iterations)
+        var storeMergeSha = new SetVariable
+        {
+            Id = "StoreMergeSha",
+            Name = "Store Merge Sha",
+            Variable = mergeShaVar,
+            Value = Expr<object?>(ctx =>
+            {
+                var r = mergeAndComplete.GetOutput<ReviewMergeResult?>(ctx, "Result");
+                return (object)(r?.MergeSha ?? "");
+            })
+        };
+        storeMergeSha.SetDisplayText("Store Merge Sha");
+
+        var emitMerged = EmitEvent("EmitMerged", "Emit Merged",
+            CodeReviewEvents.MergedSuccess, sessionId, storyId, juniorId, tenantId,
+            prNumber, prUrl, iteration, mergeShaVar, new((string?)null));
+
+        // 13. Escalate review (max iterations)
         var escalateReview = new EscalateReviewActivity
         {
             Id = "EscalateReview",
@@ -218,7 +429,7 @@ public class CodeReviewWorkflow : WorkflowBase
         };
         escalateReview.SetDisplayText("Escalate: Max Iterations");
 
-        // 13. Escalate due to timeout
+        // 14. Escalate due to timeout
         var escalateTimeout = new EscalateReviewActivity
         {
             Id = "EscalateTimeout",
@@ -232,31 +443,96 @@ public class CodeReviewWorkflow : WorkflowBase
         };
         escalateTimeout.SetDisplayText("Escalate: Review Timeout");
 
-        // 14. Terminal nodes (SetOutput sequences)
-        var failedEnd = new Sequence
+        // 15. Escalate due to guidance-generation / merge failure
+        var escalateGuidance = new EscalateReviewActivity
         {
-            Id = "FailedEnd",
-            Name = "Emit Failure Outputs",
-            Activities =
-            {
-                WithLabel(new SetOutput { Id = "OutputFailedSuccess", Name = "Output Failed Success", OutputName = new("success"), OutputValue = new(ctx => (object)false) }, "Output Failed Success"),
-                WithLabel(new SetOutput { Id = "OutputErrorMessage", Name = "Output Error Message", OutputName = new("errorMessage"), OutputValue = new(ctx => (object)"Code review failed") }, "Output Error Message")
-            }
+            Id = "EscalateGuidance",
+            SessionId = Expr<Guid>(ctx => sessionIdGuid.Get(ctx)),
+            PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
+            JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
+            Reason = new(EscalationReason.Other),
+            IterationsAttempted = Expr<int>(ctx => iteration.Get(ctx)),
+            EscalationMessage = new("Automated fix guidance could not be generated."),
+            Name = "Escalate: Guidance Failure"
         };
-        failedEnd.SetDisplayText("Emit Failure Outputs");
+        escalateGuidance.SetDisplayText("Escalate: Guidance Failure");
 
-        var successEnd = new Sequence
+        var escalateMerge = new EscalateReviewActivity
         {
-            Id = "SuccessEnd",
-            Name = "Emit Success Outputs",
-            Activities =
-            {
-                WithLabel(new SetOutput { Id = "OutputSuccessFlag", Name = "Output Success Flag", OutputName = new("success"), OutputValue = new(ctx => (object)true) }, "Output Success Flag"),
-                WithLabel(new SetOutput { Id = "OutputPrUrl", Name = "Output PR URL", OutputName = new("prUrl"), OutputValue = new(ctx => (object)(prUrl.Get(ctx) ?? "")) }, "Output PR URL"),
-                WithLabel(new SetOutput { Id = "OutputIterations", Name = "Output Iterations", OutputName = new("iterations"), OutputValue = new(ctx => (object)iteration.Get(ctx)) }, "Output Iterations")
-            }
+            Id = "EscalateMerge",
+            SessionId = Expr<Guid>(ctx => sessionIdGuid.Get(ctx)),
+            PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
+            JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
+            Reason = new(EscalationReason.MergeConflict),
+            IterationsAttempted = Expr<int>(ctx => iteration.Get(ctx)),
+            EscalationMessage = new("CI not green or merge failed after retry; senior review required."),
+            Name = "Escalate: Merge Failure"
         };
-        successEnd.SetDisplayText("Emit Success Outputs");
+        escalateMerge.SetDisplayText("Escalate: Merge Failure");
+
+        // Record escalation resolution for the structured result (all escalate nodes)
+        var captureEscalated = new SetVariable
+        {
+            Id = "CaptureEscalated",
+            Name = "Capture Escalation Resolution",
+            Variable = escalationResolution,
+            Value = Expr<object?>(ctx => (object)"resolved")
+        };
+        captureEscalated.SetDisplayText("Capture Escalation Resolution");
+
+        var emitEscalated = EmitEvent("EmitEscalated", "Emit Escalated",
+            CodeReviewEvents.Escalated, sessionId, storyId, juniorId, tenantId,
+            prNumber, prUrl, iteration, mergeShaVar, new("Escalated to senior developer."));
+
+        // ============================================
+        // Terminal: structured results (#6) + DCB FAILED event (#8)
+        // ============================================
+        // Merge-success terminal — shared by the direct-approval and escalation-resolved
+        // merge paths. wasEscalated/escalationResolution are read from the escalationResolution
+        // variable so an escalated-then-merged run is reported as escalated (not a false
+        // "direct approval").
+        var buildSuccessResult = new BuildCodeReviewResultActivity
+        {
+            Id = "BuildSuccessResult",
+            Name = "Build Success Result",
+            FinalStatus = new(PRReviewStatus.Approved),
+            Success = new(true),
+            PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
+            PRUrl = Expr<string?>(ctx => prUrl.Get(ctx)),
+            MergeSha = Expr<string?>(ctx => mergeShaVar.Get(ctx)),
+            TotalIterations = Expr<int>(ctx => iteration.Get(ctx)),
+            WasEscalated = Expr<bool>(ctx => !string.IsNullOrEmpty(escalationResolution.Get(ctx))),
+            EscalationResolution = Expr<string?>(ctx =>
+            {
+                var r = escalationResolution.Get(ctx);
+                return string.IsNullOrEmpty(r) ? null : r;
+            }),
+            Message = Expr<string?>(ctx => string.IsNullOrEmpty(escalationResolution.Get(ctx))
+                ? "PR approved and merged."
+                : "Escalation resolved by senior; PR merged.")
+        };
+        buildSuccessResult.SetDisplayText("Build Success Result");
+
+        var buildValidationFailedResult = BuildResult("BuildValidationFailedResult", "Build Validation-Failed Result",
+            PRReviewStatus.Error, false, prNumber, prUrl, mergeShaVar, iteration,
+            wasEscalated: false, escalationResolution: new("", null),
+            message: new(ctx => validationError.Get(ctx)));
+
+        var buildRejectedResult = BuildResult("BuildRejectedResult", "Build Rejected Result",
+            PRReviewStatus.ChangesRequested, false, prNumber, prUrl, mergeShaVar, iteration,
+            wasEscalated: true, escalationResolution: new("rejected", "rejected"),
+            message: new("Senior rejected the PR."));
+
+        var emitValidationFailed = EmitEvent("EmitValidationFailed", "Emit Validation Failed",
+            CodeReviewEvents.Failed, sessionId, storyId, juniorId, tenantId,
+            prNumber, prUrl, iteration, mergeShaVar, new(ctx => validationError.Get(ctx)));
+
+        var emitRejected = EmitEvent("EmitRejected", "Emit Review Failed",
+            CodeReviewEvents.Failed, sessionId, storyId, juniorId, tenantId,
+            prNumber, prUrl, iteration, mergeShaVar, new("Senior rejected the PR."));
+
+        var finish = new Finish { Id = "Finish", Name = "Finish" };
+        finish.SetDisplayText("Finish");
 
         // ============================================
         // Flowchart with connections
@@ -267,76 +543,166 @@ public class CodeReviewWorkflow : WorkflowBase
             Name = "Code Review Flowchart",
             Activities =
             {
-                createPR,
-                storePRResult,
-                prCreatedCheck,
-                requestReview,
-                monitorReview,
-                storeReviewComments,
-                incrementIteration,
-                deliverGuidance,
-                waitForFixes,
-                reRequestReview,
-                maxIterationsCheck,
-                mergeAndComplete,
-                escalateReview,
-                escalateTimeout,
-                failedEnd,
-                successEnd
+                bindInputs, bindConfig, validateInputs,
+                createPR, storePRResult, prCreatedCheck, emitPrCreated, emitPrFailed,
+                requestReview, monitorReview,
+                storeReviewComments, incrementIteration, emitIteration,
+                analyzeChanges, storeAnalysis, generateGuidance, storeGuidance,
+                deliverGuidance, emitGuidanceDelivered, emitGuidanceFailed,
+                waitForFixes, reRequestReview, maxIterationsCheck,
+                mergeAndComplete, storeMergeSha, emitMerged,
+                escalateReview, escalateTimeout, escalateGuidance, escalateMerge,
+                captureEscalated, emitEscalated,
+                buildSuccessResult, buildValidationFailedResult, buildRejectedResult,
+                emitValidationFailed, emitRejected, finish
             },
             Connections =
             {
-                // Start: create PR -> store result -> check success
+                // Head: bind inputs -> bind config -> validate
+                new(bindInputs, bindConfig),
+                new(bindConfig, validateInputs),
+
+                // Validation: Valid -> create PR ; Invalid -> validation-failed terminal
+                new(new FlowEndpoint(validateInputs, "Valid"), new FlowEndpoint(createPR)),
+                new(new FlowEndpoint(validateInputs, "Invalid"), new FlowEndpoint(emitValidationFailed)),
+                new(emitValidationFailed, buildValidationFailedResult),
+                new(buildValidationFailedResult, finish),
+
+                // Create PR -> store -> check
                 new(createPR, storePRResult),
                 new(storePRResult, prCreatedCheck),
+                new(new FlowEndpoint(prCreatedCheck, "True"), new FlowEndpoint(emitPrCreated)),
+                new(new FlowEndpoint(prCreatedCheck, "False"), new FlowEndpoint(emitPrFailed)),
+                new(emitPrCreated, requestReview),
+                new(emitPrFailed, buildValidationFailedResult),
 
-                // PR created? true -> request review, false -> fail
-                new(new FlowEndpoint(prCreatedCheck, "True"), new FlowEndpoint(requestReview)),
-                new(new FlowEndpoint(prCreatedCheck, "False"), new FlowEndpoint(failedEnd)),
-
-                // Request review -> monitor review (bookmark)
+                // Request review -> monitor (bookmark)
                 new(requestReview, monitorReview),
 
-                // Monitor review outcomes:
-                //   Approved -> merge
-                //   ChangesRequested -> store comments -> increment -> deliver guidance
-                //   TimedOut -> escalate timeout
+                // Monitor outcomes
                 new(new FlowEndpoint(monitorReview, "Approved"), new FlowEndpoint(mergeAndComplete)),
                 new(new FlowEndpoint(monitorReview, "ChangesRequested"), new FlowEndpoint(storeReviewComments)),
-                new(new FlowEndpoint(monitorReview, "Commented"), new FlowEndpoint(monitorReview)),
                 new(new FlowEndpoint(monitorReview, "TimedOut"), new FlowEndpoint(escalateTimeout)),
 
-                // Store comments -> increment iteration -> deliver guidance
+                // Changes requested -> store -> increment -> iteration event -> analyze (LLM)
                 new(storeReviewComments, incrementIteration),
-                new(incrementIteration, deliverGuidance),
+                new(incrementIteration, emitIteration),
+                new(emitIteration, analyzeChanges),
+                new(analyzeChanges, storeAnalysis),
+                new(storeAnalysis, generateGuidance),
+                new(generateGuidance, storeGuidance),
+                new(storeGuidance, deliverGuidance),
 
-                // Deliver guidance -> wait for fixes (bookmark)
-                new(deliverGuidance, waitForFixes),
+                // Deliver guidance outcomes
+                new(new FlowEndpoint(deliverGuidance, "Delivered"), new FlowEndpoint(emitGuidanceDelivered)),
+                new(new FlowEndpoint(deliverGuidance, "Failed"), new FlowEndpoint(emitGuidanceFailed)),
+                new(emitGuidanceDelivered, waitForFixes),
+                new(emitGuidanceFailed, escalateGuidance),
 
-                // Wait for fixes outcomes:
-                //   FixesReceived -> re-request review
-                //   TimedOut -> escalate timeout
+                // Wait for fixes outcomes
                 new(new FlowEndpoint(waitForFixes, "FixesReceived"), new FlowEndpoint(reRequestReview)),
                 new(new FlowEndpoint(waitForFixes, "TimedOut"), new FlowEndpoint(escalateTimeout)),
 
-                // Re-request review -> check max iterations
+                // Re-request -> max-iterations guard
                 new(reRequestReview, maxIterationsCheck),
-
-                // Max iterations? true -> escalate, false -> back to monitor
                 new(new FlowEndpoint(maxIterationsCheck, "True"), new FlowEndpoint(escalateReview)),
                 new(new FlowEndpoint(maxIterationsCheck, "False"), new FlowEndpoint(monitorReview)),
 
-                // Merge -> success end
-                new(mergeAndComplete, successEnd),
+                // Merge outcomes (CI-gated, retry-once)
+                new(new FlowEndpoint(mergeAndComplete, "Merged"), new FlowEndpoint(storeMergeSha)),
+                new(new FlowEndpoint(mergeAndComplete, "Failed"), new FlowEndpoint(escalateMerge)),
+                new(storeMergeSha, emitMerged),
+                new(emitMerged, buildSuccessResult),
+                new(buildSuccessResult, finish),
 
-                // Escalation outcomes (both escalate activities):
-                //   Resolved -> merge
-                //   Rejected -> fail
-                new(new FlowEndpoint(escalateReview, "Resolved"), new FlowEndpoint(mergeAndComplete)),
-                new(new FlowEndpoint(escalateReview, "Rejected"), new FlowEndpoint(failedEnd)),
-                new(new FlowEndpoint(escalateTimeout, "Resolved"), new FlowEndpoint(mergeAndComplete)),
-                new(new FlowEndpoint(escalateTimeout, "Rejected"), new FlowEndpoint(failedEnd))
+                // Escalations (bookmark) outcomes — Resolved -> capture+merge ; Rejected -> fail
+                new(new FlowEndpoint(escalateReview, "Resolved"), new FlowEndpoint(captureEscalated)),
+                new(new FlowEndpoint(escalateReview, "Rejected"), new FlowEndpoint(emitRejected)),
+                new(new FlowEndpoint(escalateTimeout, "Resolved"), new FlowEndpoint(captureEscalated)),
+                new(new FlowEndpoint(escalateTimeout, "Rejected"), new FlowEndpoint(emitRejected)),
+                new(new FlowEndpoint(escalateGuidance, "Resolved"), new FlowEndpoint(captureEscalated)),
+                new(new FlowEndpoint(escalateGuidance, "Rejected"), new FlowEndpoint(emitRejected)),
+                new(new FlowEndpoint(escalateMerge, "Resolved"), new FlowEndpoint(captureEscalated)),
+                new(new FlowEndpoint(escalateMerge, "Rejected"), new FlowEndpoint(emitRejected)),
+
+                // Escalation resolved -> emit escalated -> merge -> success(escalated) result
+                new(captureEscalated, emitEscalated),
+                new(emitEscalated, mergeAndComplete),
+
+                // Escalation rejected -> rejected result
+                new(emitRejected, buildRejectedResult),
+                new(buildRejectedResult, finish),
+
+                // Merge success after escalation reuses buildSuccessResult path via storeMergeSha→emitMerged→buildSuccessResult.
             }
         };
+    }
+
+    // ================================================================
+    // Helper: EmitCodeReviewEventActivity factory
+    // ================================================================
+    private static EmitCodeReviewEventActivity EmitEvent(
+        string id, string displayName, string eventType,
+        Variable<string> sessionId, Variable<string> storyId, Variable<string> juniorId,
+        Variable<string> tenantId, Variable<int> prNumber, Variable<string> prUrl,
+        Variable<int> iteration, Variable<string> mergeSha, Input<string?> detail)
+    {
+        var emit = new EmitCodeReviewEventActivity
+        {
+            Id = id,
+            Name = displayName,
+            EventType = new(eventType),
+            SessionId = Expr<string?>(ctx => sessionId.Get(ctx)),
+            StoryId = Expr<string?>(ctx => storyId.Get(ctx)),
+            JuniorId = Expr<string?>(ctx => juniorId.Get(ctx)),
+            TenantId = Expr<string?>(ctx => tenantId.Get(ctx)),
+            PrNumber = Expr<int>(ctx => prNumber.Get(ctx)),
+            PrUrl = Expr<string?>(ctx => prUrl.Get(ctx)),
+            Iteration = Expr<int>(ctx => iteration.Get(ctx)),
+            MergeSha = Expr<string?>(ctx => mergeSha.Get(ctx)),
+            Detail = detail
+        };
+        emit.SetDisplayText(displayName);
+        return emit;
+    }
+
+    // ================================================================
+    // Helper: BuildCodeReviewResultActivity factory
+    // ================================================================
+    private static BuildCodeReviewResultActivity BuildResult(
+        string id, string displayName, PRReviewStatus status, bool success,
+        Variable<int> prNumber, Variable<string> prUrl, Variable<string> mergeSha,
+        Variable<int> iteration, bool wasEscalated, Input<string?> escalationResolution,
+        Input<string?> message)
+    {
+        var build = new BuildCodeReviewResultActivity
+        {
+            Id = id,
+            Name = displayName,
+            FinalStatus = new(status),
+            Success = new(success),
+            PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
+            PRUrl = Expr<string?>(ctx => prUrl.Get(ctx)),
+            MergeSha = Expr<string?>(ctx => mergeSha.Get(ctx)),
+            TotalIterations = Expr<int>(ctx => iteration.Get(ctx)),
+            WasEscalated = new(wasEscalated),
+            EscalationResolution = escalationResolution,
+            Message = message
+        };
+        build.SetDisplayText(displayName);
+        return build;
+    }
+
+    // ================================================================
+    // Helper: extract llmResponse from a DispatchWorkflow("llm-call") result dict
+    // ================================================================
+    private static string? ExtractLlmResponse(IDictionary<string, object>? result)
+    {
+        if (result == null) return null;
+        if (result.TryGetValue("llmResponse", out var r))
+            return r?.ToString();
+        if (result.TryGetValue("response", out var r2))
+            return r2?.ToString();
+        return null;
     }
 }

@@ -1,9 +1,9 @@
 using System.Text.Json.Serialization;
 using Elsa.Extensions;
 using Elsa.Workflows;
+using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.Review.Models;
 using Tamma.Core.Entities;
@@ -13,22 +13,34 @@ using Tamma.Data.Repositories;
 namespace Tamma.Activities.Review;
 
 /// <summary>
-/// Analyses review comments and delivers actionable fix guidance to the junior developer.
-/// Uses Claude (or engine callback / mock) to generate contextual guidance for each comment,
-/// then sends the guidance via Slack.
+/// Delivers actionable, skill-level-aware fix guidance to the junior developer.
+///
+/// Story 7-1D AC7 (completeness audit 2026-06-22, <c>CodeReview.md</c> §Missing #4):
+/// the guidance text is now produced by the MEDIATED LLM upstream — the workflow runs
+/// <c>AnalyzeChanges</c> (<c>llm-call</c> role=senior_developer / action=code-review) then
+/// <c>GenerateGuidance</c> (<c>llm-call</c> role=senior_developer / action=mentor-feedback,
+/// "explain to a Level {skillLevel} developer …") via <c>DispatchWorkflow("llm-call")</c>,
+/// and passes the LLM output into <see cref="GuidanceText"/>. This activity ONLY formats +
+/// delivers that text (the prior in-process keyword heuristics are removed — there is no
+/// in-engine provider call here).
+///
+/// <para><b>Fail-closed:</b> if the upstream LLM produced no usable guidance text, this
+/// activity routes to the <c>Failed</c> outcome (the workflow escalates) rather than
+/// silently delivering empty/placeholder guidance. Outcomes: <c>Delivered</c> /
+/// <c>Failed</c>.</para>
 /// </summary>
 [Activity(
     "Tamma.Review",
     "Deliver Guidance",
-    "Analyze review comments and deliver fix guidance to the junior developer",
+    "Deliver mediated-LLM fix guidance to the junior developer",
     Kind = ActivityKind.Task
 )]
-public class DeliverGuidanceActivity : CodeActivity<FixGuidance>
+[FlowNode("Delivered", "Failed")]
+public class DeliverGuidanceActivity : Activity
 {
     private readonly ILogger<DeliverGuidanceActivity>? _logger;
     private readonly IMentorshipSessionRepository? _repository;
     private readonly IIntegrationService? _integrationService;
-    private readonly IConfiguration? _configuration;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -50,19 +62,29 @@ public class DeliverGuidanceActivity : CodeActivity<FixGuidance>
     [Input(Description = "Review comments to address")]
     public Input<string> ReviewCommentsJson { get; set; } = default!;
 
+    /// <summary>
+    /// The skill-level-aware fix guidance produced by the mediated LLM
+    /// (<c>GenerateGuidance</c> llm-call). This is the content delivered to the junior —
+    /// the activity no longer generates guidance itself.
+    /// </summary>
+    [Input(Description = "Mediated-LLM guidance text to deliver")]
+    public Input<string?> GuidanceText { get; set; } = new((string?)null);
+
+    /// <summary>The guidance delivered to the junior</summary>
+    [Output(Description = "Guidance delivered")]
+    public Output<FixGuidance?> Result { get; set; } = default!;
+
     [JsonConstructor]
     public DeliverGuidanceActivity() { }
 
     public DeliverGuidanceActivity(
         ILogger<DeliverGuidanceActivity> logger,
         IMentorshipSessionRepository repository,
-        IIntegrationService integrationService,
-        IConfiguration configuration)
+        IIntegrationService integrationService)
     {
         _logger = logger;
         _repository = repository;
         _integrationService = integrationService;
-        _configuration = configuration;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -72,32 +94,42 @@ public class DeliverGuidanceActivity : CodeActivity<FixGuidance>
         var prNumber = PRNumber.Get(context);
         var iteration = Iteration.Get(context);
         var commentsJson = ReviewCommentsJson.Get(context);
+        var guidanceText = GuidanceText.Get(context);
 
         _logger?.LogInformation(
             "Delivering fix guidance for PR #{PRNumber}, iteration {Iteration}, session {SessionId}",
             prNumber, iteration, sessionId);
+
+        // Fail-closed: never ship empty guidance. If the mediated LLM produced nothing
+        // usable, route to escalation instead of silently delivering a placeholder.
+        if (string.IsNullOrWhiteSpace(guidanceText))
+        {
+            _logger?.LogWarning(
+                "No LLM guidance text for PR #{PRNumber}, iteration {Iteration}; routing to escalation",
+                prNumber, iteration);
+            Result.Set(context, null);
+            await context.CompleteActivityWithOutcomesAsync("Failed");
+            return;
+        }
 
         try
         {
             var junior = await _repository!.GetJuniorByIdAsync(juniorId);
             var comments = DeserializeComments(commentsJson);
 
-            // Generate guidance for each comment
-            var guidanceItems = comments.Select(c => new CommentFixGuidance
-            {
-                OriginalComment = c.Body,
-                FilePath = c.FilePath,
-                LineNumber = c.LineNumber,
-                Severity = c.Severity,
-                Guidance = GenerateGuidanceForComment(c, junior?.SkillLevel ?? 3),
-                CodeExample = GenerateCodeExample(c)
-            }).ToList();
-
             var guidance = new FixGuidance
             {
                 Iteration = iteration,
-                Items = guidanceItems,
-                OverallMessage = BuildOverallMessage(iteration, guidanceItems.Count, junior?.Name ?? "Developer")
+                Items = comments.Select(c => new CommentFixGuidance
+                {
+                    OriginalComment = c.Body,
+                    FilePath = c.FilePath,
+                    LineNumber = c.LineNumber,
+                    Severity = c.Severity,
+                    Guidance = string.Empty, // per-comment detail is folded into OverallMessage (the LLM output)
+                    CodeExample = c.SuggestedFix
+                }).ToList(),
+                OverallMessage = guidanceText.Trim()
             };
 
             // Send guidance to the junior via Slack
@@ -107,7 +139,7 @@ public class DeliverGuidanceActivity : CodeActivity<FixGuidance>
                 await _integrationService!.SendSlackDirectMessageAsync(junior.SlackId, message);
             }
 
-            // Log the event
+            // Log the mentorship event (retained alongside the DCB event the workflow emits)
             await _repository.LogEventAsync(new MentorshipEvent
             {
                 SessionId = sessionId,
@@ -118,23 +150,23 @@ public class DeliverGuidanceActivity : CodeActivity<FixGuidance>
 
             _logger?.LogInformation(
                 "Delivered guidance for {CommentCount} comments, iteration {Iteration}",
-                guidanceItems.Count, iteration);
+                guidance.Items.Count, iteration);
 
-            context.SetResult(guidance);
+            Result.Set(context, guidance);
+            await context.CompleteActivityWithOutcomesAsync("Delivered");
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Error delivering guidance for session {SessionId}", sessionId);
-            context.SetResult(new FixGuidance
-            {
-                Iteration = iteration,
-                OverallMessage = $"Failed to generate guidance: {ex.Message}"
-            });
+            Result.Set(context, null);
+            await context.CompleteActivityWithOutcomesAsync("Failed");
         }
     }
 
-    private static List<ReviewCommentDetail> DeserializeComments(string json)
+    private static List<ReviewCommentDetail> DeserializeComments(string? json)
     {
+        if (string.IsNullOrWhiteSpace(json))
+            return new List<ReviewCommentDetail>();
         try
         {
             return System.Text.Json.JsonSerializer.Deserialize<List<ReviewCommentDetail>>(json)
@@ -144,58 +176,6 @@ public class DeliverGuidanceActivity : CodeActivity<FixGuidance>
         {
             return new List<ReviewCommentDetail>();
         }
-    }
-
-    private static string GenerateGuidanceForComment(ReviewCommentDetail comment, int skillLevel)
-    {
-        var bodyLower = comment.Body.ToLower();
-
-        // Provide skill-level-appropriate guidance
-        var detail = skillLevel <= 2 ? " Here is a step-by-step explanation:" : "";
-
-        if (bodyLower.Contains("null check") || bodyLower.Contains("null reference"))
-            return $"Add null validation before using this value.{detail} Use `if (variable == null)` or the null-conditional operator `?.` to guard against null references.";
-
-        if (bodyLower.Contains("test") || bodyLower.Contains("coverage"))
-            return $"Add unit tests covering this code path.{detail} Follow the existing test patterns in the project and ensure edge cases are covered.";
-
-        if (bodyLower.Contains("naming") || bodyLower.Contains("rename") || bodyLower.Contains("descriptive"))
-            return $"Improve the variable/method name to be more descriptive.{detail} Names should describe *what* the value represents, not its type.";
-
-        if (bodyLower.Contains("error handling") || bodyLower.Contains("exception") || bodyLower.Contains("try"))
-            return $"Improve error handling in this section.{detail} Wrap the operation in a try-catch block and log meaningful error context.";
-
-        if (bodyLower.Contains("performance") || bodyLower.Contains("optimize"))
-            return $"Consider optimizing this code path.{detail} Look for unnecessary allocations, repeated computations, or N+1 query patterns.";
-
-        if (bodyLower.Contains("security") || bodyLower.Contains("injection") || bodyLower.Contains("sanitize"))
-            return $"Address the security concern.{detail} Validate and sanitize all inputs. Never trust user-provided data directly.";
-
-        if (bodyLower.Contains("extract") || bodyLower.Contains("refactor"))
-            return $"Refactor this code into a smaller, focused method.{detail} Each method should do one thing well.";
-
-        if (bodyLower.Contains("documentation") || bodyLower.Contains("comment") || bodyLower.Contains("xml doc"))
-            return $"Add documentation for this public API.{detail} Use `/// <summary>` XML docs describing what the method does and its parameters.";
-
-        return $"Review the feedback and apply the suggested change.{detail} If anything is unclear, ask your reviewer for clarification.";
-    }
-
-    private static string? GenerateCodeExample(ReviewCommentDetail comment)
-    {
-        if (!string.IsNullOrEmpty(comment.SuggestedFix))
-            return comment.SuggestedFix;
-
-        return null;
-    }
-
-    private static string BuildOverallMessage(int iteration, int commentCount, string devName)
-    {
-        if (iteration == 1)
-            return $"Hi {devName}! The reviewer has left {commentCount} comment(s) on your PR. " +
-                   "Below is guidance for each one. Take your time and push your fixes when ready.";
-
-        return $"Hi {devName}, this is iteration {iteration} of fixes. " +
-               $"There are {commentCount} remaining comment(s) to address. You are making progress!";
     }
 
     private static string FormatGuidanceMessage(FixGuidance guidance, int prNumber)
@@ -208,26 +188,28 @@ public class DeliverGuidanceActivity : CodeActivity<FixGuidance>
             ""
         };
 
-        for (var i = 0; i < guidance.Items.Count; i++)
+        if (guidance.Items.Count > 0)
         {
-            var item = guidance.Items[i];
-            var severityTag = item.Severity switch
+            lines.Add("**Review comments addressed:**");
+            for (var i = 0; i < guidance.Items.Count; i++)
             {
-                ReviewCommentSeverity.Critical => "[CRITICAL]",
-                ReviewCommentSeverity.Major => "[MAJOR]",
-                ReviewCommentSeverity.Minor => "[minor]",
-                ReviewCommentSeverity.Suggestion => "[suggestion]",
-                _ => ""
-            };
+                var item = guidance.Items[i];
+                var severityTag = item.Severity switch
+                {
+                    ReviewCommentSeverity.Critical => "[CRITICAL]",
+                    ReviewCommentSeverity.Major => "[MAJOR]",
+                    ReviewCommentSeverity.Minor => "[minor]",
+                    ReviewCommentSeverity.Suggestion => "[suggestion]",
+                    _ => ""
+                };
 
-            lines.Add($"**{i + 1}. {severityTag} {item.FilePath}**" +
-                       (item.LineNumber.HasValue ? $" (line {item.LineNumber})" : ""));
-            lines.Add($"  Comment: _{item.OriginalComment}_");
-            lines.Add($"  Guidance: {item.Guidance}");
+                lines.Add($"**{i + 1}. {severityTag} {item.FilePath}**" +
+                           (item.LineNumber.HasValue ? $" (line {item.LineNumber})" : ""));
+                lines.Add($"  _{item.OriginalComment}_");
 
-            if (!string.IsNullOrEmpty(item.CodeExample))
-                lines.Add($"  Example: ```{item.CodeExample}```");
-
+                if (!string.IsNullOrEmpty(item.CodeExample))
+                    lines.Add($"  Suggested fix: ```{item.CodeExample}```");
+            }
             lines.Add("");
         }
 
