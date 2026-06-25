@@ -2,6 +2,7 @@ using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
 using Tamma.Activities.Blocker.Models;
@@ -24,6 +25,7 @@ public class CollectGitActivityActivity : CodeActivity<GitActivitySignal>
 {
     private readonly ILogger<CollectGitActivityActivity>? _logger;
     private readonly IIntegrationService? _integrationService;
+    private readonly IConfiguration? _configuration;
 
     /// <summary>Repository URL or owner/repo</summary>
     [Input(Description = "Repository URL or owner/repo")]
@@ -42,10 +44,12 @@ public class CollectGitActivityActivity : CodeActivity<GitActivitySignal>
 
     public CollectGitActivityActivity(
         ILogger<CollectGitActivityActivity> logger,
-        IIntegrationService integrationService)
+        IIntegrationService integrationService,
+        IConfiguration configuration)
     {
         _logger = logger;
         _integrationService = integrationService;
+        _configuration = configuration;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -62,25 +66,39 @@ public class CollectGitActivityActivity : CodeActivity<GitActivitySignal>
 
         try
         {
-            var since = DateTime.UtcNow.AddHours(-lookbackHours);
-            var commits = await _integrationService!.GetGitHubCommitsAsync(repository, branchName, since);
+            // AC3: cap the collector at the configured deadline (default 15s) so a slow
+            // GitHub call cannot block the parallel signal join.
+            var completedInTime = await BlockerSignalTimeout.RunAsync(_configuration, async () =>
+            {
+                var since = DateTime.UtcNow.AddHours(-lookbackHours);
+                var commits = await _integrationService!.GetGitHubCommitsAsync(repository, branchName, since);
 
-            signal.RecentCommitCount = commits.Count;
-            signal.LastCommitTime = commits.Any() ? commits.Max(c => c.Timestamp) : null;
-            signal.TimeSinceLastCommit = signal.LastCommitTime.HasValue
-                ? DateTime.UtcNow - signal.LastCommitTime.Value
-                : TimeSpan.FromHours(lookbackHours);
+                signal.RecentCommitCount = commits.Count;
+                signal.LastCommitTime = commits.Any() ? commits.Max(c => c.Timestamp) : null;
+                signal.TimeSinceLastCommit = signal.LastCommitTime.HasValue
+                    ? DateTime.UtcNow - signal.LastCommitTime.Value
+                    : TimeSpan.FromHours(lookbackHours);
 
-            var fileChanges = await _integrationService.GetGitHubFileChangesAsync(repository, branchName);
-            signal.FilesChanged = fileChanges.Count;
-            signal.TotalAdditions = fileChanges.Sum(f => f.Additions);
-            signal.TotalDeletions = fileChanges.Sum(f => f.Deletions);
-            signal.ChangedFiles = fileChanges.Select(f => f.FilePath).ToList();
-            signal.CollectionSucceeded = true;
+                var fileChanges = await _integrationService.GetGitHubFileChangesAsync(repository, branchName);
+                signal.FilesChanged = fileChanges.Count;
+                signal.TotalAdditions = fileChanges.Sum(f => f.Additions);
+                signal.TotalDeletions = fileChanges.Sum(f => f.Deletions);
+                signal.ChangedFiles = fileChanges.Select(f => f.FilePath).ToList();
+            });
 
-            _logger?.LogInformation(
-                "Git activity collected: {CommitCount} commits, {FilesChanged} files changed",
-                signal.RecentCommitCount, signal.FilesChanged);
+            if (completedInTime)
+            {
+                signal.CollectionSucceeded = true;
+                _logger?.LogInformation(
+                    "Git activity collected: {CommitCount} commits, {FilesChanged} files changed",
+                    signal.RecentCommitCount, signal.FilesChanged);
+            }
+            else
+            {
+                signal.CollectionSucceeded = false;
+                signal.Error = "Git activity collection timed out";
+                _logger?.LogWarning("Git activity collection timed out — continuing with partial data");
+            }
         }
         catch (Exception ex)
         {

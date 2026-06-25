@@ -2,6 +2,7 @@ using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
 using Tamma.Activities.Blocker.Models;
@@ -24,6 +25,7 @@ public class CollectInactivityActivity : CodeActivity<InactivitySignal>
 {
     private readonly ILogger<CollectInactivityActivity>? _logger;
     private readonly IIntegrationService? _integrationService;
+    private readonly IConfiguration? _configuration;
 
     /// <summary>Repository URL or owner/repo</summary>
     [Input(Description = "Repository URL or owner/repo")]
@@ -42,10 +44,12 @@ public class CollectInactivityActivity : CodeActivity<InactivitySignal>
 
     public CollectInactivityActivity(
         ILogger<CollectInactivityActivity> logger,
-        IIntegrationService integrationService)
+        IIntegrationService integrationService,
+        IConfiguration configuration)
     {
         _logger = logger;
         _integrationService = integrationService;
+        _configuration = configuration;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -62,29 +66,43 @@ public class CollectInactivityActivity : CodeActivity<InactivitySignal>
 
         try
         {
-            // Use recent commits as a proxy for activity
-            var since = DateTime.UtcNow.AddHours(-24);
-            var commits = await _integrationService!.GetGitHubCommitsAsync(repository, branchName, since);
-
-            if (commits.Any())
+            // AC3: cap the collector at the configured deadline (default 15s) so a slow
+            // commits call cannot block the parallel signal join.
+            var completedInTime = await BlockerSignalTimeout.RunAsync(_configuration, async () =>
             {
-                var lastCommitTime = commits.Max(c => c.Timestamp);
-                signal.LastActivityTime = lastCommitTime;
-                signal.LastActivityType = "commit";
-                signal.TimeSinceLastActivity = DateTime.UtcNow - lastCommitTime;
+                // Use recent commits as a proxy for activity
+                var since = DateTime.UtcNow.AddHours(-24);
+                var commits = await _integrationService!.GetGitHubCommitsAsync(repository, branchName, since);
+
+                if (commits.Any())
+                {
+                    var lastCommitTime = commits.Max(c => c.Timestamp);
+                    signal.LastActivityTime = lastCommitTime;
+                    signal.LastActivityType = "commit";
+                    signal.TimeSinceLastActivity = DateTime.UtcNow - lastCommitTime;
+                }
+                else
+                {
+                    signal.TimeSinceLastActivity = TimeSpan.FromHours(24);
+                    signal.LastActivityType = "none";
+                }
+
+                signal.IsInactive = signal.TimeSinceLastActivity.TotalMinutes > thresholdMinutes;
+            });
+
+            if (completedInTime)
+            {
+                signal.CollectionSucceeded = true;
+                _logger?.LogInformation(
+                    "Inactivity collected: TimeSince={TimeSince}min, IsInactive={IsInactive}",
+                    signal.TimeSinceLastActivity.TotalMinutes, signal.IsInactive);
             }
             else
             {
-                signal.TimeSinceLastActivity = TimeSpan.FromHours(24);
-                signal.LastActivityType = "none";
+                signal.CollectionSucceeded = false;
+                signal.Error = "Inactivity collection timed out";
+                _logger?.LogWarning("Inactivity collection timed out — continuing with partial data");
             }
-
-            signal.IsInactive = signal.TimeSinceLastActivity.TotalMinutes > thresholdMinutes;
-            signal.CollectionSucceeded = true;
-
-            _logger?.LogInformation(
-                "Inactivity collected: TimeSince={TimeSince}min, IsInactive={IsInactive}",
-                signal.TimeSinceLastActivity.TotalMinutes, signal.IsInactive);
         }
         catch (Exception ex)
         {

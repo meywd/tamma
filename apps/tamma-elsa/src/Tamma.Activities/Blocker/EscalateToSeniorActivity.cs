@@ -13,6 +13,21 @@ namespace Tamma.Activities.Blocker;
 /// <summary>
 /// Bookmark-based activity that compiles a full context dump and escalates to a senior developer.
 /// The workflow suspends and waits for the senior to respond via API or Slack.
+///
+/// <para><b>Durable senior-response SLA timeout (completeness audit 2026-06-22, 7-1G AC2 /
+/// §Missing #1+#2; hardened 2026-06-25 to the durable Delay primitive).</b> Two resume paths
+/// are armed when the activity suspends: a custom escalation bookmark
+/// (<c>blocker-escalation-{session}</c>) resumed by the senior → <see cref="Resolved"/>; and a
+/// DURABLE delay bookmark via
+/// <see cref="Elsa.Extensions.DelayActivityExecutionContextExtensions.DelayFor(ActivityExecutionContext, System.TimeSpan, ExecuteActivityDelegate)"/>
+/// at the SLA (<c>BlockerDiagnosis:EscalationTimeoutMinutes</c>, default 1440 = 24h) →
+/// <see cref="TimedOut"/>. The earlier build scheduled the SLA via
+/// <c>IWorkflowScheduler.ScheduleAtAsync</c>, whose default in-memory backing is LOST on a
+/// host restart — fatal here because the SLA defaults to 24h and a VPS restart inside that
+/// window is routine. The Delay bookmark is EF-persisted and re-armed by
+/// <c>Elsa.Scheduling</c>'s startup task on rehydration, so a restart mid-wait no longer
+/// drops the SLA. Whichever path resumes first completes the activity; Elsa burns the
+/// remaining bookmark, so there is no orphaned timer / stale double-resume.</para>
 /// </summary>
 [Activity(
     "Tamma.Blocker",
@@ -61,6 +76,10 @@ public class EscalateToSeniorActivity : Activity
     /// <summary>Whether the escalation was resolved by the senior</summary>
     [Output(Description = "Whether the senior resolved the blocker")]
     public Output<bool> Resolved { get; set; } = default!;
+
+    /// <summary>Whether the senior-response SLA expired with no response (durable timeout).</summary>
+    [Output(Description = "Whether the senior-response SLA expired with no response")]
+    public Output<bool> TimedOut { get; set; } = default!;
 
     /// <summary>Senior's response</summary>
     [Output(Description = "Senior's response")]
@@ -115,20 +134,25 @@ public class EscalateToSeniorActivity : Activity
         // Notify senior via configured channel
         await NotifySenior(escalationContext);
 
-        var payload = new EscalationPayload
-        {
-            SessionId = sessionId,
-            StoryId = storyId,
-            JuniorId = juniorId
-        };
-
-        // Create bookmark — workflow suspends and waits for senior response
+        // 1) Escalation bookmark — resumed by the senior's response (API/Slack). The workflow
+        //    suspends here until this resumes OR the durable SLA delay below fires.
         context.CreateBookmark(new CreateBookmarkArgs
         {
             BookmarkName = $"blocker-escalation-{sessionId}",
             Callback = OnResumeAsync,
             AutoBurn = true
         });
+
+        // 2) Durable senior-response SLA — a DelayFor (Delay) bookmark that Elsa.Scheduling's
+        //    startup background task RE-ARMS after a host restart (EF-persisted, not an
+        //    in-memory timer). A never-answered escalation now terminates as a real Timeout
+        //    even across a VPS restart inside the (default 24h) SLA window.
+        var slaMinutes = _configuration?.GetValue<int?>("BlockerDiagnosis:EscalationTimeoutMinutes") ?? 1440;
+        context.DelayFor(TimeSpan.FromMinutes(Math.Max(1, slaMinutes)), OnTimeoutAsync);
+
+        _logger?.LogInformation(
+            "Escalation awaiting senior; durable SLA timeout armed at +{SlaMinutes}min for session {SessionId}",
+            slaMinutes, sessionId);
     }
 
     private async Task NotifySenior(EscalationContext escalation)
@@ -169,21 +193,45 @@ Please respond to this escalation via the Tamma API or reply in this thread.";
         }
     }
 
+    /// <summary>
+    /// External resume path: the senior responded. Reads the senior's outcome from the resume
+    /// input and completes — Elsa burns the still-armed SLA Delay bookmark on completion (no
+    /// orphaned timer).
+    /// </summary>
     private async ValueTask OnResumeAsync(ActivityExecutionContext context)
     {
         var input = context.WorkflowInput;
 
         var resolved = input.TryGetValue("Resolved", out var r) && r is true;
-        var seniorResponse = input.TryGetValue("SeniorResponse", out var sr)
-            ? sr?.ToString()
-            : null;
+        var seniorResponse = input.TryGetValue("SeniorResponse", out var sr) ? sr?.ToString() : null;
 
-        _logger?.LogInformation(
-            "Senior escalation resumed: Resolved={Resolved}",
-            resolved);
+        _logger?.LogInformation("Senior escalation resumed (external): Resolved={Resolved}", resolved);
 
         context.Set(Resolved, resolved);
+        context.Set(TimedOut, false);
         context.Set(SeniorResponse, seniorResponse);
+
+        await context.CompleteActivityAsync();
+    }
+
+    /// <summary>
+    /// Durable timeout path: the senior-response SLA elapsed with no response. The Delay
+    /// bookmark scheduler resumes the activity here (and re-arms across a host restart). Flags
+    /// <see cref="TimedOut"/> (not <see cref="Resolved"/>) so the workflow reports the real
+    /// Timeout terminal instead of suspending forever; the still-armed escalation bookmark is
+    /// burned on completion.
+    /// </summary>
+    private async ValueTask OnTimeoutAsync(ActivityExecutionContext context)
+    {
+        var sessionId = SessionId.Get(context);
+
+        _logger?.LogWarning(
+            "Senior-response SLA expired (durable timeout) for session {SessionId} — taking the Timeout terminal",
+            sessionId);
+
+        context.Set(Resolved, false);
+        context.Set(TimedOut, true);
+        context.Set(SeniorResponse, null);
 
         await context.CompleteActivityAsync();
     }
