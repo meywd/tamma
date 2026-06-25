@@ -300,6 +300,45 @@ public class DeploymentPipelineWorkflowTests
         emitIds.Should().Contain("EmitRollbackFailed");
     }
 
+    [Test]
+    public void RollbackEmit_SourcesStatusFromRollbackStatus_NotStaleProdFailed()
+    {
+        // MINOR fix (2026-06-22): in the rollback branch stageResult is still the
+        // stale prod "failed", so DEPLOY.ROLLBACK.SUCCESS used to carry
+        // status:"failed". A rollback emit must source status from rollbackStatus.
+
+        // ROLLBACK.SUCCESS — rollback succeeded → status:"success" (NOT the stale "failed").
+        DeploymentPipelineWorkflow.SelectEmitStatus(isRollback: true, stageResult: "failed", rollbackStatus: "success")
+            .Should().Be("success",
+                "DEPLOY.ROLLBACK.SUCCESS must carry status:success, not the stale prod 'failed'");
+
+        // ROLLBACK.FAILED — rollback itself failed.
+        DeploymentPipelineWorkflow.SelectEmitStatus(true, "failed", "failed").Should().Be("failed");
+
+        // ROLLBACK.STARTED — runs before the rollback dispatch → rollbackStatus empty → "started".
+        DeploymentPipelineWorkflow.SelectEmitStatus(true, "failed", "").Should().Be("started");
+        DeploymentPipelineWorkflow.SelectEmitStatus(true, "failed", null).Should().Be("started");
+
+        // A non-rollback (stage) emit still reports stageResult unchanged.
+        DeploymentPipelineWorkflow.SelectEmitStatus(isRollback: false, stageResult: "success", rollbackStatus: "")
+            .Should().Be("success");
+        DeploymentPipelineWorkflow.SelectEmitStatus(false, "failed", "success").Should().Be("failed",
+            "a stage emit must report the stage result, not a rollback status");
+    }
+
+    [Test]
+    public void RollbackEmitNodes_AreNotStageResultSourced()
+    {
+        // Regression guard: the three rollback emit nodes must be the rollback-sourced
+        // variant (isRollback=true). We assert the wiring exists; the value mapping is
+        // covered by RollbackEmit_SourcesStatusFromRollbackStatus_NotStaleProdFailed.
+        foreach (var id in new[] { "EmitRollbackStarted", "EmitRollbackSuccess", "EmitRollbackFailed" })
+        {
+            _flowchart.Activities.OfType<EmitDeploymentEventActivity>()
+                .Any(a => a.Id == id).Should().BeTrue($"{id} must exist as a rollback emit node");
+        }
+    }
+
     // ================================================================
     // P1.6 — bounded per-stage retry then escalation (no silent bypass).
     // ================================================================

@@ -285,9 +285,12 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         // ================================================================
         // 6. Rollback on production failure (P0 item 4)
         // ================================================================
+        // Rollback emits source their `status` from rollbackStatus (NOT stageResult,
+        // which in this branch is still the stale prod "failed"). isRollback=true.
         var emitRollbackStarted = EmitDeployEvent("EmitRollbackStarted", "Emit ROLLBACK.STARTED",
             DeployEvents.RollbackStarted, "production",
-            repository, mergeSha, issueNumber, mode, tenantId, stageResult, stageError, completedStages, rollbackStatus);
+            repository, mergeSha, issueNumber, mode, tenantId, stageResult, stageError, completedStages, rollbackStatus,
+            isRollback: true);
 
         // Rollback dispatches the mediated llm-call with the `rollback` action —
         // it does NOT call a provider directly (mediation rule). Reverts prod to
@@ -304,11 +307,13 @@ public class DeploymentPipelineWorkflow : WorkflowBase
 
         var emitRollbackSuccess = EmitDeployEvent("EmitRollbackSuccess", "Emit ROLLBACK.SUCCESS",
             DeployEvents.RollbackSuccess, "production",
-            repository, mergeSha, issueNumber, mode, tenantId, stageResult, stageError, completedStages, rollbackStatus);
+            repository, mergeSha, issueNumber, mode, tenantId, stageResult, stageError, completedStages, rollbackStatus,
+            isRollback: true);
 
         var emitRollbackFailed = EmitDeployEvent("EmitRollbackFailed", "Emit ROLLBACK.FAILED",
             DeployEvents.RollbackFailed, "production",
-            repository, mergeSha, issueNumber, mode, tenantId, stageResult, stageError, completedStages, rollbackStatus);
+            repository, mergeSha, issueNumber, mode, tenantId, stageResult, stageError, completedStages, rollbackStatus,
+            isRollback: true);
 
         // ================================================================
         // 7. Success terminal — compute the (deferred) release tag, emit
@@ -618,6 +623,25 @@ public class DeploymentPipelineWorkflow : WorkflowBase
     }
 
     /// <summary>
+    /// Pick the <c>status</c> value an emit node writes into its audit payload.
+    /// For a rollback emit, source it from <paramref name="rollbackStatus"/> (the
+    /// rollback's own outcome) — an empty value means the rollback hasn't run yet
+    /// (the ROLLBACK.STARTED row) so it reads <c>"started"</c>. For a stage emit,
+    /// source it from <paramref name="stageResult"/>.
+    ///
+    /// <para>Fixes the MINOR audit-data bug (2026-06-22): the rollback branch ran
+    /// with <c>stageResult == "failed"</c> (the stale prod failure), so
+    /// <c>DEPLOY.ROLLBACK.SUCCESS</c> was carrying <c>status:"failed"</c>. Pure +
+    /// exposed for unit testing.</para>
+    /// </summary>
+    public static string SelectEmitStatus(bool isRollback, string? stageResult, string? rollbackStatus)
+    {
+        if (!isRollback)
+            return stageResult ?? "";
+        return string.IsNullOrEmpty(rollbackStatus) ? "started" : rollbackStatus;
+    }
+
+    /// <summary>
     /// Fail-closed parse of the rollback dispatch result into a rollback status.
     /// Same contract as <see cref="ParseStageStatus"/> — only an explicit
     /// <c>status:"success"</c> is a successful rollback.
@@ -696,6 +720,12 @@ public class DeploymentPipelineWorkflow : WorkflowBase
     /// tenant tags and serialises the audit data (status, reason, completedStages,
     /// rollbackStatus, optional approver/feedback/releaseTag) into the
     /// <c>DataJson</c> input so the durable drain persists it.
+    ///
+    /// <para><paramref name="isRollback"/> sources the payload <c>status</c> from
+    /// <c>rollbackStatus</c> (the rollback's own outcome) instead of
+    /// <c>stageResult</c> — which in the rollback branch is still the STALE prod
+    /// "failed". Without this, <c>DEPLOY.ROLLBACK.SUCCESS</c> would carry
+    /// <c>status:"failed"</c> (MINOR audit-data bug, 2026-06-22).</para>
     /// </summary>
     private static EmitDeploymentEventActivity EmitDeployEvent(
         string id, string label, string eventType, string stage,
@@ -704,7 +734,7 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         Variable<string> stageResult, Variable<string> stageError,
         Variable<string> completedStages, Variable<string> rollbackStatus,
         Variable<string>? approver = null, Variable<string>? feedback = null,
-        Variable<string>? releaseTag = null)
+        Variable<string>? releaseTag = null, bool isRollback = false)
     {
         var emit = new EmitDeploymentEventActivity
         {
@@ -718,9 +748,12 @@ public class DeploymentPipelineWorkflow : WorkflowBase
             TenantId = new Input<string?>(ctx => tenantId.Get(ctx)),
             DataJson = new Input<string?>(ctx =>
             {
+                // Rollback emits report the rollback's own status (started rows have
+                // no rollbackStatus yet → "started"); stage emits report stageResult.
+                var status = SelectEmitStatus(isRollback, stageResult.Get(ctx), rollbackStatus.Get(ctx));
                 var data = new Dictionary<string, object?>
                 {
-                    ["status"] = stageResult.Get(ctx),
+                    ["status"] = status,
                     ["completedStages"] = completedStages.Get(ctx),
                 };
                 var err = stageError.Get(ctx);

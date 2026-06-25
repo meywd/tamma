@@ -47,6 +47,17 @@ public class AdlOrchestratorWorkflow : WorkflowBase
         var cooldownSeconds = builder.WithVariable<int>("CooldownSeconds", 10);
         var maxConcurrent = builder.WithVariable<int>("MaxConcurrent", 1);
 
+        // Deployment mode + tenant threaded to each dispatched cycle (and from
+        // there into the deployment pipeline's production-approval gate). These
+        // are PASS-THROUGH from the orchestrator's own input: at the engine/
+        // orchestrator layer the process-wide operating mode is a CONFIG concern,
+        // not a per-instance input, so the current self-restart loop carries them
+        // empty and DispatchCycleActivity derives the real mode from configuration
+        // (mirrors TammaModeProvider). A SaaS dispatcher / operator may still set
+        // `mode`/`tenantId` on the orchestrator input to override per-instance.
+        var mode = builder.WithVariable<string>("Mode", "");
+        var tenantId = builder.WithVariable<string>("TenantId", "");
+
         // Selected work item data
         var selectedItemJson = builder.WithVariable<string?>("SelectedItemJson", null);
         var selectedIssueNumber = builder.WithVariable<int>("SelectedIssueNumber", 0);
@@ -122,6 +133,14 @@ public class AdlOrchestratorWorkflow : WorkflowBase
             IssueNumber = new Input<int>(ctx => selectedIssueNumber.Get(ctx)),
             BotAssignee = new Input<string>(ctx => botAssignee.Get(ctx)),
             BaseBranch = new Input<string>(ctx => baseBranch.Get(ctx)),
+            // Thread the operating mode + tenant end-to-end so the deployment
+            // pipeline's production-approval gate engages for business/SaaS.
+            // Pass-through from the orchestrator input (empty in the self-restart
+            // loop); DispatchCycleActivity derives the real mode from config when
+            // empty, fail-safe to "business" (gate ON) — never a silent prod
+            // auto-deploy.
+            Mode = new Input<string>(ctx => ctx.GetInput<string>("mode") ?? mode.Get(ctx)),
+            TenantId = new Input<string>(ctx => ctx.GetInput<string>("tenantId") ?? tenantId.Get(ctx)),
         };
         dispatchCycle.SetDisplayText("Dispatch Issue Cycle");
 
