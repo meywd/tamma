@@ -391,6 +391,16 @@ app.MapPost("/elsa/api/adl/merge-approval/resume",
     Tamma.ElsaServer.Endpoints.MergeApprovalResumeEndpoint.Resume)
     .RequireAuthorization();
 
+// Completeness audit P0 item 3 — in-process resume seam for the deployment
+// pipeline's production-approval human gate. Tamma.Api's tenant-scoped,
+// RBAC-gated POST /api/adl/deploy-approval/resume forwards here; this endpoint
+// looks up the gate's tenant+repo+SHA-scoped named bookmark and runs the owning
+// instance with the {decision,feedback,approver} payload injected. Same
+// engine-control-surface / RequireAuthorization rationale as the merge gate.
+app.MapPost("/elsa/api/adl/deploy-approval/resume",
+    Tamma.ElsaServer.Endpoints.DeploymentApprovalResumeEndpoint.Resume)
+    .RequireAuthorization();
+
 app.UseSerilogRequestLogging();
 
 Log.Information("Tamma ELSA Server starting up...");

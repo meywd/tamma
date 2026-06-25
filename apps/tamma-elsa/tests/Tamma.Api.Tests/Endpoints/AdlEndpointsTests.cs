@@ -214,6 +214,104 @@ public class AdlEndpointsTests
             .Should().Be("unknown");
     }
 
+    // ================================================================
+    // Production-deploy approval gate (completeness audit P0 item 3) —
+    // POST /api/adl/deploy-approval/resume. Same security model as the merge gate.
+    // ================================================================
+
+    [Test]
+    public async Task ResumeDeploymentApproval_ValidApprove_ForwardsTenantRepoShaAndDerivedApprover_Returns200()
+    {
+        var tenant = Guid.NewGuid();
+        _elsa
+            .Setup(s => s.ResumeDeploymentApprovalAsync(
+                42, tenant.ToString(), "octo/repo", "deadbeef", "approve", "ship it", "alice@example.com"))
+            .ReturnsAsync(new MergeApprovalResumeResult(Resumed: true, GateNotFound: false, WorkflowInstanceId: "wf-1"));
+
+        var req = new AdlEndpoints.DeployApprovalDecisionRequest(42, "octo/repo", "deadbeef", "approve", "ship it");
+
+        var result = await AdlEndpoints.ResumeDeploymentApproval(
+            req, _elsa.Object, TenantContext(tenant), Principal("alice@example.com"), _loggerFactory);
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status200OK);
+        _elsa.Verify(s => s.ResumeDeploymentApprovalAsync(
+            42, tenant.ToString(), "octo/repo", "deadbeef", "approve", "ship it", "alice@example.com"), Times.Once);
+    }
+
+    [Test]
+    public async Task ResumeDeploymentApproval_ApproverDerivedFromPrincipal_NotForgeable()
+    {
+        var tenant = Guid.NewGuid();
+        string? capturedApprover = null;
+        _elsa
+            .Setup(s => s.ResumeDeploymentApprovalAsync(
+                It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()))
+            .Callback<int, string?, string?, string?, string, string?, string?>(
+                (_, _, _, _, _, _, approver) => capturedApprover = approver)
+            .ReturnsAsync(new MergeApprovalResumeResult(true, false, "wf-9"));
+
+        var req = new AdlEndpoints.DeployApprovalDecisionRequest(1, "octo/repo", "sha", "reject", null);
+
+        await AdlEndpoints.ResumeDeploymentApproval(
+            req, _elsa.Object, TenantContext(tenant), Principal("bob@corp.test"), _loggerFactory);
+
+        capturedApprover.Should().Be("bob@corp.test",
+            "the prod-deploy approver must be derived from the authenticated principal for non-repudiation");
+    }
+
+    [Test]
+    public async Task ResumeDeploymentApproval_CrossTenantGate_Returns404_NeverActs()
+    {
+        var callerTenant = Guid.NewGuid();
+        _elsa
+            .Setup(s => s.ResumeDeploymentApprovalAsync(
+                5, callerTenant.ToString(), "victim/repo", "sha", "approve", null, It.IsAny<string?>()))
+            .ReturnsAsync(new MergeApprovalResumeResult(Resumed: false, GateNotFound: true, WorkflowInstanceId: null));
+
+        var req = new AdlEndpoints.DeployApprovalDecisionRequest(5, "victim/repo", "sha", "approve", null);
+
+        var result = await AdlEndpoints.ResumeDeploymentApproval(
+            req, _elsa.Object, TenantContext(callerTenant), Principal("attacker@evil.test"), _loggerFactory);
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status404NotFound);
+        _elsa.Verify(s => s.ResumeDeploymentApprovalAsync(
+            5, callerTenant.ToString(), "victim/repo", "sha", "approve", null, It.IsAny<string?>()), Times.Once);
+    }
+
+    [TestCase("yes")]
+    [TestCase("merge")]      // wrong gate's vocabulary
+    [TestCase("approve; drop table")]
+    public async Task ResumeDeploymentApproval_UnknownDecision_Returns400_NoForward(string decision)
+    {
+        var req = new AdlEndpoints.DeployApprovalDecisionRequest(1, "octo/repo", "sha", decision, null);
+
+        var result = await AdlEndpoints.ResumeDeploymentApproval(
+            req, _elsa.Object, TenantContext(Guid.NewGuid()), Principal("a@b.test"), _loggerFactory);
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest, "only approve|reject are accepted");
+        VerifyDeployNeverForwarded();
+    }
+
+    [Test]
+    public async Task ResumeDeploymentApproval_MissingMergeSha_Returns400()
+    {
+        var req = new AdlEndpoints.DeployApprovalDecisionRequest(1, "octo/repo", "  ", "approve", null);
+
+        var result = await AdlEndpoints.ResumeDeploymentApproval(
+            req, _elsa.Object, TenantContext(Guid.NewGuid()), Principal("a@b.test"), _loggerFactory);
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest,
+            "mergeSha is part of the bookmark scope and must be supplied");
+        VerifyDeployNeverForwarded();
+    }
+
+    private void VerifyDeployNeverForwarded() =>
+        _elsa.Verify(s => s.ResumeDeploymentApprovalAsync(
+            It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
+            It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()),
+            Times.Never, "invalid input must be rejected up front, not forwarded");
+
     private void VerifyNeverForwarded() =>
         _elsa.Verify(s => s.ResumeMergeApprovalAsync(
             It.IsAny<int>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string?>(),

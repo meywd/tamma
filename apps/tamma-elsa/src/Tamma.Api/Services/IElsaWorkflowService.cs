@@ -41,9 +41,26 @@ public interface IElsaWorkflowService
     Task<MergeApprovalResumeResult> ResumeMergeApprovalAsync(
         int issueNumber, int prNumber, string? tenantId, string? repository,
         string decision, string? feedback, string? approver);
+
+    /// <summary>
+    /// Completeness audit P0 item 3 — resume the <c>deployment-pipeline</c>
+    /// production-approval human gate suspended on the tenant+repo+SHA-scoped
+    /// bookmark <c>adl-deploy-prod-approval-{tenant}-{repo}-{issue}-{mergeSha}</c>,
+    /// injecting the <c>{decision, feedback, approver}</c> payload as workflow
+    /// input. Forwards to the engine's in-process resume endpoint. Returns the
+    /// resolved workflow instance id on success.
+    ///
+    /// <para>Tenant scoping — <paramref name="tenantId"/> /
+    /// <paramref name="repository"/> / <paramref name="mergeSha"/> scope the
+    /// bookmark lookup, so the engine can only resolve a gate in the caller's own
+    /// tenant; a cross-tenant attempt resolves no bookmark (GateNotFound).</para>
+    /// </summary>
+    Task<MergeApprovalResumeResult> ResumeDeploymentApprovalAsync(
+        int issueNumber, string? tenantId, string? repository, string? mergeSha,
+        string decision, string? feedback, string? approver);
 }
 
-/// <summary>Outcome of a merge-approval gate resume.</summary>
+/// <summary>Outcome of a merge-approval (or deploy-approval) gate resume.</summary>
 public sealed record MergeApprovalResumeResult(
     bool Resumed,
     bool GateNotFound,

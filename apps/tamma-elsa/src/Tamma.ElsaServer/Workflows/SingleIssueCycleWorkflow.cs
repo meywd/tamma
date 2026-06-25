@@ -51,6 +51,14 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var botAssignee = builder.WithVariable<string>("BotAssignee", "tamma-bot");
         var baseBranch = builder.WithVariable<string>("BaseBranch", "main");
         var tenantId = builder.WithVariable<string>("TenantId", "");
+        // Deployment mode (dev | business) — drives the deployment pipeline's
+        // production approval gate (Business Mode requires human approval before
+        // prod). Read from input; defaults to dev when absent.
+        var mode = builder.WithVariable<string>("Mode", "");
+        // Operator force-flag for the prod approval gate (Deployment:RequireProdApproval).
+        // Threaded from DispatchCycleActivity so an operator can force the gate even
+        // in single-user/dev mode. Read from input; defaults false.
+        var requireProdApproval = builder.WithVariable<bool>("RequireProdApproval", false);
 
         // Conventions (loaded from repo config)
         var conventions = builder.WithVariable<string>("Conventions", "");
@@ -97,6 +105,8 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 baseBranch.Set(ctx, ctx.GetInput<string>("baseBranch") ?? "main");
                 issueNumber.Set(ctx, ctx.GetInput<int>("issueNumber"));
                 tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
+                mode.Set(ctx, ctx.GetInput<string>("mode") ?? "");
+                requireProdApproval.Set(ctx, ctx.GetInput<bool>("requireProdApproval"));
                 return (object)repo;
             }),
         };
@@ -692,6 +702,13 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["mergeSha"] = mergeSha.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
+                // Thread mode + tenant so the pipeline's production approval gate
+                // is mode-aware (Business Mode → human approval) and its DCB
+                // events / bookmarks are tenant-scoped. requireProdApproval lets an
+                // operator force the gate even in dev mode.
+                ["mode"] = mode.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
+                ["requireProdApproval"] = requireProdApproval.Get(ctx),
             }),
             WaitForCompletion = new(true), // wait — need deployment result before reporting
             Result = new(subResult),
