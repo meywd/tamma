@@ -2,19 +2,30 @@ using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Tamma.Activities.Debug.Models;
+using Tamma.Activities.LlmCall;
 
 namespace Tamma.Activities.Debug;
 
 /// <summary>
-/// Refines hypotheses after a failed fix attempt by calling LLM (role=debugger).
-/// Passes the previous fix attempt results, test output, and updated errors to produce
-/// refined or new hypotheses. This prevents the LLM from repeating failed approaches.
+/// Refines hypotheses after a failed fix attempt by calling the LLM to produce
+/// refined or new hypotheses. Passes the previous fix attempt results, test output,
+/// and updated errors so the LLM does not repeat failed approaches.
+///
+/// <para>Story 32-5 (AC9) / completeness audit 2026-06-22 (Debugging.md §Missing #9):
+/// the LLM call routes through the mediated call-LLM endpoint
+/// (<see cref="MediatedLlmText"/>) — the engine holds NO provider key and makes no
+/// direct <c>/api/engine/execute-task</c> or <c>/v1/messages</c> call. The free-text
+/// "debugger" label is NOT a canonical role (the API's AgentResolverService 422s on
+/// it); refinement is a senior analytical task so it resolves the
+/// <c>senior_developer</c> agent/prompt (Epic-27), matching
+/// <see cref="AIDiagnosisActivity"/>. There is NO simulated fallback (a fabricated
+/// refinement poisons the iterative loop and the audit trail) and a textless mediated
+/// response throws rather than fabricating. The output contract
+/// (<see cref="DiagnosisResult"/>) is unchanged.</para>
 /// </summary>
 [Activity(
     "Tamma.Debug",
@@ -25,8 +36,6 @@ namespace Tamma.Activities.Debug;
 public class RefineHypothesisActivity : CodeActivity<DiagnosisResult>
 {
     private readonly ILogger<RefineHypothesisActivity>? _logger;
-    private readonly IHttpClientFactory? _httpClientFactory;
-    private readonly IConfiguration? _configuration;
 
     /// <summary>Session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -51,14 +60,9 @@ public class RefineHypothesisActivity : CodeActivity<DiagnosisResult>
     [JsonConstructor]
     public RefineHypothesisActivity() { }
 
-    public RefineHypothesisActivity(
-        ILogger<RefineHypothesisActivity> logger,
-        IHttpClientFactory httpClientFactory,
-        IConfiguration configuration)
+    public RefineHypothesisActivity(ILogger<RefineHypothesisActivity> logger)
     {
         _logger = logger;
-        _httpClientFactory = httpClientFactory;
-        _configuration = configuration;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -76,7 +80,10 @@ public class RefineHypothesisActivity : CodeActivity<DiagnosisResult>
         try
         {
             var prompt = BuildRefinementPrompt(triedJson, testResults, updatedErrors, iterationCtxJson);
-            var response = await CallLlm(prompt);
+            // Mediated call-LLM (no direct provider key in the engine). "senior_developer"
+            // is the canonical analytical role the API can resolve; the free-text
+            // "debugger" label 422s. See AIDiagnosisActivity for the same cut-over.
+            var response = await MediatedLlmText.CompleteAsync(context, "senior_developer", prompt, context.CancellationToken);
             var result = ParseRefinementResponse(response);
 
             _logger?.LogInformation(
@@ -142,30 +149,6 @@ public class RefineHypothesisActivity : CodeActivity<DiagnosisResult>
 }");
 
         return sb.ToString();
-    }
-
-    private async Task<string> CallLlm(string prompt)
-    {
-        // No mock path: simulated refinement responses fed fake "what we learned"
-        // narratives and fabricated hypotheses into the iterative debug loop,
-        // poisoning subsequent attempts and the audit trail. All refinements now
-        // require a real engine callback. See: feat/wave-b cleanup.
-        var callbackUrl = _configuration?["Engine:CallbackUrl"];
-        if (string.IsNullOrEmpty(callbackUrl) || _httpClientFactory == null)
-        {
-            throw new InvalidOperationException(
-                "RefineHypothesisActivity requires Engine:CallbackUrl and IHttpClientFactory; "
-                + "no simulated fallback is permitted.");
-        }
-
-        var client = _httpClientFactory.CreateClient();
-        var response = await client.PostAsJsonAsync(
-            $"{callbackUrl.TrimEnd('/')}/api/engine/execute-task",
-            new { prompt, analysisType = "debugging_refinement", role = "debugger" });
-        response.EnsureSuccessStatusCode();
-
-        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return result.GetProperty("output").GetString() ?? "{}";
     }
 
     private DiagnosisResult ParseRefinementResponse(string response)

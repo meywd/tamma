@@ -208,6 +208,10 @@ public class NoDirectLlmCallTests
         typeof(ApplyRefactoringActivity),
         typeof(Tamma.Activities.ADL.ApplyReviewFixesActivity),
         typeof(AIDiagnosisActivity),
+        // Debugging.md §Missing #9 — Refine + regression-test gen were the two debug
+        // activities still on the direct /api/engine/execute-task callback; now mediated.
+        typeof(RefineHypothesisActivity),
+        typeof(WriteRegressionTestActivity),
         typeof(ClaudeAnalysisActivity),
     };
 

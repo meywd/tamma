@@ -2,12 +2,11 @@ using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Tamma.Activities.Debug.Models;
+using Tamma.Activities.LlmCall;
 
 namespace Tamma.Activities.Debug;
 
@@ -15,7 +14,15 @@ namespace Tamma.Activities.Debug;
 /// Writes a regression test that reproduces the bug (BugInvestigation mode).
 /// The test should FAIL initially — if it passes, the bug may already be fixed
 /// or the test doesn't correctly reproduce the issue.
-/// Calls LLM (role=tester) to generate the test.
+///
+/// <para>Story 32-5 (AC9) / completeness audit 2026-06-22 (Debugging.md §Missing #9):
+/// the LLM call routes through the mediated call-LLM endpoint
+/// (<see cref="MediatedLlmText"/>) with the canonical <c>tester</c> role — the engine
+/// holds NO provider key and makes no direct <c>/api/engine/execute-task</c> or
+/// <c>/v1/messages</c> call. There is NO simulated fallback (a fabricated
+/// <c>expect(true).toBe(true)</c> test that lies about reproducing the bug is a
+/// false-success in the audit trail) and a textless mediated response throws. The
+/// output contract (<see cref="TestGenerationResult"/>) is unchanged.</para>
 /// </summary>
 [Activity(
     "Tamma.Debug",
@@ -26,8 +33,6 @@ namespace Tamma.Activities.Debug;
 public class WriteRegressionTestActivity : CodeActivity<TestGenerationResult>
 {
     private readonly ILogger<WriteRegressionTestActivity>? _logger;
-    private readonly IHttpClientFactory? _httpClientFactory;
-    private readonly IConfiguration? _configuration;
 
     /// <summary>Session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -60,14 +65,9 @@ public class WriteRegressionTestActivity : CodeActivity<TestGenerationResult>
     [JsonConstructor]
     public WriteRegressionTestActivity() { }
 
-    public WriteRegressionTestActivity(
-        ILogger<WriteRegressionTestActivity> logger,
-        IHttpClientFactory httpClientFactory,
-        IConfiguration configuration)
+    public WriteRegressionTestActivity(ILogger<WriteRegressionTestActivity> logger)
     {
         _logger = logger;
-        _httpClientFactory = httpClientFactory;
-        _configuration = configuration;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -85,7 +85,9 @@ public class WriteRegressionTestActivity : CodeActivity<TestGenerationResult>
         try
         {
             var prompt = BuildTestPrompt(storyId, bugDescription, hypothesisJson, codeContext);
-            var response = await CallLlm(prompt);
+            // Mediated call-LLM (no direct provider key in the engine). "tester" is the
+            // canonical role the API resolves for test authoring. See AIDiagnosisActivity.
+            var response = await MediatedLlmText.CompleteAsync(context, "tester", prompt, context.CancellationToken);
             var result = ParseTestResponse(response);
 
             if (result.Success)
@@ -147,31 +149,6 @@ public class WriteRegressionTestActivity : CodeActivity<TestGenerationResult>
 }");
 
         return sb.ToString();
-    }
-
-    private async Task<string> CallLlm(string prompt)
-    {
-        // No mock path: simulated test responses returned a hard-coded
-        // `expect(true).toBe(true)` test claiming `fails_as_expected = true`,
-        // which (a) doesn't reproduce any bug and (b) lies in the audit trail
-        // about regression coverage. All regression tests now require a real
-        // engine callback. See: feat/wave-b cleanup.
-        var callbackUrl = _configuration?["Engine:CallbackUrl"];
-        if (string.IsNullOrEmpty(callbackUrl) || _httpClientFactory == null)
-        {
-            throw new InvalidOperationException(
-                "WriteRegressionTestActivity requires Engine:CallbackUrl and IHttpClientFactory; "
-                + "no simulated fallback is permitted.");
-        }
-
-        var client = _httpClientFactory.CreateClient();
-        var response = await client.PostAsJsonAsync(
-            $"{callbackUrl.TrimEnd('/')}/api/engine/execute-task",
-            new { prompt, analysisType = "regression_test", role = "tester" });
-        response.EnsureSuccessStatusCode();
-
-        var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return result.GetProperty("output").GetString() ?? "{}";
     }
 
     private TestGenerationResult ParseTestResponse(string response)
