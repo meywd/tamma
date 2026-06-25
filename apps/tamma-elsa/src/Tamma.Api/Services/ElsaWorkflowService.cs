@@ -145,6 +145,17 @@ public partial class ElsaWorkflowService : IElsaWorkflowService
     /// <summary>
     /// Resume a paused workflow.
     /// </summary>
+    /// <remarks>
+    /// FOLLOW-UP (blocker-diagnosis Resolved terminal): this hits Elsa's GENERIC
+    /// <c>/resume</c> with no bookmark id and no input, so it cannot supply the
+    /// <c>ProgressDetected</c> / <c>Resolved</c> / <c>SeniorResponse</c> keys the
+    /// blocker-diagnosis progress / escalation bookmarks read. As a result a blocker run can
+    /// only reach the Escalated or (durable) Timeout terminal in production, never Resolved.
+    /// Reaching Resolved requires a blocker-specific resume endpoint that targets the bookmark
+    /// and passes that input, mirroring the secure MergeApprovalResumeEndpoint — a tracked
+    /// follow-up (deliberately NOT added here: it touches Program.cs and would collide with a
+    /// sibling endpoint-wiring PR).
+    /// </remarks>
     public async Task ResumeWorkflowAsync(string instanceId)
     {
         _logger.LogInformation("Resuming workflow instance {InstanceId}", instanceId);

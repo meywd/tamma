@@ -48,6 +48,14 @@ namespace Tamma.Activities.Blocker;
 public static class BlockerEvents
 {
     public const string DiagnosedSuccess = "BLOCKER.DIAGNOSED.SUCCESS";
+
+    // FOLLOW-UP: BLOCKER.DIAGNOSED.FAILED is not emitted on any graph edge today — the graph
+    // only ever emits DiagnosedSuccess after ClassifyBlockerActivity (which never throws: it
+    // always falls back to a rule-based classification). It is retained as the LOUD,
+    // fail-closed default for EmitBlockerEventActivity when an emit is reached with no
+    // EventType (so a mis-wired emit surfaces as an error row, not a false success), and is
+    // the slot a real diagnosis-failure path would emit once classification is allowed to hard
+    // fail. Kept deliberately rather than removed; no fabricated failure path is added here.
     public const string DiagnosedFailed = "BLOCKER.DIAGNOSED.FAILED";
     public const string ResolutionAttempted = "BLOCKER.RESOLUTION_ATTEMPTED";
     public const string ProgressDetected = "BLOCKER.PROGRESS_DETECTED";

@@ -41,8 +41,9 @@ namespace Tamma.ElsaServer.Workflows;
 ///   - Progress detected at any level short-circuits the ladder (the shared !isResolved
 ///     guard) and emits a terminal RESOLVED event immediately.
 ///   - Per-level waits and the escalation SLA are now durable timeouts (no hang-forever),
-///     enforced inside DetectProgressActivity / EscalateToSeniorActivity via the
-///     scheduler. Wait times moved to BlockerDiagnosis:* config.
+///     enforced inside DetectProgressActivity / EscalateToSeniorActivity via the DelayFor
+///     (Delay) bookmark — EF-persisted and re-armed by Elsa.Scheduling after a host restart
+///     (survives a VPS restart mid-wait). Wait times moved to BlockerDiagnosis:* config.
 ///   - Every rung emits a BLOCKER.* DCB audit event (diagnosed / resolution attempted /
 ///     progress detected / progress timed-out / escalated / resolved / timed-out) tagged
 ///     with sessionId/storyId/juniorId/tenantId/level/blockerType, plus the AC9 OTel
@@ -51,6 +52,20 @@ namespace Tamma.ElsaServer.Workflows;
 /// 7-11 (full prompt-enrichment: story title/description/expected-files/conventions/
 /// resolution-history threading) remains a noted follow-up — out of scope for this
 /// correctness pass.</para>
+///
+/// <para><b>Honest reachability of the <c>Resolved</c> terminal (FOLLOW-UP).</b> The
+/// in-graph wiring for <c>Resolved</c> is correct: a <c>ProgressDetected</c> /
+/// <c>Resolved</c> / <c>SeniorResponse</c> resume at any level flips <c>isResolved</c> and
+/// short-circuits the ladder. However, the ONLY external resumer in the codebase today
+/// (<c>MentorshipController.ResumeSession</c> → <c>ElsaWorkflowService.ResumeWorkflowAsync</c>)
+/// hits Elsa's generic <c>/resume</c> with NO bookmark id and NO input, so it never supplies
+/// those keys. Until a blocker-specific resume endpoint exists — one that passes
+/// <c>ProgressDetected</c> / <c>Resolved</c> / <c>SeniorResponse</c> input and targets the
+/// progress / escalation bookmark, mirroring the secure <c>MergeApprovalResumeEndpoint</c> —
+/// a production run can only reach the <c>Escalated</c> or (durable) <c>Timeout</c> terminal,
+/// never <c>Resolved</c>. That endpoint is a tracked FOLLOW-UP (it touches Program.cs and is
+/// intentionally NOT added here to avoid colliding with a sibling endpoint-wiring PR); the
+/// graph fix stands as-is.</para>
 /// </summary>
 public class BlockerDiagnosisWorkflow : WorkflowBase
 {

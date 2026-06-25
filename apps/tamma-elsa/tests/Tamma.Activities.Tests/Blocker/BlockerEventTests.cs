@@ -210,6 +210,40 @@ public class BlockerEventTests
         BlockerDiagnosisWorkflow.TerminalEventType(false, false).Should().Be(BlockerEvents.Escalated);
     }
 
+    [Test]
+    public void NeverResumedEscalationBookmark_DurableTimeout_MapsToTimeoutTerminal_NotFalseSuccess()
+    {
+        // Behavioural contract of the durable-DelayFor fix (review P0): when the escalation
+        // bookmark is NEVER resumed by a senior, the durable Delay timeout fires →
+        // EscalateToSeniorActivity sets Resolved=false / TimedOut=true. The workflow folds that
+        // into isResolved=false / timedOut=true. The terminal MUST be the loud Timeout terminal
+        // (error-status), never a silent Resolved/Escalated false success.
+        const bool isResolved = false; // senior never answered
+        const bool timedOut = true;    // durable SLA Delay fired
+
+        BlockerDiagnosisWorkflow.ResolveStatus(isResolved, timedOut)
+            .Should().Be(BlockerResolutionStatus.Timeout, "a never-answered escalation is a Timeout terminal");
+
+        var terminalEvent = BlockerDiagnosisWorkflow.TerminalEventType(isResolved, timedOut);
+        terminalEvent.Should().Be(BlockerEvents.TimedOut);
+        BlockerEvents.StatusForEvent(terminalEvent).Should().Be("error",
+            "the durable-timeout terminal is a LOUD error row — no silent false success");
+    }
+
+    [Test]
+    public void NeverResumedProgressBookmark_DurableTimeout_AdvancesLadder_NotResolved()
+    {
+        // When a per-level progress bookmark is never resumed, the durable Delay timeout fires →
+        // DetectProgressActivity sets ProgressDetected=false / TimedOut=true. That is NOT a
+        // resolution: the level's Check-Progress step advances the ladder and isResolved stays
+        // false. The emitted per-level event is PROGRESS_TIMED_OUT (expected, success-status:
+        // advancing the ladder is normal), distinct from PROGRESS_DETECTED.
+        BlockerEvents.StatusForEvent(BlockerEvents.ProgressTimedOut).Should().Be("success",
+            "a per-level progress timeout advances the ladder — expected, not an error");
+        BlockerEvents.ProgressTimedOut.Should().NotBe(BlockerEvents.ProgressDetected,
+            "a timed-out level is audited distinctly from a level where progress was detected");
+    }
+
     // ================================================================
     // BlockerMetrics — AC9 instrument increments
     // ================================================================

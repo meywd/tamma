@@ -42,7 +42,19 @@ public static class BlockerSignalTimeout
         var workTask = work();
         var completed = await Task.WhenAny(workTask, Task.Delay(timeout));
         if (completed != workTask)
+        {
+            // The deadline won: we ABANDON (don't cancel — the integration methods take no
+            // CancellationToken) the slow work task. It keeps running and will eventually
+            // mutate its own collector signal in the background, but that is harmless: the
+            // aggregator reads ONLY each signal's CollectionSucceeded flag, which stays false
+            // on a timed-out collector (the caller never sets it on this path). Any exception
+            // the abandoned task later throws is observed by the discarded continuation below
+            // (so it is not an unobserved-task crash), not propagated to the caller.
+            _ = workTask.ContinueWith(
+                static t => _ = t.Exception,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
             return false;
+        }
 
         // Surface any exception from the (now-completed) work task to the caller's catch.
         await workTask;

@@ -1,5 +1,4 @@
 using Elsa.Extensions;
-using Elsa.Scheduling;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
@@ -21,16 +20,27 @@ namespace Tamma.Activities.Blocker;
 /// The workflow suspends at this point and is resumed externally when progress
 /// is detected.
 ///
-/// <para><b>Durable wait-timeout (completeness audit 2026-06-22, 7-1G AC6 / §Missing #1+#2).</b>
-/// Alongside the progress bookmark this activity schedules a delayed resume of the SAME
-/// bookmark at <c>now + WaitTimeMinutes</c> via <see cref="IWorkflowScheduler"/> (the durable
-/// scheduling seam <c>UseScheduling()</c> wires). If no external progress signal arrives first,
-/// the scheduled resume fires with <c>Timeout=true</c> → <see cref="TimedOut"/> output and
-/// <see cref="ProgressDetected"/>=false, and the activity completes. This closes the
-/// hang-forever hole: a never-resumed bookmark now always terminates as a real per-level
-/// timeout rather than suspending indefinitely. The wait time is sourced from config
-/// (<c>BlockerDiagnosis:WaitTimeMinutes:{level}</c>, optionally <c>:Extended</c> for skill ≥
-/// the configured extended-skill floor) with the historical constants as the fallback.</para>
+/// <para><b>Durable wait-timeout (completeness audit 2026-06-22, 7-1G AC6 / §Missing #1+#2;
+/// hardened 2026-06-25 to the durable Delay primitive).</b>
+/// Two resume paths are armed when the activity suspends:</para>
+/// <list type="number">
+///   <item><description>a custom progress bookmark (<c>blocker-progress-{session}-{level}</c>)
+///     resumed by the external progress signal → <see cref="ProgressDetected"/>; and</description></item>
+///   <item><description>a DURABLE delay bookmark via
+///     <see cref="Elsa.Extensions.DelayActivityExecutionContextExtensions.DelayFor(ActivityExecutionContext, System.TimeSpan, ExecuteActivityDelegate)"/>
+///     — the same EF-persisted Delay primitive the framework's <c>Delay</c> activity uses,
+///     which <c>Elsa.Scheduling</c>'s startup background task RE-ARMS after a host restart →
+///     <see cref="TimedOut"/>.</description></item>
+/// </list>
+/// <para>The earlier build used <c>IWorkflowScheduler.ScheduleAtAsync</c>, whose default
+/// (in-memory <c>LocalScheduler</c> / <c>System.Timers.Timer</c>) backing is LOST on a host
+/// restart → the bookmark would hang forever (the exact P0 this was meant to close). The
+/// Delay bookmark is persisted and re-armed on rehydration, so a host restart mid-wait no
+/// longer drops the timeout. Whichever path resumes first completes the activity; Elsa burns
+/// the activity's remaining bookmark on completion, so there is no orphaned timer / stale
+/// double-resume. The wait time is sourced from config
+/// (<c>BlockerDiagnosis:WaitTimeMinutes:{level}</c>) with the historical constants as the
+/// fallback.</para>
 /// </summary>
 [Activity(
     "Tamma.Blocker",
@@ -94,73 +104,35 @@ public class DetectProgressActivity : Activity
             "Waiting for progress detection: Session={SessionId}, Level={Level}, Timeout={Timeout}min",
             sessionId, currentLevel, waitTimeMinutes);
 
-        // Create the progress bookmark with a deterministic id so the scheduled timeout can
-        // resume THIS bookmark. The workflow suspends here until external resume OR the
-        // scheduled timeout below fires.
-        var bookmarkId = Guid.NewGuid().ToString("N");
+        // 1) Progress bookmark — resumed by the external progress signal (commit/CI/junior
+        //    "resolved"). The workflow suspends here until this resumes OR the durable delay
+        //    below fires, whichever happens first.
         context.CreateBookmark(new CreateBookmarkArgs
         {
-            BookmarkId = bookmarkId,
             BookmarkName = $"blocker-progress-{sessionId}-{currentLevel}",
             Callback = OnResumeAsync,
             AutoBurn = true
         });
 
-        ScheduleTimeout(context, bookmarkId, waitTimeMinutes);
+        // 2) Durable timeout — a DelayFor (Delay) bookmark that Elsa.Scheduling's startup
+        //    background task RE-ARMS after a host restart (EF-persisted, not an in-memory
+        //    timer). Closes the hang-forever hole: a never-resumed progress bookmark now
+        //    always terminates as a real per-level timeout even across a VPS restart.
+        context.DelayFor(TimeSpan.FromMinutes(Math.Max(1, waitTimeMinutes)), OnTimeoutAsync);
     }
 
     /// <summary>
-    /// Schedule a durable resume of the progress bookmark at <c>now + waitMinutes</c> carrying
-    /// <c>Timeout=true</c>. Best-effort: if the scheduling seam is unavailable the bookmark
-    /// still exists (so an external progress signal can resume it) — we log loudly rather
-    /// than fail the run, but the no-hang guarantee only holds when scheduling is wired
-    /// (<c>UseScheduling()</c>, which the engine host enables).
+    /// External resume path: the junior made progress. Reads the progress fields from the
+    /// resume input, flags <see cref="ProgressDetected"/>, and completes — Elsa burns the
+    /// still-armed Delay bookmark on completion (no orphaned timer).
     /// </summary>
-    private void ScheduleTimeout(ActivityExecutionContext context, string bookmarkId, int waitMinutes)
-    {
-        var scheduler = context.GetService<IWorkflowScheduler>();
-        if (scheduler is null)
-        {
-            _logger?.LogWarning(
-                "IWorkflowScheduler unavailable — progress bookmark {BookmarkId} has no durable timeout "
-                + "(relies on an external resume).", bookmarkId);
-            return;
-        }
-
-        var instanceId = context.WorkflowExecutionContext.Id;
-        var resumeAt = DateTimeOffset.UtcNow.AddMinutes(Math.Max(1, waitMinutes));
-        var taskName = $"blocker-progress-timeout-{instanceId}-{bookmarkId}";
-
-        var request = new ScheduleExistingWorkflowInstanceRequest
-        {
-            WorkflowInstanceId = instanceId,
-            BookmarkId = bookmarkId,
-            Input = new Dictionary<string, object> { ["Timeout"] = true }
-        };
-
-        // Fire-and-forget the async schedule call from this sync Execute; ScheduleAtAsync only
-        // enqueues a scheduler job (no workflow execution happens inline).
-        scheduler.ScheduleAtAsync(taskName, request, resumeAt).AsTask().GetAwaiter().GetResult();
-
-        _logger?.LogInformation(
-            "Scheduled progress-timeout for bookmark {BookmarkId} at {ResumeAt:o} ({WaitMinutes}min)",
-            bookmarkId, resumeAt, waitMinutes);
-    }
-
     private async ValueTask OnResumeAsync(ActivityExecutionContext context)
     {
         var input = context.WorkflowInput;
 
-        var isTimeout = input.TryGetValue("Timeout", out var to) && to is true;
-        var progressDetected = !isTimeout
-            && input.TryGetValue("ProgressDetected", out var pd)
-            && pd is true;
-        var progressType = isTimeout
-            ? "Timeout"
-            : input.TryGetValue("ProgressType", out var pt) ? pt?.ToString() : null;
-        var details = isTimeout
-            ? "Per-level wait expired with no progress"
-            : input.TryGetValue("Details", out var d) ? d?.ToString() : null;
+        var progressDetected = input.TryGetValue("ProgressDetected", out var pd) && pd is true;
+        var progressType = input.TryGetValue("ProgressType", out var pt) ? pt?.ToString() : null;
+        var details = input.TryGetValue("Details", out var d) ? d?.ToString() : null;
 
         var result = new ProgressDetectionResult
         {
@@ -170,11 +142,41 @@ public class DetectProgressActivity : Activity
         };
 
         _logger?.LogInformation(
-            "Progress detection resumed: Detected={Detected}, TimedOut={TimedOut}, Type={Type}",
-            progressDetected, isTimeout, progressType);
+            "Progress detection resumed (external): Detected={Detected}, Type={Type}",
+            progressDetected, progressType);
 
         context.Set(ProgressDetected, progressDetected);
-        context.Set(TimedOut, isTimeout);
+        context.Set(TimedOut, false);
+        context.Set(Result, result);
+
+        await context.CompleteActivityAsync();
+    }
+
+    /// <summary>
+    /// Durable timeout path: the per-level wait elapsed with no external progress signal. The
+    /// Delay bookmark scheduler resumes the activity here (and re-arms across a host restart).
+    /// Flags <see cref="TimedOut"/> (and <see cref="ProgressDetected"/>=false) so the ladder
+    /// advances instead of suspending forever; the still-armed progress bookmark is burned on
+    /// completion.
+    /// </summary>
+    private async ValueTask OnTimeoutAsync(ActivityExecutionContext context)
+    {
+        var sessionId = SessionId.Get(context);
+        var currentLevel = CurrentLevel.Get(context);
+
+        _logger?.LogInformation(
+            "Progress detection timed out (durable): Session={SessionId}, Level={Level} — advancing ladder",
+            sessionId, currentLevel);
+
+        var result = new ProgressDetectionResult
+        {
+            ProgressDetected = false,
+            ProgressType = "Timeout",
+            Details = "Per-level wait expired with no progress"
+        };
+
+        context.Set(ProgressDetected, false);
+        context.Set(TimedOut, true);
         context.Set(Result, result);
 
         await context.CompleteActivityAsync();

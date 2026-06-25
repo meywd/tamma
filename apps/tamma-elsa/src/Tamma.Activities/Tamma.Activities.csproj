@@ -22,10 +22,12 @@
     <PackageReference Include="Elsa.Http" Version="3.5.3" />
     <!-- WaitForCIResultsActivity (TestingWorkflow) and BlockerDiagnosis
          DetectProgress/EscalateToSenior use DelayActivityExecutionContextExtensions.DelayFor
-         (Elsa.Scheduling) to arm a durable, scheduler-resumed timeout bookmark alongside the
-         work bookmark, so a never-resumed wait times out deterministically instead of hanging
-         forever. Elsa.Scheduling is already wired in the host (Program.cs elsa.UseScheduling());
-         this reference only exposes the extension at compile time. -->
+         (Elsa.Scheduling) to arm a timeout bookmark alongside the work bookmark. The Delay
+         bookmark is EF-persisted and re-armed by Elsa.Scheduling's startup background task
+         after a host restart, so a never-resumed wait times out deterministically instead of
+         hanging forever (survives a VPS restart mid-wait, unlike an in-memory IWorkflowScheduler
+         timer). UseScheduling() is wired in Tamma.ElsaServer; this reference only exposes the
+         DelayFor extension at compile time. -->
     <PackageReference Include="Elsa.Scheduling" Version="3.5.3" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.11" />
   </ItemGroup>
