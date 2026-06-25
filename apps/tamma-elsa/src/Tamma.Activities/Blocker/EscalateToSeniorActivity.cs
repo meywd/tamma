@@ -1,4 +1,5 @@
 using Elsa.Extensions;
+using Elsa.Scheduling;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
@@ -62,6 +63,10 @@ public class EscalateToSeniorActivity : Activity
     [Output(Description = "Whether the senior resolved the blocker")]
     public Output<bool> Resolved { get; set; } = default!;
 
+    /// <summary>Whether the senior-response SLA expired with no response (durable timeout).</summary>
+    [Output(Description = "Whether the senior-response SLA expired with no response")]
+    public Output<bool> TimedOut { get; set; } = default!;
+
     /// <summary>Senior's response</summary>
     [Output(Description = "Senior's response")]
     public Output<string?> SeniorResponse { get; set; } = default!;
@@ -115,20 +120,56 @@ public class EscalateToSeniorActivity : Activity
         // Notify senior via configured channel
         await NotifySenior(escalationContext);
 
-        var payload = new EscalationPayload
-        {
-            SessionId = sessionId,
-            StoryId = storyId,
-            JuniorId = juniorId
-        };
-
-        // Create bookmark — workflow suspends and waits for senior response
+        // Create bookmark — workflow suspends and waits for senior response. A deterministic
+        // id lets the scheduled SLA timeout resume THIS bookmark.
+        var bookmarkId = Guid.NewGuid().ToString("N");
         context.CreateBookmark(new CreateBookmarkArgs
         {
+            BookmarkId = bookmarkId,
             BookmarkName = $"blocker-escalation-{sessionId}",
             Callback = OnResumeAsync,
             AutoBurn = true
         });
+
+        ScheduleTimeout(context, bookmarkId);
+    }
+
+    /// <summary>
+    /// Schedule a durable resume of the escalation bookmark at the senior-response SLA
+    /// (<c>BlockerDiagnosis:EscalationTimeoutMinutes</c>, default 1440 = 24h) carrying
+    /// <c>Timeout=true</c> via <see cref="IWorkflowScheduler"/>. Closes the hang-forever hole
+    /// (completeness audit 2026-06-22, 7-1G §Missing #1+#2): a never-answered escalation now
+    /// terminates as a real <c>Timeout</c> rather than suspending indefinitely. Best-effort —
+    /// if scheduling is unavailable the bookmark still exists for an external resume.
+    /// </summary>
+    private void ScheduleTimeout(ActivityExecutionContext context, string bookmarkId)
+    {
+        var scheduler = context.GetService<IWorkflowScheduler>();
+        if (scheduler is null)
+        {
+            _logger?.LogWarning(
+                "IWorkflowScheduler unavailable — escalation bookmark {BookmarkId} has no durable SLA "
+                + "timeout (relies on an external resume).", bookmarkId);
+            return;
+        }
+
+        var slaMinutes = _configuration?.GetValue<int?>("BlockerDiagnosis:EscalationTimeoutMinutes") ?? 1440;
+        var instanceId = context.WorkflowExecutionContext.Id;
+        var resumeAt = DateTimeOffset.UtcNow.AddMinutes(Math.Max(1, slaMinutes));
+        var taskName = $"blocker-escalation-timeout-{instanceId}-{bookmarkId}";
+
+        var request = new ScheduleExistingWorkflowInstanceRequest
+        {
+            WorkflowInstanceId = instanceId,
+            BookmarkId = bookmarkId,
+            Input = new Dictionary<string, object> { ["Timeout"] = true }
+        };
+
+        scheduler.ScheduleAtAsync(taskName, request, resumeAt).AsTask().GetAwaiter().GetResult();
+
+        _logger?.LogInformation(
+            "Scheduled escalation SLA timeout for bookmark {BookmarkId} at {ResumeAt:o} ({SlaMinutes}min)",
+            bookmarkId, resumeAt, slaMinutes);
     }
 
     private async Task NotifySenior(EscalationContext escalation)
@@ -173,16 +214,18 @@ Please respond to this escalation via the Tamma API or reply in this thread.";
     {
         var input = context.WorkflowInput;
 
-        var resolved = input.TryGetValue("Resolved", out var r) && r is true;
-        var seniorResponse = input.TryGetValue("SeniorResponse", out var sr)
-            ? sr?.ToString()
-            : null;
+        var isTimeout = input.TryGetValue("Timeout", out var to) && to is true;
+        var resolved = !isTimeout && input.TryGetValue("Resolved", out var r) && r is true;
+        var seniorResponse = isTimeout
+            ? null
+            : input.TryGetValue("SeniorResponse", out var sr) ? sr?.ToString() : null;
 
         _logger?.LogInformation(
-            "Senior escalation resumed: Resolved={Resolved}",
-            resolved);
+            "Senior escalation resumed: Resolved={Resolved}, TimedOut={TimedOut}",
+            resolved, isTimeout);
 
         context.Set(Resolved, resolved);
+        context.Set(TimedOut, isTimeout);
         context.Set(SeniorResponse, seniorResponse);
 
         await context.CompleteActivityAsync();

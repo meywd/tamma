@@ -26,16 +26,31 @@ namespace Tamma.ElsaServer.Workflows;
 ///   Level 1: Hint (Socratic) -- 15min wait (30min for skill 4-5; skipped for skill 1-2)
 ///   Level 2: Guidance -- 30min wait
 ///   Level 3: Assistance -- 45min wait
-///   Level 4: Escalation -- wait for senior
+///   Level 4: Escalation -- wait for senior (durable SLA timeout)
 ///
 /// Can be invoked standalone via ELSA REST API or as a child workflow via DispatchWorkflow.
 ///
 /// Design: Flowchart with visible nodes for each phase in ELSA Studio.
 ///
-/// Flow:
-///   CaptureInputs → ParallelSignals → AggregateSignals → AIDiagnosis
-///     → ClassifyBlocker → DetermineStartLevel → HintLevel → GuidanceLevel
-///     → AssistanceLevel → EscalationLevel → SetOutput
+/// <para><b>Completeness build-out 2026-06-22 (BlockerDiagnosis.md, 7-1G AC2/AC6/AC9).</b>
+/// This pass fixes the P0/P1 correctness + observability gaps:
+///   - The terminal status now reflects the ACTUAL ladder outcome: Resolved (progress
+///     detected, or a senior resolved the escalation) → else Timeout (escalation SLA
+///     expired with no senior response) → else Escalated (senior notified, awaiting).
+///     The old graph always reported "Escalated" and never produced the Timeout terminal.
+///   - Progress detected at any level short-circuits the ladder (the shared !isResolved
+///     guard) and emits a terminal RESOLVED event immediately.
+///   - Per-level waits and the escalation SLA are now durable timeouts (no hang-forever),
+///     enforced inside DetectProgressActivity / EscalateToSeniorActivity via the
+///     scheduler. Wait times moved to BlockerDiagnosis:* config.
+///   - Every rung emits a BLOCKER.* DCB audit event (diagnosed / resolution attempted /
+///     progress detected / progress timed-out / escalated / resolved / timed-out) tagged
+///     with sessionId/storyId/juniorId/tenantId/level/blockerType, plus the AC9 OTel
+///     metrics (blocker.total / resolved / escalated / timed_out / resolution_time).
+///   - tenantId is threaded into every llm-call and escalation (Epic 32 tenant-scoping).
+/// 7-11 (full prompt-enrichment: story title/description/expected-files/conventions/
+/// resolution-history threading) remains a noted follow-up — out of scope for this
+/// correctness pass.</para>
 /// </summary>
 public class BlockerDiagnosisWorkflow : WorkflowBase
 {
@@ -52,6 +67,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         var sessionId = builder.WithVariable<Guid>();
         var storyId = builder.WithVariable<string>();
         var juniorId = builder.WithVariable<string>();
+        var tenantId = builder.WithVariable<string>();
         var skillLevel = builder.WithVariable<int>();
         var blockerContext = builder.WithVariable<string?>();
         var repository = builder.WithVariable<string>();
@@ -75,6 +91,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         var startTime = builder.WithVariable<DateTime>();
         var isResolved = builder.WithVariable<bool>(false);
         var progressDetected = builder.WithVariable<bool>(false);
+        var progressTimedOut = builder.WithVariable<bool>(false);
+        var progressResult = builder.WithVariable<ProgressDetectionResult>();
+        // Escalation SLA expired with no senior response → terminal Timeout (7-1G AC2).
+        var timedOut = builder.WithVariable<bool>(false);
 
         // ============================================
         // Activities
@@ -91,6 +111,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                 var sid = context.GetInput<Guid>("sessionId");
                 storyId.Set(context, context.GetInput<string>("storyId") ?? "");
                 juniorId.Set(context, context.GetInput<string>("juniorId") ?? "");
+                tenantId.Set(context, context.GetInput<string>("tenantId") ?? "");
                 skillLevel.Set(context, Math.Max(1, context.GetInput<int>("skillLevel")));
                 blockerContext.Set(context, context.GetInput<string?>("blockerContext"));
                 repository.Set(context, context.GetInput<string>("repository") ?? "");
@@ -193,6 +214,7 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                     skillLevel.Get(context),
                     blockerContext.Get(context)),
                 ["sessionId"] = sessionId.Get(context),
+                ["tenantId"] = tenantId.Get(context) ?? "",
                 ["skillLevel"] = skillLevel.Get(context)
             }),
             WaitForCompletion = new(true),
@@ -218,6 +240,22 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         };
         classifyBlocker.SetDisplayText("Classify Blocker");
 
+        // 5b. Emit BLOCKER.DIAGNOSED.SUCCESS (audit + blocker.total metric)
+        var emitDiagnosed = new EmitBlockerEventActivity
+        {
+            Id = "EmitDiagnosed",
+            Name = "Emit: Diagnosed",
+            EventType = new(BlockerEvents.DiagnosedSuccess),
+            SessionId = new(context => sessionId.Get(context).ToString()),
+            StoryId = new(context => storyId.Get(context) ?? ""),
+            JuniorId = new(context => juniorId.Get(context) ?? ""),
+            TenantId = new(context => tenantId.Get(context) ?? ""),
+            BlockerType = new(context => diagnosisResult.Get(context)?.BlockerType.ToString() ?? ""),
+            Severity = new(context => diagnosisResult.Get(context)?.Severity.ToString() ?? ""),
+            Confidence = new(context => diagnosisResult.Get(context)?.Confidence ?? 0d)
+        };
+        emitDiagnosed.SetDisplayText("Emit: Diagnosed");
+
         // 6. Determine Starting Level (Skill Adaptation)
         var determineStartLevel = new SetVariable
         {
@@ -233,59 +271,81 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         };
         determineStartLevel.SetDisplayText("Determine Start Level");
 
-        // 7a. Progressive Resolution — Level 1: Hint (wrapped in named Sequence)
+        // 7a. Level 1: Hint
         var hintLevel = new Sequence
         {
             Id = "HintLevel",
             Name = "Level 1: Hint",
             Activities =
             {
-                BuildHintLevel(sessionId, storyId, juniorId, skillLevel, diagnosisResult,
-                    currentLevel, attempts, feedbackProvided, isResolved, progressDetected)
+                BuildHintLevel(sessionId, storyId, juniorId, tenantId, skillLevel, diagnosisResult,
+                    currentLevel, attempts, feedbackProvided, isResolved, progressDetected,
+                    progressTimedOut, progressResult)
             }
         };
         hintLevel.SetDisplayText("Level 1: Hint");
 
-        // 7b. Progressive Resolution — Level 2: Guidance
+        // 7b. Level 2: Guidance
         var guidanceLevel = new Sequence
         {
             Id = "GuidanceLevel",
             Name = "Level 2: Guidance",
             Activities =
             {
-                BuildGuidanceLevel(sessionId, storyId, juniorId, skillLevel, diagnosisResult,
-                    currentLevel, attempts, feedbackProvided, isResolved, progressDetected)
+                BuildGuidanceLevel(sessionId, storyId, juniorId, tenantId, skillLevel, diagnosisResult,
+                    currentLevel, attempts, feedbackProvided, isResolved, progressDetected,
+                    progressTimedOut, progressResult)
             }
         };
         guidanceLevel.SetDisplayText("Level 2: Guidance");
 
-        // 7c. Progressive Resolution — Level 3: Assistance
+        // 7c. Level 3: Assistance
         var assistanceLevel = new Sequence
         {
             Id = "AssistanceLevel",
             Name = "Level 3: Assistance",
             Activities =
             {
-                BuildAssistanceLevel(sessionId, storyId, juniorId, skillLevel, diagnosisResult,
-                    currentLevel, attempts, feedbackProvided, isResolved, progressDetected)
+                BuildAssistanceLevel(sessionId, storyId, juniorId, tenantId, skillLevel, diagnosisResult,
+                    currentLevel, attempts, feedbackProvided, isResolved, progressDetected,
+                    progressTimedOut, progressResult)
             }
         };
         assistanceLevel.SetDisplayText("Level 3: Assistance");
 
-        // 7d. Progressive Resolution — Level 4: Escalation
+        // 7d. Level 4: Escalation
         var escalationLevel = new Sequence
         {
             Id = "EscalationLevel",
             Name = "Level 4: Escalation",
             Activities =
             {
-                BuildEscalationLevel(sessionId, storyId, juniorId, diagnosisResult,
-                    aggregatedSignals, currentLevel, attempts, feedbackProvided, isResolved)
+                BuildEscalationLevel(sessionId, storyId, juniorId, tenantId, diagnosisResult,
+                    aggregatedSignals, currentLevel, attempts, feedbackProvided, isResolved, timedOut)
             }
         };
         escalationLevel.SetDisplayText("Level 4: Escalation");
 
-        // 8. Set Output
+        // 8. Emit terminal BLOCKER event (RESOLVED / TIMED_OUT / ESCALATED) + terminal metric.
+        var emitTerminal = new EmitBlockerEventActivity
+        {
+            Id = "EmitTerminal",
+            Name = "Emit: Terminal",
+            EventType = new(context => TerminalEventType(isResolved.Get(context), timedOut.Get(context))),
+            SessionId = new(context => sessionId.Get(context).ToString()),
+            StoryId = new(context => storyId.Get(context) ?? ""),
+            JuniorId = new(context => juniorId.Get(context) ?? ""),
+            TenantId = new(context => tenantId.Get(context) ?? ""),
+            BlockerType = new(context => diagnosisResult.Get(context)?.BlockerType.ToString() ?? ""),
+            Severity = new(context => diagnosisResult.Get(context)?.Severity.ToString() ?? ""),
+            Level = new(context => currentLevel.Get(context) ?? ""),
+            Attempt = new(context => attempts.Get(context)),
+            ResolutionTimeSeconds = new(context =>
+                (DateTime.UtcNow - startTime.Get(context)).TotalSeconds)
+        };
+        emitTerminal.SetDisplayText("Emit: Terminal");
+
+        // 9. Set Output
         var setOutput = new SetOutput
         {
             Id = "SetBlockerOutput",
@@ -296,13 +356,12 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                 var diagnosis = diagnosisResult.Get(context);
                 var start = startTime.Get(context);
                 var resolutionTime = DateTime.UtcNow - start;
-                var wasResolved = isResolved.Get(context);
 
                 return new BlockerResolution
                 {
-                    Status = wasResolved
-                        ? BlockerResolutionStatus.Resolved
-                        : BlockerResolutionStatus.Escalated,
+                    // Resolved → else Timeout (escalation SLA expired) → else Escalated.
+                    // Fixes the always-"Escalated" bug and produces the real Timeout terminal.
+                    Status = ResolveStatus(isResolved.Get(context), timedOut.Get(context)),
                     BlockerType = diagnosis?.BlockerType ?? BlockerCategory.TechnicalKnowledgeGap,
                     BlockerSeverity = diagnosis?.Severity ?? BlockerDiagnosisSeverity.Medium,
                     Attempts = attempts.Get(context),
@@ -327,44 +386,51 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
             Activities =
             {
                 captureInputs, parallelSignals, aggregateSignals, aiDiagnosis,
-                classifyBlocker, determineStartLevel,
+                classifyBlocker, emitDiagnosed, determineStartLevel,
                 hintLevel, guidanceLevel, assistanceLevel, escalationLevel,
-                setOutput
+                emitTerminal, setOutput
             },
             Connections =
             {
-                // CaptureInputs → Collect Signals
                 Connect(captureInputs, parallelSignals),
-
-                // Collect Signals → Aggregate Signals
                 Connect(parallelSignals, aggregateSignals),
-
-                // Aggregate Signals → AI Diagnosis
                 Connect(aggregateSignals, aiDiagnosis),
-
-                // AI Diagnosis → Classify Blocker
                 Connect(aiDiagnosis, classifyBlocker),
-
-                // Classify Blocker → Determine Start Level
-                Connect(classifyBlocker, determineStartLevel),
-
-                // Determine Start Level → Hint Level
+                Connect(classifyBlocker, emitDiagnosed),
+                Connect(emitDiagnosed, determineStartLevel),
                 Connect(determineStartLevel, hintLevel),
-
-                // Hint Level → Guidance Level
                 Connect(hintLevel, guidanceLevel),
-
-                // Guidance Level → Assistance Level
                 Connect(guidanceLevel, assistanceLevel),
-
-                // Assistance Level → Escalation Level
                 Connect(assistanceLevel, escalationLevel),
-
-                // Escalation Level → Set Output
-                Connect(escalationLevel, setOutput)
+                Connect(escalationLevel, emitTerminal),
+                Connect(emitTerminal, setOutput)
             }
         };
     }
+
+    // ================================================================
+    // Terminal status / event helpers (pure — exposed for unit testing)
+    // ================================================================
+
+    /// <summary>
+    /// Terminal status precedence (7-1G AC2/AC6): a resolved blocker → Resolved; otherwise an
+    /// escalation whose SLA expired with no senior response → Timeout; otherwise Escalated
+    /// (senior notified, awaiting). NEVER reports Resolved/Escalated inaccurately.
+    /// </summary>
+    internal static BlockerResolutionStatus ResolveStatus(bool isResolved, bool timedOut)
+        => isResolved
+            ? BlockerResolutionStatus.Resolved
+            : timedOut
+                ? BlockerResolutionStatus.Timeout
+                : BlockerResolutionStatus.Escalated;
+
+    /// <summary>Map the terminal status onto its BLOCKER.* event type.</summary>
+    internal static string TerminalEventType(bool isResolved, bool timedOut)
+        => isResolved
+            ? BlockerEvents.Resolved
+            : timedOut
+                ? BlockerEvents.TimedOut
+                : BlockerEvents.Escalated;
 
     // ================================================================
     // Flowchart helpers
@@ -377,20 +443,83 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
         => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
 
     /// <summary>
+    /// Builds the per-level "record this attempt's feedback" SetVariable plus the
+    /// BLOCKER.RESOLUTION_ATTEMPTED emit. Kept as a small helper so each level shares the
+    /// identical attempt-counter + audit semantics.
+    /// </summary>
+    private static EmitBlockerEventActivity BuildResolutionAttemptedEmit(
+        string idPrefix,
+        string level,
+        Variable<Guid> sessionId,
+        Variable<string> storyId,
+        Variable<string> juniorId,
+        Variable<string> tenantId,
+        Variable<BlockerDiagnosisResult> diagnosisResult,
+        Variable<int> attempts)
+        => new()
+        {
+            Id = $"{idPrefix}EmitAttempt",
+            Name = $"Emit: {level} Attempt",
+            EventType = new(BlockerEvents.ResolutionAttempted),
+            SessionId = new(context => sessionId.Get(context).ToString()),
+            StoryId = new(context => storyId.Get(context) ?? ""),
+            JuniorId = new(context => juniorId.Get(context) ?? ""),
+            TenantId = new(context => tenantId.Get(context) ?? ""),
+            BlockerType = new(context => diagnosisResult.Get(context)?.BlockerType.ToString() ?? ""),
+            Severity = new(context => diagnosisResult.Get(context)?.Severity.ToString() ?? ""),
+            Level = new(level),
+            Attempt = new(context => attempts.Get(context))
+        };
+
+    /// <summary>
+    /// Builds the per-level "progress detected / timed-out" emit. Emits
+    /// BLOCKER.PROGRESS_DETECTED when the junior made progress, else
+    /// BLOCKER.PROGRESS_TIMED_OUT (the wait expired and the ladder advanced).
+    /// </summary>
+    private static EmitBlockerEventActivity BuildProgressEmit(
+        string idPrefix,
+        string level,
+        Variable<Guid> sessionId,
+        Variable<string> storyId,
+        Variable<string> juniorId,
+        Variable<string> tenantId,
+        Variable<BlockerDiagnosisResult> diagnosisResult,
+        Variable<bool> progressDetected,
+        Variable<ProgressDetectionResult> progressResult)
+        => new()
+        {
+            Id = $"{idPrefix}EmitProgress",
+            Name = $"Emit: {level} Progress",
+            EventType = new(context => progressDetected.Get(context)
+                ? BlockerEvents.ProgressDetected
+                : BlockerEvents.ProgressTimedOut),
+            SessionId = new(context => sessionId.Get(context).ToString()),
+            StoryId = new(context => storyId.Get(context) ?? ""),
+            JuniorId = new(context => juniorId.Get(context) ?? ""),
+            TenantId = new(context => tenantId.Get(context) ?? ""),
+            BlockerType = new(context => diagnosisResult.Get(context)?.BlockerType.ToString() ?? ""),
+            Level = new(level),
+            ProgressType = new(context => progressResult.Get(context)?.ProgressType ?? "")
+        };
+
+    /// <summary>
     /// Level 1: Hint (Socratic Method).
-    /// Skipped for skill level 1-2. Extended timeout (30min) for skill 4-5.
+    /// Skipped for skill level 1-2. Extended timeout (config) for skill 4-5.
     /// </summary>
     private static If BuildHintLevel(
         Variable<Guid> sessionId,
         Variable<string> storyId,
         Variable<string> juniorId,
+        Variable<string> tenantId,
         Variable<int> skillLevel,
         Variable<BlockerDiagnosisResult> diagnosisResult,
         Variable<string> currentLevel,
         Variable<int> attempts,
         Variable<List<string>> feedbackProvided,
         Variable<bool> isResolved,
-        Variable<bool> progressDetected)
+        Variable<bool> progressDetected,
+        Variable<bool> progressTimedOut,
+        Variable<ProgressDetectionResult> progressResult)
     {
         var hintBody = WithLabel(new Sequence
         {
@@ -398,7 +527,6 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
             Name = "Hint Body",
             Activities =
             {
-                    // Dispatch LLM for Socratic hints
                     WithLabel(new DispatchWorkflow
                     {
                         Id = "HintLlmCall",
@@ -413,12 +541,12 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                                           $"Blocker type: {diagnosisResult.Get(context)?.BlockerType}. " +
                                           "Use guiding questions, not direct answers. Employ the Socratic method.",
                             ["sessionId"] = sessionId.Get(context),
+                            ["tenantId"] = tenantId.Get(context) ?? "",
                             ["skillLevel"] = skillLevel.Get(context)
                         }),
                         WaitForCompletion = new(true)
                     }, "Hint LLM Call"),
 
-                    // Record feedback
                     WithLabel(new SetVariable
                     {
                         Id = "HintRecordFeedback",
@@ -433,7 +561,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         })
                     }, "Record Hint Feedback"),
 
-                    // Wait for progress (bookmark) — output wired to progressDetected variable
+                    WithLabel(BuildResolutionAttemptedEmit("Hint", "Hint", sessionId, storyId, juniorId, tenantId, diagnosisResult, attempts),
+                        "Emit: Hint Attempt"),
+
+                    // Durable wait: bookmark + scheduled timeout (WaitTimeMinutes=0 → config/defaults).
                     WithLabel(new DetectProgressActivity
                     {
                         Id = "HintDetectProgress",
@@ -442,11 +573,12 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         StoryId = new(context => storyId.Get(context) ?? ""),
                         JuniorId = new(context => juniorId.Get(context) ?? ""),
                         CurrentLevel = new("Hint"),
-                        WaitTimeMinutes = new(context => skillLevel.Get(context) >= 4 ? 30 : 15),
-                        ProgressDetected = new(progressDetected)
+                        WaitTimeMinutes = new(0),
+                        ProgressDetected = new(progressDetected),
+                        TimedOut = new(progressTimedOut),
+                        Result = new(progressResult)
                     }, "Hint: Detect Progress"),
 
-                    // Check if progress was detected via the progressDetected variable
                     WithLabel(new SetVariable
                     {
                         Id = "HintCheckProgress",
@@ -459,7 +591,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                                 currentLevel.Set(context, "Guidance");
                             return detected;
                         })
-                    }, "Hint: Check Progress")
+                    }, "Hint: Check Progress"),
+
+                    WithLabel(BuildProgressEmit("Hint", "Hint", sessionId, storyId, juniorId, tenantId, diagnosisResult, progressDetected, progressResult),
+                        "Emit: Hint Progress")
                 }
             }, "Hint Body");
 
@@ -476,19 +611,22 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
     }
 
     /// <summary>
-    /// Level 2: Direct Guidance. 30-minute wait.
+    /// Level 2: Direct Guidance.
     /// </summary>
     private static If BuildGuidanceLevel(
         Variable<Guid> sessionId,
         Variable<string> storyId,
         Variable<string> juniorId,
+        Variable<string> tenantId,
         Variable<int> skillLevel,
         Variable<BlockerDiagnosisResult> diagnosisResult,
         Variable<string> currentLevel,
         Variable<int> attempts,
         Variable<List<string>> feedbackProvided,
         Variable<bool> isResolved,
-        Variable<bool> progressDetected)
+        Variable<bool> progressDetected,
+        Variable<bool> progressTimedOut,
+        Variable<ProgressDetectionResult> progressResult)
     {
         var guidanceBody = WithLabel(new Sequence
         {
@@ -496,7 +634,6 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
             Name = "Guidance Body",
                 Activities =
                 {
-                    // Update current level
                     WithLabel(new SetVariable
                     {
                         Id = "SetLevelGuidance",
@@ -505,7 +642,6 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         Value = new(context => "Guidance")
                     }, "Set Level: Guidance"),
 
-                    // Dispatch LLM for direct guidance
                     WithLabel(new DispatchWorkflow
                     {
                         Id = "GuidanceLlmCall",
@@ -520,12 +656,12 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                                           $"Blocker type: {diagnosisResult.Get(context)?.BlockerType}. " +
                                           "Give clear, step-by-step instructions. Be specific and actionable.",
                             ["sessionId"] = sessionId.Get(context),
+                            ["tenantId"] = tenantId.Get(context) ?? "",
                             ["skillLevel"] = skillLevel.Get(context)
                         }),
                         WaitForCompletion = new(true)
                     }, "Guidance LLM Call"),
 
-                    // Record feedback
                     WithLabel(new SetVariable
                     {
                         Id = "GuidanceRecordFeedback",
@@ -540,7 +676,9 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         })
                     }, "Record Guidance Feedback"),
 
-                    // Wait for progress (bookmark) — output wired to progressDetected variable
+                    WithLabel(BuildResolutionAttemptedEmit("Guidance", "Guidance", sessionId, storyId, juniorId, tenantId, diagnosisResult, attempts),
+                        "Emit: Guidance Attempt"),
+
                     WithLabel(new DetectProgressActivity
                     {
                         Id = "GuidanceDetectProgress",
@@ -549,11 +687,12 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         StoryId = new(context => storyId.Get(context) ?? ""),
                         JuniorId = new(context => juniorId.Get(context) ?? ""),
                         CurrentLevel = new("Guidance"),
-                        WaitTimeMinutes = new(30),
-                        ProgressDetected = new(progressDetected)
+                        WaitTimeMinutes = new(0),
+                        ProgressDetected = new(progressDetected),
+                        TimedOut = new(progressTimedOut),
+                        Result = new(progressResult)
                     }, "Guidance: Detect Progress"),
 
-                    // Check if progress was detected via the progressDetected variable
                     WithLabel(new SetVariable
                     {
                         Id = "GuidanceCheckProgress",
@@ -566,7 +705,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                                 currentLevel.Set(context, "Assistance");
                             return detected;
                         })
-                    }, "Guidance: Check Progress")
+                    }, "Guidance: Check Progress"),
+
+                    WithLabel(BuildProgressEmit("Guidance", "Guidance", sessionId, storyId, juniorId, tenantId, diagnosisResult, progressDetected, progressResult),
+                        "Emit: Guidance Progress")
                 }
             }, "Guidance Body");
 
@@ -582,20 +724,23 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
     }
 
     /// <summary>
-    /// Level 3: Code Assistance. 45-minute wait. Uses the developer role
-    /// (implement-fix) to produce working solution code.
+    /// Level 3: Code Assistance. Uses the developer role (implement-fix) to produce
+    /// working solution code.
     /// </summary>
     private static If BuildAssistanceLevel(
         Variable<Guid> sessionId,
         Variable<string> storyId,
         Variable<string> juniorId,
+        Variable<string> tenantId,
         Variable<int> skillLevel,
         Variable<BlockerDiagnosisResult> diagnosisResult,
         Variable<string> currentLevel,
         Variable<int> attempts,
         Variable<List<string>> feedbackProvided,
         Variable<bool> isResolved,
-        Variable<bool> progressDetected)
+        Variable<bool> progressDetected,
+        Variable<bool> progressTimedOut,
+        Variable<ProgressDetectionResult> progressResult)
     {
         var assistanceBody = WithLabel(new Sequence
         {
@@ -603,7 +748,6 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
             Name = "Assistance Body",
                 Activities =
                 {
-                    // Update current level
                     WithLabel(new SetVariable
                     {
                         Id = "SetLevelAssistance",
@@ -612,7 +756,6 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         Value = new(context => "Assistance")
                     }, "Set Level: Assistance"),
 
-                    // Dispatch LLM for code assistance (developer implements a fix example)
                     WithLabel(new DispatchWorkflow
                     {
                         Id = "AssistanceLlmCall",
@@ -628,12 +771,12 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                                           "Include a working code example with detailed explanation. " +
                                           "Show the solution step by step.",
                             ["sessionId"] = sessionId.Get(context),
+                            ["tenantId"] = tenantId.Get(context) ?? "",
                             ["skillLevel"] = skillLevel.Get(context)
                         }),
                         WaitForCompletion = new(true)
                     }, "Assistance LLM Call"),
 
-                    // Record feedback
                     WithLabel(new SetVariable
                     {
                         Id = "AssistanceRecordFeedback",
@@ -648,7 +791,9 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         })
                     }, "Record Assistance Feedback"),
 
-                    // Wait for progress (bookmark) — output wired to progressDetected variable
+                    WithLabel(BuildResolutionAttemptedEmit("Assistance", "Assistance", sessionId, storyId, juniorId, tenantId, diagnosisResult, attempts),
+                        "Emit: Assistance Attempt"),
+
                     WithLabel(new DetectProgressActivity
                     {
                         Id = "AssistanceDetectProgress",
@@ -657,11 +802,12 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         StoryId = new(context => storyId.Get(context) ?? ""),
                         JuniorId = new(context => juniorId.Get(context) ?? ""),
                         CurrentLevel = new("Assistance"),
-                        WaitTimeMinutes = new(45),
-                        ProgressDetected = new(progressDetected)
+                        WaitTimeMinutes = new(0),
+                        ProgressDetected = new(progressDetected),
+                        TimedOut = new(progressTimedOut),
+                        Result = new(progressResult)
                     }, "Assistance: Detect Progress"),
 
-                    // Check if progress was detected via the progressDetected variable
                     WithLabel(new SetVariable
                     {
                         Id = "AssistanceCheckProgress",
@@ -674,7 +820,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                                 currentLevel.Set(context, "Escalation");
                             return detected;
                         })
-                    }, "Assistance: Check Progress")
+                    }, "Assistance: Check Progress"),
+
+                    WithLabel(BuildProgressEmit("Assistance", "Assistance", sessionId, storyId, juniorId, tenantId, diagnosisResult, progressDetected, progressResult),
+                        "Emit: Assistance Progress")
                 }
             }, "Assistance Body");
 
@@ -690,26 +839,35 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
     }
 
     /// <summary>
-    /// Level 4: Senior Escalation. Compiles context dump, notifies senior, waits via bookmark.
+    /// Level 4: Senior Escalation. Compiles context dump, notifies senior, waits via
+    /// bookmark with a durable SLA timeout. A senior who RESOLVES the escalation flips
+    /// isResolved (terminal Resolved at Escalation); an expired SLA flips timedOut
+    /// (terminal Timeout). Fixes the always-"Escalated" bug.
     /// </summary>
     private static If BuildEscalationLevel(
         Variable<Guid> sessionId,
         Variable<string> storyId,
         Variable<string> juniorId,
+        Variable<string> tenantId,
         Variable<BlockerDiagnosisResult> diagnosisResult,
         Variable<AggregatedSignals> aggregatedSignals,
         Variable<string> currentLevel,
         Variable<int> attempts,
         Variable<List<string>> feedbackProvided,
-        Variable<bool> isResolved)
+        Variable<bool> isResolved,
+        Variable<bool> timedOut)
     {
+        // Local outputs from the escalation activity, fed back into isResolved / timedOut.
+        var escalationResolved = new Variable<bool>();
+        var escalationTimedOut = new Variable<bool>();
+
         var escalationBody = WithLabel(new Sequence
         {
             Id = "EscalationBody",
             Name = "Escalation Body",
+            Variables = { escalationResolved, escalationTimedOut },
                 Activities =
                 {
-                    // Update current level
                     WithLabel(new SetVariable
                     {
                         Id = "SetLevelEscalation",
@@ -718,7 +876,25 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         Value = new(context => "Escalation")
                     }, "Set Level: Escalation"),
 
-                    // Escalate to senior (bookmark-based wait)
+                    WithLabel(BuildResolutionAttemptedEmit("Escalation", "Escalation", sessionId, storyId, juniorId, tenantId, diagnosisResult, attempts),
+                        "Emit: Escalation Attempt"),
+
+                    // Emit BLOCKER.ESCALATED before the (suspending) wait so the audit row
+                    // lands even if the workflow then suspends awaiting the senior.
+                    WithLabel(new EmitBlockerEventActivity
+                    {
+                        Id = "EmitEscalated",
+                        Name = "Emit: Escalated",
+                        EventType = new(BlockerEvents.Escalated),
+                        SessionId = new(context => sessionId.Get(context).ToString()),
+                        StoryId = new(context => storyId.Get(context) ?? ""),
+                        JuniorId = new(context => juniorId.Get(context) ?? ""),
+                        TenantId = new(context => tenantId.Get(context) ?? ""),
+                        BlockerType = new(context => diagnosisResult.Get(context)?.BlockerType.ToString() ?? ""),
+                        Severity = new(context => diagnosisResult.Get(context)?.Severity.ToString() ?? ""),
+                        Level = new("Escalation")
+                    }, "Emit: Escalated"),
+
                     WithLabel(new EscalateToSeniorActivity
                     {
                         Id = "EscalateToSenior",
@@ -730,10 +906,26 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         BlockerSeverity = new(context => diagnosisResult.Get(context)?.Severity.ToString() ?? "High"),
                         DiagnosisDetails = new(context => diagnosisResult.Get(context)?.RootCauseHypothesis ?? ""),
                         PreviousAttempts = new(context => feedbackProvided.Get(context) ?? new List<string>()),
-                        Signals = new(context => aggregatedSignals.Get(context))
+                        Signals = new(context => aggregatedSignals.Get(context)),
+                        Resolved = new(escalationResolved),
+                        TimedOut = new(escalationTimedOut)
                     }, "Escalate to Senior"),
 
-                    // Record escalation feedback
+                    // Feed the escalation outcome back into the terminal-status variables.
+                    WithLabel(new SetVariable
+                    {
+                        Id = "EscalationApplyOutcome",
+                        Name = "Escalation: Apply Outcome",
+                        Variable = isResolved,
+                        Value = new(context =>
+                        {
+                            var resolved = escalationResolved.Get(context);
+                            if (!resolved && escalationTimedOut.Get(context))
+                                timedOut.Set(context, true);
+                            return resolved;
+                        })
+                    }, "Escalation: Apply Outcome"),
+
                     WithLabel(new SetVariable
                     {
                         Id = "EscalationRecordFeedback",
@@ -742,7 +934,10 @@ public class BlockerDiagnosisWorkflow : WorkflowBase
                         Value = new(context =>
                         {
                             var existing = feedbackProvided.Get(context) ?? new List<string>();
-                            var newList = new List<string>(existing) { "[Escalation] Escalated to senior developer" };
+                            var outcome = escalationResolved.Get(context)
+                                ? "resolved by senior"
+                                : escalationTimedOut.Get(context) ? "senior-response SLA expired" : "awaiting senior";
+                            var newList = new List<string>(existing) { $"[Escalation] Escalated to senior developer ({outcome})" };
                             attempts.Set(context, attempts.Get(context) + 1);
                             return newList;
                         })
