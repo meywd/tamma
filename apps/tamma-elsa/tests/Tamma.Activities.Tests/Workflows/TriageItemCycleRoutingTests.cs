@@ -1,8 +1,10 @@
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
+using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Runtime.Activities;
 using FluentAssertions;
 using NUnit.Framework;
+using Tamma.Activities.ADL;
 using Tamma.ElsaServer.Workflows;
 
 namespace Tamma.Activities.Tests.Workflows;
@@ -107,12 +109,16 @@ public class TriageItemCycleRoutingTests
     }
 
     [Test]
-    public void UsablePanel_ProceedsToPoDecisionAndLabels()
+    public void UsablePanel_ProceedsToPoDecisionAndDecisionGate()
     {
+        // Build-out: ExtractDecision now feeds the Decision-OK gate (not apply directly),
+        // and apply is reached only via the gate's True edge → BuildApplyInputs.
         HasEdge("PanelUsable", "True", "PODecision").Should().BeTrue();
         HasEdge("PODecision", null, "ExtractDecision").Should().BeTrue();
-        HasEdge("ExtractDecision", null, "ApplyLabels").Should().BeTrue();
-        HasEdge("ApplyLabels", null, "Finish").Should().BeTrue();
+        HasEdge("ExtractDecision", null, "DecisionOK").Should().BeTrue();
+        HasEdge("DecisionOK", "True", "BuildApplyInputs").Should().BeTrue();
+        HasEdge("BuildApplyInputs", null, "ApplyLabels").Should().BeTrue();
+        HasEdge("ApplyLabels", null, "EmitCycleCompleted").Should().BeTrue();
     }
 
     [Test]
@@ -124,7 +130,11 @@ public class TriageItemCycleRoutingTests
         HasEdge("PanelUsable", "False", "SetPanelFailedReason").Should().BeTrue();
         HasEdge("SetPanelFailedReason", null, "MarkSkipped").Should().BeTrue();
         HasEdge("MarkSkipped", null, "OutSkipReason").Should().BeTrue();
-        HasEdge("OutSkipReason", null, "Finish").Should().BeTrue();
+        // Build-out: the SKIPPED terminal now emits TRIAGE.ISSUE.SKIPPED + a per-item
+        // result before Finish (no longer OutSkipReason → Finish directly).
+        HasEdge("OutSkipReason", null, "EmitCycleSkipped").Should().BeTrue();
+        HasEdge("EmitCycleSkipped", null, "OutSkippedResult").Should().BeTrue();
+        HasEdge("OutSkippedResult", null, "Finish").Should().BeTrue();
 
         var falseTargets = _flowchart.Connections
             .Where(c => c.Source.Activity.Id == "PanelUsable" && c.Source.Port == "False")
@@ -149,9 +159,13 @@ public class TriageItemCycleRoutingTests
     [Test]
     public void BothGateOutcomes_ReachFinish_NoDeadlock()
     {
-        // Usable path: ApplyLabels → Finish. Failed path: OutSkipReason → Finish.
-        HasEdge("ApplyLabels", null, "Finish").Should().BeTrue();
-        HasEdge("OutSkipReason", null, "Finish").Should().BeTrue();
+        // Build-out: every terminal routes to Finish (no deadlock/hang).
+        //   triaged:  ApplyLabels → EmitCycleCompleted → OutCompletedResult → Finish
+        //   skipped:  OutSkipReason → EmitCycleSkipped → OutSkippedResult → Finish
+        //   failed:   SetDecisionFailedReason → EmitCycleFailed → OutFailedResult → Finish
+        HasEdge("OutCompletedResult", null, "Finish").Should().BeTrue();
+        HasEdge("OutSkippedResult", null, "Finish").Should().BeTrue();
+        HasEdge("OutFailedResult", null, "Finish").Should().BeTrue();
     }
 
     [Test]
@@ -164,6 +178,141 @@ public class TriageItemCycleRoutingTests
             .FirstOrDefault(d => d.Id == "PanelReview");
         dispatch.Should().NotBeNull();
         ReadDefinitionId(dispatch!).Should().Be("triage-panel-review");
+    }
+
+    // ================================================================
+    // #1/#2 — decision-OK gate before apply (no labelling off a bad decision)
+    // ================================================================
+
+    [Test]
+    public void DecisionOkGate_Exists_AfterExtractingDecision()
+    {
+        _flowchart.Activities.OfType<FlowDecision>()
+            .Any(d => d.Id == "DecisionOK")
+            .Should().BeTrue("the cycle must gate apply on a usable PO decision");
+
+        HasEdge("ExtractDecision", null, "DecisionOK").Should().BeTrue();
+    }
+
+    [Test]
+    public void GoodDecision_RoutesToBuildApplyInputsThenApply()
+    {
+        HasEdge("DecisionOK", "True", "BuildApplyInputs").Should().BeTrue();
+        HasEdge("BuildApplyInputs", null, "ApplyLabels").Should().BeTrue();
+    }
+
+    [Test]
+    public void BadDecision_RoutesToFailedTerminal_NeverToApply()
+    {
+        // False (faulted PO / llm-failed / unparsed / empty) → set reason → FAILED →
+        // result → finish. It must NEVER reach BuildApplyInputs / ApplyLabels.
+        HasEdge("DecisionOK", "False", "SetDecisionFailedReason").Should().BeTrue();
+        HasEdge("SetDecisionFailedReason", null, "EmitCycleFailed").Should().BeTrue();
+        HasEdge("EmitCycleFailed", null, "OutFailedResult").Should().BeTrue();
+        HasEdge("OutFailedResult", null, "Finish").Should().BeTrue();
+
+        var falseTargets = _flowchart.Connections
+            .Where(c => c.Source.Activity.Id == "DecisionOK" && c.Source.Port == "False")
+            .Select(c => c.Target.Activity.Id)
+            .ToList();
+
+        falseTargets.Should().NotContain("BuildApplyInputs");
+        falseTargets.Should().NotContain("ApplyLabels");
+    }
+
+    [Test]
+    public void AllGates_HaveNoUnconditionalFallthrough()
+    {
+        foreach (var gateId in new[] { "ContextGathered", "PanelUsable", "DecisionOK" })
+        {
+            var fromGate = _flowchart.Connections
+                .Where(c => c.Source.Activity.Id == gateId)
+                .ToList();
+            fromGate.Should().NotBeEmpty();
+            fromGate.Should().OnlyContain(c => c.Source.Port == "True" || c.Source.Port == "False",
+                $"gate '{gateId}' must branch only on True/False, never fall through");
+        }
+    }
+
+    // ================================================================
+    // #3 — cycle-scoped TRIAGE.ISSUE.* events on each path
+    // ================================================================
+
+    [Test]
+    public void StartedEvent_EmittedAtInit_BeforeContextGathering()
+    {
+        CycleEventNode("EmitCycleStarted").Should().NotBeNull();
+        HasEdge("Init", null, "EmitCycleStarted").Should().BeTrue();
+        HasEdge("EmitCycleStarted", null, "GatherTriageContext").Should().BeTrue();
+    }
+
+    [Test]
+    public void EachTerminalPath_EmitsExactlyOneCycleEvent()
+    {
+        // COMPLETED on the apply-success path.
+        CycleEventNode("EmitCycleCompleted").Should().NotBeNull();
+        HasEdge("ApplyLabels", null, "EmitCycleCompleted").Should().BeTrue();
+
+        // SKIPPED on the shared context/panel non-applying terminal.
+        CycleEventNode("EmitCycleSkipped").Should().NotBeNull();
+        HasEdge("OutSkipReason", null, "EmitCycleSkipped").Should().BeTrue();
+
+        // FAILED on the bad-decision terminal.
+        CycleEventNode("EmitCycleFailed").Should().NotBeNull();
+        HasEdge("SetDecisionFailedReason", null, "EmitCycleFailed").Should().BeTrue();
+    }
+
+    // ================================================================
+    // #5 — per-item outcome output on every terminal
+    // ================================================================
+
+    [Test]
+    public void EveryTerminal_EmitsAnItemResultOutput()
+    {
+        var itemResultNodes = _flowchart.Activities.OfType<SetOutput>()
+            .Where(o => ReadOutputName(o) == "itemResult")
+            .Select(o => o.Id)
+            .ToList();
+
+        itemResultNodes.Should().Contain(new[] { "OutCompletedResult", "OutSkippedResult", "OutFailedResult" },
+            "the fire-and-forget parent needs a per-item outcome on every exit");
+    }
+
+    [Test]
+    public void PoDispatch_ThreadsTenantId_AndIsMediated()
+    {
+        var dispatch = _flowchart.Activities.OfType<DispatchWorkflow>()
+            .FirstOrDefault(d => d.Id == "PODecision");
+        dispatch.Should().NotBeNull();
+        ReadDefinitionId(dispatch!).Should().Be("triage-po-decision");
+    }
+
+    // ================================================================
+    // No dangling edge — every non-terminal activity routes somewhere.
+    // ================================================================
+
+    [Test]
+    public void EveryActivity_RoutesToATerminal_NoDanglingEdge()
+    {
+        var allIds = _flowchart.Activities.Select(a => a.Id!).ToHashSet();
+        var sources = _flowchart.Connections.Select(c => c.Source.Activity.Id!).ToHashSet();
+
+        foreach (var id in allIds.Where(i => i != "Finish"))
+        {
+            sources.Should().Contain(id, $"activity '{id}' must route somewhere (no dangling edge / hang)");
+        }
+    }
+
+    private EmitTriageCycleEventActivity? CycleEventNode(string id)
+        => _flowchart.Activities.OfType<EmitTriageCycleEventActivity>()
+            .FirstOrDefault(a => a.Id == id);
+
+    private static string? ReadOutputName(SetOutput output)
+    {
+        var value = output.OutputName;
+        var expression = value?.GetType().GetProperty("Expression")?.GetValue(value)
+            as Elsa.Expressions.Models.Expression;
+        return expression?.Value?.ToString();
     }
 
     private bool HasEdge(string sourceId, string? port, string targetId)
