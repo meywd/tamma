@@ -57,6 +57,19 @@ public abstract class TenantLifecycleActivity : TammaAsyncActivity
     /// override this to <c>false</c>.</summary>
     protected virtual bool EmitStepEvents => true;
 
+    /// <summary>
+    /// Story 28-5 item #6 — which <c>STEP_*</c> event family this activity
+    /// emits. Create-path steps use the default
+    /// <see cref="TenantStepEventFamily.Provision"/> family
+    /// (<c>TENANT.PROVISION.STEP_*</c>); delete-path steps override this to
+    /// <see cref="TenantStepEventFamily.Delete"/> so they emit
+    /// <c>TENANT.DELETE.STEP_*</c> instead of polluting the provision
+    /// timeline + the 28-11 dashboards. The constants already exist on
+    /// <see cref="TenantLifecycleEvents"/>.
+    /// </summary>
+    protected virtual TenantStepEventFamily StepEventFamily =>
+        TenantStepEventFamily.Provision;
+
     public override string? EventType => $"TENANT.LIFECYCLE.{StepName.ToUpperInvariant().Replace('-', '_')}";
 
     protected sealed override async Task RunAsync(ActivityExecutionContext context)
@@ -66,11 +79,13 @@ public abstract class TenantLifecycleActivity : TammaAsyncActivity
         var publisher = context.GetRequiredService<IPlatformEventPublisher>();
         Logger ??= context.GetService<ILogger<TenantLifecycleActivity>>();
 
+        var (started, completed, failed) = StepEventNames(StepEventFamily);
+
         if (EmitStepEvents)
         {
             await publisher.AppendAndPublishAsync(
                 TenantLifecycleEvents.BuildEvent(
-                    TenantLifecycleEvents.ProvisionStepStarted,
+                    started,
                     tenantId,
                     step: StepName,
                     attempt: attempt),
@@ -89,7 +104,7 @@ public abstract class TenantLifecycleActivity : TammaAsyncActivity
                 {
                     await publisher.AppendAndPublishAsync(
                         TenantLifecycleEvents.BuildEvent(
-                            TenantLifecycleEvents.ProvisionStepFailed,
+                            failed,
                             tenantId,
                             step: StepName,
                             attempt: attempt,
@@ -119,13 +134,36 @@ public abstract class TenantLifecycleActivity : TammaAsyncActivity
         {
             await publisher.AppendAndPublishAsync(
                 TenantLifecycleEvents.BuildEvent(
-                    TenantLifecycleEvents.ProvisionStepCompleted,
+                    completed,
                     tenantId,
                     step: StepName,
                     attempt: attempt),
                 context.CancellationToken).ConfigureAwait(false);
         }
     }
+
+    /// <summary>
+    /// Resolves the started/completed/failed event-type triple for a step
+    /// event family. Exposed via <see cref="StepEventNamesFor"/> for tests.
+    /// </summary>
+    private static (string Started, string Completed, string Failed) StepEventNames(
+        TenantStepEventFamily family) =>
+        family switch
+        {
+            TenantStepEventFamily.Delete => (
+                TenantLifecycleEvents.DeleteStepStarted,
+                TenantLifecycleEvents.DeleteStepCompleted,
+                TenantLifecycleEvents.DeleteStepFailed),
+            _ => (
+                TenantLifecycleEvents.ProvisionStepStarted,
+                TenantLifecycleEvents.ProvisionStepCompleted,
+                TenantLifecycleEvents.ProvisionStepFailed),
+        };
+
+    /// <summary>Test seam — the same started/completed/failed triple the
+    /// base uses at runtime for a given family.</summary>
+    public static (string Started, string Completed, string Failed) StepEventNamesFor(
+        TenantStepEventFamily family) => StepEventNames(family);
 
     /// <summary>
     /// Concrete activities implement this. <paramref name="tenantId"/> +
@@ -145,4 +183,21 @@ public abstract class TenantLifecycleActivity : TammaAsyncActivity
         var raw = Attempt.Get(context);
         return raw <= 0 ? 1 : raw;
     }
+}
+
+/// <summary>
+/// Story 28-5 item #6 — which <c>TENANT.*.STEP_*</c> event family a
+/// <see cref="TenantLifecycleActivity"/> step emits. Create-path steps use
+/// <see cref="Provision"/> (<c>TENANT.PROVISION.STEP_*</c>); delete-path
+/// steps use <see cref="Delete"/> (<c>TENANT.DELETE.STEP_*</c>) so the
+/// teardown timeline + the 28-11 dashboards are not polluted with provision
+/// markers.
+/// </summary>
+public enum TenantStepEventFamily
+{
+    /// <summary>Emit <c>TENANT.PROVISION.STEP_*</c> (create path, default).</summary>
+    Provision,
+
+    /// <summary>Emit <c>TENANT.DELETE.STEP_*</c> (delete path).</summary>
+    Delete,
 }

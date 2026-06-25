@@ -52,6 +52,14 @@ public static class TenantLifecycleEvents
     public const string DeleteStepCompleted = "TENANT.DELETE.STEP_COMPLETED";
     public const string DeleteStepFailed = "TENANT.DELETE.STEP_FAILED";
     public const string DeletedSuccess = "TENANT.DELETED.SUCCESS";
+
+    /// <summary>Terminal delete failure — emitted by the single terminal
+    /// step when any destructive step failed; carries a <c>failedSteps</c>
+    /// array and pairs with <c>ProvisioningState='requires_manual_cleanup'</c>.
+    /// The cleanup sibling already emits this literal string; the constant
+    /// centralises it so delete + cleanup agree.</summary>
+    public const string DeleteFailed = "TENANT.DELETE.FAILED";
+
     public const string DeleteCancelled = "TENANT.DELETE_CANCELLED";
 
     /// <summary>

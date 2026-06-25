@@ -1577,6 +1577,11 @@ admin.MapPost("/tenants/{tenantId:guid}/actions/delete",
 admin.MapPost("/tenants/{tenantId:guid}/actions/force-delete",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.ForceDeleteTenant)
     .RequireAuthorization("PlatformOwnerAccess");
+// Story 28-5 AC4 — cancel a pending delete during the cooling-off window.
+// PlatformOwnerAccess (cross-tenant infra state, like delete/force-delete).
+admin.MapPost("/tenants/{tenantId:guid}/actions/cancel-delete",
+        Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.CancelDeleteTenant)
+    .RequireAuthorization("PlatformOwnerAccess");
 // Story 28-5 AC7 — operator-triggered cleanup of damaged tenants.
 // Story 28-R2 / C1: PlatformOwnerAccess (destructive DDL across DBs).
 admin.MapPost("/tenants/{tenantId:guid}/cleanup",

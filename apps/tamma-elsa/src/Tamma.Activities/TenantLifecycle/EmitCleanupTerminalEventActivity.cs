@@ -63,6 +63,22 @@ public static class CleanupSteps
 
     public const string DropRole = "drop-tenant-role";
     public const string SoftDeleteRow = "soft-delete-cp-row";
+
+    // ── Story 28-5 item #4 — delete-workflow CP relationship cleanup ──
+    /// <summary>CP-side relationship cleanup (memberships, invites,
+    /// installations, queued tasks, tenant-keyed rows). Distinct from the
+    /// destructive DDL steps so a relationship-row failure is attributed
+    /// to its own step in the terminal failure summary.</summary>
+    public const string CleanupRelationships = "cleanup-cp-relationships";
+
+    // ── Story 28-5 item #3 — delete-workflow pre-destructive steps ──
+    /// <summary>Flip tenants.Status='deleting' before the destructive
+    /// span (continue-on-error variant for the delete workflow).</summary>
+    public const string MarkDeleting = "mark-deleting";
+
+    /// <summary>Optional pg_dump backup taken before the schema drop
+    /// (continue-on-error variant for the delete workflow).</summary>
+    public const string BackupDatabase = "backup-database";
 }
 
 /// <summary>
