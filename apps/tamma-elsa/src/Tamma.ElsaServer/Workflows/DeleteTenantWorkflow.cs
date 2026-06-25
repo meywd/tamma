@@ -30,11 +30,24 @@ namespace Tamma.ElsaServer.Workflows;
 /// 'requires_manual_cleanup'</c>).</para>
 ///
 /// <para>Order: trigger → init → mark-deleting → evict pool → backup
-/// (gated) → drop schema → drop role → CP relationship cleanup → terminal.
-/// Pool eviction precedes <c>DROP SCHEMA … CASCADE</c> so the resolver
-/// releases its cached <c>NpgsqlDataSource</c> first; the backup precedes
-/// the drop; the relationship cleanup precedes the terminal so a
-/// dangling-FK failure is attributed before the soft-delete decision.</para>
+/// (gated) → cancellation guard → drop schema → drop role → CP relationship
+/// cleanup → terminal. Pool eviction precedes <c>DROP SCHEMA … CASCADE</c> so
+/// the resolver releases its cached <c>NpgsqlDataSource</c> first; the backup
+/// precedes the drop; the cancellation guard re-reads <c>Status</c> as the
+/// LAST act before the irreversible drop (closing the
+/// dispatch→cancel→drop race); the relationship cleanup precedes the terminal
+/// so a dangling-FK failure is attributed before the soft-delete decision.</para>
+///
+/// <para><b>Cancellation safety.</b> The mark step (top of run) and the
+/// cancellation guard (immediately before the drop) both re-read
+/// <c>tenants.Status</c> and ABORT the run (via the workflow accumulator's
+/// abort flag) if the tenant is no longer <c>deleting</c> — an operator
+/// cancelled during the cooling-off window. On abort every destructive step
+/// SKIPS and the terminal emits <c>TENANT.DELETE.ABORTED</c> (non-destructive:
+/// no schema drop, no soft-delete). The mark step does NOT re-flip an
+/// <c>active</c> tenant back to <c>deleting</c>, and does NOT re-emit
+/// <c>TENANT.DELETE.REQUESTED</c> (the trigger's own poll target — which would
+/// self re-dispatch).</para>
 ///
 /// <para>Idempotency: every step probes its target (or uses <c>IF EXISTS</c>)
 /// before destructive work, so an Elsa restart between any two steps is
@@ -122,6 +135,19 @@ public class DeleteTenantWorkflow : WorkflowBase
             Attempt = new Input<int>(ctx => attempt.Get(ctx)),
         };
 
+        // ── Step B3: cancellation guard — LAST check before the
+        //    irreversible DROP SCHEMA. Re-reads Status; aborts the run
+        //    (so the drop + role-drop + relationship cleanup all skip and
+        //    the terminal emits TENANT.DELETE.ABORTED) if the operator
+        //    cancelled. Closes the dispatch→cancel→drop race. ────────────
+        var guardDeleting = new GuardTenantDeletingActivity
+        {
+            Id = "GuardTenantDeleting",
+            Name = "Guard Tenant Deleting",
+            TenantId = new Input<Guid>(ctx => tenantId.Get(ctx)),
+            Attempt = new Input<int>(ctx => attempt.Get(ctx)),
+        };
+
         // ── Step C: DROP SCHEMA IF EXISTS t_<hex> CASCADE ───────────────
         var dropSchema = new DropTenantSchemaForCleanupActivity
         {
@@ -166,6 +192,7 @@ public class DeleteTenantWorkflow : WorkflowBase
                 markDeleting,
                 evictPool,
                 backupDatabase,
+                guardDeleting,
                 dropSchema,
                 dropRole,
                 cleanupRelationships,

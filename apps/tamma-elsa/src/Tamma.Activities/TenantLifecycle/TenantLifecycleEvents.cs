@@ -48,10 +48,42 @@ public static class TenantLifecycleEvents
     public const string ProvisionFailed = "TENANT.PROVISION.FAILED";
 
     public const string DeleteRequested = "TENANT.DELETE.REQUESTED";
+
+    /// <summary>
+    /// Marker the delete WORKFLOW emits once it confirms a tenant is still
+    /// <c>deleting</c> and begins the destructive teardown. DISTINCT from
+    /// <see cref="DeleteRequested"/> — the workflow must NOT re-emit the
+    /// trigger's own event type (that is the
+    /// <c>TenantDeleteRequestedTrigger</c> poll target and re-emitting it is
+    /// a self re-dispatch loop). The admin endpoint already emitted
+    /// <see cref="DeleteRequested"/> to start the flow; the workflow signals
+    /// "I have picked this up and started" with this separate marker.
+    /// </summary>
+    public const string DeleteStarted = "TENANT.DELETE.STARTED";
+
     public const string DeleteStepStarted = "TENANT.DELETE.STEP_STARTED";
     public const string DeleteStepCompleted = "TENANT.DELETE.STEP_COMPLETED";
     public const string DeleteStepFailed = "TENANT.DELETE.STEP_FAILED";
+
+    /// <summary>Step-scoped marker emitted when a continue-on-error step is
+    /// SKIPPED because the run aborted upstream (the tenant was cancelled
+    /// out of <c>deleting</c> before the destructive span). Step-scoped,
+    /// not terminal.</summary>
+    public const string DeleteStepSkipped = "TENANT.DELETE.STEP_SKIPPED";
+
     public const string DeletedSuccess = "TENANT.DELETED.SUCCESS";
+
+    /// <summary>
+    /// Terminal delete ABORT — emitted by the single terminal step when the
+    /// run was cancelled before the destructive drop (an operator flipped the
+    /// tenant out of <c>deleting</c> during the cooling-off window, and the
+    /// in-flight workflow's cancellation guard caught it). NON-destructive:
+    /// the tenant is left in whatever state the operator restored it to
+    /// (typically <c>active</c>); the schema is NOT dropped and the row is
+    /// NOT soft-deleted. This is what protects a cancelled tenant from the
+    /// dispatch→cancel→re-flip→drop race.
+    /// </summary>
+    public const string DeleteAborted = "TENANT.DELETE.ABORTED";
 
     /// <summary>Terminal delete failure — emitted by the single terminal
     /// step when any destructive step failed; carries a <c>failedSteps</c>

@@ -16,19 +16,22 @@ public class DeleteStepActivityTests
     public void DeleteSteps_AreContinueOnError_WithDistinctStepNames()
     {
         var mark = new MarkTenantDeletingForDeleteActivity();
+        var guard = new GuardTenantDeletingActivity();
         var backup = new BackupTenantDatabaseForDeleteActivity();
         var relationships = new CleanupTenantRelationshipsActivity();
 
         mark.Should().BeAssignableTo<CleanupStepActivity>();
+        guard.Should().BeAssignableTo<CleanupStepActivity>();
         backup.Should().BeAssignableTo<CleanupStepActivity>();
         relationships.Should().BeAssignableTo<CleanupStepActivity>();
 
         mark.StepName.Should().Be(CleanupSteps.MarkDeleting);
+        guard.StepName.Should().Be(CleanupSteps.GuardDeleting);
         backup.StepName.Should().Be(CleanupSteps.BackupDatabase);
         relationships.StepName.Should().Be(CleanupSteps.CleanupRelationships);
 
-        new[] { mark.StepName, backup.StepName, relationships.StepName }
-            .Distinct().Should().HaveCount(3);
+        new[] { mark.StepName, guard.StepName, backup.StepName, relationships.StepName }
+            .Distinct().Should().HaveCount(4);
     }
 
     [Test]

@@ -83,6 +83,159 @@ public class CleanupTenantRelationshipsActivityTests
     }
 
     [Test]
+    public async Task CleanupRelationships_PurgesPlatformApiKeyIndex()
+    {
+        // The platform_api_key_index entity was DESIGNED with a TenantId index
+        // "for bulk-revoke on tenant delete (cascade)". With api_keys
+        // hard-deleted, its routing rows MUST be purged too — leaving them
+        // dangles an index pointing at deleted api_keys.
+        var tenantId = Guid.NewGuid();
+        _db.PlatformApiKeyIndex.Add(new PlatformApiKeyIndex
+        {
+            KeyPrefix = "tk_aaaaaa",
+            HashedSuffix = "h",
+            Scope = "tenant",
+            ApiKeyId = Guid.NewGuid(),
+            TenantId = tenantId,
+            CreatedAt = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+
+        var result = await CleanupTenantRelationshipsActivity.CleanupRelationshipsAsync(
+            _db, tenantId, CancellationToken.None);
+
+        result.ApiKeyIndexRows.Should().Be(1);
+        (await _db.PlatformApiKeyIndex.CountAsync(i => i.TenantId == tenantId))
+            .Should().Be(0, "the auth routing index for the tenant's keys must be purged");
+    }
+
+    [Test]
+    public async Task CleanupRelationships_DeletesTenantPlatformInstallations()
+    {
+        // Non-nullable TenantId FK — would dangle if kept.
+        var tenantId = Guid.NewGuid();
+        _db.TenantPlatformInstallations.Add(new TenantPlatformInstallation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            PlatformKind = "github",
+            BaseUrl = "https://api.github.com",
+            CredentialSecretScope = "tenant",
+            CredentialSecretName = "github/token",
+            Status = "connected",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+
+        var result = await CleanupTenantRelationshipsActivity.CleanupRelationshipsAsync(
+            _db, tenantId, CancellationToken.None);
+
+        result.PlatformInstallations.Should().Be(1);
+        (await _db.TenantPlatformInstallations.IgnoreQueryFilters()
+            .CountAsync(p => p.TenantId == tenantId)).Should().Be(0);
+    }
+
+    [Test]
+    public async Task CleanupRelationships_DeletesPrivateAgents_AndVersions_KeepsPublicAgents()
+    {
+        var tenantId = Guid.NewGuid();
+
+        var privateAgent = new Agent
+        {
+            Id = Guid.NewGuid(),
+            Name = "atlas",
+            Visibility = AgentVisibility.Private,
+            OwnerTenantId = tenantId,
+            Status = AgentStatus.Active,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        _db.Agents.Add(privateAgent);
+        _db.AgentVersions.Add(new AgentVersion
+        {
+            Id = Guid.NewGuid(),
+            AgentId = privateAgent.Id,
+            Version = 1,
+            ConfigJson = "{}",
+            CreatedAt = DateTime.UtcNow,
+        });
+
+        // Public/system agent — platform-global, must survive.
+        var publicAgent = new Agent
+        {
+            Id = Guid.NewGuid(),
+            Name = "system-reviewer",
+            Visibility = AgentVisibility.Public,
+            OwnerTenantId = null,
+            OwnerUserId = null,
+            Status = AgentStatus.Active,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        _db.Agents.Add(publicAgent);
+
+        // Tenant-keyed role selection — CP-side, purge.
+        _db.AgentRoleSelections.Add(new AgentRoleSelection
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            UserId = null,
+            Role = "developer",
+            AgentId = privateAgent.Id,
+            Visibility = "private",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+
+        var result = await CleanupTenantRelationshipsActivity.CleanupRelationshipsAsync(
+            _db, tenantId, CancellationToken.None);
+
+        result.PrivateAgents.Should().Be(1);
+        result.AgentVersions.Should().Be(1);
+        result.AgentRoleSelections.Should().Be(1);
+
+        (await _db.Agents.IgnoreQueryFilters().CountAsync(a => a.OwnerTenantId == tenantId))
+            .Should().Be(0, "tenant-owned private agents are deleted with the tenant");
+        (await _db.Agents.IgnoreQueryFilters().CountAsync(a => a.Id == publicAgent.Id))
+            .Should().Be(1, "public/system agents are platform-global and untouched");
+        (await _db.AgentVersions.CountAsync(v => v.AgentId == privateAgent.Id))
+            .Should().Be(0);
+    }
+
+    [Test]
+    public async Task CleanupRelationships_KeepsAlerts_AndPlatformAnalyticsHourly_ForAudit()
+    {
+        var tenantId = Guid.NewGuid();
+        _db.Alerts.Add(new Alert
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Severity = "warning",
+            Title = "x",
+            Description = "y",
+            Status = "open",
+            CreatedAt = DateTime.UtcNow,
+        });
+        _db.PlatformAnalyticsHourly.Add(new PlatformAnalyticsHourly
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Hour = DateTime.UtcNow,
+        });
+        await _db.SaveChangesAsync();
+
+        await CleanupTenantRelationshipsActivity.CleanupRelationshipsAsync(
+            _db, tenantId, CancellationToken.None);
+
+        (await _db.Alerts.IgnoreQueryFilters().CountAsync(a => a.TenantId == tenantId))
+            .Should().Be(1, "alerts are kept for incident/compliance history (TenantId nullable, no dangle)");
+        (await _db.PlatformAnalyticsHourly.CountAsync(p => p.TenantId == tenantId))
+            .Should().Be(1, "platform_analytics_hourly is an immutable analytics fact table — kept");
+    }
+
+    [Test]
     public async Task CleanupRelationships_NullsGithubInstallationTenantId_WithoutDeletingRow()
     {
         var tenantId = Guid.NewGuid();

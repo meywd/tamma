@@ -43,7 +43,23 @@ namespace Tamma.Activities.TenantLifecycle;
 ///
 /// <para><b>Single terminal event invariant</b>: only this activity emits
 /// a terminal event; the per-step activities emit
-/// <c>TENANT.DELETE.STEP_*</c> markers (step-scoped, not terminal).</para>
+/// <c>TENANT.DELETE.STEP_*</c> markers (step-scoped, not terminal). A
+/// workflow-variable replay guard (<see cref="TerminalEmittedFlag"/>) keeps
+/// the terminal to ONE emission even under an Elsa replay.</para>
+///
+/// <para><b>Where the authoritative outcome lives.</b> The reliable signal of
+/// teardown completion is the <c>tenants</c> COLUMNS this activity writes
+/// DIRECTLY via <see cref="IDbContextFactory{ControlPlaneDbContext}"/>
+/// (<c>Status='deleted'</c> + <c>DeletedAt</c> + nulled connection envelope +
+/// released placement on success; <c>ProvisioningState='requires_manual_cleanup'</c>
+/// on partial failure) — those persist regardless of the event sink. The
+/// terminal <c>platform_events</c> rows are the DCB AUDIT signal, and in the
+/// engine process they currently route to <see cref="NullPlatformEventPublisher"/>
+/// (no-op) — DCB terminal-event DURABILITY therefore depends on the
+/// engine→<c>platform_events</c> callback FOLLOW-UP (the systemic gap tracked
+/// for all tenant-lifecycle workflows; NOT wired in this change). Until that
+/// callback lands, do not treat "exactly one terminal event reached the audit
+/// stream" as guaranteed — the column state is what is authoritative.</para>
 /// </summary>
 [Activity(
     "Tamma.TenantLifecycle",
@@ -58,6 +74,11 @@ public sealed class EmitDeleteTerminalEventActivity : TammaAsyncActivity
     public Input<Guid> TenantId { get; set; } = new(Guid.Empty);
 
     public override string? EventType => "TENANT.DELETE.TERMINAL";
+
+    /// <summary>Workflow variable guarding against a duplicate terminal emit
+    /// under an Elsa replay (the terminal is not a CleanupStepActivity, so it
+    /// doesn't ride the per-step dedup index — this is its replay guard).</summary>
+    internal const string TerminalEmittedFlag = "Tenant.Delete.TerminalEmitted";
 
     protected override async Task RunAsync(ActivityExecutionContext context)
     {
@@ -77,7 +98,50 @@ public sealed class EmitDeleteTerminalEventActivity : TammaAsyncActivity
             return;
         }
 
+        // Replay guard — exactly ONE terminal per run. If an Elsa replay re-runs
+        // the terminal after it already emitted, short-circuit so we don't fire
+        // a second terminal event (or re-soft-delete / re-release placement).
+        // The flag lives in the workflow variable bag, so it survives the same
+        // suspend/replay checkpoints the per-step accumulator does.
+        if (context.GetVariable<bool?>(TerminalEmittedFlag) == true)
+        {
+            Logger?.LogInformation(
+                "tenant.delete.terminal_replay_skipped tenantId={TenantId}", tenantId);
+            return;
+        }
+        context.SetVariable(TerminalEmittedFlag, true);
+
         var publisher = context.GetRequiredService<IPlatformEventPublisher>();
+
+        // CRITICAL (cancellation race) — the run was aborted before the
+        // destructive span (an operator cancelled the delete during the
+        // cooling-off window and a cancellation guard caught it). This is the
+        // NON-destructive terminal: the schema was NOT dropped and the row is
+        // NOT soft-deleted. Emit TENANT.DELETE.ABORTED and leave the tenant in
+        // whatever state the operator restored it to. This is what protects a
+        // cancelled tenant from being irreversibly dropped.
+        if (CleanupWorkflowState.IsAborted(context))
+        {
+            var skippedSteps = CleanupWorkflowState.GetSkippedSteps(context);
+            var reason = CleanupWorkflowState.GetAbortReason(context) ?? "delete cancelled";
+            await publisher.AppendAndPublishAsync(
+                TenantLifecycleEvents.BuildEvent(
+                    TenantLifecycleEvents.DeleteAborted,
+                    tenantId,
+                    data: new Dictionary<string, object?>
+                    {
+                        ["source"] = "delete-workflow",
+                        ["reason"] = reason,
+                        ["skippedSteps"] = skippedSteps,
+                        ["abortedAt"] = DateTime.UtcNow,
+                    }),
+                context.CancellationToken).ConfigureAwait(false);
+
+            Logger?.LogWarning(
+                "tenant.delete.aborted tenantId={TenantId} reason={Reason} skippedSteps={SkippedSteps}",
+                tenantId, reason, string.Join(",", skippedSteps));
+            return;
+        }
 
         if (failedSteps.Count == 0)
         {

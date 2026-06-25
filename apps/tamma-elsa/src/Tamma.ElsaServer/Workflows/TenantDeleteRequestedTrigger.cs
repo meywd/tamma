@@ -57,14 +57,28 @@ public sealed class TenantDeleteRequestedTriggerOptions
 ///
 /// <para><b>Cooling-off (item #2):</b> a row is NOT dispatched until
 /// <c>now - tenants.DeleteRequestedAt &gt;= CoolingOff</c>. A row still
-/// inside its window is left for a later tick (the cursor is NOT advanced
-/// past it) so the destructive drop fires only after the grace period.</para>
+/// inside its window is DEFERRED for a later tick (the cursor is not advanced
+/// past it) — but the bridge keeps scanning the rest of the batch so a ready
+/// higher-sequence row is not starved behind it (head-of-line fix).
+/// FORCE-DELETE waives the window entirely: a row whose payload carries
+/// <c>data.source == "admin-force-delete"</c> dispatches immediately,
+/// matching the force-delete contract.</para>
 ///
 /// <para><b>Cancellation (item #5):</b> immediately before dispatch the
 /// bridge re-reads the tenant. If <c>Status != 'deleting'</c> (an operator
 /// cancelled during the window, flipping back to <c>active</c>) the row is
-/// skipped — the cursor advances past it so it is never reconsidered, and
-/// no workflow runs.</para>
+/// skipped and never dispatched. This is the EARLIEST of three cancellation
+/// checkpoints; the in-flight delete workflow has two more (the mark step and
+/// the cancellation guard immediately before <c>DROP SCHEMA</c>) so a cancel
+/// that lands AFTER dispatch is still caught and the schema is never dropped.</para>
+///
+/// <para><b>Self re-dispatch / dedup</b>: once a tenant's teardown is
+/// dispatched it is held in an in-process set until the bridge observes the
+/// tenant is no longer <c>deleting</c>. A second <c>TENANT.DELETE.REQUESTED</c>
+/// row for the same tenant (force-delete after delete, or a cooling-off
+/// re-scan) does NOT re-dispatch. The workflow also no longer re-emits
+/// <c>TENANT.DELETE.REQUESTED</c> (it emits <c>TENANT.DELETE.STARTED</c>), so
+/// the bridge can never be fed its own output.</para>
 ///
 /// <para><b>Idempotency</b>: the bridge tracks the last-seen
 /// <c>SequenceNumber</c> in process memory and starts at the max sequence
@@ -73,8 +87,8 @@ public sealed class TenantDeleteRequestedTriggerOptions
 /// step) so a duplicate dispatch is safe.</para>
 ///
 /// <para><b>Failure isolation</b>: a tick failure (CP DB unreachable,
-/// dispatch failure) is logged at WARN and the cursor is NOT advanced, so
-/// the row is retried on the next tick.</para>
+/// dispatch failure) is logged at WARN and the cursor is NOT advanced past
+/// the offending row, so it is retried on the next tick.</para>
 /// </summary>
 public sealed class TenantDeleteRequestedTrigger : BackgroundService
 {
@@ -86,6 +100,18 @@ public sealed class TenantDeleteRequestedTrigger : BackgroundService
     private readonly ILogger<TenantDeleteRequestedTrigger> _logger;
 
     private long _lastSequence;
+
+    /// <summary>
+    /// Per-tenant dispatch dedup (self re-dispatch guard). Once a tenant's
+    /// delete workflow has been dispatched it is held here until we observe
+    /// the tenant is no longer <c>deleting</c> (cancelled, or torn down). This
+    /// prevents BOTH a second <c>TENANT.DELETE.REQUESTED</c> row for the same
+    /// tenant (force-delete after delete, or a future workflow re-emit) AND a
+    /// cooling-off head-of-line re-scan from re-dispatching an already-running
+    /// teardown. The delete workflow itself is idempotent, so a missed dedup
+    /// is safe — this just avoids redundant runs.
+    /// </summary>
+    private readonly HashSet<Guid> _dispatched = new();
 
     public TenantDeleteRequestedTrigger(
         IServiceProvider services,
@@ -182,22 +208,37 @@ public sealed class TenantDeleteRequestedTrigger : BackgroundService
                         && e.SequenceNumber > _lastSequence)
             .OrderBy(e => e.SequenceNumber)
             .Take(25)
-            .Select(e => new { e.Id, e.SequenceNumber, e.TenantId })
+            .Select(e => new { e.Id, e.SequenceNumber, e.TenantId, e.Data })
             .ToListAsync(ct).ConfigureAwait(false);
 
         if (rows.Count == 0) return;
 
         var now = _timeProvider.GetUtcNow().UtcDateTime;
 
+        // Head-of-line fix — when a not-yet-due (cooling-off) row is hit we
+        // must NOT advance the cursor PAST it (a later tick has to reconsider
+        // it once its window elapses), but we MUST keep scanning the rest of
+        // this batch so a ready higher-sequence row isn't starved behind it.
+        // We therefore advance _lastSequence only across the leading run of
+        // fully-handled rows; the moment we defer one, the cursor freezes at
+        // the row just before it and every later row is processed in-place
+        // (the per-tenant dedup below makes re-scanning those rows a no-op).
+        var cursorAdvancing = true;
+
         foreach (var row in rows)
         {
             ct.ThrowIfCancellationRequested();
 
+            void AdvanceIfLeading()
+            {
+                if (cursorAdvancing) _lastSequence = row.SequenceNumber;
+            }
+
             if (row.TenantId is null)
             {
                 // Malformed row with no tenant binding — nothing to do; skip
-                // it (advance cursor) so it doesn't wedge the bridge.
-                _lastSequence = row.SequenceNumber;
+                // it. Counts as fully-handled so the cursor can move past it.
+                AdvanceIfLeading();
                 continue;
             }
 
@@ -219,34 +260,53 @@ public sealed class TenantDeleteRequestedTrigger : BackgroundService
                 .FirstOrDefaultAsync(ct).ConfigureAwait(false);
 
             // Item #5 — cancellation: tenant no longer in 'deleting' (an
-            // operator cancelled, or it was already torn down). Skip and
-            // advance the cursor — there is nothing to dispatch.
+            // operator cancelled, or it was already torn down). Skip; this row
+            // is fully-handled (nothing to dispatch). Clear any in-flight dedup
+            // so a fresh future delete of the same tenant can dispatch again.
             if (state is null
                 || state.DeletedAt is not null
                 || !string.Equals(state.Status, "deleting", StringComparison.OrdinalIgnoreCase))
             {
+                _dispatched.Remove(tenantId);
                 _logger.LogInformation(
                     "tenant.delete.dispatch_skipped reason=not_deleting tenantId={TenantId} status={Status} sequence={Sequence}",
                     tenantId, state?.Status, row.SequenceNumber);
-                _lastSequence = row.SequenceNumber;
+                AdvanceIfLeading();
+                continue;
+            }
+
+            // Self re-dispatch / duplicate-request dedup — the tenant is still
+            // 'deleting' and we already dispatched its teardown. Don't dispatch
+            // again (force-delete after delete; a cooling-off head-of-line
+            // re-scan; a hypothetical workflow re-emit). Fully-handled row.
+            if (_dispatched.Contains(tenantId))
+            {
+                _logger.LogDebug(
+                    "tenant.delete.dispatch_skipped reason=already_in_flight tenantId={TenantId} sequence={Sequence}",
+                    tenantId, row.SequenceNumber);
+                AdvanceIfLeading();
                 continue;
             }
 
             // Item #2 — cooling-off: hold the row until the grace window
-            // elapses. Do NOT advance the cursor; a later tick reconsiders
-            // it (and re-checks the cancel condition). A null
-            // DeleteRequestedAt is treated as "just requested" → hold.
+            // elapses, UNLESS this is a force-delete (cooling-off waived per
+            // the force-delete contract). A null DeleteRequestedAt is treated
+            // as "just requested" → hold. Force-delete is detected from the
+            // emitting endpoint's source marker in the event payload.
+            var forced = IsForceDelete(row.Data);
             var requestedAt = state.DeleteRequestedAt ?? now;
-            if (now - requestedAt < _options.Value.CoolingOff)
+            if (!forced && now - requestedAt < _options.Value.CoolingOff)
             {
                 _logger.LogDebug(
                     "tenant.delete.cooling_off tenantId={TenantId} requestedAt={RequestedAt} remaining={Remaining}s",
                     tenantId, requestedAt,
                     (_options.Value.CoolingOff - (now - requestedAt)).TotalSeconds);
-                // Stop scanning here — rows are ordered by sequence and this
-                // one isn't ready, so we leave it (and everything after it on
-                // this tick) for a later poll. Cursor unchanged.
-                return;
+                // Head-of-line fix — DEFER this row (do not advance the cursor
+                // past it) but keep scanning the rest of the batch. Freeze the
+                // cursor here so a later tick reconsiders this row once its
+                // window elapses.
+                cursorAdvancing = false;
+                continue;
             }
 
             try
@@ -266,21 +326,47 @@ public sealed class TenantDeleteRequestedTrigger : BackgroundService
                     false,
                     ct).ConfigureAwait(false);
 
+                _dispatched.Add(tenantId);
                 _logger.LogInformation(
-                    "tenant.delete.dispatched eventId={EventId} tenantId={TenantId} sequence={Sequence}",
-                    row.Id, tenantId, row.SequenceNumber);
+                    "tenant.delete.dispatched eventId={EventId} tenantId={TenantId} sequence={Sequence} forced={Forced}",
+                    row.Id, tenantId, row.SequenceNumber, forced);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex,
                     "tenant.delete.dispatch_failed eventId={EventId} tenantId={TenantId} — " +
-                    "will retry on next tick (cursor not advanced).",
+                    "will retry on next tick (cursor not advanced past this row).",
                     row.Id, tenantId);
-                // Cursor not advanced — the next tick re-reads this row.
-                return;
+                // Defer this row (do not advance past it) so the next tick
+                // re-reads it; keep scanning the rest of the batch.
+                cursorAdvancing = false;
+                continue;
             }
 
-            _lastSequence = row.SequenceNumber;
+            AdvanceIfLeading();
+        }
+    }
+
+    /// <summary>
+    /// Detects a force-delete request from the <c>TENANT.DELETE.REQUESTED</c>
+    /// event payload (<c>data.source == "admin-force-delete"</c>). Force-delete
+    /// waives the cooling-off window. Tolerant of malformed JSON — an
+    /// unparseable payload is simply treated as a normal (cooling-off) delete.
+    /// </summary>
+    internal static bool IsForceDelete(string? data)
+    {
+        if (string.IsNullOrWhiteSpace(data)) return false;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(data);
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("source", out var src)
+                && src.ValueKind == System.Text.Json.JsonValueKind.String
+                && string.Equals(src.GetString(), "admin-force-delete", StringComparison.Ordinal);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
         }
     }
 }

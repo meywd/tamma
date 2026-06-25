@@ -406,15 +406,22 @@ public static class AdminTenantsEndpoints
 
     /// <summary>
     /// Story 28-5 AC4 — cancels a pending tenant deletion during the
-    /// cooling-off window. A tenant in <c>deleting</c> has its
-    /// <c>TenantDeleteRequestedTrigger</c> dispatch suppressed once it flips
-    /// back to <c>active</c> (the trigger re-reads <c>Status</c> immediately
-    /// before dispatch and skips anything that isn't <c>deleting</c>). Flips
-    /// <c>Status</c> → <c>active</c>, clears <c>DeleteRequestedAt</c>,
-    /// invalidates the status cache (+ resolver pool + cluster NOTIFY), and
-    /// emits <c>TENANT.DELETE_CANCELLED</c>. 409 if the tenant is not
-    /// currently <c>deleting</c> (the destructive drop may already have run,
-    /// or never started).
+    /// cooling-off window. Flips <c>Status</c> → <c>active</c>, clears
+    /// <c>DeleteRequestedAt</c>, invalidates the status cache (+ resolver pool
+    /// + cluster NOTIFY), and emits <c>TENANT.DELETE_CANCELLED</c>. 409 if the
+    /// tenant is not currently <c>deleting</c> (the destructive drop may
+    /// already have run, or never started).
+    ///
+    /// <para><b>Cancellation is honoured even AFTER the trigger dispatches.</b>
+    /// The flip back to <c>active</c> is caught at THREE checkpoints: (1) the
+    /// trigger's pre-dispatch re-read (before the workflow even starts); (2)
+    /// the workflow's mark step (top of run); (3) the workflow's cancellation
+    /// guard immediately before <c>DROP SCHEMA</c>. Any of the three aborts the
+    /// teardown (terminal emits <c>TENANT.DELETE.ABORTED</c>), so a cancel that
+    /// races a just-dispatched workflow does NOT result in a dropped schema.
+    /// The only un-cancellable point is after the irreversible drop has
+    /// physically run — at which point the status is no longer <c>deleting</c>
+    /// and this endpoint returns 409.</para>
     /// </summary>
     public static async Task<IResult> CancelDeleteTenant(
         Guid tenantId,

@@ -38,6 +38,7 @@ public class DeleteTenantWorkflowStructureTests
         typeof(MarkTenantDeletingForDeleteActivity),
         typeof(EvictTenantPoolForCleanupActivity),
         typeof(BackupTenantDatabaseForDeleteActivity),  // AC4 — pre-drop backup (gated)
+        typeof(GuardTenantDeletingActivity),            // cancellation guard — last check before drop
         typeof(DropTenantSchemaForCleanupActivity),
         typeof(DropTenantRoleForCleanupActivity),
         typeof(CleanupTenantRelationshipsActivity),     // item #4 — CP relationship cleanup
@@ -118,6 +119,34 @@ public class DeleteTenantWorkflowStructureTests
     }
 
     [Test]
+    public void Build_CancellationGuardImmediatelyPrecedesDropSchema()
+    {
+        // CRITICAL (cancellation race) — the guard re-reads Status as the LAST
+        // act before the irreversible DROP SCHEMA, so a cancel that lands after
+        // dispatch aborts the run before anything is dropped.
+        var sequence = SequenceOf();
+        var guardIdx = sequence.FindIndex(a => a is GuardTenantDeletingActivity);
+        var dropDbIdx = sequence.FindIndex(a => a is DropTenantSchemaForCleanupActivity);
+
+        guardIdx.Should().BeGreaterThan(0);
+        dropDbIdx.Should().Be(guardIdx + 1,
+            "the cancellation guard must run immediately before DROP SCHEMA … CASCADE");
+    }
+
+    [Test]
+    public void Build_BackupPrecedesCancellationGuard()
+    {
+        // The guard is the LAST step before the drop; the (gated) backup runs
+        // before it so a backup is still taken on the non-aborted path.
+        var sequence = SequenceOf();
+        var backupIdx = sequence.FindIndex(a => a is BackupTenantDatabaseForDeleteActivity);
+        var guardIdx = sequence.FindIndex(a => a is GuardTenantDeletingActivity);
+
+        backupIdx.Should().BeGreaterThan(0);
+        guardIdx.Should().BeGreaterThan(backupIdx);
+    }
+
+    [Test]
     public void Build_DropSchemaPrecedesDropRole()
     {
         var sequence = SequenceOf();
@@ -163,7 +192,7 @@ public class DeleteTenantWorkflowStructureTests
             .Where(a => a is not SetVariable and not EmitDeleteTerminalEventActivity and not Event)
             .ToList();
 
-        stepActivities.Should().HaveCount(6);
+        stepActivities.Should().HaveCount(7);
         foreach (var step in stepActivities)
         {
             step.Should().BeAssignableTo<CleanupStepActivity>(

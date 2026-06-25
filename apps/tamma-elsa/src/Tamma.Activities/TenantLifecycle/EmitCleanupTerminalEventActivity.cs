@@ -72,9 +72,15 @@ public static class CleanupSteps
     public const string CleanupRelationships = "cleanup-cp-relationships";
 
     // ── Story 28-5 item #3 — delete-workflow pre-destructive steps ──
-    /// <summary>Flip tenants.Status='deleting' before the destructive
-    /// span (continue-on-error variant for the delete workflow).</summary>
+    /// <summary>Confirm tenants.Status='deleting' before the destructive
+    /// span (continue-on-error variant for the delete workflow). Aborts the
+    /// run — does NOT resurrect — if the tenant was cancelled.</summary>
     public const string MarkDeleting = "mark-deleting";
+
+    /// <summary>Cancellation guard re-read of tenants.Status IMMEDIATELY
+    /// before DROP SCHEMA — aborts the run if the tenant left 'deleting'
+    /// (fail-closed). Closes the dispatch→cancel→drop race.</summary>
+    public const string GuardDeleting = "guard-deleting";
 
     /// <summary>Optional pg_dump backup taken before the schema drop
     /// (continue-on-error variant for the delete workflow).</summary>
@@ -97,6 +103,21 @@ internal static class CleanupWorkflowVariables
 
     /// <summary>JSON list of succeeded step names (string[]).</summary>
     public const string SucceededStepsJson = "Tenant.CleanupStep.SucceededSteps";
+
+    /// <summary>JSON list of skipped step names (string[]) — steps that did
+    /// not run because the run aborted upstream.</summary>
+    public const string SkippedStepsJson = "Tenant.CleanupStep.SkippedSteps";
+
+    /// <summary>Bool flag — the run was aborted (cancelled out of
+    /// <c>deleting</c>) before the destructive span. Set by the mark /
+    /// cancellation-guard steps; read by every subsequent step (to skip its
+    /// destructive work) and by the terminal (to emit
+    /// <c>TENANT.DELETE.ABORTED</c> instead of dropping the schema).</summary>
+    public const string AbortedFlag = "Tenant.CleanupStep.Aborted";
+
+    /// <summary>String — human-readable abort reason for the terminal event
+    /// + log (e.g. "tenant no longer 'deleting' (status=active)").</summary>
+    public const string AbortReason = "Tenant.CleanupStep.AbortReason";
 
     /// <summary>Per-step Success flag — for fast lookup. Variable name
     /// pattern: <c>Tenant.CleanupStep.{stepName}.Success</c> (bool).</summary>
@@ -122,6 +143,7 @@ public interface ICleanupStateStore
     string? GetString(string variable);
     void SetString(string variable, string? value);
     void SetBool(string variable, bool value);
+    bool? GetBool(string variable);
 }
 
 /// <summary>
@@ -145,6 +167,9 @@ internal sealed class ActivityContextStateStore : ICleanupStateStore
 
     public void SetBool(string variable, bool value) =>
         _context.SetVariable(variable, value);
+
+    public bool? GetBool(string variable) =>
+        _context.GetVariable<bool?>(variable);
 }
 
 /// <summary>
@@ -209,6 +234,21 @@ public static class CleanupWorkflowState
         ActivityExecutionContext context) =>
         GetStepDetails(new ActivityContextStateStore(context));
 
+    public static void RecordSkipped(ActivityExecutionContext context, string step) =>
+        RecordSkipped(new ActivityContextStateStore(context), step);
+
+    public static IReadOnlyList<string> GetSkippedSteps(ActivityExecutionContext context) =>
+        GetSkippedSteps(new ActivityContextStateStore(context));
+
+    public static void MarkAborted(ActivityExecutionContext context, string reason) =>
+        MarkAborted(new ActivityContextStateStore(context), reason);
+
+    public static bool IsAborted(ActivityExecutionContext context) =>
+        IsAborted(new ActivityContextStateStore(context));
+
+    public static string? GetAbortReason(ActivityExecutionContext context) =>
+        GetAbortReason(new ActivityContextStateStore(context));
+
     // ── Pure store-bound implementations (testable) ──────────────────
 
     /// <summary>Mark a step as succeeded — appends to the in-flight
@@ -252,6 +292,39 @@ public static class CleanupWorkflowState
 
     public static IReadOnlyDictionary<string, string> GetStepDetails(ICleanupStateStore store) =>
         ReadStepDetails(store);
+
+    /// <summary>Mark a step as skipped — it did not run because the run was
+    /// aborted (cancelled) upstream. Tracked separately from succeeded /
+    /// failed so the terminal abort summary is honest about what ran.</summary>
+    public static void RecordSkipped(ICleanupStateStore store, string step)
+    {
+        var skipped = ReadStepList(store, CleanupWorkflowVariables.SkippedStepsJson);
+        if (!skipped.Contains(step))
+            skipped.Add(step);
+        WriteStepList(store, CleanupWorkflowVariables.SkippedStepsJson, skipped);
+    }
+
+    public static IReadOnlyList<string> GetSkippedSteps(ICleanupStateStore store) =>
+        ReadStepList(store, CleanupWorkflowVariables.SkippedStepsJson);
+
+    /// <summary>
+    /// Set the run-aborted flag (idempotent — keeps the FIRST reason). Once
+    /// set, every subsequent <see cref="CleanupStepActivity"/> skips its
+    /// destructive work and the terminal emits <c>TENANT.DELETE.ABORTED</c>
+    /// without dropping the schema or soft-deleting the row.
+    /// </summary>
+    public static void MarkAborted(ICleanupStateStore store, string reason)
+    {
+        store.SetBool(CleanupWorkflowVariables.AbortedFlag, true);
+        if (string.IsNullOrEmpty(store.GetString(CleanupWorkflowVariables.AbortReason)))
+            store.SetString(CleanupWorkflowVariables.AbortReason, reason);
+    }
+
+    public static bool IsAborted(ICleanupStateStore store) =>
+        store.GetBool(CleanupWorkflowVariables.AbortedFlag) == true;
+
+    public static string? GetAbortReason(ICleanupStateStore store) =>
+        store.GetString(CleanupWorkflowVariables.AbortReason);
 
     private static List<string> ReadStepList(ICleanupStateStore store, string variable)
     {
@@ -341,6 +414,17 @@ public abstract class CleanupStepActivity : TammaAsyncActivity
     /// flags.</summary>
     public abstract string StepName { get; }
 
+    /// <summary>
+    /// Whether this step is SKIPPED (its <see cref="DoStepAsync"/> is not
+    /// invoked) once the run has been aborted via
+    /// <see cref="CleanupWorkflowState.MarkAborted(ActivityExecutionContext,string)"/>.
+    /// Defaults to <c>true</c> — every DESTRUCTIVE step must skip on abort so
+    /// a cancelled tenant is never torn down. The mark-deleting + cancellation
+    /// guard steps (which DETECT cancellation and set the abort flag
+    /// themselves) override this to <c>false</c> so they always run.
+    /// </summary>
+    protected virtual bool SkipWhenAborted => true;
+
     public override string? EventType => $"TENANT.CLEANUP.{StepName.ToUpperInvariant().Replace('-', '_')}";
 
     protected sealed override async Task RunAsync(ActivityExecutionContext context)
@@ -350,6 +434,24 @@ public abstract class CleanupStepActivity : TammaAsyncActivity
         var tenantId = ResolveTenantId(context);
         var attempt = ResolveAttempt(context);
         var publisher = context.GetRequiredService<IPlatformEventPublisher>();
+
+        // CRITICAL (cancellation race) — if the run was aborted upstream (the
+        // tenant was cancelled out of 'deleting' before the destructive span),
+        // every destructive step must SKIP its work. Without this, a cancel
+        // that lands after dispatch would still be steamrolled by the in-flight
+        // workflow dropping the schema. The terminal emits TENANT.DELETE.ABORTED.
+        if (SkipWhenAborted && CleanupWorkflowState.IsAborted(context))
+        {
+            CleanupWorkflowState.RecordSkipped(context, StepName);
+            Logger?.LogInformation(
+                "tenant.delete.step_skipped_aborted step={Step} tenantId={TenantId} reason={Reason}",
+                StepName, tenantId, CleanupWorkflowState.GetAbortReason(context));
+            await SafePublish(publisher, BuildStepEvent(
+                TenantLifecycleEvents.DeleteStepSkipped, tenantId, attempt,
+                errorType: "aborted",
+                redactedMessage: CleanupWorkflowState.GetAbortReason(context) ?? "run aborted"));
+            return;
+        }
 
         if (tenantId == Guid.Empty)
         {

@@ -33,25 +33,44 @@ namespace Tamma.Activities.TenantLifecycle;
 // ═══════════════════════════════════════════════════════════════════════
 
 /// <summary>
-/// Step A of the rebuilt <c>DeleteTenantWorkflow</c> — continue-on-error
-/// variant of <see cref="MarkTenantDeletingActivity"/>. Flips
-/// <c>tenants.Status='deleting'</c> (idempotent) and emits the
-/// <c>TENANT.DELETE.REQUESTED</c> marker.
+/// Step A of the rebuilt <c>DeleteTenantWorkflow</c>. CONFIRMS the tenant is
+/// still <c>deleting</c> before the destructive span begins, then emits a
+/// <c>TENANT.DELETE.STARTED</c> marker.
 ///
-/// <para>Unlike the throwing <see cref="MarkTenantDeletingActivity"/>, a
-/// failure here records into the per-step accumulator and lets the
-/// Sequence continue so the run still reaches the single terminal event.
-/// The endpoint already flipped the row to <c>deleting</c> before the
-/// trigger dispatched, so this is normally a fast no-op.</para>
+/// <para><b>CRITICAL — cancellation race + self re-dispatch fixes.</b></para>
+/// <list type="bullet">
+///   <item><description><b>Does NOT resurrect an <c>active</c> tenant.</b>
+///     The endpoint already flipped the row to <c>deleting</c> before the
+///     trigger dispatched; this step does NOT flip <c>active→deleting</c>.
+///     If the row is no longer <c>deleting</c> (an operator cancelled during
+///     the cooling-off window, racing the dispatch), this step ABORTS the run
+///     via <see cref="CleanupWorkflowState.MarkAborted(ActivityExecutionContext,string)"/>
+///     — every subsequent destructive step then SKIPS and the terminal emits
+///     <c>TENANT.DELETE.ABORTED</c>. The cancelled tenant is NEVER torn down.</description></item>
+///   <item><description><b>Does NOT re-emit <c>TENANT.DELETE.REQUESTED</c>.</b>
+///     That is the exact event <see cref="Tamma.Activities"/>' delete trigger
+///     polls; re-emitting it is a self re-dispatch loop. The workflow signals
+///     "started" with the distinct <see cref="TenantLifecycleEvents.DeleteStarted"/>
+///     marker instead.</description></item>
+/// </list>
+///
+/// <para>Continue-on-error like its siblings — a transient CP read failure
+/// records into the accumulator and the run still reaches the terminal. It
+/// overrides <see cref="SkipWhenAborted"/> to <c>false</c> because it is the
+/// step that DETECTS cancellation; the destructive steps after it skip.</para>
 /// </summary>
 [Activity(
     "Tamma.TenantLifecycle",
     "Mark Tenant Deleting (Delete)",
-    "Continue-on-error variant — set Status='deleting' + emit TENANT.DELETE.REQUESTED; never throws.",
+    "Confirm Status='deleting' (abort if cancelled) + emit TENANT.DELETE.STARTED; never throws.",
     Kind = ActivityKind.Task)]
 public sealed class MarkTenantDeletingForDeleteActivity : CleanupStepActivity
 {
     public override string StepName => CleanupSteps.MarkDeleting;
+
+    // This step DETECTS cancellation and sets the abort flag, so it must run
+    // even though the destructive steps after it skip on abort.
+    protected override bool SkipWhenAborted => false;
 
     protected override async Task DoStepAsync(
         ActivityExecutionContext context,
@@ -61,37 +80,192 @@ public sealed class MarkTenantDeletingForDeleteActivity : CleanupStepActivity
         await using var db = await factory.CreateDbContextAsync(context.CancellationToken)
             .ConfigureAwait(false);
 
-        var tenant = await db.Tenants
-            .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(t => t.Id == tenantId, context.CancellationToken)
-            .ConfigureAwait(false)
-            ?? throw new InvalidOperationException(
-                $"MarkDeleting: tenant {tenantId} not found in CP.");
+        var store = new ActivityContextStateStore(context);
+        var stillDeleting = await EvaluateAsync(
+            db, store, tenantId, Logger, context.CancellationToken).ConfigureAwait(false);
+        if (!stillDeleting)
+            return; // aborted — EvaluateAsync already set the abort flag.
 
-        var current = (string?)db.Entry(tenant).Property("Status").CurrentValue;
-        if (!string.Equals(current, "deleting", StringComparison.OrdinalIgnoreCase))
-        {
-            db.Entry(tenant).Property("Status").CurrentValue = "deleting";
-            if (db.Entry(tenant).Property("DeleteRequestedAt").CurrentValue is null)
-                db.Entry(tenant).Property("DeleteRequestedAt").CurrentValue = DateTime.UtcNow;
-            tenant.UpdatedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync(context.CancellationToken).ConfigureAwait(false);
-        }
-
+        // Already 'deleting' (the endpoint set it). Emit the STARTED marker —
+        // NOT TENANT.DELETE.REQUESTED (the trigger's own poll target — re-emitting
+        // it would self re-dispatch). Idempotent: the step-dedup index swallows
+        // a replay on the same attempt.
         var publisher = context.GetRequiredService<IPlatformEventPublisher>();
         await publisher.AppendAndPublishAsync(
             TenantLifecycleEvents.BuildEvent(
-                TenantLifecycleEvents.DeleteRequested,
+                TenantLifecycleEvents.DeleteStarted,
                 tenantId,
                 data: new Dictionary<string, object?>
                 {
-                    ["requestedAt"] = DateTime.UtcNow,
+                    ["startedAt"] = DateTime.UtcNow,
                     ["source"] = "delete-workflow",
                 }),
             context.CancellationToken).ConfigureAwait(false);
 
         Logger?.LogInformation(
-            "tenant.delete.mark_deleting completed tenantId={TenantId}", tenantId);
+            "tenant.delete.mark_deleting confirmed_deleting tenantId={TenantId}", tenantId);
+    }
+
+    /// <summary>
+    /// Pure-DI cancellation check — testable against an EF InMemory
+    /// <see cref="ControlPlaneDbContext"/> + an in-memory
+    /// <see cref="ICleanupStateStore"/>, with NO Elsa runtime. Reads the live
+    /// <c>Status</c> and:
+    /// <list type="bullet">
+    ///   <item>returns <c>true</c> when the tenant is still <c>deleting</c> (the
+    ///     destructive span may proceed);</item>
+    ///   <item>returns <c>false</c> and calls
+    ///     <see cref="CleanupWorkflowState.MarkAborted(ICleanupStateStore,string)"/>
+    ///     when the tenant is NOT <c>deleting</c> — it does NOT flip the row, so
+    ///     a cancelled (<c>active</c>) tenant is NEVER resurrected to
+    ///     <c>deleting</c>.</item>
+    /// </list>
+    /// Throws only when the tenant row is missing (a genuinely broken input the
+    /// continue-on-error base records as a step failure).
+    /// </summary>
+    public static async Task<bool> EvaluateAsync(
+        ControlPlaneDbContext db,
+        ICleanupStateStore store,
+        Guid tenantId,
+        ILogger? logger,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(store);
+
+        var current = await db.Tenants
+            .AsNoTracking()
+            .IgnoreQueryFilters()
+            .Where(t => t.Id == tenantId)
+            .Select(t => new { Status = EF.Property<string?>(t, "Status"), Found = true })
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        if (current is null)
+            throw new InvalidOperationException(
+                $"MarkDeleting: tenant {tenantId} not found in CP.");
+
+        if (!string.Equals(current.Status, "deleting", StringComparison.OrdinalIgnoreCase))
+        {
+            // Cancellation race — the operator flipped the tenant out of
+            // 'deleting' (typically back to 'active' via cancel-delete) after
+            // the trigger dispatched. Do NOT re-flip to 'deleting' and do NOT
+            // proceed: abort so the destructive steps skip and the terminal
+            // emits ABORTED. The tenant stays exactly as the operator left it.
+            var reason = $"tenant no longer 'deleting' (status={current.Status ?? "null"}) — delete cancelled before destructive span";
+            CleanupWorkflowState.MarkAborted(store, reason);
+            logger?.LogWarning(
+                "tenant.delete.mark_deleting aborted_cancelled tenantId={TenantId} status={Status}",
+                tenantId, current.Status);
+            return false;
+        }
+
+        return true;
+    }
+}
+
+/// <summary>
+/// Cancellation guard — runs IMMEDIATELY before the destructive
+/// <c>DropTenantSchema</c> step. Re-reads <c>tenants.Status</c> a final time;
+/// if the tenant is no longer <c>deleting</c> (an operator cancelled during
+/// the brief window after <see cref="MarkTenantDeletingForDeleteActivity"/>
+/// confirmed but before the drop), it ABORTS the run so the drop + role-drop +
+/// relationship-cleanup steps all skip and the terminal emits
+/// <c>TENANT.DELETE.ABORTED</c>.
+///
+/// <para>This is the second (and last) cancellation checkpoint: the first is
+/// the mark step at the top of the run; this one closes the window between
+/// confirmation and the irreversible <c>DROP SCHEMA … CASCADE</c>. Together
+/// they make a cancelled tenant un-droppable regardless of dispatch timing.
+/// (The trigger's pre-dispatch re-read is the third, earliest, line of
+/// defence.)</para>
+///
+/// <para>Like the mark step it overrides <see cref="SkipWhenAborted"/> to
+/// <c>false</c> — it is itself a cancellation detector. A transient CP read
+/// failure FAILS CLOSED: it aborts the run (does NOT proceed to the drop) so a
+/// momentarily-unreadable status can never be assumed to be <c>deleting</c>.</para>
+/// </summary>
+[Activity(
+    "Tamma.TenantLifecycle",
+    "Guard Tenant Deleting (Delete)",
+    "Re-read Status before the destructive drop; abort the run if no longer 'deleting'. Fail-closed; never throws.",
+    Kind = ActivityKind.Task)]
+public sealed class GuardTenantDeletingActivity : CleanupStepActivity
+{
+    public override string StepName => CleanupSteps.GuardDeleting;
+
+    // Itself a cancellation detector — must run on the non-aborted path.
+    protected override bool SkipWhenAborted => false;
+
+    protected override async Task DoStepAsync(
+        ActivityExecutionContext context,
+        Guid tenantId)
+    {
+        var factory = context.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
+        var store = new ActivityContextStateStore(context);
+        await EvaluateAsync(factory, store, tenantId, Logger, context.CancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Pure-DI cancellation guard — testable against an EF InMemory
+    /// <see cref="ControlPlaneDbContext"/> factory + an in-memory
+    /// <see cref="ICleanupStateStore"/>. Re-reads the live <c>Status</c>; if it
+    /// is not <c>deleting</c> it ABORTS the run (so the drop is skipped). A read
+    /// failure FAILS CLOSED — it also aborts, so a momentarily-unreadable status
+    /// can never be mistaken for "still deleting" right before the irreversible
+    /// drop. Returns <c>true</c> only when the tenant is confirmed still
+    /// <c>deleting</c>.
+    /// </summary>
+    public static async Task<bool> EvaluateAsync(
+        IDbContextFactory<ControlPlaneDbContext> factory,
+        ICleanupStateStore store,
+        Guid tenantId,
+        ILogger? logger,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(factory);
+        ArgumentNullException.ThrowIfNull(store);
+
+        string? current;
+        try
+        {
+            await using var db = await factory.CreateDbContextAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            current = await db.Tenants
+                .AsNoTracking()
+                .IgnoreQueryFilters()
+                .Where(t => t.Id == tenantId)
+                .Select(t => EF.Property<string?>(t, "Status"))
+                .FirstOrDefaultAsync(cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Fail-closed: a read failure right before DROP SCHEMA must NOT be
+            // treated as "still deleting". Abort so the destructive span skips;
+            // the trigger re-dispatches on the next tick once CP is readable.
+            CleanupWorkflowState.MarkAborted(
+                store, "cancellation guard could not re-read status before drop (fail-closed)");
+            logger?.LogWarning(
+                ex, "tenant.delete.guard read_failed_abort tenantId={TenantId}", tenantId);
+            return false;
+        }
+
+        if (!string.Equals(current, "deleting", StringComparison.OrdinalIgnoreCase))
+        {
+            var reason = $"tenant no longer 'deleting' (status={current ?? "null"}) — delete cancelled before DROP SCHEMA";
+            CleanupWorkflowState.MarkAborted(store, reason);
+            logger?.LogWarning(
+                "tenant.delete.guard aborted_cancelled tenantId={TenantId} status={Status}",
+                tenantId, current);
+            return false;
+        }
+
+        logger?.LogInformation(
+            "tenant.delete.guard still_deleting tenantId={TenantId}", tenantId);
+        return true;
     }
 }
 
@@ -158,26 +332,45 @@ public sealed class BackupTenantDatabaseForDeleteActivity : CleanupStepActivity
 /// step. Removes the control-plane rows that key off the deleted tenant so
 /// no foreign-key dangle survives the soft-delete tombstone.
 ///
-/// <para><b>Disposition policy (decided per table):</b></para>
+/// <para><b>Disposition policy (decided per table; every live CP table with
+/// a tenant key has an explicit verdict — no silent FK dangle).</b></para>
 /// <list type="bullet">
 ///   <item><description><b>Delete</b> — operational CP rows with no audit
 ///     value once the tenant is gone: <c>tenant_memberships</c>,
 ///     <c>user_invites</c>, pending <c>platform_queued_tasks</c>,
 ///     <c>tenant_agent_enablements</c>, <c>alert_channels</c>,
 ///     <c>api_keys</c> (revoked — the credentials must stop working
-///     immediately).</description></item>
+///     immediately), <c>platform_api_key_index</c> (the auth routing rows
+///     for those keys; its model was DESIGNED with a <c>TenantId</c> index
+///     "for bulk-revoke on tenant delete (cascade)" — leaving them dangles
+///     an index pointing at deleted <c>api_keys</c>),
+///     <c>tenant_platform_installations</c> (NON-nullable <c>TenantId</c> FK
+///     — a git-platform binding for the gone tenant; its credentials live in
+///     the tenant-scoped secret store and are dropped with the schema, so
+///     the row has no standalone value and would dangle if kept),
+///     <c>agent_role_selections</c> (tenant-keyed selections) and the
+///     tenant's PRIVATE <c>agents</c> (+ their <c>agent_versions</c>) —
+///     tenant-owned data, deleted with the tenant. Public/system agents
+///     (<c>OwnerTenantId IS NULL</c>) are platform-global and untouched.</description></item>
 ///   <item><description><b>Null the FK</b> — <c>github_installations</c>:
 ///     a GitHub App installation is owned by the GitHub org, not the
 ///     tenant; nulling <c>TenantId</c> releases it for re-binding without
 ///     destroying the installation record.</description></item>
 ///   <item><description><b>Keep for audit</b> — <c>billing_customers</c>
 ///     (financial record / Stripe linkage), <c>audit_records</c>,
-///     <c>platform_events</c>: retained intentionally; the soft-deleted
-///     tenant row + these immutable trails are what compliance reads back.
-///     NOT touched here.</description></item>
+///     <c>platform_events</c>, <c>alerts</c> (operational + compliance
+///     history; <c>TenantId</c> is NULLABLE so no FK dangle, and the alert
+///     feed is read back for incident review), <c>platform_analytics_hourly</c>
+///     (immutable cross-tenant analytics fact table; <c>TenantId</c> NULLABLE,
+///     the platform-wide rollup rows carry <c>TenantId=null</c> — purging a
+///     gone tenant's hourly rows would corrupt historical platform totals).
+///     All retained intentionally; NOT touched here.</description></item>
 ///   <item><description><b>Out of scope (tenant-schema, not CP)</b> —
-///     <c>prompt_overrides</c> and other per-tenant rows live inside the
-///     tenant's own <c>t_&lt;hex&gt;</c> schema (excluded from the
+///     <c>prompt_overrides</c>, <c>secrets</c> (tenant KEK-encrypted),
+///     <c>analytics_usage_daily</c>/<c>analytics_usage_hourly</c>, and the
+///     SaaS tenant-keyed <c>agent_role_selections</c> rows all live inside the
+///     tenant's own <c>t_&lt;hex&gt;</c> schema (configured on
+///     <see cref="TenantDbContext"/>, NOT the
 ///     <see cref="ControlPlaneDbContext"/> model) and are destroyed by the
 ///     upstream <c>DROP SCHEMA … CASCADE</c> — this CP step must not, and
 ///     cannot, reach them.</description></item>
@@ -213,11 +406,15 @@ public sealed class CleanupTenantRelationshipsActivity : CleanupStepActivity
             "tenant.delete.cleanup_relationships completed tenantId={TenantId} "
             + "memberships={Memberships} invites={Invites} installationsReleased={Installations} "
             + "queuedTasks={QueuedTasks} enablements={Enablements} "
-            + "alertChannels={AlertChannels} apiKeys={ApiKeys}",
+            + "alertChannels={AlertChannels} apiKeys={ApiKeys} apiKeyIndex={ApiKeyIndex} "
+            + "platformInstallations={PlatformInstallations} agentSelections={AgentSelections} "
+            + "privateAgents={PrivateAgents} agentVersions={AgentVersions}",
             tenantId,
             removed.Memberships, removed.Invites, removed.InstallationsReleased,
             removed.QueuedTasks, removed.Enablements,
-            removed.AlertChannels, removed.ApiKeys);
+            removed.AlertChannels, removed.ApiKeys, removed.ApiKeyIndexRows,
+            removed.PlatformInstallations, removed.AgentRoleSelections,
+            removed.PrivateAgents, removed.AgentVersions);
     }
 
     /// <summary>
@@ -277,6 +474,49 @@ public sealed class CleanupTenantRelationshipsActivity : CleanupStepActivity
             .ToListAsync(cancellationToken).ConfigureAwait(false);
         db.ApiKeys.RemoveRange(apiKeys);
 
+        // platform_api_key_index — the auth routing rows for those keys. The
+        // entity was DESIGNED with a TenantId index "for bulk-revoke on tenant
+        // delete (cascade)"; with api_keys hard-deleted above, leaving these
+        // dangles an index pointing at gone api_keys rows. Purge them.
+        var apiKeyIndex = await db.PlatformApiKeyIndex
+            .Where(i => i.TenantId == tenantId)
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        db.PlatformApiKeyIndex.RemoveRange(apiKeyIndex);
+
+        // tenant_platform_installations — git-platform bindings keyed by a
+        // NON-nullable TenantId FK. The binding credentials live in the
+        // tenant-scoped secret store (dropped with the schema), so the row has
+        // no standalone value and would FK-dangle if kept. Delete.
+        var platformInstallations = await db.TenantPlatformInstallations
+            .IgnoreQueryFilters()
+            .Where(p => p.TenantId == tenantId)
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        db.TenantPlatformInstallations.RemoveRange(platformInstallations);
+
+        // agent_role_selections — CP-resident tenant-keyed selections (SaaS
+        // tenant-keyed rows that ALSO live in the tenant schema are dropped by
+        // CASCADE; this purges any CP-side rows carrying this TenantId).
+        var agentSelections = await db.AgentRoleSelections
+            .IgnoreQueryFilters()
+            .Where(s => s.TenantId == tenantId)
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        db.AgentRoleSelections.RemoveRange(agentSelections);
+
+        // Private (tenant-owned) agents + their immutable version snapshots.
+        // Public/system agents (OwnerTenantId IS NULL) are platform-global and
+        // untouched. agent_versions has OnDelete(Restrict), so the versions
+        // must be removed BEFORE the parent agents in the same unit of work.
+        var privateAgents = await db.Agents
+            .IgnoreQueryFilters()
+            .Where(a => a.OwnerTenantId == tenantId)
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        var privateAgentIds = privateAgents.Select(a => a.Id).ToList();
+        var agentVersions = await db.AgentVersions
+            .Where(v => privateAgentIds.Contains(v.AgentId))
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        db.AgentVersions.RemoveRange(agentVersions);
+        db.Agents.RemoveRange(privateAgents);
+
         // ── Null the FK: github_installations is org-owned, not
         //    tenant-owned. Release it for re-binding; keep the record. ──
         var installations = await db.GitHubInstallations
@@ -295,7 +535,12 @@ public sealed class CleanupTenantRelationshipsActivity : CleanupStepActivity
             Enablements: enablements.Count,
             AlertChannels: alertChannels.Count,
             ApiKeys: apiKeys.Count,
-            InstallationsReleased: installations.Count);
+            InstallationsReleased: installations.Count,
+            ApiKeyIndexRows: apiKeyIndex.Count,
+            PlatformInstallations: platformInstallations.Count,
+            AgentRoleSelections: agentSelections.Count,
+            PrivateAgents: privateAgents.Count,
+            AgentVersions: agentVersions.Count);
     }
 
     /// <summary>Per-table disposition counts returned by
@@ -308,5 +553,10 @@ public sealed class CleanupTenantRelationshipsActivity : CleanupStepActivity
         int Enablements,
         int AlertChannels,
         int ApiKeys,
-        int InstallationsReleased);
+        int InstallationsReleased,
+        int ApiKeyIndexRows = 0,
+        int PlatformInstallations = 0,
+        int AgentRoleSelections = 0,
+        int PrivateAgents = 0,
+        int AgentVersions = 0);
 }
