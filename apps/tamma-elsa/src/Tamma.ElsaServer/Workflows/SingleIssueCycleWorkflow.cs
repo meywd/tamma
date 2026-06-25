@@ -900,9 +900,16 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             _ => "plan-generation returned an empty plan");
 
         var tasksOk = StepGate("TasksOk", "Tasks OK?",
-            ctx => !string.IsNullOrWhiteSpace(tasksJson.Get(ctx)),
+            ctx => HasTasks(tasksJson.Get(ctx)),
             failedStepId, failedDetail, "task-creation",
-            _ => "task-creation returned no tasks");
+            _ => "task-creation returned no tasks (empty or unparseable task list)");
+        // NOTE (honestly-DEFERRED follow-up, SingleIssueCycle.md §Missing #6):
+        // WaitForPRMergedActivity / WaitForPRApprovalActivity create unbounded
+        // `pr-merged-{pr}` / `pr-approval-{pr}` bookmarks with NO SLA timeout. If a
+        // merge/approval webhook never arrives the loop hangs. This is NOT a
+        // regression (the real merge now runs synchronously inside merge-approval),
+        // but before this cycle runs in a live unattended loop a durable
+        // `context.DelayFor` SLA timer must be added to those waits. Tracked follow-up.
 
         var prOk = StepGate("PrOk", "PR OK?",
             ctx => prNumber.Get(ctx) > 0,
@@ -910,21 +917,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             _ => "pull-request returned no PR number (cannot wait on a non-existent PR)");
 
         var deployOk = StepGate("DeployOk", "Deploy OK?",
-            ctx =>
-            {
-                var result = subResult.Get(ctx);
-                // No-false-success: a missing result OR an explicit success=false /
-                // status!=success fails the cycle (deployment failure must NOT report
-                // success). A result with no recognised success signal is treated as
-                // success only when it is non-null AND not flagged failed.
-                if (result == null) return false;
-                if (result.TryGetValue("success", out var s))
-                    return s is true || string.Equals(s?.ToString(), "True", StringComparison.OrdinalIgnoreCase);
-                if (result.TryGetValue("status", out var st))
-                    return string.Equals(st?.ToString(), "success", StringComparison.OrdinalIgnoreCase);
-                // No explicit signal → treat a present result as success (pipeline ran).
-                return true;
-            },
+            ctx => IsDeploySuccessful(subResult.Get(ctx)),
             failedStepId, failedDetail, "deployment-pipeline",
             _ => "deployment-pipeline did not report a successful deployment");
 
@@ -1327,6 +1320,46 @@ public class SingleIssueCycleWorkflow : WorkflowBase
     /// fallback, never a silent proceed. The <c>True</c> outcome continues the cycle;
     /// the <c>False</c> outcome must be wired to the error sink.
     /// </summary>
+    /// <summary>
+    /// Deploy-gate predicate (fail-closed). The <c>deployment-pipeline</c> sub-workflow
+    /// reports its verdict under the <c>deploymentStatus</c> output key: <c>"success"</c>
+    /// is the only passing value; every failure value (<c>"failed"</c>, <c>"failed:qa"</c>,
+    /// <c>"failed:uat"</c>, <c>"failed:production"</c>) and ANY missing/null/unrecognised
+    /// result FAILS the cycle. There is deliberately NO "no explicit signal → success"
+    /// fallback — an absent or unrecognised deploy verdict must NOT report success.
+    /// </summary>
+    internal static bool IsDeploySuccessful(IDictionary<string, object>? result)
+    {
+        if (result == null) return false;
+        if (result.TryGetValue("deploymentStatus", out var ds))
+            return string.Equals(ds?.ToString(), "success", StringComparison.OrdinalIgnoreCase);
+        // No recognised deployment verdict → fail the cycle (fail-closed).
+        return false;
+    }
+
+    /// <summary>
+    /// Tasks-gate predicate (fail-closed). <c>task-creation</c> emits a JSON array under
+    /// <c>tasksJson</c>; on failure it emits the empty-array sentinel <c>"[]"</c> (a
+    /// non-blank string that a bare <c>IsNullOrWhiteSpace</c> check would wrongly pass,
+    /// letting the TDD loop run zero iterations and a PR be created/merged with no
+    /// implementation). Pass only when the payload parses to a JSON array with at least
+    /// one element; an empty/blank/unparseable/non-array payload FAILS the cycle.
+    /// </summary>
+    internal static bool HasTasks(string? tasksJson)
+    {
+        if (string.IsNullOrWhiteSpace(tasksJson)) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(tasksJson);
+            return doc.RootElement.ValueKind == JsonValueKind.Array
+                && doc.RootElement.GetArrayLength() > 0;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
     private static FlowDecision StepGate(
         string id, string name,
         Func<Elsa.Expressions.Models.ExpressionExecutionContext, bool> isValid,

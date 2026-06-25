@@ -195,6 +195,87 @@ public class SingleIssueCycleSafetyTests
         ReachableFromPort("DeployOk", "False").Should().Contain("ReportError");
     }
 
+    // ── Predicate-level proofs of the deploy/tasks gates (not just edge-existence) ──
+    //
+    // These exercise the EXACT predicate the gate runs (IsDeploySuccessful / HasTasks).
+    // They fail against the pre-fix code (deployOk fell through to `return true` on an
+    // unrecognised result; tasksOk only checked IsNullOrWhiteSpace) and pass after the
+    // fail-closed fix.
+
+    [Test]
+    public void DeployOk_FailsClosed_ForFailedProductionDeploy()
+    {
+        // deployment-pipeline reports failure under `deploymentStatus` — the gate must
+        // NOT report success for it.
+        var result = new Dictionary<string, object> { ["deploymentStatus"] = "failed:production" };
+        SingleIssueCycleWorkflow.IsDeploySuccessful(result).Should().BeFalse(
+            "a failed:production deploy must FAIL the cycle, never route to ReportSuccess");
+    }
+
+    [TestCase("failed")]
+    [TestCase("failed:qa")]
+    [TestCase("failed:uat")]
+    [TestCase("failed:production")]
+    public void DeployOk_FailsClosed_ForEveryFailureStatus(string status)
+    {
+        var result = new Dictionary<string, object> { ["deploymentStatus"] = status };
+        SingleIssueCycleWorkflow.IsDeploySuccessful(result).Should().BeFalse(
+            $"deploymentStatus='{status}' is a failure and must fail the cycle");
+    }
+
+    [Test]
+    public void DeployOk_FailsClosed_ForUnrecognisedResult()
+    {
+        // No `deploymentStatus` key at all (the pre-fix "no explicit signal → success"
+        // hole) must FAIL the cycle, not pass.
+        var result = new Dictionary<string, object> { ["someOtherKey"] = "ran" };
+        SingleIssueCycleWorkflow.IsDeploySuccessful(result).Should().BeFalse(
+            "an unrecognised deploy result must NOT be treated as success (fail-closed)");
+    }
+
+    [Test]
+    public void DeployOk_FailsClosed_ForNullResult()
+    {
+        SingleIssueCycleWorkflow.IsDeploySuccessful(null).Should().BeFalse(
+            "a missing deploy result must fail the cycle");
+    }
+
+    [Test]
+    public void DeployOk_Passes_OnlyForExplicitSuccessStatus()
+    {
+        var result = new Dictionary<string, object> { ["deploymentStatus"] = "success" };
+        SingleIssueCycleWorkflow.IsDeploySuccessful(result).Should().BeTrue(
+            "deploymentStatus='success' is the only passing verdict");
+    }
+
+    [Test]
+    public void TasksOk_FailsClosed_ForEmptyArraySentinel()
+    {
+        // task-creation emits "[]" on failure — a non-blank string the pre-fix gate
+        // wrongly passed (zero-iteration TDD loop → PR/merge with no implementation).
+        SingleIssueCycleWorkflow.HasTasks("[]").Should().BeFalse(
+            "an empty task array must FAIL the cycle, never proceed to a no-op TDD loop");
+    }
+
+    [TestCase(null)]
+    [TestCase("")]
+    [TestCase("   ")]
+    [TestCase("not-json")]
+    [TestCase("{}")]              // a JSON object, not a task array
+    [TestCase("[ ]")]            // whitespace-only empty array
+    public void TasksOk_FailsClosed_ForEmptyOrUnparseablePayloads(string? tasksJson)
+    {
+        SingleIssueCycleWorkflow.HasTasks(tasksJson).Should().BeFalse(
+            "empty/blank/unparseable/non-array task payloads must fail the cycle");
+    }
+
+    [Test]
+    public void TasksOk_Passes_ForNonEmptyTaskArray()
+    {
+        SingleIssueCycleWorkflow.HasTasks("[{\"id\":1},{\"id\":2}]").Should().BeTrue(
+            "a task list with at least one task must proceed");
+    }
+
     // ── Cycle-scoped DCB events at the boundaries ──
 
     [Test]
