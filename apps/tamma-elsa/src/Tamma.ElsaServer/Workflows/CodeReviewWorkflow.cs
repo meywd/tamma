@@ -38,6 +38,14 @@ namespace Tamma.ElsaServer.Workflows;
 /// </summary>
 public class CodeReviewWorkflow : WorkflowBase
 {
+    /// <summary>
+    /// Cap on how many times a resolved merge-failure escalation may route back to the merge
+    /// step before the run terminates as rejected. Each loop is human-gated (a senior responds),
+    /// so this is not a CPU spin — but without a cap the escalate→merge→escalate cycle has no
+    /// terminal guarantee. Two re-merges (then a rejected terminal) is the bound.
+    /// </summary>
+    private const int MaxMergeEscalations = 2;
+
     // Helper to disambiguate the Input constructor overloads.
     private static Input<T> Expr<T>(Func<ExpressionExecutionContext, T> func)
         => new(func);
@@ -76,6 +84,11 @@ public class CodeReviewWorkflow : WorkflowBase
         var validationError = builder.WithVariable<string>("ValidationError", "");
         var escalationResolution = builder.WithVariable<string>("EscalationResolution", "");
         var mergeShaVar = builder.WithVariable<string>("MergeSha", "");
+        // Bound (#IMPORTANT) on the escalate→merge re-merge loop. Each time the merge-failure
+        // escalation resolves and routes back to MergeAndComplete we increment this; once it
+        // reaches the cap the run terminates as rejected (with a distinct, auditable event)
+        // instead of cycling between merge and escalation forever.
+        var mergeRetryCount = builder.WithVariable<int>("MergeRetryCount", 0);
 
         // Config-resolved variables (filled by BindConfig)
         var mergeStrategy = builder.WithVariable<MergeStrategy>("MergeStrategy", MergeStrategy.Squash);
@@ -270,11 +283,13 @@ public class CodeReviewWorkflow : WorkflowBase
                 ["role"] = Tamma.Api.Services.Agents.AgentRole.SeniorDeveloper.ToWire(),
                 ["action"] = Tamma.Api.Services.Agents.AgentAction.CodeReview.ToWire(),
                 ["tenantId"] = tenantId.Get(ctx) ?? "",
+                // Only data placeholders — the seeded (senior_developer, code-review) template
+                // is the prompt (mediated prompt-store design). A hand-written variables["prompt"]
+                // would be INERT: LlmCallWorkflow reads the top-level prompt/taskPrompt, not
+                // variables. The template renders {{reviewCommentsJson}}.
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["reviewCommentsJson"] = reviewCommentsJson.Get(ctx) ?? "[]",
-                    ["prompt"] = "Identify what needs fixing based on these code review comments. " +
-                                 "Be specific and concrete about each required change.",
                 },
                 ["enableTools"] = false,
             }),
@@ -303,13 +318,14 @@ public class CodeReviewWorkflow : WorkflowBase
                 ["role"] = Tamma.Api.Services.Agents.AgentRole.SeniorDeveloper.ToWire(),
                 ["action"] = Tamma.Api.Services.Agents.AgentAction.MentorFeedback.ToWire(),
                 ["tenantId"] = tenantId.Get(ctx) ?? "",
+                // Only data placeholders — the seeded (senior_developer, mentor-feedback)
+                // template is the prompt (skill-level-aware). A hand-written variables["prompt"]
+                // would be INERT here (LlmCallWorkflow reads top-level prompt/taskPrompt). The
+                // template renders {{analysis}} / {{skillLevel}}.
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["analysis"] = analysisText.Get(ctx) ?? "",
                     ["skillLevel"] = skillLevel.Get(ctx),
-                    ["prompt"] = $"Explain to a Level {skillLevel.Get(ctx)} developer how to address the " +
-                                 "following review analysis. Be encouraging, concrete, and teach the " +
-                                 "underlying concept: {analysis}",
                 },
                 ["enableTools"] = false,
             }),
@@ -415,6 +431,14 @@ public class CodeReviewWorkflow : WorkflowBase
             CodeReviewEvents.MergedSuccess, sessionId, storyId, juniorId, tenantId,
             prNumber, prUrl, iteration, mergeShaVar, new((string?)null));
 
+        // DCB event: merge failed (CI red / merge failed after retry) — emitted on the
+        // MergeAndComplete "Failed" edge BEFORE escalating, so the repeated failure is
+        // auditable (the CODE_REVIEW.MERGED.FAILED type was defined but never emitted).
+        var emitMergeFailed = EmitEvent("EmitMergeFailed", "Emit Merge Failed",
+            CodeReviewEvents.MergedFailed, sessionId, storyId, juniorId, tenantId,
+            prNumber, prUrl, iteration, mergeShaVar,
+            new("CI not green or merge failed after retry; escalating to senior."));
+
         // 13. Escalate review (max iterations)
         var escalateReview = new EscalateReviewActivity
         {
@@ -484,6 +508,46 @@ public class CodeReviewWorkflow : WorkflowBase
             CodeReviewEvents.Escalated, sessionId, storyId, juniorId, tenantId,
             prNumber, prUrl, iteration, mergeShaVar, new("Escalated to senior developer."));
 
+        // ---- Merge re-escalation loop bound (#IMPORTANT) -------------------------------
+        // The merge-failure escalation resolving routes back to MergeAndComplete; count the
+        // re-merges and terminate as rejected once the cap is hit instead of looping forever.
+        var incrementMergeRetry = new SetVariable
+        {
+            Id = "IncrementMergeRetry",
+            Name = "Increment Merge Retry",
+            Variable = mergeRetryCount,
+            Value = Expr<object?>(ctx => (object)(mergeRetryCount.Get(ctx) + 1))
+        };
+        incrementMergeRetry.SetDisplayText("Increment Merge Retry");
+
+        var mergeRetryCapCheck = new FlowDecision(ctx => mergeRetryCount.Get(ctx) >= MaxMergeEscalations)
+        { Id = "MergeRetryCapCheck", Name = "Merge Retry Cap Reached?" };
+        mergeRetryCapCheck.SetDisplayText("Merge Retry Cap Reached?");
+
+        // Distinct, auditable terminal event for the capped merge loop (LOUD error-status).
+        var emitMergeLoopExhausted = EmitEvent("EmitMergeLoopExhausted", "Emit Merge Loop Exhausted",
+            CodeReviewEvents.MergedFailed, sessionId, storyId, juniorId, tenantId,
+            prNumber, prUrl, iteration, mergeShaVar,
+            new($"Merge could not be completed after {MaxMergeEscalations} senior re-merge attempts; terminating as rejected."));
+
+        var buildMergeExhaustedResult = BuildResult("BuildMergeExhaustedResult", "Build Merge-Exhausted Result",
+            PRReviewStatus.Error, false, prNumber, prUrl, mergeShaVar, iteration,
+            wasEscalated: true, escalationResolution: new("merge-loop-exhausted", "merge-loop-exhausted"),
+            message: new($"Merge could not be completed after {MaxMergeEscalations} senior re-merge attempts."));
+
+        // ---- Escalation senior-SLA timeout terminal (durable timeout P0) ----------------
+        // A never-answered escalation now resumes via the durable Delay bookmark on the
+        // TimedOut outcome — terminate LOUD (never a silent suspend-forever / false success).
+        var emitEscalationTimedOut = EmitEvent("EmitEscalationTimedOut", "Emit Escalation Timed Out",
+            CodeReviewEvents.Failed, sessionId, storyId, juniorId, tenantId,
+            prNumber, prUrl, iteration, mergeShaVar,
+            new("Senior-response SLA expired with no response; escalation timed out."));
+
+        var buildEscalationTimedOutResult = BuildResult("BuildEscalationTimedOutResult", "Build Escalation-TimedOut Result",
+            PRReviewStatus.TimedOut, false, prNumber, prUrl, mergeShaVar, iteration,
+            wasEscalated: true, escalationResolution: new("timed-out", "timed-out"),
+            message: new("Senior-response SLA expired with no response; escalation timed out."));
+
         // ============================================
         // Terminal: structured results (#6) + DCB FAILED event (#8)
         // ============================================
@@ -518,6 +582,14 @@ public class CodeReviewWorkflow : WorkflowBase
             wasEscalated: false, escalationResolution: new("", null),
             message: new(ctx => validationError.Get(ctx)));
 
+        // PR-creation failure has its own terminal + message — it must NOT reuse the
+        // validation-failed result (whose message reads ValidationError, which is empty on
+        // this path → an empty terminal Message). Never-empty.
+        var buildPrFailedResult = BuildResult("BuildPrFailedResult", "Build PR-Failed Result",
+            PRReviewStatus.Error, false, prNumber, prUrl, mergeShaVar, iteration,
+            wasEscalated: false, escalationResolution: new("", null),
+            message: new("PR creation failed (story/repository not resolvable); review cannot proceed."));
+
         var buildRejectedResult = BuildResult("BuildRejectedResult", "Build Rejected Result",
             PRReviewStatus.ChangesRequested, false, prNumber, prUrl, mergeShaVar, iteration,
             wasEscalated: true, escalationResolution: new("rejected", "rejected"),
@@ -550,10 +622,12 @@ public class CodeReviewWorkflow : WorkflowBase
                 analyzeChanges, storeAnalysis, generateGuidance, storeGuidance,
                 deliverGuidance, emitGuidanceDelivered, emitGuidanceFailed,
                 waitForFixes, reRequestReview, maxIterationsCheck,
-                mergeAndComplete, storeMergeSha, emitMerged,
+                mergeAndComplete, storeMergeSha, emitMerged, emitMergeFailed,
                 escalateReview, escalateTimeout, escalateGuidance, escalateMerge,
                 captureEscalated, emitEscalated,
-                buildSuccessResult, buildValidationFailedResult, buildRejectedResult,
+                incrementMergeRetry, mergeRetryCapCheck, emitMergeLoopExhausted, buildMergeExhaustedResult,
+                emitEscalationTimedOut, buildEscalationTimedOutResult,
+                buildSuccessResult, buildValidationFailedResult, buildRejectedResult, buildPrFailedResult,
                 emitValidationFailed, emitRejected, finish
             },
             Connections =
@@ -574,7 +648,8 @@ public class CodeReviewWorkflow : WorkflowBase
                 new(new FlowEndpoint(prCreatedCheck, "True"), new FlowEndpoint(emitPrCreated)),
                 new(new FlowEndpoint(prCreatedCheck, "False"), new FlowEndpoint(emitPrFailed)),
                 new(emitPrCreated, requestReview),
-                new(emitPrFailed, buildValidationFailedResult),
+                new(emitPrFailed, buildPrFailedResult),
+                new(buildPrFailedResult, finish),
 
                 // Request review -> monitor (bookmark)
                 new(requestReview, monitorReview),
@@ -610,20 +685,37 @@ public class CodeReviewWorkflow : WorkflowBase
 
                 // Merge outcomes (CI-gated, retry-once)
                 new(new FlowEndpoint(mergeAndComplete, "Merged"), new FlowEndpoint(storeMergeSha)),
-                new(new FlowEndpoint(mergeAndComplete, "Failed"), new FlowEndpoint(escalateMerge)),
+                // Failed -> emit CODE_REVIEW.MERGED.FAILED (auditable) -> escalate
+                new(new FlowEndpoint(mergeAndComplete, "Failed"), new FlowEndpoint(emitMergeFailed)),
+                new(emitMergeFailed, escalateMerge),
                 new(storeMergeSha, emitMerged),
                 new(emitMerged, buildSuccessResult),
                 new(buildSuccessResult, finish),
 
-                // Escalations (bookmark) outcomes — Resolved -> capture+merge ; Rejected -> fail
+                // Escalations (bookmark) outcomes — Resolved -> capture+merge ; Rejected -> fail ;
+                // TimedOut -> senior-SLA-expired terminal (durable timeout; never a silent suspend).
                 new(new FlowEndpoint(escalateReview, "Resolved"), new FlowEndpoint(captureEscalated)),
                 new(new FlowEndpoint(escalateReview, "Rejected"), new FlowEndpoint(emitRejected)),
+                new(new FlowEndpoint(escalateReview, "TimedOut"), new FlowEndpoint(emitEscalationTimedOut)),
                 new(new FlowEndpoint(escalateTimeout, "Resolved"), new FlowEndpoint(captureEscalated)),
                 new(new FlowEndpoint(escalateTimeout, "Rejected"), new FlowEndpoint(emitRejected)),
+                new(new FlowEndpoint(escalateTimeout, "TimedOut"), new FlowEndpoint(emitEscalationTimedOut)),
                 new(new FlowEndpoint(escalateGuidance, "Resolved"), new FlowEndpoint(captureEscalated)),
                 new(new FlowEndpoint(escalateGuidance, "Rejected"), new FlowEndpoint(emitRejected)),
-                new(new FlowEndpoint(escalateMerge, "Resolved"), new FlowEndpoint(captureEscalated)),
+                new(new FlowEndpoint(escalateGuidance, "TimedOut"), new FlowEndpoint(emitEscalationTimedOut)),
+                // EscalateMerge.Resolved goes through the re-merge loop bound, not straight to merge.
+                new(new FlowEndpoint(escalateMerge, "Resolved"), new FlowEndpoint(incrementMergeRetry)),
                 new(new FlowEndpoint(escalateMerge, "Rejected"), new FlowEndpoint(emitRejected)),
+                new(new FlowEndpoint(escalateMerge, "TimedOut"), new FlowEndpoint(emitEscalationTimedOut)),
+
+                // Merge re-escalation loop bound: increment -> cap check.
+                //   cap reached  -> distinct MERGED.FAILED event -> rejected terminal (no loop)
+                //   under the cap -> capture + re-merge
+                new(incrementMergeRetry, mergeRetryCapCheck),
+                new(new FlowEndpoint(mergeRetryCapCheck, "True"), new FlowEndpoint(emitMergeLoopExhausted)),
+                new(new FlowEndpoint(mergeRetryCapCheck, "False"), new FlowEndpoint(captureEscalated)),
+                new(emitMergeLoopExhausted, buildMergeExhaustedResult),
+                new(buildMergeExhaustedResult, finish),
 
                 // Escalation resolved -> emit escalated -> merge -> success(escalated) result
                 new(captureEscalated, emitEscalated),
@@ -632,6 +724,10 @@ public class CodeReviewWorkflow : WorkflowBase
                 // Escalation rejected -> rejected result
                 new(emitRejected, buildRejectedResult),
                 new(buildRejectedResult, finish),
+
+                // Escalation senior-SLA timed out -> escalation-timeout terminal
+                new(emitEscalationTimedOut, buildEscalationTimedOutResult),
+                new(buildEscalationTimedOutResult, finish),
 
                 // Merge success after escalation reuses buildSuccessResult path via storeMergeSha→emitMerged→buildSuccessResult.
             }

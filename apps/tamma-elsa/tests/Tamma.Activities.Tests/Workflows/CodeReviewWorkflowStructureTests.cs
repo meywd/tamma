@@ -85,11 +85,14 @@ public class CodeReviewWorkflowStructureTests
         var merge = fc.Activities.FirstOrDefault(a => a.Id == "MergeAndComplete");
         merge.Should().BeOfType<MergeAndCompleteReviewActivity>();
 
-        // A merge Failed outcome must escalate (not silently succeed).
+        // A merge Failed outcome must escalate (not silently succeed). It first emits the
+        // auditable CODE_REVIEW.MERGED.FAILED event, then routes to EscalateMerge.
         var failedEdge = fc.Connections.FirstOrDefault(c =>
             c.Source.Activity?.Id == "MergeAndComplete" && c.Source.Port == "Failed");
         failedEdge.Should().NotBeNull("a CI-red / merge-failed outcome must route to escalation");
-        failedEdge!.Target.Activity!.Id.Should().Be("EscalateMerge");
+        failedEdge!.Target.Activity!.Id.Should().Be("EmitMergeFailed");
+        var emitToEscalate = fc.Connections.FirstOrDefault(c => c.Source.Activity?.Id == "EmitMergeFailed");
+        emitToEscalate!.Target.Activity!.Id.Should().Be("EscalateMerge");
     }
 
     [Test]
@@ -140,6 +143,128 @@ public class CodeReviewWorkflowStructureTests
             var hasOutbound = fc.Connections.Any(c => c.Source.Activity == node);
             hasOutbound.Should().BeTrue($"{waitId} must have an outbound edge to a terminal (no dangling bookmark)");
         }
+    }
+
+    [Test]
+    public void EveryEscalation_HasADurableTimedOutEdge_ToALoudTerminal_ReviewFix()
+    {
+        // Each EscalateReviewActivity now arms a durable senior-SLA Delay → TimedOut outcome.
+        // The TimedOut edge must be wired to the escalation-timeout terminal (never a silent
+        // suspend-forever / false success).
+        var fc = Build();
+        foreach (var escId in new[] { "EscalateReview", "EscalateTimeout", "EscalateGuidance", "EscalateMerge" })
+        {
+            var timedOutEdge = fc.Connections.FirstOrDefault(c =>
+                c.Source.Activity?.Id == escId && c.Source.Port == "TimedOut");
+            timedOutEdge.Should().NotBeNull($"{escId} must have a TimedOut outcome edge (durable senior-SLA timeout)");
+            timedOutEdge!.Target.Activity!.Id.Should().Be("EmitEscalationTimedOut",
+                $"{escId}.TimedOut must route to the escalation-timeout terminal");
+        }
+
+        // The escalation-timeout terminal must build a structured (loud) result reaching Finish.
+        var emit = fc.Activities.FirstOrDefault(a => a.Id == "EmitEscalationTimedOut");
+        emit.Should().NotBeNull();
+        var toResult = fc.Connections.FirstOrDefault(c => c.Source.Activity?.Id == "EmitEscalationTimedOut");
+        toResult!.Target.Activity!.Id.Should().Be("BuildEscalationTimedOutResult");
+    }
+
+    [Test]
+    public void MergeReEscalationLoop_IsBounded_ReviewFix()
+    {
+        // The escalate-merge → resolved → re-merge loop must be bounded: EscalateMerge.Resolved
+        // routes through the retry counter + cap check (NOT straight back to MergeAndComplete),
+        // and the cap-reached branch terminates as rejected instead of looping forever.
+        var fc = Build();
+
+        var resolvedEdge = fc.Connections.FirstOrDefault(c =>
+            c.Source.Activity?.Id == "EscalateMerge" && c.Source.Port == "Resolved");
+        resolvedEdge.Should().NotBeNull();
+        resolvedEdge!.Target.Activity!.Id.Should().Be("IncrementMergeRetry",
+            "a resolved merge escalation must go through the re-merge counter, not straight back to merge");
+
+        var capCheck = fc.Activities.FirstOrDefault(a => a.Id == "MergeRetryCapCheck");
+        capCheck.Should().NotBeNull("there must be a cap-check decision on the re-merge loop");
+
+        // True (cap reached) -> distinct event -> terminal; never loops back to MergeAndComplete.
+        var capReached = fc.Connections.FirstOrDefault(c =>
+            c.Source.Activity?.Id == "MergeRetryCapCheck" && c.Source.Port == "True");
+        capReached.Should().NotBeNull();
+        capReached!.Target.Activity!.Id.Should().Be("EmitMergeLoopExhausted");
+
+        var exhaustedToResult = fc.Connections.FirstOrDefault(c => c.Source.Activity?.Id == "EmitMergeLoopExhausted");
+        exhaustedToResult!.Target.Activity!.Id.Should().Be("BuildMergeExhaustedResult");
+        var toFinish = fc.Connections.FirstOrDefault(c => c.Source.Activity?.Id == "BuildMergeExhaustedResult");
+        toFinish!.Target.Activity.Should().BeOfType<Finish>("the capped merge loop must terminate, not cycle");
+
+        // Under the cap, it re-merges (capture -> emit escalated -> merge).
+        var underCap = fc.Connections.FirstOrDefault(c =>
+            c.Source.Activity?.Id == "MergeRetryCapCheck" && c.Source.Port == "False");
+        underCap!.Target.Activity!.Id.Should().Be("CaptureEscalated");
+    }
+
+    [Test]
+    public void MergeFailedEdge_EmitsMergedFailedEvent_BeforeEscalating_ReviewFix()
+    {
+        // CODE_REVIEW.MERGED.FAILED was defined but never emitted — the MergeAndComplete.Failed
+        // edge must now pass through an emit node before escalating.
+        var fc = Build();
+        var failedEdge = fc.Connections.FirstOrDefault(c =>
+            c.Source.Activity?.Id == "MergeAndComplete" && c.Source.Port == "Failed");
+        failedEdge.Should().NotBeNull();
+        failedEdge!.Target.Activity!.Id.Should().Be("EmitMergeFailed",
+            "the merge-failed edge must emit CODE_REVIEW.MERGED.FAILED before escalating");
+
+        var emitToEscalate = fc.Connections.FirstOrDefault(c => c.Source.Activity?.Id == "EmitMergeFailed");
+        emitToEscalate!.Target.Activity!.Id.Should().Be("EscalateMerge");
+    }
+
+    [Test]
+    public void PrCreationFailure_HasItsOwnTerminal_WithNonEmptyMessage_ReviewFix()
+    {
+        // PR-creation failure must NOT reuse the validation-failed terminal (whose message is
+        // empty on this path). It has a dedicated terminal that reaches Finish.
+        var fc = Build();
+        var prFailedEdge = fc.Connections.FirstOrDefault(c => c.Source.Activity?.Id == "EmitPrFailed");
+        prFailedEdge.Should().NotBeNull();
+        prFailedEdge!.Target.Activity!.Id.Should().Be("BuildPrFailedResult",
+            "PR-creation failure must build its own result with a specific message, not reuse the empty validation message");
+
+        var toFinish = fc.Connections.FirstOrDefault(c => c.Source.Activity?.Id == "BuildPrFailedResult");
+        toFinish!.Target.Activity.Should().BeOfType<Finish>();
+    }
+
+    [Test]
+    public void LlmDispatches_PassOnlyDataPlaceholders_NoInertPromptVariable_ReviewFix()
+    {
+        // The hand-written variables["prompt"] is inert (LlmCallWorkflow reads top-level
+        // prompt/taskPrompt, not variables). It must be dropped — the seeded role+action
+        // template is the prompt; only data placeholders are passed. (Match the ASSIGNMENT
+        // form so the explanatory doc-comments that mention variables["prompt"] don't trip it.)
+        var src = ReadWorkflowSource();
+        src.Should().NotContain("[\"prompt\"] =",
+            "the inert variables[\"prompt\"] = ... assignment must be dropped from the llm-call dispatches");
+    }
+
+    [Test]
+    public void HasMergeRetryCountVariable_ReviewFix()
+    {
+        var builder = WorkflowTestHelper.BuildWorkflow(new CodeReviewWorkflow());
+        var names = builder.Object.Variables.Select(v => v.Name).ToHashSet();
+        names.Should().Contain("MergeRetryCount", "the re-merge loop must track a bounded retry count");
+    }
+
+    private static string ReadWorkflowSource()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            var nested = Path.Combine(dir.FullName, "apps", "tamma-elsa", "src", "Tamma.ElsaServer", "Workflows", "CodeReviewWorkflow.cs");
+            if (File.Exists(nested)) return File.ReadAllText(nested);
+            var flat = Path.Combine(dir.FullName, "src", "Tamma.ElsaServer", "Workflows", "CodeReviewWorkflow.cs");
+            if (File.Exists(flat)) return File.ReadAllText(flat);
+            dir = dir.Parent;
+        }
+        throw new DirectoryNotFoundException("Could not locate CodeReviewWorkflow.cs source.");
     }
 
     [Test]
