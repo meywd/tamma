@@ -2167,6 +2167,10 @@ workflows.MapGet("/instances/{id}/events", WorkflowEndpoints.GetInstanceEvents);
 // so a caller can only resume a gate in its OWN tenant (cross-tenant → 404).
 var adl = app.MapGroup("/api/adl").RequireAuthorization("WorkflowsManage");
 adl.MapPost("/merge-approval/resume", AdlEndpoints.ResumeMergeApproval);
+// Production-deploy approval gate (completeness audit P0 item 3). Resumes the
+// tenant+repo+SHA-scoped adl-deploy-prod-approval-{tenant}-{repo}-{issue}-{sha}
+// bookmark; approver derived server-side (I2); tenant-scoped (cross-tenant → 404).
+adl.MapPost("/deploy-approval/resume", AdlEndpoints.ResumeDeploymentApproval);
 
 // ── GitHub App (no auth, webhook signature verification) ──
 // Audit finding 017 — webhook gets the GitHubWebhook policy (300/min). The

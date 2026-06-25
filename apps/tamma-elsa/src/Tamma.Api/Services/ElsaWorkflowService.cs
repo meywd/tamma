@@ -307,6 +307,56 @@ public partial class ElsaWorkflowService : IElsaWorkflowService
             WorkflowInstanceId: result?.WorkflowInstanceId);
     }
 
+    /// <summary>
+    /// Completeness audit P0 item 3 — forward a deployment-pipeline
+    /// production-approval gate resume to the engine's in-process resume endpoint,
+    /// which looks up the tenant+repo+SHA-scoped
+    /// <c>adl-deploy-prod-approval-{tenant}-{repo}-{issue}-{mergeSha}</c> bookmark
+    /// and runs the owning instance with <c>{decision, feedback, approver}</c>
+    /// injected as input. A 404 (no gate waiting) is surfaced as
+    /// <see cref="MergeApprovalResumeResult.GateNotFound"/> rather than thrown.
+    /// </summary>
+    public async Task<MergeApprovalResumeResult> ResumeDeploymentApprovalAsync(
+        int issueNumber, string? tenantId, string? repository, string? mergeSha,
+        string decision, string? feedback, string? approver)
+    {
+        _logger.LogInformation(
+            "Resuming deploy-approval gate for issue #{Issue} (decision={Decision})",
+            issueNumber, SanitizeForLog(decision));
+
+        await EnsureHealthyAsync();
+
+        var payload = new
+        {
+            issueNumber,
+            // Tenant + repo + sha scope the engine's bookmark lookup.
+            tenantId,
+            repository,
+            mergeSha,
+            decision,
+            feedback,
+            approver,
+        };
+
+        var response = await _httpClient.PostAsJsonAsync(
+            "/elsa/api/adl/deploy-approval/resume", payload, JsonOptions);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning(
+                "No deploy-approval gate waiting for issue #{Issue}", issueNumber);
+            return new MergeApprovalResumeResult(Resumed: false, GateNotFound: true, WorkflowInstanceId: null);
+        }
+
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<EngineResumeResponse>(JsonOptions);
+        return new MergeApprovalResumeResult(
+            Resumed: result?.Resumed ?? true,
+            GateNotFound: false,
+            WorkflowInstanceId: result?.WorkflowInstanceId);
+    }
+
     private sealed class EngineResumeResponse
     {
         public bool Resumed { get; set; }

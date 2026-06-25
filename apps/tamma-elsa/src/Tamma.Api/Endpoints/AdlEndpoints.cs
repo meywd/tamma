@@ -131,6 +131,94 @@ public static class AdlEndpoints
         }
     }
 
+    /// <summary>Decisions the production-deploy gate accepts (case-insensitive).
+    /// Anything else is rejected with 400 up front so the caller never forwards an
+    /// arbitrary string that would silently route to the prod-failure terminal.</summary>
+    private static readonly HashSet<string> AllowedDeployDecisions =
+        new(StringComparer.OrdinalIgnoreCase) { "approve", "reject" };
+
+    /// <summary>
+    /// Resume request for the production-deploy approval gate. <c>Approver</c> is
+    /// intentionally absent — derived from the authenticated caller (I2), never
+    /// trusted from the client.
+    /// </summary>
+    public sealed record DeployApprovalDecisionRequest(
+        int IssueNumber,
+        string Repository,
+        string MergeSha,
+        string Decision,
+        string? Feedback);
+
+    /// <summary>
+    /// Resume the production-deploy approval gate for an issue with a human
+    /// decision (completeness audit P0 item 3).
+    /// Route: <c>POST /api/adl/deploy-approval/resume</c>.
+    /// </summary>
+    public static async Task<IResult> ResumeDeploymentApproval(
+        [FromBody] DeployApprovalDecisionRequest req,
+        [FromServices] IElsaWorkflowService elsa,
+        [FromServices] ITenantContext tenantContext,
+        ClaimsPrincipal principal,
+        [FromServices] ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("Tamma.Api.AdlEndpoints");
+
+        if (string.IsNullOrWhiteSpace(req.Decision))
+            return Results.BadRequest(new { error = "decision is required (approve|reject)" });
+        if (!AllowedDeployDecisions.Contains(req.Decision.Trim()))
+            return Results.BadRequest(new { error = "decision must be one of: approve, reject" });
+        if (req.IssueNumber <= 0)
+            return Results.BadRequest(new { error = "issueNumber is required (> 0)" });
+        if (string.IsNullOrWhiteSpace(req.Repository))
+            return Results.BadRequest(new { error = "repository is required (owner/repo)" });
+        if (string.IsNullOrWhiteSpace(req.MergeSha))
+            return Results.BadRequest(new { error = "mergeSha is required" });
+
+        // Scope the resume to the caller's ambient tenant — the engine folds it
+        // into the bookmark name so a caller can only resolve a gate in its OWN
+        // tenant. (Ambient null = self-hosted single-user scope.)
+        var tenantId = tenantContext.TenantId?.ToString();
+
+        // I2 — the approver is the authenticated caller, derived server-side. A
+        // client-supplied approver is never honoured so the audit can't be forged.
+        var approver = ResolveApprover(principal);
+
+        try
+        {
+            var result = await elsa.ResumeDeploymentApprovalAsync(
+                req.IssueNumber, tenantId, req.Repository, req.MergeSha,
+                req.Decision, req.Feedback, approver);
+
+            if (result.GateNotFound)
+            {
+                return Results.NotFound(new
+                {
+                    error = "gate_not_waiting",
+                    detail = "No production-deploy approval gate is currently suspended for this issue/SHA.",
+                });
+            }
+
+            logger.LogInformation(
+                "Drove deploy-approval gate for issue #{Issue} with decision {Decision} (approver {Approver})",
+                req.IssueNumber, LogSanitizer.Clean(req.Decision), LogSanitizer.Clean(approver));
+
+            return Results.Ok(new
+            {
+                resumed = result.Resumed,
+                workflowInstanceId = result.WorkflowInstanceId,
+                decision = req.Decision,
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Failed to resume deploy-approval gate for issue #{Issue}", req.IssueNumber);
+            return Results.Problem(
+                detail: "Failed to resume the production-deploy approval gate.",
+                statusCode: StatusCodes.Status502BadGateway);
+        }
+    }
+
     /// <summary>
     /// Derive the approver identity from the authenticated principal (I2):
     /// email → display name → subject id. Falls back to <c>"unknown"</c> only if

@@ -51,6 +51,10 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var botAssignee = builder.WithVariable<string>("BotAssignee", "tamma-bot");
         var baseBranch = builder.WithVariable<string>("BaseBranch", "main");
         var tenantId = builder.WithVariable<string>("TenantId", "");
+        // Deployment mode (dev | business) — drives the deployment pipeline's
+        // production approval gate (Business Mode requires human approval before
+        // prod). Read from input; defaults to dev when absent.
+        var mode = builder.WithVariable<string>("Mode", "");
 
         // Conventions (loaded from repo config)
         var conventions = builder.WithVariable<string>("Conventions", "");
@@ -97,6 +101,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 baseBranch.Set(ctx, ctx.GetInput<string>("baseBranch") ?? "main");
                 issueNumber.Set(ctx, ctx.GetInput<int>("issueNumber"));
                 tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
+                mode.Set(ctx, ctx.GetInput<string>("mode") ?? "");
                 return (object)repo;
             }),
         };
@@ -692,6 +697,11 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ["mergeSha"] = mergeSha.Get(ctx),
                 ["issueNumber"] = issueNumber.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
+                // Thread mode + tenant so the pipeline's production approval gate
+                // is mode-aware (Business Mode → human approval) and its DCB
+                // events / bookmarks are tenant-scoped.
+                ["mode"] = mode.Get(ctx),
+                ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true), // wait — need deployment result before reporting
             Result = new(subResult),
