@@ -284,18 +284,24 @@ public class SingleIssueCycleRoutingTests
     }
 
     [Test]
-    public void TddForTask_Failed_ConnectsTo_IncrementTask()
+    public void TddForTask_Failed_RoutesToDebugRetry_NotSilentAdvance()
     {
-        // Preserves prior DispatchWorkflow semantics: the loop advanced
-        // regardless of the sub-workflow's success flag.
-        var hasConnection = _flowchart.Connections.Any(c =>
+        // Completeness audit Phase A §Missing #3 — the old silent advance
+        // (Failed → IncrementTask) was the false-success hole and is now REMOVED.
+        // A failed task must route through tdd-with-debug-retry instead.
+        _flowchart.Connections.Any(c =>
             c.Source.Activity.Id == "TddForTask" &&
             c.Source.Port == "Failed" &&
-            c.Target.Activity.Id == "IncrementTask");
+            c.Target.Activity.Id == "IncrementTask")
+            .Should().BeFalse(
+                "a failed TDD task must NOT advance the loop silently (the false-success hole)");
 
-        hasConnection.Should().BeTrue(
-            "TddForTask 'Failed' outcome must still advance the loop — matches prior " +
-            "DispatchWorkflow semantics (the loop ignored the sub-workflow's success flag)");
+        _flowchart.Connections.Any(c =>
+            c.Source.Activity.Id == "TddForTask" &&
+            c.Source.Port == "Failed" &&
+            c.Target.Activity.Id == "DispatchTddRetry")
+            .Should().BeTrue(
+                "a failed TDD task must route through the bounded tdd-with-debug-retry sub-workflow");
     }
 
     [Test]
@@ -361,11 +367,20 @@ public class SingleIssueCycleRoutingTests
         ReadDefinitionId(gate!).Should().Be("merge-approval",
             "the merge gate must dispatch the merge-approval workflow (previously orphaned)");
 
+        // Completeness audit Phase A §Missing #4 — a CI gate (ci-with-debug-retry) now
+        // sits between the TDD loop and the merge gate. The TDD loop completion enters
+        // the CI gate; ONLY a CI pass proceeds to the merge-approval gate.
         _flowchart.Connections.Any(c =>
             c.Source.Activity.Id == "HasMoreTasks" &&
             c.Source.Port == "False" &&
+            c.Target.Activity.Id == "CiGate")
+            .Should().BeTrue("the CI gate must be entered when the TDD loop is done");
+
+        _flowchart.Connections.Any(c =>
+            c.Source.Activity.Id == "CiOk" &&
+            c.Source.Port == "True" &&
             c.Target.Activity.Id == "MergeApprovalGate")
-            .Should().BeTrue("the gate must be entered when the TDD loop is done");
+            .Should().BeTrue("only a CI pass may proceed to the merge-approval gate");
     }
 
     [Test]
