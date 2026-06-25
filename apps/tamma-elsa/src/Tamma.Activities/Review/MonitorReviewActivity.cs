@@ -18,6 +18,21 @@ namespace Tamma.Activities.Review;
 ///   - Approved: reviewer approved the PR
 ///   - ChangesRequested: reviewer requested changes
 ///   - TimedOut: no review within the timeout window
+///
+/// <para><b>Durable review-response timeout (review fix 2026-06-25, code-review P0).</b> Two
+/// resume paths are armed when the activity suspends: the review bookmark
+/// (<c>review-{session}-{pr}</c>) resumed by the reviewer webhook → <see cref="Approved"/> /
+/// <see cref="ChangesRequested"/>; and a DURABLE delay bookmark via
+/// <see cref="Elsa.Extensions.DelayActivityExecutionContextExtensions.DelayFor(ActivityExecutionContext, System.TimeSpan, ExecuteActivityDelegate)"/>
+/// at the timeout → <see cref="TimedOut"/>. The build-out only stored an in-memory deadline
+/// and checked it INSIDE the resume callback — but if the reviewer never responds the callback
+/// never fires, so the <c>TimedOut</c> outcome was runtime-unreachable and the instance
+/// suspended forever. The Delay bookmark is EF-persisted and re-armed by
+/// <c>Elsa.Scheduling</c>'s startup task on rehydration, so a never-answered review now
+/// terminates as a real <c>TimedOut</c> even across a host restart. Whichever path resumes
+/// first completes the activity; Elsa burns the remaining bookmark (no orphaned timer /
+/// double-resume). The in-memory deadline is retained as a belt-and-braces guard inside the
+/// real-resume path.</para>
 /// </summary>
 [Activity(
     "Tamma.Review",
@@ -66,10 +81,11 @@ public class MonitorReviewActivity : Activity
             "Creating review bookmark {BookmarkName}, timeout {TimeoutHours}h",
             bookmarkName, timeoutHours);
 
-        // Store the deadline so we can check on resume
+        // Store the deadline so we can guard on resume (belt-and-braces).
         context.SetVariable("ReviewDeadline", DateTime.UtcNow.AddHours(timeoutHours));
 
-        // Create the bookmark — workflow suspends here
+        // 1) Review bookmark — resumed by the reviewer webhook. The workflow suspends here
+        //    until this resumes OR the durable timeout delay below fires.
         context.CreateBookmark(
             new CreateBookmarkArgs
             {
@@ -77,6 +93,39 @@ public class MonitorReviewActivity : Activity
                 Callback = OnReviewReceivedAsync,
                 AutoBurn = true
             });
+
+        // 2) Durable review timeout — a DelayFor (Delay) bookmark that Elsa.Scheduling's
+        //    startup task RE-ARMS after a host restart (EF-persisted, not an in-memory timer).
+        //    A never-answered review terminates as a real TimedOut even across a restart.
+        //    A non-positive timeout disables the deadline (wait indefinitely).
+        if (timeoutHours > 0)
+        {
+            context.DelayFor(TimeSpan.FromHours(timeoutHours), OnTimeoutAsync);
+        }
+    }
+
+    /// <summary>
+    /// Durable timeout path: the review window elapsed with no webhook. The Delay bookmark
+    /// scheduler resumes the activity here (and re-arms across a host restart). Takes the
+    /// <c>TimedOut</c> outcome instead of suspending forever; the still-armed review bookmark
+    /// is burned on completion.
+    /// </summary>
+    private async ValueTask OnTimeoutAsync(ActivityExecutionContext context)
+    {
+        var sessionId = SessionId.Get(context);
+        var prNumber = PRNumber.Get(context);
+
+        _logger?.LogWarning(
+            "Review window expired (durable timeout) for PR #{PRNumber}, session {SessionId} — taking the TimedOut outcome",
+            prNumber, sessionId);
+
+        ReviewResult.Set(context, new Models.ReviewResult
+        {
+            Status = PRReviewStatus.TimedOut,
+            SubmittedAt = DateTime.UtcNow
+        });
+
+        await context.CompleteActivityWithOutcomesAsync("TimedOut");
     }
 
     private async ValueTask OnReviewReceivedAsync(ActivityExecutionContext context)

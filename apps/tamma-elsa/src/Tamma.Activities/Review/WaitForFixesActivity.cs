@@ -17,6 +17,20 @@ namespace Tamma.Activities.Review;
 /// Outcomes:
 ///   - FixesReceived: junior pushed fixes
 ///   - TimedOut: no fixes within the timeout window
+///
+/// <para><b>Durable hour-granular fix-submission wait (review fix 2026-06-25, code-review P0).</b>
+/// Two resume paths are armed when the activity suspends: the fixes bookmark
+/// (<c>fixes-{session}-{pr}-{iteration}</c>) resumed by the junior's push →
+/// <see cref="FixesReceived"/>; and a DURABLE delay bookmark via
+/// <see cref="Elsa.Extensions.DelayActivityExecutionContextExtensions.DelayFor(ActivityExecutionContext, System.TimeSpan, ExecuteActivityDelegate)"/>
+/// at the timeout → <see cref="TimedOut"/>. The build-out only stored an in-memory deadline and
+/// checked it INSIDE the resume callback — but if the junior never pushes, the callback never
+/// fires, so the <c>TimedOut</c> outcome was runtime-unreachable and the instance suspended
+/// forever. The Delay bookmark is EF-persisted and re-armed by <c>Elsa.Scheduling</c>'s startup
+/// task on rehydration, so an unanswered fix request now terminates as a real <c>TimedOut</c>
+/// even across a host restart. Whichever path resumes first completes the activity; Elsa burns
+/// the remaining bookmark. The wait is hour-granular: <see cref="TimeoutHours"/> is supplied by
+/// the workflow's resolved <c>CodeReview:FixTimeoutMinutes</c> config, floored at 1h.</para>
 /// </summary>
 [Activity(
     "Tamma.Review",
@@ -70,10 +84,11 @@ public class WaitForFixesActivity : Activity
             "Creating fixes bookmark {BookmarkName}, timeout {TimeoutHours}h",
             bookmarkName, timeoutHours);
 
-        // Store deadline for timeout check on resume
+        // Store deadline for the belt-and-braces guard on resume.
         context.SetVariable("FixDeadline", DateTime.UtcNow.AddHours(timeoutHours));
 
-        // Create the bookmark — workflow suspends here
+        // 1) Fixes bookmark — resumed by the junior's push. The workflow suspends here until
+        //    this resumes OR the durable timeout delay below fires.
         context.CreateBookmark(
             new CreateBookmarkArgs
             {
@@ -81,6 +96,34 @@ public class WaitForFixesActivity : Activity
                 Callback = OnFixesReceivedAsync,
                 AutoBurn = true
             });
+
+        // 2) Durable fix-submission timeout — a DelayFor (Delay) bookmark that Elsa.Scheduling's
+        //    startup task RE-ARMS after a host restart (EF-persisted, not an in-memory timer).
+        //    A never-answered fix request terminates as a real TimedOut even across a restart.
+        //    A non-positive timeout disables the deadline (wait indefinitely).
+        if (timeoutHours > 0)
+        {
+            context.DelayFor(TimeSpan.FromHours(timeoutHours), OnTimeoutAsync);
+        }
+    }
+
+    /// <summary>
+    /// Durable timeout path: the fix-submission window elapsed with no push. The Delay bookmark
+    /// scheduler resumes the activity here (and re-arms across a host restart). Takes the
+    /// <c>TimedOut</c> outcome instead of suspending forever; the still-armed fixes bookmark is
+    /// burned on completion.
+    /// </summary>
+    private async ValueTask OnTimeoutAsync(ActivityExecutionContext context)
+    {
+        var prNumber = PRNumber.Get(context);
+        var iteration = Iteration.Get(context);
+
+        _logger?.LogWarning(
+            "Fix-submission window expired (durable timeout) for PR #{PRNumber}, iteration {Iteration} — taking the TimedOut outcome",
+            prNumber, iteration);
+
+        FixesPayload.Set(context, null);
+        await context.CompleteActivityWithOutcomesAsync("TimedOut");
     }
 
     private async ValueTask OnFixesReceivedAsync(ActivityExecutionContext context)
