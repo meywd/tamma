@@ -647,6 +647,59 @@ public class AdminTenantsTests
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }
 
+    // ── Cancel-delete action (Story 28-5 AC4) ──
+
+    [Test]
+    public async Task CancelDeleteTenant_InDeletingState_FlipsToActive_ClearsDeleteRequestedAt_AndEmitsCancelled()
+    {
+        var tenantId = await SeedTenantAsync(
+            status: "deleting", deleteRequestedAt: DateTime.UtcNow.AddMinutes(-1));
+
+        var result = await AdminTenantsEndpoints.CancelDeleteTenant(
+            tenantId, _db, _publisher, _statusCache, _connectionResolver,
+            _invalidationBus, _timeProvider, AdminPrincipal());
+
+        var ok = result.Should().BeOfType<Ok<AdminTenantActionResponse>>().Subject;
+        ok.Value!.Status.Should().Be("active");
+
+        var reloaded = await _db.Tenants.IgnoreQueryFilters()
+            .FirstAsync(t => t.Id == tenantId);
+        ((string?)_db.Entry(reloaded).Property("Status").CurrentValue)
+            .Should().Be("active");
+        ((DateTime?)_db.Entry(reloaded).Property("DeleteRequestedAt").CurrentValue)
+            .Should().BeNull("cancel clears the delete-requested stamp");
+
+        _publisher.Events.Should().ContainSingle(
+            e => e.Type == "TENANT.DELETE_CANCELLED" && e.TenantId == tenantId);
+
+        _statusCache.Invalidations.Should().Contain(tenantId);
+        _connectionResolver.Evictions.Should().Contain(tenantId);
+        _invalidationBus.Publishes.Should().Contain(tenantId);
+    }
+
+    [Test]
+    public async Task CancelDeleteTenant_InActiveState_Returns409()
+    {
+        var tenantId = await SeedTenantAsync(status: "active");
+
+        var result = await AdminTenantsEndpoints.CancelDeleteTenant(
+            tenantId, _db, _publisher, _statusCache, _connectionResolver,
+            _invalidationBus, _timeProvider, AdminPrincipal());
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
+        _publisher.Events.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task CancelDeleteTenant_Returns404_WhenTenantMissing()
+    {
+        var result = await AdminTenantsEndpoints.CancelDeleteTenant(
+            Guid.NewGuid(), _db, _publisher, _statusCache, _connectionResolver,
+            _invalidationBus, _timeProvider, AdminPrincipal());
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status404NotFound);
+    }
+
     // ── Force-delete action ──
 
     [Test]

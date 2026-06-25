@@ -402,6 +402,75 @@ public static class AdminTenantsEndpoints
             "Delete queued — cooling-off period begins now; destructive drop runs after the configured delay."));
     }
 
+    // ── POST /api/admin/tenants/{id}/actions/cancel-delete ──
+
+    /// <summary>
+    /// Story 28-5 AC4 — cancels a pending tenant deletion during the
+    /// cooling-off window. Flips <c>Status</c> → <c>active</c>, clears
+    /// <c>DeleteRequestedAt</c>, invalidates the status cache (+ resolver pool
+    /// + cluster NOTIFY), and emits <c>TENANT.DELETE_CANCELLED</c>. 409 if the
+    /// tenant is not currently <c>deleting</c> (the destructive drop may
+    /// already have run, or never started).
+    ///
+    /// <para><b>Cancellation is honoured even AFTER the trigger dispatches.</b>
+    /// The flip back to <c>active</c> is caught at THREE checkpoints: (1) the
+    /// trigger's pre-dispatch re-read (before the workflow even starts); (2)
+    /// the workflow's mark step (top of run); (3) the workflow's cancellation
+    /// guard immediately before <c>DROP SCHEMA</c>. Any of the three aborts the
+    /// teardown (terminal emits <c>TENANT.DELETE.ABORTED</c>), so a cancel that
+    /// races a just-dispatched workflow does NOT result in a dropped schema.
+    /// The only un-cancellable point is after the irreversible drop has
+    /// physically run — at which point the status is no longer <c>deleting</c>
+    /// and this endpoint returns 409.</para>
+    /// </summary>
+    public static async Task<IResult> CancelDeleteTenant(
+        Guid tenantId,
+        ControlPlaneDbContext db,
+        IPlatformEventPublisher publisher,
+        ITenantStatusCache statusCache,
+        ITenantConnectionResolver connectionResolver,
+        ITenantStatusInvalidationBus invalidationBus,
+        [FromServices] TimeProvider timeProvider,
+        ClaimsPrincipal principal,
+        CancellationToken ct = default)
+    {
+        var tenant = await db.Tenants
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Id == tenantId && t.DeletedAt == null, ct);
+        if (tenant is null)
+            return Results.NotFound(new { error = "tenant_not_found" });
+
+        var current = (string?)db.Entry(tenant).Property("Status").CurrentValue;
+        if (!IsCancelDeletable(current))
+            return IllegalTransition(current, "cancel-delete");
+
+        var now = timeProvider.GetUtcNow().UtcDateTime;
+        db.Entry(tenant).Property("Status").CurrentValue = StatusActive;
+        db.Entry(tenant).Property("DeleteRequestedAt").CurrentValue = (DateTime?)null;
+        tenant.UpdatedAt = now;
+        await db.SaveChangesAsync(ct);
+        statusCache.Invalidate(tenantId);  // Story 28-8
+        await connectionResolver.EvictAsync(tenantId, ct);  // H12 #2
+        await invalidationBus.PublishAsync(tenantId, ct);  // R2 follow-up — cluster fan-out
+
+        await publisher.AppendAndPublishAsync(
+            BuildAdminEvent(
+                "TENANT.DELETE_CANCELLED",
+                tenantId,
+                principal,
+                new Dictionary<string, object?>
+                {
+                    ["cancelledAt"] = now,
+                    ["source"] = "admin-cancel-delete",
+                }),
+            ct);
+
+        return Results.Ok(new AdminTenantActionResponse(
+            tenantId,
+            StatusActive,
+            "Delete cancelled — tenant restored to active before the destructive drop ran."));
+    }
+
     // ── POST /api/admin/tenants/{id}/actions/force-delete ──
 
     /// <summary>
@@ -870,6 +939,15 @@ public static class AdminTenantsEndpoints
         return string.Equals(status, StatusFailed, StringComparison.OrdinalIgnoreCase)
             || string.Equals(status, StatusDeleting, StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>
+    /// Story 28-5 AC4 — cancel-delete is legal only while the tenant is
+    /// still <c>deleting</c> (i.e. inside the cooling-off window before the
+    /// trigger dispatches the destructive workflow). Once the workflow runs
+    /// the status leaves <c>deleting</c> and the cancel is rejected with 409.
+    /// </summary>
+    private static bool IsCancelDeletable(string? status) =>
+        string.Equals(status, StatusDeleting, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsPlanChangeAllowed(string? status)
     {

@@ -174,6 +174,16 @@ if (!string.IsNullOrWhiteSpace(cpConnection))
                 .GetSection(Tamma.ElsaServer.Workflows.TenantCleanupRequestedTriggerOptions.SectionName)
                 .Bind(opts));
     builder.Services.AddHostedService<Tamma.ElsaServer.Workflows.TenantCleanupRequestedTrigger>();
+
+    // Story 28-5 item #1 — bridge that dispatches DeleteTenantWorkflow from
+    // TENANT.DELETE.REQUESTED rows (with the cooling-off + operator-cancel
+    // checks). Mirrors the cleanup trigger above.
+    builder.Services.AddOptions<Tamma.ElsaServer.Workflows.TenantDeleteRequestedTriggerOptions>()
+        .Configure(opts =>
+            builder.Configuration
+                .GetSection(Tamma.ElsaServer.Workflows.TenantDeleteRequestedTriggerOptions.SectionName)
+                .Bind(opts));
+    builder.Services.AddHostedService<Tamma.ElsaServer.Workflows.TenantDeleteRequestedTrigger>();
 }
 
 // CORS for Tamma API and Dashboard
