@@ -256,5 +256,11 @@ public class PostgresRoleRotationHandlerTests
 
         public Task<string?> GetVersionPlaintextAsync(Guid secretId, int v, CancellationToken ct) =>
             Task.FromResult(Plaintexts.TryGetValue((secretId, v), out var p) ? p : null);
+
+        public Task<bool> TryBeginRotationAsync(Guid secretId, string rotationCorrelationId, CancellationToken ct) =>
+            Task.FromResult(true);
+
+        public Task EndRotationAsync(Guid secretId, string rotationCorrelationId, CancellationToken ct) =>
+            Task.CompletedTask;
     }
 }

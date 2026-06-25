@@ -91,6 +91,18 @@ public class SecretsDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.SecretId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // Story 29-6 (review fix) — at most ONE in-flight rotation per
+            // secret, enforced in SQL. A partial unique index on SecretId
+            // WHERE Status = 'pending' closes the TryBeginRotationAsync
+            // TOCTOU: two concurrent triggers that both observe "no pending"
+            // can no longer both mint — the loser's INSERT raises a unique
+            // violation, which the gateway maps to a clean rotation-rejected
+            // result (no silent plaintext collapse / double-push).
+            entity.HasIndex(e => e.SecretId)
+                .HasDatabaseName("UX_secret_versions_OnePendingPerSecret")
+                .HasFilter("\"Status\" = 'pending'")
+                .IsUnique();
         });
     }
 }

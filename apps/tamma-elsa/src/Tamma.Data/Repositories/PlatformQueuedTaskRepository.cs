@@ -78,6 +78,15 @@ public sealed class PlatformQueuedTaskRepository : IPlatformQueuedTaskRepository
         // flip to processing, return every column. FOR UPDATE SKIP LOCKED
         // lets concurrent workers in a multi-pod deploy each pick a
         // different row without retrying on lock contention.
+        //
+        // Story 29-6 (review fix) — the VisibleAt guard:
+        //   ("VisibleAt" IS NULL OR "VisibleAt" <= now)
+        // is BACKWARD-COMPATIBLE. Every existing producer (MoveTenant,
+        // ProvisionTenantV2, CreateBillingCustomer, installation routing)
+        // leaves VisibleAt NULL ⇒ the predicate is always true ⇒ their
+        // reservation is byte-for-byte unchanged. Only RETIRE_SECRET_VERSION
+        // sets VisibleAt = runAfter, so a not-yet-due retire is simply not
+        // reserved (never re-delivered, never dead-lettered before its grace).
         var rows = await _db.PlatformQueuedTasks.FromSqlInterpolated($"""
             UPDATE platform_queued_tasks
             SET "Status" = 'processing',
@@ -87,6 +96,7 @@ public sealed class PlatformQueuedTaskRepository : IPlatformQueuedTaskRepository
             WHERE "Id" = (
                 SELECT "Id" FROM platform_queued_tasks
                 WHERE "Status" = 'pending'
+                  AND ("VisibleAt" IS NULL OR "VisibleAt" <= {now})
                 ORDER BY "CreatedAt" ASC
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
@@ -100,14 +110,18 @@ public sealed class PlatformQueuedTaskRepository : IPlatformQueuedTaskRepository
     private async Task<PlatformQueuedTask?> ReserveViaNaivePathAsync(
         string workerId, CancellationToken ct)
     {
+        // Story 29-6 (review fix) — mirror the Postgres VisibleAt guard so
+        // the InMemory test path enforces the same not-yet-due semantics:
+        // a row with a future VisibleAt is skipped (NULL = always visible).
+        var now = DateTime.UtcNow;
         var task = await _db.PlatformQueuedTasks
-            .Where(t => t.Status == "pending")
+            .Where(t => t.Status == "pending"
+                && (t.VisibleAt == null || t.VisibleAt <= now))
             .OrderBy(t => t.CreatedAt)
             .FirstOrDefaultAsync(ct);
 
         if (task is null) return null;
 
-        var now = DateTime.UtcNow;
         task.Status = "processing";
         task.ClaimedAt = now;
         task.ClaimedBy = workerId;
@@ -185,6 +199,24 @@ public sealed class PlatformQueuedTaskRepository : IPlatformQueuedTaskRepository
 
         await _db.SaveChangesAsync(ct);
         return task;
+    }
+
+    public async Task DeferAsync(Guid id, DateTime visibleAt, CancellationToken ct = default)
+    {
+        var task = await _db.PlatformQueuedTasks.FindAsync(new object[] { id }, ct);
+        if (task is null) return;
+
+        var now = DateTime.UtcNow;
+        // Return to the pending pool WITHOUT touching RetryCount — a defer
+        // is not a failure. The (re)set VisibleAt keeps ReserveNextAsync from
+        // re-claiming the row until the window opens, so the row can't be
+        // re-delivered every poll and can't dead-letter before it is due.
+        task.Status = "pending";
+        task.ClaimedAt = null;
+        task.ClaimedBy = null;
+        task.VisibleAt = visibleAt;
+        task.UpdatedAt = now;
+        await _db.SaveChangesAsync(ct);
     }
 
     public async Task DeadLetterAsync(Guid id, string error, CancellationToken ct = default)

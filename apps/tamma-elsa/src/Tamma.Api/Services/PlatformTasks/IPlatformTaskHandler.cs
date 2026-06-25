@@ -55,3 +55,22 @@ public sealed class PlatformTaskTerminalException : Exception
     public PlatformTaskTerminalException(string message, Exception inner)
         : base(message, inner) { }
 }
+
+/// <summary>
+/// Story 29-6 (review fix) — throw from
+/// <see cref="IPlatformTaskHandler.HandleAsync"/> AFTER the handler has
+/// itself returned the row to <c>pending</c> (e.g. via
+/// <c>IPlatformQueuedTaskRepository.DeferAsync</c>) to tell the worker the
+/// row is already in its desired state: the worker must NOT
+/// <c>CompleteAsync</c> (which would clobber the defer) and must NOT
+/// <c>FailAsync</c> (which would burn the retry budget / dead-letter).
+///
+/// <para>This is a no-op acknowledgement, not a failure. Only the retire
+/// handler's clock-skew not-yet-due path uses it; every other handler is
+/// completely unaffected (they never throw it, so their
+/// complete/fail/dead-letter behaviour is byte-for-byte unchanged).</para>
+/// </summary>
+public sealed class PlatformTaskDeferredException : Exception
+{
+    public PlatformTaskDeferredException(string message) : base(message) { }
+}

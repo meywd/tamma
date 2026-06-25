@@ -1,11 +1,33 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Tamma.Activities.SecretsRotation.Contracts;
 using Tamma.Api.Services.Secrets.Postgres;
 using Tamma.Data.Entities;
 
 namespace Tamma.Api.Services.Secrets.Rotation;
+
+/// <summary>
+/// Options for <see cref="SecretStoreRotationGateway"/>. Bound to the
+/// <c>SecretRotationGateway</c> configuration section.
+/// </summary>
+public sealed class SecretRotationGatewayOptions
+{
+    public const string SectionName = "SecretRotationGateway";
+
+    /// <summary>
+    /// Story 29-6 (review fix) — max age of a <c>pending</c> version row
+    /// before it is treated as ABANDONED (a saga that crashed after mint).
+    /// A stale pending marker older than this is reclaimable: the next
+    /// rotation trigger deletes it (+ scrubs its backend bytes) and
+    /// proceeds, so a crashed run can't wedge the secret forever. Default
+    /// 1 hour — comfortably longer than any healthy rotation saga (mint →
+    /// push → probe → activate completes in seconds-to-minutes), so a live
+    /// rotation is never mistaken for abandoned.
+    /// </summary>
+    public TimeSpan StalePendingTtl { get; set; } = TimeSpan.FromHours(1);
+}
 
 /// <summary>
 /// Story 29-6 — bridges the rotation activities'
@@ -29,24 +51,26 @@ namespace Tamma.Api.Services.Secrets.Rotation;
 /// </summary>
 public sealed class SecretStoreRotationGateway : ISecretRotationGateway
 {
-    private readonly IServiceProvider _services;
+    private readonly IDbContextFactory<SecretsDbContext> _dbFactory;
     private readonly ISecretStoreBackend _backend;
+    private readonly SecretRotationGatewayOptions _options;
     private readonly ILogger<SecretStoreRotationGateway> _logger;
 
     public SecretStoreRotationGateway(
-        IServiceProvider services,
+        IDbContextFactory<SecretsDbContext> dbFactory,
         ISecretStoreBackend backend,
+        IOptions<SecretRotationGatewayOptions> options,
         ILogger<SecretStoreRotationGateway> logger)
     {
-        _services = services;
+        _dbFactory = dbFactory;
         _backend = backend;
+        _options = options?.Value ?? new SecretRotationGatewayOptions();
         _logger = logger;
     }
 
     public async Task<SecretRotationSnapshot?> GetSnapshotAsync(Guid secretId, CancellationToken ct)
     {
-        using var scope = _services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<SecretsDbContext>();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         var row = await db.Secrets
             .AsNoTracking()
             .FirstOrDefaultAsync(s => s.Id == secretId, ct)
@@ -70,8 +94,7 @@ public sealed class SecretStoreRotationGateway : ISecretRotationGateway
         Guid operatorUserId,
         CancellationToken ct)
     {
-        using var scope = _services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<SecretsDbContext>();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
 
         // Idempotency — if a pending version already exists (e.g.
         // Elsa replayed the activity), return its number.
@@ -109,7 +132,28 @@ public sealed class SecretStoreRotationGateway : ISecretRotationGateway
             CreatedAt = DateTime.UtcNow,
             CreatedByUserId = operatorUserId,
         });
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (IsPendingUniqueViolation(ex))
+        {
+            // Story 29-6 (review fix) — the partial unique index
+            // UX_secret_versions_OnePendingPerSecret rejected this INSERT:
+            // a CONCURRENT rotation won the race and minted its own pending
+            // version between our "no existing pending" read and this write.
+            // This closes the TOCTOU: we must NOT silently reuse the other
+            // rotation's row (that was the silent-collapse + double-push
+            // bug). Fail loud with a retryable concurrency error so the saga
+            // surfaces SECRET.ROTATION.FAILED(rotation_in_progress) instead.
+            _logger.LogWarning(ex,
+                "Mint lost the per-secret pending-uniqueness race for secret {Secret} " +
+                "(corr {Corr}) — another rotation is in flight.",
+                secretId, rotationCorrelationId);
+            throw new InvalidOperationException(
+                $"rotation_in_progress: secret {secretId} already has an in-flight " +
+                "rotation (a concurrent mint won the per-secret pending claim).", ex);
+        }
 
         await _backend.PutVersionAsync(secretId, next, newPlaintext, ct).ConfigureAwait(false);
 
@@ -118,8 +162,7 @@ public sealed class SecretStoreRotationGateway : ISecretRotationGateway
 
     public async Task DeleteVersionAsync(Guid secretId, int versionNumber, CancellationToken ct)
     {
-        using var scope = _services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<SecretsDbContext>();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         var row = await db.SecretVersions
             .FirstOrDefaultAsync(v => v.SecretId == secretId && v.VersionNumber == versionNumber, ct)
             .ConfigureAwait(false);
@@ -140,8 +183,7 @@ public sealed class SecretStoreRotationGateway : ISecretRotationGateway
         int previousVersionNumber,
         CancellationToken ct)
     {
-        using var scope = _services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<SecretsDbContext>();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
 
         var newRow = await db.SecretVersions
             .FirstOrDefaultAsync(v => v.SecretId == secretId && v.VersionNumber == newVersionNumber, ct)
@@ -186,8 +228,7 @@ public sealed class SecretStoreRotationGateway : ISecretRotationGateway
         int previousVersionNumber,
         CancellationToken ct)
     {
-        using var scope = _services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<SecretsDbContext>();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
 
         var newRow = await db.SecretVersions
             .FirstOrDefaultAsync(v => v.SecretId == secretId && v.VersionNumber == newVersionNumber, ct)
@@ -223,8 +264,7 @@ public sealed class SecretStoreRotationGateway : ISecretRotationGateway
 
     public async Task RetireVersionAsync(Guid secretId, int versionNumber, CancellationToken ct)
     {
-        using var scope = _services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<SecretsDbContext>();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
         var row = await db.SecretVersions
             .FirstOrDefaultAsync(v => v.SecretId == secretId && v.VersionNumber == versionNumber, ct)
             .ConfigureAwait(false);
@@ -252,6 +292,87 @@ public sealed class SecretStoreRotationGateway : ISecretRotationGateway
         {
             return Task.FromResult<string?>(null);
         }
+    }
+
+    public async Task<bool> TryBeginRotationAsync(
+        Guid secretId, string rotationCorrelationId, CancellationToken ct)
+    {
+        // Pre-dispatch guard: a secret with an existing Pending version row
+        // is already mid-rotation. The pending row IS the in-flight marker —
+        // it clears when the saga activates (Pending→Active) or compensates
+        // (deletes it). Two overlapping rotations would otherwise both mint a
+        // pending version and race the version-number sequence + double-push.
+        //
+        // This is a best-effort pre-check (the AUTHORITATIVE TOCTOU close is
+        // the partial unique index UX_secret_versions_OnePendingPerSecret +
+        // the unique-violation catch in MintPendingVersionAsync — two callers
+        // that both pass THIS check still can't both mint). Here we ALSO
+        // reclaim a STALE pending marker so a saga that crashed after mint
+        // can't wedge the secret forever.
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var pending = await db.SecretVersions
+            .Where(v => v.SecretId == secretId && v.Status == "pending")
+            .OrderByDescending(v => v.VersionNumber)
+            .FirstOrDefaultAsync(ct)
+            .ConfigureAwait(false);
+
+        if (pending is null) return true;
+
+        var age = DateTime.UtcNow - pending.CreatedAt;
+        if (age <= _options.StalePendingTtl)
+        {
+            _logger.LogWarning(
+                "Rotation rejected for secret {Secret} (corr {Corr}): a pending version " +
+                "(v{Version}, age {AgeSeconds:0}s) already exists — another rotation is in flight.",
+                secretId, rotationCorrelationId, pending.VersionNumber, age.TotalSeconds);
+            return false;
+        }
+
+        // The pending marker is older than the TTL — treat it as ABANDONED
+        // (a saga that crashed after mint). Reclaim it: hard-delete the row +
+        // scrub its backend bytes so the new rotation can proceed instead of
+        // being wedged forever. Then allow the caller. If a racing reclaim
+        // already removed it (or the row activated under us), the new mint
+        // simply re-checks; the unique index keeps the final state consistent.
+        _logger.LogWarning(
+            "Reclaiming ABANDONED pending version v{Version} for secret {Secret} " +
+            "(corr {Corr}, age {AgeSeconds:0}s > TTL {TtlSeconds:0}s) — a prior rotation " +
+            "saga appears to have crashed after mint; clearing the stale claim.",
+            pending.VersionNumber, secretId, rotationCorrelationId,
+            age.TotalSeconds, _options.StalePendingTtl.TotalSeconds);
+
+        db.SecretVersions.Remove(pending);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await _backend.DeleteVersionAsync(secretId, pending.VersionNumber, ct)
+                .ConfigureAwait(false);
+        }
+        catch (KeyNotFoundException) { /* already scrubbed */ }
+
+        return true;
+    }
+
+    /// <summary>
+    /// True iff <paramref name="ex"/> is the Postgres unique violation
+    /// raised by the per-secret one-pending partial index
+    /// (<c>UX_secret_versions_OnePendingPerSecret</c>). Constrained to that
+    /// constraint name so an unrelated unique violation (e.g. the
+    /// SecretId+VersionNumber index) is NOT swallowed as a concurrency reject.
+    /// </summary>
+    private static bool IsPendingUniqueViolation(DbUpdateException ex)
+        => ex.InnerException is Npgsql.PostgresException pg
+            && pg.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation
+            && (pg.ConstraintName is null
+                || pg.ConstraintName.Contains("OnePendingPerSecret", StringComparison.OrdinalIgnoreCase));
+
+    public Task EndRotationAsync(
+        Guid secretId, string rotationCorrelationId, CancellationToken ct)
+    {
+        // No-op for the status-check backend: the pending version row is
+        // the claim, and it is cleared by activate / compensation. An
+        // advisory-lock backend would release its lock here.
+        return Task.CompletedTask;
     }
 
     /// <summary>

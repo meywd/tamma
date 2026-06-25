@@ -76,6 +76,21 @@ public interface IPlatformQueuedTaskRepository
     Task<PlatformQueuedTask?> ParkUnprocessableAsync(
         Guid id, string reason, int maxRetries, CancellationToken ct = default);
 
+    /// <summary>
+    /// Story 29-6 (review fix) — return a reserved task to <c>pending</c>
+    /// and (re)set its <see cref="PlatformQueuedTask.VisibleAt"/> so it is
+    /// not reserved again until <paramref name="visibleAt"/>. This is a
+    /// defer, NOT a failure: <see cref="PlatformQueuedTask.RetryCount"/> is
+    /// LEFT UNCHANGED so deferring never burns the retry budget or
+    /// dead-letters the row.
+    ///
+    /// <para>Used by the retire handler's belt-and-suspenders not-yet-due
+    /// path (the primary defence is that <see cref="ReserveNextAsync"/>
+    /// won't claim a future-<c>VisibleAt</c> row at all; this covers the
+    /// clock-skew edge where a row was reserved a hair before its window).</para>
+    /// </summary>
+    Task DeferAsync(Guid id, DateTime visibleAt, CancellationToken ct = default);
+
     /// <summary>Read a task by id, or <c>null</c>.</summary>
     Task<PlatformQueuedTask?> GetAsync(Guid id, CancellationToken ct = default);
 

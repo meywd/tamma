@@ -639,6 +639,10 @@ internal static class TammaModelConfiguration
             // Nullable; non-null only on rows currently parked waiting
             // for a handler to be deployed.
             entity.Property(e => e.UnprocessableAt);
+            // Story 29-6 (review fix) — reservation visibility timestamp.
+            // NULL = always visible (every existing producer); a future
+            // value defers reservation until it elapses (RETIRE_SECRET_VERSION).
+            entity.Property(e => e.VisibleAt);
 
             entity.HasIndex(e => new { e.Status, e.CreatedAt });
             entity.HasIndex(e => e.TenantId).HasFilter("\"TenantId\" IS NOT NULL");

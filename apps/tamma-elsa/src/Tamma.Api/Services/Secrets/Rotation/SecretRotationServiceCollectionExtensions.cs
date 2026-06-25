@@ -14,10 +14,21 @@ public static class SecretRotationServiceCollectionExtensions
 {
     public static IServiceCollection AddTammaSecretRotation(this IServiceCollection services)
     {
+        // Story 29-6 (review fix) — gateway options (stale-pending TTL).
+        // Registered so IOptions<SecretRotationGatewayOptions> resolves;
+        // Program.cs binds the SecretRotationGateway config section on top.
+        services.AddOptions<SecretRotationGatewayOptions>();
         services.AddScoped<ISecretRotationGateway, SecretStoreRotationGateway>();
         services.AddSingleton<IRotationHandlerRegistry, KeyedRotationHandlerRegistry>();
         services.AddScoped<IRotationAuditEmitter, RotationAuditEmitter>();
+        // Story 29-6 AC8 — the single-version retire body shared by the
+        // periodic sweeper and the per-task RetireSecretVersionTaskHandler.
+        services.AddScoped<IRetireTaskExecutor, RetireTaskExecutor>();
         services.AddScoped<IRetireScheduler, RetireScheduler>();
+        // Story 29-6 audit gap #2/#3 — the trigger surface (operator
+        // endpoint + scheduled auto-rotation): concurrency guard, fresh
+        // correlation id, rotate-secret dispatch, REQUESTED/REJECTED audit.
+        services.AddScoped<IRotationTriggerService, RotationTriggerService>();
 
         // Fallback generic-http handler (AC4). Uses a named HttpClient
         // so CI/operator can tune timeouts via the usual HttpClientFactory

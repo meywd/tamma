@@ -263,5 +263,11 @@ public class CranlEnvVarRotationHandlerTests
         public Task RetireVersionAsync(Guid s, int v, CancellationToken ct) => Task.CompletedTask;
         public Task<string?> GetVersionPlaintextAsync(Guid s, int v, CancellationToken ct) =>
             Task.FromResult(Plaintexts.TryGetValue((s, v), out var p) ? p : null);
+
+        public Task<bool> TryBeginRotationAsync(Guid s, string rotationCorrelationId, CancellationToken ct) =>
+            Task.FromResult(true);
+
+        public Task EndRotationAsync(Guid s, string rotationCorrelationId, CancellationToken ct) =>
+            Task.CompletedTask;
     }
 }

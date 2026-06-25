@@ -60,6 +60,16 @@ public sealed record RotationAuditEvent(
 /// </summary>
 public static class RotationAuditEvents
 {
+    /// <summary>Emitted by the trigger surface (operator endpoint /
+    /// scheduled auto-rotation) when a rotation is dispatched to the
+    /// <c>rotate-secret</c> workflow — BEFORE the saga's STARTED.</summary>
+    public const string Requested = "SECRET.ROTATION.REQUESTED";
+
+    /// <summary>Emitted by the trigger surface when the per-secret
+    /// concurrency guard refuses a rotation because one is already in
+    /// flight (<c>rotation_in_progress</c>).</summary>
+    public const string Rejected = "SECRET.ROTATION.REJECTED";
+
     public const string Started = "SECRET.ROTATION.STARTED";
     public const string Staged = "SECRET.ROTATION.STAGED";
 
