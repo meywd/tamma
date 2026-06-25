@@ -343,6 +343,12 @@ internal sealed class StubGateway : ISecretRotationGateway
 
         public Task<string?> GetVersionPlaintextAsync(Guid secretId, int versionNumber, CancellationToken ct) =>
             Task.FromResult(Plaintexts.TryGetValue((secretId, versionNumber), out var p) ? p : null);
+
+        public Task<bool> TryBeginRotationAsync(Guid secretId, string rotationCorrelationId, CancellationToken ct) =>
+            Task.FromResult(true);
+
+        public Task EndRotationAsync(Guid secretId, string rotationCorrelationId, CancellationToken ct) =>
+            Task.CompletedTask;
     }
 
 internal sealed class StubHandler : IRotationHandler

@@ -18,36 +18,35 @@ namespace Tamma.Api.Services.Secrets.Rotation;
 ///     secret id, version number, <c>run_after</c> ISO-8601 timestamp,
 ///     and the rotation correlation id. <c>PlatformQueuedTask</c> in
 ///     28-10 does not yet model a first-class <c>RunAfter</c> column,
-///     so the sweeper filters on payload content.</description></item>
+///     so the drainer filters on payload content.</description></item>
 ///   <item><description><see cref="SweepDueRetireTasksAsync"/>
 ///     drains all pending <c>RETIRE_SECRET_VERSION</c> rows whose
-///     payload <c>runAfter</c> is in the past, calls the gateway's
-///     <see cref="ISecretRotationGateway.RetireVersionAsync"/>, and
-///     invokes the handler's optional <c>RevokeOldAsync</c> hook.
-///     Idempotent: an already-revoked version is a no-op.</description></item>
+///     payload <c>runAfter</c> is in the past via the shared
+///     <see cref="IRetireTaskExecutor"/>. Idempotent: an
+///     already-revoked version is a no-op.</description></item>
 /// </list>
+///
+/// <para><b>Two drainers, one body</b>: the AC8-specified route is the
+/// per-task <c>RetireSecretVersionTaskHandler</c> driven by
+/// <c>PlatformTaskWorker</c>; this sweeper is a periodic fallback. Both
+/// call <see cref="IRetireTaskExecutor.RetireOneAsync"/> so the
+/// retire-and-revoke behaviour cannot drift between the two paths.</para>
 /// </summary>
 public sealed class RetireScheduler : IRetireScheduler
 {
     public const string TaskType = "RETIRE_SECRET_VERSION";
 
     private readonly IServiceProvider _services;
-    private readonly ISecretRotationGateway _gateway;
-    private readonly IRotationHandlerRegistry _registry;
-    private readonly IRotationAuditEmitter _auditor;
+    private readonly IRetireTaskExecutor _executor;
     private readonly ILogger<RetireScheduler> _logger;
 
     public RetireScheduler(
         IServiceProvider services,
-        ISecretRotationGateway gateway,
-        IRotationHandlerRegistry registry,
-        IRotationAuditEmitter auditor,
+        IRetireTaskExecutor executor,
         ILogger<RetireScheduler> logger)
     {
         _services = services;
-        _gateway = gateway;
-        _registry = registry;
-        _auditor = auditor;
+        _executor = executor;
         _logger = logger;
     }
 
@@ -77,6 +76,15 @@ public sealed class RetireScheduler : IRetireScheduler
             TenantId = tenantId,
             Payload = payload,
             Status = "pending",
+            // Story 29-6 (review fix) — the grace window is enforced by the
+            // QUEUE, not by a per-task throw. Setting VisibleAt = runAfter
+            // means ReserveNextAsync simply won't claim this row until the
+            // window opens, so a not-yet-due retire is NEVER dead-lettered
+            // (the old per-task "ordinary throw" path burned the retry budget
+            // ~every poll and killed the row in ~25s). The payload still
+            // carries RunAfter as the defence-in-depth check inside the
+            // executor / sweeper.
+            VisibleAt = runAfter.UtcDateTime,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
@@ -111,7 +119,7 @@ public sealed class RetireScheduler : IRetireScheduler
             }
             catch (JsonException) { /* fall through to dead-letter */ }
 
-            if (parsed is null)
+            if (parsed is null || parsed.SecretId == Guid.Empty || parsed.VersionNumber <= 0)
             {
                 await repo.DeadLetterAsync(reserved.Id, "malformed_payload", ct).ConfigureAwait(false);
                 continue;
@@ -119,76 +127,19 @@ public sealed class RetireScheduler : IRetireScheduler
 
             if (parsed.RunAfter > DateTimeOffset.UtcNow)
             {
-                // Not due yet — put back.
-                await repo.FailAsync(reserved.Id, "not_yet_due", maxRetries: int.MaxValue, ct)
+                // Not due yet — DEFER (return to pending with VisibleAt =
+                // runAfter, retry count UNCHANGED) instead of FailAsync. With
+                // the VisibleAt reservation guard the sweeper won't even
+                // reserve a future row, so this is belt-and-suspenders for a
+                // clock-skew edge; deferring keeps it from burning the budget.
+                await repo.DeferAsync(reserved.Id, parsed.RunAfter.UtcDateTime, ct)
                     .ConfigureAwait(false);
                 continue;
             }
 
             try
             {
-                // Fetch the old plaintext BEFORE retiring so the handler's
-                // RevokeOld can use it (e.g. Postgres can ALTER ROLE with
-                // the last-known password).
-                var oldPlaintext = await _gateway.GetVersionPlaintextAsync(
-                        parsed.SecretId, parsed.VersionNumber, ct)
-                    .ConfigureAwait(false);
-
-                await _gateway.RetireVersionAsync(parsed.SecretId, parsed.VersionNumber, ct)
-                    .ConfigureAwait(false);
-
-                var snapshot = await _gateway.GetSnapshotAsync(parsed.SecretId, ct).ConfigureAwait(false);
-                if (snapshot is not null && oldPlaintext is not null)
-                {
-                    var handler = _registry.Resolve(snapshot.ConsumerSystem);
-                    if (handler is not null)
-                    {
-                        try
-                        {
-                            var target = new RotationTarget(
-                                snapshot.SecretId,
-                                snapshot.Name,
-                                snapshot.TenantId,
-                                snapshot.ConsumerSystem,
-                                snapshot.ConsumerIdentifier,
-                                NewVersionNumber: snapshot.ActiveVersionNumber,
-                                PreviousVersionNumber: parsed.VersionNumber);
-                            await handler.RevokeOldAsync(
-                                    target,
-                                    oldPlaintext,
-                                    new RotationContext(
-                                        parsed.RotationCorrelationId,
-                                        Guid.Empty,
-                                        DryRun: false,
-                                        new Dictionary<string, string>()),
-                                    ct)
-                                .ConfigureAwait(false);
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex,
-                                "RevokeOldAsync threw for secret {Secret} v{Version}; " +
-                                "version is still revoked in the store but the handler's " +
-                                "cleanup did not complete.",
-                                parsed.SecretId, parsed.VersionNumber);
-                        }
-                    }
-                }
-
-                await _auditor.EmitAsync(
-                    RotationAuditEvent.Create(
-                        RotationAuditEvents.VersionRetired,
-                        parsed.SecretId,
-                        snapshot?.TenantId,
-                        parsed.RotationCorrelationId,
-                        versionNumber: parsed.VersionNumber,
-                        data: new Dictionary<string, object?>
-                        {
-                            ["taskId"] = reserved.Id,
-                        }),
-                    ct)
-                    .ConfigureAwait(false);
-
+                await _executor.RetireOneAsync(parsed, reserved.Id, ct).ConfigureAwait(false);
                 await repo.CompleteAsync(reserved.Id, ct).ConfigureAwait(false);
                 processed++;
             }
@@ -202,13 +153,5 @@ public sealed class RetireScheduler : IRetireScheduler
         }
 
         return processed;
-    }
-
-    internal sealed class RetireTaskPayload
-    {
-        public Guid SecretId { get; set; }
-        public int VersionNumber { get; set; }
-        public DateTimeOffset RunAfter { get; set; }
-        public string RotationCorrelationId { get; set; } = string.Empty;
     }
 }

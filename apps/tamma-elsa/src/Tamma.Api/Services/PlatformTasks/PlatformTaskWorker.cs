@@ -49,28 +49,30 @@ public sealed class PlatformTaskWorkerOptions
     /// <para><b>⚠ Do NOT enable in production yet</b> (tenancy-residuals
     /// assessment, 2026-06): handlers being wired is necessary but NOT
     /// sufficient. <c>ReserveNextAsync</c> claims the oldest
-    /// <c>pending</c> row of <b>any</b> type, and
-    /// <c>platform_queued_tasks</c> is shared with producers whose rows
-    /// must stay pending:
+    /// <c>pending</c> row of <b>any</b> type whose <c>VisibleAt</c> has
+    /// elapsed, and <c>platform_queued_tasks</c> is shared with producers
+    /// whose rows still have no handler registered here:
     /// <list type="bullet">
-    ///   <item><description><c>RETIRE_SECRET_VERSION</c> — the 29-6
-    ///     rotation saga parks these with <c>runAfter</c> ONLY in the
-    ///     payload (no run-after column); only the
-    ///     <c>RetireScheduler</c> sweeper may drain them. This worker
-    ///     has no handler for the type, so it would park+retry the row
-    ///     each tick and dead-letter it after
-    ///     <see cref="MaxRetries"/> ticks (~25s) — destroying the
-    ///     scheduled secret retirement before its grace period.</description></item>
     ///   <item><description>Orphan-webhook fallback rows
     ///     (<c>InstallationRouterService</c>) and v1 Cranl
-    ///     <c>provisioning.tenant</c>[.deprovision] rows — same
-    ///     no-handler park→dead-letter fate.</description></item>
+    ///     <c>provisioning.tenant</c>[.deprovision] rows — no handler is
+    ///     registered, so a poll parks them and (after the retry ceiling)
+    ///     dead-letters them.</description></item>
     /// </list>
-    /// Prerequisite for flipping this on: type-aware reservation (the
+    /// <b>Note (29-6 review fix):</b> the <c>RETIRE_SECRET_VERSION</c>
+    /// hazard that previously made this dangerous is RESOLVED — those rows
+    /// now carry a first-class <c>VisibleAt = runAfter</c> reservation
+    /// column (<c>ReserveNextAsync</c> won't claim a not-yet-due row) AND a
+    /// registered <see cref="Tamma.Api.Services.Secrets.Rotation.RetireSecretVersionTaskHandler"/>,
+    /// so a not-due retire is never dead-lettered before its grace window.
+    /// The retire tail is drained by the dedicated, always-on
+    /// <c>RetireSweepHostedService</c> regardless of this flag, so leaving
+    /// the generic worker off does NOT strand retires.
+    /// <para>Prerequisite for flipping THIS on: type-aware reservation (the
     /// worker reserves only types present in its
-    /// <c>IPlatformTaskHandlerRegistry</c>) or handlers for every
+    /// <c>IPlatformTaskHandlerRegistry</c>) or handlers for every remaining
     /// producer type. See
-    /// <c>.dev/findings/platform-task-worker-runonstartup-hazard.md</c>.
+    /// <c>.dev/findings/platform-task-worker-runonstartup-hazard.md</c>.</para>
     /// </summary>
     public bool RunOnStartup { get; set; } = false;
 }
@@ -247,6 +249,19 @@ public sealed class PlatformTaskWorker : BackgroundService
             var deadLetterMsg = Redact(redactor, ex.Message);
             await repo.DeadLetterAsync(task.Id, deadLetterMsg, ct)
                 .ConfigureAwait(false);
+        }
+        catch (PlatformTaskDeferredException ex)
+        {
+            // Story 29-6 (review fix) — the handler already returned the
+            // row to 'pending' (with a future VisibleAt). This is an
+            // acknowledgement, NOT a failure: do NOT CompleteAsync (would
+            // clobber the defer) and do NOT FailAsync (would burn the
+            // retry budget / dead-letter). The retry count is untouched.
+            _logger.LogDebug(
+                "platform_task.deferred taskId={TaskId} type={TaskType} reason={Reason}",
+                task.Id,
+                task.Type,
+                ex.Message);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

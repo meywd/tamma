@@ -96,6 +96,42 @@ public interface ISecretRotationGateway
         Guid secretId,
         int versionNumber,
         CancellationToken ct);
+
+    /// <summary>
+    /// Story 29-6 (audit gap #3) — per-secret concurrency guard. Attempt
+    /// to take an exclusive "rotation in flight" claim on
+    /// <paramref name="secretId"/> before a trigger dispatches the
+    /// rotation workflow. Returns <c>true</c> when the claim was acquired
+    /// (no other rotation is in flight), <c>false</c> when a rotation is
+    /// already in progress — in which case the caller MUST reject with a
+    /// terminal <c>rotation_in_progress</c> rather than minting a second
+    /// pending version (which would race the version-number sequence and
+    /// double-push).
+    ///
+    /// <para>The default implementation is a status check: a secret with
+    /// an existing <c>Pending</c> version row is mid-rotation. The claim
+    /// is released implicitly when that pending version reaches a
+    /// terminal state — activation flips it to <c>Active</c>, compensation
+    /// deletes it — so <see cref="EndRotationAsync"/> is a no-op for the
+    /// status-check backend (kept for advisory-lock backends).</para>
+    /// </summary>
+    Task<bool> TryBeginRotationAsync(
+        Guid secretId,
+        string rotationCorrelationId,
+        CancellationToken ct);
+
+    /// <summary>
+    /// Story 29-6 (audit gap #3) — release a claim taken by
+    /// <see cref="TryBeginRotationAsync"/> when the rotation reaches a
+    /// terminal outcome WITHOUT having minted a pending version (e.g. the
+    /// dispatch failed before the saga's mint step). For the status-check
+    /// backend this is a no-op because the pending version IS the claim;
+    /// advisory-lock backends release the lock here.
+    /// </summary>
+    Task EndRotationAsync(
+        Guid secretId,
+        string rotationCorrelationId,
+        CancellationToken ct);
 }
 
 /// <summary>

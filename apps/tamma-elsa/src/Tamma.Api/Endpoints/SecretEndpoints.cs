@@ -475,6 +475,154 @@ public static class SecretEndpoints
         }
     }
 
+    /// <summary>
+    /// Story 29-6 (audit gap #2) — trigger the audited
+    /// <c>rotate-secret</c> SAGA workflow for a platform-scoped secret:
+    /// <c>POST /api/v1/secrets/{secretId}/rotate</c>. Gated by
+    /// <c>PlatformOwnerAccess</c> at the mapping site (cross-tenant
+    /// infrastructure — NOT <c>OwnerAccess</c>, which admits every
+    /// personal-tenant owner).
+    ///
+    /// <para>Unlike the legacy reveal-based rotate, this mints a fresh
+    /// rotation correlation id, takes the per-secret concurrency guard,
+    /// and dispatches the mint → push → probe → activate → schedule-retire
+    /// saga. Returns <c>202 Accepted</c> + the correlation id; emits
+    /// <c>SECRET.ROTATION.REQUESTED</c>. A rotation already in flight is
+    /// refused with <c>409</c> + <c>SECRET.ROTATION.REJECTED(rotation_in_progress)</c>.</para>
+    /// </summary>
+    public static async Task<IResult> TriggerRotateWorkflow(
+        Guid secretId,
+        TriggerRotateRequestBody? body,
+        ClaimsPrincipal principal,
+        [FromServices] Services.Secrets.Rotation.IRotationTriggerService triggerService,
+        HttpContext http)
+    {
+        if (secretId == Guid.Empty)
+            return Results.BadRequest(new { error = "secretId must be a non-empty Guid" });
+
+        var validation = ValidateTriggerBody(body);
+        if (validation is not null) return validation;
+
+        var operatorUserId = ResolveUserId(principal);
+
+        try
+        {
+            var result = await triggerService.TriggerRotationAsync(
+                secretId,
+                operatorUserId,
+                newPlaintext: body?.NewPlaintext,
+                generateLength: body?.GenerateLength,
+                graceWindowSeconds: body?.GraceWindowSeconds ?? 0L,
+                ct: http.RequestAborted)
+                .ConfigureAwait(false);
+
+            if (!result.Accepted)
+            {
+                return Results.Json(
+                    new { error = result.Reason, rotationCorrelationId = result.RotationCorrelationId },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
+            return Results.Accepted(
+                value: new
+                {
+                    secretId,
+                    rotationCorrelationId = result.RotationCorrelationId,
+                    status = "dispatched",
+                });
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Story 29-6 (audit gap #2) — tenant-scoped trigger of the saga
+    /// workflow: <c>POST /api/v1/orgs/{tenantId}/secrets/{id}/rotate-workflow</c>.
+    /// Requires tenant admin+ role (membership filter wraps the route).
+    /// Distinct path from the legacy reveal-based tenant rotate so both
+    /// surfaces coexist.
+    /// </summary>
+    public static async Task<IResult> TriggerRotateTenantWorkflow(
+        Guid tenantId,
+        Guid id,
+        TriggerRotateRequestBody? body,
+        ClaimsPrincipal principal,
+        [FromServices] Services.Secrets.Rotation.IRotationTriggerService triggerService,
+        [FromServices] ISecretQueryService queryService,
+        HttpContext http)
+    {
+        if (!RequireTenantAdmin(http, out var forbid)) return forbid!;
+
+        if (tenantId == Guid.Empty)
+            return Results.BadRequest(new { error = "tenantId must be a non-empty Guid" });
+        if (id == Guid.Empty)
+            return Results.BadRequest(new { error = "secretId must be a non-empty Guid" });
+
+        var validation = ValidateTriggerBody(body);
+        if (validation is not null) return validation;
+
+        // Defense-in-depth scope check: the secret must belong to this
+        // tenant before we dispatch a rotation for it.
+        var existing = await queryService.GetAsync(
+            id, SecretScope.Tenant, tenantId, http.RequestAborted)
+            .ConfigureAwait(false);
+        if (existing is null)
+            return Results.NotFound(new { error = "Secret not found" });
+
+        var operatorUserId = ResolveUserId(principal);
+
+        try
+        {
+            var result = await triggerService.TriggerRotationAsync(
+                id,
+                operatorUserId,
+                newPlaintext: body?.NewPlaintext,
+                generateLength: body?.GenerateLength,
+                graceWindowSeconds: body?.GraceWindowSeconds ?? 0L,
+                ct: http.RequestAborted)
+                .ConfigureAwait(false);
+
+            if (!result.Accepted)
+            {
+                return Results.Json(
+                    new { error = result.Reason, rotationCorrelationId = result.RotationCorrelationId },
+                    statusCode: StatusCodes.Status409Conflict);
+            }
+
+            return Results.Accepted(
+                value: new
+                {
+                    secretId = id,
+                    rotationCorrelationId = result.RotationCorrelationId,
+                    status = "dispatched",
+                });
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
+    }
+
+    private static IResult? ValidateTriggerBody(TriggerRotateRequestBody? body)
+    {
+        if (body is null) return null; // all-optional: saga generates a value
+        if (body.NewPlaintext is not null
+            && body.NewPlaintext.Length is < MinPlaintextLength or > MaxPlaintextLength)
+        {
+            return Results.BadRequest(new
+            {
+                error = $"newPlaintext length must be between {MinPlaintextLength} and {MaxPlaintextLength} characters"
+            });
+        }
+        if (body.GenerateLength is not null && body.GenerateLength is < 16 or > 256)
+            return Results.BadRequest(new { error = "generateLength must be between 16 and 256" });
+        if (body.GraceWindowSeconds is < 0)
+            return Results.BadRequest(new { error = "graceWindowSeconds must be >= 0" });
+        return null;
+    }
+
     // ─────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -630,4 +778,16 @@ public static class SecretEndpoints
 
     /// <summary>Request body for <see cref="RotateSecret"/>.</summary>
     public sealed record RotateSecretRequestBody(string NewPlaintext);
+
+    /// <summary>
+    /// Request body for <see cref="TriggerRotateWorkflow"/> /
+    /// <see cref="TriggerRotateTenantWorkflow"/>. All fields optional:
+    /// omit <c>newPlaintext</c> to have the saga CSPRNG-generate a value
+    /// (optionally sized via <c>generateLength</c>); omit
+    /// <c>graceWindowSeconds</c> to use the saga default (15 min).
+    /// </summary>
+    public sealed record TriggerRotateRequestBody(
+        string? NewPlaintext = null,
+        int? GenerateLength = null,
+        long GraceWindowSeconds = 0L);
 }

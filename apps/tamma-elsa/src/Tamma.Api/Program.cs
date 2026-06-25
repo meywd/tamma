@@ -12,6 +12,7 @@ using Tamma.Api.Auth;
 using Tamma.Api.Endpoints;
 using Tamma.Api.Extensions;
 using Tamma.Api.Infrastructure;
+using Tamma.Api.Services.Secrets.Rotation;
 using Tamma.Api.Middleware;
 using Tamma.Api.Services;
 using Tamma.Api.Services.Provisioning.V2;
@@ -449,6 +450,62 @@ if (!string.IsNullOrWhiteSpace(
         builder.Configuration.GetConnectionString("ControlPlane")))
 {
     builder.Services.AddTammaSecretReveal(builder.Configuration);
+
+    // Story 29-6 — rotation saga ports (gateway / handler registry /
+    // audit emitter / retire executor + scheduler / trigger service) +
+    // the postgres / cranl / generic-http handlers. Wired here (inside
+    // the cabinet-present guard) because the gateway depends on the
+    // IDbContextFactory<SecretsDbContext> AddTammaSecretReveal just
+    // registered. Without this call the rotate-secret workflow's ports
+    // resolve to nothing and a dispatch 500s.
+    builder.Services
+        .AddTammaSecretRotation(); // Tamma.Api.Services.Secrets.Rotation
+
+    // Story 29-6 (review fix) — bind the rotation gateway options
+    // (stale-pending TTL: a pending marker older than this is treated as an
+    // abandoned/crashed saga and reclaimed so a crash can't wedge the secret).
+    builder.Services
+        .AddOptions<Tamma.Api.Services.Secrets.Rotation.SecretRotationGatewayOptions>()
+        .Configure(opts => builder.Configuration
+            .GetSection(Tamma.Api.Services.Secrets.Rotation.SecretRotationGatewayOptions.SectionName)
+            .Bind(opts));
+
+    // Story 29-6 AC8 — the RETIRE_SECRET_VERSION platform-task handler.
+    // This is the AC8-specified PlatformTaskWorker drain route for the
+    // retire tail. Registering it makes the type HANDLED, which is the
+    // fix for the type-blind dead-letter hazard (we deliberately do NOT
+    // flip PlatformTaskWorker:RunOnStartup).
+    builder.Services
+        .AddPlatformTaskHandler<
+            Tamma.Api.Services.Secrets.Rotation.RetireSecretVersionTaskHandler>();
+
+    // Story 29-6 (audit gap #2b) — scheduled auto-rotation. Gated off by
+    // default (SecretAutoRotation:Enabled=false); an operator opts in
+    // once the Elsa engine + rotation handlers are deployed.
+    builder.Services
+        .AddOptions<Tamma.Api.Services.Secrets.Rotation.SecretAutoRotationSchedulerOptions>()
+        .Configure(opts => builder.Configuration
+            .GetSection(Tamma.Api.Services.Secrets.Rotation.SecretAutoRotationSchedulerOptions.SectionName)
+            .Bind(opts));
+    builder.Services
+        .AddHostedService<Tamma.Api.Services.Secrets.Rotation.SecretAutoRotationScheduler>();
+
+    // Story 29-6 (review fix) — the ACTIVE retire-tail drainer. Because
+    // PlatformTaskWorker:RunOnStartup stays false (the generic worker is not
+    // yet safe for every platform-task type), the AC8 per-task handler would
+    // never run — nothing would drain RETIRE_SECRET_VERSION rows. This
+    // dedicated sweeper periodically reserves ONLY due retire rows (the
+    // VisibleAt guard leaves not-due rows untouched) and routes them through
+    // the same IRetireTaskExecutor body, so the old credential reliably
+    // reaches Revoked. Always on once the cabinet is wired — draining a
+    // scheduled retirement is a correctness requirement, not an opt-in.
+    builder.Services
+        .AddOptions<Tamma.Api.Services.Secrets.Rotation.RetireSweepOptions>()
+        .Configure(opts => builder.Configuration
+            .GetSection(Tamma.Api.Services.Secrets.Rotation.RetireSweepOptions.SectionName)
+            .Bind(opts));
+    builder.Services
+        .AddHostedService<Tamma.Api.Services.Secrets.Rotation.RetireSweepHostedService>();
 }
 
 // Story 32-3 — BYOK→platform provider-credential resolver + cache invalidator.
@@ -1783,6 +1840,13 @@ orgs.MapGet("/{tenantId:guid}/secrets/{id:guid}/versions",
 orgs.MapPost("/{tenantId:guid}/secrets/{id:guid}/rotate",
         SecretEndpoints.RotateTenantSecret)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+// Story 29-6 (audit gap #2) — tenant-scoped trigger of the AUDITED
+// rotate-secret SAGA workflow (distinct from the legacy reveal-based
+// rotate above). Admin+ enforced inside the handler; membership proof
+// via the filter. Returns 202 + correlation id.
+orgs.MapPost("/{tenantId:guid}/secrets/{id:guid}/rotate-workflow",
+        SecretEndpoints.TriggerRotateTenantWorkflow)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 orgs.MapPost("/{tenantId:guid}/secrets/{id:guid}/retire-version/{versionNumber:int}",
         SecretEndpoints.RetireTenantVersion)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
@@ -1853,6 +1917,17 @@ app.MapGet("/api/v1/tenants/{tenantId:guid}/status",
 // guessing attempts without needing a login.
 app.MapGet("/api/v1/secrets/reveal/{token}", SecretEndpoints.RevealSecret)
     .RequireRateLimiting("SecretReveal");
+
+// Story 29-6 (audit gap #2) — platform-scope trigger of the AUDITED
+// rotate-secret SAGA workflow. Mints a fresh correlation id, takes the
+// per-secret concurrency guard, dispatches mint → push → probe →
+// activate → schedule-retire, returns 202 + correlation id. This is the
+// trigger that finally STARTS the workflow (it was previously dead
+// unless invoked manually via Elsa Studio). Gated by PlatformOwnerAccess
+// (cross-tenant infrastructure — NOT OwnerAccess, which admits every
+// personal-tenant owner).
+app.MapPost("/api/v1/secrets/{secretId:guid}/rotate", SecretEndpoints.TriggerRotateWorkflow)
+    .RequireAuthorization("PlatformOwnerAccess");
 
 // ── Onboarding wizard (Story 18-4) ──
 // Status is the polling endpoint the dashboard wizard hits every few

@@ -42,4 +42,20 @@ public class PlatformQueuedTask
     /// only after <c>RetryCount</c> reaches the configured ceiling.
     /// </summary>
     public DateTime? UnprocessableAt { get; set; }
+
+    /// <summary>
+    /// Story 29-6 (review fix) — reservation visibility timestamp.
+    /// <c>ReserveNextAsync</c> only claims a row when <c>VisibleAt</c> is
+    /// <c>NULL</c> OR has elapsed, so a deferred ("not yet due") task is
+    /// simply not reserved until its window opens instead of being
+    /// re-delivered every poll and dead-lettered before it is due.
+    ///
+    /// <para><b>Backward-compatible</b>: existing producers (MoveTenant,
+    /// ProvisionTenantV2, CreateBillingCustomer, installation routing)
+    /// leave this <c>NULL</c> ⇒ always visible ⇒ their reservation is
+    /// UNCHANGED. Only <c>RETIRE_SECRET_VERSION</c> rows set it (to the
+    /// payload's <c>runAfter</c>) so the grace window is enforced by the
+    /// queue itself, not by a per-task throw that burns the retry budget.</para>
+    /// </summary>
+    public DateTime? VisibleAt { get; set; }
 }

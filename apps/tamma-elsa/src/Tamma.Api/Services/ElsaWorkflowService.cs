@@ -87,11 +87,60 @@ public partial class ElsaWorkflowService : IElsaWorkflowService
     }
 
     /// <summary>
+    /// Keys whose VALUES must never be logged. Matched case-insensitively
+    /// against the substring patterns in <see cref="SensitiveKeyFragments"/>.
+    /// <c>RotationTriggerService</c> puts the operator's <c>newPlaintext</c>
+    /// into the dispatch dict; this is the only caller that places secret
+    /// material in <c>input</c>, but the match is defensive (covers any
+    /// future caller) so a fresh dispatch surface can't reintroduce the leak.
+    /// </summary>
+    private static readonly string[] SensitiveKeyFragments =
+    {
+        "plaintext", "secret", "password", "token", "apikey", "api_key", "credential",
+    };
+
+    private static bool IsSensitiveKey(string key)
+    {
+        foreach (var fragment in SensitiveKeyFragments)
+        {
+            if (key.Contains(fragment, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Render the dispatch input's KEY SET for safe logging — keys only,
+    /// never values, and a sensitive key is rendered as <c>name=[redacted]</c>
+    /// so its presence is auditable without leaking the value. The control
+    /// chars in each key are stripped to prevent log forging.
+    /// </summary>
+    private static string DescribeInputKeys(Dictionary<string, object>? input)
+    {
+        if (input is null || input.Count == 0) return "(none)";
+        var parts = new List<string>(input.Count);
+        foreach (var key in input.Keys)
+        {
+            var safeKey = SanitizeForLog(key);
+            parts.Add(IsSensitiveKey(key) ? $"{safeKey}=[redacted]" : safeKey);
+        }
+        return string.Join(", ", parts);
+    }
+
+    /// <summary>
     /// Start a new workflow instance by definition name.
     /// </summary>
     public async Task<string> StartWorkflowAsync(string workflowName, Dictionary<string, object> input)
     {
-        _logger.LogInformation("Starting workflow {WorkflowName} with input: {@Input}", SanitizeForLog(workflowName), input);
+        // SECURITY — do NOT destructure the dispatch input ({@Input}). The
+        // rotate-secret dispatch carries the operator's new secret plaintext
+        // under the `newPlaintext` key; destructuring logged it in cleartext
+        // at Information level. Log the workflow name + the input KEY SET only
+        // (keys never values; sensitive keys shown as name=[redacted]). This
+        // method is shared (MentorshipController is the other caller) so the
+        // key-only contract is safe for every caller.
+        _logger.LogInformation(
+            "Starting workflow {WorkflowName} with input keys: {InputKeys}",
+            SanitizeForLog(workflowName), DescribeInputKeys(input));
 
         await EnsureHealthyAsync();
 
