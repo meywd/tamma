@@ -14,12 +14,15 @@ using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// Issue Triage — fetches untriaged items and dispatches a singleton
+/// Issue Triage — fetches untriaged items and dispatches a
 /// triage-item-cycle for each one (fire & forget).
 ///
-/// The per-item processing (context → panel → PO → labels) is handled
-/// by TriageItemCycleWorkflow which runs as a singleton — Elsa queues
-/// dispatches so items are triaged sequentially without overloading.
+/// The per-item processing (context → panel → PO → labels) is handled by
+/// TriageItemCycleWorkflow. Each dispatch is independent (NOT a singleton — a
+/// SingletonStrategy would REJECT, not queue, concurrent dispatches and silently drop
+/// items from this per-item fan-out; see the cycle's header). tenantId is threaded from
+/// this workflow's input into each dispatch so the cycle's TRIAGE.ISSUE.* events are
+/// tenant-scoped.
 ///
 /// Flow:
 ///   Fetch Untriaged Items → Has Items? → Loop:
@@ -44,6 +47,11 @@ public class IssueTriageWorkflow : WorkflowBase
         // Variables
         // ================================================================
         var repository = builder.WithVariable<string>("Repository", "");
+        // Tenant id threaded from this workflow's input through to each cycle dispatch so
+        // a SaaS caller's per-item TRIAGE.ISSUE.* events carry the tenant tag (the cycle
+        // forwards it onward to its context/panel/PO sub-workflows). Empty in single-user
+        // mode → platform-scope events (honest default — no fabricated tenant).
+        var tenantId = builder.WithVariable<string>("TenantId", "");
         var itemsJson = builder.WithVariable<string>("ItemsJson", "[]");
         var currentItemIndex = builder.WithVariable<int>("CurrentItemIndex", 0);
         var totalItems = builder.WithVariable<int>("TotalItems", 0);
@@ -60,6 +68,9 @@ public class IssueTriageWorkflow : WorkflowBase
             {
                 var repo = ctx.GetInput<string>("repository") ?? "";
                 repository.Set(ctx, repo);
+                // Capture tenantId from this workflow's input so each cycle dispatch can
+                // forward it (tenant-scoped TRIAGE.ISSUE.* events).
+                tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
                 return repo;
             }),
             ItemsJson = new Output<string>(itemsJson),
@@ -99,7 +110,7 @@ public class IssueTriageWorkflow : WorkflowBase
         extractItem.SetDisplayText("Extract Current Item");
 
         // ================================================================
-        // 4. Dispatch Triage Item Cycle (fire & forget, singleton)
+        // 4. Dispatch Triage Item Cycle (fire & forget)
         // ================================================================
         var dispatchCycle = new DispatchWorkflow
         {
@@ -110,8 +121,13 @@ public class IssueTriageWorkflow : WorkflowBase
             {
                 ["repository"] = repository.Get(ctx),
                 ["itemJson"] = currentItemJson.Get(ctx),
+                // Thread tenantId so the cycle's TRIAGE.ISSUE.* events (and its
+                // context/panel/PO sub-workflows) are tenant-scoped.
+                ["tenantId"] = tenantId.Get(ctx),
             }),
-            WaitForCompletion = new(false), // fire & forget — singleton queues
+            // Fire & forget: each cycle runs independently (NOT a singleton — the child's
+            // header explains why a SingletonStrategy would silently DROP fan-out items).
+            WaitForCompletion = new(false),
         };
         dispatchCycle.SetDisplayText("Dispatch Triage Cycle");
 

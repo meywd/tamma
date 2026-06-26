@@ -2,6 +2,7 @@ using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
+using Elsa.Workflows.IncidentStrategies;
 using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
@@ -48,11 +49,29 @@ namespace Tamma.ElsaServer.Workflows;
 ///   <item><description>#7 — labels are validated against the canonical vocabulary and
 ///     the comment is rendered deterministically from the parsed decision (an AC5
 ///     markdown table) before apply — never arbitrary LLM prose/labels.</description></item>
-///   <item><description>#8 — <see cref="ApplyTriageResultActivity"/> now throws on a
-///     non-success engine-callback POST, so a 4xx/5xx faults the cycle
-///     (<c>TRIAGE.APPLY.RESULT.FAILED</c>) instead of a swallowed false
-///     <c>.COMPLETED</c>.</description></item>
+///   <item><description>#8 — <see cref="ApplyTriageResultActivity"/> is fail-loud on a
+///     non-success engine-callback POST. It emits a loud <c>TRIAGE.APPLY.RESULT.FAILED</c>
+///     leaf event instead of a swallowed false <c>.COMPLETED</c>, and exposes a
+///     <c>Success</c> / <c>Failure</c> outcome so the cycle routes an apply failure to a
+///     LOUD <c>TRIAGE.ISSUE.FAILED</c> terminal (review fix below) rather than halting
+///     with no terminal.</description></item>
 /// </list>
+///
+/// <para>Review fix (CRITICAL — "stuck, no terminal" hang). Previously the apply node
+/// <i>threw</i> on a 4xx/5xx and had only a success-only edge
+/// (<c>applyLabels → emitCompleted</c>) with the DEFAULT incident strategy. A Flowchart
+/// never schedules a <i>faulted</i> node's outbound edges (Elsa 3.5
+/// <c>Flowchart.ProcessChildCompletedAsync</c> only routes a <c>Completed</c> child), and
+/// the default <c>FaultStrategy</c> transitions the whole instance to <c>Faulted</c> — so
+/// an apply HTTP failure halted the instance with NO <c>TRIAGE.ISSUE.*</c> terminal and
+/// no <c>itemResult</c>. Mirroring the merge-approval / deployment-pipeline precedent:
+/// (a) <c>WorkflowOptions.IncidentStrategyType = ContinueWithIncidentsStrategy</c> so an
+/// unexpected fault does not hard-halt; (b) the <c>itemResult</c> output + fail-reason are
+/// SEEDED to a fail-closed <c>failed</c> default BEFORE apply, so even a halt yields a
+/// parseable failed outcome; and (c) the apply node's <c>Failure</c> outcome routes to a
+/// loud <c>TRIAGE.ISSUE.FAILED</c> terminal that overwrites the <c>itemResult</c>. The
+/// <c>Success</c> outcome routes to <c>COMPLETED</c>. Exactly ONE cycle terminal event
+/// fires per run — including the apply-fault path.</para>
 ///
 /// <para>#9 — singleton: the previous header claimed "singleton — Elsa queues
 /// subsequent dispatches until the current one finishes". That is FALSE for Elsa's
@@ -66,8 +85,11 @@ namespace Tamma.ElsaServer.Workflows;
 ///       ├─ True (ok/empty)    → Panel Review (llm-call x4) → Extract Panel + Status → Panel Usable?
 ///       │     ├─ True (ok/partial)  → PO Decision → Capture (callSucceeded/status/fields)
 ///       │     │       → Decision OK?
-///       │     │           ├─ True (callSucceeded && status=ok) → Build Apply Inputs (validated
-///       │     │           │     labels + rendered comment) → Apply → Emit COMPLETED → Finish
+///       │     │           ├─ True (callSucceeded && status=ok) → Seed failed itemResult →
+///       │     │           │     Build Apply Inputs (validated labels + rendered comment;
+///       │     │           │     emit LABELS.INVALID for any dropped) → Apply
+///       │     │           │         ├─ Success → Emit COMPLETED → Finish
+///       │     │           │         └─ Failure → Fail Item (reason=applyFailed) → Emit FAILED → Finish
 ///       │     │           └─ False → Fail Item (reason=decisionUnusable) → Emit FAILED → Finish
 ///       │     └─ False (failed)     → Mark Skipped (panel-failed)  → Emit SKIPPED → Finish
 ///       └─ False (failed)     → Mark Skipped (context-failed)      → Emit SKIPPED → Finish
@@ -83,6 +105,14 @@ public class TriageItemCycleWorkflow : WorkflowBase
         builder.DefinitionId = "triage-item-cycle";
         builder.Version = WorkflowVersions.ComputedVersion;
         builder.Description = "Process one untriaged item: context → panel → PO → labels (fail-closed, audited)";
+
+        // Review fix (CRITICAL — "stuck, no terminal" hang). Continue-with-incidents so
+        // an unexpected fault (e.g. in an Extract/Build node) does NOT halt the instance
+        // with no output. The apply step routes its failure as an explicit Failure
+        // OUTCOME (not a throw), so the loud TRIAGE.ISSUE.FAILED terminal is always
+        // reachable; the seeded fail-closed itemResult (below, before apply) covers any
+        // other halt. Mirrors MergeApprovalWorkflow I1 / DeploymentPipelineWorkflow.
+        builder.WorkflowOptions.IncidentStrategyType = typeof(ContinueWithIncidentsStrategy);
 
         // ================================================================
         // Variables
@@ -117,6 +147,10 @@ public class TriageItemCycleWorkflow : WorkflowBase
         // Validated labels + rendered comment for apply (#7).
         var appliedLabels = builder.WithVariable<string[]>("AppliedLabels", System.Array.Empty<string>());
         var appliedComment = builder.WithVariable<string>("AppliedComment", "");
+        // Out-of-vocab labels the PO returned that were dropped by ValidateLabels (#7) —
+        // captured (no longer discarded) so the cycle emits a TRIAGE.LABELS.INVALID
+        // warning recording what was dropped, rather than silently swallowing it.
+        var droppedLabels = builder.WithVariable<string[]>("DroppedLabels", System.Array.Empty<string>());
 
         // Why the cycle skipped/failed apply — surfaced on the outputs + events.
         var skipReason = builder.WithVariable<string>("SkipReason", "");
@@ -325,6 +359,8 @@ public class TriageItemCycleWorkflow : WorkflowBase
 
         // 4c. Build apply inputs — #7 validate labels against the canonical vocab and
         //     render the AC5 markdown-table comment deterministically from the decision.
+        //     Capture the dropped (out-of-vocab) labels so the cycle can emit a
+        //     TRIAGE.LABELS.INVALID warning rather than silently discarding them.
         var buildApplyInputs = new SetVariable
         {
             Id = "BuildApplyInputs",
@@ -333,16 +369,55 @@ public class TriageItemCycleWorkflow : WorkflowBase
             Value = new Input<object?>(ctx =>
             {
                 var decision = TriageItemCycleHelper.ParseDecision(poDecisionJson.Get(ctx));
-                var validated = TriageItemCycleHelper.ValidateLabels(decision.Labels, out _);
+                var validated = TriageItemCycleHelper.ValidateLabels(decision.Labels, out var dropped);
+                droppedLabels.Set(ctx, dropped.ToArray());
                 appliedComment.Set(ctx, TriageItemCycleHelper.RenderComment(decision));
                 return (object)validated.ToArray();
             })
         };
         buildApplyInputs.SetDisplayText("Build Apply Inputs");
 
+        // 4d. MINOR (#7) — record dropped out-of-vocab labels as a loud (warning) audit
+        //     row. Non-terminal: the cycle still applies the validated subset and
+        //     proceeds to COMPLETED. Reason carries the dropped set (comma-joined,
+        //     secret-free — they are label strings). Emitted unconditionally; the
+        //     downstream durable drain persists it, and an empty dropped set carries an
+        //     empty reason (the cheap path — no extra branch in the flowchart).
+        var emitLabelsInvalid = CycleEvent(
+            "EmitLabelsInvalid", "Emit TRIAGE.LABELS.INVALID",
+            _ => TriageCycleEvents.LabelsInvalid,
+            repository, itemKey, itemNumber, tenantId, itemSource,
+            _ => "", _ => "", _ => "", ctx => decisionStatus.Get(ctx),
+            ctx => string.Join(",", droppedLabels.Get(ctx) ?? System.Array.Empty<string>()));
+
+        // 4e. Seed a fail-closed itemResult + reason BEFORE apply (review fix). If apply
+        //     (or anything after this) faults and continue-with-incidents stops the flow
+        //     before a terminal, the workflow output still carries a parseable
+        //     itemResult{outcome:"failed"} — never a stuck instance with no output. The
+        //     Success / Failure terminals below overwrite this with the real outcome.
+        var seedFailedReason = new SetVariable
+        {
+            Id = "SeedFailedReason", Name = "Seed Fail-Closed Reason",
+            Variable = skipReason,
+            Value = new Input<object?>(_ => (object)"applyIncomplete"),
+        };
+        seedFailedReason.SetDisplayText("Seed Fail-Closed Reason");
+
+        var seedFailedResult = new SetOutput
+        {
+            Id = "SeedFailedResult", Name = "Seed Item Result (failed)",
+            OutputName = new("itemResult"),
+            OutputValue = new(ctx => (object)TriageItemCycleHelper.BuildItemResult(
+                itemKey.Get(ctx), TriageCycleEvents.OutcomeFailed, decisionStatus.Get(ctx),
+                "applyIncomplete")),
+        };
+        seedFailedResult.SetDisplayText("Seed Item Result (failed)");
+
         // ================================================================
         // 5. Apply Labels + Post Comment (#7/#8 — validated labels, rendered
-        //    comment, fail-loud on a non-success engine POST).
+        //    comment, fail-loud on a non-success engine POST). The activity exposes a
+        //    Success / Failure outcome so an apply HTTP failure routes to a loud
+        //    TRIAGE.ISSUE.FAILED terminal (review fix) instead of faulting the cycle.
         // ================================================================
         var applyLabels = new ApplyTriageResultActivity
         {
@@ -356,8 +431,9 @@ public class TriageItemCycleWorkflow : WorkflowBase
         };
         applyLabels.SetDisplayText("Apply Labels & Comment");
 
-        // 5a. Emit TRIAGE.ISSUE.COMPLETED (#3) — apply succeeded (it throws on failure,
-        //     which faults the cycle before this node, so COMPLETED is never false).
+        // 5a. Emit TRIAGE.ISSUE.COMPLETED (#3) — reached ONLY via the apply Success
+        //     outcome, so COMPLETED is never a false success (a failed apply takes the
+        //     Failure edge to the FAILED terminal below).
         var emitCompleted = CycleEvent(
             "EmitCycleCompleted", "Emit TRIAGE.ISSUE.COMPLETED",
             _ => TriageCycleEvents.Completed,
@@ -374,6 +450,34 @@ public class TriageItemCycleWorkflow : WorkflowBase
                 itemKey.Get(ctx), TriageCycleEvents.OutcomeTriaged, decisionStatus.Get(ctx), null)),
         };
         outCompletedResult.SetDisplayText("Output Item Result (triaged)");
+
+        // 5b. Apply Failure terminal (review fix) — the engine-callback POST failed
+        //     (4xx/5xx or a network throw). Loud TRIAGE.ISSUE.FAILED, fail-closed
+        //     itemResult{outcome:"failed"}. Exactly one cycle terminal on this path.
+        var setApplyFailedReason = new SetVariable
+        {
+            Id = "SetApplyFailedReason", Name = "Set Apply-Failed Reason",
+            Variable = skipReason,
+            Value = new Input<object?>(_ => (object)"applyFailed"),
+        };
+        setApplyFailedReason.SetDisplayText("Set Apply-Failed Reason");
+
+        var emitApplyFailed = CycleEvent(
+            "EmitCycleApplyFailed", "Emit TRIAGE.ISSUE.FAILED (apply)",
+            _ => TriageCycleEvents.Failed,
+            repository, itemKey, itemNumber, tenantId, itemSource,
+            _ => "", _ => "", _ => "", ctx => decisionStatus.Get(ctx),
+            ctx => skipReason.Get(ctx));
+
+        var outApplyFailedResult = new SetOutput
+        {
+            Id = "OutApplyFailedResult", Name = "Output Item Result (apply failed)",
+            OutputName = new("itemResult"),
+            OutputValue = new(ctx => (object)TriageItemCycleHelper.BuildItemResult(
+                itemKey.Get(ctx), TriageCycleEvents.OutcomeFailed, decisionStatus.Get(ctx),
+                skipReason.Get(ctx))),
+        };
+        outApplyFailedResult.SetDisplayText("Output Item Result (apply failed)");
 
         // ================================================================
         // Skip / fail terminals
@@ -481,7 +585,9 @@ public class TriageItemCycleWorkflow : WorkflowBase
                 gatherContext, extractContext, contextGathered,
                 panelReview, extractPanelResult, panelUsable,
                 poDecision, extractDecision, decisionOk, buildApplyInputs,
+                emitLabelsInvalid, seedFailedReason, seedFailedResult,
                 applyLabels, emitCompleted, outCompletedResult,
+                setApplyFailedReason, emitApplyFailed, outApplyFailedResult,
                 setContextFailedReason, setPanelFailedReason,
                 markSkipped, outSkipReason, emitSkipped, outSkippedResult,
                 setDecisionFailedReason, emitFailed, outFailedResult,
@@ -512,12 +618,26 @@ public class TriageItemCycleWorkflow : WorkflowBase
                 ConnectOutcome(panelUsable, "False", setPanelFailedReason),
                 Connect(setPanelFailedReason, markSkipped),
 
-                // Decision OK → validate labels + render comment → apply → COMPLETED.
+                // Decision OK → validate labels + render comment → record any dropped
+                // labels (LABELS.INVALID warning) → seed a fail-closed itemResult →
+                // apply. The apply Success outcome → COMPLETED; Failure → loud FAILED.
                 ConnectOutcome(decisionOk, "True", buildApplyInputs),
-                Connect(buildApplyInputs, applyLabels),
-                Connect(applyLabels, emitCompleted),
+                Connect(buildApplyInputs, emitLabelsInvalid),
+                Connect(emitLabelsInvalid, seedFailedReason),
+                Connect(seedFailedReason, seedFailedResult),
+                Connect(seedFailedResult, applyLabels),
+
+                // Apply succeeded → COMPLETED (overwrites the seeded itemResult).
+                ConnectOutcome(applyLabels, "Success", emitCompleted),
                 Connect(emitCompleted, outCompletedResult),
                 Connect(outCompletedResult, finish),
+
+                // Apply failed (4xx/5xx / network) → loud TRIAGE.ISSUE.FAILED terminal —
+                // exactly one cycle terminal on the apply-fault path (the review fix).
+                ConnectOutcome(applyLabels, "Failure", setApplyFailedReason),
+                Connect(setApplyFailedReason, emitApplyFailed),
+                Connect(emitApplyFailed, outApplyFailedResult),
+                Connect(outApplyFailedResult, finish),
 
                 // Decision NOT OK (faulted PO / llm-failed / unparsed / empty) → FAILED.
                 // The False edge NEVER reaches buildApplyInputs / applyLabels.

@@ -117,8 +117,11 @@ public class TriageItemCycleRoutingTests
         HasEdge("PODecision", null, "ExtractDecision").Should().BeTrue();
         HasEdge("ExtractDecision", null, "DecisionOK").Should().BeTrue();
         HasEdge("DecisionOK", "True", "BuildApplyInputs").Should().BeTrue();
-        HasEdge("BuildApplyInputs", null, "ApplyLabels").Should().BeTrue();
-        HasEdge("ApplyLabels", null, "EmitCycleCompleted").Should().BeTrue();
+        // Review fix: BuildApplyInputs → record dropped labels → seed fail-closed result
+        // → apply; the apply Success outcome → COMPLETED (a failed apply takes Failure).
+        HasEdge("BuildApplyInputs", null, "EmitLabelsInvalid").Should().BeTrue();
+        HasEdge("SeedFailedResult", null, "ApplyLabels").Should().BeTrue();
+        HasEdge("ApplyLabels", "Success", "EmitCycleCompleted").Should().BeTrue();
     }
 
     [Test]
@@ -197,8 +200,14 @@ public class TriageItemCycleRoutingTests
     [Test]
     public void GoodDecision_RoutesToBuildApplyInputsThenApply()
     {
+        // Review fix: BuildApplyInputs → record dropped labels (LABELS.INVALID) → seed a
+        // fail-closed itemResult → apply. The seed guarantees a parseable failed output
+        // even if the flow halts at a faulting apply.
         HasEdge("DecisionOK", "True", "BuildApplyInputs").Should().BeTrue();
-        HasEdge("BuildApplyInputs", null, "ApplyLabels").Should().BeTrue();
+        HasEdge("BuildApplyInputs", null, "EmitLabelsInvalid").Should().BeTrue();
+        HasEdge("EmitLabelsInvalid", null, "SeedFailedReason").Should().BeTrue();
+        HasEdge("SeedFailedReason", null, "SeedFailedResult").Should().BeTrue();
+        HasEdge("SeedFailedResult", null, "ApplyLabels").Should().BeTrue();
     }
 
     [Test]
@@ -249,9 +258,9 @@ public class TriageItemCycleRoutingTests
     [Test]
     public void EachTerminalPath_EmitsExactlyOneCycleEvent()
     {
-        // COMPLETED on the apply-success path.
+        // COMPLETED on the apply-SUCCESS outcome only.
         CycleEventNode("EmitCycleCompleted").Should().NotBeNull();
-        HasEdge("ApplyLabels", null, "EmitCycleCompleted").Should().BeTrue();
+        HasEdge("ApplyLabels", "Success", "EmitCycleCompleted").Should().BeTrue();
 
         // SKIPPED on the shared context/panel non-applying terminal.
         CycleEventNode("EmitCycleSkipped").Should().NotBeNull();
@@ -260,6 +269,90 @@ public class TriageItemCycleRoutingTests
         // FAILED on the bad-decision terminal.
         CycleEventNode("EmitCycleFailed").Should().NotBeNull();
         HasEdge("SetDecisionFailedReason", null, "EmitCycleFailed").Should().BeTrue();
+
+        // FAILED on the apply-FAILURE outcome (review fix — the "stuck, no terminal" hole).
+        CycleEventNode("EmitCycleApplyFailed").Should().NotBeNull();
+        HasEdge("SetApplyFailedReason", null, "EmitCycleApplyFailed").Should().BeTrue();
+    }
+
+    // ================================================================
+    // Review fix (CRITICAL) — the apply step exposes Success / Failure outcomes; an
+    // apply failure routes to a LOUD TRIAGE.ISSUE.FAILED terminal (not a silent halt),
+    // and the workflow seeds a fail-closed itemResult before apply + uses
+    // continue-with-incidents so a fault can never leave the cycle with no terminal.
+    // ================================================================
+
+    [Test]
+    public void ApplySuccessOutcome_RoutesToCompletedTerminal()
+    {
+        HasEdge("ApplyLabels", "Success", "EmitCycleCompleted").Should().BeTrue(
+            "a successful apply routes to the COMPLETED terminal");
+        HasEdge("EmitCycleCompleted", null, "OutCompletedResult").Should().BeTrue();
+        HasEdge("OutCompletedResult", null, "Finish").Should().BeTrue();
+    }
+
+    [Test]
+    public void ApplyFailureOutcome_RoutesToLoudFailedTerminal_NotCompleted()
+    {
+        // The apply Failure outcome must reach the loud TRIAGE.ISSUE.FAILED terminal —
+        // exactly one cycle terminal on the apply-fault path — and must NOT reach the
+        // COMPLETED terminal (no false success / no stuck instance with no terminal).
+        HasEdge("ApplyLabels", "Failure", "SetApplyFailedReason").Should().BeTrue();
+        HasEdge("SetApplyFailedReason", null, "EmitCycleApplyFailed").Should().BeTrue();
+        HasEdge("EmitCycleApplyFailed", null, "OutApplyFailedResult").Should().BeTrue();
+        HasEdge("OutApplyFailedResult", null, "Finish").Should().BeTrue();
+
+        var failureReach = Reachable("SetApplyFailedReason");
+        failureReach.Should().NotContain("EmitCycleCompleted",
+            "an apply failure must never reach the COMPLETED terminal");
+        failureReach.Should().NotContain("OutCompletedResult");
+    }
+
+    [Test]
+    public void ApplyNode_HasBothOutcomePorts_NoUnconditionalFallthrough()
+    {
+        var fromApply = _flowchart.Connections
+            .Where(c => c.Source.Activity.Id == "ApplyLabels")
+            .ToList();
+
+        fromApply.Should().NotBeEmpty();
+        fromApply.Should().OnlyContain(c => c.Source.Port == "Success" || c.Source.Port == "Failure",
+            "apply must branch only on its Success/Failure outcomes, never fall through");
+        fromApply.Select(c => c.Source.Port).Should().Contain(new[] { "Success", "Failure" });
+    }
+
+    [Test]
+    public void Workflow_SeedsFailClosedItemResultBeforeApply()
+    {
+        // A SeedFailedResult SetOutput runs BEFORE ApplyLabels so even a halt (a fault
+        // that stops the flow before a terminal) yields a parseable failed itemResult.
+        var seed = _flowchart.Activities.OfType<SetOutput>().FirstOrDefault(o => o.Id == "SeedFailedResult");
+        seed.Should().NotBeNull("a fail-closed itemResult must be seeded before apply");
+        ReadOutputName(seed!).Should().Be("itemResult");
+        HasEdge("SeedFailedResult", null, "ApplyLabels").Should().BeTrue(
+            "the seeded fail-closed result must immediately precede apply");
+    }
+
+    [Test]
+    public void Workflow_UsesContinueWithIncidentsStrategy_SoAFaultDoesNotHaltSilently()
+    {
+        var builder = WorkflowTestHelper.BuildWorkflow(new TriageItemCycleWorkflow());
+        builder.Object.WorkflowOptions.IncidentStrategyType
+            .Should().Be(typeof(Elsa.Workflows.IncidentStrategies.ContinueWithIncidentsStrategy),
+                "a faulted node must not halt the cycle with no TRIAGE.ISSUE.* terminal");
+    }
+
+    [Test]
+    public void DroppedLabels_AreRecordedAsALabelsInvalidEvent_BeforeApply()
+    {
+        // #7 (MINOR) — dropped out-of-vocab labels are recorded as a loud (warning)
+        // TRIAGE.LABELS.INVALID audit row rather than silently discarded. Non-terminal:
+        // the cycle still applies the validated subset and proceeds toward apply.
+        var node = CycleEventNode("EmitLabelsInvalid");
+        node.Should().NotBeNull("dropped labels must be recorded, not silently discarded");
+        HasEdge("BuildApplyInputs", null, "EmitLabelsInvalid").Should().BeTrue();
+        // It is on the path to apply (non-terminal), not a separate exit.
+        Reachable("EmitLabelsInvalid").Should().Contain("ApplyLabels");
     }
 
     // ================================================================
@@ -320,6 +413,24 @@ public class TriageItemCycleRoutingTests
             c.Source.Activity.Id == sourceId &&
             (port == null || c.Source.Port == port) &&
             c.Target.Activity.Id == targetId);
+
+    /// <summary>Forward-reachable activity ids from a starting node.</summary>
+    private HashSet<string> Reachable(string startId)
+    {
+        var seen = new HashSet<string>();
+        var queue = new Queue<string>();
+        queue.Enqueue(startId);
+        while (queue.Count > 0)
+        {
+            var id = queue.Dequeue();
+            foreach (var c in _flowchart.Connections.Where(c => c.Source.Activity.Id == id))
+            {
+                var t = c.Target.Activity.Id;
+                if (t != null && seen.Add(t)) queue.Enqueue(t);
+            }
+        }
+        return seen;
+    }
 
     private static string? ReadDefinitionId(DispatchWorkflow dispatch)
     {

@@ -34,6 +34,15 @@ public class TriageCycleEventTests
     }
 
     [Test]
+    public void LabelsInvalid_FollowsConvention_AndIsWarning()
+    {
+        // MINOR (#7) — dropped out-of-vocab labels are recorded as a loud (warning) audit
+        // row rather than silently discarded; non-terminal (apply still proceeds).
+        TriageCycleEvents.LabelsInvalid.Should().Be("TRIAGE.LABELS.INVALID");
+        TriageCycleEvents.StatusForEvent(TriageCycleEvents.LabelsInvalid).Should().Be("warning");
+    }
+
+    [Test]
     public void ParseTenantId_ValidGuid_Parses_InvalidOrEmpty_IsNull()
     {
         var g = Guid.NewGuid();

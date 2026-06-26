@@ -50,6 +50,15 @@ public static class TriageCycleEvents
     public const string Failed = "TRIAGE.ISSUE.FAILED";
 
     /// <summary>
+    /// Emitted (warning-status) when <see cref="Tamma.ElsaServer.Workflows.Helpers"/>'s
+    /// label validation dropped one or more out-of-vocabulary labels the PO returned
+    /// before apply (#7). NOT a terminal — the cycle still applies the validated subset
+    /// and proceeds to <c>COMPLETED</c>; this records what was dropped so the audit trail
+    /// shows the LLM proposed an invalid label rather than silently discarding it.
+    /// </summary>
+    public const string LabelsInvalid = "TRIAGE.LABELS.INVALID";
+
+    /// <summary>
     /// The per-item <c>outcome</c> values surfaced on the cycle's <c>itemResult</c>
     /// output (<see cref="TriageItemCycle.md"/> #5) so the fire-and-forget parent can
     /// report <c>{ triaged, failed, skipped }</c> instead of a blanket success.
@@ -77,6 +86,7 @@ public static class TriageCycleEvents
     {
         Failed => "error",
         Skipped => "warning",
+        LabelsInvalid => "warning",
         _ => "success",
     };
 }
