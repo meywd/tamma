@@ -68,6 +68,14 @@ public class WorkflowStructureTests
 
         mockBuilder.SetupGet(b => b.Variables).Returns(variables);
 
+        // WorkflowOptions — return a real, stable instance so workflows that set
+        // builder.WorkflowOptions.* (e.g. SingleIssueCycle / MergeApproval setting
+        // IncidentStrategyType for fail-closed continue-with-incidents) don't NRE
+        // during Build(), and so the value is inspectable afterwards. Mirrors the
+        // shared WorkflowTestHelper.
+        var workflowOptions = new Elsa.Workflows.Models.WorkflowOptions();
+        mockBuilder.SetupGet(b => b.WorkflowOptions).Returns(workflowOptions);
+
         // WithVariable<T>() — no args
         mockBuilder
             .Setup(b => b.WithVariable<string>())
