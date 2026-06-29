@@ -694,8 +694,26 @@ git commit -m "feat(30-A): cut admin provision/status/deprovision endpoints over
 
 **Why:** with no remaining caller, remove the `[Obsolete]` surface and satisfy Acceptance Criterion 1.
 
+**Execution note (deviation from plan):** The plan originally called for deleting
+`CranlProvisioningWorkflow.cs` along with the other V1 files. During implementation, review found
+that deleting the engine would have orphaned the V2 Cranl path — `CranlTenantProviderV2` delegates
+to `CranlProvisioningWorkflow` for the actual REST-walk (project→db→app), and there was no other
+implementation of that logic. Deleting the engine without a replacement would leave a Cranl-configured
+deployment silently timing out to `Failed` instead of completing. The engine was therefore **kept**
+(`CranlProvisioningWorkflow.cs` remains in the codebase), and Task 4's deletion was narrowed to
+the four true V1 files (`ITenantProvisioner`, `NullTenantProvisioner`, `CranlTenantProvisioner`,
+`TenantProvisioningTaskHandler`). As a follow-on in the same commit (`d69c42bb` + `c9f2c353`), two
+new `IPlatformTaskHandler`s were wired to drive the now-kept engine: `CranlProvisionPlatformTaskHandler`
+(task type `provisioning.tenant`) and `CranlDeprovisionPlatformTaskHandler` (task type
+`provisioning.tenant.deprovision`). The Cranl provision/deprovision paths are functional end-to-end
+as a result. See parent plan `docs/superpowers/plans/2026-06-11-epic-30-pluggable-provisioning.md`
+Phase A deviation note for the full record.
+
 **Files:**
-- Delete: `ITenantProvisioner.cs`, `NullTenantProvisioner.cs`, `CranlTenantProvisioner.cs`, `CranlProvisioningWorkflow.cs`, `TenantProvisioningTaskHandler.cs` (under `…/Services/Provisioning/`); tests `NullTenantProvisionerTests.cs`, `CranlTenantProvisionerTests.cs`, `CranlProvisioningWorkflowTests.cs`.
+- Delete: `ITenantProvisioner.cs`, `NullTenantProvisioner.cs`, `CranlTenantProvisioner.cs`,
+  `TenantProvisioningTaskHandler.cs` (under `…/Services/Provisioning/`); tests
+  `NullTenantProvisionerTests.cs`, `CranlTenantProvisionerTests.cs`, `CranlProvisioningWorkflowTests.cs`.
+  **`CranlProvisioningWorkflow.cs` was NOT deleted** (see deviation note above).
 - Modify: `ProvisioningModels.cs` (delete `ProvisioningOptions` L89 + `ProvisioningStatus` L92), `ProvisioningServiceCollectionExtensions.cs` (remove V1 registrations + CS0618), `Tenant.cs:48` (fix cref), `CranlTenantProviderV2Tests.cs` (port unique V1 behavior + drop the L15 CS0618 pragma if now unused).
 
 - [ ] **Step 1: Behavior-port analysis (blocking).** Diff `CranlProvisioningWorkflowTests.cs` against `CranlTenantProviderV2Tests.cs`. For each V1-unique behavior — env-var payload (`DATABASE_URL`,`TAMMA_CONTROL_PLANE_URL`,`TAMMA_TENANT_ID`,`TAMMA_SHARED_SECRET`), encrypted-conn round-trip, teardown order app→db→project, 404-as-absent, `ShortenForName` — confirm an equivalent assertion exists in `CranlTenantProviderV2Tests.cs`. If any is missing, add it there FIRST (against the real `CranlTenantProviderV2` + a strict `ICranlApiClient` mock). Record in the commit body which behaviors were already covered vs newly ported.
