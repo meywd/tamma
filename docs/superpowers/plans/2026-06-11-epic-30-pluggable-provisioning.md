@@ -212,6 +212,8 @@ procedure": edit all four, then `dotnet ef migrations has-pending-model-changes`
 
 ### Phase B — Reconcile V2 with the unified model: providers mint pool rows
 
+**Known constraint to fix in Phase B:** `ProvisionTenantV2Workflow.ExecuteAsync` block-polls (up to ~30 min) for an inner `provisioning.tenant` platform task that `CranlTenantProviderV2.ProvisionAsync` enqueues on the same `PlatformTaskWorker` queue. Because `PlatformTaskWorker` processes one task at a time per process, on a single worker the saga holds the only slot and the inner task is never reserved — provision times out to `Failed`. The V2 Cranl provision saga must be restructured so it does not block-poll a same-queue inner task (or require ≥2 platform-worker processes as an interim workaround). Not reachable today (`PlatformTaskWorker.RunOnStartup=false`; Cranl opt-in) but must be addressed before enabling the V2 Cranl path in production.
+
 This is decision 3 / deviation 22 made real. A `DatabaseOnly` provision = "mint a hosting DB,
 register it in `tenant_databases`, move the tenant's schema onto it." Database routing NEVER flows
 through provider-resolved raw URLs.

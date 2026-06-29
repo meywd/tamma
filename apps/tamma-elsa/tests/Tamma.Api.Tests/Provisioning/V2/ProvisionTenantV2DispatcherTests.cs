@@ -96,7 +96,7 @@ public sealed class ProvisionTenantV2DispatcherTests
     {
         var tenant = await SeedAsync("none");
         var tenantId = tenant.Id;
-        var dispatcher = BuildDispatcher(); // registry = [NullTenantProvider] only
+        var dispatcher = BuildDispatcher(); // registry is empty; the null-key check short-circuits before the registry lookup
 
         var result = await dispatcher.DispatchAsync(
             tenantId,

@@ -56,6 +56,7 @@ provisioning platform tasks drain only when that worker is enabled.
 - **Phase B** — Pool-row reconciliation / unified-model routing fix (see
   `docs/superpowers/plans/2026-06-11-epic-30-pluggable-provisioning.md` §3
   Phase B). Blocked on the Cranl-credential CREATEROLE analysis.
+  **Known limitation (single-worker Cranl saga constraint):** `ProvisionTenantV2Workflow` block-polls for an inner `provisioning.tenant` platform task that `CranlTenantProviderV2` enqueues on the same queue. `PlatformTaskWorker` processes one task at a time per process — so on a single worker process the saga occupies the only slot and the inner task is never reserved, causing provision to time out to `Failed`. Requires ≥2 platform-worker processes until Phase B restructures the saga away from block-polling a same-queue inner task. Not reachable today (`PlatformTaskWorker.RunOnStartup=false`; Cranl opt-in; null path unaffected).
 - **Phase C** — CHECK-constraint tightening (deviations 6–7 from the
   unified-tenancy plan).
 - **Phase D** — Story 28-1 closeout: per-tenant Elsa runner decision.

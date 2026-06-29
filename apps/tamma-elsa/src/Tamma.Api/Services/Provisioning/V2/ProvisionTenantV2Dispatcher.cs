@@ -258,8 +258,8 @@ public sealed class ProvisionTenantV2Dispatcher
             TenantId = tenantId,
             ProviderKey = providerKey,
             Operation = ProvisioningOperation.Deprovision,
-            // Topology is unused for deprovision but kept non-None so the
-            // handler's blank-key/payload guards stay satisfied.
+            // Topology is unused for deprovision; DeprovisionAsync ignores it.
+            // DedicatedCompute is a non-None placeholder to satisfy the payload schema.
             Topology = ProvisioningTopology.DedicatedCompute,
             CustomName = reason,
         };

@@ -438,7 +438,7 @@ public static class AdminEndpoints
         CancellationToken ct)
     {
         var (providerKey, topology) = ResolveDefaultBackend(registry);
-        var region = req?.Region ?? cranlOptions.DefaultRegion;
+        var region = string.IsNullOrWhiteSpace(req?.Region) ? cranlOptions.DefaultRegion : req!.Region!;
         var request = new ProvisioningRequest(topology, region, Tier: null, req?.CustomName);
 
         var result = await dispatcher.DispatchAsync(tenantId, providerKey, request, invokingOrgId: null, ct);

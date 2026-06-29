@@ -101,8 +101,8 @@ public static class ProvisioningServiceCollectionExtensions
         services.TryAddScoped<ProvisionTenantV2Dispatcher>();
         // Register the handler under both IPlatformTaskHandler (so
         // PlatformTaskHandlerRegistry sees it) and as a concrete type
-        // (so direct resolution works in tests). Mirrors the v1
-        // TenantProvisioningTaskHandler dual-registration pattern.
+        // (so direct resolution works in tests). Mirrors the v2
+        // platform-handler registration pattern used by CranlProvision/Deprovision handlers.
         services.AddScoped<IPlatformTaskHandler, ProvisionTenantV2TaskHandler>();
 
         return services;
