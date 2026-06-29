@@ -30,6 +30,11 @@ public sealed class ProvisionTenantV2TaskPayload
     /// <summary>Tenant the workflow targets.</summary>
     public Guid TenantId { get; set; }
 
+    /// <summary>Which lifecycle action this task performs. Defaults to
+    /// <see cref="ProvisioningOperation.Provision"/> so payloads serialized
+    /// before this field existed still deserialize as provision tasks.</summary>
+    public ProvisioningOperation Operation { get; set; } = ProvisioningOperation.Provision;
+
     /// <summary>Stable provider key the dispatch step looks up in
     /// <see cref="TenantProviderRegistry"/>. Convention is lowercase
     /// snake_case (e.g. <c>"cranl"</c>, <c>"hetzner"</c>).</summary>

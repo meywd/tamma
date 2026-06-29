@@ -63,7 +63,7 @@ namespace Tamma.Api.Services.Provisioning.V2;
 /// halts with <see cref="ProvisioningFailureReasons.CompensationFailed"/>
 /// — operator intervention is required (orphans may exist).</para>
 /// </summary>
-public sealed class ProvisionTenantV2Workflow
+public class ProvisionTenantV2Workflow
 {
     /// <summary>Bound on the InitialProbe step. The 30-1 contract did not
     /// define <c>Capabilities.TimeoutSeconds</c> (the brief mentioned it,
@@ -110,7 +110,7 @@ public sealed class ProvisionTenantV2Workflow
     /// </summary>
     /// <returns>Final snapshot — either Ready (happy path) or Failed
     /// (with FailureReason short-code).</returns>
-    public async Task<ProvisioningResult> ExecuteAsync(
+    public virtual async Task<ProvisioningResult> ExecuteAsync(
         ProvisionTenantV2TaskPayload payload,
         CancellationToken ct)
     {
@@ -454,6 +454,64 @@ public sealed class ProvisionTenantV2Workflow
         {
             _ = reserved; // suppress unused-warning when path returns early.
         }
+    }
+
+    /// <summary>
+    /// Reverse path for a real provider (the null seam is short-circuited in the
+    /// dispatcher and never enqueued). Resolves the provider, tears down its
+    /// infrastructure best-effort, and stamps Deprovisioned. Story 30-9 reduced
+    /// to Cranl+Null scope.
+    /// </summary>
+    public virtual async Task<ProvisioningResult> DeprovisionAsync(
+        ProvisionTenantV2TaskPayload payload, CancellationToken ct)
+    {
+        if (payload is null) throw new ArgumentNullException(nameof(payload));
+
+        await EmitStepEventAsync(payload.TenantId, "deprovision", "STEP_STARTED", null, ct).ConfigureAwait(false);
+
+        var tenant = await _db.Tenants
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Id == payload.TenantId && t.DeletedAt == null, ct)
+            .ConfigureAwait(false);
+        if (tenant is null)
+            return BuildSyntheticFailure(ProvisioningFailureReasons.TenantNotFound, $"tenant_{payload.TenantId}_not_found");
+
+        if (!_registry.TryGetProvider(payload.ProviderKey, out var provider) || provider is null)
+            return await StampFailureAsync(tenant, ProvisioningFailureReasons.ProviderNotRegistered,
+                $"provider_key_{payload.ProviderKey}_unknown", ct).ConfigureAwait(false);
+
+        try
+        {
+            await provider.DeprovisionAsync(
+                payload.TenantId,
+                new DeprovisioningRequest(DeprovisioningCleanupMode.BestEffort, payload.CustomName),
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // BestEffort: log + still mark Deprovisioned; the 30-9 reconciliation
+            // sweep (Phase B+) reclaims any orphan. Do NOT rethrow (a throw here
+            // re-enqueues the task and re-runs teardown).
+            _logger.LogWarning(ex,
+                "v2_deprovisioning.provider_threw tenantId={TenantId} providerKey={ProviderKey}",
+                payload.TenantId, payload.ProviderKey);
+        }
+
+        var nowUtc = _clock.GetUtcNow();
+        tenant.ProvisioningState = ProvisioningState.Deprovisioned.ToStorageString();
+        tenant.ProvisioningDetail = "deprovision_complete";
+        tenant.ProvisioningUpdatedAt = nowUtc.UtcDateTime;
+        tenant.UpdatedAt = nowUtc.UtcDateTime;
+        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        await EmitStepEventAsync(payload.TenantId, "deprovision", "STEP_COMPLETED",
+            new Dictionary<string, object?> { ["state"] = "deprovisioned" }, ct).ConfigureAwait(false);
+
+        return new ProvisioningResult(
+            new ProvisioningStatusSnapshot(ProvisioningState.Deprovisioned, "deprovision_complete", null, nowUtc),
+            ProviderResourceIds: new Dictionary<string, string>(),
+            Endpoints: null,
+            ProvisioningDurationSeconds: null);
     }
 
     // ── Helpers ─────────────────────────────────────────────────────

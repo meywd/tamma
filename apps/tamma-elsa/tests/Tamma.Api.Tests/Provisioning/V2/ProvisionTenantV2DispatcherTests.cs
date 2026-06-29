@@ -256,4 +256,65 @@ public sealed class ProvisionTenantV2DispatcherTests
             It.IsAny<PlatformQueuedTask>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
+
+    // ── Deprovision tests ───────────────────────────────────────────
+
+    [Test]
+    public async Task DispatchDeprovisionAsync_NullProviderKey_ShortCircuitsToDeprovisioned()
+    {
+        var tenant = await SeedAsync("ready");
+        var dispatcher = BuildDispatcher(); // null-only (no real providers)
+
+        var result = await dispatcher.DispatchDeprovisionAsync(
+            tenant.Id, NullTenantProvider.Key, reason: "tenant_deleted", CancellationToken.None);
+
+        Assert.That(result.Status.State, Is.EqualTo(ProvisioningState.Deprovisioned));
+        Assert.That(result.Status.FailureReason, Is.Null);
+        _platformTasks.Verify(q => q.EnqueueAsync(
+            It.IsAny<PlatformQueuedTask>(), It.IsAny<CancellationToken>()), Times.Never);
+        var row = await _db.Tenants.IgnoreQueryFilters().FirstAsync(t => t.Id == tenant.Id);
+        Assert.That(row.ProvisioningState, Is.EqualTo("deprovisioned"));
+    }
+
+    [Test]
+    public async Task DispatchDeprovisionAsync_RealProvider_FlipsToDeprovisioningAndEnqueues()
+    {
+        var tenant = await SeedAsync("ready");
+        var dispatcher = BuildDispatcher(FakeProvider("cranl", ProvisioningTopology.DedicatedCompute));
+
+        PlatformQueuedTask? captured = null;
+        _platformTasks
+            .Setup(q => q.EnqueueAsync(It.IsAny<PlatformQueuedTask>(), It.IsAny<CancellationToken>()))
+            .Callback<PlatformQueuedTask, CancellationToken>((t, _) => captured = t)
+            .ReturnsAsync((PlatformQueuedTask t, CancellationToken _) =>
+            {
+                t.Id = Guid.NewGuid();
+                return t;
+            });
+
+        var result = await dispatcher.DispatchDeprovisionAsync(
+            tenant.Id, "cranl", reason: "plan_downgrade", CancellationToken.None);
+
+        Assert.That(result.Status.State, Is.EqualTo(ProvisioningState.Deprovisioning));
+        Assert.That(captured, Is.Not.Null);
+        Assert.That(captured!.Type, Is.EqualTo(ProvisionTenantV2TaskPayload.TaskType));
+        var payload = System.Text.Json.JsonSerializer.Deserialize<ProvisionTenantV2TaskPayload>(captured.Payload!)!;
+        Assert.That(payload.Operation, Is.EqualTo(ProvisioningOperation.Deprovision));
+        Assert.That(payload.ProviderKey, Is.EqualTo("cranl"));
+    }
+
+    [Test]
+    public async Task DispatchDeprovisionAsync_UnknownProviderKey_StampsProviderNotRegistered()
+    {
+        var tenant = await SeedAsync("ready");
+        var dispatcher = BuildDispatcher(); // null-only, no "hetzner"
+
+        var result = await dispatcher.DispatchDeprovisionAsync(
+            tenant.Id, "hetzner", reason: null, CancellationToken.None);
+
+        Assert.That(result.Status.State, Is.EqualTo(ProvisioningState.Failed));
+        Assert.That(result.Status.FailureReason, Is.EqualTo(ProvisioningFailureReasons.ProviderNotRegistered));
+        _platformTasks.Verify(q => q.EnqueueAsync(
+            It.IsAny<PlatformQueuedTask>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
 }

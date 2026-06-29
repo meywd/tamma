@@ -88,7 +88,9 @@ public sealed class ProvisionTenantV2TaskHandler : IPlatformTaskHandler
             "v2_provisioning.task_started taskId={TaskId} tenantId={TenantId} providerKey={ProviderKey}",
             task.Id, payload.TenantId, payload.ProviderKey);
 
-        var result = await _workflow.ExecuteAsync(payload, ct).ConfigureAwait(false);
+        var result = payload.Operation == ProvisioningOperation.Deprovision
+            ? await _workflow.DeprovisionAsync(payload, ct).ConfigureAwait(false)
+            : await _workflow.ExecuteAsync(payload, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
             "v2_provisioning.task_finished taskId={TaskId} tenantId={TenantId} state={State} failureReason={FailureReason}",
