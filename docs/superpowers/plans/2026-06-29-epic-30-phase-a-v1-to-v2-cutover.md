@@ -716,6 +716,8 @@ Phase A deviation note for the full record.
   **`CranlProvisioningWorkflow.cs` was NOT deleted** (see deviation note above).
 - Modify: `ProvisioningModels.cs` (delete `ProvisioningOptions` L89 + `ProvisioningStatus` L92), `ProvisioningServiceCollectionExtensions.cs` (remove V1 registrations + CS0618), `Tenant.cs:48` (fix cref), `CranlTenantProviderV2Tests.cs` (port unique V1 behavior + drop the L15 CS0618 pragma if now unused).
 
+> **Superseded:** the steps below describe the original delete-all approach; the deviation note above records what actually shipped (engine kept, Cranl platform handlers wired in c9f2c353).
+
 - [ ] **Step 1: Behavior-port analysis (blocking).** Diff `CranlProvisioningWorkflowTests.cs` against `CranlTenantProviderV2Tests.cs`. For each V1-unique behavior — env-var payload (`DATABASE_URL`,`TAMMA_CONTROL_PLANE_URL`,`TAMMA_TENANT_ID`,`TAMMA_SHARED_SECRET`), encrypted-conn round-trip, teardown order app→db→project, 404-as-absent, `ShortenForName` — confirm an equivalent assertion exists in `CranlTenantProviderV2Tests.cs`. If any is missing, add it there FIRST (against the real `CranlTenantProviderV2` + a strict `ICranlApiClient` mock). Record in the commit body which behaviors were already covered vs newly ported.
 
 - [ ] **Step 2: Delete the five V1 production files + three V1 test files.**
