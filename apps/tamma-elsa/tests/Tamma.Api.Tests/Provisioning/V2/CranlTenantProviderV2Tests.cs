@@ -12,18 +12,12 @@ using Tamma.Data;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
-#pragma warning disable CS0618 // ITenantProvisioner / CranlTenantProvisioner / NullTenantProvisioner
-                               // are [Obsolete] (Story 30-3) but the test fixture wires them
-                               // alongside v2 to verify both surfaces coexist.
-
 namespace Tamma.Api.Tests.Provisioning.V2;
 
 /// <summary>
 /// Story 30-3 — behavioural contract for
-/// <see cref="CranlTenantProviderV2"/>. Mirrors the v1
-/// <see cref="CranlTenantProvisioner"/> tests where the dispatch
-/// semantics overlap (idempotency, platform-queue task type) and adds
-/// v2-specific coverage:
+/// <see cref="CranlTenantProviderV2"/>. Covers dispatch semantics
+/// (idempotency, platform-queue task type) and v2-specific contract:
 ///
 /// <list type="bullet">
 ///   <item><description><see cref="ITenantInfrastructureProvider.GetCapabilities"/>
@@ -171,7 +165,7 @@ public sealed class CranlTenantProviderV2Tests
 
         _platformTasks.Verify(q => q.EnqueueAsync(
             It.Is<PlatformQueuedTask>(t =>
-                t.Type == CranlTenantProvisioner.ProvisioningTaskType
+                t.Type == CranlTenantProviderV2.ProvisioningTaskType
                 && t.TenantId == tenant.Id
                 && t.Payload != null
                 && t.Payload.Contains(tenant.Id.ToString())
@@ -282,7 +276,7 @@ public sealed class CranlTenantProviderV2Tests
 
         _platformTasks.Verify(q => q.EnqueueAsync(
             It.Is<PlatformQueuedTask>(t =>
-                t.Type == CranlTenantProvisioner.DeprovisioningTaskType
+                t.Type == CranlTenantProviderV2.DeprovisioningTaskType
                 && t.TenantId == tenant.Id),
             It.IsAny<CancellationToken>()),
             Times.Once);

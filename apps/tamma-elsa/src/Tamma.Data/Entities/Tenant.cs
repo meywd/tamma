@@ -45,7 +45,7 @@ public class Tenant
 
     /// <summary>
     /// Provisioning state machine — string-encoded
-    /// <see cref="Tamma.Core.Enums.ProvisioningState"/> ('none' →
+    /// <see cref="Tamma.Api.Services.Provisioning.ProvisioningState"/> ('none' →
     /// 'pending' → 'database_provisioning' → ... → 'ready').
     /// </summary>
     public string ProvisioningState { get; set; } = "none";

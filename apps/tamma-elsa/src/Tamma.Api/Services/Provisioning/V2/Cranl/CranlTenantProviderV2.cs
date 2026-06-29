@@ -10,11 +10,10 @@ namespace Tamma.Api.Services.Provisioning.V2.Cranl;
 
 /// <summary>
 /// Cranl-backed implementation of v2's
-/// <see cref="ITenantInfrastructureProvider"/>. Wraps the same per-tenant
-/// flow that v1's <see cref="CranlTenantProvisioner"/> enqueues — Cranl
-/// project → db → poll → application → env → deploy → poll → domains
-/// (see <c>docs/vendors/cranl/README.md</c>) — but presents the v2
-/// capability/topology/endpoint contract that the dispatch workflow
+/// <see cref="ITenantInfrastructureProvider"/>. Drives the same per-tenant
+/// flow — Cranl project → db → poll → application → env → deploy → poll
+/// → domains (see <c>docs/vendors/cranl/README.md</c>) — and presents the
+/// v2 capability/topology/endpoint contract that the dispatch workflow
 /// (Story 30-2) and onboarding UI (Story 30-7) consume.
 ///
 /// <para><b>Dispatch pattern (preserved from v1)</b>: the long-running
@@ -57,6 +56,18 @@ namespace Tamma.Api.Services.Provisioning.V2.Cranl;
 /// </summary>
 public sealed class CranlTenantProviderV2 : ITenantInfrastructureProvider
 {
+    /// <summary>
+    /// Platform-queue task type for provisioning. Matches the constant that
+    /// was previously on the now-deleted <c>CranlTenantProvisioner</c>; the
+    /// string value is locked in because existing queued rows carry it.
+    /// </summary>
+    public const string ProvisioningTaskType = "provisioning.tenant";
+
+    /// <summary>
+    /// Platform-queue task type for deprovisioning. See <see cref="ProvisioningTaskType"/>.
+    /// </summary>
+    public const string DeprovisioningTaskType = "provisioning.tenant.deprovision";
+
     private static readonly ProviderCapabilities CapabilitiesValue =
         new(
             CranlCapabilities.ProviderKey,
@@ -163,13 +174,7 @@ public sealed class CranlTenantProviderV2 : ITenantInfrastructureProvider
         });
         await _platformTasks.EnqueueAsync(new PlatformQueuedTask
         {
-            // V2 deliberately reuses the v1 task-type constants so the existing
-            // TenantProvisioningTaskHandler dispatches both v1- and v2-enqueued
-            // tasks identically. Wave-C will retire the v1 const onto a v2-
-            // owned constant when AdminEndpoints + the handler migrate.
-#pragma warning disable CS0618
-            Type = CranlTenantProvisioner.ProvisioningTaskType,
-#pragma warning restore CS0618
+            Type = ProvisioningTaskType,
             TenantId = tenantId,
             Payload = payload,
         }, ct);
@@ -222,11 +227,7 @@ public sealed class CranlTenantProviderV2 : ITenantInfrastructureProvider
         });
         await _platformTasks.EnqueueAsync(new PlatformQueuedTask
         {
-            // V2 deliberately reuses the v1 task-type constants — see the
-            // matching note on ProvisionAsync above.
-#pragma warning disable CS0618
-            Type = CranlTenantProvisioner.DeprovisioningTaskType,
-#pragma warning restore CS0618
+            Type = DeprovisioningTaskType,
             TenantId = tenantId,
             Payload = payload,
         }, ct);
