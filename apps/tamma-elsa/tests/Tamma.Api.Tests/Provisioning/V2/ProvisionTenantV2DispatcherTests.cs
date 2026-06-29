@@ -92,27 +92,26 @@ public sealed class ProvisionTenantV2DispatcherTests
     }
 
     [Test]
-    public async Task DispatchAsync_NullProviderKey_ShortCircuitsAsNoProvisioningInThisMode()
+    public async Task DispatchAsync_NullProviderKey_ShortCircuitsAsReadyNoBackend()
     {
-        var tenant = await SeedAsync();
-        var dispatcher = BuildDispatcher(new NullTenantProvider());
+        var tenant = await SeedAsync("none");
+        var tenantId = tenant.Id;
+        var dispatcher = BuildDispatcher(); // registry = [NullTenantProvider] only
 
         var result = await dispatcher.DispatchAsync(
-            tenant.Id,
+            tenantId,
             NullTenantProvider.Key,
-            new ProvisioningRequest(ProvisioningTopology.DatabaseOnly),
-            ct: CancellationToken.None);
+            new ProvisioningRequest(ProvisioningTopology.DatabaseOnly, "germany-1"),
+            invokingOrgId: null,
+            CancellationToken.None);
 
-        result.Status.State.Should().Be(ProvisioningState.Failed);
-        result.Status.FailureReason.Should().Be(
-            ProvisioningFailureReasons.NoProvisioningInThisMode);
-        _platformTasks.Verify(q => q.EnqueueAsync(
-            It.IsAny<PlatformQueuedTask>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+        Assert.That(result.Status.State, Is.EqualTo(ProvisioningState.Ready));
+        Assert.That(result.Status.Detail, Is.EqualTo("shared_infrastructure_no_backend_configured"));
+        Assert.That(result.Status.FailureReason, Is.Null);
+        _platformTasks.Verify(q => q.EnqueueAsync(It.IsAny<PlatformQueuedTask>(), It.IsAny<CancellationToken>()), Times.Never);
 
-        var refreshed = await _db.Tenants.IgnoreQueryFilters()
-            .FirstAsync(t => t.Id == tenant.Id);
-        refreshed.ProvisioningState.Should().Be("failed");
+        var row = await _db.Tenants.IgnoreQueryFilters().FirstAsync(t => t.Id == tenantId);
+        Assert.That(row.ProvisioningState, Is.EqualTo("ready"));
     }
 
     [Test]
