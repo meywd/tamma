@@ -58,8 +58,9 @@ public sealed class CranlTenantProviderV2 : ITenantInfrastructureProvider
 {
     /// <summary>
     /// Platform-queue task type for provisioning. Matches the constant that
-    /// was previously on the now-deleted <c>CranlTenantProvisioner</c>; the
+    /// was previously on the now-retired v1 Cranl provisioner; the
     /// string value is locked in because existing queued rows carry it.
+    /// Consumed by <see cref="Provisioning.CranlProvisionPlatformTaskHandler"/>.
     /// </summary>
     public const string ProvisioningTaskType = "provisioning.tenant";
 

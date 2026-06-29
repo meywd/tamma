@@ -86,6 +86,13 @@ public static class ProvisioningStateExtensions
 }
 
 /// <summary>
+/// Caller-supplied options for kicking off a Cranl provisioning walk.
+/// Consumed by <see cref="CranlProvisioningWorkflow.ProvisionAsync"/> when
+/// the platform-queue handler drives the REST walk.
+/// </summary>
+public sealed record ProvisioningOptions(string Region, string? CustomName = null);
+
+/// <summary>
 /// Payload serialised into a platform-queue task row for provisioning and
 /// deprovisioning operations. Consumed by <see cref="V2.Cranl.CranlTenantProviderV2"/>
 /// when enqueueing background work on the platform queue.

@@ -144,6 +144,16 @@ public static class ProvisioningServiceCollectionExtensions
             ServiceDescriptor.Singleton<
                 ITenantInfrastructureProvider,
                 ScopedTenantInfrastructureProviderAdapter<CranlTenantProviderV2>>());
+
+        // Epic 30 Phase A — the Cranl REST-walk engine + the platform-queue
+        // handlers that consume the `provisioning.tenant`[.deprovision] rows
+        // CranlTenantProviderV2 enqueues. Without these the v2 Cranl provision
+        // path parks forever (no IPlatformTaskHandler matches the task type)
+        // and the dispatch probe times out to Failed. Scoped because the
+        // engine persists tenant-row state via the scoped ControlPlaneDbContext.
+        services.TryAddScoped<CranlProvisioningWorkflow>();
+        services.AddPlatformTaskHandler<CranlProvisionPlatformTaskHandler>();
+        services.AddPlatformTaskHandler<CranlDeprovisionPlatformTaskHandler>();
         return services;
     }
 

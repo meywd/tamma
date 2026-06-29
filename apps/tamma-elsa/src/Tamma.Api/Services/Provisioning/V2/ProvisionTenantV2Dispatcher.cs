@@ -18,8 +18,8 @@ namespace Tamma.Api.Services.Provisioning.V2;
 ///     creation, so provisioning dedicated infrastructure is a genuine
 ///     no-op. The dispatcher short-circuits without enqueueing: it stamps
 ///     the tenant row with <see cref="ProvisioningState.Ready"/> and returns
-///     the snapshot (matches the retired V1
-///     <c>NullTenantProvisioner</c> behaviour).</description></item>
+///     the snapshot (matches the retired V1 null provisioner
+///     behaviour).</description></item>
 ///   <item><description><b>SaaS mode</b> — the registry has at least one real
 ///     provider keyed by <see cref="ITenantInfrastructureProvider.ProviderKey"/>.
 ///     The dispatcher refuses unknown keys (<c>provider_not_registered</c>)
@@ -101,7 +101,7 @@ public sealed class ProvisionTenantV2Dispatcher
             // Unified schema-per-tenant: the tenant's schema is minted at tenant
             // creation, so provisioning dedicated infrastructure is a genuine
             // no-op for a no-backend deployment. Report Ready (matches the
-            // retired V1 NullTenantProvisioner) rather than letting
+            // retired V1 null provisioner) rather than letting
             // NullTenantProvider.ProvisionAsync throw downstream.
             _logger.LogInformation(
                 "v2_provisioning.short_circuit_null_provider_ready tenantId={TenantId}", tenantId);

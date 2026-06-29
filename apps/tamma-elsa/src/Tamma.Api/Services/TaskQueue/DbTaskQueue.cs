@@ -12,7 +12,7 @@ namespace Tamma.Api.Services.TaskQueue;
 /// authenticated user).
 ///
 /// <para>Story 28-1 PR B — platform-scope tasks no longer flow through
-/// here. <c>CranlTenantProvisioner</c> and <c>RetireScheduler</c> hit
+/// here. The Cranl provisioning walk and <c>RetireScheduler</c> hit
 /// <see cref="IPlatformQueuedTaskRepository"/> directly; the GitHub
 /// webhook handler routes orphan webhooks to the platform repo too.
 /// This surface ONLY enqueues into a real tenant's per-tenant queue.</para>

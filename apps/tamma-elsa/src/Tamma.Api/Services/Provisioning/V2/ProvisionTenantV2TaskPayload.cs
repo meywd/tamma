@@ -6,7 +6,7 @@ namespace Tamma.Api.Services.Provisioning.V2;
 /// the v2 provisioning workflow.
 ///
 /// <para><b>Why platform queue, not per-tenant queue</b>: the existing v1
-/// pattern (Story 28-1 PR B, doc-commented on <c>CranlTenantProvisioner</c>)
+/// pattern (Story 28-1 PR B, doc-commented on the v1 Cranl provisioner)
 /// puts provisioning + deprovisioning tasks on the platform queue because
 /// at provisioning time the tenant's database doesn't exist yet — the
 /// task's whole job is to create it. The 30-1 audit explicitly preserved
