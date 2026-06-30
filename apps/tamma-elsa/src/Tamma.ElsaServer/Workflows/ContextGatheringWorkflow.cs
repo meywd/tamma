@@ -40,6 +40,7 @@ public class ContextGatheringWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
+        var tenantId = builder.WithVariable<string>("TenantId", "");
         var repository = builder.WithVariable<string>("Repository", "");
         var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
         var workItemJson = builder.WithVariable<string>("WorkItemJson", "");
@@ -71,6 +72,7 @@ public class ContextGatheringWorkflow : WorkflowBase
                 var repo = ctx.GetInput<string>("repository") ?? "";
                 issueNumber.Set(ctx, ctx.GetInput<int>("issueNumber"));
                 workItemJson.Set(ctx, ctx.GetInput<string>("workItemJson") ?? "");
+                tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
                 var itemJson = ctx.GetInput<string>("workItemJson") ?? "";
                 var type = "feature";
                 if (itemJson.Contains("\"type\":\"bug\"", System.StringComparison.OrdinalIgnoreCase)) type = "bug";
@@ -90,7 +92,7 @@ public class ContextGatheringWorkflow : WorkflowBase
         // Dev Scan
         var devScan = RoleScan("DevScan", "Dev Scan", AgentRole.Developer,
             repository, workItemJson, workItemType, "{}",
-            llmResult);
+            tenantId, llmResult);
         var extractDev = Extract(devFindings, llmResult, "ExtractDev", "Extract Dev Findings");
         var storeDev = StoreRole("StoreDev", "Store Dev", AgentRole.Developer.ToWire(),
             repository, issueNumber, devFindings, contextIds);
@@ -99,7 +101,7 @@ public class ContextGatheringWorkflow : WorkflowBase
         var qaScan = RoleScan("QAScan", "QA Scan", AgentRole.Tester,
             repository, workItemJson, workItemType,
             ctx => devFindings.Get(ctx),
-            llmResult);
+            tenantId, llmResult);
         var extractQA = Extract(qaFindings, llmResult, "ExtractQA", "Extract QA Findings");
         var storeQA = StoreRole("StoreQA", "Store QA", AgentRole.Tester.ToWire(),
             repository, issueNumber, qaFindings, contextIds);
@@ -112,7 +114,7 @@ public class ContextGatheringWorkflow : WorkflowBase
                 ["dev"] = devFindings.Get(ctx),
                 ["qa"] = qaFindings.Get(ctx),
             }),
-            llmResult);
+            tenantId, llmResult);
         var extractSec = Extract(securityFindings, llmResult, "ExtractSec", "Extract Security Findings");
         var storeSec = StoreRole("StoreSec", "Store Security", AgentRole.Security.ToWire(),
             repository, issueNumber, securityFindings, contextIds);
@@ -126,7 +128,7 @@ public class ContextGatheringWorkflow : WorkflowBase
                 ["qa"] = qaFindings.Get(ctx),
                 ["security"] = securityFindings.Get(ctx),
             }),
-            llmResult);
+            tenantId, llmResult);
         var extractDevOps = Extract(devopsFindings, llmResult, "ExtractDevOps", "Extract DevOps Findings");
         var storeDevOps = StoreRole("StoreDevOps", "Store DevOps", AgentRole.Devops.ToWire(),
             repository, issueNumber, devopsFindings, contextIds);
@@ -141,7 +143,7 @@ public class ContextGatheringWorkflow : WorkflowBase
                 ["security"] = securityFindings.Get(ctx),
                 ["devops"] = devopsFindings.Get(ctx),
             }),
-            llmResult);
+            tenantId, llmResult);
         var extractArch = Extract(architectFindings, llmResult, "ExtractArch", "Extract Architect Findings");
         var storeArch = StoreRole("StoreArch", "Store Architect", AgentRole.Architect.ToWire(),
             repository, issueNumber, architectFindings, contextIds);
@@ -157,6 +159,7 @@ public class ContextGatheringWorkflow : WorkflowBase
             {
                 ["role"] = AgentRole.ProductOwner.ToWire(),
                 ["action"] = AgentAction.SummarizeStakeholder.ToWire(),
+                ["tenantId"] = tenantId.Get(ctx),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["workItemJson"] = workItemJson.Get(ctx),
@@ -281,6 +284,7 @@ public class ContextGatheringWorkflow : WorkflowBase
         string id, string name, AgentRole role,
         Variable<string> repository, Variable<string> workItemJson,
         Variable<string> workItemType, string previousFindings,
+        Variable<string> tenantId,
         Variable<IDictionary<string, object>?> result)
     {
         var dispatch = new DispatchWorkflow
@@ -291,6 +295,7 @@ public class ContextGatheringWorkflow : WorkflowBase
             {
                 ["role"] = role.ToWire(),
                 ["action"] = AgentAction.ContextScan.ToWire(),
+                ["tenantId"] = tenantId.Get(ctx),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["workItemJson"] = workItemJson.Get(ctx),
@@ -312,6 +317,7 @@ public class ContextGatheringWorkflow : WorkflowBase
         Variable<string> repository, Variable<string> workItemJson,
         Variable<string> workItemType,
         Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> previousFindingsBuilder,
+        Variable<string> tenantId,
         Variable<IDictionary<string, object>?> result)
     {
         var dispatch = new DispatchWorkflow
@@ -322,6 +328,7 @@ public class ContextGatheringWorkflow : WorkflowBase
             {
                 ["role"] = role.ToWire(),
                 ["action"] = AgentAction.ContextScan.ToWire(),
+                ["tenantId"] = tenantId.Get(ctx),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["workItemJson"] = workItemJson.Get(ctx),

@@ -48,6 +48,8 @@ public class TaskCreationWorkflow : WorkflowBase
         var contextIds = builder.WithVariable<string>("ContextIds", "[]");
         var workItemJson = builder.WithVariable<string>("WorkItemJson", "");
 
+        var tenantId = builder.WithVariable<string>("TenantId", "");
+
         var tasksJson = builder.WithVariable<string>("TasksJson", "[]");
         var tasksValid = builder.WithVariable<bool>("TasksValid", false);
         var validationErrors = builder.WithVariable<string>("ValidationErrors", "");
@@ -70,6 +72,7 @@ public class TaskCreationWorkflow : WorkflowBase
                 planJson.Set(ctx, ctx.GetInput<string>("planJson") ?? "");
                 contextIds.Set(ctx, ctx.GetInput<string>("contextIds") ?? "[]");
                 workItemJson.Set(ctx, ctx.GetInput<string>("workItemJson") ?? "");
+                tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
                 var inputMaxRetries = ctx.GetInput<int?>("maxRetries");
                 if (inputMaxRetries.HasValue) maxRetries.Set(ctx, inputMaxRetries.Value);
                 return (object)repo;
@@ -88,6 +91,7 @@ public class TaskCreationWorkflow : WorkflowBase
             {
                 ["role"] = AgentRole.SeniorDeveloper.ToWire(),
                 ["action"] = AgentAction.CreateTasks.ToWire(),
+                ["tenantId"] = tenantId.Get(ctx),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["planJson"] = planJson.Get(ctx),

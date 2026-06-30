@@ -52,6 +52,7 @@ public class MentorshipWorkflow : WorkflowBase
         // =====================================================================
         // Workflow Variables
         // =====================================================================
+        var tenantId = builder.WithVariable<string>("TenantId", "");
         var sessionId = builder.WithVariable<Guid>("SessionId", default(Guid));
         var storyId = builder.WithVariable<string>("StoryId", "");
         var juniorId = builder.WithVariable<string>("JuniorId", "");
@@ -79,6 +80,7 @@ public class MentorshipWorkflow : WorkflowBase
             Variable = maxBasicRetries,
             Value = new Input<object?>(ctx =>
             {
+                tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
                 var inputBasic = ctx.GetInput<int?>("maxBasicRetries");
                 if (inputBasic.HasValue) maxBasicRetries.Set(ctx, inputBasic.Value);
                 var inputDebug = ctx.GetInput<int?>("maxDebugRetries");
@@ -352,7 +354,8 @@ public class MentorshipWorkflow : WorkflowBase
                 ["agentRole"] = AgentRole.SeniorDeveloper.ToWire(),
                 ["action"] = AgentAction.MentorFeedback.ToWire(),
                 ["taskPrompt"] = "Generate plan decomposition",
-                ["sessionId"] = sessionId.Get(context).ToString()
+                ["sessionId"] = sessionId.Get(context).ToString(),
+                ["tenantId"] = tenantId.Get(context),
             }),
             WaitForCompletion = new(true)
         };
@@ -369,7 +372,8 @@ public class MentorshipWorkflow : WorkflowBase
                 ["SessionId"] = sessionId.Get(context),
                 ["StoryId"] = storyId.Get(context) ?? "",
                 ["Purpose"] = "Assessment",
-                ["MaxContextSize"] = 50000
+                ["MaxContextSize"] = 50000,
+                ["tenantId"] = tenantId.Get(context),
             }),
             WaitForCompletion = new(true)
         };
