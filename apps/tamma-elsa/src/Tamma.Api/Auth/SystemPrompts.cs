@@ -235,6 +235,10 @@ public static class SystemPrompts
         AgentAction.MonitorHealth => Triage,
         AgentAction.AssessCapacity => Triage,
 
+        // ── assessment (assessment P0 — real per-cell bodies, not a transitional family) ──
+        AgentAction.GenerateAssessmentQuestions => GenerateAssessmentQuestionsBody,
+        AgentAction.AnalyzeAssessmentResponse => AnalyzeAssessmentResponseBody,
+
         // ── summarize / documentation / write-ups → Summarize ──
         AgentAction.SummarizeStakeholder => Summarize,
         AgentAction.SummarizeTechnical => Summarize,
@@ -634,6 +638,80 @@ public static class SystemPrompts
         Variables: ["role", "errorContext", "stackTrace", "relevantCode", "conventions", "recentChanges"],
         EnableTools: true,
         MaxTokens: 8192);
+
+    // -----------------------------------------------------------------------
+    // Assessment-specific body builders (assessment P0)
+    //
+    // These are purpose-written for the AssessmentWorkflow llm-call dispatch
+    // (docs/superpowers/plans/2026-06-30-assessment-p0-llm-call.md). Unlike the
+    // transitional bodies above, these are authoritative per-cell prompts that use
+    // the exact Shared-contract variable names Task 2 passes in the dispatch.
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Prompt for <c>(product_owner, generate-assessment-questions)</c>: produce a
+    /// JSON array of skill-appropriate questions about the story so the
+    /// <c>AssessmentWorkflow</c> can present them to the junior developer.
+    /// Shared-contract variables: <c>storyContext</c>, <c>skillLevel</c>,
+    /// <c>questionCount</c>, <c>previousGaps</c>.
+    /// </summary>
+    private static PromptTemplate GenerateAssessmentQuestionsBody(string role, string action) => new(
+        Role: role,
+        Action: action,
+        Template:
+            "You are assessing a junior developer's understanding of a story they are about to implement.\n\n" +
+            "## Story Context\n{{storyContext}}\n\n" +
+            "## Developer Skill Level\n{{skillLevel}}\n\n" +
+            "## Previously Identified Gaps (do not re-ask about these)\n{{previousGaps}}\n\n" +
+            "## Instructions\n\n" +
+            "Generate exactly {{questionCount}} assessment questions that:\n" +
+            "- Are appropriate for a {{skillLevel}} developer (calibrate depth and terminology accordingly)\n" +
+            "- Test understanding of the story's requirements, technical approach, and edge cases\n" +
+            "- Cover different aspects: functional requirements, technical design, testing considerations, risks\n" +
+            "- Avoid topics already covered in the previousGaps list above\n" +
+            "- Are open-ended enough to reveal genuine understanding (not yes/no)\n" +
+            "- Are specific to THIS story, not generic software engineering questions\n\n" +
+            "Return ONLY a JSON array of question strings with no wrapper object:\n" +
+            "```json\n[\"Question 1 text?\", \"Question 2 text?\", ...]\n```\n\n" +
+            "Do not include numbering, explanations, or any text outside the JSON array.",
+        SystemPrompt: SystemFor(role),
+        Variables: ["storyContext", "skillLevel", "questionCount", "previousGaps"],
+        EnableTools: false,
+        MaxTokens: 2048);
+
+    /// <summary>
+    /// Prompt for <c>(product_owner, analyze-assessment-response)</c>: evaluate a
+    /// junior developer's answers against the questions and story context, returning
+    /// a structured JSON result that <c>AssessmentWorkflow</c> feeds into
+    /// <c>ClassifyResultActivity</c> (confidence) and <c>SetOutputResult</c>
+    /// (rationale).
+    /// Shared-contract variables: <c>storyContext</c>, <c>questions</c>,
+    /// <c>response</c>, <c>skillLevel</c>.
+    /// </summary>
+    private static PromptTemplate AnalyzeAssessmentResponseBody(string role, string action) => new(
+        Role: role,
+        Action: action,
+        Template:
+            "You are evaluating a junior developer's assessment response to determine their readiness to implement a story.\n\n" +
+            "## Story Context\n{{storyContext}}\n\n" +
+            "## Assessment Questions\n{{questions}}\n\n" +
+            "## Developer's Response\n{{response}}\n\n" +
+            "## Developer Skill Level\n{{skillLevel}}\n\n" +
+            "## Instructions\n\n" +
+            "Analyze the developer's response against the questions and story context. Assess:\n" +
+            "- **Correctness**: Are the answers factually correct and complete?\n" +
+            "- **Depth**: Does the developer show genuine understanding or superficial familiarity?\n" +
+            "- **Gaps**: What knowledge gaps are revealed that could cause problems during implementation?\n" +
+            "- **Strengths**: What does the developer clearly understand well?\n" +
+            "- **Readiness**: Given their {{skillLevel}} level, are they ready to implement this story?\n\n" +
+            "Calibrate your confidence score to the developer's {{skillLevel}} level — a junior developer " +
+            "is not expected to have senior-level depth; assess relative to appropriate expectations.\n\n" +
+            "Return ONLY a JSON object (no markdown fences, no wrapper):\n" +
+            "{\"status\":\"ready|needs_guidance|not_ready\",\"confidence\":0.0,\"gaps\":[\"...\"],\"strengths\":[\"...\"],\"rationale\":\"...\"}",
+        SystemPrompt: SystemFor(role),
+        Variables: ["storyContext", "questions", "response", "skillLevel"],
+        EnableTools: false,
+        MaxTokens: 2048);
 
     // -----------------------------------------------------------------------
     // Role-specific review lenses (inlined in plan-review / code-review bodies)

@@ -43,7 +43,7 @@ public static class RolePhaseMap
     private static readonly FrozenDictionary<AgentRole, FrozenSet<AgentAction>> s_eligibleActions =
         new Dictionary<AgentRole, FrozenSet<AgentAction>>
         {
-            // product_owner — intake, requirements, prioritisation, acceptance
+            // product_owner — intake, requirements, prioritisation, acceptance, assessment
             [AgentRole.ProductOwner] = FreezeSet(
                 AgentAction.ContextScan,
                 AgentAction.TriageIntake,
@@ -54,7 +54,9 @@ public static class RolePhaseMap
                 AgentAction.PlanRoadmap,
                 AgentAction.SummarizeStakeholder,
                 AgentAction.ReviewAcceptance,
-                AgentAction.ReviewScope),
+                AgentAction.ReviewScope,
+                AgentAction.GenerateAssessmentQuestions,
+                AgentAction.AnalyzeAssessmentResponse),
 
             // architect — system design, technical strategy
             [AgentRole.Architect] = FreezeSet(

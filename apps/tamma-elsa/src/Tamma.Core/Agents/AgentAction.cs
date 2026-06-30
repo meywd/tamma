@@ -28,6 +28,8 @@ public enum AgentAction
     [Wire("summarize-stakeholder")] SummarizeStakeholder,
     [Wire("review-acceptance")] ReviewAcceptance,
     [Wire("review-scope")] ReviewScope,
+    [Wire("generate-assessment-questions")] GenerateAssessmentQuestions,
+    [Wire("analyze-assessment-response")] AnalyzeAssessmentResponse,
 
     // architect
     [Wire("triage-technical")] TriageTechnical,
