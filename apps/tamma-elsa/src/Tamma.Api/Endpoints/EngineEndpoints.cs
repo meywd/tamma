@@ -813,11 +813,19 @@ public static class EngineEndpoints
     /// because platform events are cross-tenant — some fire before/after a
     /// tenant DB exists (e.g. <c>TENANT.DELETED.*</c>, <c>ORCHESTRATOR.TICK.*</c>).</para>
     ///
-    /// <para>Partial-batch semantics match <see cref="AppendEvents"/>: per-event
-    /// failures are collected; any failure → 502 so the engine drain cursor stays
-    /// put and the batch is retried. A dedup no-op (<c>AppendAndPublishAsync</c>
-    /// returns null) counts as success — the engine-minted stable id makes retries
-    /// idempotent.</para>
+    /// <para>Partial-batch semantics: per-event failures are collected; any
+    /// per-event failure → 502; full success → 201. A dedup no-op
+    /// (<c>AppendAndPublishAsync</c> returns null) counts as success.
+    /// PK-level dedup applies only when the caller sends a stable non-empty
+    /// <c>Id</c>; in production all 11 lifecycle emitters go through
+    /// <c>TenantLifecycleEvents.BuildEvent</c> (never sets <c>Id</c> →
+    /// <c>Guid.Empty</c> → the server mints a fresh Id per POST), and the 2
+    /// analytics emitters use <c>Guid.NewGuid()</c> per build — so PK-dedup is
+    /// effectively dormant. The real cross-retry guard is the partial unique
+    /// index on <c>(tenant_id, type, tags-&gt;&gt;'step', tags-&gt;&gt;'attempt')
+    /// WHERE type LIKE 'TENANT.PROVISION.STEP_%'</c>, which does survive
+    /// round-trips. <c>DELETE.STEP_*</c>, terminal, and analytics events are
+    /// not index-covered and can duplicate on a lost-success retry.</para>
     /// </summary>
     public static async Task<IResult> AppendPlatformEvents(
         AppendPlatformEventsRequest req,
@@ -864,11 +872,12 @@ public static class EngineEndpoints
             catch (Exception ex)
             {
                 // Per-event failure — collect and continue so a single bad row
-                // doesn't lose the rest of the batch. The engine retries the
-                // WHOLE batch on a non-2xx (cursor stays put), which re-sends
-                // the events that DID persist on this call. That re-send is safe
-                // only because AppendAndPublishAsync is idempotent on the stable
-                // per-event Id (ON CONFLICT DO NOTHING).
+                // doesn't lose the rest of the batch. A full-batch failure returns
+                // 502. PK-dedup (ON CONFLICT DO NOTHING) applies only when the
+                // caller sends a stable non-empty Id; current emitters send
+                // Guid.Empty, so the server mints a fresh Id per call — dedup
+                // is dormant for all but TENANT.PROVISION.STEP_* (which is
+                // covered by the partial unique index on step+attempt tags).
                 failures.Add(new { id = e.Id, type = e.Type, error = ex.Message });
             }
         }

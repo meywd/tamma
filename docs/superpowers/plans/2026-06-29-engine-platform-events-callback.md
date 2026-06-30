@@ -442,7 +442,7 @@ git commit -m "feat(platform-events): real engine publisher replaces NullPlatfor
 | Endpoint reachable by tenant users (audit forgery / spend) | `EngineServiceOnly` (service-principal only) copied verbatim from the `/events` line; Task 1 includes the auth-rejection assertion (or route-policy assertion). |
 | Singleton publisher captures a transient typed `TammaApiClient` (stale handler) | Resolve `TammaApiClient` per-call via `IServiceScopeFactory` (mirrors `PlatformEventPublisher`). |
 | Lost audit event on a transient API failure | Degrade-to-WARN (`platform_event.post_failed`) — strictly better than today's always-drop; the authoritative lifecycle state is still the `tenants` columns the terminals write directly. At-least-once buffering is a documented follow-up, out of scope. |
-| Duplicate rows on activity retry for non-`PROVISION.STEP` types | Stable `Guid Id` per event gives PK-level dedup (`AppendAsync` returns null on unique-violation); the partial unique index adds step/attempt dedup for `TENANT.PROVISION.STEP_*`. Cross-retry dedup for other types is pre-existing emitter behavior, out of scope. |
+| Duplicate rows on activity retry for non-`PROVISION.STEP` types | PK-level dedup applies only when the caller sends a stable non-empty `Id`; in production all 11 lifecycle emitters go through `TenantLifecycleEvents.BuildEvent` (never sets `Id` → `Guid.Empty` → server mints a fresh Id per POST), and the 2 analytics emitters use `Guid.NewGuid()` per build — so PK-dedup is effectively dormant. The real cross-retry guard is the partial unique index on `(tenant_id, type, tags->>'step', tags->>'attempt') WHERE type LIKE 'TENANT.PROVISION.STEP_%'`, which does survive round-trips. `DELETE.STEP_*`, terminal, and analytics events are not index-covered and can duplicate on a lost-success retry. Tracked as a follow-up (see below). |
 | jsonb column mapping (`Tags`/`Metadata`/`Data` string vs object) | Task 1/3 steps say to confirm the entity's actual types and serialize/parse accordingly. |
 | Engine in-process subscribers don't fire (endpoint publishes in Tamma.Api, not the engine) | Accepted + same as `domain_events`; the endpoint's `AppendAndPublishAsync` fans out to the Tamma.Api in-process subscribers (where they live). Cross-process fan-out is a separate documented concern. |
 
@@ -452,6 +452,10 @@ git commit -m "feat(platform-events): real engine publisher replaces NullPlatfor
 2. `TammaApiClient.AppendPlatformEventsAsync` POSTs to it (true on 2xx, false otherwise); covered by a client test.
 3. `EngineApiPlatformEventPublisher` replaces `NullPlatformEventPublisher` in the engine (`ElsaServer/Program.cs`); resolves `TammaApiClient` per-call; returns the event on success and degrades to WARN+null on failure; covered by a publisher test. All 13 emitters now flow through it (no emitter changes).
 4. Build 0 errors; full `Tamma.Api.Tests` + `Tamma.Activities.Tests` green; **no schema change / no migration**.
+
+## Follow-ups
+
+- **FOLLOW-UP (before any exactly-once consumer of `platform_events`, e.g. aggregation/billing):** give the 13 emitters deterministic/stable event Ids (or add natural-key unique indexes for `DELETE.STEP_*`/terminal/analytics types), and consider at-least-once buffering for the engine publisher. Today's PK-dedup is dormant (emitters send `Guid.Empty`); only `TENANT.PROVISION.STEP_*` is index-protected.
 
 ## Self-review
 
