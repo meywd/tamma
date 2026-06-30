@@ -7,6 +7,7 @@ using Tamma.Api.Dtos.Engine;
 using Tamma.Api.Services.Engine;
 using Tamma.Api.Services.Engine.Lifecycle;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -797,6 +798,93 @@ public static class EngineEndpoints
         return Results.Created(
             "/api/engine/events",
             new { ok = true, persisted, storedAt = DateTime.UtcNow });
+    }
+
+    // ─── Platform-events (control-plane) append ────────────────────────────────
+
+    /// <summary>
+    /// Engine→<c>platform_events</c> DCB-event callback. Persists a batch of
+    /// cross-tenant lifecycle / analytics events to the control-plane store and
+    /// fans them out to in-process subscribers via
+    /// <see cref="IPlatformEventPublisher"/>.
+    ///
+    /// <para>This mirrors <see cref="AppendEvents"/> (which targets per-tenant
+    /// <c>domain_events</c>). The tenant is nullable and carried in the body
+    /// because platform events are cross-tenant — some fire before/after a
+    /// tenant DB exists (e.g. <c>TENANT.DELETED.*</c>, <c>ORCHESTRATOR.TICK.*</c>).</para>
+    ///
+    /// <para>Partial-batch semantics match <see cref="AppendEvents"/>: per-event
+    /// failures are collected; any failure → 502 so the engine drain cursor stays
+    /// put and the batch is retried. A dedup no-op (<c>AppendAndPublishAsync</c>
+    /// returns null) counts as success — the engine-minted stable id makes retries
+    /// idempotent.</para>
+    /// </summary>
+    public static async Task<IResult> AppendPlatformEvents(
+        AppendPlatformEventsRequest req,
+        IPlatformEventPublisher publisher)
+    {
+        if (req?.Events is null || req.Events.Count == 0)
+            return Results.BadRequest(new { error = "events array is required and must be non-empty" });
+
+        var persisted = 0;
+        var failures = new List<object>();
+
+        for (var i = 0; i < req.Events.Count; i++)
+        {
+            var e = req.Events[i];
+
+            if (string.IsNullOrWhiteSpace(e.Type))
+            {
+                failures.Add(new { index = i, error = "type is required" });
+                continue;
+            }
+
+            try
+            {
+                var evt = new PlatformEvent
+                {
+                    Id = e.Id == Guid.Empty ? Guid.NewGuid() : e.Id,
+                    Type = e.Type,
+                    TenantId = e.TenantId,
+                    UserId = e.UserId,
+                    Tags = e.Tags is null ? "{}" : JsonSerializer.Serialize(e.Tags),
+                    Metadata = e.Metadata is JsonElement md && md.ValueKind != JsonValueKind.Undefined
+                        ? md.GetRawText()
+                        : "{}",
+                    Data = e.Data is JsonElement d && d.ValueKind != JsonValueKind.Undefined
+                        ? d.GetRawText()
+                        : "{}",
+                    CreatedAt = e.CreatedAt ?? DateTime.UtcNow,
+                };
+
+                // null result = idempotent dedup no-op = success (already persisted).
+                await publisher.AppendAndPublishAsync(evt);
+                persisted++;
+            }
+            catch (Exception ex)
+            {
+                // Per-event failure — collect and continue so a single bad row
+                // doesn't lose the rest of the batch. The engine retries the
+                // WHOLE batch on a non-2xx (cursor stays put), which re-sends
+                // the events that DID persist on this call. That re-send is safe
+                // only because AppendAndPublishAsync is idempotent on the stable
+                // per-event Id (ON CONFLICT DO NOTHING).
+                failures.Add(new { index = i, error = ex.GetType().Name });
+            }
+        }
+
+        if (failures.Count > 0)
+        {
+            return Results.Json(new
+            {
+                error = "partial_append_failure",
+                persisted,
+                failed = failures.Count,
+                failures,
+            }, statusCode: StatusCodes.Status502BadGateway);
+        }
+
+        return Results.Created("/api/engine/platform-events", new { ok = true, persisted });
     }
 
     // ─── Agent availability — finding 002 ─────────────────────────────────────
