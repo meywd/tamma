@@ -835,7 +835,7 @@ public static class EngineEndpoints
 
             if (string.IsNullOrWhiteSpace(e.Type))
             {
-                failures.Add(new { index = i, error = "type is required" });
+                failures.Add(new { id = e.Id, error = "empty_type" });
                 continue;
             }
 
@@ -869,7 +869,7 @@ public static class EngineEndpoints
                 // the events that DID persist on this call. That re-send is safe
                 // only because AppendAndPublishAsync is idempotent on the stable
                 // per-event Id (ON CONFLICT DO NOTHING).
-                failures.Add(new { index = i, error = ex.GetType().Name });
+                failures.Add(new { id = e.Id, type = e.Type, error = ex.Message });
             }
         }
 
