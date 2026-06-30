@@ -11,10 +11,18 @@ using Tamma.Activities.Assessment.Models;
 namespace Tamma.Activities.Assessment;
 
 /// <summary>
-/// Generates assessment questions adapted to the junior's skill level.
-/// Uses story context and optional previous attempt data to produce targeted questions.
-/// In production, delegates to the LLM Call sub-workflow (7-1B) via RunWorkflow.
+/// SUPERSEDED (P0 fix 2026-06-30): <c>AssessmentWorkflow</c> now dispatches
+/// <c>llm-call</c> (role=product_owner / action=generate-assessment-questions)
+/// instead of invoking this activity. This class used a hardcoded question bank
+/// (<see cref="GetSkillLevelQuestions"/>) that bypassed the LLM entirely, which
+/// made the whole mentorship assessment non-AI. Kept as a reference / explicit
+/// mock-mode fallback (audit 7-2 AC7); not called by any workflow in production.
 /// </summary>
+[Obsolete(
+    "Superseded by DispatchWorkflow(\"llm-call\", role=product_owner, " +
+    "action=generate-assessment-questions) in AssessmentWorkflow (P0 fix 2026-06-30). " +
+    "This activity used a hardcoded question bank instead of the LLM. " +
+    "Kept as a documented mock-mode fallback; not wired into any workflow.")]
 [Activity(
     "Tamma.Assessment",
     "Generate Questions",

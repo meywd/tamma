@@ -102,6 +102,7 @@ public class TaxonomyDriftBuildTests
     /// </summary>
     private static readonly IReadOnlySet<string> ExpectedContributingWorkflows = new HashSet<string>
     {
+        "AssessmentWorkflow",           // P0 fix 2026-06-30: dispatches generate-assessment-questions + analyze-assessment-response
         "BlockerDiagnosisWorkflow",
         "ContextGatheringWorkflow",
         "DebuggingWorkflow",

@@ -707,7 +707,11 @@ public static class SystemPrompts
             "Calibrate your confidence score to the developer's {{skillLevel}} level — a junior developer " +
             "is not expected to have senior-level depth; assess relative to appropriate expectations.\n\n" +
             "Return ONLY a JSON object (no markdown fences, no wrapper):\n" +
-            "{\"status\":\"ready|needs_guidance|not_ready\",\"confidence\":0.0,\"gaps\":[\"...\"],\"strengths\":[\"...\"],\"rationale\":\"...\"}",
+            "{\"status\":\"Correct|Partial|Incorrect\",\"confidence\":0.0,\"gaps\":[\"...\"],\"strengths\":[\"...\"],\"rationale\":\"...\"}\n\n" +
+            "Where `confidence` is a decimal between 0.0 and 1.0, and `status` follows the classification:\n" +
+            "- `Correct` = developer is ready, confidence ≥ 0.7\n" +
+            "- `Partial` = developer has gaps but shows some understanding, 0.4 ≤ confidence < 0.7\n" +
+            "- `Incorrect` = developer is not ready, confidence < 0.4",
         SystemPrompt: SystemFor(role),
         Variables: ["storyContext", "questions", "response", "skillLevel"],
         EnableTools: false,

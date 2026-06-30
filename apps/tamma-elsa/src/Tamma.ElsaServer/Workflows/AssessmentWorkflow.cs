@@ -8,6 +8,7 @@ using Elsa.Workflows.Runtime.Activities;
 using System.Text.Json;
 using Tamma.Activities.Assessment;
 using Tamma.Activities.Assessment.Models;
+using Tamma.Api.Services.Agents;
 using Tamma.Core.Enums;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 
@@ -22,14 +23,23 @@ namespace Tamma.ElsaServer.Workflows;
 ///
 /// Flow:
 ///   1. Gather context (via Context Gathering 7-1F)
-///   2. Generate targeted questions (via LLM Call 7-1B)
+///   2. Generate targeted questions via DispatchWorkflow("llm-call")
+///      role=product_owner / action=generate-assessment-questions
 ///   3. Deliver questions to junior
 ///   4. Wait for response (bookmark-based with timeout)
-///   5a. On response: analyze with AI, classify result, update profile
+///   5a. On response: analyse via DispatchWorkflow("llm-call")
+///       role=product_owner / action=analyze-assessment-response,
+///       classify result, update profile
 ///   5b. On timeout: set timeout result, update profile
 ///   6. Set workflow outputs
 ///
-/// Can be invoked standalone via ELSA REST API or as a child workflow via RunWorkflow.
+/// Fail-closed: if either llm-call returns success=false, or the JSON
+/// response cannot be parsed into the expected shape, the workflow routes
+/// to the LlmCallError terminal — it never proceeds with fabricated
+/// questions or a fabricated confidence score.
+///
+/// Can be invoked standalone via the Elsa REST API or as a child workflow
+/// via RunWorkflow.
 /// </summary>
 public class AssessmentWorkflow : WorkflowBase
 {
@@ -41,38 +51,48 @@ public class AssessmentWorkflow : WorkflowBase
         builder.Description = "Evaluate junior developer's understanding of story requirements";
 
         // ── Workflow variables ──────────────────────────────────────────
-        var sessionId = builder.WithVariable<Guid>();
-        var storyId = builder.WithVariable<string>();
-        var juniorId = builder.WithVariable<string>();
-        var skillLevel = builder.WithVariable<int>();
+        var sessionId        = builder.WithVariable<Guid>();
+        var storyId          = builder.WithVariable<string>();
+        var juniorId         = builder.WithVariable<string>();
+        var skillLevel       = builder.WithVariable<int>();
         var previousAttemptJson = builder.WithVariable<string>();
-        var storyContext = builder.WithVariable<string>();
-        var questionsJson = builder.WithVariable<string>();
-        var juniorResponse = builder.WithVariable<string>();
+        var tenantId         = builder.WithVariable<string>("TenantId", "");
+        var storyContext     = builder.WithVariable<string>();
+        var questionsJson    = builder.WithVariable<string>();
+        var juniorResponse   = builder.WithVariable<string>();
         var analysisResultJson = builder.WithVariable<string>();
         var responseReceived = builder.WithVariable<bool>();
         var assessmentStatus = builder.WithVariable<AssessmentOutcomeStatus>();
-        var confidence = builder.WithVariable<decimal>();
-        var nextState = builder.WithVariable<MentorshipState>();
-        var gapsJson = builder.WithVariable<string>();
-        var strengthsJson = builder.WithVariable<string>();
-        var attemptNumber = builder.WithVariable<int>();
+        var confidence       = builder.WithVariable<decimal>();
+        var nextState        = builder.WithVariable<MentorshipState>();
+        var gapsJson         = builder.WithVariable<string>();
+        var strengthsJson    = builder.WithVariable<string>();
+        var attemptNumber    = builder.WithVariable<int>();
+
+        // llm-call result containers
+        var contextGatherResult = builder.WithVariable<IDictionary<string, object>?>();
+        var questionLlm         = builder.WithVariable<IDictionary<string, object>?>();
+        var analysisLlm         = builder.WithVariable<IDictionary<string, object>?>();
+
+        // Success flags (fail-closed guards)
+        var questionsLlmOk  = builder.WithVariable<bool>();
+        var analysisLlmOk   = builder.WithVariable<bool>();
 
         // Variables to capture activity outputs via binding
         var generatedQuestionSet = builder.WithVariable<QuestionSet>();
-        var deliveryResult = builder.WithVariable<DeliveryResult>();
-        var waitJuniorResponse = builder.WithVariable<string>();
+        var deliveryResult       = builder.WithVariable<DeliveryResult>();
+        var waitJuniorResponse   = builder.WithVariable<string>();
         var waitResponseReceived = builder.WithVariable<bool>();
-        var analysisOutput = builder.WithVariable<AnalysisResult>();
-        var classifiedStatus = builder.WithVariable<AssessmentOutcomeStatus>();
+        var analysisOutput       = builder.WithVariable<AnalysisResult>();
+        var classifiedStatus     = builder.WithVariable<AssessmentOutcomeStatus>();
         var classifiedConfidence = builder.WithVariable<decimal>();
-        var classifiedNextState = builder.WithVariable<MentorshipState>();
+        var classifiedNextState  = builder.WithVariable<MentorshipState>();
 
         // Output variables (readable by parent workflow)
-        var outputResultJson = builder.WithVariable<string>();
-        var outputNextState = builder.WithVariable<string>();
-        var outputStatus = builder.WithVariable<string>();
-        var outputSkillLevel = builder.WithVariable<int>();
+        var outputResultJson  = builder.WithVariable<string>();
+        var outputNextState   = builder.WithVariable<string>();
+        var outputStatus      = builder.WithVariable<string>();
+        var outputSkillLevel  = builder.WithVariable<int>();
 
         // ── Step 1: Read inputs into variables ─────────────────────────
         var readInputs = new SetVariable
@@ -87,6 +107,7 @@ public class AssessmentWorkflow : WorkflowBase
                 juniorId.Set(context, context.GetInput<string>("juniorId") ?? string.Empty);
                 skillLevel.Set(context, context.GetInput<int>("skillLevel"));
                 previousAttemptJson.Set(context, context.GetInput<string>("previousAttemptJson") ?? string.Empty);
+                tenantId.Set(context, context.GetInput<string>("tenantId") ?? string.Empty);
 
                 var prevJson = context.GetInput<string>("previousAttemptJson") ?? string.Empty;
                 if (!string.IsNullOrEmpty(prevJson))
@@ -123,7 +144,8 @@ public class AssessmentWorkflow : WorkflowBase
                 ["Purpose"] = "Assessment",
                 ["MaxContextSize"] = 50000
             }),
-            WaitForCompletion = new(true)
+            WaitForCompletion = new(true),
+            Result = new(contextGatherResult)
         };
         gatherContext.SetDisplayText("Gather Context");
 
@@ -132,26 +154,100 @@ public class AssessmentWorkflow : WorkflowBase
             Id = "StoreContextResult",
             Name = "Store Context Result",
             Variable = storyContext,
-            Value = new(ctx => {
-                // Context is available from the dispatched workflow output
+            Value = new(ctx =>
+            {
+                var result = contextGatherResult.Get(ctx);
+                if (result != null && result.TryGetValue("summary", out var s) && s != null)
+                    return s.ToString() ?? $"Assessment context for story {storyId.Get(ctx)}";
                 return $"Assessment context for story {storyId.Get(ctx)} gathered via ContextGathering workflow";
             })
         };
         storeContextResult.SetDisplayText("Store Context Result");
 
-        // ── Step 3: Generate questions ─────────────────────────────────
-        var generateQuestions = new GenerateQuestionsActivity
+        // ── Step 3: Generate questions via llm-call ────────────────────
+        var generateQuestionsLlm = new DispatchWorkflow
         {
-            Id = "GenerateQuestions",
-            Name = "Generate Questions",
-            SessionId = new(context => sessionId.Get(context)),
-            StoryId = new(context => storyId.Get(context)),
-            SkillLevel = new(context => skillLevel.Get(context)),
-            StoryContext = new(context => storyContext.Get(context)),
-            PreviousAttemptJson = new(context => previousAttemptJson.Get(context)),
-            Result = new(generatedQuestionSet)
+            Id = "GenerateQuestionsLlm",
+            Name = "Generate Questions (LLM)",
+            WorkflowDefinitionId = new("llm-call"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["role"]      = AgentRole.ProductOwner.ToWire(),
+                ["action"]    = AgentAction.GenerateAssessmentQuestions.ToWire(),
+                ["tenantId"]  = tenantId.Get(ctx),
+                ["variables"] = new Dictionary<string, object>
+                {
+                    ["storyContext"]  = storyContext.Get(ctx) ?? "",
+                    ["skillLevel"]   = skillLevel.Get(ctx),
+                    ["questionCount"] = ComputeQuestionCount(skillLevel.Get(ctx)),
+                    ["previousGaps"] = ExtractPreviousGaps(previousAttemptJson.Get(ctx)),
+                },
+                ["enableTools"] = false,
+            }),
+            WaitForCompletion = new(true),
+            Result = new(questionLlm),
         };
-        generateQuestions.SetDisplayText("Generate Questions");
+        generateQuestionsLlm.SetDisplayText("Generate Questions (LLM)");
+
+        // Parse llm-call response into QuestionSet; set questionsLlmOk flag
+        var parseQuestionsResult = new SetVariable
+        {
+            Id = "ParseQuestionsResult",
+            Name = "Parse Questions Result",
+            Variable = generatedQuestionSet,
+            Value = new(ctx =>
+            {
+                var result = questionLlm.Get(ctx);
+
+                // Fail-closed: no result or success=false → error
+                var succeeded = ReadSuccessFlag(result);
+                if (!succeeded)
+                {
+                    questionsLlmOk.Set(ctx, false);
+                    return null;
+                }
+
+                var text = result!.TryGetValue("llmResponse", out var r) ? r?.ToString() ?? "" : "";
+                try
+                {
+                    // Try JSON array of strings: ["Q1","Q2",...]
+                    var arrStart = text.IndexOf('[');
+                    var arrEnd   = text.LastIndexOf(']');
+                    if (arrStart >= 0 && arrEnd > arrStart)
+                    {
+                        var qs = JsonSerializer.Deserialize<List<string>>(text[arrStart..(arrEnd + 1)]);
+                        if (qs?.Count > 0)
+                        {
+                            questionsLlmOk.Set(ctx, true);
+                            return (object)new QuestionSet { Questions = qs, TargetSkillLevel = skillLevel.Get(ctx) };
+                        }
+                    }
+
+                    // Try JSON object: {"questions":["Q1","Q2",...]}
+                    var objStart = text.IndexOf('{');
+                    var objEnd   = text.LastIndexOf('}');
+                    if (objStart >= 0 && objEnd > objStart)
+                    {
+                        var qs = JsonSerializer.Deserialize<QuestionSet>(text[objStart..(objEnd + 1)]);
+                        if (qs?.Questions?.Count > 0)
+                        {
+                            questionsLlmOk.Set(ctx, true);
+                            return (object)qs;
+                        }
+                    }
+                }
+                catch { /* parse failure → fail closed below */ }
+
+                questionsLlmOk.Set(ctx, false);
+                return null;
+            })
+        };
+        parseQuestionsResult.SetDisplayText("Parse Questions Result");
+
+        // Fail-closed gate: route to error terminal if questions LLM call failed
+        var questionsSuccessCheck = new FlowDecision(ctx => questionsLlmOk.Get(ctx))
+        { Id = "QuestionsLlmOk", Name = "Questions LLM OK?" };
+        questionsSuccessCheck.SetDisplayText("Questions LLM OK?");
 
         // Store generated questions as JSON string
         var storeQuestions = new SetVariable
@@ -207,19 +303,100 @@ public class AssessmentWorkflow : WorkflowBase
         };
         storeResponse.SetDisplayText("Store Response");
 
-        // ── Step 6a: Analyze response ──────────────────────────────────
-        var analyzeResponse = new AnalyzeResponseActivity
+        // ── Step 6a: Analyse response via llm-call ─────────────────────
+        var analyzeResponseLlm = new DispatchWorkflow
         {
-            Id = "AnalyzeResponse",
-            Name = "Analyze Response",
-            SessionId = new(context => sessionId.Get(context)),
-            SkillLevel = new(context => skillLevel.Get(context)),
-            QuestionsJson = new(context => questionsJson.Get(context)),
-            JuniorResponse = new(context => juniorResponse.Get(context)),
-            StoryContext = new(context => storyContext.Get(context)),
-            Result = new(analysisOutput)
+            Id = "AnalyzeResponseLlm",
+            Name = "Analyze Response (LLM)",
+            WorkflowDefinitionId = new("llm-call"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["role"]      = AgentRole.ProductOwner.ToWire(),
+                ["action"]    = AgentAction.AnalyzeAssessmentResponse.ToWire(),
+                ["tenantId"]  = tenantId.Get(ctx),
+                ["variables"] = new Dictionary<string, object>
+                {
+                    ["storyContext"] = storyContext.Get(ctx) ?? "",
+                    ["questions"]   = questionsJson.Get(ctx) ?? "",
+                    ["response"]    = juniorResponse.Get(ctx) ?? "",
+                    ["skillLevel"]  = skillLevel.Get(ctx),
+                },
+                ["enableTools"] = false,
+            }),
+            WaitForCompletion = new(true),
+            Result = new(analysisLlm),
         };
-        analyzeResponse.SetDisplayText("Analyze Response");
+        analyzeResponseLlm.SetDisplayText("Analyze Response (LLM)");
+
+        // Parse llm-call response into AnalysisResult; set analysisLlmOk flag.
+        //
+        // Uses JsonElement extraction rather than direct AnalysisResult deserialisation
+        // to avoid an enum mismatch: the LLM prompt suggests "ready|needs_guidance|
+        // not_ready" as status values, which do not map to AssessmentOutcomeStatus
+        // (Correct|Partial|Incorrect|Timeout). ClassifyResultActivity recomputes Status
+        // from the Confidence threshold anyway, so we only need to extract Confidence,
+        // Rationale, Gaps, and Strengths robustly.
+        var parseAnalysisResult = new SetVariable
+        {
+            Id = "ParseAnalysisResult",
+            Name = "Parse Analysis Result",
+            Variable = analysisOutput,
+            Value = new(ctx =>
+            {
+                var result = analysisLlm.Get(ctx);
+
+                // Fail-closed: no result or success=false → error
+                var succeeded = ReadSuccessFlag(result);
+                if (!succeeded)
+                {
+                    analysisLlmOk.Set(ctx, false);
+                    return null;
+                }
+
+                var text = result!.TryGetValue("llmResponse", out var r) ? r?.ToString() ?? "" : "";
+                try
+                {
+                    // Slice JSON object: {"confidence":0.8,"gaps":[...],...}
+                    var jsonStart = text.IndexOf('{');
+                    var jsonEnd   = text.LastIndexOf('}');
+                    if (jsonStart >= 0 && jsonEnd > jsonStart)
+                    {
+                        var element = JsonSerializer.Deserialize<JsonElement>(text[jsonStart..(jsonEnd + 1)]);
+
+                        // Extract numeric confidence (fail if missing/unparseable)
+                        if (!element.TryGetProperty("confidence", out var cv) ||
+                            cv.ValueKind != JsonValueKind.Number)
+                        {
+                            analysisLlmOk.Set(ctx, false);
+                            return null;
+                        }
+
+                        var parsed = new AnalysisResult
+                        {
+                            Confidence = (decimal)cv.GetDouble(),
+                            Rationale  = element.TryGetProperty("rationale", out var rv) ? rv.GetString() ?? "" : "",
+                            Gaps       = ExtractStringList(element, "gaps"),
+                            Strengths  = ExtractStringList(element, "strengths"),
+                            // Status is recomputed by ClassifyResultActivity from Confidence
+                            Status = AssessmentOutcomeStatus.Incorrect,
+                        };
+
+                        analysisLlmOk.Set(ctx, true);
+                        return (object)parsed;
+                    }
+                }
+                catch { /* parse failure → fail closed below */ }
+
+                analysisLlmOk.Set(ctx, false);
+                return null;
+            })
+        };
+        parseAnalysisResult.SetDisplayText("Parse Analysis Result");
+
+        // Fail-closed gate: route to error terminal if analysis LLM call failed
+        var analysisSuccessCheck = new FlowDecision(ctx => analysisLlmOk.Get(ctx))
+        { Id = "AnalysisLlmOk", Name = "Analysis LLM OK?" };
+        analysisSuccessCheck.SetDisplayText("Analysis LLM OK?");
 
         // Store analysis result as JSON + extract gaps/strengths
         var storeAnalysis = new SetVariable
@@ -327,7 +504,8 @@ public class AssessmentWorkflow : WorkflowBase
         updateSkillProfileTimeout.SetDisplayText("Update Skill Profile (Timeout)");
 
         // ── Step 9: Set workflow output (response path) ────────────────
-        // Store the final result into output variables for parent workflow retrieval
+        // Use the real LLM rationale from analysisOutput (P0 fix: was hardcoded
+        // "Assessment completed" — now the actual reasoning from the LLM).
         var setOutput = new SetVariable
         {
             Id = "SetOutputResult",
@@ -335,6 +513,7 @@ public class AssessmentWorkflow : WorkflowBase
             Variable = outputResultJson,
             Value = new(context =>
             {
+                var parsed = analysisOutput.Get(context);
                 var result = new AssessmentResult
                 {
                     Status = assessmentStatus.Get(context),
@@ -344,7 +523,7 @@ public class AssessmentWorkflow : WorkflowBase
                     JuniorResponse = juniorResponse.Get(context) ?? string.Empty,
                     Gaps = DeserializeList(gapsJson.Get(context)),
                     Strengths = DeserializeList(strengthsJson.Get(context)),
-                    AnalysisRationale = "Assessment completed"
+                    AnalysisRationale = parsed?.Rationale ?? "Assessment completed"
                 };
                 outputNextState.Set(context, nextState.Get(context).ToString());
                 outputStatus.Set(context, assessmentStatus.Get(context).ToString());
@@ -398,6 +577,7 @@ public class AssessmentWorkflow : WorkflowBase
             }
         };
         exposeOutputResponse.SetDisplayText("Expose Output Response");
+
         var exposeOutputTimeout = new Sequence
         {
             Id = "ExposeOutputTimeout",
@@ -412,6 +592,17 @@ public class AssessmentWorkflow : WorkflowBase
         };
         exposeOutputTimeout.SetDisplayText("Expose Output Timeout");
 
+        // ── Fail-closed error terminal ─────────────────────────────────
+        // Reached when either llm-call returns success=false or the JSON
+        // cannot be parsed. The workflow terminates here rather than
+        // proceeding with fabricated questions or a fabricated confidence.
+        var llmCallError = new Finish
+        {
+            Id = "LlmCallError",
+            Name = "LLM Call Error"
+        };
+        llmCallError.SetDisplayText("LLM Call Error");
+
         // ── Build the flowchart ────────────────────────────────────────
         builder.Root = new Flowchart
         {
@@ -422,44 +613,71 @@ public class AssessmentWorkflow : WorkflowBase
                 readInputs,
                 gatherContext,
                 storeContextResult,
-                generateQuestions,
+
+                // Question generation (llm-call dispatch + parse + gate)
+                generateQuestionsLlm,
+                parseQuestionsResult,
+                questionsSuccessCheck,
+
                 storeQuestions,
                 deliverQuestions,
                 waitForResponse,
                 storeResponse,
-                analyzeResponse,
+
+                // Response analysis (llm-call dispatch + parse + gate)
+                analyzeResponseLlm,
+                parseAnalysisResult,
+                analysisSuccessCheck,
+
                 storeAnalysis,
                 classifyResult,
                 storeClassification,
                 updateSkillProfile,
                 setOutput,
                 exposeOutputResponse,
+
+                // Timeout path
                 setTimeoutResult,
                 updateSkillProfileTimeout,
                 setOutputTimeout,
-                exposeOutputTimeout
+                exposeOutputTimeout,
+
+                // Fail-closed error terminal (both llm-call failures route here)
+                llmCallError
             },
             Connections =
             {
-                // Main flow: inputs -> context -> store context -> questions -> deliver -> wait
+                // Main flow: inputs → context → store context → generate questions
                 new(readInputs, gatherContext),
                 new(gatherContext, storeContextResult),
-                new(storeContextResult, generateQuestions),
-                new(generateQuestions, storeQuestions),
+                new(storeContextResult, generateQuestionsLlm),
+
+                // Question generation: dispatch → parse → gate
+                new(generateQuestionsLlm, parseQuestionsResult),
+                new(parseQuestionsResult, questionsSuccessCheck),
+                new(new FlowEndpoint(questionsSuccessCheck, "True"),  new FlowEndpoint(storeQuestions)),
+                new(new FlowEndpoint(questionsSuccessCheck, "False"), new FlowEndpoint(llmCallError)),
+
+                // Deliver and wait
                 new(storeQuestions, deliverQuestions),
                 new(deliverQuestions, waitForResponse),
 
-                // Response path: wait[Responded] -> store -> analyze -> classify -> profile -> output
+                // Response path: wait[Responded] → store → analyse → parse → gate
                 new(new FlowEndpoint(waitForResponse, "Responded"), new FlowEndpoint(storeResponse)),
-                new(storeResponse, analyzeResponse),
-                new(analyzeResponse, storeAnalysis),
+                new(storeResponse, analyzeResponseLlm),
+                new(analyzeResponseLlm, parseAnalysisResult),
+                new(parseAnalysisResult, analysisSuccessCheck),
+                new(new FlowEndpoint(analysisSuccessCheck, "True"),  new FlowEndpoint(storeAnalysis)),
+                new(new FlowEndpoint(analysisSuccessCheck, "False"), new FlowEndpoint(llmCallError)),
+
+                // Classify → profile → output
                 new(storeAnalysis, classifyResult),
                 new(classifyResult, storeClassification),
                 new(storeClassification, updateSkillProfile),
                 new(updateSkillProfile, setOutput),
                 new(setOutput, exposeOutputResponse),
 
-                // Timeout path: wait[Timeout] -> timeout result -> profile -> output
+                // Timeout path: wait[Timeout] → timeout result → profile → output
                 new(new FlowEndpoint(waitForResponse, "Timeout"), new FlowEndpoint(setTimeoutResult)),
                 new(setTimeoutResult, updateSkillProfileTimeout),
                 new(updateSkillProfileTimeout, setOutputTimeout),
@@ -469,7 +687,74 @@ public class AssessmentWorkflow : WorkflowBase
     }
 
     /// <summary>
-    /// Deserialize a JSON string to a list, returning empty list on failure
+    /// Read the <c>success</c> flag from a dispatched workflow's Result dictionary.
+    /// Returns <c>false</c> if the dictionary is null, the key is absent, or the
+    /// value is falsy — fail-closed by design.
+    /// </summary>
+    private static bool ReadSuccessFlag(IDictionary<string, object>? result)
+    {
+        if (result == null) return false;
+        if (!result.TryGetValue("success", out var s)) return false;
+        return s switch
+        {
+            bool b    => b,
+            string str => bool.TryParse(str, out var r) && r,
+            _         => false,
+        };
+    }
+
+    /// <summary>
+    /// Compute the target question count for a given skill level.
+    /// Mirrors the logic previously in GenerateQuestionsActivity.
+    /// </summary>
+    private static int ComputeQuestionCount(int skillLevel) => skillLevel switch
+    {
+        1 => 2,
+        2 => 3,
+        3 => 4,
+        4 => 4,
+        5 => 5,
+        _ => 3
+    };
+
+    /// <summary>
+    /// Extract the gap list from a previous-attempt JSON blob as a comma-separated
+    /// string for use in the generate-assessment-questions prompt template.
+    /// Returns an empty string when there is no previous attempt or no gaps.
+    /// </summary>
+    private static string ExtractPreviousGaps(string? previousAttemptJson)
+    {
+        if (string.IsNullOrEmpty(previousAttemptJson)) return "";
+        try
+        {
+            var prev = JsonSerializer.Deserialize<PreviousAttempt>(previousAttemptJson);
+            return prev?.Gaps?.Count > 0 ? string.Join(", ", prev.Gaps) : "";
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
+    /// <summary>
+    /// Extract a JSON array of strings from a <see cref="JsonElement"/> property.
+    /// Returns an empty list when the property is absent, not an array, or empty.
+    /// </summary>
+    private static List<string> ExtractStringList(JsonElement element, string key)
+    {
+        if (!element.TryGetProperty(key, out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return new List<string>();
+
+        return arr.EnumerateArray()
+            .Where(e => e.ValueKind == JsonValueKind.String)
+            .Select(e => e.GetString() ?? "")
+            .Where(s => !string.IsNullOrEmpty(s))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Deserialize a JSON string to a list of strings, returning an empty list on failure.
+    /// Handles both plain JSON arrays and QuestionSet-wrapped arrays.
     /// </summary>
     private static List<string> DeserializeList(string? json)
     {
