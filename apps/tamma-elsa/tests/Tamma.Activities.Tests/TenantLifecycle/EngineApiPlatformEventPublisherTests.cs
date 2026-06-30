@@ -121,6 +121,63 @@ public class EngineApiPlatformEventPublisherTests
         Assert.That(handler.LastRequest, Is.Null, "null event must not trigger a POST");
     }
 
+    [Test]
+    public async Task AppendAndPublishAsync_Malformed_Tags_Returns_Null_And_Does_Not_Throw()
+    {
+        // "[1,2,3]" is valid JSON but cannot be deserialized as Dictionary<string,string?>.
+        // Before FIX 1 this would have thrown JsonException, aborting the lifecycle workflow.
+        var handler = new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.Created));
+        var api = BuildClient(handler);
+        var pub = NewPublisher(api);
+        var evt = new PlatformEvent
+        {
+            Id = Guid.NewGuid(),
+            Type = "TENANT.DROPPED.SUCCESS",
+            TenantId = Guid.NewGuid(),
+            Tags = "[1,2,3]",   // not a JSON object — ParseTags will throw without FIX 1
+            Metadata = "{}",
+            Data = "{}",
+        };
+
+        // Must NOT throw — the catch block returns null and logs WARN instead.
+        var result = await pub.AppendAndPublishAsync(evt, CancellationToken.None);
+
+        Assert.That(result, Is.Null, "malformed jsonb must degrade to null, not throw");
+    }
+
+    [Test]
+    public async Task AppendAndPublishAsync_NonEmpty_Tags_Round_Trips_Through_Mapping()
+    {
+        // Verifies that ParseTags / ToJsonElement are actually exercised (not short-circuited
+        // by the null/"{}" early-return) and that the publisher still returns the event on success.
+        string? capturedBody = null;
+        var handler = new StubHandler(req =>
+        {
+            // Read synchronously inside the callback (the handler is invoked on the test thread).
+            capturedBody = req.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.Created);
+        });
+        var api = BuildClient(handler);
+        var pub = NewPublisher(api);
+        var evt = new PlatformEvent
+        {
+            Id = Guid.NewGuid(),
+            Type = "TENANT.SCHEMA.DROPPED",
+            TenantId = Guid.NewGuid(),
+            Tags = "{\"step\":\"drop_schema\"}",
+            Metadata = "{\"workflowVersion\":\"1.0.0\"}",
+            Data = "{\"foo\":1}",
+        };
+
+        var result = await pub.AppendAndPublishAsync(evt, CancellationToken.None);
+
+        Assert.That(result, Is.SameAs(evt), "non-empty tags must succeed and return the event");
+        Assert.That(capturedBody, Is.Not.Null, "publisher must POST a request body");
+        // Confirm the mapping ran — the serialized body must contain the tag key/value.
+        Assert.That(capturedBody, Does.Contain("drop_schema"),
+            "captured request body must include the mapped tag value");
+    }
+
     // -----------------------------------------------------------------------
     // Test double
     // -----------------------------------------------------------------------

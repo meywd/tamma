@@ -47,29 +47,40 @@ public sealed class EngineApiPlatformEventPublisher : IPlatformEventPublisher
     {
         if (evt is null) return null;
 
-        using var scope = _scopeFactory.CreateScope();
-        var api = scope.ServiceProvider.GetRequiredService<TammaApiClient>();
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var api = scope.ServiceProvider.GetRequiredService<TammaApiClient>();
 
-        var record = new PlatformEventRecord(
-            evt.Id,
-            evt.Type,
-            evt.TenantId,
-            evt.UserId,
-            ParseTags(evt.Tags),
-            ToJsonElement(evt.Metadata),
-            ToJsonElement(evt.Data),
-            evt.CreatedAt == default ? null : evt.CreatedAt);
+            var record = new PlatformEventRecord(
+                evt.Id,
+                evt.Type,
+                evt.TenantId,
+                evt.UserId,
+                ParseTags(evt.Tags),
+                ToJsonElement(evt.Metadata),
+                ToJsonElement(evt.Data),
+                evt.CreatedAt == default ? null : evt.CreatedAt);
 
-        var ok = await api.AppendPlatformEventsAsync(new[] { record }, ct).ConfigureAwait(false);
-        if (!ok)
+            var ok = await api.AppendPlatformEventsAsync(new[] { record }, ct).ConfigureAwait(false);
+            if (!ok)
+            {
+                _logger.LogWarning(
+                    "platform_event.post_failed type={Type} tenantId={TenantId}",
+                    evt.Type, evt.TenantId);
+                return null;
+            }
+
+            return evt;
+        }
+        catch (Exception ex)
         {
             _logger.LogWarning(
-                "platform_event.post_failed type={Type} tenantId={TenantId}",
+                ex,
+                "platform_event.publish_error type={Type} tenantId={TenantId}",
                 evt.Type, evt.TenantId);
             return null;
         }
-
-        return evt;
     }
 
     // -----------------------------------------------------------------------
@@ -100,6 +111,7 @@ public sealed class EngineApiPlatformEventPublisher : IPlatformEventPublisher
         if (string.IsNullOrWhiteSpace(json) || json == "{}")
             return null;
 
-        return JsonDocument.Parse(json).RootElement.Clone();
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
     }
 }
