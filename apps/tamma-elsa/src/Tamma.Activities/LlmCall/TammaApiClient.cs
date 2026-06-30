@@ -273,6 +273,56 @@ public class TammaApiClient
         }
     }
 
+    // ----- Platform event append ----------------------------------------
+
+    /// <summary>
+    /// Persist a BATCH of platform events to durable storage via
+    /// <c>POST /api/engine/platform-events</c>. Used by Task 3's publisher
+    /// to forward cross-tenant lifecycle events (e.g. TENANT.DELETED.SUCCESS)
+    /// that the engine witnesses but the Tamma API owns durably.
+    ///
+    /// <para>Returns <c>true</c> only on a fully-successful append (2xx).
+    /// Any non-2xx or transport failure returns <c>false</c> so the caller
+    /// can retry. No <c>X-Tenant-Id</c> header is sent — <c>TenantId</c>
+    /// travels per-event in the body, and <c>EngineServiceOnly</c> auth is
+    /// satisfied by the service Bearer token the client already attaches.</para>
+    /// </summary>
+    public async Task<bool> AppendPlatformEventsAsync(
+        IReadOnlyList<Models.PlatformEventRecord> events,
+        CancellationToken ct = default)
+    {
+        if (events is null || events.Count == 0)
+            return true; // nothing to flush — a successful no-op.
+
+        var url = $"{_baseUrl}/api/engine/platform-events";
+        var body = new Models.AppendPlatformEventsRequest(events);
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = JsonContent.Create(body, options: JsonOpts),
+            };
+            using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            await RecordHealthAsync(
+                response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
+                .ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Tamma API POST /api/engine/platform-events returned {Status} for {Count} events",
+                    (int)response.StatusCode, events.Count);
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex, "Tamma API POST /api/engine/platform-events failed");
+            await RecordHealthAsync(false, null, ex.GetType().Name, ct).ConfigureAwait(false);
+            return false;
+        }
+    }
+
     // ----- Helpers ------------------------------------------------------
 
     private async Task<T?> GetAsync<T>(
