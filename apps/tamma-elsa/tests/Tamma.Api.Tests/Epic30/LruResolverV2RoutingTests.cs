@@ -6,6 +6,8 @@ using Microsoft.Extensions.Options;
 using NUnit.Framework;
 using System.Collections.Concurrent;
 using System.Text;
+using Tamma.Api.Services.Provisioning.V2;
+using Tamma.Api.Tests.Provisioning.V2;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -117,6 +119,49 @@ public class LruResolverV2RoutingTests
         _decryptor.Calls.Should().Be(0,
             "V2 directory provided the connection string; the encrypted-column decryptor must be skipped");
         directory.ResolveCalls.Should().Be(1);
+    }
+
+    // ─── 1b. Epic 30 Phase B (B1) — the REAL directory never bypasses ─
+    //
+    // The tests above exercise the resolver's generic seam via a
+    // test-double directory (FakeEndpointDirectory) that CAN return
+    // Applicable — that seam is intentionally retained. This test proves
+    // that the PRODUCTION V2TenantEndpointDirectory never uses it for DB
+    // routing: a provider-keyed (provider_key set) tenant resolves its DB
+    // connection through the unified EncryptedConnectionString envelope,
+    // NOT the provider's DatabaseUrl.
+
+    [Test]
+    public async Task Resolver_WithRealV2Directory_RoutesProviderKeyedTenant_ViaUnifiedEnvelope()
+    {
+        var tenantId = await SeedTenantAsync(
+            legacyConnectionString:
+                "Host=stub.invalid;Port=5432;Database=unified;Username=u;Password=p");
+
+        var provider = new FakeTenantInfrastructureProvider("cranl")
+        {
+            // The provider WOULD hand back a routable DatabaseUrl, but B1
+            // means DB routing never consults it. If the directory calls
+            // this, the test fails loudly.
+            OnResolveEndpoints = (_, _) => throw new InvalidOperationException(
+                "provider ResolveEndpointsAsync must not be consulted for DB routing (B1)"),
+        };
+        var registry = new TenantProviderRegistry(
+            new ITenantInfrastructureProvider[] { provider });
+        var directory = new V2TenantEndpointDirectory(
+            registry,
+            new StubProviderKeyLookup("cranl"),
+            NullLogger<V2TenantEndpointDirectory>.Instance);
+
+        await using var resolver = CreateResolver(directory);
+
+        var ds = await resolver.GetDataSourceAsync(tenantId);
+
+        ds.ConnectionString.Should().Contain("Database=unified",
+            "the provider-keyed tenant must be routed via the unified envelope");
+        _decryptor.Calls.Should().Be(1,
+            "the unified EncryptedConnectionString decrypt path must be taken — " +
+            "the provider DatabaseUrl bypass is removed in B1");
     }
 
     // ─── 2. Fall back to legacy path when provider_key is null ────────
@@ -366,6 +411,21 @@ public class LruResolverV2RoutingTests
             public string? ProviderKey { get; init; }
             public string? Status { get; init; }
         }
+    }
+
+    /// <summary>
+    /// Minimal <see cref="ITenantProviderKeyLookup"/> that returns a fixed
+    /// provider key for every tenant — used to drive the REAL
+    /// <see cref="V2TenantEndpointDirectory"/> in the B1 end-to-end test.
+    /// </summary>
+    private sealed class StubProviderKeyLookup : ITenantProviderKeyLookup
+    {
+        private readonly string? _providerKey;
+
+        public StubProviderKeyLookup(string? providerKey) => _providerKey = providerKey;
+
+        public Task<string?> GetProviderKeyAsync(Guid tenantId, CancellationToken ct)
+            => Task.FromResult(_providerKey);
     }
 
     private sealed class RecordingDecryptor : IConnectionStringDecryptor

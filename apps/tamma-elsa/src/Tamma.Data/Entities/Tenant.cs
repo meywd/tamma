@@ -14,34 +14,16 @@ public class Tenant
     public DateTime UpdatedAt { get; set; }
     public DateTime? DeletedAt { get; set; }
 
-    // ── Cranl per-tenant provisioning (audit cranl/001 — Doc 02 §3) ──
+    // ── Cranl per-tenant provisioning ──
     //
-    // Populated when a platform owner provisions the tenant onto Cranl
-    // (via POST /api/admin/tenants/{id}/provision). NULL when Cranl has
-    // not minted hosting infrastructure for the tenant — the default;
-    // placement is owned by the unified schema-per-tenant model
-    // (SchemaName + DatabaseId against the tenant_databases pool).
-    public string? CranlProjectId { get; set; }
-    public string? CranlDatabaseId { get; set; }
-    public string? CranlAppId { get; set; }
-    public string? CranlRegion { get; set; }
-
-    /// <summary>
-    /// Encrypted DATABASE_URL handed back by Cranl after the database
-    /// reaches <c>running</c>. Encrypted at rest with AES-GCM keyed
-    /// from <c>Cranl:EncryptionKey</c> (or the HKDF fallback noted
-    /// in TenantSecretProtector). NULL when Cranl never minted a
-    /// database for the tenant — routing then uses the tenant's
-    /// unified-model connection string (EncryptedConnectionString).
-    /// </summary>
-    public byte[]? CranlDatabaseUrlEncrypted { get; set; }
-
-    /// <summary>
-    /// Default <c>*.cranl.net</c> hostname for the tenant's Elsa app
-    /// (e.g. <c>tamma-engine-abc123.cranl.net</c>). Populated by the
-    /// final step of the provisioning flow.
-    /// </summary>
-    public string? CranlAppUrl { get; set; }
+    // Epic 30 Phase B (Task B3): the six dedicated Cranl columns
+    // (CranlProjectId/DatabaseId/AppId/Region/AppUrl + the encrypted
+    // CranlDatabaseUrlEncrypted) were dropped. The walk/resume working-state
+    // (project/db/app ids, region, engine host) now lives in the
+    // `tenants.provider_resource_ids` JSONB (accessed via CranlResourceIds),
+    // and the encrypted admin DATABASE_URL lives only on the tenant's
+    // `tenant_databases` pool row (AdminConnectionStringEncrypted). The
+    // provisioning state machine below is unchanged.
 
     /// <summary>
     /// Provisioning state machine — string-encoded

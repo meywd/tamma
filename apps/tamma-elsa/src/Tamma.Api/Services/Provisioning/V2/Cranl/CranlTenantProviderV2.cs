@@ -81,20 +81,17 @@ public sealed class CranlTenantProviderV2 : ITenantInfrastructureProvider
 
     private readonly ControlPlaneDbContext _db;
     private readonly IPlatformQueuedTaskRepository _platformTasks;
-    private readonly TenantSecretProtector _protector;
     private readonly CranlOptions _options;
     private readonly ILogger<CranlTenantProviderV2> _logger;
 
     public CranlTenantProviderV2(
         ControlPlaneDbContext db,
         IPlatformQueuedTaskRepository platformTasks,
-        TenantSecretProtector protector,
         CranlOptions options,
         ILogger<CranlTenantProviderV2> logger)
     {
         _db = db;
         _platformTasks = platformTasks;
-        _protector = protector;
         _options = options;
         _logger = logger;
     }
@@ -133,8 +130,13 @@ public sealed class CranlTenantProviderV2 : ITenantInfrastructureProvider
 
         // Idempotency: if Cranl resources already exist (or the row is mid-flow)
         // return the current snapshot rather than enqueueing a second task.
+        // B3: the "already has a project" signal reads from the
+        // provider_resource_ids JSONB (via CranlResourceIds), not the retired
+        // cranl_project_id column.
         var current = ProvisioningStateExtensions.ParseState(tenant.ProvisioningState);
-        if (!string.IsNullOrEmpty(tenant.CranlProjectId)
+        var hasCranlProject =
+            !string.IsNullOrEmpty(CranlResourceIds.Get(_db.Entry(tenant), CranlResourceIds.ProjectId));
+        if (hasCranlProject
             || current is ProvisioningState.Pending
                        or ProvisioningState.DatabaseProvisioning
                        or ProvisioningState.DatabaseReady
@@ -142,7 +144,7 @@ public sealed class CranlTenantProviderV2 : ITenantInfrastructureProvider
                        or ProvisioningState.AppDeploying
                        or ProvisioningState.Ready)
         {
-            return BuildResult(tenant, decryptEndpoint: current is ProvisioningState.Ready or ProvisioningState.DatabaseReady or ProvisioningState.AppProvisioning or ProvisioningState.AppDeploying);
+            return BuildResult(tenant, includeEndpoints: current is ProvisioningState.Ready or ProvisioningState.DatabaseReady or ProvisioningState.AppProvisioning or ProvisioningState.AppDeploying);
         }
 
         var now = DateTime.UtcNow;
@@ -153,7 +155,6 @@ public sealed class CranlTenantProviderV2 : ITenantInfrastructureProvider
         tenant.ProvisioningState = ProvisioningState.Pending.ToStorageString();
         tenant.ProvisioningDetail = "queued_for_cranl_provisioning";
         tenant.ProvisioningUpdatedAt = now;
-        tenant.CranlRegion = region;
         tenant.UpdatedAt = now;
 
         // Story 30-3 — write the new v2 fields. Shadow columns are accessed via
@@ -164,6 +165,10 @@ public sealed class CranlTenantProviderV2 : ITenantInfrastructureProvider
         entry.Property<string?>("ProviderKey").CurrentValue = CranlCapabilities.ProviderKey;
         // Clear any stale failure short-code from a prior failed run.
         entry.Property<string?>("FailureReason").CurrentValue = null;
+        // B3: seed the region into the provider_resource_ids JSONB (the
+        // retired cranl_region column) so the walk + BuildResourceIds read a
+        // consistent value.
+        CranlResourceIds.Set(entry, CranlResourceIds.Region, region);
 
         await _db.SaveChangesAsync(ct);
 
@@ -184,7 +189,7 @@ public sealed class CranlTenantProviderV2 : ITenantInfrastructureProvider
             "Cranl V2 provider: enqueued provisioning task for tenant {TenantId} (region={Region}, topology={Topology})",
             tenantId, region, request.Topology);
 
-        return BuildResult(tenant, decryptEndpoint: false);
+        return BuildResult(tenant, includeEndpoints: false);
     }
 
     /// <inheritdoc />
@@ -223,7 +228,7 @@ public sealed class CranlTenantProviderV2 : ITenantInfrastructureProvider
         var payload = JsonSerializer.Serialize(new ProvisioningTaskPayload
         {
             TenantId = tenantId,
-            Region = tenant.CranlRegion ?? string.Empty,
+            Region = CranlResourceIds.Get(_db.Entry(tenant), CranlResourceIds.Region) ?? string.Empty,
             CustomName = null
         });
         await _platformTasks.EnqueueAsync(new PlatformQueuedTask
@@ -249,9 +254,9 @@ public sealed class CranlTenantProviderV2 : ITenantInfrastructureProvider
         if (endpoints is null)
         {
             throw new InvalidOperationException(
-                $"Tenant {tenantId} is in state '{state}' (no endpoint available). " +
-                "ResolveEndpointsAsync requires DatabaseReady / AppProvisioning / " +
-                "AppDeploying / Ready — call GetStatusAsync first to check progress.");
+                $"Tenant {tenantId} is in state '{state}' (no engine endpoint available). " +
+                "ResolveEndpointsAsync requires the engine host (cranl_app_url) to be " +
+                "published — that lands at Ready. Call GetStatusAsync first to check progress.");
         }
         return endpoints;
     }
@@ -264,10 +269,10 @@ public sealed class CranlTenantProviderV2 : ITenantInfrastructureProvider
             ?? throw new InvalidOperationException($"Tenant {tenantId} not found");
     }
 
-    private ProvisioningResult BuildResult(Tenant tenant, bool decryptEndpoint)
+    private ProvisioningResult BuildResult(Tenant tenant, bool includeEndpoints)
     {
         var snapshot = BuildSnapshot(tenant);
-        var endpoints = decryptEndpoint ? TryBuildEndpoints(tenant) : null;
+        var endpoints = includeEndpoints ? TryBuildEndpoints(tenant) : null;
         return new ProvisioningResult(
             snapshot,
             ProviderResourceIds: BuildResourceIds(tenant),
@@ -308,52 +313,38 @@ public sealed class CranlTenantProviderV2 : ITenantInfrastructureProvider
             UpdatedAt: updated);
     }
 
-    private static IReadOnlyDictionary<string, string> BuildResourceIds(Tenant tenant)
+    private IReadOnlyDictionary<string, string> BuildResourceIds(Tenant tenant)
     {
-        // Build the resource-id map from whatever columns are populated. The
-        // dispatch workflow persists this onto tenants.provider_resource_ids
-        // when the v2 result lands — the in-memory shape is the contract.
-        var map = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (!string.IsNullOrEmpty(tenant.CranlProjectId))
-            map["cranl_project_id"] = tenant.CranlProjectId!;
-        if (!string.IsNullOrEmpty(tenant.CranlDatabaseId))
-            map["cranl_database_id"] = tenant.CranlDatabaseId!;
-        if (!string.IsNullOrEmpty(tenant.CranlAppId))
-            map["cranl_app_id"] = tenant.CranlAppId!;
-        if (!string.IsNullOrEmpty(tenant.CranlRegion))
-            map["cranl_region"] = tenant.CranlRegion!;
+        // B3: the resource-id map is read straight from the
+        // tenants.provider_resource_ids JSONB (the CranlProvisioningWorkflow
+        // accumulates it as the walk progresses). The in-memory shape is the
+        // dispatch-workflow contract; keys: cranl_project_id, cranl_database_id,
+        // cranl_app_id, cranl_app_url, cranl_region (whichever are populated).
+        var map = CranlResourceIds.Read(_db.Entry(tenant));
         return map.Count == 0 ? EmptyResourceIds : map;
     }
 
     private TenantEndpoints? TryBuildEndpoints(Tenant tenant)
     {
-        if (tenant.CranlDatabaseUrlEncrypted is null
-            || tenant.CranlDatabaseUrlEncrypted.Length == 0)
+        // B3 (with B1): DB routing no longer uses a provider-supplied
+        // DatabaseUrl — every tenant routes through the unified per-tenant
+        // EncryptedConnectionString pool envelope. The Cranl admin DATABASE_URL
+        // is therefore no longer persisted on the tenant row and is not
+        // resolvable here. The only endpoint still meaningful is the engine
+        // host (cranl_app_url), kept for a future dedicated-compute engine
+        // dispatch. When it isn't populated yet there is no endpoint to hand
+        // back — return null so ResolveEndpointsAsync fails loud.
+        var appUrl = CranlResourceIds.Get(_db.Entry(tenant), CranlResourceIds.AppUrl);
+        if (string.IsNullOrWhiteSpace(appUrl))
         {
             return null;
         }
 
-        string databaseUrl;
-        try
-        {
-            databaseUrl = _protector.Decrypt(tenant.CranlDatabaseUrlEncrypted);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex,
-                "Cranl V2 provider: failed to decrypt DATABASE_URL for tenant {TenantId} — the encryption key may be misconfigured",
-                tenant.Id);
-            throw;
-        }
-
-        var engineUrl = !string.IsNullOrWhiteSpace(tenant.CranlAppUrl)
-            ? $"https://{tenant.CranlAppUrl}"
-            : null;
-
         return new TenantEndpoints(
-            DatabaseUrl: databaseUrl,
-            EngineHost: tenant.CranlAppUrl,
-            EngineUrl: engineUrl,
+            // DB routing is owned by the unified pool envelope, not this field.
+            DatabaseUrl: string.Empty,
+            EngineHost: appUrl,
+            EngineUrl: $"https://{appUrl}",
             CustomDomain: null);
     }
 
