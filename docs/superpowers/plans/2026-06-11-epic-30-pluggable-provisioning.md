@@ -6,7 +6,7 @@
 > `superpowers:subagent-driven-development`. Tasks inside phases use checkbox (`- [ ]`) syntax.
 > The project is test-first: every task lists the tests to write BEFORE implementation.
 
-**Status**: PLANNED (2026-06-11). Not started.
+**Status**: PHASE A DONE (2026-06-29); Phases B–E PLANNED.
 
 **Goal:** Finish Epic 30's pluggable-provisioning seam on top of the now-merged unified
 schema-per-tenant model (PR #343, 98cfb1c2): retire the [Obsolete] V1 `ITenantProvisioner` surface
@@ -177,38 +177,42 @@ procedure": edit all four, then `dotnet ef migrations has-pending-model-changes`
 
 ## 3. Phase decomposition (each becomes its own task-plan)
 
-### Phase A — Wave C: retire the V1 provisioner surface
+### Phase A — Wave C: retire the V1 provisioner surface ✅ DONE (2026-06-29)
 
-Port the three admin endpoints onto the V2 dispatcher; delete V1; preserve external API contract.
+**Execution plan:** `docs/superpowers/plans/2026-06-29-epic-30-phase-a-v1-to-v2-cutover.md`
+**Commits:** `c25cd980` → `ca4a3879` → `7678e794` → `d69c42bb` → `c9f2c353`
+(branch `feat/epic-30-phase-a-v1v2-cutover`, off `origin/main f118e58d`)
 
-- [ ] **Task A1 — Null-deployment semantics decision + dispatcher gap.** V1
-  `NullTenantProvisioner` marks tenants Ready immediately (CLAUDE.md: "admin endpoints still work —
-  they just mark tenants Ready immediately"); V2 `NullTenantProvider` throws. Bridge in the
-  **dispatcher**, not the provider: when the resolved provider's capabilities are
-  `ProviderCapabilities.None`, `ProvisionTenantV2Dispatcher.DispatchAsync` short-circuits to
-  `ProvisioningState.Ready` with detail `shared_infrastructure_no_backend_configured` (placement
-  already happened at tenant creation under the unified model — there is genuinely nothing to do).
-  Tests first: `ProvisionTenantV2DispatcherTests` — null-provider dispatch → Ready, no queue row,
-  no `NotSupportedException` escape.
-- [ ] **Task A2 — Port admin endpoints to V2.** `AdminEndpoints.cs:428-482` swap
-  `ITenantProvisioner` → `ProvisionTenantV2Dispatcher` (provision), provider
-  `GetStatusAsync`/`tenants.ProvisioningState` read (status), and a new
-  `DeprovisionAsync` dispatch path (deprovision rides the same platform-queue handler with a
-  payload flag — the 30-9 "reverse saga" reduced to Cranl+Null scope). Response DTO
-  (`TenantProvisioningResponse`) and state strings are unchanged — both surfaces share
-  `ProvisioningState.ToStorageString()`. Tests first: existing admin provisioning endpoint tests
-  re-pointed at the V2 wiring (202 + Location, status polling transitions, deprovision 202,
-  OwnerAccess 403s); keep them green through the swap.
-- [ ] **Task A3 — Delete V1.** Remove `ITenantProvisioner.cs`, `NullTenantProvisioner.cs`,
-  `CranlTenantProvisioner.cs`, `CranlProvisioningWorkflow.cs`, `TenantProvisioningTaskHandler.cs`,
-  the `CS0618` pragmas and V1 registrations in `ProvisioningServiceCollectionExtensions.cs`, and
-  `tests/.../Provisioning/CranlProvisioningWorkflowTests.cs` (port any behavior assertions V2
-  tests lack into `ProvisionTenantV2WorkflowTests` FIRST — diff the two test files before
-  deleting). Keep `ProvisioningModels.cs`'s `ProvisioningState` enum + `ToStorageString`/
-  `ParseState` (move into `V2/` or a neutral file; update the `Tenant.cs:48` doc ref).
-  Gate: `grep -rn "ITenantProvisioner\b" src tests` → zero hits; full suite green.
+- [x] **Task A1 — Null-deployment semantics decision + dispatcher gap.** `c25cd980`:
+  `ProvisionTenantV2Dispatcher.DispatchAsync` null-provider branch short-circuits to
+  `ProvisioningState.Ready` / detail `shared_infrastructure_no_backend_configured`. No enqueue.
+  Matches V1 `NullTenantProvisioner` semantics under the unified model (schema minted at creation).
+- [x] **Task A2 — Port admin endpoints to V2 + add deprovision path.** `ca4a3879` + `7678e794`:
+  `ProvisionTenantV2TaskPayload` gains `Operation` discriminator (`Provision`/`Deprovision`);
+  `DispatchDeprovisionAsync` added to the dispatcher (null → `Deprovisioned` no-enqueue; real →
+  `Deprovisioning` + enqueue); `DeprovisionAsync` added to `ProvisionTenantV2Workflow`;
+  handler branches on `payload.Operation`. `AdminEndpoints.cs:428-482` re-pointed to
+  `ProvisionTenantV2Dispatcher` + `TenantProviderRegistry`; DTO / status codes / route
+  templates unchanged; `ProvisioningAdminEndpointsTests` green on V2.
+- [x] **Task A3 — Delete V1.** `d69c42bb`: `ITenantProvisioner`, `NullTenantProvisioner`,
+  `CranlTenantProvisioner`, `TenantProvisioningTaskHandler`, V1 DI registrations and CS0618
+  pragmas removed; V1 test files deleted; `ProvisioningModels.cs` V1 records cleaned up;
+  `grep -rn "ITenantProvisioner\b" src tests` → 0 hits.
+
+  **Deviation from this plan's original A3 scope:** `CranlProvisioningWorkflow.cs` was **kept**
+  (not deleted). The plan originally called for deleting it along with the rest of the V1 surface.
+  Code review found that deleting the engine would orphan the V2 Cranl path — the V2
+  `CranlTenantProviderV2` delegates to the workflow, and there was no other implementation of the
+  Cranl REST-walk. Instead (`c9f2c353`): `CranlProvisioningWorkflow` was retained and two new
+  `IPlatformTaskHandler`s were wired — `CranlProvisionPlatformTaskHandler` (task type
+  `provisioning.tenant`) and `CranlDeprovisionPlatformTaskHandler` (task type
+  `provisioning.tenant.deprovision`) — so a Cranl-configured deployment completes end-to-end
+  (project→db→app→Ready, and app→db→project teardown) rather than timing out to Failed. This
+  makes the Cranl V2 path **functional in Phase A** rather than deferred to Phase B.
 
 ### Phase B — Reconcile V2 with the unified model: providers mint pool rows
+
+**Known constraint to fix in Phase B:** `ProvisionTenantV2Workflow.ExecuteAsync` block-polls (up to ~30 min) for an inner `provisioning.tenant` platform task that `CranlTenantProviderV2.ProvisionAsync` enqueues on the same `PlatformTaskWorker` queue. Because `PlatformTaskWorker` processes one task at a time per process, on a single worker the saga holds the only slot and the inner task is never reserved — provision times out to `Failed`. The V2 Cranl provision saga must be restructured so it does not block-poll a same-queue inner task (or require ≥2 platform-worker processes as an interim workaround). Not reachable today (`PlatformTaskWorker.RunOnStartup=false`; Cranl opt-in) but must be addressed before enabling the V2 Cranl path in production.
 
 This is decision 3 / deviation 22 made real. A `DatabaseOnly` provision = "mint a hosting DB,
 register it in `tenant_databases`, move the tenant's schema onto it." Database routing NEVER flows

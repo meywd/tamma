@@ -19,7 +19,7 @@ namespace Tamma.Api.Services.Provisioning.V2;
 /// (e.g. the first <c>Pending</c> snapshot).</param>
 /// <param name="Endpoints">Connection details for the freshly-provisioned
 /// tenant. <c>null</c> until the underlying database is ready (i.e. while
-/// <see cref="ProvisioningStatus.State"/> is one of the early states).</param>
+/// <see cref="ProvisioningStatusSnapshot.State"/> is one of the early states).</param>
 /// <param name="ProvisioningDurationSeconds">Wall-clock seconds the
 /// provider has spent on this provisioning run so far. Useful for the
 /// cost dashboard (Story 30-10) and for SLO alerts. <c>null</c> when the

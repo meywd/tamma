@@ -13,10 +13,9 @@ namespace Tamma.Api.Services.Provisioning;
 ///     connection string unchanged for every tenant where
 ///     <c>tenants.cranl_database_url_encrypted IS NULL</c>.</description></item>
 ///   <item><description><b>Per-tenant Cranl DB</b>: tenant has been
-///     provisioned via <see cref="CranlTenantProvisioner"/> and has its
-///     own Postgres on Cranl. Returns the decrypted Cranl
-///     <c>DATABASE_URL</c> so the per-request DbContext binds to that
-///     database.</description></item>
+///     provisioned via the Cranl backend and has its own Postgres on
+///     Cranl. Returns the decrypted Cranl <c>DATABASE_URL</c> so the
+///     per-request DbContext binds to that database.</description></item>
 /// </list>
 ///
 /// <para><b>Status (audit cranl/004): STUBBED.</b> The interface +
@@ -28,9 +27,9 @@ namespace Tamma.Api.Services.Provisioning;
 /// migrating the repository constructors to ask for a factory rather
 /// than the singleton context — that cascade is the next milestone
 /// once a real Cranl-provisioned tenant is available to test against.
-/// In the meantime <see cref="CranlProvisioningWorkflow"/> still
-/// populates the encrypted column correctly so the eventual switch
-/// is a no-op for already-provisioned rows.</para>
+/// In the meantime the Cranl background workflow still populates the
+/// encrypted column correctly so the eventual switch is a no-op for
+/// already-provisioned rows.</para>
 /// </summary>
 public interface ITenantConnectionResolver
 {

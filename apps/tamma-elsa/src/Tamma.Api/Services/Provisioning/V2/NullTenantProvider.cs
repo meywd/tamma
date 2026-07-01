@@ -20,7 +20,7 @@ namespace Tamma.Api.Services.Provisioning.V2;
 ///   <item><description><see cref="ProviderKey"/> = <c>"null"</c>.</description></item>
 ///   <item><description><see cref="GetCapabilities"/> returns
 ///     <see cref="ProviderCapabilities.None"/> (no topologies supported,
-///     no regions). Distinct from the v1 <c>NullTenantProvisioner</c>
+///     no regions). Distinct from the v1 null provisioner
 ///     which fakes "shared infra Ready" — that behaviour stays on v1
 ///     until 30-3 retires it.</description></item>
 ///   <item><description><see cref="ProvisionAsync"/> +

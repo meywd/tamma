@@ -6,7 +6,7 @@ namespace Tamma.Api.Services.Provisioning.V2;
 /// the v2 provisioning workflow.
 ///
 /// <para><b>Why platform queue, not per-tenant queue</b>: the existing v1
-/// pattern (Story 28-1 PR B, doc-commented on <c>CranlTenantProvisioner</c>)
+/// pattern (Story 28-1 PR B, doc-commented on the v1 Cranl provisioner)
 /// puts provisioning + deprovisioning tasks on the platform queue because
 /// at provisioning time the tenant's database doesn't exist yet — the
 /// task's whole job is to create it. The 30-1 audit explicitly preserved
@@ -29,6 +29,11 @@ public sealed class ProvisionTenantV2TaskPayload
 
     /// <summary>Tenant the workflow targets.</summary>
     public Guid TenantId { get; set; }
+
+    /// <summary>Which lifecycle action this task performs. Defaults to
+    /// <see cref="ProvisioningOperation.Provision"/> so payloads serialized
+    /// before this field existed still deserialize as provision tasks.</summary>
+    public ProvisioningOperation Operation { get; set; } = ProvisioningOperation.Provision;
 
     /// <summary>Stable provider key the dispatch step looks up in
     /// <see cref="TenantProviderRegistry"/>. Convention is lowercase

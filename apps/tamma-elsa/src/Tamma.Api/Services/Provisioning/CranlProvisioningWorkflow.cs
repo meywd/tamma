@@ -7,10 +7,11 @@ using Tamma.Data.Entities;
 namespace Tamma.Api.Services.Provisioning;
 
 /// <summary>
-/// State-machine walker for Cranl provisioning. Lives separately from
-/// <see cref="CranlTenantProvisioner"/> so the long-running flow can be
-/// invoked directly by the queue handler (and unit-tested in isolation
-/// without the task-queue plumbing).
+/// State-machine walker for Cranl provisioning. Lives separately from the
+/// platform-queue handlers that drive it (the v2 Cranl provider enqueues
+/// <c>provisioning.tenant</c>[<c>.deprovision</c>] tasks) so the
+/// long-running flow can be invoked directly by the handler (and
+/// unit-tested in isolation without the task-queue plumbing).
 ///
 /// <para>Provisioning resumes from whichever state the tenant row is in,
 /// so a worker that died mid-flow can be resumed by re-enqueueing the

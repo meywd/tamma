@@ -14,8 +14,8 @@ namespace Tamma.Api.Services.Provisioning.V2;
 ///
 /// <para>Implements <see cref="IPlatformTaskHandler"/>, NOT the per-tenant
 /// <c>ITaskHandler</c>, because the V2 work runs on the platform queue
-/// (the constraint preserved from 30-1's audit of v1
-/// <c>CranlTenantProvisioner</c>: at provisioning time the tenant DB
+/// (the constraint preserved from 30-1's audit of the v1 Cranl
+/// provisioner: at provisioning time the tenant DB
 /// doesn't exist yet). This is the first
 /// <see cref="IPlatformTaskHandler"/> implementation in the codebase.</para>
 ///
@@ -88,7 +88,9 @@ public sealed class ProvisionTenantV2TaskHandler : IPlatformTaskHandler
             "v2_provisioning.task_started taskId={TaskId} tenantId={TenantId} providerKey={ProviderKey}",
             task.Id, payload.TenantId, payload.ProviderKey);
 
-        var result = await _workflow.ExecuteAsync(payload, ct).ConfigureAwait(false);
+        var result = payload.Operation == ProvisioningOperation.Deprovision
+            ? await _workflow.DeprovisionAsync(payload, ct).ConfigureAwait(false)
+            : await _workflow.ExecuteAsync(payload, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
             "v2_provisioning.task_finished taskId={TaskId} tenantId={TenantId} state={State} failureReason={FailureReason}",

@@ -1,18 +1,80 @@
 # Epic 30: Pluggable Tenant Infrastructure Provisioning
 
-**Status**: planning (briefs only, 2026-04-20)
+**Status**: in-progress (Phase A / Wave C complete 2026-06-29; Phases B–E outstanding)
 **Layer**: Layer 5 (validation + scale-out) — see
 [`plans/epic-29-30-placement.md`](../plans/epic-29-30-placement.md)
 **Depends on**: Epic 28 (tenant DbContext factory, tenant lifecycle
 workflows), Epic 29 Story 29-6..29-8 (rotation workflow + handlers for
 secret-push into provisioned infra)
 
+## Execution status
+
+### Phase A — Wave C: V1→V2 provisioner cutover (DONE 2026-06-29)
+
+Commits `c25cd980`–`d69c42bb` on `feat/epic-30-phase-a-v1v2-cutover`
+(plus Cranl wiring `c9f2c353`). Covers the three admin endpoints
+(`POST/GET/POST /api/admin/tenants/{id}/provision|provisioning|deprovision`),
+all now riding `ProvisionTenantV2Dispatcher` / `TenantProviderRegistry`.
+
+**Delivered:**
+- `c25cd980` — null-provider dispatch short-circuits to `Ready`
+  (`shared_infrastructure_no_backend_configured`), matching V1
+  `NullTenantProvisioner` semantics under the unified schema-per-tenant
+  model (schema minted at creation; nothing to do).
+- `ca4a3879` — V2 deprovision path: `ProvisioningOperation` payload
+  discriminator; `DispatchDeprovisionAsync` on the dispatcher (null →
+  `Deprovisioned` no-enqueue; real → `Deprovisioning` + enqueue);
+  `DeprovisionAsync` on `ProvisionTenantV2Workflow`.
+- `7678e794` — admin endpoints cut over to `ProvisionTenantV2Dispatcher`;
+  V1 `ITenantProvisioner` injection removed.
+- `d69c42bb` — V1 surface deleted: `ITenantProvisioner`, `NullTenantProvisioner`,
+  `CranlTenantProvisioner`, `TenantProvisioningTaskHandler` removed; V1 test
+  files deleted; `ProvisioningModels.cs` V1 records cleaned up.
+- `c9f2c353` — **deviation from the 2026-06-11 plan** (which deferred Cranl
+  to Phase B): `CranlProvisioningWorkflow` (the REST-walk engine) was KEPT
+  and two new `IPlatformTaskHandler`s wired — `CranlProvisionPlatformTaskHandler`
+  (`provisioning.tenant`) and `CranlDeprovisionPlatformTaskHandler`
+  (`provisioning.tenant.deprovision`) — so the Cranl provision/deprovision
+  paths complete end-to-end (project→db→app→Ready / app→db→project teardown)
+  rather than timing out to Failed.
+
+**Still deferred (Phase B / Story 30-3):**
+- `RegisterSecrets` saga step — hard-blocked on Epic 29's `ISecretStore`
+  (does not exist in code).
+- Per-org quota enforcement (Story 30-3).
+- Pool-row registration: Cranl provider must mint a `tenant_databases` row
+  and drive `TenantMoveService` (the V2↔unified-model reconciliation; the
+  V2↔unified-model routing fix so Cranl DB routing flows through the unified
+  `EncryptedConnectionString` envelope rather than a raw Cranl URL).
+- `provider_resource_ids`/`provider_key` column persistence; `SqlTenantProviderKeyLookup` activation.
+
+**Ops note:** `PlatformTaskWorker.RunOnStartup` is `false` (unchanged) —
+provisioning platform tasks drain only when that worker is enabled.
+
+### Phases B–E — Outstanding
+
+- **Phase B** — Pool-row reconciliation / unified-model routing fix (see
+  `docs/superpowers/plans/2026-06-11-epic-30-pluggable-provisioning.md` §3
+  Phase B). Blocked on the Cranl-credential CREATEROLE analysis.
+  **Known limitation (single-worker Cranl saga constraint):** `ProvisionTenantV2Workflow` block-polls for an inner `provisioning.tenant` platform task that `CranlTenantProviderV2` enqueues on the same queue. `PlatformTaskWorker` processes one task at a time per process — so on a single worker process the saga occupies the only slot and the inner task is never reserved, causing provision to time out to `Failed`. Requires ≥2 platform-worker processes until Phase B restructures the saga away from block-polling a same-queue inner task. Not reachable today (`PlatformTaskWorker.RunOnStartup=false`; Cranl opt-in; null path unaffected).
+- **Phase C** — CHECK-constraint tightening (deviations 6–7 from the
+  unified-tenancy plan).
+- **Phase D** — Story 28-1 closeout: per-tenant Elsa runner decision.
+- **Phase E** — Story 28-13 trigger review (OpenBao).
+
+---
+
 ## Why this epic exists
 
-Today `ITenantProvisioner` has two implementations: `Null` (dev
+The V1 `ITenantProvisioner` surface has now been retired (Phase A above).
+Phases B–E generalise the provisioning plane further: one interface,
+multiple backends, multiple topologies, per-tenant routing, and CHECK
+tightening. The original motivation for coupling elimination:
+
+Today (`pre-Phase A`) `ITenantProvisioner` had two implementations: `Null` (dev
 fallback) and `Cranl`. Everything else about the tenant plane — the
-connection string, the engine host, the DB topology — is Cranl-specific.
-This couples the platform to one vendor and makes it impossible to
+connection string, the engine host, the DB topology — was Cranl-specific.
+This coupled the platform to one vendor and made it impossible to
 offer:
 
 - **BYO** tenants (enterprise accounts on their own Postgres + their own

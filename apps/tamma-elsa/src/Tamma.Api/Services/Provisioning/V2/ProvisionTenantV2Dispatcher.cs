@@ -13,12 +13,13 @@ namespace Tamma.Api.Services.Provisioning.V2;
 ///
 /// <list type="bullet">
 ///   <item><description><b>single-user mode</b> — the
-///     <see cref="TenantProviderRegistry"/> only has the null seam wired. The
-///     dispatcher short-circuits without enqueueing: it stamps the tenant
-///     row with <see cref="ProvisioningState.Failed"/> +
-///     <see cref="ProvisioningFailureReasons.NoProvisioningInThisMode"/>
-///     and returns the snapshot. Per ADR §6, we surface a structured
-///     failure rather than letting the null seam throw mid-workflow.</description></item>
+///     <see cref="TenantProviderRegistry"/> only has the null seam wired.
+///     Under unified schema-per-tenant the tenant's schema is minted at
+///     creation, so provisioning dedicated infrastructure is a genuine
+///     no-op. The dispatcher short-circuits without enqueueing: it stamps
+///     the tenant row with <see cref="ProvisioningState.Ready"/> and returns
+///     the snapshot (matches the retired V1 null provisioner
+///     behaviour).</description></item>
 ///   <item><description><b>SaaS mode</b> — the registry has at least one real
 ///     provider keyed by <see cref="ITenantInfrastructureProvider.ProviderKey"/>.
 ///     The dispatcher refuses unknown keys (<c>provider_not_registered</c>)
@@ -95,20 +96,18 @@ public sealed class ProvisionTenantV2Dispatcher
                 $"tenant_{tenantId}_not_found");
         }
 
-        // Mode-aware short-circuit. The null seam advertises
-        // ProvisioningTopology.None — the registry contains it in every
-        // configuration. If the caller picked the null key explicitly,
-        // OR the registry has no real backends wired (single-user mode
-        // signature), surface a structured failure rather than letting
-        // NullTenantProvider.ProvisionAsync throw downstream.
         if (string.Equals(providerKey, NullTenantProvider.Key, StringComparison.Ordinal))
         {
+            // Unified schema-per-tenant: the tenant's schema is minted at tenant
+            // creation, so provisioning dedicated infrastructure is a genuine
+            // no-op for a no-backend deployment. Report Ready (matches the
+            // retired V1 null provisioner) rather than letting
+            // NullTenantProvider.ProvisionAsync throw downstream.
             _logger.LogInformation(
-                "v2_provisioning.short_circuit_null_provider tenantId={TenantId}", tenantId);
-            return await StampFailureAsync(
+                "v2_provisioning.short_circuit_null_provider_ready tenantId={TenantId}", tenantId);
+            return await StampReadyAsync(
                 tenant,
-                ProvisioningFailureReasons.NoProvisioningInThisMode,
-                detail: "single_user_or_dev_mode",
+                detail: "shared_infrastructure_no_backend_configured",
                 ct).ConfigureAwait(false);
         }
 
@@ -199,6 +198,122 @@ public sealed class ProvisionTenantV2Dispatcher
                 Detail: "queued_for_v2_provisioning",
                 FailureReason: null,
                 UpdatedAt: nowUtc),
+            ProviderResourceIds: new Dictionary<string, string>(),
+            Endpoints: null,
+            ProvisioningDurationSeconds: null);
+    }
+
+    /// <summary>
+    /// Submit a deprovisioning request. Mirrors <see cref="DispatchAsync"/>:
+    /// the null seam short-circuits to <see cref="ProvisioningState.Deprovisioned"/>
+    /// without enqueueing (nothing to tear down under the unified model); a
+    /// real provider flips the tenant to <see cref="ProvisioningState.Deprovisioning"/>
+    /// and enqueues a <see cref="ProvisioningOperation.Deprovision"/> task on the
+    /// same platform queue + handler.
+    /// </summary>
+    public async Task<ProvisioningResult> DispatchDeprovisionAsync(
+        Guid tenantId,
+        string providerKey,
+        string? reason = null,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(providerKey))
+        {
+            return await PersistFailureAsync(
+                tenantId, ProvisioningFailureReasons.ProviderNotRegistered, "provider_key_blank", ct)
+                .ConfigureAwait(false);
+        }
+
+        var tenant = await _db.Tenants
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Id == tenantId && t.DeletedAt == null, ct)
+            .ConfigureAwait(false);
+        if (tenant is null)
+            return BuildSyntheticFailure(ProvisioningFailureReasons.TenantNotFound, $"tenant_{tenantId}_not_found");
+
+        if (string.Equals(providerKey, NullTenantProvider.Key, StringComparison.Ordinal))
+        {
+            _logger.LogInformation(
+                "v2_deprovisioning.short_circuit_null_provider tenantId={TenantId}", tenantId);
+            return await StampDeprovisionedAsync(tenant, "shared_infrastructure_deprovision_noop", ct)
+                .ConfigureAwait(false);
+        }
+
+        if (!_registry.TryGetProvider(providerKey, out var provider) || provider is null)
+        {
+            return await StampFailureAsync(
+                tenant, ProvisioningFailureReasons.ProviderNotRegistered, $"provider_key_{providerKey}_unknown", ct)
+                .ConfigureAwait(false);
+        }
+
+        var nowUtc = _clock.GetUtcNow();
+        tenant.ProvisioningState = ProvisioningState.Deprovisioning.ToStorageString();
+        tenant.ProvisioningDetail = "queued_for_v2_deprovisioning";
+        tenant.ProvisioningUpdatedAt = nowUtc.UtcDateTime;
+        tenant.UpdatedAt = nowUtc.UtcDateTime;
+        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        var payload = new ProvisionTenantV2TaskPayload
+        {
+            TenantId = tenantId,
+            ProviderKey = providerKey,
+            Operation = ProvisioningOperation.Deprovision,
+            // Topology is unused for deprovision; DeprovisionAsync ignores it.
+            // DedicatedCompute is a non-None placeholder to satisfy the payload schema.
+            Topology = ProvisioningTopology.DedicatedCompute,
+            CustomName = reason,
+        };
+
+        await _platformTasks.EnqueueAsync(new PlatformQueuedTask
+        {
+            Type = ProvisionTenantV2TaskPayload.TaskType,
+            TenantId = tenantId,
+            Payload = JsonSerializer.Serialize(payload),
+        }, ct).ConfigureAwait(false);
+
+        return new ProvisioningResult(
+            new ProvisioningStatusSnapshot(
+                ProvisioningState.Deprovisioning, "queued_for_v2_deprovisioning", null, nowUtc),
+            ProviderResourceIds: new Dictionary<string, string>(),
+            Endpoints: null,
+            ProvisioningDurationSeconds: null);
+    }
+
+    private async Task<ProvisioningResult> StampReadyAsync(
+        Tenant tenant,
+        string detail,
+        CancellationToken ct)
+    {
+        var nowUtc = _clock.GetUtcNow();
+        tenant.ProvisioningState = ProvisioningState.Ready.ToStorageString();
+        tenant.ProvisioningDetail = detail;
+        tenant.ProvisioningUpdatedAt = nowUtc.UtcDateTime;
+        tenant.UpdatedAt = nowUtc.UtcDateTime;
+        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return new ProvisioningResult(
+            new ProvisioningStatusSnapshot(
+                ProvisioningState.Ready,
+                Detail: detail,
+                FailureReason: null,
+                UpdatedAt: nowUtc),
+            ProviderResourceIds: new Dictionary<string, string>(),
+            Endpoints: null,
+            ProvisioningDurationSeconds: null);
+    }
+
+    private async Task<ProvisioningResult> StampDeprovisionedAsync(
+        Tenant tenant, string detail, CancellationToken ct)
+    {
+        var nowUtc = _clock.GetUtcNow();
+        tenant.ProvisioningState = ProvisioningState.Deprovisioned.ToStorageString();
+        tenant.ProvisioningDetail = detail;
+        tenant.ProvisioningUpdatedAt = nowUtc.UtcDateTime;
+        tenant.UpdatedAt = nowUtc.UtcDateTime;
+        await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+        return new ProvisioningResult(
+            new ProvisioningStatusSnapshot(ProvisioningState.Deprovisioned, detail, null, nowUtc),
             ProviderResourceIds: new Dictionary<string, string>(),
             Endpoints: null,
             ProvisioningDurationSeconds: null);

@@ -646,16 +646,22 @@ Tamma:ControlPlaneUrl        — https://api.tamma.dev (used as TAMMA_CONTROL_PL
 Tamma:TenantSharedSecret     — HMAC secret pushed as TAMMA_SHARED_SECRET to each engine
 ```
 
-When `Cranl:ApiKey` is unset the Null seam wins (`NullTenantProvisioner`) and no external resources are minted — tenant placement stays on the `tenant_databases` pool (central DB by default). The admin endpoints still work — they just mark tenants Ready immediately.
+When `Cranl:ApiKey` is unset the null seam wins (`NullTenantProvider` registered under key `"null"`) and no external resources are minted — tenant placement stays on the `tenant_databases` pool (central DB by default). The three admin provisioning endpoints route through `ProvisionTenantV2Dispatcher` / `TenantProviderRegistry` (the V1 `ITenantProvisioner` / `NullTenantProvisioner` surface was retired in Epic 30 Phase A, commits `c25cd980`–`c9f2c353`). Under the unified schema-per-tenant model the tenant schema is already minted at tenant creation, so a no-backend provision short-circuits to `Ready` immediately (detail `shared_infrastructure_no_backend_configured`) without enqueueing any task.
 
-**Admin endpoints** (platform-owner only — `OwnerAccess` policy):
+Deprovision follows the same pattern: the null seam returns `Deprovisioned` (no-op); for a Cranl-configured deployment the V2 task handler (task type `provisioning.tenant.v2`) branches on `Operation=Deprovision` and calls `CranlTenantProviderV2.DeprovisionAsync`, which enqueues a `provisioning.tenant.deprovision` task handled by `CranlDeprovisionPlatformTaskHandler` → `CranlProvisioningWorkflow` (the REST-walk engine, kept in Phase A to provide the Cranl teardown path).
+
+**Admin endpoints** (platform-owner only — `PlatformOwnerAccess` policy):
 ```
 POST  /api/admin/tenants/{tenantId}/provision     body: { region, customName? }
 GET   /api/admin/tenants/{tenantId}/provisioning
 POST  /api/admin/tenants/{tenantId}/deprovision
 ```
 
-`POST /provision` returns `202 Accepted` immediately; the long-running Cranl polling (db ready ≈ 1-3 min, app deploy ≈ 3-8 min) runs on the existing `TaskQueueProcessor` thread. Subsequent `GET /provisioning` calls report state transitions: `pending → database_provisioning → database_ready → app_provisioning → app_deploying → ready`.
+`POST /provision` returns `202 Accepted` immediately; for Cranl, the long-running poll (db ready ≈ 1–3 min, app deploy ≈ 3–8 min) runs via `CranlProvisionPlatformTaskHandler` → `CranlProvisioningWorkflow` on the `PlatformTaskWorker` thread. Subsequent `GET /provisioning` calls report state transitions: `pending → database_provisioning → database_ready → app_provisioning → app_deploying → ready`. Note: `PlatformTaskWorker.RunOnStartup` is `false` — provisioning tasks drain only when that worker is enabled.
+
+**Known constraint — V2 Cranl saga requires ≥2 platform-worker processes (Phase-B fix pending):** `ProvisionTenantV2Workflow.ExecuteAsync` block-polls (up to ~30 min via `InitialProbe`/`ProbeUntilReadyAsync`) for an inner `provisioning.tenant` platform task that `CranlTenantProviderV2.ProvisionAsync` enqueues on the same queue. `PlatformTaskWorker` processes one task at a time per process — so on a single worker process the saga occupies the only slot, the inner task is never reserved, and the provision times out to `Failed`. The V2 Cranl path requires ≥2 platform-worker processes (or a Phase-B restructure so the saga does not block-poll a same-queue inner task). Not reachable today (`PlatformTaskWorker.RunOnStartup=false`; Cranl opt-in; null path unaffected), but noted here so "Cranl is functional" is not misread.
+
+**Deferred to Phase B:** pool-row registration (`tenant_databases`) by the Cranl provider (the V2↔unified-model reconciliation — providers must mint pool rows rather than supplying raw `DATABASE_URL`); `provider_resource_ids`/`provider_key` DB persistence; `SqlTenantProviderKeyLookup` activation. **Hard-blocked:** `RegisterSecrets` saga step (needs Epic 29's `ISecretStore`, which does not yet exist).
 
 **Routing** (current state): per-request DB connection switching by tenant is unconditional — `LruPooledTenantConnectionResolver` is always wired (the old stub resolver is removed) and every tenant resolves through its own encrypted connection string against its assigned pool database. The `cranl_database_url_encrypted` column is still populated during Cranl provisioning, so a backend-minted hosting database joins the pool with no code change.
 

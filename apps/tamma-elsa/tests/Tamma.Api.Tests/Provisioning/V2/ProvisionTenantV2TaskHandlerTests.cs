@@ -243,4 +243,63 @@ public sealed class ProvisionTenantV2TaskHandlerTests
         Func<Task> act = async () => await handler.HandleAsync(null!, CancellationToken.None);
         await act.Should().ThrowAsync<ArgumentNullException>();
     }
+
+    [Test]
+    public async Task HandleAsync_DeprovisionOperation_RoutesToWorkflowDeprovision()
+    {
+        // Arrange — build a mock workflow to verify routing without running
+        // the real DB-backed implementation. ProvisionTenantV2Workflow is
+        // unsealed + virtual-methods so Moq can proxy it.
+        var registry = new TenantProviderRegistry(
+            new ITenantInfrastructureProvider[] { new NullTenantProvider() });
+        var workflowMock = new Mock<ProvisionTenantV2Workflow>(
+            _db,
+            registry,
+            Mock.Of<IPlatformEventPublisher>(),
+            TimeProvider.System,
+            NullLogger<ProvisionTenantV2Workflow>.Instance);
+
+        var deprovisionResult = new ProvisioningResult(
+            new ProvisioningStatusSnapshot(
+                ProvisioningState.Deprovisioned, "deprovision_complete", null, DateTimeOffset.UtcNow),
+            new Dictionary<string, string>());
+        var provisionResult = new ProvisioningResult(
+            new ProvisioningStatusSnapshot(
+                ProvisioningState.Ready, "ready", null, DateTimeOffset.UtcNow),
+            new Dictionary<string, string>());
+
+        workflowMock
+            .Setup(w => w.DeprovisionAsync(
+                It.IsAny<ProvisionTenantV2TaskPayload>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(deprovisionResult);
+        workflowMock
+            .Setup(w => w.ExecuteAsync(
+                It.IsAny<ProvisionTenantV2TaskPayload>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(provisionResult);
+
+        var handler = new ProvisionTenantV2TaskHandler(
+            workflowMock.Object, NullLogger<ProvisionTenantV2TaskHandler>.Instance);
+
+        var payload = new ProvisionTenantV2TaskPayload
+        {
+            TenantId = Guid.NewGuid(),
+            ProviderKey = "cranl",
+            Operation = ProvisioningOperation.Deprovision,
+            Topology = ProvisioningTopology.DedicatedCompute,
+        };
+        var task = new PlatformQueuedTask
+        {
+            Type = ProvisionTenantV2TaskPayload.TaskType,
+            Payload = JsonSerializer.Serialize(payload),
+        };
+
+        // Act
+        await handler.HandleAsync(task, CancellationToken.None);
+
+        // Assert — deprovision path called, provision path NOT called.
+        workflowMock.Verify(w => w.DeprovisionAsync(
+            It.IsAny<ProvisionTenantV2TaskPayload>(), It.IsAny<CancellationToken>()), Times.Once);
+        workflowMock.Verify(w => w.ExecuteAsync(
+            It.IsAny<ProvisionTenantV2TaskPayload>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
 }

@@ -318,6 +318,107 @@ public sealed class ProvisionTenantV2WorkflowTests
         await act.Should().ThrowAsync<ArgumentNullException>();
     }
 
+    // ── Deprovision tests ───────────────────────────────────────────
+
+    [Test]
+    public async Task DeprovisionAsync_RealProvider_TearsDownAndStampsDeprovisioned()
+    {
+        var tenant = await SeedAsync("ready");
+        var provider = new FakeTenantInfrastructureProvider("cranl");
+        var workflow = Build(RegistryWith(provider));
+        var payload = new ProvisionTenantV2TaskPayload
+        {
+            TenantId = tenant.Id,
+            ProviderKey = "cranl",
+            Operation = ProvisioningOperation.Deprovision,
+            Topology = ProvisioningTopology.DedicatedCompute,
+        };
+
+        var result = await workflow.DeprovisionAsync(payload, CancellationToken.None);
+
+        result.Status.State.Should().Be(ProvisioningState.Deprovisioned);
+        result.Status.FailureReason.Should().BeNull();
+        provider.DeprovisionCalls.Should().HaveCount(1, "provider.DeprovisionAsync called once");
+        var row = await _db.Tenants.IgnoreQueryFilters().FirstAsync(t => t.Id == tenant.Id);
+        row.ProvisioningState.Should().Be("deprovisioned");
+    }
+
+    [Test]
+    public async Task DeprovisionAsync_ProviderThrows_SwallowsAndStillStampsDeprovisioned()
+    {
+        var tenant = await SeedAsync("ready");
+        var provider = new FakeTenantInfrastructureProvider("cranl")
+        {
+            OnDeprovision = (_, _, _) => throw new InvalidOperationException("infra_error"),
+        };
+        var workflow = Build(RegistryWith(provider));
+        var payload = new ProvisionTenantV2TaskPayload
+        {
+            TenantId = tenant.Id,
+            ProviderKey = "cranl",
+            Operation = ProvisioningOperation.Deprovision,
+            Topology = ProvisioningTopology.DedicatedCompute,
+        };
+
+        // BestEffort: the workflow must NOT rethrow — a rethrow would re-enqueue teardown.
+        Func<Task> act = async () => await workflow.DeprovisionAsync(payload, CancellationToken.None);
+        await act.Should().NotThrowAsync();
+
+        var row = await _db.Tenants.IgnoreQueryFilters().FirstAsync(t => t.Id == tenant.Id);
+        row.ProvisioningState.Should().Be("deprovisioned",
+            "BestEffort swallows the provider exception and still stamps Deprovisioned");
+    }
+
+    [Test]
+    public async Task DeprovisionAsync_UnknownProviderKey_StampsProviderNotRegistered()
+    {
+        var tenant = await SeedAsync("ready");
+        var workflow = Build(RegistryWith()); // null seam only
+
+        var payload = new ProvisionTenantV2TaskPayload
+        {
+            TenantId = tenant.Id,
+            ProviderKey = "unknown-backend",
+            Operation = ProvisioningOperation.Deprovision,
+            Topology = ProvisioningTopology.DedicatedCompute,
+        };
+
+        var result = await workflow.DeprovisionAsync(payload, CancellationToken.None);
+
+        result.Status.State.Should().Be(ProvisioningState.Failed);
+        result.Status.FailureReason.Should().Be(ProvisioningFailureReasons.ProviderNotRegistered);
+    }
+
+    [Test]
+    public async Task DeprovisionAsync_TenantNotFound_ReturnsSyntheticFailure()
+    {
+        var provider = new FakeTenantInfrastructureProvider("cranl");
+        var workflow = Build(RegistryWith(provider));
+
+        var payload = new ProvisionTenantV2TaskPayload
+        {
+            TenantId = Guid.NewGuid(), // no such tenant
+            ProviderKey = "cranl",
+            Operation = ProvisioningOperation.Deprovision,
+            Topology = ProvisioningTopology.DedicatedCompute,
+        };
+
+        var result = await workflow.DeprovisionAsync(payload, CancellationToken.None);
+
+        result.Status.State.Should().Be(ProvisioningState.Failed);
+        result.Status.FailureReason.Should().Be(ProvisioningFailureReasons.TenantNotFound);
+        provider.DeprovisionCalls.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task DeprovisionAsync_PayloadNull_Throws()
+    {
+        var workflow = Build(RegistryWith(new FakeTenantInfrastructureProvider("cranl")));
+
+        Func<Task> act = async () => await workflow.DeprovisionAsync(null!, CancellationToken.None);
+        await act.Should().ThrowAsync<ArgumentNullException>();
+    }
+
     [Test]
     public async Task ExecuteAsync_RegionNotSupported_FailsAtPreflight()
     {

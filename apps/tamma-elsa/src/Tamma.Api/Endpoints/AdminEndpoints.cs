@@ -4,8 +4,11 @@ using Microsoft.AspNetCore.Mvc;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Admin;
 using Tamma.Api.Services;
+using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Services.Provisioning;
 using Tamma.Api.Services.Provisioning.Cranl;
+using Tamma.Api.Services.Provisioning.V2;
+using Tamma.Api.Services.Provisioning.V2.Cranl;
 using Tamma.Data;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -419,65 +422,87 @@ public static class AdminEndpoints
 
     // ─── Tenant provisioning (audit cranl/003) ─────────────────────────────
     //
-    // Platform-owner-only endpoints that drive per-tenant Cranl provisioning.
-    // ITenantProvisioner is wired by ProvisioningServiceCollectionExtensions:
-    // the Cranl-backed impl runs when Cranl:ApiKey is set, otherwise the Null
-    // impl flips the row to Ready immediately (no external resources minted;
-    // placement stays on the unified tenant_databases pool).
+    // Platform-owner-only endpoints that drive per-tenant provisioning via
+    // the V2 dispatcher. ProvisionTenantV2Dispatcher is the single call-site:
+    // the null seam short-circuits to Ready (shared infra, no external
+    // resources minted); the Cranl provider enqueues a background task and
+    // returns Pending. Phase B (Story 30-7) will replace ResolveDefaultBackend
+    // with the persisted tenants.ProviderKey + an onboarding-driven topology.
 
     public static async Task<IResult> ProvisionTenant(
         Guid tenantId,
         ProvisionTenantRequest? req,
-        ITenantProvisioner provisioner,
+        ProvisionTenantV2Dispatcher dispatcher,
+        TenantProviderRegistry registry,
         CranlOptions cranlOptions,
         CancellationToken ct)
     {
-        var region = !string.IsNullOrWhiteSpace(req?.Region)
-            ? req!.Region!
-            : cranlOptions.DefaultRegion;
-        var status = await provisioner.ProvisionAsync(
-            tenantId,
-            new ProvisioningOptions(region, req?.CustomName),
-            ct);
+        var (providerKey, topology) = ResolveDefaultBackend(registry);
+        var region = string.IsNullOrWhiteSpace(req?.Region) ? cranlOptions.DefaultRegion : req!.Region!;
+        var request = new ProvisioningRequest(topology, region, Tier: null, req?.CustomName);
+
+        var result = await dispatcher.DispatchAsync(tenantId, providerKey, request, invokingOrgId: null, ct);
+        if (result.Status.FailureReason == ProvisioningFailureReasons.TenantNotFound)
+            return Results.NotFound(new { error = "tenant_not_found", tenantId });
+
         return Results.Accepted(
             $"/api/admin/tenants/{tenantId}/provisioning",
             new TenantProvisioningResponse(
                 tenantId,
-                status.State.ToStorageString(),
-                status.Detail,
-                status.AppDefaultDomain,
-                status.UpdatedAt));
+                result.Status.State.ToStorageString(),
+                result.Status.Detail,
+                AppDefaultDomain: null,
+                result.Status.UpdatedAt.UtcDateTime));
     }
 
     public static async Task<IResult> GetTenantProvisioning(
         Guid tenantId,
-        ITenantProvisioner provisioner,
+        ControlPlaneDbContext db,
         CancellationToken ct)
     {
-        var status = await provisioner.GetStatusAsync(tenantId, ct);
-        return Results.Ok(
-            new TenantProvisioningResponse(
-                tenantId,
-                status.State.ToStorageString(),
-                status.Detail,
-                status.AppDefaultDomain,
-                status.UpdatedAt));
+        var tenant = await db.Tenants
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Id == tenantId && t.DeletedAt == null, ct);
+        if (tenant is null)
+            return Results.NotFound(new { error = "tenant_not_found", tenantId });
+
+        return Results.Ok(new TenantProvisioningResponse(
+            tenantId,
+            tenant.ProvisioningState,
+            tenant.ProvisioningDetail,
+            AppDefaultDomain: null,
+            tenant.ProvisioningUpdatedAt ?? tenant.UpdatedAt));
     }
 
     public static async Task<IResult> DeprovisionTenant(
         Guid tenantId,
-        ITenantProvisioner provisioner,
+        ProvisionTenantV2Dispatcher dispatcher,
+        TenantProviderRegistry registry,
         CancellationToken ct)
     {
-        await provisioner.DeprovisionAsync(tenantId, ct);
-        var status = await provisioner.GetStatusAsync(tenantId, ct);
+        var (providerKey, _) = ResolveDefaultBackend(registry);
+        var result = await dispatcher.DispatchDeprovisionAsync(tenantId, providerKey, reason: "admin_deprovision", ct);
+        if (result.Status.FailureReason == ProvisioningFailureReasons.TenantNotFound)
+            return Results.NotFound(new { error = "tenant_not_found", tenantId });
+
         return Results.Accepted(
             $"/api/admin/tenants/{tenantId}/provisioning",
             new TenantProvisioningResponse(
                 tenantId,
-                status.State.ToStorageString(),
-                status.Detail,
-                status.AppDefaultDomain,
-                status.UpdatedAt));
+                result.Status.State.ToStorageString(),
+                result.Status.Detail,
+                AppDefaultDomain: null,
+                result.Status.UpdatedAt.UtcDateTime));
+    }
+
+    // Phase-A backend selection: one real backend (Cranl) or the null seam.
+    // Phase B replaces this with the persisted tenants.ProviderKey + a topology
+    // chosen at onboarding (Story 30-7).
+    private static (string providerKey, ProvisioningTopology topology) ResolveDefaultBackend(
+        TenantProviderRegistry registry)
+    {
+        if (registry.RegisteredKeys.Contains(CranlCapabilities.ProviderKey))
+            return (CranlCapabilities.ProviderKey, ProvisioningTopology.DedicatedCompute);
+        return (NullTenantProvider.Key, ProvisioningTopology.DatabaseOnly);
     }
 }

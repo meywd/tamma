@@ -1,8 +1,8 @@
 namespace Tamma.Api.Services.Provisioning.V2;
 
 /// <summary>
-/// v2 of the per-tenant provisioning surface. Replaces v1's Cranl-only
-/// <c>ITenantProvisioner</c> with a backend-pluggable contract: any
+/// v2 of the per-tenant provisioning surface. Replaces the legacy v1
+/// Cranl-only provisioner contract with a backend-pluggable contract: any
 /// number of providers (Cranl, Hetzner Cloud, Cloudflare Workers + D1,
 /// BYO, the dev null seam) implement this interface and the dispatch
 /// workflow (Story 30-2) selects between them by <see cref="ProviderKey"/>
