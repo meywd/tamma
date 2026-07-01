@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Story 38-4 — unit tests for the EngineExternalCallAnalyzer (TAMMA001), using the Roslyn
+    analyzer-testing harness (Microsoft.CodeAnalysis.CSharp.Analyzer.Testing) with NUnit
+    (matching the repo's test stack). The analyzer is referenced as a NORMAL library here
+    (we instantiate its type + descriptor); it is NOT applied as an analyzer to this project.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.5.0" />
+    <!-- Roslyn analyzer-testing harness (CSharpAnalyzerTest + DefaultVerifier) + a pinned
+         Roslyn (Workspaces) matching the analyzer's Microsoft.CodeAnalysis.CSharp 4.8.0. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Analyzer.Testing" Version="1.1.4" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.8.0" />
+    <PackageReference Include="coverlet.collector" Version="6.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Plain reference (NOT OutputItemType=Analyzer): load the analyzer type + descriptor. -->
+    <ProjectReference Include="..\..\src\Tamma.Activities.Guardrails\Tamma.Activities.Guardrails.csproj" />
+  </ItemGroup>
+
+</Project>

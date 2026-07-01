@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Story 38-4 — build-time rule-1 guardrail analyzer.
+
+    A netstandard2.0 Roslyn DiagnosticAnalyzer (TAMMA001) referenced by the engine
+    projects (Tamma.Activities / Tamma.ElsaServer) via an
+    <ProjectReference OutputItemType="Analyzer" ReferenceOutputAssembly="false" />,
+    so the existing `dotnet build Tamma.sln` is the gate (no new CI job). Declared at
+    DiagnosticSeverity.Error because Directory.Build.props sets TreatWarningsAsErrors=false
+    repo-wide — a Warning would not fail the build.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>Tamma.Activities.Guardrails</RootNamespace>
+    <AssemblyName>Tamma.Activities.Guardrails</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <!-- This project is consumed as an analyzer, never as a runtime library. -->
+    <IncludeSymbols>false</IncludeSymbols>
+    <Version>1.0.0</Version>
+    <Authors>Tamma Team</Authors>
+    <Description>Story 38-4 — build-time rule-1 guardrail analyzer (TAMMA001) for the Tamma engine surface.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compiler-provided at analysis time; PrivateAssets=all keeps it from flowing to
+         consumers (the host compiler supplies Microsoft.CodeAnalysis.* at its own version). -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.8.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Analyzer release tracking (RS2008) — declares TAMMA001 for the release-tracking rule. -->
+  <ItemGroup>
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+  </ItemGroup>
+
+</Project>

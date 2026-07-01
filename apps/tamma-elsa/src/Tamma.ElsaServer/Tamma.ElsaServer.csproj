@@ -50,4 +50,13 @@
     <ProjectReference Include="..\Tamma.Activities\Tamma.Activities.csproj" />
   </ItemGroup>
 
+  <!-- Story 38-4 — rule-1 build-time guardrail (TAMMA001). Referenced as an ANALYZER so
+       `dotnet build Tamma.sln` fails if any engine-surface type re-introduces a direct
+       external call or a vendor-credential injection. Do NOT suppress TAMMA001. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Tamma.Activities.Guardrails\Tamma.Activities.Guardrails.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
 </Project>
