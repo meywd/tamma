@@ -5,10 +5,10 @@ using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.LlmCall;
 using Tamma.Activities.Review.Models;
 using Microsoft.Extensions.Configuration;
 using Tamma.Core.Entities;
-using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Activities.Review;
@@ -47,7 +47,6 @@ public class EscalateReviewActivity : Activity
 {
     private readonly ILogger<EscalateReviewActivity>? _logger;
     private readonly IMentorshipSessionRepository? _repository;
-    private readonly IIntegrationService? _integrationService;
     private readonly IConfiguration? _configuration;
 
     /// <summary>Mentorship session ID</summary>
@@ -84,12 +83,10 @@ public class EscalateReviewActivity : Activity
     public EscalateReviewActivity(
         ILogger<EscalateReviewActivity> logger,
         IMentorshipSessionRepository repository,
-        IIntegrationService integrationService,
         IConfiguration configuration)
     {
         _logger = logger;
         _repository = repository;
-        _integrationService = integrationService;
         _configuration = configuration;
     }
 
@@ -134,24 +131,31 @@ public class EscalateReviewActivity : Activity
                     _ => "The review requires senior developer input."
                 };
 
-                await _integrationService!.SendSlackDirectMessageAsync(
+                // Story 38-3b — enqueue the junior DM intent via the API seam (engine
+                // holds no Slack credential); fire-and-forget, fail-soft.
+                await MediatedSlack.QueueDirectMessageAsync(
+                    context,
                     junior.SlackId,
                     $"**Tamma: Review Escalated**\n\n" +
                     $"PR #{prNumber} has been escalated to a senior developer.\n" +
                     $"Reason: {reasonText}\n\n" +
                     "A senior developer will review and respond. This is a normal part of " +
-                    "the development process and a great learning opportunity!");
+                    "the development process and a great learning opportunity!",
+                    "Warning", "SendNotification", context.CancellationToken);
             }
 
-            // Send escalation notification to a senior channel
-            await _integrationService!.SendSlackMessageAsync(
+            // Send escalation notification to the senior channel — Story 38-3b: a
+            // second, independent enqueue (channel post) via the same API seam.
+            await MediatedSlack.QueueChannelMessageAsync(
+                context,
                 "senior-review",
                 $"**Tamma: Escalation Required**\n\n" +
                 $"PR #{prNumber} needs senior review.\n" +
                 $"Developer: {junior?.Name ?? juniorId}\n" +
                 $"Reason: {reason}\n" +
                 $"Iterations attempted: {iterations}\n" +
-                $"{(message != null ? $"Details: {message}" : "")}");
+                $"{(message != null ? $"Details: {message}" : "")}",
+                "Warning", "SendChannel", context.CancellationToken);
         }
         catch (Exception ex)
         {

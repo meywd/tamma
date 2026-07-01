@@ -15,7 +15,6 @@ public class ProvideGuidanceActivityTests
 {
     private Mock<ILogger<ProvideGuidanceActivity>> _mockLogger = null!;
     private Mock<IMentorshipSessionRepository> _mockRepository = null!;
-    private Mock<IIntegrationService> _mockIntegrationService = null!;
     private Mock<IAnalyticsService> _mockAnalyticsService = null!;
 
     [SetUp]
@@ -23,18 +22,17 @@ public class ProvideGuidanceActivityTests
     {
         _mockLogger = new Mock<ILogger<ProvideGuidanceActivity>>();
         _mockRepository = new Mock<IMentorshipSessionRepository>();
-        _mockIntegrationService = new Mock<IIntegrationService>();
         _mockAnalyticsService = new Mock<IAnalyticsService>();
     }
 
     [Test]
     public void Constructor_WithValidDependencies_ShouldNotThrow()
     {
-        // Act
+        // Act — Story 38-3b: the activity no longer injects IIntegrationService
+        // (Slack now routes through the mediated API seam), so the ctor is 3-arg.
         Action act = () => new ProvideGuidanceActivity(
             _mockLogger.Object,
             _mockRepository.Object,
-            _mockIntegrationService.Object,
             _mockAnalyticsService.Object);
 
         // Assert

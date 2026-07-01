@@ -4,8 +4,8 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using Tamma.Activities.LlmCall;
 using Tamma.Core.Enums;
-using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Activities.Mentorship;
@@ -25,7 +25,6 @@ public class AssessJuniorCapabilityActivity : CodeActivity<AssessmentOutput>
 {
     private readonly ILogger<AssessJuniorCapabilityActivity>? _logger;
     private readonly IMentorshipSessionRepository? _repository;
-    private readonly IIntegrationService? _integrationService;
 
     /// <summary>ID of the story to assess</summary>
     [Input(Description = "ID of the story to assess")]
@@ -48,12 +47,10 @@ public class AssessJuniorCapabilityActivity : CodeActivity<AssessmentOutput>
 
     public AssessJuniorCapabilityActivity(
         ILogger<AssessJuniorCapabilityActivity> logger,
-        IMentorshipSessionRepository repository,
-        IIntegrationService integrationService)
+        IMentorshipSessionRepository repository)
     {
         _logger = logger;
         _repository = repository;
-        _integrationService = integrationService;
     }
 
     /// <summary>
@@ -106,11 +103,14 @@ public class AssessJuniorCapabilityActivity : CodeActivity<AssessmentOutput>
             // Build assessment questions based on story complexity
             var questions = BuildAssessmentQuestions(story.Complexity);
 
-            // Send assessment via Slack (if configured)
+            // Send assessment via Slack (if configured) — Story 38-3b: enqueue the
+            // DM intent via the API seam (engine holds no Slack credential);
+            // fire-and-forget, fail-soft.
             if (!string.IsNullOrEmpty(junior.SlackId))
             {
                 var message = FormatAssessmentMessage(story.Title, story.Description ?? "", questions);
-                await _integrationService!.SendSlackDirectMessageAsync(junior.SlackId, message);
+                await MediatedSlack.QueueDirectMessageAsync(
+                    context, junior.SlackId, message, "Info", "SendAssessment", context.CancellationToken);
             }
 
             // Log the assessment event

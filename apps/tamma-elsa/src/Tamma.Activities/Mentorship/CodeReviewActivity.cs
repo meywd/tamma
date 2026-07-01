@@ -4,6 +4,7 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using Tamma.Activities.LlmCall;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -96,9 +97,9 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
 
             CodeReviewOutput result = action switch
             {
-                CodeReviewAction.Prepare => await PrepareCodeReview(sessionId, story, junior),
-                CodeReviewAction.Monitor => await MonitorCodeReview(sessionId, story, junior, prNumber),
-                CodeReviewAction.RequestChanges => await HandleReviewChanges(sessionId, story, junior, prNumber),
+                CodeReviewAction.Prepare => await PrepareCodeReview(context, sessionId, story, junior),
+                CodeReviewAction.Monitor => await MonitorCodeReview(context, sessionId, story, junior, prNumber),
+                CodeReviewAction.RequestChanges => await HandleReviewChanges(context, sessionId, story, junior, prNumber),
                 _ => new CodeReviewOutput
                 {
                     Success = false,
@@ -139,6 +140,7 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
     }
 
     private async Task<CodeReviewOutput> PrepareCodeReview(
+        ActivityExecutionContext context,
         Guid sessionId,
         Tamma.Core.Entities.Story story,
         Tamma.Core.Entities.JuniorDeveloper junior)
@@ -196,7 +198,7 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
         // Notify junior about PR creation
         if (!string.IsNullOrEmpty(junior.SlackId))
         {
-            await NotifyPullRequestCreated(junior.SlackId, prResult, story.Title);
+            await NotifyPullRequestCreated(context, junior.SlackId, prResult, story.Title);
         }
 
         // Record analytics
@@ -226,6 +228,7 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
     }
 
     private async Task<CodeReviewOutput> MonitorCodeReview(
+        ActivityExecutionContext context,
         Guid sessionId,
         Tamma.Core.Entities.Story story,
         Tamma.Core.Entities.JuniorDeveloper junior,
@@ -250,12 +253,15 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
         switch (reviewStatus.Status)
         {
             case ReviewStatus.Approved:
-                // Notify junior about approval
+                // Notify junior about approval — Story 38-3b: enqueue via the API
+                // seam (engine holds no Slack credential); fire-and-forget, fail-soft.
                 if (!string.IsNullOrEmpty(junior.SlackId))
                 {
-                    await _integrationService!.SendSlackDirectMessageAsync(
+                    await MediatedSlack.QueueDirectMessageAsync(
+                        context,
                         junior.SlackId,
-                        $"Great news! Your PR #{prNumber} has been approved! Proceeding to merge.");
+                        $"Great news! Your PR #{prNumber} has been approved! Proceeding to merge.",
+                        "Success", "SendDirect", context.CancellationToken);
                 }
 
                 await _analyticsService!.RecordMetricAsync(sessionId, "pr_approved", 1);
@@ -273,7 +279,7 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
                 // Notify junior about requested changes
                 if (!string.IsNullOrEmpty(junior.SlackId))
                 {
-                    await NotifyChangesRequested(junior.SlackId, prNumber.Value, reviewStatus.Comments);
+                    await NotifyChangesRequested(context, junior.SlackId, prNumber.Value, reviewStatus.Comments);
                 }
 
                 return new CodeReviewOutput
@@ -308,6 +314,7 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
     }
 
     private async Task<CodeReviewOutput> HandleReviewChanges(
+        ActivityExecutionContext context,
         Guid sessionId,
         Tamma.Core.Entities.Story story,
         Tamma.Core.Entities.JuniorDeveloper junior,
@@ -343,7 +350,10 @@ Here's help addressing the review feedback on PR #{prNumber}:
 
 After making changes, the PR will be re-reviewed automatically.";
 
-            await _integrationService!.SendSlackDirectMessageAsync(junior.SlackId, message);
+            // Story 38-3b — enqueue via the API seam (engine holds no Slack
+            // credential); fire-and-forget, fail-soft.
+            await MediatedSlack.QueueDirectMessageAsync(
+                context, junior.SlackId, message, "Info", "SendGuidance", context.CancellationToken);
         }
 
         await _analyticsService!.RecordMetricAsync(sessionId, "review_changes_guided", commentGuidance.Count);
@@ -508,7 +518,8 @@ Implementation of story **{story.Id}**: {story.Title}
         return "Review the comment and apply the suggested change. Ask if you need clarification.";
     }
 
-    private async Task NotifyPullRequestCreated(string slackId, GitHubPullRequestResult pr, string storyTitle)
+    private static async Task NotifyPullRequestCreated(
+        ActivityExecutionContext context, string slackId, GitHubPullRequestResult pr, string storyTitle)
     {
         var message = $@"**Tamma: Pull Request Created**
 
@@ -520,10 +531,14 @@ Your code is ready for review!
 
 A reviewer will look at your code soon. You'll be notified when there's feedback.";
 
-        await _integrationService!.SendSlackDirectMessageAsync(slackId, message);
+        // Story 38-3b — enqueue via the API seam (engine holds no Slack credential);
+        // fire-and-forget, fail-soft.
+        await MediatedSlack.QueueDirectMessageAsync(
+            context, slackId, message, "Info", "SendDirect", context.CancellationToken);
     }
 
-    private async Task NotifyChangesRequested(string slackId, int prNumber, List<ReviewComment> comments)
+    private static async Task NotifyChangesRequested(
+        ActivityExecutionContext context, string slackId, int prNumber, List<ReviewComment> comments)
     {
         var message = $@"**Tamma: Review Feedback Received**
 
@@ -533,7 +548,10 @@ Your PR #{prNumber} has received feedback. {comments.Count} change(s) requested:
 
 I'll send you guidance on how to address each item shortly.";
 
-        await _integrationService!.SendSlackDirectMessageAsync(slackId, message);
+        // Story 38-3b — enqueue via the API seam (engine holds no Slack credential);
+        // fire-and-forget, fail-soft.
+        await MediatedSlack.QueueDirectMessageAsync(
+            context, slackId, message, "Warning", "SendDirect", context.CancellationToken);
     }
 }
 

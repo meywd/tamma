@@ -5,6 +5,7 @@ using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.LlmCall;
 using Tamma.Activities.Review.Models;
 using Tamma.Core.Entities;
 using Tamma.Core.Enums;
@@ -204,17 +205,20 @@ public class MergeAndCompleteReviewActivity : Activity
             await _analyticsService!.RecordMetricAsync(sessionId, "pr_merged", 1);
             await _analyticsService.RecordMetricAsync(sessionId, "review_iterations", totalIterations);
 
-            // Notify junior
+            // Notify junior — Story 38-3b: enqueue via the API seam (engine holds no
+            // Slack credential); fire-and-forget, fail-soft.
             if (junior != null && !string.IsNullOrEmpty(junior.SlackId))
             {
                 var iterationNote = totalIterations > 0
                     ? $" after {totalIterations} fix iteration(s)"
                     : "";
 
-                await _integrationService.SendSlackDirectMessageAsync(
+                await MediatedSlack.QueueDirectMessageAsync(
+                    context,
                     junior.SlackId,
                     $"Your PR #{prNumber} has been approved and merged{iterationNote}! " +
-                    "Great work on completing the code review process.");
+                    "Great work on completing the code review process.",
+                    "Success", "SendDirect", context.CancellationToken);
             }
 
             _logger?.LogInformation(
