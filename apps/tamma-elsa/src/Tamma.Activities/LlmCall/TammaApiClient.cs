@@ -248,6 +248,29 @@ public class TammaApiClient
         return $"{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}";
     }
 
+    // ----- Slack / notifications mediation (Story 38-3 — Class D) -------
+
+    /// <summary>
+    /// Story 38-3 (AC5) — enqueue a Slack notification INTENT to the internal,
+    /// engine-only endpoint <c>POST /api/v1/notifications/slack</c>. Fire-and-forget:
+    /// the API writes a <c>slack_outbox</c> row and returns 202; the out-of-band
+    /// <c>OutboxSlackSender</c> (the sole webhook-credential holder) performs the
+    /// transport. Uses the <see cref="PostVoidAsync"/> path so the request gets the
+    /// engine bearer + <c>X-Tenant-Id</c> (<paramref name="tenantId"/>, the acting
+    /// scope) + per-call health recording. Returns <c>false</c> on any non-2xx /
+    /// transport failure — the thin activity treats that as a fail-soft "queue
+    /// failed" (the workflow continues; a missing Slack post must not break a
+    /// mentorship session). The Slack token never travels here.
+    /// </summary>
+    public virtual Task<bool> QueueSlackNotificationAsync(
+        Models.SlackNotificationRequest request,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/notifications/slack";
+        return PostVoidAsync(url, request, tenantId, ct);
+    }
+
     // ----- Provider Health ---------------------------------------------
 
     public Task<ProviderHealthStatus?> GetProviderHealthAsync(

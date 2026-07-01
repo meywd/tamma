@@ -680,6 +680,30 @@ internal static class TammaModelConfiguration
                 .HasDatabaseName("UX_platform_email_outbox_tenant_template_active");
         });
 
+        // ── SlackOutboxMessage (Story 38-3) ──
+        // The fire-and-forget Slack analogue of platform_email_outbox. CP-resident
+        // so it delivers regardless of tenant-DB routing; the body is already
+        // formatted engine-side (token-free) and LastError is key-free.
+        modelBuilder.Entity<SlackOutboxMessage>(entity =>
+        {
+            entity.ToTable("slack_outbox");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Channel).HasMaxLength(255);
+            entity.Property(e => e.TargetUserId).HasMaxLength(255);
+            entity.Property(e => e.MessageType).IsRequired().HasMaxLength(32).HasDefaultValue("Info");
+            entity.Property(e => e.Body).IsRequired();
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(20).HasDefaultValue("pending");
+            entity.Property(e => e.Attempts).HasDefaultValue(0);
+            entity.Property(e => e.MaxAttempts).HasDefaultValue(5);
+            entity.Property(e => e.NextAttemptAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // Claim scan — the OutboxSlackSender polls pending rows due for delivery.
+            entity.HasIndex(e => new { e.Status, e.NextAttemptAt });
+        });
+
         // ── AdminImpersonation (Story 28-R2 follow-up B) ──
         //
         // SOC2 / ISO 27001 audit row: each platform-admin impersonation
@@ -1184,6 +1208,9 @@ internal static class TammaModelConfiguration
             modelBuilder.Ignore<PlatformEvent>();
             modelBuilder.Ignore<PlatformQueuedTask>();
             modelBuilder.Ignore<PlatformEmailOutboxMessage>();
+            // Story 38-3 — slack_outbox is CP-resident; keep it out of the tenant
+            // model graph (mirrors platform_email_outbox above).
+            modelBuilder.Ignore<SlackOutboxMessage>();
         }
 
         // ── AgentConfig ──

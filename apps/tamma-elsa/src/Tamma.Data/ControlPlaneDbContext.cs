@@ -504,6 +504,15 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<PlatformEmailOutboxMessage> PlatformEmailOutbox => Set<PlatformEmailOutboxMessage>();
 
     /// <summary>
+    /// Story 38-3 — control-plane Slack notification outbox. The fire-and-forget
+    /// analogue of <see cref="PlatformEmailOutbox"/>; the engine writes intent via
+    /// <c>POST /api/v1/notifications/slack</c> and <c>OutboxSlackSender</c> (the
+    /// sole webhook-credential holder) drains it. CP-resident so it delivers
+    /// regardless of tenant-DB routing (same rationale as the email outbox).
+    /// </summary>
+    public DbSet<SlackOutboxMessage> SlackOutbox => Set<SlackOutboxMessage>();
+
+    /// <summary>
     /// Story 28-10 fact table — one row per <c>(Hour, TenantId)</c> tuple,
     /// populated hourly by <c>HourlyAnalyticsRollupWorkflow</c>. Platform-wide
     /// rows carry <c>TenantId = null</c>. See

@@ -395,6 +395,9 @@ builder.Services.AddGitHubInstallationServices(builder.Configuration);
 // Wave 2
 builder.Services.AddConventionServices();
 builder.Services.AddEmailServices();
+// Story 38-3 (Epic 38, Class D) — Slack notification outbox sender (sole webhook
+// credential holder). Gated off automatically when Slack:WebhookUrl is unset.
+builder.Services.AddSlackNotificationServices();
 builder.Services.AddTaskQueue();
 builder.Services.AddProviderSessionServices();
 builder.Services.AddSaaSServices();
@@ -2377,6 +2380,17 @@ app.MapGet("/api/v1/agent-dispatch/{owner}/{repo}/runs/{id:long}/results", Agent
 app.MapGet("/api/v1/agent-dispatch/{owner}/{repo}/installation", AgentDispatchEndpoints.ResolveInstallation)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("ResolveAgentInstallation");
+
+// ── Story 38-3 (Epic 38) — Slack / notifications step mediation (Class D) ──
+// Same engine-only plane as /api/v1/llm/call: the engine's thin SlackActivity
+// posts an (already-formatted) notification intent here as the service-scope
+// Tamma:ApiToken; the API writes a slack_outbox row (tenant from ITenantContext,
+// never the body — no tenant↔repo guard, Slack is not repo-scoped) and returns
+// 202. The out-of-band OutboxSlackSender holds the webhook credential, performs
+// the transport, and audits to platform_events. NO Slack token ever reaches here.
+app.MapPost("/api/v1/notifications/slack", NotificationEndpoints.QueueSlack)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("QueueSlackNotification");
 app.MapPost("/api/v1/workflows/{id}/status", SaaSEndpoints.UpdateWorkflowStatus).RequireAuthorization();
 app.MapPost("/api/v1/workflows/{id}/result", SaaSEndpoints.PostWorkflowResult).RequireAuthorization();
 app.MapPost("/api/v1/installations/{id}/rotate-key", SaaSEndpoints.RotateInstallationKey).RequireAuthorization();
@@ -2489,6 +2503,7 @@ using (var scope = app.Services.CreateScope())
                     platform_api_key_index,
                     platform_bootstrap,
                     platform_email_outbox, platform_events, platform_queued_tasks,
+                    slack_outbox,
                     prompt_overrides,
                     provider_diagnostics, provider_health, queued_tasks, refresh_tokens,
                     sanitization_rules, stories,
