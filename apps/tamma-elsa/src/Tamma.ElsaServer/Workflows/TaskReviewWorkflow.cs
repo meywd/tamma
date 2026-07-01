@@ -64,6 +64,8 @@ public class TaskReviewWorkflow : WorkflowBase
         var allReviewsJson = builder.WithVariable<string>("AllReviewsJson", "[]");
         var allApproved = builder.WithVariable<bool>("AllApproved", false);
 
+        var tenantId = builder.WithVariable<string>("TenantId", "");
+
         // Final outputs
         var decision = builder.WithVariable<string>("Decision", "needsHuman");
         var reviewNotes = builder.WithVariable<string>("ReviewNotes", "");
@@ -93,6 +95,7 @@ public class TaskReviewWorkflow : WorkflowBase
                 issueNumber.Set(ctx, ctx.GetInput<int>("issueNumber"));
                 tasksJson.Set(ctx, ctx.GetInput<string>("tasksJson") ?? "[]");
                 planJson.Set(ctx, ctx.GetInput<string>("planJson") ?? "");
+                tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
                 return (object)repo;
             })
         };
@@ -104,25 +107,25 @@ public class TaskReviewWorkflow : WorkflowBase
 
         // Architect review
         var archReviewCall = RoleReviewDispatch("ArchReview", "Architect Review", AgentRole.Architect,
-            repository, tasksJson, planJson, allReviewsJson, llmResult);
+            repository, tasksJson, planJson, allReviewsJson, tenantId, llmResult);
         var extractArch = ExtractReview(architectReview, llmResult,
             "ExtractArchReview", "Extract Architect Review");
 
         // Senior Developer review
         var srDevReviewCall = RoleReviewDispatch("SrDevReview", "Sr Dev Review", AgentRole.SeniorDeveloper,
-            repository, tasksJson, planJson, allReviewsJson, llmResult);
+            repository, tasksJson, planJson, allReviewsJson, tenantId, llmResult);
         var extractSrDev = ExtractReview(seniorDevReview, llmResult,
             "ExtractSrDevReview", "Extract Sr Dev Review");
 
         // Developer review
         var devReviewCall = RoleReviewDispatch("DevReview", "Developer Review", AgentRole.Developer,
-            repository, tasksJson, planJson, allReviewsJson, llmResult);
+            repository, tasksJson, planJson, allReviewsJson, tenantId, llmResult);
         var extractDev = ExtractReview(developerReview, llmResult,
             "ExtractDevReview", "Extract Developer Review");
 
         // Tester review
         var testerReviewCall = RoleReviewDispatch("TesterReview", "Tester Review", AgentRole.Tester,
-            repository, tasksJson, planJson, allReviewsJson, llmResult);
+            repository, tasksJson, planJson, allReviewsJson, tenantId, llmResult);
         var extractTester = ExtractReview(testerReview, llmResult,
             "ExtractTesterReview", "Extract Tester Review");
 
@@ -308,6 +311,7 @@ public class TaskReviewWorkflow : WorkflowBase
         string id, string displayName, AgentRole role,
         Variable<string> repository, Variable<string> tasksJson,
         Variable<string> planJson, Variable<string> allReviewsJson,
+        Variable<string> tenantId,
         Variable<IDictionary<string, object>?> result)
     {
         var dispatch = new DispatchWorkflow
@@ -318,6 +322,7 @@ public class TaskReviewWorkflow : WorkflowBase
             {
                 ["role"] = role.ToWire(),
                 ["action"] = RolePhaseMap.GetReviewActionForRole(role).ToWire(),
+                ["tenantId"] = tenantId.Get(ctx),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["tasksJson"] = tasksJson.Get(ctx),

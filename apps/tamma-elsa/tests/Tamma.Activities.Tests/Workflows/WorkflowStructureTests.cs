@@ -684,6 +684,60 @@ public class WorkflowStructureTests
     }
 
     // ================================================================
+    // Bucket-B TenantId propagation tests (5 sub-workflows)
+    // ================================================================
+
+    [Test]
+    public void PlanReviewWorkflow_ShouldHaveTenantIdVariable()
+    {
+        var workflow = new PlanReviewWorkflow();
+        var builder = BuildWorkflow(workflow);
+        var variables = builder.Object.Variables;
+        variables.Any(v => v.Name == "TenantId").Should().BeTrue(
+            "PlanReviewWorkflow must accept TenantId and thread it to llm-call dispatches");
+    }
+
+    [Test]
+    public void ContextGatheringWorkflow_ShouldHaveTenantIdVariable()
+    {
+        var workflow = new ContextGatheringWorkflow();
+        var builder = BuildWorkflow(workflow);
+        var variables = builder.Object.Variables;
+        variables.Any(v => v.Name == "TenantId").Should().BeTrue(
+            "ContextGatheringWorkflow must accept TenantId and thread it to llm-call dispatches");
+    }
+
+    [Test]
+    public void MentorshipWorkflow_ShouldHaveTenantIdVariable()
+    {
+        var workflow = new MentorshipWorkflow();
+        var builder = BuildWorkflow(workflow);
+        var variables = builder.Object.Variables;
+        variables.Any(v => v.Name == "TenantId").Should().BeTrue(
+            "MentorshipWorkflow must accept TenantId and thread it to llm-call and context-gathering dispatches");
+    }
+
+    [Test]
+    public void TaskReviewWorkflow_ShouldHaveTenantIdVariable()
+    {
+        var workflow = new TaskReviewWorkflow();
+        var builder = BuildWorkflow(workflow);
+        var variables = builder.Object.Variables;
+        variables.Any(v => v.Name == "TenantId").Should().BeTrue(
+            "TaskReviewWorkflow must accept TenantId and thread it to llm-call dispatches");
+    }
+
+    [Test]
+    public void TaskCreationWorkflow_ShouldHaveTenantIdVariable()
+    {
+        var workflow = new TaskCreationWorkflow();
+        var builder = BuildWorkflow(workflow);
+        var variables = builder.Object.Variables;
+        variables.Any(v => v.Name == "TenantId").Should().BeTrue(
+            "TaskCreationWorkflow must accept TenantId and thread it to llm-call dispatches");
+    }
+
+    // ================================================================
     // Cross-cutting structure tests
     // ================================================================
 

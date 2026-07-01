@@ -58,6 +58,7 @@ public class PlanReviewWorkflow : WorkflowBase
         // ================================================================
         // Variables
         // ================================================================
+        var tenantId = builder.WithVariable<string>("TenantId", "");
         var repository = builder.WithVariable<string>("Repository", "");
         var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
         var planJson = builder.WithVariable<string>("PlanJson", "");
@@ -145,6 +146,7 @@ public class PlanReviewWorkflow : WorkflowBase
                 planJson.Set(ctx, ctx.GetInput<string>("planJson") ?? "");
                 contextIds.Set(ctx, ctx.GetInput<string>("contextIds") ?? "[]");
                 workItemJson.Set(ctx, ctx.GetInput<string>("workItemJson") ?? "");
+                tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
                 roundCount.Set(ctx, 1);
                 var inputMaxRounds = ctx.GetInput<int?>("maxRetries");
                 if (inputMaxRounds.HasValue) maxRounds.Set(ctx, inputMaxRounds.Value);
@@ -163,7 +165,7 @@ public class PlanReviewWorkflow : WorkflowBase
 
         // Architect review
         var phase1ArchCall = RoleReviewDispatch("Phase1ArchReview", "Phase 1: Architect Review", AgentRole.Architect,
-            repository, planJson, contextIds, workItemJson, allReviewsJson, llmResult);
+            repository, planJson, contextIds, workItemJson, allReviewsJson, tenantId, llmResult);
         var extractPhase1Arch = ExtractReview(architectReview, llmResult, "architect",
             "ExtractPhase1Arch", "Extract Phase 1 Architect Review");
         var storePhase1Arch = StoreReviewRole("StorePhase1Arch", "Store Phase 1 Architect Review", "architect",
@@ -171,7 +173,7 @@ public class PlanReviewWorkflow : WorkflowBase
 
         // Developer review
         var phase1DevCall = RoleReviewDispatch("Phase1DevReview", "Phase 1: Developer Review", AgentRole.Developer,
-            repository, planJson, contextIds, workItemJson, allReviewsJson, llmResult);
+            repository, planJson, contextIds, workItemJson, allReviewsJson, tenantId, llmResult);
         var extractPhase1Dev = ExtractReview(developerReview, llmResult, "developer",
             "ExtractPhase1Dev", "Extract Phase 1 Developer Review");
         var storePhase1Dev = StoreReviewRole("StorePhase1Dev", "Store Phase 1 Developer Review", "developer",
@@ -179,7 +181,7 @@ public class PlanReviewWorkflow : WorkflowBase
 
         // Tester review
         var phase1TesterCall = RoleReviewDispatch("Phase1TesterReview", "Phase 1: Tester Review", AgentRole.Tester,
-            repository, planJson, contextIds, workItemJson, allReviewsJson, llmResult);
+            repository, planJson, contextIds, workItemJson, allReviewsJson, tenantId, llmResult);
         var extractPhase1Tester = ExtractReview(testerReview, llmResult, "tester",
             "ExtractPhase1Tester", "Extract Phase 1 Tester Review");
         var storePhase1Tester = StoreReviewRole("StorePhase1Tester", "Store Phase 1 Tester Review", "tester",
@@ -187,7 +189,7 @@ public class PlanReviewWorkflow : WorkflowBase
 
         // Security review
         var phase1SecCall = RoleReviewDispatch("Phase1SecReview", "Phase 1: Security Review", AgentRole.Security,
-            repository, planJson, contextIds, workItemJson, allReviewsJson, llmResult);
+            repository, planJson, contextIds, workItemJson, allReviewsJson, tenantId, llmResult);
         var extractPhase1Sec = ExtractReview(securityReview, llmResult, "security",
             "ExtractPhase1Sec", "Extract Phase 1 Security Review");
         var storePhase1Sec = StoreReviewRole("StorePhase1Sec", "Store Phase 1 Security Review", "security",
@@ -195,7 +197,7 @@ public class PlanReviewWorkflow : WorkflowBase
 
         // DevOps review
         var phase1DevOpsCall = RoleReviewDispatch("Phase1DevOpsReview", "Phase 1: DevOps Review", AgentRole.Devops,
-            repository, planJson, contextIds, workItemJson, allReviewsJson, llmResult);
+            repository, planJson, contextIds, workItemJson, allReviewsJson, tenantId, llmResult);
         var extractPhase1DevOps = ExtractReview(devopsReview, llmResult, "devops",
             "ExtractPhase1DevOps", "Extract Phase 1 DevOps Review");
         var storePhase1DevOps = StoreReviewRole("StorePhase1DevOps", "Store Phase 1 DevOps Review", "devops",
@@ -203,7 +205,7 @@ public class PlanReviewWorkflow : WorkflowBase
 
         // Product Owner review
         var phase1POCall = RoleReviewDispatch("Phase1POReview", "Phase 1: PO Review", AgentRole.ProductOwner,
-            repository, planJson, contextIds, workItemJson, allReviewsJson, llmResult);
+            repository, planJson, contextIds, workItemJson, allReviewsJson, tenantId, llmResult);
         var extractPhase1PO = ExtractReview(productOwnerReview, llmResult, "product_owner",
             "ExtractPhase1PO", "Extract Phase 1 PO Review");
         var storePhase1PO = StoreReviewRole("StorePhase1PO", "Store Phase 1 PO Review", "product_owner",
@@ -211,7 +213,7 @@ public class PlanReviewWorkflow : WorkflowBase
 
         // Senior Developer review
         var phase1SrDevCall = RoleReviewDispatch("Phase1SrDevReview", "Phase 1: Senior Dev Review", AgentRole.SeniorDeveloper,
-            repository, planJson, contextIds, workItemJson, allReviewsJson, llmResult);
+            repository, planJson, contextIds, workItemJson, allReviewsJson, tenantId, llmResult);
         var extractPhase1SrDev = ExtractReview(seniorDeveloperReview, llmResult, "senior_developer",
             "ExtractPhase1SrDev", "Extract Phase 1 Senior Dev Review");
         var storePhase1SrDev = StoreReviewRole("StorePhase1SrDev", "Store Phase 1 Senior Dev Review", "senior_developer",
@@ -323,7 +325,7 @@ public class PlanReviewWorkflow : WorkflowBase
 
         // Architect rebuttal
         var phase2ArchCall = RebuttalDispatch("Phase2ArchRebuttal", "Phase 2: Architect Rebuttal", AgentRole.Architect,
-            repository, planJson, contextIds, anonymizedReviewsJson, architectReview, roundCount, llmResult);
+            repository, planJson, contextIds, anonymizedReviewsJson, architectReview, roundCount, tenantId, llmResult);
         var extractPhase2Arch = ExtractRebuttal(architectRebuttal, llmResult,
             "ExtractPhase2Arch", "Extract Phase 2 Architect Rebuttal");
         var storePhase2Arch = StoreReviewRole("StorePhase2Arch", "Store Phase 2 Architect Rebuttal", "architect-rebuttal",
@@ -331,7 +333,7 @@ public class PlanReviewWorkflow : WorkflowBase
 
         // Developer rebuttal
         var phase2DevCall = RebuttalDispatch("Phase2DevRebuttal", "Phase 2: Developer Rebuttal", AgentRole.Developer,
-            repository, planJson, contextIds, anonymizedReviewsJson, developerReview, roundCount, llmResult);
+            repository, planJson, contextIds, anonymizedReviewsJson, developerReview, roundCount, tenantId, llmResult);
         var extractPhase2Dev = ExtractRebuttal(developerRebuttal, llmResult,
             "ExtractPhase2Dev", "Extract Phase 2 Developer Rebuttal");
         var storePhase2Dev = StoreReviewRole("StorePhase2Dev", "Store Phase 2 Developer Rebuttal", "developer-rebuttal",
@@ -339,7 +341,7 @@ public class PlanReviewWorkflow : WorkflowBase
 
         // Tester rebuttal
         var phase2TesterCall = RebuttalDispatch("Phase2TesterRebuttal", "Phase 2: Tester Rebuttal", AgentRole.Tester,
-            repository, planJson, contextIds, anonymizedReviewsJson, testerReview, roundCount, llmResult);
+            repository, planJson, contextIds, anonymizedReviewsJson, testerReview, roundCount, tenantId, llmResult);
         var extractPhase2Tester = ExtractRebuttal(testerRebuttal, llmResult,
             "ExtractPhase2Tester", "Extract Phase 2 Tester Rebuttal");
         var storePhase2Tester = StoreReviewRole("StorePhase2Tester", "Store Phase 2 Tester Rebuttal", "tester-rebuttal",
@@ -347,7 +349,7 @@ public class PlanReviewWorkflow : WorkflowBase
 
         // Security rebuttal
         var phase2SecCall = RebuttalDispatch("Phase2SecRebuttal", "Phase 2: Security Rebuttal", AgentRole.Security,
-            repository, planJson, contextIds, anonymizedReviewsJson, securityReview, roundCount, llmResult);
+            repository, planJson, contextIds, anonymizedReviewsJson, securityReview, roundCount, tenantId, llmResult);
         var extractPhase2Sec = ExtractRebuttal(securityRebuttal, llmResult,
             "ExtractPhase2Sec", "Extract Phase 2 Security Rebuttal");
         var storePhase2Sec = StoreReviewRole("StorePhase2Sec", "Store Phase 2 Security Rebuttal", "security-rebuttal",
@@ -355,7 +357,7 @@ public class PlanReviewWorkflow : WorkflowBase
 
         // DevOps rebuttal
         var phase2DevOpsCall = RebuttalDispatch("Phase2DevOpsRebuttal", "Phase 2: DevOps Rebuttal", AgentRole.Devops,
-            repository, planJson, contextIds, anonymizedReviewsJson, devopsReview, roundCount, llmResult);
+            repository, planJson, contextIds, anonymizedReviewsJson, devopsReview, roundCount, tenantId, llmResult);
         var extractPhase2DevOps = ExtractRebuttal(devopsRebuttal, llmResult,
             "ExtractPhase2DevOps", "Extract Phase 2 DevOps Rebuttal");
         var storePhase2DevOps = StoreReviewRole("StorePhase2DevOps", "Store Phase 2 DevOps Rebuttal", "devops-rebuttal",
@@ -363,7 +365,7 @@ public class PlanReviewWorkflow : WorkflowBase
 
         // Product Owner rebuttal
         var phase2POCall = RebuttalDispatch("Phase2PORebuttal", "Phase 2: PO Rebuttal", AgentRole.ProductOwner,
-            repository, planJson, contextIds, anonymizedReviewsJson, productOwnerReview, roundCount, llmResult);
+            repository, planJson, contextIds, anonymizedReviewsJson, productOwnerReview, roundCount, tenantId, llmResult);
         var extractPhase2PO = ExtractRebuttal(productOwnerRebuttal, llmResult,
             "ExtractPhase2PO", "Extract Phase 2 PO Rebuttal");
         var storePhase2PO = StoreReviewRole("StorePhase2PO", "Store Phase 2 PO Rebuttal", "product_owner-rebuttal",
@@ -371,7 +373,7 @@ public class PlanReviewWorkflow : WorkflowBase
 
         // Senior Developer rebuttal
         var phase2SrDevCall = RebuttalDispatch("Phase2SrDevRebuttal", "Phase 2: Senior Dev Rebuttal", AgentRole.SeniorDeveloper,
-            repository, planJson, contextIds, anonymizedReviewsJson, seniorDeveloperReview, roundCount, llmResult);
+            repository, planJson, contextIds, anonymizedReviewsJson, seniorDeveloperReview, roundCount, tenantId, llmResult);
         var extractPhase2SrDev = ExtractRebuttal(seniorDeveloperRebuttal, llmResult,
             "ExtractPhase2SrDev", "Extract Phase 2 Senior Dev Rebuttal");
         var storePhase2SrDev = StoreReviewRole("StorePhase2SrDev", "Store Phase 2 Senior Dev Rebuttal", "senior_developer-rebuttal",
@@ -491,6 +493,7 @@ public class PlanReviewWorkflow : WorkflowBase
             {
                 ["role"] = AgentRole.ProductOwner.ToWire(),
                 ["action"] = AgentAction.ReviewScope.ToWire(),
+                ["tenantId"] = tenantId.Get(ctx),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["planJson"] = planJson.Get(ctx),
@@ -847,7 +850,7 @@ public class PlanReviewWorkflow : WorkflowBase
         string id, string displayName, AgentRole role,
         Variable<string> repository, Variable<string> planJson,
         Variable<string> contextIds, Variable<string> workItemJson,
-        Variable<string> allReviewsJson,
+        Variable<string> allReviewsJson, Variable<string> tenantId,
         Variable<IDictionary<string, object>?> result)
     {
         var dispatch = new DispatchWorkflow
@@ -858,6 +861,7 @@ public class PlanReviewWorkflow : WorkflowBase
             {
                 ["role"] = role.ToWire(),
                 ["action"] = RolePhaseMap.GetReviewActionForRole(role).ToWire(),
+                ["tenantId"] = tenantId.Get(ctx),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["planJson"] = planJson.Get(ctx),
@@ -882,6 +886,7 @@ public class PlanReviewWorkflow : WorkflowBase
         Variable<string> repository, Variable<string> planJson,
         Variable<string> contextIds, Variable<string> anonymizedReviewsJson,
         Variable<string> previousReview, Variable<int> roundCount,
+        Variable<string> tenantId,
         Variable<IDictionary<string, object>?> result)
     {
         var dispatch = new DispatchWorkflow
@@ -892,6 +897,7 @@ public class PlanReviewWorkflow : WorkflowBase
             {
                 ["role"] = role.ToWire(),
                 ["action"] = RolePhaseMap.GetReviewActionForRole(role).ToWire(),
+                ["tenantId"] = tenantId.Get(ctx),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["planJson"] = planJson.Get(ctx),
