@@ -7,6 +7,8 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.ADL.Models;
+using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 using Tamma.Core.Interfaces;
 
 namespace Tamma.Activities.ADL;
@@ -30,13 +32,16 @@ namespace Tamma.Activities.ADL;
 public class AnalyzeReviewActivity : Activity
 {
     private readonly ILogger<AnalyzeReviewActivity>? _logger;
-    private readonly IGitHubIntegrationService? _github;
+    private readonly TammaApiClient? _apiClient;
 
     [Input(Description = "Repository in owner/repo format")]
     public Input<string> Repository { get; set; } = default!;
 
     [Input(Description = "Pull request number")]
     public Input<int> PrNumber { get; set; } = default!;
+
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
 
     [Output(Description = "Whether there are actionable review comments")]
     public Output<bool> HasActionableComments { get; set; } = default!;
@@ -47,30 +52,43 @@ public class AnalyzeReviewActivity : Activity
     [JsonConstructor]
     public AnalyzeReviewActivity() { }
 
+    /// <summary>
+    /// Story 38-1 — thin-client DI constructor. No <c>IGitHubIntegrationService</c>
+    /// and no git token: the review comments are fetched through
+    /// <c>GET /api/v1/git/{owner}/{repo}/pull-requests/{n}/comments</c> via
+    /// <see cref="TammaApiClient"/>; the (token-free) categorization runs engine-side.
+    /// </summary>
     public AnalyzeReviewActivity(
-        ILogger<AnalyzeReviewActivity> logger,
-        IGitHubIntegrationService github)
+        ILogger<AnalyzeReviewActivity>? logger,
+        TammaApiClient? apiClient)
     {
         _logger = logger;
-        _github = github;
+        _apiClient = apiClient;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var repository = Repository.Get(context);
         var prNumber = PrNumber.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
 
         try
         {
-            var result = await _github!.GetPullRequestReviewCommentsAsync(repository, prNumber);
-            if (!result.Success)
+            var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+            var response = await apiClient
+                .GetPullRequestCommentsAsync(repository, prNumber, context.WorkflowExecutionContext.Id, tenantId, context.CancellationToken)
+                .ConfigureAwait(false);
+
+            if (response is null || !response.Success)
             {
-                _logger?.LogError("Failed to fetch review comments: {Error}", result.Error);
+                _logger?.LogError(
+                    "Failed to fetch review comments for PR #{Number}: {Failure}",
+                    prNumber, response?.FailureReason ?? "git mediation endpoint unavailable");
                 await context.CompleteActivityWithOutcomesAsync("Error");
                 return;
             }
 
-            var comments = result.Data ?? new List<GitHubReviewComment>();
+            var comments = response.Comments ?? new List<GitCommentDto>();
 
             var fixItems = comments.Select(c =>
             {

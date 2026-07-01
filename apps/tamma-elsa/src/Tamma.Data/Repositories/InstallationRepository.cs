@@ -211,9 +211,16 @@ public class InstallationRepository(ControlPlaneDbContext db) : IInstallationRep
     {
         // Join via the active-only repo view so that a repo removed from the
         // installation no longer resolves back to the installation row.
+        //
+        // GitHub repo full names are case-INsensitive ("Acme/Widget" ==
+        // "acme/widget"); a case-sensitive match would 404 a legitimate tenant
+        // and hard-fail the ADL cycle. Lowercase both sides — works across EF
+        // providers (Postgres LOWER() + InMemory), unlike EF.Functions.ILike
+        // which is Postgres-only.
+        var needle = repoFullName?.ToLowerInvariant();
         var repo = await db.GitHubInstallationRepos
             .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.IsActive && r.RepoFullName == repoFullName);
+            .FirstOrDefaultAsync(r => r.IsActive && r.RepoFullName.ToLower() == needle);
         if (repo is null) return null;
         return await db.GitHubInstallations
             .FirstOrDefaultAsync(i => i.Id == repo.InstallationEntityId);

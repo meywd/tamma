@@ -36,8 +36,7 @@ public class PullRequestActivityTests
     public void CreatePullRequestActivity_WithDependencies_ShouldNotThrow()
     {
         var logger = new Mock<ILogger<CreatePullRequestActivity>>();
-        var github = new Mock<IGitHubIntegrationService>();
-        Action act = () => new CreatePullRequestActivity(logger.Object, github.Object);
+        Action act = () => new CreatePullRequestActivity(logger.Object, (Tamma.Activities.LlmCall.TammaApiClient?)null);
         act.Should().NotThrow();
     }
 

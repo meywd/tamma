@@ -8,6 +8,8 @@ using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 using Tamma.Core.Interfaces;
 
 namespace Tamma.Activities.ADL;
@@ -33,7 +35,7 @@ namespace Tamma.Activities.ADL;
 public class CreatePullRequestActivity : Activity
 {
     private readonly ILogger<CreatePullRequestActivity>? _logger;
-    private readonly IGitHubIntegrationService? _github;
+    private readonly TammaApiClient? _apiClient;
 
     [Input(Description = "Repository in owner/repo format")]
     public Input<string> Repository { get; set; } = default!;
@@ -71,6 +73,9 @@ public class CreatePullRequestActivity : Activity
     [Input(Description = "Reviewers JSON array (usernames to request)")]
     public Input<string?> ReviewersJson { get; set; } = new((string?)null);
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [Output(Description = "Created/updated PR number")]
     public Output<int> PrNumber { get; set; } = default!;
 
@@ -92,12 +97,19 @@ public class CreatePullRequestActivity : Activity
     [JsonConstructor]
     public CreatePullRequestActivity() { }
 
+    /// <summary>
+    /// Story 38-1 — thin-client DI constructor. No <c>IGitHubIntegrationService</c>
+    /// and no git token: the PR create/update routes through
+    /// <c>POST /api/v1/git/{owner}/{repo}/pull-requests</c> via
+    /// <see cref="TammaApiClient"/>. Title / body / labels are still composed
+    /// engine-side (pure, token-free).
+    /// </summary>
     public CreatePullRequestActivity(
-        ILogger<CreatePullRequestActivity> logger,
-        IGitHubIntegrationService github)
+        ILogger<CreatePullRequestActivity>? logger,
+        TammaApiClient? apiClient)
     {
         _logger = logger;
-        _github = github;
+        _apiClient = apiClient;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -114,33 +126,29 @@ public class CreatePullRequestActivity : Activity
         var testSummary = TestSummary.Parse(TestSummaryJson.Get(context));
         var issueLabels = ParseStringList(IssueLabelsJson.Get(context));
         var reviewers = ParseStringList(ReviewersJson.Get(context));
-
-        var github = _github ?? context.GetService<IGitHubIntegrationService>();
-        if (github is null)
-        {
-            _logger?.LogError("GitHub integration service unavailable — cannot create PR for issue #{Issue}", issueNumber);
-            ErrorCode.Set(context, "github-service-unavailable");
-            await context.CompleteActivityWithOutcomesAsync("Error");
-            return;
-        }
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
 
         var title = BuildTitle(issueNumber, issueTitle);
         var body = BuildBody(issueNumber, aiBody, planJson, changeSummary, testSummary);
         var labels = DetermineLabels(issueLabels, changeSummary);
 
-        var request = new CreatePullRequestRequest
+        var request = new GitCreatePrRequest
         {
             Title = title,
             Body = body,
-            Head = branchName,
-            Base = baseBranch,
+            HeadRef = branchName,
+            BaseRef = baseBranch,
             Labels = labels,
             Reviewers = reviewers,
-            IsDraft = draft
+            IsDraft = draft,
+            CorrelationId = context.WorkflowExecutionContext.Id,
         };
 
-        var outcome = await ExecuteCoreAsync(github, repository, branchName, baseBranch, draft, request, _logger);
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var response = await apiClient.CreatePullRequestAsync(repository, request, tenantId, context.CancellationToken)
+            .ConfigureAwait(false);
 
+        var outcome = MapResponse(response);
         switch (outcome.Outcome)
         {
             case "Created":
@@ -154,6 +162,25 @@ public class CreatePullRequestActivity : Activity
                 await context.CompleteActivityWithOutcomesAsync("Error");
                 break;
         }
+    }
+
+    /// <summary>
+    /// Story 38-1 (AC5) — project the git-mediation wire response into the SAME
+    /// <see cref="PrCreationOutcome"/> the local path produced (Created / Updated /
+    /// Error + PrNumber / PrUrl / IsDraft / Reused / ErrorCode). A null response
+    /// (guard 403 / token 503 / auth 401 / transport) fails closed to Error.
+    /// </summary>
+    public static PrCreationOutcome MapResponse(GitCallResponse? response)
+    {
+        if (response is null)
+            return PrCreationOutcome.Failed("git-mediation-unavailable");
+
+        return response switch
+        {
+            { Success: true, Outcome: "Created" } => PrCreationOutcome.Create(response.PrNumber ?? 0, response.PrUrl, response.IsDraft ?? false),
+            { Success: true, Outcome: "Updated" } => PrCreationOutcome.Reuse(response.PrNumber ?? 0, response.PrUrl, response.IsDraft ?? false),
+            _ => PrCreationOutcome.Failed(response.FailureCode ?? "pr-creation-failed"),
+        };
     }
 
     /// <summary>

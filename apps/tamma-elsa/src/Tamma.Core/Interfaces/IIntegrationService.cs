@@ -116,6 +116,19 @@ public interface IGitHubIntegrationService
 
     /// <summary>Get pull request review comments</summary>
     Task<IntegrationResult<List<GitHubReviewComment>>> GetPullRequestReviewCommentsAsync(string repository, int pullRequestNumber);
+
+    /// <summary>
+    /// Story 38-1 — post a comment on an issue (the git-mediation issue-update
+    /// path). Backs <c>PATCH /api/v1/git/{repo}/issues/{n}</c>.
+    /// </summary>
+    Task<IntegrationResult<bool>> PostIssueCommentAsync(string repository, int issueNumber, string body);
+
+    /// <summary>Story 38-1 — add labels to an issue (git-mediation issue-update path).</summary>
+    Task<IntegrationResult<bool>> AddIssueLabelsAsync(string repository, int issueNumber, string[] labels);
+
+    /// <summary>Story 38-1 — remove a single label from an issue (idempotent: a 404
+    /// "label not present" is treated as removed).</summary>
+    Task<IntegrationResult<bool>> RemoveIssueLabelAsync(string repository, int issueNumber, string label);
 }
 
 /// <summary>

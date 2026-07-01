@@ -115,6 +115,70 @@ public class TammaApiClient
         return PostAsync<LlmCallApiResponse>(url, request, tenantId, ct);
     }
 
+    // ----- Git mediation (Story 38-1 — the git step-mediation endpoints) --
+
+    /// <summary>
+    /// Story 38-1 (AC5) — POST the engine→API <see cref="GitCreateBranchRequest"/>
+    /// to <c>POST /api/v1/git/{owner}/{repo}/branches</c>. <paramref name="repo"/>
+    /// is <c>owner/name</c>; it is split into two path segments (a full name
+    /// carries a slash). Returns null on any non-2xx (guard 403 / token 503 / auth
+    /// 401 / transport), which the thin activity maps to its Error outcome
+    /// (fail-closed). The token is resolved + used server-side; it never travels here.
+    /// </summary>
+    public Task<GitCallResponse?> CreateBranchAsync(
+        string repo, GitCreateBranchRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/branches";
+        return PostAsync<GitCallResponse>(url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 38-1 (AC5) — <c>POST /api/v1/git/{owner}/{repo}/pull-requests</c>.</summary>
+    public Task<GitCallResponse?> CreatePullRequestAsync(
+        string repo, GitCreatePrRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests";
+        return PostAsync<GitCallResponse>(url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 38-1 (AC5) — <c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n}/merge</c>.</summary>
+    public Task<GitCallResponse?> MergePullRequestAsync(
+        string repo, int prNumber, GitMergePrRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests/{prNumber}/merge";
+        return SendJsonAsync<GitCallResponse>(HttpMethod.Put, url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 38-1 (AC5) — <c>PATCH /api/v1/git/{owner}/{repo}/issues/{n}</c>.</summary>
+    public Task<GitCallResponse?> UpdateIssueStatusAsync(
+        string repo, int issueNumber, GitUpdateIssueRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/issues/{issueNumber}";
+        return PatchAsync<GitCallResponse>(url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 38-1 (AC5) — <c>GET /api/v1/git/{owner}/{repo}/pull-requests/{n}/comments</c>.</summary>
+    public Task<GitCallResponse?> GetPullRequestCommentsAsync(
+        string repo, int prNumber, string? correlationId = null, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests/{prNumber}/comments";
+        if (!string.IsNullOrWhiteSpace(correlationId))
+            url += $"?correlationId={Uri.EscapeDataString(correlationId)}";
+        return GetAsync<GitCallResponse>(url, tenantId, ct);
+    }
+
+    /// <summary>Build the two-segment <c>{owner}/{repo}</c> path from an
+    /// <c>owner/name</c> repo string, URL-escaping each segment. A repo string
+    /// without a slash is escaped as a single segment (the endpoint's owner param).</summary>
+    private static string RepoPath(string repo)
+    {
+        var slash = (repo ?? string.Empty).IndexOf('/');
+        if (slash <= 0 || slash >= repo!.Length - 1)
+            return Uri.EscapeDataString(repo ?? string.Empty);
+        var owner = repo[..slash];
+        var name = repo[(slash + 1)..];
+        return $"{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(name)}";
+    }
+
     // ----- Provider Health ---------------------------------------------
 
     public Task<ProviderHealthStatus?> GetProviderHealthAsync(
@@ -395,6 +459,56 @@ public class TammaApiClient
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
             _logger.LogWarning(ex, "Tamma API POST failed");
+            await RecordHealthAsync(false, null, ex.GetType().Name, ct).ConfigureAwait(false);
+            return null;
+        }
+    }
+
+    private Task<T?> PatchAsync<T>(
+        string url,
+        object body,
+        string? tenantId,
+        CancellationToken ct) where T : class
+        => SendJsonAsync<T>(HttpMethod.Patch, url, body, tenantId, ct);
+
+    /// <summary>
+    /// Shared PUT/PATCH JSON send with the same contract as
+    /// <see cref="PostAsync{T}"/> — engine bearer + <c>X-Tenant-Id</c> + per-call
+    /// health recording, returning null on any non-2xx / transport failure so the
+    /// caller falls back (fail-closed for the git-mediation shim).
+    /// </summary>
+    private async Task<T?> SendJsonAsync<T>(
+        HttpMethod method,
+        string url,
+        object body,
+        string? tenantId,
+        CancellationToken ct) where T : class
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(method, url)
+            {
+                Content = JsonContent.Create(body, options: JsonOpts),
+            };
+            AddTenantHeader(request, tenantId);
+            using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            await RecordHealthAsync(
+                response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
+                .ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Tamma API {Method} returned {Status}",
+                    method.Method, (int)response.StatusCode);
+                return null;
+            }
+            return await response.Content
+                .ReadFromJsonAsync<T>(JsonOpts, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogWarning(ex, "Tamma API {Method} failed", method.Method);
             await RecordHealthAsync(false, null, ex.GetType().Name, ct).ConfigureAwait(false);
             return null;
         }
