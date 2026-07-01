@@ -146,7 +146,8 @@ public class MonitorAgentWorkflowActivity : Activity, ITammaActivity
             AgentProvider: string.Empty,
             AgentConfigJson: null,
             WorkflowFileName: null,
-            TimeoutMinutes: TimeoutMinutes.Get(context));
+            TimeoutMinutes: TimeoutMinutes.Get(context),
+            TenantId: ReadTenantIdFromContext(context));
 
         var options = new AgentMonitorOptions(
             PollIntervalSeconds: Math.Max(5, PollIntervalSeconds.Get(context)),
@@ -235,4 +236,25 @@ public class MonitorAgentWorkflowActivity : Activity, ITammaActivity
             AgentMonitorMode.Webhook => "webhook",
             _ => "poll"
         };
+
+    /// <summary>
+    /// Story 38-2 — best-effort tenant resolution so the thin monitor can send
+    /// X-Tenant-Id on the mediated poll/discover/installation calls. Mirrors
+    /// <c>DispatchAgentWorkflowActivity.ReadTenantIdFromContext</c>.
+    /// </summary>
+    private static Guid? ReadTenantIdFromContext(ActivityExecutionContext context)
+    {
+        string?[] candidates =
+        {
+            context.GetVariable<string>("TenantId"),
+            context.GetVariable<string>("tenantId"),
+            context.GetVariable<string>("Tamma:TenantId"),
+        };
+        foreach (var s in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(s) && Guid.TryParse(s, out var g))
+                return g;
+        }
+        return null;
+    }
 }

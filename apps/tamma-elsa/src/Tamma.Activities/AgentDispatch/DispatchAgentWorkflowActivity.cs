@@ -164,7 +164,8 @@ public class DispatchAgentWorkflowActivity : Activity, ITammaActivity
             AgentProvider: AgentProvider.Get(context),
             AgentConfigJson: AgentConfigJson.Get(context),
             WorkflowFileName: WorkflowFileName.Get(context),
-            TimeoutMinutes: TimeoutMinutes.Get(context));
+            TimeoutMinutes: TimeoutMinutes.Get(context),
+            TenantId: ReadTenantIdFromContext(context));
 
         try
         {

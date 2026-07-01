@@ -1,9 +1,11 @@
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 using Tamma.Activities.AgentDispatch;
 using Tamma.Activities.AgentDispatch.Models;
+using Tamma.Activities.LlmCall;
 
 namespace Tamma.Activities.Tests.AgentDispatch;
 
@@ -26,7 +28,10 @@ public class AgentExecutorFactoryTests
 
         var services = new ServiceCollection();
         services.AddSingleton<IConfiguration>(cfg);
-        services.AddSingleton<IGitHubActionsClient, NullGitHubActionsClient>();
+        // Story 38-2 — the phase services are now thin TammaApiClient clients (no
+        // IGitHubActionsClient). A no-HTTP instance suffices: the factory only
+        // constructs the executor graph; it never dispatches here.
+        services.AddSingleton(new TammaApiClient(new HttpClient(), NullLogger<TammaApiClient>.Instance, cfg));
         services.AddScoped<IAgentDispatchService, AgentDispatchService>();
         services.AddScoped<IAgentMonitorService, AgentMonitorService>();
         services.AddScoped<IAgentResultCollectorService, AgentResultCollectorService>();

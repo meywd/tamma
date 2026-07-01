@@ -152,7 +152,7 @@ public sealed class OctokitGitHubActionsClient : IGitHubActionsClient
             {
                 Branch = branch,
                 Event = "workflow_dispatch",
-                Created = $">={createdAfter:yyyy-MM-ddTHH:mm:ssZ}"
+                Created = FormatCreatedFilter(createdAfter)
             };
             var options = new ApiOptions { PageSize = perPage, PageCount = 1 };
             var response = await client.Actions.Workflows.Runs.List(owner, repo, request, options).WaitAsync(ct);
@@ -369,6 +369,21 @@ public sealed class OctokitGitHubActionsClient : IGitHubActionsClient
             return Array.Empty<CheckRunSummary>();
         }
     }
+
+    /// <summary>
+    /// Review-session 2026-06-30 finding 1 (TZ bug): format the GitHub
+    /// <c>created:&gt;=</c> filter as the CORRECT UTC instant regardless of host TZ.
+    /// The endpoint binds <c>createdAfter</c> as a string and parses it to
+    /// <see cref="DateTimeKind.Utc"/>, but a <see cref="DateTimeKind.Local"/> value
+    /// reaching here (ASP.NET parsed a <c>Z</c>-suffixed value to Kind=Local, or any
+    /// other caller) must be normalized first — otherwise the literal <c>Z</c> in the
+    /// format string stamps the LOCAL wall-clock (e.g. 14:00Z on Europe/Berlin for a
+    /// 12:00Z instant), shifting the discovery window into the future and EXCLUDING
+    /// the just-dispatched run. <c>ToUniversalTime()</c> recovers the right instant in
+    /// all TZ cases (a Kind=Utc value passes through unchanged).
+    /// </summary>
+    internal static string FormatCreatedFilter(DateTime createdAfter) =>
+        $">={createdAfter.ToUniversalTime():yyyy-MM-ddTHH:mm:ssZ}";
 
     private static WorkflowRunSummary ToSummary(WorkflowRun r) =>
         new(

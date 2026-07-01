@@ -64,7 +64,11 @@ public sealed record AgentExecutionRequest(
     string AgentProvider,
     string? AgentConfigJson,
     string? WorkflowFileName,
-    int TimeoutMinutes);
+    int TimeoutMinutes,
+    // Story 38-2 — the acting tenant, threaded from the activity's Elsa context so
+    // the thin phase services can send X-Tenant-Id on the mediated agent-dispatch
+    // calls (the API asserts tenant↔repo before minting the installation token).
+    Guid? TenantId = null);
 
 /// <summary>
 /// Unified result returned by every <see cref="IAgentExecutor"/>

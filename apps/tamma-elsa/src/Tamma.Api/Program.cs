@@ -735,17 +735,16 @@ else
 builder.Services.AddSingleton<Tamma.Api.Services.Engine.IEngineRegistry,
     Tamma.Api.Services.Engine.InMemoryEngineRegistry>();
 
-// ─── Epic 19: Agent dispatch (stories 19-2 / 3 / 4 / 5) ────────────────
+// ─── Epic 19 / Story 38-2: Agent dispatch (Class-C mediation) ──────────
 //
 // IGitHubActionsClient — Octokit-backed when the GitHub App is wired,
-// otherwise the Null impl that reports NotConfigured so the activities
-// surface a clean operator error instead of silently succeeding.
-//
-// Services (Dispatch/Monitor/Collect) wrap the client and encapsulate
-// the logic shared by the Elsa activities AND the GitHubActionsExecutor.
-// The AgentExecutorFactory picks between LocalExecutor and
-// GitHubActionsExecutor at runtime (TAMMA_AGENT_MODE env var > config
-// `Agent:ExecutorMode` > auto-detect via GitHub App presence).
+// otherwise the Null impl that reports NotConfigured. After the Story 38-2
+// cutover this client is API-ONLY: it is consumed by the new
+// AgentDispatchMediationService + ActionsResultAggregator behind the
+// /api/v1/agent-dispatch endpoints (which mint the per-repo installation
+// token internally), NOT by the engine phase services (those are now thin
+// TammaApiClient clients). The engine's NullGitHubActionsClient registration
+// was removed from ElsaServer/Program.cs.
 if (builder.Configuration.GetValue<long?>("GitHub:AppId") is long actionsAppId && actionsAppId > 0
     && !string.IsNullOrWhiteSpace(builder.Configuration["GitHub:PrivateKey"]))
 {
@@ -761,7 +760,23 @@ else
         Tamma.Activities.AgentDispatch.NullGitHubActionsClient>();
 }
 
-// Services — scoped to match the client lifetime.
+// Story 38-2 — the managed agent-dispatch execution layer behind
+// /api/v1/agent-dispatch/{owner}/{repo}/... . The mediation service composes the
+// Story 38-1 cross-tenant guard (IGitRepoAuthorizer) → IGitHubActionsClient →
+// one DCB event; the aggregator does the collect multi-read server-side.
+builder.Services.AddScoped<Tamma.Api.Services.AgentDispatch.IActionsResultAggregator,
+    Tamma.Api.Services.AgentDispatch.ActionsResultAggregator>();
+builder.Services.AddScoped<Tamma.Api.Services.AgentDispatch.IAgentDispatchMediationService,
+    Tamma.Api.Services.AgentDispatch.AgentDispatchMediationService>();
+
+// Story 38-2 — the engine's TammaApiClient. Tamma.Api does NOT host the Elsa
+// engine, so the phase services below are dead registrations here; but wiring the
+// client keeps them resolvable (belt-and-suspenders for DI validation / any
+// co-host path) and holds no cost.
+builder.Services.AddHttpClient<Tamma.Activities.LlmCall.TammaApiClient>();
+
+// Services — scoped to match the client lifetime. After 38-2 these are thin
+// TammaApiClient clients (no IGitHubActionsClient injection).
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentDispatchService,
     Tamma.Activities.AgentDispatch.AgentDispatchService>();
 builder.Services.AddScoped<Tamma.Activities.AgentDispatch.IAgentMonitorService,
@@ -2338,6 +2353,30 @@ app.MapGet("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/comments", GitEndpo
 app.MapPatch("/api/v1/git/{owner}/{repo}/issues/{n:int}", GitEndpoints.UpdateIssue)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitUpdateIssue");
+
+// ── Story 38-2 (Epic 38) — agent-dispatch step mediation (Class C) ──
+// Same engine-only plane as /api/v1/git and /api/v1/llm/call: the engine's thin
+// phase services post here as the service-scope Tamma:ApiToken; the API holds the
+// per-repo GitHub App installation token, authorizes tenant↔repo (reusing 38-1's
+// guard), triggers/polls/collects the workflow_dispatch run, and audits it.
+// The monitor's poll LOOP stays engine-side — GET .../runs (discover) and
+// GET .../runs/{id} (poll) are single-shot status reads it loops over.
+// {owner}/{repo} is bound as two segments.
+app.MapPost("/api/v1/agent-dispatch/{owner}/{repo}/runs", AgentDispatchEndpoints.TriggerRun)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("DispatchAgentRun");
+app.MapGet("/api/v1/agent-dispatch/{owner}/{repo}/runs", AgentDispatchEndpoints.DiscoverRun)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("DiscoverAgentRun");
+app.MapGet("/api/v1/agent-dispatch/{owner}/{repo}/runs/{id:long}", AgentDispatchEndpoints.GetRun)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GetAgentRun");
+app.MapGet("/api/v1/agent-dispatch/{owner}/{repo}/runs/{id:long}/results", AgentDispatchEndpoints.CollectResults)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("CollectAgentResults");
+app.MapGet("/api/v1/agent-dispatch/{owner}/{repo}/installation", AgentDispatchEndpoints.ResolveInstallation)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("ResolveAgentInstallation");
 app.MapPost("/api/v1/workflows/{id}/status", SaaSEndpoints.UpdateWorkflowStatus).RequireAuthorization();
 app.MapPost("/api/v1/workflows/{id}/result", SaaSEndpoints.PostWorkflowResult).RequireAuthorization();
 app.MapPost("/api/v1/installations/{id}/rotate-key", SaaSEndpoints.RotateInstallationKey).RequireAuthorization();

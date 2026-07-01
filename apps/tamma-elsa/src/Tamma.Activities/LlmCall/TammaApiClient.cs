@@ -166,6 +166,75 @@ public class TammaApiClient
         return GetAsync<GitCallResponse>(url, tenantId, ct);
     }
 
+    // ----- Agent-dispatch mediation (Story 38-2 — the CI-run step-mediation endpoints) --
+
+    /// <summary>
+    /// Story 38-2 (AC5) — POST the engine→API <see cref="Models.AgentDispatchRunApiRequest"/>
+    /// to <c>POST /api/v1/agent-dispatch/{owner}/{repo}/runs</c> to trigger a
+    /// <c>workflow_dispatch</c> run. <paramref name="repo"/> is <c>owner/name</c>; it is
+    /// split into two path segments. Returns null on any non-2xx (guard 403 / auth 401 /
+    /// transport), which the thin phase service maps to its failure result (fail-closed).
+    /// The per-repo installation token is minted + used server-side; it never travels here.
+    /// </summary>
+    public virtual Task<Models.AgentDispatchRunApiResponse?> DispatchAgentRunAsync(
+        string repo, Models.AgentDispatchRunApiRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/agent-dispatch/{RepoPath(repo)}/runs";
+        return PostAsync<Models.AgentDispatchRunApiResponse>(url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 38-2 (AC5) — discover the latest dispatched run for a branch via
+    /// <c>GET /api/v1/agent-dispatch/{owner}/{repo}/runs?branch=&amp;createdAfter=</c>.
+    /// The monitor's discovery phase, mediated (the poll LOOP stays engine-side).</summary>
+    public virtual Task<Models.AgentRunStatusApiResponse?> DiscoverAgentRunAsync(
+        string repo, string branch, DateTime createdAfter, string? correlationId = null,
+        string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/agent-dispatch/{RepoPath(repo)}/runs" +
+                  $"?branch={Uri.EscapeDataString(branch ?? string.Empty)}" +
+                  $"&createdAfter={Uri.EscapeDataString(createdAfter.ToString("o", System.Globalization.CultureInfo.InvariantCulture))}";
+        if (!string.IsNullOrWhiteSpace(correlationId))
+            url += $"&correlationId={Uri.EscapeDataString(correlationId)}";
+        return GetAsync<Models.AgentRunStatusApiResponse>(url, tenantId, ct);
+    }
+
+    /// <summary>Story 38-2 (AC5) — single-shot status of one run via
+    /// <c>GET /api/v1/agent-dispatch/{owner}/{repo}/runs/{id}</c> (one poll iteration).</summary>
+    public virtual Task<Models.AgentRunStatusApiResponse?> GetAgentRunAsync(
+        string repo, long runId, string? correlationId = null, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/agent-dispatch/{RepoPath(repo)}/runs/{runId}";
+        if (!string.IsNullOrWhiteSpace(correlationId))
+            url += $"?correlationId={Uri.EscapeDataString(correlationId)}";
+        return GetAsync<Models.AgentRunStatusApiResponse>(url, tenantId, ct);
+    }
+
+    /// <summary>Story 38-2 (AC5) — aggregate a completed run's outputs via
+    /// <c>GET /api/v1/agent-dispatch/{owner}/{repo}/runs/{id}/results</c>.</summary>
+    public virtual Task<Models.AgentRunResultsApiResponse?> CollectAgentResultsAsync(
+        string repo, long runId, Models.CollectAgentRunApiRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var url = $"{_baseUrl}/api/v1/agent-dispatch/{RepoPath(repo)}/runs/{runId}/results" +
+                  $"?branch={Uri.EscapeDataString(request.BranchName ?? string.Empty)}" +
+                  $"&conclusion={Uri.EscapeDataString(request.Conclusion ?? string.Empty)}" +
+                  $"&agentProvider={Uri.EscapeDataString(request.AgentProvider ?? string.Empty)}" +
+                  $"&durationSeconds={request.DurationSeconds}";
+        if (!string.IsNullOrWhiteSpace(request.CorrelationId))
+            url += $"&correlationId={Uri.EscapeDataString(request.CorrelationId)}";
+        return GetAsync<Models.AgentRunResultsApiResponse>(url, tenantId, ct);
+    }
+
+    /// <summary>Story 38-2 (AC5) — resolve the GitHub App installation id owning the
+    /// repo via <c>GET /api/v1/agent-dispatch/{owner}/{repo}/installation</c>. Used only
+    /// to scope the inbound webhook-signal wait key; the id is not a secret.</summary>
+    public virtual Task<Models.AgentInstallationApiResponse?> ResolveAgentInstallationIdAsync(
+        string repo, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/agent-dispatch/{RepoPath(repo)}/installation";
+        return GetAsync<Models.AgentInstallationApiResponse>(url, tenantId, ct);
+    }
+
     /// <summary>Build the two-segment <c>{owner}/{repo}</c> path from an
     /// <c>owner/name</c> repo string, URL-escaping each segment. A repo string
     /// without a slash is escaped as a single segment (the endpoint's owner param).</summary>
