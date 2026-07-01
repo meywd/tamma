@@ -12,10 +12,20 @@ using Tamma.Data.Repositories;
 namespace Tamma.Activities.Assessment;
 
 /// <summary>
-/// Analyzes the junior's assessment response using AI (LLM Call sub-workflow 7-1B).
-/// Sends questions, response, story context, and skill level to the LLM for structured analysis.
-/// The analysis prompt instructs the LLM to be encouraging but honest.
+/// SUPERSEDED (P0 fix 2026-06-30): <c>AssessmentWorkflow</c> now dispatches
+/// <c>llm-call</c> (role=product_owner / action=analyze-assessment-response)
+/// instead of invoking this activity. This class used keyword counting and
+/// response-length heuristics to fabricate a confidence score
+/// (<see cref="PerformAnalysis"/>), making the mentorship machine route on a
+/// value that was never produced by an LLM. Kept as a reference / explicit
+/// mock-mode fallback (audit 7-2 AC7); not called by any workflow in production.
 /// </summary>
+[Obsolete(
+    "Superseded by DispatchWorkflow(\"llm-call\", role=product_owner, " +
+    "action=analyze-assessment-response) in AssessmentWorkflow (P0 fix 2026-06-30). " +
+    "This activity fabricated confidence from keyword counting and response length " +
+    "instead of calling the LLM. " +
+    "Kept as a documented mock-mode fallback; not wired into any workflow.")]
 [Activity(
     "Tamma.Assessment",
     "Analyze Response",

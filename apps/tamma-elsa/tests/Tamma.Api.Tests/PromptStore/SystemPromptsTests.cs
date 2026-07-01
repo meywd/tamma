@@ -163,6 +163,45 @@ public class SystemPromptsTests
     }
 
     // ------------------------------------------------------------------
+    // Assessment P0 — the 2 assessment cells under product_owner
+    // (task-1 of docs/superpowers/plans/2026-06-30-assessment-p0-llm-call.md)
+    // TDD RED: these assertions fail BEFORE the enum/taxonomy/template additions.
+    // ------------------------------------------------------------------
+
+    [Test]
+    public void AssessmentActions_ExistInTaxonomy_ProductOwner()
+    {
+        // Both cells must be present in the taxonomy (added to product_owner's §4
+        // action set and AgentAction enum) and resolve to a non-empty template.
+        var generate = SystemPrompts.GetRoleAction("product_owner", "generate-assessment-questions");
+        var analyze = SystemPrompts.GetRoleAction("product_owner", "analyze-assessment-response");
+
+        generate.Should().NotBeNull(
+            "generate-assessment-questions must be in product_owner's RolePhaseMap action set " +
+            "with a non-empty SystemPrompts template (assessment P0 taxonomy)");
+        analyze.Should().NotBeNull(
+            "analyze-assessment-response must be in product_owner's RolePhaseMap action set " +
+            "with a non-empty SystemPrompts template (assessment P0 taxonomy)");
+
+        generate!.Variables.Should().Contain("storyContext")
+            .And.Contain("skillLevel")
+            .And.Contain("questionCount")
+            .And.Contain("previousGaps",
+                "generate-assessment-questions must declare the Shared-contract variables from the plan");
+
+        analyze!.Variables.Should().Contain("storyContext")
+            .And.Contain("questions")
+            .And.Contain("response")
+            .And.Contain("skillLevel",
+                "analyze-assessment-response must declare the Shared-contract variables from the plan");
+
+        generate.Template.Should().NotBeNullOrWhiteSpace(
+            "generate-assessment-questions template must not be empty (resolution is tenant→system→error)");
+        analyze.Template.Should().NotBeNullOrWhiteSpace(
+            "analyze-assessment-response template must not be empty (resolution is tenant→system→error)");
+    }
+
+    // ------------------------------------------------------------------
     // Audit prompts/001 — role-tailored review-lens shape is retained on the
     // review-family cells. The PlanReview body is used by the per-role
     // plan-review lens actions; CodeReview by the code-review lens actions.

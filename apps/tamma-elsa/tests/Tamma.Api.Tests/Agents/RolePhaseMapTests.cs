@@ -11,7 +11,9 @@ namespace Tamma.Api.Tests.Agents;
 /// The 8 roles: developer, tester, security, devops, architect, product_owner,
 /// senior_developer, tech_writer.
 ///
-/// The 72 actions are the union of the per-role action sets in SPEC §4.
+/// The 74 actions are the union of the per-role action sets in SPEC §4
+/// (72 original + 2 assessment actions: generate-assessment-questions,
+/// analyze-assessment-response under product_owner — added in assessment P0).
 /// Which (role, action) pairs are valid is the per-role eligibility matrix.
 /// </summary>
 [TestFixture]
@@ -39,9 +41,11 @@ public class RolePhaseMapTests
     }
 
     [Test]
-    public void ValidActions_Should_Contain_Seventy_Two_Actions()
+    public void ValidActions_Should_Contain_Seventy_Four_Actions()
     {
-        RolePhaseMap.ValidActions.Should().HaveCount(72);
+        // 72 original actions + 2 assessment actions added in assessment P0
+        // (generate-assessment-questions, analyze-assessment-response under product_owner).
+        RolePhaseMap.ValidActions.Should().HaveCount(74);
     }
 
     [Test]

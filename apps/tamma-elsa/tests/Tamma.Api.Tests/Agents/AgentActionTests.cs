@@ -24,7 +24,9 @@ public class AgentActionTests
     [Test]
     public void Has_the_expected_token_count()
     {
-        Enum.GetValues<AgentAction>().Length.Should().Be(72);
+        // 72 original + 2 assessment actions (generate-assessment-questions,
+        // analyze-assessment-response) added in assessment P0.
+        Enum.GetValues<AgentAction>().Length.Should().Be(74);
     }
 
     [TestCase("context-scan", AgentAction.ContextScan)]
