@@ -5,40 +5,36 @@ using Tamma.Data.Abstractions;
 namespace Tamma.Api.Services.Provisioning.V2;
 
 /// <summary>
-/// Story 30-8 — production
+/// Story 30-8 / Epic 30 Phase B (B1) — production
 /// <see cref="ITenantEndpointDirectory"/> that bridges
 /// <see cref="LruPooledTenantConnectionResolver"/> (in
 /// <c>Tamma.Data.Pooling</c>) to the V2 provider surface
 /// (<see cref="ITenantInfrastructureProvider"/> +
 /// <see cref="TenantProviderRegistry"/>).
 ///
-/// <para>Resolution flow per <c>TryResolveAsync(tenantId)</c>:
-/// <list type="number">
-///   <item><description>Look up <c>tenants.provider_key</c> via
-///     <see cref="ITenantProviderKeyLookup"/>. If <c>null</c> →
-///     <see cref="TenantEndpointResolution.NotApplicable"/>; the LRU
-///     resolver falls back to the legacy
-///     <c>EncryptedConnectionString</c> path.</description></item>
-///   <item><description>Look up the registered provider via
-///     <see cref="TenantProviderRegistry.TryGetProvider"/>. If the
-///     provider key is unknown to the registry → log a WARN +
-///     <see cref="TenantEndpointResolution.NotApplicable"/>. This
-///     handles deployments where a tenant has been migrated to a
-///     provider the local process doesn't have wired (e.g. Cloudflare
-///     provider on a deployment without the Cloudflare client). The
-///     legacy fallback gives the operator a chance to recover.</description></item>
-///   <item><description>Call
-///     <see cref="ITenantInfrastructureProvider.ResolveEndpointsAsync"/>.
-///     Provider-thrown
-///     <see cref="InvalidOperationException"/> ("not in a state where
-///     endpoints are available") translates to
-///     <see cref="TenantNotProvisionedException"/> so the resolver's
-///     negative cache + status middleware behave consistently across
-///     the V2 path and the legacy path.</description></item>
-///   <item><description>Build a
-///     <see cref="TenantEndpointResolution"/> from the provider's
-///     <see cref="TenantEndpoints"/> and return it.</description></item>
-/// </list></para>
+/// <para><b>B1 — the DB-routing bypass is removed.</b> The unified
+/// per-tenant <c>EncryptedConnectionString</c> envelope (via the
+/// <c>tenant_databases</c> pool) is the SINGLE DB route. This directory
+/// no longer turns a provider-supplied <c>DatabaseUrl</c> into a routed
+/// connection string. <c>TryResolveAsync(tenantId)</c> therefore always
+/// returns <see cref="TenantEndpointResolution.NotApplicable"/> for the
+/// resolver's DB-routing purpose, so the resolver falls through to the
+/// unified <c>EncryptedConnectionString</c> path for EVERY tenant —
+/// including provider-backed (Cranl / dedicated-compute) tenants. That
+/// path is fail-closed: a provider-keyed tenant whose unified envelope is
+/// missing surfaces <c>TenantConnectionStringMissingException</c> rather
+/// than silently routing to the central connection.</para>
+///
+/// <para>The provider <c>provider_key</c> is still read (via
+/// <see cref="ITenantProviderKeyLookup"/>) purely for observability — a
+/// provider-backed tenant is logged at Debug, and a tenant claiming a
+/// key that isn't wired in this deployment (unknown to
+/// <see cref="TenantProviderRegistry.TryGetProvider"/>) is logged at
+/// Warn — but neither changes the DB route. Engine-URL resolution for a
+/// future dedicated-compute engine dispatch stays available on
+/// <see cref="ITenantInfrastructureProvider.ResolveEndpointsAsync"/> for
+/// a distinct future consumer; it is intentionally NOT called on the
+/// DB-routing hot path.</para>
 ///
 /// <para><b>Concurrency</b>: this type is a thread-safe singleton.
 /// Multiple LRU cold-misses for the same tenant call
@@ -72,94 +68,65 @@ public sealed class V2TenantEndpointDirectory : ITenantEndpointDirectory
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        // 1. Read provider_key from CP. NullTenantFoundException bubbles.
-        string? providerKey;
-        try
-        {
-            providerKey = await _providerKeyLookup
-                .GetProviderKeyAsync(tenantId, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (TenantNotFoundException)
-        {
-            // Bubble verbatim — the resolver expects this to surface as
-            // a definitive 404 / "no such tenant".
-            throw;
-        }
+        // Epic 30 Phase B (B1) — the unified per-tenant
+        // EncryptedConnectionString envelope (via the tenant_databases
+        // pool) is the SINGLE DB route. This directory no longer turns a
+        // provider-supplied DatabaseUrl into a routed connection string;
+        // that bypass is removed. EVERY tenant — including provider-backed
+        // (Cranl / dedicated-compute) tenants — resolves its DB connection
+        // through the unified envelope, so this method always returns
+        // NotApplicable for the resolver's DB-routing purpose. The resolver
+        // then falls through to its EncryptedConnectionString path, which is
+        // fail-closed: a provider-keyed tenant whose unified envelope is
+        // missing surfaces TenantConnectionStringMissingException rather than
+        // silently routing to the central connection.
+        //
+        // Engine-URL resolution for a future dedicated-compute engine
+        // dispatch stays available on
+        // ITenantInfrastructureProvider.ResolveEndpointsAsync (reachable via
+        // the registry) for a distinct future consumer. It is intentionally
+        // NOT called here — DB routing must never depend on a provider
+        // round-trip, and must never be short-circuited by the provider's
+        // provisioning state (which would preempt the unified envelope's
+        // own fail-closed handling).
+
+        // 1. Read provider_key from CP — purely for observability now.
+        //    TenantNotFoundException bubbles verbatim (definitive 404),
+        //    matching the resolver's own not-found surface.
+        var providerKey = await _providerKeyLookup
+            .GetProviderKeyAsync(tenantId, cancellationToken)
+            .ConfigureAwait(false);
 
         if (string.IsNullOrWhiteSpace(providerKey))
         {
-            // Legacy tenant — no V2 routing applies. Resolver falls
-            // back to the EncryptedConnectionString path.
+            // Legacy / unified-only tenant — nothing provider-specific to
+            // note. Resolver uses the EncryptedConnectionString path.
             return TenantEndpointResolution.NotApplicable;
         }
 
-        // 2. Find the provider. Unknown key → NotApplicable so the
-        //    resolver can still recover via the legacy path. We log a
-        //    warning so operators see that a tenant claims to be on a
-        //    provider that isn't wired in this deployment.
-        if (!_registry.TryGetProvider(providerKey, out var provider) || provider is null)
+        // 2. Provider-backed tenant. Emit an observability signal, then still
+        //    route via the unified envelope. A tenant claiming a provider key
+        //    that isn't wired in this deployment is worth a WARN — but it no
+        //    longer changes the DB route (the pool envelope is authoritative).
+        if (_registry.TryGetProvider(providerKey, out _))
+        {
+            _logger.LogDebug(
+                "tenant.routing.provider_backed_via_unified_envelope tenantId={TenantId} providerKey={ProviderKey}",
+                tenantId,
+                providerKey);
+        }
+        else
         {
             _logger.LogWarning(
                 "tenant.routing.provider_key_unregistered tenantId={TenantId} providerKey={ProviderKey} " +
-                "registeredKeys={RegisteredKeys} fallback=legacy",
+                "registeredKeys={RegisteredKeys} route=unified_envelope",
                 tenantId,
                 providerKey,
                 string.Join(",", _registry.RegisteredKeys));
-            return TenantEndpointResolution.NotApplicable;
         }
 
-        // 3. Resolve endpoints. Translate provider exceptions into the
-        //    abstraction-layer exceptions Tamma.Data understands.
-        TenantEndpoints endpoints;
-        try
-        {
-            endpoints = await provider
-                .ResolveEndpointsAsync(tenantId, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (InvalidOperationException ex)
-        {
-            // The V2 contract uses InvalidOperationException to mean
-            // "tenant is not in a state where endpoints are available"
-            // (e.g. ProvisioningState.Pending). The LRU resolver's
-            // negative cache + Story 28-8 middleware both speak
-            // TenantNotProvisionedException, so translate.
-            _logger.LogInformation(
-                "tenant.routing.endpoints_unavailable tenantId={TenantId} providerKey={ProviderKey} reason={Reason}",
-                tenantId,
-                providerKey,
-                ex.Message);
-            throw new TenantNotProvisionedException(tenantId, providerKey);
-        }
-        catch (NotSupportedException)
-        {
-            // Null provider seam was selected (or another provider
-            // explicitly opted out). NotApplicable so the resolver
-            // falls back to the legacy path — distinct from the
-            // not-provisioned semantic above.
-            _logger.LogWarning(
-                "tenant.routing.provider_not_supported tenantId={TenantId} providerKey={ProviderKey} fallback=legacy",
-                tenantId,
-                providerKey);
-            return TenantEndpointResolution.NotApplicable;
-        }
-
-        if (string.IsNullOrWhiteSpace(endpoints.DatabaseUrl))
-        {
-            // Provider returned without a database URL — treat as
-            // "endpoints unavailable" so the resolver doesn't try to
-            // build a NpgsqlDataSource on an empty string.
-            _logger.LogWarning(
-                "tenant.routing.endpoints_missing_db_url tenantId={TenantId} providerKey={ProviderKey}",
-                tenantId,
-                providerKey);
-            throw new TenantNotProvisionedException(tenantId, providerKey);
-        }
-
-        return TenantEndpointResolution.Resolved(
-            endpoints.DatabaseUrl,
-            endpoints.EngineUrl,
-            providerKey);
+        // B1: never return a provider DatabaseUrl. Unified envelope is the
+        // one and only DB route.
+        return TenantEndpointResolution.NotApplicable;
     }
 }

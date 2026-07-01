@@ -474,12 +474,8 @@ internal sealed class MinimalCpDbContext : ControlPlaneDbContext
             b.Ignore(t => t.Settings);
             b.Ignore(t => t.CreatedAt);
             b.Ignore(t => t.UpdatedAt);
-            b.Ignore(t => t.CranlProjectId);
-            b.Ignore(t => t.CranlDatabaseId);
-            b.Ignore(t => t.CranlAppId);
-            b.Ignore(t => t.CranlRegion);
-            b.Ignore(t => t.CranlDatabaseUrlEncrypted);
-            b.Ignore(t => t.CranlAppUrl);
+            // Epic 30 Phase B (Task B3): the six dedicated Cranl columns were
+            // dropped from the Tenant entity, so there is nothing to Ignore.
             b.Ignore(t => t.ProvisioningState);
             b.Ignore(t => t.ProvisioningDetail);
             b.Ignore(t => t.ProvisioningUpdatedAt);

@@ -508,30 +508,39 @@ public class ControlPlaneDbContextModelTests
         slugIndex!.IsUnique.Should().BeTrue();
     }
 
+    // Epic 30 Phase B (Task B3) — SHIPPED. The six dedicated Cranl columns
+    // were dropped (migration DropCranlTenantColumns); their walk/resume state
+    // moved into the tenants.provider_resource_ids JSONB (CranlResourceIds) and
+    // the encrypted admin DB URL onto the tenant_databases pool row. B1 already
+    // removed the LruPooledTenantConnectionResolver's dependency on
+    // CranlDatabaseUrlEncrypted (every tenant now routes through the unified
+    // EncryptedConnectionString envelope), so the stale rationale that kept this
+    // test [Ignore]d no longer holds — it is re-enabled here.
+    //
+    // Deviation from the original Story 28-1 test: the three Provisioning*
+    // assertions were DELETED. B3 KEEPS ProvisioningState/ProvisioningDetail/
+    // ProvisioningUpdatedAt (the saga state machine) — only the six Cranl
+    // columns were dropped, so asserting the Provisioning* columns are absent
+    // would be wrong.
     [Test]
-    [Ignore("Story 28-1 PR D — Decision #3: keep this test ignored until "
-        + "Epic 30 ships pluggable infra backends and an alternative "
-        + "routing column. Today the Cranl columns are load-bearing "
-        + "(Story 29-10 stopgap) — LruPooledTenantConnectionResolver "
-        + "reads tenants.CranlDatabaseUrlEncrypted to route per-request "
-        + "DB connections in production. Re-enable when Epic 30 lands "
-        + "the alternative routing column.")]
-    public void Tenants_Cranl_Columns_Are_Ignored_On_NewContext()
+    public void Tenants_Cranl_Columns_Are_Dropped_From_Model()
     {
         using var ctx = CreateContext();
 
         var tenant = ctx.Model.FindEntityType(typeof(Tenant))!;
         var propertyNames = tenant.GetProperties().Select(p => p.Name).ToHashSet();
 
-        // Cranl columns belong to the legacy single-DB topology.
+        // Dropped in Epic 30 Phase B (Task B3).
         propertyNames.Should().NotContain("CranlProjectId");
         propertyNames.Should().NotContain("CranlDatabaseId");
         propertyNames.Should().NotContain("CranlAppId");
         propertyNames.Should().NotContain("CranlAppUrl");
         propertyNames.Should().NotContain("CranlDatabaseUrlEncrypted");
         propertyNames.Should().NotContain("CranlRegion");
-        propertyNames.Should().NotContain("ProvisioningState");
-        propertyNames.Should().NotContain("ProvisioningDetail");
-        propertyNames.Should().NotContain("ProvisioningUpdatedAt");
+
+        // KEPT by B3 — the saga state machine stays on the tenants row.
+        propertyNames.Should().Contain("ProvisioningState");
+        propertyNames.Should().Contain("ProvisioningDetail");
+        propertyNames.Should().Contain("ProvisioningUpdatedAt");
     }
 }

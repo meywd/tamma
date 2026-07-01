@@ -115,6 +115,14 @@ public sealed class CranlDatabase
     /// <see cref="ConnectionString"/> if Cranl provided one; otherwise stitches
     /// <c>postgresql://user:pass@host:port/db</c>. Returns null when any required
     /// part is missing.
+    ///
+    /// <para>The username and password are percent-encoded
+    /// (<see cref="Uri.EscapeDataString(string)"/>) so a random Cranl-minted
+    /// credential containing URI-reserved chars (<c>@ : / # ? % + </c> or
+    /// space) produces a VALID libpq URI — both for the pool-row admin string
+    /// parse and for the <c>DATABASE_URL</c> the Cranl engine reads. The
+    /// keyword-form parser percent-decodes on the way back, so the credential
+    /// round-trips exactly.</para>
     /// </summary>
     public string? BuildConnectionString()
     {
@@ -124,7 +132,9 @@ public sealed class CranlDatabase
             || string.IsNullOrWhiteSpace(Password) || string.IsNullOrWhiteSpace(Database))
             return null;
         var port = Port ?? 5432;
-        return $"postgresql://{Username}:{Password}@{Host}:{port}/{Database}";
+        var user = Uri.EscapeDataString(Username);
+        var pass = Uri.EscapeDataString(Password);
+        return $"postgresql://{user}:{pass}@{Host}:{port}/{Database}";
     }
 }
 

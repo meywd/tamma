@@ -29,28 +29,20 @@ namespace Tamma.Api.Tests.Provisioning.V2;
 ///     reads the structured failure short-code from the
 ///     <c>FailureReason</c> shadow column when state is <c>Failed</c>.</description></item>
 ///   <item><description><see cref="ITenantInfrastructureProvider.ResolveEndpointsAsync"/>
-///     decrypts the stored <c>CranlDatabaseUrlEncrypted</c> via
-///     <see cref="TenantSecretProtector"/> and assembles the
-///     <see cref="TenantEndpoints"/>.</description></item>
+///     assembles the engine <see cref="TenantEndpoints"/> from the
+///     <c>cranl_app_url</c> in the provider_resource_ids JSONB. Epic 30
+///     Phase B (Task B3): the DB URL was dropped from the endpoint — B1 made
+///     DB routing flow through the unified pool envelope, not this field.</description></item>
 /// </list>
 /// </summary>
 [TestFixture]
 public sealed class CranlTenantProviderV2Tests
 {
-    private static readonly byte[] TestKey =
-    {
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-        0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
-        0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-        0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
-    };
-
     private IServiceScope _scope = null!;
 #pragma warning disable NUnit1032
     private ControlPlaneDbContext _db = null!;
 #pragma warning restore NUnit1032
     private Mock<IPlatformQueuedTaskRepository> _platformTasks = null!;
-    private TenantSecretProtector _protector = null!;
     private CranlOptions _options = null!;
     private CranlTenantProviderV2 _provider = null!;
 
@@ -71,7 +63,6 @@ public sealed class CranlTenantProviderV2Tests
                 return t;
             });
 
-        _protector = new TenantSecretProtector(TestKey);
         _options = new CranlOptions
         {
             ApiKey = "cranl_sk_test_dummy",
@@ -80,7 +71,7 @@ public sealed class CranlTenantProviderV2Tests
         };
 
         _provider = new CranlTenantProviderV2(
-            _db, _platformTasks.Object, _protector, _options,
+            _db, _platformTasks.Object, _options,
             NullLogger<CranlTenantProviderV2>.Instance);
     }
 
@@ -94,7 +85,6 @@ public sealed class CranlTenantProviderV2Tests
         string? appId = null,
         string? region = null,
         string? appUrl = null,
-        byte[]? dbUrlEncrypted = null,
         string? failureReason = null)
     {
         var tenant = new Tenant
@@ -103,23 +93,29 @@ public sealed class CranlTenantProviderV2Tests
             Name = "Acme",
             Slug = "acme-" + Guid.NewGuid().ToString("N").Substring(0, 6),
             ProvisioningState = state,
-            CranlProjectId = projectId,
-            CranlDatabaseId = databaseId,
-            CranlAppId = appId,
-            CranlRegion = region,
-            CranlAppUrl = appUrl,
-            CranlDatabaseUrlEncrypted = dbUrlEncrypted,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
         _db.Tenants.Add(tenant);
         await _db.SaveChangesAsync();
 
+        // B3: the Cranl walk ids live in the provider_resource_ids JSONB
+        // (CranlResourceIds), not dedicated columns.
+        var entry = _db.Entry(tenant);
+        if (!string.IsNullOrEmpty(projectId))
+            CranlResourceIds.Set(entry, CranlResourceIds.ProjectId, projectId);
+        if (!string.IsNullOrEmpty(databaseId))
+            CranlResourceIds.Set(entry, CranlResourceIds.DatabaseId, databaseId);
+        if (!string.IsNullOrEmpty(appId))
+            CranlResourceIds.Set(entry, CranlResourceIds.AppId, appId);
+        if (!string.IsNullOrEmpty(region))
+            CranlResourceIds.Set(entry, CranlResourceIds.Region, region);
+        if (!string.IsNullOrEmpty(appUrl))
+            CranlResourceIds.Set(entry, CranlResourceIds.AppUrl, appUrl);
         if (failureReason is not null)
-        {
-            _db.Entry(tenant).Property<string?>("FailureReason").CurrentValue = failureReason;
-            await _db.SaveChangesAsync();
-        }
+            entry.Property<string?>("FailureReason").CurrentValue = failureReason;
+        await _db.SaveChangesAsync();
+
         return tenant;
     }
 
@@ -238,15 +234,13 @@ public sealed class CranlTenantProviderV2Tests
     [Test]
     public async Task ProvisionAsync_AlreadyReady_DoesNotReProvisionAndExposesEndpoint()
     {
-        var encrypted = _protector.Encrypt("postgresql://u:p@db.cranl.net/x");
         var tenant = await SeedAsync(
             state: "ready",
             projectId: "proj-1",
             databaseId: "db-1",
             appId: "app-1",
             region: "germany-1",
-            appUrl: "tamma-engine-x.cranl.net",
-            dbUrlEncrypted: encrypted);
+            appUrl: "tamma-engine-x.cranl.net");
 
         var result = await _provider.ProvisionAsync(
             tenant.Id,
@@ -255,7 +249,9 @@ public sealed class CranlTenantProviderV2Tests
 
         result.Status.State.Should().Be(ProvisioningState.Ready);
         result.Endpoints.Should().NotBeNull();
-        result.Endpoints!.DatabaseUrl.Should().Be("postgresql://u:p@db.cranl.net/x");
+        // B3: DB routing is owned by the unified pool envelope — the endpoint
+        // no longer carries a DatabaseUrl. The engine host survives.
+        result.Endpoints!.DatabaseUrl.Should().BeEmpty();
         result.Endpoints.EngineHost.Should().Be("tamma-engine-x.cranl.net");
         result.Endpoints.EngineUrl.Should().Be("https://tamma-engine-x.cranl.net");
         result.ProviderResourceIds.Should().ContainKeys(
@@ -356,27 +352,27 @@ public sealed class CranlTenantProviderV2Tests
     // ─── ResolveEndpointsAsync ───────────────────────────────────────────
 
     [Test]
-    public async Task ResolveEndpointsAsync_ReadyTenant_DecryptsAndAssembles()
+    public async Task ResolveEndpointsAsync_ReadyTenant_AssemblesEngineEndpoint()
     {
-        var encrypted = _protector.Encrypt("postgresql://user:secret@cranl.example/db");
         var tenant = await SeedAsync(
             state: "ready",
             projectId: "proj-1",
-            appUrl: "tamma-engine-y.cranl.net",
-            dbUrlEncrypted: encrypted);
+            appUrl: "tamma-engine-y.cranl.net");
 
         var endpoints = await _provider.ResolveEndpointsAsync(
             tenant.Id, CancellationToken.None);
 
-        endpoints.DatabaseUrl.Should().Be("postgresql://user:secret@cranl.example/db");
+        // B3: DB routing moved to the unified pool envelope — no DatabaseUrl.
+        endpoints.DatabaseUrl.Should().BeEmpty();
         endpoints.EngineHost.Should().Be("tamma-engine-y.cranl.net");
         endpoints.EngineUrl.Should().Be("https://tamma-engine-y.cranl.net");
         endpoints.CustomDomain.Should().BeNull();
     }
 
     [Test]
-    public async Task ResolveEndpointsAsync_NoEncryptedUrl_Throws()
+    public async Task ResolveEndpointsAsync_NoEngineHost_Throws()
     {
+        // No cranl_app_url yet (pending) → no engine endpoint → fail loud.
         var tenant = await SeedAsync(state: "pending");
 
         var act = async () => await _provider.ResolveEndpointsAsync(

@@ -12,9 +12,10 @@ namespace Tamma.Api.Services.Secrets.Stopgap;
 /// runtime reads through <see cref="IRuntimeSecretResolver"/>.</para>
 ///
 /// <para>All entries are <b>platform-scoped</b> in the current port —
-/// per-tenant Cranl DATABASE_URL entries are handled out-of-band by
-/// the provisioning flow (one row per tenant, imported dynamically
-/// based on the <c>tenants.CranlDatabaseUrlEncrypted</c> column).</para>
+/// per-tenant Cranl DATABASE_URL secrets are handled out-of-band by the
+/// provisioning flow. Since Epic 30 Phase B (Task B3) the encrypted admin
+/// credential lives on the tenant's <c>tenant_databases</c> pool row
+/// (<c>AdminConnectionStringEncrypted</c>), not a dedicated tenant column.</para>
 /// </summary>
 public static class StopgapSecretMap
 {

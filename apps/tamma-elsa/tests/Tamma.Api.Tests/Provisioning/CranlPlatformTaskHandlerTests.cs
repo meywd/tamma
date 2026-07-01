@@ -45,6 +45,8 @@ public sealed class CranlPlatformTaskHandlerTests
     private Mock<ICranlApiClient> _cranl = null!;
     private CranlOptions _options = null!;
     private TenantSecretProtector _protector = null!;
+    private ITenantConnectionStringProtector _connProtector = null!;
+    private Mock<ITenantMoveService> _moveService = null!;
     private IConfiguration _configuration = null!;
     private CranlProvisioningWorkflow _workflow = null!;
 
@@ -67,6 +69,8 @@ public sealed class CranlPlatformTaskHandlerTests
             DefaultBranch = "main"
         };
         _protector = new TenantSecretProtector(new byte[32]);
+        _connProtector = new TenantSecretProtectorAdapter(_protector);
+        _moveService = new Mock<ITenantMoveService>();
         _configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -76,8 +80,9 @@ public sealed class CranlPlatformTaskHandlerTests
             .Build();
 
         _workflow = new CranlProvisioningWorkflow(
-            _db, _cranl.Object, _options, _protector, _configuration,
-            NullLogger<CranlProvisioningWorkflow>.Instance);
+            _db, _cranl.Object, _options, _configuration,
+            NullLogger<CranlProvisioningWorkflow>.Instance,
+            _connProtector, _moveService.Object);
     }
 
     [TearDown]
@@ -154,8 +159,10 @@ public sealed class CranlPlatformTaskHandlerTests
 
         var refreshed = await ReloadAsync(tenant.Id);
         refreshed.ProvisioningState.Should().Be("ready");
-        refreshed.CranlProjectId.Should().Be("proj-1");
-        refreshed.CranlAppId.Should().Be("app-1");
+        // B3: walk ids land in the provider_resource_ids JSONB.
+        var ids = CranlResourceIds.Read(_db.Entry(refreshed));
+        ids.Should().Contain(CranlResourceIds.ProjectId, "proj-1");
+        ids.Should().Contain(CranlResourceIds.AppId, "app-1");
         // The handler genuinely walked the Cranl REST flow via the engine.
         _cranl.Verify(c => c.CreateProjectAsync(
             It.IsAny<string>(), "org-1", It.IsAny<CancellationToken>()), Times.Once);
@@ -251,11 +258,11 @@ public sealed class CranlPlatformTaskHandlerTests
     public async Task DeprovisionHandler_HappyPath_DrivesWorkflowToDeprovisioned()
     {
         var tenant = await SeedTenantAsync(state: "ready");
-        tenant.CranlProjectId = "proj-1";
-        tenant.CranlDatabaseId = "db-1";
-        tenant.CranlAppId = "app-1";
-        tenant.CranlAppUrl = "x.cranl.net";
-        tenant.CranlDatabaseUrlEncrypted = _protector.Encrypt("postgresql://h");
+        var entry = _db.Entry(tenant);
+        CranlResourceIds.Set(entry, CranlResourceIds.ProjectId, "proj-1");
+        CranlResourceIds.Set(entry, CranlResourceIds.DatabaseId, "db-1");
+        CranlResourceIds.Set(entry, CranlResourceIds.AppId, "app-1");
+        CranlResourceIds.Set(entry, CranlResourceIds.AppUrl, "x.cranl.net");
         await _db.SaveChangesAsync();
 
         _cranl.Setup(c => c.DeleteApplicationAsync("app-1", It.IsAny<CancellationToken>()))
@@ -281,8 +288,10 @@ public sealed class CranlPlatformTaskHandlerTests
 
         var refreshed = await ReloadAsync(tenant.Id);
         refreshed.ProvisioningState.Should().Be("deprovisioned");
-        refreshed.CranlProjectId.Should().BeNull();
-        refreshed.CranlAppId.Should().BeNull();
+        // B3: teardown clears the Cranl ids from the JSONB.
+        var ids = CranlResourceIds.Read(_db.Entry(refreshed));
+        ids.Should().NotContainKey(CranlResourceIds.ProjectId);
+        ids.Should().NotContainKey(CranlResourceIds.AppId);
     }
 
     [Test]
@@ -344,6 +353,12 @@ public sealed class CranlPlatformTaskHandlerTests
         // registered handler, so the whole graph must be satisfiable.
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton(Mock.Of<IPlatformEventPublisher>());
+        // Epic 30 Phase B — CranlProvisioningWorkflow now takes the pool-row
+        // protector + the schema-move engine (both provided by
+        // AddPlatformEventBus in production, not wired in this bare graph).
+        services.AddSingleton(Mock.Of<ITenantMoveService>());
+        services.AddSingleton<ITenantConnectionStringProtector>(sp =>
+            new TenantSecretProtectorAdapter(sp.GetRequiredService<TenantSecretProtector>()));
         services.AddTenantProvisioning(configuration);
 
         using var sp = services.BuildServiceProvider();

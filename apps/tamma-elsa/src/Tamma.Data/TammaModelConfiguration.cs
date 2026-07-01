@@ -190,15 +190,13 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
 
-            // Cranl per-tenant provisioning columns (audit cranl/001).
+            // Cranl per-tenant provisioning state machine. Epic 30 Phase B
+            // (Task B3) dropped the six dedicated Cranl columns
+            // (project/db/app ids, region, app url, encrypted DB URL) — that
+            // walk/resume state now lives in provider_resource_ids JSONB and
+            // the tenant_databases pool row. ProvisioningState stays here.
             entity.Property(e => e.ProvisioningState)
                 .IsRequired().HasMaxLength(40).HasDefaultValue("none");
-            entity.Property(e => e.CranlProjectId).HasMaxLength(255);
-            entity.Property(e => e.CranlDatabaseId).HasMaxLength(255);
-            entity.Property(e => e.CranlAppId).HasMaxLength(255);
-            entity.Property(e => e.CranlRegion).HasMaxLength(100);
-            entity.Property(e => e.CranlAppUrl).HasMaxLength(255);
-            entity.Property(e => e.CranlDatabaseUrlEncrypted).HasColumnType("bytea");
 
             if (includeTenantShadowColumns)
             {
