@@ -175,6 +175,8 @@ public static class DependencyInjection
         services.TryAddScoped<IPlatformEventRepository, PlatformEventRepository>();
         services.TryAddScoped<IPlatformQueuedTaskRepository, PlatformQueuedTaskRepository>();
         services.TryAddScoped<IPlatformEmailOutboxRepository, PlatformEmailOutboxRepository>();
+        // Story 38-3 — control-plane Slack notification outbox repository.
+        services.TryAddScoped<ISlackOutboxRepository, SlackOutboxRepository>();
 
         return services;
     }

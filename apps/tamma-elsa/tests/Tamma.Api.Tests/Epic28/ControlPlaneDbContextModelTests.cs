@@ -66,6 +66,10 @@ public class ControlPlaneDbContextModelTests
             "platform_events",
             "platform_queued_tasks",
             "platform_email_outbox",
+            // Story 38-3 — control-plane Slack notification outbox (Class D
+            // step-mediation). CP-resident so it delivers regardless of tenant-DB
+            // routing (same rationale as platform_email_outbox).
+            "slack_outbox",
             // Story 28-7 — bearer-token routing index.
             "platform_api_key_index",
             // Story 28-10 — hourly analytics fact table.
@@ -141,7 +145,8 @@ public class ControlPlaneDbContextModelTests
             + "Story 34-1 adds plan_features + plan_entitlements + plan_prices. "
             + "Story 35-1 adds billing_customers + billing_plan_prices. "
             + "Story 37-1 adds audit_records + audit_projector_cursor. "
-            + "Story 34-11 adds providers + provider_model_prices.");
+            + "Story 34-11 adds providers + provider_model_prices. "
+            + "Story 38-3 adds slack_outbox.");
     }
 
     // ── Story 34-11 — provider cost price-book model shape ──

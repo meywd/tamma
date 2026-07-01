@@ -6,6 +6,7 @@ using Tamma.Api.Services.Alerts.Rules;
 using Tamma.Api.Services.Conventions;
 using Tamma.Api.Services.Email;
 using Tamma.Api.Services.Engine.Lifecycle;
+using Tamma.Api.Services.Notifications;
 using Tamma.Api.Services.PlatformTasks;
 using Tamma.Api.Services.Providers;
 using Tamma.Api.Services.TaskQueue;
@@ -84,6 +85,14 @@ internal static class AlertHostedServiceTestExtensions
             // override per-fixture.
             services.RemoveAll<OutboxSmtpSenderOptions>();
             services.AddSingleton(new OutboxSmtpSenderOptions
+            {
+                RunOnStartup = false,
+            });
+
+            // Story 38-3 — gate the Slack notification outbox sender the same way
+            // so it never races endpoint tests asserting slack_outbox row state.
+            services.RemoveAll<OutboxSlackSenderOptions>();
+            services.AddSingleton(new OutboxSlackSenderOptions
             {
                 RunOnStartup = false,
             });
