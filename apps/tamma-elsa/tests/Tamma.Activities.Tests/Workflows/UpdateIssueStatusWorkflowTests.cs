@@ -186,7 +186,7 @@ public class UpdateIssueStatusWorkflowTests
             .ToList();
 
         ids.Should().Contain("OutSuccess");   // success = true
-        ids.Should().Contain("OutDegraded");  // degraded flag (auditable local no-op)
+        ids.Should().Contain("OutIssueNumber");
     }
 
     // ================================================================

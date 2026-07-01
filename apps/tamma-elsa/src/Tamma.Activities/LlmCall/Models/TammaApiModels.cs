@@ -265,6 +265,106 @@ public record PlatformEventRecord(
     [property: JsonPropertyName("createdAt")] DateTime? CreatedAt
 );
 
+// ============================================================
+// Story 38-1 (Epic 38): git-mediation wire models
+//
+// These mirror the JSON shapes of Tamma.Api's Services/Git request records +
+// GitMediationResult for the engine→API git-mediation endpoints
+// POST/PUT/GET/PATCH /api/v1/git/{owner}/{repo}/... . They live in
+// Tamma.Activities (the reference graph runs Tamma.Api → Tamma.Activities, so the
+// engine client cannot see Tamma.Api's types) and carry [JsonPropertyName]
+// camelCase to match the API's CamelCase serialization. NONE carry a token — the
+// API resolves the per-tenant credential server-side; only credentialSource (the
+// LABEL) ever comes back.
+// ============================================================
+
+public sealed record GitCreateBranchRequest
+{
+    [JsonPropertyName("branchName")] public string BranchName { get; init; } = string.Empty;
+    [JsonPropertyName("baseRef")] public string BaseRef { get; init; } = "main";
+    [JsonPropertyName("conflictStrategy")] public string? ConflictStrategy { get; init; }
+    [JsonPropertyName("issueNumber")] public int IssueNumber { get; init; }
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
+public sealed record GitCreatePrRequest
+{
+    [JsonPropertyName("title")] public string Title { get; init; } = string.Empty;
+    [JsonPropertyName("body")] public string? Body { get; init; }
+    [JsonPropertyName("headRef")] public string HeadRef { get; init; } = string.Empty;
+    [JsonPropertyName("baseRef")] public string BaseRef { get; init; } = "main";
+    [JsonPropertyName("labels")] public IReadOnlyList<string>? Labels { get; init; }
+    [JsonPropertyName("reviewers")] public IReadOnlyList<string>? Reviewers { get; init; }
+    [JsonPropertyName("isDraft")] public bool IsDraft { get; init; }
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
+public sealed record GitMergePrRequest
+{
+    [JsonPropertyName("mergeStrategy")] public string? MergeStrategy { get; init; }
+    [JsonPropertyName("issueNumber")] public int IssueNumber { get; init; }
+    [JsonPropertyName("branchName")] public string? BranchName { get; init; }
+    [JsonPropertyName("autoDeleteBranch")] public bool AutoDeleteBranch { get; init; } = true;
+    [JsonPropertyName("closeAssociatedIssue")] public bool CloseAssociatedIssue { get; init; } = true;
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
+public sealed record GitUpdateIssueRequest
+{
+    [JsonPropertyName("body")] public string? Body { get; init; }
+    [JsonPropertyName("addLabels")] public IReadOnlyList<string>? AddLabels { get; init; }
+    [JsonPropertyName("removeLabels")] public IReadOnlyList<string>? RemoveLabels { get; init; }
+    [JsonPropertyName("status")] public string? Status { get; init; }
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// Engine→API wire response for the git-mediation endpoints. Mirrors
+/// <c>Tamma.Api.Services.Git.GitMediationResult</c>. KEY-FREE: only the
+/// <see cref="CredentialSource"/> LABEL is ever present — never the token.
+/// </summary>
+public sealed record GitCallResponse
+{
+    [JsonPropertyName("success")] public bool Success { get; init; }
+    [JsonPropertyName("credentialSource")] public string? CredentialSource { get; init; }
+    [JsonPropertyName("outcome")] public string? Outcome { get; init; }
+
+    [JsonPropertyName("branchRef")] public string? BranchRef { get; init; }
+    [JsonPropertyName("baseSha")] public string? BaseSha { get; init; }
+    [JsonPropertyName("conflictResolved")] public bool? ConflictResolved { get; init; }
+
+    [JsonPropertyName("prNumber")] public int? PrNumber { get; init; }
+    [JsonPropertyName("prUrl")] public string? PrUrl { get; init; }
+    [JsonPropertyName("reused")] public bool? Reused { get; init; }
+    [JsonPropertyName("isDraft")] public bool? IsDraft { get; init; }
+
+    [JsonPropertyName("merged")] public bool? Merged { get; init; }
+    [JsonPropertyName("mergeSha")] public string? MergeSha { get; init; }
+    [JsonPropertyName("issueClosed")] public bool? IssueClosed { get; init; }
+    [JsonPropertyName("branchDeleted")] public bool? BranchDeleted { get; init; }
+    [JsonPropertyName("alreadyMerged")] public bool? AlreadyMerged { get; init; }
+
+    [JsonPropertyName("issueStatus")] public string? IssueStatus { get; init; }
+
+    [JsonPropertyName("comments")] public IReadOnlyList<GitCommentDto>? Comments { get; init; }
+
+    [JsonPropertyName("failureCode")] public string? FailureCode { get; init; }
+    [JsonPropertyName("failureReason")] public string? FailureReason { get; init; }
+    [JsonPropertyName("platformStatusCode")] public int? PlatformStatusCode { get; init; }
+    [JsonPropertyName("correlationId")] public string? CorrelationId { get; init; }
+}
+
+/// <summary>A key-free PR review comment. Mirrors <c>Tamma.Api.Services.Git.PrCommentDto</c>.</summary>
+public sealed record GitCommentDto
+{
+    [JsonPropertyName("id")] public long Id { get; init; }
+    [JsonPropertyName("body")] public string Body { get; init; } = string.Empty;
+    [JsonPropertyName("path")] public string? Path { get; init; }
+    [JsonPropertyName("line")] public int? Line { get; init; }
+    [JsonPropertyName("author")] public string Author { get; init; } = string.Empty;
+    [JsonPropertyName("createdAt")] public DateTime CreatedAt { get; init; }
+}
+
 /// <summary>
 /// Wire projection of one engine <c>TammaEvent</c> (see
 /// <c>Tamma.Activities.Core.TammaEvent</c>). camelCase to match the API DTO

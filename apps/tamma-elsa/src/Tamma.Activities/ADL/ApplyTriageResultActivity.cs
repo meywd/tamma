@@ -125,7 +125,7 @@ public class ApplyTriageResultActivity : TammaOutcomeActivity
         // Resolve the apply client. A directly-injected ITriageApplyClient (test seam, or
         // a future DI registration) wins; otherwise build the HTTP client from config +
         // the http-client factory (resolved from the activity scope when the ctor did not
-        // inject them — mirrors MergePullRequestActivity's `_github ?? context.GetService`).
+        // inject them — the same ctor-or-context.GetService fallback the thin activities use).
         var injectedClient = context.GetService<ITriageApplyClient>();
         var configuration = _configuration ?? context.GetService<IConfiguration>();
         var httpClientFactory = _httpClientFactory ?? context.GetService<IHttpClientFactory>();

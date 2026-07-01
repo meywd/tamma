@@ -6,6 +6,8 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.Core;
+using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 using Tamma.Core.Interfaces;
 
 namespace Tamma.Activities.ADL;
@@ -66,7 +68,7 @@ public class MergePullRequestActivity : TammaOutcomeActivity
     /// <summary>Default merge strategy when none is supplied.</summary>
     public const string DefaultStrategy = "squash";
 
-    private readonly IGitHubIntegrationService? _github;
+    private readonly TammaApiClient? _apiClient;
 
     [Input(Description = "Repository in owner/repo format")]
     public Input<string> Repository { get; set; } = default!;
@@ -88,6 +90,9 @@ public class MergePullRequestActivity : TammaOutcomeActivity
 
     [Input(Description = "When false, skip closing the associated issue after merge (default true)")]
     public Input<bool> CloseAssociatedIssue { get; set; } = new(true);
+
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
 
     [Output(Description = "Merge commit SHA")]
     public Output<string?> MergeSha { get; set; } = default!;
@@ -113,12 +118,20 @@ public class MergePullRequestActivity : TammaOutcomeActivity
     [JsonConstructor]
     public MergePullRequestActivity() { }
 
+    /// <summary>
+    /// Story 38-1 — thin-client DI constructor. No <c>IGitHubIntegrationService</c>
+    /// and no git token: the pre-merge read + merge + verified post-merge
+    /// close-issue/branch-delete run server-side behind
+    /// <c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n}/merge</c>. This stays a
+    /// <see cref="TammaOutcomeActivity"/> so the <c>PR.MERGE.STARTED/COMPLETED/FAILED</c>
+    /// lifecycle events still auto-emit.
+    /// </summary>
     public MergePullRequestActivity(
-        ILogger<MergePullRequestActivity> logger,
-        IGitHubIntegrationService github)
+        ILogger<MergePullRequestActivity>? logger,
+        TammaApiClient? apiClient)
     {
         Logger = logger;
-        _github = github;
+        _apiClient = apiClient;
     }
 
     /// <summary>
@@ -146,21 +159,23 @@ public class MergePullRequestActivity : TammaOutcomeActivity
         var strategy = NormalizeStrategy(MergeStrategy.Get(context));
         var autoDeleteBranch = AutoDeleteBranch.Get(context);
         var closeIssue = CloseAssociatedIssue.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
 
-        var github = _github ?? context.GetService<IGitHubIntegrationService>();
-        if (github is null)
+        var request = new GitMergePrRequest
         {
-            Logger?.LogError("GitHub integration service unavailable — cannot merge PR #{Pr}", prNumber);
-            FailureCode.Set(context, "github-service-unavailable");
-            FailureReason.Set(context, "GitHub integration service unavailable");
-            MergeSha.Set(context, "");
-            await context.CompleteActivityWithOutcomesAsync("Error");
-            return;
-        }
+            MergeStrategy = strategy,
+            IssueNumber = issueNumber,
+            BranchName = branchName,
+            AutoDeleteBranch = autoDeleteBranch,
+            CloseAssociatedIssue = closeIssue,
+            CorrelationId = context.WorkflowExecutionContext.Id,
+        };
 
-        var outcome = await ExecuteCoreAsync(
-            github, repository, prNumber, issueNumber, branchName, strategy,
-            autoDeleteBranch, closeIssue, Logger);
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var response = await apiClient.MergePullRequestAsync(repository, prNumber, request, tenantId, context.CancellationToken)
+            .ConfigureAwait(false);
+
+        var outcome = MapResponse(response);
 
         MergeSha.Set(context, outcome.MergeSha ?? "");
         AppliedStrategy.Set(context, strategy);
@@ -171,6 +186,37 @@ public class MergePullRequestActivity : TammaOutcomeActivity
         FailureReason.Set(context, outcome.FailureReason);
 
         await context.CompleteActivityWithOutcomesAsync(outcome.Outcome);
+    }
+
+    /// <summary>
+    /// Story 38-1 (AC5) — project the git-mediation wire response into the SAME
+    /// <see cref="MergeOutcome"/> the local path produced, so the outputs
+    /// (MergeSha / IssueClosed / BranchDeleted / AlreadyMerged / FailureCode /
+    /// FailureReason) and the Merged / MergedWithWarnings / Error outcome are
+    /// byte-compatible. A null response (guard 403 / token 503 / auth 401 /
+    /// transport) fails closed to Error.
+    /// </summary>
+    public static MergeOutcome MapResponse(GitCallResponse? response)
+    {
+        if (response is null)
+            return MergeOutcome.Failed("api_error", "git mediation endpoint unavailable");
+
+        if (response.Success)
+        {
+            var warnings = response.Outcome == "MergedWithWarnings"
+                ? (response.FailureReason ?? "post-merge warning")
+                : null;
+            return MergeOutcome.Merged(
+                response.MergeSha ?? "",
+                response.IssueClosed ?? false,
+                response.BranchDeleted ?? false,
+                response.AlreadyMerged ?? false,
+                warnings);
+        }
+
+        return MergeOutcome.Failed(
+            response.FailureCode ?? "api_error",
+            response.FailureReason ?? "merge failed");
     }
 
     /// <summary>

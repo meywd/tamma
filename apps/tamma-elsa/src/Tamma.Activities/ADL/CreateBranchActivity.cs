@@ -7,6 +7,8 @@ using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 using Tamma.Core.Interfaces;
 
 namespace Tamma.Activities.ADL;
@@ -49,7 +51,7 @@ public class CreateBranchActivity : Activity
     public const int MaxConflictSuffix = 100;
 
     private readonly ILogger<CreateBranchActivity>? _logger;
-    private readonly IGitHubIntegrationService? _github;
+    private readonly TammaApiClient? _apiClient;
 
     [Input(Description = "Repository in owner/repo format")]
     public Input<string> Repository { get; set; } = default!;
@@ -65,6 +67,9 @@ public class CreateBranchActivity : Activity
 
     [Input(Description = "Conflict strategy: suffix | timestamp | abort (default suffix)")]
     public Input<string> ConflictStrategy { get; set; } = new(DefaultConflictStrategy);
+
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
 
     [Output(Description = "Created (or reused) branch name")]
     public Output<string?> BranchName { get; set; } = default!;
@@ -84,12 +89,18 @@ public class CreateBranchActivity : Activity
     [JsonConstructor]
     public CreateBranchActivity() { }
 
+    /// <summary>
+    /// Story 38-1 — thin-client DI constructor. The activity holds NO
+    /// <c>IGitHubIntegrationService</c> and no git token: it delegates the branch
+    /// create to <c>POST /api/v1/git/{owner}/{repo}/branches</c> via
+    /// <see cref="TammaApiClient"/>, where the per-tenant token lives.
+    /// </summary>
     public CreateBranchActivity(
-        ILogger<CreateBranchActivity> logger,
-        IGitHubIntegrationService github)
+        ILogger<CreateBranchActivity>? logger,
+        TammaApiClient? apiClient)
     {
         _logger = logger;
-        _github = github;
+        _apiClient = apiClient;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -99,20 +110,25 @@ public class CreateBranchActivity : Activity
         var issueTitle = IssueTitle.Get(context) ?? "";
         var baseBranch = string.IsNullOrWhiteSpace(BaseBranch.Get(context)) ? DefaultBaseBranch : BaseBranch.Get(context)!;
         var strategy = string.IsNullOrWhiteSpace(ConflictStrategy.Get(context)) ? DefaultConflictStrategy : ConflictStrategy.Get(context)!;
+        var tenantId = NormalizeTenant(TenantId.Get(context));
 
-        var github = _github ?? context.GetService<IGitHubIntegrationService>();
-        if (github is null)
-        {
-            _logger?.LogError("GitHub integration service unavailable — cannot create branch for issue #{Issue}", issueNumber);
-            ErrorCode.Set(context, "github-service-unavailable");
-            Error.Set(context, "GitHub integration service unavailable");
-            await context.CompleteActivityWithOutcomesAsync("Error");
-            return;
-        }
-
+        // The candidate branch name is generated engine-side (pure, token-free);
+        // the API performs the idempotent conflict-resolution + create + validate.
         var candidate = GenerateBranchName(issueNumber, issueTitle);
-        var outcome = await ExecuteCoreAsync(github, repository, issueNumber, candidate, baseBranch, strategy, _logger);
+        var request = new GitCreateBranchRequest
+        {
+            BranchName = candidate,
+            BaseRef = baseBranch,
+            ConflictStrategy = strategy,
+            IssueNumber = issueNumber,
+            CorrelationId = context.WorkflowExecutionContext.Id,
+        };
 
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var response = await apiClient.CreateBranchAsync(repository, request, tenantId, context.CancellationToken)
+            .ConfigureAwait(false);
+
+        var outcome = MapResponse(response);
         if (outcome.Outcome == "Created")
         {
             BranchName.Set(context, outcome.BranchName);
@@ -127,6 +143,31 @@ public class CreateBranchActivity : Activity
             await context.CompleteActivityWithOutcomesAsync("Error");
         }
     }
+
+    /// <summary>
+    /// Story 38-1 (AC5) — project the git-mediation wire response into the SAME
+    /// <see cref="BranchCreationOutcome"/> the local path produced, so the outputs
+    /// (BranchName / BaseSha / ConflictResolved / ErrorCode / Error) and the
+    /// Created/Error outcome are byte-compatible. A null response (guard 403 /
+    /// token 503 / auth 401 / transport) fails closed to Error.
+    /// </summary>
+    public static BranchCreationOutcome MapResponse(GitCallResponse? response)
+    {
+        if (response is null)
+            return BranchCreationOutcome.Failed("git-mediation-unavailable", "git mediation endpoint unavailable");
+
+        if (response.Success && response.Outcome == "Created")
+            return BranchCreationOutcome.Created(response.BranchRef ?? "", response.BaseSha, response.ConflictResolved ?? false);
+
+        return BranchCreationOutcome.Failed(
+            response.FailureCode ?? "unknown",
+            response.FailureReason ?? "branch creation failed");
+    }
+
+    /// <summary>Normalize a tenant-id input to a non-empty trimmed string or null
+    /// (empty / whitespace ⇒ single-user / platform scope).</summary>
+    internal static string? NormalizeTenant(string? raw)
+        => string.IsNullOrWhiteSpace(raw) ? null : raw.Trim();
 
     /// <summary>
     /// Pure-ish orchestration core (no Elsa context): ref-name validation →

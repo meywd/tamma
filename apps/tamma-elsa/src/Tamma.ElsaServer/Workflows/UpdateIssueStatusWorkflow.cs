@@ -56,7 +56,6 @@ public class UpdateIssueStatusWorkflow : WorkflowBase
         var removeLabelsVar = builder.WithVariable<string[]>("RemoveLabels", Array.Empty<string>());
 
         var updatedVar = builder.WithVariable<bool>("Updated", false);
-        var degradedVar = builder.WithVariable<bool>("Degraded", false);
         var errorCodeVar = builder.WithVariable<string>("ErrorCode", "");
         var errorVar = builder.WithVariable<string>("Error", "");
         var startedAtTicksVar = builder.WithVariable<long>("StartedAtTicks", 0);
@@ -99,7 +98,6 @@ public class UpdateIssueStatusWorkflow : WorkflowBase
             PrNumber = new Input<int>(ctx => prNumberVar.Get(ctx)),
             PrUrl = new Input<string?>(ctx => prUrlVar.Get(ctx)),
             Updated = new Output<bool>(updatedVar),
-            Degraded = new Output<bool>(degradedVar),
             ErrorCode = new Output<string?>(errorCodeVar),
             Error = new Output<string?>(errorVar),
         };
@@ -117,7 +115,7 @@ public class UpdateIssueStatusWorkflow : WorkflowBase
             TenantId = new Input<string?>(ctx => tenantIdVar.Get(ctx)),
             DataJson = new Input<string?>(ctx => BuildSuccessData(
                 messageVar.Get(ctx), addLabelsVar.Get(ctx), removeLabelsVar.Get(ctx),
-                prNumberVar.Get(ctx), degradedVar.Get(ctx),
+                prNumberVar.Get(ctx),
                 ElapsedMs(startedAtTicksVar.Get(ctx)))),
         };
         emitSuccess.SetDisplayText("Emit ISSUE_STATUS.UPDATED.SUCCESS");
@@ -128,7 +126,6 @@ public class UpdateIssueStatusWorkflow : WorkflowBase
             Activities =
             {
                 WithLabel(new SetOutput { Id = "OutSuccess", OutputName = new("success"), OutputValue = new(_ => (object)true) }, "Output success"),
-                WithLabel(new SetOutput { Id = "OutDegraded", OutputName = new("degraded"), OutputValue = new(ctx => (object)degradedVar.Get(ctx)) }, "Output degraded"),
                 WithLabel(new SetOutput { Id = "OutIssueNumber", OutputName = new("issueNumber"), OutputValue = new(ctx => (object)issueNumberVar.Get(ctx)) }, "Output issueNumber"),
             }
         };
@@ -214,7 +211,7 @@ public class UpdateIssueStatusWorkflow : WorkflowBase
 
     private static string BuildSuccessData(
         string message, string[]? addLabels, string[]? removeLabels,
-        int prNumber, bool degraded, long durationMs)
+        int prNumber, long durationMs)
     {
         var data = new Dictionary<string, object?>
         {
@@ -222,7 +219,6 @@ public class UpdateIssueStatusWorkflow : WorkflowBase
             ["addLabels"] = addLabels ?? Array.Empty<string>(),
             ["removeLabels"] = removeLabels ?? Array.Empty<string>(),
             ["prNumber"] = prNumber,
-            ["degraded"] = degraded,
             ["durationMs"] = durationMs,
         };
         return JsonSerializer.Serialize(data);

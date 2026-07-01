@@ -539,6 +539,23 @@ builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IBudgetGuard,
 builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.ILlmCallResponseMapper,
     Tamma.Api.Services.Agents.LlmCallResponseMapper>();
 
+// Story 38-1 (Epic 38) — git-platform step mediation (Class A). The engine's
+// thin ADL git activities (CreateBranch / CreatePullRequest / MergePullRequest /
+// UpdateIssueStatus / AnalyzeReview) POST to /api/v1/git/{owner}/{repo}/... here
+// instead of resolving the co-hosted IGitHubIntegrationService. The API holds the
+// per-tenant token: it authorizes tenant↔repo FIRST (the cross-tenant guard),
+// resolves the token BYOK→platform, performs the platform call with THAT token,
+// and emits one terminal GIT.* DCB event. IGitHubIntegrationService stays
+// API-only; the GitHubClientFactory mints a token-bound instance per request.
+builder.Services.AddScoped<Tamma.Api.Services.Git.IGitRepoAuthorizer,
+    Tamma.Api.Services.Git.GitRepoAuthorizer>();
+builder.Services.AddScoped<Tamma.Api.Services.Git.IGitTokenResolver,
+    Tamma.Api.Services.Git.GitTokenResolver>();
+builder.Services.AddSingleton<Tamma.Api.Services.Git.IGitHubClientFactory,
+    Tamma.Api.Services.Git.GitHubClientFactory>();
+builder.Services.AddScoped<Tamma.Api.Services.Git.IGitMediationService,
+    Tamma.Api.Services.Git.GitMediationService>();
+
 // Story 32-5 (T4) — provider-side DI for the server-side tool loop, FORMALIZED
 // in the API process (replacing T3's best-effort GetService factory). The loop
 // (extracted verbatim into InlineToolLoopRunner) now executes HERE, where the
@@ -2299,6 +2316,28 @@ app.MapPost("/api/v1/llm/chat", SaaSEndpoints.LlmChat).RequireAuthorization();
 app.MapPost("/api/v1/llm/call", LlmCallEndpoints.CallLlm)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("CallLlm");
+
+// ── Story 38-1 (Epic 38) — git-platform step mediation (Class A) ──
+// Same engine-only plane as /api/v1/llm/call: the engine's thin ADL git
+// activities post here as the service-scope Tamma:ApiToken; the API holds the
+// per-tenant token, authorizes tenant↔repo (cross-tenant guard), performs the
+// platform call with the resolved token, and audits it. {owner}/{repo} is bound
+// as two segments (an owner/name full name carries a slash).
+app.MapPost("/api/v1/git/{owner}/{repo}/branches", GitEndpoints.CreateBranch)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitCreateBranch");
+app.MapPost("/api/v1/git/{owner}/{repo}/pull-requests", GitEndpoints.CreatePullRequest)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitCreatePullRequest");
+app.MapPut("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/merge", GitEndpoints.MergePullRequest)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitMergePullRequest");
+app.MapGet("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/comments", GitEndpoints.GetPullRequestComments)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitGetPullRequestComments");
+app.MapPatch("/api/v1/git/{owner}/{repo}/issues/{n:int}", GitEndpoints.UpdateIssue)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitUpdateIssue");
 app.MapPost("/api/v1/workflows/{id}/status", SaaSEndpoints.UpdateWorkflowStatus).RequireAuthorization();
 app.MapPost("/api/v1/workflows/{id}/result", SaaSEndpoints.PostWorkflowResult).RequireAuthorization();
 app.MapPost("/api/v1/installations/{id}/rotate-key", SaaSEndpoints.RotateInstallationKey).RequireAuthorization();

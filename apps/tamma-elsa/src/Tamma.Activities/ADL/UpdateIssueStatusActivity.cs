@@ -5,8 +5,9 @@ using Elsa.Workflows;
 using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 
 namespace Tamma.Activities.ADL;
 
@@ -15,19 +16,25 @@ namespace Tamma.Activities.ADL;
 /// adds / removes labels and (when supplied) composes a PR-linked close comment,
 /// keeping the issue a "living log" of what Tamma is doing.
 ///
-/// <para>Story 2.10 build-out: this activity used to <b>swallow</b> a failed
-/// status update — after 3 failed attempts it logged a WARN and returned
-/// normally, so the workflow always reported success even when nothing was
-/// posted (a false-success / silent-failure violation). It is now an
-/// <b>outcome-bearing</b> activity: a genuine callback failure surfaces a loud
-/// <c>Failed</c> outcome (the workflow routes it to a failure edge that emits
-/// <c>ISSUE_STATUS.UPDATED.FAILED</c>); a successful (or degraded local-no-op)
-/// update surfaces <c>Updated</c>. It never reports success on a real failure.</para>
+/// <para>Story 2.10 build-out + Story 38-1 pivot: this activity used to
+/// <b>swallow</b> a failed status update into a silent success. It is now a thin
+/// <see cref="TammaApiClient"/> client over
+/// <c>PATCH /api/v1/git/{owner}/{repo}/issues/{n}</c> (the API holds the
+/// per-tenant token) and is strictly <b>outcome-bearing</b>: the mediation
+/// response maps to <c>Updated</c> on success and to a loud <c>Failed</c> on any
+/// failure (guard 403, token 503, auth 401, transport, or a null response),
+/// which the workflow routes to a failure edge that emits
+/// <c>ISSUE_STATUS.UPDATED.FAILED</c>. It never reports success on a real
+/// failure.</para>
+///
+/// <para>The pivot guarantees <c>Tamma:ApiUrl</c>, so there is NO "degraded
+/// local no-op" branch any more: a missing / failed callback is a loud failure,
+/// not a silent success. The former degraded path — and its dead
+/// <c>Degraded</c> output — were removed with the cutover.</para>
 ///
 /// Outcomes:
-///   - Updated: the update was applied (or degraded to a local no-op when no
-///     engine callback is configured — flagged <c>degraded</c>, nothing failed).
-///   - Failed:  the configured callback failed after retries (loud failure).
+///   - Updated: the mediation call applied the update.
+///   - Failed:  the mediation call failed (loud failure — never a false success).
 /// </summary>
 [Activity(
     "Tamma.ADL",
@@ -41,8 +48,7 @@ public class UpdateIssueStatusActivity : Activity
     private const int MaxAttempts = 3;
 
     private readonly ILogger<UpdateIssueStatusActivity>? _logger;
-    private readonly IHttpClientFactory? _httpClientFactory;
-    private readonly IConfiguration? _configuration;
+    private readonly TammaApiClient? _apiClient;
 
     [Input(Description = "Repository (owner/repo)")]
     public Input<string> Repository { get; set; } = default!;
@@ -68,11 +74,8 @@ public class UpdateIssueStatusActivity : Activity
     [Input(Description = "Merged-PR URL to link in the close comment (empty → no link)")]
     public Input<string?> PrUrl { get; set; } = new((string?)null);
 
-    [Output(Description = "True when the update was applied / degraded (no real failure)")]
+    [Output(Description = "True when the update was applied")]
     public Output<bool> Updated { get; set; } = default!;
-
-    [Output(Description = "True when the update degraded to a local no-op (no callback configured)")]
-    public Output<bool> Degraded { get; set; } = default!;
 
     [Output(Description = "Failure classification when the Failed outcome fires")]
     public Output<string?> ErrorCode { get; set; } = default!;
@@ -83,14 +86,20 @@ public class UpdateIssueStatusActivity : Activity
     [JsonConstructor]
     public UpdateIssueStatusActivity() { }
 
+    /// <summary>
+    /// Story 38-1 — thin-client DI constructor. This activity previously posted to
+    /// <c>Engine:CallbackUrl</c> (<c>/api/engine/issue-*</c>) via
+    /// <see cref="IIssueCallbackClient"/>; it now re-points to the git-mediation
+    /// endpoint <c>PATCH /api/v1/git/{owner}/{repo}/issues/{n}</c> via
+    /// <see cref="TammaApiClient"/> (base URL <c>Tamma:ApiUrl</c>), where the API
+    /// holds the per-tenant token. No token, no engine-callback path here.
+    /// </summary>
     public UpdateIssueStatusActivity(
-        ILogger<UpdateIssueStatusActivity> logger,
-        IHttpClientFactory httpClientFactory,
-        IConfiguration configuration)
+        ILogger<UpdateIssueStatusActivity>? logger,
+        TammaApiClient? apiClient)
     {
         _logger = logger;
-        _httpClientFactory = httpClientFactory;
-        _configuration = configuration;
+        _apiClient = apiClient;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -102,27 +111,26 @@ public class UpdateIssueStatusActivity : Activity
         var removeLabels = RemoveLabels.Get(context);
         var prNumber = PrNumber.Get(context);
         var prUrl = PrUrl.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
 
         var body = ComposeBody(message, prNumber, prUrl);
 
-        var callbackUrl = _configuration?["Engine:CallbackUrl"];
-        if (string.IsNullOrEmpty(callbackUrl) || _httpClientFactory is null)
+        var request = new GitUpdateIssueRequest
         {
-            // Degraded local/dev no-op: log and report a flagged success.
-            // Nothing was attempted against a platform, so this is NOT a failure —
-            // it is an auditable degrade (Degraded=true), never a false success.
-            _logger?.LogInformation("[Issue #{IssueNumber}] {Message}", issueNum, body);
-            SetSuccess(context, degraded: true);
-            await context.CompleteActivityWithOutcomesAsync("Updated");
-            return;
-        }
+            Body = body,
+            AddLabels = addLabels,
+            RemoveLabels = removeLabels,
+            CorrelationId = context.WorkflowExecutionContext.Id,
+        };
 
-        var client = new HttpIssueCallbackClient(_httpClientFactory.CreateClient(), callbackUrl);
-        var outcome = await ExecuteCoreAsync(client, repo, issueNum, body, addLabels, removeLabels, _logger, context.CancellationToken);
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var response = await apiClient.UpdateIssueStatusAsync(repo, issueNum, request, tenantId, context.CancellationToken)
+            .ConfigureAwait(false);
 
+        var outcome = MapResponse(response);
         if (outcome.Success)
         {
-            SetSuccess(context, degraded: false);
+            SetSuccess(context);
             await context.CompleteActivityWithOutcomesAsync("Updated");
         }
         else
@@ -130,17 +138,31 @@ public class UpdateIssueStatusActivity : Activity
             // No false success — surface the failure loudly. The workflow's
             // Failed edge emits ISSUE_STATUS.UPDATED.FAILED.
             Updated.Set(context, false);
-            Degraded.Set(context, false);
             ErrorCode.Set(context, outcome.ErrorCode ?? "issue-update-failed");
             Error.Set(context, outcome.Error);
             await context.CompleteActivityWithOutcomesAsync("Failed");
         }
     }
 
-    private void SetSuccess(ActivityExecutionContext context, bool degraded)
+    /// <summary>
+    /// Story 38-1 (AC5) — project the git-mediation wire response into the SAME
+    /// <see cref="IssueUpdateOutcome"/> the local path produced (Updated / Failed +
+    /// ErrorCode / Error). A null response (guard 403 / token 503 / auth 401 /
+    /// transport) fails closed to Failed.
+    /// </summary>
+    public static IssueUpdateOutcome MapResponse(GitCallResponse? response)
+    {
+        if (response is null)
+            return IssueUpdateOutcome.Failed("callback-unavailable", "git mediation endpoint unavailable");
+
+        return response.Success
+            ? IssueUpdateOutcome.Updated()
+            : IssueUpdateOutcome.Failed(response.FailureCode ?? "issue-update-failed", response.FailureReason);
+    }
+
+    private void SetSuccess(ActivityExecutionContext context)
     {
         Updated.Set(context, true);
-        Degraded.Set(context, degraded);
         ErrorCode.Set(context, null);
         Error.Set(context, null);
     }

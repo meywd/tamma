@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Tamma.Core.Interfaces;
@@ -14,14 +15,57 @@ public class GitHubIntegrationService : IGitHubIntegrationService
     private readonly IConfiguration _configuration;
     private readonly IHttpClientFactory _httpClientFactory;
 
+    /// <summary>
+    /// Story 38-1 — when set, this request-scoped token overrides the named
+    /// "github" client's static <c>GitHub:Token</c> bearer for EVERY call made
+    /// through this instance, so the platform call uses the per-tenant token the
+    /// mediation layer resolved (the "token used == token resolved" invariant).
+    /// Minted per-request by <see cref="Git.GitHubClientFactory"/>; the token is
+    /// never logged, returned, or persisted. Null ⇒ legacy static-token behaviour.
+    /// </summary>
+    private readonly string? _tokenOverride;
+
     public GitHubIntegrationService(
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
         ILogger<GitHubIntegrationService> logger)
+        : this(httpClientFactory, configuration, logger, tokenOverride: null)
+    {
+    }
+
+    /// <summary>
+    /// Story 38-1 — construct bound to a request-scoped <paramref name="tokenOverride"/>.
+    /// Used by <see cref="Git.GitHubClientFactory"/> so the git-mediation endpoints
+    /// perform the platform call with the resolved per-tenant token.
+    /// </summary>
+    public GitHubIntegrationService(
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration,
+        ILogger<GitHubIntegrationService> logger,
+        string? tokenOverride)
     {
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _logger = logger;
+        _tokenOverride = tokenOverride;
+    }
+
+    /// <summary>
+    /// Create the named "github" <see cref="HttpClient"/>, applying the
+    /// request-scoped <see cref="_tokenOverride"/> when present. The factory
+    /// returns a fresh client instance per call, so mutating its default
+    /// Authorization header is scoped to this instance only.
+    /// </summary>
+    private HttpClient CreateGitHubClient()
+    {
+        var client = _httpClientFactory.CreateClient("github");
+        if (!string.IsNullOrWhiteSpace(_tokenOverride))
+        {
+            client.DefaultRequestHeaders.Remove("Authorization");
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", _tokenOverride);
+        }
+        return client;
     }
 
     public Task<IntegrationResult<GitHubBranchResult>> CreateGitHubBranchAsync(string repository, string branchName)
@@ -29,8 +73,10 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
     public async Task<IntegrationResult<GitHubBranchResult>> CreateGitHubBranchAsync(string repository, string branchName, string? baseBranch)
     {
-        var httpClient = _httpClientFactory.CreateClient("github");
-        var token = _configuration["GitHub:Token"];
+        var httpClient = CreateGitHubClient();
+        // A request-scoped override (BYOK, resolved by the mediation layer) IS the
+        // token; only require the static GitHub:Token when no override is bound.
+        var token = _tokenOverride ?? _configuration["GitHub:Token"];
         if (string.IsNullOrEmpty(token))
         {
             _logger.LogWarning("GitHub token not configured");
@@ -118,7 +164,7 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
     public async Task<IntegrationResult<bool>> BranchExistsAsync(string repository, string branchName)
     {
-        var httpClient = _httpClientFactory.CreateClient("github");
+        var httpClient = CreateGitHubClient();
 
         try
         {
@@ -147,7 +193,7 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
     public async Task<IntegrationResult<List<GitHubCommit>>> GetGitHubCommitsAsync(string repository, string branch, DateTime? since = null)
     {
-        var httpClient = _httpClientFactory.CreateClient("github");
+        var httpClient = CreateGitHubClient();
 
         try
         {
@@ -187,7 +233,7 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
     public async Task<IntegrationResult<GitHubPullRequestResult>> CreateGitHubPullRequestAsync(string repository, CreatePullRequestRequest request)
     {
-        var httpClient = _httpClientFactory.CreateClient("github");
+        var httpClient = CreateGitHubClient();
 
         try
         {
@@ -230,7 +276,7 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
     public async Task<IntegrationResult<GitHubPullRequestRef?>> GetGitHubOpenPullRequestForBranchAsync(string repository, string headBranch, string baseBranch)
     {
-        var httpClient = _httpClientFactory.CreateClient("github");
+        var httpClient = CreateGitHubClient();
 
         try
         {
@@ -267,7 +313,7 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
     public async Task<IntegrationResult<GitHubPullRequestResult>> UpdateGitHubPullRequestAsync(string repository, int pullRequestNumber, CreatePullRequestRequest request)
     {
-        var httpClient = _httpClientFactory.CreateClient("github");
+        var httpClient = CreateGitHubClient();
 
         try
         {
@@ -341,7 +387,7 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
     public async Task<IntegrationResult<GitHubMergeResult>> MergeGitHubPullRequestAsync(string repository, int pullRequestNumber, string mergeStrategy)
     {
-        var httpClient = _httpClientFactory.CreateClient("github");
+        var httpClient = CreateGitHubClient();
 
         try
         {
@@ -395,7 +441,7 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
     public async Task<IntegrationResult<GitHubPullRequestDetail>> GetGitHubPullRequestAsync(string repository, int pullRequestNumber)
     {
-        var httpClient = _httpClientFactory.CreateClient("github");
+        var httpClient = CreateGitHubClient();
 
         try
         {
@@ -441,7 +487,7 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
     public async Task<IntegrationResult<List<GitHubFileChange>>> GetGitHubFileChangesAsync(string repository, string branch)
     {
-        var httpClient = _httpClientFactory.CreateClient("github");
+        var httpClient = CreateGitHubClient();
 
         try
         {
@@ -481,7 +527,7 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
     public async Task<IntegrationResult<List<GitHubIssue>>> ListGitHubIssuesAsync(string repository, string[]? labels = null, string state = "open")
     {
-        var httpClient = _httpClientFactory.CreateClient("github");
+        var httpClient = CreateGitHubClient();
 
         try
         {
@@ -536,7 +582,7 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
     public async Task<IntegrationResult<bool>> AssignGitHubIssueAsync(string repository, int issueNumber, string assignee)
     {
-        var httpClient = _httpClientFactory.CreateClient("github");
+        var httpClient = CreateGitHubClient();
 
         try
         {
@@ -555,7 +601,7 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
     public async Task<IntegrationResult<bool>> CloseGitHubIssueAsync(string repository, int issueNumber, string? comment = null)
     {
-        var httpClient = _httpClientFactory.CreateClient("github");
+        var httpClient = CreateGitHubClient();
 
         try
         {
@@ -581,7 +627,7 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
     public async Task<IntegrationResult<bool>> DeleteGitHubBranchAsync(string repository, string branchName)
     {
-        var httpClient = _httpClientFactory.CreateClient("github");
+        var httpClient = CreateGitHubClient();
 
         try
         {
@@ -599,7 +645,7 @@ public class GitHubIntegrationService : IGitHubIntegrationService
 
     public async Task<IntegrationResult<List<GitHubReviewComment>>> GetPullRequestReviewCommentsAsync(string repository, int pullRequestNumber)
     {
-        var httpClient = _httpClientFactory.CreateClient("github");
+        var httpClient = CreateGitHubClient();
 
         try
         {
@@ -629,6 +675,87 @@ public class GitHubIntegrationService : IGitHubIntegrationService
         {
             _logger.LogError(ex, "Failed to get review comments for PR #{Number} in {Repo}", pullRequestNumber, repository);
             return IntegrationResult<List<GitHubReviewComment>>.Fail(ex.Message);
+        }
+    }
+
+    public async Task<IntegrationResult<bool>> PostIssueCommentAsync(string repository, int issueNumber, string body)
+    {
+        var httpClient = CreateGitHubClient();
+
+        try
+        {
+            var response = await httpClient.PostAsJsonAsync(
+                $"/repos/{repository}/issues/{issueNumber}/comments", new { body });
+            if (!response.IsSuccessStatusCode)
+            {
+                var respBody = await response.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Failed to post comment on issue #{Number} in {Repo}: {Status} {Body}",
+                    issueNumber, repository, (int)response.StatusCode, respBody);
+                return IntegrationResult<bool>.Fail($"{(int)response.StatusCode}: {respBody}");
+            }
+            return IntegrationResult<bool>.Ok(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to post comment on issue #{Number} in {Repo}", issueNumber, repository);
+            return IntegrationResult<bool>.Fail(ex.Message);
+        }
+    }
+
+    public async Task<IntegrationResult<bool>> AddIssueLabelsAsync(string repository, int issueNumber, string[] labels)
+    {
+        if (labels is not { Length: > 0 })
+            return IntegrationResult<bool>.Ok(true);
+
+        var httpClient = CreateGitHubClient();
+
+        try
+        {
+            var response = await httpClient.PostAsJsonAsync(
+                $"/repos/{repository}/issues/{issueNumber}/labels", new { labels });
+            if (!response.IsSuccessStatusCode)
+            {
+                var respBody = await response.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Failed to add labels to issue #{Number} in {Repo}: {Status} {Body}",
+                    issueNumber, repository, (int)response.StatusCode, respBody);
+                return IntegrationResult<bool>.Fail($"{(int)response.StatusCode}: {respBody}");
+            }
+            return IntegrationResult<bool>.Ok(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to add labels to issue #{Number} in {Repo}", issueNumber, repository);
+            return IntegrationResult<bool>.Fail(ex.Message);
+        }
+    }
+
+    public async Task<IntegrationResult<bool>> RemoveIssueLabelAsync(string repository, int issueNumber, string label)
+    {
+        var httpClient = CreateGitHubClient();
+
+        try
+        {
+            var response = await httpClient.DeleteAsync(
+                $"/repos/{repository}/issues/{issueNumber}/labels/{Uri.EscapeDataString(label)}");
+            // A 404 means the label was not present — idempotently treat as removed.
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                return IntegrationResult<bool>.Ok(true);
+            if (!response.IsSuccessStatusCode)
+            {
+                var respBody = await response.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Failed to remove label '{Label}' from issue #{Number} in {Repo}: {Status} {Body}",
+                    label, issueNumber, repository, (int)response.StatusCode, respBody);
+                return IntegrationResult<bool>.Fail($"{(int)response.StatusCode}: {respBody}");
+            }
+            return IntegrationResult<bool>.Ok(true);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to remove label '{Label}' from issue #{Number} in {Repo}", label, issueNumber, repository);
+            return IntegrationResult<bool>.Fail(ex.Message);
         }
     }
 }

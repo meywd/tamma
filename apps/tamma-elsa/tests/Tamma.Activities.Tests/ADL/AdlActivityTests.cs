@@ -49,9 +49,8 @@ public class AdlActivityTests
     public void CreateBranchActivity_WithDependencies_ShouldNotThrow()
     {
         var logger = new Mock<ILogger<CreateBranchActivity>>();
-        var github = new Mock<IGitHubIntegrationService>();
 
-        Action act = () => new CreateBranchActivity(logger.Object, github.Object);
+        Action act = () => new CreateBranchActivity(logger.Object, (Tamma.Activities.LlmCall.TammaApiClient?)null);
         act.Should().NotThrow();
     }
 
@@ -70,9 +69,8 @@ public class AdlActivityTests
     public void CreatePullRequestActivity_WithDependencies_ShouldNotThrow()
     {
         var logger = new Mock<ILogger<CreatePullRequestActivity>>();
-        var github = new Mock<IGitHubIntegrationService>();
 
-        Action act = () => new CreatePullRequestActivity(logger.Object, github.Object);
+        Action act = () => new CreatePullRequestActivity(logger.Object, (Tamma.Activities.LlmCall.TammaApiClient?)null);
         act.Should().NotThrow();
     }
 
@@ -91,9 +89,8 @@ public class AdlActivityTests
     public void AnalyzeReviewActivity_WithDependencies_ShouldNotThrow()
     {
         var logger = new Mock<ILogger<AnalyzeReviewActivity>>();
-        var github = new Mock<IGitHubIntegrationService>();
 
-        Action act = () => new AnalyzeReviewActivity(logger.Object, github.Object);
+        Action act = () => new AnalyzeReviewActivity(logger.Object, (Tamma.Activities.LlmCall.TammaApiClient?)null);
         act.Should().NotThrow();
     }
 
@@ -163,9 +160,8 @@ public class AdlActivityTests
     public void MergePullRequestActivity_WithDependencies_ShouldNotThrow()
     {
         var logger = new Mock<ILogger<MergePullRequestActivity>>();
-        var github = new Mock<IGitHubIntegrationService>();
 
-        Action act = () => new MergePullRequestActivity(logger.Object, github.Object);
+        Action act = () => new MergePullRequestActivity(logger.Object, (Tamma.Activities.LlmCall.TammaApiClient?)null);
         act.Should().NotThrow();
     }
 
