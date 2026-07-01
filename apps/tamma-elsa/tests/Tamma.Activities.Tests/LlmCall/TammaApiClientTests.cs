@@ -267,6 +267,75 @@ public class TammaApiClientTests
         handler.LastRequest.Should().BeNull("an empty batch must not hit the network");
     }
 
+    // -------------------------------------------------------------------
+    // AppendPlatformEventsAsync
+    // -------------------------------------------------------------------
+
+    [Test]
+    public async Task AppendPlatformEventsAsync_Posts_To_PlatformEvents_Endpoint_And_Returns_True_On_2xx()
+    {
+        var id = Guid.NewGuid();
+        var tenantId = Guid.NewGuid();
+        var handler = new StubHttpMessageHandler(HttpStatusCode.Created, "{\"ok\":true}");
+        var client = BuildClient(handler);
+        var evt = new PlatformEventRecord(id, "TENANT.DELETED.SUCCESS", tenantId, null, null, null, null, null);
+
+        var ok = await client.AppendPlatformEventsAsync(new[] { evt }, CancellationToken.None);
+
+        ok.Should().BeTrue();
+        handler.LastRequest!.Method.Should().Be(HttpMethod.Post);
+        handler.LastRequest.RequestUri!.AbsolutePath.Should().Be("/api/engine/platform-events");
+
+        // TenantId travels per-event in the body — no X-Tenant-Id header.
+        handler.LastRequest.Headers.TryGetValues("X-Tenant-Id", out _).Should().BeFalse();
+
+        // Verify the body carries the event batch.
+        handler.LastBody.Should().NotBeNull();
+        var body = JsonDocument.Parse(handler.LastBody!).RootElement;
+        body.GetProperty("events").GetArrayLength().Should().Be(1);
+        body.GetProperty("events")[0].GetProperty("id").GetGuid().Should().Be(id);
+        body.GetProperty("events")[0].GetProperty("type").GetString().Should().Be("TENANT.DELETED.SUCCESS");
+        body.GetProperty("events")[0].GetProperty("tenantId").GetGuid().Should().Be(tenantId);
+    }
+
+    [Test]
+    public async Task AppendPlatformEventsAsync_Returns_False_On_Non2xx()
+    {
+        var handler = new StubHttpMessageHandler(HttpStatusCode.InternalServerError, "{}");
+        var client = BuildClient(handler);
+
+        var ok = await client.AppendPlatformEventsAsync(
+            new[] { new PlatformEventRecord(Guid.NewGuid(), "X", null, null, null, null, null, null) },
+            default);
+
+        ok.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task AppendPlatformEventsAsync_Returns_False_On_NetworkError()
+    {
+        var handler = new StubHttpMessageHandler(new HttpRequestException("down"));
+        var client = BuildClient(handler);
+
+        var ok = await client.AppendPlatformEventsAsync(
+            new[] { new PlatformEventRecord(Guid.NewGuid(), "X", null, null, null, null, null, null) },
+            default);
+
+        ok.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task AppendPlatformEventsAsync_EmptyList_IsNoOp_ReturnsTrue_SendsNoRequest()
+    {
+        var handler = new StubHttpMessageHandler(HttpStatusCode.Created, "{}");
+        var client = BuildClient(handler);
+
+        var ok = await client.AppendPlatformEventsAsync(Array.Empty<PlatformEventRecord>(), default);
+
+        ok.Should().BeTrue();
+        handler.LastRequest.Should().BeNull("an empty list must not hit the network");
+    }
+
     [Test]
     public async Task DisposeProviderAsync_SendsDelete_AndReturnsFalseOnFailure()
     {

@@ -2220,6 +2220,11 @@ engine.MapGet("/cycle-results", EngineEndpoints.GetCycleResults);
 // Gated to EngineServiceOnly (service principal) — NOT WorkflowsManage, which
 // every tenant owner/admin holds and would let them forge audit events (I4).
 engine.MapPost("/events", EngineEndpoints.AppendEvents).RequireAuthorization("EngineServiceOnly");
+// Engine→platform_events callback: cross-tenant lifecycle / analytics events that the
+// engine drains from its in-process list and POSTs here for durable control-plane
+// persistence + in-process fan-out. Gated EngineServiceOnly (same rationale as /events).
+engine.MapPost("/platform-events", EngineEndpoints.AppendPlatformEvents)
+    .RequireAuthorization("EngineServiceOnly");
 // Audit finding 002 — `agent-available` is a GET liveness probe (no body),
 // not a POST registration call. The previous wiring as POST silently drifted
 // from the TS contract.

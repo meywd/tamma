@@ -129,3 +129,22 @@ public record EngineEventRecord(
     int? IssueNumber,
     JsonElement? Data,
     Dictionary<string, string?>? Tags);
+
+/// <summary>Batch of platform (control-plane) events from the engine, written to platform_events.</summary>
+public record AppendPlatformEventsRequest(List<PlatformEventRecord> Events);
+
+/// <summary>
+/// One platform event from the engine. <see cref="Id"/> is the stable idempotency key
+/// (Guid.Empty → server assigns). <see cref="TenantId"/> is nullable and carried in the
+/// body because <c>platform_events</c> is cross-tenant (unlike <c>domain_events</c> whose
+/// tenant comes from the <c>X-Tenant-Id</c> service header).
+/// </summary>
+public record PlatformEventRecord(
+    Guid Id,
+    string Type,
+    Guid? TenantId,
+    Guid? UserId,
+    Dictionary<string, string?>? Tags,
+    JsonElement? Metadata,
+    JsonElement? Data,
+    DateTime? CreatedAt);

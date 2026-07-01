@@ -239,6 +239,33 @@ public record AppendEventsRequest(
 );
 
 /// <summary>
+/// POST body for <c>/api/engine/platform-events</c> — a BATCH of platform
+/// events the Elsa engine forwards to the Tamma API for durable audit storage.
+/// </summary>
+public record AppendPlatformEventsRequest(
+    [property: JsonPropertyName("events")] IReadOnlyList<PlatformEventRecord> Events
+);
+
+/// <summary>
+/// Wire projection of one platform event (see
+/// <c>Tamma.Api.Dtos.Engine.PlatformEventRecord</c>). camelCase to match the
+/// API DTO serialization (JsonNamingPolicy.CamelCase in Program.cs).
+/// TenantId/UserId travel per-event in the body; no <c>X-Tenant-Id</c> header
+/// is needed because <c>EngineServiceOnly</c> auth is satisfied by the service
+/// Bearer token.
+/// </summary>
+public record PlatformEventRecord(
+    [property: JsonPropertyName("id")] Guid Id,
+    [property: JsonPropertyName("type")] string Type,
+    [property: JsonPropertyName("tenantId")] Guid? TenantId,
+    [property: JsonPropertyName("userId")] Guid? UserId,
+    [property: JsonPropertyName("tags")] IReadOnlyDictionary<string, string?>? Tags,
+    [property: JsonPropertyName("metadata")] JsonElement? Metadata,
+    [property: JsonPropertyName("data")] JsonElement? Data,
+    [property: JsonPropertyName("createdAt")] DateTime? CreatedAt
+);
+
+/// <summary>
 /// Wire projection of one engine <c>TammaEvent</c> (see
 /// <c>Tamma.Activities.Core.TammaEvent</c>). camelCase to match the API DTO
 /// (<c>Tamma.Api.Dtos.Engine.EngineEventRecord</c>).

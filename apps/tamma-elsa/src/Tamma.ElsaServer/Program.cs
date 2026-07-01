@@ -277,19 +277,21 @@ builder.Services.AddSingleton<Tamma.Activities.LlmCall.TammaApiHealthMonitor>(sp
 builder.Services.AddSingleton<Tamma.Activities.AgentDispatch.IGitHubActionsClient,
     Tamma.Activities.AgentDispatch.NullGitHubActionsClient>();
 
-// Engine has no control-plane platform_events sink. The tenant-lifecycle
-// activities (TenantLifecycleActivity / CleanupStepActivity /
+// Real engine→API platform-events publisher. The tenant-lifecycle activities
+// (TenantLifecycleActivity / CleanupStepActivity /
 // EmitCleanupTerminalEventActivity) resolve IPlatformEventPublisher via
-// GetRequiredService — without a registration that THROWS in the engine and
-// aborts CreateTenant/DeleteTenant/CleanUpFailedTenant workflows. The Null
-// seam (mirrors NullGitHubActionsClient above) lets those workflows complete;
-// the per-step platform telemetry is a best-effort no-op (logged at WARN)
-// until a sibling POST /api/engine/platform-events callback lands (FOLLOW-UP).
-// This is DISTINCT from the tenant domain_events drain, which now flows
-// through POST /api/engine/events + the event-persistence middleware below.
+// GetRequiredService. EngineApiPlatformEventPublisher POSTs to
+// POST /api/engine/platform-events (Task 3 of the engine→platform_events
+// callback plan) so the 13 emitters that previously dropped events now
+// land durably. On POST failure it degrades to WARN+null (never throws)
+// so lifecycle workflows complete even when the callback is briefly
+// unavailable. This is DISTINCT from the tenant domain_events drain, which
+// flows through POST /api/engine/events + the event-persistence middleware.
+// NullPlatformEventPublisher is kept below (documents the seam; may be used
+// in tests).
 Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions
     .TryAddSingleton<Tamma.Data.Abstractions.IPlatformEventPublisher,
-        Tamma.Activities.TenantLifecycle.NullPlatformEventPublisher>(builder.Services);
+        Tamma.Activities.TenantLifecycle.EngineApiPlatformEventPublisher>(builder.Services);
 
 // Story 29-6 — engine-side rotation audit emitter. RotateSecretWorkflow runs
 // HERE (the engine), and RotateSecretSagaActivity resolves
