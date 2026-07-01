@@ -4,6 +4,7 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using Tamma.Activities.LlmCall;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -127,7 +128,7 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
             // Notify junior about diagnosis
             if (!string.IsNullOrEmpty(junior.SlackId))
             {
-                await NotifyJunior(junior.SlackId, diagnosis);
+                await NotifyJunior(context, junior.SlackId, diagnosis);
             }
 
             context.SetResult(diagnosis);
@@ -341,7 +342,8 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
         };
     }
 
-    private async Task NotifyJunior(string slackId, BlockerDiagnosisOutput diagnosis)
+    private static async Task NotifyJunior(
+        ActivityExecutionContext context, string slackId, BlockerDiagnosisOutput diagnosis)
     {
         var message = $@"**Tamma: Blocker Detected**
 
@@ -354,7 +356,10 @@ I've noticed you might be stuck. Here's what I've identified:
 
 Don't worry - this is a normal part of learning! Reply if you need more help.";
 
-        await _integrationService!.SendSlackDirectMessageAsync(slackId, message);
+        // Story 38-3b — enqueue the diagnosis DM via the API seam (engine holds no
+        // Slack credential); fire-and-forget, fail-soft.
+        await MediatedSlack.QueueDirectMessageAsync(
+            context, slackId, message, "Warning", "SendDirect", context.CancellationToken);
     }
 }
 

@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using System.Text;
 using System.Text.Json.Serialization;
 using Tamma.Activities.Assessment.Models;
+using Tamma.Activities.LlmCall;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
 
@@ -83,7 +84,10 @@ public class DeliverQuestionsActivity : CodeActivity<DeliveryResult>
                 case "slack":
                     if (junior?.SlackId != null)
                     {
-                        await _integrationService!.SendSlackDirectMessageAsync(junior.SlackId, message);
+                        // Story 38-3b — enqueue the DM intent via the API seam (engine
+                        // holds no Slack credential); fire-and-forget, fail-soft.
+                        await MediatedSlack.QueueDirectMessageAsync(
+                            context, junior.SlackId, message, "Info", "SendAssessment", context.CancellationToken);
                     }
                     else
                     {

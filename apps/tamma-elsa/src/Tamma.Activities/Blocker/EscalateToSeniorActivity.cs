@@ -6,7 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
 using Tamma.Activities.Blocker.Models;
-using Tamma.Core.Interfaces;
+using Tamma.Activities.LlmCall;
 
 namespace Tamma.Activities.Blocker;
 
@@ -38,7 +38,6 @@ namespace Tamma.Activities.Blocker;
 public class EscalateToSeniorActivity : Activity
 {
     private readonly ILogger<EscalateToSeniorActivity>? _logger;
-    private readonly IIntegrationService? _integrationService;
     private readonly IConfiguration? _configuration;
 
     /// <summary>Mentorship session ID</summary>
@@ -90,11 +89,9 @@ public class EscalateToSeniorActivity : Activity
 
     public EscalateToSeniorActivity(
         ILogger<EscalateToSeniorActivity> logger,
-        IIntegrationService integrationService,
         IConfiguration configuration)
     {
         _logger = logger;
-        _integrationService = integrationService;
         _configuration = configuration;
     }
 
@@ -132,7 +129,7 @@ public class EscalateToSeniorActivity : Activity
         };
 
         // Notify senior via configured channel
-        await NotifySenior(escalationContext);
+        await NotifySenior(context, escalationContext);
 
         // 1) Escalation bookmark — resumed by the senior's response (API/Slack). The workflow
         //    suspends here until this resumes OR the durable SLA delay below fires.
@@ -155,7 +152,7 @@ public class EscalateToSeniorActivity : Activity
             slaMinutes, sessionId);
     }
 
-    private async Task NotifySenior(EscalationContext escalation)
+    private async Task NotifySenior(ActivityExecutionContext context, EscalationContext escalation)
     {
         var escalationChannel = _configuration?["BlockerDiagnosis:EscalationChannel"] ?? "slack";
         var seniorChannel = _configuration?["BlockerDiagnosis:SeniorNotificationChannel"] ?? "#mentorship-escalations";
@@ -180,9 +177,13 @@ Please respond to this escalation via the Tamma API or reply in this thread.";
 
         try
         {
-            if (escalationChannel == "slack" && _integrationService != null)
+            if (escalationChannel == "slack")
             {
-                await _integrationService.SendSlackMessageAsync(seniorChannel, message);
+                // Story 38-3b — enqueue the senior-channel post via the API seam
+                // (engine holds no Slack credential); fire-and-forget, fail-soft so
+                // the escalation bookmark is still created if the notification fails.
+                await MediatedSlack.QueueChannelMessageAsync(
+                    context, seniorChannel, message, "Warning", "SendNotification", context.CancellationToken);
             }
 
             _logger?.LogInformation("Senior notification sent for session {SessionId}", escalation.SessionId);

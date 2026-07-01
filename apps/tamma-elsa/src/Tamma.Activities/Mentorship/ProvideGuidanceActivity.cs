@@ -4,6 +4,7 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using Tamma.Activities.LlmCall;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -24,7 +25,6 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
 {
     private readonly ILogger<ProvideGuidanceActivity>? _logger;
     private readonly IMentorshipSessionRepository? _repository;
-    private readonly IIntegrationService? _integrationService;
     private readonly IAnalyticsService? _analyticsService;
 
     /// <summary>Mentorship session ID</summary>
@@ -57,12 +57,10 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
     public ProvideGuidanceActivity(
         ILogger<ProvideGuidanceActivity> logger,
         IMentorshipSessionRepository repository,
-        IIntegrationService integrationService,
         IAnalyticsService analyticsService)
     {
         _logger = logger;
         _repository = repository;
-        _integrationService = integrationService;
         _analyticsService = analyticsService;
     }
 
@@ -134,7 +132,7 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
             // Deliver guidance via appropriate channel
             if (!string.IsNullOrEmpty(junior.SlackId))
             {
-                await DeliverGuidanceViaSlack(junior.SlackId, guidance, resources, guidanceLevel);
+                await DeliverGuidanceViaSlack(context, junior.SlackId, guidance, resources, guidanceLevel);
             }
 
             _logger?.LogInformation(
@@ -519,7 +517,8 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
         return resources;
     }
 
-    private async Task DeliverGuidanceViaSlack(
+    private static async Task DeliverGuidanceViaSlack(
+        ActivityExecutionContext context,
         string slackId,
         GuidanceContent guidance,
         List<Resource> resources,
@@ -554,7 +553,11 @@ public class ProvideGuidanceActivity : CodeActivity<GuidanceOutput>
 
         message += "\n\nReply if you need more help!";
 
-        await _integrationService!.SendSlackDirectMessageAsync(slackId, message);
+        // Story 38-3b — enqueue the DM intent via the API seam (engine holds no
+        // Slack credential); fire-and-forget, fail-soft (a missed post never breaks
+        // the mentorship session).
+        await MediatedSlack.QueueDirectMessageAsync(
+            context, slackId, message, "Info", "SendGuidance", context.CancellationToken);
     }
 }
 

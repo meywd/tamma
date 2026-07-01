@@ -4,6 +4,7 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using Tamma.Activities.LlmCall;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -160,7 +161,7 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
             // Step 9: Notify junior about completion
             if (!string.IsNullOrEmpty(junior.SlackId))
             {
-                await NotifyCompletion(junior.SlackId, story, report, skillUpdate);
+                await NotifyCompletion(context, junior.SlackId, story, report, skillUpdate);
             }
 
             _logger?.LogInformation(
@@ -338,7 +339,8 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
             "count");
     }
 
-    private async Task NotifyCompletion(
+    private static async Task NotifyCompletion(
+        ActivityExecutionContext context,
         string slackId,
         Tamma.Core.Entities.Story story,
         SessionReport report,
@@ -399,7 +401,10 @@ Your skill level has been updated from {skillUpdate.OldSkillLevel} to {skillUpda
 
 Great work! Ready for your next challenge?";
 
-        await _integrationService!.SendSlackDirectMessageAsync(slackId, message);
+        // Story 38-3b — enqueue the completion DM via the API seam (engine holds no
+        // Slack credential); fire-and-forget, fail-soft.
+        await MediatedSlack.QueueDirectMessageAsync(
+            context, slackId, message, "Celebration", "SendDirect", context.CancellationToken);
     }
 }
 

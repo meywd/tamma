@@ -15,24 +15,22 @@ public class AssessJuniorCapabilityActivityTests
 {
     private Mock<ILogger<AssessJuniorCapabilityActivity>> _mockLogger = null!;
     private Mock<IMentorshipSessionRepository> _mockRepository = null!;
-    private Mock<IIntegrationService> _mockIntegrationService = null!;
 
     [SetUp]
     public void SetUp()
     {
         _mockLogger = new Mock<ILogger<AssessJuniorCapabilityActivity>>();
         _mockRepository = new Mock<IMentorshipSessionRepository>();
-        _mockIntegrationService = new Mock<IIntegrationService>();
     }
 
     [Test]
     public void Constructor_WithValidDependencies_ShouldNotThrow()
     {
-        // Act
+        // Act — Story 38-3b: the activity no longer injects IIntegrationService
+        // (Slack now routes through the mediated API seam), so the ctor is 2-arg.
         Action act = () => new AssessJuniorCapabilityActivity(
             _mockLogger.Object,
-            _mockRepository.Object,
-            _mockIntegrationService.Object);
+            _mockRepository.Object);
 
         // Assert
         act.Should().NotThrow();

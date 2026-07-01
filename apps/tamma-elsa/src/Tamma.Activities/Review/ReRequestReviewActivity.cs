@@ -4,9 +4,9 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.LlmCall;
 using Tamma.Activities.Review.Models;
 using Tamma.Core.Entities;
-using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Activities.Review;
@@ -27,7 +27,6 @@ public class ReRequestReviewActivity : CodeActivity<ReRequestReviewOutput>
 {
     private readonly ILogger<ReRequestReviewActivity>? _logger;
     private readonly IMentorshipSessionRepository? _repository;
-    private readonly IIntegrationService? _integrationService;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -58,12 +57,10 @@ public class ReRequestReviewActivity : CodeActivity<ReRequestReviewOutput>
 
     public ReRequestReviewActivity(
         ILogger<ReRequestReviewActivity> logger,
-        IMentorshipSessionRepository repository,
-        IIntegrationService integrationService)
+        IMentorshipSessionRepository repository)
     {
         _logger = logger;
         _repository = repository;
-        _integrationService = integrationService;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -101,13 +98,17 @@ public class ReRequestReviewActivity : CodeActivity<ReRequestReviewOutput>
 
             var junior = await _repository!.GetJuniorByIdAsync(juniorId);
 
-            // Notify the junior that re-review is in progress
+            // Notify the junior that re-review is in progress — Story 38-3b: enqueue
+            // the DM intent via the API seam (engine holds no Slack credential);
+            // fire-and-forget, fail-soft.
             if (junior != null && !string.IsNullOrEmpty(junior.SlackId))
             {
-                await _integrationService!.SendSlackDirectMessageAsync(
+                await MediatedSlack.QueueDirectMessageAsync(
+                    context,
                     junior.SlackId,
                     $"Your fixes for PR #{prNumber} have been submitted (iteration {iteration}). " +
-                    "The PR is being re-reviewed. Hang tight!");
+                    "The PR is being re-reviewed. Hang tight!",
+                    "Info", "SendDirect", context.CancellationToken);
             }
 
             // Log the event

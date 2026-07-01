@@ -5,9 +5,9 @@ using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.LlmCall;
 using Tamma.Activities.Review.Models;
 using Tamma.Core.Entities;
-using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Activities.Review;
@@ -40,7 +40,6 @@ public class DeliverGuidanceActivity : Activity
 {
     private readonly ILogger<DeliverGuidanceActivity>? _logger;
     private readonly IMentorshipSessionRepository? _repository;
-    private readonly IIntegrationService? _integrationService;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -79,12 +78,10 @@ public class DeliverGuidanceActivity : Activity
 
     public DeliverGuidanceActivity(
         ILogger<DeliverGuidanceActivity> logger,
-        IMentorshipSessionRepository repository,
-        IIntegrationService integrationService)
+        IMentorshipSessionRepository repository)
     {
         _logger = logger;
         _repository = repository;
-        _integrationService = integrationService;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -132,11 +129,14 @@ public class DeliverGuidanceActivity : Activity
                 OverallMessage = guidanceText.Trim()
             };
 
-            // Send guidance to the junior via Slack
+            // Send guidance to the junior via Slack — Story 38-3b: enqueue the DM
+            // intent via the API seam (engine holds no Slack credential);
+            // fire-and-forget, fail-soft.
             if (junior != null && !string.IsNullOrEmpty(junior.SlackId))
             {
                 var message = FormatGuidanceMessage(guidance, prNumber);
-                await _integrationService!.SendSlackDirectMessageAsync(junior.SlackId, message);
+                await MediatedSlack.QueueDirectMessageAsync(
+                    context, junior.SlackId, message, "Info", "SendGuidance", context.CancellationToken);
             }
 
             // Log the mentorship event (retained alongside the DCB event the workflow emits)

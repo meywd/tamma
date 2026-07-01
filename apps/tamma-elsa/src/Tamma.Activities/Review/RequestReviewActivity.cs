@@ -4,9 +4,9 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.LlmCall;
 using Tamma.Activities.Review.Models;
 using Tamma.Core.Entities;
-using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Activities.Review;
@@ -26,7 +26,6 @@ public class RequestReviewActivity : CodeActivity<RequestReviewOutput>
 {
     private readonly ILogger<RequestReviewActivity>? _logger;
     private readonly IMentorshipSessionRepository? _repository;
-    private readonly IIntegrationService? _integrationService;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -53,12 +52,10 @@ public class RequestReviewActivity : CodeActivity<RequestReviewOutput>
 
     public RequestReviewActivity(
         ILogger<RequestReviewActivity> logger,
-        IMentorshipSessionRepository repository,
-        IIntegrationService integrationService)
+        IMentorshipSessionRepository repository)
     {
         _logger = logger;
         _repository = repository;
-        _integrationService = integrationService;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -77,13 +74,17 @@ public class RequestReviewActivity : CodeActivity<RequestReviewOutput>
         {
             var junior = await _repository!.GetJuniorByIdAsync(juniorId);
 
-            // Notify the junior that the PR is awaiting review
+            // Notify the junior that the PR is awaiting review — Story 38-3b: enqueue
+            // the DM intent via the API seam (engine holds no Slack credential);
+            // fire-and-forget, fail-soft.
             if (junior != null && !string.IsNullOrEmpty(junior.SlackId))
             {
-                await _integrationService!.SendSlackDirectMessageAsync(
+                await MediatedSlack.QueueDirectMessageAsync(
+                    context,
                     junior.SlackId,
                     $"Your PR #{prNumber} is now awaiting code review. " +
-                    "You will be notified when a reviewer submits feedback.");
+                    "You will be notified when a reviewer submits feedback.",
+                    "Info", "SendDirect", context.CancellationToken);
             }
 
             // Log the event
