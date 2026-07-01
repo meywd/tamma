@@ -13,6 +13,10 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
+    <!-- netstandard2.0 defaults to C# 7.3 on some SDKs (notably the Docker build image),
+         which rejects <Nullable>enable</Nullable> with CS8630. Pin the language version so
+         nullable + modern C# compile regardless of the SDK's TFM default. -->
+    <LangVersion>latest</LangVersion>
     <RootNamespace>Tamma.Activities.Guardrails</RootNamespace>
     <AssemblyName>Tamma.Activities.Guardrails</AssemblyName>
     <Nullable>enable</Nullable>
