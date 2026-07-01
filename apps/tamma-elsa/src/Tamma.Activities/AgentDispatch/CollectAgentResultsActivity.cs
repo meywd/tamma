@@ -20,10 +20,12 @@ namespace Tamma.Activities.AgentDispatch;
 ///   <item><c>Collected</c> — collection succeeded (even if the agent
 ///     itself reported a failure; the activity's job is to read state,
 ///     not interpret it).</item>
-///   <item><c>Partial</c> — collection ran but some data (artifact, PR,
+///   <item><c>Partial</c> — collection RAN but some data (artifact, PR,
 ///     check runs) was unavailable.</item>
-///   <item><c>Failed</c> — collection itself threw / couldn't reach
-///     GitHub at all.</item>
+///   <item><c>Failed</c> — the collection itself did not run: it threw, or the
+///     mediated collect call returned a MEDIATION/authorization failure (guard 403 /
+///     auth 401 / transport). This is checked BEFORE the Partial heuristic so a
+///     revoked mid-run authorization never surfaces as a phantom Partial.</item>
 /// </list>
 /// </para>
 /// </summary>
@@ -166,7 +168,8 @@ public class CollectAgentResultsActivity : Activity, ITammaActivity
             AgentProvider: AgentProvider.Get(context),
             AgentConfigJson: null,
             WorkflowFileName: null,
-            TimeoutMinutes: 0);
+            TimeoutMinutes: 0,
+            TenantId: ReadTenantIdFromContext(context));
 
         var monitor = new AgentMonitorResult(
             WorkflowRunId: WorkflowRunId.Get(context),
@@ -182,24 +185,38 @@ public class CollectAgentResultsActivity : Activity, ITammaActivity
             SetOutputs(context, result);
             context.SetVariable("LastAgentResult", result);
 
-            var partial = IsPartial(result);
-            if (partial)
+            switch (Route(result))
             {
-                _logger?.LogInformation(
-                    "Partial result for {Repository}/{Branch}: artifact or PR missing",
-                    request.Repository, request.BranchName);
-                TammaEventEmitter.Emit(context, this, _logger, new TammaEvent
-                {
-                    EventType = "AGENT.RESULTS.PARTIAL",
-                    Status = "partial",
-                    Data = BuildEndData(context)
-                });
-                await context.CompleteActivityWithOutcomesAsync("Partial");
-            }
-            else
-            {
-                TammaEventEmitter.EmitSuccess(context, this, this, _logger, DateTime.UtcNow - startedAt);
-                await context.CompleteActivityWithOutcomesAsync("Collected");
+                case CollectRoute.Failed:
+                    // Review finding 2 — the collect call itself did not run (mediation
+                    // outage / revoked mid-run authorization). Route to Failed, NOT the
+                    // soft Partial, so a downstream branch never proceeds on a phantom.
+                    _logger?.LogWarning(
+                        "Agent result collection unavailable for {Repository}/{Branch}: {Error}",
+                        request.Repository, request.BranchName, result.ErrorMessage);
+                    TammaEventEmitter.EmitFailure(
+                        context, this, this, _logger, DateTime.UtcNow - startedAt,
+                        result.ErrorMessage ?? "agent result collection unavailable");
+                    await context.CompleteActivityWithOutcomesAsync("Failed");
+                    break;
+
+                case CollectRoute.Partial:
+                    _logger?.LogInformation(
+                        "Partial result for {Repository}/{Branch}: artifact or PR missing",
+                        request.Repository, request.BranchName);
+                    TammaEventEmitter.Emit(context, this, _logger, new TammaEvent
+                    {
+                        EventType = "AGENT.RESULTS.PARTIAL",
+                        Status = "partial",
+                        Data = BuildEndData(context)
+                    });
+                    await context.CompleteActivityWithOutcomesAsync("Partial");
+                    break;
+
+                default:
+                    TammaEventEmitter.EmitSuccess(context, this, this, _logger, DateTime.UtcNow - startedAt);
+                    await context.CompleteActivityWithOutcomesAsync("Collected");
+                    break;
             }
         }
         catch (OperationCanceledException)
@@ -223,6 +240,29 @@ public class CollectAgentResultsActivity : Activity, ITammaActivity
         }
     }
 
+    /// <summary>The three terminal routes for a completed collect call.</summary>
+    internal enum CollectRoute { Collected, Partial, Failed }
+
+    /// <summary>
+    /// Review finding 2 — decide the outcome for a mapped collect result. A
+    /// MEDIATION/authorization failure (the collect call itself did not run) is a hard
+    /// <see cref="CollectRoute.Failed"/>, evaluated BEFORE the Partial heuristic so an
+    /// empty-git-state mediation outage never misroutes to the soft Partial. Only a
+    /// collection that RAN but couldn't read full git state stays a Partial.
+    /// </summary>
+    internal static CollectRoute Route(AgentExecutionResult r)
+    {
+        if (IsCollectionUnavailable(r)) return CollectRoute.Failed;
+        if (IsPartial(r)) return CollectRoute.Partial;
+        return CollectRoute.Collected;
+    }
+
+    private static bool IsCollectionUnavailable(AgentExecutionResult r) =>
+        !r.Success
+        && r.ErrorMessage is not null
+        && r.ErrorMessage.StartsWith(
+            AgentResultCollectorService.CollectionUnavailableMarker, StringComparison.OrdinalIgnoreCase);
+
     private static bool IsPartial(AgentExecutionResult r)
     {
         // AGENT.RESULTS.PARTIAL when the artifact wasn't available OR the
@@ -234,6 +274,27 @@ public class CollectAgentResultsActivity : Activity, ITammaActivity
             return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Story 38-2 — best-effort tenant resolution so the thin collector can send
+    /// X-Tenant-Id on the mediated collect call. Mirrors
+    /// <c>DispatchAgentWorkflowActivity.ReadTenantIdFromContext</c>.
+    /// </summary>
+    private static Guid? ReadTenantIdFromContext(ActivityExecutionContext context)
+    {
+        string?[] candidates =
+        {
+            context.GetVariable<string>("TenantId"),
+            context.GetVariable<string>("tenantId"),
+            context.GetVariable<string>("Tamma:TenantId"),
+        };
+        foreach (var s in candidates)
+        {
+            if (!string.IsNullOrWhiteSpace(s) && Guid.TryParse(s, out var g))
+                return g;
+        }
+        return null;
     }
 
     private void SetOutputs(ActivityExecutionContext context, AgentExecutionResult r)

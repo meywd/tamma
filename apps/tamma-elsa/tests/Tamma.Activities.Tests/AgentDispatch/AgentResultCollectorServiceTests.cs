@@ -1,16 +1,22 @@
-using System.IO.Compression;
-using System.Text;
 using FluentAssertions;
 using NUnit.Framework;
 using Tamma.Activities.AgentDispatch;
 using Tamma.Activities.AgentDispatch.Models;
+using Tamma.Activities.LlmCall.Models;
 
 namespace Tamma.Activities.Tests.AgentDispatch;
 
+/// <summary>
+/// Story 38-2 — the thin <see cref="AgentResultCollectorService"/> (wire→result
+/// mapping) plus the pure <see cref="AgentResultArtifactParser"/> (relocated from
+/// the former collector; still engine-side, still credential-free). The multi-read
+/// aggregation moved server-side to <c>Tamma.Api</c>'s <c>ActionsResultAggregator</c>
+/// (covered by <c>ActionsResultAggregatorTests</c> there).
+/// </summary>
 [TestFixture]
 public class AgentResultCollectorServiceTests
 {
-    private static AgentExecutionRequest MakeRequest() =>
+    private static AgentExecutionRequest MakeRequest(Guid? tenantId = null) =>
         new(
             Repository: "acme/widgets",
             BranchName: "tamma/issue-42",
@@ -22,28 +28,167 @@ public class AgentResultCollectorServiceTests
             AgentProvider: "claude-code",
             AgentConfigJson: null,
             WorkflowFileName: null,
-            TimeoutMinutes: 0);
+            TimeoutMinutes: 0,
+            TenantId: tenantId);
 
     private static AgentMonitorResult MonitorOk(string conclusion = "success") =>
-        new(
-            WorkflowRunId: 99,
-            Status: "completed",
-            Conclusion: conclusion,
-            WorkflowRunUrl: "https://github.com/acme/widgets/actions/runs/99",
-            DurationSeconds: 123,
-            ArtifactsUrl: string.Empty);
+        new(WorkflowRunId: 99, Status: "completed", Conclusion: conclusion,
+            WorkflowRunUrl: "https://github.com/acme/widgets/actions/runs/99", DurationSeconds: 123, ArtifactsUrl: string.Empty);
 
-    private static byte[] BuildArtifactZip(string resultJson)
+    // ================================================================
+    // Thin-client wire→result mapping (AC5) + tenant threading
+    // ================================================================
+
+    [Test]
+    public async Task CollectAsync_CallsMediation_AndMapsAggregatedResult()
     {
-        using var ms = new MemoryStream();
-        using (var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true))
+        var tenant = Guid.NewGuid();
+        var api = new FakeTammaApiClient
         {
-            var entry = zip.CreateEntry("result.json");
-            using var writer = new StreamWriter(entry.Open(), Encoding.UTF8);
-            writer.Write(resultJson);
-        }
-        return ms.ToArray();
+            OnCollect = (_, _, _, _) => new AgentRunResultsApiResponse
+            {
+                Success = true,
+                AgentSuccess = true,
+                PrNumber = 7,
+                PrUrl = "https://gh/pr/7",
+                CommitSha = "abc",
+                FilesChanged = new[] { "a.ts" },
+                CommitsCount = 2,
+                ChecksPassed = true,
+                TokensUsed = 1000,
+                DurationSeconds = 60,
+                AgentProvider = "claude-code",
+            }
+        };
+        var svc = new AgentResultCollectorService(api);
+
+        var result = await svc.CollectAsync(MakeRequest(tenant), MonitorOk());
+
+        result.Success.Should().BeTrue();
+        result.PrNumber.Should().Be(7);
+        result.CommitSha.Should().Be("abc");
+        result.TokensUsed.Should().Be(1000);
+        result.FilesChanged.Should().ContainSingle().Which.Should().Be("a.ts");
+        result.ChecksPassed.Should().BeTrue();
+
+        api.CollectCalls.Should().HaveCount(1);
+        var call = api.CollectCalls[0];
+        call.Repo.Should().Be("acme/widgets");
+        call.RunId.Should().Be(99);
+        call.TenantId.Should().Be(tenant.ToString());
+        call.Request.Conclusion.Should().Be("success");
+        call.Request.DurationSeconds.Should().Be(123);
     }
+
+    [Test]
+    public async Task CollectAsync_InvalidRepo_FailsWithoutCallingApi()
+    {
+        var api = new FakeTammaApiClient();
+        var svc = new AgentResultCollectorService(api);
+
+        var request = MakeRequest() with { Repository = "bad" };
+        var result = await svc.CollectAsync(request, MonitorOk());
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("Invalid repository format");
+        api.CollectCalls.Should().BeEmpty();
+    }
+
+    [Test]
+    public void MapResponse_NullResponse_FailsClosed()
+    {
+        var result = AgentResultCollectorService.MapResponse(null, "claude-code");
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("unavailable");
+        result.AgentProvider.Should().Be("claude-code");
+    }
+
+    [Test]
+    public void MapResponse_AgentFailure_CarriesAgentSuccessFalse()
+    {
+        var result = AgentResultCollectorService.MapResponse(new AgentRunResultsApiResponse
+        {
+            Success = true,          // mediation succeeded
+            AgentSuccess = false,    // agent's task failed
+            ErrorMessage = "conclusion: failure; no result artifact found",
+            CommitSha = "head-sha",
+            FilesChanged = new[] { "x.ts", "y.ts" },
+            CommitsCount = 2,
+        }, "claude-code");
+
+        result.Success.Should().BeFalse("the agent's own success rides in agentSuccess");
+        result.CommitSha.Should().Be("head-sha");
+        result.FilesChanged.Should().HaveCount(2);
+        result.ErrorMessage.Should().Contain("failure");
+    }
+
+    // ================================================================
+    // Outcome routing (review finding 2) — a MEDIATION/authorization failure
+    // (collect never ran) is a hard Failed, checked BEFORE the Partial heuristic;
+    // a genuine "ran but empty git state" stays a soft Partial.
+    // ================================================================
+
+    [Test]
+    public void Route_NullResponseMediationOutage_RoutesToFailed_NotPartial()
+    {
+        var mediationFailure = AgentResultCollectorService.MapResponse(null, "claude-code");
+        // Empty CommitSha + empty FilesChanged would trip the Partial heuristic —
+        // the mediation-unavailable marker must win first and route to Failed.
+        CollectAgentResultsActivity.Route(mediationFailure).Should().Be(CollectAgentResultsActivity.CollectRoute.Failed);
+    }
+
+    [Test]
+    public void Route_GuardDenyMediationFailure_RoutesToFailed()
+    {
+        var denied = AgentResultCollectorService.MapResponse(
+            new AgentRunResultsApiResponse
+            {
+                Success = false, // mediation failed (guard 403 rode as success:false or nulled body)
+                FailureCode = "REPO_NOT_AUTHORIZED",
+                FailureReason = "repo not authorized for tenant",
+            },
+            "claude-code");
+
+        CollectAgentResultsActivity.Route(denied).Should().Be(CollectAgentResultsActivity.CollectRoute.Failed);
+        denied.ErrorMessage.Should().StartWith(AgentResultCollectorService.CollectionUnavailableMarker);
+    }
+
+    [Test]
+    public void Route_GenuineEmptyGitState_StaysPartial()
+    {
+        // Mediation SUCCEEDED, agent ran, but no commit/files were read → soft Partial.
+        var partial = AgentResultCollectorService.MapResponse(
+            new AgentRunResultsApiResponse
+            {
+                Success = true,
+                AgentSuccess = true,
+                CommitSha = string.Empty,
+                FilesChanged = Array.Empty<string>(),
+            },
+            "claude-code");
+
+        CollectAgentResultsActivity.Route(partial).Should().Be(CollectAgentResultsActivity.CollectRoute.Partial);
+    }
+
+    [Test]
+    public void Route_FullResult_IsCollected()
+    {
+        var full = AgentResultCollectorService.MapResponse(
+            new AgentRunResultsApiResponse
+            {
+                Success = true,
+                AgentSuccess = true,
+                CommitSha = "abc",
+                FilesChanged = new[] { "a.ts" },
+            },
+            "claude-code");
+
+        CollectAgentResultsActivity.Route(full).Should().Be(CollectAgentResultsActivity.CollectRoute.Collected);
+    }
+
+    // ================================================================
+    // Pure result.json parser (relocated to AgentResultArtifactParser)
+    // ================================================================
 
     [Test]
     public void ParseResultJson_MapsAllFields()
@@ -65,7 +210,7 @@ public class AgentResultCollectorServiceTests
             ""agent_version"": ""1.2.3""
         }";
 
-        var artifact = AgentResultCollectorService.ParseResultJson(json);
+        var artifact = AgentResultArtifactParser.ParseResultJson(json);
 
         artifact.Should().NotBeNull();
         artifact!.Success.Should().BeTrue();
@@ -79,172 +224,8 @@ public class AgentResultCollectorServiceTests
     [Test]
     public void ParseResultJson_ReturnsNullForInvalidJson()
     {
-        var artifact = AgentResultCollectorService.ParseResultJson("{ broken ");
-        artifact.Should().BeNull();
+        AgentResultArtifactParser.ParseResultJson("{ broken ").Should().BeNull();
     }
-
-    [Test]
-    public async Task CollectAsync_UsesArtifactWhenAvailable()
-    {
-        var fake = new FakeGitHubActionsClient();
-        fake.ArtifactsByRunId[99] = new[]
-        {
-            new WorkflowRunArtifact(Id: 500, Name: "tamma-result", SizeInBytes: 100, Expired: false)
-        };
-        fake.ArtifactBytes[500] = BuildArtifactZip(@"{
-            ""success"": true,
-            ""task"": ""implement"",
-            ""issue_number"": 42,
-            ""branch_name"": ""tamma/issue-42"",
-            ""tamma_session_id"": ""sess_abc"",
-            ""files_changed"": [""a.ts""],
-            ""pr_number"": 7,
-            ""commit_sha"": ""abc"",
-            ""tokens_used"": 1000,
-            ""duration_seconds"": 60,
-            ""agent_provider"": ""claude-code""
-        }");
-
-        var svc = new AgentResultCollectorService(fake);
-        var result = await svc.CollectAsync(MakeRequest(), MonitorOk());
-
-        result.Success.Should().BeTrue();
-        result.PrNumber.Should().Be(7);
-        result.CommitSha.Should().Be("abc");
-        result.TokensUsed.Should().Be(1000);
-        result.FilesChanged.Should().ContainSingle().Which.Should().Be("a.ts");
-    }
-
-    [Test]
-    public async Task CollectAsync_FallsBackToCompare_WhenArtifactMissing()
-    {
-        var fake = new FakeGitHubActionsClient
-        {
-            Comparison = new BranchComparison(
-                BaseSha: "base-sha",
-                HeadSha: "head-sha",
-                Files: new[]
-                {
-                    new CompareFileChange("src/x.ts", "modified", 5, 3),
-                    new CompareFileChange("src/y.ts", "added", 20, 0)
-                },
-                Commits: new[]
-                {
-                    new CompareCommit("commit1", "first"),
-                    new CompareCommit("commit2", "second")
-                })
-        };
-
-        var svc = new AgentResultCollectorService(fake);
-        var result = await svc.CollectAsync(MakeRequest(), MonitorOk("failure"));
-
-        result.Success.Should().BeFalse();
-        result.CommitSha.Should().Be("head-sha");
-        result.FilesChanged.Should().HaveCount(2);
-        result.CommitsCount.Should().Be(2);
-        result.ErrorMessage.Should().Contain("failure");
-        result.ErrorMessage.Should().Contain("no result artifact");
-    }
-
-    [Test]
-    public async Task CollectAsync_IncludesPullRequestWhenFound()
-    {
-        var fake = new FakeGitHubActionsClient
-        {
-            Pulls = new[]
-            {
-                new PullRequestSummary(
-                    Number: 11, Title: "PR", Body: null,
-                    HtmlUrl: "https://github.com/acme/widgets/pull/11",
-                    HeadSha: "pr-sha", ChangedFiles: 2)
-            }
-        };
-
-        var svc = new AgentResultCollectorService(fake);
-        var result = await svc.CollectAsync(MakeRequest(), MonitorOk());
-
-        result.PrNumber.Should().Be(11);
-        result.PrUrl.Should().Be("https://github.com/acme/widgets/pull/11");
-    }
-
-    [Test]
-    public async Task CollectAsync_ComputesChecksPassed_AllSuccess()
-    {
-        var fake = new FakeGitHubActionsClient
-        {
-            Pulls = new[]
-            {
-                new PullRequestSummary(11, "PR", null, "url", "head-sha", 1)
-            },
-            CheckRuns = new[]
-            {
-                new CheckRunSummary("build", "completed", "success"),
-                new CheckRunSummary("test", "completed", "success")
-            }
-        };
-
-        var svc = new AgentResultCollectorService(fake);
-        var result = await svc.CollectAsync(MakeRequest(), MonitorOk());
-
-        result.ChecksPassed.Should().BeTrue();
-    }
-
-    [Test]
-    public async Task CollectAsync_ComputesChecksFailed_MixedStatus()
-    {
-        var fake = new FakeGitHubActionsClient
-        {
-            Pulls = new[] { new PullRequestSummary(11, "PR", null, "url", "h", 1) },
-            CheckRuns = new[]
-            {
-                new CheckRunSummary("build", "completed", "success"),
-                new CheckRunSummary("test", "completed", "failure")
-            }
-        };
-
-        var svc = new AgentResultCollectorService(fake);
-        var result = await svc.CollectAsync(MakeRequest(), MonitorOk());
-
-        result.ChecksPassed.Should().BeFalse();
-    }
-
-    [Test]
-    public async Task CollectAsync_ReturnsNullChecks_WhenPending()
-    {
-        var fake = new FakeGitHubActionsClient
-        {
-            Pulls = new[] { new PullRequestSummary(11, "PR", null, "url", "h", 1) },
-            CheckRuns = new[]
-            {
-                new CheckRunSummary("build", "in_progress", null)
-            }
-        };
-
-        var svc = new AgentResultCollectorService(fake);
-        var result = await svc.CollectAsync(MakeRequest(), MonitorOk());
-
-        result.ChecksPassed.Should().BeNull();
-    }
-
-    [Test]
-    public async Task CollectAsync_IgnoresExpiredArtifacts()
-    {
-        var fake = new FakeGitHubActionsClient();
-        fake.ArtifactsByRunId[99] = new[]
-        {
-            new WorkflowRunArtifact(500, "tamma-result", 100, Expired: true)
-        };
-
-        var svc = new AgentResultCollectorService(fake);
-        var result = await svc.CollectAsync(MakeRequest(), MonitorOk());
-
-        result.TokensUsed.Should().Be(0);
-        result.AgentProvider.Should().Be("claude-code");
-    }
-
-    // ================================================================
-    // Review-session 2026-04-20 finding 6 — bounded artifact download
-    // ================================================================
 
     [Test]
     public void ParseResultJson_ClampsAgentLogSummary_To32Kb()
@@ -264,13 +245,11 @@ public class AgentResultCollectorServiceTests
             ""agent_provider"": ""claude-code""
         }}";
 
-        var artifact = AgentResultCollectorService.ParseResultJson(json);
+        var artifact = AgentResultArtifactParser.ParseResultJson(json);
 
         artifact.Should().NotBeNull();
-        artifact!.AgentLogSummary.Should().NotBeNull();
-        artifact.AgentLogSummary!.Length.Should().Be(
-            AgentResultCollectorService.MaxAgentLogSummaryChars,
-            "agent_log_summary is clamped to 32 KB");
+        artifact!.AgentLogSummary!.Length.Should().Be(
+            AgentResultArtifactParser.MaxAgentLogSummaryChars, "agent_log_summary is clamped to 32 KB");
     }
 
     [Test]
@@ -291,20 +270,43 @@ public class AgentResultCollectorServiceTests
             ""agent_provider"": ""claude-code""
         }}";
 
-        var artifact = AgentResultCollectorService.ParseResultJson(json);
+        var artifact = AgentResultArtifactParser.ParseResultJson(json);
 
         artifact.Should().NotBeNull();
-        artifact!.ErrorMessage.Should().NotBeNull();
-        artifact.ErrorMessage!.Length.Should().Be(
-            AgentResultCollectorService.MaxShortStringChars,
-            "error_message is clamped to 2 KB");
+        artifact!.ErrorMessage!.Length.Should().Be(
+            AgentResultArtifactParser.MaxShortStringChars, "error_message is clamped to 2 KB");
     }
 
     [Test]
-    public async Task CollectAsync_OversizedResultJsonInZip_IsRejected()
+    public void ParseResultJson_ClampsFilesChangedCount_To2000()
     {
-        // Build a zip whose result.json is ~5 MB — over the 4 MB cap.
-        var hugePayload = new string('z', (int)(AgentResultCollectorService.MaxResultJsonBytes + 1024));
+        // Review finding 6: a malicious result.json with ~1M tiny file entries must not
+        // balloon the allocation / JSONB column — the COUNT is capped, not just each entry.
+        var files = string.Join(",", Enumerable.Range(0, 5000).Select(i => $"\"f{i}.ts\""));
+        var json = $@"{{
+            ""success"": true,
+            ""task"": ""implement"",
+            ""issue_number"": 42,
+            ""branch_name"": ""tamma/issue-42"",
+            ""tamma_session_id"": ""sess_abc"",
+            ""files_changed"": [{files}],
+            ""commit_sha"": ""abc123"",
+            ""tokens_used"": 0,
+            ""duration_seconds"": 1,
+            ""agent_provider"": ""claude-code""
+        }}";
+
+        var artifact = AgentResultArtifactParser.ParseResultJson(json);
+
+        artifact.Should().NotBeNull();
+        artifact!.FilesChanged.Length.Should().Be(
+            AgentResultArtifactParser.MaxFilesChangedCount, "files_changed count is capped at 2000");
+    }
+
+    [Test]
+    public void ParseResultJson_ClampsTokensUsed_ToCeiling()
+    {
+        // A poisoned tokens_used must not corrupt cost/analytics — clamp to the ceiling.
         var json = $@"{{
             ""success"": true,
             ""task"": ""implement"",
@@ -313,27 +315,43 @@ public class AgentResultCollectorServiceTests
             ""tamma_session_id"": ""sess_abc"",
             ""files_changed"": [],
             ""commit_sha"": ""abc123"",
-            ""agent_log_summary"": ""{hugePayload}""
+            ""tokens_used"": {int.MaxValue},
+            ""duration_seconds"": 1,
+            ""agent_provider"": ""claude-code""
         }}";
 
-        var fake = new FakeGitHubActionsClient();
-        fake.ArtifactsByRunId[99] = new[]
-        {
-            new WorkflowRunArtifact(500, "tamma-result", 100, Expired: false)
-        };
-        fake.ArtifactBytes[500] = BuildArtifactZip(json);
+        var artifact = AgentResultArtifactParser.ParseResultJson(json);
 
-        var svc = new AgentResultCollectorService(fake);
-
-        // Oversized result.json is rejected — the service falls back to
-        // other data sources (PR lookup, compare API). No artifact data
-        // propagates.
-        var result = await svc.CollectAsync(MakeRequest(), MonitorOk("success"));
-
-        result.Success.Should().BeTrue("monitor said success; artifact was rejected but that doesn't flip it");
-        result.TokensUsed.Should().Be(0, "artifact was rejected so no tokens carried over");
-        result.AgentLogSummary.Should().BeNull("no artifact means no log summary");
+        artifact.Should().NotBeNull();
+        artifact!.TokensUsed.Should().Be(
+            AgentResultArtifactParser.MaxTokensUsed, "tokens_used is clamped to the 100M ceiling");
     }
+
+    [Test]
+    public void ParseResultJson_ClampsNegativeTokensUsed_ToZero()
+    {
+        var json = @"{
+            ""success"": true,
+            ""task"": ""implement"",
+            ""issue_number"": 42,
+            ""branch_name"": ""tamma/issue-42"",
+            ""tamma_session_id"": ""sess_abc"",
+            ""files_changed"": [],
+            ""commit_sha"": ""abc123"",
+            ""tokens_used"": -500,
+            ""duration_seconds"": 1,
+            ""agent_provider"": ""claude-code""
+        }";
+
+        var artifact = AgentResultArtifactParser.ParseResultJson(json);
+
+        artifact.Should().NotBeNull();
+        artifact!.TokensUsed.Should().Be(0, "a negative tokens_used is clamped to 0");
+    }
+
+    // ================================================================
+    // LimitedStream (stays in Tamma.Activities — used by the Octokit client)
+    // ================================================================
 
     [Test]
     public void LimitedStream_ThrowsOnOverflow()

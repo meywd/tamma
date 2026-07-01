@@ -2,16 +2,28 @@ using FluentAssertions;
 using NUnit.Framework;
 using Tamma.Activities.AgentDispatch;
 using Tamma.Activities.AgentDispatch.Models;
+using Tamma.Activities.LlmCall.Models;
 
 namespace Tamma.Activities.Tests.AgentDispatch;
 
+/// <summary>
+/// Story 38-2 — the thin <see cref="AgentDispatchService"/>. It composes the
+/// dispatch inputs engine-side (pure, token-free) and delegates the actual
+/// workflow_dispatch (check + retry) to <c>Tamma.Api</c> via
+/// <c>TammaApiClient.DispatchAgentRunAsync</c>. Tests cover: engine-side
+/// repo-format validation (no API call on bad input), input composition, tenant
+/// threading, and the pure wire→result mapping (including the fail-closed
+/// null-response path). The check/retry/403/404 platform semantics now live in
+/// <c>AgentDispatchMediationServiceTests</c> (Tamma.Api).
+/// </summary>
 [TestFixture]
 public class AgentDispatchServiceTests
 {
     private static AgentExecutionRequest MakeRequest(
         string repo = "acme/widgets",
         string branch = "tamma/issue-42",
-        string? workflowFile = "tamma-agent.yml") =>
+        string? workflowFile = "tamma-agent.yml",
+        Guid? tenantId = null) =>
         new(
             Repository: repo,
             BranchName: branch,
@@ -23,82 +35,78 @@ public class AgentDispatchServiceTests
             AgentProvider: "claude-code",
             AgentConfigJson: null,
             WorkflowFileName: workflowFile,
-            TimeoutMinutes: 30);
+            TimeoutMinutes: 30,
+            TenantId: tenantId);
 
     [Test]
-    public async Task DispatchAsync_ReturnsSuccess_OnHappyPath()
+    public async Task DispatchAsync_ComposesInputs_AndCalls_Mediation_OnHappyPath()
     {
-        var fake = new FakeGitHubActionsClient();
-        var svc = new AgentDispatchService(fake);
+        var tenant = Guid.NewGuid();
+        var api = new FakeTammaApiClient
+        {
+            OnDispatch = (_, _, _) => new AgentDispatchRunApiResponse
+            { Success = true, DispatchedAt = DateTime.UtcNow, CredentialSource = "installation" }
+        };
+        var svc = new AgentDispatchService(api);
 
-        var result = await svc.DispatchAsync(MakeRequest());
+        var result = await svc.DispatchAsync(MakeRequest(tenantId: tenant));
 
         result.Success.Should().BeTrue();
         result.ErrorMessage.Should().BeNull();
-        fake.DispatchCalls.Should().HaveCount(1);
 
-        var call = fake.DispatchCalls[0];
-        call.Owner.Should().Be("acme");
-        call.Repo.Should().Be("widgets");
-        call.WorkflowFile.Should().Be("tamma-agent.yml");
-        call.Ref.Should().Be("tamma/issue-42");
-        call.Inputs.Should().ContainKey("issue_number").WhoseValue.Should().Be("42");
-        call.Inputs.Should().ContainKey("tamma_session_id").WhoseValue.Should().Be("sess_abc123");
-        call.Inputs.Should().ContainKey("agent_provider").WhoseValue.Should().Be("claude-code");
+        api.DispatchCalls.Should().HaveCount(1);
+        var call = api.DispatchCalls[0];
+        call.Repo.Should().Be("acme/widgets");
+        call.TenantId.Should().Be(tenant.ToString(), "the acting tenant is sent as X-Tenant-Id");
+        call.Request.WorkflowFileName.Should().Be("tamma-agent.yml");
+        call.Request.Ref.Should().Be("tamma/issue-42");
+        call.Request.CorrelationId.Should().Be("sess_abc123");
+        call.Request.Inputs.Should().ContainKey("issue_number").WhoseValue.Should().Be("42");
+        call.Request.Inputs.Should().ContainKey("tamma_session_id").WhoseValue.Should().Be("sess_abc123");
+        call.Request.Inputs.Should().ContainKey("agent_provider").WhoseValue.Should().Be("claude-code");
     }
 
     [Test]
-    public async Task DispatchAsync_Fails_WhenRepositoryFormatInvalid()
+    public async Task DispatchAsync_Fails_WhenRepositoryFormatInvalid_WithoutCallingApi()
     {
-        var fake = new FakeGitHubActionsClient();
-        var svc = new AgentDispatchService(fake);
+        var api = new FakeTammaApiClient();
+        var svc = new AgentDispatchService(api);
 
         var result = await svc.DispatchAsync(MakeRequest(repo: "not-a-repo"));
 
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().Contain("owner/repo");
-        fake.CheckWorkflowCalls.Should().Be(0);
+        api.DispatchCalls.Should().BeEmpty("a malformed repo never reaches the API");
     }
 
     [Test]
-    public async Task DispatchAsync_Fails_WhenWorkflowFileMissing()
+    public async Task DispatchAsync_FallsBackToDefaultWorkflowFileName()
     {
-        var fake = new FakeGitHubActionsClient
+        var api = new FakeTammaApiClient
         {
-            CheckWorkflow = (_, _, _) => new WorkflowFileCheck(false, false, "workflow_not_found")
+            OnDispatch = (_, _, _) => new AgentDispatchRunApiResponse { Success = true, DispatchedAt = DateTime.UtcNow }
         };
-        var svc = new AgentDispatchService(fake);
+        var svc = new AgentDispatchService(api);
 
-        var result = await svc.DispatchAsync(MakeRequest());
+        await svc.DispatchAsync(MakeRequest(workflowFile: null));
 
-        result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("tamma-agent.yml");
-        fake.DispatchCalls.Should().BeEmpty();
+        api.DispatchCalls[0].Request.WorkflowFileName.Should().Be("tamma-agent.yml");
     }
 
     [Test]
-    public async Task DispatchAsync_Fails_WhenClientNotConfigured()
+    public async Task DispatchAsync_MapsFailureReason_ToErrorMessage()
     {
-        var fake = new FakeGitHubActionsClient
+        var api = new FakeTammaApiClient
         {
-            CheckWorkflow = (_, _, _) => new WorkflowFileCheck(false, true, "github_client_not_configured")
+            OnDispatch = (_, _, _) => new AgentDispatchRunApiResponse
+            {
+                Success = false,
+                FailureCode = "DISPATCH_REJECTED",
+                FailureReason = "GitHub returned 403 for dispatch — Tamma App installation may be missing the 'actions: write' permission.",
+                DispatchedAt = DateTime.UtcNow,
+            }
         };
-        var svc = new AgentDispatchService(fake);
-
-        var result = await svc.DispatchAsync(MakeRequest());
-
-        result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("GitHub App not configured");
-    }
-
-    [Test]
-    public async Task DispatchAsync_ReturnsPermissionError_On403()
-    {
-        var fake = new FakeGitHubActionsClient
-        {
-            OnDispatch = (_, _, _, _, _) => new DispatchApiResult(403, "forbidden")
-        };
-        var svc = new AgentDispatchService(fake);
+        var svc = new AgentDispatchService(api);
 
         var result = await svc.DispatchAsync(MakeRequest());
 
@@ -107,74 +115,26 @@ public class AgentDispatchServiceTests
         result.ErrorMessage.Should().Contain("actions: write");
     }
 
-    [Test]
-    public async Task DispatchAsync_ReturnsBranchError_On404()
-    {
-        var fake = new FakeGitHubActionsClient
-        {
-            OnDispatch = (_, _, _, _, _) => new DispatchApiResult(404, "not found")
-        };
-        var svc = new AgentDispatchService(fake);
-
-        var result = await svc.DispatchAsync(MakeRequest());
-
-        result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("404");
-    }
+    // ── Pure wire→result mapping (AC5) ────────────────────────────────────
 
     [Test]
-    public async Task DispatchAsync_RetriesOn429_ThenSucceeds()
+    public void MapResponse_Success_ProjectsRunUrlAndDispatchedAt()
     {
-        var attempts = 0;
-        var fake = new FakeGitHubActionsClient
-        {
-            OnDispatch = (_, _, _, _, _) =>
-            {
-                attempts++;
-                return attempts < 2
-                    ? new DispatchApiResult(429, "rate limited")
-                    : new DispatchApiResult(204, null);
-            }
-        };
-        // Use a cancellation token we can cancel to avoid real delays.
-        // Service uses Task.Delay; the test runs quickly because
-        // first delay is only 1s.
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var svc = new AgentDispatchService(fake);
-
-        var result = await svc.DispatchAsync(MakeRequest(), cts.Token);
+        var at = new DateTime(2026, 6, 30, 12, 0, 0, DateTimeKind.Utc);
+        var result = AgentDispatchService.MapResponse(new AgentDispatchRunApiResponse
+        { Success = true, WorkflowRunUrl = "https://gh/run/1", DispatchedAt = at });
 
         result.Success.Should().BeTrue();
-        attempts.Should().Be(2);
+        result.WorkflowRunUrl.Should().Be("https://gh/run/1");
+        result.DispatchedAt.Should().Be(at);
+        result.ErrorMessage.Should().BeNull();
     }
 
     [Test]
-    public async Task DispatchAsync_FailsAfterRetryBudget_On429()
+    public void MapResponse_NullResponse_FailsClosed()
     {
-        var fake = new FakeGitHubActionsClient
-        {
-            OnDispatch = (_, _, _, _, _) => new DispatchApiResult(429, "still rate-limited")
-        };
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-        var svc = new AgentDispatchService(fake);
-
-        var result = await svc.DispatchAsync(MakeRequest(), cts.Token);
-
+        var result = AgentDispatchService.MapResponse(null);
         result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("429");
-        // MaxRetries = 3 → 4 attempts total (initial + 3 retries).
-        fake.DispatchCalls.Should().HaveCount(4);
-    }
-
-    [Test]
-    public async Task DispatchAsync_FallsBackToDefaultWorkflowFileName()
-    {
-        var fake = new FakeGitHubActionsClient();
-        var svc = new AgentDispatchService(fake);
-
-        var result = await svc.DispatchAsync(MakeRequest(workflowFile: null));
-
-        result.Success.Should().BeTrue();
-        fake.DispatchCalls[0].WorkflowFile.Should().Be("tamma-agent.yml");
+        result.ErrorMessage.Should().Contain("mediation unavailable");
     }
 }

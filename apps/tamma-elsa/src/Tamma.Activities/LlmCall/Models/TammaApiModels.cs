@@ -365,6 +365,112 @@ public sealed record GitCommentDto
     [JsonPropertyName("createdAt")] public DateTime CreatedAt { get; init; }
 }
 
+// ============================================================
+// Story 38-2 (Epic 38): agent-dispatch mediation wire models
+//
+// These mirror the JSON shapes of Tamma.Api's Services/AgentDispatch request +
+// result records for the engine→API agent-dispatch endpoints
+// POST/GET /api/v1/agent-dispatch/{owner}/{repo}/... . They live in
+// Tamma.Activities (the reference graph runs Tamma.Api → Tamma.Activities) and
+// carry [JsonPropertyName] camelCase to match the API's CamelCase serialization.
+// NONE carry a token — the API mints the per-repo GitHub App INSTALLATION token
+// server-side; only credentialSource (the constant LABEL "installation") comes
+// back. Distinct from the LLM AgentRunResult (Story 32-5) — separate namespaces.
+// ============================================================
+
+/// <summary>Engine→API request body for <c>POST .../runs</c>. Inputs are composed
+/// engine-side (pure, token-free).</summary>
+public sealed record AgentDispatchRunApiRequest
+{
+    [JsonPropertyName("workflowFileName")] public string WorkflowFileName { get; init; } = "tamma-agent.yml";
+    [JsonPropertyName("ref")] public string Ref { get; init; } = string.Empty;
+    [JsonPropertyName("inputs")] public Dictionary<string, string> Inputs { get; init; } = new();
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
+/// <summary>Engine-side collect parameters for <c>GET .../runs/{id}/results</c>
+/// (sent as query params, not a body).</summary>
+public sealed record CollectAgentRunApiRequest
+{
+    public string BranchName { get; init; } = string.Empty;
+    public string Conclusion { get; init; } = string.Empty;
+    public string AgentProvider { get; init; } = "claude-code";
+    public int DurationSeconds { get; init; }
+    public string CorrelationId { get; init; } = string.Empty;
+}
+
+/// <summary>Response for <c>POST .../runs</c>. Mirrors
+/// <c>Tamma.Api.Services.AgentDispatch.AgentDispatchRunResult</c>. KEY-FREE.</summary>
+public sealed record AgentDispatchRunApiResponse
+{
+    [JsonPropertyName("success")] public bool Success { get; init; }
+    [JsonPropertyName("credentialSource")] public string? CredentialSource { get; init; }
+    [JsonPropertyName("workflowRunUrl")] public string? WorkflowRunUrl { get; init; }
+    [JsonPropertyName("dispatchedAt")] public DateTime DispatchedAt { get; init; }
+    [JsonPropertyName("failureCode")] public string? FailureCode { get; init; }
+    [JsonPropertyName("failureReason")] public string? FailureReason { get; init; }
+    [JsonPropertyName("platformStatusCode")] public int? PlatformStatusCode { get; init; }
+    [JsonPropertyName("correlationId")] public string? CorrelationId { get; init; }
+}
+
+/// <summary>Response for <c>GET .../runs</c> (discover) + <c>GET .../runs/{id}</c>
+/// (poll). Mirrors <c>Tamma.Api.Services.AgentDispatch.AgentRunStatusResult</c>.</summary>
+public sealed record AgentRunStatusApiResponse
+{
+    [JsonPropertyName("success")] public bool Success { get; init; }
+    [JsonPropertyName("credentialSource")] public string? CredentialSource { get; init; }
+    [JsonPropertyName("found")] public bool Found { get; init; }
+    [JsonPropertyName("runId")] public long? RunId { get; init; }
+    [JsonPropertyName("status")] public string? Status { get; init; }
+    [JsonPropertyName("conclusion")] public string? Conclusion { get; init; }
+    [JsonPropertyName("workflowRunUrl")] public string? WorkflowRunUrl { get; init; }
+    [JsonPropertyName("headBranch")] public string? HeadBranch { get; init; }
+    [JsonPropertyName("createdAt")] public DateTime? CreatedAt { get; init; }
+    [JsonPropertyName("updatedAt")] public DateTime? UpdatedAt { get; init; }
+    [JsonPropertyName("artifactsUrl")] public string? ArtifactsUrl { get; init; }
+    [JsonPropertyName("failureCode")] public string? FailureCode { get; init; }
+    [JsonPropertyName("failureReason")] public string? FailureReason { get; init; }
+    [JsonPropertyName("platformStatusCode")] public int? PlatformStatusCode { get; init; }
+    [JsonPropertyName("correlationId")] public string? CorrelationId { get; init; }
+}
+
+/// <summary>Response for <c>GET .../runs/{id}/results</c>. Mirrors
+/// <c>Tamma.Api.Services.AgentDispatch.AgentRunResultsResult</c>. <c>agentSuccess</c>
+/// is the AGENT's task success; <c>success</c> is the mediation success.</summary>
+public sealed record AgentRunResultsApiResponse
+{
+    [JsonPropertyName("success")] public bool Success { get; init; }
+    [JsonPropertyName("credentialSource")] public string? CredentialSource { get; init; }
+    [JsonPropertyName("agentSuccess")] public bool AgentSuccess { get; init; }
+    [JsonPropertyName("prNumber")] public int? PrNumber { get; init; }
+    [JsonPropertyName("prUrl")] public string? PrUrl { get; init; }
+    [JsonPropertyName("commitSha")] public string CommitSha { get; init; } = string.Empty;
+    [JsonPropertyName("filesChanged")] public IReadOnlyList<string> FilesChanged { get; init; } = Array.Empty<string>();
+    [JsonPropertyName("commitsCount")] public int CommitsCount { get; init; }
+    [JsonPropertyName("checksPassed")] public bool? ChecksPassed { get; init; }
+    [JsonPropertyName("tokensUsed")] public int TokensUsed { get; init; }
+    [JsonPropertyName("durationSeconds")] public int DurationSeconds { get; init; }
+    [JsonPropertyName("errorMessage")] public string? ErrorMessage { get; init; }
+    [JsonPropertyName("agentLogSummary")] public string? AgentLogSummary { get; init; }
+    [JsonPropertyName("agentProvider")] public string? AgentProvider { get; init; }
+    [JsonPropertyName("agentVersion")] public string? AgentVersion { get; init; }
+    [JsonPropertyName("failureCode")] public string? FailureCode { get; init; }
+    [JsonPropertyName("failureReason")] public string? FailureReason { get; init; }
+    [JsonPropertyName("platformStatusCode")] public int? PlatformStatusCode { get; init; }
+    [JsonPropertyName("correlationId")] public string? CorrelationId { get; init; }
+}
+
+/// <summary>Response for <c>GET .../installation</c>. Mirrors
+/// <c>Tamma.Api.Services.AgentDispatch.AgentInstallationResult</c>.</summary>
+public sealed record AgentInstallationApiResponse
+{
+    [JsonPropertyName("success")] public bool Success { get; init; }
+    [JsonPropertyName("installationId")] public long? InstallationId { get; init; }
+    [JsonPropertyName("failureCode")] public string? FailureCode { get; init; }
+    [JsonPropertyName("failureReason")] public string? FailureReason { get; init; }
+    [JsonPropertyName("correlationId")] public string? CorrelationId { get; init; }
+}
+
 /// <summary>
 /// Wire projection of one engine <c>TammaEvent</c> (see
 /// <c>Tamma.Activities.Core.TammaEvent</c>). camelCase to match the API DTO

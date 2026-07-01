@@ -144,7 +144,7 @@ public sealed class LocalExecutor : IAgentExecutor
             }
 
             var resultJson = await File.ReadAllTextAsync(resultPath, cancellationToken);
-            var artifact = AgentResultCollectorService.ParseResultJson(resultJson);
+            var artifact = AgentResultArtifactParser.ParseResultJson(resultJson);
             if (artifact is null)
             {
                 return AgentExecutionResult.Failed(

@@ -251,15 +251,13 @@ builder.Services.AddSingleton<Tamma.Activities.LlmCall.TammaApiHealthMonitor>(sp
 
 // ─── Epic 19: Agent dispatch services (stories 19-2 / 3 / 4 / 5) ───────
 //
-// The ElsaServer process runs the Tamma workflows. It does NOT reference
-// Tamma.Api, so the Octokit-backed IGitHubActionsClient isn't available
-// here — the Null impl surfaces a clean operator error if workflows try
-// to dispatch. In production, agent-dispatching workflows are hosted by
-// the Tamma.Api process (which wires Octokit). This registration keeps
-// the Elsa runtime self-consistent for the non-SaaS (CLI / local-only)
-// deployments.
-builder.Services.AddSingleton<Tamma.Activities.AgentDispatch.IGitHubActionsClient,
-    Tamma.Activities.AgentDispatch.NullGitHubActionsClient>();
+// Story 38-2 (Class-C cutover): the engine NO LONGER resolves the co-hosted,
+// credential-holding IGitHubActionsClient — the former NullGitHubActionsClient
+// registration is REMOVED. The three phase services below are now thin
+// TammaApiClient clients (registered at AddHttpClient<TammaApiClient> above);
+// every workflow_dispatch / poll / collect goes over the wire to Tamma.Api's
+// /api/v1/agent-dispatch endpoints, where the per-repo GitHub App installation
+// token lives, the tenant↔repo guard runs, and the audit event is emitted.
 
 // Real engine→API platform-events publisher. The tenant-lifecycle activities
 // (TenantLifecycleActivity / CleanupStepActivity /
