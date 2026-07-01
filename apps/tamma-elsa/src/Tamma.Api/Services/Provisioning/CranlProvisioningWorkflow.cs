@@ -77,6 +77,23 @@ public sealed class CranlProvisioningWorkflow
         var entry = _db.Entry(tenant);
         try
         {
+            // ── M-2 (Epic 30 Phase B follow-up): Cranl mints a DEDICATED,
+            //    single-tenant database, so it is only valid for a plan whose
+            //    PlacementPolicy is 'dedicated'. Validate up front — BEFORE any
+            //    Cranl resource is minted — so a shared-plan tenant fails fast
+            //    with a legible detail instead of late-and-cryptically inside
+            //    RegisterCranlDatabaseAndMoveAsync, where the schema move rejects
+            //    a dedicated pool row for a shared-policy plan and surfaces a
+            //    generic tenant_schema_move_failed:... after a Cranl project +
+            //    database were already provisioned. Reuses the same plan lookup
+            //    placement/move use (pin Status=='active' so a multi-version slug
+            //    resolves the LIVE PlacementPolicy). ────────────────────────────
+            if (!await IsDedicatedPlacementPlanAsync(tenant, ct))
+            {
+                // Detail already stamped Failed by the guard; nothing minted.
+                return;
+            }
+
             // B3: the Cranl walk/resume working-state lives in the
             // tenants.provider_resource_ids JSONB (via CranlResourceIds), not
             // the retired cranl_* columns. Each step reads back the id it may
@@ -290,6 +307,23 @@ public sealed class CranlProvisioningWorkflow
         var entry = _db.Entry(tenant);
         try
         {
+            // ── M-1 (Epic 30 Phase B follow-up): before tearing down the Cranl
+            //    hosting DB, reclaim the tenant off the dedicated
+            //    `cranl-<tenantId>` pool row B2 minted. Deprovision leaves the
+            //    TENANT alive (state Deprovisioned, re-provisionable) — so the
+            //    tenant's schema (which lives ON the Cranl DB we're about to
+            //    delete) must be moved back onto a surviving shared/central pool
+            //    row, and the orphaned dedicated pool row (holding an encrypted
+            //    admin credential to the deleted DB) retired. Runs BEFORE any
+            //    Cranl delete so the move can still dump the schema off the live
+            //    DB, and fails CLOSED — a failure throws here, before the DB is
+            //    deleted, so the tenant never loses its only DB route. ──────────
+            await ReclaimCranlPoolPlacementAsync(tenant, ct);
+            // ReclaimCranlPoolPlacementAsync may reload the tracked tenant after
+            // an inline move — re-read the entry so the resource-ids below come
+            // from the refreshed instance.
+            entry = _db.Entry(tenant);
+
             var appId = CranlResourceIds.Get(entry, CranlResourceIds.AppId);
             var databaseId = CranlResourceIds.Get(entry, CranlResourceIds.DatabaseId);
             var projectId = CranlResourceIds.Get(entry, CranlResourceIds.ProjectId);
@@ -551,6 +585,148 @@ public sealed class CranlProvisioningWorkflow
             "Moving tenant {TenantId} schema onto Cranl pool row {DatabaseId} (label={Label})",
             tenant.Id, poolRow.Id, label);
         await _moveService.MoveAsync(tenant.Id, poolRow.Id, ct);
+    }
+
+    /// <summary>
+    /// M-2 guard: is the tenant's plan a <c>dedicated</c>-placement plan (the
+    /// only kind Cranl — a single-tenant DB — is valid for)? Returns
+    /// <see langword="false"/> AND stamps the row <see cref="ProvisioningState.Failed"/>
+    /// with a legible short code when the plan is missing or shared-placement,
+    /// so the caller can bail before minting any Cranl resource.
+    /// </summary>
+    private async Task<bool> IsDedicatedPlacementPlanAsync(Tenant tenant, CancellationToken ct)
+    {
+        // Same lookup placement/move use: pin Status=='active' so a multi-
+        // version slug (Story 34-1) resolves the live PlacementPolicy, not a
+        // deprecated row picked in undefined order.
+        var plan = await _db.Plans
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Slug == tenant.Plan && p.Status == "active", ct);
+        if (plan is null)
+        {
+            await TransitionAsync(tenant,
+                ProvisioningState.Failed,
+                $"cranl_plan_not_found:{tenant.Plan}", ct);
+            return false;
+        }
+        if (!string.Equals(plan.PlacementPolicy, "dedicated", StringComparison.OrdinalIgnoreCase))
+        {
+            await TransitionAsync(tenant,
+                ProvisioningState.Failed,
+                $"cranl_requires_dedicated_plan:{plan.Slug}", ct);
+            return false;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// M-1: reclaim the tenant off the dedicated <c>cranl-&lt;tenantId&gt;</c>
+    /// pool row before the Cranl DB is torn down. If the tenant still routes to
+    /// that row, move its schema back onto a surviving shared/central pool row
+    /// (the schema lives on the Cranl DB, so the move MUST run before the DB is
+    /// deleted). Then retire the orphaned pool row — it holds an encrypted admin
+    /// credential to a database that is about to vanish. Idempotent: a resumed
+    /// deprovision whose move already committed just removes the (now
+    /// unreferenced) row; a deprovision where B2 never minted a pool row (a
+    /// provision that failed before <see cref="ProvisioningState.DatabaseReady"/>)
+    /// is a no-op. Fail-closed: if no eligible move-back target exists this
+    /// THROWS before any Cranl resource is deleted, so the tenant is never
+    /// stranded pointing at a deleted database.
+    /// </summary>
+    private async Task ReclaimCranlPoolPlacementAsync(Tenant tenant, CancellationToken ct)
+    {
+        var label = CranlPoolRowLabel(tenant);
+        var poolRow = await _db.TenantDatabases
+            .FirstOrDefaultAsync(d => d.Label == label, ct);
+        if (poolRow is null)
+        {
+            // B2 never minted the row (provision failed before DatabaseReady) or
+            // a prior deprovision pass already retired it — nothing to reclaim.
+            return;
+        }
+
+        var entry = _db.Entry(tenant);
+        var currentDatabaseId = entry.Property<Guid?>("DatabaseId").CurrentValue;
+
+        if (currentDatabaseId == poolRow.Id)
+        {
+            // Tenant still routes to the Cranl DB — move its schema back onto a
+            // surviving shared/central pool row FIRST (while the Cranl DB is
+            // still alive to be dumped).
+            var target = await FindMoveBackTargetAsync(tenant, poolRow.Id, ct);
+            if (target is null)
+            {
+                // Fail-closed: refuse to delete the Cranl DB while the tenant
+                // still routes to it (that would strand the tenant + lose its
+                // data). The operator downgrades the plan to a shared tier — or
+                // registers an eligible pool row — and re-runs deprovision.
+                throw new InvalidOperationException(
+                    $"Cranl deprovision cannot re-point tenant '{tenant.Id}' off its "
+                    + $"dedicated pool row '{poolRow.Id}': no eligible tenant_databases "
+                    + $"row for plan '{tenant.Plan}'. Downgrade the plan to a shared tier "
+                    + "(or add an eligible pool row) and retry — the Cranl database was NOT "
+                    + "deleted (deleting it would strand the tenant and lose its data).");
+            }
+
+            _logger.LogInformation(
+                "Cranl deprovision: moving tenant {TenantId} schema off Cranl pool row "
+                + "{SourceDatabaseId} onto {TargetDatabaseId} before teardown",
+                tenant.Id, poolRow.Id, target.Id);
+            await _moveService.MoveAsync(tenant.Id, target.Id, ct);
+
+            // The inline move committed its re-point via its OWN DbContext, so
+            // the tracked tenant here is stale — reload to observe the new
+            // DatabaseId before the FK-guarded retire below.
+            await entry.ReloadAsync(ct);
+            currentDatabaseId = entry.Property<Guid?>("DatabaseId").CurrentValue;
+        }
+
+        // Never retire the row while the tenant still references it (the
+        // tenants.DatabaseId FK is Restrict — a delete would 23503 anyway).
+        if (currentDatabaseId == poolRow.Id)
+        {
+            throw new InvalidOperationException(
+                $"Cranl deprovision: tenant '{tenant.Id}' still points at pool row "
+                + $"'{poolRow.Id}' after the move-back attempt — refusing to retire it "
+                + "(the Cranl database was NOT deleted).");
+        }
+
+        // Retire the orphaned pool row. DELETE (not Status='retired') so the
+        // encrypted admin credential to the now-doomed Cranl DB does not linger
+        // in tenant_databases (that ciphertext is exactly the orphaned-credential
+        // the review flagged).
+        _db.TenantDatabases.Remove(poolRow);
+        await _db.SaveChangesAsync(ct);
+        _logger.LogInformation(
+            "Cranl deprovision: removed dedicated pool row {DatabaseId} (label={Label})",
+            poolRow.Id, label);
+    }
+
+    /// <summary>
+    /// Pick the least-loaded pool row a deprovisioned tenant's schema can be
+    /// moved back onto, reusing the ONE eligibility rule placement + move share
+    /// (<see cref="TenantPlacementService.EligibleFor"/>) so a move-back target
+    /// can never disagree with what a fresh placement would choose. Excludes the
+    /// Cranl row being torn down. Returns <see langword="null"/> when the plan is
+    /// missing or no eligible row exists (the caller fails closed).
+    /// </summary>
+    private async Task<TenantDatabase?> FindMoveBackTargetAsync(
+        Tenant tenant, Guid excludeDatabaseId, CancellationToken ct)
+    {
+        var plan = await _db.Plans
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Slug == tenant.Plan && p.Status == "active", ct);
+        if (plan is null)
+        {
+            return null;
+        }
+
+        return await _db.TenantDatabases
+            .Where(TenantPlacementService.EligibleFor(plan.Slug, plan.PlacementPolicy))
+            .Where(d => d.Id != excludeDatabaseId)
+            .OrderBy(d => d.TenantCount)
+            .ThenBy(d => d.CreatedAt)
+            .FirstOrDefaultAsync(ct);
     }
 
     /// <summary>

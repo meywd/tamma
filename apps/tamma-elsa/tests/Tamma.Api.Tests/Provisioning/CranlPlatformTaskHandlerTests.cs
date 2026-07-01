@@ -94,13 +94,17 @@ public sealed class CranlPlatformTaskHandlerTests
     private CranlDeprovisionPlatformTaskHandler BuildDeprovisionHandler() =>
         new(_workflow, NullLogger<CranlDeprovisionPlatformTaskHandler>.Instance);
 
-    private async Task<Tenant> SeedTenantAsync(string state = "pending")
+    // M-2 (Epic 30 Phase B follow-up): CranlProvisioningWorkflow.ProvisionAsync
+    // now fails closed for a shared-policy plan, so the provision walk needs a
+    // DEDICATED-placement plan (enterprise) to reach Ready.
+    private async Task<Tenant> SeedTenantAsync(string state = "pending", string plan = "enterprise")
     {
         var tenant = new Tenant
         {
             Id = Guid.NewGuid(),
             Name = "Acme",
             Slug = "acme-" + Guid.NewGuid().ToString("N").Substring(0, 6),
+            Plan = plan,
             ProvisioningState = state,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow

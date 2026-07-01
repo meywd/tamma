@@ -88,13 +88,19 @@ public class CranlProvisioningWorkflowTests
     private Dictionary<string, string> ResourceIds(Tenant tenant) =>
         CranlResourceIds.Read(_db.Entry(tenant));
 
-    private async Task<Tenant> SeedTenantAsync()
+    // M-2 (Epic 30 Phase B follow-up): Cranl provisions a dedicated,
+    // single-tenant DB, so ProvisionAsync now fails closed for a shared-policy
+    // plan. Default the seed to a DEDICATED-placement plan (enterprise) so the
+    // provisioning walk proceeds; tests that exercise the shared-plan gate (or
+    // the M-1 move-back onto a shared central row) pass an explicit slug.
+    private async Task<Tenant> SeedTenantAsync(string plan = "enterprise")
     {
         var tenant = new Tenant
         {
             Id = Guid.NewGuid(),
             Name = "Acme",
             Slug = "acme-" + Guid.NewGuid().ToString("N").Substring(0, 6),
+            Plan = plan,
             ProvisioningState = "pending",
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -194,6 +200,57 @@ public class CranlProvisioningWorkflowTests
                 && s.Contains("TAMMA_SHARED_SECRET=shared-secret-for-tests")),
             It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    // ─── M-2: Cranl requires a dedicated-placement plan ──────────────────────
+
+    [Test]
+    public async Task ProvisionAsync_SharedPlan_FailsClosedBeforeMintingAnyResource()
+    {
+        // A shared-placement plan (team) can't land on a dedicated single-tenant
+        // Cranl DB. The guard must fail closed at the TOP of the walk — before a
+        // Cranl project/database is created and before a tenant_databases row is
+        // minted — with a legible detail (not a late tenant_schema_move_failed).
+        var tenant = await SeedTenantAsync(plan: "team");
+
+        // Strict Cranl mock with NO setups: any Cranl call would throw.
+        await _workflow.ProvisionAsync(
+            tenant.Id, new ProvisioningOptions("germany-1"), CancellationToken.None);
+
+        var refreshed = await ReloadAsync(tenant.Id);
+        refreshed.ProvisioningState.Should().Be("failed");
+        refreshed.ProvisioningDetail.Should().Be("cranl_requires_dedicated_plan:team");
+
+        _cranl.Verify(c => c.CreateProjectAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _cranl.Verify(c => c.CreateDatabaseAsync(
+            It.IsAny<CreateDatabaseRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        // No dedicated pool row was minted for this tenant.
+        var label = "cranl-" + CranlProvisioningWorkflow.ShortenForName(tenant.Id);
+        (await _db.TenantDatabases.AnyAsync(d => d.Label == label)).Should().BeFalse();
+    }
+
+    // (No unit test for the cranl_plan_not_found guard: the ck_tenants_plan
+    // CHECK constraint restricts tenants.Plan to free|team|enterprise — all
+    // seeded — so a tenant row can never hold a slug with no active plans row.
+    // The guard stays as defence-in-depth against a wiped/misconfigured plans
+    // table, but its precondition can't be seeded through the tenants table.)
+
+    [Test]
+    public async Task ProvisionAsync_DedicatedPlan_PassesGate_AndReachesReady()
+    {
+        // The dedicated-plan happy path still provisions end-to-end (guards the
+        // gate against being over-eager and blocking a legitimate Cranl tenant).
+        var tenant = await SeedTenantAsync(plan: "enterprise");
+        CranlResourceIds.Set(_db.Entry(tenant), CranlResourceIds.Region, "germany-1");
+        await _db.SaveChangesAsync();
+        SetupFullCranlWalk();
+
+        await _workflow.ProvisionAsync(
+            tenant.Id, new ProvisioningOptions("germany-1"), CancellationToken.None);
+
+        var refreshed = await ReloadAsync(tenant.Id);
+        refreshed.ProvisioningState.Should().Be("ready");
     }
 
     // ─── Epic 30 Phase B (B2): pool-row registration + resource ids + move ───
@@ -847,6 +904,176 @@ public class CranlProvisioningWorkflowTests
 
         var refreshed = await ReloadAsync(tenant.Id);
         refreshed.ProvisioningState.Should().Be("deprovisioned");
+    }
+
+    // ─── M-1: reclaim the tenant off the dedicated Cranl pool row on teardown ─
+
+    [Test]
+    public async Task DeprovisionAsync_TenantOnCranlPoolRow_MovesSchemaBackToSharedRow_ThenRetiresCranlRow()
+    {
+        // The realistic deprovision-with-persist path: a dedicated Cranl tenant
+        // downgraded to a shared plan still routes to the cranl-<id> pool row B2
+        // minted. Deprovision must move its schema back onto the shared central
+        // row, retire the cranl row, and leave NO orphaned encrypted-credential
+        // row behind.
+        var tenant = await SeedTenantAsync(plan: "team");   // shared placement
+        var entry = _db.Entry(tenant);
+        CranlResourceIds.Set(entry, CranlResourceIds.ProjectId, "proj-1");
+        CranlResourceIds.Set(entry, CranlResourceIds.DatabaseId, "db-1");
+        CranlResourceIds.Set(entry, CranlResourceIds.AppId, "app-1");
+        CranlResourceIds.Set(entry, CranlResourceIds.Region, "germany-1");
+
+        var cranlRow = await AddCranlPoolRowAsync(tenant);
+        // Place the tenant on the cranl row, as a completed B2 move would.
+        entry.Property<Guid?>("DatabaseId").CurrentValue = cranlRow.Id;
+        await _db.SaveChangesAsync();
+
+        var central = await _db.TenantDatabases.AsNoTracking()
+            .SingleAsync(d => d.Label == "central");
+
+        // Mock the inline move exactly like the real engine's committed
+        // re-point: flip tenants.DatabaseId to the target pool row.
+        Guid? movedTo = null;
+        _moveService
+            .Setup(m => m.MoveAsync(tenant.Id, It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns(async (Guid _, Guid targetDbId, CancellationToken _) =>
+            {
+                movedTo = targetDbId;
+                _db.Entry(tenant).Property<Guid?>("DatabaseId").CurrentValue = targetDbId;
+                await _db.SaveChangesAsync();
+            });
+
+        _cranl.Setup(c => c.DeleteApplicationAsync("app-1", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _cranl.Setup(c => c.DeleteDatabaseAsync("db-1", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _cranl.Setup(c => c.DeleteProjectAsync("proj-1", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        await _workflow.DeprovisionAsync(tenant.Id, CancellationToken.None);
+
+        // Schema moved back onto the shared central row exactly once.
+        _moveService.Verify(m => m.MoveAsync(
+            tenant.Id, central.Id, It.IsAny<CancellationToken>()), Times.Once);
+        movedTo.Should().Be(central.Id);
+
+        // The orphaned cranl pool row (an encrypted admin credential to the
+        // now-deleted Cranl DB) is GONE — not merely marked retired.
+        var label = "cranl-" + CranlProvisioningWorkflow.ShortenForName(tenant.Id);
+        (await _db.TenantDatabases.AnyAsync(d => d.Label == label)).Should().BeFalse();
+
+        var refreshed = await ReloadAsync(tenant.Id);
+        refreshed.ProvisioningState.Should().Be("deprovisioned");
+        // Tenant re-pointed onto the surviving shared row — resolves a real DB.
+        _db.Entry(refreshed).Property<Guid?>("DatabaseId").CurrentValue
+            .Should().Be(central.Id);
+    }
+
+    [Test]
+    public async Task DeprovisionAsync_ResumeAfterMove_RetiresCranlRow_WithoutReMoving()
+    {
+        // Resume: a prior deprovision pass already moved the schema back (the
+        // tenant now points at central) but died before retiring the cranl pool
+        // row. The second pass must NOT re-move, but must still clean up the
+        // orphaned pool row.
+        var tenant = await SeedTenantAsync(plan: "team");
+        var entry = _db.Entry(tenant);
+        CranlResourceIds.Set(entry, CranlResourceIds.ProjectId, "proj-1");
+        CranlResourceIds.Set(entry, CranlResourceIds.DatabaseId, "db-1");
+        CranlResourceIds.Set(entry, CranlResourceIds.AppId, "app-1");
+        await _db.SaveChangesAsync();
+
+        var cranlRow = await AddCranlPoolRowAsync(tenant);
+        var central = await _db.TenantDatabases.AsNoTracking()
+            .SingleAsync(d => d.Label == "central");
+        // Tenant already re-pointed onto central by the earlier (crashed) pass.
+        entry.Property<Guid?>("DatabaseId").CurrentValue = central.Id;
+        await _db.SaveChangesAsync();
+
+        _cranl.Setup(c => c.DeleteApplicationAsync("app-1", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _cranl.Setup(c => c.DeleteDatabaseAsync("db-1", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _cranl.Setup(c => c.DeleteProjectAsync("proj-1", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        await _workflow.DeprovisionAsync(tenant.Id, CancellationToken.None);
+
+        _moveService.Verify(m => m.MoveAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        var label = "cranl-" + CranlProvisioningWorkflow.ShortenForName(tenant.Id);
+        (await _db.TenantDatabases.AnyAsync(d => d.Label == label)).Should().BeFalse();
+
+        var refreshed = await ReloadAsync(tenant.Id);
+        refreshed.ProvisioningState.Should().Be("deprovisioned");
+    }
+
+    [Test]
+    public async Task DeprovisionAsync_NoEligibleMoveBackTarget_FailsClosed_KeepsCranlDbAndPoolRow()
+    {
+        // A still-DEDICATED tenant (never downgraded) has no shared/central row
+        // it can move onto and no free dedicated row — deprovision must fail
+        // closed WITHOUT deleting the Cranl DB or orphaning the pool row.
+        var tenant = await SeedTenantAsync(plan: "enterprise");   // dedicated
+        var entry = _db.Entry(tenant);
+        CranlResourceIds.Set(entry, CranlResourceIds.ProjectId, "proj-1");
+        CranlResourceIds.Set(entry, CranlResourceIds.DatabaseId, "db-1");
+        CranlResourceIds.Set(entry, CranlResourceIds.AppId, "app-1");
+        await _db.SaveChangesAsync();
+
+        var cranlRow = await AddCranlPoolRowAsync(tenant);
+        entry.Property<Guid?>("DatabaseId").CurrentValue = cranlRow.Id;
+        await _db.SaveChangesAsync();
+
+        // No delete mocks + strict mock: a Cranl delete before the fail-closed
+        // throw would blow up the strict mock; MoveAsync is never reached.
+        var act = async () => await _workflow.DeprovisionAsync(tenant.Id, CancellationToken.None);
+        await act.Should().ThrowAsync<InvalidOperationException>();
+
+        _moveService.Verify(m => m.MoveAsync(
+            It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _cranl.Verify(c => c.DeleteDatabaseAsync(
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        var refreshed = await ReloadAsync(tenant.Id);
+        refreshed.ProvisioningState.Should().Be("failed");
+        refreshed.ProvisioningDetail.Should().Contain("deprovision_error");
+        // The cranl pool row survives (still referenced by the tenant) — no
+        // encrypted credential dropped, no data lost.
+        var label = "cranl-" + CranlProvisioningWorkflow.ShortenForName(tenant.Id);
+        (await _db.TenantDatabases.AnyAsync(d => d.Label == label)).Should().BeTrue();
+        _db.Entry(refreshed).Property<Guid?>("DatabaseId").CurrentValue
+            .Should().Be(cranlRow.Id);
+    }
+
+    /// <summary>
+    /// Seed a dedicated <c>cranl-&lt;tenantId&gt;</c> pool row (mirrors what B2
+    /// mints) and place a completed-move TenantCount of 1 on it. Central (the
+    /// shared move-back target) is already seeded by the fixture.
+    /// </summary>
+    private async Task<TenantDatabase> AddCranlPoolRowAsync(Tenant tenant)
+    {
+        var label = "cranl-" + CranlProvisioningWorkflow.ShortenForName(tenant.Id);
+        var row = new TenantDatabase
+        {
+            Id = Guid.NewGuid(),
+            Label = label,
+            Host = "db1.cranl.internal",
+            Port = 5432,
+            AdminConnectionStringEncrypted = _protector.Encrypt(
+                "Host=db1.cranl.internal;Port=5432;Username=admin;Password=s3cret;Database=tamma-x"),
+            PlacementClass = "dedicated",
+            TierEligibility = new[] { tenant.Plan },
+            TenantCapacity = 1,
+            TenantCount = 1,
+            Status = "active",
+            KekVersion = 1,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        _db.TenantDatabases.Add(row);
+        await _db.SaveChangesAsync();
+        return row;
     }
 
     // ─── Naming ──────────────────────────────────────────────────────────────
