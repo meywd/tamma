@@ -80,15 +80,23 @@ public sealed class ComputePlatformRollupActivity : TammaAsyncActivity
             .CreateDbContextAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        // Platform-wide AGENT.DISPATCH.* events in the bucket. Matches
-        // the pattern PlatformAnalyticsService uses for the live
-        // aggregation so the fact table and the fallback path report
-        // the same counter.
+        // Agent-dispatch events come in TWO real families: the Story 38-2
+        // mediation events are underscore-prefixed
+        // (AGENT_DISPATCH.RUN_TRIGGERED.*) and the legacy alert/analytics
+        // family is dotted (AGENT.DISPATCH.*). A dotted LIKE pattern would
+        // NEVER match the underscore family (and worse, '_' is a LIKE
+        // single-char wildcard), so we use StartsWith — EF escapes the '_'
+        // and it translates on both Npgsql and the InMemory provider. Only
+        // the RUN_TRIGGERED terminal (one per dispatch) counts; RUN_POLLED /
+        // RESULTS_COLLECTED are follow-up ops, not dispatches. Mirrors
+        // ComputeTenantDimensionalRollupActivity so every rollup reports the
+        // same dispatch counter.
         var agentDispatches = await cp.PlatformEvents
             .AsNoTracking()
             .CountAsync(
                 e => e.CreatedAt >= hour && e.CreatedAt < hourEnd
-                     && EF.Functions.Like(e.Type, "AGENT.DISPATCH.%"),
+                     && (e.Type.StartsWith("AGENT.DISPATCH.")
+                         || e.Type.StartsWith("AGENT_DISPATCH.RUN_TRIGGERED.")),
                 cancellationToken)
             .ConfigureAwait(false);
 
