@@ -268,6 +268,358 @@ public sealed class PlanVersionEditor : IPlanVersionEditor
         return newPlan;
     }
 
+    /// <inheritdoc />
+    public async Task<Plan> CreateInitialVersionAsync(
+        string slug,
+        PlanDraftSpec draft,
+        PlanEditorPrincipal principal,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(slug);
+        ArgumentNullException.ThrowIfNull(draft);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        ValidateDraft(draft);
+        RequireDisplayName(draft);
+
+        // A brand-new plan may not collide with ANY existing version of the slug
+        // — the caller must version an existing slug via VersionPlanAsync.
+        var exists = await _db.Plans.AsNoTracking().AnyAsync(p => p.Slug == slug, ct);
+        if (exists)
+        {
+            throw new TammaError(
+                "PLAN.SLUG.EXISTS",
+                $"Plan slug '{slug}' already exists — create a new version via PUT instead.",
+                new Dictionary<string, object?> { ["slug"] = slug },
+                retryable: false,
+                severity: TammaErrorSeverity.Medium);
+        }
+
+        var plan = await InsertNewV1PlanAsync(slug, draft, isCustom: false, ct);
+
+        _logger.LogInformation(
+            "Plan created (initial version): {Slug} v1 ({PlanId}) by {ActorUserId}",
+            slug, plan.Id, principal.UserId);
+
+        await _publisher.AppendAndPublishAsync(
+            BuildPlanEvent(
+                PlanCatalogEventTypes.CatalogUpdated,
+                principal,
+                new Dictionary<string, string?>
+                {
+                    ["action"] = "created",
+                    ["slug"] = slug,
+                    ["version"] = "1",
+                    ["planId"] = plan.Id.ToString("D"),
+                }),
+            ct);
+
+        return plan;
+    }
+
+    /// <inheritdoc />
+    public async Task<Plan> VersionPlanAsync(
+        string slug,
+        PlanDraftSpec draft,
+        PlanEditorPrincipal principal,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(slug);
+        ArgumentNullException.ThrowIfNull(draft);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        ValidateDraft(draft);
+
+        // Reuse ALL of the supersede/deprecate versioning logic (and its
+        // PLAN.VERSION.CREATED / PLAN.DEPRECATED events) — do NOT duplicate it.
+        var newPlan = await CreateNewVersionAsync(slug, draft, principal, ct);
+
+        // Add the admin-surface catalog event on top (AC9).
+        await _publisher.AppendAndPublishAsync(
+            BuildPlanEvent(
+                PlanCatalogEventTypes.CatalogUpdated,
+                principal,
+                new Dictionary<string, string?>
+                {
+                    ["action"] = "versioned",
+                    ["slug"] = slug,
+                    ["version"] = newPlan.Version.ToString(),
+                    ["planId"] = newPlan.Id.ToString("D"),
+                    ["supersedesPlanId"] = newPlan.SupersedesPlanId?.ToString("D"),
+                }),
+            ct);
+
+        return newPlan;
+    }
+
+    /// <inheritdoc />
+    public async Task<Plan> CreateCustomVersionAsync(
+        Guid tenantId,
+        PlanDraftSpec draft,
+        PlanEditorPrincipal principal,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        if (tenantId == Guid.Empty)
+        {
+            throw new TammaError(
+                "PLAN.CUSTOM.TENANT_REQUIRED",
+                "A custom plan must be bound to a non-empty tenant id.",
+                new Dictionary<string, object?> { ["tenantId"] = tenantId.ToString("D") },
+                retryable: false,
+                severity: TammaErrorSeverity.Medium);
+        }
+
+        ValidateDraft(draft);
+        RequireDisplayName(draft);
+
+        var slug = CustomPlanSlug.New(tenantId);
+        var plan = await InsertNewV1PlanAsync(slug, draft, isCustom: true, ct);
+
+        _logger.LogInformation(
+            "Custom plan minted: {Slug} v1 ({PlanId}) bound to tenant {TenantId} by {ActorUserId}",
+            slug, plan.Id, tenantId, principal.UserId);
+
+        await _publisher.AppendAndPublishAsync(
+            BuildPlanEvent(
+                PlanCatalogEventTypes.CustomCreated,
+                principal,
+                new Dictionary<string, string?>
+                {
+                    ["slug"] = slug,
+                    ["version"] = "1",
+                    ["planId"] = plan.Id.ToString("D"),
+                    ["tenantId"] = tenantId.ToString("D"),
+                }),
+            ct);
+
+        return plan;
+    }
+
+    /// <inheritdoc />
+    public async Task<PlanDeprecationResult> DeprecateVersionAsync(
+        string slug,
+        int version,
+        bool force,
+        PlanEditorPrincipal principal,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(slug);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        var plan = await _db.Plans
+            .FirstOrDefaultAsync(p => p.Slug == slug && p.Version == version, ct);
+
+        if (plan is null)
+        {
+            throw new TammaError(
+                "PLAN.VERSION.NOT_FOUND",
+                $"Plan '{slug}' v{version} does not exist.",
+                new Dictionary<string, object?> { ["slug"] = slug, ["version"] = version },
+                retryable: false,
+                severity: TammaErrorSeverity.Medium);
+        }
+
+        // Count tenants whose assignment PINS this exact version (the version-
+        // pinned PlanId shadow column — Story 34-1/28). TODO(34-4): once tracked
+        // assignment lands, switch this to the assignment table.
+        var affected = await _db.Tenants
+            .IgnoreQueryFilters()
+            .Where(t => t.DeletedAt == null && EF.Property<Guid?>(t, "PlanId") == plan.Id)
+            .CountAsync(ct);
+
+        _logger.LogDebug(
+            "Deprecate {Slug} v{Version}: status={Status}, affectedTenants={Affected}, force={Force}",
+            slug, version, plan.Status, affected, force);
+
+        // Already deprecated — idempotent success (no write, immutability holds).
+        if (plan.Status == "deprecated")
+        {
+            return new PlanDeprecationResult(Deprecated: true, AffectedTenantCount: affected);
+        }
+
+        // Blocked: active assignments and no force. Re-pricing existing tenants is
+        // never a silent side effect of catalog deprecation (immutability rule).
+        if (affected > 0 && !force)
+        {
+            _logger.LogWarning(
+                "Deprecate blocked: {Slug} v{Version} has {Affected} assigned tenant(s); pass force=true to override",
+                slug, version, affected);
+            return new PlanDeprecationResult(Deprecated: false, AffectedTenantCount: affected);
+        }
+
+        var now = _time.GetUtcNow().UtcDateTime;
+        plan.Status = "deprecated";
+        plan.UpdatedAt = now;
+        await _db.SaveChangesAsync(ct);
+
+        _logger.LogInformation(
+            "Plan deprecated: {Slug} v{Version} ({PlanId}); {Affected} tenant(s) remain pinned; by {ActorUserId}",
+            slug, version, plan.Id, affected, principal.UserId);
+
+        await _publisher.AppendAndPublishAsync(
+            BuildPlanEvent(
+                PlanCatalogEventTypes.CatalogUpdated,
+                principal,
+                new Dictionary<string, string?>
+                {
+                    ["action"] = "deprecated",
+                    ["slug"] = slug,
+                    ["version"] = version.ToString(),
+                    ["planId"] = plan.Id.ToString("D"),
+                    ["affectedTenantCount"] = affected.ToString(),
+                    ["force"] = force ? "true" : "false",
+                }),
+            ct);
+
+        return new PlanDeprecationResult(Deprecated: true, AffectedTenantCount: affected);
+    }
+
+    /// <summary>
+    /// Build + insert a fresh v1 <c>active</c> plan (with children) from
+    /// <paramref name="draft"/>. Shared by the initial-create and custom-mint
+    /// paths. The immutability interceptor permits a freshly-Added active plan
+    /// and its children.
+    /// </summary>
+    private async Task<Plan> InsertNewV1PlanAsync(
+        string slug, PlanDraftSpec draft, bool isCustom, CancellationToken ct)
+    {
+        var now = _time.GetUtcNow().UtcDateTime;
+        var newPlanId = Guid.NewGuid();
+
+        var plan = new Plan
+        {
+            Id = newPlanId,
+            Slug = slug,
+            DisplayName = draft.DisplayName!,
+            Version = 1,
+            Status = "active",
+            IsCustom = isCustom,
+            BillingInterval = draft.BillingInterval ?? "monthly",
+            SupersedesPlanId = null,
+            MonthlyPriceUsd = draft.MonthlyPriceUsd ?? 0m,
+            Quotas = "{}",
+            IsActive = true,
+            PlacementPolicy = draft.PlacementPolicy ?? "shared",
+            CreatedAt = now,
+            UpdatedAt = now,
+            Features = (draft.Features ?? [])
+                .Select(f => new PlanFeature
+                {
+                    Id = Guid.NewGuid(),
+                    PlanId = newPlanId,
+                    FeatureKey = f.FeatureKey,
+                    BoolValue = f.BoolValue,
+                    StringValue = f.StringValue,
+                }).ToList(),
+            Entitlements = (draft.Entitlements ?? [])
+                .Select(e => new PlanEntitlement
+                {
+                    Id = Guid.NewGuid(),
+                    PlanId = newPlanId,
+                    MetricKey = e.MetricKey,
+                    LimitValue = e.LimitValue,
+                    Period = e.Period,
+                    OverageMode = e.OverageMode,
+                }).ToList(),
+            Prices = (draft.Prices ?? [])
+                .Select(p => new PlanPrice
+                {
+                    Id = Guid.NewGuid(),
+                    PlanId = newPlanId,
+                    PricingMode = p.PricingMode,
+                    RecurringUsd = p.RecurringUsd,
+                    SeatUsd = p.SeatUsd,
+                    MeteredComponent = p.MeteredComponent,
+                }).ToList(),
+        };
+
+        _db.Plans.Add(plan);
+        await _db.SaveChangesAsync(ct);
+        return plan;
+    }
+
+    private static readonly string[] s_validPricingModes = { "platform_provided", "byok" };
+    private static readonly string[] s_validBillingIntervals = { "monthly", "annual" };
+    private static readonly string[] s_validPeriods = { "monthly", "total" };
+    private static readonly string[] s_validOverageModes = { "block", "allow", "meter" };
+
+    private static void RequireDisplayName(PlanDraftSpec draft)
+    {
+        if (string.IsNullOrWhiteSpace(draft.DisplayName))
+        {
+            throw new TammaError(
+                "PLAN.DISPLAY_NAME.REQUIRED",
+                "A new plan requires a non-empty display name.",
+                retryable: false,
+                severity: TammaErrorSeverity.Medium);
+        }
+    }
+
+    /// <summary>
+    /// Story 34-2 (AC8) — validate the closed-enum string fields BEFORE any write
+    /// and fail loud with a stable code the endpoint maps to 422/400. The metric
+    /// key is already a typed <c>EntitlementMetricKey</c> on the draft (the DTO
+    /// mapping parsed + validated it), so it is not re-checked here.
+    /// </summary>
+    private static void ValidateDraft(PlanDraftSpec draft)
+    {
+        if (draft.BillingInterval is not null
+            && !s_validBillingIntervals.Contains(draft.BillingInterval))
+        {
+            throw new TammaError(
+                "PLAN.BILLING_INTERVAL.INVALID",
+                $"Invalid billing interval '{draft.BillingInterval}' (expected: monthly | annual).",
+                new Dictionary<string, object?> { ["billingInterval"] = draft.BillingInterval },
+                retryable: false,
+                severity: TammaErrorSeverity.High);
+        }
+
+        if (draft.Prices is not null)
+        {
+            foreach (var p in draft.Prices)
+            {
+                if (!s_validPricingModes.Contains(p.PricingMode))
+                {
+                    throw new TammaError(
+                        "PLAN.PRICING_MODE.INVALID",
+                        $"Invalid pricing mode '{p.PricingMode}' (expected: platform_provided | byok).",
+                        new Dictionary<string, object?> { ["pricingMode"] = p.PricingMode },
+                        retryable: false,
+                        severity: TammaErrorSeverity.High);
+                }
+            }
+        }
+
+        if (draft.Entitlements is not null)
+        {
+            foreach (var e in draft.Entitlements)
+            {
+                if (!s_validPeriods.Contains(e.Period))
+                {
+                    throw new TammaError(
+                        "PLAN.ENTITLEMENT_PERIOD.INVALID",
+                        $"Invalid entitlement period '{e.Period}' (expected: monthly | total) for metric '{e.MetricKey}'.",
+                        new Dictionary<string, object?> { ["period"] = e.Period, ["metricKey"] = e.MetricKey.ToString() },
+                        retryable: false,
+                        severity: TammaErrorSeverity.High);
+                }
+
+                if (!s_validOverageModes.Contains(e.OverageMode))
+                {
+                    throw new TammaError(
+                        "PLAN.OVERAGE_MODE.INVALID",
+                        $"Invalid overage mode '{e.OverageMode}' (expected: block | allow | meter) for metric '{e.MetricKey}'.",
+                        new Dictionary<string, object?> { ["overageMode"] = e.OverageMode, ["metricKey"] = e.MetricKey.ToString() },
+                        retryable: false,
+                        severity: TammaErrorSeverity.High);
+                }
+            }
+        }
+    }
+
     private PlatformEvent BuildPlanEvent(
         string type,
         PlanEditorPrincipal principal,

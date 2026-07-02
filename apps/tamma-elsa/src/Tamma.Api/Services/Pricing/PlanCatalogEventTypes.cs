@@ -14,4 +14,19 @@ public static class PlanCatalogEventTypes
 
     /// <summary>A prior plan version was flipped to <c>deprecated</c>.</summary>
     public const string Deprecated = "PLAN.DEPRECATED";
+
+    /// <summary>
+    /// Story 34-2 — admin-surface catalog mutation (create / version /
+    /// deprecate). Carries an <c>action</c> tag (<c>created|versioned|deprecated</c>)
+    /// so a single event type covers the whole admin write surface; the
+    /// lower-level <see cref="VersionCreated"/> / <see cref="Deprecated"/>
+    /// lifecycle events (34-1) are still emitted by the version path.
+    /// </summary>
+    public const string CatalogUpdated = "PLAN.CATALOG.UPDATED";
+
+    /// <summary>
+    /// Story 34-2 — a bespoke enterprise plan was minted and bound to a single
+    /// tenant. Carries the bound <c>tenantId</c> in both tags and data.
+    /// </summary>
+    public const string CustomCreated = "PLAN.CUSTOM.CREATED";
 }

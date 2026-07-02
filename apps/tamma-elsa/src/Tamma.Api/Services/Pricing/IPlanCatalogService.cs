@@ -31,9 +31,47 @@ public interface IPlanCatalogService
     Task<IReadOnlyList<PlanSnapshot>> ListActiveAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Story 34-2 (AC1) — the public catalog: every <c>active</c>, non-custom
+    /// (<c>IsCustom == false</c>) version, ordered by slug. This is what the
+    /// pricing / upgrade UI renders — deprecated, draft, and custom plans are
+    /// excluded by construction so a bespoke enterprise plan can never leak into
+    /// the public list.
+    /// </summary>
+    Task<IReadOnlyList<PlanSnapshot>> ListActivePublicAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Story 34-2 (AC2) — the single <c>active</c>, non-custom version for a slug,
+    /// or <c>null</c>. A custom plan's slug is never resolvable through this route
+    /// (it is <c>IsCustom == true</c>), so the public read returns 404 for it.
+    /// </summary>
+    Task<PlanSnapshot?> GetActivePublicBySlugAsync(string slug, CancellationToken ct = default);
+
+    /// <summary>
+    /// Story 34-2 — the admin catalog list. Unlike <see cref="ListActiveAsync"/>
+    /// this surfaces every status (active / deprecated / draft) and includes
+    /// custom plans, filtered by the supplied <paramref name="filter"/>
+    /// (status / isCustom / bound tenantId). Ordered by slug then version
+    /// descending.
+    /// </summary>
+    Task<IReadOnlyList<PlanSnapshot>> ListAllForAdminAsync(
+        PlanListFilter filter, CancellationToken ct = default);
+
+    /// <summary>
     /// The full version chain for a slug — the active version plus all
     /// deprecated versions, ordered by <c>Version</c> descending. Empty when
     /// the slug is unknown.
     /// </summary>
     Task<IReadOnlyList<PlanSnapshot>> GetVersionsBySlugAsync(string slug, CancellationToken ct = default);
 }
+
+/// <summary>
+/// Story 34-2 — server-side filter for the admin catalog list
+/// (<see cref="IPlanCatalogService.ListAllForAdminAsync"/>). All fields are
+/// optional (null ⇒ no filter on that dimension). <see cref="TenantId"/> filters
+/// custom plans to those bound to that tenant (matched on the server-derived
+/// <c>custom-{tenantId:N}-*</c> slug — see <see cref="CustomPlanSlug"/>).
+/// </summary>
+public sealed record PlanListFilter(
+    string? Status = null,
+    bool? IsCustom = null,
+    Guid? TenantId = null);
