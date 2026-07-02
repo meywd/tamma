@@ -1,0 +1,62 @@
+[
+  {
+    "Name": "platform-multiplier-only",
+    "PricingMode": "PlatformProvided",
+    "CostBasisUsd": "1.000000",
+    "MarginUsd": "0.300000",
+    "SellPriceUsd": "1.300000",
+    "InvoiceCostBasisUsd": "1.00",
+    "InvoiceMarginUsd": "0.30",
+    "InvoiceSellPriceUsd": "1.30"
+  },
+  {
+    "Name": "platform-fixed-only",
+    "PricingMode": "PlatformProvided",
+    "CostBasisUsd": "1.000000",
+    "MarginUsd": "0.500000",
+    "SellPriceUsd": "1.500000",
+    "InvoiceCostBasisUsd": "1.00",
+    "InvoiceMarginUsd": "0.50",
+    "InvoiceSellPriceUsd": "1.50"
+  },
+  {
+    "Name": "platform-both",
+    "PricingMode": "PlatformProvided",
+    "CostBasisUsd": "1.000000",
+    "MarginUsd": "0.800000",
+    "SellPriceUsd": "1.800000",
+    "InvoiceCostBasisUsd": "1.00",
+    "InvoiceMarginUsd": "0.80",
+    "InvoiceSellPriceUsd": "1.80"
+  },
+  {
+    "Name": "byok-zero-token-markup",
+    "PricingMode": "Byok",
+    "CostBasisUsd": "1.000000",
+    "MarginUsd": "0.000000",
+    "SellPriceUsd": "0.000000",
+    "InvoiceCostBasisUsd": "1.00",
+    "InvoiceMarginUsd": "0.00",
+    "InvoiceSellPriceUsd": "0.00"
+  },
+  {
+    "Name": "platform-zero-tokens",
+    "PricingMode": "PlatformProvided",
+    "CostBasisUsd": "0.000000",
+    "MarginUsd": "0.000000",
+    "SellPriceUsd": "0.000000",
+    "InvoiceCostBasisUsd": "0.00",
+    "InvoiceMarginUsd": "0.00",
+    "InvoiceSellPriceUsd": "0.00"
+  },
+  {
+    "Name": "rounding-6dp-even",
+    "PricingMode": "PlatformProvided",
+    "CostBasisUsd": "1.234568",
+    "MarginUsd": "0.000000",
+    "SellPriceUsd": "1.234568",
+    "InvoiceCostBasisUsd": "1.23",
+    "InvoiceMarginUsd": "0.00",
+    "InvoiceSellPriceUsd": "1.23"
+  }
+]

@@ -27,4 +27,26 @@ public static class PricingServiceCollectionExtensions
 
         return services;
     }
+
+    /// <summary>
+    /// Story 34-5 — the cost->price markup engine + its policy/mode resolvers.
+    /// The engine is a pure singleton (depends only on the singleton
+    /// <c>IProviderPricingService</c>); the resolvers are scoped (they read the
+    /// scoped <c>ControlPlaneDbContext</c>). The
+    /// <see cref="ITenantProviderPricingModeResolver"/> default reads the
+    /// per-tenant <c>BillingCustomer.BillingMode</c> until Story 34-3 swaps a
+    /// per-<c>(tenant, provider)</c> implementation behind the same seam.
+    /// </summary>
+    public static IServiceCollection AddUsagePricingEngine(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.TryAddSingleton(TimeProvider.System);
+
+        services.TryAddSingleton<IUsagePricingEngine, UsagePricingEngine>();
+        services.TryAddScoped<IMarginPolicyResolver, MarginPolicyResolver>();
+        services.TryAddScoped<ITenantProviderPricingModeResolver, BillingCustomerPricingModeResolver>();
+
+        return services;
+    }
 }
