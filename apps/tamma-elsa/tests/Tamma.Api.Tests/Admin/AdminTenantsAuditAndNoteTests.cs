@@ -156,16 +156,41 @@ public class AdminTenantsAuditAndNoteTests
     {
         var tenantId = await SeedTenantAsync(status: "active");
 
+        // Story 34-4 — the endpoint delegates to IPlanAssignmentService, which
+        // emits TENANT.PLAN.CHANGED (superseding PLAN.UPDATED) with the same
+        // actor breadcrumb BuildAdminEvent captured.
         await AdminTenantsEndpoints.UpdateTenantPlan(
             tenantId,
             new UpdateTenantPlanRequest(PlansSeeder.TeamPlanId),
             _db,
-            _publisher,
-            _timeProvider,
+            BuildAssignments(),
             Operator());
 
-        _publisher.Events.Should().ContainSingle(e => e.Type == "PLAN.UPDATED");
+        _publisher.Events.Should().ContainSingle(e => e.Type == "TENANT.PLAN.CHANGED");
         AssertActorTagsAndData(_publisher.Events[0]);
+    }
+
+    private Tamma.Api.Services.Pricing.IPlanAssignmentService BuildAssignments()
+    {
+        var catalog = new Tamma.Api.Services.Pricing.PlanCatalogService(
+            _db, Microsoft.Extensions.Logging.Abstractions.NullLogger<
+                Tamma.Api.Services.Pricing.PlanCatalogService>.Instance);
+        var usage = new Tamma.Api.Services.Pricing.NullTenantUsageReader(
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<
+                Tamma.Api.Services.Pricing.NullTenantUsageReader>.Instance);
+        return new Tamma.Api.Services.Pricing.PlanAssignmentService(
+            _db, catalog, usage, _publisher,
+            new RecordingPlatformQueuedTaskRepository(),
+            new FakeModeProvider(Tamma.Api.Services.PromptStore.TammaMode.SaaS),
+            _timeProvider,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<
+                Tamma.Api.Services.Pricing.PlanAssignmentService>.Instance);
+    }
+
+    private sealed class FakeModeProvider : Tamma.Api.Services.PromptStore.ITammaModeProvider
+    {
+        public FakeModeProvider(Tamma.Api.Services.PromptStore.TammaMode mode) => Mode = mode;
+        public Tamma.Api.Services.PromptStore.TammaMode Mode { get; }
     }
 
     private static void AssertActorTagsAndData(PlatformEvent evt)

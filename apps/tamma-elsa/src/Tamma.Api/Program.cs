@@ -1041,6 +1041,13 @@ builder.Services.AddUsagePricingEngine();
 // cache-invalidation listener. Read-only; fails loud on no assignment.
 builder.Services.AddEntitlementResolution();
 
+// Story 34-4 — the version-pinned plan-assignment service (source of truth for
+// "what plan version is this tenant on"), its ITenantUsageReader seam (null
+// default; Epic 35 supplies the real reader), and the platform-queue
+// boundary-activation handler. AddEntitlementResolution's
+// IActivePlanAssignmentSource now reads the assignment table via this service.
+builder.Services.AddPlanAssignment();
+
 // Wave C.4 §4 — per-process health monitor for TammaApiClient.
 // Singleton so the rolling 5-min failure window is shared across every
 // call site. Fires PLATFORM.API.UNHEALTHY via IAlertEventEmitter when
@@ -1793,6 +1800,16 @@ admin.MapPost("/tenants/{tenantId:guid}/cleanup",
 admin.MapPatch("/tenants/{tenantId:guid}/plan",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.UpdateTenantPlan)
     .RequireAuthorization("PlatformOwnerAccess");
+// Story 34-4 — idempotent version-pinned assign (body { planId, reason?, force? })
+// + period-end / immediate cancel → free. Both delegate to
+// IPlanAssignmentService, emit TENANT.PLAN.CHANGED / .CANCELLED, and keep the
+// lockstep tenant plan columns aligned. PlatformOwnerAccess.
+admin.MapPut("/tenants/{tenantId:guid}/plan",
+        Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.PutTenantPlan)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapPost("/tenants/{tenantId:guid}/plan/cancel",
+        Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.CancelTenantPlan)
+    .RequireAuthorization("PlatformOwnerAccess");
 
 // Unified-tenancy Phase 4 — move a tenant's schema to another pool row.
 // POST validates cheaply + enqueues a `tenant.move` platform task and
@@ -1947,6 +1964,13 @@ pricing.MapGet("/entitlements", Tamma.Api.Endpoints.PricingEndpoints.GetEntitlem
 // read; the admin write surface stays platform-owner-only (/api/admin/pricing/plans*).
 pricing.MapGet("/plans", Tamma.Api.Endpoints.PricingEndpoints.ListPublicPlans);
 pricing.MapGet("/plans/{slug}", Tamma.Api.Endpoints.PricingEndpoints.GetPublicPlanBySlug);
+// Story 34-4 (AC11) — tenant self-service subscribe to a PUBLIC plan. Tenant is
+// resolved strictly from ITenantContext (never the body) so a caller can only
+// affect their OWN tenant. Gated by SettingsManage (tenant_owner) on top of the
+// group's MemberAccess — a member-role caller gets 403; custom/draft/deprecated
+// or unknown plans return 422.
+pricing.MapPost("/subscribe", Tamma.Api.Endpoints.PricingEndpoints.Subscribe)
+    .RequireAuthorization("SettingsManage");
 
 var orgs = app.MapGroup("/api/v1/orgs").RequireAuthorization("MemberAccess");
 orgs.MapPost("/", OrgEndpoints.CreateOrg);
@@ -2734,6 +2758,7 @@ using (var scope = app.Services.CreateScope())
                     junior_developers, kek_rotations,
                     mentorship_events, mentorship_sessions,
                     password_reset_tokens,
+                    tenant_plan_assignments,
                     plan_features, plan_entitlements, plan_prices, plans,
                     margin_policies,
                     provider_model_prices, providers,

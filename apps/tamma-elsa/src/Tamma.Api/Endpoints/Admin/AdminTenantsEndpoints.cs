@@ -719,12 +719,19 @@ public static class AdminTenantsEndpoints
 
     // ── PATCH /api/admin/tenants/{id}/plan ──
 
+    /// <summary>
+    /// Story 34-4 — refactored to DELEGATE to
+    /// <see cref="IPlanAssignmentService.AssignAsync"/> (replacing the inline
+    /// shadow-column flip + ad-hoc <c>PLAN.UPDATED</c> emit). The tenant-status
+    /// gate stays here (a plan change is only legal in a stable state); the
+    /// service pins the version, keeps the lockstep tenant columns, and emits the
+    /// superseding <c>TENANT.PLAN.CHANGED</c> event.
+    /// </summary>
     public static async Task<IResult> UpdateTenantPlan(
         Guid tenantId,
         UpdateTenantPlanRequest req,
         ControlPlaneDbContext db,
-        IPlatformEventPublisher publisher,
-        [FromServices] TimeProvider timeProvider,
+        IPlanAssignmentService assignments,
         ClaimsPrincipal principal,
         CancellationToken ct = default)
     {
@@ -741,39 +748,174 @@ public static class AdminTenantsEndpoints
         if (!IsPlanChangeAllowed(current))
             return IllegalTransition(current, "change-plan");
 
-        var plan = await db.Plans.AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Id == req.PlanId, ct);
-        if (plan is null)
-            return Results.BadRequest(new { error = "plan_not_found" });
-        if (!plan.IsActive)
-            return Results.BadRequest(new { error = "plan_inactive" });
+        var actor = ActorTriple(principal);
+        try
+        {
+            var result = await assignments.AssignAsync(
+                tenantId, req.PlanId,
+                new AssignPlanOptions(
+                    ActorUserId: actor.UserId,
+                    Reason: "admin plan change (PATCH)",
+                    Source: "admin",
+                    ActorEmail: actor.Email,
+                    ActorPlatformRole: actor.Role),
+                ct);
 
-        var oldPlanId = (Guid?)db.Entry(tenant).Property("PlanId").CurrentValue;
-        db.Entry(tenant).Property("PlanId").CurrentValue = plan.Id;
-        // Keep the legacy string column in lockstep so dashboards that still
-        // read it render the same plan.
-        tenant.Plan = plan.Slug;
-        tenant.UpdatedAt = timeProvider.GetUtcNow().UtcDateTime;
-        await db.SaveChangesAsync(ct);
-
-        await publisher.AppendAndPublishAsync(
-            BuildAdminEvent(
-                "PLAN.UPDATED",
+            return Results.Ok(new AdminTenantActionResponse(
                 tenantId,
-                principal,
-                new Dictionary<string, object?>
-                {
-                    ["oldPlanId"] = oldPlanId?.ToString("D"),
-                    ["newPlanId"] = plan.Id.ToString("D"),
-                    ["newPlanSlug"] = plan.Slug,
-                }),
-            ct);
-
-        return Results.Ok(new AdminTenantActionResponse(
-            tenantId,
-            current ?? StatusActive,
-            $"Plan changed to {plan.DisplayName}."));
+                current ?? StatusActive,
+                $"Plan changed to {result.Assignment.PlanId:D} v{result.Assignment.PlanVersion}."));
+        }
+        catch (TammaError ex)
+        {
+            return MapPlanAssignmentError(ex);
+        }
     }
+
+    // ── PUT /api/admin/tenants/{id}/plan (idempotent assign) ──
+
+    /// <summary>
+    /// Story 34-4 — idempotent version-pinned assign with an optional reason +
+    /// force (deprecated). Returns the full <see cref="PlanAssignmentResponse"/>
+    /// (planVersion, direction, warnings). PlatformOwnerAccess.
+    /// </summary>
+    public static async Task<IResult> PutTenantPlan(
+        Guid tenantId,
+        PutTenantPlanRequest req,
+        ControlPlaneDbContext db,
+        IPlanAssignmentService assignments,
+        ClaimsPrincipal principal,
+        CancellationToken ct = default)
+    {
+        if (req.PlanId == Guid.Empty)
+            return Results.BadRequest(new { error = "plan_id_required" });
+
+        var tenant = await db.Tenants
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Id == tenantId && t.DeletedAt == null, ct);
+        if (tenant is null)
+            return Results.NotFound(new { error = "tenant_not_found" });
+
+        var current = (string?)db.Entry(tenant).Property("Status").CurrentValue;
+        if (!IsPlanChangeAllowed(current))
+            return IllegalTransition(current, "change-plan");
+
+        var actor = ActorTriple(principal);
+        try
+        {
+            var result = await assignments.AssignAsync(
+                tenantId, req.PlanId,
+                new AssignPlanOptions(
+                    ActorUserId: actor.UserId,
+                    Reason: req.Reason,
+                    Force: req.Force,
+                    Source: "admin",
+                    ActorEmail: actor.Email,
+                    ActorPlatformRole: actor.Role),
+                ct);
+
+            return Results.Ok(ToPlanAssignmentResponse(tenantId, result));
+        }
+        catch (TammaError ex)
+        {
+            return MapPlanAssignmentError(ex);
+        }
+    }
+
+    // ── POST /api/admin/tenants/{id}/plan/cancel ──
+
+    /// <summary>
+    /// Story 34-4 — schedule a cancel → <c>free</c> at the period boundary (or
+    /// immediately). Returns 200 with the scheduled assignment + effectiveAt.
+    /// PlatformOwnerAccess.
+    /// </summary>
+    public static async Task<IResult> CancelTenantPlan(
+        Guid tenantId,
+        CancelTenantPlanRequest? req,
+        ControlPlaneDbContext db,
+        IPlanAssignmentService assignments,
+        ClaimsPrincipal principal,
+        CancellationToken ct = default)
+    {
+        var tenant = await db.Tenants
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Id == tenantId && t.DeletedAt == null, ct);
+        if (tenant is null)
+            return Results.NotFound(new { error = "tenant_not_found" });
+
+        var current = (string?)db.Entry(tenant).Property("Status").CurrentValue;
+        if (!IsPlanChangeAllowed(current))
+            return IllegalTransition(current, "change-plan");
+
+        var actor = ActorTriple(principal);
+        try
+        {
+            var result = await assignments.CancelAsync(
+                tenantId,
+                new CancelPlanOptions(
+                    ActorUserId: actor.UserId,
+                    Reason: req?.Reason,
+                    Immediate: req?.Immediate ?? false,
+                    ActorEmail: actor.Email,
+                    ActorPlatformRole: actor.Role),
+                ct);
+
+            return Results.Ok(ToPlanAssignmentResponse(tenantId, result));
+        }
+        catch (TammaError ex)
+        {
+            return MapPlanAssignmentError(ex);
+        }
+    }
+
+    /// <summary>
+    /// Story 34-4 — the full actor breadcrumb (user id + email + platform role)
+    /// for the assignment audit event, extracted the same way
+    /// <see cref="BuildAdminEvent"/> does.
+    /// </summary>
+    internal static (Guid? UserId, string? Email, string? Role) ActorTriple(ClaimsPrincipal? principal)
+    {
+        var actor = ExtractActor(principal);
+        var userId = Guid.TryParse(actor.UserId, out var id) ? id : (Guid?)null;
+        return (userId, actor.Email, actor.PlatformRole);
+    }
+
+    /// <summary>Story 34-4 — project a service result onto the wire DTO.</summary>
+    internal static PlanAssignmentResponse ToPlanAssignmentResponse(
+        Guid tenantId, PlanAssignmentResult result) =>
+        new(
+            tenantId,
+            result.Assignment.PlanId,
+            result.Assignment.PlanVersion,
+            result.Assignment.Status,
+            result.Direction.ToString().ToLowerInvariant(),
+            result.Warnings
+                .Select(w => new PlanAssignmentWarningItem(
+                    w.MetricKey.ToString(), w.CurrentUsage, w.NewLimit))
+                .ToList(),
+            result.ScheduledEffectiveAt);
+
+    /// <summary>Story 34-4 — map a typed assignment <see cref="TammaError"/> to an HTTP status.</summary>
+    internal static IResult MapPlanAssignmentError(TammaError ex) => ex.Code switch
+    {
+        "PLAN.ASSIGN.PLAN_NOT_FOUND" => Results.BadRequest(new { error = "plan_not_found" }),
+        "PLAN.ASSIGN.TENANT_NOT_FOUND" => Results.NotFound(new { error = "tenant_not_found" }),
+        "PLAN.CANCEL.NO_ACTIVE_ASSIGNMENT" => Results.Json(
+            new { error = "no_active_assignment" }, statusCode: StatusCodes.Status409Conflict),
+        "PLAN.ASSIGN.PLAN_DRAFT" => Results.UnprocessableEntity(new { error = "plan_draft" }),
+        "PLAN.ASSIGN.PLAN_DEPRECATED" => Results.UnprocessableEntity(
+            new { error = "plan_deprecated_no_force" }),
+        "PLAN.ASSIGN.CUSTOM_PLAN_MISBOUND" => Results.UnprocessableEntity(
+            new { error = "custom_plan_misbound" }),
+        "PLAN.ASSIGN.CONCURRENT" => Results.Json(
+            new { error = "concurrent_assign" }, statusCode: StatusCodes.Status409Conflict),
+        "PLAN.CANCEL.NO_FREE_PLAN" => Results.Problem(
+            title: ex.Code, detail: ex.Message,
+            statusCode: StatusCodes.Status500InternalServerError),
+        _ => Results.Problem(
+            title: ex.Code, detail: ex.Message,
+            statusCode: StatusCodes.Status500InternalServerError),
+    };
 
     // ── POST /api/admin/tenants/{id}/move ──
 

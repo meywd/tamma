@@ -8,6 +8,15 @@ public class Tenant
     public string Type { get; set; } = "personal";
     public Guid? OwnerId { get; set; }
     public string? ExternalId { get; set; }
+
+    /// <summary>
+    /// Legacy plan slug. Story 34-4 — <b>DERIVED</b> from the tenant's active
+    /// <see cref="TenantPlanAssignment"/> (the source of truth), kept in lockstep
+    /// by <c>PlanAssignmentService</c> only so dashboards that still read this
+    /// column (and the Epic-28 <c>PlanId</c> shadow column) render the right plan
+    /// without a rewrite. New reads should call
+    /// <c>IPlanAssignmentService.GetActiveAsync</c>, never this field.
+    /// </summary>
     public string Plan { get; set; } = "free";
     public string Settings { get; set; } = "{}";
     public DateTime CreatedAt { get; set; }

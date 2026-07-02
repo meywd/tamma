@@ -968,6 +968,62 @@ internal static class TammaModelConfiguration
     }
 
     /// <summary>
+    /// Story 34-4 — <c>tenant_plan_assignments</c> table. Version-pinned,
+    /// audited plan assignments; CP-resident. Three CHECKs pin the closed
+    /// <c>Status</c> set, the effective-window ordering, and a positive pinned
+    /// version. The partial unique index
+    /// <c>ux_tpa_one_active_per_tenant</c> on <c>(TenantId) WHERE Status='active'</c>
+    /// guarantees at most one active assignment per tenant (mirrors
+    /// <c>UX_plans_OneActivePerSlug</c>). A <c>(TenantId, Status)</c> index backs
+    /// the "current assignment" lookup; a <c>PlanId</c> index backs the FK.
+    /// FKs: TenantId → tenants (Cascade); PlanId → plans (Restrict).
+    /// </summary>
+    public static void ConfigureTenantPlanAssignments(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<TenantPlanAssignment>(entity =>
+        {
+            entity.ToTable("tenant_plan_assignments", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_tpa_status",
+                    "\"Status\" IN ('active','scheduled','cancelled')");
+                t.HasCheckConstraint(
+                    "ck_tpa_effective_window",
+                    "\"EffectiveTo\" IS NULL OR \"EffectiveTo\" >= \"EffectiveFrom\"");
+                t.HasCheckConstraint(
+                    "ck_tpa_version_positive",
+                    "\"PlanVersion\" >= 1");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // AC2 — at most one active assignment per tenant.
+            entity.HasIndex(e => e.TenantId)
+                .IsUnique()
+                .HasFilter("\"Status\" = 'active'")
+                .HasDatabaseName("ux_tpa_one_active_per_tenant");
+
+            // "current assignment" lookup + FK support index.
+            entity.HasIndex(e => new { e.TenantId, e.Status })
+                .HasDatabaseName("IX_tenant_plan_assignments_TenantId_Status");
+            entity.HasIndex(e => e.PlanId)
+                .HasDatabaseName("IX_tenant_plan_assignments_PlanId");
+
+            entity.HasOne<Tenant>()
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<Plan>()
+                .WithMany()
+                .HasForeignKey(e => e.PlanId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    /// <summary>
     /// Story 35-1 — billing foundation entities. The tenant→Stripe customer
     /// mapping (<c>billing_customers</c>, unique <c>TenantId</c>) and the
     /// slug→Stripe-ids catalog (<c>billing_plan_prices</c>, unique

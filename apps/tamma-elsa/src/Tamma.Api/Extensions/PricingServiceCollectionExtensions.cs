@@ -1,6 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Tamma.Api.Services.PlatformTasks;
 using Tamma.Api.Services.Pricing;
+using Tamma.Api.Services.Provisioning;
 
 namespace Tamma.Api.Extensions;
 
@@ -67,11 +69,15 @@ public static class PricingServiceCollectionExtensions
     ///     hosted service subscribing the in-process event bus.</description></item>
     /// </list>
     ///
-    /// <para><b>34-4 interim:</b> the default
-    /// <see cref="IActivePlanAssignmentSource"/> reads the tenant's Epic-28
-    /// <c>PlanId</c> shadow column. Swap in a 34-4
-    /// <c>IPlanAssignmentService</c> adapter under this same seam once that
-    /// story lands — no resolver change required.</para>
+    /// <para><b>34-4 wired:</b> the <see cref="IActivePlanAssignmentSource"/> now
+    /// reads the tenant's active <c>TenantPlanAssignment</c> row via
+    /// <see cref="PlanAssignmentActivePlanSource"/> (which delegates to
+    /// <see cref="IPlanAssignmentService"/>, registered by
+    /// <see cref="AddPlanAssignment"/>). This is the one-line swap Story 34-6
+    /// anticipated — it replaces the interim
+    /// <see cref="TenantShadowColumnPlanAssignmentSource"/> behind the same seam
+    /// with no entitlement-resolver change, and now supplies the pinned
+    /// <c>PlanVersion</c> directly.</para>
     /// </summary>
     public static IServiceCollection AddEntitlementResolution(this IServiceCollection services)
     {
@@ -83,11 +89,45 @@ public static class PricingServiceCollectionExtensions
         services.TryAddSingleton<IEntitlementSnapshotCache>(sp =>
             new EntitlementSnapshotCache(sp.GetRequiredService<TimeProvider>()));
 
-        services.TryAddScoped<IActivePlanAssignmentSource, TenantShadowColumnPlanAssignmentSource>();
+        // Story 34-4 — read the pinned (PlanId, PlanVersion) from the real
+        // assignment table. Ensure IPlanAssignmentService is registered
+        // (AddPlanAssignment); called independently from Program.cs.
+        services.TryAddScoped<IActivePlanAssignmentSource, PlanAssignmentActivePlanSource>();
         services.TryAddScoped<IEntitlementUsageReader, ControlPlaneEntitlementUsageReader>();
         services.TryAddScoped<IEntitlementService, EntitlementService>();
 
         services.AddHostedService<EntitlementCacheInvalidationListener>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Story 34-4 — the version-pinned plan-assignment service + its usage seam
+    /// and the platform-queue boundary-activation handler.
+    ///
+    /// <list type="bullet">
+    ///   <item><description><see cref="IPlanAssignmentService"/> — scoped
+    ///     (depends on the scoped <c>ControlPlaneDbContext</c> + catalog).</description></item>
+    ///   <item><description><see cref="ITenantUsageReader"/> —
+    ///     <see cref="NullTenantUsageReader"/> default (Epic 35 supplies the real
+    ///     metering reader behind this same seam; keeps Billing out of the
+    ///     assignment path).</description></item>
+    ///   <item><description><see cref="ActivateScheduledPlanTaskHandler"/> —
+    ///     platform-task handler promoting a due scheduled assignment at its
+    ///     boundary (requires <c>AddPlatformTaskWorker</c>).</description></item>
+    /// </list>
+    /// </summary>
+    public static IServiceCollection AddPlanAssignment(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.TryAddSingleton(TimeProvider.System);
+
+        services.TryAddScoped<ITenantUsageReader, NullTenantUsageReader>();
+        services.TryAddScoped<IPlanAssignmentService, PlanAssignmentService>();
+
+        // Boundary-activation platform-task handler (period-end cancel → free).
+        services.AddPlatformTaskHandler<ActivateScheduledPlanTaskHandler>();
 
         return services;
     }

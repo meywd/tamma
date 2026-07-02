@@ -111,6 +111,43 @@ public record AdminTenantActionGate(
 public record UpdateTenantPlanRequest(Guid PlanId);
 
 /// <summary>
+/// Story 34-4 — request body for the idempotent
+/// <c>PUT /api/admin/tenants/{id}/plan</c>. <see cref="PlanId"/> is a specific
+/// versioned plan row; <see cref="Reason"/> is an audit note; <see cref="Force"/>
+/// permits assigning a <c>deprecated</c> version (a <c>draft</c> is always
+/// rejected).
+/// </summary>
+public record PutTenantPlanRequest(Guid PlanId, string? Reason = null, bool Force = false);
+
+/// <summary>
+/// Story 34-4 — request body for
+/// <c>POST /api/admin/tenants/{id}/plan/cancel</c>. <see cref="Immediate"/> drops
+/// the tenant to <c>free</c> now instead of at the current billing-interval
+/// boundary.
+/// </summary>
+public record CancelTenantPlanRequest(string? Reason = null, bool Immediate = false);
+
+/// <summary>
+/// Story 34-4 — 200 body for the assign / subscribe / cancel plan operations.
+/// <see cref="Warnings"/> lists over-limit downgrade flags (never blocking).
+/// <see cref="ScheduledEffectiveAt"/> is set only for a period-end cancel.
+/// </summary>
+public record PlanAssignmentResponse(
+    Guid TenantId,
+    Guid PlanId,
+    int PlanVersion,
+    string Status,
+    string Direction,
+    IReadOnlyList<PlanAssignmentWarningItem> Warnings,
+    DateTime? ScheduledEffectiveAt);
+
+/// <summary>Story 34-4 — one over-limit downgrade warning on a plan change.</summary>
+public record PlanAssignmentWarningItem(
+    string MetricKey,
+    long? CurrentUsage,
+    long? NewLimit);
+
+/// <summary>
 /// Minimal response the action POST handlers return (retry / delete /
 /// force-delete / change-plan). <see cref="Status"/> is the new Status
 /// value after the action applies; <see cref="Message"/> is a

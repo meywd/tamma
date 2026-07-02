@@ -222,4 +222,74 @@ public static class PricingEndpoints
             ? Results.NotFound(new { error = "plan_not_found", slug })
             : Results.Ok(snapshot);
     }
+
+    // ── POST /api/pricing/subscribe ── (Story 34-4 AC11, SettingsManage)
+    //
+    // Tenant self-service: a tenant_owner picks a PUBLIC (active, non-custom)
+    // plan for their OWN tenant. The tenant is resolved STRICTLY from
+    // ITenantContext (SaaS) / the sole user's instance (single-user) — a request
+    // body NEVER selects the tenant, so a caller can never subscribe/affect
+    // another tenant (tenant isolation, AC12/AC14). A member-role caller is
+    // rejected 403 by the SettingsManage policy on the route; subscribing to a
+    // custom / draft / deprecated / unknown plan returns 422.
+    public static async Task<IResult> Subscribe(
+        SubscribeRequest? req,
+        ClaimsPrincipal user,
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider,
+        IPlanCatalogService planCatalog,
+        IPlanAssignmentService assignments,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("Tamma.Api.Endpoints.PricingEndpoints");
+
+        if (req is null || string.IsNullOrWhiteSpace(req.PlanSlug))
+        {
+            return Results.BadRequest(new { error = "plan_slug_required" });
+        }
+
+        // Tenant strictly from context — never from the body.
+        if (tenantContext.TenantId is not Guid tenantId)
+        {
+            return Results.NotFound(new { error = "no_active_tenant" });
+        }
+
+        // Only a PUBLIC (active, non-custom) plan is subscribable here. A custom
+        // plan's slug is never resolvable through this route (IsCustom filter),
+        // and draft/deprecated are excluded by construction.
+        var snapshot = await planCatalog.GetActivePublicBySlugAsync(req.PlanSlug, ct);
+        if (snapshot is null)
+        {
+            return Results.UnprocessableEntity(new { error = "plan_not_public" });
+        }
+
+        var actor = Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.ActorTriple(user);
+        try
+        {
+            var result = await assignments.AssignAsync(
+                tenantId, snapshot.PlanId,
+                new AssignPlanOptions(
+                    ActorUserId: actor.UserId,
+                    Reason: "tenant self-service subscribe",
+                    Source: "self-service",
+                    ActorEmail: actor.Email,
+                    ActorPlatformRole: actor.Role),
+                ct);
+
+            logger.LogInformation(
+                "Tenant {TenantId} subscribed to plan {Slug} v{Version} (mode={Mode})",
+                tenantId, snapshot.Slug, snapshot.Version, modeProvider.Mode);
+
+            return Results.Ok(
+                Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.ToPlanAssignmentResponse(tenantId, result));
+        }
+        catch (TammaError ex)
+        {
+            return Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.MapPlanAssignmentError(ex);
+        }
+    }
 }
+
+/// <summary>Story 34-4 — request body for <c>POST /api/pricing/subscribe</c>.</summary>
+public sealed record SubscribeRequest(string PlanSlug);

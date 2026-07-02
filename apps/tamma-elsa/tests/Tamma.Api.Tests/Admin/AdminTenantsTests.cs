@@ -759,6 +759,31 @@ public class AdminTenantsTests
 
     // ── Plan change ──
 
+    // Story 34-4 — UpdateTenantPlan now delegates to IPlanAssignmentService.
+    // Build a real service over the InMemory context (PlansSeeder ran in SetUp).
+    private Tamma.Api.Services.Pricing.IPlanAssignmentService BuildAssignments()
+    {
+        var catalog = new Tamma.Api.Services.Pricing.PlanCatalogService(
+            _db, Microsoft.Extensions.Logging.Abstractions.NullLogger<
+                Tamma.Api.Services.Pricing.PlanCatalogService>.Instance);
+        var usage = new Tamma.Api.Services.Pricing.NullTenantUsageReader(
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<
+                Tamma.Api.Services.Pricing.NullTenantUsageReader>.Instance);
+        return new Tamma.Api.Services.Pricing.PlanAssignmentService(
+            _db, catalog, usage, _publisher,
+            new RecordingPlatformQueuedTaskRepository(),
+            new FakeModeProvider(Tamma.Api.Services.PromptStore.TammaMode.SaaS),
+            _timeProvider,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<
+                Tamma.Api.Services.Pricing.PlanAssignmentService>.Instance);
+    }
+
+    private sealed class FakeModeProvider : Tamma.Api.Services.PromptStore.ITammaModeProvider
+    {
+        public FakeModeProvider(Tamma.Api.Services.PromptStore.TammaMode mode) => Mode = mode;
+        public Tamma.Api.Services.PromptStore.TammaMode Mode { get; }
+    }
+
     [Test]
     public async Task UpdateTenantPlan_SetsPlanIdAndLegacySlug_AndEmitsEvent()
     {
@@ -768,8 +793,8 @@ public class AdminTenantsTests
             tenantId,
             new UpdateTenantPlanRequest(PlansSeeder.TeamPlanId),
             _db,
-            _publisher,
-            _timeProvider, AdminPrincipal());
+            BuildAssignments(),
+            AdminPrincipal());
 
         result.Should().BeOfType<Ok<AdminTenantActionResponse>>();
         var reloaded = await _db.Tenants.IgnoreQueryFilters()
@@ -777,7 +802,8 @@ public class AdminTenantsTests
         ((Guid?)_db.Entry(reloaded).Property("PlanId").CurrentValue)
             .Should().Be(PlansSeeder.TeamPlanId);
         reloaded.Plan.Should().Be("team", "legacy plan string stays in lockstep with PlanId FK");
-        _publisher.Events.Should().ContainSingle(e => e.Type == "PLAN.UPDATED");
+        // Story 34-4 — PLAN.UPDATED is superseded by TENANT.PLAN.CHANGED.
+        _publisher.Events.Should().ContainSingle(e => e.Type == "TENANT.PLAN.CHANGED");
     }
 
     [Test]
@@ -789,8 +815,8 @@ public class AdminTenantsTests
             tenantId,
             new UpdateTenantPlanRequest(Guid.NewGuid()),
             _db,
-            _publisher,
-            _timeProvider, AdminPrincipal());
+            BuildAssignments(),
+            AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -804,8 +830,8 @@ public class AdminTenantsTests
             tenantId,
             new UpdateTenantPlanRequest(Guid.Empty),
             _db,
-            _publisher,
-            _timeProvider, AdminPrincipal());
+            BuildAssignments(),
+            AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
     }
@@ -819,8 +845,8 @@ public class AdminTenantsTests
             tenantId,
             new UpdateTenantPlanRequest(PlansSeeder.TeamPlanId),
             _db,
-            _publisher,
-            _timeProvider, AdminPrincipal());
+            BuildAssignments(),
+            AdminPrincipal());
 
         StatusCodeOf(result).Should().Be(StatusCodes.Status409Conflict);
     }
