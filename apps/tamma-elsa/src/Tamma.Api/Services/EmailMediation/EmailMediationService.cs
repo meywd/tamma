@@ -1,5 +1,7 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Api.Services.Email;
+using Tamma.Api.Services.PromptStore;
 using Tamma.Core.Logging;
 
 namespace Tamma.Api.Services.EmailMediation;
@@ -22,20 +24,62 @@ namespace Tamma.Api.Services.EmailMediation;
 /// </summary>
 public sealed class EmailMediationService : IEmailMediationService
 {
+    /// <summary>
+    /// Config flag (default FALSE) that opts a SaaS deployment back into
+    /// tenant-workflow-initiated mediated email sends. See the SaaS guard in
+    /// <see cref="SendEmailAsync"/> and <see cref="EmailMediationFailureCodes.MediationDeniedInSaaS"/>.
+    /// </summary>
+    internal const string AllowMediatedSendInSaaSKey = "Email:AllowMediatedSendInSaaS";
+
     private readonly IEmailService _email;
+    private readonly ITammaModeProvider _mode;
+    private readonly IConfiguration _config;
     private readonly ILogger<EmailMediationService> _logger;
 
     public EmailMediationService(
         IEmailService email,
+        ITammaModeProvider mode,
+        IConfiguration config,
         ILogger<EmailMediationService> logger)
     {
         _email = email ?? throw new ArgumentNullException(nameof(email));
+        _mode = mode ?? throw new ArgumentNullException(nameof(mode));
+        _config = config ?? throw new ArgumentNullException(nameof(config));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public async Task<EmailMediationResult> SendEmailAsync(Guid? tenantId, SendEmailRequest body, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(body);
+
+        // SaaS fail-closed tenant guard (mirrors the JIRA/git mediation guards).
+        // A mediated send composes mail FROM the platform's configured sender identity
+        // (Email:From) — there is no per-tenant From/domain allowlist here. In SaaS a
+        // tenant workflow could therefore emit arbitrary mail under the platform's
+        // reputation/domain (spam/phishing amplification), so deny-by-default. An
+        // operator opts back in with Email:AllowMediatedSendInSaaS=true once a
+        // per-tenant sender policy exists. Single-user mode is always allowed (the sole
+        // principal owns the domain). Fail-soft: return a typed denial inside 200
+        // success:false, never a raw 5xx. Only TENANT-WORKFLOW-initiated sends reach
+        // this service; system emails (welcome/verification/password-reset) call
+        // IEmailService directly and are unaffected.
+        if (_mode.Mode == TammaMode.SaaS
+            && !_config.GetValue(AllowMediatedSendInSaaSKey, false))
+        {
+            _logger.LogWarning(
+                "email-mediation send DENIED in SaaS mode: no per-tenant sender allowlist; " +
+                "set {ConfigKey}=true to opt in. correlationId={CorrelationId}, tenantId={TenantId}",
+                AllowMediatedSendInSaaSKey, LogSanitizer.Clean(body.CorrelationId), tenantId);
+
+            return new EmailMediationResult
+            {
+                Success = false,
+                Outcome = "Denied",
+                FailureCode = EmailMediationFailureCodes.MediationDeniedInSaaS,
+                FailureReason = "mediated email send is not permitted in SaaS mode",
+                CorrelationId = body.CorrelationId,
+            };
+        }
 
         if (string.IsNullOrWhiteSpace(body.To))
         {

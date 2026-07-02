@@ -34,6 +34,15 @@ public static class EmailMediationFailureCodes
 {
     /// <summary>Any expected accept failure (validation, DI, transient).</summary>
     public const string PlatformError = "PLATFORM_ERROR";
+
+    /// <summary>
+    /// SaaS fail-closed guard: a tenant-workflow-initiated mediated send was denied
+    /// because the message would go out FROM the platform's configured sender
+    /// identity (<c>Email:From</c>) with no per-tenant sender/domain allowlist. Opt
+    /// back in with <c>Email:AllowMediatedSendInSaaS=true</c> once a per-tenant sender
+    /// policy exists. Single-user mode is never denied (one principal owns the domain).
+    /// </summary>
+    public const string MediationDeniedInSaaS = "email_mediation_denied_in_saas";
 }
 
 /// <summary>
