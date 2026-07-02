@@ -180,7 +180,10 @@ jobs:
   dotnet-tests:
     name: .NET Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # The C# suite (4000+ tests, Postgres testcontainers) grew to ~13-15 min as
+    # Epics 32/34/35/36/37 landed and began flaking on the old 15-min cap. 25 min
+    # gives headroom for continued growth without masking a real hang.
+    timeout-minutes: 25
     permissions:
       contents: read
     defaults:
