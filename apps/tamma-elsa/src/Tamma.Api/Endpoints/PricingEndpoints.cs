@@ -75,6 +75,11 @@ public static class PricingEndpoints
                 "Pricing estimate served: tenantId={TenantId} provider={Provider} model={Model} mode={Mode}",
                 tenantId, provider, model ?? "", pricingMode);
 
+            // AC10 — the tenant-facing estimate exposes ONLY the SELL price the
+            // caller would be charged. The platform cost basis and margin are
+            // business-confidential (a customer could otherwise compute the exact
+            // platform markup) and are surfaced solely on the platform-owner admin
+            // surface, never here.
             return Results.Ok(new
             {
                 provider,
@@ -82,13 +87,9 @@ public static class PricingEndpoints
                 inputTokens,
                 outputTokens,
                 pricingMode = priced.PricingMode.ToString(),
-                costBasisUsd = priced.CostBasisUsd,
-                marginUsd = priced.MarginUsd,
                 sellPriceUsd = priced.SellPriceUsd,
                 invoice = new
                 {
-                    costBasisUsd = PricedUsage.InvoiceUsd(priced.CostBasisUsd),
-                    marginUsd = PricedUsage.InvoiceUsd(priced.MarginUsd),
                     sellPriceUsd = PricedUsage.InvoiceUsd(priced.SellPriceUsd),
                 },
             });

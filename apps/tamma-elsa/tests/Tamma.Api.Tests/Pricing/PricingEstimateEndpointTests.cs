@@ -82,6 +82,9 @@ public class PricingEstimateEndpointTests
     private static string Str(object value, string prop) =>
         (string)value.GetType().GetProperty(prop)!.GetValue(value)!;
 
+    private static bool HasProp(object value, string prop) =>
+        value.GetType().GetProperty(prop) is not null;
+
     [Test]
     public async Task GetEstimate_PlatformProvidedTenant_ReturnsMarkedUpPrice()
     {
@@ -92,15 +95,21 @@ public class PricingEstimateEndpointTests
             Guid.NewGuid(), TammaMode.SaaS, PricingMode.PlatformProvided);
 
         var value = Value(result);
-        var cost = Dec(value, "costBasisUsd");
         var sell = Dec(value, "sellPriceUsd");
-        var margin = Dec(value, "marginUsd");
 
         // 1000*3/1e6 + 500*15/1e6 = 0.0105 cost basis; *1.3 = 0.01365 sell.
-        cost.Should().Be(0.010500m);
         sell.Should().Be(0.013650m);
-        margin.Should().Be(0.003150m);
         Str(value, "pricingMode").Should().Be("PlatformProvided");
+
+        // AC10 — the tenant estimate must NOT leak the platform cost basis or
+        // margin (a customer could otherwise compute the exact platform markup).
+        HasProp(value, "costBasisUsd").Should().BeFalse();
+        HasProp(value, "marginUsd").Should().BeFalse();
+
+        var invoice = value.GetType().GetProperty("invoice")!.GetValue(value)!;
+        Dec(invoice, "sellPriceUsd").Should().Be(0.01m);
+        HasProp(invoice, "costBasisUsd").Should().BeFalse();
+        HasProp(invoice, "marginUsd").Should().BeFalse();
     }
 
     [Test]
@@ -113,10 +122,12 @@ public class PricingEstimateEndpointTests
             Guid.NewGuid(), TammaMode.SaaS, PricingMode.Byok);
 
         var value = Value(result);
-        Dec(value, "costBasisUsd").Should().Be(0.010500m); // still computed
         Dec(value, "sellPriceUsd").Should().Be(0m);
-        Dec(value, "marginUsd").Should().Be(0m);
         Str(value, "pricingMode").Should().Be("Byok");
+
+        // AC10 — no cost/margin leak on the BYOK estimate either.
+        HasProp(value, "costBasisUsd").Should().BeFalse();
+        HasProp(value, "marginUsd").Should().BeFalse();
     }
 
     [Test]

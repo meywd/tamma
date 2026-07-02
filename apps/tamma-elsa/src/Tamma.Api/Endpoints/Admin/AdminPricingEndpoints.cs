@@ -86,6 +86,16 @@ public static class AdminPricingEndpoints
         {
             return Results.BadRequest(new { error = "negative_markup_multiplier" });
         }
+        // A markup is by definition >= 1: sell = cost * multiplier, so a supplied
+        // multiplier in [0,1) would price AT/BELOW the platform's own wholesale
+        // cost (a fat-fingered 0.13 = ~87% revenue loss) while still passing
+        // ck_margin_policies_has_knob. Only guard when the multiplier is actually
+        // supplied — a null multiplier with a FixedUsdPer1M knob is a legitimate
+        // "cost + fixed per-token fee" policy and must stay allowed.
+        if (body.MarkupMultiplier is not null && body.MarkupMultiplier < 1m)
+        {
+            return Results.BadRequest(new { error = "markup_multiplier_below_one" });
+        }
         if (body.FixedUsdPer1M is < 0m)
         {
             return Results.BadRequest(new { error = "negative_fixed_usd_per_1m" });
@@ -133,6 +143,22 @@ public static class AdminPricingEndpoints
 
             if (tx is not null) await tx.CommitAsync(ct);
         }
+        catch (DbUpdateException dbEx) when (IsUniqueViolation(dbEx))
+        {
+            // A concurrent PUT for the same (scope, refKey) won the race and
+            // inserted its active row first; our insert then hit the partial
+            // unique index (Postgres 23505). This is a benign lost-write, not a
+            // server fault — surface 409 so the caller retries (pre-fix it leaked
+            // as a 500). The one-active-per-scope invariant is preserved.
+            if (tx is not null) await tx.RollbackAsync(ct);
+            return Results.Conflict(new
+            {
+                error = "margin_policy_conflict",
+                scope = body.Scope,
+                refKey,
+                message = "A concurrent update superseded this margin policy; retry the request.",
+            });
+        }
         catch
         {
             if (tx is not null) await tx.RollbackAsync(ct);
@@ -161,6 +187,17 @@ public static class AdminPricingEndpoints
             supersededPolicyId = prior?.Id,
         });
     }
+
+    /// <summary>
+    /// Detects the Postgres 23505 unique-violation raised by the partial unique
+    /// index (one active row per <c>(scope, refKey)</c>) when two concurrent PUTs
+    /// race the supersede-then-insert. EF wraps the Npgsql exception in a
+    /// <see cref="DbUpdateException"/>. Same shape as
+    /// <c>PromptEndpoints.IsUniqueViolation</c>.
+    /// </summary>
+    private static bool IsUniqueViolation(DbUpdateException dbEx)
+        => dbEx.InnerException is Npgsql.PostgresException pgEx
+           && string.Equals(pgEx.SqlState, "23505", StringComparison.Ordinal);
 
     /// <summary>Canonicalize a provider-scope refKey; trim others; global -> null.</summary>
     private static string? NormalizeRefKey(string scope, string? refKey)

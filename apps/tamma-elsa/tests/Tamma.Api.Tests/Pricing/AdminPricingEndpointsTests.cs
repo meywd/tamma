@@ -188,4 +188,78 @@ public class AdminPricingEndpointsTests
             db, new RecordingPlatformEventPublisher(), Actor(), TimeProvider.System, default);
         AssertStatus(result, StatusCodes.Status400BadRequest);
     }
+
+    // ── Fix B: a supplied markup multiplier < 1 prices at/below platform cost ──
+    [Test]
+    public async Task VersionMargin_FatFingeredMultiplier_Returns400()
+    {
+        await using var db = NewContext();
+        // 0.13 = ~87% revenue loss (sell = cost * 0.13) — must be rejected.
+        var result = await AdminPricingEndpoints.VersionMargin(
+            new VersionMarginRequest("global", null, 0.13m, null),
+            db, new RecordingPlatformEventPublisher(), Actor(), TimeProvider.System, default);
+        AssertStatus(result, StatusCodes.Status400BadRequest);
+    }
+
+    [Test]
+    public async Task VersionMargin_ZeroMultiplier_Returns400()
+    {
+        await using var db = NewContext();
+        var result = await AdminPricingEndpoints.VersionMargin(
+            new VersionMarginRequest("global", null, 0m, null),
+            db, new RecordingPlatformEventPublisher(), Actor(), TimeProvider.System, default);
+        AssertStatus(result, StatusCodes.Status400BadRequest);
+    }
+
+    [Test]
+    public async Task VersionMargin_ValidMultiplier_Returns200()
+    {
+        await using var db = NewContext();
+        var result = await AdminPricingEndpoints.VersionMargin(
+            new VersionMarginRequest("global", null, 1.3m, null),
+            db, new RecordingPlatformEventPublisher(), Actor(), TimeProvider.System, default);
+        AssertStatus(result, StatusCodes.Status200OK);
+    }
+
+    // A null multiplier with only a fixed per-token fee is a legitimate policy —
+    // the < 1 guard must NOT reject it.
+    [Test]
+    public async Task VersionMargin_NullMultiplierWithFixedFee_Returns200()
+    {
+        await using var db = NewContext();
+        var result = await AdminPricingEndpoints.VersionMargin(
+            new VersionMarginRequest("global", null, null, 5m),
+            db, new RecordingPlatformEventPublisher(), Actor(), TimeProvider.System, default);
+        AssertStatus(result, StatusCodes.Status200OK);
+    }
+
+    // ── Fix C: concurrent PUTs on the same (scope, refKey) must not 500 ──
+    [Test]
+    public async Task VersionMargin_ConcurrentPuts_NeverReturn500_AndKeepOneActive()
+    {
+        // Fire several PUTs for the SAME (scope, refKey) in parallel. The partial
+        // unique index (one active row per scope) forces a loser's insert to hit
+        // Postgres 23505; the endpoint must translate that to 409 (retryable),
+        // never a bare 500. Regardless of interleaving the one-active-per-scope
+        // invariant must still hold afterwards.
+        var tasks = Enumerable.Range(0, 8).Select(async i =>
+        {
+            await using var db = NewContext();
+            return await AdminPricingEndpoints.VersionMargin(
+                new VersionMarginRequest("global", null, 1.0m + (i * 0.1m), null),
+                db, new RecordingPlatformEventPublisher(), Actor(), TimeProvider.System, default);
+        }).ToArray();
+
+        var results = await Task.WhenAll(tasks);
+
+        var codes = results.Select(r => ((IStatusCodeHttpResult)r).StatusCode).ToArray();
+        codes.Should().OnlyContain(c =>
+            c == StatusCodes.Status200OK || c == StatusCodes.Status409Conflict);
+        codes.Should().Contain(StatusCodes.Status200OK);
+
+        await using var verify = NewContext();
+        var active = await verify.MarginPolicies.AsNoTracking()
+            .CountAsync(p => p.Scope == "global" && p.Status == "active");
+        active.Should().Be(1);
+    }
 }
