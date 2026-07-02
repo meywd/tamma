@@ -1,4 +1,6 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
+using Tamma.Api.Auth;
 using Tamma.Api.Services.Pricing;
 using Tamma.Api.Services.PromptStore;
 using Tamma.Core;
@@ -108,6 +110,60 @@ public static class PricingEndpoints
                 provider, planSlug ?? "");
             return Results.Problem(
                 title: ex.Code, detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
+
+    // ── GET /api/pricing/entitlements ─────────────────────────────────────
+    // Story 34-6 (AC4/AC11) — the caller's OWN resolved entitlement set +
+    // live headroom. MemberAccess: any authenticated tenant member reads their
+    // own tenant (read is unprivileged — mirrors the PromptStore "GET resolved
+    // = any member" RBAC). Tenant is taken from ITenantContext (SaaS) / the
+    // sole user (single-user); a request body/param NEVER selects the tenant,
+    // so a member can never read another tenant's entitlements.
+    public static async Task<IResult> GetEntitlements(
+        ClaimsPrincipal user,
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider,
+        IEntitlementService entitlements,
+        IEntitlementUsageReader usageReader,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("Tamma.Api.Endpoints.PricingEndpoints");
+
+        // Per-mode principal (CLAUDE.md two-scoping-model rule):
+        //  - single-user → the sole user → their personal tenant (ForUser)
+        //  - SaaS        → the caller's ambient tenant (ForTenant)
+        EntitlementPrincipal principal;
+        if (modeProvider.Mode == TammaMode.SingleUser)
+        {
+            if (user.GetUserId() is not Guid userId)
+            {
+                return Results.Unauthorized();
+            }
+
+            principal = EntitlementPrincipal.ForUser(userId);
+        }
+        else
+        {
+            if (tenantContext.TenantId is not Guid tenantId)
+            {
+                return Results.NotFound(new { error = "no_active_tenant" });
+            }
+
+            principal = EntitlementPrincipal.ForTenant(tenantId);
+        }
+
+        try
+        {
+            var dto = await EntitlementResponseBuilder.BuildAsync(
+                entitlements, usageReader, principal, logger, ct);
+            return Results.Ok(dto);
+        }
+        catch (TammaError ex) when (ex.Code == "ENTITLEMENT.RESOLVE.NO_ASSIGNMENT")
+        {
+            // No active plan assignment — a 404, never a 500 (AC4/AC5).
+            return Results.NotFound(new { error = "no_active_assignment" });
         }
     }
 }

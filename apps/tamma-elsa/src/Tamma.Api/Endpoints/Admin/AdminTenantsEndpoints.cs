@@ -5,7 +5,9 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Dtos.Admin;
+using Tamma.Api.Services.Pricing;
 using Tamma.Api.Services.TenantStatus;
+using Tamma.Core;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -88,6 +90,43 @@ public static class AdminTenantsEndpoints
         StatusDeleting,
         StatusDeleted,
     };
+
+    // ── GET /api/admin/tenants/{tenantId}/entitlements ──
+
+    /// <summary>
+    /// Story 34-6 (AC5) — the platform-owner read seam for any tenant's
+    /// resolved entitlement set + live headroom. <c>PlatformOwnerAccess</c>
+    /// only; the tenant is taken from the route. An unknown tenant OR a tenant
+    /// with no active assignment → 404 (the <c>NO_ASSIGNMENT</c> error mapped,
+    /// never a 500). Same body shape as the member self-read
+    /// (<c>GET /api/pricing/entitlements</c>).
+    /// </summary>
+    public static async Task<IResult> GetTenantEntitlements(
+        Guid tenantId,
+        IEntitlementService entitlements,
+        IEntitlementUsageReader usageReader,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger(
+            "Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints");
+
+        try
+        {
+            var dto = await EntitlementResponseBuilder.BuildAsync(
+                entitlements, usageReader,
+                EntitlementPrincipal.ForTenant(tenantId), logger, ct);
+
+            logger.LogInformation(
+                "Admin entitlement read: tenant {TenantId}", tenantId);
+            return Results.Ok(dto);
+        }
+        catch (TammaError ex) when (ex.Code == "ENTITLEMENT.RESOLVE.NO_ASSIGNMENT")
+        {
+            // Unknown tenant OR no active assignment — both 404 (AC5).
+            return Results.NotFound(new { error = "no_active_assignment" });
+        }
+    }
 
     // ── GET /api/admin/tenants ──
 

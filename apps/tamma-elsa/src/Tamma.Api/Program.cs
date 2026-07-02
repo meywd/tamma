@@ -1035,6 +1035,12 @@ builder.Services.AddPlanCatalog();
 // resolver. CP-resident; platform-owned margin policies in both modes.
 builder.Services.AddUsagePricingEngine();
 
+// Story 34-6 — entitlement & quota resolution: the single read seam turning a
+// tenant's pinned plan assignment into a closed ResolvedEntitlements map, plus
+// the per-tenant snapshot cache, gauge-metric usage reader, and event-driven
+// cache-invalidation listener. Read-only; fails loud on no assignment.
+builder.Services.AddEntitlementResolution();
+
 // Wave C.4 §4 — per-process health monitor for TammaApiClient.
 // Singleton so the rolling 5-min failure window is shared across every
 // call site. Fires PLATFORM.API.UNHEALTHY via IAlertEventEmitter when
@@ -1739,6 +1745,10 @@ admin.MapGet("/tenants", Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.ListTen
 admin.MapGet("/tenants/{tenantId:guid}/detail",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.GetTenantDetail)
     .RequireAuthorization("PlatformOwnerAccess");
+// Story 34-6 (AC5) — platform-owner read of any tenant's resolved entitlements.
+admin.MapGet("/tenants/{tenantId:guid}/entitlements",
+        Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.GetTenantEntitlements)
+    .RequireAuthorization("PlatformOwnerAccess");
 admin.MapPost("/tenants/{tenantId:guid}/actions/retry",
         Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.RetryTenant)
     .RequireAuthorization("PlatformOwnerAccess");
@@ -1905,6 +1915,10 @@ admin.MapPost("/secrets/{id:guid}/retire-version/{versionNumber:int}",
 // (/api/admin/pricing/*). Powers the upgrade/cost UI in packages/dashboard-user.
 var pricing = app.MapGroup("/api/pricing").RequireAuthorization("MemberAccess");
 pricing.MapGet("/estimate", Tamma.Api.Endpoints.PricingEndpoints.GetEstimate);
+// Story 34-6 — the caller's OWN resolved entitlements + live headroom. Read is
+// unprivileged (any authenticated member); tenant is taken from ITenantContext
+// (SaaS) / the sole user (single-user), never from a request param.
+pricing.MapGet("/entitlements", Tamma.Api.Endpoints.PricingEndpoints.GetEntitlements);
 
 var orgs = app.MapGroup("/api/v1/orgs").RequireAuthorization("MemberAccess");
 orgs.MapPost("/", OrgEndpoints.CreateOrg);
