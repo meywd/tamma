@@ -459,6 +459,38 @@ public class AuditProjectorIntegrationTests
         failing.ThrowCount.Should().Be(1);
     }
 
+    // ════════════════════ Finding 1 (37-10 review) — over-length actor email ════════════════════
+    //
+    // Security (audit evasion): the submitted login email is attacker-controlled
+    // and unbounded. Padded past varchar(320), it overflows ActorEmailSnapshot on
+    // INSERT (Npgsql 22001); ProjectOneAsync swallows the exception, returns
+    // false, and the cursor STILL advances — the failed-login audit row is
+    // silently DROPPED, letting an attacker suppress the audit of their own brute
+    // force. The projector must defensively truncate the field so the row STILL
+    // persists. This test DROPS the row against the pre-fix code (inserted == 0)
+    // and persists it (truncated) after.
+    [Test]
+    public async Task OverLength_LoginFailure_Email_Still_Persists_Truncated_Row()
+    {
+        var longEmail = new string('a', 400) + "@attacker.example.com";
+        await SeedPlatformEvent("AUTH.LOGIN.FAILURE", tenantId: null,
+            data: new { actorEmail = longEmail, reason = "bad_credentials" });
+
+        await using var sp = BuildServices(TammaMode.SaaS);
+        var inserted = await Svc(sp).ProcessOnceAsync(default);
+
+        inserted.Should().Be(1,
+            "the failed-login audit row must be persisted, not dropped by a varchar(320) 22001 overflow");
+        (await CountCp()).Should().Be(1);
+
+        await using var cp = NewCp();
+        var row = await cp.AuditRecords.SingleAsync();
+        row.ActionCode.Should().Be("AUTH.LOGIN.FAILURE");
+        row.ActorEmailSnapshot!.Length.Should().Be(320,
+            "ActorEmailSnapshot is capped to its varchar(320) column length");
+        row.ActorEmailSnapshot.Should().Be(longEmail[..320]);
+    }
+
     // ── snapshot/raw helpers ──
 
     private async Task<List<string>> SnapshotTenant(Guid tenantId, string schema)

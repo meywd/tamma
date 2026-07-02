@@ -266,4 +266,62 @@ public class AuditProjectorTests
         rec.Outcome.Should().Be("failure");
         rec.PayloadJson.Should().Be(AuditProjector.QuarantinePayload);
     }
+
+    // ── Finding 1 (Story 37-10 review, security — audit evasion) ──
+    //
+    // Resolved string fields are attacker-influenced (e.g. the submitted login
+    // email travels under actorEmail). If an over-length value reaches the row
+    // it overflows its varchar column on INSERT (Npgsql 22001) and the audit row
+    // is SILENTLY DROPPED while the cursor still advances — an attacker padding
+    // their email suppresses the audit of their own brute force. The projector
+    // MUST defensively cap every varchar-bounded field to its column length so no
+    // over-length value can ever throw 22001.
+
+    [Test]
+    public void OverLength_ActorEmail_Is_Truncated_To_Column_Limit()
+    {
+        // 421-char attacker-controlled email → would overflow varchar(320).
+        var longEmail = new string('a', 400) + "@attacker.example.com";
+        var raw = Raw("AUTH.LOGIN.FAILURE", tenantId: null,
+            data: new { actorEmail = longEmail, reason = "bad_credentials" });
+
+        var rec = _projector.TryBuildRecord(raw, AuditOwnershipMode.SaaS, null)!;
+
+        rec.ActorEmailSnapshot!.Length.Should().Be(320,
+            "ActorEmailSnapshot must be capped to its varchar(320) column length");
+        rec.ActorEmailSnapshot.Should().Be(longEmail[..320]);
+    }
+
+    [Test]
+    public void OverLength_Context_Fields_Are_Truncated_To_Column_Limits()
+    {
+        var raw = Raw("SECRET.REVEAL", tenantId: Guid.NewGuid(),
+            tags: new
+            {
+                targetType = new string('t', 200), // varchar(64)
+                targetId = new string('i', 400),   // varchar(255)
+                ip = new string('9', 200),         // varchar(64)
+                userAgent = new string('u', 1000), // varchar(512)
+            });
+
+        var rec = _projector.TryBuildRecord(raw, AuditOwnershipMode.SaaS, null)!;
+
+        rec.TargetType!.Length.Should().Be(64);
+        rec.TargetId!.Length.Should().Be(255);
+        rec.IpAddress!.Length.Should().Be(64);
+        rec.UserAgent!.Length.Should().Be(512);
+    }
+
+    [Test]
+    public void OverLength_Fields_Are_Also_Truncated_On_The_Quarantine_Path()
+    {
+        var longEmail = new string('z', 500) + "@attacker.example.com";
+        var raw = Raw("SECRET.REVEAL", tenantId: Guid.NewGuid(),
+            data: new { actorEmail = longEmail });
+
+        var rec = _projector.BuildQuarantineRecord(raw, AuditOwnershipMode.SaaS, null);
+
+        rec.ActorEmailSnapshot!.Length.Should().Be(320,
+            "the quarantine builder must also cap fields so the placeholder row cannot 22001");
+    }
 }

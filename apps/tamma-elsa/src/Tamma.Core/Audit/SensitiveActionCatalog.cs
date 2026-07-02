@@ -69,7 +69,12 @@ public static class SensitiveActionCatalog
     public const string PromptDeleted = "PROMPT.DELETED.SUCCESS";
     public const string PromptReset = "PROMPT.RESET.SUCCESS";
 
-    // ── BYOK (forward-looking — provider-key / provider-chain edits) ──
+    // ── BYOK (provider-key wired in 37-10; provider-chain forward-looking) ──
+    /// <summary>A tenant BYOK provider key was set / rotated / removed — wired by
+    /// Story 37-10 (<c>ProviderCredentialEndpoints</c>). The concrete operation
+    /// (set|rotated|removed) travels in the event's <c>operation</c> tag/data;
+    /// the underlying <c>SECRET.*</c> cabinet write stays the secret source of
+    /// truth (this is the curated, catalog-facing BYOK event, not a second write).</summary>
     public const string ProviderKeyChanged = "PROVIDER_KEY.CHANGED.SUCCESS";
     public const string ProviderChainChanged = "PROVIDER_CHAIN.CHANGED.SUCCESS";
 
@@ -85,16 +90,26 @@ public static class SensitiveActionCatalog
     public const string DataExported = "DATA.EXPORTED.SUCCESS";
     public const string DsarRequested = "GDPR.DSAR.REQUESTED";
 
-    // ── AUTH (maps existing AuthEndpoints emitters; login/reset forward-looking) ──
+    // ── AUTH (maps existing AuthEndpoints emitters; login/refresh/api-key wired in 37-10) ──
     public const string LogoutAll = "USER.LOGOUT_ALL.SUCCESS";
     public const string OrgSwitched = "USER.ORG_SWITCHED.SUCCESS";
     public const string RefreshReuseDetected = "AUTH.REFRESH_REUSE_DETECTED";
 
-    /// <summary>Forward-looking: an interactive login succeeded.</summary>
+    /// <summary>An interactive login succeeded — wired by Story 37-10
+    /// (<c>AuthEndpoints.Login</c>) as a platform-edge auth event.</summary>
     public const string LoginSuccess = "AUTH.LOGIN.SUCCESS";
 
-    /// <summary>Forward-looking: an interactive login failed (brute-force signal).</summary>
+    /// <summary>An interactive login failed (brute-force signal). Wired by Story
+    /// 37-10 (<c>AuthEndpoints.Login</c>) carrying a machine-readable reason.</summary>
     public const string LoginFailure = "AUTH.LOGIN.FAILURE";
+
+    /// <summary>A refresh-token rotation succeeded — wired by Story 37-10
+    /// (<c>AuthEndpoints.Refresh</c>). Distinct from the reuse-detection event.</summary>
+    public const string TokenRefreshed = "AUTH.TOKEN.REFRESHED";
+
+    /// <summary>An API key authenticated a request — wired by Story 37-10
+    /// (<c>ApiKeyAuthHandler</c>), throttled to a heartbeat (never per-request).</summary>
+    public const string ApiKeyUsed = "AUTH.APIKEY.USED";
 
     /// <summary>Forward-looking: a password-reset completed.</summary>
     public const string PasswordReset = "AUTH.PASSWORD_RESET.SUCCESS";
@@ -179,7 +194,7 @@ public static class SensitiveActionCatalog
         Add(PromptReset, AuditCategory.Persona, AuditSeverity.Notice, "CC8.1", "prompt", true);
 
         // ── BYOK — CC6.1 (provider credential / chain configuration) ──
-        Add(ProviderKeyChanged, AuditCategory.Byok, AuditSeverity.Warning, "CC6.1", "provider", false);
+        Add(ProviderKeyChanged, AuditCategory.Byok, AuditSeverity.Warning, "CC6.1", "provider", true);
         Add(ProviderChainChanged, AuditCategory.Byok, AuditSeverity.Notice, "CC6.1", "provider", false);
 
         // ── BILLING — A1.1 (commitments affecting availability/spend) ──
@@ -196,8 +211,11 @@ public static class SensitiveActionCatalog
         Add(LogoutAll, AuditCategory.Auth, AuditSeverity.Notice, "CC6.1", "user", true);
         Add(OrgSwitched, AuditCategory.Auth, AuditSeverity.Info, "CC6.1", "user", true);
         Add(RefreshReuseDetected, AuditCategory.Auth, AuditSeverity.Critical, "CC6.1", "user", true);
-        Add(LoginSuccess, AuditCategory.Auth, AuditSeverity.Info, "CC6.1", "user", false);
-        Add(LoginFailure, AuditCategory.Auth, AuditSeverity.Notice, "CC6.1", "user", false);
+        // Story 37-10 wired the emitters for these — flip MapsExistingEmitter true.
+        Add(LoginSuccess, AuditCategory.Auth, AuditSeverity.Info, "CC6.1", "user", true);
+        Add(LoginFailure, AuditCategory.Auth, AuditSeverity.Notice, "CC6.1", "user", true);
+        Add(TokenRefreshed, AuditCategory.Auth, AuditSeverity.Info, "CC6.1", "user", true);
+        Add(ApiKeyUsed, AuditCategory.Auth, AuditSeverity.Info, "CC6.1", "api_key", true);
         Add(PasswordReset, AuditCategory.Auth, AuditSeverity.Warning, "CC6.1", "user", false);
 
         // ── TENANT lifecycle — A1.2 (provisioning/de-provisioning) ──

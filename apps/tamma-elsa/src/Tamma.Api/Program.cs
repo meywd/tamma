@@ -1015,6 +1015,15 @@ builder.Services.AddTammaAlertRuleEngine();
 // background loop is opt-in (AuditProjectorOptions.RunOnStartup defaults false).
 builder.Services.AddTammaAuditProjection();
 
+// Story 37-10 — curated sensitive-action EMISSION seam (write side): the single
+// ISensitiveActionEmitter every sensitive-action call site (auth login/refresh,
+// API-key auth, BYOK provider-key changes, ...) appends through, plus the
+// per-key AUTH.APIKEY.USED heartbeat throttle. Routes tenant actions to
+// domain_events and platform-edge actions to platform_events so the 37-1
+// projector materialises them into audit_records in the correct scope. Never
+// throws to the caller (a failed audit emit must not break the action).
+builder.Services.AddTammaSensitiveActionEmitter();
+
 // Story 37-3 — audit query/search/filter read seam over the curated
 // audit_records read-model (Story 37-1). Scoped (depends on the scoped
 // ControlPlaneDbContext); reads the tenant schema via ITenantDbContextFactory

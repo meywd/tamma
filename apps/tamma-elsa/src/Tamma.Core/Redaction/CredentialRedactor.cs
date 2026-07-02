@@ -44,11 +44,13 @@ public static class CredentialRedactor
         @"(?<q>[""']?)(?<value>[^""'\s,;)\]}]+)\k<q>",
         RegexOptions.Compiled, TimeSpan.FromMilliseconds(200));
 
-    // Tamma API key / session prefix tokens — ship with a recognisable
-    // prefix so we can redact them even when the surrounding key name
-    // doesn't match the credential heuristic.
+    // Tamma + provider API-key prefix tokens — these ship with a recognisable
+    // prefix so we can redact them even when the surrounding key name doesn't
+    // match the credential heuristic. Covers Tamma/Stripe (tamma_sk_ / sk_live_ /
+    // sk_test_), Anthropic (sk-ant-), OpenAI project keys (sk-proj-), GitHub
+    // (ghp_ / github_pat_), Slack (xoxb- / xoxp-) and AWS access keys (AKIA).
     private static readonly Regex TammaSecretPrefix = new(
-        @"\b(?:tamma_sk_|sk_live_|sk_test_|ghp_|github_pat_|xoxb-|xoxp-|AKIA)[A-Za-z0-9_\-]{6,}",
+        @"\b(?:tamma_sk_|sk_live_|sk_test_|sk-ant-|sk-proj-|ghp_|github_pat_|xoxb-|xoxp-|AKIA)[A-Za-z0-9_\-]{6,}",
         RegexOptions.Compiled, TimeSpan.FromMilliseconds(200));
 
     // Basic-auth userinfo inside URL: scheme://user:pass@host

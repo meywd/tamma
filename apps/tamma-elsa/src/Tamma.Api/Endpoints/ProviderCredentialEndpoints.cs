@@ -1,13 +1,16 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using Tamma.Activities.LlmCall.Credentials;
 using Tamma.Activities.Security;
 using Tamma.Api.Auth;
+using Tamma.Api.Services.Audit;
 using Tamma.Api.Services.PromptStore;
 using Tamma.Api.Services.Providers;
 using Tamma.Api.Services.Secrets;
 using Tamma.Api.Services.Secrets.Query;
 using Tamma.Api.Services.Secrets.Reveal;
+using Tamma.Core.Audit;
 using Tamma.Data;
 
 namespace Tamma.Api.Endpoints;
@@ -117,6 +120,13 @@ public static class ProviderCredentialEndpoints
 
             resolver.Invalidate(tid, norm!);
 
+            // Story 37-10 — curated BYOK audit event (the SECRET.WRITE cabinet
+            // event stays the secret source of truth; this is derived alongside it,
+            // NOT a second write). Metadata only — the key never travels here.
+            await EmitByokChangeAsync(
+                http, tid, principal.GetUserId(), norm!, "set",
+                result.Metadata.ActiveVersionNumber).ConfigureAwait(false);
+
             return Results.Created(
                 $"/api/v1/agents/providers/{norm}/credential",
                 new SetProviderCredentialResponse(
@@ -182,6 +192,11 @@ public static class ProviderCredentialEndpoints
 
             resolver.Invalidate(tid, norm!);
 
+            // Story 37-10 — curated BYOK rotate audit event (see RegisterCredential).
+            await EmitByokChangeAsync(
+                http, tid, principal.GetUserId(), norm!, "rotated",
+                result.Metadata.ActiveVersionNumber).ConfigureAwait(false);
+
             return Results.Ok(new SetProviderCredentialResponse(
                 norm!, result.Metadata.ActiveVersionNumber,
                 result.RevealToken, result.ExpiresAt));
@@ -227,6 +242,7 @@ public static class ProviderCredentialEndpoints
             });
         }
 
+        var retiredVersion = meta.ActiveVersionNumber;
         try
         {
             await query.RetireVersionAsync(
@@ -246,10 +262,58 @@ public static class ProviderCredentialEndpoints
         }
 
         resolver.Invalidate(tid, norm!);
+
+        // Story 37-10 — curated BYOK remove audit event (see RegisterCredential).
+        await EmitByokChangeAsync(
+            http, tid, principal.GetUserId(), norm!, "removed",
+            retiredVersion).ConfigureAwait(false);
+
         return Results.NoContent();
     }
 
     // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Story 37-10 — emit the curated <c>PROVIDER_KEY.CHANGED.SUCCESS</c> BYOK
+    /// audit event (tenant-scoped) after a successful cabinet write. Metadata
+    /// only (provider, operation, mode, version) — the emitter additionally
+    /// scrubs any secret-shaped value defensively. The emitter is resolved
+    /// best-effort off the request scope (keeps the handler signature stable for
+    /// the direct-call tests); a missing registration simply skips the emission.
+    /// Never throws.
+    /// </summary>
+    private static async Task EmitByokChangeAsync(
+        HttpContext http,
+        Guid tenantId,
+        Guid? actorUserId,
+        string provider,
+        string operation,
+        int? version)
+    {
+        ISensitiveActionEmitter? emitter;
+        try { emitter = http.RequestServices?.GetService<ISensitiveActionEmitter>(); }
+        catch { emitter = null; }
+        if (emitter is null) return;
+
+        var tags = new Dictionary<string, string?>
+        {
+            ["provider"] = provider,
+            ["operation"] = operation,
+            ["mode"] = "byok",
+        };
+        var data = new Dictionary<string, object?>
+        {
+            ["provider"] = provider,
+            ["operation"] = operation,
+            ["mode"] = "byok",
+        };
+        if (version is int v) data["version"] = v;
+
+        await emitter.EmitAsync(
+            SensitiveAction.ForTenant(
+                SensitiveActionCatalog.ProviderKeyChanged, tenantId, actorUserId, tags, data),
+            http.RequestAborted).ConfigureAwait(false);
+    }
 
     private static async Task<Guid?> FindSecretIdAsync(
         ISecretQueryService query, Guid tenantId, string provider, CancellationToken ct)

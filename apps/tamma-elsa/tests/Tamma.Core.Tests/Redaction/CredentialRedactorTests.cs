@@ -165,4 +165,30 @@ public class CredentialRedactorTests
         output.Should().Contain("HttpRequestException");
         output.Should().Contain("canceled");
     }
+
+    // ── Finding 3 (Story 37-10 review) — provider-key prefix backstop ──
+    // The backstop must match its "belt-and-suspenders" doc: common provider-key
+    // shapes (Anthropic sk-ant-, OpenAI project sk-proj-) must be redacted even
+    // when the surrounding key name doesn't match the credential heuristic.
+
+    [Test]
+    public void Clean_AnthropicKeyPrefix_Redacts()
+    {
+        // Synthetic value (clearly fake) with the real sk-ant- banner shape.
+        const string fakeKey = "sk-ant-api03-FAKE0123456789abcdefFAKE";
+        var input = $"anthropic call failed using {fakeKey} at boundary";
+        var output = CredentialRedactor.Clean(input);
+        output.Should().NotContain(fakeKey);
+        output.Should().Contain("[REDACTED]");
+    }
+
+    [Test]
+    public void Clean_OpenAiProjectKeyPrefix_Redacts()
+    {
+        const string fakeKey = "sk-proj-FAKE0123456789abcdefFAKE";
+        var input = $"openai auth error token={fakeKey} rejected";
+        var output = CredentialRedactor.Clean(input);
+        output.Should().NotContain(fakeKey);
+        output.Should().Contain("[REDACTED]");
+    }
 }

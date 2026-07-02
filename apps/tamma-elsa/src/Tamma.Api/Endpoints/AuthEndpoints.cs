@@ -7,9 +7,11 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Auth;
+using Tamma.Api.Services.Audit;
 using Tamma.Api.Services.Auth;
 using Tamma.Api.Services.Email;
 using Tamma.Api.Services.RateLimit;
+using Tamma.Core.Audit;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -563,9 +565,17 @@ public static class AuthEndpoints
         if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.Password))
             return Results.BadRequest(new { error = "Email and password are required" });
 
+        // Story 37-10 — best-effort resolve the sensitive-action emitter off the
+        // request scope (mirrors the Refresh handler's IPlatformEventPublisher
+        // pattern) so the many tests that call Login/Refresh directly with
+        // positional args keep compiling; a missing registration simply skips the
+        // audit emission (never-throws / best-effort).
+        var auditEmitter = TryResolveEmitter(httpContext);
+
         if (lockout.IsLocked(req.Email))
         {
             var remaining = lockout.GetRemainingLockoutSeconds(req.Email);
+            await EmitLoginFailureAsync(auditEmitter, req.Email, "locked_out", httpContext);
             return Results.Json(new { error = $"Account locked. Try again in {remaining} seconds" }, statusCode: 429);
         }
 
@@ -577,21 +587,29 @@ public static class AuthEndpoints
         {
             passwordService.VerifyPassword(req.Password, passwordService.DummyHash);
             lockout.RecordFailedAttempt(req.Email);
+            await EmitLoginFailureAsync(auditEmitter, req.Email, "bad_credentials", httpContext);
             return Results.Unauthorized();
         }
 
         if (!passwordService.VerifyPassword(req.Password, user.PasswordHash))
         {
             lockout.RecordFailedAttempt(req.Email);
+            await EmitLoginFailureAsync(auditEmitter, req.Email, "bad_credentials", httpContext);
             return Results.Unauthorized();
         }
 
         if (!user.IsActive)
+        {
+            await EmitLoginFailureAsync(auditEmitter, req.Email, "account_deactivated", httpContext);
             return Results.Json(new { error = "Account deactivated" }, statusCode: 403);
+        }
 
         // Email verification gate. Audit finding 006 / Story 18-2 AC 2.
         if (!user.EmailVerified)
+        {
+            await EmitLoginFailureAsync(auditEmitter, req.Email, "unverified_email", httpContext);
             return Results.Json(new { error = "Please verify your email" }, statusCode: 403);
+        }
 
         lockout.ResetAttempts(req.Email);
 
@@ -650,6 +668,12 @@ public static class AuthEndpoints
             BuildSessionCookie(config, 900));
 
         await userRepo.UpdateLastActiveAsync(user.Id);
+
+        // Story 37-10 — AUTH.LOGIN.SUCCESS. Platform-edge event carrying the
+        // resolved active tenant (null => control-plane), so the 37-1 projector
+        // routes the curated row to that tenant's schema in SaaS.
+        await EmitLoginSuccessAsync(
+            auditEmitter, user, tenantId == Guid.Empty ? null : tenantId, httpContext);
 
         return Results.Ok(new LoginResponse(
             accessToken,
@@ -854,6 +878,13 @@ public static class AuthEndpoints
         httpContext.Response.Cookies.Append("tamma_session", accessToken,
             BuildSessionCookie(config, 900));
 
+        // Story 37-10 — AUTH.TOKEN.REFRESHED (distinct from the reuse-detection
+        // event, which is untouched above). Platform-edge event carrying the
+        // resolved tenant when present. Best-effort emitter off the request scope.
+        await EmitTokenRefreshedAsync(
+            TryResolveEmitter(httpContext),
+            user.Id, tenantId == Guid.Empty ? null : tenantId, user.Email, httpContext);
+
         return Results.Ok(new RefreshResponse(accessToken, newRefresh, 900));
     }
 
@@ -983,6 +1014,138 @@ public static class AuthEndpoints
             // Audit failures must not break the user's logout flow. The
             // structured logger picks these up via Serilog request logging.
         }
+    }
+
+    // ─── Story 37-10 — curated auth sensitive-action emission ──────────────
+
+    /// <summary>Best-effort resolve the sensitive-action emitter off the request
+    /// scope. Swallows resolution failures (e.g. a test double whose fallback is a
+    /// root provider that can't resolve the scoped emitter) — audit emission is a
+    /// side effect that must never break auth.</summary>
+    private static ISensitiveActionEmitter? TryResolveEmitter(HttpContext httpContext)
+    {
+        try { return httpContext.RequestServices?.GetService<ISensitiveActionEmitter>(); }
+        catch { return null; }
+    }
+
+    /// <summary>Resolve the request fingerprint (ip + user-agent) with the same
+    /// TrustedProxyResolver logic as <see cref="BuildAuthAuditEvent"/>. Falls back
+    /// to the socket peer when the resolver isn't registered (test contexts).</summary>
+    private static (string? Ip, string? UserAgent) ResolveRequestFingerprint(HttpContext httpContext)
+    {
+        TrustedProxyResolver? resolver;
+        try { resolver = httpContext.RequestServices?.GetService<TrustedProxyResolver>(); }
+        catch { resolver = null; }
+        var ip = resolver is not null
+            ? resolver.ResolveActorIp(httpContext)
+            : httpContext.Connection.RemoteIpAddress?.ToString();
+        if (!string.IsNullOrEmpty(ip) && ip.Length > 64) ip = ip[..64];
+
+        var ua = httpContext.Request.Headers.UserAgent.ToString();
+        if (ua.Length > 256) ua = ua[..256];
+
+        return (ip, string.IsNullOrEmpty(ua) ? null : ua);
+    }
+
+    /// <summary>Emit <c>AUTH.LOGIN.FAILURE</c> (platform-edge; no trusted tenant
+    /// yet). Redaction-safe — the submitted email + machine-readable reason only,
+    /// NEVER the password. No-op when the emitter isn't registered.</summary>
+    private static async Task EmitLoginFailureAsync(
+        ISensitiveActionEmitter? emitter, string email, string reason, HttpContext httpContext)
+    {
+        if (emitter is null) return;
+        var (ip, ua) = ResolveRequestFingerprint(httpContext);
+
+        // The submitted email is attacker-controlled and unbounded (no validation
+        // filter). Clamp to the RFC 5321 max (254) before it enters the audit
+        // tags/data so a padded value can't overflow the ActorEmailSnapshot
+        // varchar(320) column downstream. The projector also caps defensively,
+        // but capping at the source keeps the emitted event tidy too.
+        if (email.Length > 254) email = email[..254];
+
+        var tags = new Dictionary<string, string?>
+        {
+            ["reason"] = reason,
+            ["actorEmail"] = email,
+            ["source"] = "auth",
+        };
+        if (!string.IsNullOrEmpty(ip)) tags["ip"] = ip;
+        if (!string.IsNullOrEmpty(ua)) tags["userAgent"] = ua;
+
+        var data = new Dictionary<string, object?>
+        {
+            ["reason"] = reason,
+            ["actorEmail"] = email,
+            ["ip"] = ip,
+            ["userAgent"] = ua,
+        };
+
+        await emitter.EmitAsync(
+            SensitiveAction.ForPlatform(
+                SensitiveActionCatalog.LoginFailure, tenantId: null, actorUserId: null, tags, data),
+            httpContext.RequestAborted);
+    }
+
+    /// <summary>Emit <c>AUTH.LOGIN.SUCCESS</c>. Platform-edge event carrying the
+    /// resolved active tenant (null => control-plane). No password material.</summary>
+    private static async Task EmitLoginSuccessAsync(
+        ISensitiveActionEmitter? emitter, User user, Guid? tenantId, HttpContext httpContext)
+    {
+        if (emitter is null) return;
+        var (ip, ua) = ResolveRequestFingerprint(httpContext);
+
+        var tags = new Dictionary<string, string?>
+        {
+            ["actorUserId"] = user.Id.ToString("D"),
+            ["actorEmail"] = user.Email,
+            ["source"] = "auth",
+        };
+        if (!string.IsNullOrEmpty(ip)) tags["ip"] = ip;
+        if (!string.IsNullOrEmpty(ua)) tags["userAgent"] = ua;
+
+        var data = new Dictionary<string, object?>
+        {
+            ["userId"] = user.Id.ToString("D"),
+            ["actorEmail"] = user.Email,
+            ["ip"] = ip,
+            ["userAgent"] = ua,
+        };
+
+        await emitter.EmitAsync(
+            SensitiveAction.ForPlatform(
+                SensitiveActionCatalog.LoginSuccess, tenantId, user.Id, tags, data),
+            httpContext.RequestAborted);
+    }
+
+    /// <summary>Emit <c>AUTH.TOKEN.REFRESHED</c> on a successful refresh-token
+    /// rotation. Platform-edge event carrying the resolved tenant when present.</summary>
+    private static async Task EmitTokenRefreshedAsync(
+        ISensitiveActionEmitter? emitter, Guid userId, Guid? tenantId,
+        string? email, HttpContext httpContext)
+    {
+        if (emitter is null) return;
+        var (ip, ua) = ResolveRequestFingerprint(httpContext);
+
+        var tags = new Dictionary<string, string?>
+        {
+            ["actorUserId"] = userId.ToString("D"),
+            ["source"] = "auth",
+        };
+        if (!string.IsNullOrEmpty(email)) tags["actorEmail"] = email;
+        if (!string.IsNullOrEmpty(ip)) tags["ip"] = ip;
+        if (!string.IsNullOrEmpty(ua)) tags["userAgent"] = ua;
+
+        var data = new Dictionary<string, object?>
+        {
+            ["userId"] = userId.ToString("D"),
+            ["ip"] = ip,
+            ["userAgent"] = ua,
+        };
+
+        await emitter.EmitAsync(
+            SensitiveAction.ForPlatform(
+                SensitiveActionCatalog.TokenRefreshed, tenantId, userId, tags, data),
+            httpContext.RequestAborted);
     }
 
     /// <summary>
