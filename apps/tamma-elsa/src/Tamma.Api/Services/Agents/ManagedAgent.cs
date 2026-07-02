@@ -61,6 +61,11 @@ public sealed class ManagedAgent : IManagedAgent
     // prompt + the user prompt BEFORE the provider call. Optional (null ⇒ skip,
     // matching the legacy `if (_sanitizer == null) return raw;`).
     private readonly Tamma.Activities.Security.IContentSanitizer? _sanitizer;
+    // Story 32-6 — the per-agent ACTION TRAIL emitter. Optional (null ⇒ no trail
+    // emission) so the existing unit-test ctor arity is unchanged; DI-registered in
+    // the API host so production always emits the trail. NEVER throws into the run
+    // (the emitter swallows + breadcrumbs — AC7).
+    private readonly IAgentTrailEmitter? _trail;
     private readonly ILogger<ManagedAgent> _logger;
 
     // NOTE: the process mode (single-user vs SaaS) is NOT a dependency here — the
@@ -78,7 +83,8 @@ public sealed class ManagedAgent : IManagedAgent
         IUsageEmitter usage,
         IEventRepository events,
         ILogger<ManagedAgent> logger,
-        Tamma.Activities.Security.IContentSanitizer? sanitizer = null)
+        Tamma.Activities.Security.IContentSanitizer? sanitizer = null,
+        IAgentTrailEmitter? trail = null)
     {
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _budget = budget ?? throw new ArgumentNullException(nameof(budget));
@@ -94,6 +100,9 @@ public sealed class ManagedAgent : IManagedAgent
         // identical to the legacy `if (_sanitizer == null) return raw;`. It is
         // DI-registered in the API host (Program.cs), so production always has it.
         _sanitizer = sanitizer;
+        // Optional (Story 32-6): the action-trail emitter. DI-registered in the API
+        // host; absent in the minimal unit-test ctor. Its writes never affect the run.
+        _trail = trail;
     }
 
     /// <inheritdoc />
@@ -351,6 +360,12 @@ public sealed class ManagedAgent : IManagedAgent
             await EmitAsync(AgentRunEventTypes.Success, ctx, failureCode: null, ct)
                 .ConfigureAwait(false);
 
+            // ── Story 32-6 — action trail: per-tool-call events + the terminal
+            //    AGENT.TASK.SUCCESS. Best-effort, non-blocking (the emitter swallows). ──
+            await EmitTrailToolCallsAsync(ctx, loop, ct).ConfigureAwait(false);
+            await EmitTrailRunAsync(ctx, AgentRunStatus.Success, result, loop.Turns,
+                failureCode: null, ct).ConfigureAwait(false);
+
             return result;
         }
         catch (OperationCanceledException)
@@ -412,8 +427,90 @@ public sealed class ManagedAgent : IManagedAgent
         };
 
         await EmitAsync(AgentRunEventTypes.Failed, ctx, failureCode, ct).ConfigureAwait(false);
+
+        // Story 32-6 — action trail: the terminal AGENT.TASK.FAILED. Every run
+        // (including gate/budget/credential denials) leaves a trail record.
+        // Best-effort, non-blocking (the emitter swallows — AC7).
+        await EmitTrailRunAsync(ctx, AgentRunStatus.Failed, result, turns, failureCode, ct)
+            .ConfigureAwait(false);
+
         return result;
     }
+
+    // -----------------------------------------------------------------------
+    // Story 32-6 — action-trail emission (best-effort; the emitter never throws)
+    // -----------------------------------------------------------------------
+
+    /// <summary>Emit the terminal <c>AGENT.TASK.*</c> trail event for a completed
+    /// run. No-op when the emitter is absent (unit-test ctor).</summary>
+    private async Task EmitTrailRunAsync(
+        RunContext ctx, AgentRunStatus status, AgentRunResult result, int iterations,
+        string? failureCode, CancellationToken ct)
+    {
+        if (_trail is null)
+        {
+            return;
+        }
+
+        await _trail.RunCompletedAsync(
+            ToTrailContext(ctx, iteration: 0),
+            new AgentRunOutcome
+            {
+                Status = status,
+                DurationMs = result.DurationMs,
+                Iterations = iterations,
+                InputTokens = result.InputTokens,
+                OutputTokens = result.OutputTokens,
+                CostUsd = result.CostUsd,
+                FailureCode = failureCode,
+            },
+            ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Emit one <c>AGENT.TOOL_CALL.*</c> trail event per tool call the
+    /// loop made. The verbatim runner currently tracks a turn count only, so
+    /// <c>loop.ToolCalls</c> is typically empty — this is forward-compatible with
+    /// the per-call summary follow-on.</summary>
+    private async Task EmitTrailToolCallsAsync(RunContext ctx, InlineToolLoopResult loop, CancellationToken ct)
+    {
+        if (_trail is null || loop.ToolCalls.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var tc in loop.ToolCalls)
+        {
+            await _trail.ToolCallAsync(
+                ToTrailContext(ctx, iteration: 0),
+                new ToolCallRecord
+                {
+                    ToolName = tc.ToolName,
+                    // Ref only — never the raw args/result (AC6). The loop summary
+                    // carries no bodies; the tool-call id is a safe reference.
+                    ArgsRef = tc.ToolCallId,
+                    DurationMs = tc.DurationMs,
+                    Success = tc.Success,
+                },
+                ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Project the mutable run identity carrier into the immutable
+    /// trail context. <c>agentId</c>/<c>provider</c>/<c>model</c> default to
+    /// empty when the run failed before they were resolved.</summary>
+    private static AgentTrailContext ToTrailContext(RunContext ctx, int iteration) =>
+        new()
+        {
+            TenantId = ctx.TenantId,
+            AgentId = ctx.AgentId ?? Guid.Empty,
+            AgentVersion = ctx.Version,
+            Role = ctx.Role,
+            Provider = ctx.Provider ?? string.Empty,
+            Model = ctx.Model ?? string.Empty,
+            Iteration = iteration,
+            CorrelationId = ctx.CorrelationId,
+            CredentialSource = ctx.CredentialSource ?? "platform",
+        };
 
     // -----------------------------------------------------------------------
     // events / usage (best-effort — never converts a returned run into a loss)

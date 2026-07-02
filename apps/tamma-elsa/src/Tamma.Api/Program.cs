@@ -627,6 +627,15 @@ builder.Services.AddScoped<Tamma.Api.Services.Agents.IInlineToolLoopRunner,
 builder.Services.AddScoped<Tamma.Api.Services.Agents.IManagedAgent,
     Tamma.Api.Services.Agents.ManagedAgent>();
 
+// Story 32-6 — the per-agent ACTION TRAIL emitter. The single seam ManagedAgent
+// (and later 32-7 panels / 32-8 review gate) calls to record AGENT.TASK.* /
+// AGENT.TOOL_CALL.* / AGENT.ITERATION.* / AGENT.PANEL.* / REVIEW.BUG.* events into
+// the resolving tenant's domain_events stream. Scoped (its IEventRepository dep is
+// scoped); the IContentSanitizer redaction seam is optional and resolves from the
+// singleton registered above. It never throws into a run (AC7).
+builder.Services.AddScoped<Tamma.Api.Services.Agents.IAgentTrailEmitter,
+    Tamma.Api.Services.Agents.AgentTrailEmitter>();
+
 // Story 31-2: platform routing resolver. Exposes IPlatformResolver as a
 // scoped service over a singleton driver cache and the Epic 29 secret
 // store seam. Drivers themselves (GitHub 31-3, Gitea 31-4, ...) ship in
@@ -1957,6 +1966,17 @@ orgs.MapPatch("/{tenantId:guid}/alert-channels/{id:guid}",
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 orgs.MapDelete("/{tenantId:guid}/alert-channels/{id:guid}",
         AlertEndpoints.DeleteTenantChannel)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+
+// Story 32-6 — per-agent ACTION TRAIL read surface. Member-readable, no
+// mutation. The path-tenant membership filter proves the caller is a member of
+// {tenantId}; the IEventRepository.QueryAgentTrailAsync read is PHYSICALLY scoped
+// to that tenant's schema (schema-per-tenant), so a member of org A can never
+// read org B's trail and a platform owner has no route to any tenant's trail
+// (AC4). Both page on SequenceNumber (nextCursor/hasMore).
+orgs.MapGet("/{tenantId:guid}/agents/{agentId:guid}/runs", AgentTrailEndpoints.ListRuns)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapGet("/{tenantId:guid}/agents/{agentId:guid}/trail", AgentTrailEndpoints.ListTrail)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 
 app.MapGet("/api/v1/tenants", OrgEndpoints.ListTenants).RequireAuthorization("MemberAccess");

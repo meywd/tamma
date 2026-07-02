@@ -268,4 +268,105 @@ public class EventRepository(
 
         return (rows, total);
     }
+
+    /// <inheritdoc />
+    public async Task<(IReadOnlyList<DomainEvent> Events, int Total)> QueryAgentTrailAsync(
+        Guid tenantId, Guid agentId, string? typePrefix,
+        DateTimeOffset? from, DateTimeOffset? to,
+        string? role, string? provider, string? outcome,
+        long? cursor, int limit)
+    {
+        // Story 32-6 AC4 — the hard tenant guard. An empty tenant is not a
+        // cross-tenant scan we implement; it is a bug. Mirror the
+        // QueryWithPaginationAsync guard so a cross-tenant trail read is
+        // unimplementable through this repository, not merely unauthorized.
+        if (tenantId == Guid.Empty)
+        {
+            throw new NotSupportedException(
+                "QueryAgentTrailAsync requires a non-empty tenant id. The per-agent " +
+                "action trail (Story 32-6) is ALWAYS tenant-scoped — there is no " +
+                "cross-tenant or platform-admin read path. See " +
+                ".dev/decisions/story-28-1-design-calls.md Decision #2.");
+        }
+
+        await using var db = await tenantDbFactory.CreateAsync(tenantId);
+
+        // The agentId + role + provider predicates live in the Tags JSONB. They
+        // are expressed as raw SQL `->>` extractions (the column is jsonb) so they
+        // translate on Postgres and use the JSONB values written by
+        // AgentTrailTags.Build. role/provider are optional via the
+        // `({param} IS NULL OR ...)` idiom. The unqualified `domain_events` name
+        // resolves to the tenant schema via the per-tenant connection's
+        // search_path. Non-JSONB filters (tenant defence-in-depth, type prefix,
+        // outcome→type, date, cursor, order, take) compose in LINQ over the
+        // raw SQL subquery.
+        var agentIdText = agentId.ToString();
+        // The `::text` casts pin the parameter type so Postgres does not reject
+        // the `$n IS NULL` predicate with "could not determine data type of
+        // parameter" when role/provider are omitted (NULL).
+        IQueryable<DomainEvent> query = db.DomainEvents
+            .FromSqlInterpolated($@"
+                SELECT * FROM domain_events
+                WHERE ""Tags""->>'agentId' = {agentIdText}
+                  AND ({role}::text IS NULL OR ""Tags""->>'role' = {role})
+                  AND ({provider}::text IS NULL OR ""Tags""->>'provider' = {provider})");
+
+        // Defence-in-depth tenant predicate (structural isolation is the
+        // per-tenant connection; this keeps the slice tight during the
+        // transitional shared-DB phase).
+        query = query.Where(e => e.TenantId == tenantId);
+
+        if (!string.IsNullOrEmpty(typePrefix))
+        {
+            var like = typePrefix + "%";
+            query = query.Where(e => EF.Functions.Like(e.Type, like));
+        }
+
+        var outcomeType = MapOutcomeToType(outcome);
+        if (outcomeType is not null)
+        {
+            query = query.Where(e => e.Type == outcomeType);
+        }
+
+        if (from is { } f)
+        {
+            var fromUtc = f.UtcDateTime;
+            query = query.Where(e => e.CreatedAt >= fromUtc);
+        }
+        if (to is { } t)
+        {
+            var toUtc = t.UtcDateTime;
+            query = query.Where(e => e.CreatedAt < toUtc);
+        }
+
+        var total = await query.CountAsync();
+
+        if (cursor is { } c)
+        {
+            // SequenceNumber DESC page: everything strictly older than the last
+            // sequence number the caller saw. Immune to same-millisecond
+            // CreatedAt collisions (AC5).
+            query = query.Where(e => e.SequenceNumber < c);
+        }
+
+        var rows = await query
+            .OrderByDescending(e => e.SequenceNumber)
+            .Take(limit)
+            .ToListAsync();
+
+        return (rows, total);
+    }
+
+    /// <summary>Map the <c>outcome</c> filter (<c>success|failed|partial</c>) to
+    /// the terminal <c>AGENT.TASK.*</c> event type. Returns <c>null</c> when no
+    /// (or an unrecognized) outcome is supplied — the caller then does not
+    /// constrain by outcome.</summary>
+    private static string? MapOutcomeToType(string? outcome) =>
+        outcome?.Trim().ToLowerInvariant() switch
+        {
+            "success" => "AGENT.TASK.SUCCESS",
+            "failed" => "AGENT.TASK.FAILED",
+            "partial" => "AGENT.TASK.PARTIAL",
+            _ => null,
+        };
 }
