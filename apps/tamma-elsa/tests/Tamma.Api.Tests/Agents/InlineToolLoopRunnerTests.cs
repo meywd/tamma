@@ -9,8 +9,9 @@ using Tamma.Activities.LlmCall;
 using Tamma.Activities.LlmCall.Models;
 using Tamma.Activities.LlmCall.Tools;
 using Tamma.Activities.Security;
+using Tamma.Api.Services.Agents;
 
-namespace Tamma.Activities.Tests.LlmCall;
+namespace Tamma.Api.Tests.Agents;
 
 /// <summary>
 /// Story 32-5 (AC4) — runner-level coverage of the agentic tool loop, now the

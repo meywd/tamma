@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.LlmCall;
 using Tamma.Activities.LlmCall.Credentials;
 using Tamma.Activities.LlmCall.Models;
 using Tamma.Activities.LlmCall.Tools;
@@ -10,7 +11,7 @@ using Tamma.Activities.Security;
 using Tamma.Activities.ToolExecution;
 using Tamma.Core;
 
-namespace Tamma.Activities.LlmCall;
+namespace Tamma.Api.Services.Agents;
 
 /// <summary>
 /// Story 32-5 (AC4) — the agentic tool loop, extracted VERBATIM from

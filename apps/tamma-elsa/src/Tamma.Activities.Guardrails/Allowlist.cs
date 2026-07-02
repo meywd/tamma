@@ -50,19 +50,10 @@ internal static class Allowlist
         "Tamma.Activities.AgentDispatch.IGitHubActionsClient",
         "Tamma.Core.Interfaces.IGitHubIntegrationService",
         "Tamma.Core.Interfaces.ISlackIntegrationService",
-        // The engine must not resolve provider credentials post-32-5. (The one legitimate
-        // holder, InlineToolLoopRunner, is the Tamma.Api-executed LLM core — exempted below.)
+        // The engine must not resolve provider credentials post-32-5. (The LLM core that
+        // legitimately holds it — InlineToolLoopRunner — now lives in the Tamma.Api assembly,
+        // outside the analyzed engine surface, so no engine exemption is needed.)
         "Tamma.Activities.LlmCall.Credentials.IProviderCredentialResolver",
-        // FIX M1 — the inline tool-loop runner is the Tamma.Api-executed LLM core: it holds
-        // the direct anthropic/openai calls + IProviderCredentialResolver. It is DI-registered
-        // ONLY in Tamma.Api (Program.cs). INJECTING it into any engine activity would drive a
-        // credentialed LLM call from a workflow STEP — a rule-1 violation — so its injection is
-        // denied here. NB no conflict with the whole-type EXEMPTION below: the exemption keys on
-        // the ANALYZED (owner) type, so it only suppresses the runner's OWN members (its
-        // IProviderCredentialResolver ctor injection); a DIFFERENT engine type injecting the
-        // runner has a non-exempt owner and is correctly flagged.
-        "Tamma.Activities.LlmCall.IInlineToolLoopRunner",
-        "Tamma.Activities.LlmCall.InlineToolLoopRunner",
         // Forward-compatible (Epic 35 billing / future vendor SDKs) — harmless string data
         // until such a type is actually referenced by the engine:
         "SlackNet.ISlackApiClient",
@@ -140,15 +131,5 @@ internal static class Allowlist
         "Tamma.Activities.LlmCall.Tools.ShellExecuteTool",
         "Tamma.Activities.LlmCall.Tools.GitOperationsTool",
         // Inbound webhook-signal store (inbound; no outbound call):
-        "Tamma.Activities.AgentDispatch.WebhookSignalRegistry",
-        // TRACKED FOLLOW-UP — the API-plane LLM execution core. It is DI-registered and
-        // executed ONLY in Tamma.Api (ManagedAgent); it lives in the Tamma.Activities
-        // ASSEMBLY purely for code-organisation (32-5 extracted it verbatim from
-        // CallLlmInlineActivity). It ctor-injects IProviderCredentialResolver and holds the
-        // direct anthropic/openai calls = the sanctioned Tamma.Api LLM core, NOT an
-        // engine-executed path. Exempt so it does not false-positive the engine guardrail.
-        // Follow-up: physically relocate InlineToolLoopRunner (+ IInlineToolLoopRunner) into
-        // Tamma.Api, then delete this line (its IProviderCredentialResolver injection is
-        // then correctly outside the engine surface).
-        "Tamma.Activities.LlmCall.InlineToolLoopRunner");
+        "Tamma.Activities.AgentDispatch.WebhookSignalRegistry");
 }

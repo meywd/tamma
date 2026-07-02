@@ -8,8 +8,9 @@ using NUnit.Framework;
 using Tamma.Activities.LlmCall;
 using Tamma.Activities.LlmCall.Credentials;
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Api.Services.Agents;
 
-namespace Tamma.Activities.Tests.LlmCall;
+namespace Tamma.Api.Tests.Agents;
 
 /// <summary>
 /// Story 32-3 Phase 3 / Phase 5 — credential resolution in the shared

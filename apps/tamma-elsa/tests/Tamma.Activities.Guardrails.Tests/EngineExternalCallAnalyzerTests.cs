@@ -21,7 +21,6 @@ public class EngineExternalCallAnalyzerTests
 namespace Octokit { public interface IGitHubClient { } public class GitHubClient { } }
 namespace Tamma.Activities.AgentDispatch { public interface IGitHubActionsClient { } }
 namespace Tamma.Activities.LlmCall.Credentials { public interface IProviderCredentialResolver { } }
-namespace Tamma.Activities.LlmCall { public interface IInlineToolLoopRunner { } }
 namespace SlackNet { public interface ISlackApiClient { } }
 namespace Microsoft.Extensions.Configuration { public interface IConfiguration { } }
 namespace Tamma.Core.Interfaces {
@@ -161,16 +160,6 @@ public class Merger {
     public async Task Do() {
         await _svc.MergePullRequestAsync(""o/r"", 5);
     }
-}" + Vendors);
-
-    // ---------- (M1) injecting the Tamma.Api LLM core into an engine step → TAMMA001 -----
-    // The whole-type EXEMPTION suppresses ONLY the runner's own members; INJECTING it into a
-    // different engine activity would drive a credentialed LLM call from a workflow STEP.
-
-    [Test]
-    public Task InlineToolLoopRunner_CtorInjection_Flags() => Verify.Engine(@"
-public class BadActivity {
-    public BadActivity(Tamma.Activities.LlmCall.IInlineToolLoopRunner {|TAMMA001:runner|}) { }
 }" + Vendors);
 
     // ---------- (I1) service-locator resolve of a denylisted vendor type → TAMMA001 ------
@@ -320,17 +309,6 @@ namespace Tamma.Activities.LlmCall.Tools {
 namespace Tamma.Activities.AgentDispatch {
   public class WebhookSignalRegistry {
     public WebhookSignalRegistry(Octokit.IGitHubClient gh) { }
-  }
-}" + Vendors);
-
-    [Test]
-    public Task InlineToolLoopRunner_ApiCoreCoLocated_DoesNotFlag() => Verify.Engine(@"
-namespace Tamma.Activities.LlmCall {
-  using System.Net.Http; using System.Net.Http.Json; using System.Threading.Tasks;
-  public class InlineToolLoopRunner {
-    private readonly HttpClient _http = new HttpClient();
-    public InlineToolLoopRunner(Tamma.Activities.LlmCall.Credentials.IProviderCredentialResolver r) { }
-    public async Task Run() { await _http.PostAsJsonAsync(""https://api.anthropic.com/v1/messages"", new { }); }
   }
 }" + Vendors);
 

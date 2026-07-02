@@ -1,6 +1,6 @@
 using Tamma.Activities.LlmCall.Models;
 
-namespace Tamma.Activities.LlmCall;
+namespace Tamma.Api.Services.Agents;
 
 /// <summary>
 /// Story 32-5 (AC4) — the extracted, reusable agentic tool-loop seam.

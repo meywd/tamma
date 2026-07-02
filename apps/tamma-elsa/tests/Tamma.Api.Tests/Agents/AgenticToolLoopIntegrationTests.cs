@@ -10,8 +10,9 @@ using Tamma.Activities.LlmCall;
 using Tamma.Activities.LlmCall.Models;
 using Tamma.Activities.LlmCall.Tools;
 using Tamma.Activities.Security;
+using Tamma.Api.Services.Agents;
 
-namespace Tamma.Activities.Tests.LlmCall;
+namespace Tamma.Api.Tests.Agents;
 
 /// <summary>
 /// Integration tests for the agentic tool loop (Epic 12).
