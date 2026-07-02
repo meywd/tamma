@@ -186,6 +186,39 @@ public class AuditQueryServiceTests
     }
 
     [Test]
+    public async Task Keyset_Does_Not_Skip_Rows_That_Share_A_NonUnique_SourceSequenceNumber()
+    {
+        // The control-plane audit_records table is fed by TWO independent identity
+        // sequences (domain_events.SequenceNumber AND platform_events.SequenceNumber,
+        // both starting at 1), so source_sequence_number values COLLIDE — the table
+        // is unique only on source_event_id. A keyset that seeks on the sequence
+        // ALONE (cursor encodes seq=N; next page does `seq < N`) silently drops the
+        // OTHER row sharing the boundary sequence — a compliance completeness bug.
+        // Seed two platform rows with the SAME sequence (distinct id/source_event_id)
+        // and page one-at-a-time: BOTH must surface, none skipped, none duplicated.
+        await SeedControlPlane(s => s with { Seq = 7, TargetId = "collide-A", TenantId = null, UserId = null });
+        await SeedControlPlane(s => s with { Seq = 7, TargetId = "collide-B", TenantId = null, UserId = null });
+
+        var svc = NewService(out _, out _);
+
+        var page1 = await svc.QueryPlatformAsync(null, F(limit: 1), TammaMode.SaaS, default);
+        page1.Records.Should().HaveCount(1);
+        page1.NextCursor.Should().NotBeNull(
+            "a second row shares the boundary sequence and must not be skipped");
+
+        var page2 = await svc.QueryPlatformAsync(null, F(limit: 1, cursor: page1.NextCursor), TammaMode.SaaS, default);
+        page2.Records.Should().HaveCount(1,
+            "the OTHER row sharing source_sequence_number=7 surfaces on the next page "
+                + "(a single-key cursor skipped it)");
+        page2.NextCursor.Should().BeNull("both rows are now consumed");
+
+        var seen = page1.Records.Concat(page2.Records).Select(r => r.TargetId).ToList();
+        seen.Should().OnlyHaveUniqueItems("no row is duplicated across pages");
+        seen.Should().BeEquivalentTo(new[] { "collide-A", "collide-B" },
+            "both colliding-sequence rows surface across the pages — none skipped");
+    }
+
+    [Test]
     public async Task Keyset_Is_Stable_Under_Concurrent_Inserts()
     {
         for (var i = 1; i <= 250; i++)

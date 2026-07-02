@@ -131,18 +131,30 @@ public class AuditQueryFilterTests
     [Test]
     public void Cursor_RoundTrips_Exactly()
     {
-        foreach (var seq in new[] { 0L, 1L, 42L, long.MaxValue, 9_876_543_210L })
+        // The cursor is COMPOUND — (source_sequence_number, row id) — because
+        // source_sequence_number is not unique in the CP audit_records table.
+        var samples = new (long Seq, Guid Id)[]
         {
-            var encoded = AuditQueryFilter.EncodeCursor(seq);
+            (0L, Guid.Empty),
+            (1L, Guid.NewGuid()),
+            (42L, Guid.NewGuid()),
+            (long.MaxValue, Guid.NewGuid()),
+            (9_876_543_210L, Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff")),
+        };
+
+        foreach (var (seq, id) in samples)
+        {
+            var encoded = AuditQueryFilter.EncodeCursor(seq, id);
             encoded.Should().NotContain("+").And.NotContain("/").And.NotContain("=",
                 "cursor is base64URL (opaque, URL-safe)");
             AuditQueryFilter.TryDecodeCursor(encoded, out var decoded).Should().BeTrue();
-            decoded.Should().Be(seq);
+            decoded.Seq.Should().Be(seq);
+            decoded.Id.Should().Be(id);
 
             // And through the full parse path.
             var (f, err) = Parse(cursor: encoded);
             err.Should().BeNull();
-            f!.Cursor.Should().Be(seq);
+            f!.Cursor.Should().Be(new AuditCursor(seq, id));
         }
     }
 
@@ -152,6 +164,55 @@ public class AuditQueryFilterTests
         var (f, err) = Parse(cursor: "!!!not-base64!!!");
         f.Should().BeNull();
         err.Should().Contain("cursor");
+    }
+
+    [Test]
+    public void WrongLength_Cursor_Yields_Error()
+    {
+        // A well-formed base64url payload of the WRONG length (e.g. the old
+        // 8-byte sequence-only cursor) is rejected — the decode is strict.
+        var eightBytes = Convert.ToBase64String(new byte[8]).TrimEnd('=')
+            .Replace('+', '-').Replace('/', '_');
+        AuditQueryFilter.TryDecodeCursor(eightBytes, out _).Should().BeFalse();
+
+        var (f, err) = Parse(cursor: eightBytes);
+        f.Should().BeNull();
+        err.Should().Contain("cursor");
+    }
+
+    [Test]
+    public void Unspecified_Kind_From_Is_Treated_As_Utc_Not_Shifted()
+    {
+        // A from/to boundary that arrives WITHOUT a zone (Kind=Unspecified) must
+        // be read as UTC — never passed through ToUniversalTime(), which would
+        // subtract the HOST's local offset and shift the window (a TZ drift that
+        // UTC-only CI hides).
+        var unspecified = new DateTime(2026, 1, 15, 8, 30, 0, DateTimeKind.Unspecified);
+        var utcEquivalent = new DateTime(2026, 1, 15, 8, 30, 0, DateTimeKind.Utc);
+
+        var fromUnspecified = Parse(from: unspecified).Filter!.From!.Value;
+        var fromUtc = Parse(from: utcEquivalent).Filter!.From!.Value;
+
+        fromUnspecified.Kind.Should().Be(DateTimeKind.Utc);
+        fromUnspecified.Should().Be(utcEquivalent, "the clock reading is preserved, not offset-shifted");
+        fromUnspecified.Should().Be(fromUtc,
+            "an unspecified-kind boundary selects the same instant as its UTC equivalent");
+    }
+
+    [Test]
+    public void Local_Kind_From_Converts_To_The_Same_Instant_As_Its_Utc_Equivalent()
+    {
+        // A boundary that arrives as Local (e.g. an offset-carrying input the
+        // model binder resolved to local) converts to the same UTC instant its
+        // UTC form would — the two select the same boundary.
+        var local = new DateTime(2026, 1, 15, 8, 30, 0, DateTimeKind.Local);
+        var utcEquivalent = local.ToUniversalTime();
+
+        var fromLocal = Parse(from: local).Filter!.From!.Value;
+
+        fromLocal.Kind.Should().Be(DateTimeKind.Utc);
+        fromLocal.Should().Be(utcEquivalent,
+            "a local-kind boundary and its UTC equivalent select the same instant");
     }
 
     [Test]

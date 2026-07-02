@@ -14,8 +14,9 @@ namespace Tamma.Api.Services.Audit;
 /// <summary>
 /// Story 37-3 — the audit query orchestrator. Parses are already done by
 /// <see cref="AuditQueryFilter"/>; this service builds the EF query (structured
-/// filters AND-combined, parameterized <c>ILIKE</c> search, keyset seek on
-/// <c>source_sequence_number</c>), projects <see cref="AuditRecordResponse"/>,
+/// filters AND-combined, parameterized <c>ILIKE</c> search, keyset seek on the
+/// TOTAL order <c>(source_sequence_number, id)</c>), projects
+/// <see cref="AuditRecordResponse"/>,
 /// computes a capped-estimate <c>total</c>, and appends the best-effort
 /// <c>AUDIT.QUERIED</c> meta-audit event (AC10).
 ///
@@ -121,17 +122,32 @@ public sealed class AuditQueryService(
         var total = await filtered.Take(AuditQueryResponse.CountCap).CountAsync(ct).ConfigureAwait(false);
         var totalIsCapped = total >= AuditQueryResponse.CountCap;
 
-        // Keyset seek (AC5): cursor < last-seen sequence, most-recent first. The
-        // sequence is unique + monotonic so it is its own deterministic tiebreak.
+        // Keyset seek (AC5), most-recent first, over a TOTAL order. The order key
+        // is COMPOUND — (source_sequence_number, id) — because
+        // source_sequence_number is NOT unique in the CP audit_records table (it
+        // is fed by two independent identity sequences — domain_events AND
+        // platform_events — whose values collide; the table is unique only on
+        // source_event_id). Seeking on the sequence alone would silently drop the
+        // OTHER row sharing a boundary sequence — a compliance completeness bug.
+        // The row id (globally-unique PK Guid) is the deterministic tiebreak.
+        //
+        // The seek uses a Postgres ROW-VALUE comparison
+        // `(source_sequence_number, id) < (cursor.seq, cursor.id)`
+        // (EF.Functions.LessThan over ValueTuples — Npgsql translates this to a
+        // native `(a, b) < (c, d)`), which is exactly "strictly before the cursor
+        // in (seq DESC, id DESC) order" and uses the uuid column's native ordering
+        // for the id leg — consistent with the ORDER BY below.
         var pageQuery = filtered;
-        if (f.Cursor is not null)
+        if (f.Cursor is { } cursor)
         {
-            var cursor = f.Cursor.Value;
-            pageQuery = pageQuery.Where(r => r.SourceSequenceNumber < cursor);
+            pageQuery = pageQuery.Where(r => EF.Functions.LessThan(
+                ValueTuple.Create(r.SourceSequenceNumber, r.Id),
+                ValueTuple.Create(cursor.Seq, cursor.Id)));
         }
 
         var page = await pageQuery
             .OrderByDescending(r => r.SourceSequenceNumber)
+            .ThenByDescending(r => r.Id)
             .Take(f.Limit + 1) // +1 sentinel to compute nextCursor without a second query
             .Select(r => new AuditRecordResponse(
                 r.Id,
@@ -153,7 +169,7 @@ public sealed class AuditQueryService(
         var hasMore = page.Count > f.Limit;
         var rows = hasMore ? page.Take(f.Limit).ToList() : page;
         var nextCursor = hasMore
-            ? AuditQueryFilter.EncodeCursor(rows[^1].SourceSequenceNumber)
+            ? AuditQueryFilter.EncodeCursor(rows[^1].SourceSequenceNumber, rows[^1].Id)
             : null;
 
         return new AuditQueryResponse(rows, nextCursor, total, totalIsCapped);

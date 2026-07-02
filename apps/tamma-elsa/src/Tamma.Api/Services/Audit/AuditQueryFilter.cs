@@ -4,6 +4,22 @@ using Tamma.Core.Audit;
 namespace Tamma.Api.Services.Audit;
 
 /// <summary>
+/// Story 37-3 — the keyset position: the last-seen row's TOTAL-order key. The
+/// audit read orders by <c>(source_sequence_number DESC, id DESC)</c>.
+///
+/// <para><b>Why the compound key:</b> in the control-plane <c>audit_records</c>
+/// table <c>source_sequence_number</c> is NOT unique — the table is fed by two
+/// independent identity sequences (<c>domain_events.SequenceNumber</c> AND
+/// <c>platform_events.SequenceNumber</c>, both starting at 1) whose values
+/// collide; the table is unique only on <c>source_event_id</c>. Seeking on the
+/// sequence alone would silently drop the OTHER row that shares the boundary
+/// sequence — a compliance completeness failure. The globally-unique surrogate
+/// <see cref="Id"/> (the PK Guid) is the deterministic tiebreak that makes the
+/// seek TOTAL: no row skipped or repeated at a page boundary.</para>
+/// </summary>
+public readonly record struct AuditCursor(long Seq, Guid Id);
+
+/// <summary>
 /// Story 37-3 — the parsed, validated, immutable filter for an audit query over
 /// the curated <c>audit_records</c> read-model (Story 37-1). Parsing is total:
 /// <see cref="TryParse"/> returns a descriptive error string for any bad input
@@ -18,10 +34,13 @@ namespace Tamma.Api.Services.Audit;
 /// matches nothing, which is the correct exact-match semantics.</para>
 ///
 /// <para><b>Keyset, not offset (AC5):</b> <see cref="Cursor"/> is the last-seen
-/// <c>source_sequence_number</c>, decoded from the opaque base64url
-/// <c>cursor</c> query value. The next page is
-/// <c>WHERE source_sequence_number &lt; cursor ORDER BY … DESC</c> — stable
-/// under concurrent inserts.</para>
+/// row's <see cref="AuditCursor"/> (<c>source_sequence_number</c> + row
+/// <c>id</c>), decoded from the opaque base64url <c>cursor</c> query value. The
+/// next page is
+/// <c>WHERE (source_sequence_number, id) &lt; (cursor.seq, cursor.id)
+/// ORDER BY source_sequence_number DESC, id DESC</c> — a TOTAL order (the
+/// unique <c>id</c> tiebreak) that stays stable under concurrent inserts AND
+/// never drops rows that share a non-unique <c>source_sequence_number</c>.</para>
 /// </summary>
 public sealed record AuditQueryFilter(
     string? Category,
@@ -36,7 +55,7 @@ public sealed record AuditQueryFilter(
     DateTime? To,
     string? Search,
     int Limit,
-    long? Cursor)
+    AuditCursor? Cursor)
 {
     public const int DefaultLimit = 50;
     public const int MinLimit = 1;
@@ -112,13 +131,13 @@ public sealed record AuditQueryFilter(
         if (fromUtc is not null && toUtc is not null && fromUtc > toUtc)
             return (null, "from must not be after to");
 
-        long? cursorSeq = null;
+        AuditCursor? cursorKey = null;
         var rawCursor = Trimmed(cursor);
         if (rawCursor is not null)
         {
-            if (!TryDecodeCursor(rawCursor, out var seq))
+            if (!TryDecodeCursor(rawCursor, out var key))
                 return (null, "cursor is malformed");
-            cursorSeq = seq;
+            cursorKey = key;
         }
 
         // limit is clamped, never rejected (AC6).
@@ -137,7 +156,7 @@ public sealed record AuditQueryFilter(
             To: toUtc,
             Search: Trimmed(q),
             Limit: clampedLimit,
-            Cursor: cursorSeq);
+            Cursor: cursorKey);
 
         return (filter, null);
     }
@@ -160,7 +179,12 @@ public sealed record AuditQueryFilter(
         if (To is not null) shape["to"] = To.Value.ToString("o");
         if (Search is not null) shape["hasSearch"] = true;
         shape["limit"] = Limit;
-        if (Cursor is not null) shape["cursor"] = Cursor;
+        if (Cursor is { } cur)
+            shape["cursor"] = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["seq"] = cur.Seq,
+                ["id"] = cur.Id.ToString(),
+            };
         return shape;
     }
 
@@ -184,26 +208,34 @@ public sealed record AuditQueryFilter(
         return keys.Count == 0 ? "(none)" : string.Join(",", keys);
     }
 
-    // ── Opaque cursor codec — base64url of a single big-endian long ──
+    // ── Opaque cursor codec — base64url of (big-endian seq | 16-byte id) ──
 
-    /// <summary>Encode a <c>source_sequence_number</c> as an opaque base64url
-    /// cursor. Opaque so clients don't hand-roll their own; trivially decodable
-    /// server-side.</summary>
-    public static string EncodeCursor(long sequenceNumber)
+    /// <summary>Encode a compound keyset position (<c>source_sequence_number</c>
+    /// + row <c>id</c>) as an opaque base64url cursor: 8 big-endian bytes of
+    /// sequence followed by the 16-byte row id. Opaque so clients don't hand-roll
+    /// their own; trivially decodable server-side. The row id makes the position
+    /// TOTAL — the sequence alone is not unique in the CP <c>audit_records</c>
+    /// table (two identity sequences feed it).</summary>
+    public static string EncodeCursor(long sequenceNumber, Guid id)
     {
-        Span<byte> buf = stackalloc byte[8];
+        Span<byte> buf = stackalloc byte[24];
         BinaryPrimitives.WriteInt64BigEndian(buf, sequenceNumber);
+        var wrote = id.TryWriteBytes(buf[8..]);
+        System.Diagnostics.Debug.Assert(wrote, "Guid is exactly 16 bytes");
         return Base64UrlEncode(buf);
     }
 
-    /// <summary>Decode an opaque cursor back to its <c>source_sequence_number</c>.
-    /// Returns <c>false</c> for any malformed input (→ 400).</summary>
-    public static bool TryDecodeCursor(string cursor, out long sequenceNumber)
+    /// <summary>Decode an opaque cursor back to its compound
+    /// <see cref="AuditCursor"/> (sequence + row id). Returns <c>false</c> for any
+    /// malformed input — wrong length included (→ 400).</summary>
+    public static bool TryDecodeCursor(string cursor, out AuditCursor value)
     {
-        sequenceNumber = 0;
+        value = default;
         if (string.IsNullOrWhiteSpace(cursor)) return false;
-        if (!TryBase64UrlDecode(cursor.Trim(), out var bytes) || bytes.Length != 8) return false;
-        sequenceNumber = BinaryPrimitives.ReadInt64BigEndian(bytes);
+        if (!TryBase64UrlDecode(cursor.Trim(), out var bytes) || bytes.Length != 24) return false;
+        var seq = BinaryPrimitives.ReadInt64BigEndian(bytes);
+        var id = new Guid(bytes.AsSpan(8, 16));
+        value = new AuditCursor(seq, id);
         return true;
     }
 
@@ -235,6 +267,28 @@ public sealed record AuditQueryFilter(
     private static string? Trimmed(string? v) =>
         string.IsNullOrWhiteSpace(v) ? null : v.Trim();
 
-    private static DateTime? ToUtc(DateTime? v) =>
-        v is null ? null : DateTime.SpecifyKind(v.Value.ToUniversalTime(), DateTimeKind.Utc);
+    /// <summary>
+    /// Normalize a from/to boundary to UTC WITHOUT shifting the intended instant:
+    /// <list type="bullet">
+    ///   <item><description><see cref="DateTimeKind.Utc"/> — kept as-is.</description></item>
+    ///   <item><description><see cref="DateTimeKind.Local"/> — converted, so a
+    ///     <c>+02:00</c>-offset input and its UTC equivalent select the SAME
+    ///     boundary.</description></item>
+    ///   <item><description><see cref="DateTimeKind.Unspecified"/> — treated as
+    ///     already-UTC. It is NOT passed through <c>ToUniversalTime()</c>, which
+    ///     would silently subtract the HOST's local offset and shift the window —
+    ///     the class of TZ drift that UTC-only CI hides.</description></item>
+    /// </list>
+    /// </summary>
+    private static DateTime? ToUtc(DateTime? v)
+    {
+        if (v is null) return null;
+        var d = v.Value;
+        return d.Kind switch
+        {
+            DateTimeKind.Utc => d,
+            DateTimeKind.Local => d.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(d, DateTimeKind.Utc),
+        };
+    }
 }
