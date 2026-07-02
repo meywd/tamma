@@ -44,6 +44,23 @@ public sealed class AuditProjector : IAuditProjector
     /// for the descriptor-missing quarantine path only.</summary>
     public const string UnclassifiedCategory = "unclassified";
 
+    // Physical varchar column lengths of audit_records (see
+    // TammaModelConfiguration.ConfigureAuditEntities + migration AddAuditRecords).
+    // Every resolved string field is clamped to its column length BEFORE the row
+    // is built so no over-length — possibly attacker-controlled — value can throw
+    // Npgsql 22001 (string_data_right_truncation) on INSERT and break the curated
+    // trail for that event. Belt-and-suspenders: this protects EVERY current and
+    // future emitter, not just any one call site.
+    private const int MaxActionCodeLength = 128;
+    private const int MaxCategoryLength = 32;
+    private const int MaxSeverityLength = 16;
+    private const int MaxActorEmailLength = 320;
+    private const int MaxTargetTypeLength = 64;
+    private const int MaxTargetIdLength = 255;
+    private const int MaxOutcomeLength = 16;
+    private const int MaxIpAddressLength = 64;
+    private const int MaxUserAgentLength = 512;
+
     /// <inheritdoc />
     public AuditRecord? TryBuildRecord(
         RawAuditEvent rawEvent, AuditOwnershipMode mode, Guid? singleUserOwnerId)
@@ -83,6 +100,7 @@ public sealed class AuditProjector : IAuditProjector
             PrevRecordHash = null,
         };
 
+        ClampToColumnLimits(record);
         AssignOwnership(record, rawEvent, mode, singleUserOwnerId);
         return record;
     }
@@ -146,9 +164,40 @@ public sealed class AuditProjector : IAuditProjector
             PrevRecordHash = null,
         };
 
+        ClampToColumnLimits(record);
         AssignOwnership(record, rawEvent, mode, singleUserOwnerId);
         return record;
     }
+
+    /// <summary>
+    /// Defensively cap every varchar-bounded field to its physical column length
+    /// so an over-length resolved value (e.g. an attacker-padded login email in
+    /// <c>ActorEmailSnapshot</c>) can NEVER overflow the column and throw Npgsql
+    /// 22001 (string_data_right_truncation) on INSERT. Left unbounded, that
+    /// overflow breaks the audit trail for the event — the failed insert leaves a
+    /// tracked poison entity that re-throws on the next SaveChanges (the cursor
+    /// write), stalling the projector tick — so an attacker could suppress the
+    /// audit of their own failed logins by padding the email. Capping here makes
+    /// the insert always fit. The redacted <c>PayloadJson</c> is already
+    /// length-bounded by <see cref="CredentialRedactor.MaxLength"/>; the outcome
+    /// is a closed enum but is capped too for uniformity. Guid / long / timestamp
+    /// columns cannot overflow and are left untouched.
+    /// </summary>
+    private static void ClampToColumnLimits(AuditRecord record)
+    {
+        record.ActionCode = Truncate(record.ActionCode, MaxActionCodeLength)!;
+        record.Category = Truncate(record.Category, MaxCategoryLength)!;
+        record.Severity = Truncate(record.Severity, MaxSeverityLength)!;
+        record.ActorEmailSnapshot = Truncate(record.ActorEmailSnapshot, MaxActorEmailLength);
+        record.TargetType = Truncate(record.TargetType, MaxTargetTypeLength);
+        record.TargetId = Truncate(record.TargetId, MaxTargetIdLength);
+        record.Outcome = Truncate(record.Outcome, MaxOutcomeLength)!;
+        record.IpAddress = Truncate(record.IpAddress, MaxIpAddressLength);
+        record.UserAgent = Truncate(record.UserAgent, MaxUserAgentLength);
+    }
+
+    private static string? Truncate(string? value, int maxLength) =>
+        value is not null && value.Length > maxLength ? value[..maxLength] : value;
 
     // Quarantine field extraction must never itself throw — wrap the resolvers.
     private static string? SafeResolveString(

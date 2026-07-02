@@ -1056,6 +1056,13 @@ public static class AuthEndpoints
         if (emitter is null) return;
         var (ip, ua) = ResolveRequestFingerprint(httpContext);
 
+        // The submitted email is attacker-controlled and unbounded (no validation
+        // filter). Clamp to the RFC 5321 max (254) before it enters the audit
+        // tags/data so a padded value can't overflow the ActorEmailSnapshot
+        // varchar(320) column downstream. The projector also caps defensively,
+        // but capping at the source keeps the emitted event tidy too.
+        if (email.Length > 254) email = email[..254];
+
         var tags = new Dictionary<string, string?>
         {
             ["reason"] = reason,

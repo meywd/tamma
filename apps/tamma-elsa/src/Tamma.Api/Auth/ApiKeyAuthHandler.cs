@@ -735,10 +735,18 @@ public class ApiKeyAuthHandler(
                 ["ip"] = ip,
             };
 
+            // Hot path: this runs inside request authentication. A stalled CP
+            // DB/bus must NOT block the auth request until the DB command timeout.
+            // Bound the emit with a short timeout linked to the request-abort
+            // token so a slow audit sink can't hang authentication (the throttle
+            // caps frequency, but the once-per-bucket request still shouldn't stall).
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(Context.RequestAborted);
+            cts.CancelAfter(TimeSpan.FromSeconds(2));
             await emitter.EmitAsync(
                 Tamma.Api.Services.Audit.SensitiveAction.ForPlatform(
                     Tamma.Core.Audit.SensitiveActionCatalog.ApiKeyUsed,
-                    tenantId, actorUserId: null, tags, data));
+                    tenantId, actorUserId: null, tags, data),
+                cts.Token);
         }
         catch (Exception ex)
         {
