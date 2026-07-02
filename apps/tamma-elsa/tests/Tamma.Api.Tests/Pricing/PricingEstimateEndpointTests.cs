@@ -224,6 +224,12 @@ public class PricingEstimateEndpointTests
             Task.FromResult<PlanSnapshot?>(null);
         public Task<IReadOnlyList<PlanSnapshot>> ListActiveAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<PlanSnapshot>>(Array.Empty<PlanSnapshot>());
+        public Task<IReadOnlyList<PlanSnapshot>> ListActivePublicAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<PlanSnapshot>>(Array.Empty<PlanSnapshot>());
+        public Task<PlanSnapshot?> GetActivePublicBySlugAsync(string slug, CancellationToken ct = default) =>
+            Task.FromResult<PlanSnapshot?>(null);
+        public Task<IReadOnlyList<PlanSnapshot>> ListAllForAdminAsync(PlanListFilter filter, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<PlanSnapshot>>(Array.Empty<PlanSnapshot>());
         public Task<IReadOnlyList<PlanSnapshot>> GetVersionsBySlugAsync(string slug, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<PlanSnapshot>>(Array.Empty<PlanSnapshot>());
     }

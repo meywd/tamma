@@ -186,4 +186,40 @@ public static class PricingEndpoints
                 statusCode: StatusCodes.Status401Unauthorized);
         }
     }
+
+    // ── GET /api/pricing/plans ── (Story 34-2 AC1, MemberAccess)
+    //
+    // The PUBLIC catalog: active, non-custom plans only. Deprecated / draft /
+    // custom plans are excluded by construction (IPlanCatalogService filters
+    // Status='active' AND IsCustom=false), so a bespoke enterprise plan can never
+    // leak into the pricing/upgrade UI. Works identically in single-user and
+    // SaaS mode — the list is platform-global with no per-tenant view.
+    public static async Task<IResult> ListPublicPlans(
+        IPlanCatalogService planCatalog,
+        CancellationToken ct)
+    {
+        var plans = await planCatalog.ListActivePublicAsync(ct);
+        return Results.Ok(new { plans });
+    }
+
+    // ── GET /api/pricing/plans/{slug} ── (Story 34-2 AC2, MemberAccess)
+    //
+    // The single active public plan for a slug. A custom plan's slug is never
+    // resolvable here (it is IsCustom=true) → 404. Returns the typed PlanSnapshot
+    // projection (AC13 — never a raw EF entity).
+    public static async Task<IResult> GetPublicPlanBySlug(
+        string slug,
+        IPlanCatalogService planCatalog,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(slug))
+        {
+            return Results.NotFound(new { error = "plan_not_found", slug });
+        }
+
+        var snapshot = await planCatalog.GetActivePublicBySlugAsync(slug, ct);
+        return snapshot is null
+            ? Results.NotFound(new { error = "plan_not_found", slug })
+            : Results.Ok(snapshot);
+    }
 }

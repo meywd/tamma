@@ -74,6 +74,64 @@ public sealed class PlanCatalogService : IPlanCatalogService
         return plans.Select(ToSnapshot).ToList();
     }
 
+    public async Task<IReadOnlyList<PlanSnapshot>> ListActivePublicAsync(CancellationToken ct = default)
+    {
+        var plans = await BaseQuery()
+            .Where(p => p.Status == "active" && !p.IsCustom)
+            .OrderBy(p => p.Slug)
+            .ToListAsync(ct);
+
+        _logger.LogDebug("ListActivePublicAsync returned {Count} public plan(s)", plans.Count);
+        return plans.Select(ToSnapshot).ToList();
+    }
+
+    public async Task<PlanSnapshot?> GetActivePublicBySlugAsync(string slug, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(slug);
+
+        var plan = await BaseQuery()
+            .FirstOrDefaultAsync(p => p.Slug == slug && p.Status == "active" && !p.IsCustom, ct);
+
+        return plan is null ? null : ToSnapshot(plan);
+    }
+
+    public async Task<IReadOnlyList<PlanSnapshot>> ListAllForAdminAsync(
+        PlanListFilter filter, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        var query = BaseQuery();
+
+        if (!string.IsNullOrWhiteSpace(filter.Status))
+        {
+            query = query.Where(p => p.Status == filter.Status);
+        }
+
+        if (filter.IsCustom is bool isCustom)
+        {
+            query = query.Where(p => p.IsCustom == isCustom);
+        }
+
+        if (filter.TenantId is Guid tenantId)
+        {
+            // Custom plans encode their bound tenant in the slug
+            // (custom-{tenantId:N}-*), so filter on that prefix. Only custom
+            // plans carry the binding.
+            var prefix = CustomPlanSlug.PrefixFor(tenantId);
+            query = query.Where(p => p.IsCustom && p.Slug.StartsWith(prefix));
+        }
+
+        var plans = await query
+            .OrderBy(p => p.Slug)
+            .ThenByDescending(p => p.Version)
+            .ToListAsync(ct);
+
+        _logger.LogDebug(
+            "ListAllForAdminAsync(status={Status}, isCustom={IsCustom}, tenantId={TenantId}) returned {Count}",
+            filter.Status, filter.IsCustom, filter.TenantId, plans.Count);
+        return plans.Select(ToSnapshot).ToList();
+    }
+
     public async Task<IReadOnlyList<PlanSnapshot>> GetVersionsBySlugAsync(string slug, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(slug);

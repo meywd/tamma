@@ -1734,6 +1734,28 @@ admin.MapPut("/pricing/margins",
         Tamma.Api.Endpoints.Admin.AdminPricingEndpoints.VersionMargin)
     .RequireAuthorization("PlatformOwnerAccess");
 
+// Story 34-2 — plan-catalog admin write surface under /api/admin/pricing/plans*.
+// PlatformOwnerAccess (Finding C1): the price book is platform-GLOBAL in both
+// modes (no per-tenant override layer), so it is platform-scoped admin work — a
+// tenant_owner/admin/member gets 403. All mutation flows through the immutable,
+// versioned PlanVersionEditor (Story 34-1) and emits PLAN.CATALOG.UPDATED /
+// PLAN.CUSTOM.CREATED DCB events. (The 34-1 read routes stay at /api/admin/plans.)
+admin.MapGet("/pricing/plans",
+        Tamma.Api.Endpoints.Admin.AdminPlanCatalogEndpoints.ListForAdmin)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapPost("/pricing/plans",
+        Tamma.Api.Endpoints.Admin.AdminPlanCatalogEndpoints.CreatePlan)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapPut("/pricing/plans/{slug}",
+        Tamma.Api.Endpoints.Admin.AdminPlanCatalogEndpoints.VersionPlan)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapPost("/pricing/plans/custom",
+        Tamma.Api.Endpoints.Admin.AdminPlanCatalogEndpoints.CreateCustomPlan)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapDelete("/pricing/plans/{slug}/versions/{version:int}",
+        Tamma.Api.Endpoints.Admin.AdminPlanCatalogEndpoints.DeprecateVersion)
+    .RequireAuthorization("PlatformOwnerAccess");
+
 // Story 28-11 — platform-admin tenant-status UX. List + detail surface the
 // Epic-28 shadow columns on tenants (Status, PlanId, KekVersion,
 // FailureReason, DeleteRequestedAt); action endpoints re-drive the Story
@@ -1919,6 +1941,12 @@ pricing.MapGet("/estimate", Tamma.Api.Endpoints.PricingEndpoints.GetEstimate);
 // unprivileged (any authenticated member); tenant is taken from ITenantContext
 // (SaaS) / the sole user (single-user), never from a request param.
 pricing.MapGet("/entitlements", Tamma.Api.Endpoints.PricingEndpoints.GetEntitlements);
+// Story 34-2 (AC1/AC2) — the PUBLIC plan catalog powering the pricing/upgrade UI.
+// Active, non-custom plans only (deprecated/draft/custom excluded by the
+// IPlanCatalogService filter). MemberAccess: any authenticated tenant member can
+// read; the admin write surface stays platform-owner-only (/api/admin/pricing/plans*).
+pricing.MapGet("/plans", Tamma.Api.Endpoints.PricingEndpoints.ListPublicPlans);
+pricing.MapGet("/plans/{slug}", Tamma.Api.Endpoints.PricingEndpoints.GetPublicPlanBySlug);
 
 var orgs = app.MapGroup("/api/v1/orgs").RequireAuthorization("MemberAccess");
 orgs.MapPost("/", OrgEndpoints.CreateOrg);

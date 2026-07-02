@@ -173,6 +173,11 @@ public class PlatformOwnerAccessPolicyTests
         // rows). Same Finding-C1 gate: a tenant-owner who is not a platform admin
         // must NOT view or version them (AC14).
         "/api/admin/pricing/margins",
+        // Story 34-2 — the plan-catalog admin write surface is platform-global
+        // (no per-tenant override layer). Same Finding-C1 gate: a tenant-owner
+        // who is not a platform admin must NOT list/create/version/deprecate
+        // plans or mint custom plans (AC10).
+        "/api/admin/pricing/plans",
     };
 
     [Test]
