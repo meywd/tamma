@@ -115,22 +115,56 @@ public sealed class ProvisionTenantV2WorkflowTests
     {
         var tenant = await SeedAsync();
         var fake = new FakeTenantInfrastructureProvider("cranl");
-        fake.EnqueueDeploying(times: 2).EnqueueReady();
+        // Phase-B I1: the probe is SINGLE-SHOT — one GetStatusAsync per
+        // invocation. A tenant that is Ready on the first probe reaches Ready
+        // in one call; the "not ready yet" case is a DeferRequested outcome,
+        // covered by ExecuteAsync_NonTerminalWithinBudget_ReturnsDeferRequested.
+        fake.EnqueueReady();
 
         var workflow = Build(RegistryWith(fake));
 
         var result = await workflow.ExecuteAsync(
             PayloadFor(tenant.Id, "cranl"), CancellationToken.None);
 
+        result.Kind.Should().Be(ProvisionTenantV2OutcomeKind.Completed);
         result.Status.State.Should().Be(ProvisioningState.Ready);
         result.Status.FailureReason.Should().BeNull();
         fake.ProvisionCalls.Should().HaveCount(1);
-        fake.StatusCalls.Count.Should().BeGreaterThanOrEqualTo(3);
+        fake.StatusCalls.Should().HaveCount(1, "single-shot probe reads status exactly once");
         fake.DeprovisionCalls.Should().BeEmpty("happy path runs no compensation");
 
         var refreshed = await _db.Tenants.IgnoreQueryFilters()
             .FirstAsync(t => t.Id == tenant.Id);
         refreshed.ProvisioningState.Should().Be("ready");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_NonTerminalWithinBudget_ReturnsDeferRequested()
+    {
+        // Phase-B I1: a still-provisioning tenant within the probe budget must
+        // NOT block-poll — it returns DeferRequested so the caller releases the
+        // worker slot. No compensation runs; the tenant stays Pending.
+        var tenant = await SeedAsync();
+        var fake = new FakeTenantInfrastructureProvider("cranl");
+        fake.EnqueueDeploying(times: 1);
+
+        var workflow = Build(RegistryWith(fake));
+        // 2-arg overload → deadline = now + ProbeTimeout(5s) ⇒ within budget.
+        var result = await workflow.ExecuteAsync(
+            PayloadFor(tenant.Id, "cranl"), CancellationToken.None);
+
+        result.Kind.Should().Be(ProvisionTenantV2OutcomeKind.DeferRequested);
+        result.IsDeferRequested.Should().BeTrue();
+        result.DeferDelay.Should().Be(workflow.ProbeInterval);
+        result.Status.State.Should().Be(ProvisioningState.AppDeploying,
+            "the defer outcome carries the last non-terminal snapshot");
+        fake.StatusCalls.Should().HaveCount(1, "exactly one probe before yielding");
+        fake.DeprovisionCalls.Should().BeEmpty("a defer runs no compensation");
+
+        var refreshed = await _db.Tenants.IgnoreQueryFilters()
+            .FirstAsync(t => t.Id == tenant.Id);
+        refreshed.ProvisioningState.Should().Be("pending",
+            "the tenant stays Pending across the yield so the next resume re-enters");
     }
 
     [Test]
@@ -188,20 +222,24 @@ public sealed class ProvisionTenantV2WorkflowTests
     }
 
     [Test]
-    public async Task ExecuteAsync_ProbeTimeout_StampsTimeoutAndDeprovisions()
+    public async Task ExecuteAsync_ProbeDeadlineExceeded_StampsTimeoutAndDeprovisions()
     {
+        // Phase-B I1: the ~30-min budget is now enforced by an ABSOLUTE
+        // deadline passed in by the caller (derived from the task's
+        // first-enqueue time so it survives defers). A still-provisioning
+        // probe past that deadline drives the same timeout + compensation the
+        // old in-loop budget-exceeded branch produced.
         var tenant = await SeedAsync();
         var fake = new FakeTenantInfrastructureProvider("cranl");
-        // Drain the script — every GetStatus call returns AppDeploying
-        // forever (until the budget runs out).
-        fake.EnqueueDeploying(times: 100);
+        fake.EnqueueDeploying(times: 1);
 
         var workflow = Build(RegistryWith(fake));
-        workflow.ProbeTimeout = TimeSpan.FromMilliseconds(20);
+        var alreadyExpired = DateTimeOffset.UtcNow.AddSeconds(-1);
 
         var result = await workflow.ExecuteAsync(
-            PayloadFor(tenant.Id, "cranl"), CancellationToken.None);
+            PayloadFor(tenant.Id, "cranl"), alreadyExpired, CancellationToken.None);
 
+        result.Kind.Should().Be(ProvisionTenantV2OutcomeKind.Failed);
         result.Status.FailureReason.Should().Be(ProvisioningFailureReasons.ProbeTimeout);
         fake.DeprovisionCalls.Should().HaveCount(1);
     }
@@ -448,8 +486,7 @@ public sealed class ProvisionTenantV2WorkflowTests
     {
         var tenant = await SeedAsync();
         var fake = new FakeTenantInfrastructureProvider("cranl");
-        // First poll: still deploying. Second poll: provider transitioned to Failed.
-        fake.EnqueueDeploying(times: 1);
+        // Single-shot probe observes the provider's Failed transition.
         fake.EnqueueProviderFailure("cranl_app_deploy_failed", "deploy returned 500");
 
         var workflow = Build(RegistryWith(fake));
@@ -457,6 +494,7 @@ public sealed class ProvisionTenantV2WorkflowTests
         var result = await workflow.ExecuteAsync(
             PayloadFor(tenant.Id, "cranl"), CancellationToken.None);
 
+        result.Kind.Should().Be(ProvisionTenantV2OutcomeKind.Failed);
         result.Status.State.Should().Be(ProvisioningState.Failed);
         result.Status.FailureReason.Should().Be("cranl_app_deploy_failed",
             "probe surfaces the provider's failure short-code");

@@ -42,9 +42,13 @@ namespace Tamma.Api.Services.Provisioning.V2;
 ///     <c>ISecretStore.CreateAsync</c>) is wired by 30-3 once each
 ///     provider declares which secrets it surfaces. Compensation: noop
 ///     today; <c>RetireVersionAsync</c> per registered secret in 30-3.</description></item>
-///   <item><description>InitialProbe — poll
-///     <see cref="ITenantInfrastructureProvider.GetStatusAsync"/> until
-///     Ready or budget exhausted. Compensation: <c>DeprovisionAsync</c>.</description></item>
+///   <item><description>InitialProbe — SINGLE-SHOT
+///     <see cref="ITenantInfrastructureProvider.GetStatusAsync"/>: Ready →
+///     Activate; Failed → compensate; still-provisioning within budget →
+///     <see cref="ProvisionTenantV2OutcomeKind.DeferRequested"/> (caller
+///     releases the worker slot and re-enters after ProbeInterval);
+///     still-provisioning past the deadline → timeout + compensation.
+///     Compensation on terminal failure: <c>DeprovisionAsync</c>.</description></item>
 ///   <item><description>Activate — flip tenant to <c>ready</c>, emit
 ///     <c>TENANT.PROVISIONED.SUCCESS</c>. Compensation: flip back to
 ///     <c>failed</c> with diagnostic.</description></item>
@@ -106,12 +110,40 @@ public class ProvisionTenantV2Workflow
     }
 
     /// <summary>
-    /// Run (or resume) the workflow for the supplied payload.
+    /// Convenience overload for callers that drive a SINGLE invocation and
+    /// want the probe budget measured from now (unit tests, ad-hoc runs).
+    /// The cross-resume path (<see cref="ProvisionTenantV2TaskHandler"/>)
+    /// calls the 3-arg overload with a deadline derived from the task's
+    /// first-enqueue timestamp so the budget survives defers.
     /// </summary>
-    /// <returns>Final snapshot — either Ready (happy path) or Failed
-    /// (with FailureReason short-code).</returns>
-    public virtual async Task<ProvisioningResult> ExecuteAsync(
+    public Task<ProvisionTenantV2Outcome> ExecuteAsync(
         ProvisionTenantV2TaskPayload payload,
+        CancellationToken ct)
+        => ExecuteAsync(payload, _clock.GetUtcNow() + ProbeTimeout, ct);
+
+    /// <summary>
+    /// Run (or resume) the workflow for the supplied payload.
+    ///
+    /// <para><b>Single-shot probe + defer (Phase-B I1)</b>: the InitialProbe
+    /// step performs ONE <see cref="ITenantInfrastructureProvider.GetStatusAsync"/>
+    /// call. <c>Ready</c> → activate + <see cref="ProvisionTenantV2OutcomeKind.Completed"/>.
+    /// <c>Failed</c> → compensate + <see cref="ProvisionTenantV2OutcomeKind.Failed"/>.
+    /// Still-provisioning AND within <paramref name="probeDeadline"/> →
+    /// <see cref="ProvisionTenantV2OutcomeKind.DeferRequested"/> so the caller
+    /// releases the worker slot and re-enters after the probe interval.
+    /// Still-provisioning AND past the deadline → the timeout/compensation
+    /// path (identical to the old in-loop budget-exceeded branch).</para>
+    /// </summary>
+    /// <param name="payload">Task payload.</param>
+    /// <param name="probeDeadline">Absolute wall-clock instant the probe
+    /// budget expires. Passed in (not recomputed) so it is STABLE across
+    /// resumes — the handler derives it from the task's <c>CreatedAt</c> so a
+    /// defer never resets the ~30-min budget.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The invocation outcome (Completed / Failed / DeferRequested).</returns>
+    public virtual async Task<ProvisionTenantV2Outcome> ExecuteAsync(
+        ProvisionTenantV2TaskPayload payload,
+        DateTimeOffset probeDeadline,
         CancellationToken ct)
     {
         if (payload is null) throw new ArgumentNullException(nameof(payload));
@@ -119,9 +151,9 @@ public class ProvisionTenantV2Workflow
         var tenant = await LoadTenantAsync(payload.TenantId, ct).ConfigureAwait(false);
         if (tenant is null)
         {
-            return BuildSyntheticFailure(
+            return ProvisionTenantV2Outcome.Failed(BuildSyntheticFailure(
                 ProvisioningFailureReasons.TenantNotFound,
-                $"tenant_{payload.TenantId}_not_found");
+                $"tenant_{payload.TenantId}_not_found"));
         }
 
         var initialState = ProvisioningStateExtensions.ParseState(tenant.ProvisioningState);
@@ -129,11 +161,11 @@ public class ProvisionTenantV2Workflow
             or ProvisioningState.Deprovisioning
             or ProvisioningState.Deprovisioned)
         {
-            return await StampFailureAsync(
+            return ProvisionTenantV2Outcome.Failed(await StampFailureAsync(
                 tenant,
                 ProvisioningFailureReasons.IllegalTenantState,
                 $"refused_to_run_against_state_{initialState.ToStorageString()}",
-                ct).ConfigureAwait(false);
+                ct).ConfigureAwait(false));
         }
 
         // ── Step 1: ResolveProvider ───────────────────────────────────
@@ -148,11 +180,11 @@ public class ProvisionTenantV2Workflow
                 {
                     ["failureReason"] = ProvisioningFailureReasons.NoProvisioningInThisMode,
                 }, ct).ConfigureAwait(false);
-            return await StampFailureAsync(
+            return ProvisionTenantV2Outcome.Failed(await StampFailureAsync(
                 tenant,
                 ProvisioningFailureReasons.NoProvisioningInThisMode,
                 "single_user_or_dev_mode",
-                ct).ConfigureAwait(false);
+                ct).ConfigureAwait(false));
         }
 
         if (!_registry.TryGetProvider(payload.ProviderKey, out var provider) || provider is null)
@@ -164,11 +196,11 @@ public class ProvisionTenantV2Workflow
                     ["failureReason"] = ProvisioningFailureReasons.ProviderNotRegistered,
                     ["providerKey"] = payload.ProviderKey,
                 }, ct).ConfigureAwait(false);
-            return await StampFailureAsync(
+            return ProvisionTenantV2Outcome.Failed(await StampFailureAsync(
                 tenant,
                 ProvisioningFailureReasons.ProviderNotRegistered,
                 $"provider_key_{payload.ProviderKey}_unknown",
-                ct).ConfigureAwait(false);
+                ct).ConfigureAwait(false));
         }
 
         await EmitStepEventAsync(payload.TenantId, "resolve_provider",
@@ -188,11 +220,11 @@ public class ProvisionTenantV2Workflow
                     ["failureReason"] = ProvisioningFailureReasons.UnsupportedTopology,
                     ["topology"] = payload.Topology.ToString(),
                 }, ct).ConfigureAwait(false);
-            return await StampFailureAsync(
+            return ProvisionTenantV2Outcome.Failed(await StampFailureAsync(
                 tenant,
                 ProvisioningFailureReasons.UnsupportedTopology,
                 $"provider_{payload.ProviderKey}_does_not_support_{payload.Topology}",
-                ct).ConfigureAwait(false);
+                ct).ConfigureAwait(false));
         }
 
         if (payload.Region is not null
@@ -206,11 +238,11 @@ public class ProvisionTenantV2Workflow
                     ["failureReason"] = ProvisioningFailureReasons.UnsupportedRegion,
                     ["region"] = payload.Region,
                 }, ct).ConfigureAwait(false);
-            return await StampFailureAsync(
+            return ProvisionTenantV2Outcome.Failed(await StampFailureAsync(
                 tenant,
                 ProvisioningFailureReasons.UnsupportedRegion,
                 $"region_{payload.Region}_not_supported_by_{payload.ProviderKey}",
-                ct).ConfigureAwait(false);
+                ct).ConfigureAwait(false));
         }
 
         // Quota check — skipped today because the per-org tenant count
@@ -273,11 +305,11 @@ public class ProvisionTenantV2Workflow
                         ["errorType"] = ex.GetType().Name,
                     }, ct).ConfigureAwait(false);
                 await RunCompensationsAsync(compensations, payload.TenantId, ct).ConfigureAwait(false);
-                return await StampFailureAsync(
+                return ProvisionTenantV2Outcome.Failed(await StampFailureAsync(
                     tenant,
                     ProvisioningFailureReasons.ProviderUnexpectedException,
                     $"provider_threw_{ex.GetType().Name}",
-                    ct).ConfigureAwait(false);
+                    ct).ConfigureAwait(false));
             }
 
             // Provider returned a structured Failed snapshot — surface
@@ -311,13 +343,13 @@ public class ProvisionTenantV2Workflow
                         ["detail"] = executeResult.Status.Detail,
                     }, ct).ConfigureAwait(false);
                 await RunCompensationsAsync(compensations, payload.TenantId, ct).ConfigureAwait(false);
-                return await StampFailureAsync(
+                return ProvisionTenantV2Outcome.Failed(await StampFailureAsync(
                     tenant,
                     executeResult.Status.FailureReason
                         ?? ProvisioningFailureReasons.ProviderUnexpectedException,
                     executeResult.Status.Detail
                         ?? "provider_returned_failed_without_detail",
-                    ct).ConfigureAwait(false);
+                    ct).ConfigureAwait(false));
             }
 
             await EmitStepEventAsync(payload.TenantId, "execute_provision",
@@ -378,28 +410,80 @@ public class ProvisionTenantV2Workflow
                 }, ct).ConfigureAwait(false);
             compensations.Add(("register_secrets", _ => Task.CompletedTask));
 
-            // ── Step 7: InitialProbe ─────────────────────────────────
+            // ── Step 7: InitialProbe (SINGLE-SHOT + defer) ───────────
+            // Phase-B I1: exactly ONE GetStatusAsync per invocation. We do
+            // NOT block-poll here — a non-terminal snapshot yields a
+            // DeferRequested outcome so the caller (handler) releases the
+            // one-task-at-a-time worker slot, letting the inner
+            // provisioning.tenant task (Cranl's walk) run on the same single
+            // worker before we re-enter and probe again.
             await EmitStepEventAsync(payload.TenantId, "initial_probe",
                 "STEP_STARTED", null, ct).ConfigureAwait(false);
-            var probeOutcome = await ProbeUntilReadyAsync(
-                provider, payload.TenantId, ProbeTimeout, ct).ConfigureAwait(false);
-            if (!probeOutcome.IsReady)
+
+            var snapshot = await provider
+                .GetStatusAsync(payload.TenantId, ct).ConfigureAwait(false);
+
+            if (snapshot.State == ProvisioningState.Failed)
             {
+                // Provider transitioned to Failed during the walk — surface
+                // verbatim + compensate (same path the old in-loop Failed
+                // branch took).
                 await EmitStepEventAsync(payload.TenantId, "initial_probe",
                     "STEP_FAILED",
                     new Dictionary<string, object?>
                     {
-                        ["failureReason"] = probeOutcome.FailureReason,
-                        ["detail"] = probeOutcome.Detail,
+                        ["failureReason"] = snapshot.FailureReason
+                            ?? ProvisioningFailureReasons.ProviderUnexpectedException,
+                        ["detail"] = snapshot.Detail,
                     }, ct).ConfigureAwait(false);
                 await RunCompensationsAsync(compensations, payload.TenantId, ct).ConfigureAwait(false);
-                return await StampFailureAsync(
+                return ProvisionTenantV2Outcome.Failed(await StampFailureAsync(
                     tenant,
-                    probeOutcome.FailureReason
-                        ?? ProvisioningFailureReasons.ProbeTimeout,
-                    probeOutcome.Detail ?? "probe_timeout_no_detail",
-                    ct).ConfigureAwait(false);
+                    snapshot.FailureReason
+                        ?? ProvisioningFailureReasons.ProviderUnexpectedException,
+                    snapshot.Detail ?? "provider_reported_failed_during_probe",
+                    ct).ConfigureAwait(false));
             }
+
+            if (snapshot.State != ProvisioningState.Ready)
+            {
+                // Still provisioning. Enforce the OVERALL budget across
+                // resumes: probeDeadline is the task's first-enqueue time +
+                // ProbeTimeout (stable — a defer does not reset it). Past the
+                // deadline ⇒ same timeout + compensation the old in-loop
+                // budget-exceeded branch produced.
+                if (_clock.GetUtcNow() >= probeDeadline)
+                {
+                    var timeoutDetail =
+                        $"probe_budget_{(int)ProbeTimeout.TotalSeconds}s_exceeded_state_{snapshot.State.ToStorageString()}";
+                    await EmitStepEventAsync(payload.TenantId, "initial_probe",
+                        "STEP_FAILED",
+                        new Dictionary<string, object?>
+                        {
+                            ["failureReason"] = ProvisioningFailureReasons.ProbeTimeout,
+                            ["detail"] = timeoutDetail,
+                        }, ct).ConfigureAwait(false);
+                    await RunCompensationsAsync(compensations, payload.TenantId, ct).ConfigureAwait(false);
+                    return ProvisionTenantV2Outcome.Failed(await StampFailureAsync(
+                        tenant,
+                        ProvisioningFailureReasons.ProbeTimeout,
+                        timeoutDetail,
+                        ct).ConfigureAwait(false));
+                }
+
+                // Within budget — release the slot. NO compensation runs: the
+                // tenant stays Pending and the next resume re-enters steps 1-6
+                // (idempotent) then re-probes.
+                await EmitStepEventAsync(payload.TenantId, "initial_probe",
+                    "STEP_DEFERRED",
+                    new Dictionary<string, object?>
+                    {
+                        ["state"] = snapshot.State.ToStorageString(),
+                        ["deferSeconds"] = (int)ProbeInterval.TotalSeconds,
+                    }, ct).ConfigureAwait(false);
+                return ProvisionTenantV2Outcome.Defer(ProbeInterval, snapshot);
+            }
+
             await EmitStepEventAsync(payload.TenantId, "initial_probe",
                 "STEP_COMPLETED", null, ct).ConfigureAwait(false);
 
@@ -429,7 +513,7 @@ public class ProvisionTenantV2Workflow
                 }),
             }, ct).ConfigureAwait(false);
 
-            return new ProvisioningResult(
+            return ProvisionTenantV2Outcome.Completed(new ProvisioningResult(
                 new ProvisioningStatusSnapshot(
                     ProvisioningState.Ready,
                     Detail: "activated_v2",
@@ -437,7 +521,7 @@ public class ProvisionTenantV2Workflow
                     UpdatedAt: _clock.GetUtcNow()),
                 resourceIds,
                 endpoints,
-                executeResult.ProvisioningDurationSeconds);
+                executeResult.ProvisioningDurationSeconds));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -613,49 +697,6 @@ public class ProvisionTenantV2Workflow
         }, ct).ConfigureAwait(false);
     }
 
-    private async Task<ProbeOutcome> ProbeUntilReadyAsync(
-        ITenantInfrastructureProvider provider,
-        Guid tenantId,
-        TimeSpan budget,
-        CancellationToken ct)
-    {
-        var start = _clock.GetUtcNow();
-        ProvisioningStatusSnapshot lastSnapshot;
-        while (true)
-        {
-            ct.ThrowIfCancellationRequested();
-            lastSnapshot = await provider.GetStatusAsync(tenantId, ct).ConfigureAwait(false);
-            if (lastSnapshot.State == ProvisioningState.Ready)
-            {
-                return ProbeOutcome.Ready();
-            }
-            if (lastSnapshot.State == ProvisioningState.Failed)
-            {
-                return ProbeOutcome.Failed(
-                    lastSnapshot.FailureReason
-                        ?? ProvisioningFailureReasons.ProviderUnexpectedException,
-                    lastSnapshot.Detail ?? "provider_reported_failed_during_probe");
-            }
-            var elapsed = _clock.GetUtcNow() - start;
-            if (elapsed >= budget)
-            {
-                return ProbeOutcome.Failed(
-                    ProvisioningFailureReasons.ProbeTimeout,
-                    $"probe_budget_{(int)budget.TotalSeconds}s_exceeded_state_{lastSnapshot.State.ToStorageString()}");
-            }
-
-            // Cancellable delay so worker shutdown unblocks fast.
-            try
-            {
-                await Task.Delay(ProbeInterval, ct).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-        }
-    }
-
     private async Task RunCompensationsAsync(
         List<(string Step, Func<CancellationToken, Task> Run)> compensations,
         Guid tenantId,
@@ -690,16 +731,5 @@ public class ProvisionTenantV2Workflow
                 return;
             }
         }
-    }
-
-    private readonly struct ProbeOutcome
-    {
-        public bool IsReady { get; init; }
-        public string? FailureReason { get; init; }
-        public string? Detail { get; init; }
-
-        public static ProbeOutcome Ready() => new() { IsReady = true };
-        public static ProbeOutcome Failed(string reason, string detail) =>
-            new() { IsReady = false, FailureReason = reason, Detail = detail };
     }
 }
