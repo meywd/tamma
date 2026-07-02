@@ -46,7 +46,7 @@ public class SubscriptionServiceCheckoutTests
         captured.LineItems[1].Price.Should().Be("price_seats");
         captured.LineItems[1].Quantity.Should().Be(3);
         captured.SubscriptionData!.TrialPeriodDays.Should().Be(14);
-        capturedRo!.IdempotencyKey.Should().Be($"sub-checkout-{tenantId:D}-team");
+        capturedRo!.IdempotencyKey.Should().Be($"sub-checkout-{tenantId:D}-team-s3-t14");
 
         // No local mirror row is created here (AC2).
         (await h.Db.BillingSubscriptions.CountAsync()).Should().Be(0);
@@ -73,6 +73,36 @@ public class SubscriptionServiceCheckoutTests
 
         captured!.LineItems.Should().HaveCount(1);
         captured.SubscriptionData.Should().BeNull();
+    }
+
+    [Test]
+    public async Task Checkout_Keys_Differ_When_Params_Differ_But_Dedup_When_Same()
+    {
+        // Two checkouts for the SAME plan but DIFFERENT params (seats/trialDays) must
+        // get DISTINCT keys — a same-key replay with different params 502s at Stripe.
+        // A genuine retry of the SAME params dedups. Before the fix the key was only
+        // (tenant, planSlug), so different-param checkouts COLLIDED.
+        var h = SubscriptionHarness.Create(nameof(Checkout_Keys_Differ_When_Params_Differ_But_Dedup_When_Same));
+        var tenantId = Guid.NewGuid();
+        h.SeedCustomer(tenantId, "cus_x");
+        h.SeedCatalog("team", "price_team", "price_seats");
+
+        var keys = new List<string?>();
+        h.Checkout.Setup(c => c.CreateAsync(
+                It.IsAny<Stripe.Checkout.SessionCreateOptions>(),
+                It.IsAny<Stripe.RequestOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<Stripe.Checkout.SessionCreateOptions, Stripe.RequestOptions, CancellationToken>(
+                (_, ro, _) => keys.Add(ro.IdempotencyKey))
+            .ReturnsAsync(new Stripe.Checkout.Session { Id = "cs", Url = "https://checkout/cs" });
+
+        await h.Service.CreateCheckoutSessionAsync(tenantId, "team", seats: 3, trialDays: 14);
+        await h.Service.CreateCheckoutSessionAsync(tenantId, "team", seats: 5, trialDays: 14);
+        await h.Service.CreateCheckoutSessionAsync(tenantId, "team", seats: 3, trialDays: 14);
+
+        keys[0].Should().Be($"sub-checkout-{tenantId:D}-team-s3-t14");
+        keys[1].Should().Be($"sub-checkout-{tenantId:D}-team-s5-t14");
+        keys[0].Should().NotBe(keys[1], "different seats ⇒ different key (else Stripe 502s on param mismatch)");
+        keys[2].Should().Be(keys[0], "identical params dedup");
     }
 
     [Test]

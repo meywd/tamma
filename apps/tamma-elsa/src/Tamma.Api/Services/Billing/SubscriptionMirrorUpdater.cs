@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Tamma.Core;
 using Tamma.Data;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -30,7 +31,21 @@ public sealed class SubscriptionMirrorUpdater
     public const string TransitionSeatsChanged = "seats_changed";
     public const string TransitionCanceledAtPeriodEnd = "canceled_at_period_end";
     public const string TransitionCanceled = "canceled";
-    public const string TransitionTrialEnded = "trial_ended";
+
+    /// <summary>
+    /// The <c>customer.subscription.trial_will_end</c> transition — fires ~3 days
+    /// BEFORE the trial ends (the subscription is still <c>trialing</c>), so it
+    /// emits <c>BILLING.SUBSCRIPTION.TRIAL_ENDING</c> (not <c>..._ENDED</c>).
+    /// </summary>
+    public const string TransitionTrialWillEnd = "trial_will_end";
+
+    /// <summary>
+    /// Raised when the effective plan slug has no active <c>Plan</c> row to lock
+    /// <c>Tenant.Plan</c>/<c>PlanId</c> onto (e.g. a cancel to free with no seeded
+    /// <c>free</c> plan). Fails LOUD so the transition surfaces/retries rather than
+    /// silently leaving the tenant entitled to the old higher plan.
+    /// </summary>
+    public const string LockstepPlanMissingCode = "BILLING.SUBSCRIPTION.LOCKSTEP_PLAN_MISSING";
 
     private static readonly HashSet<string> AllowedStatuses = new(StringComparer.Ordinal)
     {
@@ -116,6 +131,14 @@ public sealed class SubscriptionMirrorUpdater
         var status = MapStatus(stripeSub.Status);
         var (periodStart, periodEnd) = ExtractPeriod(stripeSub);
 
+        // Snapshot the mirror BEFORE mutation so the DCB event is emitted only when
+        // the applied Stripe state actually changes the mirror (AC — no double
+        // count). An API-initiated change applies once (emits here), then the
+        // resulting Stripe webhook re-applies the SAME state; without this guard the
+        // second apply would emit an identical BILLING.SUBSCRIPTION.* event and
+        // double-count in Epic 36/37. The mirror write itself stays idempotent.
+        var before = new MirrorSnapshot(mirror);
+
         mirror.StripeSubscriptionId = stripeSub.Id ?? mirror.StripeSubscriptionId;
         mirror.Status = status;
         if (periodStart is not null) mirror.CurrentPeriodStart = periodStart.Value;
@@ -148,12 +171,20 @@ public sealed class SubscriptionMirrorUpdater
         await ApplyTenantPlanLockstepAsync(tenantId, effectiveSlug, now, ct).ConfigureAwait(false);
         await _db.SaveChangesAsync(ct).ConfigureAwait(false);
 
-        await EmitAsync(EventTypeFor(transition), tenantId, effectiveSlug, status, null).ConfigureAwait(false);
+        // Emit the DCB event ONLY when the applied Stripe state changed the mirror
+        // (a brand-new mirror always counts as a change). A pure replay (webhook
+        // echoing an already-applied API change) is a no-op emit.
+        var changed = isNew || before.DiffersFrom(mirror);
+        if (changed)
+        {
+            await EmitAsync(EventTypeFor(transition), tenantId, effectiveSlug, status, null)
+                .ConfigureAwait(false);
+        }
 
         _logger.LogInformation(
             "Subscription {Transition} for tenant {TenantId}: planSlug={PlanSlug}, status={Status}, "
-            + "seats={Seats} (new={IsNew}).",
-            transition, tenantId, effectiveSlug, status, mirror.Seats, isNew);
+            + "seats={Seats} (new={IsNew}, emitted={Emitted}).",
+            transition, tenantId, effectiveSlug, status, mirror.Seats, isNew, changed);
 
         return SubscriptionProjection.From(mirror);
     }
@@ -195,7 +226,7 @@ public sealed class SubscriptionMirrorUpdater
     {
         TransitionCreated => BillingEvents.SubscriptionCreatedType,
         TransitionCanceled or TransitionCanceledAtPeriodEnd => BillingEvents.SubscriptionCanceledType,
-        TransitionTrialEnded => BillingEvents.SubscriptionTrialEndedType,
+        TransitionTrialWillEnd => BillingEvents.SubscriptionTrialEndingType,
         _ => BillingEvents.SubscriptionUpdatedType, // upgraded / updated / seats_changed
     };
 
@@ -287,10 +318,25 @@ public sealed class SubscriptionMirrorUpdater
             .ConfigureAwait(false);
         if (plan is null)
         {
+            // Fail LOUD (no silent fallback): a missing target plan row on a
+            // money-critical transition would otherwise leave the tenant entitled
+            // to the OLD (higher) plan — 34-6 reads the shadow PlanId. A `free`
+            // plan must always be seeded; a gap must abort the transition so it
+            // surfaces/retries rather than drift silently.
             _logger.LogError(
-                "Subscription lockstep skipped: no active Plan row for slug '{Slug}' — "
-                + "Tenant.Plan not updated for tenant {TenantId}.", effectiveSlug, tenantId);
-            return;
+                "Subscription lockstep failed: no active Plan row for slug '{Slug}' — "
+                + "aborting the transition for tenant {TenantId} (would drift entitlement).",
+                effectiveSlug, tenantId);
+            throw new TammaError(
+                LockstepPlanMissingCode,
+                $"No active Plan row for effective slug '{effectiveSlug}' — cannot lock "
+                + $"Tenant.Plan for tenant {tenantId:D}. Seed the plan catalog.",
+                new Dictionary<string, object?>
+                {
+                    ["tenantId"] = tenantId.ToString("D"),
+                    ["effectiveSlug"] = effectiveSlug,
+                },
+                retryable: false, severity: TammaErrorSeverity.Critical);
         }
 
         _db.Entry(tenant).Property("PlanId").CurrentValue = plan.Id;
@@ -315,5 +361,34 @@ public sealed class SubscriptionMirrorUpdater
                 "Failed to append {Type} for tenant {TenantId} (mirror already saved).",
                 type, tenantId);
         }
+    }
+
+    /// <summary>
+    /// Immutable snapshot of the mirror fields that decide whether a transition is
+    /// a real state change (drives the emit-once guard — Finding 3). Compared
+    /// field-for-field against the mutated mirror; equal ⇒ pure replay ⇒ no emit.
+    /// </summary>
+    private readonly record struct MirrorSnapshot(
+        string? StripeSubscriptionId,
+        string? PlanSlug,
+        string Status,
+        DateTime CurrentPeriodStart,
+        DateTime CurrentPeriodEnd,
+        bool CancelAtPeriodEnd,
+        DateTime? TrialEnd,
+        int Seats,
+        string? ScheduledPlanSlug,
+        DateTime? ScheduledEffectiveAt,
+        string? StripeScheduleId)
+    {
+        public MirrorSnapshot(BillingSubscription m) : this(
+            m.StripeSubscriptionId, m.PlanSlug, m.Status, m.CurrentPeriodStart,
+            m.CurrentPeriodEnd, m.CancelAtPeriodEnd, m.TrialEnd, m.Seats,
+            m.ScheduledPlanSlug, m.ScheduledEffectiveAt, m.StripeScheduleId)
+        {
+        }
+
+        /// <summary>True when any tracked field differs from the (mutated) mirror.</summary>
+        public bool DiffersFrom(BillingSubscription m) => this != new MirrorSnapshot(m);
     }
 }

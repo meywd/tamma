@@ -49,7 +49,7 @@ public sealed class SubscriptionMirrorWebhookHandler : IBillingEventHandler
             BillingWebhookEventTypes.SubscriptionUpdated => SubscriptionMirrorUpdater.TransitionUpdated,
             BillingWebhookEventTypes.SubscriptionDeleted => SubscriptionMirrorUpdater.TransitionCanceled,
             BillingWebhookEventTypes.SubscriptionTrialWillEnd =>
-                SubscriptionMirrorUpdater.TransitionTrialEnded,
+                SubscriptionMirrorUpdater.TransitionTrialWillEnd,
             _ => throw new InvalidOperationException(
                 $"SubscriptionMirrorWebhookHandler received unclaimed type '{ctx.EventType}'."),
         };

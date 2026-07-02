@@ -9,8 +9,9 @@ namespace Tamma.Api.Tests.Billing;
 /// <summary>
 /// Story 35-4 (AC5) — trial handling: a checkout with <c>trialDays</c> passes the
 /// trial period to Stripe; a trialing subscription applied through the shared
-/// updater sets <c>Status=trialing</c> + <c>TrialEnd</c>; conversion/expiry emit
-/// <c>BILLING.SUBSCRIPTION.TRIAL_ENDED</c> (covered in the updater tests).
+/// updater sets <c>Status=trialing</c> + <c>TrialEnd</c>; the pre-end
+/// <c>trial_will_end</c> event emits <c>BILLING.SUBSCRIPTION.TRIAL_ENDING</c>
+/// (covered in the updater tests).
 /// </summary>
 [TestFixture]
 public class SubscriptionServiceTrialTests

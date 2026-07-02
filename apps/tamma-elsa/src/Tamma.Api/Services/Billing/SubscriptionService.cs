@@ -118,7 +118,11 @@ public sealed class SubscriptionService : ISubscriptionService
         }
 
         var stripe = await _stripeFactory.CreateAsync(ct).ConfigureAwait(false);
-        var idempotencyKey = $"sub-checkout-{tenantId:D}-{planSlug}";
+        // Fold the checkout params (seats + trialDays) into the key so two DISTINCT
+        // checkout intents get DISTINCT keys — a same-key replay with different
+        // params 502s at Stripe; a genuine retry of the SAME params still dedups.
+        var idempotencyKey =
+            $"sub-checkout-{tenantId:D}-{planSlug}-s{seats ?? 0}-t{trialDays ?? 0}";
         _logger.LogDebug(
             "Creating Checkout session for tenant {TenantId} (planSlug={PlanSlug}, seats={Seats}, "
             + "trialDays={TrialDays}, idempotencyKey set).",
@@ -170,8 +174,14 @@ public sealed class SubscriptionService : ISubscriptionService
                     new() { Id = baseItemId, Price = targetCatalog.StripePriceId },
                 },
             };
+            // Fold the PRE-CHANGE slug into the key so an A→B→A plan sequence issues
+            // DISTINCT keys (each intent applies), while a genuine retry of the SAME
+            // change reuses the key (dedups). Pre-change slug read from the mirror
+            // (residual mirror-lag edge: a webhook that already moved the mirror
+            // could shift the "from" — acceptable vs. a schema column/migration).
             var idempotencyKey =
-                $"sub-change-{tenantId:D}-{newPlanSlug}-{mirror.CurrentPeriodEnd:yyyyMMdd}";
+                $"sub-change-{tenantId:D}-{mirror.PlanSlug}-to-{newPlanSlug}"
+                + $"-{mirror.CurrentPeriodEnd:yyyyMMdd}";
             var updated = await stripe.Subscriptions
                 .UpdateAsync(mirror.StripeSubscriptionId, updateOptions, Idem(idempotencyKey), ct)
                 .ConfigureAwait(false);
@@ -184,18 +194,90 @@ public sealed class SubscriptionService : ISubscriptionService
         // Downgrade — schedule at period end via a Stripe Subscription Schedule.
         // The live PlanSlug/Tenant.Plan stay at the current (higher) plan until the
         // rollover webhook fires (AC3); the mirror records the scheduled target.
-        var scheduleOptions = new SubscriptionScheduleCreateOptions
+        //
+        // A schedule created with ONLY FromSubscription is a single-phase mirror of
+        // the CURRENT sub (end_behavior=release) — at period end it releases back to
+        // the current (higher) plan and keeps charging; the target downgrade never
+        // fires. So we CREATE from the subscription, then UPDATE it into TWO phases:
+        // phase 1 = the current price item(s) through the current period end, phase 2
+        // = the TARGET plan's price (from billing_plan_prices). end_behavior=release
+        // then leaves the sub live on the target plan after the rollover.
+        if (string.IsNullOrEmpty(targetCatalog.StripePriceId))
         {
-            FromSubscription = mirror.StripeSubscriptionId,
-        };
-        var scheduleKey =
-            $"sub-downgrade-{tenantId:D}-{newPlanSlug}-{mirror.CurrentPeriodEnd:yyyyMMdd}";
+            throw new TammaError(
+                "BILLING.CATALOG.NO_PRICE",
+                $"Target plan '{newPlanSlug}' has no Stripe base price id in the catalog — "
+                + "run `seed-billing`.",
+                new Dictionary<string, object?> { ["planSlug"] = newPlanSlug },
+                retryable: false, severity: TammaErrorSeverity.High);
+        }
+
+        var fromSlug = mirror.PlanSlug;
+        var period = $"{mirror.CurrentPeriodEnd:yyyyMMdd}";
+        var scheduleKey = $"sub-downgrade-{tenantId:D}-{fromSlug}-to-{newPlanSlug}-{period}";
         var schedule = await stripe.SubscriptionSchedules
-            .CreateAsync(scheduleOptions, Idem(scheduleKey), ct)
+            .CreateAsync(
+                new SubscriptionScheduleCreateOptions { FromSubscription = mirror.StripeSubscriptionId },
+                Idem(scheduleKey), ct)
+            .ConfigureAwait(false);
+
+        var currentPhase = schedule.Phases?.FirstOrDefault();
+        List<SubscriptionSchedulePhaseItemOptions> phaseOneItems;
+        if (currentPhase?.Items is { Count: > 0 } phaseItems)
+        {
+            // Canonical path: carry the current sub's price item(s) as phase 1.
+            phaseOneItems = phaseItems
+                .Select(i => new SubscriptionSchedulePhaseItemOptions
+                {
+                    Price = i.PriceId ?? i.Price?.Id,
+                    Quantity = i.Quantity,
+                })
+                .ToList();
+        }
+        else
+        {
+            // Defensive fallback (a from_subscription schedule always seeds phase[0]
+            // in practice): rebuild phase 1 from the current plan's catalog base price.
+            var currentCatalog = await _catalog.GetBySlugAsync(fromSlug, ct).ConfigureAwait(false);
+            phaseOneItems = new List<SubscriptionSchedulePhaseItemOptions>
+            {
+                new() { Price = currentCatalog.StripePriceId, Quantity = 1 },
+            };
+        }
+
+        var effectiveAt = currentPhase is not null && currentPhase.EndDate != default
+            ? currentPhase.EndDate
+            : mirror.CurrentPeriodEnd;
+
+        var scheduleUpdateOptions = new SubscriptionScheduleUpdateOptions
+        {
+            EndBehavior = "release",
+            Phases = new List<SubscriptionSchedulePhaseOptions>
+            {
+                new()
+                {
+                    Items = phaseOneItems,
+                    StartDate = currentPhase?.StartDate ?? mirror.CurrentPeriodStart,
+                    EndDate = effectiveAt,
+                },
+                new()
+                {
+                    Items = new List<SubscriptionSchedulePhaseItemOptions>
+                    {
+                        new() { Price = targetCatalog.StripePriceId, Quantity = 1 },
+                    },
+                },
+            },
+        };
+        // Distinct key from the create so a create-then-update retry doesn't replay
+        // the create's cached response onto the update call.
+        var updateKey = $"sub-downgrade-update-{tenantId:D}-{fromSlug}-to-{newPlanSlug}-{period}";
+        await stripe.SubscriptionSchedules
+            .UpdateAsync(schedule.Id, scheduleUpdateOptions, Idem(updateKey), ct)
             .ConfigureAwait(false);
 
         return await _mirror.RecordScheduledDowngradeAsync(
-            mirror, newPlanSlug, mirror.CurrentPeriodEnd, schedule.Id, ct).ConfigureAwait(false);
+            mirror, newPlanSlug, effectiveAt, schedule.Id, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -205,8 +287,12 @@ public sealed class SubscriptionService : ISubscriptionService
         EnsureSaas();
         var mirror = await ResolveActiveMirrorAsync(tenantId, ct).ConfigureAwait(false);
         var stripe = await _stripeFactory.CreateAsync(ct).ConfigureAwait(false);
+        // Fold the PRE-CHANGE cancel-at-period-end flag into the key so a
+        // set→undo→set sequence issues DISTINCT keys (each intent applies), while a
+        // genuine retry of the SAME cancel reuses it (dedups).
         var idempotencyKey =
-            $"sub-cancel-{tenantId:D}-{atPeriodEnd}-{mirror.CurrentPeriodEnd:yyyyMMdd}";
+            $"sub-cancel-{tenantId:D}-{atPeriodEnd}-from{mirror.CancelAtPeriodEnd}"
+            + $"-{mirror.CurrentPeriodEnd:yyyyMMdd}";
 
         if (atPeriodEnd)
         {
@@ -276,7 +362,13 @@ public sealed class SubscriptionService : ISubscriptionService
             ? new SubscriptionItemOptions { Price = catalog.SeatsPriceId, Quantity = seats }
             : new SubscriptionItemOptions { Id = seatItemId, Quantity = seats };
 
-        var idempotencyKey = $"sub-seats-{tenantId:D}-{seats}-{mirror.CurrentPeriodEnd:yyyyMMdd}";
+        // Fold the PRE-CHANGE seat count into the key so a 5→10→5 sequence issues
+        // DISTINCT keys (each applies at Stripe), while a genuine retry of the SAME
+        // change (same from/to) reuses it (dedups). Pre-change count read from the
+        // mirror (residual mirror-lag edge: a webhook that already moved Seats could
+        // shift the "from" — acceptable vs. a schema column/migration).
+        var idempotencyKey =
+            $"sub-seats-{tenantId:D}-{mirror.Seats}-to-{seats}-{mirror.CurrentPeriodEnd:yyyyMMdd}";
         var updated = await stripe.Subscriptions
             .UpdateAsync(
                 mirror.StripeSubscriptionId,

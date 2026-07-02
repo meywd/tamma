@@ -219,4 +219,31 @@ internal sealed class SubscriptionHarness
             Items = new Stripe.StripeList<Stripe.SubscriptionItem> { Data = items },
         };
     }
+
+    /// <summary>
+    /// Fabricate a <see cref="Stripe.SubscriptionSchedule"/> as returned by a
+    /// <c>from_subscription</c> create: a single phase[0] mirroring the current sub
+    /// (base price item + current-period boundaries). The service reads this phase
+    /// to build phase 1 of the two-phase downgrade update.
+    /// </summary>
+    public static Stripe.SubscriptionSchedule MakeSchedule(
+        string id, string currentPriceId, DateTime periodStart, DateTime periodEnd,
+        long currentQty = 1)
+        => new()
+        {
+            Id = id,
+            EndBehavior = "release",
+            Phases = new List<Stripe.SubscriptionSchedulePhase>
+            {
+                new()
+                {
+                    StartDate = periodStart,
+                    EndDate = periodEnd,
+                    Items = new List<Stripe.SubscriptionSchedulePhaseItem>
+                    {
+                        new() { Price = new Stripe.Price { Id = currentPriceId }, Quantity = currentQty },
+                    },
+                },
+            },
+        };
 }

@@ -27,7 +27,13 @@ public static class BillingEvents
     public const string SubscriptionCreatedType = "BILLING.SUBSCRIPTION.CREATED";
     public const string SubscriptionUpdatedType = "BILLING.SUBSCRIPTION.UPDATED";
     public const string SubscriptionCanceledType = "BILLING.SUBSCRIPTION.CANCELED";
-    public const string SubscriptionTrialEndedType = "BILLING.SUBSCRIPTION.TRIAL_ENDED";
+
+    // The Stripe `customer.subscription.trial_will_end` event fires BEFORE the
+    // trial ends (the subscription is still `trialing`), so the DCB type is the
+    // semantically-correct TRIAL_ENDING — matching Story 35-5's
+    // <c>BillingWebhookEventTypes.DcbSubscriptionTrialEnding</c> (they must not
+    // drift; a rename here would orphan any consumer of the 35-5 string).
+    public const string SubscriptionTrialEndingType = "BILLING.SUBSCRIPTION.TRIAL_ENDING";
 
     private const string SystemMetadata =
         """{"workflowVersion":"1.0.0","eventSource":"system"}""";
