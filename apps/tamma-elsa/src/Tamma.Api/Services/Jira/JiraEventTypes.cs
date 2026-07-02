@@ -30,6 +30,15 @@ public static class JiraFailureCodes
     /// <summary>The referenced ticket was not found.</summary>
     public const string NotFound = "NOT_FOUND";
 
+    /// <summary>
+    /// SaaS fail-closed guard: JIRA uses a single platform-global credential with no
+    /// per-tenant/ticket scoping (there is no tenant↔JIRA-project mapping yet), so in
+    /// SaaS mode the shared-credential path is a confused-deputy — any tenant could
+    /// read/patch ANY ticket id. Denied by default; an operator re-enables it
+    /// knowingly via <c>Jira:AllowSharedCredentialInSaaS=true</c>.
+    /// </summary>
+    public const string SharedCredentialDeniedInSaaS = "JIRA_SHARED_CREDENTIAL_DENIED_IN_SAAS";
+
     /// <summary>Any other expected platform failure (permission, rate-limit, transient).</summary>
     public const string PlatformError = "PLATFORM_ERROR";
 }
