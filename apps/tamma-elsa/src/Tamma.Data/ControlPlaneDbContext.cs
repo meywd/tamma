@@ -666,6 +666,14 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<BillingWebhookEvent> BillingWebhookEvents => Set<BillingWebhookEvent>();
 
     /// <summary>
+    /// Story 35-4 — the control-plane mirror of a tenant's Stripe subscription.
+    /// At most one non-terminal row per tenant (partial-unique on
+    /// <c>TenantId</c>). Story 35-6 reads <c>PlanSlug</c> + <c>Seats</c> as the
+    /// single quota source. See <see cref="Entities.BillingSubscription"/>.
+    /// </summary>
+    public DbSet<BillingSubscription> BillingSubscriptions => Set<BillingSubscription>();
+
+    /// <summary>
     /// Story 37-1 — platform-scope curated audit trail. Tenant-scope rows live
     /// in the per-tenant schema's <c>audit_records</c>; these are the
     /// platform/lifecycle rows (impersonation, tenant provision/move, etc.).

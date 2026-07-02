@@ -3,6 +3,7 @@ using Tamma.Api.Services.Billing;
 using Tamma.Api.Services.Billing.Tasks;
 using Tamma.Api.Services.PlatformTasks;
 using Tamma.Api.Services.PromptStore;
+using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Extensions;
 
@@ -59,6 +60,15 @@ public static class BillingServiceCollectionExtensions
         // both modes — in single-user it dead-letters cleanly (handler guards on
         // IsEnabled) but the hook never enqueues a task there anyway.
         services.AddPlatformTaskHandler<CreateBillingCustomerTaskHandler>();
+
+        // Story 35-4 — subscription lifecycle seam. Registered in BOTH modes so the
+        // service resolves the NullBillingProvider in single-user and short-circuits
+        // every mutating call (zero Stripe — AC11); the endpoints are mapped only in
+        // SaaS (Program.cs). The mirror updater is ALSO consumed by the 35-5 webhook
+        // handler (SubscriptionMirrorWebhookHandler) so the mirror logic lives once.
+        services.AddScoped<IBillingSubscriptionRepository, BillingSubscriptionRepository>();
+        services.AddScoped<SubscriptionMirrorUpdater>();
+        services.AddScoped<ISubscriptionService, SubscriptionService>();
 
         return services;
     }

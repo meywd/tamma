@@ -30,4 +30,16 @@ public sealed class BillingOptions
 
     /// <summary>Default ISO-4217 settlement currency for new customers/prices.</summary>
     public string DefaultCurrency { get; set; } = "usd";
+
+    /// <summary>
+    /// Story 35-4 — the URL Stripe Checkout redirects to on success. Non-secret;
+    /// binds from config (<c>Billing:CheckoutSuccessUrl</c>).
+    /// </summary>
+    public string CheckoutSuccessUrl { get; set; } = "https://app.tamma.dev/billing/success";
+
+    /// <summary>
+    /// Story 35-4 — the URL Stripe Checkout redirects to on cancel. Non-secret;
+    /// binds from config (<c>Billing:CheckoutCancelUrl</c>).
+    /// </summary>
+    public string CheckoutCancelUrl { get; set; } = "https://app.tamma.dev/billing/cancel";
 }

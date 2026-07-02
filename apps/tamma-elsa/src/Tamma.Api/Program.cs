@@ -2458,6 +2458,13 @@ if (app.Services.GetRequiredService<Tamma.Api.Services.PromptStore.ITammaModePro
     app.MapPost("/api/v1/admin/billing/webhook-events/{id:guid}/replay",
             Tamma.Api.Endpoints.Billing.BillingWebhookAdminEndpoints.Replay)
         .RequireAuthorization("PlatformOwnerAccess");
+
+    // ── Story 35-4 — tenant-scoped subscription lifecycle (SaaS only) ──
+    // /api/v1/orgs/{tenantId}/billing/subscription/{checkout,change,cancel,seats}
+    // + GET. Membership-gated (RequireTenantMembershipFilter); mutations require
+    // tenant owner/admin (checked in-handler). Single-user leaves these unmapped
+    // (NullBillingProvider, zero Stripe — AC11).
+    Tamma.Api.Endpoints.Billing.SubscriptionEndpoints.MapSubscriptionEndpoints(app);
 }
 
 // ── SaaS (API key auth) ──
@@ -2674,7 +2681,7 @@ using (var scope = app.Services.CreateScope())
                     tenant_agent_enablements,
                     audit_records, audit_projector_cursor,
                     billing_customers, billing_plan_prices,
-                    billing_webhook_events,
+                    billing_webhook_events, billing_subscriptions,
                     alert_delivery_attempts, alert_channels, alerts,
                     alert_evaluator_cursor, alert_rules,
                     api_keys, agent_configs, budget_configs, domain_events,

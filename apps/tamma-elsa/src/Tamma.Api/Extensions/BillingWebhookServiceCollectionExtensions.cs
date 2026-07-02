@@ -52,7 +52,16 @@ public static class BillingWebhookServiceCollectionExtensions
         // 35-5's default DCB-emitting handlers. Sibling stories add their own via
         // AddBillingEventHandler<T>(); duplicate-claim detection supersedes these
         // cleanly when 35-4/35-7/35-8 land.
-        services.AddBillingEventHandler<SubscriptionWebhookHandler>();
+        //
+        // Story 35-4 SUPERSEDES the audit-only SubscriptionWebhookHandler with
+        // SubscriptionMirrorWebhookHandler, which drives the shared
+        // SubscriptionMirrorUpdater (mirror + Tenant.Plan lockstep + the
+        // BILLING.SUBSCRIPTION.* DCB event). Its dependency graph is registered by
+        // AddTammaBilling, which Program.cs calls before this. Registry
+        // duplicate-claim detection forbids BOTH claiming the subscription types, so
+        // the 35-5 handler is no longer registered (its class stays for its own unit
+        // tests).
+        services.AddBillingEventHandler<SubscriptionMirrorWebhookHandler>();
         services.AddBillingEventHandler<InvoiceWebhookHandler>();
         services.AddBillingEventHandler<PaymentWebhookHandler>();
         services.AddBillingEventHandler<DisputeWebhookHandler>();

@@ -1079,6 +1079,53 @@ internal static class TammaModelConfiguration
                 .HasDatabaseName("IX_billing_webhook_events_TenantId")
                 .HasFilter("\"TenantId\" IS NOT NULL");
         });
+
+        // ── BillingSubscription (Story 35-4 — control-plane subscription mirror) ──
+        modelBuilder.Entity<BillingSubscription>(entity =>
+        {
+            entity.ToTable("billing_subscriptions", t =>
+            {
+                // Text domain for the Stripe-mirrored status.
+                t.HasCheckConstraint(
+                    "ck_billing_subscriptions_status",
+                    "\"Status\" IN ('trialing','active','past_due','canceled',"
+                    + "'incomplete','incomplete_expired','unpaid')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.StripeSubscriptionId).HasMaxLength(255);
+            entity.Property(e => e.PlanSlug)
+                .IsRequired().HasMaxLength(64).HasDefaultValue("free");
+            entity.Property(e => e.Status)
+                .IsRequired().HasMaxLength(32).HasDefaultValue("active");
+            entity.Property(e => e.CancelAtPeriodEnd).HasDefaultValue(false);
+            entity.Property(e => e.Seats).HasDefaultValue(1);
+            entity.Property(e => e.ScheduledPlanSlug).HasMaxLength(64);
+            entity.Property(e => e.StripeScheduleId).HasMaxLength(255);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // At most ONE non-terminal subscription per tenant (AC1 / AC12). A
+            // tenant may keep many historical terminal rows; only the live one is
+            // constrained. Partial-unique expresses that without a soft-delete col.
+            entity.HasIndex(e => e.TenantId)
+                .HasDatabaseName("UX_billing_subscriptions_TenantId_NonTerminal")
+                .HasFilter("\"Status\" NOT IN ('canceled','incomplete_expired')")
+                .IsUnique();
+
+            // Stripe subscription ids are globally unique once assigned. Partial so
+            // the null-until-acked rows don't collide on NULL.
+            entity.HasIndex(e => e.StripeSubscriptionId)
+                .HasDatabaseName("UX_billing_subscriptions_StripeSubscriptionId")
+                .HasFilter("\"StripeSubscriptionId\" IS NOT NULL")
+                .IsUnique();
+
+            // Tenant purge cascades the subscription mirror.
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
     }
 
     /// <summary>
