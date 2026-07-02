@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Tamma.Api.Services.Analytics;
+using Tamma.Api.Services.PromptStore;
 
 namespace Tamma.Api.Endpoints;
 
@@ -128,6 +129,76 @@ public static class TenantAnalyticsEndpoints
         LogWindowDebug(log, tenantId, from, to, window);
 
         var result = await analytics.GetBreakdownAsync(tenantId, window, dim, met, clampedLimit, ct);
+        return Results.Ok(result);
+    }
+
+    /// <summary>
+    /// Story 36-4 — <c>GET /api/v1/orgs/{tenantId}/analytics/cost</c>. A daily
+    /// BYOK/platform cost split over <c>[from, to)</c> (optionally grouped by
+    /// <c>provider</c>|<c>agent</c>), plus month-to-date + linear-run-rate
+    /// projected platform-billed spend, a <c>BudgetConfig</c> join, and a trend
+    /// vs the prior equivalent window.
+    ///
+    /// <para>Reuses the Story 36-3 <see cref="AnalyticsWindow"/> for forced-UTC
+    /// binding + range clamp; the only difference from <see cref="GetUsage"/> is
+    /// (a) the window <b>defaults to the current calendar month</b> (UTC) when
+    /// omitted — the natural budget/MTD frame — and (b) <c>groupBy</c> accepts
+    /// only <c>provider</c>|<c>agent</c> (cost has no workflow/repo split).</para>
+    /// </summary>
+    public static async Task<IResult> GetCost(
+        Guid tenantId,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? groupBy,
+        ICostAnalyticsService cost,
+        ITammaModeProvider modeProvider,
+        TimeProvider timeProvider,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        var log = loggerFactory.CreateLogger("Tamma.Api.Endpoints.TenantAnalyticsEndpoints");
+
+        // groupBy is optional; cost only splits by provider|agent (not workflow/repo).
+        AnalyticsDimension? groupByDim = null;
+        if (!string.IsNullOrWhiteSpace(groupBy))
+        {
+            switch (groupBy.Trim().ToLowerInvariant())
+            {
+                case "provider":
+                    groupByDim = AnalyticsDimension.Provider;
+                    break;
+                case "agent":
+                    groupByDim = AnalyticsDimension.Agent;
+                    break;
+                default:
+                    return Results.BadRequest(new { error = "groupBy must be one of: provider, agent" });
+            }
+        }
+
+        // Default the window to the current calendar month (UTC) when omitted —
+        // the frame budget-vs-actual + MTD projection are reasoned about. Then
+        // hand off to AnalyticsWindow.Resolve for the shared forced-UTC binding,
+        // from<to validation, and 365-day clamp (reused verbatim from 36-3).
+        var nowUtc = timeProvider.GetUtcNow().UtcDateTime;
+        var monthStart = new DateTime(nowUtc.Year, nowUtc.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var nextMonthStart = monthStart.AddMonths(1);
+        var effectiveFrom = from ?? monthStart;
+        var effectiveTo = to ?? nextMonthStart;
+
+        var window = AnalyticsWindow.Resolve(effectiveFrom, effectiveTo, "day");
+        if (!window.IsValid)
+        {
+            log.LogWarning(
+                "Tenant cost query rejected: tenantId={TenantId} requestedFrom={From} "
+                    + "requestedTo={To} error={Error}",
+                tenantId, from, to, window.Error);
+            return Results.BadRequest(new { error = window.Error });
+        }
+
+        LogWindowDebug(log, tenantId, from, to, window);
+
+        var mode = modeProvider.Mode == TammaMode.SaaS ? "saas" : "single-user";
+        var result = await cost.GetCostAsync(tenantId, window, groupByDim, mode, ct);
         return Results.Ok(result);
     }
 

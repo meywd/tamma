@@ -1048,6 +1048,16 @@ builder.Services.AddScoped<
     Tamma.Api.Services.Analytics.ITenantAnalyticsService,
     Tamma.Api.Services.Analytics.TenantAnalyticsService>();
 
+// Story 36-4 — tenant-facing cost & spend analytics read seam. Reads the same
+// per-tenant Story 36-1 analytics_usage_daily fact table (populated by 36-2)
+// through ITenantDbContextFactory, splitting BYOK CostUsd (informational) from
+// the materialised PlatformBilledUsd (billable). Reads PlatformBilledUsd as the
+// single source of truth — NO markup/pricing dependency (AC4/AC10). Joins
+// BudgetConfig read-only and emits the deduped budget-exceeded DCB event.
+builder.Services.AddScoped<
+    Tamma.Api.Services.Analytics.ICostAnalyticsService,
+    Tamma.Api.Services.Analytics.CostAnalyticsService>();
+
 // Story 34-11 — swap the frozen ProviderPricingService for the DB-backed
 // DbProviderPricingService behind the unchanged IProviderPricingService seam
 // (a one-line DI change; zero downstream consumer edits). Must run AFTER
@@ -1958,6 +1968,14 @@ orgs.MapGet("/{tenantId:guid}/dashboard/stats", UserDashboardEndpoints.GetStats)
 orgs.MapGet("/{tenantId:guid}/analytics/usage", TenantAnalyticsEndpoints.GetUsage)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 orgs.MapGet("/{tenantId:guid}/analytics/usage/breakdown", TenantAnalyticsEndpoints.GetBreakdown)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+
+// Story 36-4 — tenant cost & spend analytics API (BYOK vs platform split +
+// budget projection). Same MemberAccess + membership-filter gate as the usage
+// routes above; reads the per-tenant analytics_usage_daily fact table only and
+// exposes the tenant's own BYOK cost + billed amount (never a platform-internal
+// margin). Read-only aggregation + one deduped budget-exceeded DCB event.
+orgs.MapGet("/{tenantId:guid}/analytics/cost", TenantAnalyticsEndpoints.GetCost)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 
 // Story 5.6 / 1.5-37 (Wave C.3) — tenant-scope alert surface.
