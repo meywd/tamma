@@ -209,10 +209,12 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
                         buildResponse?.FailureReason ?? "ci mediation endpoint unavailable");
                 var buildStatus = GitMediationMapping.ToBuildStatus(buildResponse.BuildStatus);
                 data.BuildStatus = buildStatus.Status;
-                // NB: the CI-mediation build-status DTO carries no Error field (Batch B note),
-                // so BuildError is now always null. The build-failure branch of AnalyzeBlocker
-                // (which required a non-empty BuildError) therefore no longer fires — a failing
-                // build now surfaces only via BuildStatus + the test/inactivity branches.
+                // NB: BuildError remains null here — the CI-mediation build-status DTO carries
+                // no Error field, but note the pre-cutover composite CI service was ALSO a stub
+                // that never populated BuildStatus.Error, so AnalyzeBlocker's build-failure branch
+                // (which requires a non-empty BuildError) was already inert on main — this is not
+                // a regression. Populating it would require the CI service to return a real error
+                // string first; do not restore the branch without that.
                 data.BuildError = buildStatus.Error;
 
                 var testsResponse = await apiClient.TriggerTestsAsync(
@@ -222,9 +224,10 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
                         testsResponse?.FailureReason ?? "ci mediation endpoint unavailable");
                 var testResults = GitMediationMapping.ToTestRun(testsResponse.TestRun);
                 data.FailingTestCount = testResults.FailedTests;
-                // NB: the CI-mediation test-run DTO carries aggregate counts only (no per-test
-                // detail), so FailingTests is now always empty — FailingTestCount still drives
-                // the testing-challenge branch.
+                // NB: FailingTests is empty — the CI-mediation test-run DTO carries aggregate
+                // counts only. The pre-cutover composite CI service was ALSO a stub (TotalTests=0,
+                // no per-test detail), so this list was already always empty on main (not a
+                // regression). FailingTestCount still drives the testing-challenge branch.
                 data.FailingTests = testResults.FailedTestDetails
                     .Select(t => t.TestName)
                     .ToList();

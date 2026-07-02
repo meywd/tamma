@@ -107,8 +107,12 @@ public sealed class GitMediationService : IGitMediationService
         {
             return await body().ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            // Genuine caller cancellation propagates; an HttpClient timeout
+            // (TaskCanceledException with ct NOT requested) falls through to the
+            // general catch → typed PLATFORM_ERROR envelope (never a raw 5xx),
+            // matching the Ci/Jira mediation siblings.
             throw;
         }
         catch (Exception ex)
