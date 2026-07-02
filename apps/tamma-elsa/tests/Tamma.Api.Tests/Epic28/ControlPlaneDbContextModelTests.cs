@@ -147,6 +147,11 @@ public class ControlPlaneDbContextModelTests
             // scope, versioned). Platform-owned (PlatformOwnerAccess); CP-resident
             // because margin is a platform-global pricing concern, not per-tenant.
             "margin_policies",
+            // Story 34-4 — per-tenant, version-pinned plan assignments (source of
+            // truth for "what plan version is this tenant on right now"). CP-resident
+            // (keyed by tenant, alongside the plans catalog). One active row per
+            // tenant (partial unique index).
+            "tenant_plan_assignments",
         }, because: "Story 28-1 PR D (Decision #4) — enumerate every "
             + "CP-resident table; the 11 + 4 mentorship tenant-resident "
             + "entities have moved to TenantDbContext. Story 31-2 adds "
@@ -162,6 +167,7 @@ public class ControlPlaneDbContextModelTests
             + "Story 37-1 adds audit_records + audit_projector_cursor. "
             + "Story 34-11 adds providers + provider_model_prices. "
             + "Story 34-5 adds margin_policies. "
+            + "Story 34-4 adds tenant_plan_assignments. "
             + "Story 38-3 adds slack_outbox.");
     }
 

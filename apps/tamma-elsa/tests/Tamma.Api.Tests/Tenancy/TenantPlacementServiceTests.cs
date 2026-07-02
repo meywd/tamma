@@ -282,6 +282,69 @@ public class TenantPlacementServiceTests
     }
 
     [Test]
+    public async Task Assign_CustomPlanTenant_ResolvesPinnedPlanId_NotStaleSlug()
+    {
+        // Finding 2 (Story 34-4) — a custom-plan tenant has its version-pinned
+        // Tenant.PlanId shadow FK set to a CUSTOM plan while the legacy Tenant.Plan
+        // slug stays stale/non-canonical (a custom slug can't sit in the
+        // ck_tenants_plan-constrained column). Placement must resolve the
+        // PlacementPolicy/tier from PlanId, not the stale slug. Here the stale slug
+        // is "team" (shared) but the pinned custom plan is 'dedicated'; only a
+        // dedicated pool row (eligible for the custom tier) is available, so
+        // placement SUCCEEDS only if it resolves the pinned custom plan — resolving
+        // the stale "team" slug ('shared') would find no eligible row and throw.
+        var dbName = nameof(Assign_CustomPlanTenant_ResolvesPinnedPlanId_NotStaleSlug);
+        var tenantId = Guid.NewGuid();
+        var customPlanId = Guid.NewGuid();
+        var customSlug = $"custom-{tenantId:N}"[..20];
+
+        await using (var seed = CreateContext(dbName))
+        {
+            await PlansSeeder.SeedAsync(seed);
+            var now = DateTime.UtcNow;
+            seed.Plans.Add(new Plan
+            {
+                Id = customPlanId,
+                Slug = customSlug,
+                DisplayName = "Bespoke Enterprise",
+                Version = 1,
+                Status = "active",
+                IsCustom = true,
+                BillingInterval = "monthly",
+                MonthlyPriceUsd = 999m,
+                PlacementPolicy = "dedicated",
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+
+            var tenant = new Tenant
+            {
+                Id = tenantId,
+                Name = "Custom Plan Tenant",
+                Slug = $"custom-t-{tenantId:N}"[..20],
+                Plan = "team", // STALE legacy slug (shared) — must be IGNORED
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+            seed.Tenants.Add(tenant);
+            seed.Entry(tenant).Property<Guid?>("PlanId").CurrentValue = customPlanId;
+            await seed.SaveChangesAsync();
+        }
+
+        // Only a DEDICATED row (eligible for the custom tier) exists. A stale-slug
+        // ("team" → 'shared') resolution would find no eligible row and throw.
+        var dedicated = PoolRow("dedicated-1", placementClass: "dedicated",
+            tiers: [customSlug]);
+        await AddPoolRowsAsync(dbName, dedicated);
+
+        var placement = await CreateService(dbName).AssignAsync(tenantId);
+
+        placement.DatabaseId.Should().Be(dedicated.Id,
+            "placement must resolve the version-pinned custom plan ('dedicated') from "
+            + "Tenant.PlanId, not the stale legacy slug ('team' → 'shared')");
+    }
+
+    [Test]
     public async Task Assign_CorruptState_OnePropSet_ReStamps()
     {
         var dbName = nameof(Assign_CorruptState_OnePropSet_ReStamps);

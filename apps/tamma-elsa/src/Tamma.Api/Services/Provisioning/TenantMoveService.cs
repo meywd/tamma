@@ -460,15 +460,15 @@ public sealed class TenantMoveService : ITenantMoveService
 
         // Tier eligibility/capacity — the SAME predicate placement uses
         // (TenantPlacementService.EligibleFor), evaluated in-memory on the
-        // loaded target row. Story 34-1: pin Status == "active" so a multi-
-        // version slug resolves the live PlacementPolicy, not a deprecated
-        // row picked in undefined order. UX_plans_OneActivePerSlug keeps it
-        // deterministic.
-        var plan = await db.Plans
-                .FirstOrDefaultAsync(p => p.Slug == tenant.Plan && p.Status == "active", ct)
+        // loaded target row. Story 34-4: resolve the version-pinned Tenant.PlanId
+        // FK (so a custom-plan tenant with a stale legacy slug moves to a row
+        // eligible for its REAL tier), falling back to the active version of the
+        // legacy slug only for a NULL-PlanId legacy tenant.
+        var plan = await TenantPlacementService.ResolveTenantPlanAsync(db, tenant, asNoTracking: false, ct)
             ?? throw new InvalidOperationException(
-                $"No active plans row for slug '{tenant.Plan}' (tenant '{tenantId}') — move "
-                + "requires plans.PlacementPolicy; seed or repair the plans table.");
+                $"No plans row resolved for tenant '{tenantId}' (PlanId shadow FK or legacy slug "
+                + $"'{tenant.Plan}') — move requires plans.PlacementPolicy; seed or repair the "
+                + "plans table.");
         if (!TenantPlacementService.EligibleFor(plan.Slug, plan.PlacementPolicy)
                 .Compile()(target))
         {

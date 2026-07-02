@@ -499,6 +499,15 @@ public class ControlPlaneDbContext : DbContext
     /// </summary>
     public DbSet<PlanPrice> PlanPrices => Set<PlanPrice>();
 
+    /// <summary>
+    /// Story 34-4 — audited, version-pinned per-tenant plan assignments. The
+    /// SOURCE OF TRUTH for "what plan version is this tenant on right now"
+    /// (replaces the loose <c>Tenant.Plan</c> string + the Epic-28 <c>PlanId</c>
+    /// shadow column, which are kept in lockstep as a cache). CP-resident. At
+    /// most one <c>active</c> row per tenant (partial unique index).
+    /// </summary>
+    public DbSet<TenantPlanAssignment> TenantPlanAssignments => Set<TenantPlanAssignment>();
+
     public DbSet<PlatformEvent> PlatformEvents => Set<PlatformEvent>();
     public DbSet<PlatformQueuedTask> PlatformQueuedTasks => Set<PlatformQueuedTask>();
     public DbSet<PlatformEmailOutboxMessage> PlatformEmailOutbox => Set<PlatformEmailOutboxMessage>();
@@ -820,6 +829,12 @@ public class ControlPlaneDbContext : DbContext
         // CP-resident, platform-global, immutable-versioned shape as the 34-11
         // cost rows above.
         ConfigureMarginPolicies(modelBuilder);
+
+        // Story 34-4 — per-tenant, version-pinned plan assignments. CP-resident
+        // (keyed by tenant, alongside the plans catalog). Partial unique index
+        // enforces at most one active assignment per tenant; FKs to tenants
+        // (Cascade) + plans (Restrict).
+        TammaModelConfiguration.ConfigureTenantPlanAssignments(modelBuilder);
     }
 
     /// <summary>
