@@ -1,9 +1,11 @@
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
 using Tamma.Activities.AI;
+using Tamma.Activities.LlmCall;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
 
@@ -14,7 +16,7 @@ public class ContextGatheringActivityTests
 {
     private Mock<ILogger<ContextGatheringActivity>> _mockLogger = null!;
     private Mock<IMentorshipSessionRepository> _mockRepository = null!;
-    private Mock<IIntegrationService> _mockIntegrationService = null!;
+    private TammaApiClient _apiClient = null!;
     private Mock<IHttpClientFactory> _mockHttpClientFactory = null!;
     private Mock<IConfiguration> _mockConfiguration = null!;
 
@@ -23,7 +25,9 @@ public class ContextGatheringActivityTests
     {
         _mockLogger = new Mock<ILogger<ContextGatheringActivity>>();
         _mockRepository = new Mock<IMentorshipSessionRepository>();
-        _mockIntegrationService = new Mock<IIntegrationService>();
+        // Story 38 (Phase 2): the activity now depends on the thin TammaApiClient, not
+        // the credential-holding composite IIntegrationService.
+        _apiClient = new TammaApiClient(new HttpClient(), NullLogger<TammaApiClient>.Instance, null, null);
         _mockHttpClientFactory = new Mock<IHttpClientFactory>();
         _mockConfiguration = new Mock<IConfiguration>();
     }
@@ -35,7 +39,7 @@ public class ContextGatheringActivityTests
         Action act = () => new ContextGatheringActivity(
             _mockLogger.Object,
             _mockRepository.Object,
-            _mockIntegrationService.Object,
+            _apiClient,
             _mockHttpClientFactory.Object,
             _mockConfiguration.Object);
 

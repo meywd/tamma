@@ -138,14 +138,17 @@ public class SlackCallerCutoverTests
         typeof(Tamma.Activities.Blocker.EscalateToSeniorActivity),
     };
 
-    // The five activities that ALSO use IIntegrationService for non-Slack work
-    // (GitHub merge/PR, CI status, JIRA, email) — they legitimately retain it; the
+    // The activities that ALSO use IIntegrationService for non-Slack work (GitHub
+    // merge/PR, CI status, JIRA, email) — they legitimately retain it; the 38-3b
     // cutover removed only their Slack calls (proved by the drift guard below).
+    //
+    // NOTE: CodeReviewActivity was in this list until Story 38 Phase 2 (Batch A) cut its
+    // git reads + PR create over to the thin TammaApiClient — it now holds NO
+    // IIntegrationService and is covered by IntegrationServiceCutoverTests instead.
     private static readonly Type[] NonSlackRetainers =
     {
         typeof(Tamma.Activities.Mentorship.MergeCompleteActivity),
         typeof(Tamma.Activities.Mentorship.DiagnoseBlockerActivity),
-        typeof(Tamma.Activities.Mentorship.CodeReviewActivity),
         typeof(Tamma.Activities.Review.MergeAndCompleteReviewActivity),
         typeof(Tamma.Activities.Assessment.DeliverQuestionsActivity),
     };

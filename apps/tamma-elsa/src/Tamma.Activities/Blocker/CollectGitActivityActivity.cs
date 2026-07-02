@@ -5,7 +5,10 @@ using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using Tamma.Activities.ADL;
 using Tamma.Activities.Blocker.Models;
+using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 using Tamma.Core.Interfaces;
 
 namespace Tamma.Activities.Blocker;
@@ -24,7 +27,7 @@ namespace Tamma.Activities.Blocker;
 public class CollectGitActivityActivity : CodeActivity<GitActivitySignal>
 {
     private readonly ILogger<CollectGitActivityActivity>? _logger;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
     private readonly IConfiguration? _configuration;
 
     /// <summary>Repository URL or owner/repo</summary>
@@ -39,16 +42,25 @@ public class CollectGitActivityActivity : CodeActivity<GitActivitySignal>
     [Input(Description = "Lookback period in hours", DefaultValue = 24)]
     public Input<int> LookbackHours { get; set; } = new(24);
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public CollectGitActivityActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no git token: commits + file changes are read through
+    /// <c>GET /api/v1/git/{owner}/{repo}/commits</c> and <c>/file-changes</c> via
+    /// <see cref="TammaApiClient"/>, where the per-tenant token lives.
+    /// </summary>
     public CollectGitActivityActivity(
         ILogger<CollectGitActivityActivity> logger,
-        IIntegrationService integrationService,
+        TammaApiClient apiClient,
         IConfiguration configuration)
     {
         _logger = logger;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
         _configuration = configuration;
     }
 
@@ -57,12 +69,15 @@ public class CollectGitActivityActivity : CodeActivity<GitActivitySignal>
         var repository = Repository.Get(context);
         var branchName = BranchName.Get(context);
         var lookbackHours = LookbackHours.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
 
         _logger?.LogInformation(
             "Collecting git activity signals for {Repository}/{Branch}",
             repository, branchName);
 
         var signal = new GitActivitySignal();
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
 
         try
         {
@@ -71,7 +86,12 @@ public class CollectGitActivityActivity : CodeActivity<GitActivitySignal>
             var completedInTime = await BlockerSignalTimeout.RunAsync(_configuration, async () =>
             {
                 var since = DateTime.UtcNow.AddHours(-lookbackHours);
-                var commits = await _integrationService!.GetGitHubCommitsAsync(repository, branchName, since);
+                var commitsResponse = await apiClient.GetCommitsAsync(
+                    repository, branchName, since, correlationId, tenantId, context.CancellationToken);
+                if (commitsResponse is null || !commitsResponse.Success)
+                    throw new InvalidOperationException(
+                        commitsResponse?.FailureReason ?? "git mediation endpoint unavailable");
+                var commits = GitMediationMapping.ToCommits(commitsResponse.Commits);
 
                 signal.RecentCommitCount = commits.Count;
                 signal.LastCommitTime = commits.Any() ? commits.Max(c => c.Timestamp) : null;
@@ -79,7 +99,12 @@ public class CollectGitActivityActivity : CodeActivity<GitActivitySignal>
                     ? DateTime.UtcNow - signal.LastCommitTime.Value
                     : TimeSpan.FromHours(lookbackHours);
 
-                var fileChanges = await _integrationService.GetGitHubFileChangesAsync(repository, branchName);
+                var fileChangesResponse = await apiClient.GetFileChangesAsync(
+                    repository, branchName, correlationId, tenantId, context.CancellationToken);
+                if (fileChangesResponse is null || !fileChangesResponse.Success)
+                    throw new InvalidOperationException(
+                        fileChangesResponse?.FailureReason ?? "git mediation endpoint unavailable");
+                var fileChanges = GitMediationMapping.ToFileChanges(fileChangesResponse.FileChanges);
                 signal.FilesChanged = fileChanges.Count;
                 signal.TotalAdditions = fileChanges.Sum(f => f.Additions);
                 signal.TotalDeletions = fileChanges.Sum(f => f.Deletions);

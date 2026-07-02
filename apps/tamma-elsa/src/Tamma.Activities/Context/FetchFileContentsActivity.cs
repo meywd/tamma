@@ -8,7 +8,9 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.ADL;
 using Tamma.Activities.Context.Models;
+using Tamma.Activities.LlmCall;
 using Tamma.Core.Interfaces;
 
 namespace Tamma.Activities.Context;
@@ -30,7 +32,7 @@ namespace Tamma.Activities.Context;
 public class FetchFileContentsActivity : CodeActivity<FileContentsResult>
 {
     private readonly ILogger<FetchFileContentsActivity>? _logger;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
     private readonly IHttpClientFactory? _httpClientFactory;
     private readonly IConfiguration? _configuration;
 
@@ -58,19 +60,28 @@ public class FetchFileContentsActivity : CodeActivity<FileContentsResult>
     [Input(Description = "Maximum files to fetch", DefaultValue = 15)]
     public Input<int> MaxFiles { get; set; } = new(15);
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public FetchFileContentsActivity()
     {
     }
 
+    /// <summary>
+    /// Story 38 (Phase 2) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no git token: the fallback branch file-change list is read through
+    /// <c>GET /api/v1/git/{owner}/{repo}/file-changes</c> via <see cref="TammaApiClient"/>.
+    /// The GitHub Contents API reads keep using the injected <see cref="IHttpClientFactory"/>.
+    /// </summary>
     public FetchFileContentsActivity(
         ILogger<FetchFileContentsActivity> logger,
-        IIntegrationService integrationService,
+        TammaApiClient apiClient,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration)
     {
         _logger = logger;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
     }
@@ -83,6 +94,9 @@ public class FetchFileContentsActivity : CodeActivity<FileContentsResult>
         var storyDescription = StoryDescription.Get(context);
         var commitFiles = CommitFiles.Get(context);
         var maxFiles = MaxFiles.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
 
         _logger?.LogInformation(
             "Fetching file contents for story {StoryId} from {Repo}",
@@ -108,8 +122,12 @@ public class FetchFileContentsActivity : CodeActivity<FileContentsResult>
             if (!filePaths.Any())
             {
                 // Fallback: try to get file changes from the branch
-                var fileChanges = await _integrationService!.GetGitHubFileChangesAsync(
-                    repositoryUrl, $"feature/{storyId}");
+                var fileChangesResponse = await apiClient.GetFileChangesAsync(
+                    repositoryUrl, $"feature/{storyId}", correlationId, tenantId, context.CancellationToken);
+                if (fileChangesResponse is null || !fileChangesResponse.Success)
+                    throw new InvalidOperationException(
+                        fileChangesResponse?.FailureReason ?? "git mediation endpoint unavailable");
+                var fileChanges = GitMediationMapping.ToFileChanges(fileChangesResponse.FileChanges);
                 filePaths = fileChanges.Select(f => f.FilePath).Take(maxFiles).ToList();
             }
 

@@ -4,7 +4,9 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using Tamma.Activities.ADL;
 using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -25,7 +27,7 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
 {
     private readonly ILogger<CodeReviewActivity>? _logger;
     private readonly IMentorshipSessionRepository? _repository;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
     private readonly IAnalyticsService? _analyticsService;
 
     /// <summary>Mentorship session ID</summary>
@@ -48,18 +50,28 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
     [Input(Description = "Existing PR number")]
     public Input<int?> PullRequestNumber { get; set; } = default!;
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public CodeReviewActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no git token: the Prepare path reads file changes + commits and creates the
+    /// PR through the git-mediation endpoints via <see cref="TammaApiClient"/> (the PR
+    /// body is composed engine-side); Slack notifications already route through the
+    /// <see cref="MediatedSlack"/> seam.
+    /// </summary>
     public CodeReviewActivity(
         ILogger<CodeReviewActivity> logger,
         IMentorshipSessionRepository repository,
-        IIntegrationService integrationService,
+        TammaApiClient apiClient,
         IAnalyticsService analyticsService)
     {
         _logger = logger;
         _repository = repository;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
         _analyticsService = analyticsService;
     }
 
@@ -158,47 +170,58 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
             };
         }
 
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var ct = context.CancellationToken;
+
         // Get file changes for PR description
-        var fileChanges = await _integrationService!.GetGitHubFileChangesAsync(
-            story.RepositoryUrl,
-            $"feature/{story.Id}");
+        var fileChangesResponse = await apiClient.GetFileChangesAsync(
+            story.RepositoryUrl, $"feature/{story.Id}", correlationId, tenantId, ct);
+        if (fileChangesResponse is null || !fileChangesResponse.Success)
+            throw new InvalidOperationException(
+                fileChangesResponse?.FailureReason ?? "git mediation endpoint unavailable");
+        var fileChanges = GitMediationMapping.ToFileChanges(fileChangesResponse.FileChanges);
 
         // Get recent commits for context
-        var commits = await _integrationService!.GetGitHubCommitsAsync(
-            story.RepositoryUrl,
-            $"feature/{story.Id}",
-            DateTime.UtcNow.AddDays(-7));
+        var commitsResponse = await apiClient.GetCommitsAsync(
+            story.RepositoryUrl, $"feature/{story.Id}", DateTime.UtcNow.AddDays(-7), correlationId, tenantId, ct);
+        if (commitsResponse is null || !commitsResponse.Success)
+            throw new InvalidOperationException(
+                commitsResponse?.FailureReason ?? "git mediation endpoint unavailable");
+        var commits = GitMediationMapping.ToCommits(commitsResponse.Commits);
 
         // Build PR description
         var prBody = BuildPullRequestBody(story, junior, fileChanges, commits);
 
         // Create the pull request
-        var prResult = await _integrationService!.CreateGitHubPullRequestAsync(
+        var prResponse = await apiClient.CreatePullRequestAsync(
             story.RepositoryUrl,
-            new CreatePullRequestRequest
+            new GitCreatePrRequest
             {
                 Title = $"[{story.Id}] {story.Title}",
                 Body = prBody,
-                Head = $"feature/{story.Id}",
-                Base = "main",
-                Labels = new List<string> { "mentorship", "junior-developer" }
-            });
+                HeadRef = $"feature/{story.Id}",
+                BaseRef = "main",
+                Labels = new List<string> { "mentorship", "junior-developer" },
+                CorrelationId = correlationId,
+            }, tenantId, ct);
 
-        if (!prResult.Success)
+        if (prResponse is null || !prResponse.Success)
         {
             return new CodeReviewOutput
             {
                 Success = false,
                 Status = ReviewStatus.Error,
                 NextState = MentorshipState.DIAGNOSE_BLOCKER,
-                Message = $"Failed to create PR: {prResult.Error}"
+                Message = $"Failed to create PR: {prResponse?.FailureReason ?? "git mediation endpoint unavailable"}"
             };
         }
 
         // Notify junior about PR creation
         if (!string.IsNullOrEmpty(junior.SlackId))
         {
-            await NotifyPullRequestCreated(context, junior.SlackId, prResult, story.Title);
+            await NotifyPullRequestCreated(context, junior.SlackId, prResponse.PrNumber, prResponse.PrUrl, story.Title);
         }
 
         // Record analytics
@@ -206,14 +229,14 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
 
         _logger?.LogInformation(
             "Created pull request #{PrNumber} for story {StoryId}",
-            prResult.Number, story.Id);
+            prResponse.PrNumber, story.Id);
 
         return new CodeReviewOutput
         {
             Success = true,
             Status = ReviewStatus.Pending,
-            PullRequestNumber = prResult.Number,
-            PullRequestUrl = prResult.Url,
+            PullRequestNumber = prResponse.PrNumber,
+            PullRequestUrl = prResponse.PrUrl,
             FileChanges = fileChanges.Select(f => new FileChangeInfo
             {
                 FilePath = f.FilePath,
@@ -223,7 +246,7 @@ public class CodeReviewActivity : CodeActivity<CodeReviewOutput>
             }).ToList(),
             CommitCount = commits.Count,
             NextState = MentorshipState.MONITOR_REVIEW,
-            Message = $"PR #{prResult.Number} created successfully"
+            Message = $"PR #{prResponse.PrNumber} created successfully"
         };
     }
 
@@ -519,15 +542,15 @@ Implementation of story **{story.Id}**: {story.Title}
     }
 
     private static async Task NotifyPullRequestCreated(
-        ActivityExecutionContext context, string slackId, GitHubPullRequestResult pr, string storyTitle)
+        ActivityExecutionContext context, string slackId, int? prNumber, string? prUrl, string storyTitle)
     {
         var message = $@"**Tamma: Pull Request Created**
 
 Your code is ready for review!
 
 *Story:* {storyTitle}
-*PR:* #{pr.Number}
-*Link:* {pr.Url}
+*PR:* #{prNumber}
+*Link:* {prUrl}
 
 A reviewer will look at your code soon. You'll be notified when there's feedback.";
 

@@ -5,7 +5,9 @@ using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using Tamma.Activities.ADL;
 using Tamma.Activities.Blocker.Models;
+using Tamma.Activities.LlmCall;
 using Tamma.Core.Interfaces;
 
 namespace Tamma.Activities.Blocker;
@@ -24,7 +26,7 @@ namespace Tamma.Activities.Blocker;
 public class CollectInactivityActivity : CodeActivity<InactivitySignal>
 {
     private readonly ILogger<CollectInactivityActivity>? _logger;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
     private readonly IConfiguration? _configuration;
 
     /// <summary>Repository URL or owner/repo</summary>
@@ -39,16 +41,24 @@ public class CollectInactivityActivity : CodeActivity<InactivitySignal>
     [Input(Description = "Inactivity threshold in minutes", DefaultValue = 30)]
     public Input<int> InactivityThresholdMinutes { get; set; } = new(30);
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public CollectInactivityActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no git token: recent commits (an activity proxy) are read through
+    /// <c>GET /api/v1/git/{owner}/{repo}/commits</c> via <see cref="TammaApiClient"/>.
+    /// </summary>
     public CollectInactivityActivity(
         ILogger<CollectInactivityActivity> logger,
-        IIntegrationService integrationService,
+        TammaApiClient apiClient,
         IConfiguration configuration)
     {
         _logger = logger;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
         _configuration = configuration;
     }
 
@@ -57,12 +67,15 @@ public class CollectInactivityActivity : CodeActivity<InactivitySignal>
         var repository = Repository.Get(context);
         var branchName = BranchName.Get(context);
         var thresholdMinutes = InactivityThresholdMinutes.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
 
         _logger?.LogInformation(
             "Collecting inactivity signals for {Repository}/{Branch}",
             repository, branchName);
 
         var signal = new InactivitySignal();
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
 
         try
         {
@@ -72,7 +85,12 @@ public class CollectInactivityActivity : CodeActivity<InactivitySignal>
             {
                 // Use recent commits as a proxy for activity
                 var since = DateTime.UtcNow.AddHours(-24);
-                var commits = await _integrationService!.GetGitHubCommitsAsync(repository, branchName, since);
+                var commitsResponse = await apiClient.GetCommitsAsync(
+                    repository, branchName, since, correlationId, tenantId, context.CancellationToken);
+                if (commitsResponse is null || !commitsResponse.Success)
+                    throw new InvalidOperationException(
+                        commitsResponse?.FailureReason ?? "git mediation endpoint unavailable");
+                var commits = GitMediationMapping.ToCommits(commitsResponse.Commits);
 
                 if (commits.Any())
                 {
