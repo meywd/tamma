@@ -67,11 +67,13 @@ public class AgentTrailEndpointsTests
             TaskEvent(29, "AGENT.TASK.FAILED", Agent, DateTime.UtcNow),
         }, total: 2);
 
-        var result = await AgentTrailEndpoints.ListRuns(Http(), repo, Tenant, Agent, limit: 50);
+        var result = await AgentTrailEndpoints.ListRuns(
+            Http(), repo, Tenant, Agent, limit: 50, includeTotal: true);
 
         repo.LastTenantId.Should().Be(Tenant);
         repo.LastAgentId.Should().Be(Agent);
         repo.LastTypePrefix.Should().Be("AGENT.TASK");
+        repo.LastIncludeTotal.Should().BeTrue("includeTotal:true was requested");
 
         var page = ((Ok<AgentTrailPage<AgentRunDto>>)result).Value!;
         page.Total.Should().Be(2);
@@ -84,6 +86,26 @@ public class AgentTrailEndpointsTests
         // 2 rows < take(50) ⇒ no next page.
         page.HasMore.Should().BeFalse();
         page.NextCursor.Should().BeNull();
+    }
+
+    // ── Total is opt-in (review I2) ─────────────────────────────────────
+
+    [Test]
+    public async Task ListRuns_OmitsTotalByDefault_AndDoesNotRequestTheCount()
+    {
+        var repo = new CapturingRepo(new[]
+        {
+            TaskEvent(30, "AGENT.TASK.SUCCESS", Agent, DateTime.UtcNow),
+        }, total: 42);
+
+        // No includeTotal ⇒ endpoint must NOT ask the repo for the unbounded count,
+        // and Total must be null ("not computed", not 0).
+        var result = await AgentTrailEndpoints.ListRuns(Http(), repo, Tenant, Agent, limit: 50);
+
+        repo.LastIncludeTotal.Should().BeFalse("includeTotal defaults to false");
+        var page = ((Ok<AgentTrailPage<AgentRunDto>>)result).Value!;
+        page.Total.Should().BeNull();
+        page.Items.Should().HaveCount(1);
     }
 
     [Test]
@@ -202,12 +224,13 @@ public class AgentTrailEndpointsTests
         public DateTimeOffset? LastTo { get; private set; }
         public long? LastCursor { get; private set; }
         public int LastLimit { get; private set; }
+        public bool LastIncludeTotal { get; private set; }
 
-        public Task<(IReadOnlyList<DomainEvent> Events, int Total)> QueryAgentTrailAsync(
+        public Task<(IReadOnlyList<DomainEvent> Events, int? Total)> QueryAgentTrailAsync(
             Guid tenantId, Guid agentId, string? typePrefix,
             DateTimeOffset? from, DateTimeOffset? to,
             string? role, string? provider, string? outcome,
-            long? cursor, int limit)
+            long? cursor, int limit, bool includeTotal = false)
         {
             LastTenantId = tenantId;
             LastAgentId = agentId;
@@ -219,7 +242,10 @@ public class AgentTrailEndpointsTests
             LastTo = to;
             LastCursor = cursor;
             LastLimit = limit;
-            return Task.FromResult((_rows, _total));
+            LastIncludeTotal = includeTotal;
+            // Stub: echo the seeded total only when the caller opted in, mirroring
+            // the real repo's opt-in COUNT(*); null otherwise ("not computed").
+            return Task.FromResult((_rows, includeTotal ? (int?)_total : null));
         }
 
         public Task<DomainEvent> AppendAsync(DomainEvent evt) => Task.FromResult(evt);

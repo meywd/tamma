@@ -26,8 +26,16 @@ namespace Tamma.Api.Tests.Agents;
 ///   <item>cursor correctness (AC5): stable <c>SequenceNumber</c> ordering across
 ///     same-millisecond <c>CreatedAt</c>, no dup/skip at page boundaries;</item>
 ///   <item>filters: type prefix, role, provider, outcome;</item>
-///   <item>diagnostics link (AC8): a run's <c>AGENT.TASK.*</c> event and its
-///     <see cref="ProviderDiagnostic"/> row share <c>correlationId</c> + agent.</item>
+///   <item>opt-in total (review I2): <c>includeTotal=false</c> (default) skips the
+///     unbounded <c>COUNT(*)</c> and returns a <c>null</c> total; <c>true</c>
+///     computes it;</item>
+///   <item>diagnostics re-key (honest scope): the trail is keyed by
+///     <c>agentId</c> + <c>correlationId</c> WITHIN the tenant DCB stream. There is
+///     NO per-run join to <see cref="ProviderDiagnostic"/> today — diagnostics carry
+///     a <c>Guid?</c> correlationId and no <c>agentId</c>, and managed runs emit no
+///     diagnostic row — so the only field the two share is the agent role
+///     (<c>AgentType</c>), a role-scoped (not run-scoped) re-key. A true per-run
+///     correlation is deferred (Story 35-2 diagnostics work).</item>
 /// </list>
 /// </summary>
 [TestFixture]
@@ -99,9 +107,9 @@ public class AgentTrailRepositoryTests
         await SeedTaskAsync(TenantB, AgentX, "AGENT.TASK.SUCCESS", role: "developer", provider: "anthropic");
 
         var (aRows, aTotal) = await _repo.QueryAgentTrailAsync(
-            TenantA, AgentX, "AGENT.TASK", null, null, null, null, null, null, 50);
+            TenantA, AgentX, "AGENT.TASK", null, null, null, null, null, null, 50, includeTotal: true);
         var (bRows, bTotal) = await _repo.QueryAgentTrailAsync(
-            TenantB, AgentX, "AGENT.TASK", null, null, null, null, null, null, 50);
+            TenantB, AgentX, "AGENT.TASK", null, null, null, null, null, null, 50, includeTotal: true);
 
         aTotal.Should().Be(2);
         bTotal.Should().Be(1);
@@ -124,7 +132,7 @@ public class AgentTrailRepositoryTests
         await SeedTaskAsync(TenantA, AgentY, "AGENT.TASK.SUCCESS");
 
         var (rows, total) = await _repo.QueryAgentTrailAsync(
-            TenantA, AgentX, "AGENT.TASK", null, null, null, null, null, null, 50);
+            TenantA, AgentX, "AGENT.TASK", null, null, null, null, null, null, 50, includeTotal: true);
 
         total.Should().Be(1);
         rows.Should().ContainSingle();
@@ -144,9 +152,9 @@ public class AgentTrailRepositoryTests
             await SeedTaskAsync(TenantA, AgentX, "AGENT.TASK.SUCCESS", createdAt: ts);
         }
 
-        // Page 1 (limit 2, DESC by SequenceNumber).
+        // Page 1 (limit 2, DESC by SequenceNumber). Opt into the total here.
         var (p1, total) = await _repo.QueryAgentTrailAsync(
-            TenantA, AgentX, "AGENT.TASK", null, null, null, null, null, cursor: null, 2);
+            TenantA, AgentX, "AGENT.TASK", null, null, null, null, null, cursor: null, 2, includeTotal: true);
         total.Should().Be(5);
         p1.Should().HaveCount(2);
         p1[0].SequenceNumber.Should().BeGreaterThan(p1[1].SequenceNumber);
@@ -201,7 +209,7 @@ public class AgentTrailRepositoryTests
 
         // No type prefix ⇒ all of AgentX's events; AgentY excluded.
         var (rows, total) = await _repo.QueryAgentTrailAsync(
-            TenantA, AgentX, typePrefix: null, null, null, null, null, null, null, 50);
+            TenantA, AgentX, typePrefix: null, null, null, null, null, null, null, 50, includeTotal: true);
         total.Should().Be(3);
         rows.Select(r => r.Type).Should().BeEquivalentTo(new[]
         {
@@ -209,33 +217,44 @@ public class AgentTrailRepositoryTests
         });
     }
 
-    // ── AC8: diagnostics link (correlationId + agent) ───────────────────
+    // ── diagnostics re-key: honest scope (role-only; NO per-run join today) ──
+    //
+    // This replaces an earlier test that claimed a "(correlationId, agentId)" join
+    // to ProviderDiagnostic. That join is NOT executable against the current schema
+    // (ProviderDiagnostic.CorrelationId is a Guid?, not the trail's string; there is
+    // no agentId column, only AgentType = role; managed runs emit no diagnostic row).
+    // The test now asserts ONLY what is real: the trail is keyed by agentId +
+    // correlationId within the DCB stream, and the sole field it shares with a
+    // diagnostic is the agent ROLE (a role-scoped, not run-scoped, re-key).
 
     [Test]
-    public async Task TrailEvent_AndProviderDiagnostic_ShareCorrelationIdAndAgent()
+    public async Task TrailEvent_KeyedByAgentIdAndCorrelationId_DiagnosticsReKeyByRoleOnly()
     {
+        // The trail event carries a STRING correlationId + agentId + role — the keys
+        // a per-agent rollup uses WITHIN this tenant's DCB stream.
         var correlationId = "corr-link-1";
         await SeedTaskAsync(TenantA, AgentX, "AGENT.TASK.SUCCESS",
             role: "developer", provider: "anthropic", correlationId: correlationId);
 
-        // The diagnostics row the run wrote (correlationId + AgentType=role).
+        // A ProviderDiagnostic row for the same tenant + role. It is inserted with a
+        // deliberately UNRELATED Guid correlationId to make the schema gap explicit:
+        // ProviderDiagnostic.CorrelationId is a Guid? (never the trail's string tag)
+        // and there is NO agentId column — only AgentType (= the role). A real managed
+        // run would not even write one of these (it meters via IUsageEmitter); this row
+        // exists purely to prove the ONLY field the two share is the role.
+        var diagCorrelation = Guid.Parse("00000000-0000-0000-0000-000000000001");
         await using (var db = await _factory.CreateAsync(TenantA))
         {
             db.ProviderDiagnostics.Add(new ProviderDiagnostic
             {
                 Id = Guid.NewGuid(),
                 ProviderKey = "anthropic",
-                CorrelationId = Guid.Parse("00000000-0000-0000-0000-000000000001"),
+                CorrelationId = diagCorrelation,
                 AgentType = "developer",
                 TenantId = TenantA,
                 Cost = 0.0030m,
                 CreatedAt = DateTime.UtcNow,
             });
-            // Store the string correlationId link the same way the trail tags it:
-            // ProviderDiagnostic.CorrelationId is a Guid column, so the join key in
-            // this story is the shared *string* correlationId carried in the trail
-            // tag AND the run's diagnostics. We assert the trail carries it and the
-            // diagnostics row is re-keyable by the same agent role.
             await db.SaveChangesAsync();
         }
 
@@ -244,18 +263,53 @@ public class AgentTrailRepositoryTests
 
         var trail = rows.Should().ContainSingle().Subject;
         var tags = Tags(trail);
+        // Achievable trail keying: agentId + correlationId (both string tags) + role.
         tags["correlationId"].Should().Be(correlationId);
         tags["agentId"].Should().Be(AgentX.ToString());
         tags["role"].Should().Be("developer");
 
-        // Re-key diagnostics by the trail's agent role (AgentType) — the join 32-9/
-        // 32-10 perform to attribute cost/latency to the agent.
         await using var read = await _factory.CreateAsync(TenantA);
         var diag = await read.ProviderDiagnostics
             .Where(d => d.TenantId == TenantA && d.AgentType == tags["role"])
             .SingleAsync();
-        diag.AgentType.Should().Be("developer");
+
+        // The ONLY shared re-key today is the agent ROLE — role-scoped, not run-scoped.
+        diag.AgentType.Should().Be(tags["role"]);
         diag.ProviderKey.Should().Be(tags["provider"]);
+
+        // And a per-RUN join is genuinely NOT expressible: the diagnostic's
+        // correlationId is a Guid unrelated to the trail's string correlationId, and
+        // the diagnostic carries no agentId at all.
+        diag.CorrelationId.Should().Be(diagCorrelation);
+        diag.CorrelationId.ToString().Should().NotBe(tags["correlationId"]);
+    }
+
+    // ── opt-in total (review I2): includeTotal skips/computes COUNT(*) ────
+
+    [Test]
+    public async Task QueryAgentTrail_IncludeTotalFalse_SkipsCount_ReturnsNullTotal_StillPagesByCursor()
+    {
+        for (var i = 0; i < 3; i++)
+        {
+            await SeedTaskAsync(TenantA, AgentX, "AGENT.TASK.SUCCESS");
+        }
+
+        // Default (includeTotal:false) ⇒ no COUNT(*); Total is null ("not computed").
+        var (rowsNoTotal, noTotal) = await _repo.QueryAgentTrailAsync(
+            TenantA, AgentX, "AGENT.TASK", null, null, null, null, null, cursor: null, 2);
+        noTotal.Should().BeNull();
+        rowsNoTotal.Should().HaveCount(2, "the page still fills; pagination uses the cursor, not the total");
+
+        // Cursor still advances without a total.
+        var (page2, _) = await _repo.QueryAgentTrailAsync(
+            TenantA, AgentX, "AGENT.TASK", null, null, null, null, null,
+            cursor: rowsNoTotal[^1].SequenceNumber, 2);
+        page2.Should().ContainSingle();
+
+        // Opt in ⇒ the exact count is computed.
+        var (_, withTotal) = await _repo.QueryAgentTrailAsync(
+            TenantA, AgentX, "AGENT.TASK", null, null, null, null, null, cursor: null, 2, includeTotal: true);
+        withTotal.Should().Be(3);
     }
 
     // ── seeding helpers ─────────────────────────────────────────────────

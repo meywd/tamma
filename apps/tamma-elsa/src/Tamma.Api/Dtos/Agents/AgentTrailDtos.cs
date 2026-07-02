@@ -3,13 +3,17 @@ namespace Tamma.Api.Dtos.Agents;
 /// <summary>
 /// Story 32-6 — wire DTOs for the per-agent action-trail read API. Both the
 /// <c>/runs</c> and <c>/trail</c> endpoints page on <c>SequenceNumber</c> and
-/// return <see cref="nextCursor"/>/<see cref="hasMore"/>.
+/// return <see cref="NextCursor"/>/<see cref="HasMore"/>.
 /// </summary>
 /// <typeparam name="T">The item shape (<see cref="AgentRunDto"/> or
 /// <see cref="AgentTrailEventDto"/>).</typeparam>
+/// <param name="Total">Exact match count — <c>null</c> unless the caller passed
+/// <c>includeTotal=true</c> (the count is an unbounded scan; it is opt-in).
+/// <c>null</c> means "not computed", NOT "zero". Pagination uses
+/// <paramref name="HasMore"/>/<paramref name="NextCursor"/>, never the total.</param>
 public sealed record AgentTrailPage<T>(
     IReadOnlyList<T> Items,
-    int Total,
+    int? Total,
     long? NextCursor,
     bool HasMore);
 

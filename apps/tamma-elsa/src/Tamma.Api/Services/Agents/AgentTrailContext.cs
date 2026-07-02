@@ -22,7 +22,16 @@ public sealed record AgentTrailContext
     public Guid? TenantId { get; init; }
 
     /// <summary>Stable agent identity — the join key all of 32-10 re-keys off.
-    /// Sourced from the resolved config until 32-1's entity lands.</summary>
+    /// Sourced from the resolved config until 32-1's entity lands.
+    ///
+    /// <para><b>Sentinel — <c>Guid.Empty</c> = "agent-unresolved".</b> A run that fails
+    /// BEFORE the agent is resolved (unknown role, no enabled default, prompt-unresolved,
+    /// gate/budget/credential denial evaluated pre-resolve) still emits a fully-tagged
+    /// terminal <c>AGENT.TASK.FAILED</c> so the failure stays visible in the trail — but
+    /// it carries <c>agentId = 00000000-0000-0000-0000-000000000000</c> because no agent
+    /// identity existed yet. Per-agent attribution rollups (32-9 / 32-10) MUST EXCLUDE
+    /// <c>Guid.Empty</c>: it is not a real agent, and folding it in would bucket every
+    /// pre-resolution failure under one phantom agent.</para></summary>
     public Guid AgentId { get; init; }
 
     /// <summary>Pinned config version of the resolved agent.</summary>
@@ -51,8 +60,20 @@ public sealed record AgentTrailContext
     /// <summary>Loop iteration ordinal (0 for the terminal run event).</summary>
     public int Iteration { get; init; }
 
-    /// <summary>Workflow instance id — shared with <c>ProviderDiagnostic.CorrelationId</c>
-    /// so trail ↔ diagnostics re-key by <c>(correlationId, agentId)</c> (AC8).</summary>
+    /// <summary>Workflow instance id, carried as a STRING tag on every trail event.
+    /// It scopes a single run's events together within this tenant's DCB stream, so
+    /// the achievable trail keying today is <c>agentId</c> + <c>correlationId</c>
+    /// (both string tags) inside <c>t_&lt;hex&gt;.domain_events</c>.
+    ///
+    /// <para><b>No per-run join to <c>ProviderDiagnostic</c> today.</b> Such a join is
+    /// NOT executable against the current schema: <c>ProviderDiagnostic.CorrelationId</c>
+    /// is a <c>Guid?</c> (not this string), <c>ProviderDiagnostic</c> has no
+    /// <c>agentId</c> column (only <c>AgentType</c> = the role string), and the managed
+    /// run path emits NO <c>ProviderDiagnostic</c> row at all — it meters via
+    /// <c>IUsageEmitter</c>. A true per-run trail↔diagnostics correlation is deferred to
+    /// a future story / schema change (see Story 35-2 <c>ProviderDiagnostic.BillingMode</c>
+    /// / diagnostics work). The only field the two share today is the agent role
+    /// (<c>AgentType</c>), which supports a role-scoped — not run-scoped — re-key.</para></summary>
     public required string CorrelationId { get; init; }
 
     /// <summary>Where the provider key came from: <c>"byok"</c> | <c>"platform"</c>

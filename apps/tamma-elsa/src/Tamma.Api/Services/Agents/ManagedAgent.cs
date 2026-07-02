@@ -497,11 +497,20 @@ public sealed class ManagedAgent : IManagedAgent
 
     /// <summary>Project the mutable run identity carrier into the immutable
     /// trail context. <c>agentId</c>/<c>provider</c>/<c>model</c> default to
-    /// empty when the run failed before they were resolved.</summary>
+    /// empty when the run failed before they were resolved.
+    /// <para><b>Sentinel:</b> a pre-resolution failure (unknown role / no enabled
+    /// default / prompt-unresolved / gate-budget-credential denial evaluated before
+    /// <c>ctx.AgentId</c> is set at resolve time) still emits a fully-tagged terminal
+    /// <c>AGENT.TASK.FAILED</c> — but tagged <c>agentId = Guid.Empty</c>
+    /// ("agent-unresolved"). The event is emitted deliberately so failures stay
+    /// visible; per-agent attribution rollups (32-9 / 32-10) MUST EXCLUDE
+    /// <c>Guid.Empty</c> — see <see cref="AgentTrailContext.AgentId"/>.</para></summary>
     private static AgentTrailContext ToTrailContext(RunContext ctx, int iteration) =>
         new()
         {
             TenantId = ctx.TenantId,
+            // Guid.Empty = "agent-unresolved" sentinel (pre-resolution failure). Excluded
+            // from per-agent rollups; documented on AgentTrailContext.AgentId.
             AgentId = ctx.AgentId ?? Guid.Empty,
             AgentVersion = ctx.Version,
             Role = ctx.Role,

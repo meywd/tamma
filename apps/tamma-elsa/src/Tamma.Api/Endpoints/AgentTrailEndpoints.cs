@@ -25,7 +25,10 @@ public static class AgentTrailEndpoints
     /// of runs (one row per terminal <c>AGENT.TASK.*</c>) for the agent within
     /// the tenant. Filterable by <paramref name="from"/>/<paramref name="to"/>
     /// date, <paramref name="role"/>, <paramref name="provider"/>, and
-    /// <paramref name="outcome"/> (<c>success|failed|partial</c>).
+    /// <paramref name="outcome"/> (<c>success|failed|partial</c>). Pass
+    /// <paramref name="includeTotal"/><c>=true</c> to also compute the exact match
+    /// count (an unbounded scan; off by default — pagination uses the cursor, and
+    /// <c>Total</c> is <c>null</c> when not requested).
     /// </summary>
     public static async Task<IResult> ListRuns(
         HttpContext http,
@@ -38,7 +41,8 @@ public static class AgentTrailEndpoints
         string? provider = null,
         string? outcome = null,
         long? cursor = null,
-        int? limit = null)
+        int? limit = null,
+        bool includeTotal = false)
     {
         if (tenantId == Guid.Empty)
             return Results.BadRequest(new { error = "tenantId must be a non-empty Guid" });
@@ -51,7 +55,7 @@ public static class AgentTrailEndpoints
             tenantId, agentId,
             typePrefix: AgentTrailEventTypes.TaskPrefix,
             from, to, role, provider, outcome,
-            cursor, take).ConfigureAwait(false);
+            cursor, take, includeTotal).ConfigureAwait(false);
 
         var items = rows.Select(ToRunDto).ToList();
         var nextCursor = rows.Count == take && rows.Count > 0
@@ -66,7 +70,9 @@ public static class AgentTrailEndpoints
     /// <c>GET /api/v1/orgs/{tenantId}/agents/{agentId}/trail</c> — paginated flat
     /// stream of all trail events for the agent within the tenant (runs, tool
     /// calls, iterations, panels, bugs). Same filters as
-    /// <see cref="ListRuns"/> plus an optional <paramref name="type"/> prefix.
+    /// <see cref="ListRuns"/> plus an optional <paramref name="type"/> prefix, and
+    /// the same opt-in <paramref name="includeTotal"/> (off by default; <c>Total</c>
+    /// is <c>null</c> when not requested).
     /// </summary>
     public static async Task<IResult> ListTrail(
         HttpContext http,
@@ -80,7 +86,8 @@ public static class AgentTrailEndpoints
         string? provider = null,
         string? outcome = null,
         long? cursor = null,
-        int? limit = null)
+        int? limit = null,
+        bool includeTotal = false)
     {
         if (tenantId == Guid.Empty)
             return Results.BadRequest(new { error = "tenantId must be a non-empty Guid" });
@@ -93,7 +100,7 @@ public static class AgentTrailEndpoints
             tenantId, agentId,
             typePrefix: string.IsNullOrWhiteSpace(type) ? null : type,
             from, to, role, provider, outcome,
-            cursor, take).ConfigureAwait(false);
+            cursor, take, includeTotal).ConfigureAwait(false);
 
         var items = rows.Select(ToTrailDto).ToList();
         var nextCursor = rows.Count == take && rows.Count > 0

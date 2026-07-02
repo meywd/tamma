@@ -270,11 +270,11 @@ public class EventRepository(
     }
 
     /// <inheritdoc />
-    public async Task<(IReadOnlyList<DomainEvent> Events, int Total)> QueryAgentTrailAsync(
+    public async Task<(IReadOnlyList<DomainEvent> Events, int? Total)> QueryAgentTrailAsync(
         Guid tenantId, Guid agentId, string? typePrefix,
         DateTimeOffset? from, DateTimeOffset? to,
         string? role, string? provider, string? outcome,
-        long? cursor, int limit)
+        long? cursor, int limit, bool includeTotal = false)
     {
         // Story 32-6 AC4 — the hard tenant guard. An empty tenant is not a
         // cross-tenant scan we implement; it is a bug. Mirror the
@@ -300,6 +300,12 @@ public class EventRepository(
         // search_path. Non-JSONB filters (tenant defence-in-depth, type prefix,
         // outcome→type, date, cursor, order, take) compose in LINQ over the
         // raw SQL subquery.
+        //
+        // The `"Tags"->>'agentId' = $1` equality is served by the btree EXPRESSION
+        // index `ix_domain_events_tags_agentid` on `((Tags->>'agentId'))` (added in
+        // migration AddAgentTrailAgentIdIndex) — WITHOUT it this is a seq scan of the
+        // whole 100%-audit stream. The expression matches the predicate exactly, so
+        // Postgres uses the index for this lookup.
         var agentIdText = agentId.ToString();
         // The `::text` casts pin the parameter type so Postgres does not reject
         // the `$n IS NULL` predicate with "could not determine data type of
@@ -339,7 +345,11 @@ public class EventRepository(
             query = query.Where(e => e.CreatedAt < toUtc);
         }
 
-        var total = await query.CountAsync();
+        // Story 32-6 (review I2) — the total is an UNBOUNDED COUNT(*) over the
+        // tenant's 100%-audit stream; running it on every page is wasteful.
+        // Compute it ONLY when the caller opts in; otherwise pagination relies on
+        // hasMore/nextCursor and Total stays null ("not computed", not "zero").
+        int? total = includeTotal ? await query.CountAsync() : null;
 
         if (cursor is { } c)
         {
