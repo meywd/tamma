@@ -659,6 +659,13 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<BillingPlanPrice> BillingPlanPrices => Set<BillingPlanPrice>();
 
     /// <summary>
+    /// Story 35-5 — Stripe webhook dedup + audit journal. Unique
+    /// <c>StripeEventId</c> makes at-least-once redelivery a no-op ack. See
+    /// <see cref="Entities.BillingWebhookEvent"/>.
+    /// </summary>
+    public DbSet<BillingWebhookEvent> BillingWebhookEvents => Set<BillingWebhookEvent>();
+
+    /// <summary>
     /// Story 37-1 — platform-scope curated audit trail. Tenant-scope rows live
     /// in the per-tenant schema's <c>audit_records</c>; these are the
     /// platform/lifecycle rows (impersonation, tenant provision/move, etc.).

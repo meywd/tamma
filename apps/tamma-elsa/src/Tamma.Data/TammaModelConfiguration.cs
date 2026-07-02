@@ -1040,6 +1040,45 @@ internal static class TammaModelConfiguration
                 .HasDatabaseName("UX_billing_plan_prices_PlanSlug")
                 .IsUnique();
         });
+
+        // ── BillingWebhookEvent (Story 35-5 — Stripe webhook dedup journal) ──
+        modelBuilder.Entity<BillingWebhookEvent>(entity =>
+        {
+            entity.ToTable("billing_webhook_events", t =>
+            {
+                // Text domain for the processing status.
+                t.HasCheckConstraint(
+                    "ck_billing_webhook_events_status",
+                    "\"Status\" IN ('received','processing','projected','enqueued','failed','skipped')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.StripeEventId).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.EventType).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.StripeObjectId).HasMaxLength(255);
+            entity.Property(e => e.Status)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("received");
+            entity.Property(e => e.Attempts).HasDefaultValue(0);
+            entity.Property(e => e.Payload)
+                .IsRequired().HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.ReceivedAt).HasDefaultValueSql("now()");
+
+            // Dedup key — Stripe delivers at-least-once; the unique insert
+            // collision is the authoritative idempotency guard (AC5).
+            entity.HasIndex(e => e.StripeEventId)
+                .HasDatabaseName("UX_billing_webhook_events_StripeEventId")
+                .IsUnique();
+
+            // Admin list — recent rows by status (AC12).
+            entity.HasIndex(e => new { e.Status, e.ReceivedAt })
+                .HasDatabaseName("IX_billing_webhook_events_Status_ReceivedAt")
+                .IsDescending(false, true);
+
+            // Tenant-scoped filter for the admin list (partial — most rows resolve).
+            entity.HasIndex(e => e.TenantId)
+                .HasDatabaseName("IX_billing_webhook_events_TenantId")
+                .HasFilter("\"TenantId\" IS NOT NULL");
+        });
     }
 
     /// <summary>
