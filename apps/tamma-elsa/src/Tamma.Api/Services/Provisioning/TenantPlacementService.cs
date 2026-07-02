@@ -54,18 +54,19 @@ public sealed class TenantPlacementService : ITenantPlacementService
             return new TenantPlacement(existingDatabaseId.Value, existingSchema);
         }
 
-        // Plan lookup is tenant→system→error: a tenant whose plan slug has
-        // no plans row is a configuration fault — never default silently.
-        // Story 34-1 made a slug a multi-version chain (active + deprecated
-        // rows), so the lookup MUST pin Status == "active" — otherwise it can
-        // return a deprecated row with a stale PlacementPolicy in undefined
-        // order. The partial unique index UX_plans_OneActivePerSlug guarantees
-        // exactly one active row per slug.
-        var plan = await db.Plans
-                .FirstOrDefaultAsync(p => p.Slug == tenant.Plan && p.Status == "active", ct)
+        // Plan lookup is tenant→system→error: a tenant that resolves to no plans
+        // row is a configuration fault — never default silently. Story 34-4:
+        // resolve the version-pinned Tenant.PlanId FK (so a CUSTOM-plan tenant,
+        // whose legacy Tenant.Plan slug is stale/non-canonical, gets the right
+        // PlacementPolicy); only a legacy tenant with a NULL PlanId falls back to
+        // the active version of its slug. (Story 34-1 made a slug a multi-version
+        // chain, so the slug fallback pins Status == "active" — the partial unique
+        // index UX_plans_OneActivePerSlug guarantees exactly one.)
+        var plan = await ResolveTenantPlanAsync(db, tenant, asNoTracking: false, ct)
             ?? throw new InvalidOperationException(
-                $"No active plans row for slug '{tenant.Plan}' (tenant '{tenantId}') — placement "
-                + "requires plans.PlacementPolicy; seed or repair the plans table.");
+                $"No plans row resolved for tenant '{tenantId}' (PlanId shadow FK or legacy slug "
+                + $"'{tenant.Plan}') — placement requires plans.PlacementPolicy; seed or repair "
+                + "the plans table.");
 
         var slug = plan.Slug;
         var policy = plan.PlacementPolicy;
@@ -147,5 +148,37 @@ public sealed class TenantPlacementService : ITenantPlacementService
             && d.PlacementClass == policy
             && Enumerable.Contains(d.TierEligibility, tier)
             && (d.TenantCapacity == null || d.TenantCount < d.TenantCapacity);
+    }
+
+    /// <summary>
+    /// Resolve the tenant's effective <see cref="Plan"/> row for placement/move
+    /// decisions (Story 34-4). When the version-pinned <c>Tenant.PlanId</c> shadow
+    /// FK is set, resolve THAT exact plan version by id — with NO
+    /// <c>Status == "active"</c> filter, because the pin may legitimately point at
+    /// a <b>custom</b> plan (never <c>active</c> under a canonical slug) or an
+    /// intentionally-retained <c>deprecated</c> version. Only when <c>PlanId</c> is
+    /// NULL (legacy, pre-34-4 tenants) does it fall back to the active version of
+    /// the legacy <c>Tenant.Plan</c> slug. This is what lets placement, move, and
+    /// Cranl resolve the correct <c>PlacementPolicy</c>/tier for a custom-plan
+    /// tenant whose stale legacy slug is not canonical.
+    ///
+    /// <para><paramref name="asNoTracking"/> mirrors the caller's prior query
+    /// behaviour: placement/move track the plan; the Cranl read path does not.
+    /// Reading the shadow <c>PlanId</c> requires <paramref name="tenant"/> to be
+    /// tracked by <paramref name="db"/> (all three callers already track it).</para>
+    /// </summary>
+    public static async Task<Plan?> ResolveTenantPlanAsync(
+        ControlPlaneDbContext db, Tenant tenant, bool asNoTracking, CancellationToken ct)
+    {
+        var pinnedPlanId = db.Entry(tenant).Property<Guid?>("PlanId").CurrentValue;
+        IQueryable<Plan> plans = asNoTracking ? db.Plans.AsNoTracking() : db.Plans;
+
+        if (pinnedPlanId is Guid planId)
+        {
+            return await plans.FirstOrDefaultAsync(p => p.Id == planId, ct);
+        }
+
+        return await plans.FirstOrDefaultAsync(
+            p => p.Slug == tenant.Plan && p.Status == "active", ct);
     }
 }

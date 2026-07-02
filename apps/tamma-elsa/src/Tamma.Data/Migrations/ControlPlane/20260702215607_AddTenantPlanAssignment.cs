@@ -64,32 +64,65 @@ namespace Tamma.Data.Migrations.ControlPlane
                 unique: true,
                 filter: "\"Status\" = 'active'");
 
-            // Story 34-4 AC3 — back-fill exactly one `active` assignment per
-            // existing (non-deleted) tenant, pinning the plan's CURRENT Version
-            // at migration time. Resolution: the Epic-28 shadow `PlanId` column
-            // (p) → else the plan whose Slug matches the legacy `Plan` string (s)
-            // → else the active `free` plan (f). PlanVersion is read from the
-            // SAME chosen plan row so it stays consistent with PlanId.
+            // Story 34-4 AC3 — back-fill exactly one `active` assignment for EVERY
+            // existing (non-deleted) tenant, pinning the plan's CURRENT Version at
+            // migration time. Resolution chain (PlanId + Version stay paired):
+            //   1. the version-pinned Epic-28 shadow `PlanId` FK (p), else
+            //   2. the plan whose Slug matches the legacy `Plan` string (s), else
+            //   3. the active `free` plan as a GUARANTEED terminal fallback.
+            // The prior version silently OMITTED any tenant that resolved to NULL
+            // (via `AND COALESCE(...) IS NOT NULL`), which — if the active `free`
+            // plan were ever absent — left a non-deleted tenant with NO assignment
+            // and made Story 34-6 throw NO_ASSIGNMENT/404 for it post-deploy. This
+            // version drops that filter and instead FAILS LOUD (RAISE) when a
+            // tenant would be left assignment-less because `free` is missing, so the
+            // fault is caught at deploy time, never silently after.
             migrationBuilder.Sql(@"
-                INSERT INTO tenant_plan_assignments
-                    (""Id"", ""TenantId"", ""PlanId"", ""PlanVersion"", ""Status"",
-                     ""EffectiveFrom"", ""AssignedByUserId"", ""Reason"", ""CreatedAt"", ""UpdatedAt"")
-                SELECT gen_random_uuid(),
-                       t.""Id"",
-                       COALESCE(t.""PlanId"", s.""Id"", f.""Id""),
-                       COALESCE(p.""Version"", s.""Version"", f.""Version"", 1),
-                       'active',
-                       t.""CreatedAt"",
-                       NULL,
-                       'backfill: 34-4 migration',
-                       now(),
-                       now()
-                FROM tenants t
-                LEFT JOIN plans p ON p.""Id"" = t.""PlanId""
-                LEFT JOIN plans s ON s.""Slug"" = t.""Plan"" AND s.""Status"" = 'active'
-                LEFT JOIN plans f ON f.""Slug"" = 'free' AND f.""Status"" = 'active'
-                WHERE t.""DeletedAt"" IS NULL
-                  AND COALESCE(t.""PlanId"", s.""Id"", f.""Id"") IS NOT NULL;");
+                DO $$
+                DECLARE
+                    free_id uuid;
+                    free_version int;
+                    orphan_count int;
+                BEGIN
+                    SELECT f.""Id"", f.""Version"" INTO free_id, free_version
+                    FROM plans f
+                    WHERE f.""Slug"" = 'free' AND f.""Status"" = 'active'
+                    LIMIT 1;
+
+                    -- Any non-deleted tenant that resolves to NO plan through the
+                    -- chain (pinned PlanId → active slug match → active free) means
+                    -- the terminal `free` fallback is unavailable. Fail loud rather
+                    -- than leaving that tenant assignment-less.
+                    SELECT count(*) INTO orphan_count
+                    FROM tenants t
+                    LEFT JOIN plans s ON s.""Slug"" = t.""Plan"" AND s.""Status"" = 'active'
+                    WHERE t.""DeletedAt"" IS NULL
+                      AND COALESCE(t.""PlanId"", s.""Id"", free_id) IS NULL;
+
+                    IF orphan_count > 0 THEN
+                        RAISE EXCEPTION
+                            'AddTenantPlanAssignment back-fill: % non-deleted tenant(s) resolve to no plan and the active ''free'' plan is absent — seed the ''free'' plan before migrating so every tenant gets a terminal fallback assignment.',
+                            orphan_count;
+                    END IF;
+
+                    INSERT INTO tenant_plan_assignments
+                        (""Id"", ""TenantId"", ""PlanId"", ""PlanVersion"", ""Status"",
+                         ""EffectiveFrom"", ""AssignedByUserId"", ""Reason"", ""CreatedAt"", ""UpdatedAt"")
+                    SELECT gen_random_uuid(),
+                           t.""Id"",
+                           COALESCE(t.""PlanId"", s.""Id"", free_id),
+                           COALESCE(p.""Version"", s.""Version"", free_version, 1),
+                           'active',
+                           t.""CreatedAt"",
+                           NULL,
+                           'backfill: 34-4 migration',
+                           now(),
+                           now()
+                    FROM tenants t
+                    LEFT JOIN plans p ON p.""Id"" = t.""PlanId""
+                    LEFT JOIN plans s ON s.""Slug"" = t.""Plan"" AND s.""Status"" = 'active'
+                    WHERE t.""DeletedAt"" IS NULL;
+                END $$;");
         }
 
         /// <inheritdoc />

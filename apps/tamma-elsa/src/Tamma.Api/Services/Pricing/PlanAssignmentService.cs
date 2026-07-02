@@ -100,11 +100,24 @@ public sealed class PlanAssignmentService : IPlanAssignmentService
         var current = await GetActiveAsync(tenantId, ct).ConfigureAwait(false);
 
         // Idempotent PUT — re-assigning the exact same (PlanId, PlanVersion) is a
-        // lateral no-op: no swap, no event.
+        // lateral no-op: no swap, no event. It must STILL reconcile away any
+        // pending `scheduled` downgrade (a prior period-end cancel): re-affirming
+        // the current plan means the tenant no longer intends to be downgraded at
+        // the boundary. Without this a "keep my plan" PUT would silently drop the
+        // tenant to free when the scheduled row later activates.
         if (current is not null
             && current.PlanId == planId
             && current.PlanVersion == snapshot.Version)
         {
+            var voided = await VoidPendingScheduledAsync(
+                    tenantId, _time.GetUtcNow().UtcDateTime, saveInOwnTransaction: true, ct)
+                .ConfigureAwait(false);
+            if (voided > 0)
+            {
+                _logger.LogInformation(
+                    "Plan re-affirm voided {Count} pending scheduled downgrade(s) for tenant {TenantId} (plan {PlanId} v{Version})",
+                    voided, tenantId, planId, snapshot.Version);
+            }
             _logger.LogDebug(
                 "Plan assign no-op: tenant {TenantId} already on plan {PlanId} v{Version}",
                 tenantId, planId, snapshot.Version);
@@ -268,9 +281,37 @@ public sealed class PlanAssignmentService : IPlanAssignmentService
         var snapshot = await _catalog.GetByIdAsync(scheduled.PlanId, ct).ConfigureAwait(false);
         var tenant = await LoadTenantAsync(tenantId, ct).ConfigureAwait(false);
         var current = await GetActiveAsync(tenantId, ct).ConfigureAwait(false);
-        var direction = await ClassifyDirectionAsync(current, snapshot, ct).ConfigureAwait(false);
 
         var now = _time.GetUtcNow().UtcDateTime;
+
+        // Reconciliation guard (defence-in-depth alongside the void-on-reassign in
+        // SwapActiveAsync): only promote this scheduled downgrade if the CURRENT
+        // active row is still the one that scheduled it — i.e. its EffectiveTo
+        // boundary equals this scheduled row's EffectiveFrom. A later re-assign
+        // replaces that active row with one whose EffectiveTo is null (or a
+        // different boundary), so the downgrade is no longer intended: void the
+        // stale scheduled row and no-op rather than reverting the tenant. When
+        // there is NO active row we still promote (never leave the tenant with no
+        // active plan).
+        if (current is not null
+            && current.Id != scheduled.Id
+            && current.EffectiveTo != scheduled.EffectiveFrom)
+        {
+            scheduled.Status = PlanAssignmentStatus.Cancelled;
+            // Leave EffectiveTo null (see VoidPendingScheduledAsync): a scheduled
+            // row voided here never activated, and `now` may precede its future
+            // EffectiveFrom (ck_tpa_effective_window).
+            scheduled.UpdatedAt = now;
+            await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Scheduled activation superseded: tenant {TenantId} assignment {AssignmentId} voided "
+                + "— a newer active plan {CurrentPlanId} replaced the scheduled downgrade to {ScheduledPlanId}",
+                tenantId, assignmentId, current.PlanId, scheduled.PlanId);
+            return null;
+        }
+
+        var direction = await ClassifyDirectionAsync(current, snapshot, ct).ConfigureAwait(false);
 
         await using (var tx = await _db.Database.BeginTransactionAsync(ct).ConfigureAwait(false))
         {
@@ -393,6 +434,17 @@ public sealed class PlanAssignmentService : IPlanAssignmentService
     {
         await using var tx = await _db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
 
+        // Reconcile away any pending `scheduled` downgrade for the tenant BEFORE
+        // inserting the new active row — in the SAME transaction. A new active
+        // assignment (or an immediate cancel) supersedes a prior period-end
+        // cancel's scheduled row; leaving it live would let ActivateScheduledAsync
+        // later cancel this new active row and silently revert the tenant. These
+        // rows are `scheduled` (not `active`), so voiding them never trips the
+        // one-active-per-tenant partial unique index. Persisted by the SaveChanges
+        // below (or the current-flip SaveChanges when there is a prior active row).
+        await VoidPendingScheduledAsync(tenantId, now, saveInOwnTransaction: false, ct)
+            .ConfigureAwait(false);
+
         if (current is not null)
         {
             current.Status = PlanAssignmentStatus.Cancelled;
@@ -431,6 +483,46 @@ public sealed class PlanAssignmentService : IPlanAssignmentService
 
         await tx.CommitAsync(ct).ConfigureAwait(false);
         return newRow;
+    }
+
+    /// <summary>
+    /// Void (→ <c>cancelled</c>) every pending <c>scheduled</c> assignment for the
+    /// tenant. A new/re-affirmed active plan supersedes a prior period-end cancel's
+    /// scheduled downgrade; leaving it live lets <see cref="ActivateScheduledAsync"/>
+    /// later revert the tenant to <c>free</c>. Returns the count voided. By default
+    /// it does NOT open a transaction/SaveChanges — the caller
+    /// (<see cref="SwapActiveAsync"/>) persists it inside its own transaction so the
+    /// void and the swap are atomic. When <paramref name="saveInOwnTransaction"/> is
+    /// set (the idempotent re-affirm path, which has no surrounding transaction) it
+    /// commits its own transaction, and only when there is something to void.
+    /// </summary>
+    private async Task<int> VoidPendingScheduledAsync(
+        Guid tenantId, DateTime now, bool saveInOwnTransaction, CancellationToken ct)
+    {
+        var pending = await _db.TenantPlanAssignments
+            .Where(a => a.TenantId == tenantId && a.Status == PlanAssignmentStatus.Scheduled)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+        if (pending.Count == 0) return 0;
+
+        foreach (var row in pending)
+        {
+            row.Status = PlanAssignmentStatus.Cancelled;
+            // Leave EffectiveTo null: a scheduled row voided before its boundary
+            // never had an active window. Stamping `now` here would violate
+            // ck_tpa_effective_window (EffectiveTo >= EffectiveFrom) because the
+            // row's EffectiveFrom is the future boundary.
+            row.UpdatedAt = now;
+        }
+
+        if (saveInOwnTransaction)
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+            await _db.SaveChangesAsync(ct).ConfigureAwait(false);
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+        }
+
+        return pending.Count;
     }
 
     private async Task<PlanChangeDirection> ClassifyDirectionAsync(

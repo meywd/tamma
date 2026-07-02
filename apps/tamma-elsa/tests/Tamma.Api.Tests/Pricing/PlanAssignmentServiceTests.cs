@@ -441,6 +441,62 @@ public class PlanAssignmentServiceTests
         again!.Direction.Should().Be(PlanChangeDirection.Lateral);
     }
 
+    [Test]
+    public async Task ReAssign_After_PeriodEnd_Cancel_Voids_Scheduled_And_Boundary_Does_Not_Revert()
+    {
+        // Finding 1 — a scheduled period-end downgrade must be reconciled with a
+        // later re-assign. team → period-end cancel (schedules a free downgrade) →
+        // re-assign enterprise → at the boundary ActivateScheduledAsync must NOT
+        // drop the upgraded tenant to free.
+        var tenantId = await SeedTenantAsync();
+
+        await using (var ctx = NewContext())
+        {
+            var (svc, _, _, _) = Build(ctx);
+            await svc.AssignAsync(tenantId, PlansSeeder.TeamPlanId, new AssignPlanOptions());
+        }
+
+        Guid scheduledId;
+        await using (var ctx = NewContext())
+        {
+            var (svc, _, _, _) = Build(ctx);
+            var cancel = await svc.CancelAsync(tenantId, new CancelPlanOptions());
+            scheduledId = cancel.Assignment.Id;
+        }
+
+        // Re-assign enterprise BEFORE the boundary — this must void the pending
+        // scheduled free downgrade in the same swap.
+        await using (var ctx = NewContext())
+        {
+            var (svc, _, _, _) = Build(ctx);
+            await svc.AssignAsync(tenantId, PlansSeeder.EnterprisePlanId, new AssignPlanOptions());
+        }
+
+        // The scheduled free row is voided (cancelled), not left pending.
+        await using (var verify = NewContext())
+        {
+            var scheduledRow = await verify.TenantPlanAssignments.AsNoTracking()
+                .SingleAsync(a => a.Id == scheduledId);
+            scheduledRow.Status.Should().Be("cancelled",
+                "a re-assign voids the stale scheduled downgrade in the same transaction");
+        }
+
+        // Boundary fires: activating the (now voided) scheduled row is a no-op.
+        await using var ctx2 = NewContext();
+        var (svc2, _, _, _) = Build(ctx2);
+        var activated = await svc2.ActivateScheduledAsync(tenantId, scheduledId);
+        activated.Should().BeNull("the voided scheduled row is not promoted");
+
+        var rows = await ctx2.TenantPlanAssignments.AsNoTracking()
+            .Where(a => a.TenantId == tenantId).ToListAsync();
+        rows.Count(a => a.Status == "active").Should().Be(1, "exactly one active plan — no gap");
+        rows.Single(a => a.Status == "active").PlanId.Should().Be(PlansSeeder.EnterprisePlanId,
+            "the re-assigned enterprise plan survives — the tenant is NOT reverted to free");
+        rows.Where(a => a.PlanId == PlansSeeder.FreePlanId)
+            .Should().OnlyContain(a => a.Status == "cancelled",
+                "the scheduled free row is voided, never promoted");
+    }
+
     /// <summary>Inserts a bare plan version row (no children) for guard tests.</summary>
     private async Task<Guid> InsertPlanAsync(string slug, string status, bool isCustom)
     {

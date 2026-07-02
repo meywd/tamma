@@ -231,13 +231,25 @@ public class PlanAssignmentBackfillMigrationTests
             await migrator.MigrateAsync(PreviousMigration);
         }
 
-        // 2. Seed plans + two tenants (one team via PlanId, one free via slug).
+        // 2. Seed plans + three tenants: one team via PlanId, one free via slug,
+        //    and one ORPHAN whose PlanId is NULL and whose (canonical) legacy slug
+        //    resolves to no ACTIVE plan (Finding 3). The orphan's slug is
+        //    'enterprise' (canonical → passes ck_tenants_plan) but the active
+        //    enterprise plan is deprecated below, so the slug lookup misses — the
+        //    tenant must STILL back-fill to the terminal `free` fallback, never
+        //    silently vanish.
         await using (var ctx = NewContext())
         {
             await PlansSeeder.SeedAsync(ctx);
 
+            // Deprecate the active 'enterprise' version so slug 'enterprise' has no
+            // active row (bypasses EF plan-immutability enforcement via raw SQL).
+            await ctx.Database.ExecuteSqlRawAsync(
+                "UPDATE plans SET \"Status\" = 'deprecated' WHERE \"Slug\" = 'enterprise';");
+
             AddTenant(ctx, TeamTenantId, "team-tenant", planId: PlansSeeder.TeamPlanId, planSlug: "team");
             AddTenant(ctx, FreeTenantId, "free-tenant", planId: null, planSlug: "free");
+            AddTenant(ctx, OrphanSlugTenantId, "orphan-tenant", planId: null, planSlug: "enterprise");
             await ctx.SaveChangesAsync();
         }
 
@@ -256,6 +268,7 @@ public class PlanAssignmentBackfillMigrationTests
 
     private static readonly Guid TeamTenantId = Guid.NewGuid();
     private static readonly Guid FreeTenantId = Guid.NewGuid();
+    private static readonly Guid OrphanSlugTenantId = Guid.NewGuid();
 
     private ControlPlaneDbContext NewContext() =>
         new(new DbContextOptionsBuilder<ControlPlaneDbContext>().UseNpgsql(_cs).Options);
@@ -285,8 +298,23 @@ public class PlanAssignmentBackfillMigrationTests
         await using var ctx = NewContext();
 
         var all = await ctx.TenantPlanAssignments.AsNoTracking().ToListAsync();
-        all.Should().HaveCount(2, "one active assignment per existing tenant");
+        all.Should().HaveCount(3, "one active assignment per existing (non-deleted) tenant");
         all.Should().OnlyContain(a => a.Status == "active");
+    }
+
+    [Test]
+    public async Task Backfill_OrphanSlug_Tenant_Falls_Back_To_Free()
+    {
+        // Finding 3 — a non-deleted tenant with a NULL shadow PlanId AND a legacy
+        // slug that resolves to no active plan must STILL receive a `free` active
+        // assignment (the guaranteed terminal fallback), never be silently skipped.
+        await using var ctx = NewContext();
+
+        var orphan = await ctx.TenantPlanAssignments.AsNoTracking()
+            .SingleAsync(a => a.TenantId == OrphanSlugTenantId);
+        orphan.PlanId.Should().Be(PlansSeeder.FreePlanId,
+            "an unresolvable legacy slug + NULL PlanId back-fills to the active 'free' plan");
+        orphan.Status.Should().Be("active");
     }
 
     [Test]
@@ -309,5 +337,121 @@ public class PlanAssignmentBackfillMigrationTests
             .SingleAsync(a => a.TenantId == FreeTenantId);
         free.PlanId.Should().Be(PlansSeeder.FreePlanId,
             "a NULL shadow PlanId back-fills via the Plan slug ('free')");
+    }
+}
+
+/// <summary>
+/// Story 34-4 (Finding 3) — when the active <c>free</c> plan is ABSENT and a
+/// non-deleted tenant would resolve to no plan (NULL <c>PlanId</c> + a legacy slug
+/// with no active version), the back-fill must FAIL LOUD (RAISE) rather than
+/// silently skip the tenant and leave it assignment-less (→ Story 34-6
+/// <c>NO_ASSIGNMENT</c>/404 post-deploy). fail-before: the prior
+/// <c>AND COALESCE(...) IS NOT NULL</c> filter let the migration succeed while
+/// omitting the tenant; pass-after: the migration throws.
+/// </summary>
+[TestFixture]
+public class PlanAssignmentBackfillFreeAbsentMigrationTests
+{
+    private const string PreviousMigration = "20260702193642_AddBillingSubscription";
+
+    private static readonly Guid OrphanTenantId = Guid.NewGuid();
+
+    private PostgreSqlContainer _postgres = null!;
+    private string _cs = null!;
+
+    [OneTimeSetUp]
+    public async Task OneTimeSetUp()
+    {
+        _postgres = new PostgreSqlBuilder()
+            .WithImage("postgres:17-alpine")
+            .WithDatabase("tpa_backfill_free_absent_test")
+            .WithUsername("tamma")
+            .WithPassword("tamma")
+            .Build();
+        await _postgres.StartAsync();
+        _cs = _postgres.GetConnectionString();
+
+        // 1. Migrate to the migration BEFORE AddTenantPlanAssignment.
+        await using (var ctx = NewContext())
+        {
+            var migrator = ctx.GetInfrastructure().GetRequiredService<IMigrator>();
+            await migrator.MigrateAsync(PreviousMigration);
+        }
+
+        // 2. Seed plans, then deprecate EVERY plan version (raw SQL, bypassing EF's
+        //    plan-immutability guard) so there is no active `free` terminal
+        //    fallback (nor any other active plan). Add an orphan tenant (NULL
+        //    PlanId + a canonical slug 'free' that no longer resolves to an active
+        //    plan) that therefore resolves to no plan at all.
+        await using (var ctx = NewContext())
+        {
+            await PlansSeeder.SeedAsync(ctx);
+            await ctx.Database.ExecuteSqlRawAsync(
+                "UPDATE plans SET \"Status\" = 'deprecated';");
+
+            var tenant = new Tenant
+            {
+                Id = OrphanTenantId,
+                Name = "orphan-tenant",
+                Slug = "orphan-" + OrphanTenantId.ToString("N")[..6],
+                Type = "team",
+                Plan = "free", // canonical (passes ck_tenants_plan); no active row now
+                CreatedAt = DateTime.UtcNow.AddMinutes(-5),
+                UpdatedAt = DateTime.UtcNow,
+            };
+            ctx.Tenants.Add(tenant);
+            ctx.Entry(tenant).Property("Status").CurrentValue = "active";
+            ctx.Entry(tenant).Property("PlanId").CurrentValue = (Guid?)null;
+            ctx.Entry(tenant).Property("EncryptedConnectionString").CurrentValue = new byte[] { 1, 2, 3, 4 };
+            await ctx.SaveChangesAsync();
+        }
+        // NOTE: AddTenantPlanAssignment is intentionally NOT applied here — the
+        // test applies it and asserts it throws.
+    }
+
+    [OneTimeTearDown]
+    public async Task OneTimeTearDown()
+    {
+        if (_postgres is not null) await _postgres.DisposeAsync();
+    }
+
+    private ControlPlaneDbContext NewContext() =>
+        new(new DbContextOptionsBuilder<ControlPlaneDbContext>().UseNpgsql(_cs).Options);
+
+    [Test]
+    public async Task Backfill_FailsLoud_When_Free_Absent_And_Tenant_Would_Be_Orphaned()
+    {
+        var act = async () =>
+        {
+            await using var ctx = NewContext();
+            await ctx.Database.MigrateAsync();
+        };
+
+        var ex = (await act.Should().ThrowAsync<Exception>(
+            "the back-fill must fail loud, not silently leave a tenant assignment-less")).Which;
+
+        Flatten(ex).Should().Contain("free",
+            "the RAISE message must name the missing 'free' terminal fallback");
+
+        // And the migration aborted transactionally: the assignments table it
+        // would have created never landed (PostgreSQL DDL is transactional).
+        await using var conn = new NpgsqlConnection(_cs);
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
+            + "WHERE table_schema='public' AND table_name='tenant_plan_assignments');", conn);
+        var tableExists = (bool)(await cmd.ExecuteScalarAsync())!;
+        tableExists.Should().BeFalse(
+            "the failed migration rolled back — the assignments table was never created");
+    }
+
+    private static string Flatten(Exception ex)
+    {
+        var messages = new List<string>();
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+        {
+            messages.Add(e.Message);
+        }
+        return string.Join(" | ", messages);
     }
 }

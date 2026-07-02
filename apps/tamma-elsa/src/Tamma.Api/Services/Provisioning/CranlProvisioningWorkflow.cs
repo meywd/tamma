@@ -632,12 +632,11 @@ public sealed class CranlProvisioningWorkflow
     /// </summary>
     private async Task<bool> IsDedicatedPlacementPlanAsync(Tenant tenant, CancellationToken ct)
     {
-        // Same lookup placement/move use: pin Status=='active' so a multi-
-        // version slug (Story 34-1) resolves the live PlacementPolicy, not a
-        // deprecated row picked in undefined order.
-        var plan = await _db.Plans
-            .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Slug == tenant.Plan && p.Status == "active", ct);
+        // Same lookup placement/move use (Story 34-4): resolve the version-pinned
+        // Tenant.PlanId FK so a custom-plan tenant resolves its REAL
+        // PlacementPolicy; a NULL-PlanId legacy tenant falls back to the active
+        // version of its slug.
+        var plan = await TenantPlacementService.ResolveTenantPlanAsync(_db, tenant, asNoTracking: true, ct);
         if (plan is null)
         {
             await TransitionAsync(tenant,
@@ -749,9 +748,10 @@ public sealed class CranlProvisioningWorkflow
     private async Task<TenantDatabase?> FindMoveBackTargetAsync(
         Tenant tenant, Guid excludeDatabaseId, CancellationToken ct)
     {
-        var plan = await _db.Plans
-            .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.Slug == tenant.Plan && p.Status == "active", ct);
+        // Story 34-4: resolve the version-pinned Tenant.PlanId FK (custom-plan
+        // tenants resolve their REAL tier), falling back to the active version of
+        // the legacy slug only for a NULL-PlanId legacy tenant.
+        var plan = await TenantPlacementService.ResolveTenantPlanAsync(_db, tenant, asNoTracking: true, ct);
         if (plan is null)
         {
             return null;
