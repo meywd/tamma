@@ -138,17 +138,13 @@ public class SlackCallerCutoverTests
         typeof(Tamma.Activities.Blocker.EscalateToSeniorActivity),
     };
 
-    // The five activities that ALSO use IIntegrationService for non-Slack work
-    // (GitHub merge/PR, CI status, JIRA, email) — they legitimately retain it; the
-    // cutover removed only their Slack calls (proved by the drift guard below).
-    private static readonly Type[] NonSlackRetainers =
-    {
-        typeof(Tamma.Activities.Mentorship.MergeCompleteActivity),
-        typeof(Tamma.Activities.Mentorship.DiagnoseBlockerActivity),
-        typeof(Tamma.Activities.Mentorship.CodeReviewActivity),
-        typeof(Tamma.Activities.Review.MergeAndCompleteReviewActivity),
-        typeof(Tamma.Activities.Assessment.DeliverQuestionsActivity),
-    };
+    // NOTE: the four "non-Slack retainer" activities (MergeCompleteActivity,
+    // DiagnoseBlockerActivity, MergeAndCompleteReviewActivity, DeliverQuestionsActivity) that
+    // still held IIntegrationService for GitHub / CI / JIRA / email after 38-3b were fully cut
+    // over to the thin TammaApiClient in Story 38 Phase 2 (Batch C). They now inject NO
+    // IIntegrationService and are covered by IntegrationServiceCutoverTests instead — so the
+    // former NonSlackRetainer_KeepsIntegrationService assertion was removed (no engine activity
+    // retains the composite after Batch C).
 
     [Test]
     [TestCaseSource(nameof(SlackOnlyActivities))]
@@ -167,19 +163,6 @@ public class SlackCallerCutoverTests
             .Any(f => IsIntegrationServiceType(f.FieldType))
             .Should().BeFalse(
                 $"{activityType.Name} must hold no Slack-credential integration-service field");
-    }
-
-    [Test]
-    [TestCaseSource(nameof(NonSlackRetainers))]
-    public void NonSlackRetainer_KeepsIntegrationService_ForNonSlackUse(Type activityType)
-    {
-        var hasField = activityType
-            .GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
-            .Any(f => IsIntegrationServiceType(f.FieldType));
-
-        hasField.Should().BeTrue(
-            $"{activityType.Name} still uses IIntegrationService for non-Slack work (GitHub / CI / JIRA / "
-            + "email); the cutover removed only its Slack calls");
     }
 
     private static bool IsIntegrationServiceType(Type t) =>

@@ -4,7 +4,9 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
-using Tamma.Core.Interfaces;
+using Tamma.Activities.ADL;
+using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 
 namespace Tamma.Activities.Integration;
 
@@ -21,7 +23,7 @@ namespace Tamma.Activities.Integration;
 public class JiraActivity : CodeActivity<JiraOperationResult>
 {
     private readonly ILogger<JiraActivity>? _logger;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
 
     /// <summary>JIRA action to perform</summary>
     [Input(Description = "Action: GetTicket, UpdateStatus, AddComment, LinkPR")]
@@ -47,15 +49,23 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
     [Input(Description = "Custom fields as key-value pairs")]
     public Input<Dictionary<string, object>?> CustomFields { get; set; } = default!;
 
+    [Input(Description = "Tenant id (GUID string) for JIRA credential resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public JiraActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2, Batch C) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no JIRA credential: every JIRA op routes through the JIRA-mediation endpoints via
+    /// <see cref="TammaApiClient"/>, where the credential lives.
+    /// </summary>
     public JiraActivity(
         ILogger<JiraActivity> logger,
-        IIntegrationService integrationService)
+        TammaApiClient apiClient)
     {
         _logger = logger;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
     }
 
     /// <summary>
@@ -69,6 +79,10 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
         var comment = Comment.Get(context);
         var prUrl = PullRequestUrl.Get(context);
         var customFields = CustomFields.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var ct = context.CancellationToken;
 
         _logger?.LogInformation(
             "Executing JIRA action {Action} on ticket {TicketId}",
@@ -78,11 +92,11 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
         {
             JiraOperationResult result = action switch
             {
-                JiraAction.GetTicket => await GetTicket(ticketId),
-                JiraAction.UpdateStatus => await UpdateStatus(ticketId, status!),
-                JiraAction.AddComment => await AddComment(ticketId, comment!),
-                JiraAction.LinkPR => await LinkPullRequest(ticketId, prUrl!),
-                JiraAction.UpdateFields => await UpdateCustomFields(ticketId, customFields!),
+                JiraAction.GetTicket => await GetTicket(apiClient, ticketId, correlationId, tenantId, ct),
+                JiraAction.UpdateStatus => await UpdateStatus(apiClient, ticketId, status!, correlationId, tenantId, ct),
+                JiraAction.AddComment => await AddComment(apiClient, ticketId, comment!, correlationId, tenantId, ct),
+                JiraAction.LinkPR => await LinkPullRequest(apiClient, ticketId, prUrl!, correlationId, tenantId, ct),
+                JiraAction.UpdateFields => await UpdateCustomFields(apiClient, ticketId, customFields!, correlationId, tenantId, ct),
                 _ => new JiraOperationResult { Success = false, Message = $"Unknown action: {action}" }
             };
 
@@ -99,10 +113,19 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
         }
     }
 
-    private async Task<JiraOperationResult> GetTicket(string ticketId)
+    private static async Task<JiraOperationResult> GetTicket(
+        TammaApiClient apiClient, string ticketId, string correlationId, string? tenantId, CancellationToken ct)
     {
-        var ticket = await _integrationService!.GetJiraTicketAsync(ticketId);
+        var response = await apiClient.GetJiraTicketAsync(ticketId, correlationId, tenantId, ct);
 
+        // A null / failed response (mediation unavailable / platform error) is an UNEXPECTED
+        // failure — throw so the outer catch surfaces "Operation failed" (mirrors the composite
+        // GetJiraTicketAsync which threw on error, distinct from a found-but-null "not found").
+        if (response is null || !response.Success)
+            throw new InvalidOperationException(
+                response?.FailureReason ?? "jira mediation endpoint unavailable");
+
+        var ticket = GitMediationMapping.ToJiraTicket(response.Ticket);
         if (ticket == null)
         {
             return new JiraOperationResult
@@ -123,12 +146,15 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
         };
     }
 
-    private async Task<JiraOperationResult> UpdateStatus(string ticketId, string newStatus)
+    private static async Task<JiraOperationResult> UpdateStatus(
+        TammaApiClient apiClient, string ticketId, string newStatus, string correlationId, string? tenantId, CancellationToken ct)
     {
-        var result = await _integrationService!.UpdateJiraTicketAsync(ticketId, new JiraTicketUpdate
-        {
-            Status = newStatus
-        });
+        var result = GitMediationMapping.ToJiraTicketResult(
+            await apiClient.UpdateJiraTicketAsync(ticketId, new JiraUpdateTicketRequest
+            {
+                Status = newStatus,
+                CorrelationId = correlationId,
+            }, tenantId, ct));
 
         return new JiraOperationResult
         {
@@ -141,12 +167,15 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
         };
     }
 
-    private async Task<JiraOperationResult> AddComment(string ticketId, string comment)
+    private static async Task<JiraOperationResult> AddComment(
+        TammaApiClient apiClient, string ticketId, string comment, string correlationId, string? tenantId, CancellationToken ct)
     {
-        var result = await _integrationService!.UpdateJiraTicketAsync(ticketId, new JiraTicketUpdate
-        {
-            Comment = comment
-        });
+        var result = GitMediationMapping.ToJiraTicketResult(
+            await apiClient.UpdateJiraTicketAsync(ticketId, new JiraUpdateTicketRequest
+            {
+                Comment = comment,
+                CorrelationId = correlationId,
+            }, tenantId, ct));
 
         return new JiraOperationResult
         {
@@ -158,14 +187,17 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
         };
     }
 
-    private async Task<JiraOperationResult> LinkPullRequest(string ticketId, string prUrl)
+    private static async Task<JiraOperationResult> LinkPullRequest(
+        TammaApiClient apiClient, string ticketId, string prUrl, string correlationId, string? tenantId, CancellationToken ct)
     {
         var comment = $"**Pull Request Linked**\n\nPR: {prUrl}\n\n_Linked automatically by Tamma Mentorship System_";
 
-        var result = await _integrationService!.UpdateJiraTicketAsync(ticketId, new JiraTicketUpdate
-        {
-            Comment = comment
-        });
+        var result = GitMediationMapping.ToJiraTicketResult(
+            await apiClient.UpdateJiraTicketAsync(ticketId, new JiraUpdateTicketRequest
+            {
+                Comment = comment,
+                CorrelationId = correlationId,
+            }, tenantId, ct));
 
         return new JiraOperationResult
         {
@@ -178,12 +210,15 @@ public class JiraActivity : CodeActivity<JiraOperationResult>
         };
     }
 
-    private async Task<JiraOperationResult> UpdateCustomFields(string ticketId, Dictionary<string, object> fields)
+    private static async Task<JiraOperationResult> UpdateCustomFields(
+        TammaApiClient apiClient, string ticketId, Dictionary<string, object> fields, string correlationId, string? tenantId, CancellationToken ct)
     {
-        var result = await _integrationService!.UpdateJiraTicketAsync(ticketId, new JiraTicketUpdate
-        {
-            CustomFields = fields
-        });
+        var result = GitMediationMapping.ToJiraTicketResult(
+            await apiClient.UpdateJiraTicketAsync(ticketId, new JiraUpdateTicketRequest
+            {
+                CustomFields = fields,
+                CorrelationId = correlationId,
+            }, tenantId, ct));
 
         return new JiraOperationResult
         {

@@ -4,8 +4,10 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.ADL;
 using Tamma.Activities.Context.Models;
-using Tamma.Core.Interfaces;
+using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 
 namespace Tamma.Activities.Context;
 
@@ -22,7 +24,7 @@ namespace Tamma.Activities.Context;
 public class FetchTestResultsActivity : CodeActivity<TestResultsData>
 {
     private readonly ILogger<FetchTestResultsActivity>? _logger;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
 
     /// <summary>Repository URL (e.g., owner/repo)</summary>
     [Input(Description = "Repository URL or identifier")]
@@ -32,23 +34,35 @@ public class FetchTestResultsActivity : CodeActivity<TestResultsData>
     [Input(Description = "Story ID for branch naming")]
     public Input<string> StoryId { get; set; } = default!;
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public FetchTestResultsActivity()
     {
     }
 
+    /// <summary>
+    /// Story 38 (Phase 2) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no git token: the CI test summary is read through the CI mediation endpoint
+    /// (<c>POST /api/v1/ci/{owner}/{repo}/test-runs</c>) via <see cref="TammaApiClient"/>.
+    /// </summary>
     public FetchTestResultsActivity(
         ILogger<FetchTestResultsActivity> logger,
-        IIntegrationService integrationService)
+        TammaApiClient apiClient)
     {
         _logger = logger;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var repositoryUrl = RepositoryUrl.Get(context);
         var storyId = StoryId.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var ct = context.CancellationToken;
 
         _logger?.LogInformation(
             "Fetching test results for story {StoryId} from {Repo}",
@@ -67,8 +81,14 @@ public class FetchTestResultsActivity : CodeActivity<TestResultsData>
             }
 
             var branchName = $"feature/{storyId}";
-            var testResults = await _integrationService!.TriggerTestsAsync(
-                repositoryUrl, branchName);
+            var testResponse = await apiClient.TriggerTestsAsync(
+                repositoryUrl,
+                new CiTriggerTestsRequest { Branch = branchName, CorrelationId = correlationId },
+                tenantId, ct);
+            if (testResponse is null || !testResponse.Success)
+                throw new InvalidOperationException(
+                    testResponse?.FailureReason ?? "ci mediation endpoint unavailable");
+            var testResults = GitMediationMapping.ToTestRun(testResponse.TestRun);
 
             context.SetResult(new TestResultsData
             {

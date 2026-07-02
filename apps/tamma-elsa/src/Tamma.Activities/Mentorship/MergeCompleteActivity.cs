@@ -4,7 +4,9 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using Tamma.Activities.ADL;
 using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -25,7 +27,7 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
 {
     private readonly ILogger<MergeCompleteActivity>? _logger;
     private readonly IMentorshipSessionRepository? _repository;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
     private readonly IAnalyticsService? _analyticsService;
 
     /// <summary>Mentorship session ID</summary>
@@ -48,18 +50,26 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
     [Input(Description = "Auto-merge the PR", DefaultValue = true)]
     public Input<bool> AutoMerge { get; set; } = new(true);
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public MergeCompleteActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2, Batch C) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no git/JIRA credential: the PR merge + JIRA update route through the git/JIRA
+    /// mediation endpoints via <see cref="TammaApiClient"/>.
+    /// </summary>
     public MergeCompleteActivity(
         ILogger<MergeCompleteActivity> logger,
         IMentorshipSessionRepository repository,
-        IIntegrationService integrationService,
+        TammaApiClient apiClient,
         IAnalyticsService analyticsService)
     {
         _logger = logger;
         _repository = repository;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
         _analyticsService = analyticsService;
     }
 
@@ -73,6 +83,10 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
         var juniorId = JuniorId.Get(context);
         var prNumber = PullRequestNumber.Get(context);
         var autoMerge = AutoMerge.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var ct = context.CancellationToken;
 
         _logger?.LogInformation(
             "Starting merge and completion for session {SessionId}, PR #{PrNumber}",
@@ -98,13 +112,18 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
                 return;
             }
 
-            // Step 1: Merge the PR
+            // Step 1: Merge the PR (mediated; soft-fail — a merge failure does not fail the
+            // whole completion, the PR can be merged manually).
             GitHubMergeResult? mergeResult = null;
             if (autoMerge && !string.IsNullOrEmpty(story.RepositoryUrl))
             {
-                mergeResult = await _integrationService!.MergeGitHubPullRequestAsync(
-                    story.RepositoryUrl,
-                    prNumber);
+                mergeResult = GitMediationMapping.ToMergeResult(
+                    await apiClient.MergePullRequestAsync(
+                        story.RepositoryUrl,
+                        prNumber,
+                        new GitMergePrRequest { CorrelationId = correlationId },
+                        tenantId,
+                        ct));
 
                 if (!mergeResult.Success)
                 {
@@ -130,16 +149,19 @@ public class MergeCompleteActivity : CodeActivity<MergeCompleteOutput>
                     juniorId, skillUpdate.OldSkillLevel, skillUpdate.NewSkillLevel);
             }
 
-            // Step 5: Update JIRA ticket if configured
+            // Step 5: Update JIRA ticket if configured (mediated; fire-and-forget as before).
             if (!string.IsNullOrEmpty(story.JiraTicketId))
             {
-                await _integrationService!.UpdateJiraTicketAsync(
+                await apiClient.UpdateJiraTicketAsync(
                     story.JiraTicketId,
-                    new JiraTicketUpdate
+                    new JiraUpdateTicketRequest
                     {
                         Status = "Done",
-                        Comment = $"Completed through Tamma mentorship. PR #{prNumber} merged."
-                    });
+                        Comment = $"Completed through Tamma mentorship. PR #{prNumber} merged.",
+                        CorrelationId = correlationId,
+                    },
+                    tenantId,
+                    ct);
             }
 
             // Step 6: Update session as completed

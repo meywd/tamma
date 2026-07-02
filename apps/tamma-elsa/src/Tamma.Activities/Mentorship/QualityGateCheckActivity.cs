@@ -4,6 +4,9 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using Tamma.Activities.ADL;
+using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -24,7 +27,7 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
 {
     private readonly ILogger<QualityGateCheckActivity>? _logger;
     private readonly IMentorshipSessionRepository? _repository;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -42,17 +45,27 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
     [Input(Description = "Allow warnings to pass", DefaultValue = true)]
     public Input<bool> AllowWarnings { get; set; } = new(true);
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public QualityGateCheckActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no git token: the test / coverage / build gates read through the CI mediation
+    /// endpoints (<c>POST .../test-runs</c> and <c>GET .../build-status</c>) via
+    /// <see cref="TammaApiClient"/>. A mediation failure still falls back to the
+    /// simulated gate exactly as the composite-throws path did.
+    /// </summary>
     public QualityGateCheckActivity(
         ILogger<QualityGateCheckActivity> logger,
         IMentorshipSessionRepository repository,
-        IIntegrationService integrationService)
+        TammaApiClient apiClient)
     {
         _logger = logger;
         _repository = repository;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
     }
 
     /// <summary>
@@ -64,6 +77,10 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
         var storyId = StoryId.Get(context);
         var minCoverage = MinCoverage.Get(context);
         var allowWarnings = AllowWarnings.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var ct = context.CancellationToken;
 
         _logger?.LogInformation(
             "Running quality gate checks for story {StoryId}",
@@ -95,15 +112,15 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
             if (!string.IsNullOrEmpty(story.RepositoryUrl))
             {
                 // 1. Unit Tests
-                var testResult = await RunTestGate(story.RepositoryUrl, storyId);
+                var testResult = await RunTestGate(apiClient, story.RepositoryUrl, storyId, correlationId, tenantId, ct);
                 results.Add(testResult);
 
                 // 2. Code Coverage
-                var coverageResult = await RunCoverageGate(story.RepositoryUrl, storyId, minCoverage);
+                var coverageResult = await RunCoverageGate(apiClient, story.RepositoryUrl, storyId, minCoverage, correlationId, tenantId, ct);
                 results.Add(coverageResult);
 
                 // 3. Build Compilation
-                var buildResult = await RunBuildGate(story.RepositoryUrl, storyId);
+                var buildResult = await RunBuildGate(apiClient, story.RepositoryUrl, storyId, correlationId, tenantId, ct);
                 results.Add(buildResult);
 
                 // 4. Linting (simulated)
@@ -152,11 +169,20 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
         }
     }
 
-    private async Task<GateResult> RunTestGate(string repositoryUrl, string storyId)
+    private async Task<GateResult> RunTestGate(
+        TammaApiClient apiClient, string repositoryUrl, string storyId,
+        string correlationId, string? tenantId, CancellationToken ct)
     {
         try
         {
-            var testResults = await _integrationService!.TriggerTestsAsync(repositoryUrl, $"feature/{storyId}");
+            var testResponse = await apiClient.TriggerTestsAsync(
+                repositoryUrl,
+                new CiTriggerTestsRequest { Branch = $"feature/{storyId}", CorrelationId = correlationId },
+                tenantId, ct);
+            if (testResponse is null || !testResponse.Success)
+                throw new InvalidOperationException(
+                    testResponse?.FailureReason ?? "ci mediation endpoint unavailable");
+            var testResults = GitMediationMapping.ToTestRun(testResponse.TestRun);
 
             return new GateResult
             {
@@ -181,11 +207,20 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
         }
     }
 
-    private async Task<GateResult> RunCoverageGate(string repositoryUrl, string storyId, int minCoverage)
+    private async Task<GateResult> RunCoverageGate(
+        TammaApiClient apiClient, string repositoryUrl, string storyId, int minCoverage,
+        string correlationId, string? tenantId, CancellationToken ct)
     {
         try
         {
-            var testResults = await _integrationService!.TriggerTestsAsync(repositoryUrl, $"feature/{storyId}");
+            var testResponse = await apiClient.TriggerTestsAsync(
+                repositoryUrl,
+                new CiTriggerTestsRequest { Branch = $"feature/{storyId}", CorrelationId = correlationId },
+                tenantId, ct);
+            if (testResponse is null || !testResponse.Success)
+                throw new InvalidOperationException(
+                    testResponse?.FailureReason ?? "ci mediation endpoint unavailable");
+            var testResults = GitMediationMapping.ToTestRun(testResponse.TestRun);
             var coverage = testResults.CoveragePercentage ?? 0;
 
             return new GateResult
@@ -213,11 +248,18 @@ public class QualityGateCheckActivity : CodeActivity<QualityGateOutput>
         }
     }
 
-    private async Task<GateResult> RunBuildGate(string repositoryUrl, string storyId)
+    private async Task<GateResult> RunBuildGate(
+        TammaApiClient apiClient, string repositoryUrl, string storyId,
+        string correlationId, string? tenantId, CancellationToken ct)
     {
         try
         {
-            var buildStatus = await _integrationService!.GetBuildStatusAsync(repositoryUrl, $"feature/{storyId}");
+            var buildResponse = await apiClient.GetBuildStatusAsync(
+                repositoryUrl, $"feature/{storyId}", correlationId, tenantId, ct);
+            if (buildResponse is null || !buildResponse.Success)
+                throw new InvalidOperationException(
+                    buildResponse?.FailureReason ?? "ci mediation endpoint unavailable");
+            var buildStatus = GitMediationMapping.ToBuildStatus(buildResponse.BuildStatus);
 
             return new GateResult
             {

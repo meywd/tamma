@@ -1,7 +1,9 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
+using Tamma.Activities.LlmCall;
 using Tamma.Activities.Mentorship;
 using Tamma.Core.Entities;
 using Tamma.Core.Enums;
@@ -15,7 +17,7 @@ public class CodeReviewActivityTests
 {
     private Mock<ILogger<CodeReviewActivity>> _mockLogger = null!;
     private Mock<IMentorshipSessionRepository> _mockRepository = null!;
-    private Mock<IIntegrationService> _mockIntegrationService = null!;
+    private TammaApiClient _apiClient = null!;
     private Mock<IAnalyticsService> _mockAnalyticsService = null!;
 
     [SetUp]
@@ -23,7 +25,9 @@ public class CodeReviewActivityTests
     {
         _mockLogger = new Mock<ILogger<CodeReviewActivity>>();
         _mockRepository = new Mock<IMentorshipSessionRepository>();
-        _mockIntegrationService = new Mock<IIntegrationService>();
+        // Story 38 (Phase 2): the git reads + PR create now route through the thin
+        // TammaApiClient, not the credential-holding composite IIntegrationService.
+        _apiClient = new TammaApiClient(new HttpClient(), NullLogger<TammaApiClient>.Instance, null, null);
         _mockAnalyticsService = new Mock<IAnalyticsService>();
     }
 
@@ -34,7 +38,7 @@ public class CodeReviewActivityTests
         Action act = () => new CodeReviewActivity(
             _mockLogger.Object,
             _mockRepository.Object,
-            _mockIntegrationService.Object,
+            _apiClient,
             _mockAnalyticsService.Object);
 
         // Assert

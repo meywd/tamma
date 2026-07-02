@@ -33,23 +33,26 @@ internal static class Allowlist
     // PARAMETERS of the reused static cores (called by Tamma.Api's mediation services), not
     // ctor/field injections; Slack/GitHub effects route through TammaApiClient.
     //
-    // DELIBERATELY EXCLUDED — the COMPOSITE `Tamma.Core.Interfaces.IIntegrationService`:
-    //   it is STILL legitimately injected in 5 engine activities (MergeCompleteActivity,
-    //   DiagnoseBlockerActivity, CodeReviewActivity, MergeAndCompleteReviewActivity,
-    //   DeliverQuestionsActivity) for NON-Slack ops (GitHub merge/CI, JIRA, email) that
-    //   Epic 38 did NOT mediate. Denying its INJECTION would fail the build on clean main.
-    //   Those un-migrated GitHub/CI/JIRA/email uses are a TRACKED FOLLOW-UP; once they move
-    //   to Tamma.Api endpoints, add IIntegrationService here. The Slack hole this exclusion
-    //   would otherwise open is closed by DeniedInvocationNames below (Correction 2) — the
-    //   composite's Slack SEND methods are denied at the call site.
+    // Epic 38 (Phase 3, cutover COMPLETE) — the engine reaches all four integration domains
+    // (GitHub, CI, JIRA, email) exclusively via Tamma.Api mediation over TammaApiClient, and
+    // holds NO integration credential. The COMPOSITE `Tamma.Core.Interfaces.IIntegrationService`
+    // and every focused variant (GitHub/Slack/CI/JIRA/email) are therefore DENIED as engine
+    // injections — the earlier "still injected in 5 activities" exclusion is retired now that
+    // those activities are thin-client (Phase 2). Reintroducing any as a ctor/field/property
+    // fails the build (TAMMA001). The composite's Slack SEND methods stay additionally denied
+    // at the call site via DeniedInvocationNames below (defence in depth).
     // ------------------------------------------------------------------------------------
     public static readonly ImmutableHashSet<string> InjectionDenylist = ImmutableHashSet.Create(
         StringComparer.Ordinal,
         "Octokit.IGitHubClient",
         "Octokit.GitHubClient",
         "Tamma.Activities.AgentDispatch.IGitHubActionsClient",
+        "Tamma.Core.Interfaces.IIntegrationService",
         "Tamma.Core.Interfaces.IGitHubIntegrationService",
         "Tamma.Core.Interfaces.ISlackIntegrationService",
+        "Tamma.Core.Interfaces.ICIIntegrationService",
+        "Tamma.Core.Interfaces.IJiraIntegrationService",
+        "Tamma.Core.Interfaces.IEmailIntegrationService",
         // The engine must not resolve provider credentials post-32-5. (The LLM core that
         // legitimately holds it — InlineToolLoopRunner — now lives in the Tamma.Api assembly,
         // outside the analyzed engine surface, so no engine exemption is needed.)
@@ -79,10 +82,11 @@ internal static class Allowlist
         "GetRequiredKeyedService");
 
     // ------------------------------------------------------------------------------------
-    // Correction 2 — denied Slack SEND invocations on ANY receiver. Because the composite
-    // IIntegrationService INJECTION is allowed (for GitHub/CI/JIRA/email), also deny its
-    // Slack send METHODS at the call site so a re-introduced engine-side Slack post via the
-    // composite is still caught. Its GitHub/CI methods stay allowed (the tracked follow-up).
+    // Correction 2 — denied Slack SEND invocations on ANY receiver (defence in depth). The
+    // composite IIntegrationService INJECTION is now itself denied (Epic 38 Phase 3), but
+    // these Slack send METHOD names stay denied at the call site so a re-introduced
+    // engine-side Slack post — via the composite or any other receiver that exposes them —
+    // is caught even if the injection pass is somehow bypassed.
     // ------------------------------------------------------------------------------------
     public static readonly ImmutableHashSet<string> DeniedInvocationNames = ImmutableHashSet.Create(
         StringComparer.Ordinal,

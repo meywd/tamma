@@ -4,7 +4,9 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.ADL;
 using Tamma.Activities.Context.Models;
+using Tamma.Activities.LlmCall;
 using Tamma.Core.Interfaces;
 
 namespace Tamma.Activities.Context;
@@ -22,7 +24,7 @@ namespace Tamma.Activities.Context;
 public class FetchRecentCommitsActivity : CodeActivity<RecentCommitsResult>
 {
     private readonly ILogger<FetchRecentCommitsActivity>? _logger;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
 
     /// <summary>Repository URL (e.g., owner/repo)</summary>
     [Input(Description = "Repository URL or identifier")]
@@ -40,17 +42,25 @@ public class FetchRecentCommitsActivity : CodeActivity<RecentCommitsResult>
     [Input(Description = "Maximum commits to return", DefaultValue = 10)]
     public Input<int> MaxCommits { get; set; } = new(10);
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public FetchRecentCommitsActivity()
     {
     }
 
+    /// <summary>
+    /// Story 38 (Phase 2) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no git token: recent commits are read through
+    /// <c>GET /api/v1/git/{owner}/{repo}/commits</c> via <see cref="TammaApiClient"/>.
+    /// </summary>
     public FetchRecentCommitsActivity(
         ILogger<FetchRecentCommitsActivity> logger,
-        IIntegrationService integrationService)
+        TammaApiClient apiClient)
     {
         _logger = logger;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -59,6 +69,9 @@ public class FetchRecentCommitsActivity : CodeActivity<RecentCommitsResult>
         var storyId = StoryId.Get(context);
         var daysBack = DaysBack.Get(context);
         var maxCommits = MaxCommits.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
 
         _logger?.LogInformation(
             "Fetching recent commits for story {StoryId} from {Repo}",
@@ -79,8 +92,12 @@ public class FetchRecentCommitsActivity : CodeActivity<RecentCommitsResult>
             var branchName = $"feature/{storyId}";
             var since = DateTime.UtcNow.AddDays(-daysBack);
 
-            var commits = await _integrationService!.GetGitHubCommitsAsync(
-                repositoryUrl, branchName, since);
+            var commitsResponse = await apiClient.GetCommitsAsync(
+                repositoryUrl, branchName, since, correlationId, tenantId, context.CancellationToken);
+            if (commitsResponse is null || !commitsResponse.Success)
+                throw new InvalidOperationException(
+                    commitsResponse?.FailureReason ?? "git mediation endpoint unavailable");
+            var commits = GitMediationMapping.ToCommits(commitsResponse.Commits);
 
             var entries = commits
                 .Take(maxCommits)

@@ -4,6 +4,9 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using Tamma.Activities.ADL;
+using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
 
@@ -22,7 +25,7 @@ namespace Tamma.Activities.Integration;
 public class GitHubActivity : CodeActivity<GitHubOperationResult>
 {
     private readonly ILogger<GitHubActivity>? _logger;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
 
     /// <summary>GitHub action to perform</summary>
     [Input(Description = "Action: CreateBranch, MonitorCommits, CreatePullRequest, MergePullRequest, GetFileChanges")]
@@ -52,15 +55,24 @@ public class GitHubActivity : CodeActivity<GitHubOperationResult>
     [Input(Description = "Pull request body")]
     public Input<string?> PrBody { get; set; } = default!;
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public GitHubActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no git token: every GitHub op (branch / commits / PR / merge / file-changes /
+    /// tests) routes through the git/CI mediation endpoints via
+    /// <see cref="TammaApiClient"/>, where the per-tenant token lives.
+    /// </summary>
     public GitHubActivity(
         ILogger<GitHubActivity> logger,
-        IIntegrationService integrationService)
+        TammaApiClient apiClient)
     {
         _logger = logger;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
     }
 
     /// <summary>
@@ -75,6 +87,10 @@ public class GitHubActivity : CodeActivity<GitHubOperationResult>
         var prNumber = PullRequestNumber.Get(context);
         var prTitle = PrTitle.Get(context);
         var prBody = PrBody.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var ct = context.CancellationToken;
 
         _logger?.LogInformation(
             "Executing GitHub action {Action} on repository {Repository}",
@@ -84,12 +100,12 @@ public class GitHubActivity : CodeActivity<GitHubOperationResult>
         {
             GitHubOperationResult result = action switch
             {
-                GitHubAction.CreateBranch => await CreateBranch(repository, branchName!),
-                GitHubAction.MonitorCommits => await MonitorCommits(repository, branchName!),
-                GitHubAction.CreatePullRequest => await CreatePullRequest(repository, branchName!, prTitle!, prBody!),
-                GitHubAction.MergePullRequest => await MergePullRequest(repository, prNumber!.Value),
-                GitHubAction.GetFileChanges => await GetFileChanges(repository, branchName!),
-                GitHubAction.RunTests => await RunTests(repository, branchName!),
+                GitHubAction.CreateBranch => await CreateBranch(apiClient, repository, branchName!, correlationId, tenantId, ct),
+                GitHubAction.MonitorCommits => await MonitorCommits(apiClient, repository, branchName!, correlationId, tenantId, ct),
+                GitHubAction.CreatePullRequest => await CreatePullRequest(apiClient, repository, branchName!, prTitle!, prBody!, correlationId, tenantId, ct),
+                GitHubAction.MergePullRequest => await MergePullRequest(apiClient, repository, prNumber!.Value, correlationId, tenantId, ct),
+                GitHubAction.GetFileChanges => await GetFileChanges(apiClient, repository, branchName!, correlationId, tenantId, ct),
+                GitHubAction.RunTests => await RunTests(apiClient, repository, branchName!, correlationId, tenantId, ct),
                 _ => new GitHubOperationResult { Success = false, Message = $"Unknown action: {action}" }
             };
 
@@ -106,23 +122,43 @@ public class GitHubActivity : CodeActivity<GitHubOperationResult>
         }
     }
 
-    private async Task<GitHubOperationResult> CreateBranch(string repository, string branchName)
+    private static async Task<GitHubOperationResult> CreateBranch(
+        TammaApiClient apiClient, string repository, string branchName,
+        string correlationId, string? tenantId, CancellationToken ct)
     {
-        var result = await _integrationService!.CreateGitHubBranchAsync(repository, branchName);
+        var response = await apiClient.CreateBranchAsync(repository, new GitCreateBranchRequest
+        {
+            BranchName = branchName,
+            BaseRef = CreateBranchActivity.DefaultBaseBranch,
+            CorrelationId = correlationId,
+        }, tenantId, ct);
+
+        // A null / failed response (guard 403 / token 503 / auth 401 / transport) maps to
+        // the same soft failure the composite surfaced (Success=false + reason).
+        var success = response?.Success ?? false;
         return new GitHubOperationResult
         {
-            Success = result.Success,
-            Message = result.Success ? $"Created branch: {branchName}" : result.Error,
-            BranchName = result.BranchName,
-            BranchUrl = result.BranchUrl
+            Success = success,
+            Message = success
+                ? $"Created branch: {response!.BranchRef ?? branchName}"
+                : (response?.FailureReason ?? "git mediation endpoint unavailable"),
+            BranchName = response?.BranchRef ?? (success ? branchName : null),
+            // BranchUrl is not carried by the git-mediation wire response.
+            BranchUrl = null
         };
     }
 
-    private async Task<GitHubOperationResult> MonitorCommits(string repository, string branchName)
+    private static async Task<GitHubOperationResult> MonitorCommits(
+        TammaApiClient apiClient, string repository, string branchName,
+        string correlationId, string? tenantId, CancellationToken ct)
     {
-        var commits = await _integrationService!.GetGitHubCommitsAsync(
-            repository, branchName, DateTime.UtcNow.AddHours(-1));
+        var response = await apiClient.GetCommitsAsync(
+            repository, branchName, DateTime.UtcNow.AddHours(-1), correlationId, tenantId, ct);
+        if (response is null || !response.Success)
+            throw new InvalidOperationException(
+                response?.FailureReason ?? "git mediation endpoint unavailable");
 
+        var commits = GitMediationMapping.ToCommits(response.Commits);
         return new GitHubOperationResult
         {
             Success = true,
@@ -138,42 +174,61 @@ public class GitHubActivity : CodeActivity<GitHubOperationResult>
         };
     }
 
-    private async Task<GitHubOperationResult> CreatePullRequest(
-        string repository, string branchName, string title, string body)
+    private static async Task<GitHubOperationResult> CreatePullRequest(
+        TammaApiClient apiClient, string repository, string branchName, string title, string body,
+        string correlationId, string? tenantId, CancellationToken ct)
     {
-        var result = await _integrationService!.CreateGitHubPullRequestAsync(repository, new CreatePullRequestRequest
+        var response = await apiClient.CreatePullRequestAsync(repository, new GitCreatePrRequest
         {
             Title = title,
             Body = body,
-            Head = branchName,
-            Base = "main"
-        });
+            HeadRef = branchName,
+            BaseRef = "main",
+            CorrelationId = correlationId,
+        }, tenantId, ct);
 
+        var success = response?.Success ?? false;
         return new GitHubOperationResult
         {
-            Success = result.Success,
-            Message = result.Success ? $"Created PR #{result.Number}" : result.Error,
-            PullRequestNumber = result.Number,
-            PullRequestUrl = result.Url
+            Success = success,
+            Message = success
+                ? $"Created PR #{response!.PrNumber}"
+                : (response?.FailureReason ?? "git mediation endpoint unavailable"),
+            PullRequestNumber = response?.PrNumber,
+            PullRequestUrl = response?.PrUrl
         };
     }
 
-    private async Task<GitHubOperationResult> MergePullRequest(string repository, int prNumber)
+    private static async Task<GitHubOperationResult> MergePullRequest(
+        TammaApiClient apiClient, string repository, int prNumber,
+        string correlationId, string? tenantId, CancellationToken ct)
     {
-        var result = await _integrationService!.MergeGitHubPullRequestAsync(repository, prNumber);
+        var response = await apiClient.MergePullRequestAsync(repository, prNumber, new GitMergePrRequest
+        {
+            CorrelationId = correlationId,
+        }, tenantId, ct);
 
+        var success = response?.Success ?? false;
         return new GitHubOperationResult
         {
-            Success = result.Success,
-            Message = result.Success ? $"Merged PR #{prNumber}" : result.Error,
-            MergeSha = result.MergeSha
+            Success = success,
+            Message = success
+                ? $"Merged PR #{prNumber}"
+                : (response?.FailureReason ?? "git mediation endpoint unavailable"),
+            MergeSha = response?.MergeSha
         };
     }
 
-    private async Task<GitHubOperationResult> GetFileChanges(string repository, string branchName)
+    private static async Task<GitHubOperationResult> GetFileChanges(
+        TammaApiClient apiClient, string repository, string branchName,
+        string correlationId, string? tenantId, CancellationToken ct)
     {
-        var changes = await _integrationService!.GetGitHubFileChangesAsync(repository, branchName);
+        var response = await apiClient.GetFileChangesAsync(repository, branchName, correlationId, tenantId, ct);
+        if (response is null || !response.Success)
+            throw new InvalidOperationException(
+                response?.FailureReason ?? "git mediation endpoint unavailable");
 
+        var changes = GitMediationMapping.ToFileChanges(response.FileChanges);
         return new GitHubOperationResult
         {
             Success = true,
@@ -188,10 +243,20 @@ public class GitHubActivity : CodeActivity<GitHubOperationResult>
         };
     }
 
-    private async Task<GitHubOperationResult> RunTests(string repository, string branchName)
+    private static async Task<GitHubOperationResult> RunTests(
+        TammaApiClient apiClient, string repository, string branchName,
+        string correlationId, string? tenantId, CancellationToken ct)
     {
-        var result = await _integrationService!.TriggerTestsAsync(repository, branchName);
+        var response = await apiClient.TriggerTestsAsync(repository, new CiTriggerTestsRequest
+        {
+            Branch = branchName,
+            CorrelationId = correlationId,
+        }, tenantId, ct);
+        if (response is null || !response.Success)
+            throw new InvalidOperationException(
+                response?.FailureReason ?? "ci mediation endpoint unavailable");
 
+        var result = GitMediationMapping.ToTestRun(response.TestRun);
         return new GitHubOperationResult
         {
             Success = result.FailedTests == 0,

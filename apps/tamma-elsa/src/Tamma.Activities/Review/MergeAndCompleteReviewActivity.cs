@@ -5,7 +5,9 @@ using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.ADL;
 using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 using Tamma.Activities.Review.Models;
 using Tamma.Core.Entities;
 using Tamma.Core.Enums;
@@ -22,9 +24,9 @@ namespace Tamma.Activities.Review;
 ///     head-branch build status; a non-success status routes to the <c>Failed</c> outcome
 ///     (the workflow escalates) instead of merging on red.
 ///   - <b>Honour the merge strategy</b>: the configured <see cref="MergeStrategy"/> is mapped
-///     to GitHub's <c>merge_method</c> via the strategy-aware
-///     <see cref="IIntegrationService.MergeGitHubPullRequestAsync(string,int,string)"/>
-///     overload (the prior single-arg call let the service pick squash unconditionally).
+///     to GitHub's <c>merge_method</c> via the git-mediation merge endpoint's
+///     <c>mergeStrategy</c> field (the prior single-arg call let the service pick squash
+///     unconditionally).
 ///   - <b>Retry merge once then escalate</b>: a transient merge failure (e.g. a momentary
 ///     conflict/CI flake) is retried exactly once; a second failure routes to <c>Failed</c>
 ///     so the workflow escalates to a senior — never a silent false success.
@@ -46,7 +48,7 @@ public class MergeAndCompleteReviewActivity : Activity
 {
     private readonly ILogger<MergeAndCompleteReviewActivity>? _logger;
     private readonly IMentorshipSessionRepository? _repository;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
     private readonly IAnalyticsService? _analyticsService;
 
     /// <summary>Mentorship session ID</summary>
@@ -89,18 +91,27 @@ public class MergeAndCompleteReviewActivity : Activity
     [Output(Description = "Merge result")]
     public Output<ReviewMergeResult?> Result { get; set; } = default!;
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public MergeAndCompleteReviewActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2, Batch C) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no git credential: the CI gate (build status), the strategy-aware merge (+ retry),
+    /// and the source-branch delete all route through the git/CI mediation endpoints via
+    /// <see cref="TammaApiClient"/>.
+    /// </summary>
     public MergeAndCompleteReviewActivity(
         ILogger<MergeAndCompleteReviewActivity> logger,
         IMentorshipSessionRepository repository,
-        IIntegrationService integrationService,
+        TammaApiClient apiClient,
         IAnalyticsService analyticsService)
     {
         _logger = logger;
         _repository = repository;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
         _analyticsService = analyticsService;
     }
 
@@ -114,6 +125,10 @@ public class MergeAndCompleteReviewActivity : Activity
         var totalIterations = TotalIterations.Get(context);
         var verifyCi = VerifyCIBeforeMerge.Get(context);
         var deleteBranch = DeleteBranchAfterMerge.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var ct = context.CancellationToken;
 
         _logger?.LogInformation(
             "Merging PR #{PRNumber} with strategy {Strategy} for session {SessionId} (verifyCi={VerifyCi})",
@@ -137,7 +152,7 @@ public class MergeAndCompleteReviewActivity : Activity
             // 1) CI gate — verify the head branch's build is green before merging.
             if (verifyCi)
             {
-                var ciOk = await IsCiGreenAsync(story.RepositoryUrl, headBranch);
+                var ciOk = await IsCiGreenAsync(apiClient, story.RepositoryUrl, headBranch, correlationId, tenantId, ct);
                 if (!ciOk)
                 {
                     _logger?.LogWarning(
@@ -151,8 +166,11 @@ public class MergeAndCompleteReviewActivity : Activity
 
             // 2) Strategy-aware merge with a single retry on failure.
             var mergeStrategyWire = strategy.ToString().ToLowerInvariant(); // squash | merge | rebase
-            var mergeResult = await _integrationService!.MergeGitHubPullRequestAsync(
-                story.RepositoryUrl, prNumber, mergeStrategyWire);
+            var mergeResult = GitMediationMapping.ToMergeResult(
+                await apiClient.MergePullRequestAsync(
+                    story.RepositoryUrl, prNumber,
+                    new GitMergePrRequest { MergeStrategy = mergeStrategyWire, CorrelationId = correlationId },
+                    tenantId, ct));
 
             if (!mergeResult.Success)
             {
@@ -160,8 +178,11 @@ public class MergeAndCompleteReviewActivity : Activity
                     "Merge failed for PR #{PRNumber}: {Error}. Retrying once.",
                     prNumber, mergeResult.Error);
 
-                mergeResult = await _integrationService.MergeGitHubPullRequestAsync(
-                    story.RepositoryUrl, prNumber, mergeStrategyWire);
+                mergeResult = GitMediationMapping.ToMergeResult(
+                    await apiClient.MergePullRequestAsync(
+                        story.RepositoryUrl, prNumber,
+                        new GitMergePrRequest { MergeStrategy = mergeStrategyWire, CorrelationId = correlationId },
+                        tenantId, ct));
 
                 if (!mergeResult.Success)
                 {
@@ -174,15 +195,27 @@ public class MergeAndCompleteReviewActivity : Activity
                 }
             }
 
-            // 3) Delete the source branch (best-effort — never fails the merge).
+            // 3) Delete the source branch (best-effort — never fails the merge). Mediated:
+            // a null / failed delete response is logged and swallowed, exactly as the composite's
+            // throwing delete was caught here before the cutover.
             if (deleteBranch)
             {
                 try
                 {
-                    await _integrationService.DeleteGitHubBranchAsync(story.RepositoryUrl, headBranch);
-                    _logger?.LogInformation(
-                        "Deleted source branch {Branch} after merging PR #{PRNumber}",
-                        headBranch, prNumber);
+                    var deleteResponse = await apiClient.DeleteBranchAsync(
+                        story.RepositoryUrl, headBranch, correlationId, tenantId, ct);
+                    if (deleteResponse is null || !deleteResponse.Success)
+                    {
+                        _logger?.LogWarning(
+                            "Failed to delete source branch {Branch} after merge (merge still succeeded): {Reason}",
+                            headBranch, deleteResponse?.FailureReason ?? "git mediation endpoint unavailable");
+                    }
+                    else
+                    {
+                        _logger?.LogInformation(
+                            "Deleted source branch {Branch} after merging PR #{PRNumber}",
+                            headBranch, prNumber);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -257,12 +290,23 @@ public class MergeAndCompleteReviewActivity : Activity
     /// Anything else (failure, pending, error, or an exception talking to CI) is treated
     /// as NOT-green — fail-closed: a PR never merges on an unknown CI state.
     /// </summary>
-    private async Task<bool> IsCiGreenAsync(string repository, string branch)
+    private async Task<bool> IsCiGreenAsync(
+        TammaApiClient apiClient, string repository, string branch,
+        string correlationId, string? tenantId, CancellationToken ct)
     {
         try
         {
-            var status = await _integrationService!.GetBuildStatusAsync(repository, branch);
-            var s = status?.Status?.Trim().ToLowerInvariant();
+            var response = await apiClient.GetBuildStatusAsync(repository, branch, correlationId, tenantId, ct);
+            // Fail-closed: a null / failed mediation response is an unknown CI state → not-green.
+            if (response is null || !response.Success)
+            {
+                _logger?.LogWarning(
+                    "CI status unavailable for branch {Branch} ({Reason}); treating as not-green",
+                    branch, response?.FailureReason ?? "ci mediation endpoint unavailable");
+                return false;
+            }
+            var status = GitMediationMapping.ToBuildStatus(response.BuildStatus);
+            var s = status.Status?.Trim().ToLowerInvariant();
             return s is "success" or "passed" or "passing" or "completed" or "green";
         }
         catch (Exception ex)

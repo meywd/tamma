@@ -122,19 +122,36 @@ public class BadActivity {
     public BadActivity(SlackNet.ISlackApiClient {|TAMMA001:slack|}) { }
 }" + Vendors);
 
+    // ---------- (2b) COMPOSITE IIntegrationService injection → TAMMA001 (Epic 38 Phase 3) --
+    // The composite (and every focused variant) is now DENIED as an engine injection — the
+    // engine reaches those domains only via TammaApiClient. Reintroducing the ctor/field
+    // injection fails the build.
+
+    [Test]
+    public Task CompositeIntegrationService_CtorInjection_Flags() => Verify.Engine(@"
+using Tamma.Core.Interfaces;
+public class BadActivity {
+    public BadActivity(IIntegrationService {|TAMMA001:svc|}) { }
+}" + Vendors);
+
+    [Test]
+    public Task CompositeIntegrationService_FieldInjection_Flags() => Verify.Engine(@"
+using Tamma.Core.Interfaces;
+public class BadActivity {
+    private IIntegrationService? {|TAMMA001:_svc|};
+}" + Vendors);
+
     // ---------- (3) denied Slack SEND invocation → TAMMA001 -----------------------------
-    // Injecting the COMPOSITE IIntegrationService is allowed (no injection diagnostic); only
-    // its Slack send methods are denied at the call site (Correction 2).
+    // The composite is received as a METHOD PARAMETER here (method params are not injection,
+    // so no injection diagnostic) to isolate the call-site Slack-send denial (Correction 2).
 
     [Test]
     public Task SendSlackMessageAsync_Invocation_Flags() => Verify.Engine(@"
 using System.Threading.Tasks;
 using Tamma.Core.Interfaces;
 public class Notifier {
-    private readonly IIntegrationService _svc;
-    public Notifier(IIntegrationService svc) { _svc = svc; }
-    public async Task Ping() {
-        await {|TAMMA001:_svc.SendSlackMessageAsync(""chan"", ""hi"")|};
+    public async Task Ping(IIntegrationService svc) {
+        await {|TAMMA001:svc.SendSlackMessageAsync(""chan"", ""hi"")|};
     }
 }" + Vendors);
 
@@ -143,22 +160,18 @@ public class Notifier {
 using System.Threading.Tasks;
 using Tamma.Core.Interfaces;
 public class Notifier {
-    private readonly IIntegrationService _svc;
-    public Notifier(IIntegrationService svc) { _svc = svc; }
-    public async Task Ping() {
-        await {|TAMMA001:_svc.SendSlackDirectMessageAsync(""U1"", ""hi"")|};
+    public async Task Ping(IIntegrationService svc) {
+        await {|TAMMA001:svc.SendSlackDirectMessageAsync(""U1"", ""hi"")|};
     }
 }" + Vendors);
 
     [Test]
-    public Task CompositeIntegrationService_NonSlackMethod_DoesNotFlag() => Verify.Engine(@"
+    public Task CompositeIntegrationService_NonSlackMethod_ViaMethodParam_DoesNotFlag() => Verify.Engine(@"
 using System.Threading.Tasks;
 using Tamma.Core.Interfaces;
 public class Merger {
-    private readonly IIntegrationService _svc;
-    public Merger(IIntegrationService svc) { _svc = svc; }
-    public async Task Do() {
-        await _svc.MergePullRequestAsync(""o/r"", 5);
+    public async Task Do(IIntegrationService svc) {
+        await svc.MergePullRequestAsync(""o/r"", 5);
     }
 }" + Vendors);
 

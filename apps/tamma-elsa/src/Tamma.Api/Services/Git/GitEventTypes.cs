@@ -16,6 +16,14 @@ public static class GitEventTypes
     public const string IssueUpdateOperation = "issue_update";
     public const string PrCommentsReadOperation = "pr_comments_read";
 
+    // Story 38 (Phase 1) — the GitHub "extra ops" the engine's context / debug /
+    // integration activities call on the composite today (commits + file-changes
+    // reads and the standalone branch delete). Mediated here on the same
+    // guard→token→platform→one-event plane as the git-platform ops above.
+    public const string CommitsReadOperation = "commits_read";
+    public const string FileChangesReadOperation = "file_changes_read";
+    public const string BranchDeleteOperation = "branch_delete";
+
     public const string BranchCreatedSuccess = "GIT.BRANCH_CREATED.SUCCESS";
     public const string BranchCreatedFailed = "GIT.BRANCH_CREATED.FAILED";
 
@@ -30,6 +38,15 @@ public static class GitEventTypes
 
     public const string PrCommentsReadSuccess = "GIT.PR_COMMENTS_READ.SUCCESS";
     public const string PrCommentsReadFailed = "GIT.PR_COMMENTS_READ.FAILED";
+
+    public const string CommitsReadSuccess = "GIT.COMMITS_READ.SUCCESS";
+    public const string CommitsReadFailed = "GIT.COMMITS_READ.FAILED";
+
+    public const string FileChangesReadSuccess = "GIT.FILE_CHANGES_READ.SUCCESS";
+    public const string FileChangesReadFailed = "GIT.FILE_CHANGES_READ.FAILED";
+
+    public const string BranchDeletedSuccess = "GIT.BRANCH_DELETED.SUCCESS";
+    public const string BranchDeletedFailed = "GIT.BRANCH_DELETED.FAILED";
 }
 
 /// <summary>

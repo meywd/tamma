@@ -561,6 +561,22 @@ builder.Services.AddSingleton<Tamma.Api.Services.Git.IGitHubClientFactory,
 builder.Services.AddScoped<Tamma.Api.Services.Git.IGitMediationService,
     Tamma.Api.Services.Git.GitMediationService>();
 
+// ── Story 38 (Phase 1) — CI / JIRA / email step mediation ──
+// CI (GitHub Actions) reuses the git guard + token resolver (CI runs on the same
+// per-tenant git token); the CiClientFactory mints a token-bound CIIntegrationService
+// per request. JIRA + email are NOT repo-scoped (like Slack): they run the existing
+// config-credentialed IJiraIntegrationService / outbox-backed IEmailService under the
+// caller's tenant context. In every case the credential stays in Tamma.Api; the
+// engine holds nothing.
+builder.Services.AddSingleton<Tamma.Api.Services.Ci.ICiClientFactory,
+    Tamma.Api.Services.Ci.CiClientFactory>();
+builder.Services.AddScoped<Tamma.Api.Services.Ci.ICiMediationService,
+    Tamma.Api.Services.Ci.CiMediationService>();
+builder.Services.AddScoped<Tamma.Api.Services.Jira.IJiraMediationService,
+    Tamma.Api.Services.Jira.JiraMediationService>();
+builder.Services.AddScoped<Tamma.Api.Services.EmailMediation.IEmailMediationService,
+    Tamma.Api.Services.EmailMediation.EmailMediationService>();
+
 // Story 32-5 (T4) — provider-side DI for the server-side tool loop, FORMALIZED
 // in the API process (replacing T3's best-effort GetService factory). The loop
 // (extracted verbatim into InlineToolLoopRunner) now executes HERE, where the
@@ -2359,6 +2375,40 @@ app.MapPatch("/api/v1/git/{owner}/{repo}/issues/{n:int}", GitEndpoints.UpdateIss
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitUpdateIssue");
 
+// ── Story 38 (Phase 1) — GitHub "extra ops" (commits + file-changes reads,
+// standalone branch delete) the engine's context/debug/integration activities call
+// on the composite today. Same engine-only plane + guard→token→platform→one-event
+// mediation as the git-platform ops above. The branch name (may carry a slash)
+// travels as a query param so the route owns only {owner}/{repo}.
+app.MapGet("/api/v1/git/{owner}/{repo}/commits", GitEndpoints.GetCommits)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitGetCommits");
+app.MapGet("/api/v1/git/{owner}/{repo}/file-changes", GitEndpoints.GetFileChanges)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitGetFileChanges");
+app.MapDelete("/api/v1/git/{owner}/{repo}/branches", GitEndpoints.DeleteBranch)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitDeleteBranch");
+
+// ── Story 38 (Phase 1) — CI (GitHub Actions) step mediation ──
+// Same engine-only plane + guard→token→platform→one-event mediation as git.
+app.MapPost("/api/v1/ci/{owner}/{repo}/test-runs", CiEndpoints.TriggerTests)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("CiTriggerTests");
+app.MapGet("/api/v1/ci/{owner}/{repo}/build-status", CiEndpoints.GetBuildStatus)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("CiGetBuildStatus");
+
+// ── Story 38 (Phase 1) — JIRA step mediation ──
+// Not repo-scoped (like Slack): no tenant↔repo guard; the JIRA credential lives in
+// Tamma.Api config, resolved inside IJiraIntegrationService.
+app.MapGet("/api/v1/jira/tickets/{ticketId}", JiraEndpoints.GetTicket)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("JiraGetTicket");
+app.MapPatch("/api/v1/jira/tickets/{ticketId}", JiraEndpoints.UpdateTicket)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("JiraUpdateTicket");
+
 // ── Story 38-2 (Epic 38) — agent-dispatch step mediation (Class C) ──
 // Same engine-only plane as /api/v1/git and /api/v1/llm/call: the engine's thin
 // phase services post here as the service-scope Tamma:ApiToken; the API holds the
@@ -2393,6 +2443,15 @@ app.MapGet("/api/v1/agent-dispatch/{owner}/{repo}/installation", AgentDispatchEn
 app.MapPost("/api/v1/notifications/slack", NotificationEndpoints.QueueSlack)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("QueueSlackNotification");
+
+// ── Story 38 (Phase 1) — email step mediation ──
+// Same engine-only plane as the Slack notification: the engine posts an
+// already-rendered message; the API accepts it into the credentialed, outbox-backed
+// IEmailService (which owns transport + EMAIL.* audit). Not repo-scoped; the acting
+// tenant scopes the message. NO SMTP/Resend credential ever reaches the engine.
+app.MapPost("/api/v1/notifications/email", EmailEndpoints.SendEmail)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("SendEmailNotification");
 app.MapPost("/api/v1/workflows/{id}/status", SaaSEndpoints.UpdateWorkflowStatus).RequireAuthorization();
 app.MapPost("/api/v1/workflows/{id}/result", SaaSEndpoints.PostWorkflowResult).RequireAuthorization();
 app.MapPost("/api/v1/installations/{id}/rotate-key", SaaSEndpoints.RotateInstallationKey).RequireAuthorization();

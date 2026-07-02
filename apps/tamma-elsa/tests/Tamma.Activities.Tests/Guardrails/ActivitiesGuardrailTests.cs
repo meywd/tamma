@@ -26,15 +26,20 @@ namespace Tamma.Activities.Tests.Guardrails;
 [TestFixture]
 public class ActivitiesGuardrailTests
 {
-    // Independent mirror of the vendor-credential INJECTION denylist (the composite
-    // IIntegrationService is deliberately NOT here — see Allowlist.cs / the story report).
+    // Independent mirror of the vendor-credential INJECTION denylist. Epic 38 Phase 3: the
+    // composite Tamma.Core.Interfaces.IIntegrationService and every focused variant are now
+    // denied as engine injections (the engine reaches those domains only via TammaApiClient).
     private static readonly HashSet<string> Denylist = new(StringComparer.Ordinal)
     {
         "Octokit.IGitHubClient",
         "Octokit.GitHubClient",
         "Tamma.Activities.AgentDispatch.IGitHubActionsClient",
+        "Tamma.Core.Interfaces.IIntegrationService",
         "Tamma.Core.Interfaces.IGitHubIntegrationService",
         "Tamma.Core.Interfaces.ISlackIntegrationService",
+        "Tamma.Core.Interfaces.ICIIntegrationService",
+        "Tamma.Core.Interfaces.IJiraIntegrationService",
+        "Tamma.Core.Interfaces.IEmailIntegrationService",
         "Tamma.Activities.LlmCall.Credentials.IProviderCredentialResolver",
         "SlackNet.ISlackApiClient",
         "Stripe.StripeClient",

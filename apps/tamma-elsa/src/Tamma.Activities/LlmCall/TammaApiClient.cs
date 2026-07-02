@@ -166,6 +166,112 @@ public class TammaApiClient
         return GetAsync<GitCallResponse>(url, tenantId, ct);
     }
 
+    // ----- GitHub extra ops (Story 38 Phase 1 — commits / file-changes / delete) --
+
+    /// <summary>Story 38 (Phase 1) — read recent commits on a branch via
+    /// <c>GET /api/v1/git/{owner}/{repo}/commits?branch=&amp;since=&amp;correlationId=</c>.
+    /// The token is resolved + used server-side; it never travels here. Returns null on
+    /// any non-2xx / transport failure (the thin activity maps it to its Error edge).</summary>
+    public virtual Task<GitCallResponse?> GetCommitsAsync(
+        string repo, string branch, DateTime? since = null, string? correlationId = null,
+        string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/commits?branch={Uri.EscapeDataString(branch ?? string.Empty)}";
+        if (since is { } s)
+            url += $"&since={Uri.EscapeDataString(s.ToString("o", System.Globalization.CultureInfo.InvariantCulture))}";
+        if (!string.IsNullOrWhiteSpace(correlationId))
+            url += $"&correlationId={Uri.EscapeDataString(correlationId)}";
+        return GetAsync<GitCallResponse>(url, tenantId, ct);
+    }
+
+    /// <summary>Story 38 (Phase 1) — read the file changes on a branch via
+    /// <c>GET /api/v1/git/{owner}/{repo}/file-changes?branch=&amp;correlationId=</c>.</summary>
+    public virtual Task<GitCallResponse?> GetFileChangesAsync(
+        string repo, string branch, string? correlationId = null, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/file-changes?branch={Uri.EscapeDataString(branch ?? string.Empty)}";
+        if (!string.IsNullOrWhiteSpace(correlationId))
+            url += $"&correlationId={Uri.EscapeDataString(correlationId)}";
+        return GetAsync<GitCallResponse>(url, tenantId, ct);
+    }
+
+    /// <summary>Story 38 (Phase 1) — delete a branch via
+    /// <c>DELETE /api/v1/git/{owner}/{repo}/branches?branch=&amp;correlationId=</c>. The
+    /// branch name (may carry a slash) travels as a query param. Write op — fail-closed
+    /// (null on any non-2xx / transport failure).</summary>
+    public virtual async Task<GitCallResponse?> DeleteBranchAsync(
+        string repo, string branchName, string? correlationId = null, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/branches?branch={Uri.EscapeDataString(branchName ?? string.Empty)}";
+        if (!string.IsNullOrWhiteSpace(correlationId))
+            url += $"&correlationId={Uri.EscapeDataString(correlationId)}";
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Delete, url);
+            AddTenantHeader(request, tenantId);
+            using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            await RecordHealthAsync(response.IsSuccessStatusCode, (int)response.StatusCode, null, ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Tamma API DELETE returned {Status}", (int)response.StatusCode);
+                return null;
+            }
+            return await response.Content.ReadFromJsonAsync<GitCallResponse>(JsonOpts, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            _logger.LogWarning(ex, "Tamma API DELETE failed");
+            await RecordHealthAsync(false, null, ex.GetType().Name, ct).ConfigureAwait(false);
+            return null;
+        }
+    }
+
+    // ----- CI mediation (Story 38 Phase 1 — GitHub Actions test-run / build-status) --
+
+    /// <summary>Story 38 (Phase 1) — trigger the CI workflow on a branch via
+    /// <c>POST /api/v1/ci/{owner}/{repo}/test-runs</c>. The per-tenant git token is
+    /// resolved + used server-side; it never travels here.</summary>
+    public virtual Task<Models.CiCallResponse?> TriggerTestsAsync(
+        string repo, Models.CiTriggerTestsRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/ci/{RepoPath(repo)}/test-runs";
+        return PostAsync<Models.CiCallResponse>(url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 38 (Phase 1) — read the latest build status for a branch via
+    /// <c>GET /api/v1/ci/{owner}/{repo}/build-status?branch=&amp;correlationId=</c>.</summary>
+    public virtual Task<Models.CiCallResponse?> GetBuildStatusAsync(
+        string repo, string branch, string? correlationId = null, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/ci/{RepoPath(repo)}/build-status?branch={Uri.EscapeDataString(branch ?? string.Empty)}";
+        if (!string.IsNullOrWhiteSpace(correlationId))
+            url += $"&correlationId={Uri.EscapeDataString(correlationId)}";
+        return GetAsync<Models.CiCallResponse>(url, tenantId, ct);
+    }
+
+    // ----- JIRA mediation (Story 38 Phase 1 — ticket read / update) --
+
+    /// <summary>Story 38 (Phase 1) — read a JIRA ticket via
+    /// <c>GET /api/v1/jira/tickets/{ticketId}?correlationId=</c>. The JIRA credential
+    /// lives in Tamma.Api config; it never travels here.</summary>
+    public virtual Task<Models.JiraCallResponse?> GetJiraTicketAsync(
+        string ticketId, string? correlationId = null, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/jira/tickets/{Uri.EscapeDataString(ticketId)}";
+        if (!string.IsNullOrWhiteSpace(correlationId))
+            url += $"?correlationId={Uri.EscapeDataString(correlationId)}";
+        return GetAsync<Models.JiraCallResponse>(url, tenantId, ct);
+    }
+
+    /// <summary>Story 38 (Phase 1) — update a JIRA ticket (status + comment) via
+    /// <c>PATCH /api/v1/jira/tickets/{ticketId}</c>.</summary>
+    public virtual Task<Models.JiraCallResponse?> UpdateJiraTicketAsync(
+        string ticketId, Models.JiraUpdateTicketRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/jira/tickets/{Uri.EscapeDataString(ticketId)}";
+        return PatchAsync<Models.JiraCallResponse>(url, request, tenantId, ct);
+    }
+
     // ----- Agent-dispatch mediation (Story 38-2 — the CI-run step-mediation endpoints) --
 
     /// <summary>
@@ -269,6 +375,21 @@ public class TammaApiClient
     {
         var url = $"{_baseUrl}/api/v1/notifications/slack";
         return PostVoidAsync(url, request, tenantId, ct);
+    }
+
+    /// <summary>
+    /// Story 38 (Phase 1) — send an email via the mediated, outbox-backed endpoint
+    /// <c>POST /api/v1/notifications/email</c>. The API accepts the (already-rendered)
+    /// message into the credentialed <c>IEmailService</c>; the SMTP/Resend credential
+    /// never travels here. Fail-soft: a failure rides inside 200 success:false, so a
+    /// missing notification does not break the workflow. Returns null on transport /
+    /// 5xx failure.
+    /// </summary>
+    public virtual Task<Models.EmailCallResponse?> SendEmailAsync(
+        Models.EmailSendRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/notifications/email";
+        return PostAsync<Models.EmailCallResponse>(url, request, tenantId, ct);
     }
 
     // ----- Provider Health ---------------------------------------------

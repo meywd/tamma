@@ -4,6 +4,9 @@ using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.ADL;
+using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 using Tamma.Activities.Review.Models;
 using Tamma.Core.Entities;
 using Tamma.Core.Enums;
@@ -27,7 +30,7 @@ public class CreatePRActivity : CodeActivity<PRCreationResult>
 {
     private readonly ILogger<CreatePRActivity>? _logger;
     private readonly IMentorshipSessionRepository? _repository;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -49,17 +52,26 @@ public class CreatePRActivity : CodeActivity<PRCreationResult>
     [Input(Description = "Head branch containing the changes (default: feature/{storyId})")]
     public Input<string?> HeadBranch { get; set; } = default!;
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public CreatePRActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no git token: file changes + commits are read and the PR is created through
+    /// the git-mediation endpoints via <see cref="TammaApiClient"/>. The PR body is
+    /// composed engine-side (pure, token-free).
+    /// </summary>
     public CreatePRActivity(
         ILogger<CreatePRActivity> logger,
         IMentorshipSessionRepository repository,
-        IIntegrationService integrationService)
+        TammaApiClient apiClient)
     {
         _logger = logger;
         _repository = repository;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -69,6 +81,10 @@ public class CreatePRActivity : CodeActivity<PRCreationResult>
         var juniorId = JuniorId.Get(context);
         var baseBranch = BaseBranch.Get(context);
         var headBranch = HeadBranch.Get(context) ?? $"feature/{storyId}";
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var ct = context.CancellationToken;
 
         _logger?.LogInformation(
             "Creating PR for session {SessionId}, story {StoryId}, branch {HeadBranch}",
@@ -100,32 +116,43 @@ public class CreatePRActivity : CodeActivity<PRCreationResult>
             }
 
             // Gather file changes and commits for the PR body
-            var fileChanges = await _integrationService!.GetGitHubFileChangesAsync(
-                story.RepositoryUrl, headBranch);
-            var commits = await _integrationService.GetGitHubCommitsAsync(
-                story.RepositoryUrl, headBranch, DateTime.UtcNow.AddDays(-14));
+            var fileChangesResponse = await apiClient.GetFileChangesAsync(
+                story.RepositoryUrl, headBranch, correlationId, tenantId, ct);
+            if (fileChangesResponse is null || !fileChangesResponse.Success)
+                throw new InvalidOperationException(
+                    fileChangesResponse?.FailureReason ?? "git mediation endpoint unavailable");
+            var fileChanges = GitMediationMapping.ToFileChanges(fileChangesResponse.FileChanges);
+
+            var commitsResponse = await apiClient.GetCommitsAsync(
+                story.RepositoryUrl, headBranch, DateTime.UtcNow.AddDays(-14), correlationId, tenantId, ct);
+            if (commitsResponse is null || !commitsResponse.Success)
+                throw new InvalidOperationException(
+                    commitsResponse?.FailureReason ?? "git mediation endpoint unavailable");
+            var commits = GitMediationMapping.ToCommits(commitsResponse.Commits);
 
             var prBody = BuildPRBody(story, junior, fileChanges, commits);
 
             // Create the pull request
-            var prResult = await _integrationService.CreateGitHubPullRequestAsync(
+            var prResponse = await apiClient.CreatePullRequestAsync(
                 story.RepositoryUrl,
-                new CreatePullRequestRequest
+                new GitCreatePrRequest
                 {
                     Title = $"[{story.Id}] {story.Title}",
                     Body = prBody,
-                    Head = headBranch,
-                    Base = baseBranch,
-                    Labels = new List<string> { "mentorship", "code-review" }
-                });
+                    HeadRef = headBranch,
+                    BaseRef = baseBranch,
+                    Labels = new List<string> { "mentorship", "code-review" },
+                    CorrelationId = correlationId,
+                }, tenantId, ct);
 
-            if (!prResult.Success)
+            if (prResponse is null || !prResponse.Success)
             {
-                _logger?.LogWarning("Failed to create PR: {Error}", prResult.Error);
+                var error = prResponse?.FailureReason ?? "git mediation endpoint unavailable";
+                _logger?.LogWarning("Failed to create PR: {Error}", error);
                 context.SetResult(new PRCreationResult
                 {
                     Success = false,
-                    Error = $"Failed to create PR: {prResult.Error}"
+                    Error = $"Failed to create PR: {error}"
                 });
                 return;
             }
@@ -141,13 +168,13 @@ public class CreatePRActivity : CodeActivity<PRCreationResult>
 
             _logger?.LogInformation(
                 "Created PR #{PRNumber} for session {SessionId}",
-                prResult.Number, sessionId);
+                prResponse.PrNumber, sessionId);
 
             context.SetResult(new PRCreationResult
             {
                 Success = true,
-                PRNumber = prResult.Number,
-                PRUrl = prResult.Url,
+                PRNumber = prResponse.PrNumber,
+                PRUrl = prResponse.PrUrl,
                 HeadBranch = headBranch,
                 BaseBranch = baseBranch
             });

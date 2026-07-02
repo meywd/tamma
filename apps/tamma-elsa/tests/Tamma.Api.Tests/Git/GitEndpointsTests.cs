@@ -268,6 +268,24 @@ public class GitEndpointsTests
             LastTenantId = tenantId; LastRepo = repo;
             return Task.FromResult(NextComments ?? new GitMediationResult { Success = true, Outcome = "Done", Comments = new List<PrCommentDto>() });
         }
+
+        public Task<GitMediationResult> GetCommitsAsync(Guid? tenantId, string repo, string branch, DateTime? since, string correlationId, CancellationToken ct = default)
+        {
+            LastTenantId = tenantId; LastRepo = repo;
+            return Task.FromResult(new GitMediationResult { Success = true, Outcome = "Done", Commits = new List<GitCommitDto>() });
+        }
+
+        public Task<GitMediationResult> GetFileChangesAsync(Guid? tenantId, string repo, string branch, string correlationId, CancellationToken ct = default)
+        {
+            LastTenantId = tenantId; LastRepo = repo;
+            return Task.FromResult(new GitMediationResult { Success = true, Outcome = "Done", FileChanges = new List<GitFileChangeDto>() });
+        }
+
+        public Task<GitMediationResult> DeleteBranchAsync(Guid? tenantId, string repo, string branchName, string correlationId, CancellationToken ct = default)
+        {
+            LastTenantId = tenantId; LastRepo = repo;
+            return Task.FromResult(new GitMediationResult { Success = true, Outcome = "Deleted", BranchDeleted = true });
+        }
     }
 
     private sealed class StubTenantContext : ITenantContext

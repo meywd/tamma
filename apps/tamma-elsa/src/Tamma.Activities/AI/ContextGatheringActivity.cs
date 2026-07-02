@@ -8,6 +8,8 @@ using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using Tamma.Activities.ADL;
+using Tamma.Activities.LlmCall;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
 
@@ -27,7 +29,7 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
 {
     private readonly ILogger<ContextGatheringActivity>? _logger;
     private readonly IMentorshipSessionRepository? _repository;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
     private readonly IHttpClientFactory? _httpClientFactory;
     private readonly IConfiguration? _configuration;
 
@@ -55,19 +57,28 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
     [Input(Description = "Include test files", DefaultValue = true)]
     public Input<bool> IncludeTests { get; set; } = new(true);
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public ContextGatheringActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no git token: recent commits + the CI test summary are read through the
+    /// git/CI mediation endpoints via <see cref="TammaApiClient"/>. The GitHub
+    /// Contents/tree reads keep using the injected <see cref="IHttpClientFactory"/>.
+    /// </summary>
     public ContextGatheringActivity(
         ILogger<ContextGatheringActivity> logger,
         IMentorshipSessionRepository repository,
-        IIntegrationService integrationService,
+        TammaApiClient apiClient,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration)
     {
         _logger = logger;
         _repository = repository;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
     }
@@ -83,6 +94,10 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
         var maxContextSize = MaxContextSize.Get(context);
         var includeSimilarPatterns = IncludeSimilarPatterns.Get(context);
         var includeTests = IncludeTests.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var ct = context.CancellationToken;
 
         _logger?.LogInformation(
             "Gathering context for story {StoryId} in session {SessionId}",
@@ -114,7 +129,7 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
             if (!string.IsNullOrEmpty(story.RepositoryUrl))
             {
                 // 1. Get recent changes
-                var recentChanges = await GatherRecentChanges(story.RepositoryUrl, storyId);
+                var recentChanges = await GatherRecentChanges(apiClient, story.RepositoryUrl, storyId, correlationId, tenantId, ct);
                 codeContext.RecentChanges = recentChanges;
 
                 // 2. Get target file contents
@@ -141,7 +156,7 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
                 // 4. Get test files if requested
                 if (includeTests)
                 {
-                    var testContext = await GatherTestContext(story.RepositoryUrl, storyId);
+                    var testContext = await GatherTestContext(apiClient, story.RepositoryUrl, storyId, correlationId, tenantId, ct);
                     codeContext.TestContext = testContext;
                 }
 
@@ -187,14 +202,21 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
 
     private bool UseMock => _configuration?.GetValue<bool>("Anthropic:UseMock") ?? false;
 
-    private async Task<List<FileChange>> GatherRecentChanges(string repositoryUrl, string storyId)
+    private async Task<List<FileChange>> GatherRecentChanges(
+        TammaApiClient apiClient, string repositoryUrl, string storyId,
+        string correlationId, string? tenantId, CancellationToken ct)
     {
         try
         {
-            var commits = await _integrationService!.GetGitHubCommitsAsync(
+            var commitsResponse = await apiClient.GetCommitsAsync(
                 repositoryUrl,
                 $"feature/{storyId}",
-                DateTime.UtcNow.AddDays(-7));
+                DateTime.UtcNow.AddDays(-7),
+                correlationId, tenantId, ct);
+            if (commitsResponse is null || !commitsResponse.Success)
+                throw new InvalidOperationException(
+                    commitsResponse?.FailureReason ?? "git mediation endpoint unavailable");
+            var commits = GitMediationMapping.ToCommits(commitsResponse.Commits);
 
             var changes = new List<FileChange>();
 
@@ -441,13 +463,24 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
         }
     }
 
-    private async Task<TestContextInfo> GatherTestContext(string repositoryUrl, string storyId)
+    private async Task<TestContextInfo> GatherTestContext(
+        TammaApiClient apiClient, string repositoryUrl, string storyId,
+        string correlationId, string? tenantId, CancellationToken ct)
     {
         try
         {
-            var testResults = await _integrationService!.TriggerTestsAsync(
+            var ciResponse = await apiClient.TriggerTestsAsync(
                 repositoryUrl,
-                $"feature/{storyId}");
+                new LlmCall.Models.CiTriggerTestsRequest
+                {
+                    Branch = $"feature/{storyId}",
+                    CorrelationId = correlationId,
+                },
+                tenantId, ct);
+            if (ciResponse is null || !ciResponse.Success)
+                throw new InvalidOperationException(
+                    ciResponse?.FailureReason ?? "ci mediation endpoint unavailable");
+            var testResults = GitMediationMapping.ToTestRun(ciResponse.TestRun);
 
             return new TestContextInfo
             {
@@ -455,6 +488,8 @@ public class ContextGatheringActivity : CodeActivity<CodeContextOutput>
                 PassingTests = testResults.PassedTests,
                 FailingTests = testResults.FailedTests,
                 CoveragePercentage = testResults.CoveragePercentage ?? 0,
+                // Per-test failure detail is not returned by the CI-mediation endpoint —
+                // FailedTestDetails is empty (aggregate counts only).
                 FailingTestDetails = testResults.FailedTestDetails.Select(t => new FailingTestInfo
                 {
                     TestName = t.TestName,
