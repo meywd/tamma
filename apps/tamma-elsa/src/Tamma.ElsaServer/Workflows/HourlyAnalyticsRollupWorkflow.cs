@@ -70,6 +70,9 @@ public class HourlyAnalyticsRollupWorkflow : WorkflowBase
         var targetHour = builder.WithVariable<DateTime>("TargetHour", DateTime.MinValue);
         var tenantsSuccess = builder.WithVariable<int>("TenantsSuccess", 0);
         var tenantsFailed = builder.WithVariable<int>("TenantsFailed", 0);
+        // Story 36-2 — dimensional fan-out success/failure counts.
+        var dimTenantsSuccess = builder.WithVariable<int>("DimTenantsSuccess", 0);
+        var dimTenantsFailed = builder.WithVariable<int>("DimTenantsFailed", 0);
 
         // ── Step 1: resolve the target hour from input or now-1 ─────────
         var initBucket = new SetVariable
@@ -125,6 +128,24 @@ public class HourlyAnalyticsRollupWorkflow : WorkflowBase
             TenantsFailed = new Output<int>(tenantsFailed),
         };
 
+        // ── Step 3b: per-tenant DIMENSIONAL rollup (Story 36-2) ─────────
+        //    Runs after the platform fact-table fan-out, sharing the same
+        //    schedule / advisory lock / target hour. Projects each tenant's
+        //    domain_events + ProviderDiagnostic into its own
+        //    analytics_usage_hourly (one row per provider/agent/workflow/repo/
+        //    cost-basis tuple), then — at the last hour of a UTC day — the
+        //    lossless daily compaction, then the best-effort hourly retention
+        //    purge. Per-tenant failures are tolerated (they do NOT abort the
+        //    fan-out). The existing platform rollup + CP purge are untouched.
+        var fanOutDimensional = new FanOutTenantDimensionalRollupsActivity
+        {
+            Id = "FanOutTenantDimensionalRollups",
+            Name = "Fan Out Tenant Dimensional Rollups",
+            Hour = new Input<DateTime>(ctx => targetHour.Get(ctx)),
+            TenantsSuccess = new Output<int>(dimTenantsSuccess),
+            TenantsFailed = new Output<int>(dimTenantsFailed),
+        };
+
         // ── Step 4: emit the terminal HOUR_COMPLETED event ──────────────
         var emitCompleted = new EmitHourCompletedActivity
         {
@@ -152,6 +173,7 @@ public class HourlyAnalyticsRollupWorkflow : WorkflowBase
                 initBucket,
                 platformRollup,
                 fanOut,
+                fanOutDimensional,
                 emitCompleted,
                 purgeStale,
             },

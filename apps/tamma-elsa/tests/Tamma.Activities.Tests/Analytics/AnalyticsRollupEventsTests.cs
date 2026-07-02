@@ -73,6 +73,33 @@ public class AnalyticsRollupEventsTests
     }
 
     [Test]
+    public void DimensionalEventConstants_FollowAggregateActionStatus()
+    {
+        // Story 36-2 — the new dimensional/compact/purge/lag constants follow
+        // the AGGREGATE.ACTION.STATUS convention (dotted, uppercase segments).
+        var constants = new[]
+        {
+            AnalyticsRollupEvents.TenantDimensionalRollupCompleted,
+            AnalyticsRollupEvents.TenantDimensionalRollupFailed,
+            AnalyticsRollupEvents.DailyCompacted,
+            AnalyticsRollupEvents.UsageHourlyPurged,
+            AnalyticsRollupEvents.UsageHourlyPurgeFailed,
+            AnalyticsRollupEvents.DimensionalLag,
+        };
+
+        foreach (var c in constants)
+        {
+            c.Should().StartWith("ANALYTICS.");
+            c.Split('.').Length.Should().BeGreaterThanOrEqualTo(3, $"{c} must be AGGREGATE.ACTION.STATUS");
+            c.Should().Be(c.ToUpperInvariant());
+        }
+
+        AnalyticsRollupEvents.TenantDimensionalRollupCompleted
+            .Should().Be("ANALYTICS.ROLLUP.TENANT_DIMENSIONAL_COMPLETED");
+        AnalyticsRollupEvents.DimensionalLag.Should().Be("ANALYTICS.ROLLUP.DIMENSIONAL_LAG");
+    }
+
+    [Test]
     public void TruncateToHour_StripsMinutesSecondsMilliseconds()
     {
         var instant = new DateTime(2026, 04, 18, 12, 34, 56, 789, DateTimeKind.Utc);

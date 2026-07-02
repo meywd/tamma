@@ -229,29 +229,42 @@ public sealed class ComputeTenantRollupActivity : TammaAsyncActivity
 
         foreach (var blob in dataBlobs)
         {
-            if (string.IsNullOrWhiteSpace(blob)) continue;
-            try
-            {
-                using var doc = JsonDocument.Parse(blob);
-                var root = doc.RootElement;
-                if (root.ValueKind != JsonValueKind.Object) continue;
-
-                if (root.TryGetProperty("costUsd", out var costEl))
-                    cost += ReadDecimal(costEl);
-
-                if (root.TryGetProperty("inputTokens", out var inEl))
-                    tokensIn += ReadLong(inEl);
-
-                if (root.TryGetProperty("outputTokens", out var outEl))
-                    tokensOut += ReadLong(outEl);
-            }
-            catch (JsonException)
-            {
-                // Skip malformed rows — see method doc-comment.
-            }
+            var (c, ti, to) = ExtractLlmUsage(blob);
+            cost += c;
+            tokensIn += ti;
+            tokensOut += to;
         }
 
         return (Math.Round(cost, 4, MidpointRounding.AwayFromZero), tokensIn, tokensOut);
+    }
+
+    /// <summary>
+    /// Extracts <c>costUsd</c>, <c>inputTokens</c>, <c>outputTokens</c> from a
+    /// single <c>LLM.CALL.SUCCESS</c> data-column JSON blob. Malformed / empty
+    /// / non-object blobs contribute zero (same tolerance as
+    /// <see cref="AggregateLlmUsage"/>). Shared by the Story 36-2 dimensional
+    /// rollup so per-event measure extraction never drifts from the tenant
+    /// rollup. Cost is NOT rounded here — callers round the aggregate.
+    /// </summary>
+    internal static (decimal CostUsd, long TokensIn, long TokensOut) ExtractLlmUsage(string? blob)
+    {
+        if (string.IsNullOrWhiteSpace(blob)) return (0m, 0L, 0L);
+        try
+        {
+            using var doc = JsonDocument.Parse(blob);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return (0m, 0L, 0L);
+
+            var cost = root.TryGetProperty("costUsd", out var costEl) ? ReadDecimal(costEl) : 0m;
+            var tokensIn = root.TryGetProperty("inputTokens", out var inEl) ? ReadLong(inEl) : 0L;
+            var tokensOut = root.TryGetProperty("outputTokens", out var outEl) ? ReadLong(outEl) : 0L;
+            return (cost, tokensIn, tokensOut);
+        }
+        catch (JsonException)
+        {
+            // Skip malformed rows — see method doc-comment.
+            return (0m, 0L, 0L);
+        }
     }
 
     private static decimal ReadDecimal(JsonElement el) => el.ValueKind switch

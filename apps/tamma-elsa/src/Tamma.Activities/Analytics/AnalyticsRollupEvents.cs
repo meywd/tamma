@@ -34,6 +34,34 @@ public static class AnalyticsRollupEvents
     public const string AnalyticsPurged = "ANALYTICS.PURGE.HOURLY";
     public const string AnalyticsPurgeFailed = "ANALYTICS.PURGE.FAILED";
 
+    // ── Story 36-2 — per-tenant dimensional projection pipeline ──
+    // Same AGGREGATE.ACTION.STATUS convention; the ANALYTICS.PROJECTION /
+    // ANALYTICS.ROLLUP.TENANT_DIMENSIONAL_* family was reserved for this
+    // story by Story 36-1 §"DCB events". Per-tenant events carry tenantId so
+    // the Story 28-6 step-dedup index applies.
+
+    /// <summary>Per tenant×hour — the dimensional projection wrote its rows.</summary>
+    public const string TenantDimensionalRollupCompleted =
+        "ANALYTICS.ROLLUP.TENANT_DIMENSIONAL_COMPLETED";
+
+    /// <summary>Per tenant×hour — the dimensional projection threw (fan-out continues).</summary>
+    public const string TenantDimensionalRollupFailed =
+        "ANALYTICS.ROLLUP.TENANT_DIMENSIONAL_FAILED";
+
+    /// <summary>Per tenant×day — hourly→daily lossless compaction completed.</summary>
+    public const string DailyCompacted = "ANALYTICS.COMPACT.DAILY";
+
+    /// <summary>Terminal event for the per-tenant analytics_usage_hourly retention sweep.</summary>
+    public const string UsageHourlyPurged = "ANALYTICS.PURGE.USAGE_HOURLY";
+    public const string UsageHourlyPurgeFailed = "ANALYTICS.PURGE.USAGE_HOURLY_FAILED";
+
+    /// <summary>
+    /// Per fan-out pass, emitted only when the wall-clock lag between the
+    /// rolled-up hour and projection completion exceeds the SLO budget. A
+    /// WARN-level observability signal, never a failure.
+    /// </summary>
+    public const string DimensionalLag = "ANALYTICS.ROLLUP.DIMENSIONAL_LAG";
+
     /// <summary>
     /// Build a <see cref="PlatformEvent"/> for an hourly-rollup milestone.
     /// <paramref name="tenantId"/> is null when the event is platform-wide

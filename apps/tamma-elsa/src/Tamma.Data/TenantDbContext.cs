@@ -70,6 +70,10 @@ public class TenantDbContext : DbContext
     public DbSet<AnalyticsUsageHourly> AnalyticsUsageHourly => Set<AnalyticsUsageHourly>();
     public DbSet<AnalyticsUsageDaily> AnalyticsUsageDaily => Set<AnalyticsUsageDaily>();
 
+    // Story 36-2 — per-tenant resumable cursor for the dimensional projection.
+    public DbSet<AnalyticsProjectionCheckpoint> AnalyticsProjectionCheckpoints =>
+        Set<AnalyticsProjectionCheckpoint>();
+
     // Story 37-1 — tenant-scope curated audit trail, materialized from this
     // tenant's domain_events stream by the AuditProjector. Platform-scope rows
     // live in the CP audit_records.
