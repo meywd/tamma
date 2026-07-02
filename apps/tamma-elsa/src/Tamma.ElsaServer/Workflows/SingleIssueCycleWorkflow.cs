@@ -687,6 +687,12 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         var notifyMergeEscalated = NotifyIssue("NotifyMergeEscalated", repository, issueNumber,
             "⚠️ Merge-approval gate escalated (failed merge / invalid decision). Needs human attention.",
             new[] { "tamma-error", "needs-human" }, new[] { "tamma-processing" });
+        // Durable merge-SLA escalation (§Missing #6): the merge was approved but the
+        // `pr-merged` webhook never arrived within the SLA. A human must check the PR /
+        // merge status — a needs-human handoff, not a cycle error.
+        var notifyMergeTimeout = NotifyIssue("NotifyMergeTimeout", repository, issueNumber,
+            "⏰ Merge approved but not confirmed within the SLA (no merge webhook). Needs human attention.",
+            new[] { "needs-human" }, new[] { "tamma-processing" });
 
         // ================================================================
         // 13. Wait for PR Merged (bookmark — blocks until merged)
@@ -903,13 +909,15 @@ public class SingleIssueCycleWorkflow : WorkflowBase
             ctx => HasTasks(tasksJson.Get(ctx)),
             failedStepId, failedDetail, "task-creation",
             _ => "task-creation returned no tasks (empty or unparseable task list)");
-        // NOTE (honestly-DEFERRED follow-up, SingleIssueCycle.md §Missing #6):
-        // WaitForPRMergedActivity / WaitForPRApprovalActivity create unbounded
-        // `pr-merged-{pr}` / `pr-approval-{pr}` bookmarks with NO SLA timeout. If a
-        // merge/approval webhook never arrives the loop hangs. This is NOT a
-        // regression (the real merge now runs synchronously inside merge-approval),
-        // but before this cycle runs in a live unattended loop a durable
-        // `context.DelayFor` SLA timer must be added to those waits. Tracked follow-up.
+        // RESOLVED (SingleIssueCycle.md §Missing #6 — was a DEFERRED follow-up):
+        // WaitForPRMerged is the ONLY unbounded human/webhook wait left in the cycle
+        // (the old binary WaitForPRApprovalActivity was retired for the merge-approval
+        // gate). It now arms a DURABLE `context.DelayFor` merge SLA alongside its
+        // `pr-merged-{pr}` bookmark (Adl:PrMergeTimeoutMinutes, default 12h) and exposes
+        // a `TimedOut` outcome — so a never-delivered merge webhook escalates to the
+        // needs-human terminal (notifyMergeTimeout → reportNeedsHuman) instead of
+        // hanging the loop forever. See the WaitForPRMerged wiring below and the
+        // durable-timer precedents (WaitForCIResultsActivity / EscalateToSeniorActivity).
 
         var prOk = StepGate("PrOk", "PR OK?",
             ctx => prNumber.Get(ctx) > 0,
@@ -1029,7 +1037,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ciGate, ciOk, notifyCiPassed,
                 dispatchCodeReview, mergeApprovalGate,
                 extractGateOutcome, gateOutcomeSwitch,
-                notifyMergeRejected, notifyMergeEscalated,
+                notifyMergeRejected, notifyMergeEscalated, notifyMergeTimeout,
                 waitForMerged, closeIssue, deploymentPipeline, deployOk,
                 emitCycleCompleted,
                 // Notifications (fire-and-forget)
@@ -1216,9 +1224,18 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 ConnectOutcome(gateOutcomeSwitch, "Escalated", notifyMergeEscalated),
                 ConnectOutcome(gateOutcomeSwitch, "Escalated", reportError),
 
-                // 13. Merged → Close Issue + Deployment Pipeline (parallel)
-                Connect(waitForMerged, closeIssue),
-                Connect(waitForMerged, deploymentPipeline),
+                // 13. Merged → Close Issue + Deployment Pipeline (parallel) — the
+                //      happy path, now gated on the explicit "Merged" outcome so the
+                //      durable merge-SLA "TimedOut" outcome can escalate separately.
+                ConnectOutcome(waitForMerged, "Merged", closeIssue),
+                ConnectOutcome(waitForMerged, "Merged", deploymentPipeline),
+
+                // 13b. Merge SLA elapsed with no merge webhook (§Missing #6) → the
+                //      durable timer fires the "TimedOut" outcome: notify + needs-human
+                //      handoff terminal. The loop can NEVER wait on the merge webhook
+                //      forever — a lost/failed merge webhook now escalates deterministically.
+                ConnectOutcome(waitForMerged, "TimedOut", notifyMergeTimeout),
+                ConnectOutcome(waitForMerged, "TimedOut", reportNeedsHuman),
 
                 // 15. Deployment done → GATE on the deploy result (§Missing #11).
                 //     A deployment failure must NOT report success — it routes to the
