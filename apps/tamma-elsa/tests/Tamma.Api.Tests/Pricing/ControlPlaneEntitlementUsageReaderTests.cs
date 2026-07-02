@@ -115,16 +115,16 @@ public class ControlPlaneEntitlementUsageReaderTests
         await using var ctx = NewContext();
         var reader = BuildReader(ctx, memberships.Object);
 
-        (await reader.GetCurrentAsync(tenantA, EntitlementMetricKey.Seats)).Should().Be(4);
-        (await reader.GetCurrentAsync(tenantA, EntitlementMetricKey.Agents)).Should().Be(2,
+        (await reader.GetCurrentAsync(tenantA, null, EntitlementMetricKey.Seats)).Should().Be(4);
+        (await reader.GetCurrentAsync(tenantA, null, EntitlementMetricKey.Agents)).Should().Be(2,
             "only tenant-owned private agents count, not the public system agent");
-        (await reader.GetCurrentAsync(tenantA, EntitlementMetricKey.Repos)).Should().Be(2,
+        (await reader.GetCurrentAsync(tenantA, null, EntitlementMetricKey.Repos)).Should().Be(2,
             "only active repos count");
 
-        (await reader.GetCurrentAsync(tenantA, EntitlementMetricKey.LlmTokens)).Should().BeNull();
-        (await reader.GetCurrentAsync(tenantA, EntitlementMetricKey.WorkflowRuns)).Should().BeNull();
-        (await reader.GetCurrentAsync(tenantA, EntitlementMetricKey.RagStorageMb)).Should().BeNull();
-        (await reader.GetCurrentAsync(tenantA, EntitlementMetricKey.BenchmarkRetentionDays)).Should().BeNull();
+        (await reader.GetCurrentAsync(tenantA, null, EntitlementMetricKey.LlmTokens)).Should().BeNull();
+        (await reader.GetCurrentAsync(tenantA, null, EntitlementMetricKey.WorkflowRuns)).Should().BeNull();
+        (await reader.GetCurrentAsync(tenantA, null, EntitlementMetricKey.RagStorageMb)).Should().BeNull();
+        (await reader.GetCurrentAsync(tenantA, null, EntitlementMetricKey.BenchmarkRetentionDays)).Should().BeNull();
     }
 
     [Test]
@@ -156,9 +156,55 @@ public class ControlPlaneEntitlementUsageReaderTests
         await using var ctx = NewContext();
         var reader = BuildReader(ctx, memberships.Object);
 
-        (await reader.GetCurrentAsync(tenantB, EntitlementMetricKey.Agents)).Should().Be(0);
-        (await reader.GetCurrentAsync(tenantB, EntitlementMetricKey.Repos)).Should().Be(0);
-        (await reader.GetCurrentAsync(tenantB, EntitlementMetricKey.Seats)).Should().Be(0);
+        (await reader.GetCurrentAsync(tenantB, null, EntitlementMetricKey.Agents)).Should().Be(0);
+        (await reader.GetCurrentAsync(tenantB, null, EntitlementMetricKey.Repos)).Should().Be(0);
+        (await reader.GetCurrentAsync(tenantB, null, EntitlementMetricKey.Seats)).Should().Be(0);
+    }
+
+    [Test]
+    public async Task Agents_SingleUserOwned_CountedByUserId_TenantOwnedStillByTenant()
+    {
+        // single-user: agents are USER-owned (OwnerUserId set, OwnerTenantId
+        // NULL) and the sole user resolves through their personal tenant, which
+        // owns no agents. Counting Agents by OwnerTenantId alone is therefore
+        // always 0 in single-user — the two-scoping-models gap. The reader must
+        // count the user's own agents when given the single-user user id.
+        var personalTenant = Guid.NewGuid();  // the sole user's personal tenant
+        var user = Guid.NewGuid();             // single-user principal
+        var saasTenant = Guid.NewGuid();       // an unrelated SaaS tenant
+
+        await using (var setup = NewContext())
+        {
+            setup.Tenants.Add(NewTenant(personalTenant));
+            setup.Tenants.Add(NewTenant(saasTenant));
+
+            // 2 single-user-owned agents (OwnerUserId == user, OwnerTenantId NULL).
+            setup.Agents.Add(UserOwnedAgent(user, "atlas"));
+            setup.Agents.Add(UserOwnedAgent(user, "nova"));
+            // A different user's agent — must NOT be counted for `user`.
+            setup.Agents.Add(UserOwnedAgent(Guid.NewGuid(), "someone-else"));
+            // A tenant-owned (SaaS) agent — must NOT leak into the user count,
+            // and must still be counted by its tenant.
+            setup.Agents.Add(OwnedAgent(saasTenant, "team-bot"));
+            // A public/system agent — owned by nobody, never counted.
+            setup.Agents.Add(PublicAgent("claude"));
+
+            await setup.SaveChangesAsync();
+        }
+
+        var memberships = new Mock<ITenantMembershipRepository>();
+
+        await using var ctx = NewContext();
+        var reader = BuildReader(ctx, memberships.Object);
+
+        // single-user: resolved tenant = personal tenant (owns 0 agents), userId
+        // = the sole user → their 2 agents are counted.
+        (await reader.GetCurrentAsync(personalTenant, user, EntitlementMetricKey.Agents))
+            .Should().Be(2, "single-user-owned agents (OwnerUserId) must be counted for the sole user");
+
+        // SaaS path (userId == null) still counts strictly by owner tenant.
+        (await reader.GetCurrentAsync(saasTenant, null, EntitlementMetricKey.Agents))
+            .Should().Be(1, "tenant-owned agents are still counted by OwnerTenantId in SaaS");
     }
 
     [Test]
@@ -204,6 +250,17 @@ public class ControlPlaneEntitlementUsageReaderTests
         Name = name,
         Visibility = AgentVisibility.Private,
         OwnerTenantId = tenantId,
+        Status = AgentStatus.Active,
+        CreatedAt = DateTime.UtcNow,
+        UpdatedAt = DateTime.UtcNow,
+    };
+
+    private static Agent UserOwnedAgent(Guid userId, string name) => new()
+    {
+        Id = Guid.NewGuid(),
+        Name = name,
+        Visibility = AgentVisibility.Private,
+        OwnerUserId = userId,
         Status = AgentStatus.Active,
         CreatedAt = DateTime.UtcNow,
         UpdatedAt = DateTime.UtcNow,

@@ -49,9 +49,10 @@ public class EntitlementEndpointsTests
             .ReturnsAsync(resolved ?? ResolvedFor(tenantId));
 
         var usage = new Mock<IEntitlementUsageReader>();
-        usage.Setup(u => u.GetCurrentAsync(tenantId, EntitlementMetricKey.Seats, It.IsAny<CancellationToken>()))
+        usage.Setup(u => u.GetCurrentAsync(
+                tenantId, It.IsAny<Guid?>(), EntitlementMetricKey.Seats, It.IsAny<CancellationToken>()))
             .ReturnsAsync(3);
-        usage.Setup(u => u.GetCurrentAsync(It.IsAny<Guid>(), It.Is<EntitlementMetricKey>(
+        usage.Setup(u => u.GetCurrentAsync(It.IsAny<Guid>(), It.IsAny<Guid?>(), It.Is<EntitlementMetricKey>(
                 m => m != EntitlementMetricKey.Seats), It.IsAny<CancellationToken>()))
             .ReturnsAsync((long?)null);
         return (svc, usage);
@@ -183,6 +184,45 @@ public class EntitlementEndpointsTests
             NullLoggerFactory.Instance, CancellationToken.None);
 
         StatusOf(result).Should().Be(StatusCodes.Status404NotFound);
+    }
+
+    [Test]
+    public async Task Member_CatalogUnavailable_Returns503()
+    {
+        // A pinned plan with no catalog snapshot throws CATALOG_UNAVAILABLE.
+        // Without an explicit map it would surface as a bare 500 (no global
+        // TammaError→ProblemDetails middleware); it must be a fail-loud 503.
+        var tenant = Guid.NewGuid();
+        var svc = new Mock<IEntitlementService>();
+        svc.Setup(s => s.ResolveAsync(It.IsAny<EntitlementPrincipal>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TammaError(
+                "ENTITLEMENT.RESOLVE.CATALOG_UNAVAILABLE", "pinned plan snapshot missing"));
+        var tenantContext = new TenantContext();
+        tenantContext.SetTenantId(tenant);
+
+        var result = await PricingEndpoints.GetEntitlements(
+            UserPrincipal(Guid.NewGuid()),
+            tenantContext,
+            new FakeMode { Mode = TammaMode.SaaS },
+            svc.Object, Mock.Of<IEntitlementUsageReader>(),
+            NullLoggerFactory.Instance, CancellationToken.None);
+
+        StatusOf(result).Should().Be(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    [Test]
+    public async Task Admin_CatalogUnavailable_Returns503()
+    {
+        var svc = new Mock<IEntitlementService>();
+        svc.Setup(s => s.ResolveAsync(It.IsAny<EntitlementPrincipal>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TammaError(
+                "ENTITLEMENT.RESOLVE.CATALOG_UNAVAILABLE", "pinned plan snapshot missing"));
+
+        var result = await AdminTenantsEndpoints.GetTenantEntitlements(
+            Guid.NewGuid(), svc.Object, Mock.Of<IEntitlementUsageReader>(),
+            NullLoggerFactory.Instance, CancellationToken.None);
+
+        StatusOf(result).Should().Be(StatusCodes.Status503ServiceUnavailable);
     }
 
     [Test]

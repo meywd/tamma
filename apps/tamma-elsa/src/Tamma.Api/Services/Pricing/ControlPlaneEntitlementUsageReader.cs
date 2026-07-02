@@ -14,8 +14,10 @@ namespace Tamma.Api.Services.Pricing;
 ///   <item><term><see cref="EntitlementMetricKey.Seats"/></term>
 ///     <description><c>TenantMembership</c> count</description></item>
 ///   <item><term><see cref="EntitlementMetricKey.Agents"/></term>
-///     <description>Epic-32 tenant-owned <c>Agent</c> identities
-///       (<c>OwnerTenantId == tenantId</c>)</description></item>
+///     <description>Epic-32 owned <c>Agent</c> identities — SaaS:
+///       <c>OwnerTenantId == tenantId</c>; single-user:
+///       <c>OwnerUserId == userId</c> (mode-scoped ownership, see
+///       <c>AgentsAsync</c>)</description></item>
 ///   <item><term><see cref="EntitlementMetricKey.Repos"/></term>
 ///     <description>active <c>GitHubInstallationRepo</c> for the tenant's installation</description></item>
 /// </list>
@@ -47,12 +49,12 @@ public sealed class ControlPlaneEntitlementUsageReader : IEntitlementUsageReader
     }
 
     public async Task<long?> GetCurrentAsync(
-        Guid tenantId, EntitlementMetricKey metric, CancellationToken ct = default)
+        Guid tenantId, Guid? userId, EntitlementMetricKey metric, CancellationToken ct = default)
     {
         long? value = metric switch
         {
             EntitlementMetricKey.Seats => await SeatsAsync(tenantId, ct),
-            EntitlementMetricKey.Agents => await AgentsAsync(tenantId, ct),
+            EntitlementMetricKey.Agents => await AgentsAsync(tenantId, userId, ct),
             EntitlementMetricKey.Repos => await ReposAsync(tenantId, ct),
 
             // Metering-backed — Epic 35 reader answers these.
@@ -60,8 +62,8 @@ public sealed class ControlPlaneEntitlementUsageReader : IEntitlementUsageReader
         };
 
         _logger.LogDebug(
-            "Usage reader: tenant {TenantId} metric {Metric} → {Value}",
-            tenantId, metric.ToMetricString(), value?.ToString() ?? "unavailable");
+            "Usage reader: tenant {TenantId} user {UserId} metric {Metric} → {Value}",
+            tenantId, userId, metric.ToMetricString(), value?.ToString() ?? "unavailable");
 
         return value;
     }
@@ -74,13 +76,24 @@ public sealed class ControlPlaneEntitlementUsageReader : IEntitlementUsageReader
         return total;
     }
 
-    private Task<int> AgentsAsync(Guid tenantId, CancellationToken ct) =>
-        // Tenant agent identities: private Agent rows owned by this tenant
-        // (public/system agents have OwnerTenantId == null and aren't "owned").
+    private Task<int> AgentsAsync(Guid tenantId, Guid? userId, CancellationToken ct) =>
+        // Agent identities owned by this principal. Ownership is mode-scoped
+        // (Agent entity: OwnerTenantId XOR OwnerUserId), so mirror
+        // AgentRepository.ListVisibleAsync's ownership predicate:
+        //   • SaaS         → OwnerTenantId == the (resolved) tenant.
+        //   • single-user  → OwnerUserId  == the sole user (userId != null);
+        //                     the resolved personal tenant owns no agents, so
+        //                     the tenant clause contributes 0 and the user
+        //                     clause carries the count.
+        // Public/system agents (both owner columns NULL) are never counted; the
+        // userId guard keeps them out of the SaaS count (userId == null there).
         _db.Agents
             .AsNoTracking()
             .IgnoreQueryFilters()
-            .CountAsync(a => a.OwnerTenantId == tenantId, ct);
+            .CountAsync(
+                a => a.OwnerTenantId == tenantId
+                     || (userId != null && a.OwnerUserId == userId),
+                ct);
 
     private Task<int> ReposAsync(Guid tenantId, CancellationToken ct) =>
         // Active connected repos across the tenant's GitHub installation(s).

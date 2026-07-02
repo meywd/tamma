@@ -37,7 +37,12 @@ public static class EntitlementResponseBuilder
             long? usage = null;
             try
             {
-                usage = await usageReader.GetCurrentAsync(resolved.TenantId, metric, ct);
+                // Pass BOTH the resolved tenant (SaaS + single-user personal
+                // tenant scope) AND the single-user principal's user id, so
+                // USER-owned counts (Agents) resolve in single-user mode where
+                // the owner is a user, not the personal tenant.
+                usage = await usageReader.GetCurrentAsync(
+                    resolved.TenantId, principal.UserId, metric, ct);
             }
             catch (Exception ex)
             {

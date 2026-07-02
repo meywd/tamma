@@ -18,6 +18,18 @@ public interface IEntitlementUsageReader
     /// reader cannot answer the metric (headroom degrades to
     /// <c>CurrentUsage = null</c> for those).
     /// </summary>
+    /// <param name="tenantId">
+    /// The resolved tenant id (SaaS: the ambient tenant; single-user: the sole
+    /// user's personal tenant). Tenant-scoped counts (<c>Seats</c>, <c>Repos</c>)
+    /// key off this in both modes.
+    /// </param>
+    /// <param name="userId">
+    /// The single-user principal's user id (<c>null</c> in SaaS). Needed for
+    /// USER-owned counts: an <c>Agent</c> owned in single-user mode carries
+    /// <c>OwnerUserId</c> (not <c>OwnerTenantId</c>), so without this the
+    /// <c>Agents</c> count is silently 0 in single-user (CLAUDE.md
+    /// "design two scoping models, not one").
+    /// </param>
     Task<long?> GetCurrentAsync(
-        Guid tenantId, EntitlementMetricKey metric, CancellationToken ct = default);
+        Guid tenantId, Guid? userId, EntitlementMetricKey metric, CancellationToken ct = default);
 }

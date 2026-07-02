@@ -126,6 +126,26 @@ public static class AdminTenantsEndpoints
             // Unknown tenant OR no active assignment — both 404 (AC5).
             return Results.NotFound(new { error = "no_active_assignment" });
         }
+        catch (TammaError ex) when (ex.Code == "ENTITLEMENT.RESOLVE.CATALOG_UNAVAILABLE")
+        {
+            // A pinned plan whose catalog snapshot vanished — a transient/config
+            // fault (the snapshot SHOULD exist), not "no plan". Fail loud as 503
+            // (typed ProblemDetails), never a bare 500 and never a permissive 200.
+            logger.LogError(
+                "Admin entitlement read failed — tenant {TenantId} pinned plan has no catalog snapshot",
+                tenantId);
+            return Results.Problem(
+                title: ex.Code, detail: ex.Message,
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+        catch (TammaError ex) when (ex.Code == "ENTITLEMENT.RESOLVE.NO_PRINCIPAL")
+        {
+            // Defensive — the admin route always supplies a tenant id, so a
+            // malformed principal reaching here is a bad request, not a 500.
+            return Results.Problem(
+                title: ex.Code, detail: ex.Message,
+                statusCode: StatusCodes.Status400BadRequest);
+        }
     }
 
     // ── GET /api/admin/tenants ──

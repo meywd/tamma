@@ -165,5 +165,25 @@ public static class PricingEndpoints
             // No active plan assignment — a 404, never a 500 (AC4/AC5).
             return Results.NotFound(new { error = "no_active_assignment" });
         }
+        catch (TammaError ex) when (ex.Code == "ENTITLEMENT.RESOLVE.CATALOG_UNAVAILABLE")
+        {
+            // A pinned plan whose catalog snapshot vanished — a transient/config
+            // fault (the snapshot SHOULD exist), NOT "no plan". Fail loud as 503
+            // (typed ProblemDetails) so the caller retries; never a permissive
+            // 200 and never a bare 500.
+            logger.LogError(
+                "Entitlement read failed — pinned plan has no catalog snapshot (member self-read)");
+            return Results.Problem(
+                title: ex.Code, detail: ex.Message,
+                statusCode: StatusCodes.Status503ServiceUnavailable);
+        }
+        catch (TammaError ex) when (ex.Code == "ENTITLEMENT.RESOLVE.NO_PRINCIPAL")
+        {
+            // Resolver got a principal with neither a tenant nor a user id — for
+            // the member self-read that is a missing/invalid identity → 401.
+            return Results.Problem(
+                title: ex.Code, detail: ex.Message,
+                statusCode: StatusCodes.Status401Unauthorized);
+        }
     }
 }
