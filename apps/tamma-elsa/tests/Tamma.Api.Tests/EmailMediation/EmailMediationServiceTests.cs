@@ -1,9 +1,11 @@
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
 using Tamma.Api.Services.Email;
 using Tamma.Api.Services.EmailMediation;
+using Tamma.Api.Services.PromptStore;
 
 namespace Tamma.Api.Tests.EmailMediation;
 
@@ -26,7 +28,25 @@ public class EmailMediationServiceTests
     public void SetUp()
     {
         _email = new Mock<IEmailService>(MockBehavior.Strict);
-        _sut = new EmailMediationService(_email.Object, NullLogger<EmailMediationService>.Instance);
+        // Default SUT is single-user mode — the existing accept/fail-soft tests
+        // exercise the composition without the SaaS guard tripping.
+        _sut = BuildSut(TammaMode.SingleUser);
+    }
+
+    private EmailMediationService BuildSut(TammaMode mode, bool allowMediatedSendInSaaS = false)
+    {
+        var modeProvider = new Mock<ITammaModeProvider>();
+        modeProvider.SetupGet(m => m.Mode).Returns(mode);
+
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [EmailMediationService.AllowMediatedSendInSaaSKey] = allowMediatedSendInSaaS ? "true" : "false",
+            })
+            .Build();
+
+        return new EmailMediationService(
+            _email.Object, modeProvider.Object, config, NullLogger<EmailMediationService>.Instance);
     }
 
     private static SendEmailRequest Body() => new()
@@ -76,5 +96,60 @@ public class EmailMediationServiceTests
         result.Outcome.Should().Be("Error");
         result.FailureCode.Should().Be(EmailMediationFailureCodes.PlatformError);
         result.CorrelationId.Should().Be("corr-e");
+    }
+
+    // ── SaaS fail-closed tenant guard ──
+    // A tenant workflow mediates mail FROM the platform's configured sender identity
+    // (Email:From). In SaaS that lets a tenant emit arbitrary mail under the
+    // platform's reputation/domain, so mediated sends are denied by default. Only
+    // TENANT-WORKFLOW-initiated sends flow through here; system emails
+    // (welcome/verification/password-reset) call IEmailService directly and are
+    // unaffected.
+
+    [Test]
+    public async Task Send_SingleUserMode_Allowed_AcceptsIntoOutbox()
+    {
+        var txn = Guid.NewGuid();
+        _email.Setup(e => e.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(txn);
+        var sut = BuildSut(TammaMode.SingleUser);
+
+        var result = await sut.SendEmailAsync(_tenant, Body());
+
+        result.Success.Should().BeTrue("single-user mode has one principal who owns the sender domain");
+        result.Outcome.Should().Be("Queued");
+        result.TxnId.Should().Be(txn);
+        _email.Verify(e => e.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Test]
+    public async Task Send_SaaSMode_NoOptIn_TypedDenial_NeverEnqueues()
+    {
+        var sut = BuildSut(TammaMode.SaaS, allowMediatedSendInSaaS: false);
+
+        var result = await sut.SendEmailAsync(_tenant, Body());
+
+        result.Success.Should().BeFalse();
+        result.Outcome.Should().Be("Denied");
+        result.FailureCode.Should().Be(EmailMediationFailureCodes.MediationDeniedInSaaS);
+        result.CorrelationId.Should().Be("corr-e");
+        _email.Verify(e => e.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()), Times.Never,
+            "a denied mediated send must never reach the outbox/transport");
+    }
+
+    [Test]
+    public async Task Send_SaaSMode_WithOptIn_Allowed_AcceptsIntoOutbox()
+    {
+        var txn = Guid.NewGuid();
+        _email.Setup(e => e.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(txn);
+        var sut = BuildSut(TammaMode.SaaS, allowMediatedSendInSaaS: true);
+
+        var result = await sut.SendEmailAsync(_tenant, Body());
+
+        result.Success.Should().BeTrue("the explicit Email:AllowMediatedSendInSaaS opt-in re-enables the send");
+        result.Outcome.Should().Be("Queued");
+        result.TxnId.Should().Be(txn);
+        _email.Verify(e => e.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 }
