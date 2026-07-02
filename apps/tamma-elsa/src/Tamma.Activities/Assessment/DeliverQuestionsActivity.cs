@@ -6,9 +6,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text;
 using System.Text.Json.Serialization;
+using Tamma.Activities.ADL;
 using Tamma.Activities.Assessment.Models;
 using Tamma.Activities.LlmCall;
-using Tamma.Core.Interfaces;
+using Tamma.Activities.LlmCall.Models;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Activities.Assessment;
@@ -26,7 +27,7 @@ namespace Tamma.Activities.Assessment;
 public class DeliverQuestionsActivity : CodeActivity<DeliveryResult>
 {
     private readonly ILogger<DeliverQuestionsActivity>? _logger;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
     private readonly IMentorshipSessionRepository? _repository;
     private readonly IConfiguration? _configuration;
 
@@ -46,17 +47,26 @@ public class DeliverQuestionsActivity : CodeActivity<DeliveryResult>
     [Input(Description = "Assessment attempt number", DefaultValue = 1)]
     public Input<int> AttemptNumber { get; set; } = new(1);
 
+    [Input(Description = "Tenant id (GUID string) for the acting scope; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public DeliverQuestionsActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2, Batch C) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no email credential: the email delivery channel routes through the outbox-backed
+    /// email-mediation endpoint via <see cref="TammaApiClient"/> (the API owns the <c>EMAIL.*</c>
+    /// audit event); the Slack channel already goes through the <see cref="MediatedSlack"/> seam.
+    /// </summary>
     public DeliverQuestionsActivity(
         ILogger<DeliverQuestionsActivity> logger,
-        IIntegrationService integrationService,
+        TammaApiClient apiClient,
         IMentorshipSessionRepository repository,
         IConfiguration configuration)
     {
         _logger = logger;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
         _repository = repository;
         _configuration = configuration;
     }
@@ -67,6 +77,10 @@ public class DeliverQuestionsActivity : CodeActivity<DeliveryResult>
         var juniorId = JuniorId.Get(context);
         var questionsJson = QuestionsJson.Get(context);
         var attemptNumber = AttemptNumber.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var ct = context.CancellationToken;
 
         _logger?.LogInformation(
             "Delivering assessment questions for session {SessionId}, attempt {AttemptNumber}",
@@ -100,10 +114,21 @@ public class DeliverQuestionsActivity : CodeActivity<DeliveryResult>
                 case "email":
                     if (junior?.Email != null)
                     {
-                        await _integrationService!.SendEmailAsync(
-                            junior.Email,
-                            $"Tamma Assessment - Session {sessionId}",
-                            message);
+                        // Mediated, outbox-backed send (the API owns the EMAIL.* audit event).
+                        // A null / success:false envelope is an unexpected send failure — throw
+                        // so the outer catch reports delivery failure, exactly as the composite's
+                        // void SendEmailAsync did when it threw.
+                        var emailResponse = await apiClient.SendEmailAsync(new EmailSendRequest
+                        {
+                            To = junior.Email,
+                            Subject = $"Tamma Assessment - Session {sessionId}",
+                            Body = message,
+                            CorrelationId = correlationId,
+                        }, tenantId, ct);
+
+                        if (emailResponse is null || !emailResponse.Success)
+                            throw new InvalidOperationException(
+                                emailResponse?.FailureReason ?? "email mediation endpoint unavailable");
                     }
                     else
                     {

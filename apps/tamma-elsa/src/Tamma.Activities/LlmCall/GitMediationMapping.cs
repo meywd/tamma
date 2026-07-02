@@ -77,4 +77,56 @@ public static class GitMediationMapping
                 StartedAt = status.StartedAt,
                 FinishedAt = status.FinishedAt,
             };
+
+    /// <summary>Story 38 (Phase 2, Batch C) — project a git-merge wire response into the
+    /// composite <see cref="GitHubMergeResult"/> so the two mentorship/review merge callers
+    /// keep their downstream logic byte-compatible. Soft-fail (write op): a null response
+    /// (guard 403 / token 503 / auth 401 / transport) or a <c>Success=false</c> envelope
+    /// maps to <c>Success=false</c> with the failure reason/code surfaced on
+    /// <see cref="GitHubMergeResult.Error"/> — mirrors the composite's soft merge result
+    /// (never a fabricated success).</summary>
+    public static GitHubMergeResult ToMergeResult(GitCallResponse? response)
+        => response is null
+            ? new GitHubMergeResult { Success = false, Error = "git mediation endpoint unavailable" }
+            : new GitHubMergeResult
+            {
+                Success = response.Success,
+                MergeSha = response.MergeSha,
+                Error = response.Success ? null : (response.FailureReason ?? response.FailureCode),
+            };
+
+    /// <summary>Story 38 (Phase 2, Batch C) — project a JIRA-mediation ticket DTO into the
+    /// composite <see cref="JiraTicket"/> (null DTO → null, matching the composite's nullable
+    /// read). <see cref="JiraTicket.Labels"/> defaults to an empty list when the wire carried
+    /// none.</summary>
+    public static JiraTicket? ToJiraTicket(JiraTicketDto? dto)
+        => dto is null
+            ? null
+            : new JiraTicket
+            {
+                Id = dto.Id,
+                Key = dto.Key,
+                Summary = dto.Summary,
+                Description = dto.Description,
+                Status = dto.Status,
+                Assignee = dto.Assignee,
+                Priority = dto.Priority,
+                Labels = dto.Labels.ToList(),
+            };
+
+    /// <summary>Story 38 (Phase 2, Batch C) — project a JIRA-mediation response into the
+    /// composite <see cref="JiraTicketResult"/>. Soft-fail (write op): a null response
+    /// (transport / mediation unavailable) or a <c>Success=false</c> envelope maps to
+    /// <c>Success=false</c> with the failure reason/code on <see cref="JiraTicketResult.Error"/> —
+    /// mirrors the composite's soft update result (the update path never threw for an expected
+    /// failure).</summary>
+    public static JiraTicketResult ToJiraTicketResult(JiraCallResponse? response)
+        => response is null
+            ? new JiraTicketResult { Success = false, Error = "jira mediation endpoint unavailable" }
+            : new JiraTicketResult
+            {
+                Success = response.Success,
+                TicketKey = response.TicketKey,
+                Error = response.Success ? null : (response.FailureReason ?? response.FailureCode),
+            };
 }

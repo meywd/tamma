@@ -127,6 +127,100 @@ public class IntegrationServiceCutoverTests
         status.Error.Should().BeNull();
     }
 
+    // ------- Batch C: merge + JIRA projections -------
+
+    [Test]
+    public void ToMergeResult_Success_ProjectsSha_NoError()
+    {
+        var result = GitMediationMapping.ToMergeResult(new GitCallResponse
+        {
+            Success = true, Merged = true, MergeSha = "sha42",
+        });
+
+        result.Success.Should().BeTrue();
+        result.MergeSha.Should().Be("sha42");
+        result.Error.Should().BeNull();
+    }
+
+    [Test]
+    public void ToMergeResult_Failure_ProjectsError_SoftNotThrow()
+    {
+        var result = GitMediationMapping.ToMergeResult(new GitCallResponse
+        {
+            Success = false, FailureCode = "NOT_MERGEABLE", FailureReason = "closed",
+        });
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be("closed");
+    }
+
+    [Test]
+    public void ToMergeResult_Null_SoftFailsWithReason()
+    {
+        var result = GitMediationMapping.ToMergeResult(null);
+        result.Success.Should().BeFalse();
+        result.MergeSha.Should().BeNull();
+        result.Error.Should().Be("git mediation endpoint unavailable");
+    }
+
+    [Test]
+    public void ToJiraTicket_ProjectsAllFields()
+    {
+        var ticket = GitMediationMapping.ToJiraTicket(new JiraTicketDto
+        {
+            Id = "10001", Key = "TAMMA-7", Summary = "Do the thing", Description = "desc",
+            Status = "In Progress", Assignee = "dev", Priority = "High",
+            Labels = new[] { "backend", "urgent" },
+        });
+
+        ticket.Should().NotBeNull();
+        ticket!.Id.Should().Be("10001");
+        ticket.Key.Should().Be("TAMMA-7");
+        ticket.Summary.Should().Be("Do the thing");
+        ticket.Description.Should().Be("desc");
+        ticket.Status.Should().Be("In Progress");
+        ticket.Assignee.Should().Be("dev");
+        ticket.Priority.Should().Be("High");
+        ticket.Labels.Should().BeEquivalentTo("backend", "urgent");
+    }
+
+    [Test]
+    public void ToJiraTicket_Null_YieldsNull()
+        => GitMediationMapping.ToJiraTicket(null).Should().BeNull();
+
+    [Test]
+    public void ToJiraTicketResult_Success_ProjectsKey_NoError()
+    {
+        var result = GitMediationMapping.ToJiraTicketResult(new JiraCallResponse
+        {
+            Success = true, TicketKey = "TAMMA-7",
+        });
+
+        result.Success.Should().BeTrue();
+        result.TicketKey.Should().Be("TAMMA-7");
+        result.Error.Should().BeNull();
+    }
+
+    [Test]
+    public void ToJiraTicketResult_Failure_ProjectsError_SoftNotThrow()
+    {
+        var result = GitMediationMapping.ToJiraTicketResult(new JiraCallResponse
+        {
+            Success = false, FailureCode = "JIRA_403", FailureReason = "forbidden",
+        });
+
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be("forbidden");
+    }
+
+    [Test]
+    public void ToJiraTicketResult_Null_SoftFailsWithReason()
+    {
+        var result = GitMediationMapping.ToJiraTicketResult(null);
+        result.Success.Should().BeFalse();
+        result.Error.Should().Be("jira mediation endpoint unavailable");
+    }
+
     // ===================================================================
     // Cutover proof — zero IIntegrationService injections in the eight
     // ===================================================================
@@ -152,6 +246,13 @@ public class IntegrationServiceCutoverTests
         typeof(Tamma.Activities.Mentorship.MonitorImplementationActivity),
         typeof(Tamma.Activities.Context.FetchSimilarPatternsActivity),
         typeof(Tamma.Activities.Blocker.CollectCommunicationActivity),
+        // Batch C (6) — JIRA / email / merge / diagnostic reads mediated
+        typeof(Tamma.Activities.Integration.JiraActivity),
+        typeof(Tamma.Activities.Integration.EmailActivity),
+        typeof(Tamma.Activities.Mentorship.MergeCompleteActivity),
+        typeof(Tamma.Activities.Assessment.DeliverQuestionsActivity),
+        typeof(Tamma.Activities.Mentorship.DiagnoseBlockerActivity),
+        typeof(Tamma.Activities.Review.MergeAndCompleteReviewActivity),
     };
 
     /// <summary>
@@ -178,6 +279,13 @@ public class IntegrationServiceCutoverTests
         typeof(Tamma.Activities.Debug.CollectRelevantCodeActivity),
         typeof(Tamma.Activities.Mentorship.QualityGateCheckActivity),
         typeof(Tamma.Activities.Mentorship.MonitorImplementationActivity),
+        // Batch C (6) — all mediate a JIRA / email / git-merge / CI read via the thin client
+        typeof(Tamma.Activities.Integration.JiraActivity),
+        typeof(Tamma.Activities.Integration.EmailActivity),
+        typeof(Tamma.Activities.Mentorship.MergeCompleteActivity),
+        typeof(Tamma.Activities.Assessment.DeliverQuestionsActivity),
+        typeof(Tamma.Activities.Mentorship.DiagnoseBlockerActivity),
+        typeof(Tamma.Activities.Review.MergeAndCompleteReviewActivity),
     };
 
     [Test]
@@ -213,5 +321,7 @@ public class IntegrationServiceCutoverTests
     private static bool IsIntegrationServiceType(Type t) =>
         typeof(IIntegrationService).IsAssignableFrom(t)
         || typeof(IGitHubIntegrationService).IsAssignableFrom(t)
-        || typeof(ICIIntegrationService).IsAssignableFrom(t);
+        || typeof(ICIIntegrationService).IsAssignableFrom(t)
+        || typeof(IJiraIntegrationService).IsAssignableFrom(t)
+        || typeof(IEmailIntegrationService).IsAssignableFrom(t);
 }

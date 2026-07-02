@@ -4,7 +4,9 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using Tamma.Activities.ADL;
 using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -25,7 +27,7 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
 {
     private readonly ILogger<DiagnoseBlockerActivity>? _logger;
     private readonly IMentorshipSessionRepository? _repository;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
     private readonly IAnalyticsService? _analyticsService;
 
     /// <summary>Mentorship session ID</summary>
@@ -44,18 +46,26 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
     [Input(Description = "Additional context about the blocker")]
     public Input<string?> BlockerContext { get; set; } = default!;
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public DiagnoseBlockerActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2, Batch C) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no git/CI credential: the diagnostic git-commit / build-status / test-trigger reads
+    /// route through the git/CI mediation endpoints via <see cref="TammaApiClient"/>.
+    /// </summary>
     public DiagnoseBlockerActivity(
         ILogger<DiagnoseBlockerActivity> logger,
         IMentorshipSessionRepository repository,
-        IIntegrationService integrationService,
+        TammaApiClient apiClient,
         IAnalyticsService analyticsService)
     {
         _logger = logger;
         _repository = repository;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
         _analyticsService = analyticsService;
     }
 
@@ -68,6 +78,10 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
         var storyId = StoryId.Get(context);
         var juniorId = JuniorId.Get(context);
         var blockerContext = BlockerContext.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var ct = context.CancellationToken;
 
         _logger?.LogInformation(
             "Diagnosing blocker for junior {JuniorId} on story {StoryId}",
@@ -97,7 +111,7 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
             }
 
             // Collect diagnostic data
-            var diagnosticData = await CollectDiagnosticData(story, junior, storyId, juniorId);
+            var diagnosticData = await CollectDiagnosticData(apiClient, story, junior, storyId, correlationId, tenantId, ct);
 
             // Analyze patterns from analytics
             var patterns = await _analyticsService!.DetectPatternsAsync(juniorId);
@@ -148,10 +162,13 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
     }
 
     private async Task<DiagnosticData> CollectDiagnosticData(
+        TammaApiClient apiClient,
         Tamma.Core.Entities.Story story,
         Tamma.Core.Entities.JuniorDeveloper junior,
         string storyId,
-        string juniorId)
+        string correlationId,
+        string? tenantId,
+        CancellationToken ct)
     {
         var data = new DiagnosticData
         {
@@ -160,15 +177,22 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
             TimeSinceLastActivity = TimeSpan.Zero
         };
 
-        // Collect GitHub activity if repository configured
+        // Collect GitHub activity if repository configured. All three reads are mediated
+        // via the git/CI endpoints; a null / failed mediation response throws and is caught
+        // locally (best-effort — a diagnostic read failure never fails the diagnosis), exactly
+        // as the composite's throwing calls were caught here before the cutover.
         if (!string.IsNullOrEmpty(story.RepositoryUrl))
         {
             try
             {
-                var commits = await _integrationService!.GetGitHubCommitsAsync(
-                    story.RepositoryUrl,
-                    $"feature/{storyId}",
-                    DateTime.UtcNow.AddHours(-24));
+                var branch = $"feature/{storyId}";
+
+                var commitsResponse = await apiClient.GetCommitsAsync(
+                    story.RepositoryUrl, branch, DateTime.UtcNow.AddHours(-24), correlationId, tenantId, ct);
+                if (commitsResponse is null || !commitsResponse.Success)
+                    throw new InvalidOperationException(
+                        commitsResponse?.FailureReason ?? "git mediation endpoint unavailable");
+                var commits = GitMediationMapping.ToCommits(commitsResponse.Commits);
 
                 data.RecentCommitCount = commits.Count;
                 data.LastCommitTime = commits.Any() ? commits.Max(c => c.Timestamp) : null;
@@ -178,16 +202,29 @@ public class DiagnoseBlockerActivity : CodeActivity<BlockerDiagnosisOutput>
                     data.TimeSinceLastActivity = DateTime.UtcNow - data.LastCommitTime.Value;
                 }
 
-                var buildStatus = await _integrationService.GetBuildStatusAsync(
-                    story.RepositoryUrl,
-                    $"feature/{storyId}");
+                var buildResponse = await apiClient.GetBuildStatusAsync(
+                    story.RepositoryUrl, branch, correlationId, tenantId, ct);
+                if (buildResponse is null || !buildResponse.Success)
+                    throw new InvalidOperationException(
+                        buildResponse?.FailureReason ?? "ci mediation endpoint unavailable");
+                var buildStatus = GitMediationMapping.ToBuildStatus(buildResponse.BuildStatus);
                 data.BuildStatus = buildStatus.Status;
+                // NB: the CI-mediation build-status DTO carries no Error field (Batch B note),
+                // so BuildError is now always null. The build-failure branch of AnalyzeBlocker
+                // (which required a non-empty BuildError) therefore no longer fires — a failing
+                // build now surfaces only via BuildStatus + the test/inactivity branches.
                 data.BuildError = buildStatus.Error;
 
-                var testResults = await _integrationService.TriggerTestsAsync(
-                    story.RepositoryUrl,
-                    $"feature/{storyId}");
+                var testsResponse = await apiClient.TriggerTestsAsync(
+                    story.RepositoryUrl, new CiTriggerTestsRequest { Branch = branch, CorrelationId = correlationId }, tenantId, ct);
+                if (testsResponse is null || !testsResponse.Success)
+                    throw new InvalidOperationException(
+                        testsResponse?.FailureReason ?? "ci mediation endpoint unavailable");
+                var testResults = GitMediationMapping.ToTestRun(testsResponse.TestRun);
                 data.FailingTestCount = testResults.FailedTests;
+                // NB: the CI-mediation test-run DTO carries aggregate counts only (no per-test
+                // detail), so FailingTests is now always empty — FailingTestCount still drives
+                // the testing-challenge branch.
                 data.FailingTests = testResults.FailedTestDetails
                     .Select(t => t.TestName)
                     .ToList();

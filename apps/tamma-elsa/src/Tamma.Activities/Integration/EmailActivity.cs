@@ -4,7 +4,9 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
-using Tamma.Core.Interfaces;
+using Tamma.Activities.ADL;
+using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 
 namespace Tamma.Activities.Integration;
 
@@ -21,7 +23,7 @@ namespace Tamma.Activities.Integration;
 public class EmailActivity : CodeActivity<EmailOperationResult>
 {
     private readonly ILogger<EmailActivity>? _logger;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
 
     /// <summary>Recipient email address</summary>
     [Input(Description = "Recipient email address")]
@@ -47,15 +49,24 @@ public class EmailActivity : CodeActivity<EmailOperationResult>
     [Input(Description = "CC recipients (comma-separated)")]
     public Input<string?> Cc { get; set; } = default!;
 
+    [Input(Description = "Tenant id (GUID string) for the acting scope; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public EmailActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2, Batch C) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no SMTP/Resend credential: the send routes through the outbox-backed email-mediation
+    /// endpoint via <see cref="TammaApiClient"/>, which OWNS the terminal <c>EMAIL.*</c> audit
+    /// event — this activity never emits its own.
+    /// </summary>
     public EmailActivity(
         ILogger<EmailActivity> logger,
-        IIntegrationService integrationService)
+        TammaApiClient apiClient)
     {
         _logger = logger;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
     }
 
     /// <summary>
@@ -68,6 +79,10 @@ public class EmailActivity : CodeActivity<EmailOperationResult>
         var body = Body.Get(context);
         var template = Template.Get(context);
         var templateData = TemplateData.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var ct = context.CancellationToken;
 
         _logger?.LogInformation(
             "Sending email to {To} with subject: {Subject}",
@@ -80,7 +95,21 @@ public class EmailActivity : CodeActivity<EmailOperationResult>
                 ? ApplyTemplate(template, body, templateData)
                 : body;
 
-            await _integrationService!.SendEmailAsync(to, subject, finalBody);
+            // Route through the outbox-backed mediation endpoint (the API owns the EMAIL.*
+            // audit event; this activity emits none). A null / success:false envelope is an
+            // unexpected send failure — throw so the outer catch reports Success=false, exactly
+            // as the composite's void SendEmailAsync did when it threw.
+            var response = await apiClient.SendEmailAsync(new EmailSendRequest
+            {
+                To = to,
+                Subject = subject,
+                Body = finalBody,
+                CorrelationId = correlationId,
+            }, tenantId, ct);
+
+            if (response is null || !response.Success)
+                throw new InvalidOperationException(
+                    response?.FailureReason ?? "email mediation endpoint unavailable");
 
             _logger?.LogInformation("Email sent successfully to {To}", to);
 

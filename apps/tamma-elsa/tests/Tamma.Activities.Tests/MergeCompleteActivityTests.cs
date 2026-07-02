@@ -1,7 +1,9 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
+using Tamma.Activities.LlmCall;
 using Tamma.Activities.Mentorship;
 using Tamma.Core.Entities;
 using Tamma.Core.Enums;
@@ -15,7 +17,10 @@ public class MergeCompleteActivityTests
 {
     private Mock<ILogger<MergeCompleteActivity>> _mockLogger = null!;
     private Mock<IMentorshipSessionRepository> _mockRepository = null!;
-    private Mock<IIntegrationService> _mockIntegrationService = null!;
+    // Story 38 (Phase 2, Batch C): the composite IIntegrationService injection is gone;
+    // the merge + JIRA update now route through the thin TammaApiClient. A throwaway real
+    // client (HttpClient + NullLogger, never hit) proves the ctor resolves the thin client.
+    private TammaApiClient _apiClient = null!;
     private Mock<IAnalyticsService> _mockAnalyticsService = null!;
 
     [SetUp]
@@ -23,7 +28,7 @@ public class MergeCompleteActivityTests
     {
         _mockLogger = new Mock<ILogger<MergeCompleteActivity>>();
         _mockRepository = new Mock<IMentorshipSessionRepository>();
-        _mockIntegrationService = new Mock<IIntegrationService>();
+        _apiClient = new TammaApiClient(new HttpClient(), NullLogger<TammaApiClient>.Instance, null, null);
         _mockAnalyticsService = new Mock<IAnalyticsService>();
     }
 
@@ -34,7 +39,7 @@ public class MergeCompleteActivityTests
         Action act = () => new MergeCompleteActivity(
             _mockLogger.Object,
             _mockRepository.Object,
-            _mockIntegrationService.Object,
+            _apiClient,
             _mockAnalyticsService.Object);
 
         // Assert
