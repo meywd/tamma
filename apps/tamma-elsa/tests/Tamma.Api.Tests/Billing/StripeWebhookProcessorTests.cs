@@ -3,6 +3,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Npgsql;
 using NUnit.Framework;
 using Tamma.Api.Services.Billing;
 using Tamma.Api.Services.Billing.Handlers;
@@ -129,10 +130,14 @@ public class StripeWebhookProcessorTests
     // ── AC6 — tenant resolution ──
 
     [Test]
-    public async Task No_Customer_Match_Is_Skipped_200_No_Projection()
+    public async Task No_Customer_Match_Known_Type_Skips_But_Emits_Skipped_Audit()
     {
+        // Finding 1(b): a KNOWN-relevant type (invoice.paid has a handler) that
+        // cannot be tenant-resolved must be AUDITED at platform scope
+        // (BILLING.WEBHOOK.SKIPPED), not left as zero trace. It still emits no
+        // money/projection event and acks 200 (no Stripe retry storm).
         var tid = Guid.NewGuid();
-        var h = Build(nameof(No_Customer_Match_Is_Skipped_200_No_Projection), tid);
+        var h = Build(nameof(No_Customer_Match_Known_Type_Skips_But_Emits_Skipped_Audit), tid);
         var evt = Evt(BillingWebhookEventTypes.InvoicePaid, "evt_nocust");
 
         var result = await h.Processor.ProcessAsync(evt, Payload("in_1", "cus_unknown"));
@@ -141,8 +146,31 @@ public class StripeWebhookProcessorTests
         var row = await h.Db.BillingWebhookEvents.SingleAsync();
         row.Status.Should().Be("skipped");
         row.TenantId.Should().BeNull();
+
+        var audit = h.Appended.Should().ContainSingle().Subject;
+        audit.Type.Should().Be(BillingWebhookEventTypes.DcbWebhookSkipped,
+            "a known-relevant unresolvable event is audited, not silently dropped");
+        audit.TenantId.Should().BeNull("the skip is platform-scoped");
+        h.Appended.Should().NotContain(e => e.Type == BillingWebhookEventTypes.DcbInvoicePaid,
+            "no money/projection event is emitted for an unknown tenant");
+    }
+
+    [Test]
+    public async Task Unknown_Type_No_Tenant_Skips_Without_Audit_Spam()
+    {
+        // The flip side of 1(b): an UNKNOWN type with no tenant is a benign,
+        // irrelevant delivery — it must NOT emit a BILLING.WEBHOOK.SKIPPED audit
+        // (that would spam the platform stream for every stray Stripe event type).
+        var tid = Guid.NewGuid();
+        var h = Build(nameof(Unknown_Type_No_Tenant_Skips_Without_Audit_Spam), tid);
+
+        var result = await h.Processor.ProcessAsync(
+            Evt("foo.bar.baz", "evt_unk_notenant"), Payload("x_1", "cus_unknown"));
+
+        result.Status.Should().Be(WebhookProcessResult.SkippedStatus);
+        (await h.Db.BillingWebhookEvents.SingleAsync()).Status.Should().Be("skipped");
         h.Events.Verify(e => e.AppendAsync(It.IsAny<DomainEvent>()), Times.Never,
-            "a no-customer-match emits no projection event");
+            "an unknown type with no tenant emits no audit event (no spam)");
     }
 
     [Test]
@@ -176,7 +204,10 @@ public class StripeWebhookProcessorTests
     [TestCase(BillingWebhookEventTypes.InvoicePaid, "in_1", BillingWebhookEventTypes.DcbInvoicePaid)]
     [TestCase(BillingWebhookEventTypes.PaymentIntentSucceeded, "pi_1", BillingWebhookEventTypes.DcbPaymentSucceeded)]
     [TestCase(BillingWebhookEventTypes.PaymentIntentPaymentFailed, "pi_1", BillingWebhookEventTypes.DcbPaymentFailed)]
-    [TestCase(BillingWebhookEventTypes.ChargeDisputeCreated, "dp_1", BillingWebhookEventTypes.DcbDisputeOpened)]
+    // NB: charge.dispute.created is intentionally NOT here — a realistic Dispute
+    // object has NO top-level `customer`, so it never resolves inline. Its two
+    // paths (resolvable-via-expanded-customer → projects; unresolvable → SKIPPED +
+    // follow-up) are covered by the dedicated dispute tests below.
     public async Task Default_Handler_Emits_Expected_Dcb_Type(
         string stripeType, string objectId, string expectedDcbType)
     {
@@ -187,6 +218,77 @@ public class StripeWebhookProcessorTests
 
         h.Appended.Should().ContainSingle()
             .Which.Type.Should().Be(expectedDcbType);
+    }
+
+    // ── Disputes (Finding 1) — a verified dispute must NEVER vanish silently ──
+
+    /// <summary>
+    /// A realistic <c>charge.dispute.created</c>: the Dispute object has NO
+    /// top-level <c>customer</c> — only <c>charge</c>/<c>payment_intent</c>. Under
+    /// the old code this resolved tenant=null and was stamped <c>skipped</c> with
+    /// zero trace: the dispute silently vanished. It must instead emit
+    /// <c>BILLING.WEBHOOK.SKIPPED</c> (platform audit) AND enqueue the dispute
+    /// follow-up carrying the charge/payment_intent ids.
+    /// </summary>
+    [Test]
+    public async Task Realistic_Dispute_No_Customer_Emits_Skipped_And_Enqueues_Followup()
+    {
+        var tid = Guid.NewGuid();
+        var h = Build(nameof(Realistic_Dispute_No_Customer_Emits_Skipped_And_Enqueues_Followup), tid);
+
+        // Real Stripe dispute shape: no `customer`, has `charge` + `payment_intent`.
+        var payload =
+            "{\"data\":{\"object\":{\"id\":\"dp_1\",\"object\":\"dispute\","
+            + "\"charge\":\"ch_123\",\"payment_intent\":\"pi_456\"}}}";
+
+        var result = await h.Processor.ProcessAsync(
+            Evt(BillingWebhookEventTypes.ChargeDisputeCreated, "evt_dispute_real"), payload);
+
+        // NOT silently skipped — a follow-up exists so it is handled out-of-band.
+        result.Status.Should().Be(WebhookProcessResult.EnqueuedStatus);
+        var row = await h.Db.BillingWebhookEvents.SingleAsync();
+        row.Status.Should().Be("enqueued");
+        row.TenantId.Should().BeNull();
+
+        // (i) audited at platform scope
+        var audit = h.Appended.Should().ContainSingle().Subject;
+        audit.Type.Should().Be(BillingWebhookEventTypes.DcbWebhookSkipped);
+        audit.TenantId.Should().BeNull();
+        h.Appended.Should().NotContain(e => e.Type == BillingWebhookEventTypes.DcbDisputeOpened,
+            "an unresolvable dispute does not project BILLING.DISPUTE.OPENED");
+
+        // (ii) follow-up carries the charge/payment_intent + stripe event id
+        h.Tasks.Verify(t => t.EnqueueAsync(
+            It.Is<PlatformQueuedTask>(p =>
+                p.Type == BillingWebhookEventTypes.FollowupTaskType
+                && p.TenantId == null
+                && p.Payload.Contains("ch_123")
+                && p.Payload.Contains("pi_456")
+                && p.Payload.Contains("evt_dispute_real")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    /// <summary>
+    /// A dispute CAN arrive with an expanded <c>customer</c> (SDK expansion). Then
+    /// it resolves inline and projects <c>BILLING.DISPUTE.OPENED</c> + enqueues the
+    /// dispute-response follow-up. Keeps <see cref="DisputeWebhookHandler"/>'s
+    /// happy path covered without a fake customer on a realistic payload.
+    /// </summary>
+    [Test]
+    public async Task Dispute_With_Expanded_Customer_Projects_Dispute_Opened()
+    {
+        var tid = Guid.NewGuid();
+        var h = Build(nameof(Dispute_With_Expanded_Customer_Projects_Dispute_Opened), tid);
+
+        var result = await h.Processor.ProcessAsync(
+            Evt(BillingWebhookEventTypes.ChargeDisputeCreated, "evt_dp_cust"),
+            Payload("dp_1", Cus));
+
+        result.Status.Should().Be(WebhookProcessResult.EnqueuedStatus);
+        h.Appended.Should().ContainSingle()
+            .Which.Type.Should().Be(BillingWebhookEventTypes.DcbDisputeOpened);
+        h.Tasks.Verify(t => t.EnqueueAsync(
+            It.IsAny<PlatformQueuedTask>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── AC11 — unknown type ──
@@ -323,6 +425,99 @@ public class StripeWebhookProcessorTests
         (await h.Processor.ReplayAsync(Guid.NewGuid())).Should().BeNull();
     }
 
+    // ── Finding 2 — the dedup-insert catch is unique-violation-ONLY ──
+
+    [Test]
+    public async Task Insert_Unique_Violation_Is_Acked_As_Duplicate()
+    {
+        // A 23505 collision on the dedup insert is the idempotent-redelivery case
+        // → Duplicate/200 (Stripe stops retrying).
+        var db = new ThrowOnSaveCpDb(
+            InMemoryOptions(nameof(Insert_Unique_Violation_Is_Acked_As_Duplicate)),
+            new DbUpdateException("dup",
+                new PostgresException(
+                    "duplicate key value violates unique constraint", "ERROR", "ERROR", "23505")));
+        var proc = NewProcessorFor(db);
+
+        var result = await proc.ProcessAsync(
+            Evt(BillingWebhookEventTypes.InvoicePaid, "evt_uv"), Payload("in_uv", Cus));
+
+        result.Status.Should().Be(WebhookProcessResult.DuplicateStatus);
+    }
+
+    [Test]
+    public async Task Insert_Transient_DbUpdateException_Bubbles_Not_Swallowed()
+    {
+        // A deadlock/timeout/connection-reset during the dedup insert is NOT a
+        // duplicate — it must BUBBLE (→ endpoint non-2xx → Stripe retries) rather
+        // than be swallowed as Duplicate/200 (which would lose the billing event).
+        var db = new ThrowOnSaveCpDb(
+            InMemoryOptions(nameof(Insert_Transient_DbUpdateException_Bubbles_Not_Swallowed)),
+            new DbUpdateException("deadlock",
+                new PostgresException("deadlock detected", "ERROR", "ERROR", "40P01")));
+        var proc = NewProcessorFor(db);
+
+        var act = async () => await proc.ProcessAsync(
+            Evt(BillingWebhookEventTypes.InvoicePaid, "evt_deadlock"), Payload("in_dl", Cus));
+
+        await act.Should().ThrowAsync<DbUpdateException>();
+    }
+
+    // ── Finding 3 — deterministic DCB Id makes replay idempotent ──
+
+    [Test]
+    public async Task Replay_Of_NonTerminal_Row_Does_Not_Double_Emit_Money_Event()
+    {
+        var tid = Guid.NewGuid();
+
+        // Dedup-aware event store (mirrors EventRepository / PlatformEventRepository
+        // dedup-on-Id). A deterministic DCB Id makes a re-dispatch a no-op here.
+        var byId = new Dictionary<Guid, DomainEvent>();
+        var events = new Mock<IEventRepository>();
+        events.Setup(e => e.AppendAsync(It.IsAny<DomainEvent>()))
+            .ReturnsAsync((DomainEvent d) => d)
+            .Callback<DomainEvent>(d => byId.TryAdd(d.Id, d));
+        var tasks = new Mock<IPlatformQueuedTaskRepository>();
+        tasks.Setup(t => t.EnqueueAsync(It.IsAny<PlatformQueuedTask>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PlatformQueuedTask t, CancellationToken _) => t);
+
+        var db = NewDb(nameof(Replay_Of_NonTerminal_Row_Does_Not_Double_Emit_Money_Event));
+        db.BillingCustomers.Add(new BillingCustomer
+        {
+            Id = Guid.NewGuid(), TenantId = tid, StripeCustomerId = Cus,
+            BillingMode = "PlatformProvided", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
+        });
+        db.SaveChanges();
+
+        var proc = new StripeWebhookProcessor(
+            db, events.Object, tasks.Object,
+            new BillingEventHandlerRegistry(DefaultHandlers(events.Object).ToList()),
+            new NullBillingEventHandler(NullLogger<NullBillingEventHandler>.Instance),
+            TimeProvider.System, NullLogger<StripeWebhookProcessor>.Instance);
+
+        // Full Stripe-shaped payload so admin replay's EventUtility.ParseEvent is happy.
+        var payload =
+            "{\"id\":\"evt_det\",\"type\":\"payment_intent.succeeded\","
+            + "\"data\":{\"object\":{\"id\":\"pi_det\",\"customer\":\"" + Cus + "\"}}}";
+
+        await proc.ProcessAsync(Evt(BillingWebhookEventTypes.PaymentIntentSucceeded, "evt_det"), payload);
+        byId.Values.Count(e => e.Type == BillingWebhookEventTypes.DcbPaymentSucceeded)
+            .Should().Be(1, "one money event on first delivery");
+
+        // Simulate a crash between the DCB emit and the terminal status save: the
+        // row is left non-terminal, so admin replay re-dispatches it.
+        var row = await db.BillingWebhookEvents.SingleAsync();
+        row.Status = "received";
+        row.ProcessedAt = null;
+        await db.SaveChangesAsync();
+
+        await proc.ReplayAsync(row.Id);
+
+        byId.Values.Count(e => e.Type == BillingWebhookEventTypes.DcbPaymentSucceeded)
+            .Should().Be(1,
+                "a deterministic DCB Id lets the store dedup the replay — money events never double-count");
+    }
+
     // ── Id extraction ──
 
     [Test]
@@ -338,5 +533,69 @@ public class StripeWebhookProcessorTests
     {
         StripeWebhookProcessor.ExtractIds(Payload("dp_1", null)).CustomerId.Should().BeNull();
         StripeWebhookProcessor.ExtractIds("not json").Should().Be((null, null));
+    }
+
+    [Test]
+    public void ExtractDisputeRefs_Reads_Charge_And_PaymentIntent()
+    {
+        var payload =
+            "{\"data\":{\"object\":{\"id\":\"dp_1\",\"charge\":\"ch_9\",\"payment_intent\":\"pi_9\"}}}";
+        var (charge, pi) = StripeWebhookProcessor.ExtractDisputeRefs(payload);
+        charge.Should().Be("ch_9");
+        pi.Should().Be("pi_9");
+
+        StripeWebhookProcessor.ExtractDisputeRefs("not json").Should().Be((null, null));
+    }
+
+    [Test]
+    public void DeterministicId_Is_Stable_Per_Type_And_Event_And_Distinct_Across_Them()
+    {
+        var a1 = BillingWebhookDcbEvents.DeterministicId("BILLING.PAYMENT.SUCCEEDED", "evt_1");
+        var a2 = BillingWebhookDcbEvents.DeterministicId("BILLING.PAYMENT.SUCCEEDED", "evt_1");
+        a1.Should().Be(a2, "same (dcbType, stripeEventId) → same Id (dedup key)");
+        a1.Should().NotBe(Guid.Empty);
+
+        BillingWebhookDcbEvents.DeterministicId("BILLING.PAYMENT.SUCCEEDED", "evt_2")
+            .Should().NotBe(a1, "a different event id is a different fact");
+        BillingWebhookDcbEvents.DeterministicId("BILLING.WEBHOOK.SKIPPED", "evt_1")
+            .Should().NotBe(a1, "a different dcb type is a different fact");
+    }
+
+    // ── helpers for Finding 2 ──
+
+    private static DbContextOptions<ControlPlaneDbContext> InMemoryOptions(string name) =>
+        new DbContextOptionsBuilder<ControlPlaneDbContext>().UseInMemoryDatabase(name).Options;
+
+    private static StripeWebhookProcessor NewProcessorFor(ControlPlaneDbContext db)
+    {
+        var events = new Mock<IEventRepository>();
+        events.Setup(e => e.AppendAsync(It.IsAny<DomainEvent>()))
+            .ReturnsAsync((DomainEvent d) => d);
+        var tasks = new Mock<IPlatformQueuedTaskRepository>();
+        tasks.Setup(t => t.EnqueueAsync(It.IsAny<PlatformQueuedTask>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PlatformQueuedTask t, CancellationToken _) => t);
+        return new StripeWebhookProcessor(
+            db, events.Object, tasks.Object,
+            new BillingEventHandlerRegistry(DefaultHandlers(events.Object).ToList()),
+            new NullBillingEventHandler(NullLogger<NullBillingEventHandler>.Instance),
+            TimeProvider.System, NullLogger<StripeWebhookProcessor>.Instance);
+    }
+
+    /// <summary>
+    /// A <see cref="ControlPlaneDbContext"/> whose async SaveChanges always throws
+    /// a supplied exception — used to simulate a specific
+    /// <see cref="DbUpdateException"/> on the dedup insert. The synchronous
+    /// <c>SaveChanges</c> used by test seeding is untouched.
+    /// </summary>
+    private sealed class ThrowOnSaveCpDb : ControlPlaneDbContext
+    {
+        private readonly Exception _toThrow;
+
+        public ThrowOnSaveCpDb(DbContextOptions<ControlPlaneDbContext> opts, Exception toThrow)
+            : base(opts) => _toThrow = toThrow;
+
+        public override Task<int> SaveChangesAsync(
+            bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+            => throw _toThrow;
     }
 }
