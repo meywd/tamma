@@ -41,6 +41,16 @@ public sealed class OutboxSmtpSenderOptions
     /// gate pattern.
     /// </summary>
     public bool RunOnStartup { get; set; } = true;
+
+    /// <summary>
+    /// Lease timeout for the durability reaper. A row claimed into <c>sending</c>
+    /// whose <c>UpdatedAt</c> is older than this is assumed orphaned by a crashed
+    /// sender and reset to <c>pending</c> so it is re-delivered (at-least-once).
+    /// Applies to BOTH the per-tenant <c>email_outbox</c> and the control-plane
+    /// <c>platform_email_outbox</c>. The reap runs at most once per this interval
+    /// (throttled in the poll loop). Default 5 minutes.
+    /// </summary>
+    public TimeSpan SendingLeaseTimeout { get; set; } = TimeSpan.FromMinutes(5);
 }
 
 /// <summary>
@@ -78,6 +88,12 @@ public sealed class OutboxSmtpSender : BackgroundService
     // attempt entirely instead of letting EF log the error each cycle.
     // Volatile read in the hot path.
     private int _platformPathDisabled;
+
+    // Durability reaper throttle — the reclaim UPDATE matches 0 rows in steady
+    // state, so it runs at most once per SendingLeaseTimeout rather than every
+    // poll. MinValue means "reap on the first cycle" so a restart immediately
+    // recovers rows a prior crash orphaned in 'sending'.
+    private DateTime _lastReclaimUtc = DateTime.MinValue;
 
     public OutboxSmtpSender(
         IServiceProvider serviceProvider,
@@ -117,6 +133,12 @@ public sealed class OutboxSmtpSender : BackgroundService
         if (seconds > 0)
         {
             _options.PollInterval = TimeSpan.FromSeconds(seconds);
+        }
+
+        var leaseSeconds = _config.GetValue("Email:OutboxSendingLeaseSeconds", 0);
+        if (leaseSeconds > 0)
+        {
+            _options.SendingLeaseTimeout = TimeSpan.FromSeconds(leaseSeconds);
         }
 
         _logger.LogInformation(
@@ -185,7 +207,15 @@ public sealed class OutboxSmtpSender : BackgroundService
         var transport = scope.ServiceProvider.GetRequiredService<ISmtpTransport>();
         var events = scope.ServiceProvider.GetRequiredService<IEventRepository>();
 
-        var claimed = await outbox.ClaimNextPendingFromAnyTenantAsync(DateTime.UtcNow, ct);
+        var now = DateTime.UtcNow;
+
+        // Durability reaper (throttled) — recover rows a crashed sender left
+        // orphaned in 'sending' back to 'pending' before we claim the next
+        // batch. Covers both the per-tenant and platform queues so at-least-once
+        // delivery holds across process restarts.
+        await MaybeReclaimAsync(scope.ServiceProvider, outbox, now, ct);
+
+        var claimed = await outbox.ClaimNextPendingFromAnyTenantAsync(now, ct);
         if (claimed is not null)
         {
             await ProcessTenantClaimedAsync(outbox, transport, events, claimed, ct);
@@ -194,6 +224,93 @@ public sealed class OutboxSmtpSender : BackgroundService
 
         // Tenant queue empty — try the platform queue. Story 28-6.
         return await TryProcessPlatformOnceAsync(scope.ServiceProvider, transport, ct);
+    }
+
+    /// <summary>
+    /// Run the durability reaper at most once per
+    /// <see cref="OutboxSmtpSenderOptions.SendingLeaseTimeout"/>, across BOTH
+    /// the per-tenant <c>email_outbox</c> (cross-tenant fan-out) and the
+    /// control-plane <c>platform_email_outbox</c>. Rows a crashed sender
+    /// orphaned in <c>sending</c> (UpdatedAt older than the lease) are reset to
+    /// <c>pending</c> so the next claim re-delivers them. Folded into the
+    /// existing poll loop — no extra hosted service. The platform reap honours
+    /// the same 42P01 / not-registered back-compat guards as the drain path;
+    /// reap failures are logged and swallowed so the claim path still runs.
+    /// </summary>
+    private async Task MaybeReclaimAsync(
+        IServiceProvider scopedProvider,
+        IEmailOutboxRepository outbox,
+        DateTime now,
+        CancellationToken ct)
+    {
+        if (now - _lastReclaimUtc < _options.SendingLeaseTimeout) return;
+        _lastReclaimUtc = now;
+
+        // Per-tenant queues.
+        try
+        {
+            var reclaimed = await outbox.ReclaimStuckSendingFromAllTenantsAsync(
+                now, _options.SendingLeaseTimeout, ct);
+            if (reclaimed > 0)
+            {
+                _logger.LogWarning(
+                    "Reclaimed {Count} tenant email row(s) stuck in 'sending' past the {Lease} lease",
+                    reclaimed, _options.SendingLeaseTimeout);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Tenant email outbox reclaim pass failed");
+        }
+
+        // Platform queue — same back-compat guards as TryProcessPlatformOnceAsync.
+        if (Volatile.Read(ref _platformPathDisabled) == 1) return;
+
+        var platformOutbox = scopedProvider.GetService<IPlatformEmailOutboxRepository>();
+        if (platformOutbox is null) return;
+
+        try
+        {
+            var reclaimed = await platformOutbox.ReclaimStuckSendingAsync(
+                now, _options.SendingLeaseTimeout, ct);
+            if (reclaimed > 0)
+            {
+                _logger.LogWarning(
+                    "Reclaimed {Count} platform email row(s) stuck in 'sending' past the {Lease} lease",
+                    reclaimed, _options.SendingLeaseTimeout);
+            }
+        }
+        catch (Npgsql.PostgresException pgEx)
+            when (string.Equals(pgEx.SqlState, "42P01", StringComparison.Ordinal))
+        {
+            Interlocked.Exchange(ref _platformPathDisabled, 1);
+            _logger.LogWarning(
+                "platform_email_outbox table missing on this connection — " +
+                "disabling the platform email path for this process. " +
+                "Apply the Story 28-1 CP migration to enable it.");
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException dbEx)
+            when (dbEx.InnerException is Npgsql.PostgresException pgEx
+                && string.Equals(pgEx.SqlState, "42P01", StringComparison.Ordinal))
+        {
+            Interlocked.Exchange(ref _platformPathDisabled, 1);
+            _logger.LogWarning(
+                "platform_email_outbox table missing on this connection — " +
+                "disabling the platform email path for this process. " +
+                "Apply the Story 28-1 CP migration to enable it.");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Platform email outbox reclaim pass failed");
+        }
     }
 
     private async Task ProcessTenantClaimedAsync(

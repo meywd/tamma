@@ -87,6 +87,37 @@ public sealed class SlackOutboxRepository : ISlackOutboxRepository
         return candidate;
     }
 
+    public async Task<int> ReclaimStuckSendingAsync(
+        DateTime now, TimeSpan leaseTimeout, CancellationToken ct = default)
+    {
+        var cutoff = now - leaseTimeout;
+
+        if (string.Equals(_db.Database.ProviderName, NpgsqlProviderName, StringComparison.Ordinal))
+        {
+            // Reset to 'pending' only — Attempts is left untouched so a stuck
+            // row keeps its full retry budget (it was never attempted-to-
+            // completion). NextAttemptAt was already <= claim-time, so the
+            // reclaimed row is immediately due for the next claim pass.
+            return await _db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE slack_outbox
+                SET "Status" = 'pending', "UpdatedAt" = {now}
+                WHERE "Status" = 'sending'
+                  AND "UpdatedAt" < {cutoff}
+                """, ct);
+        }
+
+        var stuck = await _db.SlackOutbox
+            .Where(m => m.Status == "sending" && m.UpdatedAt < cutoff)
+            .ToListAsync(ct);
+        foreach (var m in stuck)
+        {
+            m.Status = "pending";
+            m.UpdatedAt = now;
+        }
+        if (stuck.Count > 0) await _db.SaveChangesAsync(ct);
+        return stuck.Count;
+    }
+
     public async Task MarkSentAsync(Guid id, CancellationToken ct = default)
     {
         var msg = await _db.SlackOutbox.FindAsync(new object[] { id }, ct);

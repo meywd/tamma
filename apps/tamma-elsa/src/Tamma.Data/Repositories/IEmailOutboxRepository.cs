@@ -66,6 +66,37 @@ public interface IEmailOutboxRepository
         DateTime now, CancellationToken ct = default);
 
     /// <summary>
+    /// Durability reaper (single tenant) — reset rows orphaned in
+    /// <c>sending</c> back to <c>pending</c> for the supplied tenant so the
+    /// sender re-claims and re-delivers them. Claiming a row flips it to
+    /// <c>sending</c> (stamping <c>UpdatedAt</c>); if the process crashes
+    /// before <see cref="MarkSentAsync"/> / <see cref="MarkFailedAsync"/> the
+    /// row is orphaned forever (never re-selected by
+    /// <see cref="ClaimNextPendingAsync"/>), defeating at-least-once delivery.
+    /// A row qualifies when its <c>Status='sending'</c> and its <c>UpdatedAt</c>
+    /// (stamped at claim time) is older than <paramref name="leaseTimeout"/>
+    /// before <paramref name="now"/>. <see cref="EmailOutboxMessage.Attempts"/>
+    /// is deliberately NOT incremented — a stuck row was never
+    /// attempted-to-completion, so it keeps its full retry budget. Returns the
+    /// number of rows reclaimed for that tenant.
+    /// </summary>
+    Task<int> ReclaimStuckSendingAsync(
+        Guid tenantId, DateTime now, TimeSpan leaseTimeout, CancellationToken ct = default);
+
+    /// <summary>
+    /// Cross-tenant reaper — enumerate active tenants from the CP
+    /// <c>tenants</c> table and run <see cref="ReclaimStuckSendingAsync"/> on
+    /// each, returning the total number of rows reclaimed. The tenant analogue
+    /// of <see cref="ClaimNextPendingFromAnyTenantAsync"/>; used by
+    /// <c>OutboxSmtpSender</c> to reap orphaned <c>sending</c> rows across the
+    /// per-tenant outbox queues before each claim pass. A per-tenant failure
+    /// (mid-deletion, transient connection error) is swallowed so one tenant's
+    /// outage does not block the rest; cooperative cancellation propagates.
+    /// </summary>
+    Task<int> ReclaimStuckSendingFromAllTenantsAsync(
+        DateTime now, TimeSpan leaseTimeout, CancellationToken ct = default);
+
+    /// <summary>
     /// Mark a claimed message as successfully delivered. Sets
     /// <c>Status=sent</c> and <c>SentAt=UtcNow</c>.
     /// </summary>

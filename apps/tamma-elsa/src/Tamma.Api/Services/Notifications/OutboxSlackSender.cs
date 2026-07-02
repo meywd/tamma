@@ -32,6 +32,16 @@ public sealed class OutboxSlackSenderOptions
     /// <c>OutboxSmtpSenderOptions.RunOnStartup</c>).
     /// </summary>
     public bool RunOnStartup { get; set; } = true;
+
+    /// <summary>
+    /// Lease timeout for the durability reaper. A row claimed into <c>sending</c>
+    /// whose <c>UpdatedAt</c> is older than this is assumed orphaned by a crashed
+    /// sender and reset to <c>pending</c> so it is re-delivered (at-least-once).
+    /// The reap runs at most once per this interval (throttled in the poll loop),
+    /// so a stuck row is re-delivered within ~2× this window in the worst case.
+    /// Default 5 minutes — comfortably above a single delivery's duration.
+    /// </summary>
+    public TimeSpan SendingLeaseTimeout { get; set; } = TimeSpan.FromMinutes(5);
 }
 
 /// <summary>
@@ -62,6 +72,12 @@ public sealed class OutboxSlackSender : BackgroundService
     private readonly OutboxSlackSenderOptions _options;
     private readonly IConfiguration _config;
     private readonly ILogger<OutboxSlackSender> _logger;
+
+    // Durability reaper throttle — the reclaim UPDATE matches 0 rows in steady
+    // state, so it runs at most once per SendingLeaseTimeout rather than every
+    // poll. MinValue means "reap on the first cycle" so a restart immediately
+    // recovers rows a prior crash orphaned in 'sending'.
+    private DateTime _lastReclaimUtc = DateTime.MinValue;
 
     public OutboxSlackSender(
         IServiceProvider serviceProvider,
@@ -97,6 +113,12 @@ public sealed class OutboxSlackSender : BackgroundService
         if (seconds > 0)
         {
             _options.PollInterval = TimeSpan.FromSeconds(seconds);
+        }
+
+        var leaseSeconds = _config.GetValue("Slack:OutboxSendingLeaseSeconds", 0);
+        if (leaseSeconds > 0)
+        {
+            _options.SendingLeaseTimeout = TimeSpan.FromSeconds(leaseSeconds);
         }
 
         _logger.LogInformation("OutboxSlackSender started. Poll interval={Interval}", _options.PollInterval);
@@ -140,7 +162,14 @@ public sealed class OutboxSlackSender : BackgroundService
         var slack = scope.ServiceProvider.GetRequiredService<ISlackIntegrationService>();
         var events = scope.ServiceProvider.GetService<IPlatformEventRepository>();
 
-        var claimed = await outbox.ClaimNextPendingAsync(DateTime.UtcNow, ct).ConfigureAwait(false);
+        var now = DateTime.UtcNow;
+
+        // Durability reaper (throttled) — recover rows a crashed sender left
+        // orphaned in 'sending' back to 'pending' before we claim the next
+        // batch, so at-least-once delivery holds across process restarts.
+        await MaybeReclaimAsync(outbox, now, ct).ConfigureAwait(false);
+
+        var claimed = await outbox.ClaimNextPendingAsync(now, ct).ConfigureAwait(false);
         if (claimed is null) return false;
 
         try
@@ -171,6 +200,38 @@ public sealed class OutboxSlackSender : BackgroundService
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Run the durability reaper at most once per <see cref="OutboxSlackSenderOptions.SendingLeaseTimeout"/>.
+    /// Resets rows a crashed sender orphaned in <c>sending</c> (UpdatedAt older
+    /// than the lease) back to <c>pending</c> so the very next
+    /// <see cref="ISlackOutboxRepository.ClaimNextPendingAsync"/> re-delivers
+    /// them. Folded into the existing poll loop so no extra hosted service is
+    /// needed. Reap failures are logged and swallowed — the claim path still runs.
+    /// </summary>
+    private async Task MaybeReclaimAsync(
+        ISlackOutboxRepository outbox, DateTime now, CancellationToken ct)
+    {
+        if (now - _lastReclaimUtc < _options.SendingLeaseTimeout) return;
+        _lastReclaimUtc = now;
+
+        try
+        {
+            var reclaimed = await outbox
+                .ReclaimStuckSendingAsync(now, _options.SendingLeaseTimeout, ct)
+                .ConfigureAwait(false);
+            if (reclaimed > 0)
+            {
+                _logger.LogWarning(
+                    "Reclaimed {Count} Slack outbox row(s) stuck in 'sending' past the {Lease} lease",
+                    reclaimed, _options.SendingLeaseTimeout);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Slack outbox reclaim pass failed");
+        }
     }
 
     /// <summary>

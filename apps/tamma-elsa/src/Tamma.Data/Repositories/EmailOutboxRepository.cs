@@ -114,6 +114,74 @@ public class EmailOutboxRepository(
         return null;
     }
 
+    public async Task<int> ReclaimStuckSendingAsync(
+        Guid tenantId, DateTime now, TimeSpan leaseTimeout, CancellationToken ct = default)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("Tenant id is required.", nameof(tenantId));
+
+        var cutoff = now - leaseTimeout;
+        await using var db = await tenantDbFactory.CreateAsync(tenantId, ct);
+
+        if (string.Equals(db.Database.ProviderName, NpgsqlProviderName, StringComparison.Ordinal))
+        {
+            // Reset to 'pending' only — Attempts is left untouched so a stuck
+            // row keeps its full retry budget (it was never attempted-to-
+            // completion). `"TenantId" = @tid` is REQUIRED while email_outbox
+            // physically co-resides on the CP DB (see ClaimViaPostgresAsync).
+            return await db.Database.ExecuteSqlInterpolatedAsync($"""
+                UPDATE email_outbox
+                SET "Status" = 'pending', "UpdatedAt" = {now}
+                WHERE "Status" = 'sending'
+                  AND "UpdatedAt" < {cutoff}
+                  AND "TenantId" = {tenantId}
+                """, ct);
+        }
+
+        var stuck = await db.EmailOutbox
+            .Where(m => m.Status == "sending"
+                && m.UpdatedAt < cutoff
+                && m.TenantId == tenantId)
+            .ToListAsync(ct);
+        foreach (var m in stuck)
+        {
+            m.Status = "pending";
+            m.UpdatedAt = now;
+        }
+        if (stuck.Count > 0) await db.SaveChangesAsync(ct);
+        return stuck.Count;
+    }
+
+    public async Task<int> ReclaimStuckSendingFromAllTenantsAsync(
+        DateTime now, TimeSpan leaseTimeout, CancellationToken ct = default)
+    {
+        var activeTenantIds = await cp.Tenants
+            .AsNoTracking()
+            .Where(t => t.DeletedAt == null)
+            .OrderBy(t => t.Id)
+            .Select(t => t.Id)
+            .ToListAsync(ct);
+
+        var total = 0;
+        foreach (var tid in activeTenantIds)
+        {
+            if (ct.IsCancellationRequested) break;
+
+            try
+            {
+                total += await ReclaimStuckSendingAsync(tid, now, leaseTimeout, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // One tenant mid-deletion / transient connection failure must
+                // not starve the rest of the reap pass; the next cycle retries.
+                continue;
+            }
+        }
+
+        return total;
+    }
+
     private static async Task<EmailOutboxMessage?> ClaimViaPostgresAsync(
         TenantDbContext db, Guid tenantId, DateTime now, CancellationToken ct)
     {

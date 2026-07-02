@@ -158,6 +158,98 @@ public class OutboxSmtpSenderPlatformPathTests
         }
     }
 
+    /// <summary>
+    /// Seed a platform row already in <c>sending</c> with an explicit
+    /// <c>UpdatedAt</c> — simulates a row claimed by a sender that crashed
+    /// before MarkSent/MarkFailed. Bypasses <c>EnqueueAsync</c> (which always
+    /// writes <c>pending</c>).
+    /// </summary>
+    private async Task<PlatformEmailOutboxMessage> SeedSendingPlatformRowAsync(DateTime updatedAt)
+    {
+        using var cp = new ControlPlaneDbContext(_cpOptions);
+        var row = new PlatformEmailOutboxMessage
+        {
+            Id = Guid.NewGuid(),
+            Template = "verification",
+            ToAddress = "platform@example.com",
+            Subject = "Verify",
+            HtmlBody = "<p>p</p>",
+            TextBody = "p",
+            FromAddress = "noreply@tamma.dev",
+            Status = "sending",
+            Attempts = 0,
+            MaxAttempts = 5,
+            NextAttemptAt = updatedAt,
+            CreatedAt = updatedAt,
+            UpdatedAt = updatedAt,
+        };
+        cp.PlatformEmailOutbox.Add(row);
+        await cp.SaveChangesAsync();
+        return row;
+    }
+
+    // ── Durability reaper: orphaned 'sending' platform rows ──────────────────
+
+    [Test]
+    public async Task ProcessOnceAsync_StuckSendingPlatformRowPastLease_ReclaimedAndDelivered()
+    {
+        var (sp, sender) = BuildSender(registerPlatform: true);
+        try
+        {
+            // A row a crashed sender left in 'sending' 10 minutes ago (past the
+            // default 5-minute lease). Without the reaper it is orphaned forever
+            // — ClaimNextPendingAsync only selects 'pending'.
+            var enq = await SeedSendingPlatformRowAsync(DateTime.UtcNow.AddMinutes(-10));
+            _transport.Setup(t => t.SendAsync(It.IsAny<EmailOutboxMessage>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            // Single cycle: reclaim → pending → claim → deliver → purge.
+            var processed = await sender.ProcessOnceAsync(CancellationToken.None);
+
+            processed.Should().BeTrue("the reclaimed row is claimed and delivered in the same cycle");
+            _transport.Verify(t => t.SendAsync(
+                It.Is<EmailOutboxMessage>(m => m.Id == enq.Id),
+                It.IsAny<CancellationToken>()), Times.Once);
+
+            using var cpVerify = new ControlPlaneDbContext(_cpOptions);
+            (await cpVerify.PlatformEmailOutbox.FindAsync(enq.Id))
+                .Should().BeNull("the re-delivered row is purged, exactly like a normal send");
+        }
+        finally
+        {
+            sender.Dispose();
+            sp.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task ProcessOnceAsync_FreshSendingPlatformRowWithinLease_NotReclaimed()
+    {
+        var (sp, sender) = BuildSender(registerPlatform: true);
+        try
+        {
+            // A row another sender just claimed (UpdatedAt = now) and is
+            // delivering right now. The reaper must NOT steal it back to pending.
+            var enq = await SeedSendingPlatformRowAsync(DateTime.UtcNow);
+
+            var processed = await sender.ProcessOnceAsync(CancellationToken.None);
+
+            processed.Should().BeFalse("a fresh 'sending' row is neither reclaimed nor claimable");
+            _transport.Verify(t => t.SendAsync(
+                It.IsAny<EmailOutboxMessage>(), It.IsAny<CancellationToken>()), Times.Never);
+
+            using var cpVerify = new ControlPlaneDbContext(_cpOptions);
+            var row = await cpVerify.PlatformEmailOutbox.FindAsync(enq.Id);
+            row!.Status.Should().Be("sending", "a within-lease claim is left untouched");
+            row.Attempts.Should().Be(0, "reclaim never bumps the attempt counter");
+        }
+        finally
+        {
+            sender.Dispose();
+            sp.Dispose();
+        }
+    }
+
     // ── Platform path drains when tenant queue empty ─────────────────────────
 
     [Test]

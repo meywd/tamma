@@ -134,6 +134,80 @@ public class OutboxSmtpSenderTests
         MaxAttempts = maxAttempts,
     };
 
+    /// <summary>
+    /// Seed a tenant row already in <c>sending</c> with an explicit
+    /// <c>UpdatedAt</c> — simulates a row claimed by a sender that crashed
+    /// before MarkSent/MarkFailed. Bypasses <c>EnqueueAsync</c> (which always
+    /// writes <c>pending</c>).
+    /// </summary>
+    private async Task<EmailOutboxMessage> SeedSendingTenantRowAsync(DateTime updatedAt)
+    {
+        await using var db = new TestTenantDbContext(_tenantOptions, TestTenantId);
+        var row = new EmailOutboxMessage
+        {
+            Id = Guid.NewGuid(),
+            TenantId = TestTenantId,
+            Template = "verification",
+            ToAddress = "u@example.com",
+            Subject = "Verify",
+            HtmlBody = "<p>hi</p>",
+            TextBody = "hi",
+            FromAddress = "noreply@tamma.dev",
+            Status = "sending",
+            Attempts = 0,
+            MaxAttempts = 5,
+            NextAttemptAt = updatedAt,
+            CreatedAt = updatedAt,
+            UpdatedAt = updatedAt,
+        };
+        db.EmailOutbox.Add(row);
+        await db.SaveChangesAsync();
+        return row;
+    }
+
+    // ── Durability reaper: orphaned 'sending' rows ────────────────────────────
+
+    [Test]
+    public async Task ProcessOnceAsync_StuckSendingTenantRowPastLease_ReclaimedAndDelivered()
+    {
+        // A row a crashed sender left in 'sending' 10 minutes ago (past the
+        // default 5-minute lease). Without the reaper it is orphaned forever —
+        // ClaimNextPendingFromAnyTenantAsync only selects 'pending'.
+        var enq = await SeedSendingTenantRowAsync(DateTime.UtcNow.AddMinutes(-10));
+        _transport.Setup(t => t.SendAsync(It.IsAny<EmailOutboxMessage>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Single cycle: reclaim → pending → claim → deliver → purge.
+        var processed = await _sender.ProcessOnceAsync(CancellationToken.None);
+
+        processed.Should().BeTrue("the reclaimed row is claimed and delivered in the same cycle");
+        _transport.Verify(
+            t => t.SendAsync(It.Is<EmailOutboxMessage>(m => m.Id == enq.Id), It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        var stored = await FreshOutbox().GetByIdAsync(TestTenantId, enq.Id);
+        stored.Should().BeNull("the re-delivered row is purged, exactly like a normal send");
+    }
+
+    [Test]
+    public async Task ProcessOnceAsync_FreshSendingTenantRowWithinLease_NotReclaimed()
+    {
+        // A row another sender just claimed (UpdatedAt = now) and is delivering
+        // right now. The reaper must NOT steal it back to pending.
+        var enq = await SeedSendingTenantRowAsync(DateTime.UtcNow);
+
+        var processed = await _sender.ProcessOnceAsync(CancellationToken.None);
+
+        processed.Should().BeFalse("a fresh 'sending' row is neither reclaimed nor claimable");
+        _transport.Verify(
+            t => t.SendAsync(It.IsAny<EmailOutboxMessage>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+
+        var stored = await FreshOutbox().GetByIdAsync(TestTenantId, enq.Id);
+        stored!.Status.Should().Be("sending", "a within-lease claim is left untouched");
+        stored.Attempts.Should().Be(0, "reclaim never bumps the attempt counter");
+    }
+
     // ── Happy path ──────────────────────────────────────────────────────────
 
     [Test]

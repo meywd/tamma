@@ -27,6 +27,24 @@ public interface ISlackOutboxRepository
     /// </summary>
     Task<SlackOutboxMessage?> ClaimNextPendingAsync(DateTime now, CancellationToken ct = default);
 
+    /// <summary>
+    /// Durability reaper — reset rows orphaned in <c>sending</c> back to
+    /// <c>pending</c> so the sender re-claims and re-delivers them. A row is
+    /// claimed by flipping it to <c>sending</c> (stamping <c>UpdatedAt</c>);
+    /// if the process crashes before <see cref="MarkSentAsync"/> /
+    /// <see cref="MarkFailedAsync"/> the row would otherwise stay <c>sending</c>
+    /// forever (never re-selected by <see cref="ClaimNextPendingAsync"/>),
+    /// defeating at-least-once delivery. A row qualifies when its
+    /// <c>Status='sending'</c> and its <c>UpdatedAt</c> (stamped at claim time)
+    /// is older than <paramref name="leaseTimeout"/> before
+    /// <paramref name="now"/>. <see cref="SlackOutboxMessage.Attempts"/> is
+    /// deliberately NOT incremented — a stuck row was never
+    /// attempted-to-completion, so it is treated as still-pending and keeps its
+    /// full retry budget. Returns the number of rows reclaimed.
+    /// </summary>
+    Task<int> ReclaimStuckSendingAsync(
+        DateTime now, TimeSpan leaseTimeout, CancellationToken ct = default);
+
     /// <summary>Mark a claimed message delivered (<c>Status=sent</c> + <c>SentAt</c>).</summary>
     Task MarkSentAsync(Guid id, CancellationToken ct = default);
 
