@@ -34,6 +34,12 @@ public class AddBillingWebhookIngestionTests
         services.AddSingleton<ITammaModeProvider, TammaModeProvider>();
         services.TryAddSingletonDoubles();
         services.AddPlatformTaskWorker(configuration);
+        // Story 35-4 supersedes 35-5's SubscriptionWebhookHandler with
+        // SubscriptionMirrorWebhookHandler; register just its deps (the shared
+        // mirror updater + subscription repo) so the SaaS handler set resolves.
+        // (In Program.cs these come from AddTammaBilling, called before this.)
+        services.AddScoped<IBillingSubscriptionRepository, BillingSubscriptionRepository>();
+        services.AddScoped<SubscriptionMirrorUpdater>();
         services.AddBillingWebhookIngestion(configuration);
         return services.BuildServiceProvider();
     }
@@ -54,7 +60,9 @@ public class AddBillingWebhookIngestionTests
         s.GetServices<IBillingEventHandler>().Select(h => h.GetType().Name)
             .Should().Contain(new[]
             {
-                "SubscriptionWebhookHandler", "InvoiceWebhookHandler",
+                // Story 35-4 superseded SubscriptionWebhookHandler with the
+                // mirror-writing SubscriptionMirrorWebhookHandler.
+                "SubscriptionMirrorWebhookHandler", "InvoiceWebhookHandler",
                 "PaymentWebhookHandler", "DisputeWebhookHandler",
             });
         s.GetServices<IPlatformTaskHandler>()

@@ -21,6 +21,20 @@ public static class BillingEvents
     public const string CustomerCreatedType = "BILLING.CUSTOMER.CREATED";
     public const string PlanCatalogSyncedType = "BILLING.PLAN_CATALOG.SYNCED";
 
+    // ── Story 35-4 — subscription lifecycle DCB event types (AC8). Emitted by
+    //    SubscriptionMirrorUpdater on every transition; tags { tenantId, planSlug,
+    //    status }. Names follow the AGGREGATE.ACTION.STATUS convention. ──
+    public const string SubscriptionCreatedType = "BILLING.SUBSCRIPTION.CREATED";
+    public const string SubscriptionUpdatedType = "BILLING.SUBSCRIPTION.UPDATED";
+    public const string SubscriptionCanceledType = "BILLING.SUBSCRIPTION.CANCELED";
+
+    // The Stripe `customer.subscription.trial_will_end` event fires BEFORE the
+    // trial ends (the subscription is still `trialing`), so the DCB type is the
+    // semantically-correct TRIAL_ENDING — matching Story 35-5's
+    // <c>BillingWebhookEventTypes.DcbSubscriptionTrialEnding</c> (they must not
+    // drift; a rename here would orphan any consumer of the 35-5 string).
+    public const string SubscriptionTrialEndingType = "BILLING.SUBSCRIPTION.TRIAL_ENDING";
+
     private const string SystemMetadata =
         """{"workflowVersion":"1.0.0","eventSource":"system"}""";
 
@@ -47,6 +61,38 @@ public static class BillingEvents
             {
                 stripeCustomerId,
                 billingMode,
+            }),
+            CreatedAt = DateTime.UtcNow,
+        };
+
+    /// <summary>
+    /// Story 35-4 (AC8) — a subscription-lifecycle DCB event. <paramref name="type"/>
+    /// is one of the <c>Subscription*Type</c> constants; tags are
+    /// <c>{ tenantId, planSlug, status }</c> (plus optional
+    /// <paramref name="scheduledPlanSlug"/> on a scheduled downgrade). Tenant-scoped
+    /// (<c>TenantId</c> set) so <c>IEventRepository.AppendAsync</c> routes it to the
+    /// tenant's own <c>DomainEvents</c> store.
+    /// </summary>
+    public static DomainEvent Subscription(
+        string type, Guid tenantId, string planSlug, string status,
+        string? scheduledPlanSlug = null) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            Type = type,
+            TenantId = tenantId,
+            Tags = JsonSerializer.Serialize(new
+            {
+                tenantId = tenantId.ToString("D"),
+                planSlug,
+                status,
+            }),
+            Metadata = SystemMetadata,
+            Data = JsonSerializer.Serialize(new
+            {
+                planSlug,
+                status,
+                scheduledPlanSlug,
             }),
             CreatedAt = DateTime.UtcNow,
         };

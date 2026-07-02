@@ -22,9 +22,22 @@ public interface IStripeServices
     ProductService Products { get; }
     PriceService Prices { get; }
     MeterService Meters { get; }
+
+    // ── Story 35-4 — subscription lifecycle surface ──
+    // These service classes are non-sealed with virtual *Async methods, so tests
+    // mock them directly with Moq (same pattern as Customers above).
+
+    /// <summary>Stripe subscription CRUD (create/update/cancel) — Story 35-4.</summary>
+    Stripe.SubscriptionService Subscriptions { get; }
+
+    /// <summary>Stripe subscription schedules (scheduled downgrade at period end) — Story 35-4.</summary>
+    Stripe.SubscriptionScheduleService SubscriptionSchedules { get; }
+
+    /// <summary>Stripe Checkout sessions (mode=subscription) — Story 35-4.</summary>
+    Stripe.Checkout.SessionService CheckoutSessions { get; }
 }
 
-/// <summary>Concrete bundle wrapping the four service classes over one client.</summary>
+/// <summary>Concrete bundle wrapping the Stripe service classes over one client.</summary>
 public sealed class StripeServices : IStripeServices
 {
     public StripeServices(IStripeClient client)
@@ -34,10 +47,16 @@ public sealed class StripeServices : IStripeServices
         Products = new ProductService(client);
         Prices = new PriceService(client);
         Meters = new MeterService(client);
+        Subscriptions = new Stripe.SubscriptionService(client);
+        SubscriptionSchedules = new Stripe.SubscriptionScheduleService(client);
+        CheckoutSessions = new Stripe.Checkout.SessionService(client);
     }
 
     public CustomerService Customers { get; }
     public ProductService Products { get; }
     public PriceService Prices { get; }
     public MeterService Meters { get; }
+    public Stripe.SubscriptionService Subscriptions { get; }
+    public Stripe.SubscriptionScheduleService SubscriptionSchedules { get; }
+    public Stripe.Checkout.SessionService CheckoutSessions { get; }
 }
