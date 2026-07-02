@@ -285,6 +285,7 @@ public static class AdminPlanCatalogEndpoints
         "PLAN.METRIC_KEY.INVALID" or "PLAN.METRIC_KEY.UNKNOWN" or "PLAN.METRIC_KEY.UNMAPPED"
             or "PLAN.PRICING_MODE.INVALID" or "PLAN.BILLING_INTERVAL.INVALID"
             or "PLAN.ENTITLEMENT_PERIOD.INVALID" or "PLAN.OVERAGE_MODE.INVALID"
+            or "PLAN.PRICE.INVALID" or "PLAN.LIMIT.INVALID"
             => Results.UnprocessableEntity(new { error = ex.Code, message = ex.Message, context = ex.Context }),
 
         "PLAN.CUSTOM.PUBLIC_REJECTED" or "PLAN.DISPLAY_NAME.REQUIRED" or "PLAN.CUSTOM.TENANT_REQUIRED"

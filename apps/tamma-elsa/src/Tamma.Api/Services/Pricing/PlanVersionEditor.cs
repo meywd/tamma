@@ -107,6 +107,31 @@ public sealed class PlanVersionEditor : IPlanVersionEditor
         PlanEditorPrincipal principal,
         CancellationToken ct = default)
     {
+        var (newPlan, events) = await CreateNewVersionCoreAsync(slug, draft, principal, ct);
+
+        // Post-commit audit emit is BEST-EFFORT (Finding 2): a publisher outage
+        // must NOT fail a change that already committed — that would 500 the
+        // write and invite a retry that mints a SECOND superseding version.
+        await PublishBestEffortAsync("plan.version.create", events, ct);
+        return newPlan;
+    }
+
+    /// <summary>
+    /// State-transition core of the version supersede: fetch the prior active
+    /// version, insert the new active version and flip the prior to deprecated in
+    /// ONE transaction, then RETURN (without emitting) the new plan plus the
+    /// primary <c>PLAN.VERSION.CREATED</c> / <c>PLAN.DEPRECATED</c> events. The
+    /// caller emits them best-effort AFTER commit — <see cref="VersionPlanAsync"/>
+    /// batches these together with its <c>PLAN.CATALOG.UPDATED</c> event in a
+    /// single best-effort block so a publisher outage never leaves a partial
+    /// audit trail.
+    /// </summary>
+    private async Task<(Plan Plan, List<PlatformEvent> Events)> CreateNewVersionCoreAsync(
+        string slug,
+        PlanDraftSpec draft,
+        PlanEditorPrincipal principal,
+        CancellationToken ct)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(slug);
         ArgumentNullException.ThrowIfNull(draft);
         ArgumentNullException.ThrowIfNull(principal);
@@ -238,8 +263,10 @@ public sealed class PlanVersionEditor : IPlanVersionEditor
             "Plan version created: {Slug} v{Version} ({PlanId}); v{PriorVersion} deprecated",
             slug, newVersion, newPlanId, prior.Version);
 
-        // Events only AFTER the real state transition committed.
-        await _publisher.AppendAndPublishAsync(
+        // Build (but DO NOT emit) the primary lifecycle events — the caller
+        // emits them best-effort AFTER this committed state transition.
+        var events = new List<PlatformEvent>
+        {
             BuildPlanEvent(
                 PlanCatalogEventTypes.VersionCreated,
                 principal,
@@ -250,9 +277,6 @@ public sealed class PlanVersionEditor : IPlanVersionEditor
                     ["planId"] = newPlanId.ToString("D"),
                     ["supersedesPlanId"] = prior.Id.ToString("D"),
                 }),
-            ct);
-
-        await _publisher.AppendAndPublishAsync(
             BuildPlanEvent(
                 PlanCatalogEventTypes.Deprecated,
                 principal,
@@ -263,9 +287,9 @@ public sealed class PlanVersionEditor : IPlanVersionEditor
                     ["planId"] = prior.Id.ToString("D"),
                     ["supersededByPlanId"] = newPlanId.ToString("D"),
                 }),
-            ct);
+        };
 
-        return newPlan;
+        return (newPlan, events);
     }
 
     /// <inheritdoc />
@@ -301,17 +325,22 @@ public sealed class PlanVersionEditor : IPlanVersionEditor
             "Plan created (initial version): {Slug} v1 ({PlanId}) by {ActorUserId}",
             slug, plan.Id, principal.UserId);
 
-        await _publisher.AppendAndPublishAsync(
-            BuildPlanEvent(
-                PlanCatalogEventTypes.CatalogUpdated,
-                principal,
-                new Dictionary<string, string?>
-                {
-                    ["action"] = "created",
-                    ["slug"] = slug,
-                    ["version"] = "1",
-                    ["planId"] = plan.Id.ToString("D"),
-                }),
+        // Best-effort audit emit AFTER the plan committed (Finding 2).
+        await PublishBestEffortAsync(
+            "plan.create",
+            new[]
+            {
+                BuildPlanEvent(
+                    PlanCatalogEventTypes.CatalogUpdated,
+                    principal,
+                    new Dictionary<string, string?>
+                    {
+                        ["action"] = "created",
+                        ["slug"] = slug,
+                        ["version"] = "1",
+                        ["planId"] = plan.Id.ToString("D"),
+                    }),
+            },
             ct);
 
         return plan;
@@ -330,25 +359,28 @@ public sealed class PlanVersionEditor : IPlanVersionEditor
 
         ValidateDraft(draft);
 
-        // Reuse ALL of the supersede/deprecate versioning logic (and its
+        // Reuse ALL of the supersede/deprecate state-transition logic (and its
         // PLAN.VERSION.CREATED / PLAN.DEPRECATED events) — do NOT duplicate it.
-        var newPlan = await CreateNewVersionAsync(slug, draft, principal, ct);
+        var (newPlan, events) = await CreateNewVersionCoreAsync(slug, draft, principal, ct);
 
-        // Add the admin-surface catalog event on top (AC9).
-        await _publisher.AppendAndPublishAsync(
-            BuildPlanEvent(
-                PlanCatalogEventTypes.CatalogUpdated,
-                principal,
-                new Dictionary<string, string?>
-                {
-                    ["action"] = "versioned",
-                    ["slug"] = slug,
-                    ["version"] = newPlan.Version.ToString(),
-                    ["planId"] = newPlan.Id.ToString("D"),
-                    ["supersedesPlanId"] = newPlan.SupersedesPlanId?.ToString("D"),
-                }),
-            ct);
+        // Add the admin-surface catalog event on top (AC9), then emit the primary
+        // lifecycle events AND this catalog event TOGETHER in one best-effort
+        // block (Finding 2) so a publisher outage never leaves a partial audit
+        // trail — and never 500s a committed version (which would invite a retry
+        // that mints a second superseding version).
+        events.Add(BuildPlanEvent(
+            PlanCatalogEventTypes.CatalogUpdated,
+            principal,
+            new Dictionary<string, string?>
+            {
+                ["action"] = "versioned",
+                ["slug"] = slug,
+                ["version"] = newPlan.Version.ToString(),
+                ["planId"] = newPlan.Id.ToString("D"),
+                ["supersedesPlanId"] = newPlan.SupersedesPlanId?.ToString("D"),
+            }));
 
+        await PublishBestEffortAsync("plan.version", events, ct);
         return newPlan;
     }
 
@@ -382,17 +414,22 @@ public sealed class PlanVersionEditor : IPlanVersionEditor
             "Custom plan minted: {Slug} v1 ({PlanId}) bound to tenant {TenantId} by {ActorUserId}",
             slug, plan.Id, tenantId, principal.UserId);
 
-        await _publisher.AppendAndPublishAsync(
-            BuildPlanEvent(
-                PlanCatalogEventTypes.CustomCreated,
-                principal,
-                new Dictionary<string, string?>
-                {
-                    ["slug"] = slug,
-                    ["version"] = "1",
-                    ["planId"] = plan.Id.ToString("D"),
-                    ["tenantId"] = tenantId.ToString("D"),
-                }),
+        // Best-effort audit emit AFTER the custom plan committed (Finding 2).
+        await PublishBestEffortAsync(
+            "plan.custom.create",
+            new[]
+            {
+                BuildPlanEvent(
+                    PlanCatalogEventTypes.CustomCreated,
+                    principal,
+                    new Dictionary<string, string?>
+                    {
+                        ["slug"] = slug,
+                        ["version"] = "1",
+                        ["planId"] = plan.Id.ToString("D"),
+                        ["tenantId"] = tenantId.ToString("D"),
+                    }),
+            },
             ct);
 
         return plan;
@@ -459,19 +496,24 @@ public sealed class PlanVersionEditor : IPlanVersionEditor
             "Plan deprecated: {Slug} v{Version} ({PlanId}); {Affected} tenant(s) remain pinned; by {ActorUserId}",
             slug, version, plan.Id, affected, principal.UserId);
 
-        await _publisher.AppendAndPublishAsync(
-            BuildPlanEvent(
-                PlanCatalogEventTypes.CatalogUpdated,
-                principal,
-                new Dictionary<string, string?>
-                {
-                    ["action"] = "deprecated",
-                    ["slug"] = slug,
-                    ["version"] = version.ToString(),
-                    ["planId"] = plan.Id.ToString("D"),
-                    ["affectedTenantCount"] = affected.ToString(),
-                    ["force"] = force ? "true" : "false",
-                }),
+        // Best-effort audit emit AFTER the deprecation committed (Finding 2).
+        await PublishBestEffortAsync(
+            "plan.deprecate",
+            new[]
+            {
+                BuildPlanEvent(
+                    PlanCatalogEventTypes.CatalogUpdated,
+                    principal,
+                    new Dictionary<string, string?>
+                    {
+                        ["action"] = "deprecated",
+                        ["slug"] = slug,
+                        ["version"] = version.ToString(),
+                        ["planId"] = plan.Id.ToString("D"),
+                        ["affectedTenantCount"] = affected.ToString(),
+                        ["force"] = force ? "true" : "false",
+                    }),
+            },
             ct);
 
         return new PlanDeprecationResult(Deprecated: true, AffectedTenantCount: affected);
@@ -577,6 +619,24 @@ public sealed class PlanVersionEditor : IPlanVersionEditor
                 severity: TammaErrorSeverity.High);
         }
 
+        // Non-negative money guard (Finding 1): a negative price would credit
+        // money downstream (Epic 35 billing / markup engine reads PlanPrice).
+        // ValidateDraft is the single write-path choke point, so guarding here
+        // covers create / version / custom-mint alike.
+        if (draft.MonthlyPriceUsd is < 0m)
+        {
+            throw new TammaError(
+                "PLAN.PRICE.INVALID",
+                $"Monthly price must be >= 0 (got {draft.MonthlyPriceUsd}).",
+                new Dictionary<string, object?>
+                {
+                    ["field"] = "monthlyPriceUsd",
+                    ["value"] = draft.MonthlyPriceUsd,
+                },
+                retryable: false,
+                severity: TammaErrorSeverity.High);
+        }
+
         if (draft.Prices is not null)
         {
             foreach (var p in draft.Prices)
@@ -590,6 +650,36 @@ public sealed class PlanVersionEditor : IPlanVersionEditor
                         retryable: false,
                         severity: TammaErrorSeverity.High);
                 }
+
+                if (p.RecurringUsd < 0m)
+                {
+                    throw new TammaError(
+                        "PLAN.PRICE.INVALID",
+                        $"Recurring price must be >= 0 (got {p.RecurringUsd}) for pricing mode '{p.PricingMode}'.",
+                        new Dictionary<string, object?>
+                        {
+                            ["field"] = "recurringUsd",
+                            ["value"] = p.RecurringUsd,
+                            ["pricingMode"] = p.PricingMode,
+                        },
+                        retryable: false,
+                        severity: TammaErrorSeverity.High);
+                }
+
+                if (p.SeatUsd < 0m)
+                {
+                    throw new TammaError(
+                        "PLAN.PRICE.INVALID",
+                        $"Seat price must be >= 0 (got {p.SeatUsd}) for pricing mode '{p.PricingMode}'.",
+                        new Dictionary<string, object?>
+                        {
+                            ["field"] = "seatUsd",
+                            ["value"] = p.SeatUsd,
+                            ["pricingMode"] = p.PricingMode,
+                        },
+                        retryable: false,
+                        severity: TammaErrorSeverity.High);
+                }
             }
         }
 
@@ -597,6 +687,23 @@ public sealed class PlanVersionEditor : IPlanVersionEditor
         {
             foreach (var e in draft.Entitlements)
             {
+                // A null limit means UNLIMITED (valid); only a NEGATIVE limit is
+                // invalid (Finding 1).
+                if (e.LimitValue is < 0)
+                {
+                    throw new TammaError(
+                        "PLAN.LIMIT.INVALID",
+                        $"Entitlement limit must be >= 0 or null (unlimited); got {e.LimitValue} for metric '{e.MetricKey}'.",
+                        new Dictionary<string, object?>
+                        {
+                            ["field"] = "limitValue",
+                            ["value"] = e.LimitValue,
+                            ["metricKey"] = e.MetricKey.ToString(),
+                        },
+                        retryable: false,
+                        severity: TammaErrorSeverity.High);
+                }
+
                 if (!s_validPeriods.Contains(e.Period))
                 {
                     throw new TammaError(
@@ -616,6 +723,37 @@ public sealed class PlanVersionEditor : IPlanVersionEditor
                         retryable: false,
                         severity: TammaErrorSeverity.High);
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Emit post-commit audit events BEST-EFFORT (Finding 2). Every write path
+    /// calls this only AFTER its state transition has committed, so a transient
+    /// event-store / publisher outage must never fail the operation: a 500 on a
+    /// committed catalog change would invite an operator retry that mints a
+    /// SECOND superseding version. Each event is attempted independently and a
+    /// failure is logged (ERROR) but swallowed, so one bad emit cannot leave the
+    /// remaining audit breadcrumbs unwritten either.
+    /// </summary>
+    private async Task PublishBestEffortAsync(
+        string operation,
+        IReadOnlyList<PlatformEvent> events,
+        CancellationToken ct)
+    {
+        foreach (var evt in events)
+        {
+            try
+            {
+                await _publisher.AppendAndPublishAsync(evt, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Plan catalog change committed but audit event emit failed (best-effort): {Operation} {EventType}. " +
+                    "The state transition is durable; this audit event was NOT recorded.",
+                    operation, evt.Type);
             }
         }
     }
