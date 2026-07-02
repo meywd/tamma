@@ -1,6 +1,7 @@
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Core.Redaction;
 
 namespace Tamma.Activities.LlmCall;
 
@@ -26,9 +27,16 @@ namespace Tamma.Activities.LlmCall;
 /// non-2xx) or an unwired client is returned to the caller but NEVER throws and NEVER
 /// changes the activity's outcome — a missing Slack post must not break a
 /// mentorship/review run (and this also fixes the latent "PR merged but reported
-/// Failed because the notify threw" bug). The message body is passed through UNCHANGED
-/// (each activity formats its own body engine-side exactly as before the cutover; this
-/// seam adds no re-formatting — Slack-token hardening is a separate 38-3 follow-up).</para>
+/// Failed because the notify threw" bug). Each activity formats its own body engine-side;
+/// this seam does no re-formatting BUT is the exactly-once point at which the untrusted
+/// body is hardened against Slack control tokens via
+/// <see cref="SlackTextSanitizer.Escape"/> — so <c>&lt;!channel&gt;</c> / <c>&lt;!here&gt;</c> /
+/// <c>&lt;@Uxxxx&gt;</c> / <c>&lt;!subteam^Sxxx&gt;</c> derived from issue titles or LLM output
+/// can never trigger a broadcast/mention ping. The escape is applied when the request is
+/// BUILT (before it is enqueued to <c>slack_outbox</c>), and neither the notification
+/// endpoint nor <c>OutboxSlackSender</c> re-escape, so every mediated send is escaped
+/// exactly once. (The engine-side <c>SlackActivity</c> escapes in its own formatters via
+/// the same shared helper; it does not use this seam.)</para>
 /// </summary>
 internal static class MediatedSlack
 {
@@ -60,7 +68,11 @@ internal static class MediatedSlack
             BuildChannelMessage(channel, message, messageType, action),
             ct);
 
-    /// <summary>Pure builder: a single-target DM request (channel = null).</summary>
+    /// <summary>
+    /// Pure builder: a single-target DM request (channel = null). The untrusted
+    /// <paramref name="message"/> is hardened against Slack control tokens exactly once
+    /// here via <see cref="SlackTextSanitizer.Escape"/> — see the class remarks.
+    /// </summary>
     public static SlackNotificationRequest BuildDirectMessage(
         string slackUserId, string message, string messageType, string action)
         => new()
@@ -68,11 +80,15 @@ internal static class MediatedSlack
             Action = action,
             Channel = null,
             UserId = slackUserId,
-            Message = message,
+            Message = SlackTextSanitizer.Escape(message),
             MessageType = string.IsNullOrWhiteSpace(messageType) ? "Info" : messageType,
         };
 
-    /// <summary>Pure builder: a single-target channel-post request (userId = null).</summary>
+    /// <summary>
+    /// Pure builder: a single-target channel-post request (userId = null). The untrusted
+    /// <paramref name="message"/> is hardened against Slack control tokens exactly once
+    /// here via <see cref="SlackTextSanitizer.Escape"/> — see the class remarks.
+    /// </summary>
     public static SlackNotificationRequest BuildChannelMessage(
         string channel, string message, string messageType, string action)
         => new()
@@ -80,7 +96,7 @@ internal static class MediatedSlack
             Action = action,
             Channel = channel,
             UserId = null,
-            Message = message,
+            Message = SlackTextSanitizer.Escape(message),
             MessageType = string.IsNullOrWhiteSpace(messageType) ? "Info" : messageType,
         };
 
