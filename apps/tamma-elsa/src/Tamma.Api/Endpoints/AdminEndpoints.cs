@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Mvc;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Admin;
 using Tamma.Api.Services;
+using Tamma.Api.Services.Audit;
+using Tamma.Api.Services.PromptStore;
 using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Services.Provisioning;
 using Tamma.Api.Services.Provisioning.Cranl;
@@ -504,5 +506,56 @@ public static class AdminEndpoints
         if (registry.RegisteredKeys.Contains(CranlCapabilities.ProviderKey))
             return (CranlCapabilities.ProviderKey, ProvisioningTopology.DedicatedCompute);
         return (NullTenantProvider.Key, ProvisioningTopology.DatabaseOnly);
+    }
+
+    /// <summary>
+    /// Story 37-3 (AC2) — platform-scope audit query over the control-plane
+    /// <c>audit_records</c> rows (impersonation, tenant lifecycle, platform RBAC,
+    /// platform-level BYOK). Same filter + keyset surface as the tenant endpoint;
+    /// physically a DIFFERENT set of rows — this NEVER reads a tenant's audit and
+    /// vice-versa. Gated <c>PlatformOwnerAccess</c> at the wiring site (AC7).
+    /// </summary>
+    public static async Task<IResult> ListPlatformAudit(
+        IAuditQueryService auditQuery,
+        ITammaModeProvider modeProvider,
+        ClaimsPrincipal principal,
+        ILoggerFactory loggerFactory,
+        [FromQuery] string? category,
+        [FromQuery] string? action,
+        [FromQuery] string? actorUserId,
+        [FromQuery] string? targetType,
+        [FromQuery] string? targetId,
+        [FromQuery] string? severity,
+        [FromQuery] string? outcome,
+        [FromQuery] string? ipAddress,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? q,
+        [FromQuery] int? limit,
+        [FromQuery] string? cursor,
+        [FromQuery] string? type,
+        [FromQuery] int? offset,
+        CancellationToken ct)
+    {
+        var log = loggerFactory.CreateLogger("Tamma.Api.Endpoints.AdminEndpoints.ListPlatformAudit");
+
+        var effectiveAction = string.IsNullOrWhiteSpace(action) ? type : action;
+        if (offset is not null && offset != 0)
+        {
+            log.LogWarning(
+                "Deprecated 'offset' param supplied to platform audit query (ignored — "
+                    + "use keyset 'cursor').");
+        }
+
+        var (filter, error) = AuditQueryFilter.TryParse(
+            category, effectiveAction, actorUserId, targetType, targetId, severity,
+            outcome, ipAddress, from, to, q, limit, cursor);
+        if (filter is null)
+            return Results.BadRequest(new { error });
+
+        var callerUserId = principal.GetUserId();
+        var result = await auditQuery.QueryPlatformAsync(
+            callerUserId, filter, modeProvider.Mode, ct);
+        return Results.Ok(result);
     }
 }

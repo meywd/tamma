@@ -1015,6 +1015,16 @@ builder.Services.AddTammaAlertRuleEngine();
 // background loop is opt-in (AuditProjectorOptions.RunOnStartup defaults false).
 builder.Services.AddTammaAuditProjection();
 
+// Story 37-3 — audit query/search/filter read seam over the curated
+// audit_records read-model (Story 37-1). Scoped (depends on the scoped
+// ControlPlaneDbContext); reads the tenant schema via ITenantDbContextFactory
+// (SaaS) or the CP by user/tenant-null (single-user / platform). Read-only —
+// it never re-projects raw events; the only write is the best-effort
+// AUDIT.QUERIED meta-audit event.
+builder.Services.AddScoped<
+    Tamma.Api.Services.Audit.IAuditQueryService,
+    Tamma.Api.Services.Audit.AuditQueryService>();
+
 // Story 34-1 — plan price-book catalog: read-only IPlanCatalogService +
 // the PlanVersionEditor (immutable, versioned plan management). CP-resident;
 // platform-owned in both modes.
@@ -1838,6 +1848,13 @@ v1Admin.MapPatch("/alert-rules/{id:guid}", AlertRuleEndpoints.UpdateRule)
 v1Admin.MapDelete("/alert-rules/{id:guid}", AlertRuleEndpoints.DeleteRule)
     .RequireAuthorization("PlatformOwnerAccess");
 v1Admin.MapPost("/alert-rules/{id:guid}/_test", AlertRuleEndpoints.TestFireRule)
+    .RequireAuthorization("PlatformOwnerAccess");
+
+// Story 37-3 — platform-scope audit query. Same PlatformOwnerAccess gate as
+// the alerts/alert-rules platform-admin surface (cross-tenant + platform-
+// internal blast radius). Reads ONLY the control-plane audit_records rows;
+// a tenant's audit lives in a different schema and is never returned here.
+v1Admin.MapGet("/audit", AdminEndpoints.ListPlatformAudit)
     .RequireAuthorization("PlatformOwnerAccess");
 
 // Story 29-3 — platform-scope secret-cabinet create + rotate. Both

@@ -1,11 +1,14 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Auth;
 using Tamma.Api.Authorization;
 using Tamma.Api.Dtos.Orgs;
+using Tamma.Api.Services.Audit;
 using Tamma.Api.Services.Email;
+using Tamma.Api.Services.PromptStore;
 using Tamma.Api.Services.RateLimit;
 using Tamma.Api.Services.TenantStatus;
 using Tamma.Api.Validation;
@@ -532,54 +535,74 @@ public static class OrgEndpoints
     }
 
     /// <summary>
-    /// Story 18-7 task 2 — tenant-scoped audit-log read. Returns events
-    /// whose <c>TenantId</c> matches the path tenant, most-recent first,
-    /// paginated. <see cref="RequireTenantMembershipFilter"/> already
-    /// enforces caller membership; this handler additionally requires
-    /// admin+. The event store's global query filter provides defence
-    /// in depth (cross-tenant rows are rejected even if the explicit
-    /// filter regresses).
+    /// Story 37-3 (was 18-7 task 2) — tenant-scoped audit query over the curated
+    /// <c>audit_records</c> read-model (Story 37-1), replacing the thin type-prefix
+    /// read over raw <c>domain_events</c>. Rich filtering (<c>category</c> /
+    /// <c>action</c> / <c>actorUserId</c> / <c>targetType</c> / <c>targetId</c> /
+    /// <c>severity</c> / <c>outcome</c> / <c>ipAddress</c> / <c>from</c> / <c>to</c>
+    /// / <c>q</c>) with keyset (<c>cursor</c>) pagination.
+    ///
+    /// <para><b>RBAC (AC7):</b> <see cref="RequireTenantMembershipFilter"/> (wired
+    /// on the route) rejects non-members (403) and stashes the caller's role;
+    /// this handler additionally requires admin+ (a SaaS <c>member</c> gets 403).
+    /// A cross-tenant caller never reaches the handler (membership 403).</para>
+    ///
+    /// <para><b>Backward compat (AC12):</b> the legacy <c>?type=</c> maps onto the
+    /// new exact <c>action</c> filter; the legacy <c>?offset=</c> is
+    /// accepted-but-ignored-with-WARN (keyset replaces it) for one release so the
+    /// existing dashboard does not break.</para>
     /// </summary>
     public static async Task<IResult> ListTenantAudit(
         Guid tenantId,
-        IEventRepository events,
-        ITenantContext tenantContext,
+        IAuditQueryService auditQuery,
+        ITammaModeProvider modeProvider,
+        ClaimsPrincipal principal,
         HttpContext httpContext,
-        int? limit,
-        int? offset,
-        string? type)
+        ILoggerFactory loggerFactory,
+        [FromQuery] string? category,
+        [FromQuery] string? action,
+        [FromQuery] string? actorUserId,
+        [FromQuery] string? targetType,
+        [FromQuery] string? targetId,
+        [FromQuery] string? severity,
+        [FromQuery] string? outcome,
+        [FromQuery] string? ipAddress,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? q,
+        [FromQuery] int? limit,
+        [FromQuery] string? cursor,
+        [FromQuery] string? type,
+        [FromQuery] int? offset,
+        CancellationToken ct)
     {
+        var log = loggerFactory.CreateLogger("Tamma.Api.Endpoints.OrgEndpoints.ListTenantAudit");
+
         var requesterRole = httpContext.Items[RequireTenantMembershipFilter.TenantRoleItemKey] as string;
         if (requesterRole is null)
             return Results.Json(new { error = "Not a member of this organization" }, statusCode: 403);
         if (!TenantRoleHierarchy.IsAtLeast(requesterRole, TenantRoleHierarchy.Admin))
             return Results.Json(new { error = "Requires admin role or higher" }, statusCode: 403);
 
-        var clampedLimit = Math.Clamp(limit ?? 50, 1, 200);
-        var clampedOffset = Math.Max(offset ?? 0, 0);
-
-        // Set ambient tenant context so the global query filter on
-        // domain_events triggers the defence-in-depth path. Idempotent —
-        // RequireTenantMembershipFilter usually sets this too, but be
-        // explicit so this handler is safe when called in isolation.
-        tenantContext.SetTenantId(tenantId);
-
-        var (rows, total) = await events.ListByTenantAsync(tenantId, type, clampedLimit, clampedOffset);
-
-        var projected = rows.Select(e => new AuditEventResponse(
-            e.Id,
-            e.Type,
-            e.CreatedAt,
-            e.Tags,
-            e.Data)).ToList();
-
-        return Results.Ok(new
+        // Backward-compat: legacy ?type= → exact `action`; legacy ?offset= ignored.
+        var effectiveAction = string.IsNullOrWhiteSpace(action) ? type : action;
+        if (offset is not null && offset != 0)
         {
-            events = projected,
-            total,
-            limit = clampedLimit,
-            offset = clampedOffset,
-        });
+            log.LogWarning(
+                "Deprecated 'offset' param supplied to tenant audit query (ignored — "
+                    + "use keyset 'cursor'). tenantId={TenantId}", tenantId);
+        }
+
+        var (filter, error) = AuditQueryFilter.TryParse(
+            category, effectiveAction, actorUserId, targetType, targetId, severity,
+            outcome, ipAddress, from, to, q, limit, cursor);
+        if (filter is null)
+            return Results.BadRequest(new { error });
+
+        var callerUserId = principal.GetUserId();
+        var result = await auditQuery.QueryTenantAsync(
+            tenantId, callerUserId, filter, modeProvider.Mode, ct);
+        return Results.Ok(result);
     }
 
     public static async Task<IResult> AcceptInvite(
