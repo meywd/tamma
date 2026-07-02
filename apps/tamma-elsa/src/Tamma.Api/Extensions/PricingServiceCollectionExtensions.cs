@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Tamma.Api.Services.Pricing;
 
@@ -46,6 +47,47 @@ public static class PricingServiceCollectionExtensions
         services.TryAddSingleton<IUsagePricingEngine, UsagePricingEngine>();
         services.TryAddScoped<IMarginPolicyResolver, MarginPolicyResolver>();
         services.TryAddScoped<ITenantProviderPricingModeResolver, BillingCustomerPricingModeResolver>();
+
+        return services;
+    }
+
+    /// <summary>
+    /// Story 34-6 — the entitlement &amp; quota resolution service + its
+    /// per-tenant snapshot cache, gauge-metric usage reader, and event-driven
+    /// cache-invalidation listener.
+    ///
+    /// <list type="bullet">
+    ///   <item><description><see cref="IEntitlementSnapshotCache"/> — singleton
+    ///     (one cache shared across requests + the invalidation listener).</description></item>
+    ///   <item><description><see cref="IEntitlementService"/>,
+    ///     <see cref="IActivePlanAssignmentSource"/>,
+    ///     <see cref="IEntitlementUsageReader"/> — scoped (depend on the scoped
+    ///     <c>ControlPlaneDbContext</c> / catalog service).</description></item>
+    ///   <item><description><see cref="EntitlementCacheInvalidationListener"/> —
+    ///     hosted service subscribing the in-process event bus.</description></item>
+    /// </list>
+    ///
+    /// <para><b>34-4 interim:</b> the default
+    /// <see cref="IActivePlanAssignmentSource"/> reads the tenant's Epic-28
+    /// <c>PlanId</c> shadow column. Swap in a 34-4
+    /// <c>IPlanAssignmentService</c> adapter under this same seam once that
+    /// story lands — no resolver change required.</para>
+    /// </summary>
+    public static IServiceCollection AddEntitlementResolution(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.TryAddSingleton(TimeProvider.System);
+
+        // One shared cache across requests + the invalidation listener.
+        services.TryAddSingleton<IEntitlementSnapshotCache>(sp =>
+            new EntitlementSnapshotCache(sp.GetRequiredService<TimeProvider>()));
+
+        services.TryAddScoped<IActivePlanAssignmentSource, TenantShadowColumnPlanAssignmentSource>();
+        services.TryAddScoped<IEntitlementUsageReader, ControlPlaneEntitlementUsageReader>();
+        services.TryAddScoped<IEntitlementService, EntitlementService>();
+
+        services.AddHostedService<EntitlementCacheInvalidationListener>();
 
         return services;
     }
