@@ -1179,6 +1179,14 @@ builder.Services.AddPlatformTaskWorker(builder.Configuration);
 // resolves through the Epic 29 cabinet — never raw env in production (AC5).
 builder.Services.AddTammaBilling(builder.Configuration);
 
+// Story 35-5 — Stripe webhook ingestion pipeline (SaaS only). Registers the
+// processor, the pluggable IBillingEventHandler registry + 35-5's default
+// DCB-emitting handlers, the cabinet-resolving signing-secret source, the
+// Stripe event verifier, and the fast-ack billing.webhook.followup task handler.
+// Single-user is a no-op (NullBillingProvider — zero Stripe surface); the routes
+// below are mapped only in SaaS mode.
+builder.Services.AddBillingWebhookIngestion(builder.Configuration);
+
 // Unified-tenancy Phase 4 — `tenant.move` platform-task handler. Drives
 // ITenantMoveService.MoveAsync for tasks enqueued by
 // POST /api/admin/tenants/{tenantId}/move; on failure it stamps the
@@ -2431,6 +2439,27 @@ github.MapPost("/webhooks", GitHubEndpoints.Webhooks)
 app.MapPost("/api/webhooks/{platform}", WebhookEndpoints.Receive)
     .RequireRateLimiting("GitHubWebhook"); // reuse the 300/min budget
 
+// ── Story 35-5 — Stripe billing webhook (SaaS only; signature-gated, no JWT) ──
+// Mapped only in SaaS mode: single-user has no Stripe surface (NullBillingProvider,
+// 35-1 AC7 / 35-5 AC13), so the webhook + admin routes stay unmapped (→ 404). The
+// webhook route is anonymous at the app-auth layer (Stripe calls it) and gated by
+// the Stripe signature instead; the admin routes are PlatformOwnerAccess (a Stripe
+// webhook is a platform-operator concern, never a tenant-scoped route).
+if (app.Services.GetRequiredService<Tamma.Api.Services.PromptStore.ITammaModeProvider>()
+        .Mode == Tamma.Api.Services.PromptStore.TammaMode.SaaS)
+{
+    app.MapPost("/api/v1/billing/stripe/webhook",
+            Tamma.Api.Endpoints.Billing.StripeWebhookEndpoint.Receive)
+        .RequireRateLimiting("GitHubWebhook"); // reuse the 300/min webhook budget
+
+    app.MapGet("/api/v1/admin/billing/webhook-events",
+            Tamma.Api.Endpoints.Billing.BillingWebhookAdminEndpoints.List)
+        .RequireAuthorization("PlatformOwnerAccess");
+    app.MapPost("/api/v1/admin/billing/webhook-events/{id:guid}/replay",
+            Tamma.Api.Endpoints.Billing.BillingWebhookAdminEndpoints.Replay)
+        .RequireAuthorization("PlatformOwnerAccess");
+}
+
 // ── SaaS (API key auth) ──
 app.MapPost("/api/v1/llm/chat", SaaSEndpoints.LlmChat).RequireAuthorization();
 
@@ -2645,6 +2674,7 @@ using (var scope = app.Services.CreateScope())
                     tenant_agent_enablements,
                     audit_records, audit_projector_cursor,
                     billing_customers, billing_plan_prices,
+                    billing_webhook_events,
                     alert_delivery_attempts, alert_channels, alerts,
                     alert_evaluator_cursor, alert_rules,
                     api_keys, agent_configs, budget_configs, domain_events,

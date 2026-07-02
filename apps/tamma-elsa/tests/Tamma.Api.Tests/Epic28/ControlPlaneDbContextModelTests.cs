@@ -121,6 +121,10 @@ public class ControlPlaneDbContextModelTests
             // only — usage/metering data is owned by later Epic 35 stories.
             "billing_customers",
             "billing_plan_prices",
+            // Story 35-5 — Stripe webhook dedup + audit journal. CP-resident:
+            // billing is a cross-cutting platform concern; the webhook arrives
+            // with no tenant context (tenant resolved from the Stripe customer).
+            "billing_webhook_events",
             // Story 37-1 — curated audit-record read-model + the per-(projector,
             // tenant) cursor. audit_records is mapped on BOTH contexts (the CP
             // build materializes platform-scope + single-user rows); the cursor
@@ -148,6 +152,7 @@ public class ControlPlaneDbContextModelTests
             + "Story 32-16 adds tenant_agent_enablements. "
             + "Story 34-1 adds plan_features + plan_entitlements + plan_prices. "
             + "Story 35-1 adds billing_customers + billing_plan_prices. "
+            + "Story 35-5 adds billing_webhook_events. "
             + "Story 37-1 adds audit_records + audit_projector_cursor. "
             + "Story 34-11 adds providers + provider_model_prices. "
             + "Story 34-5 adds margin_policies. "
