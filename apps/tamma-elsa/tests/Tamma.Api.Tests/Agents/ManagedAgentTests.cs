@@ -453,6 +453,39 @@ public class ManagedAgentTests
     }
 
     // -------------------------------------------------------------------
+    // Story 32-6 (review M1) — the Guid.Empty "agent-unresolved" sentinel
+    // -------------------------------------------------------------------
+
+    [Test]
+    public async Task RunAsync_PreResolutionFailure_EmitsTerminalTrail_TaggedGuidEmptySentinel()
+    {
+        // A failure BEFORE the agent is resolved still emits a terminal trail event
+        // (failures must stay visible) — but tagged agentId = Guid.Empty because no
+        // agent identity existed yet. Per-agent rollups (32-9/32-10) MUST exclude it.
+        _resolver
+            .Setup(r => r.ResolveForRoleAsync("developer", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new Tamma.Core.TammaError(
+                "AGENT.RESOLVE.NO_ENABLED_DEFAULT", "nothing enabled",
+                retryable: false, severity: Tamma.Core.TammaErrorSeverity.High));
+
+        var trail = new CapturingTrailEmitter();
+        var sut = new ManagedAgent(
+            _gate.Object, _budget.Object, _resolver.Object, _credentials.Object,
+            _runner.Object, _pricing.Object, _markup, _usage, _events,
+            NullLogger<ManagedAgent>.Instance, sanitizer: null, trail: trail);
+
+        var run = await sut.RunAsync(Req(Guid.NewGuid(), "developer"));
+
+        run.Success.Should().BeFalse();
+        run.FailureCode.Should().Be(AgentRunFailureCodes.AgentUnresolved);
+
+        var terminal = trail.RunCompletions.Should().ContainSingle().Subject;
+        terminal.Ctx.AgentId.Should().Be(Guid.Empty,
+            "a pre-resolution failure has no resolved agent identity — the trail carries the sentinel");
+        terminal.Outcome.Status.Should().Be(AgentRunStatus.Failed);
+    }
+
+    // -------------------------------------------------------------------
     // Finding I-3 — input prompts are sanitized SERVER-SIDE before the call
     // -------------------------------------------------------------------
 
@@ -727,5 +760,23 @@ public class ManagedAgentTests
         public Task<(IReadOnlyList<DomainEvent> Events, int Total)> ListByTenantAsync(
             Guid tenantId, string? typePrefix, int limit, int offset)
             => Task.FromResult(((IReadOnlyList<DomainEvent>)new List<DomainEvent>(), 0));
+    }
+
+    /// <summary>Captures the trail contexts + outcomes the run emits, so a test can
+    /// assert the Guid.Empty "agent-unresolved" sentinel (review M1).</summary>
+    private sealed class CapturingTrailEmitter : IAgentTrailEmitter
+    {
+        public List<(AgentTrailContext Ctx, AgentRunOutcome Outcome)> RunCompletions { get; } = new();
+
+        public Task RunCompletedAsync(AgentTrailContext ctx, AgentRunOutcome outcome, CancellationToken ct = default)
+        {
+            RunCompletions.Add((ctx, outcome));
+            return Task.CompletedTask;
+        }
+
+        public Task ToolCallAsync(AgentTrailContext ctx, ToolCallRecord call, CancellationToken ct = default) => Task.CompletedTask;
+        public Task IterationCompletedAsync(AgentTrailContext ctx, IterationRecord iteration, CancellationToken ct = default) => Task.CompletedTask;
+        public Task PanelAggregatedAsync(AgentTrailContext ctx, PanelRecord panel, CancellationToken ct = default) => Task.CompletedTask;
+        public Task BugRecordedAsync(AgentTrailContext ctx, BugRecord bug, CancellationToken ct = default) => Task.CompletedTask;
     }
 }
