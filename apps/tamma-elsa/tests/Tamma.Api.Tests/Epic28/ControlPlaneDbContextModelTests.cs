@@ -134,6 +134,10 @@ public class ControlPlaneDbContextModelTests
             // sheet behind the unchanged IProviderPricingService seam.
             "providers",
             "provider_model_prices",
+            // Story 34-5 — cost→price markup policy (global/plan/provider
+            // scope, versioned). Platform-owned (PlatformOwnerAccess); CP-resident
+            // because margin is a platform-global pricing concern, not per-tenant.
+            "margin_policies",
         }, because: "Story 28-1 PR D (Decision #4) — enumerate every "
             + "CP-resident table; the 11 + 4 mentorship tenant-resident "
             + "entities have moved to TenantDbContext. Story 31-2 adds "
@@ -146,6 +150,7 @@ public class ControlPlaneDbContextModelTests
             + "Story 35-1 adds billing_customers + billing_plan_prices. "
             + "Story 37-1 adds audit_records + audit_projector_cursor. "
             + "Story 34-11 adds providers + provider_model_prices. "
+            + "Story 34-5 adds margin_policies. "
             + "Story 38-3 adds slack_outbox.");
     }
 

@@ -686,6 +686,13 @@ public class ControlPlaneDbContext : DbContext
     /// </summary>
     public DbSet<ProviderModelPrice> ProviderModelPrices => Set<ProviderModelPrice>();
 
+    /// <summary>
+    /// Story 34-5 — versioned platform margin policies (global/plan/provider
+    /// scope) applied by the cost->price engine. Platform-global (no TenantId);
+    /// immutable + EffectiveFrom-windowed like <see cref="ProviderModelPrices"/>.
+    /// </summary>
+    public DbSet<MarginPolicy> MarginPolicies => Set<MarginPolicy>();
+
     // Story 28-1 PR D: the 11 + 4 mentorship tenant-resident entities
     // (AgentConfig, PromptOverride, ProviderHealth, ProviderDiagnostic,
     // SanitizationRule, WorkflowDefinition, WorkflowInstance, DomainEvent,
@@ -793,6 +800,11 @@ public class ControlPlaneDbContext : DbContext
         // every tenant. Mirrors the ConfigurePlans versioning pattern.
         ConfigureProviders(modelBuilder);
         ConfigureProviderModelPrices(modelBuilder);
+
+        // Story 34-5 — versioned platform margin policies (sell-side). Same
+        // CP-resident, platform-global, immutable-versioned shape as the 34-11
+        // cost rows above.
+        ConfigureMarginPolicies(modelBuilder);
     }
 
     /// <summary>
@@ -885,6 +897,59 @@ public class ControlPlaneDbContext : DbContext
                 .HasForeignKey(e => e.ProviderKey)
                 .HasPrincipalKey(p => p.Key)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+    }
+
+    /// <summary>
+    /// Story 34-5 — <c>margin_policies</c> table. Three CHECKs pin the closed
+    /// enums (<c>Scope</c>, <c>Status</c>) and the "at least one knob" invariant
+    /// (<c>ck_margin_policies_has_knob</c> — never an all-null policy row). The
+    /// partial unique index <c>UX_margin_policies_OneActivePerScopeRef</c> on
+    /// <c>(Scope, RefKey) WHERE "Status" = 'active'</c> with
+    /// <c>NULLS NOT DISTINCT</c> guarantees exactly one active policy per
+    /// <c>(Scope, RefKey)</c> — including the single global row whose
+    /// <c>RefKey</c> is NULL (mirrors <c>UX_provider_model_prices_OneActivePerModel</c>).
+    /// The window index supports the EffectiveFrom-windowed resolution.
+    /// </summary>
+    private static void ConfigureMarginPolicies(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<MarginPolicy>(entity =>
+        {
+            entity.ToTable("margin_policies", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_margin_policies_scope",
+                    "\"Scope\" IN ('global','plan','provider')");
+                t.HasCheckConstraint(
+                    "ck_margin_policies_status",
+                    "\"Status\" IN ('active','superseded')");
+                // At least one knob must be set — never an all-null policy row.
+                t.HasCheckConstraint(
+                    "ck_margin_policies_has_knob",
+                    "\"MarkupMultiplier\" IS NOT NULL OR \"FixedUsdPer1M\" IS NOT NULL");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Scope).IsRequired().HasMaxLength(20);
+            entity.Property(e => e.RefKey).HasMaxLength(200);
+            entity.Property(e => e.MarkupMultiplier).HasColumnType("decimal(20,8)");
+            entity.Property(e => e.FixedUsdPer1M).HasColumnType("decimal(20,8)");
+            entity.Property(e => e.Status)
+                .IsRequired().HasMaxLength(20).HasDefaultValue("active");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // Exactly one active policy per (Scope, RefKey); NULLS NOT DISTINCT so
+            // the single global row (RefKey NULL) is unique too.
+            entity.HasIndex(e => new { e.Scope, e.RefKey })
+                .HasDatabaseName("UX_margin_policies_OneActivePerScopeRef")
+                .HasFilter("\"Status\" = 'active'")
+                .IsUnique()
+                .AreNullsDistinct(false);
+
+            // Resolution-window lookup (scope+refKey, ordered by EffectiveFrom).
+            entity.HasIndex(e => new { e.Scope, e.RefKey, e.EffectiveFrom })
+                .HasDatabaseName("IX_margin_policies_Window");
         });
     }
 

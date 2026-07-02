@@ -1020,6 +1020,11 @@ builder.Services.AddTammaAuditProjection();
 // platform-owned in both modes.
 builder.Services.AddPlanCatalog();
 
+// Story 34-5 — the canonical cost->price markup engine (pure IUsagePricingEngine)
+// + the DB-backed IMarginPolicyResolver + the (interim) per-tenant pricing-mode
+// resolver. CP-resident; platform-owned margin policies in both modes.
+builder.Services.AddUsagePricingEngine();
+
 // Wave C.4 §4 — per-process health monitor for TammaApiClient.
 // Singleton so the rolling 5-min failure window is shared across every
 // call site. Fires PLATFORM.API.UNHEALTHY via IAlertEventEmitter when
@@ -1684,6 +1689,17 @@ admin.MapPut("/providers/{key}/prices",
         Tamma.Api.Endpoints.Admin.AdminProviderPricingEndpoints.VersionPrice)
     .RequireAuthorization("PlatformOwnerAccess");
 
+// Story 34-5 — platform MARGIN policy admin (view + version). PlatformOwnerAccess:
+// margin policies are platform-GLOBAL in both modes (no per-tenant margin rows),
+// so it is platform-scoped admin work — NOT OwnerAccess. The PUT supersedes the
+// prior active row + inserts a new one and emits PRICING.MARGIN.UPDATED.
+admin.MapGet("/pricing/margins",
+        Tamma.Api.Endpoints.Admin.AdminPricingEndpoints.ListMargins)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapPut("/pricing/margins",
+        Tamma.Api.Endpoints.Admin.AdminPricingEndpoints.VersionMargin)
+    .RequireAuthorization("PlatformOwnerAccess");
+
 // Story 28-11 — platform-admin tenant-status UX. List + detail surface the
 // Epic-28 shadow columns on tenants (Status, PlanId, KekVersion,
 // FailureReason, DeleteRequestedAt); action endpoints re-drive the Story
@@ -1848,6 +1864,13 @@ admin.MapPost("/secrets/{id:guid}/retire-version/{versionNumber:int}",
 // previous `AdminAccess` / `OwnerAccess` policies checked JWT *platform*
 // permissions, not the caller's role within the path tenant, and were the
 // root cause of audit findings 001, 012, 013, 020, 021.
+// Story 34-5 — tenant-facing pricing estimate (MemberAccess). Prices a
+// hypothetical usage line under the caller's OWN plan + (tenant, provider)
+// pricing mode; the margin-policy rows themselves stay platform-owner-only
+// (/api/admin/pricing/*). Powers the upgrade/cost UI in packages/dashboard-user.
+var pricing = app.MapGroup("/api/pricing").RequireAuthorization("MemberAccess");
+pricing.MapGet("/estimate", Tamma.Api.Endpoints.PricingEndpoints.GetEstimate);
+
 var orgs = app.MapGroup("/api/v1/orgs").RequireAuthorization("MemberAccess");
 orgs.MapPost("/", OrgEndpoints.CreateOrg);
 orgs.MapPost("/invites/accept", OrgEndpoints.AcceptInvite);
@@ -2598,6 +2621,7 @@ using (var scope = app.Services.CreateScope())
                     mentorship_events, mentorship_sessions,
                     password_reset_tokens,
                     plan_features, plan_entitlements, plan_prices, plans,
+                    margin_policies,
                     provider_model_prices, providers,
                     platform_analytics_hourly,
                     platform_api_key_index,
@@ -2638,6 +2662,11 @@ using (var scope = app.Services.CreateScope())
         // seeder validates each persona's (provider, model) against the active
         // price rows this seeder writes (the in-data IsKnown guard).
         await Tamma.Data.Seeders.ProviderPricingSeeder.SeedAsync(dbContext);
+
+        // Story 34-5 — the default GLOBAL margin policy (1.3x = +30%). Gives the
+        // cost->price engine a global safety-net policy to resolve to.
+        // Insert-missing-only; no-op on re-run and never reverts an admin edit.
+        await Tamma.Data.Seeders.MarginPolicySeeder.SeedAsync(dbContext);
 
         // Story 32-15 — public/system PERSONAS (named cross-role agents:
         // claude/gemini/codegpt, Role=NULL, explicit provider+model, no prompts).

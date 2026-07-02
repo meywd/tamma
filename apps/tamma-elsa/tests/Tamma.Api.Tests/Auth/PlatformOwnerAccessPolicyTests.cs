@@ -169,6 +169,10 @@ public class PlatformOwnerAccessPolicyTests
         // modes (no per-tenant override layer). Same Finding-C1 gate: a
         // tenant-owner who is not a platform admin must NOT read or edit it.
         "/api/admin/providers",
+        // Story 34-5 — MARGIN policies are platform-global (no per-tenant margin
+        // rows). Same Finding-C1 gate: a tenant-owner who is not a platform admin
+        // must NOT view or version them (AC14).
+        "/api/admin/pricing/margins",
     };
 
     [Test]
