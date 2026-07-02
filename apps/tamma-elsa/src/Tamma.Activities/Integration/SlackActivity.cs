@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using Tamma.Activities.LlmCall;
 using Tamma.Activities.LlmCall.Models;
 using Tamma.Core.Entities;
+using Tamma.Core.Redaction;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Activities.Integration;
@@ -286,22 +287,12 @@ _Reply if you have questions or need more help!_";
 
     /// <summary>
     /// Neutralize Slack control characters in an UNTRUSTED message body before it is
-    /// interpolated into a posted body. Slack's documented escaping (<c>&amp;</c> →
-    /// <c>&amp;amp;</c>, <c>&lt;</c> → <c>&amp;lt;</c>, <c>&gt;</c> → <c>&amp;gt;</c>)
-    /// renders broadcast/mention tokens like <c>&lt;!channel&gt;</c>, <c>&lt;!here&gt;</c>,
-    /// <c>&lt;@U…&gt;</c> literally, so issue/task/AI-derived content can't expand into
-    /// pings beyond the intended audience. Applied ONLY to caller-supplied text — never
-    /// to our own emoji/label prefixes. Order matters: escape <c>&amp;</c> first so the
-    /// replacements it introduces are not double-escaped.
+    /// interpolated into a posted body. Delegates to the single shared implementation
+    /// <see cref="SlackTextSanitizer.Escape"/> so the engine-side formatters and the
+    /// mediated <c>MediatedSlack</c> seam escape identically. Applied ONLY to
+    /// caller-supplied text — never to our own emoji/label prefixes.
     /// </summary>
-    internal static string EscapeSlack(string? text)
-    {
-        if (string.IsNullOrEmpty(text)) return string.Empty;
-        return text
-            .Replace("&", "&amp;", StringComparison.Ordinal)
-            .Replace("<", "&lt;", StringComparison.Ordinal)
-            .Replace(">", "&gt;", StringComparison.Ordinal);
-    }
+    internal static string EscapeSlack(string? text) => SlackTextSanitizer.Escape(text);
 }
 
 /// <summary>
