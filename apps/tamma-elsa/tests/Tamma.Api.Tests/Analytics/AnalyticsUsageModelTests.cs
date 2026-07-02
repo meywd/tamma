@@ -118,8 +118,9 @@ public class AnalyticsUsageModelTests
         entity.FindProperty("AgentId")!.IsNullable.Should().BeTrue();
         entity.FindProperty("WorkflowDefinitionId")!.IsNullable.Should().BeTrue();
         entity.FindProperty("RepoId")!.IsNullable.Should().BeTrue();
+        entity.FindProperty("Provider")!.IsNullable.Should().BeTrue(
+            "Provider is nullable (Story 36-2) — workflow/dispatch counts bucket under NULL");
 
-        entity.FindProperty("Provider")!.IsNullable.Should().BeFalse("Provider is required");
         entity.FindProperty("CostBasis")!.IsNullable.Should().BeFalse("CostBasis is required");
     }
 
@@ -133,7 +134,7 @@ public class AnalyticsUsageModelTests
         entity.FindProperty("AgentId")!.IsNullable.Should().BeTrue();
         entity.FindProperty("WorkflowDefinitionId")!.IsNullable.Should().BeTrue();
         entity.FindProperty("RepoId")!.IsNullable.Should().BeTrue();
-        entity.FindProperty("Provider")!.IsNullable.Should().BeFalse();
+        entity.FindProperty("Provider")!.IsNullable.Should().BeTrue();
     }
 
     // ── AC8 — counter store types are bigint, costs are numeric(20,4) ──

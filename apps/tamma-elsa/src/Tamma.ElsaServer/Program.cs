@@ -147,6 +147,16 @@ Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorE
     .TryAddSingleton<TimeProvider>(builder.Services, _ => TimeProvider.System);
 builder.Services.AddHostedService<Tamma.ElsaServer.Workflows.HourlyAnalyticsRollupScheduler>();
 
+// Story 36-2 — dimensional analytics projection seams. The margin/pricing
+// config is the Story 36-7 seam; until 36-7 lands the Null impl yields a zero
+// margin (billed == cost) + WARN so the rollup stays green. The metrics
+// singleton is a self-registering meter exposing
+// tamma.analytics.projection_lag_seconds (KekRotationMetrics precedent).
+Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions
+    .TryAddSingleton<Tamma.Activities.Analytics.IAnalyticsPricingConfig,
+        Tamma.Activities.Analytics.NullAnalyticsPricingConfig>(builder.Services);
+builder.Services.AddSingleton<Tamma.Activities.Analytics.DimensionalProjectionMetrics>();
+
 // Round-2 review M3 — bridge that polls platform_events for new
 // TENANT.CLEANUP.REQUESTED rows and re-publishes the matching Elsa
 // event so CleanUpFailedTenantWorkflow's starter trigger fires. The

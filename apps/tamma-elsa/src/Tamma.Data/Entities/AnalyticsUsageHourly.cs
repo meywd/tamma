@@ -48,8 +48,14 @@ public class AnalyticsUsageHourly
 
     // ── Dimensions ──
 
-    /// <summary>AI provider key (e.g. <c>anthropic-claude</c>). Required.</summary>
-    public string Provider { get; set; } = null!;
+    /// <summary>
+    /// AI provider key (e.g. <c>anthropic-claude</c>). <c>null</c> = the measure
+    /// is not provider-attributed — workflow-lifecycle counts and agent-dispatch
+    /// counts carry no provider signal and bucket under the NULL provider (Story
+    /// 36-2). The <c>UX_analytics_usage_hourly_dims</c> NULLS-NOT-DISTINCT index
+    /// dedupes these NULL-provider rows to one per bucket.
+    /// </summary>
+    public string? Provider { get; set; }
 
     /// <summary>Agent handle/id this usage is attributed to; <c>null</c> = unattributed.</summary>
     public string? AgentId { get; set; }

@@ -1643,6 +1643,11 @@ internal static class TammaModelConfiguration
         // conventions NULLS NOT DISTINCT pattern for the idempotent business key.
         ConfigureAnalyticsUsageEntities(modelBuilder, fixedTenantId);
 
+        // ── Analytics projection checkpoint (Story 36-2) ──
+        // Per-tenant resumable SequenceNumber cursor for the dimensional
+        // projection. Schema is the isolation plane (no TenantId column).
+        ConfigureAnalyticsProjectionCheckpoint(modelBuilder, fixedTenantId);
+
         // ── Curated audit records (Story 37-1) ──
         // Tenant-scope curated audit trail materialized from the tenant
         // domain_events stream. The SAME table shape is also configured on the
@@ -1747,8 +1752,10 @@ internal static class TammaModelConfiguration
         ValueConverter<CostBasis, string> costBasisConverter)
         where T : class
     {
-        // Dimensions.
-        entity.Property("Provider").IsRequired().HasMaxLength(100);
+        // Dimensions. Provider is nullable (Story 36-2): workflow-lifecycle and
+        // agent-dispatch counts carry no provider and bucket under NULL — the
+        // UX_*_dims NULLS-NOT-DISTINCT index dedupes those NULL-provider rows.
+        entity.Property("Provider").IsRequired(false).HasMaxLength(100);
         entity.Property("AgentId").HasMaxLength(200);
         entity.Property("RepoId").HasMaxLength(400);
         entity.Property(typeof(CostBasis), "CostBasis")
@@ -1766,6 +1773,34 @@ internal static class TammaModelConfiguration
         entity.Property("CostUsd").HasPrecision(20, 4).HasDefaultValue(0m);
         entity.Property("PlatformBilledUsd").HasPrecision(20, 4).HasDefaultValue(0m);
         entity.Property("ComputedAt").HasDefaultValueSql("now()");
+    }
+
+    /// <summary>
+    /// Story 36-2 — maps the per-tenant <c>analytics_projection_checkpoint</c>
+    /// resumable cursor. One row per projection <c>Stream</c> (unique). No
+    /// <c>TenantId</c> column — the tenant schema is the isolation plane
+    /// (Doc 01 §1.4), so <see cref="ApplyTenantFilter{T}"/> is the deliberate
+    /// no-op accessor (returns <c>null</c>; nothing to filter).
+    /// </summary>
+    private static void ConfigureAnalyticsProjectionCheckpoint(
+        ModelBuilder modelBuilder, Guid? fixedTenantId)
+    {
+        modelBuilder.Entity<AnalyticsProjectionCheckpoint>(entity =>
+        {
+            entity.ToTable("analytics_projection_checkpoint");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Stream).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.LastSequenceNumber).HasDefaultValue(0L);
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // One cursor per stream — the upsert target for the atomic advance.
+            entity.HasIndex(e => e.Stream)
+                .IsUnique()
+                .HasDatabaseName("UX_analytics_projection_checkpoint_stream");
+
+            ApplyTenantFilter<AnalyticsProjectionCheckpoint>(entity, fixedTenantId, _ => null);
+        });
     }
 
     /// <summary>

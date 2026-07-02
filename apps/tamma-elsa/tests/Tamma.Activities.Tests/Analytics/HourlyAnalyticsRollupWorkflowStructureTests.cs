@@ -23,9 +23,10 @@ public class HourlyAnalyticsRollupWorkflowStructureTests
     {
         typeof(SetVariable),                         // initBucket
         typeof(ComputePlatformRollupActivity),
-        typeof(FanOutTenantRollupsActivity),
+        typeof(FanOutTenantRollupsActivity),         // platform fact table (28-10)
+        typeof(FanOutTenantDimensionalRollupsActivity), // per-tenant dimensional (36-2)
         typeof(EmitHourCompletedActivity),
-        typeof(PurgeStaleAnalyticsActivity),         // PURGE_ANALYTICS_HOURLY
+        typeof(PurgeStaleAnalyticsActivity),         // PURGE_ANALYTICS_HOURLY (CP, 28-10)
     };
 
     [Test]
@@ -60,6 +61,24 @@ public class HourlyAnalyticsRollupWorkflowStructureTests
                 .Be(ExpectedActivitiesInOrder[i],
                     $"position {i} should be {ExpectedActivitiesInOrder[i].Name}");
         }
+    }
+
+    [Test]
+    public void Build_DimensionalFanOut_FollowsPlatformFanOut()
+    {
+        // Story 36-2 AC14 — the dimensional fan-out is an additional step AFTER
+        // the platform fact-table fan-out and before the terminal emit/purge.
+        var workflow = new HourlyAnalyticsRollupWorkflow();
+        var builder = WorkflowTestHelper.BuildWorkflow(workflow);
+        var activities = ((Sequence)builder.Object.Root).Activities.ToList();
+
+        var platformIdx = activities.FindIndex(a => a is FanOutTenantRollupsActivity);
+        var dimensionalIdx = activities.FindIndex(a => a is FanOutTenantDimensionalRollupsActivity);
+        var emitIdx = activities.FindIndex(a => a is EmitHourCompletedActivity);
+
+        platformIdx.Should().BeGreaterThanOrEqualTo(0);
+        dimensionalIdx.Should().BeGreaterThan(platformIdx, "the platform fan-out must precede the dimensional one");
+        emitIdx.Should().BeGreaterThan(dimensionalIdx, "EmitHourCompleted stays terminal-before-purge, after the dimensional fan-out");
     }
 
     [Test]

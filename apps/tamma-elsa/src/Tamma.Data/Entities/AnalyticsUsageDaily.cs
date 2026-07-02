@@ -34,8 +34,12 @@ public class AnalyticsUsageDaily
 
     // ── Dimensions (identical to AnalyticsUsageHourly) ──
 
-    /// <summary>AI provider key (e.g. <c>anthropic-claude</c>). Required.</summary>
-    public string Provider { get; set; } = null!;
+    /// <summary>
+    /// AI provider key (e.g. <c>anthropic-claude</c>). <c>null</c> = not
+    /// provider-attributed (workflow-lifecycle / agent-dispatch counts bucket
+    /// under the NULL provider — see <see cref="AnalyticsUsageHourly.Provider"/>).
+    /// </summary>
+    public string? Provider { get; set; }
 
     /// <summary>Agent handle/id this usage is attributed to; <c>null</c> = unattributed.</summary>
     public string? AgentId { get; set; }
