@@ -713,7 +713,7 @@ public class ApiKeyAuthHandler(
 
             // Safe display prefix: the banner + a few chars only, short enough that
             // the credential redactor's secret-prefix regex (which needs 6+ trailing
-            // chars after tamma_sk_/sk_live_/...) does NOT scrub it away. Never the key.
+            // chars after a known key banner) does NOT scrub it away. Never the key.
             var safePrefix = apiKey.KeyPrefix.Length > 12
                 ? apiKey.KeyPrefix[..12]
                 : apiKey.KeyPrefix;
