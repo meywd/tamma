@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using Tamma.Activities.LlmCall;
 using Tamma.Activities.LlmCall.Credentials;
 using Tamma.Activities.LlmCall.Models;
 using Tamma.Api.Services.Providers;

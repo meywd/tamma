@@ -22,10 +22,11 @@ namespace Tamma.Activities.Tests.LlmCall;
 /// <list type="bullet">
 ///   <item>ZERO <c>*:ApiKey</c> / <c>*_API_KEY</c> config or env reads;</item>
 ///   <item>ZERO <c>/v1/messages</c> / <c>/v1/chat/completions</c> provider URLs
-///         and ZERO named provider <c>HttpClient</c>s EXCEPT inside the shared
-///         <see cref="InlineToolLoopRunner"/> (which executes in the API process,
-///         where the key is resolved) and the <see cref="TammaApiClient"/> wire
-///         client itself;</item>
+///         and ZERO named provider <c>HttpClient</c>s EXCEPT inside the
+///         <see cref="TammaApiClient"/> wire client itself (which only POSTs to the
+///         call-LLM endpoint, not to a provider). The shared
+///         <c>InlineToolLoopRunner</c> — the one type that DOES make a keyed
+///         provider call — now lives in <c>Tamma.Api</c>, outside this engine scan;</item>
 ///   <item>and the engine's <c>Tamma.ElsaServer</c> must be COMPLETELY clean of
 ///         all of the above AND register no provider credential resolver
 ///         (<c>AddEngineProviderCredentialResolution</c> /
@@ -43,12 +44,12 @@ namespace Tamma.Activities.Tests.LlmCall;
 [TestFixture]
 public class NoDirectLlmCallTests
 {
-    // Files that legitimately retain the provider HTTP call. The runner is the
-    // single extracted tool-loop (AC4) and runs in the API process; the wire
-    // client only POSTs to the call-LLM endpoint, not to a provider.
+    // Files under Tamma.Activities that legitimately retain a provider-shaped HTTP
+    // literal. Only the wire client remains: it POSTs to the call-LLM endpoint, not
+    // to a provider. The InlineToolLoopRunner (the sole keyed provider caller) has
+    // been relocated into Tamma.Api, so it is no longer part of this engine scan.
     private static readonly string[] AllowedProviderCallFiles =
     {
-        Path.Combine("LlmCall", "InlineToolLoopRunner.cs"),
         Path.Combine("LlmCall", "TammaApiClient.cs"),
     };
 
@@ -90,7 +91,7 @@ public class NoDirectLlmCallTests
     // ── Source scans over Tamma.Activities ─────────────────────────────────
 
     [Test]
-    public void TammaActivities_HasNoDirectProviderMessagesCall_OutsideRunnerAndWireClient()
+    public void TammaActivities_HasNoDirectProviderMessagesCall_OutsideWireClient()
     {
         var offenders = ActivitiesSourceFiles()
             .Where(f => !IsAllowedProviderCallFile(f.Relative))
@@ -105,7 +106,7 @@ public class NoDirectLlmCallTests
     }
 
     [Test]
-    public void TammaActivities_HasNoDirectProviderChatCompletionsCall_OutsideRunnerAndWireClient()
+    public void TammaActivities_HasNoDirectProviderChatCompletionsCall_OutsideWireClient()
     {
         var offenders = ActivitiesSourceFiles()
             .Where(f => !IsAllowedProviderCallFile(f.Relative))
@@ -119,7 +120,7 @@ public class NoDirectLlmCallTests
     }
 
     [Test]
-    public void TammaActivities_HasNoDirectProviderCompleteCall_OutsideRunnerAndWireClient()
+    public void TammaActivities_HasNoDirectProviderCompleteCall_OutsideWireClient()
     {
         var offenders = ActivitiesSourceFiles()
             .Where(f => !IsAllowedProviderCallFile(f.Relative))
@@ -133,7 +134,7 @@ public class NoDirectLlmCallTests
     }
 
     [Test]
-    public void TammaActivities_DoesNotCreateNamedProviderHttpClient_OutsideRunnerAndWireClient()
+    public void TammaActivities_DoesNotCreateNamedProviderHttpClient_OutsideWireClient()
     {
         var offenders = ActivitiesSourceFiles()
             .Where(f => !IsAllowedProviderCallFile(f.Relative))

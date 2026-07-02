@@ -530,9 +530,11 @@ builder.Services.AddProviderCredentialResolution();
 // NullUsageEmitter = no-op, the AGENT.RUN.* DCB events remain the durable
 // signal) ship the SAFE default until those stories replace them behind the
 // same interfaces. IBudgetGuard is the per-call fail-closed gate (32-9 backs
-// running-spend later). InlineToolLoopRunner is the extracted T2 runner shared
-// from Tamma.Activities; its provider-side collaborators (sanitizer/registry/
-// validator/compactor) are all optional and are fully wired in the API in T4.
+// running-spend later). InlineToolLoopRunner is the extracted T2 runner, now
+// hosted in Tamma.Api.Services.Agents (the workflow-engine assembly no longer
+// hosts the agentic tool loop); its provider-side collaborators (sanitizer/
+// registry/validator/compactor) are all optional and are fully wired in the API
+// in T4.
 builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IProviderMarkupEngine,
     Tamma.Api.Services.Agents.PassthroughProviderMarkupEngine>();
 builder.Services.TryAddSingleton<Tamma.Api.Services.Agents.IUsageEmitter,
@@ -604,8 +606,8 @@ builder.Services.TryAddSingleton<Tamma.Activities.ToolExecution.ParallelToolExec
 // dep is the cabinet-backed DefaultProviderCredentialResolver (registered above
 // via AddProviderCredentialResolution) — but the loop never re-resolves: the key
 // is set on the provider config ManagedAgent hands it.
-builder.Services.AddScoped<Tamma.Activities.LlmCall.IInlineToolLoopRunner,
-    Tamma.Activities.LlmCall.InlineToolLoopRunner>();
+builder.Services.AddScoped<Tamma.Api.Services.Agents.IInlineToolLoopRunner,
+    Tamma.Api.Services.Agents.InlineToolLoopRunner>();
 builder.Services.AddScoped<Tamma.Api.Services.Agents.IManagedAgent,
     Tamma.Api.Services.Agents.ManagedAgent>();
 

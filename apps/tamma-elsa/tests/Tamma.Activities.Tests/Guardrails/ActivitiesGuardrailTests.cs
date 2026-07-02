@@ -14,7 +14,7 @@ namespace Tamma.Activities.Tests.Guardrails;
 ///   <item>loads the REAL built <c>Tamma.Activities</c> / <c>Tamma.ElsaServer</c> assemblies
 ///     and asserts no type's constructor parameter / field / property is a denylisted
 ///     vendor-credential type (proving the post-cutover engine surface is clean) — except
-///     the documented exemptions (design §5.3 + the co-located Tamma.Api LLM core);</item>
+///     the documented design-§5.3 exemptions;</item>
 ///   <item>asserts the analyzer is WIRED into both engine projects as an
 ///     <c>OutputItemType="Analyzer"</c> reference (so the gate is actually active); and</item>
 ///   <item>asserts NO <c>TAMMA001</c> suppression exists anywhere under the engine surface
@@ -36,17 +36,12 @@ public class ActivitiesGuardrailTests
         "Tamma.Core.Interfaces.IGitHubIntegrationService",
         "Tamma.Core.Interfaces.ISlackIntegrationService",
         "Tamma.Activities.LlmCall.Credentials.IProviderCredentialResolver",
-        // FIX M1 — the Tamma.Api-executed LLM core; injecting it into an engine step is a
-        // rule-1 violation. Its OWN ctor injection of IProviderCredentialResolver is covered
-        // by the Exempt set below (the runner type is skipped entirely).
-        "Tamma.Activities.LlmCall.IInlineToolLoopRunner",
-        "Tamma.Activities.LlmCall.InlineToolLoopRunner",
         "SlackNet.ISlackApiClient",
         "Stripe.StripeClient",
         "Stripe.IStripeClient",
     };
 
-    // Design-§5.3 exemptions + the co-located Tamma.Api LLM core (tracked follow-up).
+    // Design-§5.3 exemptions (local process / local filesystem / inbound signal).
     private static readonly HashSet<string> Exempt = new(StringComparer.Ordinal)
     {
         "Tamma.Providers.ICLIAgentProvider",
@@ -54,7 +49,6 @@ public class ActivitiesGuardrailTests
         "Tamma.Activities.LlmCall.Tools.ShellExecuteTool",
         "Tamma.Activities.LlmCall.Tools.GitOperationsTool",
         "Tamma.Activities.AgentDispatch.WebhookSignalRegistry",
-        "Tamma.Activities.LlmCall.InlineToolLoopRunner",
     };
 
     private const BindingFlags AllMembers =

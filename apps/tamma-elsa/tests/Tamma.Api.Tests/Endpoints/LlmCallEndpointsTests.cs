@@ -454,7 +454,7 @@ public class LlmCallEndpointsTests
         // scope under ValidateScopes (a pre-existing host wiring, not a T4 gap).
         ApiTestFixture.Factory.Services.Should().NotBeNull();
         AssertRegistered<IManagedAgent>();
-        AssertRegistered<Tamma.Activities.LlmCall.IInlineToolLoopRunner>();
+        AssertRegistered<Tamma.Api.Services.Agents.IInlineToolLoopRunner>();
     }
 
     /// <summary>Assert a service is REGISTERED (a descriptor exists) without
