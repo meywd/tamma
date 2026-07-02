@@ -160,6 +160,26 @@ public class CostAnalyticsServiceTests
         res.Summary.ProjectedPlatformBilledUsd.Should().Be(100m / 15 * 31);
     }
 
+    [Test]
+    public async Task GetCost_StoredZeroLimitBudget_TreatedAsNoMeaningfulBudget_NoExceedNoEvent()
+    {
+        // A persisted BudgetConfig with LimitUsd = 0 (e.g. BudgetConfigDefaults.DefaultLimitUsd)
+        // plus real platform spend must be consistent: projectedToExceedBudget=false and null
+        // utilisation pcts (the "no meaningful budget" story), NOT the asymmetric
+        // projectedToExceed:true / budgetUsd:0 mix — and NO spurious budget-exceeded event.
+        var budget = new BudgetConfig { LimitUsd = 0m, AlertThreshold = 0.8, PeriodDays = 30 };
+        var ctx = await SeedAsync(July15, budget,
+            Daily(Utc(2026, 7, 5), CostBasis.Platform, cost: 300m, billed: 300m));
+
+        var res = await ctx.Svc.GetCostAsync(ctx.TenantId, JulyWindow(), null, "saas", CancellationToken.None);
+
+        res.Summary.ProjectedToExceedBudget.Should().BeFalse(
+            "a LimitUsd <= 0 budget is not a meaningful budget to exceed");
+        res.Summary.BudgetUtilizationPct.Should().BeNull();
+        res.Summary.ProjectedUtilizationPct.Should().BeNull();
+        ctx.Events.Verify(e => e.AppendAsync(It.IsAny<DomainEvent>()), Times.Never);
+    }
+
     // ───────────────────────── Grouping + reconciliation ─────────────────────────
 
     [Test]

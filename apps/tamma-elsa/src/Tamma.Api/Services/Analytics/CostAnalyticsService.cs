@@ -81,7 +81,11 @@ public sealed class CostAnalyticsService(
         double? alertThreshold = budget?.AlertThreshold;
         double? budgetUtil = hasBudget ? (double)(mtdPlatform / budget!.LimitUsd) : null;
         double? projectedUtil = hasBudget ? (double)(projected / budget!.LimitUsd) : null;
-        var projectedToExceed = budget is not null && projected > budget.LimitUsd;
+        // Gate on the SAME hasBudget predicate as the utilisation pcts: a stored
+        // BudgetConfig with LimitUsd <= 0 (e.g. BudgetConfigDefaults.DefaultLimitUsd = 0)
+        // is "no meaningful budget" — projectedToExceed must be false (and no
+        // BUDGET_PROJECTED_EXCEEDED event is emitted), not true-with-budgetUsd:0.
+        var projectedToExceed = hasBudget && projected > budget!.LimitUsd;
 
         var summary = new CostSummary(
             windowByok, mtdPlatform, projected,
