@@ -31,7 +31,41 @@ public sealed class CranlProvisioningWorkflow
 {
     public static readonly TimeSpan DatabasePollTimeout = TimeSpan.FromMinutes(5);
     public static readonly TimeSpan ApplicationPollTimeout = TimeSpan.FromMinutes(10);
+    /// <summary>Base readiness-poll interval (the first wait between probes).</summary>
     public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
+    /// <summary>Cap for the exponential poll backoff.</summary>
+    public static readonly TimeSpan PollIntervalMax = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Exponential backoff for db/app readiness polling: <see cref="PollInterval"/>
+    /// * 2^attempt, capped at <see cref="PollIntervalMax"/>. A Cranl db/app provision
+    /// takes 1–8 min, so a fixed 5s interval hammered the Cranl API ~60–100×/provision;
+    /// backoff (5s→10s→20s→…→60s) cuts that to a handful of calls with negligible added
+    /// detection latency once minutes deep. <paramref name="attempt"/> is 0-based
+    /// (attempt 0 = base interval). Deterministic (no jitter) — a single poll loop per
+    /// provision has no thundering-herd to spread.
+    /// </summary>
+    internal static TimeSpan PollBackoff(int attempt)
+    {
+        if (attempt <= 0) return PollInterval;
+        // Min(attempt, 20) guards Math.Pow against overflow; Min with the cap bounds it.
+        var delayMs = PollInterval.TotalMilliseconds * Math.Pow(2, Math.Min(attempt, 20));
+        return TimeSpan.FromMilliseconds(Math.Min(delayMs, PollIntervalMax.TotalMilliseconds));
+    }
+
+    /// <summary>
+    /// Delays for the backoff of <paramref name="attempt"/>, clamped to the time
+    /// remaining before <paramref name="deadline"/> so a late backoff never overshoots
+    /// the poll-timeout budget. No-op if the deadline has already passed.
+    /// </summary>
+    private static async Task DelayWithBackoffAsync(int attempt, DateTime deadline, CancellationToken ct)
+    {
+        var remaining = deadline - DateTime.UtcNow;
+        if (remaining <= TimeSpan.Zero) return;
+        var delay = PollBackoff(attempt);
+        if (delay > remaining) delay = remaining;
+        await Task.Delay(delay, ct);
+    }
 
     private readonly ControlPlaneDbContext _db;
     private readonly ICranlApiClient _cranl;
@@ -375,6 +409,7 @@ public sealed class CranlProvisioningWorkflow
     private async Task<string?> PollDatabaseUntilRunningAsync(string databaseId, CancellationToken ct)
     {
         var deadline = DateTime.UtcNow + DatabasePollTimeout;
+        var attempt = 0;
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
@@ -386,7 +421,7 @@ public sealed class CranlProvisioningWorkflow
             catch (CranlApiException ex) when (ex.IsRetryable)
             {
                 _logger.LogWarning(ex, "Transient error polling database {Id}; retrying", databaseId);
-                await Task.Delay(PollInterval, ct);
+                await DelayWithBackoffAsync(attempt++, deadline, ct);
                 continue;
             }
 
@@ -399,7 +434,7 @@ public sealed class CranlProvisioningWorkflow
                 _logger.LogError("Cranl database {Id} reached error state during provisioning", databaseId);
                 return null;
             }
-            await Task.Delay(PollInterval, ct);
+            await DelayWithBackoffAsync(attempt++, deadline, ct);
         }
         _logger.LogWarning("Database {Id} did not reach running within {Timeout}",
             databaseId, DatabasePollTimeout);
@@ -409,6 +444,7 @@ public sealed class CranlProvisioningWorkflow
     private async Task<bool> PollApplicationUntilRunningAsync(string appId, CancellationToken ct)
     {
         var deadline = DateTime.UtcNow + ApplicationPollTimeout;
+        var attempt = 0;
         while (DateTime.UtcNow < deadline)
         {
             ct.ThrowIfCancellationRequested();
@@ -420,7 +456,7 @@ public sealed class CranlProvisioningWorkflow
             catch (CranlApiException ex) when (ex.IsRetryable)
             {
                 _logger.LogWarning(ex, "Transient error polling application {Id}; retrying", appId);
-                await Task.Delay(PollInterval, ct);
+                await DelayWithBackoffAsync(attempt++, deadline, ct);
                 continue;
             }
 
@@ -434,7 +470,7 @@ public sealed class CranlProvisioningWorkflow
                 _logger.LogError("Cranl application {Id} reached error state during deploy", appId);
                 return false;
             }
-            await Task.Delay(PollInterval, ct);
+            await DelayWithBackoffAsync(attempt++, deadline, ct);
         }
         return false;
     }
