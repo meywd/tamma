@@ -674,7 +674,79 @@ public class ApiKeyAuthHandler(
             LogSanitizer.Clean(Request.Method),
             LogSanitizer.Clean(Request.Path.Value));
 
+        // Story 37-10 (AC8) — AUTH.APIKEY.USED, throttled to one heartbeat per
+        // key per time bucket so the hot per-request auth path does not flood the
+        // audit trail. Prefix only, never the key. Best-effort + never-throws.
+        await EmitApiKeyUsedHeartbeatAsync(apiKey, effectiveTenantId, scope);
+
         return AuthenticateResult.Success(ticket);
+    }
+
+    /// <summary>
+    /// Story 37-10 — emit the throttled <c>AUTH.APIKEY.USED</c> heartbeat. The
+    /// throttle (<see cref="Tamma.Api.Services.Audit.IApiKeyAuditHeartbeat"/>) and
+    /// the emitter are resolved from the request scope; a missing registration
+    /// simply skips the emission. Platform-edge event carrying the tenant when the
+    /// key is tenant-scoped. Never throws (audit is best-effort).
+    /// </summary>
+    private async Task EmitApiKeyUsedHeartbeatAsync(
+        ApiKey apiKey, Guid? tenantId, IServiceScope scope)
+    {
+        try
+        {
+            var heartbeat = scope.ServiceProvider
+                .GetService<Tamma.Api.Services.Audit.IApiKeyAuditHeartbeat>();
+            var emitter = scope.ServiceProvider
+                .GetService<Tamma.Api.Services.Audit.ISensitiveActionEmitter>();
+            if (heartbeat is null || emitter is null) return;
+
+            // Throttle: one event per key per bucket (heartbeat, not per-request).
+            if (!heartbeat.ShouldEmit(apiKey.Id))
+            {
+                Logger.LogDebug(
+                    "AUTH.APIKEY.USED suppressed by throttle keyId={KeyId}", apiKey.Id);
+                return;
+            }
+
+            var ip = Context.Connection.RemoteIpAddress?.ToString();
+            if (!string.IsNullOrEmpty(ip) && ip.Length > 64) ip = ip[..64];
+
+            // Safe display prefix: the banner + a few chars only, short enough that
+            // the credential redactor's secret-prefix regex (which needs 6+ trailing
+            // chars after tamma_sk_/sk_live_/...) does NOT scrub it away. Never the key.
+            var safePrefix = apiKey.KeyPrefix.Length > 12
+                ? apiKey.KeyPrefix[..12]
+                : apiKey.KeyPrefix;
+
+            var tags = new Dictionary<string, string?>
+            {
+                ["apiKeyId"] = apiKey.Id.ToString("D"),
+                ["apiKeyPrefix"] = safePrefix,
+                ["scope"] = apiKey.Scope,
+                ["source"] = "api-key",
+            };
+            if (!string.IsNullOrEmpty(ip)) tags["ip"] = ip;
+
+            var data = new Dictionary<string, object?>
+            {
+                ["apiKeyId"] = apiKey.Id.ToString("D"),
+                ["apiKeyPrefix"] = safePrefix,
+                ["scope"] = apiKey.Scope,
+                ["ip"] = ip,
+            };
+
+            await emitter.EmitAsync(
+                Tamma.Api.Services.Audit.SensitiveAction.ForPlatform(
+                    Tamma.Core.Audit.SensitiveActionCatalog.ApiKeyUsed,
+                    tenantId, actorUserId: null, tags, data));
+        }
+        catch (Exception ex)
+        {
+            // Best-effort — an audit emit failure must never fail authentication.
+            Logger.LogWarning(ex,
+                "AUTH.APIKEY.USED emission failed keyId={KeyId}; auth is unaffected.",
+                apiKey.Id);
+        }
     }
 
     /// <summary>
