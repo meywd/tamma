@@ -76,6 +76,33 @@ public class OutboxSlackSenderTests
         return await repo.EnqueueAsync(row);
     }
 
+    /// <summary>
+    /// Seed a row already in <c>sending</c> with an explicit <c>UpdatedAt</c> —
+    /// simulates a row claimed by a sender that then crashed before
+    /// MarkSent/MarkFailed. Bypasses <c>EnqueueAsync</c> (which always writes
+    /// <c>pending</c>).
+    /// </summary>
+    private async Task<SlackOutboxMessage> SeedSendingAsync(DateTime updatedAt)
+    {
+        using var cp = new TestControlPlaneDbContext(_cpOptions);
+        var row = new SlackOutboxMessage
+        {
+            Id = Guid.NewGuid(),
+            Channel = "eng-updates",
+            MessageType = "Info",
+            Body = ":information_source: orphaned-in-sending",
+            Status = "sending",
+            Attempts = 0,
+            MaxAttempts = 5,
+            NextAttemptAt = updatedAt,
+            CreatedAt = updatedAt,
+            UpdatedAt = updatedAt,
+        };
+        cp.SlackOutbox.Add(row);
+        await cp.SaveChangesAsync();
+        return row;
+    }
+
     private static SlackOutboxMessage ChannelRow(int maxAttempts = 5) => new()
     {
         Channel = "eng-updates",
@@ -275,6 +302,64 @@ public class OutboxSlackSenderTests
             chanRow.Attempts.Should().Be(1);
             (await verify.SlackOutbox.FindAsync(dm.Id))
                 .Should().BeNull("the delivered DM leg is purged, untouched by the channel retry");
+        }
+        finally
+        {
+            sender.Dispose();
+            sp.Dispose();
+        }
+    }
+
+    // ── Durability reaper: orphaned 'sending' rows ────────────────────────────
+
+    [Test]
+    public async Task ProcessOnceAsync_StuckSendingRowPastLease_ReclaimedAndDelivered()
+    {
+        var (sp, sender, slack) = BuildSender();
+        try
+        {
+            // A row a crashed sender left in 'sending' 10 minutes ago (past the
+            // default 5-minute lease). Without the reaper it would be orphaned
+            // forever — ClaimNextPendingAsync only selects 'pending'.
+            var enq = await SeedSendingAsync(DateTime.UtcNow.AddMinutes(-10));
+
+            // Single poll cycle: reclaim → pending → claim → deliver → purge.
+            var processed = await sender.ProcessOnceAsync(CancellationToken.None);
+
+            processed.Should().BeTrue("the reclaimed row is claimed and delivered in the same cycle");
+            slack.ChannelCalls.Should().ContainSingle("the reclaimed row is re-sent");
+
+            using var verify = new TestControlPlaneDbContext(_cpOptions);
+            (await verify.SlackOutbox.FindAsync(enq.Id))
+                .Should().BeNull("the re-delivered row is purged, exactly like a normal send");
+        }
+        finally
+        {
+            sender.Dispose();
+            sp.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task ProcessOnceAsync_FreshSendingRowWithinLease_NotReclaimed()
+    {
+        var (sp, sender, slack) = BuildSender();
+        try
+        {
+            // A row another sender just claimed (UpdatedAt = now). It is being
+            // delivered right now by that sender — the reaper must NOT steal it.
+            var enq = await SeedSendingAsync(DateTime.UtcNow);
+
+            var processed = await sender.ProcessOnceAsync(CancellationToken.None);
+
+            processed.Should().BeFalse("a fresh 'sending' row is neither reclaimed nor claimable");
+            slack.ChannelCalls.Should().BeEmpty("nothing is (re)delivered");
+
+            using var verify = new TestControlPlaneDbContext(_cpOptions);
+            var row = await verify.SlackOutbox.FindAsync(enq.Id);
+            row.Should().NotBeNull();
+            row!.Status.Should().Be("sending", "a within-lease claim is left untouched");
+            row.Attempts.Should().Be(0, "reclaim never bumps the attempt counter");
         }
         finally
         {

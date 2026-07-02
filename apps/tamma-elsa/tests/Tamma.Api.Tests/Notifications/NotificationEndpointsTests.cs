@@ -295,6 +295,10 @@ public class NotificationEndpointsTests
         public Task<SlackOutboxMessage?> ClaimNextPendingAsync(DateTime now, CancellationToken ct = default)
             => Task.FromResult<SlackOutboxMessage?>(null);
 
+        // The hosted sender is gated off in tests; no rows to reap.
+        public Task<int> ReclaimStuckSendingAsync(DateTime now, TimeSpan leaseTimeout, CancellationToken ct = default)
+            => Task.FromResult(0);
+
         public Task MarkSentAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
 
         public Task<SlackOutboxMessage?> MarkFailedAsync(Guid id, string error, TimeSpan? backoff, CancellationToken ct = default)

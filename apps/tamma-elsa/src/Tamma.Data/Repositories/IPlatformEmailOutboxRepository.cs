@@ -35,6 +35,24 @@ public interface IPlatformEmailOutboxRepository
         DateTime now, CancellationToken ct = default);
 
     /// <summary>
+    /// Durability reaper — reset rows orphaned in <c>sending</c> back to
+    /// <c>pending</c> so the sender re-claims and re-delivers them. Claiming a
+    /// row flips it to <c>sending</c> (stamping <c>UpdatedAt</c>); if the
+    /// process crashes before <see cref="MarkSentAsync"/> /
+    /// <see cref="MarkFailedAsync"/> the row would otherwise be orphaned forever
+    /// (never re-selected by <see cref="ClaimNextPendingAsync"/>), defeating
+    /// at-least-once delivery for verification / password-reset / welcome mail.
+    /// A row qualifies when its <c>Status='sending'</c> and its <c>UpdatedAt</c>
+    /// (stamped at claim time) is older than <paramref name="leaseTimeout"/>
+    /// before <paramref name="now"/>. <see cref="PlatformEmailOutboxMessage.Attempts"/>
+    /// is deliberately NOT incremented — a stuck row was never
+    /// attempted-to-completion, so it keeps its full retry budget. Returns the
+    /// number of rows reclaimed.
+    /// </summary>
+    Task<int> ReclaimStuckSendingAsync(
+        DateTime now, TimeSpan leaseTimeout, CancellationToken ct = default);
+
+    /// <summary>
     /// Mark a claimed message as successfully delivered. Sets
     /// <c>Status=sent</c> + <c>SentAt=UtcNow</c>.
     /// </summary>
