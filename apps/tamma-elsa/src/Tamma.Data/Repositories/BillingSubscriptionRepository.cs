@@ -12,7 +12,15 @@ namespace Tamma.Data.Repositories;
 /// </summary>
 public sealed class BillingSubscriptionRepository : IBillingSubscriptionRepository
 {
-    private static readonly string[] TerminalStatuses = { "canceled", "incomplete_expired" };
+    // Declared as IReadOnlyList<string> (NOT string[]) on purpose: under C# 13's
+    // first-class-span overload resolution, `array.Contains(x)` binds to
+    // MemoryExtensions.Contains(ReadOnlySpan<T>, T) via the implicit array→span
+    // conversion. EF Core's LINQ interpreter then tries to use ReadOnlySpan<string>
+    // as a generic argument and throws TypeLoadException (a ref struct can't be a
+    // generic type arg). The interface receiver has no array→span conversion, so the
+    // call binds to Enumerable.Contains, which EF translates cleanly to SQL `IN`.
+    private static readonly IReadOnlyList<string> TerminalStatuses =
+        new[] { "canceled", "incomplete_expired" };
 
     private readonly ControlPlaneDbContext _db;
 
