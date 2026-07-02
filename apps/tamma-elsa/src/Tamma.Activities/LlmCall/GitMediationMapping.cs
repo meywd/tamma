@@ -60,4 +60,21 @@ public static class GitMediationMapping
                 SkippedTests = run.SkippedTests,
                 CoveragePercentage = run.CoveragePercentage,
             };
+
+    /// <summary>Story 38 (Phase 2, Batch B) — project the wire build-status summary
+    /// into a composite <see cref="BuildStatus"/>. The CI-mediation build-status DTO
+    /// carries no <c>Error</c> field (a failed build surfaces via <see cref="BuildStatus.Status"/>);
+    /// <see cref="BuildStatus.Error"/> is therefore left null — a genuine mediation
+    /// failure is handled upstream by the caller's <c>!Success</c> throw, not here. A
+    /// null summary projects to an empty (default) status.</summary>
+    public static BuildStatus ToBuildStatus(CiBuildStatusDto? status)
+        => status is null
+            ? new BuildStatus()
+            : new BuildStatus
+            {
+                Status = status.Status,
+                BuildUrl = status.BuildUrl,
+                StartedAt = status.StartedAt,
+                FinishedAt = status.FinishedAt,
+            };
 }

@@ -101,11 +101,67 @@ public class IntegrationServiceCutoverTests
         run.FailedTestDetails.Should().BeEmpty();
     }
 
+    [Test]
+    public void ToBuildStatus_ProjectsFields_AndLeavesErrorNull()
+    {
+        var started = new DateTime(2026, 7, 1, 10, 0, 0, DateTimeKind.Utc);
+        var finished = new DateTime(2026, 7, 1, 10, 5, 0, DateTimeKind.Utc);
+        var status = GitMediationMapping.ToBuildStatus(new CiBuildStatusDto
+        {
+            Status = "Success", BuildUrl = "https://ci/run/1", StartedAt = started, FinishedAt = finished,
+        });
+
+        status.Status.Should().Be("Success");
+        status.BuildUrl.Should().Be("https://ci/run/1");
+        status.StartedAt.Should().Be(started);
+        status.FinishedAt.Should().Be(finished);
+        // The CI-mediation build-status DTO carries no Error field — Error stays null.
+        status.Error.Should().BeNull();
+    }
+
+    [Test]
+    public void ToBuildStatus_Null_YieldsEmptyStatus()
+    {
+        var status = GitMediationMapping.ToBuildStatus(null);
+        status.Status.Should().BeEmpty();
+        status.Error.Should().BeNull();
+    }
+
     // ===================================================================
     // Cutover proof — zero IIntegrationService injections in the eight
     // ===================================================================
 
     private static readonly Type[] CutoverActivityTypes =
+    {
+        // Batch A (8)
+        typeof(Tamma.Activities.Blocker.CollectGitActivityActivity),
+        typeof(Tamma.Activities.Blocker.CollectInactivityActivity),
+        typeof(Tamma.Activities.AI.ContextGatheringActivity),
+        typeof(Tamma.Activities.Integration.GitHubActivity),
+        typeof(Tamma.Activities.Review.CreatePRActivity),
+        typeof(Tamma.Activities.Context.FetchFileContentsActivity),
+        typeof(Tamma.Activities.Context.FetchRecentCommitsActivity),
+        typeof(Tamma.Activities.Mentorship.CodeReviewActivity),
+        // Batch B (9) — 7 mediated + 2 dead-injection removals
+        typeof(Tamma.Activities.Blocker.CollectCIStatusActivity),
+        typeof(Tamma.Activities.Context.FetchTestResultsActivity),
+        typeof(Tamma.Activities.Debug.CollectGitHistoryActivity),
+        typeof(Tamma.Activities.Debug.CollectTestResultsActivity),
+        typeof(Tamma.Activities.Debug.CollectRelevantCodeActivity),
+        typeof(Tamma.Activities.Mentorship.QualityGateCheckActivity),
+        typeof(Tamma.Activities.Mentorship.MonitorImplementationActivity),
+        typeof(Tamma.Activities.Context.FetchSimilarPatternsActivity),
+        typeof(Tamma.Activities.Blocker.CollectCommunicationActivity),
+    };
+
+    /// <summary>
+    /// The subset that actively mediates a git/CI read through the thin client — these
+    /// must hold a <see cref="TammaApiClient"/> field. Excludes
+    /// <c>FetchSimilarPatternsActivity</c> and <c>CollectCommunicationActivity</c>, whose
+    /// composite injection was DEAD (no call site) and was removed outright without
+    /// adding a mediation client.
+    /// </summary>
+    private static readonly Type[] MediatedActivityTypes =
     {
         typeof(Tamma.Activities.Blocker.CollectGitActivityActivity),
         typeof(Tamma.Activities.Blocker.CollectInactivityActivity),
@@ -115,6 +171,13 @@ public class IntegrationServiceCutoverTests
         typeof(Tamma.Activities.Context.FetchFileContentsActivity),
         typeof(Tamma.Activities.Context.FetchRecentCommitsActivity),
         typeof(Tamma.Activities.Mentorship.CodeReviewActivity),
+        typeof(Tamma.Activities.Blocker.CollectCIStatusActivity),
+        typeof(Tamma.Activities.Context.FetchTestResultsActivity),
+        typeof(Tamma.Activities.Debug.CollectGitHistoryActivity),
+        typeof(Tamma.Activities.Debug.CollectTestResultsActivity),
+        typeof(Tamma.Activities.Debug.CollectRelevantCodeActivity),
+        typeof(Tamma.Activities.Mentorship.QualityGateCheckActivity),
+        typeof(Tamma.Activities.Mentorship.MonitorImplementationActivity),
     };
 
     [Test]
@@ -137,7 +200,7 @@ public class IntegrationServiceCutoverTests
     }
 
     [Test]
-    [TestCaseSource(nameof(CutoverActivityTypes))]
+    [TestCaseSource(nameof(MediatedActivityTypes))]
     public void CutoverActivity_InjectsTammaApiClient(Type activityType)
     {
         activityType

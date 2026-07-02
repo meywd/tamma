@@ -4,6 +4,9 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using Tamma.Activities.ADL;
+using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 using Tamma.Core.Enums;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Repositories;
@@ -24,7 +27,7 @@ public class MonitorImplementationActivity : CodeActivity<ProgressOutput>
 {
     private readonly ILogger<MonitorImplementationActivity>? _logger;
     private readonly IMentorshipSessionRepository? _repository;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
 
     /// <summary>Mentorship session ID</summary>
     [Input(Description = "Mentorship session ID")]
@@ -46,17 +49,26 @@ public class MonitorImplementationActivity : CodeActivity<ProgressOutput>
     [Input(Description = "Check interval in minutes", DefaultValue = 5)]
     public Input<int> CheckInterval { get; set; } = new(5);
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public MonitorImplementationActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no git token: recent commits, file changes, build status, and the CI test
+    /// summary are read through the git/CI mediation endpoints via
+    /// <see cref="TammaApiClient"/>, where the per-tenant token lives.
+    /// </summary>
     public MonitorImplementationActivity(
         ILogger<MonitorImplementationActivity> logger,
         IMentorshipSessionRepository repository,
-        IIntegrationService integrationService)
+        TammaApiClient apiClient)
     {
         _logger = logger;
         _repository = repository;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
     }
 
     /// <summary>
@@ -69,6 +81,10 @@ public class MonitorImplementationActivity : CodeActivity<ProgressOutput>
         var juniorId = JuniorId.Get(context);
         var monitoringDuration = MonitoringDuration.Get(context);
         var checkInterval = CheckInterval.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var ct = context.CancellationToken;
 
         _logger?.LogInformation(
             "Starting implementation monitoring for junior {JuniorId} on story {StoryId}",
@@ -94,7 +110,7 @@ public class MonitorImplementationActivity : CodeActivity<ProgressOutput>
             }
 
             // Collect progress data from integrations
-            var progressData = await CollectProgressData(story.RepositoryUrl, juniorId, storyId);
+            var progressData = await CollectProgressData(apiClient, story.RepositoryUrl, juniorId, storyId, correlationId, tenantId, ct);
 
             // Analyze progress
             var analysis = AnalyzeProgress(progressData);
@@ -127,7 +143,9 @@ public class MonitorImplementationActivity : CodeActivity<ProgressOutput>
         }
     }
 
-    private async Task<ImplementationProgress> CollectProgressData(string? repositoryUrl, string juniorId, string storyId)
+    private async Task<ImplementationProgress> CollectProgressData(
+        TammaApiClient apiClient, string? repositoryUrl, string juniorId, string storyId,
+        string correlationId, string? tenantId, CancellationToken ct)
     {
         var progress = new ImplementationProgress
         {
@@ -140,11 +158,15 @@ public class MonitorImplementationActivity : CodeActivity<ProgressOutput>
         {
             try
             {
+                var branch = $"feature/{storyId}";
+
                 // Get recent commits
-                var commits = await _integrationService!.GetGitHubCommitsAsync(
-                    repositoryUrl,
-                    $"feature/{storyId}",
-                    DateTime.UtcNow.AddHours(-1));
+                var commitsResponse = await apiClient.GetCommitsAsync(
+                    repositoryUrl, branch, DateTime.UtcNow.AddHours(-1), correlationId, tenantId, ct);
+                if (commitsResponse is null || !commitsResponse.Success)
+                    throw new InvalidOperationException(
+                        commitsResponse?.FailureReason ?? "git mediation endpoint unavailable");
+                var commits = GitMediationMapping.ToCommits(commitsResponse.Commits);
 
                 progress.Commits = commits;
                 progress.LastActivity = commits.Any()
@@ -152,22 +174,30 @@ public class MonitorImplementationActivity : CodeActivity<ProgressOutput>
                     : DateTime.UtcNow.AddHours(-2); // Assume stale if no commits
 
                 // Get file changes
-                var fileChanges = await _integrationService.GetGitHubFileChangesAsync(
-                    repositoryUrl,
-                    $"feature/{storyId}");
-                progress.FileChanges = fileChanges;
+                var fileChangesResponse = await apiClient.GetFileChangesAsync(
+                    repositoryUrl, branch, correlationId, tenantId, ct);
+                if (fileChangesResponse is null || !fileChangesResponse.Success)
+                    throw new InvalidOperationException(
+                        fileChangesResponse?.FailureReason ?? "git mediation endpoint unavailable");
+                progress.FileChanges = GitMediationMapping.ToFileChanges(fileChangesResponse.FileChanges);
 
                 // Get build status
-                var buildStatus = await _integrationService.GetBuildStatusAsync(
-                    repositoryUrl,
-                    $"feature/{storyId}");
-                progress.BuildStatus = buildStatus.Status;
+                var buildResponse = await apiClient.GetBuildStatusAsync(
+                    repositoryUrl, branch, correlationId, tenantId, ct);
+                if (buildResponse is null || !buildResponse.Success)
+                    throw new InvalidOperationException(
+                        buildResponse?.FailureReason ?? "ci mediation endpoint unavailable");
+                progress.BuildStatus = GitMediationMapping.ToBuildStatus(buildResponse.BuildStatus).Status;
 
                 // Get test results
-                var testResults = await _integrationService.TriggerTestsAsync(
+                var testResponse = await apiClient.TriggerTestsAsync(
                     repositoryUrl,
-                    $"feature/{storyId}");
-                progress.TestResults = testResults;
+                    new CiTriggerTestsRequest { Branch = branch, CorrelationId = correlationId },
+                    tenantId, ct);
+                if (testResponse is null || !testResponse.Success)
+                    throw new InvalidOperationException(
+                        testResponse?.FailureReason ?? "ci mediation endpoint unavailable");
+                progress.TestResults = GitMediationMapping.ToTestRun(testResponse.TestRun);
             }
             catch (Exception ex)
             {

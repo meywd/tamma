@@ -5,7 +5,6 @@ using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
 using Tamma.Activities.Blocker.Models;
-using Tamma.Core.Interfaces;
 
 namespace Tamma.Activities.Blocker;
 
@@ -23,7 +22,6 @@ namespace Tamma.Activities.Blocker;
 public class CollectCommunicationActivity : CodeActivity<CommunicationSignal>
 {
     private readonly ILogger<CollectCommunicationActivity>? _logger;
-    private readonly IIntegrationService? _integrationService;
 
     /// <summary>Junior developer's Slack ID (if available)</summary>
     [Input(Description = "Junior developer's Slack ID")]
@@ -36,12 +34,17 @@ public class CollectCommunicationActivity : CodeActivity<CommunicationSignal>
     [JsonConstructor]
     public CollectCommunicationActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2) — this best-effort signal collector never called the
+    /// credential-holding <c>IIntegrationService</c> (it cannot query Slack history
+    /// without extra API scopes and only reports availability), so that dead injection
+    /// was removed in the Batch B cutover. It sends no Slack message, so no mediation
+    /// client is needed.
+    /// </summary>
     public CollectCommunicationActivity(
-        ILogger<CollectCommunicationActivity> logger,
-        IIntegrationService integrationService)
+        ILogger<CollectCommunicationActivity> logger)
     {
         _logger = logger;
-        _integrationService = integrationService;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)

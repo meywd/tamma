@@ -4,8 +4,10 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using Tamma.Activities.ADL;
 using Tamma.Activities.Debug.Models;
-using Tamma.Core.Interfaces;
+using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 
 namespace Tamma.Activities.Debug;
 
@@ -22,7 +24,7 @@ namespace Tamma.Activities.Debug;
 public class CollectTestResultsActivity : CodeActivity<TestResultsContext>
 {
     private readonly ILogger<CollectTestResultsActivity>? _logger;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
 
     /// <summary>Repository URL</summary>
     [Input(Description = "Repository URL")]
@@ -40,15 +42,23 @@ public class CollectTestResultsActivity : CodeActivity<TestResultsContext>
     [Input(Description = "Error output that may contain test results")]
     public Input<string> ErrorOutput { get; set; } = default!;
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public CollectTestResultsActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no git token: the CI test summary is read through the CI mediation endpoint
+    /// (<c>POST /api/v1/ci/{owner}/{repo}/test-runs</c>) via <see cref="TammaApiClient"/>.
+    /// </summary>
     public CollectTestResultsActivity(
         ILogger<CollectTestResultsActivity> logger,
-        IIntegrationService integrationService)
+        TammaApiClient apiClient)
     {
         _logger = logger;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
     }
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -57,6 +67,10 @@ public class CollectTestResultsActivity : CodeActivity<TestResultsContext>
         var branchName = BranchName.Get(context);
         var mode = DebugContextMode.Get(context);
         var errorOutput = ErrorOutput.Get(context) ?? string.Empty;
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var ct = context.CancellationToken;
 
         _logger?.LogInformation(
             "Collecting test results for {Repository}:{Branch} in mode {Mode}",
@@ -66,10 +80,16 @@ public class CollectTestResultsActivity : CodeActivity<TestResultsContext>
         {
             var result = new TestResultsContext();
 
-            if (_integrationService != null && !string.IsNullOrEmpty(repositoryUrl))
+            if (!string.IsNullOrEmpty(repositoryUrl))
             {
-                var testRun = await _integrationService.TriggerTestsAsync(
-                    repositoryUrl, branchName);
+                var testResponse = await apiClient.TriggerTestsAsync(
+                    repositoryUrl,
+                    new CiTriggerTestsRequest { Branch = branchName, CorrelationId = correlationId },
+                    tenantId, ct);
+                if (testResponse is null || !testResponse.Success)
+                    throw new InvalidOperationException(
+                        testResponse?.FailureReason ?? "ci mediation endpoint unavailable");
+                var testRun = GitMediationMapping.ToTestRun(testResponse.TestRun);
 
                 result.TotalTests = testRun.TotalTests;
                 result.PassingTests = testRun.PassedTests;

@@ -8,7 +8,6 @@ using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.Context.Models;
-using Tamma.Core.Interfaces;
 
 namespace Tamma.Activities.Context;
 
@@ -26,7 +25,6 @@ namespace Tamma.Activities.Context;
 public class FetchSimilarPatternsActivity : CodeActivity<SimilarPatternsResult>
 {
     private readonly ILogger<FetchSimilarPatternsActivity>? _logger;
-    private readonly IIntegrationService? _integrationService;
     private readonly IHttpClientFactory? _httpClientFactory;
     private readonly IConfiguration? _configuration;
 
@@ -51,14 +49,18 @@ public class FetchSimilarPatternsActivity : CodeActivity<SimilarPatternsResult>
     {
     }
 
+    /// <summary>
+    /// Story 38 (Phase 2) — this activity discovers patterns purely by scanning the
+    /// GitHub tree via the injected <see cref="IHttpClientFactory"/>; it never called
+    /// the credential-holding <c>IIntegrationService</c>, so that dead injection was
+    /// removed in the Batch B cutover (no mediation client is needed here).
+    /// </summary>
     public FetchSimilarPatternsActivity(
         ILogger<FetchSimilarPatternsActivity> logger,
-        IIntegrationService integrationService,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration)
     {
         _logger = logger;
-        _integrationService = integrationService;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
     }

@@ -5,8 +5,10 @@ using Elsa.Workflows.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json.Serialization;
+using Tamma.Activities.ADL;
 using Tamma.Activities.Blocker.Models;
-using Tamma.Core.Interfaces;
+using Tamma.Activities.LlmCall;
+using Tamma.Activities.LlmCall.Models;
 
 namespace Tamma.Activities.Blocker;
 
@@ -24,7 +26,7 @@ namespace Tamma.Activities.Blocker;
 public class CollectCIStatusActivity : CodeActivity<CIStatusSignal>
 {
     private readonly ILogger<CollectCIStatusActivity>? _logger;
-    private readonly IIntegrationService? _integrationService;
+    private readonly TammaApiClient? _apiClient;
     private readonly IConfiguration? _configuration;
 
     /// <summary>Repository URL or owner/repo</summary>
@@ -35,16 +37,26 @@ public class CollectCIStatusActivity : CodeActivity<CIStatusSignal>
     [Input(Description = "Branch name to check")]
     public Input<string> BranchName { get; set; } = default!;
 
+    [Input(Description = "Tenant id (GUID string) for BYOK token resolution; empty = single-user/platform")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public CollectCIStatusActivity() { }
 
+    /// <summary>
+    /// Story 38 (Phase 2) — thin-client DI constructor. No <c>IIntegrationService</c>
+    /// and no git token: build status + the CI test summary are read through the CI
+    /// mediation endpoints (<c>GET /api/v1/ci/{owner}/{repo}/build-status</c> and
+    /// <c>POST .../test-runs</c>) via <see cref="TammaApiClient"/>, where the per-tenant
+    /// token lives.
+    /// </summary>
     public CollectCIStatusActivity(
         ILogger<CollectCIStatusActivity> logger,
-        IIntegrationService integrationService,
+        TammaApiClient apiClient,
         IConfiguration configuration)
     {
         _logger = logger;
-        _integrationService = integrationService;
+        _apiClient = apiClient;
         _configuration = configuration;
     }
 
@@ -52,6 +64,10 @@ public class CollectCIStatusActivity : CodeActivity<CIStatusSignal>
     {
         var repository = Repository.Get(context);
         var branchName = BranchName.Get(context);
+        var tenantId = CreateBranchActivity.NormalizeTenant(TenantId.Get(context));
+        var correlationId = context.WorkflowExecutionContext.Id;
+        var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
+        var ct = context.CancellationToken;
 
         _logger?.LogInformation(
             "Collecting CI status signals for {Repository}/{Branch}",
@@ -65,11 +81,23 @@ public class CollectCIStatusActivity : CodeActivity<CIStatusSignal>
             // CI / test trigger cannot block the parallel signal join.
             var completedInTime = await BlockerSignalTimeout.RunAsync(_configuration, async () =>
             {
-                var buildStatus = await _integrationService!.GetBuildStatusAsync(repository, branchName);
+                var buildStatusResponse = await apiClient.GetBuildStatusAsync(
+                    repository, branchName, correlationId, tenantId, ct);
+                if (buildStatusResponse is null || !buildStatusResponse.Success)
+                    throw new InvalidOperationException(
+                        buildStatusResponse?.FailureReason ?? "ci mediation endpoint unavailable");
+                var buildStatus = GitMediationMapping.ToBuildStatus(buildStatusResponse.BuildStatus);
                 signal.BuildStatus = buildStatus.Status;
                 signal.BuildError = buildStatus.Error;
 
-                var testResults = await _integrationService.TriggerTestsAsync(repository, branchName);
+                var testResponse = await apiClient.TriggerTestsAsync(
+                    repository,
+                    new CiTriggerTestsRequest { Branch = branchName, CorrelationId = correlationId },
+                    tenantId, ct);
+                if (testResponse is null || !testResponse.Success)
+                    throw new InvalidOperationException(
+                        testResponse?.FailureReason ?? "ci mediation endpoint unavailable");
+                var testResults = GitMediationMapping.ToTestRun(testResponse.TestRun);
                 signal.TotalTests = testResults.TotalTests;
                 signal.PassedTests = testResults.PassedTests;
                 signal.FailedTests = testResults.FailedTests;
