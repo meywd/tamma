@@ -348,6 +348,10 @@ public sealed record GitCallResponse
 
     [JsonPropertyName("comments")] public IReadOnlyList<GitCommentDto>? Comments { get; init; }
 
+    // Story 38 (Phase 1) — GitHub extra-op reads.
+    [JsonPropertyName("commits")] public IReadOnlyList<GitCommitSummaryDto>? Commits { get; init; }
+    [JsonPropertyName("fileChanges")] public IReadOnlyList<GitFileChangeDto>? FileChanges { get; init; }
+
     [JsonPropertyName("failureCode")] public string? FailureCode { get; init; }
     [JsonPropertyName("failureReason")] public string? FailureReason { get; init; }
     [JsonPropertyName("platformStatusCode")] public int? PlatformStatusCode { get; init; }
@@ -363,6 +367,27 @@ public sealed record GitCommentDto
     [JsonPropertyName("line")] public int? Line { get; init; }
     [JsonPropertyName("author")] public string Author { get; init; } = string.Empty;
     [JsonPropertyName("createdAt")] public DateTime CreatedAt { get; init; }
+}
+
+/// <summary>A key-free commit. Mirrors <c>Tamma.Api.Services.Git.GitCommitDto</c> (Story 38 Phase 1).</summary>
+public sealed record GitCommitSummaryDto
+{
+    [JsonPropertyName("sha")] public string Sha { get; init; } = string.Empty;
+    [JsonPropertyName("message")] public string Message { get; init; } = string.Empty;
+    [JsonPropertyName("author")] public string Author { get; init; } = string.Empty;
+    [JsonPropertyName("timestamp")] public DateTime Timestamp { get; init; }
+    [JsonPropertyName("additions")] public int Additions { get; init; }
+    [JsonPropertyName("deletions")] public int Deletions { get; init; }
+    [JsonPropertyName("files")] public IReadOnlyList<string> Files { get; init; } = Array.Empty<string>();
+}
+
+/// <summary>A key-free file change. Mirrors <c>Tamma.Api.Services.Git.GitFileChangeDto</c> (Story 38 Phase 1).</summary>
+public sealed record GitFileChangeDto
+{
+    [JsonPropertyName("filePath")] public string FilePath { get; init; } = string.Empty;
+    [JsonPropertyName("changeType")] public string ChangeType { get; init; } = string.Empty;
+    [JsonPropertyName("additions")] public int Additions { get; init; }
+    [JsonPropertyName("deletions")] public int Deletions { get; init; }
 }
 
 // ============================================================
@@ -466,6 +491,117 @@ public sealed record AgentInstallationApiResponse
 {
     [JsonPropertyName("success")] public bool Success { get; init; }
     [JsonPropertyName("installationId")] public long? InstallationId { get; init; }
+    [JsonPropertyName("failureCode")] public string? FailureCode { get; init; }
+    [JsonPropertyName("failureReason")] public string? FailureReason { get; init; }
+    [JsonPropertyName("correlationId")] public string? CorrelationId { get; init; }
+}
+
+// ============================================================
+// Story 38 (Phase 1): CI / JIRA / email mediation wire models
+//
+// These mirror the JSON shapes of Tamma.Api's Services/Ci, Services/Jira, and
+// Services/EmailMediation request + result records for the engine→API endpoints
+// POST/GET /api/v1/ci/... , GET/PATCH /api/v1/jira/tickets/... , and
+// POST /api/v1/notifications/email . They live in Tamma.Activities (the reference
+// graph runs Tamma.Api → Tamma.Activities) and carry [JsonPropertyName] camelCase to
+// match the API's CamelCase serialization. NONE carry a credential — the API resolves
+// it server-side; only credentialSource (the LABEL) ever comes back (CI only).
+// ============================================================
+
+/// <summary>Engine→API request for <c>POST /api/v1/ci/{owner}/{repo}/test-runs</c>.</summary>
+public sealed record CiTriggerTestsRequest
+{
+    [JsonPropertyName("branch")] public string Branch { get; init; } = string.Empty;
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
+/// <summary>Response for the CI-mediation endpoints. Mirrors
+/// <c>Tamma.Api.Services.Ci.CiMediationResult</c>. KEY-FREE.</summary>
+public sealed record CiCallResponse
+{
+    [JsonPropertyName("success")] public bool Success { get; init; }
+    [JsonPropertyName("credentialSource")] public string? CredentialSource { get; init; }
+    [JsonPropertyName("outcome")] public string? Outcome { get; init; }
+    [JsonPropertyName("testRun")] public CiTestRunDto? TestRun { get; init; }
+    [JsonPropertyName("buildStatus")] public CiBuildStatusDto? BuildStatus { get; init; }
+    [JsonPropertyName("failureCode")] public string? FailureCode { get; init; }
+    [JsonPropertyName("failureReason")] public string? FailureReason { get; init; }
+    [JsonPropertyName("platformStatusCode")] public int? PlatformStatusCode { get; init; }
+    [JsonPropertyName("correlationId")] public string? CorrelationId { get; init; }
+}
+
+/// <summary>A key-free test-run projection. Mirrors <c>Tamma.Api.Services.Ci.CiTestRunDto</c>.</summary>
+public sealed record CiTestRunDto
+{
+    [JsonPropertyName("runId")] public string RunId { get; init; } = string.Empty;
+    [JsonPropertyName("status")] public string Status { get; init; } = string.Empty;
+    [JsonPropertyName("totalTests")] public int TotalTests { get; init; }
+    [JsonPropertyName("passedTests")] public int PassedTests { get; init; }
+    [JsonPropertyName("failedTests")] public int FailedTests { get; init; }
+    [JsonPropertyName("skippedTests")] public int SkippedTests { get; init; }
+    [JsonPropertyName("coveragePercentage")] public double? CoveragePercentage { get; init; }
+}
+
+/// <summary>A key-free build-status projection. Mirrors <c>Tamma.Api.Services.Ci.CiBuildStatusDto</c>.</summary>
+public sealed record CiBuildStatusDto
+{
+    [JsonPropertyName("status")] public string Status { get; init; } = string.Empty;
+    [JsonPropertyName("buildUrl")] public string? BuildUrl { get; init; }
+    [JsonPropertyName("startedAt")] public DateTime? StartedAt { get; init; }
+    [JsonPropertyName("finishedAt")] public DateTime? FinishedAt { get; init; }
+}
+
+/// <summary>Engine→API request for <c>PATCH /api/v1/jira/tickets/{ticketId}</c>.</summary>
+public sealed record JiraUpdateTicketRequest
+{
+    [JsonPropertyName("status")] public string? Status { get; init; }
+    [JsonPropertyName("comment")] public string? Comment { get; init; }
+    [JsonPropertyName("customFields")] public Dictionary<string, object>? CustomFields { get; init; }
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
+/// <summary>Response for the JIRA-mediation endpoints. Mirrors
+/// <c>Tamma.Api.Services.Jira.JiraMediationResult</c>. KEY-FREE.</summary>
+public sealed record JiraCallResponse
+{
+    [JsonPropertyName("success")] public bool Success { get; init; }
+    [JsonPropertyName("outcome")] public string? Outcome { get; init; }
+    [JsonPropertyName("ticket")] public JiraTicketDto? Ticket { get; init; }
+    [JsonPropertyName("ticketKey")] public string? TicketKey { get; init; }
+    [JsonPropertyName("failureCode")] public string? FailureCode { get; init; }
+    [JsonPropertyName("failureReason")] public string? FailureReason { get; init; }
+    [JsonPropertyName("correlationId")] public string? CorrelationId { get; init; }
+}
+
+/// <summary>A key-free JIRA ticket projection. Mirrors <c>Tamma.Api.Services.Jira.JiraTicketDto</c>.</summary>
+public sealed record JiraTicketDto
+{
+    [JsonPropertyName("id")] public string Id { get; init; } = string.Empty;
+    [JsonPropertyName("key")] public string Key { get; init; } = string.Empty;
+    [JsonPropertyName("summary")] public string Summary { get; init; } = string.Empty;
+    [JsonPropertyName("description")] public string? Description { get; init; }
+    [JsonPropertyName("status")] public string Status { get; init; } = string.Empty;
+    [JsonPropertyName("assignee")] public string? Assignee { get; init; }
+    [JsonPropertyName("priority")] public string? Priority { get; init; }
+    [JsonPropertyName("labels")] public IReadOnlyList<string> Labels { get; init; } = Array.Empty<string>();
+}
+
+/// <summary>Engine→API request for <c>POST /api/v1/notifications/email</c>.</summary>
+public sealed record EmailSendRequest
+{
+    [JsonPropertyName("to")] public string To { get; init; } = string.Empty;
+    [JsonPropertyName("subject")] public string Subject { get; init; } = string.Empty;
+    [JsonPropertyName("body")] public string Body { get; init; } = string.Empty;
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
+/// <summary>Response for the email-mediation endpoint. Mirrors
+/// <c>Tamma.Api.Services.EmailMediation.EmailMediationResult</c>. KEY-FREE.</summary>
+public sealed record EmailCallResponse
+{
+    [JsonPropertyName("success")] public bool Success { get; init; }
+    [JsonPropertyName("outcome")] public string? Outcome { get; init; }
+    [JsonPropertyName("txnId")] public Guid? TxnId { get; init; }
     [JsonPropertyName("failureCode")] public string? FailureCode { get; init; }
     [JsonPropertyName("failureReason")] public string? FailureReason { get; init; }
     [JsonPropertyName("correlationId")] public string? CorrelationId { get; init; }

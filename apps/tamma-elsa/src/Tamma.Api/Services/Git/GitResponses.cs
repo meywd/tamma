@@ -47,6 +47,10 @@ public sealed record GitMediationResult
     // ── comments ──
     public IReadOnlyList<PrCommentDto>? Comments { get; init; }
 
+    // ── commits / file-changes reads (Story 38 Phase 1 — GitHub extra ops) ──
+    public IReadOnlyList<GitCommitDto>? Commits { get; init; }
+    public IReadOnlyList<GitFileChangeDto>? FileChanges { get; init; }
+
     // ── failure-only (key-free) ──
     public string? FailureCode { get; init; }   // REPO_NOT_AUTHORIZED | GIT_CONFLICT | NOT_MERGEABLE | NOT_FOUND | PLATFORM_ERROR | GIT_TOKEN_UNAVAILABLE
     public string? FailureReason { get; init; }  // key-free
@@ -64,6 +68,29 @@ public sealed record PrCommentDto
     public int? Line { get; init; }
     public string Author { get; init; } = string.Empty;
     public DateTime CreatedAt { get; init; }
+}
+
+/// <summary>A key-free commit projection (Story 38 Phase 1). Mirrors the engine
+/// wire type <c>Tamma.Activities.LlmCall.Models.GitCommitSummaryDto</c>.</summary>
+public sealed record GitCommitDto
+{
+    public string Sha { get; init; } = string.Empty;
+    public string Message { get; init; } = string.Empty;
+    public string Author { get; init; } = string.Empty;
+    public DateTime Timestamp { get; init; }
+    public int Additions { get; init; }
+    public int Deletions { get; init; }
+    public IReadOnlyList<string> Files { get; init; } = Array.Empty<string>();
+}
+
+/// <summary>A key-free file-change projection (Story 38 Phase 1). Mirrors the engine
+/// wire type <c>Tamma.Activities.LlmCall.Models.GitFileChangeDto</c>.</summary>
+public sealed record GitFileChangeDto
+{
+    public string FilePath { get; init; } = string.Empty;
+    public string ChangeType { get; init; } = string.Empty;
+    public int Additions { get; init; }
+    public int Deletions { get; init; }
 }
 
 /// <summary>

@@ -81,6 +81,18 @@ public sealed class GitMediationService : IGitMediationService
         => ExecuteGuardedAsync(tenantId, repo, GitEventTypes.PrCommentsReadOperation, GitEventTypes.PrCommentsReadFailed, correlationId, ct,
             () => GetPullRequestCommentsCoreAsync(tenantId, repo, prNumber, correlationId, ct));
 
+    public Task<GitMediationResult> GetCommitsAsync(Guid? tenantId, string repo, string branch, DateTime? since, string correlationId, CancellationToken ct = default)
+        => ExecuteGuardedAsync(tenantId, repo, GitEventTypes.CommitsReadOperation, GitEventTypes.CommitsReadFailed, correlationId, ct,
+            () => GetCommitsCoreAsync(tenantId, repo, branch, since, correlationId, ct));
+
+    public Task<GitMediationResult> GetFileChangesAsync(Guid? tenantId, string repo, string branch, string correlationId, CancellationToken ct = default)
+        => ExecuteGuardedAsync(tenantId, repo, GitEventTypes.FileChangesReadOperation, GitEventTypes.FileChangesReadFailed, correlationId, ct,
+            () => GetFileChangesCoreAsync(tenantId, repo, branch, correlationId, ct));
+
+    public Task<GitMediationResult> DeleteBranchAsync(Guid? tenantId, string repo, string branchName, string correlationId, CancellationToken ct = default)
+        => ExecuteGuardedAsync(tenantId, repo, GitEventTypes.BranchDeleteOperation, GitEventTypes.BranchDeletedFailed, correlationId, ct,
+            () => DeleteBranchCoreAsync(tenantId, repo, branchName, correlationId, ct));
+
     /// <summary>
     /// F3 — run one mediation op body; convert any unexpected exception (DB read,
     /// secret decrypt, client mint, transport) into a typed key-free
@@ -444,6 +456,145 @@ public sealed class GitMediationService : IGitMediationService
         await EmitAsync(GitEventTypes.PrCommentsReadSuccess, op, tenantId, repo, correlationId, cred.Source, null,
             new { prNumber, commentCount = comments.Count }, ct).ConfigureAwait(false);
         return ok;
+    }
+
+    // ===================================================================
+    // GitHub extra ops (Story 38 Phase 1) — commits / file-changes reads + delete
+    // ===================================================================
+
+    private async Task<GitMediationResult> GetCommitsCoreAsync(Guid? tenantId, string repo, string branch, DateTime? since, string correlationId, CancellationToken ct)
+    {
+        var op = GitEventTypes.CommitsReadOperation;
+
+        var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.CommitsReadFailed, correlationId, ct).ConfigureAwait(false);
+        if (gate is not null) return gate;
+
+        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        if (cred is null)
+            return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.CommitsReadFailed, correlationId, ct).ConfigureAwait(false);
+
+        var github = _githubFactory.Create(cred.Token);
+        var res = await github.GetGitHubCommitsAsync(repo, branch, since).ConfigureAwait(false);
+
+        if (!res.Success)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.CommitsReadFailed, correlationId, cred.Source, res.Error, new { branch }, ct).ConfigureAwait(false);
+
+        var commits = (res.Data ?? new List<GitHubCommit>())
+            .Select(c => new GitCommitDto
+            {
+                Sha = c.Sha,
+                Message = c.Message,
+                Author = c.Author,
+                Timestamp = c.Timestamp,
+                Additions = c.Additions,
+                Deletions = c.Deletions,
+                Files = c.Files.ToList(),
+            })
+            .ToList();
+
+        var ok = new GitMediationResult
+        {
+            Success = true,
+            CredentialSource = cred.Source,
+            Outcome = "Done",
+            Commits = commits,
+            CorrelationId = correlationId,
+        };
+        await EmitAsync(GitEventTypes.CommitsReadSuccess, op, tenantId, repo, correlationId, cred.Source, null,
+            new { branch, commitCount = commits.Count }, ct).ConfigureAwait(false);
+        return ok;
+    }
+
+    private async Task<GitMediationResult> GetFileChangesCoreAsync(Guid? tenantId, string repo, string branch, string correlationId, CancellationToken ct)
+    {
+        var op = GitEventTypes.FileChangesReadOperation;
+
+        var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.FileChangesReadFailed, correlationId, ct).ConfigureAwait(false);
+        if (gate is not null) return gate;
+
+        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        if (cred is null)
+            return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.FileChangesReadFailed, correlationId, ct).ConfigureAwait(false);
+
+        var github = _githubFactory.Create(cred.Token);
+        var res = await github.GetGitHubFileChangesAsync(repo, branch).ConfigureAwait(false);
+
+        if (!res.Success)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.FileChangesReadFailed, correlationId, cred.Source, res.Error, new { branch }, ct).ConfigureAwait(false);
+
+        var changes = (res.Data ?? new List<GitHubFileChange>())
+            .Select(f => new GitFileChangeDto
+            {
+                FilePath = f.FilePath,
+                ChangeType = f.ChangeType,
+                Additions = f.Additions,
+                Deletions = f.Deletions,
+            })
+            .ToList();
+
+        var ok = new GitMediationResult
+        {
+            Success = true,
+            CredentialSource = cred.Source,
+            Outcome = "Done",
+            FileChanges = changes,
+            CorrelationId = correlationId,
+        };
+        await EmitAsync(GitEventTypes.FileChangesReadSuccess, op, tenantId, repo, correlationId, cred.Source, null,
+            new { branch, fileCount = changes.Count }, ct).ConfigureAwait(false);
+        return ok;
+    }
+
+    private async Task<GitMediationResult> DeleteBranchCoreAsync(Guid? tenantId, string repo, string branchName, string correlationId, CancellationToken ct)
+    {
+        var op = GitEventTypes.BranchDeleteOperation;
+
+        var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.BranchDeletedFailed, correlationId, ct).ConfigureAwait(false);
+        if (gate is not null) return gate;
+
+        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        if (cred is null)
+            return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.BranchDeletedFailed, correlationId, ct).ConfigureAwait(false);
+
+        var github = _githubFactory.Create(cred.Token);
+        var res = await github.DeleteGitHubBranchAsync(repo, branchName).ConfigureAwait(false);
+
+        if (!res.Success)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.BranchDeletedFailed, correlationId, cred.Source, res.Error, new { branchName }, ct).ConfigureAwait(false);
+
+        var ok = new GitMediationResult
+        {
+            Success = true,
+            CredentialSource = cred.Source,
+            Outcome = "Deleted",
+            BranchRef = branchName,
+            BranchDeleted = true,
+            CorrelationId = correlationId,
+        };
+        await EmitAsync(GitEventTypes.BranchDeletedSuccess, op, tenantId, repo, correlationId, cred.Source, null,
+            new { branchName }, ct).ConfigureAwait(false);
+        return ok;
+    }
+
+    /// <summary>Shared typed-failure path for the extra read/delete ops — key-free
+    /// PLATFORM_ERROR / NOT_FOUND (via the same 404 heuristic) + one FAILED event.</summary>
+    private async Task<GitMediationResult> ReadFailAsync(
+        Guid? tenantId, string repo, string operation, string failedEventType, string correlationId,
+        string credentialSource, string? reason, object data, CancellationToken ct)
+    {
+        var failCode = MapReadFailure(reason);
+        var fail = new GitMediationResult
+        {
+            Success = false,
+            CredentialSource = credentialSource,
+            Outcome = "Error",
+            FailureCode = failCode,
+            FailureReason = reason,
+            PlatformStatusCode = ParsePlatformStatus(reason),
+            CorrelationId = correlationId,
+        };
+        await EmitAsync(failedEventType, operation, tenantId, repo, correlationId, credentialSource, failCode, data, ct).ConfigureAwait(false);
+        return fail;
     }
 
     // ===================================================================

@@ -70,5 +70,34 @@ public static class GitEndpoints
         return result.ToHttpResult();
     }
 
+    public static async Task<IResult> GetCommits(
+        string owner, string repo, string? branch, DateTime? since, string? correlationId,
+        ITenantContext tenantContext, IGitMediationService git, CancellationToken ct)
+    {
+        var result = await git.GetCommitsAsync(
+            tenantContext.TenantId, Repo(owner, repo), branch ?? string.Empty, since, correlationId ?? string.Empty, ct).ConfigureAwait(false);
+        return result.ToHttpResult();
+    }
+
+    public static async Task<IResult> GetFileChanges(
+        string owner, string repo, string? branch, string? correlationId,
+        ITenantContext tenantContext, IGitMediationService git, CancellationToken ct)
+    {
+        var result = await git.GetFileChangesAsync(
+            tenantContext.TenantId, Repo(owner, repo), branch ?? string.Empty, correlationId ?? string.Empty, ct).ConfigureAwait(false);
+        return result.ToHttpResult();
+    }
+
+    public static async Task<IResult> DeleteBranch(
+        string owner, string repo, string? branch, string? correlationId,
+        ITenantContext tenantContext, IGitMediationService git, CancellationToken ct)
+    {
+        // The branch name (which may contain slashes, e.g. feature/foo) travels as a
+        // query param so it is captured whole; the route owns only {owner}/{repo}.
+        var result = await git.DeleteBranchAsync(
+            tenantContext.TenantId, Repo(owner, repo), branch ?? string.Empty, correlationId ?? string.Empty, ct).ConfigureAwait(false);
+        return result.ToHttpResult();
+    }
+
     private static string Repo(string owner, string repo) => $"{owner}/{repo}";
 }

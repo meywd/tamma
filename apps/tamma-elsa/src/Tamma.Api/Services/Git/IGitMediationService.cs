@@ -15,4 +15,19 @@ public interface IGitMediationService
     Task<GitMediationResult> MergePullRequestAsync(Guid? tenantId, string repo, int prNumber, MergePrRequest body, CancellationToken ct = default);
     Task<GitMediationResult> UpdateIssueAsync(Guid? tenantId, string repo, int issueNumber, UpdateIssueRequest body, CancellationToken ct = default);
     Task<GitMediationResult> GetPullRequestCommentsAsync(Guid? tenantId, string repo, int prNumber, string correlationId, CancellationToken ct = default);
+
+    // Story 38 (Phase 1) — GitHub "extra ops" the engine's context/debug/integration
+    // activities call on the composite today, mediated on the same plane.
+
+    /// <summary>Read recent commits on <paramref name="branch"/> (optionally
+    /// <paramref name="since"/>). Read op — guard→token→platform→one event.</summary>
+    Task<GitMediationResult> GetCommitsAsync(Guid? tenantId, string repo, string branch, DateTime? since, string correlationId, CancellationToken ct = default);
+
+    /// <summary>Read the file changes on <paramref name="branch"/> relative to the
+    /// repo default. Read op — guard→token→platform→one event.</summary>
+    Task<GitMediationResult> GetFileChangesAsync(Guid? tenantId, string repo, string branch, string correlationId, CancellationToken ct = default);
+
+    /// <summary>Delete <paramref name="branchName"/> (the standalone delete the
+    /// composite exposes, distinct from the verified post-merge delete). Write op.</summary>
+    Task<GitMediationResult> DeleteBranchAsync(Guid? tenantId, string repo, string branchName, string correlationId, CancellationToken ct = default);
 }

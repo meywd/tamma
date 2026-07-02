@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Tamma.Core.Interfaces;
@@ -15,21 +16,66 @@ public class CIIntegrationService : ICIIntegrationService
     private readonly int _ciPollIntervalMs;
     private readonly int _ciPollMaxAttempts;
 
+    /// <summary>
+    /// Story 38 (Phase 1) — when set, this request-scoped token overrides the named
+    /// "github" client's static <c>GitHub:Token</c> bearer for EVERY Actions call
+    /// made through this instance, so the CI mediation layer uses the per-tenant
+    /// token it resolved (the "token used == token resolved" invariant, mirroring
+    /// <see cref="GitHubIntegrationService"/>). Minted per-request by
+    /// <see cref="Ci.CiClientFactory"/>; never logged, returned, or persisted.
+    /// Null ⇒ legacy static-token behaviour.
+    /// </summary>
+    private readonly string? _tokenOverride;
+
     public CIIntegrationService(
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
         ILogger<CIIntegrationService> logger)
+        : this(httpClientFactory, configuration, logger, tokenOverride: null)
+    {
+    }
+
+    /// <summary>
+    /// Story 38 (Phase 1) — construct bound to a request-scoped
+    /// <paramref name="tokenOverride"/>. Used by <see cref="Ci.CiClientFactory"/> so
+    /// the CI-mediation endpoints perform the Actions call with the resolved
+    /// per-tenant token.
+    /// </summary>
+    public CIIntegrationService(
+        IHttpClientFactory httpClientFactory,
+        IConfiguration configuration,
+        ILogger<CIIntegrationService> logger,
+        string? tokenOverride)
     {
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _logger = logger;
+        _tokenOverride = tokenOverride;
         _ciPollIntervalMs = configuration.GetValue<int>("CI:PollIntervalMs", 5000);
         _ciPollMaxAttempts = configuration.GetValue<int>("CI:PollMaxAttempts", 10);
     }
 
+    /// <summary>
+    /// Create the named "github" <see cref="HttpClient"/>, applying the
+    /// request-scoped <see cref="_tokenOverride"/> when present. The factory returns
+    /// a fresh client instance per call, so mutating its default Authorization
+    /// header is scoped to this instance only.
+    /// </summary>
+    private HttpClient CreateGitHubClient()
+    {
+        var client = _httpClientFactory.CreateClient("github");
+        if (!string.IsNullOrWhiteSpace(_tokenOverride))
+        {
+            client.DefaultRequestHeaders.Remove("Authorization");
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", _tokenOverride);
+        }
+        return client;
+    }
+
     public async Task<IntegrationResult<TestRunResult>> TriggerTestsAsync(string repository, string branch)
     {
-        var httpClient = _httpClientFactory.CreateClient("github");
+        var httpClient = CreateGitHubClient();
 
         try
         {
@@ -110,7 +156,7 @@ public class CIIntegrationService : ICIIntegrationService
 
     public async Task<IntegrationResult<BuildStatus>> GetBuildStatusAsync(string repository, string branch)
     {
-        var httpClient = _httpClientFactory.CreateClient("github");
+        var httpClient = CreateGitHubClient();
 
         try
         {
