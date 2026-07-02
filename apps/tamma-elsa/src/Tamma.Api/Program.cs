@@ -1040,6 +1040,14 @@ builder.Services.AddScoped<
     Tamma.Api.Services.Analytics.IPlatformAnalyticsService,
     Tamma.Api.Services.Analytics.PlatformAnalyticsService>();
 
+// Story 36-3 — tenant-facing usage analytics read seam. Reads the per-tenant
+// Story 36-1 fact tables (analytics_usage_hourly / analytics_usage_daily,
+// populated by Story 36-2) through ITenantDbContextFactory — NOT the
+// control-plane platform_analytics_hourly surface above.
+builder.Services.AddScoped<
+    Tamma.Api.Services.Analytics.ITenantAnalyticsService,
+    Tamma.Api.Services.Analytics.TenantAnalyticsService>();
+
 // Story 34-11 — swap the frozen ProviderPricingService for the DB-backed
 // DbProviderPricingService behind the unchanged IProviderPricingService seam
 // (a one-line DI change; zero downstream consumer edits). Must run AFTER
@@ -1939,6 +1947,17 @@ orgs.MapGet("/{tenantId:guid}/dashboard/summary", UserDashboardEndpoints.GetOrgS
 orgs.MapGet("/{tenantId:guid}/dashboard/runs", UserDashboardEndpoints.GetRecentRuns)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 orgs.MapGet("/{tenantId:guid}/dashboard/stats", UserDashboardEndpoints.GetStats)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+
+// Story 36-3 — tenant usage analytics API. Reads Story 36-1's per-tenant
+// analytics_usage_hourly / analytics_usage_daily fact tables (populated by
+// Story 36-2) through ITenantDbContextFactory. Member-read (the group's
+// MemberAccess policy + the path-tenant membership filter); NO owner/admin
+// gate — usage analytics is read-only and tenant-wide. A member of org A can
+// never reach org B's route (403) nor its schema (physical isolation).
+orgs.MapGet("/{tenantId:guid}/analytics/usage", TenantAnalyticsEndpoints.GetUsage)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+orgs.MapGet("/{tenantId:guid}/analytics/usage/breakdown", TenantAnalyticsEndpoints.GetBreakdown)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 
 // Story 5.6 / 1.5-37 (Wave C.3) — tenant-scope alert surface.
