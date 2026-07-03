@@ -66,6 +66,13 @@ public sealed class ManagedAgent : IManagedAgent
     // the API host so production always emits the trail. NEVER throws into the run
     // (the emitter swallows + breadcrumbs — AC7).
     private readonly IAgentTrailEmitter? _trail;
+    // Story 32-23 — the in-process run-stream bus. Optional (null ⇒ no tap
+    // publishes) so the existing unit-test ctors are unchanged; DI-registered in
+    // the API host. Publishing the terminal `final` frame is a fire-and-forget
+    // SIDE-EFFECT — never control flow — so the buffered AgentRunResult is
+    // byte-for-byte identical whether 0 or N tap subscribers are attached (AC6),
+    // and a publish failure NEVER faults the run (AC5, log-and-swallow).
+    private readonly Tamma.Api.Services.Streaming.ILlmRunStreamBus? _runStreamBus;
     private readonly ILogger<ManagedAgent> _logger;
 
     // NOTE: the process mode (single-user vs SaaS) is NOT a dependency here — the
@@ -84,7 +91,8 @@ public sealed class ManagedAgent : IManagedAgent
         IEventRepository events,
         ILogger<ManagedAgent> logger,
         Tamma.Activities.Security.IContentSanitizer? sanitizer = null,
-        IAgentTrailEmitter? trail = null)
+        IAgentTrailEmitter? trail = null,
+        Tamma.Api.Services.Streaming.ILlmRunStreamBus? runStreamBus = null)
     {
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _budget = budget ?? throw new ArgumentNullException(nameof(budget));
@@ -103,6 +111,10 @@ public sealed class ManagedAgent : IManagedAgent
         // Optional (Story 32-6): the action-trail emitter. DI-registered in the API
         // host; absent in the minimal unit-test ctor. Its writes never affect the run.
         _trail = trail;
+        // Optional (Story 32-23): the run-stream bus for the human tap. When present,
+        // the terminal `final` frame is published as a side-effect after the run
+        // completes. Absent ⇒ no publish (older unit-test ctors).
+        _runStreamBus = runStreamBus;
     }
 
     /// <inheritdoc />
@@ -111,6 +123,22 @@ public sealed class ManagedAgent : IManagedAgent
         // The ONLY case that may throw (a contract violation, AC10).
         ArgumentNullException.ThrowIfNull(request);
 
+        // Run the buffered composition to a typed result (the engine's contract —
+        // unchanged). THEN publish the terminal `final` frame to the run-stream bus
+        // as a decoupled side-effect (Story 32-23, AC6). Cancellation propagates out
+        // of RunCoreAsync (the host aborts) WITHOUT a `final` publish — an aborted
+        // run has no terminal summary to tap.
+        var result = await RunCoreAsync(request, ct).ConfigureAwait(false);
+        await PublishFinalFrameAsync(request.CorrelationId, result).ConfigureAwait(false);
+        return result;
+    }
+
+    /// <summary>Story 32-23 (AC6) — the buffered composition. Its return value is
+    /// the engine's source of truth and is IDENTICAL regardless of tap subscribers;
+    /// the tap publishes are layered on OUTSIDE this method so they can never touch
+    /// its control flow.</summary>
+    private async Task<AgentRunResult> RunCoreAsync(ManagedAgentRequest request, CancellationToken ct)
+    {
         var sw = Stopwatch.StartNew();
 
         // ── carries the identity stamped as composition advances, so a failure
@@ -604,6 +632,47 @@ public sealed class ManagedAgent : IManagedAgent
             _logger.LogError(ex,
                 "Usage emission failed; the run result still returns. correlationId={CorrelationId}",
                 run.CorrelationId);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Story 32-23 — run-stream tap (side-effect only; never touches the run)
+    // -----------------------------------------------------------------------
+
+    /// <summary>Publish the terminal <c>final</c> frame to the run-stream bus so a
+    /// human tap sees the run close. Pure side-effect: fire-and-forget, key-free,
+    /// and wrapped log-and-swallow so a streaming failure can NEVER fault or alter
+    /// the buffered run (AC5/AC6). No-op when the bus is absent (older ctors) — and
+    /// the bus itself is a no-op when there are zero subscribers.</summary>
+    private async Task PublishFinalFrameAsync(string correlationId, AgentRunResult result)
+    {
+        if (_runStreamBus is null || string.IsNullOrEmpty(correlationId))
+        {
+            return;
+        }
+
+        try
+        {
+            // Key-free turn summary (AC4/AC9): no prompt body, no key, no tool bodies.
+            var payload = new
+            {
+                success = result.Success,
+                totalTurns = result.ToolLoopTurns,
+                totalTokens = result.InputTokens + result.OutputTokens,
+                exhausted = result.ToolLoopExhausted,
+                durationMs = result.DurationMs,
+            };
+            var frame = new Tamma.Api.Services.Streaming.RunStreamFrame(
+                Tamma.Api.Services.Streaming.RunStreamFrameType.Final, correlationId, 0, payload);
+            await _runStreamBus.PublishAsync(correlationId, frame, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // The bus is contracted never to throw; this is a bug guard. Logged at
+            // ERROR per the story's logging requirements, NEVER propagated to the run.
+            _logger.LogError(ex,
+                "run-stream `final` publish threw despite the swallow guard; the run result still returns. "
+                + "correlationId={CorrelationId}", correlationId);
         }
     }
 

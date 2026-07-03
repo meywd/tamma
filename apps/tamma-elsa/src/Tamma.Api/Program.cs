@@ -617,6 +617,33 @@ builder.Services.TryAddSingleton<Tamma.Activities.LlmCall.Tools.ContextCompactor
 // defaults to the no-op NullToolLoopEventSink when none is registered).
 builder.Services.TryAddSingleton<Tamma.Activities.ToolExecution.ToolLoopEventEmitter>();
 builder.Services.TryAddSingleton<Tamma.Activities.ToolExecution.ParallelToolExecutor>();
+
+// ── Story 32-23 — the streaming run tap (SSE for dashboard / CLI) ──
+// The in-process run-stream bus is ALWAYS registered (a cheap in-memory
+// singleton). ManagedAgent publishes the terminal `final` frame to it as a
+// decoupled SIDE-EFFECT; the human tap (GET /api/v1/llm/runs/{cid}/stream)
+// subscribes. The bus is fire-and-forget: a no-op with zero subscribers, and it
+// never blocks or throws into the buffered run, so the engine's /llm/call
+// contract stays byte-for-byte unchanged (AC5/AC6).
+builder.Services.TryAddSingleton<Tamma.Api.Services.Streaming.ILlmRunStreamBus,
+    Tamma.Api.Services.Streaming.LlmRunStreamBus>();
+// The LIVE tool-loop sink is gated behind the app-level streaming flag. When
+// enabled, TOOL_LOOP.* events map to tool_call/tool_result frames on the bus;
+// when disabled the registration stays NullToolLoopEventSink (a graceful no-op —
+// the tap still shows the terminal `final`, never an error). This makes live the
+// IToolLoopEventSink seam 32-5 shipped inert.
+var runTapStreamingEnabled = string.Equals(
+    builder.Configuration["Tamma:Streaming:Enabled"], "true", StringComparison.OrdinalIgnoreCase);
+if (runTapStreamingEnabled)
+{
+    builder.Services.TryAddSingleton<Tamma.Activities.ToolExecution.IToolLoopEventSink,
+        Tamma.Api.Services.Streaming.BusToolLoopEventSink>();
+}
+else
+{
+    builder.Services.TryAddSingleton<Tamma.Activities.ToolExecution.IToolLoopEventSink>(
+        Tamma.Activities.ToolExecution.NullToolLoopEventSink.Instance);
+}
 // The extracted runner — the SINGLE home of the loop (no fork). Scoped so each
 // call binds a request-scoped provider config. Its IProviderCredentialResolver
 // dep is the cabinet-backed DefaultProviderCredentialResolver (registered above
@@ -2596,6 +2623,18 @@ app.MapPost("/api/v1/llm/chat", SaaSEndpoints.LlmChat).RequireAuthorization();
 app.MapPost("/api/v1/llm/call", LlmCallEndpoints.CallLlm)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("CallLlm");
+
+// ── Story 32-23 — the streaming run tap (human SSE plane) ──
+// GET /api/v1/llm/runs/{correlationId}/stream — a live, READ-ONLY view of a
+// managed run for the dashboard (JWT) / tamma CLI (ApiKey). Rides AuthenticatedAny
+// (the HUMAN plane), NOT the engine bearer: unlike POST /api/v1/llm/call this is
+// consumed by people. In SaaS the caller may only tap runs its tenant owns (a
+// foreign correlationId ⇒ 404, never a cross-tenant existence oracle); in
+// single-user the sole user taps any local run. Decoupled from the buffered call:
+// it can never break RetryCheck/SkipIfSucceeded/the circuit breaker.
+app.MapGet("/api/v1/llm/runs/{correlationId}/stream", LlmRunStreamEndpoints.StreamRun)
+    .RequireAuthorization("AuthenticatedAny")
+    .WithName("StreamRunTap");
 
 // ── Story 38-1 (Epic 38) — git-platform step mediation (Class A) ──
 // Same engine-only plane as /api/v1/llm/call: the engine's thin ADL git
