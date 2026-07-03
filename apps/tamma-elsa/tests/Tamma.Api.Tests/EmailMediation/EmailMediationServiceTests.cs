@@ -1,26 +1,32 @@
 using FluentAssertions;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
 using Tamma.Api.Services.Email;
 using Tamma.Api.Services.EmailMediation;
-using Tamma.Api.Services.PromptStore;
+using Tamma.Api.Services.Integrations;
 
 namespace Tamma.Api.Tests.EmailMediation;
 
 /// <summary>
-/// Story 38 (Phase 1) — <see cref="EmailMediationService"/> composition. Email is not
-/// repo-scoped: it accepts the engine's rendered message into the credentialed,
-/// outbox-backed <see cref="IEmailService"/> (which owns transport + EMAIL.* audit)
-/// under the acting tenant. Fail-soft: a missing recipient or an accept exception
-/// surfaces a typed PLATFORM_ERROR inside a 200 success:false envelope (never a raw
-/// 5xx). The email credential never reaches the engine.
+/// Integration BYOK — <see cref="EmailMediationService"/> composition. The old
+/// SaaS-deny guard is replaced by per-tenant credential resolution: the tenant's
+/// email credential is resolved (BYOK→system→fail-loud), its tenant-authorized
+/// <c>From</c> is threaded onto the message, and the message is accepted into the
+/// outbox-backed <see cref="IEmailService"/>.
+///
+/// <para>Pins: present credential ⇒ Queued with the resolved From on the message;
+/// ABSENT credential ⇒ fail-loud
+/// <see cref="EmailMediationFailureCodes.CredentialUnavailable"/> with the transport
+/// NEVER reached; a missing recipient / accept exception is fail-soft PLATFORM_ERROR.</para>
 /// </summary>
 [TestFixture]
 public class EmailMediationServiceTests
 {
+    private const string ResolvedFrom = "team@tenant.example.com";
+
     private Mock<IEmailService> _email = null!;
+    private FakeResolver _resolver = null!;
     private EmailMediationService _sut = null!;
     private readonly Guid _tenant = Guid.NewGuid();
 
@@ -28,25 +34,13 @@ public class EmailMediationServiceTests
     public void SetUp()
     {
         _email = new Mock<IEmailService>(MockBehavior.Strict);
-        // Default SUT is single-user mode — the existing accept/fail-soft tests
-        // exercise the composition without the SaaS guard tripping.
-        _sut = BuildSut(TammaMode.SingleUser);
-    }
-
-    private EmailMediationService BuildSut(TammaMode mode, bool allowMediatedSendInSaaS = false)
-    {
-        var modeProvider = new Mock<ITammaModeProvider>();
-        modeProvider.SetupGet(m => m.Mode).Returns(mode);
-
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                [EmailMediationService.AllowMediatedSendInSaaSKey] = allowMediatedSendInSaaS ? "true" : "false",
-            })
-            .Build();
-
-        return new EmailMediationService(
-            _email.Object, modeProvider.Object, config, NullLogger<EmailMediationService>.Instance);
+        _resolver = new FakeResolver
+        {
+            Resolution = new EmailCredentialResolution(
+                new EmailCredential(EmailCredential.TransportResend, ResolvedFrom, ResendApiKey: "fake-resend-key"),
+                IntegrationCredentialSource.Tenant),
+        };
+        _sut = new EmailMediationService(_email.Object, _resolver, NullLogger<EmailMediationService>.Instance);
     }
 
     private static SendEmailRequest Body() => new()
@@ -55,7 +49,7 @@ public class EmailMediationServiceTests
     };
 
     [Test]
-    public async Task Send_Success_AcceptsIntoOutbox_ReturnsTxnId_ScopesTenant()
+    public async Task Send_CredentialResolved_ThreadsFrom_AcceptsIntoOutbox_ReturnsTxn()
     {
         var txn = Guid.NewGuid();
         EmailMessage? captured = null;
@@ -69,9 +63,25 @@ public class EmailMediationServiceTests
         result.Outcome.Should().Be("Queued");
         result.TxnId.Should().Be(txn);
         captured.Should().NotBeNull();
-        captured!.TenantId.Should().Be(_tenant, "the acting tenant scopes the message + its EMAIL.* events");
+        captured!.From.Should().Be(ResolvedFrom, "the resolved tenant-authorized sender identity is threaded onto the message");
+        captured.TenantId.Should().Be(_tenant);
         captured.To.Should().Be("dev@example.com");
         captured.Text.Should().Be("All green");
+    }
+
+    [Test]
+    public async Task Send_NoCredential_FailsLoud_NeverCallsTransport()
+    {
+        _resolver.Resolution = null;
+
+        var result = await _sut.SendEmailAsync(_tenant, Body());
+
+        result.Success.Should().BeFalse();
+        result.Outcome.Should().Be("Error");
+        result.FailureCode.Should().Be(EmailMediationFailureCodes.CredentialUnavailable);
+        result.CorrelationId.Should().Be("corr-e");
+        _email.Verify(e => e.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()), Times.Never,
+            "a fail-loud send must never reach the outbox/transport");
     }
 
     [Test]
@@ -98,58 +108,11 @@ public class EmailMediationServiceTests
         result.CorrelationId.Should().Be("corr-e");
     }
 
-    // ── SaaS fail-closed tenant guard ──
-    // A tenant workflow mediates mail FROM the platform's configured sender identity
-    // (Email:From). In SaaS that lets a tenant emit arbitrary mail under the
-    // platform's reputation/domain, so mediated sends are denied by default. Only
-    // TENANT-WORKFLOW-initiated sends flow through here; system emails
-    // (welcome/verification/password-reset) call IEmailService directly and are
-    // unaffected.
-
-    [Test]
-    public async Task Send_SingleUserMode_Allowed_AcceptsIntoOutbox()
+    private sealed class FakeResolver : IEmailCredentialResolver
     {
-        var txn = Guid.NewGuid();
-        _email.Setup(e => e.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(txn);
-        var sut = BuildSut(TammaMode.SingleUser);
-
-        var result = await sut.SendEmailAsync(_tenant, Body());
-
-        result.Success.Should().BeTrue("single-user mode has one principal who owns the sender domain");
-        result.Outcome.Should().Be("Queued");
-        result.TxnId.Should().Be(txn);
-        _email.Verify(e => e.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Test]
-    public async Task Send_SaaSMode_NoOptIn_TypedDenial_NeverEnqueues()
-    {
-        var sut = BuildSut(TammaMode.SaaS, allowMediatedSendInSaaS: false);
-
-        var result = await sut.SendEmailAsync(_tenant, Body());
-
-        result.Success.Should().BeFalse();
-        result.Outcome.Should().Be("Denied");
-        result.FailureCode.Should().Be(EmailMediationFailureCodes.MediationDeniedInSaaS);
-        result.CorrelationId.Should().Be("corr-e");
-        _email.Verify(e => e.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()), Times.Never,
-            "a denied mediated send must never reach the outbox/transport");
-    }
-
-    [Test]
-    public async Task Send_SaaSMode_WithOptIn_Allowed_AcceptsIntoOutbox()
-    {
-        var txn = Guid.NewGuid();
-        _email.Setup(e => e.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(txn);
-        var sut = BuildSut(TammaMode.SaaS, allowMediatedSendInSaaS: true);
-
-        var result = await sut.SendEmailAsync(_tenant, Body());
-
-        result.Success.Should().BeTrue("the explicit Email:AllowMediatedSendInSaaS opt-in re-enables the send");
-        result.Outcome.Should().Be("Queued");
-        result.TxnId.Should().Be(txn);
-        _email.Verify(e => e.SendAsync(It.IsAny<EmailMessage>(), It.IsAny<CancellationToken>()), Times.Once);
+        public EmailCredentialResolution? Resolution { get; set; }
+        public Task<EmailCredentialResolution?> ResolveAsync(Guid? tenantId, CancellationToken ct = default)
+            => Task.FromResult(Resolution);
+        public void Invalidate(Guid? tenantId) { }
     }
 }

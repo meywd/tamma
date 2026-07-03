@@ -31,13 +31,14 @@ public static class JiraFailureCodes
     public const string NotFound = "NOT_FOUND";
 
     /// <summary>
-    /// SaaS fail-closed guard: JIRA uses a single platform-global credential with no
-    /// per-tenant/ticket scoping (there is no tenant↔JIRA-project mapping yet), so in
-    /// SaaS mode the shared-credential path is a confused-deputy — any tenant could
-    /// read/patch ANY ticket id. Denied by default; an operator re-enables it
-    /// knowingly via <c>Jira:AllowSharedCredentialInSaaS=true</c>.
+    /// Per-tenant BYOK fail-loud: no JIRA credential resolved for the acting
+    /// tenant (no tenant cabinet bundle in SaaS, and no single-user <c>Jira:*</c>
+    /// config). The credential-bound JIRA client is
+    /// NEVER called — the mediation fails loud rather than silently using a
+    /// shared platform default. The tenant registers its own credential via
+    /// <c>POST /api/v1/integrations/jira/credential</c>.
     /// </summary>
-    public const string SharedCredentialDeniedInSaaS = "JIRA_SHARED_CREDENTIAL_DENIED_IN_SAAS";
+    public const string CredentialUnavailable = "JIRA_CREDENTIAL_UNAVAILABLE";
 
     /// <summary>Any other expected platform failure (permission, rate-limit, transient).</summary>
     public const string PlatformError = "PLATFORM_ERROR";

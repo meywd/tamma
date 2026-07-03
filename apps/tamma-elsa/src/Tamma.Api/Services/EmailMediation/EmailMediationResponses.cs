@@ -36,13 +36,14 @@ public static class EmailMediationFailureCodes
     public const string PlatformError = "PLATFORM_ERROR";
 
     /// <summary>
-    /// SaaS fail-closed guard: a tenant-workflow-initiated mediated send was denied
-    /// because the message would go out FROM the platform's configured sender
-    /// identity (<c>Email:From</c>) with no per-tenant sender/domain allowlist. Opt
-    /// back in with <c>Email:AllowMediatedSendInSaaS=true</c> once a per-tenant sender
-    /// policy exists. Single-user mode is never denied (one principal owns the domain).
+    /// Per-tenant BYOK fail-loud: no email transport credential resolved for the
+    /// acting tenant (no tenant cabinet bundle in SaaS, and no single-user
+    /// <c>Email:*</c> config). The transport is NEVER reached — the mediation
+    /// fails loud rather than sending under a shared platform sender identity
+    /// (the confused-deputy). The tenant registers its own credential via
+    /// <c>POST /api/v1/integrations/email/credential</c>.
     /// </summary>
-    public const string MediationDeniedInSaaS = "email_mediation_denied_in_saas";
+    public const string CredentialUnavailable = "EMAIL_CREDENTIAL_UNAVAILABLE";
 }
 
 /// <summary>
