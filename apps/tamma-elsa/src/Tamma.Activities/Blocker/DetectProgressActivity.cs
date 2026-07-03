@@ -94,6 +94,19 @@ public class DetectProgressActivity : Activity
         _configuration = configuration;
     }
 
+    /// <summary>
+    /// The SINGLE canonical progress-bookmark name (<c>blocker-progress-{session}-{level}</c>).
+    /// Shared by the suspend side (<see cref="Execute"/>) and the resume side
+    /// (<c>BlockerResumeEndpoint</c>) so the two match byte-for-byte — the same
+    /// suspend/resume-name-parity discipline as
+    /// <c>WaitForMergeApprovalActivity.BookmarkName</c>. The name is keyed by the
+    /// (globally-unique, unguessable) mentorship session id + resolution level; the
+    /// resume endpoint additionally verifies the caller's tenant OWNS that session
+    /// before it ever resolves this name (IDOR guard on the Tamma.Api tier).
+    /// </summary>
+    public static string ProgressBookmarkName(Guid sessionId, string level)
+        => $"blocker-progress-{sessionId}-{level}";
+
     protected override void Execute(ActivityExecutionContext context)
     {
         var sessionId = SessionId.Get(context);
@@ -109,7 +122,7 @@ public class DetectProgressActivity : Activity
         //    below fires, whichever happens first.
         context.CreateBookmark(new CreateBookmarkArgs
         {
-            BookmarkName = $"blocker-progress-{sessionId}-{currentLevel}",
+            BookmarkName = ProgressBookmarkName(sessionId, currentLevel),
             Callback = OnResumeAsync,
             AutoBurn = true
         });

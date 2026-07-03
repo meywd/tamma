@@ -95,6 +95,19 @@ public class EscalateToSeniorActivity : Activity
         _configuration = configuration;
     }
 
+    /// <summary>
+    /// The SINGLE canonical escalation-bookmark name (<c>blocker-escalation-{session}</c>).
+    /// Shared by the suspend side (<see cref="ExecuteAsync"/>) and the resume side
+    /// (<c>BlockerResumeEndpoint</c>) so the two match byte-for-byte — the same
+    /// suspend/resume-name-parity discipline as
+    /// <c>WaitForMergeApprovalActivity.BookmarkName</c>. The name is keyed by the
+    /// (globally-unique, unguessable) mentorship session id; the resume endpoint
+    /// additionally verifies the caller's tenant OWNS that session before it ever
+    /// resolves this name (IDOR guard on the Tamma.Api tier).
+    /// </summary>
+    public static string EscalationBookmarkName(Guid sessionId)
+        => $"blocker-escalation-{sessionId}";
+
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var sessionId = SessionId.Get(context);
@@ -135,7 +148,7 @@ public class EscalateToSeniorActivity : Activity
         //    suspends here until this resumes OR the durable SLA delay below fires.
         context.CreateBookmark(new CreateBookmarkArgs
         {
-            BookmarkName = $"blocker-escalation-{sessionId}",
+            BookmarkName = EscalationBookmarkName(sessionId),
             Callback = OnResumeAsync,
             AutoBurn = true
         });

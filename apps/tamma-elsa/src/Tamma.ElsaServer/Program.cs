@@ -405,6 +405,18 @@ app.MapPost("/elsa/api/adl/deploy-approval/resume",
     Tamma.ElsaServer.Endpoints.DeploymentApprovalResumeEndpoint.Resume)
     .RequireAuthorization();
 
+// Follow-up #15 — in-process resume seam for the blocker-diagnosis progressive
+// resolution ladder. Tamma.Api's RBAC-gated, tenant-scoped POST /api/adl/blocker/resume
+// forwards here (after verifying the caller's tenant OWNS the mentorship session);
+// this endpoint looks up the session-scoped progress / escalation bookmark and runs the
+// owning instance with the {ProgressDetected,...} / {Resolved,SeniorResponse} payload
+// injected. It closes the "Resolved terminal is unreachable in production" gap called out
+// in BlockerDiagnosisWorkflow. Same engine-control-surface / RequireAuthorization rationale
+// as the merge/deploy gates.
+app.MapPost("/elsa/api/adl/blocker/resume",
+    Tamma.ElsaServer.Endpoints.BlockerResumeEndpoint.Resume)
+    .RequireAuthorization();
+
 app.UseSerilogRequestLogging();
 
 Log.Information("Tamma ELSA Server starting up...");

@@ -2,6 +2,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Tamma.Api.Services;
+using Tamma.Core.Interfaces;
 using Tamma.Core.Logging;
 using Tamma.Data;
 
@@ -218,6 +219,136 @@ public static class AdlEndpoints
                 statusCode: StatusCodes.Status502BadGateway);
         }
     }
+
+    // ================================================================
+    // Blocker-diagnosis progressive-resolution ladder (follow-up #15) —
+    // POST /api/adl/blocker/resume. Same RBAC (WorkflowsManage) + I2
+    // (server-derived resolver) posture as the merge/deploy gates. The
+    // cross-tenant guard differs in MECHANISM only: the blocker bookmark is
+    // keyed by the (unguessable) session id, not the tenant, so we enforce
+    // ownership by a tenant-scoped session lookup BEFORE forwarding (a
+    // cross-tenant / unknown session 404s and never reaches the engine).
+    // ================================================================
+
+    /// <summary>The blocker ladder resume kinds accepted (case-insensitive).</summary>
+    private static readonly HashSet<string> AllowedBlockerKinds =
+        new(StringComparer.OrdinalIgnoreCase) { "progress", "escalation" };
+
+    /// <summary>The progress-ladder levels accepted (case-insensitive; canonicalised to the
+    /// workflow's PascalCase before forwarding).</summary>
+    private static readonly HashSet<string> AllowedBlockerLevels =
+        new(StringComparer.OrdinalIgnoreCase) { "Hint", "Guidance", "Assistance" };
+
+    /// <summary>
+    /// Resume request for the blocker-diagnosis ladder. <c>Resolver</c> is intentionally
+    /// absent — the acting identity is derived from the authenticated caller (I2), never
+    /// trusted from the client.
+    /// </summary>
+    public sealed record BlockerResolutionRequest(
+        Guid SessionId,
+        string Kind,              // "progress" | "escalation"
+        string? Level,            // required for progress: Hint | Guidance | Assistance
+        bool? Resolved,           // escalation: did the senior resolve it (default true)
+        string? ProgressType,     // progress: commit | ci | manual | ...
+        string? Details,          // progress: free-text detail
+        string? SeniorResponse);  // escalation: senior's response note
+
+    /// <summary>
+    /// Resume the blocker-diagnosis progressive-resolution ladder for a mentorship session.
+    /// Route: <c>POST /api/adl/blocker/resume</c>.
+    /// </summary>
+    public static async Task<IResult> ResumeBlocker(
+        [FromBody] BlockerResolutionRequest req,
+        [FromServices] IElsaWorkflowService elsa,
+        [FromServices] IMentorshipService mentorship,
+        [FromServices] ITenantContext tenantContext,
+        ClaimsPrincipal principal,
+        [FromServices] ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("Tamma.Api.AdlEndpoints");
+
+        if (req.SessionId == Guid.Empty)
+            return Results.BadRequest(new { error = "sessionId is required" });
+        if (string.IsNullOrWhiteSpace(req.Kind) || !AllowedBlockerKinds.Contains(req.Kind.Trim()))
+            return Results.BadRequest(new { error = "kind must be one of: progress, escalation" });
+
+        var kind = req.Kind.Trim().ToLowerInvariant();
+        string? level = null;
+        if (kind == "progress")
+        {
+            if (string.IsNullOrWhiteSpace(req.Level) || !AllowedBlockerLevels.Contains(req.Level.Trim()))
+                return Results.BadRequest(new { error = "level must be one of: Hint, Guidance, Assistance (for kind=progress)" });
+            level = CanonicalBlockerLevel(req.Level);
+        }
+
+        // I2 — the resolver is the authenticated caller, derived server-side. A
+        // client-supplied resolver is never honoured so the audit trail can't be forged.
+        var resolver = ResolveApprover(principal);
+
+        try
+        {
+            // IDOR guard (mirrors the merge/deploy "cross-tenant → 404, never acts"):
+            // GetSessionAsync is tenant-scoped (per-tenant schema), so a session that does
+            // not belong to the caller's ambient tenant simply resolves to null. We refuse
+            // to forward a resume for a session the caller does not own — the resume can only
+            // ever target the caller's OWN blocker gate.
+            var session = await mentorship.GetSessionAsync(req.SessionId);
+            if (session is null)
+            {
+                logger.LogWarning(
+                    "Blocker resume for session {SessionId} not found in caller tenant {Tenant} — refusing",
+                    req.SessionId, tenantContext.TenantId);
+                return Results.NotFound(new
+                {
+                    error = "session_not_found",
+                    detail = "No blocker-diagnosis session with this id exists in your scope.",
+                });
+            }
+
+            var result = await elsa.ResumeBlockerResolutionAsync(
+                req.SessionId, kind, level, req.Resolved ?? true,
+                req.ProgressType, req.Details, req.SeniorResponse, resolver);
+
+            if (result.GateNotFound)
+            {
+                return Results.NotFound(new
+                {
+                    error = "gate_not_waiting",
+                    detail = "No blocker-diagnosis wait is currently suspended for this session/level.",
+                });
+            }
+
+            logger.LogInformation(
+                "Drove blocker gate for session {SessionId} (kind {Kind}, level {Level}, resolver {Resolver})",
+                req.SessionId, LogSanitizer.Clean(kind), LogSanitizer.Clean(level ?? ""), LogSanitizer.Clean(resolver));
+
+            return Results.Ok(new
+            {
+                resumed = result.Resumed,
+                workflowInstanceId = result.WorkflowInstanceId,
+                kind,
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Failed to resume blocker gate for session {SessionId}", req.SessionId);
+            return Results.Problem(
+                detail: "Failed to resume the blocker-diagnosis gate.",
+                statusCode: StatusCodes.Status502BadGateway);
+        }
+    }
+
+    /// <summary>Map a case-insensitive level onto the workflow's exact PascalCase segment
+    /// ("Hint"/"Guidance"/"Assistance"); null for anything else.</summary>
+    internal static string? CanonicalBlockerLevel(string? level)
+        => level?.Trim().ToLowerInvariant() switch
+        {
+            "hint" => "Hint",
+            "guidance" => "Guidance",
+            "assistance" => "Assistance",
+            _ => null,
+        };
 
     /// <summary>
     /// Derive the approver identity from the authenticated principal (I2):

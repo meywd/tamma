@@ -58,6 +58,32 @@ public interface IElsaWorkflowService
     Task<MergeApprovalResumeResult> ResumeDeploymentApprovalAsync(
         int issueNumber, string? tenantId, string? repository, string? mergeSha,
         string decision, string? feedback, string? approver);
+
+    /// <summary>
+    /// Follow-up #15 — resume the <c>blocker-diagnosis</c> progressive resolution ladder
+    /// suspended on a session-scoped bookmark, injecting the payload the suspend-side
+    /// activity callback reads:
+    /// <list type="bullet">
+    ///   <item><description><c>kind == "progress"</c> → the per-level progress bookmark
+    ///     <c>blocker-progress-{session}-{level}</c> with
+    ///     <c>{ProgressDetected=true, ProgressType, Details}</c>; and</description></item>
+    ///   <item><description><c>kind == "escalation"</c> → the escalation bookmark
+    ///     <c>blocker-escalation-{session}</c> with
+    ///     <c>{Resolved, SeniorResponse}</c>.</description></item>
+    /// </list>
+    /// Forwards to the engine's in-process resume endpoint (which owns
+    /// <c>IBookmarkStore</c>/<c>IWorkflowRuntime</c>). A 404 (no wait suspended) is surfaced
+    /// as <see cref="MergeApprovalResumeResult.GateNotFound"/> rather than thrown.
+    ///
+    /// <para>SECURITY — the blocker bookmark is keyed by the (unguessable) session id only,
+    /// so the cross-tenant guard is enforced by the caller (<c>AdlEndpoints</c>): it verifies
+    /// the caller's ambient tenant OWNS <paramref name="sessionId"/> (tenant-scoped session
+    /// lookup) BEFORE invoking this. <paramref name="resolver"/> is the server-derived acting
+    /// identity (I2), logged by the engine for the audit trail.</para>
+    /// </summary>
+    Task<MergeApprovalResumeResult> ResumeBlockerResolutionAsync(
+        Guid sessionId, string kind, string? level, bool resolved,
+        string? progressType, string? details, string? seniorResponse, string? resolver);
 }
 
 /// <summary>Outcome of a merge-approval (or deploy-approval) gate resume.</summary>

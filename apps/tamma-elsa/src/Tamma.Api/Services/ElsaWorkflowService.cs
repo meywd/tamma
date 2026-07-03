@@ -195,15 +195,13 @@ public partial class ElsaWorkflowService : IElsaWorkflowService
     /// Resume a paused workflow.
     /// </summary>
     /// <remarks>
-    /// FOLLOW-UP (blocker-diagnosis Resolved terminal): this hits Elsa's GENERIC
-    /// <c>/resume</c> with no bookmark id and no input, so it cannot supply the
-    /// <c>ProgressDetected</c> / <c>Resolved</c> / <c>SeniorResponse</c> keys the
-    /// blocker-diagnosis progress / escalation bookmarks read. As a result a blocker run can
-    /// only reach the Escalated or (durable) Timeout terminal in production, never Resolved.
-    /// Reaching Resolved requires a blocker-specific resume endpoint that targets the bookmark
-    /// and passes that input, mirroring the secure MergeApprovalResumeEndpoint — a tracked
-    /// follow-up (deliberately NOT added here: it touches Program.cs and would collide with a
-    /// sibling endpoint-wiring PR).
+    /// This hits Elsa's GENERIC <c>/resume</c> with no bookmark id and no input, so it cannot
+    /// supply the <c>ProgressDetected</c> / <c>Resolved</c> / <c>SeniorResponse</c> keys the
+    /// blocker-diagnosis progress / escalation bookmarks read. To reach the blocker
+    /// <c>Resolved</c> terminal use the blocker-specific
+    /// <see cref="ResumeBlockerResolutionAsync"/> (follow-up #15) instead — it targets the
+    /// session-scoped bookmark and injects that input, mirroring the secure
+    /// MergeApprovalResumeEndpoint.
     /// </remarks>
     public async Task ResumeWorkflowAsync(string instanceId)
     {
@@ -405,6 +403,58 @@ public partial class ElsaWorkflowService : IElsaWorkflowService
         {
             _logger.LogWarning(
                 "No deploy-approval gate waiting for issue #{Issue}", issueNumber);
+            return new MergeApprovalResumeResult(Resumed: false, GateNotFound: true, WorkflowInstanceId: null);
+        }
+
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<EngineResumeResponse>(JsonOptions);
+        return new MergeApprovalResumeResult(
+            Resumed: result?.Resumed ?? true,
+            GateNotFound: false,
+            WorkflowInstanceId: result?.WorkflowInstanceId);
+    }
+
+    /// <summary>
+    /// Follow-up #15 — forward a blocker-diagnosis ladder resume to the engine's in-process
+    /// resume endpoint, which looks up the session-scoped progress
+    /// (<c>blocker-progress-{session}-{level}</c>) or escalation
+    /// (<c>blocker-escalation-{session}</c>) bookmark and runs the owning instance with the
+    /// payload injected as input. A 404 (no wait suspended) is surfaced as
+    /// <see cref="MergeApprovalResumeResult.GateNotFound"/> rather than thrown, so the
+    /// controller can map it to a 404 for the caller.
+    /// </summary>
+    public async Task<MergeApprovalResumeResult> ResumeBlockerResolutionAsync(
+        Guid sessionId, string kind, string? level, bool resolved,
+        string? progressType, string? details, string? seniorResponse, string? resolver)
+    {
+        _logger.LogInformation(
+            "Resuming blocker gate for session {SessionId} (kind={Kind}, level={Level})",
+            sessionId, SanitizeForLog(kind), SanitizeForLog(level));
+
+        await EnsureHealthyAsync();
+
+        var payload = new
+        {
+            sessionId,
+            kind,
+            level,
+            resolved,
+            progressType,
+            details,
+            seniorResponse,
+            // I2 — server-derived acting identity, forwarded for the engine's audit log.
+            resolver,
+        };
+
+        var response = await _httpClient.PostAsJsonAsync(
+            "/elsa/api/adl/blocker/resume", payload, JsonOptions);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning(
+                "No blocker gate waiting for session {SessionId} (kind={Kind}, level={Level})",
+                sessionId, SanitizeForLog(kind), SanitizeForLog(level));
             return new MergeApprovalResumeResult(Resumed: false, GateNotFound: true, WorkflowInstanceId: null);
         }
 
