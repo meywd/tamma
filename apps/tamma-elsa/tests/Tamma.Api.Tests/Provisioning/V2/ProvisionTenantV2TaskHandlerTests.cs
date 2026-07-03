@@ -82,6 +82,12 @@ public sealed class ProvisionTenantV2TaskHandlerTests
         var workflow = new ProvisionTenantV2Workflow(
             _db,
             registry,
+            // Story 30-3 — a real registrar backed by a throwaway fake cabinet
+            // so the DedicatedCompute paths reach Ready (Step 6 registers the
+            // HMAC into the fake harmlessly). This handler suite asserts queue
+            // routing, not secret registration.
+            new ProvisioningSecretRegistrar(
+                new FakeSecretStore(), NullLogger<ProvisioningSecretRegistrar>.Instance),
             Mock.Of<IPlatformEventPublisher>(),
             TimeProvider.System,
             NullLogger<ProvisionTenantV2Workflow>.Instance)
@@ -292,6 +298,7 @@ public sealed class ProvisionTenantV2TaskHandlerTests
         var workflowMock = new Mock<ProvisionTenantV2Workflow>(
             _db,
             registry,
+            Mock.Of<IProvisioningSecretRegistrar>(),
             Mock.Of<IPlatformEventPublisher>(),
             TimeProvider.System,
             NullLogger<ProvisionTenantV2Workflow>.Instance);

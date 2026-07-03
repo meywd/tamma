@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Tamma.Api.Services.PlatformTasks;
+using Tamma.Api.Services.Secrets;
 using Tamma.Api.Services.Provisioning;
 using Tamma.Api.Services.Provisioning.Cranl;
 using Tamma.Api.Services.Provisioning.V2;
@@ -97,6 +98,19 @@ public static class ProvisioningServiceCollectionExtensions
         // Both need ControlPlaneDbContext + the registry, so Scoped.
         // The workflow itself is also Scoped because it persists
         // tenant-row state via the same DbContext.
+        //
+        // ── Story 30-3: RegisterSecrets saga-step collaborator ─────────────
+        // Registers per-tenant provisioning secrets (Step 6) via the Epic 29
+        // ISecretStore facade. ISecretStore is resolved OPTIONALLY here: it is
+        // only wired on the Postgres cabinet path (AddTammaPostgresSecrets). On
+        // a dev/in-memory host it is absent, and the registrar then fails loud
+        // ONLY if a DedicatedCompute tenant actually needs it (the dormant
+        // Cranl path); every non-dedicated topology is a clean guarded no-op
+        // regardless. Factory registration keeps the optional resolve explicit.
+        services.TryAddScoped<IProvisioningSecretRegistrar>(sp =>
+            new ProvisioningSecretRegistrar(
+                sp.GetService<ISecretStore>(),
+                sp.GetRequiredService<ILogger<ProvisioningSecretRegistrar>>()));
         services.TryAddScoped<ProvisionTenantV2Workflow>();
         services.TryAddScoped<ProvisionTenantV2Dispatcher>();
         // Register the handler under both IPlatformTaskHandler (so

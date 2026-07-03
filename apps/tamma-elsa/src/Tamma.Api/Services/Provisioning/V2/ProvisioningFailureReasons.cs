@@ -96,4 +96,13 @@ public static class ProvisioningFailureReasons
     /// (e.g. already <c>ready</c>, or in <c>deprovisioning</c>). Dispatch
     /// refuses without making a provider call.</summary>
     public const string IllegalTenantState = "illegal_tenant_state";
+
+    /// <summary>Story 30-3 — the RegisterSecrets step (Step 6) could not
+    /// register a per-tenant secret it genuinely needed (cabinet
+    /// unavailable, duplicate-mint race, or a fail-closed backend rejecting
+    /// the write). The workflow fails loud + compensates rather than
+    /// activating a tenant whose engine is missing its
+    /// <c>TAMMA_SHARED_SECRET</c> shadow — a silent miss would surface later
+    /// as an un-diagnosable HMAC mismatch on every signed engine call.</summary>
+    public const string SecretRegistrationFailed = "secret_registration_failed";
 }

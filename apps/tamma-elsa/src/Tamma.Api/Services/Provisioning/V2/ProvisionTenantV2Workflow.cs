@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Tamma.Api.Services.Secrets;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -37,11 +38,16 @@ namespace Tamma.Api.Services.Provisioning.V2;
 ///     +  endpoints in workflow state (not yet persisted to columns
 ///     because <c>provider_resource_ids</c> + <c>provider_key</c> land
 ///     in 30-3). Compensation: clear the in-memory captures.</description></item>
-///   <item><description>RegisterSecrets — placeholder hook that 30-2 leaves
-///     intentionally unimplemented. The cabinet integration (Epic 29
-///     <c>ISecretStore.CreateAsync</c>) is wired by 30-3 once each
-///     provider declares which secrets it surfaces. Compensation: noop
-///     today; <c>RetireVersionAsync</c> per registered secret in 30-3.</description></item>
+///   <item><description>RegisterSecrets — Story 30-3: register the
+///     per-tenant secrets the saga needs via the Epic 29
+///     <see cref="ISecretStore"/> facade
+///     (<see cref="IProvisioningSecretRegistrar"/>). For
+///     <see cref="ProvisioningTopology.DedicatedCompute"/> that is the
+///     per-tenant HMAC / <c>TAMMA_SHARED_SECRET</c> shadow; for every
+///     other topology it is a DELIBERATE guarded no-op (nothing to
+///     register). Fails loud on a genuine registration failure.
+///     Compensation: <c>RetireVersionAsync</c> per registered secret
+///     (idempotent — safe even if nothing was created).</description></item>
 ///   <item><description>InitialProbe — SINGLE-SHOT
 ///     <see cref="ITenantInfrastructureProvider.GetStatusAsync"/>: Ready →
 ///     Activate; Failed → compensate; still-provisioning within budget →
@@ -91,6 +97,7 @@ public class ProvisionTenantV2Workflow
 
     private readonly ControlPlaneDbContext _db;
     private readonly TenantProviderRegistry _registry;
+    private readonly IProvisioningSecretRegistrar _secretRegistrar;
     private readonly IPlatformEventPublisher _events;
     private readonly TimeProvider _clock;
     private readonly ILogger<ProvisionTenantV2Workflow> _logger;
@@ -98,12 +105,14 @@ public class ProvisionTenantV2Workflow
     public ProvisionTenantV2Workflow(
         ControlPlaneDbContext db,
         TenantProviderRegistry registry,
+        IProvisioningSecretRegistrar secretRegistrar,
         IPlatformEventPublisher events,
         TimeProvider clock,
         ILogger<ProvisionTenantV2Workflow> logger)
     {
         _db = db;
         _registry = registry;
+        _secretRegistrar = secretRegistrar;
         _events = events;
         _clock = clock;
         _logger = logger;
@@ -395,20 +404,68 @@ public class ProvisionTenantV2Workflow
                 return Task.CompletedTask;
             }));
 
-            // ── Step 6: RegisterSecrets ──────────────────────────────
-            // Hook is intentionally a no-op in 30-2. 30-3 lands the
-            // per-provider secret declaration + the
-            // ISecretStore.CreateAsync call. Tracked as a follow-up;
-            // documented in the return summary so the gap is visible.
+            // ── Step 6: RegisterSecrets (Story 30-3) ─────────────────
+            // Register the per-tenant secrets the saga genuinely needs via
+            // the Epic 29 ISecretStore facade. For DedicatedCompute that is
+            // the per-tenant HMAC / TAMMA_SHARED_SECRET shadow
+            // (tenant:cranl/app-env-hmac); for every other topology the
+            // registrar registers NOTHING and returns an empty list — a
+            // DELIBERATE guarded no-op (there is no per-tenant engine env to
+            // sign), NOT a stub.
             await EmitStepEventAsync(payload.TenantId, "register_secrets",
                 "STEP_STARTED", null, ct).ConfigureAwait(false);
+
+            IReadOnlyList<SecretRef> registeredSecrets;
+            try
+            {
+                registeredSecrets = await _secretRegistrar
+                    .RegisterInitialSecretsAsync(payload.TenantId, payload.Topology, ct)
+                    .ConfigureAwait(false)
+                    ?? Array.Empty<SecretRef>();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // FAIL LOUD: a genuine registration failure must NOT let the
+                // saga proceed with a missing per-tenant secret (the engine
+                // would later fail every signed call). Surface the structured
+                // short-code + run compensation (tears down the provisioned
+                // resources reserved so far).
+                _logger.LogError(ex,
+                    "v2_provisioning.register_secrets_failed tenantId={TenantId}",
+                    payload.TenantId);
+                await EmitStepEventAsync(payload.TenantId, "register_secrets",
+                    "STEP_FAILED",
+                    new Dictionary<string, object?>
+                    {
+                        ["failureReason"] = ProvisioningFailureReasons.SecretRegistrationFailed,
+                        ["errorType"] = ex.GetType().Name,
+                    }, ct).ConfigureAwait(false);
+                await RunCompensationsAsync(compensations, payload.TenantId, ct).ConfigureAwait(false);
+                return ProvisionTenantV2Outcome.Failed(await StampFailureAsync(
+                    tenant,
+                    ProvisioningFailureReasons.SecretRegistrationFailed,
+                    $"secret_registration_threw_{ex.GetType().Name}",
+                    ct).ConfigureAwait(false));
+            }
+
+            // Compensation: retire every secret we registered. Registered
+            // BEFORE the STEP_COMPLETED event so a LATER step's failure rolls
+            // the secrets back. Idempotent — RetireInitialSecretsAsync tolerates
+            // an empty list (guarded no-op ⇒ pure no-op) and a secret that was
+            // never created.
+            compensations.Add(("register_secrets", async ictok =>
+            {
+                await _secretRegistrar
+                    .RetireInitialSecretsAsync(registeredSecrets, ictok)
+                    .ConfigureAwait(false);
+            }));
+
             await EmitStepEventAsync(payload.TenantId, "register_secrets",
                 "STEP_COMPLETED",
                 new Dictionary<string, object?>
                 {
-                    ["status"] = "deferred_to_30_3",
+                    ["secretsRegistered"] = registeredSecrets.Count,
                 }, ct).ConfigureAwait(false);
-            compensations.Add(("register_secrets", _ => Task.CompletedTask));
 
             // ── Step 7: InitialProbe (SINGLE-SHOT + defer) ───────────
             // Phase-B I1: exactly ONE GetStatusAsync per invocation. We do
