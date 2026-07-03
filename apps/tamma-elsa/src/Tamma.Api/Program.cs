@@ -175,6 +175,18 @@ builder.Services.AddHttpClient("github", client =>
     if (!string.IsNullOrEmpty(token))
         client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
 });
+// Integration BYOK — the credential-bound JIRA client (JiraApiClient) rides this
+// named client. It carries NO base address (each call targets the per-tenant
+// baseUrl) and is hardened against SSRF: redirects are NOT auto-followed (a 3xx to
+// an internal host is refused, not chased), and the connect callback re-checks the
+// resolved address at connect time so a host that passed URL validation but rebinds
+// its DNS to a private/metadata address cannot be reached.
+builder.Services.AddHttpClient(Tamma.Api.Services.Integrations.JiraApiClient.HttpClientName)
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        ConnectCallback = Tamma.Api.Services.Integrations.JiraBaseUrlGuard.SafeConnectAsync,
+    });
 
 // ────────────────────────────────────────────────────────────────────────────
 // Database + repositories (via extension method)

@@ -8,49 +8,59 @@ namespace Tamma.Api.Services.EmailMediation;
 /// <summary>
 /// Story 38 (Phase 1) + integration BYOK — composes the email-mediation sequence
 /// entirely inside <c>Tamma.Api</c>: resolve the acting tenant's email transport
-/// credential per-request (BYOK→system→fail-loud, like git/LLM), thread its
-/// tenant-authorized <c>From</c> identity onto the rendered message, and accept it
-/// into the credentialed, outbox-backed <see cref="IEmailService"/> for delivery.
-/// The transport secret NEVER reaches the engine — it stays in Tamma.Api (cabinet
-/// or single-user config).
+/// credential per-request (BYOK→system→fail-loud, like git/LLM), then deliver via
+/// the resolved credential's OWN transport authority. The transport secret NEVER
+/// reaches the engine — it stays in Tamma.Api (cabinet or single-user config).
 ///
 /// <para><b>Fail-loud tenant resolution (replaces the old SaaS-deny guard).</b>
 /// The credential is resolved via <see cref="IEmailCredentialResolver"/>:
 /// <list type="bullet">
 ///   <item><b>present</b> — the tenant's BYOK bundle (SaaS) or the single-user
 ///     <c>Email:*</c> config (system tier) ⇒ ALLOW, sending FROM the resolved
-///     tenant-authorized identity.</item>
+///     tenant-authorized identity, over that tier's own transport.</item>
 ///   <item><b>absent</b> — no per-tenant credential and no legitimate system tier
 ///     ⇒ <b>fail loud</b> with the typed
 ///     <see cref="EmailMediationFailureCodes.CredentialUnavailable"/> and a WARN
-///     log; the transport is NEVER reached. This closes the confused-deputy: a
+///     log; no transport is ever reached. This closes the confused-deputy: a
 ///     SaaS tenant can no longer send under a shared platform sender identity.</item>
 /// </list></para>
 ///
-/// <para>The DCB audit is owned by <see cref="IEmailService"/> itself
+/// <para><b>Per-tier transport authority (the anti-spoofing invariant).</b> The
+/// transport is chosen by the tier that answered — NOT a single shared singleton:
+/// <list type="bullet">
+///   <item><b>SaaS BYOK (<see cref="IntegrationCredentialSource.Tenant"/>)</b> —
+///     delivered via <see cref="ITenantEmailTransport"/> built from the tenant's
+///     OWN bundle (their Resend key / their SMTP relay). The tenant's <c>From</c> is
+///     therefore backed by the tenant's own sending authority (their DKIM); they can
+///     only ever send as themselves. The platform singleton
+///     <see cref="IEmailService"/> is <b>never</b> used for a SaaS tenant — using it
+///     with a tenant-supplied <c>From</c> would be an open-relay / From-spoofing
+///     hole (the platform's DKIM-signed transport emitting brand-impersonating
+///     mail).</item>
+///   <item><b>single-user system tier (<see cref="IntegrationCredentialSource.System"/>)</b>
+///     — delivered via the platform singleton <see cref="IEmailService"/>, whose
+///     <c>Email:*</c> process config IS the sole principal's own authority.</item>
+/// </list></para>
+///
+/// <para>The DCB audit is owned by the transport itself
 /// (<c>EMAIL.QUEUED/SENT/FAILED</c>); the mediation layer does NOT emit a duplicate
 /// terminal event.</para>
-///
-/// <para><b>Bounded transport threading.</b> The resolved <c>From</c> is threaded
-/// onto the message (the tenant-owned sender identity — the anti-spoofing control);
-/// swapping the singleton outbox transport's own secret (the tenant's Resend key /
-/// SMTP endpoint) per-tenant is a follow-on, because the outbox transport reads
-/// process config and carrying a per-tenant SMTP endpoint would need an outbox
-/// column (NON-migration forbids it). Single-user's transport IS the config the
-/// resolver mirrors, so delivery is fully consistent there.</para>
 /// </summary>
 public sealed class EmailMediationService : IEmailMediationService
 {
     private readonly IEmailService _email;
+    private readonly ITenantEmailTransport _tenantTransport;
     private readonly IEmailCredentialResolver _credentials;
     private readonly ILogger<EmailMediationService> _logger;
 
     public EmailMediationService(
         IEmailService email,
+        ITenantEmailTransport tenantTransport,
         IEmailCredentialResolver credentials,
         ILogger<EmailMediationService> logger)
     {
         _email = email ?? throw new ArgumentNullException(nameof(email));
+        _tenantTransport = tenantTransport ?? throw new ArgumentNullException(nameof(tenantTransport));
         _credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -124,7 +134,14 @@ public sealed class EmailMediationService : IEmailMediationService
                 TenantId: tenantId,
                 UserId: null);
 
-            var txnId = await _email.SendAsync(message, ct).ConfigureAwait(false);
+            // Route by the tier that answered — the anti-spoofing invariant. A SaaS
+            // BYOK credential is delivered via the TENANT'S OWN transport (their
+            // Resend key / SMTP relay), never the platform singleton with a
+            // tenant-supplied From. Single-user's system tier uses the platform
+            // singleton, whose Email:* config IS the sole principal's authority.
+            var txnId = resolution.Source == IntegrationCredentialSource.Tenant
+                ? await _tenantTransport.SendAsync(resolution.Credential, message, ct).ConfigureAwait(false)
+                : await _email.SendAsync(message, ct).ConfigureAwait(false);
 
             return new EmailMediationResult
             {

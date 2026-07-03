@@ -28,7 +28,14 @@ namespace Tamma.Api.Services.Integrations;
 /// </summary>
 public sealed class JiraCredentialResolver : IJiraCredentialResolver
 {
-    /// <summary>In-process cache TTL for a resolved tenant bundle.</summary>
+    /// <summary>
+    /// In-process cache TTL for a resolved tenant bundle. NOTE (same as provider
+    /// BYOK): a positive entry lives up to this TTL and <see cref="Invalidate"/> only
+    /// evicts the LOCAL process cache — in a multi-replica deployment a credential
+    /// revoked/rotated on one replica may keep resolving on another for up to this
+    /// window before its own entry expires. 60s bounds that revocation lag; we do NOT
+    /// over-engineer distributed invalidation here.
+    /// </summary>
     public static readonly TimeSpan DefaultCacheTtl = TimeSpan.FromSeconds(60);
 
     private readonly ITenantProviderKeyReader _cabinet;

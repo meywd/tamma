@@ -79,6 +79,40 @@ public class IntegrationCredentialEndpointsTests
         _cabinet.SetName.Should().BeNull();
     }
 
+    [TestCase("http://acme.atlassian.net")]   // http scheme
+    [TestCase("https://169.254.169.254")]     // cloud metadata
+    [TestCase("https://127.0.0.1")]           // loopback
+    [TestCase("https://10.0.0.1")]            // private
+    [TestCase("https://192.168.1.1")]         // private
+    public async Task SetJira_SsrfOrHttpBaseUrl_BadRequest_NotStored(string baseUrl)
+    {
+        var body = new SetJiraCredentialRequest(baseUrl, "bot@example.com", JiraToken);
+        var result = await IntegrationCredentialEndpoints.SetJiraCredential(
+            body, Principal(), TenantCtx(Tenant), _cabinet, _jiraResolver, Http());
+        result.GetType().Name.Should().Contain("BadRequest");
+        _cabinet.SetName.Should().BeNull("a hostile baseUrl must never reach the cabinet");
+    }
+
+    [Test]
+    public async Task SetJira_CabinetArgumentException_FixedClientSafeError_NotRawMessage()
+    {
+        _cabinet.ThrowArgument = "internal cabinet detail leak";
+        var body = new SetJiraCredentialRequest("https://acme.atlassian.net", "bot@example.com", JiraToken);
+
+        var result = await IntegrationCredentialEndpoints.SetJiraCredential(
+            body, Principal(), TenantCtx(Tenant), _cabinet, _jiraResolver, Http());
+
+        result.GetType().Name.Should().Contain("BadRequest");
+        // The raw exception message must NOT be echoed to the client.
+        JsonSerializer.Serialize(GetValue(result)).Should().NotContain("internal cabinet detail leak");
+    }
+
+    private static object? GetValue(IResult result)
+    {
+        var prop = result.GetType().GetProperty("Value");
+        return prop?.GetValue(result);
+    }
+
     [Test]
     public async Task SetJira_MissingToken_BadRequest()
     {
@@ -202,10 +236,15 @@ public class IntegrationCredentialEndpointsTests
         public string? SetJson { get; private set; }
         public string? RemovedName { get; private set; }
         public bool ThrowDuplicate { get; set; }
+        public string? ThrowArgument { get; set; }
         public bool RemoveResult { get; set; }
 
         public Task<SecretMetadata> SetAsync(Guid tenantId, string cabinetName, string consumerSystem, string bundleJson, Guid ownerUserId, CancellationToken ct = default)
         {
+            if (ThrowArgument is not null)
+            {
+                throw new ArgumentException(ThrowArgument);
+            }
             if (ThrowDuplicate)
             {
                 throw new InvalidOperationException("already exists");

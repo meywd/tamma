@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Tamma.Api.Auth;
 using Tamma.Api.Services.Audit;
 using Tamma.Api.Services.Integrations;
@@ -54,7 +56,7 @@ public static class IntegrationCredentialEndpoints
         {
             return Results.BadRequest(new { error = "invalid_body" });
         }
-        var validation = ValidateJira(body);
+        var validation = await ValidateJiraAsync(body, http).ConfigureAwait(false);
         if (validation is not null) return validation;
 
         if (tenantContext.TenantId is not Guid tid)
@@ -86,7 +88,7 @@ public static class IntegrationCredentialEndpoints
         }
         catch (ArgumentException ex)
         {
-            return Results.BadRequest(new { error = ex.Message });
+            return RejectInvalidRequest(http, JiraIntegration, ex);
         }
         catch (Exception ex) when (IsDuplicate(ex))
         {
@@ -155,7 +157,7 @@ public static class IntegrationCredentialEndpoints
         }
         catch (ArgumentException ex)
         {
-            return Results.BadRequest(new { error = ex.Message });
+            return RejectInvalidRequest(http, EmailIntegration, ex);
         }
         catch (Exception ex) when (IsDuplicate(ex))
         {
@@ -247,16 +249,25 @@ public static class IntegrationCredentialEndpoints
             http.RequestAborted).ConfigureAwait(false);
     }
 
-    private static IResult? ValidateJira(SetJiraCredentialRequest body)
+    /// <summary>
+    /// Write-time validation of a JIRA credential bundle, including the SSRF guard on
+    /// <c>baseUrl</c> (https-only + private/loopback/link-local/metadata rejection +
+    /// optional <c>Jira:AllowedHostSuffixes</c> allowlist) via
+    /// <see cref="JiraBaseUrlGuard"/>. This is the first layer; <see cref="JiraApiClient"/>
+    /// re-validates at use time (defense in depth). Reject at write time so a hostile
+    /// baseUrl never even lands in the cabinet.
+    /// </summary>
+    private static async Task<IResult?> ValidateJiraAsync(SetJiraCredentialRequest body, HttpContext http)
     {
-        if (string.IsNullOrWhiteSpace(body.BaseUrl)
-            || !Uri.TryCreate(body.BaseUrl.Trim(), UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        var validation = await JiraBaseUrlGuard
+            .ValidateAsync(body.BaseUrl, AllowedJiraHostSuffixes(http), dnsResolve: null, http.RequestAborted)
+            .ConfigureAwait(false);
+        if (!validation.IsValid)
         {
             return Results.BadRequest(new
             {
-                error = "invalid_base_url",
-                detail = "baseUrl must be an absolute http(s) URL.",
+                error = validation.ErrorCode ?? "invalid_base_url",
+                detail = validation.ErrorDetail ?? "baseUrl must be an absolute https URL.",
             });
         }
         if (string.IsNullOrWhiteSpace(body.Email))
@@ -264,6 +275,14 @@ public static class IntegrationCredentialEndpoints
             return Results.BadRequest(new { error = "invalid_email", detail = "email is required." });
         }
         return ValidateSecret(body.ApiToken, "apiToken");
+    }
+
+    private static IReadOnlyList<string>? AllowedJiraHostSuffixes(HttpContext http)
+    {
+        var raw = http.RequestServices?.GetService<IConfiguration>()?["Jira:AllowedHostSuffixes"];
+        return string.IsNullOrWhiteSpace(raw)
+            ? null
+            : raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
     private static (EmailCredential? Bundle, IResult? Error) ValidateEmail(SetEmailCredentialRequest body)
@@ -306,6 +325,31 @@ public static class IntegrationCredentialEndpoints
             SmtpPassword: body.SmtpPassword,
             SmtpUseStartTls: body.SmtpUseStartTls);
         return (bundle, null);
+    }
+
+    /// <summary>
+    /// Map a cabinet <see cref="ArgumentException"/> to a fixed, client-safe 400 —
+    /// the raw exception message may carry internal detail (cabinet naming, backend
+    /// state) and must NOT be echoed to the caller. The real message is logged
+    /// server-side (best-effort; never a secret) for operators.
+    /// </summary>
+    private static IResult RejectInvalidRequest(HttpContext http, string integration, ArgumentException ex)
+    {
+        try
+        {
+            http.RequestServices?.GetService<ILoggerFactory>()
+                ?.CreateLogger(typeof(IntegrationCredentialEndpoints))
+                .LogWarning(ex, "Rejected {Integration} credential set: invalid request.", integration);
+        }
+        catch
+        {
+            // Logging is best-effort; never let it change the response.
+        }
+        return Results.BadRequest(new
+        {
+            error = "invalid_request",
+            detail = "the credential could not be stored; check the submitted values.",
+        });
     }
 
     private static IResult? ValidateSecret(string? secret, string field)
