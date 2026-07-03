@@ -5,8 +5,10 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Auth;
 using Tamma.Api.Authorization;
+using Tamma.Api.Dtos.Audit;
 using Tamma.Api.Dtos.Orgs;
 using Tamma.Api.Services.Audit;
+using Tamma.Core.Audit;
 using Tamma.Api.Services.Email;
 using Tamma.Api.Services.PromptStore;
 using Tamma.Api.Services.RateLimit;
@@ -603,6 +605,33 @@ public static class OrgEndpoints
         var result = await auditQuery.QueryTenantAsync(
             tenantId, callerUserId, filter, modeProvider.Mode, ct);
         return Results.Ok(result);
+    }
+
+    /// <summary>
+    /// Story 37-2 (AC8/AC13) — verify THIS tenant's tamper-evident audit
+    /// hash-chain. <see cref="RequireTenantMembershipFilter"/> rejects
+    /// non-members (403); this handler additionally requires admin+ (a SaaS
+    /// <c>member</c> gets 403). The verify reads ONLY this tenant's chain (its
+    /// own schema) and never the platform chain or another tenant's. Optional
+    /// <c>from</c>/<c>to</c> bound the <c>chain_sequence</c> range.
+    /// </summary>
+    public static async Task<IResult> VerifyTenantAudit(
+        Guid tenantId,
+        IAuditChainVerificationService verification,
+        HttpContext httpContext,
+        [FromQuery] long? from,
+        [FromQuery] long? to,
+        CancellationToken ct)
+    {
+        var requesterRole = httpContext.Items[RequireTenantMembershipFilter.TenantRoleItemKey] as string;
+        if (requesterRole is null)
+            return Results.Json(new { error = "Not a member of this organization" }, statusCode: 403);
+        if (!TenantRoleHierarchy.IsAtLeast(requesterRole, TenantRoleHierarchy.Admin))
+            return Results.Json(new { error = "Requires admin role or higher" }, statusCode: 403);
+
+        var scope = AuditChainScope.ForTenant(tenantId);
+        var result = await verification.VerifyAsync(scope, from, to, ct);
+        return Results.Ok(AuditChainVerifyResponse.From(scope, result));
     }
 
     public static async Task<IResult> AcceptInvite(

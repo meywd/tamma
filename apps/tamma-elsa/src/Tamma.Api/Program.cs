@@ -1015,6 +1015,12 @@ builder.Services.AddTammaAlertRuleEngine();
 // background loop is opt-in (AuditProjectorOptions.RunOnStartup defaults false).
 builder.Services.AddTammaAuditProjection();
 
+// Story 37-2 — tamper-evident audit hash-chain: canonical hasher/verifier,
+// cabinet-backed checkpoint signer, verification + checkpoint-writer services,
+// and the AUDIT.CHAIN.* event emitter (raises a critical tamper alert). Scoped;
+// the checkpoint scheduler (Tamma.ElsaServer) creates its own per-tick scope.
+builder.Services.AddTammaAuditChain();
+
 // Story 37-10 — curated sensitive-action EMISSION seam (write side): the single
 // ISensitiveActionEmitter every sensitive-action call site (auth login/refresh,
 // API-key auth, BYOK provider-key changes, ...) appends through, plus the
@@ -1935,6 +1941,14 @@ v1Admin.MapPost("/alert-rules/{id:guid}/_test", AlertRuleEndpoints.TestFireRule)
 v1Admin.MapGet("/audit", AdminEndpoints.ListPlatformAudit)
     .RequireAuthorization("PlatformOwnerAccess");
 
+// Story 37-2 (AC8) — platform (or ?tenantId) audit hash-chain verification +
+// on-demand checkpoint. PlatformOwnerAccess (same gate as the platform audit
+// read). The tenant-scope verify lives on the org route below (tenant_admin+).
+v1Admin.MapGet("/audit/verify", AdminEndpoints.VerifyPlatformAudit)
+    .RequireAuthorization("PlatformOwnerAccess");
+v1Admin.MapPost("/audit/checkpoint", AdminEndpoints.CheckpointAudit)
+    .RequireAuthorization("PlatformOwnerAccess");
+
 // Story 29-3 — platform-scope secret-cabinet create + rotate. Both
 // return the newly-minted plaintext via a one-shot reveal token in
 // the response (no plaintext bytes in the body); the caller must
@@ -2032,6 +2046,9 @@ orgs.MapPost("/{tenantId:guid}/invites/{inviteId:guid}/resend", OrgEndpoints.Res
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 // Story 18-7: tenant-scoped audit log read for tenant admins.
 orgs.MapGet("/{tenantId:guid}/audit", OrgEndpoints.ListTenantAudit)
+    .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
+// Story 37-2 (AC8): tenant-scoped audit hash-chain verification (tenant_admin+).
+orgs.MapGet("/{tenantId:guid}/audit/verify", OrgEndpoints.VerifyTenantAudit)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
 orgs.MapPost("/{tenantId:guid}/transfer-ownership", OrgEndpoints.TransferOwnership)
     .AddEndpointFilter<Tamma.Api.Authorization.RequireTenantMembershipFilter>();
@@ -2766,7 +2783,7 @@ using (var scope = app.Services.CreateScope())
                     admin_impersonations,
                     agents, agent_versions, agent_role_selections,
                     tenant_agent_enablements,
-                    audit_records, audit_projector_cursor,
+                    audit_records, audit_projector_cursor, audit_chain_checkpoints,
                     billing_customers, billing_plan_prices,
                     billing_webhook_events, billing_subscriptions,
                     alert_delivery_attempts, alert_channels, alerts,

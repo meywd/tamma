@@ -247,7 +247,7 @@ public class AuditRecordMigrationTests
                "SourceEventId","SourceSequenceNumber","PayloadJson","TenantId","UserId")
             VALUES
               ('SECRET.REVEAL','secret','critical','success', now(),
-               @src, 1, '{}'::jsonb, @tid, @uid);
+               @src, 1, '{}', @tid, @uid);
             """, conn);
         cmd.Parameters.AddWithValue("src", sourceId);
         cmd.Parameters.AddWithValue("tid", (object?)tenantId ?? DBNull.Value);
