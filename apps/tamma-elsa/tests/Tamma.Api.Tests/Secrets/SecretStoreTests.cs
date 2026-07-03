@@ -118,6 +118,56 @@ public class SecretStoreTests
             && e.Outcome == SecretAuditOutcome.Success);
     }
 
+    [Test]
+    public async Task Create_BackendPutFails_LeavesNoRow_SoNameIsReusable()
+    {
+        // A create whose backend PutVersion throws must NOT poison a
+        // name-locked row: compensation deletes the just-committed metadata +
+        // pending version so a retry with the SAME name succeeds (rather than
+        // "already exists"). Under the fail-closed backend every plaintext
+        // create would otherwise poison a row.
+        var throwingStore = new SecretStore(
+            _factory, new ThrowingPutBackend(), _auditor, TimeProvider.System,
+            NullLogger<SecretStore>.Instance);
+
+        Func<Task> failed = () => throwingStore.CreateAsync(
+            TenantCreate("db/app-role", "first-value"));
+        await failed.Should().ThrowAsync<InvalidOperationException>();
+
+        // No orphan secret row + no orphan version rows remain.
+        (await throwingStore.GetAsync(SecretRef.ForTenant(TenantA, "db/app-role")))
+            .Should().BeNull("the failed create was rolled back — no row remains");
+        (await AllVersionCountAsync()).Should().Be(0,
+            "the pending version row was compensated too");
+
+        // A fresh create with the SAME name now SUCCEEDS (name is reusable).
+        var meta = await _store.CreateAsync(TenantCreate("db/app-role", "second-value"));
+        meta.ActiveVersionNumber.Should().Be(1);
+        (await _backend.GetVersionPlaintextAsync(meta.Id, 1)).Should().Be("second-value");
+    }
+
+    [Test]
+    public void IsPendingUniqueViolation_TrueForUniqueViolation()
+    {
+        var pg = new Npgsql.PostgresException(
+            "duplicate pending", "ERROR", "ERROR",
+            Npgsql.PostgresErrorCodes.UniqueViolation);
+        var ex = new DbUpdateException("mint conflict", pg);
+
+        SecretStore.IsPendingUniqueViolation(ex).Should().BeTrue();
+    }
+
+    [Test]
+    public void IsPendingUniqueViolation_FalseForNonUniqueViolation()
+    {
+        var pg = new Npgsql.PostgresException(
+            "fk", "ERROR", "ERROR",
+            Npgsql.PostgresErrorCodes.ForeignKeyViolation);
+        var ex = new DbUpdateException("x", pg);
+
+        SecretStore.IsPendingUniqueViolation(ex).Should().BeFalse();
+    }
+
     // ── Get / List ───────────────────────────────────────────────────
 
     [Test]
@@ -177,25 +227,47 @@ public class SecretStoreTests
     // ── Rotate ───────────────────────────────────────────────────────
 
     [Test]
-    public async Task Rotate_MintsPendingSuccessor_AndRetiresPriorActiveToGrace()
+    public async Task Rotate_MintsPendingSuccessor_AndLeavesPriorActive()
     {
         var created = await _store.CreateAsync(TenantCreate("db/app-role", "initial-secret-value"));
 
         var rotated = await _store.RotateAsync(
             created.ToRef(), new RotateSecretRequest(NewPlaintext: "rotated-secret-value"));
 
-        rotated.ActiveVersionNumber.Should().Be(2);
-        rotated.LastRotatedAt.Should().NotBeNull();
+        // Gateway-consistency: the pointer stays on the PRIOR active version;
+        // the successor is minted PENDING and activation is the saga's job.
+        rotated.ActiveVersionNumber.Should().Be(1,
+            "the facade does not advance the ActiveVersionNumber pointer — activation does");
 
         var versions = (await VersionsAsync(created.Id))
             .ToDictionary(v => v.VersionNumber, v => v.Status);
 
         versions[2].Should().Be("pending",
             "the successor is minted as pending — the saga's handler flips it to active");
-        versions[1].Should().Be("retired_grace",
-            "the prior active version moves into the grace window on rotation");
-        versions.Values.Count(s => s == "active").Should().Be(0,
-            "the facade never leaves two active versions; the successor awaits activation");
+        versions[1].Should().Be("active",
+            "the prior active version stays active (and propagated) until activation");
+        versions.Values.Count(s => s == "active").Should().Be(1,
+            "exactly one version is active — the prior one — until the saga activates the successor");
+    }
+
+    [Test]
+    public async Task Rotate_LeavesActivePointerOnPrior_SoReadersGetOldSecretUntilActivation()
+    {
+        var created = await _store.CreateAsync(TenantCreate("db/app-role", "old-propagated-secret"));
+
+        await _store.RotateAsync(
+            created.ToRef(), new RotateSecretRequest(NewPlaintext: "new-unpropagated-secret"));
+
+        // The SecretRow pointer is unchanged — a reader that resolves by
+        // ActiveVersionNumber (every read seam does) gets the OLD, still-
+        // propagated secret, NOT the un-pushed pending successor.
+        var row = await GetSecretRowAsync(created.Id);
+        row.ActiveVersionNumber.Should().Be(1);
+
+        var activePlaintext =
+            await _backend.GetVersionPlaintextAsync(created.Id, row.ActiveVersionNumber);
+        activePlaintext.Should().Be("old-propagated-secret",
+            "readers key on ActiveVersionNumber, which still points at the propagated v1");
     }
 
     [Test]
@@ -268,20 +340,21 @@ public class SecretStoreTests
         await _store.RotateAsync(
             created.ToRef(), new RotateSecretRequest(NewPlaintext: "rotated-secret-value"));
 
-        // After rotate: ActiveVersionNumber = 2, v1 = retired_grace.
-        // v1 is not the active pointer, so it can be retired.
-        await _store.RetireVersionAsync(created.ToRef(), versionNumber: 1);
+        // After rotate (gateway-consistent): ActiveVersionNumber = 1 (v1
+        // still active), v2 is the pending successor. v2 is NOT the active
+        // pointer, so the abandoned successor can be retired.
+        await _store.RetireVersionAsync(created.ToRef(), versionNumber: 2);
 
-        var v1 = (await VersionsAsync(created.Id)).Single(v => v.VersionNumber == 1);
-        v1.Status.Should().Be("revoked");
-        v1.Ciphertext.Should().BeNull("the ciphertext row is scrubbed on revoke");
+        var v2 = (await VersionsAsync(created.Id)).Single(v => v.VersionNumber == 2);
+        v2.Status.Should().Be("revoked");
+        v2.Ciphertext.Should().BeNull("the ciphertext row is scrubbed on revoke");
 
-        (await _backend.GetVersionPlaintextAsync(created.Id, 1))
+        (await _backend.GetVersionPlaintextAsync(created.Id, 2))
             .Should().BeNull("the backend bytes are scrubbed on retire");
 
         _auditor.Events.Should().Contain(e =>
             e.EventType == SecretAuditEventTypes.VersionRevoked
-            && e.VersionNumber == 1);
+            && e.VersionNumber == 2);
     }
 
     [Test]
@@ -328,20 +401,21 @@ public class SecretStoreTests
         var fetched = await _store.GetAsync(created.ToRef());
         fetched!.Id.Should().Be(created.Id);
 
-        // Rotate → pending successor, prior active → grace.
+        // Rotate → pending successor; prior active stays active + pointer
+        // stays on it (activation is the gateway's job).
         var rotated = await _store.RotateAsync(
             created.ToRef(), new RotateSecretRequest(NewPlaintext: "rotated-secret-value"));
-        rotated.ActiveVersionNumber.Should().Be(2);
+        rotated.ActiveVersionNumber.Should().Be(1);
         var afterRotate = (await VersionsAsync(created.Id))
             .ToDictionary(v => v.VersionNumber, v => v.Status);
         afterRotate[2].Should().Be("pending");
-        afterRotate[1].Should().Be("retired_grace");
+        afterRotate[1].Should().Be("active");
 
-        // Retire the graced predecessor → revoked + scrubbed.
-        await _store.RetireVersionAsync(created.ToRef(), versionNumber: 1);
-        var v1 = (await VersionsAsync(created.Id)).Single(v => v.VersionNumber == 1);
-        v1.Status.Should().Be("revoked");
-        v1.Ciphertext.Should().BeNull();
+        // Retire the abandoned pending successor → revoked + scrubbed.
+        await _store.RetireVersionAsync(created.ToRef(), versionNumber: 2);
+        var v2 = (await VersionsAsync(created.Id)).Single(v => v.VersionNumber == 2);
+        v2.Status.Should().Be("revoked");
+        v2.Ciphertext.Should().BeNull();
     }
 
     // ── helpers ──────────────────────────────────────────────────────
@@ -377,6 +451,38 @@ public class SecretStoreTests
             .AsNoTracking()
             .Where(v => v.SecretId == secretId)
             .ToListAsync();
+    }
+
+    private async Task<SecretRow> GetSecretRowAsync(Guid secretId)
+    {
+        await using var ctx = await _factory.CreateDbContextAsync();
+        return await ctx.Secrets.AsNoTracking().SingleAsync(s => s.Id == secretId);
+    }
+
+    private async Task<int> AllVersionCountAsync()
+    {
+        await using var ctx = await _factory.CreateDbContextAsync();
+        return await ctx.SecretVersions.AsNoTracking().CountAsync();
+    }
+
+    /// <summary>
+    /// Test double whose <see cref="PutVersionAsync"/> always throws — used to
+    /// prove <see cref="SecretStore.CreateAsync"/> compensates a committed
+    /// metadata row when the backend write fails. Reads/deletes are no-ops.
+    /// </summary>
+    private sealed class ThrowingPutBackend : ISecretStoreBackend
+    {
+        public Task PutVersionAsync(
+            Guid secretId, int versionNumber, string plaintext, CancellationToken ct = default) =>
+            throw new InvalidOperationException("backend refused the write");
+
+        public Task<string?> GetVersionPlaintextAsync(
+            Guid secretId, int versionNumber, CancellationToken ct = default) =>
+            Task.FromResult<string?>(null);
+
+        public Task DeleteVersionAsync(
+            Guid secretId, int versionNumber, CancellationToken ct = default) =>
+            Task.CompletedTask;
     }
 
     /// <summary>

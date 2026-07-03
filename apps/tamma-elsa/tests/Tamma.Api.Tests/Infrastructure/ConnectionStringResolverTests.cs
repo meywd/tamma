@@ -89,4 +89,66 @@ public class ConnectionStringResolverTests
         var cfg = Build(("ConnectionStrings:TammaAppDb", "Host=postgres;User Id=tamma_app"));
         ConnectionStringResolver.ResolveApp(cfg).Should().Be("Host=postgres;User Id=tamma_app");
     }
+
+    // ── ResolveSecretStore (Epic 29 review fix) ──────────────────────────
+
+    [Test]
+    public void ResolveSecretStore_PrefersDedicatedSecretStore_WhenSet()
+    {
+        var cfg = Build(
+            ("ConnectionStrings:SecretStore", "Host=secrets;Database=tamma_secrets"),
+            ("ConnectionStrings:ControlPlane", "Host=cp;Database=tamma_control"),
+            ("ConnectionStrings:TammaDb", "Host=admin;Database=tamma"));
+
+        ConnectionStringResolver.ResolveSecretStore(cfg)
+            .Should().Be("Host=secrets;Database=tamma_secrets");
+    }
+
+    [Test]
+    public void ResolveSecretStore_FallsBackToControlPlane_WhenSecretStoreMissing()
+    {
+        var cfg = Build(
+            ("ConnectionStrings:ControlPlane", "Host=cp;Database=tamma_control"),
+            ("ConnectionStrings:TammaDb", "Host=admin;Database=tamma"));
+
+        ConnectionStringResolver.ResolveSecretStore(cfg)
+            .Should().Be("Host=cp;Database=tamma_control");
+    }
+
+    // The VPS shape: both SecretStore and ControlPlane ship as EMPTY STRING;
+    // the CP DbContext only works via the admin-connection fallback. The raw
+    // GetConnectionString guard this replaces resolved to "" (not null) →
+    // IsNullOrWhiteSpace("") == true → the whole backend guard was skipped and
+    // Production silently used volatile in-memory. ResolveSecretStore must
+    // coerce the empty strings to null and fall through to the admin
+    // connection so the secret store sees a REAL connection.
+    [Test]
+    public void ResolveSecretStore_EmptySecretStoreAndControlPlane_FallsBackToAdmin()
+    {
+        var cfg = Build(
+            ("ConnectionStrings:SecretStore", ""),
+            ("ConnectionStrings:ControlPlane", ""),
+            ("ConnectionStrings:TammaDb", "Host=admin;Database=tamma"));
+
+        ConnectionStringResolver.ResolveSecretStore(cfg)
+            .Should().Be("Host=admin;Database=tamma",
+                "the secret store must ride the SAME admin connection the CP DbContext falls back to");
+    }
+
+    [Test]
+    public void ResolveSecretStore_FallsBackToLegacyDefaultConnection()
+    {
+        var cfg = Build(
+            ("ConnectionStrings:DefaultConnection", "Host=legacy;Database=tamma"));
+
+        ConnectionStringResolver.ResolveSecretStore(cfg)
+            .Should().Be("Host=legacy;Database=tamma");
+    }
+
+    [Test]
+    public void ResolveSecretStore_ReturnsNull_WhenNothingResolves()
+    {
+        // Non-throwing (unlike ResolveAdmin) so the caller can fail closed.
+        ConnectionStringResolver.ResolveSecretStore(Build()).Should().BeNull();
+    }
 }

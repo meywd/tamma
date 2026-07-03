@@ -69,6 +69,18 @@ public class SecretsDbContext : DbContext
             entity.Property(e => e.RotationScheduleJson)
                 .HasDefaultValueSql("'{\"Kind\":\"None\"}'::jsonb");
 
+            // Story 29-1 (review fix) — unique per (Scope, TenantId, Name).
+            // Including TenantId lets two tenants each hold a same-named
+            // tenant-scoped secret (JIRA / email BYOK); the prior (Scope,
+            // Name) index collided them cross-tenant. NULLS NOT DISTINCT
+            // (PG15+; production runs PG17 — same pattern as prompt_overrides
+            // / conventions) collapses the NULL TenantId that all
+            // platform-scope rows share, so platform-scope name uniqueness is
+            // still enforced (two platform rows with the same Name collide).
+            entity.HasIndex(e => new { e.Scope, e.TenantId, e.Name })
+                .IsUnique()
+                .AreNullsDistinct(false);
+
             // Application-level discriminator. The two databases
             // (control-plane vs tenant) carry rows of opposite scope
             // by routing convention; the CHECK isn't pinned here

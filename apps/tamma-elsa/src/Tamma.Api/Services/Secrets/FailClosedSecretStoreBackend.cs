@@ -13,10 +13,22 @@ namespace Tamma.Api.Services.Secrets;
 /// secrets is the exact silent failure this project forbids: the
 /// metadata rows persist while the ciphertext evaporates on restart. So
 /// instead of writing plaintext to volatile memory, every WRITE throws
-/// loudly with a remediation message. Reads / deletes delegate to an
-/// inner in-memory map (which, since no write ever succeeds, simply
-/// reports the version as absent) so ambient BYOK read probes degrade to
-/// "credential absent → platform fallback" rather than crashing.</para>
+/// loudly with a remediation message.</para>
+///
+/// <para><b>Reads return absent, never throw</b>: since no write ever
+/// succeeds, there is nothing to read, so
+/// <see cref="GetVersionPlaintextAsync"/> returns <c>null</c> (the
+/// contract's "no readable plaintext" signal) rather than delegating to a
+/// map that would raise <see cref="KeyNotFoundException"/>. Returning
+/// <c>null</c> keeps ambient BYOK read probes on the
+/// "credential absent → platform fallback" path AND means a future caller
+/// that does not catch <see cref="KeyNotFoundException"/> cannot 500 off a
+/// fail-closed read. <see cref="DeleteVersionAsync"/> is a no-op (there is
+/// never anything to scrub). The three current read seams
+/// (<c>CabinetTenantProviderKeyReader</c>,
+/// <c>SecretStorePlatformCredentialReader</c>,
+/// <c>RuntimeSecretResolver</c>) already treat both <c>null</c> and a
+/// thrown <see cref="KeyNotFoundException"/> as absent, so this is safe.</para>
 ///
 /// <para>This mirrors the env-gated production hard-fail used by
 /// <c>TenantSecretProtector.FromConfiguration</c> (Cranl:EncryptionKey
@@ -32,22 +44,12 @@ public sealed class FailClosedSecretStoreBackend : ISecretStoreBackend
     /// </summary>
     public const string ReasonCode = "persistent_secret_backend_not_configured";
 
-    private readonly ISecretStoreBackend _inner;
     private readonly ILogger<FailClosedSecretStoreBackend> _logger;
 
     public FailClosedSecretStoreBackend(
         ILogger<FailClosedSecretStoreBackend> logger)
-        : this(new InMemorySecretStoreBackend(), logger)
     {
-    }
-
-    internal FailClosedSecretStoreBackend(
-        ISecretStoreBackend inner,
-        ILogger<FailClosedSecretStoreBackend> logger)
-    {
-        ArgumentNullException.ThrowIfNull(inner);
         ArgumentNullException.ThrowIfNull(logger);
-        _inner = inner;
         _logger = logger;
     }
 
@@ -74,16 +76,24 @@ public sealed class FailClosedSecretStoreBackend : ISecretStoreBackend
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Always returns <c>null</c> (absent) — a fail-closed backend never
+    /// persists anything, so there is never plaintext to return. Never throws
+    /// <see cref="KeyNotFoundException"/>, so a caller that does not catch it
+    /// cannot 500 off a fail-closed read.
+    /// </remarks>
     public Task<string?> GetVersionPlaintextAsync(
         Guid secretId,
         int versionNumber,
         CancellationToken ct = default) =>
-        _inner.GetVersionPlaintextAsync(secretId, versionNumber, ct);
+        Task.FromResult<string?>(null);
 
     /// <inheritdoc />
+    /// <remarks>No-op — nothing was ever persisted, so there is nothing to
+    /// scrub. Idempotent, never throws.</remarks>
     public Task DeleteVersionAsync(
         Guid secretId,
         int versionNumber,
         CancellationToken ct = default) =>
-        _inner.DeleteVersionAsync(secretId, versionNumber, ct);
+        Task.CompletedTask;
 }

@@ -9,9 +9,10 @@ namespace Tamma.Api.Tests.Secrets;
 /// Tests for <see cref="FailClosedSecretStoreBackend"/> — the guard
 /// registered when a real secret-store database is configured but the
 /// envelope KEK is missing. The contract: WRITES fail loud (never persist
-/// plaintext to volatile memory); reads / deletes degrade to "absent" so
-/// ambient BYOK probes fall through to the platform path instead of
-/// crashing.
+/// plaintext to volatile memory); reads return <c>null</c> (absent) and
+/// never throw, and deletes are no-ops, so ambient BYOK probes fall through
+/// to the platform path instead of crashing — and a future caller that does
+/// not catch <see cref="KeyNotFoundException"/> cannot 500 off a read.
 /// </summary>
 [TestFixture]
 public class FailClosedSecretStoreBackendTests
@@ -40,14 +41,23 @@ public class FailClosedSecretStoreBackendTests
     public async Task PutVersion_NeverPersists_SoSubsequentGetIsAbsent()
     {
         // The write threw; the byte must NOT have landed anywhere. A read
-        // therefore reports the version as absent (KeyNotFound), never a
-        // silently-retained volatile value.
+        // therefore reports the version as absent — returning null (never a
+        // silently-retained volatile value, and never a throw a future caller
+        // could 500 on).
         Func<Task> write = () => _backend.PutVersionAsync(SecretId, 1, "byok-plaintext");
         await write.Should().ThrowAsync<InvalidOperationException>();
 
-        Func<Task> read = () => _backend.GetVersionPlaintextAsync(SecretId, 1);
-        await read.Should().ThrowAsync<KeyNotFoundException>(
-            "nothing was ever persisted, so the version row is absent");
+        var read = await _backend.GetVersionPlaintextAsync(SecretId, 1);
+        read.Should().BeNull("nothing was ever persisted, so the version reads as absent");
+    }
+
+    [Test]
+    public async Task GetVersion_ReturnsNull_AndNeverThrows()
+    {
+        // A fail-closed backend never persists anything, so every read is
+        // absent → null, and it must NOT throw KeyNotFoundException.
+        Func<Task<string?>> read = () => _backend.GetVersionPlaintextAsync(SecretId, 99);
+        (await read.Should().NotThrowAsync()).Which.Should().BeNull();
     }
 
     [Test]

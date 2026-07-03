@@ -40,13 +40,16 @@ namespace Tamma.Api.Services.Secrets;
 ///     never leaves two versions active at once.</description></item>
 ///   <item><description><b>Rotation state machine</b>: <see cref="RotateAsync"/>
 ///     mints the successor version as
-///     <see cref="SecretVersionStatus.Pending"/> and moves the prior
-///     active version to <see cref="SecretVersionStatus.RetiredGrace"/>
-///     for the grace window. The pending → active flip is the saga's
-///     later step (the rotation handler signals success via the
-///     <c>SecretStoreRotationGateway.ActivateVersionAsync</c> path); it is
-///     deliberately NOT part of this handler-less single call, matching
-///     the <see cref="ISecretStore.RotateAsync"/> contract text.</description></item>
+///     <see cref="SecretVersionStatus.Pending"/> and LEAVES the prior
+///     active version <see cref="SecretVersionStatus.Active"/> with the
+///     <c>ActiveVersionNumber</c> pointer unchanged. It does NOT demote the
+///     prior active and does NOT advance the pointer — mirroring
+///     <c>SecretStoreRotationGateway</c>. Every read seam resolves by
+///     <c>ActiveVersionNumber</c>, so advancing to a not-yet-propagated
+///     pending version would serve an un-pushed secret. The pending → active
+///     flip (pointer advance + prior-active → RetiredGrace) is the saga's
+///     later step via <c>SecretStoreRotationGateway.ActivateVersionAsync</c>;
+///     it is deliberately NOT part of this handler-less call.</description></item>
 ///   <item><description><b>Version retirement</b>: <see cref="RetireVersionAsync"/>
 ///     refuses the active version, then scrubs the ciphertext (via the
 ///     backend) and flips the version to
@@ -164,33 +167,45 @@ public sealed class SecretStore : ISecretStore
         // the Postgres backend upserts the ciphertext onto this row; the
         // in-memory backend only holds bytes. Then activate it: exactly
         // one active version after a create-with-plaintext.
-        await MintPendingVersionRowAsync(
-            metadata.Id, versionNumber: 1, request.OwnerUserId, now, ct)
-            .ConfigureAwait(false);
-
+        //
+        // ATOMIC create (review fix): the metadata row is already committed
+        // above, so a failure minting / persisting / activating v1 would
+        // otherwise leave an orphan secret (ActiveVersionNumber = 0) whose
+        // NAME is locked — every retry hits the exists-check and 409s, and
+        // under the fail-closed backend EVERY create-with-plaintext would
+        // poison a row. Compensate in the catch (delete the version rows +
+        // the secret row + scrub any backend bytes) BEFORE rethrow so a
+        // failed create leaves NO row and the name is reusable.
         try
         {
+            await MintPendingVersionRowAsync(
+                metadata.Id, versionNumber: 1, request.OwnerUserId, now, ct)
+                .ConfigureAwait(false);
+
             await _backend
                 .PutVersionAsync(metadata.Id, 1, request.InitialPlaintext, ct)
+                .ConfigureAwait(false);
+
+            await ActivateVersionAsync(
+                metadata.Id, newVersion: 1, previousVersion: 0, now, ct)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "Backend PutVersion failed for new secret {SecretId} v1; " +
-                "the secret row persists with no active version.",
-                metadata.Id);
+                "Create failed for secret {SecretId} after the metadata row was " +
+                "committed; compensating (deleting the orphan secret + version rows " +
+                "+ scrubbing backend bytes) so the name '{Name}' stays reusable.",
+                metadata.Id, metadata.Name);
+            await CompensateFailedCreateAsync(metadata.Id, versionNumber: 1, ct)
+                .ConfigureAwait(false);
             await EmitAsync(
                 SecretAuditEventTypes.Write, metadata.ToRef(), request.OwnerUserId,
                 versionNumber: 1, SecretAuditOutcome.Failure,
-                "backend_putversion_failed", now, ct)
+                "create_failed_rolled_back", now, ct)
                 .ConfigureAwait(false);
             throw;
         }
-
-        await ActivateVersionAsync(
-            metadata.Id, newVersion: 1, previousVersion: 0, now, ct)
-            .ConfigureAwait(false);
 
         await EmitAsync(
             SecretAuditEventTypes.Write, metadata.ToRef(), request.OwnerUserId,
@@ -311,10 +326,36 @@ public sealed class SecretStore : ISecretStore
             .ConfigureAwait(false);
 
         // Mint the successor version as PENDING (owns the row for both
-        // backends), then persist its ciphertext.
-        await MintPendingVersionRowAsync(
-            current.Id, newVersion, actorUserId: Guid.Empty, now, ct)
-            .ConfigureAwait(false);
+        // backends). Gateway-consistency (review fix): the successor stays
+        // PENDING and the ActiveVersionNumber pointer stays on the PRIOR
+        // active version — do NOT demote the prior active and do NOT advance
+        // the pointer here. Every read seam (CabinetTenantProviderKeyReader,
+        // SecretStorePlatformCredentialReader, RuntimeSecretResolver)
+        // resolves by ActiveVersionNumber, so advancing the pointer to a
+        // not-yet-propagated pending version would serve an un-pushed secret.
+        // The pending → active flip + prior-active → retired_grace transition
+        // is the saga's job (SecretStoreRotationGateway.ActivateVersionAsync).
+        try
+        {
+            await MintPendingVersionRowAsync(
+                current.Id, newVersion, actorUserId: Guid.Empty, now, ct)
+                .ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Per-secret one-pending unique-index race: a concurrent rotation
+            // won the pending claim. Fail loud — the pending row is the
+            // winner's, so do NOT remove it — and record the rejection.
+            _logger.LogWarning(ex,
+                "Rotation mint lost the per-secret pending-uniqueness race for " +
+                "secret {SecretId} (v{Version}); another rotation is in flight.",
+                current.Id, newVersion);
+            await EmitAsync(
+                SecretAuditEventTypes.RotateFailed, reference, Guid.Empty,
+                newVersion, SecretAuditOutcome.Failure, "rotation_in_progress", now, ct)
+                .ConfigureAwait(false);
+            throw;
+        }
 
         try
         {
@@ -338,20 +379,15 @@ public sealed class SecretStore : ISecretStore
             throw;
         }
 
-        // Move the prior active version into the grace window and advance
-        // the active-version pointer. The new version stays PENDING — the
-        // saga's activation step (rotation handler success) flips it to
-        // Active; a handler-less RotateAsync does not.
-        await BeginRotationTransitionAsync(
-            current.Id, newVersion, previousActive, now, ct)
-            .ConfigureAwait(false);
-
         await EmitAsync(
             SecretAuditEventTypes.RotateSucceeded, reference, Guid.Empty,
             newVersion, SecretAuditOutcome.Success, null, now, ct)
             .ConfigureAwait(false);
 
-        return SecretMetadataFactory.WithRotation(current, newVersion, now);
+        // Pointer + prior-active status are unchanged: the returned snapshot
+        // still reports the prior active version (activation is the gateway's
+        // job) and mirrors the actual persisted SecretRow.
+        return current;
     }
 
     /// <inheritdoc />
@@ -527,7 +563,96 @@ public sealed class SecretStore : ISecretStore
             RetiredAt = null,
             CreatedByUserId = actorUserId,
         });
-        await ctx.SaveChangesAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await ctx.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException ex) when (IsPendingUniqueViolation(ex))
+        {
+            // The per-secret one-pending partial unique index
+            // (UX_secret_versions_OnePendingPerSecret) rejected the INSERT: a
+            // CONCURRENT rotation minted its own pending version between our
+            // "no existing row" read and this write. Fail loud with a
+            // retryable concurrency error rather than silently reusing the
+            // other rotation's row (the silent-collapse / double-push bug).
+            // Mirrors SecretStoreRotationGateway.MintPendingVersionAsync.
+            throw new InvalidOperationException(
+                $"rotation_in_progress: secret {secretId} already has an in-flight " +
+                "rotation (a concurrent mint won the per-secret pending claim).", ex);
+        }
+    }
+
+    /// <summary>
+    /// True iff <paramref name="ex"/> is the Postgres unique violation raised
+    /// by the per-secret one-pending partial index
+    /// (<c>UX_secret_versions_OnePendingPerSecret</c>). Mirrors
+    /// <c>SecretStoreRotationGateway.IsPendingUniqueViolation</c> — constrained
+    /// to that constraint name so an unrelated unique violation (e.g. the
+    /// SecretId+VersionNumber index) is NOT swallowed as a concurrency reject.
+    /// Internal for unit tests (InternalsVisibleTo Tamma.Api.Tests).
+    /// </summary>
+    internal static bool IsPendingUniqueViolation(DbUpdateException ex)
+        => ex.InnerException is Npgsql.PostgresException pg
+            && pg.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation
+            && (pg.ConstraintName is null
+                || pg.ConstraintName.Contains(
+                    "OnePendingPerSecret", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Compensate a create that failed AFTER the metadata row was committed:
+    /// delete every version row + the secret row and scrub any backend bytes
+    /// that partially landed, so the name is reusable and no orphan
+    /// (ActiveVersionNumber = 0) row is left behind. Best-effort — a
+    /// compensation failure is logged but does not mask the original error.
+    /// </summary>
+    private async Task CompensateFailedCreateAsync(
+        Guid secretId, int versionNumber, CancellationToken ct)
+    {
+        try
+        {
+            await using var ctx = await _dbFactory
+                .CreateDbContextAsync(ct).ConfigureAwait(false);
+
+            var versions = await ctx.SecretVersions
+                .Where(v => v.SecretId == secretId)
+                .ToListAsync(ct)
+                .ConfigureAwait(false);
+            if (versions.Count > 0)
+            {
+                ctx.SecretVersions.RemoveRange(versions);
+            }
+
+            var secret = await ctx.Secrets
+                .FirstOrDefaultAsync(s => s.Id == secretId, ct)
+                .ConfigureAwait(false);
+            if (secret is not null)
+            {
+                ctx.Secrets.Remove(secret);
+            }
+
+            await ctx.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Compensation for failed create of secret {SecretId} did not fully " +
+                "clean up the metadata rows; the name may remain locked until manual " +
+                "cleanup.", secretId);
+        }
+
+        // Scrub any ciphertext bytes that landed before the failure.
+        try
+        {
+            await _backend.DeleteVersionAsync(secretId, versionNumber, ct)
+                .ConfigureAwait(false);
+        }
+        catch (KeyNotFoundException) { /* never stored */ }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Best-effort backend scrub during create compensation for secret " +
+                "{SecretId} v{Version} failed.", secretId, versionNumber);
+        }
     }
 
     private async Task RemovePendingVersionRowAsync(
@@ -562,48 +687,6 @@ public sealed class SecretStore : ISecretStore
             newRow.Status = "active";
             newRow.ActivatedAt = now.UtcDateTime;
         }
-
-        if (previousVersion > 0)
-        {
-            var oldRow = await ctx.SecretVersions
-                .FirstOrDefaultAsync(
-                    v => v.SecretId == secretId
-                         && v.VersionNumber == previousVersion
-                         && v.Status == "active", ct)
-                .ConfigureAwait(false);
-            if (oldRow is not null)
-            {
-                oldRow.Status = "retired_grace";
-                oldRow.RetiredAt = now.UtcDateTime;
-            }
-        }
-
-        var secret = await ctx.Secrets
-            .FirstOrDefaultAsync(s => s.Id == secretId, ct)
-            .ConfigureAwait(false);
-        if (secret is not null)
-        {
-            secret.ActiveVersionNumber = newVersion;
-            secret.LastRotatedAt = now.UtcDateTime;
-            secret.UpdatedAt = now.UtcDateTime;
-        }
-
-        await ctx.SaveChangesAsync(ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Rotation "begin" transition: retire the prior active version into
-    /// the grace window and advance the active-version pointer to the
-    /// freshly-minted successor. The successor row itself stays PENDING —
-    /// it is flipped to Active later by the rotation handler's activation
-    /// step, per the <see cref="RotateAsync"/> contract.
-    /// </summary>
-    private async Task BeginRotationTransitionAsync(
-        Guid secretId, int newVersion, int previousVersion,
-        DateTimeOffset now, CancellationToken ct)
-    {
-        await using var ctx = await _dbFactory
-            .CreateDbContextAsync(ct).ConfigureAwait(false);
 
         if (previousVersion > 0)
         {
