@@ -178,6 +178,11 @@ public class PlatformOwnerAccessPolicyTests
         // who is not a platform admin must NOT list/create/version/deprecate
         // plans or mint custom plans (AC10).
         "/api/admin/pricing/plans",
+        // Story 34-9 — the pricing DASHBOARD overview reveals platform-internal
+        // economics (list prices + margin knobs). Same Finding-C1 gate: a
+        // tenant-owner who is not a platform admin must NOT read it (the
+        // tenant-facing /api/pricing/* surface only ever exposes the sell price).
+        "/api/admin/pricing/overview",
     };
 
     [Test]

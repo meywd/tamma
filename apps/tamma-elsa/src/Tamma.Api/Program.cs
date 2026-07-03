@@ -1772,6 +1772,18 @@ admin.MapDelete("/pricing/plans/{slug}/versions/{version:int}",
         Tamma.Api.Endpoints.Admin.AdminPlanCatalogEndpoints.DeprecateVersion)
     .RequireAuthorization("PlatformOwnerAccess");
 
+// Story 34-9 — the platform-owner PRICING DASHBOARD read surface. One read-only
+// aggregation over the existing 34-x data (plan catalog + live per-plan active
+// tenant-assignment counts + a margin-config rollup) that powers the admin
+// Pricing dashboard. PlatformOwnerAccess (Finding C1 + the 34-5 estimate-leak
+// rule): this surface reveals platform-internal economics (list prices + margin
+// knobs) that a tenant caller must NEVER see, so it stays platform-owner-only —
+// the tenant-facing /api/pricing/* surface only ever exposes the sell price. No
+// new pricing logic and no schema (additive read; no EF migration).
+admin.MapGet("/pricing/overview",
+        Tamma.Api.Endpoints.Admin.AdminPricingDashboardEndpoints.GetOverview)
+    .RequireAuthorization("PlatformOwnerAccess");
+
 // Story 28-11 — platform-admin tenant-status UX. List + detail surface the
 // Epic-28 shadow columns on tenants (Status, PlanId, KekVersion,
 // FailureReason, DeleteRequestedAt); action endpoints re-drive the Story
