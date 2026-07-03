@@ -1,12 +1,11 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using FluentAssertions;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
+using Tamma.Api.Services.Integrations;
 using Tamma.Api.Services.Jira;
-using Tamma.Api.Services.PromptStore;
 using Tamma.Core.Interfaces;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
@@ -14,23 +13,25 @@ using Tamma.Data.Repositories;
 namespace Tamma.Api.Tests.Jira;
 
 /// <summary>
-/// Story 38 (Phase 1) — <see cref="JiraMediationService"/> composition. JIRA has no
-/// per-tenant token resolver: it runs the config-credentialed
-/// <see cref="IJiraIntegrationService"/> under the acting tenant, then emits exactly
-/// one terminal DCB event. Failures ride inside a typed key-free result (200
-/// success:false at the endpoint); an unexpected exception becomes PLATFORM_ERROR.
+/// Integration BYOK — <see cref="JiraMediationService"/> composition. The old
+/// SaaS-deny guard is replaced by per-tenant credential resolution: the tenant's
+/// JIRA credential is resolved (BYOK→system→fail-loud) and threaded into the
+/// credential-bound <see cref="IJiraApiClient"/>; a terminal DCB event is emitted.
 ///
-/// <para>Because that single credential has no per-tenant/ticket scoping, a
-/// fail-closed mode guard applies: single-user ⇒ allow; SaaS ⇒ deny (typed
-/// <see cref="JiraFailureCodes.SharedCredentialDeniedInSaaS"/>, underlying client
-/// never called) unless <c>Jira:AllowSharedCredentialInSaaS=true</c> opts in.</para>
+/// <para>Pins: present credential ⇒ the client is called with it and one terminal
+/// event is emitted; ABSENT credential ⇒ fail-loud
+/// <see cref="JiraFailureCodes.CredentialUnavailable"/> with the client NEVER
+/// reached; client failures map to the typed key-free taxonomy; an exception
+/// becomes PLATFORM_ERROR.</para>
 /// </summary>
 [TestFixture]
 public class JiraMediationServiceTests
 {
     private const string TicketId = "PROJ-42";
+    private static readonly JiraCredential Cred = new("https://jira.example.com", "bot@example.com", "fake-jira-token");
 
-    private Mock<IJiraIntegrationService> _jira = null!;
+    private Mock<IJiraApiClient> _jira = null!;
+    private FakeResolver _resolver = null!;
     private RecordingEventRepository _events = null!;
     private JiraMediationService _sut = null!;
     private readonly Guid _tenant = Guid.NewGuid();
@@ -38,32 +39,16 @@ public class JiraMediationServiceTests
     [SetUp]
     public void SetUp()
     {
-        _jira = new Mock<IJiraIntegrationService>(MockBehavior.Strict);
+        _jira = new Mock<IJiraApiClient>(MockBehavior.Strict);
+        _resolver = new FakeResolver { Resolution = new JiraCredentialResolution(Cred, IntegrationCredentialSource.Tenant) };
         _events = new RecordingEventRepository();
-        // Default SUT runs in single-user mode (the sole principal owns everything),
-        // so the shared JIRA credential is always allowed — matches the pre-guard
-        // behavior the composition tests below assert.
-        _sut = Build(TammaMode.SingleUser);
-    }
-
-    private JiraMediationService Build(TammaMode mode, bool allowSharedInSaaS = false)
-    {
-        var modeProvider = new Mock<ITammaModeProvider>();
-        modeProvider.SetupGet(m => m.Mode).Returns(mode);
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Jira:AllowSharedCredentialInSaaS"] = allowSharedInSaaS ? "true" : "false",
-            })
-            .Build();
-        return new JiraMediationService(
-            _jira.Object, _events, modeProvider.Object, configuration, NullLogger<JiraMediationService>.Instance);
+        _sut = new JiraMediationService(_jira.Object, _resolver, _events, NullLogger<JiraMediationService>.Instance);
     }
 
     [Test]
-    public async Task GetTicket_Success_MapsTicket_OneEvent()
+    public async Task GetTicket_CredentialResolved_CallsClientWithIt_OneEvent()
     {
-        _jira.Setup(j => j.GetJiraTicketAsync(TicketId))
+        _jira.Setup(j => j.GetTicketAsync(Cred, TicketId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(IntegrationResult<JiraTicket?>.Ok(new JiraTicket { Id = "1", Key = TicketId, Summary = "s", Status = "In Progress" }));
 
         var result = await _sut.GetTicketAsync(_tenant, TicketId, "corr-j");
@@ -71,14 +56,14 @@ public class JiraMediationServiceTests
         result.Success.Should().BeTrue();
         result.Outcome.Should().Be("Read");
         result.Ticket!.Key.Should().Be(TicketId);
-        result.Ticket.Status.Should().Be("In Progress");
+        _jira.Verify(j => j.GetTicketAsync(Cred, TicketId, It.IsAny<CancellationToken>()), Times.Once);
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(JiraEventTypes.TicketReadSuccess);
     }
 
     [Test]
-    public async Task UpdateTicket_Success_ReturnsKey_OneEvent()
+    public async Task UpdateTicket_CredentialResolved_ReturnsKey_OneEvent()
     {
-        _jira.Setup(j => j.UpdateJiraTicketAsync(TicketId, It.IsAny<JiraTicketUpdate>()))
+        _jira.Setup(j => j.UpdateTicketAsync(Cred, TicketId, It.IsAny<JiraTicketUpdate>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(IntegrationResult<JiraTicketResult>.Ok(new JiraTicketResult { Success = true, TicketKey = TicketId }));
 
         var body = new UpdateTicketRequest { Status = "Done", Comment = "merged", CorrelationId = "corr-u" };
@@ -91,9 +76,25 @@ public class JiraMediationServiceTests
     }
 
     [Test]
-    public async Task UpdateTicket_NotConfigured_TypedNotConfigured_OneFailedEvent()
+    public async Task NoCredential_FailsLoud_NeverCallsClient_OneFailedEvent()
     {
-        _jira.Setup(j => j.UpdateJiraTicketAsync(TicketId, It.IsAny<JiraTicketUpdate>()))
+        // The strict mock has NO setup ⇒ any call would throw. Resolver returns null.
+        _resolver.Resolution = null;
+
+        var body = new UpdateTicketRequest { Status = "Done", CorrelationId = "corr-x" };
+        var result = await _sut.UpdateTicketAsync(_tenant, TicketId, body);
+
+        result.Success.Should().BeFalse();
+        result.FailureCode.Should().Be(JiraFailureCodes.CredentialUnavailable);
+        result.TicketKey.Should().Be(TicketId);
+        _jira.Verify(j => j.UpdateTicketAsync(It.IsAny<JiraCredential>(), It.IsAny<string>(), It.IsAny<JiraTicketUpdate>(), It.IsAny<CancellationToken>()), Times.Never);
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(JiraEventTypes.TicketUpdatedFailed);
+    }
+
+    [Test]
+    public async Task UpdateTicket_NotConfiguredFromClient_TypedNotConfigured()
+    {
+        _jira.Setup(j => j.UpdateTicketAsync(Cred, TicketId, It.IsAny<JiraTicketUpdate>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(IntegrationResult<JiraTicketResult>.Fail("JIRA not configured"));
 
         var body = new UpdateTicketRequest { Status = "Done", CorrelationId = "corr-u" };
@@ -105,9 +106,10 @@ public class JiraMediationServiceTests
     }
 
     [Test]
-    public async Task GetTicket_ServiceThrows_TypedPlatformError_OneFailedEvent()
+    public async Task GetTicket_ClientThrows_TypedPlatformError_OneFailedEvent()
     {
-        _jira.Setup(j => j.GetJiraTicketAsync(TicketId)).ThrowsAsync(new InvalidOperationException("boom"));
+        _jira.Setup(j => j.GetTicketAsync(Cred, TicketId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("boom"));
 
         var result = await _sut.GetTicketAsync(_tenant, TicketId, "corr-j");
 
@@ -116,58 +118,12 @@ public class JiraMediationServiceTests
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(JiraEventTypes.TicketReadFailed);
     }
 
-    // ── fail-closed tenant guard (SaaS shared-credential) ───────────────────
-
-    [Test]
-    public async Task SingleUser_SharedCredential_Allows_CallsJira()
+    private sealed class FakeResolver : IJiraCredentialResolver
     {
-        // (a) single-user: the sole principal owns everything ⇒ the guard allows the
-        // op and the underlying JIRA client is reached.
-        _jira.Setup(j => j.GetJiraTicketAsync(TicketId))
-            .ReturnsAsync(IntegrationResult<JiraTicket?>.Ok(new JiraTicket { Id = "1", Key = TicketId, Summary = "s", Status = "Open" }));
-        var sut = Build(TammaMode.SingleUser);
-
-        var result = await sut.GetTicketAsync(_tenant, TicketId, "corr-su");
-
-        result.Success.Should().BeTrue();
-        _jira.Verify(j => j.GetJiraTicketAsync(TicketId), Times.Once);
-        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(JiraEventTypes.TicketReadSuccess);
-    }
-
-    [Test]
-    public async Task Saas_NoOptIn_Denies_TypedResult_NeverCallsJira()
-    {
-        // (b) SaaS without the opt-in: the shared-credential path is a confused-deputy,
-        // so the guard denies with the typed key-free failure and the strict-mock JIRA
-        // client is NEVER invoked (no Setup ⇒ any call would throw).
-        var sut = Build(TammaMode.SaaS, allowSharedInSaaS: false);
-
-        var body = new UpdateTicketRequest { Status = "Done", CorrelationId = "corr-saas" };
-        var result = await sut.UpdateTicketAsync(_tenant, TicketId, body);
-
-        result.Success.Should().BeFalse();
-        result.FailureCode.Should().Be(JiraFailureCodes.SharedCredentialDeniedInSaaS);
-        result.TicketKey.Should().Be(TicketId);
-        _jira.Verify(j => j.UpdateJiraTicketAsync(It.IsAny<string>(), It.IsAny<JiraTicketUpdate>()), Times.Never);
-        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(JiraEventTypes.TicketUpdatedFailed);
-    }
-
-    [Test]
-    public async Task Saas_WithOptIn_Allows_CallsJira()
-    {
-        // (c) SaaS WITH Jira:AllowSharedCredentialInSaaS=true: the operator knowingly
-        // re-enabled the shared credential ⇒ the op runs and reaches the JIRA client.
-        _jira.Setup(j => j.UpdateJiraTicketAsync(TicketId, It.IsAny<JiraTicketUpdate>()))
-            .ReturnsAsync(IntegrationResult<JiraTicketResult>.Ok(new JiraTicketResult { Success = true, TicketKey = TicketId }));
-        var sut = Build(TammaMode.SaaS, allowSharedInSaaS: true);
-
-        var body = new UpdateTicketRequest { Status = "Done", CorrelationId = "corr-optin" };
-        var result = await sut.UpdateTicketAsync(_tenant, TicketId, body);
-
-        result.Success.Should().BeTrue();
-        result.Outcome.Should().Be("Updated");
-        _jira.Verify(j => j.UpdateJiraTicketAsync(TicketId, It.IsAny<JiraTicketUpdate>()), Times.Once);
-        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(JiraEventTypes.TicketUpdatedSuccess);
+        public JiraCredentialResolution? Resolution { get; set; }
+        public Task<JiraCredentialResolution?> ResolveAsync(Guid? tenantId, CancellationToken ct = default)
+            => Task.FromResult(Resolution);
+        public void Invalidate(Guid? tenantId) { }
     }
 
     private sealed class RecordingEventRepository : IEventRepository

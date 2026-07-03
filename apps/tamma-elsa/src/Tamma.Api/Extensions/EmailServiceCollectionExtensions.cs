@@ -41,6 +41,17 @@ public static class EmailServiceCollectionExtensions
         // runs, or by re-registering afterwards.
         services.TryAddSingleton<ISmtpTransport, MailKitSmtpTransport>();
 
+        // Integration BYOK — the per-tenant (SaaS) email transport. A SaaS tenant's
+        // message is delivered via THIS seam over the tenant's OWN authority (their
+        // Resend key / SMTP relay from the resolved bundle), never the platform
+        // singleton IEmailService with a tenant-supplied From (the From-spoofing /
+        // open-relay hole). ITenantEmailTransport is scoped because it emits the
+        // EMAIL.* audit through the scoped IEventRepository; the MailKit tenant SMTP
+        // transport is a stateless singleton.
+        services.TryAddSingleton<ITenantSmtpTransport, MailKitTenantSmtpTransport>();
+        services.TryAddScoped<Tamma.Api.Services.EmailMediation.ITenantEmailTransport,
+            Tamma.Api.Services.EmailMediation.TenantEmailTransport>();
+
         // Named HttpClient for Resend. Safe to register unconditionally — it
         // is only resolved when ResendEmailService is the active provider.
         services.AddHttpClient("resend", client =>

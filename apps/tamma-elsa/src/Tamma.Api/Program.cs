@@ -175,6 +175,18 @@ builder.Services.AddHttpClient("github", client =>
     if (!string.IsNullOrEmpty(token))
         client.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
 });
+// Integration BYOK — the credential-bound JIRA client (JiraApiClient) rides this
+// named client. It carries NO base address (each call targets the per-tenant
+// baseUrl) and is hardened against SSRF: redirects are NOT auto-followed (a 3xx to
+// an internal host is refused, not chased), and the connect callback re-checks the
+// resolved address at connect time so a host that passed URL validation but rebinds
+// its DNS to a private/metadata address cannot be reached.
+builder.Services.AddHttpClient(Tamma.Api.Services.Integrations.JiraApiClient.HttpClientName)
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        AllowAutoRedirect = false,
+        ConnectCallback = Tamma.Api.Services.Integrations.JiraBaseUrlGuard.SafeConnectAsync,
+    });
 
 // ────────────────────────────────────────────────────────────────────────────
 // Database + repositories (via extension method)
@@ -633,6 +645,16 @@ builder.Services.AddScoped<Tamma.Api.Services.Jira.IJiraMediationService,
     Tamma.Api.Services.Jira.JiraMediationService>();
 builder.Services.AddScoped<Tamma.Api.Services.EmailMediation.IEmailMediationService,
     Tamma.Api.Services.EmailMediation.EmailMediationService>();
+
+// ── Integration BYOK — per-tenant JIRA + email credentials ──
+// The JIRA/email mediation now resolves the acting tenant's OWN credential
+// per-request (BYOK→system→fail-loud, like git/LLM) instead of a shared platform
+// credential + SaaS-deny guard. This wires the resolvers (mediation reads them),
+// the credential-bound JIRA HTTP client, and the cabinet write helper (the
+// /api/v1/integrations/* management endpoints use it). Registered AFTER
+// AddProviderCredentialResolution so the singleton cabinet reader + SecretsDbContext
+// factory signal are already present.
+builder.Services.AddIntegrationCredentialResolution();
 
 // Story 32-5 (T4) — provider-side DI for the server-side tool loop, FORMALIZED
 // in the API process (replacing T3's best-effort GetService factory). The loop
@@ -2355,6 +2377,25 @@ agents.MapPost("/providers/{provider}/credential/rotate", ProviderCredentialEndp
     .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
 agents.MapDelete("/providers/{provider}/credential", ProviderCredentialEndpoints.DeleteCredential)
     .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+
+// ── Integration BYOK — tenant-admin JIRA + email credential management ──
+// Sibling of the Story 32-3 provider BYOK endpoints. Set/remove the tenant's own
+// JIRA/email credential in the secret cabinet so the mediation resolves it
+// per-request (BYOK→system→fail-loud). PlatformsManage (tenant_owner/tenant_admin →
+// member 403), like the platform-installation picker. Set is reveal-safe — the
+// response carries the version only, NEVER the secret.
+app.MapPost("/api/v1/integrations/jira/credential", IntegrationCredentialEndpoints.SetJiraCredential)
+    .RequireAuthorization("PlatformsManage").RequireRateLimiting("ConfigWrite")
+    .WithName("SetJiraCredential");
+app.MapDelete("/api/v1/integrations/jira/credential", IntegrationCredentialEndpoints.DeleteJiraCredential)
+    .RequireAuthorization("PlatformsManage").RequireRateLimiting("ConfigWrite")
+    .WithName("DeleteJiraCredential");
+app.MapPost("/api/v1/integrations/email/credential", IntegrationCredentialEndpoints.SetEmailCredential)
+    .RequireAuthorization("PlatformsManage").RequireRateLimiting("ConfigWrite")
+    .WithName("SetEmailCredential");
+app.MapDelete("/api/v1/integrations/email/credential", IntegrationCredentialEndpoints.DeleteEmailCredential)
+    .RequireAuthorization("PlatformsManage").RequireRateLimiting("ConfigWrite")
+    .WithName("DeleteEmailCredential");
 
 // ── Story 32-2 — entity-aware registry / resolution surface (/api/agents) ──
 // Distinct from the legacy /api/v1/agents group above (which stays byte-for-byte

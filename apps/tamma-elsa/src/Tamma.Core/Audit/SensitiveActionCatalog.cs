@@ -78,6 +78,14 @@ public static class SensitiveActionCatalog
     public const string ProviderKeyChanged = "PROVIDER_KEY.CHANGED.SUCCESS";
     public const string ProviderChainChanged = "PROVIDER_CHAIN.CHANGED.SUCCESS";
 
+    /// <summary>A tenant BYOK integration credential (JIRA / email) was set or
+    /// removed — wired by <c>IntegrationCredentialEndpoints</c>. The concrete
+    /// operation (set|removed) + integration (jira|email) travel in the event's
+    /// <c>operation</c>/<c>integration</c> tag/data; the underlying <c>SECRET.*</c>
+    /// cabinet write stays the secret source of truth (this is the curated,
+    /// catalog-facing BYOK event, not a second write).</summary>
+    public const string IntegrationCredentialChanged = "INTEGRATION_CREDENTIAL.CHANGED.SUCCESS";
+
     // ── BILLING (maps existing BillingEvents; budget edits forward-looking) ──
     public const string BillingCustomerCreated = "BILLING.CUSTOMER.CREATED";
     public const string PlanUpdated = "PLAN.UPDATED";
@@ -196,6 +204,7 @@ public static class SensitiveActionCatalog
         // ── BYOK — CC6.1 (provider credential / chain configuration) ──
         Add(ProviderKeyChanged, AuditCategory.Byok, AuditSeverity.Warning, "CC6.1", "provider", true);
         Add(ProviderChainChanged, AuditCategory.Byok, AuditSeverity.Notice, "CC6.1", "provider", false);
+        Add(IntegrationCredentialChanged, AuditCategory.Byok, AuditSeverity.Warning, "CC6.1", "integration", true);
 
         // ── BILLING — A1.1 (commitments affecting availability/spend) ──
         Add(BillingCustomerCreated, AuditCategory.Billing, AuditSeverity.Notice, "A1.1", "tenant", true);

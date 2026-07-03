@@ -1,7 +1,6 @@
 using System.Text.Json;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Tamma.Api.Services.PromptStore;
+using Tamma.Api.Services.Integrations;
 using Tamma.Core.Interfaces;
 using Tamma.Core.Logging;
 using Tamma.Data.Entities;
@@ -10,78 +9,63 @@ using Tamma.Data.Repositories;
 namespace Tamma.Api.Services.Jira;
 
 /// <summary>
-/// Story 38 (Phase 1) — composes the JIRA-mediation sequence entirely inside
-/// <c>Tamma.Api</c>: platform call via the existing config-credentialed
-/// <see cref="IJiraIntegrationService"/> (the JIRA base URL / email / API token live
-/// in Tamma.Api config, resolved inside that service) → exactly-one terminal DCB
-/// event scoped by the acting tenant. Unlike git/CI there is no per-tenant BYOK
-/// token resolver: JIRA is a single, server-side, config-provided integration
-/// (mirrors the Slack outbox plane, not the repo-scoped git plane). The JIRA token
-/// NEVER reaches the engine — it stays in Tamma.Api config.
+/// Story 38 (Phase 1) + integration BYOK — composes the JIRA-mediation sequence
+/// entirely inside <c>Tamma.Api</c>: resolve the acting tenant's JIRA credential
+/// per-request (BYOK→system→fail-loud, like git/LLM), thread it into the
+/// credential-bound <see cref="IJiraApiClient"/>, then emit exactly one terminal
+/// DCB event scoped by the tenant. The JIRA token NEVER reaches the engine — it
+/// stays in Tamma.Api (cabinet or single-user config).
 ///
-/// <para><b>Fail-closed tenant guard (SaaS).</b> Because that single credential has
-/// NO per-tenant/ticket authorization — and there is no tenant↔JIRA-project mapping
-/// to derive one from — the shared-credential path is a confused-deputy in SaaS: any
-/// tenant A could GET/PATCH ANY ticket id belonging to tenant B through the global
-/// client. So this service is mode-gated (mirroring <c>GitRepoAuthorizer</c>):
+/// <para><b>Fail-loud tenant resolution (replaces the old SaaS-deny guard).</b>
+/// The credential is resolved via <see cref="IJiraCredentialResolver"/>:
 /// <list type="bullet">
-///   <item><b>single-user</b> — the sole principal owns everything ⇒ ALLOW.</item>
-///   <item><b>SaaS</b> — DENY by default with a typed, key-free soft-fail
-///     (<see cref="JiraFailureCodes.SharedCredentialDeniedInSaaS"/>) and a WARN log;
-///     the underlying <see cref="IJiraIntegrationService"/> is NEVER called. An
-///     operator may re-enable the shared-credential behavior knowingly by setting
-///     <c>Jira:AllowSharedCredentialInSaaS=true</c> (default <c>false</c>).</item>
-/// </list>
-/// This is a conservative guard, not full per-tenant JIRA scoping (blocked until a
-/// tenant↔project mapping exists).</para>
+///   <item><b>present</b> — the tenant's BYOK bundle (SaaS) or the single-user
+///     <c>Jira:*</c> config (system tier) ⇒ ALLOW, using THAT credential.</item>
+///   <item><b>absent</b> — no per-tenant credential and no legitimate system tier
+///     ⇒ <b>fail loud</b> with the typed key-free
+///     <see cref="JiraFailureCodes.CredentialUnavailable"/> and a WARN log; the
+///     JIRA client is NEVER reached. This is the confused-deputy fix: SaaS no
+///     longer silently falls back to a shared platform credential.</item>
+/// </list></para>
 /// </summary>
 public sealed class JiraMediationService : IJiraMediationService
 {
-    private readonly IJiraIntegrationService _jira;
+    private readonly IJiraApiClient _jira;
+    private readonly IJiraCredentialResolver _credentials;
     private readonly IEventRepository _events;
-    private readonly ITammaModeProvider _mode;
-    private readonly bool _allowSharedCredentialInSaaS;
     private readonly ILogger<JiraMediationService> _logger;
 
     public JiraMediationService(
-        IJiraIntegrationService jira,
+        IJiraApiClient jira,
+        IJiraCredentialResolver credentials,
         IEventRepository events,
-        ITammaModeProvider mode,
-        IConfiguration configuration,
         ILogger<JiraMediationService> logger)
     {
         _jira = jira ?? throw new ArgumentNullException(nameof(jira));
+        _credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
         _events = events ?? throw new ArgumentNullException(nameof(events));
-        _mode = mode ?? throw new ArgumentNullException(nameof(mode));
-        ArgumentNullException.ThrowIfNull(configuration);
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-
-        // Opt-in escape hatch: an operator who has accepted the cross-tenant risk of
-        // a shared JIRA credential in SaaS sets this to true. Default (unset / any
-        // non-"true" value) ⇒ false ⇒ SaaS denies.
-        _allowSharedCredentialInSaaS =
-            bool.TryParse(configuration["Jira:AllowSharedCredentialInSaaS"], out var allow) && allow;
     }
 
     public Task<JiraMediationResult> GetTicketAsync(Guid? tenantId, string ticketId, string correlationId, CancellationToken ct = default)
         => ExecuteGuardedAsync(tenantId, ticketId, JiraEventTypes.TicketReadOperation, JiraEventTypes.TicketReadFailed, correlationId, ct,
-            () => GetTicketCoreAsync(tenantId, ticketId, correlationId, ct));
+            cred => GetTicketCoreAsync(tenantId, ticketId, correlationId, cred, ct));
 
     public Task<JiraMediationResult> UpdateTicketAsync(Guid? tenantId, string ticketId, UpdateTicketRequest body, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(body);
         return ExecuteGuardedAsync(tenantId, ticketId, JiraEventTypes.TicketUpdateOperation, JiraEventTypes.TicketUpdatedFailed, body.CorrelationId, ct,
-            () => UpdateTicketCoreAsync(tenantId, ticketId, body, ct));
+            cred => UpdateTicketCoreAsync(tenantId, ticketId, body, cred, ct));
     }
 
     // ===================================================================
     // Read ticket
     // ===================================================================
 
-    private async Task<JiraMediationResult> GetTicketCoreAsync(Guid? tenantId, string ticketId, string correlationId, CancellationToken ct)
+    private async Task<JiraMediationResult> GetTicketCoreAsync(Guid? tenantId, string ticketId, string correlationId, JiraCredential credential, CancellationToken ct)
     {
         var op = JiraEventTypes.TicketReadOperation;
-        var res = await _jira.GetJiraTicketAsync(ticketId).ConfigureAwait(false);
+        var res = await _jira.GetTicketAsync(credential, ticketId, ct).ConfigureAwait(false);
 
         if (!res.Success)
             return await FailAsync(tenantId, ticketId, op, JiraEventTypes.TicketReadFailed, correlationId, res.Error, ct).ConfigureAwait(false);
@@ -116,7 +100,7 @@ public sealed class JiraMediationService : IJiraMediationService
     // Update ticket (status transition + comment)
     // ===================================================================
 
-    private async Task<JiraMediationResult> UpdateTicketCoreAsync(Guid? tenantId, string ticketId, UpdateTicketRequest body, CancellationToken ct)
+    private async Task<JiraMediationResult> UpdateTicketCoreAsync(Guid? tenantId, string ticketId, UpdateTicketRequest body, JiraCredential credential, CancellationToken ct)
     {
         var op = JiraEventTypes.TicketUpdateOperation;
         var update = new JiraTicketUpdate
@@ -126,7 +110,7 @@ public sealed class JiraMediationService : IJiraMediationService
             CustomFields = body.CustomFields,
         };
 
-        var res = await _jira.UpdateJiraTicketAsync(ticketId, update).ConfigureAwait(false);
+        var res = await _jira.UpdateTicketAsync(credential, ticketId, update, ct).ConfigureAwait(false);
 
         if (!res.Success)
             return await FailAsync(tenantId, ticketId, op, JiraEventTypes.TicketUpdatedFailed, correlationId: body.CorrelationId, res.Error, ct).ConfigureAwait(false);
@@ -166,27 +150,45 @@ public sealed class JiraMediationService : IJiraMediationService
 
     private async Task<JiraMediationResult> ExecuteGuardedAsync(
         Guid? tenantId, string ticketId, string operation, string failedEventType, string correlationId,
-        CancellationToken ct, Func<Task<JiraMediationResult>> body)
+        CancellationToken ct, Func<JiraCredential, Task<JiraMediationResult>> body)
     {
-        // Fail-closed tenant guard (runs BEFORE the body so the shared-credential
-        // IJiraIntegrationService is never reached on denial). In SaaS the single
-        // platform-global JIRA credential has no per-tenant/ticket scoping ⇒ deny
-        // unless an operator opted in. Single-user owns everything ⇒ allow.
-        if (_mode.Mode == TammaMode.SaaS && !_allowSharedCredentialInSaaS)
+        // Fail-loud per-tenant credential resolution (runs BEFORE the body so the
+        // JIRA client is never reached on an unresolved credential). In SaaS the
+        // tenant must have registered its own BYOK bundle; single-user resolves
+        // the Jira:* config as the system tier. Absent ⇒ typed key-free failure,
+        // NOT a silent shared-credential fallback.
+        JiraCredentialResolution? resolution;
+        try
+        {
+            resolution = await _credentials.ResolveAsync(tenantId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "jira-mediation credential resolution threw for op {Operation}; failing loud (CREDENTIAL_UNAVAILABLE). correlationId={CorrelationId}, ticketId={TicketId}, tenantId={TenantId}",
+                operation, LogSanitizer.Clean(correlationId), LogSanitizer.Clean(ticketId), tenantId);
+            resolution = null;
+        }
+
+        if (resolution is null)
         {
             _logger.LogWarning(
-                "jira-mediation guard DENIED (shared-credential in SaaS): op {Operation} refused — JIRA has no per-tenant scoping and Jira:AllowSharedCredentialInSaaS is not set. correlationId={CorrelationId}, ticketId={TicketId}, tenantId={TenantId}",
+                "jira-mediation FAILED-LOUD (no JIRA credential for tenant): op {Operation} refused — register a per-tenant JIRA credential or configure Jira:* (single-user). correlationId={CorrelationId}, ticketId={TicketId}, tenantId={TenantId}",
                 operation, LogSanitizer.Clean(correlationId), LogSanitizer.Clean(ticketId), tenantId);
 
             await EmitAsync(failedEventType, operation, tenantId, ticketId, correlationId,
-                JiraFailureCodes.SharedCredentialDeniedInSaaS, new { ticketId }, ct).ConfigureAwait(false);
+                JiraFailureCodes.CredentialUnavailable, new { ticketId }, ct).ConfigureAwait(false);
 
             return new JiraMediationResult
             {
                 Success = false,
                 Outcome = "Error",
-                FailureCode = JiraFailureCodes.SharedCredentialDeniedInSaaS,
-                FailureReason = "JIRA uses a shared platform credential with no per-tenant scoping; refused in SaaS mode. Set Jira:AllowSharedCredentialInSaaS=true to allow knowingly.",
+                FailureCode = JiraFailureCodes.CredentialUnavailable,
+                FailureReason = "no JIRA credential is configured for this tenant; register one via POST /api/v1/integrations/jira/credential.",
                 TicketKey = ticketId,
                 CorrelationId = correlationId,
             };
@@ -194,7 +196,7 @@ public sealed class JiraMediationService : IJiraMediationService
 
         try
         {
-            return await body().ConfigureAwait(false);
+            return await body(resolution.Credential).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

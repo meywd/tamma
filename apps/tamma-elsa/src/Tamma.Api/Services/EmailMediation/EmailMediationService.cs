@@ -1,50 +1,67 @@
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Api.Services.Email;
-using Tamma.Api.Services.PromptStore;
+using Tamma.Api.Services.Integrations;
 using Tamma.Core.Logging;
 
 namespace Tamma.Api.Services.EmailMediation;
 
 /// <summary>
-/// Story 38 (Phase 1) — composes the email-mediation sequence entirely inside
-/// <c>Tamma.Api</c>: accept the engine's rendered message into the credentialed,
-/// outbox-backed <see cref="IEmailService"/> (SMTP / Resend / in-memory, chosen by
-/// <c>AddEmailServices</c> config) under the caller's tenant context. Unlike git/CI
-/// there is no per-tenant BYOK token resolver and no repo guard — email is a single,
-/// server-side, config-provided integration (mirrors the Slack outbox plane).
+/// Story 38 (Phase 1) + integration BYOK — composes the email-mediation sequence
+/// entirely inside <c>Tamma.Api</c>: resolve the acting tenant's email transport
+/// credential per-request (BYOK→system→fail-loud, like git/LLM), then deliver via
+/// the resolved credential's OWN transport authority. The transport secret NEVER
+/// reaches the engine — it stays in Tamma.Api (cabinet or single-user config).
 ///
-/// <para>The DCB audit is owned by <see cref="IEmailService"/> itself, which emits
-/// <see cref="EmailEventTypes.Queued"/> on accept and later
-/// <see cref="EmailEventTypes.Sent"/> / <see cref="EmailEventTypes.Failed"/> from the
-/// transport; the mediation layer therefore does NOT emit a duplicate terminal event
-/// (that would double-audit and collide with the subsystem's <c>EMAIL.SENT.*</c>
-/// types). The email credential NEVER reaches the engine — it stays in Tamma.Api
-/// config.</para>
+/// <para><b>Fail-loud tenant resolution (replaces the old SaaS-deny guard).</b>
+/// The credential is resolved via <see cref="IEmailCredentialResolver"/>:
+/// <list type="bullet">
+///   <item><b>present</b> — the tenant's BYOK bundle (SaaS) or the single-user
+///     <c>Email:*</c> config (system tier) ⇒ ALLOW, sending FROM the resolved
+///     tenant-authorized identity, over that tier's own transport.</item>
+///   <item><b>absent</b> — no per-tenant credential and no legitimate system tier
+///     ⇒ <b>fail loud</b> with the typed
+///     <see cref="EmailMediationFailureCodes.CredentialUnavailable"/> and a WARN
+///     log; no transport is ever reached. This closes the confused-deputy: a
+///     SaaS tenant can no longer send under a shared platform sender identity.</item>
+/// </list></para>
+///
+/// <para><b>Per-tier transport authority (the anti-spoofing invariant).</b> The
+/// transport is chosen by the tier that answered — NOT a single shared singleton:
+/// <list type="bullet">
+///   <item><b>SaaS BYOK (<see cref="IntegrationCredentialSource.Tenant"/>)</b> —
+///     delivered via <see cref="ITenantEmailTransport"/> built from the tenant's
+///     OWN bundle (their Resend key / their SMTP relay). The tenant's <c>From</c> is
+///     therefore backed by the tenant's own sending authority (their DKIM); they can
+///     only ever send as themselves. The platform singleton
+///     <see cref="IEmailService"/> is <b>never</b> used for a SaaS tenant — using it
+///     with a tenant-supplied <c>From</c> would be an open-relay / From-spoofing
+///     hole (the platform's DKIM-signed transport emitting brand-impersonating
+///     mail).</item>
+///   <item><b>single-user system tier (<see cref="IntegrationCredentialSource.System"/>)</b>
+///     — delivered via the platform singleton <see cref="IEmailService"/>, whose
+///     <c>Email:*</c> process config IS the sole principal's own authority.</item>
+/// </list></para>
+///
+/// <para>The DCB audit is owned by the transport itself
+/// (<c>EMAIL.QUEUED/SENT/FAILED</c>); the mediation layer does NOT emit a duplicate
+/// terminal event.</para>
 /// </summary>
 public sealed class EmailMediationService : IEmailMediationService
 {
-    /// <summary>
-    /// Config flag (default FALSE) that opts a SaaS deployment back into
-    /// tenant-workflow-initiated mediated email sends. See the SaaS guard in
-    /// <see cref="SendEmailAsync"/> and <see cref="EmailMediationFailureCodes.MediationDeniedInSaaS"/>.
-    /// </summary>
-    internal const string AllowMediatedSendInSaaSKey = "Email:AllowMediatedSendInSaaS";
-
     private readonly IEmailService _email;
-    private readonly ITammaModeProvider _mode;
-    private readonly IConfiguration _config;
+    private readonly ITenantEmailTransport _tenantTransport;
+    private readonly IEmailCredentialResolver _credentials;
     private readonly ILogger<EmailMediationService> _logger;
 
     public EmailMediationService(
         IEmailService email,
-        ITammaModeProvider mode,
-        IConfiguration config,
+        ITenantEmailTransport tenantTransport,
+        IEmailCredentialResolver credentials,
         ILogger<EmailMediationService> logger)
     {
         _email = email ?? throw new ArgumentNullException(nameof(email));
-        _mode = mode ?? throw new ArgumentNullException(nameof(mode));
-        _config = config ?? throw new ArgumentNullException(nameof(config));
+        _tenantTransport = tenantTransport ?? throw new ArgumentNullException(nameof(tenantTransport));
+        _credentials = credentials ?? throw new ArgumentNullException(nameof(credentials));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -52,31 +69,39 @@ public sealed class EmailMediationService : IEmailMediationService
     {
         ArgumentNullException.ThrowIfNull(body);
 
-        // SaaS fail-closed tenant guard (mirrors the JIRA/git mediation guards).
-        // A mediated send composes mail FROM the platform's configured sender identity
-        // (Email:From) — there is no per-tenant From/domain allowlist here. In SaaS a
-        // tenant workflow could therefore emit arbitrary mail under the platform's
-        // reputation/domain (spam/phishing amplification), so deny-by-default. An
-        // operator opts back in with Email:AllowMediatedSendInSaaS=true once a
-        // per-tenant sender policy exists. Single-user mode is always allowed (the sole
-        // principal owns the domain). Fail-soft: return a typed denial inside 200
-        // success:false, never a raw 5xx. Only TENANT-WORKFLOW-initiated sends reach
-        // this service; system emails (welcome/verification/password-reset) call
-        // IEmailService directly and are unaffected.
-        if (_mode.Mode == TammaMode.SaaS
-            && !_config.GetValue(AllowMediatedSendInSaaSKey, false))
+        // ── fail-loud per-tenant credential gate (runs BEFORE the transport) ──
+        // SaaS: the tenant must have registered its own email credential; absent ⇒
+        // fail loud rather than sending under a shared platform sender identity
+        // (the confused-deputy). Single-user resolves the Email:* config tier.
+        EmailCredentialResolution? resolution;
+        try
+        {
+            resolution = await _credentials.ResolveAsync(tenantId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "email-mediation credential resolution threw; failing loud (CREDENTIAL_UNAVAILABLE). correlationId={CorrelationId}, tenantId={TenantId}",
+                LogSanitizer.Clean(body.CorrelationId), tenantId);
+            resolution = null;
+        }
+
+        if (resolution is null)
         {
             _logger.LogWarning(
-                "email-mediation send DENIED in SaaS mode: no per-tenant sender allowlist; " +
-                "set {ConfigKey}=true to opt in. correlationId={CorrelationId}, tenantId={TenantId}",
-                AllowMediatedSendInSaaSKey, LogSanitizer.Clean(body.CorrelationId), tenantId);
+                "email-mediation FAILED-LOUD (no email credential for tenant): send refused — register a per-tenant email credential or configure Email:* (single-user). correlationId={CorrelationId}, tenantId={TenantId}",
+                LogSanitizer.Clean(body.CorrelationId), tenantId);
 
             return new EmailMediationResult
             {
                 Success = false,
-                Outcome = "Denied",
-                FailureCode = EmailMediationFailureCodes.MediationDeniedInSaaS,
-                FailureReason = "mediated email send is not permitted in SaaS mode",
+                Outcome = "Error",
+                FailureCode = EmailMediationFailureCodes.CredentialUnavailable,
+                FailureReason = "no email credential is configured for this tenant; register one via POST /api/v1/integrations/email/credential.",
                 CorrelationId = body.CorrelationId,
             };
         }
@@ -96,20 +121,27 @@ public sealed class EmailMediationService : IEmailMediationService
         try
         {
             // The engine sends a single already-rendered body; use it for BOTH the
-            // plain-text (required) and HTML variants. The tenant scopes the message
-            // + its EMAIL.* audit events; no per-user identity at the engine-service
-            // principal plane.
+            // plain-text (required) and HTML variants. From = the resolved
+            // tenant-authorized sender identity. The tenant scopes the message +
+            // its EMAIL.* audit events.
             var message = new EmailMessage(
                 To: body.To,
                 Subject: body.Subject,
                 Html: body.Body,
                 Text: body.Body,
-                From: null,
+                From: resolution.Credential.From,
                 Template: null,
                 TenantId: tenantId,
                 UserId: null);
 
-            var txnId = await _email.SendAsync(message, ct).ConfigureAwait(false);
+            // Route by the tier that answered — the anti-spoofing invariant. A SaaS
+            // BYOK credential is delivered via the TENANT'S OWN transport (their
+            // Resend key / SMTP relay), never the platform singleton with a
+            // tenant-supplied From. Single-user's system tier uses the platform
+            // singleton, whose Email:* config IS the sole principal's authority.
+            var txnId = resolution.Source == IntegrationCredentialSource.Tenant
+                ? await _tenantTransport.SendAsync(resolution.Credential, message, ct).ConfigureAwait(false)
+                : await _email.SendAsync(message, ct).ConfigureAwait(false);
 
             return new EmailMediationResult
             {
