@@ -1242,9 +1242,18 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.OccurredAt).HasColumnType("timestamp with time zone");
             entity.Property(e => e.PayloadJson)
                 .HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
-            // Reserved for Story 37-2 — nullable, never populated here.
+            // Story 37-2 — tamper-evidence hash chain. The hash columns were
+            // reserved by 37-1; 37-2 adds the per-scope monotonic sequence and a
+            // UNIQUE index over it (one chain per physical table — the CP table
+            // or a tenant schema's table). Nullable for pre-37-2 legacy rows
+            // awaiting backfill; Postgres treats NULLs as distinct so the unique
+            // index permits many un-backfilled rows.
             entity.Property(e => e.RecordHash).HasMaxLength(128);
             entity.Property(e => e.PrevRecordHash).HasMaxLength(128);
+            entity.Property(e => e.ChainSequence);
+            entity.HasIndex(e => e.ChainSequence)
+                .IsUnique()
+                .HasDatabaseName("UX_audit_records_ChainSequence");
 
             // Idempotency key — one curated row per raw event (AC8). The
             // projector inserts-if-absent; a re-scan after a crash is a no-op.
@@ -1287,6 +1296,40 @@ internal static class TammaModelConfiguration
     /// <c>TenantId</c>), which also carries the single-user / shared-DB
     /// <c>cp.domain_events</c> fallback.</para>
     /// </summary>
+    /// <summary>
+    /// Story 37-2 (AC5) — configure the <c>audit_chain_checkpoints</c> table.
+    /// CP-resident only (called from <see cref="ControlPlaneDbContext"/>). Holds
+    /// signed anchors for BOTH platform and tenant chains; <c>tenant_id</c>
+    /// discriminates. A CHECK ties <c>scope</c>↔<c>tenant_id</c> consistency.
+    /// </summary>
+    public static void ConfigureAuditChainCheckpoint(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AuditChainCheckpoint>(entity =>
+        {
+            entity.ToTable("audit_chain_checkpoints", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_audit_chain_checkpoints_scope_tenant",
+                    "(\"Scope\" = 'platform' AND \"TenantId\" IS NULL) "
+                    + "OR (\"Scope\" = 'tenant' AND \"TenantId\" IS NOT NULL)");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Scope).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.HeadSequence).IsRequired();
+            entity.Property(e => e.HeadHash).IsRequired().HasMaxLength(128);
+            entity.Property(e => e.SignedAt).HasColumnType("timestamp with time zone");
+            entity.Property(e => e.Signature).IsRequired().HasColumnType("bytea");
+            entity.Property(e => e.KeyVersion).IsRequired();
+            entity.Property(e => e.CreatedAt)
+                .HasColumnType("timestamp with time zone").HasDefaultValueSql("now()");
+
+            // Latest-covering-checkpoint lookup: (scope, tenant_id, head_sequence DESC).
+            entity.HasIndex(e => new { e.Scope, e.TenantId, e.HeadSequence })
+                .HasDatabaseName("IX_audit_chain_checkpoints_scope_seq");
+        });
+    }
+
     public static void ConfigureAuditProjectorCursor(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<AuditProjectorCursor>(entity =>

@@ -89,5 +89,22 @@ public static class BuiltInAlertRules
             EventType: "SECRET.ROTATION.FAILED",
             Predicate: """{"op":"always"}""",
             ThrottleSeconds: 0),
+
+        // Story 37-2 (AC10) — audit hash-chain tamper. Fires on every
+        // AUDIT.CHAIN.TAMPER_DETECTED so detection fans out with no manual
+        // rule setup. Throttled to avoid a storm if a scan re-detects the
+        // same break on repeated verifies.
+        new BuiltInAlertRuleSpec(
+            BuiltInKey: "audit-chain-tamper",
+            Name: "audit-chain-tamper",
+            Description:
+                "The tamper-evident audit hash-chain detected a broken link " +
+                "(a record was modified, deleted, reordered, or a checkpoint " +
+                "signature failed). Scope {scope}, sequence {chainSequence}. " +
+                "Treat as a potential integrity incident.",
+            Severity: AlertSeverity.Critical,
+            EventType: "AUDIT.CHAIN.TAMPER_DETECTED",
+            Predicate: """{"op":"always"}""",
+            ThrottleSeconds: 300),
     };
 }

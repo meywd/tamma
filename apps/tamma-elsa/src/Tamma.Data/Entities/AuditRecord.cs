@@ -90,13 +90,22 @@ public class AuditRecord
     /// <summary>Single-user-mode owner (the sole user). Null in SaaS mode.</summary>
     public Guid? UserId { get; set; }
 
-    // ── Reserved for Story 37-2 tamper-evidence (this story leaves both null) ──
+    // ── Story 37-2 tamper-evidence hash chain ──
 
-    /// <summary>Reserved for Story 37-2 — the hash of this record in the chain.
-    /// Story 37-1 leaves this null; 37-2 populates it. Do NOT compute here.</summary>
+    /// <summary>Story 37-2 — this record's hash in the chain, lowercase-hex
+    /// SHA-256 of <c>prev_hash ‖ canonical(record)</c>. Populated by the
+    /// projector at insert time (37-1 reserved it null). Nullable only for
+    /// pre-37-2 legacy rows awaiting backfill.</summary>
     public string? RecordHash { get; set; }
 
-    /// <summary>Reserved for Story 37-2 — the previous record's hash, linking the
-    /// chain. Story 37-1 leaves this null; 37-2 populates it.</summary>
+    /// <summary>Story 37-2 — the previous record's <see cref="RecordHash"/> in
+    /// this scope's chain (or <c>AuditChainGenesis.HashHex</c> for the first
+    /// record), lowercase-hex. Populated at insert time.</summary>
     public string? PrevRecordHash { get; set; }
+
+    /// <summary>Story 37-2 — per-scope monotonic chain position (1-based). One
+    /// chain per physical <c>audit_records</c> table (the CP table = the
+    /// platform / single-user chain; each tenant schema's table = that tenant's
+    /// chain). Nullable only for pre-37-2 legacy rows awaiting backfill.</summary>
+    public long? ChainSequence { get; set; }
 }

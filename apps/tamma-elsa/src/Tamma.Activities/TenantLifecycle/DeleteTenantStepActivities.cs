@@ -363,7 +363,11 @@ public sealed class BackupTenantDatabaseForDeleteActivity : CleanupStepActivity
 ///     feed is read back for incident review), <c>platform_analytics_hourly</c>
 ///     (immutable cross-tenant analytics fact table; <c>TenantId</c> NULLABLE,
 ///     the platform-wide rollup rows carry <c>TenantId=null</c> — purging a
-///     gone tenant's hourly rows would corrupt historical platform totals).
+///     gone tenant's hourly rows would corrupt historical platform totals),
+///     <c>audit_chain_checkpoints</c> (Story 37-2 — signed tamper-evidence
+///     anchors of the tenant's audit chain; <c>TenantId</c> NULLABLE, no FK, so
+///     no dangle. They are the compliance proof that the retained
+///     <c>audit_records</c> were not rewritten and MUST outlive the tenant).
 ///     All retained intentionally; NOT touched here.</description></item>
 ///   <item><description><b>Out of scope (tenant-schema, not CP)</b> —
 ///     <c>prompt_overrides</c>, <c>secrets</c> (tenant KEK-encrypted),

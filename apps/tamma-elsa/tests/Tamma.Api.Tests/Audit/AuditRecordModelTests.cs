@@ -76,7 +76,8 @@ public class AuditRecordModelTests
             "IpAddress", "UserAgent", "OccurredAt",
             "SourceEventId", "SourceSequenceNumber", "PayloadJson",
             "TenantId", "UserId",
-            "RecordHash", "PrevRecordHash",
+            // Story 37-2 tamper-evidence hash chain.
+            "RecordHash", "PrevRecordHash", "ChainSequence",
         });
     }
 
@@ -89,6 +90,9 @@ public class AuditRecordModelTests
         var entity = ctx.Model.FindEntityType(typeof(AuditRecord))!;
         entity.FindProperty("RecordHash")!.IsNullable.Should().BeTrue();
         entity.FindProperty("PrevRecordHash")!.IsNullable.Should().BeTrue();
+        // Story 37-2 — ChainSequence is nullable only for pre-37-2 legacy rows
+        // (new inserts always populate it).
+        entity.FindProperty("ChainSequence")!.IsNullable.Should().BeTrue();
     }
 
     // ── AC4 — payload is jsonb; occurred_at is timestamptz ──

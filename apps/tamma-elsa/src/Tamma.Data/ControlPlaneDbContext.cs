@@ -696,6 +696,13 @@ public class ControlPlaneDbContext : DbContext
     public DbSet<AuditProjectorCursor> AuditProjectorCursors => Set<AuditProjectorCursor>();
 
     /// <summary>
+    /// Story 37-2 — signed chain checkpoints for BOTH platform and tenant
+    /// scopes. Always CP-resident (a tenant cannot rewrite an anchor stored
+    /// outside its own schema); <c>tenant_id</c> discriminates the scope.
+    /// </summary>
+    public DbSet<AuditChainCheckpoint> AuditChainCheckpoints => Set<AuditChainCheckpoint>();
+
+    /// <summary>
     /// Story 34-11 — the provider COST identity (platform-global, NOT
     /// tenant-scoped). Promotes the frozen <c>ProviderPricingService</c> rate
     /// sheet to a first-class, admin-editable entity behind the unchanged
@@ -818,6 +825,8 @@ public class ControlPlaneDbContext : DbContext
         // projector resumes both streams from one row.
         TammaModelConfiguration.ConfigureAuditEntities(modelBuilder, fixedTenantId: null);
         TammaModelConfiguration.ConfigureAuditProjectorCursor(modelBuilder);
+        // Story 37-2 — signed chain checkpoints (CP-resident for every scope).
+        TammaModelConfiguration.ConfigureAuditChainCheckpoint(modelBuilder);
 
         // Story 34-11 — provider COST price-book. CP-resident, platform-global
         // (no TenantId): cost is the provider's published rate, identical for

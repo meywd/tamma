@@ -33,6 +33,14 @@ public static class StopgapSecretMap
     public const string PlatformTenantSharedSecret = "hmac/shared-engine";
 
     /// <summary>
+    /// Story 37-2 — HMAC key that signs audit hash-chain checkpoints. Sourced
+    /// from the cabinet (never a plaintext env key at rest); the config/env
+    /// fallback here exists only for the Story 29-9 coexistence window, exactly
+    /// like every other platform HMAC secret.
+    /// </summary>
+    public const string PlatformAuditChainSigningKey = "audit/chain-signing-key";
+
+    /// <summary>
     /// Table of every platform-scoped stopgap. The migration service
     /// walks this list in order, skipping entries already present in
     /// the cabinet, and emits one
@@ -91,6 +99,13 @@ public static class StopgapSecretMap
                 Purpose: SecretPurpose.HmacSharedSecret,
                 Consumer: new ConsumerRef("tamma-engine", "request-signing"),
                 RotationDays: 30),
+            new StopgapSecretDescriptor(
+                CabinetName: PlatformAuditChainSigningKey,
+                ConfigKeys: new[] { "Audit:ChainSigningKey" },
+                EnvVars: new[] { "AUDIT_CHAIN_SIGNING_KEY" },
+                Purpose: SecretPurpose.HmacSharedSecret,
+                Consumer: new ConsumerRef("audit-chain", "checkpoint-signing"),
+                RotationDays: 90),
         };
 }
 

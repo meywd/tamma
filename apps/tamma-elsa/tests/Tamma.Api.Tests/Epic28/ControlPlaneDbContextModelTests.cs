@@ -137,6 +137,10 @@ public class ControlPlaneDbContextModelTests
             // CP-resident high-water marks).
             "audit_records",
             "audit_projector_cursor",
+            // Story 37-2 — signed hash-chain checkpoints. CP-resident for BOTH
+            // platform and tenant scopes (a tenant cannot rewrite an anchor
+            // stored outside its own schema); tenant_id discriminates the scope.
+            "audit_chain_checkpoints",
             // Story 34-11 — provider COST price-book. Platform-global (no
             // TenantId): cost is the provider's published rate, identical for
             // every tenant. Promotes the frozen ProviderPricingService rate
@@ -168,7 +172,8 @@ public class ControlPlaneDbContextModelTests
             + "Story 34-11 adds providers + provider_model_prices. "
             + "Story 34-5 adds margin_policies. "
             + "Story 34-4 adds tenant_plan_assignments. "
-            + "Story 38-3 adds slack_outbox.");
+            + "Story 38-3 adds slack_outbox. "
+            + "Story 37-2 adds audit_chain_checkpoints.");
     }
 
     // ── Story 34-11 — provider cost price-book model shape ──

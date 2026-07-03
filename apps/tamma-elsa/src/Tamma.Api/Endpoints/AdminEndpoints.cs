@@ -3,8 +3,10 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Admin;
+using Tamma.Api.Dtos.Audit;
 using Tamma.Api.Services;
 using Tamma.Api.Services.Audit;
+using Tamma.Core.Audit;
 using Tamma.Api.Services.PromptStore;
 using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Services.Provisioning;
@@ -557,5 +559,45 @@ public static class AdminEndpoints
         var result = await auditQuery.QueryPlatformAsync(
             callerUserId, filter, modeProvider.Mode, ct);
         return Results.Ok(result);
+    }
+
+    /// <summary>
+    /// Story 37-2 (AC8) — verify the platform audit hash-chain, or (with
+    /// <c>?tenantId=</c>) any tenant's chain. Gated <c>PlatformOwnerAccess</c> at
+    /// the wiring site. Without <c>tenantId</c> this reads ONLY the control-plane
+    /// chain; with it, that tenant's schema-resident chain. Optional
+    /// <c>from</c>/<c>to</c> bound the range.
+    /// </summary>
+    public static async Task<IResult> VerifyPlatformAudit(
+        IAuditChainVerificationService verification,
+        [FromQuery] Guid? tenantId,
+        [FromQuery] long? from,
+        [FromQuery] long? to,
+        CancellationToken ct)
+    {
+        var scope = tenantId is Guid t ? AuditChainScope.ForTenant(t) : AuditChainScope.Platform;
+        var result = await verification.VerifyAsync(scope, from, to, ct);
+        return Results.Ok(AuditChainVerifyResponse.From(scope, result));
+    }
+
+    /// <summary>
+    /// Story 37-2 (AC6) — on-demand: write a signed checkpoint anchoring the
+    /// current head of the platform chain, or (with <c>?tenantId=</c>) a tenant's
+    /// chain. Gated <c>PlatformOwnerAccess</c>. Returns 202 with the written
+    /// checkpoint, or 200 with <c>written=false</c> when the chain is empty.
+    /// </summary>
+    public static async Task<IResult> CheckpointAudit(
+        IAuditChainCheckpointService checkpoints,
+        [FromQuery] Guid? tenantId,
+        CancellationToken ct)
+    {
+        var scope = tenantId is Guid t ? AuditChainScope.ForTenant(t) : AuditChainScope.Platform;
+        var written = await checkpoints.WriteCheckpointAsync(scope, ct);
+        if (written is null)
+        {
+            return Results.Ok(new { written = false, scope = scope.Discriminator, tenantId });
+        }
+        return Results.Accepted(value: new AuditChainCheckpointDto(
+            written.Id, written.HeadSequence, written.HeadHash, written.SignedAt, written.KeyVersion));
     }
 }
