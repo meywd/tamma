@@ -181,7 +181,84 @@ public static class SecretsServiceCollectionExtensions
         // construct this. Scoped to match EF context lifecycles.
         services.TryAddScoped<ISecretQueryService, SecretQueryService>();
 
+        // Story 29-1 concrete ISecretStore facade. Depends on the
+        // SecretsDbContext factory (above), the ISecretStoreBackend +
+        // ISecretAccessAuditor (from AddTammaSecrets), and TimeProvider.
+        // Scoped to match the EF context lifecycle. Only wired on the
+        // Postgres path — the bare AddTammaSecrets placeholder has no
+        // DbContext factory to back the facade's metadata surface.
+        services.TryAddScoped<ISecretStore, SecretStore>();
+
         return services;
+    }
+
+    /// <summary>
+    /// Epic 29 (review fix) — production-safe secret-cabinet backend
+    /// selection. Extracted from <c>Program.cs</c> so the decision matrix is
+    /// unit-testable (the raw <c>GetConnectionString</c> guard it replaces
+    /// was a no-op on the VPS, where both <c>SecretStore</c> and
+    /// <c>ControlPlane</c> ship as empty strings and the CP DbContext only
+    /// works via an admin-connection fallback — so a Production host
+    /// silently used the volatile in-memory backend for real secrets).
+    ///
+    /// <para>Decision matrix (caller passes the ALREADY-RESOLVED connection
+    /// from <see cref="Tamma.Api.Infrastructure.ConnectionStringResolver.ResolveSecretStore"/>,
+    /// which mirrors the CP DbContext's admin fallback):</para>
+    /// <list type="bullet">
+    ///   <item><description>KEK present AND a resolvable connection →
+    ///     <see cref="AddTammaPostgresSecrets"/> (persistent envelope backend
+    ///     + <c>IKekProvider</c> + the <see cref="ISecretStore"/> facade);
+    ///     returns <see cref="SecretCabinetBackend.PersistentPostgres"/>.</description></item>
+    ///   <item><description>Production AND (KEK absent OR no resolvable
+    ///     persistent backend) → <see cref="FailClosedSecretStoreBackend"/>:
+    ///     every secret WRITE throws loudly; startup stays up. NEVER falls to
+    ///     volatile in-memory for real secrets. Returns
+    ///     <see cref="SecretCabinetBackend.FailClosed"/>.</description></item>
+    ///   <item><description>Non-Production (dev/test) → the volatile
+    ///     in-memory placeholder is fine; returns
+    ///     <see cref="SecretCabinetBackend.VolatileInMemory"/>.</description></item>
+    /// </list>
+    ///
+    /// <para>Returns the selected backend so the caller can emit the
+    /// appropriate startup log without re-deriving the decision.</para>
+    /// </summary>
+    public static SecretCabinetBackend AddTammaSecretCabinet(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        bool isProduction,
+        bool kekConfigured,
+        string? resolvedConnectionString)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        var hasBackendConnection = !string.IsNullOrWhiteSpace(resolvedConnectionString);
+
+        if (kekConfigured && hasBackendConnection)
+        {
+            // Pass the resolved connection explicitly — do NOT let the
+            // extension re-read the raw (possibly empty-string) config keys.
+            services.AddTammaPostgresSecrets(configuration, resolvedConnectionString);
+            return SecretCabinetBackend.PersistentPostgres;
+        }
+
+        // Base placeholders (in-memory backend + auditor + TimeProvider).
+        services.AddTammaSecrets();
+
+        if (isProduction)
+        {
+            // Production without a persistent backend (KEK absent OR no
+            // resolvable connection): NEVER silently persist real secrets to
+            // volatile memory. Swap the placeholder for the fail-closed guard
+            // so every WRITE throws loudly; startup stays up so the operator
+            // sees the cause at the first write, not a crash loop.
+            services.RemoveAll<ISecretStoreBackend>();
+            services.AddSingleton<ISecretStoreBackend, FailClosedSecretStoreBackend>();
+            return SecretCabinetBackend.FailClosed;
+        }
+
+        // Non-production dev/test — the volatile in-memory backend is fine.
+        return SecretCabinetBackend.VolatileInMemory;
     }
 
     /// <summary>
@@ -225,4 +302,23 @@ public static class SecretsServiceCollectionExtensions
 
         return services;
     }
+}
+
+/// <summary>
+/// Which secret-store backend <see cref="SecretsServiceCollectionExtensions.AddTammaSecretCabinet"/>
+/// wired, so the caller can emit the matching startup log.
+/// </summary>
+public enum SecretCabinetBackend
+{
+    /// <summary>Persistent Postgres envelope-encrypted backend (KEK + connection).</summary>
+    PersistentPostgres,
+
+    /// <summary>
+    /// Production fail-closed guard: writes throw loudly; real secrets are
+    /// never silently persisted to volatile memory.
+    /// </summary>
+    FailClosed,
+
+    /// <summary>Volatile in-memory placeholder — dev/test only.</summary>
+    VolatileInMemory,
 }

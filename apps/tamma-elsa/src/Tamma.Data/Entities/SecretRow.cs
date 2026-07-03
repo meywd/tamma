@@ -1,6 +1,5 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
-using Microsoft.EntityFrameworkCore;
 
 namespace Tamma.Data.Entities;
 
@@ -32,7 +31,10 @@ namespace Tamma.Data.Entities;
 /// <c>OnModelCreating</c> file (Epic 28 owns those).</para>
 /// </summary>
 [Table("secrets")]
-[Index(nameof(Scope), nameof(Name), IsUnique = true)]
+// Unique index is configured fluently in SecretsDbContext.OnModelCreating
+// as (Scope, TenantId, Name) with NULLS NOT DISTINCT — a DataAnnotation
+// [Index] cannot express NULLS NOT DISTINCT, which is required so
+// platform-scope rows (TenantId = NULL) still collide on a duplicate name.
 public class SecretRow
 {
     /// <summary>

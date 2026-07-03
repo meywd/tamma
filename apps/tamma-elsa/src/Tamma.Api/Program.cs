@@ -408,11 +408,68 @@ builder.Services.AddSaaSServices();
 // by default). See docs/vendors/cranl/README.md for the provisioning flow.
 builder.Services.AddTenantProvisioning(builder.Configuration);
 
-// Platform secret cabinet (Epic 29). Story 29-1 wires only the
-// abstraction + a null auditor + an in-memory backend placeholder;
-// Story 29-2 swaps in the Postgres envelope-encrypted backend and the
-// real auditor.
-builder.Services.AddTammaSecrets();
+// Platform secret cabinet (Epic 29). Backend selection (Story 29-2):
+//   • KEK configured (TAMMA_SECRET_STORE_KEK_PRIMARY) + a secret-store
+//     connection string → the PERSISTENT Postgres envelope-encrypted
+//     backend (AddTammaPostgresSecrets). This is the REQUIRED production
+//     wiring: BYOK ciphertext survives restart. It ALSO registers
+//     IKekProvider (which the reveal + rotation writers require) and the
+//     Story 29-1 ISecretStore facade.
+//   • KEK absent → the VOLATILE in-memory placeholder, which is safe
+//     ONLY for dev/test. In Production we FAIL LOUD rather than silently
+//     backing real (tenant BYOK) secrets with volatile memory — a
+//     persistent secret whose ciphertext evaporates on restart is the
+//     exact silent failure this project forbids. The fail-closed backend
+//     lets startup succeed (health answers) but throws on any secret
+//     WRITE with a clear remediation message. Mirrors
+//     TenantSecretProtector's env-gated production hard-fail.
+// Resolve the secret-store connection the SAME way the ControlPlane
+// DbContext binds at runtime (SecretStore → ControlPlane → admin fallback,
+// empty strings coerced to null). The raw GetConnectionString guard this
+// replaces was a no-op on the VPS: both keys ship as "" there and the CP
+// DbContext only works via the admin-connection fallback, so
+// IsNullOrWhiteSpace("") == true skipped the whole guard and Production
+// silently used the volatile in-memory backend for real secrets.
+var secretStoreConnString =
+    Tamma.Api.Infrastructure.ConnectionStringResolver.ResolveSecretStore(builder.Configuration);
+var secretStoreKekConfigured = !string.IsNullOrWhiteSpace(
+    Environment.GetEnvironmentVariable(
+        Tamma.Api.Services.Secrets.Postgres.EnvKekProvider.PrimaryEnvVar));
+
+var secretCabinetBackend = builder.Services.AddTammaSecretCabinet(
+    builder.Configuration,
+    builder.Environment.IsProduction(),
+    secretStoreKekConfigured,
+    secretStoreConnString);
+
+var kekEnvVar = Tamma.Api.Services.Secrets.Postgres.EnvKekProvider.PrimaryEnvVar;
+switch (secretCabinetBackend)
+{
+    case SecretCabinetBackend.PersistentPostgres:
+        Log.Information(
+            "Secret cabinet: persistent Postgres envelope-encrypted backend wired ({KekEnv} present).",
+            kekEnvVar);
+        break;
+    case SecretCabinetBackend.FailClosed:
+        // Production with no persistent backend (KEK absent OR no resolvable
+        // connection). Secret WRITES fail closed; startup stays up so the
+        // operator sees the cause at the first write, not a crash loop.
+        Log.Error(
+            "Secret cabinet MISCONFIGURED: Production has no persistent secret backend " +
+            "({KekEnv} unset or no resolvable connection). Secret WRITES will FAIL CLOSED " +
+            "(no plaintext is persisted to volatile memory). Set {KekEnv} (and, if a " +
+            "dedicated secrets DB is wanted, ConnectionStrings:SecretStore) to enable the " +
+            "persistent Postgres envelope-encrypted backend.",
+            kekEnvVar, kekEnvVar);
+        break;
+    case SecretCabinetBackend.VolatileInMemory:
+        Log.Warning(
+            "Secret cabinet: {KekEnv} not set — using the VOLATILE in-memory backend. " +
+            "Secret ciphertext will NOT survive a restart. Acceptable for dev/test only; " +
+            "set {KekEnv} for any persistent deployment.",
+            kekEnvVar, kekEnvVar);
+        break;
+}
 
 // Story 29-9 / 29-10: runtime resolver + stopgap migrator. The
 // resolver is the read-path abstraction over the cabinet + the
