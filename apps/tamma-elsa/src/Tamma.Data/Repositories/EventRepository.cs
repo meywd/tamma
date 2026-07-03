@@ -385,11 +385,13 @@ public class EventRepository(
         // connection's search_path. The tenant defence-in-depth predicate + the
         // EXISTS (from AnyAsync) compose in LINQ over the raw-SQL subquery.
         //
-        // TODO(perf): expression index on ((Tags->>'correlationId')) — separate
-        // migration, mirroring ix_domain_events_tags_agentid on ((Tags->>'agentId'))
-        // (see AddAgentTrailAgentIdIndex). Without it this is a seq scan, but AnyAsync
-        // compiles to EXISTS(SELECT 1 …) so Postgres short-circuits on the first match —
-        // the lookup is volume-independent regardless, unlike the retired recent-200 scan.
+        // The `"Tags"->>'correlationId' = $1` equality is served by the btree
+        // EXPRESSION index `ix_domain_events_tags_correlationid` on
+        // ((Tags->>'correlationId')) (added in migration AddDomainEventsCorrelationIdIndex,
+        // mirroring ix_domain_events_tags_agentid on ((Tags->>'agentId')) — see
+        // AddAgentTrailAgentIdIndex). AnyAsync also compiles to EXISTS(SELECT 1 …) so
+        // Postgres short-circuits on the first match — the lookup is volume-independent
+        // regardless, unlike the retired recent-200 scan.
         return await db.DomainEvents
             .FromSqlInterpolated($@"
                 SELECT * FROM domain_events
@@ -414,8 +416,10 @@ public class EventRepository(
         // replay. Volume-independent: the target run's events are returned regardless
         // of how many other AGENT.* events the tenant has.
         //
-        // TODO(perf): expression index on ((Tags->>'correlationId')) — separate
-        // migration (see ExistsByCorrelationIdAsync / AddAgentTrailAgentIdIndex).
+        // The `"Tags"->>'correlationId' = $1` equality is served by the btree
+        // EXPRESSION index `ix_domain_events_tags_correlationid` on
+        // ((Tags->>'correlationId')) (migration AddDomainEventsCorrelationIdIndex; see
+        // ExistsByCorrelationIdAsync / AddAgentTrailAgentIdIndex).
         var rows = await db.DomainEvents
             .FromSqlInterpolated($@"
                 SELECT * FROM domain_events
