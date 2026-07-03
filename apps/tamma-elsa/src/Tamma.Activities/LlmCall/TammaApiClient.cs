@@ -156,6 +156,21 @@ public class TammaApiClient
         return PatchAsync<GitCallResponse>(url, request, tenantId, ct);
     }
 
+    /// <summary>
+    /// Epic 38 follow-up #21 — create a git-platform release for the shipped version
+    /// via <c>POST /api/v1/git/{owner}/{repo}/releases</c> (the deployment-pipeline
+    /// release step). The tag / notes are composed engine-side; the per-tenant git
+    /// token is resolved + used server-side, it never travels here. Returns null on
+    /// any non-2xx / transport failure (the thin activity maps it to its Error edge,
+    /// fail-closed).
+    /// </summary>
+    public virtual Task<GitCallResponse?> CreateReleaseAsync(
+        string repo, GitCreateReleaseRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/releases";
+        return PostAsync<GitCallResponse>(url, request, tenantId, ct);
+    }
+
     /// <summary>Story 38-1 (AC5) — <c>GET /api/v1/git/{owner}/{repo}/pull-requests/{n}/comments</c>.</summary>
     public Task<GitCallResponse?> GetPullRequestCommentsAsync(
         string repo, int prNumber, string? correlationId = null, string? tenantId = null, CancellationToken ct = default)

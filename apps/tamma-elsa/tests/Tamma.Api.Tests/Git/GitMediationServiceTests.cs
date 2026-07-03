@@ -76,6 +76,12 @@ public class GitMediationServiceTests
         MergeStrategy = "squash", IssueNumber = 7, BranchName = "feature", CorrelationId = "corr-merge",
     };
 
+    private static CreateReleaseRequest ReleaseBody() => new()
+    {
+        TagName = "deploy-abc1234", TargetRef = "abc1234def", Name = "Release deploy-abc1234",
+        Body = "notes", IssueNumber = 7, CorrelationId = "corr-release",
+    };
+
     // ===================================================================
     // Cross-tenant guard (AC2) — FIRST, fail-closed
     // ===================================================================
@@ -334,6 +340,79 @@ public class GitMediationServiceTests
         result.Outcome.Should().Be("Failed");
         result.PlatformStatusCode.Should().Be(403);
         _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.IssueUpdatedFailed);
+    }
+
+    // ===================================================================
+    // Create release (Epic 38 follow-up #21) — deployment-pipeline release step
+    // ===================================================================
+
+    [Test]
+    public async Task CreateRelease_Success_Byok_UsesResolvedToken_EmitsOneSuccessEvent()
+    {
+        Allow();
+        ResolveToken(GitCredentialSources.Byok);
+        _github.Setup(g => g.CreateGitHubReleaseAsync(Repo, It.IsAny<ReleaseCreationRequest>()))
+            .ReturnsAsync(IntegrationResult<GitHubReleaseResult>.Ok(
+                new GitHubReleaseResult { Success = true, Id = 55, HtmlUrl = "https://gh/releases/55", TagName = "deploy-abc1234" }));
+
+        var result = await _sut.CreateReleaseAsync(_tenant, Repo, ReleaseBody());
+
+        result.Success.Should().BeTrue();
+        result.Outcome.Should().Be("Created");
+        result.ReleaseId.Should().Be(55);
+        result.ReleaseUrl.Should().Be("https://gh/releases/55");
+        result.ReleaseTag.Should().Be("deploy-abc1234");
+        result.CredentialSource.Should().Be(GitCredentialSources.Byok);
+
+        // The invariant: the token USED (minted into the client) == the token RESOLVED.
+        _factory.Verify(f => f.Create(SecretToken), Times.Once);
+
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.ReleaseCreatedSuccess);
+    }
+
+    [Test]
+    public async Task CreateRelease_PlatformError_200SuccessFalse_OneFailedEvent()
+    {
+        Allow();
+        ResolveToken(GitCredentialSources.Platform);
+        _github.Setup(g => g.CreateGitHubReleaseAsync(Repo, It.IsAny<ReleaseCreationRequest>()))
+            .ReturnsAsync(IntegrationResult<GitHubReleaseResult>.Fail("422: tag already exists"));
+
+        var result = await _sut.CreateReleaseAsync(_tenant, Repo, ReleaseBody());
+
+        result.Success.Should().BeFalse();
+        result.Outcome.Should().Be("Error");
+        result.FailureCode.Should().Be(GitFailureCodes.PlatformError);
+        result.ToHttpResult().Let(StatusOf).Should().Be(200, "an expected platform failure rides inside 200 success:false");
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.ReleaseCreatedFailed);
+    }
+
+    [Test]
+    public async Task CreateRelease_GuardDenied_403_PlatformNeverCalled()
+    {
+        Deny();
+
+        var result = await _sut.CreateReleaseAsync(_tenant, Repo, ReleaseBody());
+
+        result.FailureCode.Should().Be(GitFailureCodes.RepoNotAuthorized);
+        _factory.Verify(f => f.Create(It.IsAny<string>()), Times.Never);
+        _github.VerifyNoOtherCalls();
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.ReleaseCreatedFailed);
+    }
+
+    [Test]
+    public async Task CreateRelease_TokenUnavailable_503_FailClosed_PlatformNeverCalled()
+    {
+        Allow();
+        NoToken();
+
+        var result = await _sut.CreateReleaseAsync(_tenant, Repo, ReleaseBody());
+
+        result.Success.Should().BeFalse();
+        result.FailureCode.Should().Be(GitFailureCodes.TokenUnavailable);
+        _factory.Verify(f => f.Create(It.IsAny<string>()), Times.Never);
+        result.ToHttpResult().Let(StatusOf).Should().Be(503);
+        _events.Appended.Should().ContainSingle().Which.Type.Should().Be(GitEventTypes.ReleaseCreatedFailed);
     }
 
     // ===================================================================

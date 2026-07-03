@@ -64,14 +64,17 @@ namespace Tamma.ElsaServer.Workflows;
 /// continue-with-incidents and the pre-seeded <c>deploymentStatus = "failed"</c>
 /// so an internal fault never reports a silent success.</para>
 ///
-/// <para><b>Deferred (P1 item 5 — release/tag):</b> no GitHub-release / git-tag
-/// activity exists anywhere in <c>apps/tamma-elsa/src</c> (a real seam is a
-/// follow-up — a <c>CreateReleaseActivity</c> wrapping the platform's GitHub
-/// client). Rather than FAKE a release, the successful-prod terminal surfaces
-/// <c>releaseStatus = "deferred"</c> + a computed <c>releaseTag</c> output and
-/// records it in the pipeline-success event, so the gap is explicit and queryable
-/// instead of silently claimed-done. P2/P3 items (post-deploy health probe, typed
-/// mediation contract, per-stage timeout, notifications) remain follow-ups.</para>
+/// <para><b>Release/tag (Epic 38 follow-up #21 — IMPLEMENTED):</b> after a
+/// successful production deploy the pipeline cuts a REAL git-platform release via
+/// <see cref="Tamma.Activities.ADL.CreateReleaseActivity"/> — the MEDIATED release
+/// step (the engine holds NO git credential; the release create routes through
+/// <c>POST /api/v1/git/{owner}/{repo}/releases</c> via <c>TammaApiClient</c>, where
+/// the per-tenant token lives, so <c>TAMMA001</c> stays satisfied). The successful
+/// terminal now surfaces <c>releaseStatus = "created"</c> + <c>releaseUrl</c>; a
+/// release-create failure surfaces <c>releaseStatus = "failed"</c> + a loud
+/// <c>RELEASE.CREATED.FAILED</c> event (never silently swallowed) without undoing
+/// the successful deploy. P2/P3 items (post-deploy health probe, per-stage timeout,
+/// notifications) remain follow-ups.</para>
 ///
 /// Flow:
 ///   Init (status=failed default) → QA STARTED → QA Deploy (llm-call) → Extract → QA OK?
@@ -82,7 +85,7 @@ namespace Tamma.ElsaServer.Workflows;
 ///     │   │   │     ├─ Reject  → REJECTED → SetProdFailed
 ///     │   │   │     └─ Invalid → REJECTED → SetProdFailed
 ///     │   │   └─ No(dev) → Prod STARTED → Prod Deploy → Extract → Prod OK?
-///     │   │         ├─ Yes → Prod SUCCESS → PIPELINE.SUCCESS (releaseStatus=deferred) → Output
+///     │   │         ├─ Yes → Prod SUCCESS → Compute Tag → CreateRelease (mediated) → PIPELINE.SUCCESS (releaseStatus=created|failed) → Output
 ///     │   │         └─ No  → Prod FAILED → Rollback (ROLLBACK.*) → SetProdFailed
 ///     │   └─ No → UAT FAILED → SetUATFailed
 ///     └─ No → QA FAILED → SetQAFailed
@@ -90,7 +93,7 @@ namespace Tamma.ElsaServer.Workflows;
 ///
 /// Inputs: repository, mergeSha, issueNumber, branchName, mode, tenantId, requireProdApproval
 /// Outputs: deploymentStatus (success/failed:&lt;stage&gt;), completedStages (JSON array),
-///          releaseTag, releaseStatus (deferred), rollbackStatus
+///          releaseTag, releaseStatus (created|failed), releaseUrl, rollbackStatus
 /// </summary>
 public class DeploymentPipelineWorkflow : WorkflowBase
 {
@@ -103,7 +106,7 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         builder.Name = "Deployment Pipeline";
         builder.DefinitionId = "deployment-pipeline";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description = "Deploy through QA -> UAT -> Prod with a fail-closed gate per stage, a Business-Mode production approval gate, rollback on prod failure, and a full DCB audit trail. Release/tag deferred (no seam).";
+        builder.Description = "Deploy through QA -> UAT -> Prod with a fail-closed gate per stage, a Business-Mode production approval gate, rollback on prod failure, a full DCB audit trail, and a real git-platform release cut via the mediated integration seam after a successful prod deploy.";
 
         // Fail-closed on internal fault — a faulted activity must not halt the
         // instance with no output. Continue-with-incidents keeps the flow alive;
@@ -131,6 +134,10 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         var stageError = builder.WithVariable<string>("StageError", "");
         var rollbackStatus = builder.WithVariable<string>("RollbackStatus", "");
         var releaseTag = builder.WithVariable<string>("ReleaseTag", "");
+        // Epic 38 follow-up #21 — the real release-step outputs (was the hardcoded
+        // "deferred"). CreateReleaseActivity sets these on its outcome.
+        var releaseStatus = builder.WithVariable<string>("ReleaseStatus", "");
+        var releaseUrl = builder.WithVariable<string>("ReleaseUrl", "");
 
         var decisionVar = builder.WithVariable<string>("Decision", "");
         var feedbackVar = builder.WithVariable<string>("Feedback", "");
@@ -316,17 +323,15 @@ public class DeploymentPipelineWorkflow : WorkflowBase
             isRollback: true);
 
         // ================================================================
-        // 7. Success terminal — compute the (deferred) release tag, emit
-        //    PIPELINE.SUCCESS, set status=success.
+        // 7. Success terminal — compute the release tag, CUT the real release
+        //    (Epic 38 follow-up #21, mediated), emit PIPELINE.SUCCESS, status=success.
         // ================================================================
         var setReleaseTag = new SetVariable
         {
             Id = "SetReleaseTag", Name = "Compute Release Tag",
             Variable = releaseTag,
-            // P1 item 5 (deferred): no release/tag activity exists; we compute a
-            // candidate tag from the merged SHA so the audit row and output carry
-            // it, but DO NOT cut a real release (releaseStatus=deferred). Never a
-            // fake "release created".
+            // Compute the version tag from the merged SHA; CreateRelease (below) cuts
+            // the real git-platform release from it via the mediated integration seam.
             Value = new Input<object?>(ctx =>
             {
                 var sha = mergeSha.Get(ctx) ?? "";
@@ -335,6 +340,58 @@ public class DeploymentPipelineWorkflow : WorkflowBase
             })
         };
         setReleaseTag.SetDisplayText("Compute Release Tag");
+
+        // Epic 38 follow-up #21 — the real release step. Cuts a git-platform release
+        // for the shipped version through the MEDIATED integration seam (the engine
+        // holds NO git credential — the release create routes through
+        // POST /api/v1/git/{owner}/{repo}/releases via TammaApiClient, where the
+        // per-tenant token lives). Emits RELEASE.CREATED.SUCCESS/FAILED itself.
+        var createRelease = new CreateReleaseActivity
+        {
+            Id = "CreateRelease", Name = "Create Release",
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            TagName = new Input<string>(ctx => releaseTag.Get(ctx)),
+            TargetRef = new Input<string?>(ctx => mergeSha.Get(ctx)),
+            ReleaseName = new Input<string?>(ctx => $"Release {releaseTag.Get(ctx)}"),
+            Body = new Input<string?>(ctx =>
+            {
+                var sha = mergeSha.Get(ctx) ?? "";
+                var shortSha = sha.Length >= 7 ? sha[..7] : sha;
+                var issue = issueNumber.Get(ctx);
+                var stages = completedStages.Get(ctx);
+                return $"Automated release for the shipped version." +
+                       (issue > 0 ? $" Resolves #{issue}." : "") +
+                       (string.IsNullOrEmpty(shortSha) ? "" : $"\n\nMerge commit: `{shortSha}`.") +
+                       $"\n\nDeployed through: {stages}.";
+            }),
+            Draft = new Input<bool>(false),
+            Prerelease = new Input<bool>(false),
+            IssueNumber = new Input<int>(ctx => issueNumber.Get(ctx)),
+            TenantId = new Input<string?>(ctx => tenantId.Get(ctx)),
+            ReleaseUrl = new Output<string?>(releaseUrl),
+            ReleaseTag = new Output<string?>(releaseTag),
+            ErrorCode = new Output<string?>(stageError),
+        };
+        createRelease.SetDisplayText("Create Release");
+
+        // The deploy itself already succeeded; a release-create failure is surfaced
+        // (releaseStatus=failed + the loud RELEASE.CREATED.FAILED event the activity
+        // emits) but does NOT flip the deploy to failed — never silently swallowed.
+        var setReleaseCreated = new SetVariable
+        {
+            Id = "SetReleaseCreated", Name = "Release Created",
+            Variable = releaseStatus,
+            Value = new Input<object?>(_ => (object)"created")
+        };
+        setReleaseCreated.SetDisplayText("Release Created");
+
+        var setReleaseFailed = new SetVariable
+        {
+            Id = "SetReleaseFailed", Name = "Release Failed",
+            Variable = releaseStatus,
+            Value = new Input<object?>(_ => (object)"failed")
+        };
+        setReleaseFailed.SetDisplayText("Release Failed");
 
         var setSuccess = new SetVariable
         {
@@ -347,7 +404,7 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         var emitPipelineSuccess = EmitDeployEvent("EmitPipelineSuccess", "Emit PIPELINE.SUCCESS",
             DeployEvents.PipelineSuccess, /*stage*/ "",
             repository, mergeSha, issueNumber, mode, tenantId, stageResult, stageError, completedStages, rollbackStatus,
-            releaseTag: releaseTag);
+            releaseTag: releaseTag, releaseStatus: releaseStatus, releaseUrl: releaseUrl);
 
         // ================================================================
         // 8. Failure terminals (one per stage) → PIPELINE.FAILED → outputs
@@ -374,9 +431,12 @@ public class DeploymentPipelineWorkflow : WorkflowBase
                     { Id = "OutStages", OutputName = new("completedStages"), OutputValue = new(ctx => (object)completedStages.Get(ctx)) },
                 new SetOutput
                     { Id = "OutReleaseTag", OutputName = new("releaseTag"), OutputValue = new(ctx => (object)releaseTag.Get(ctx)) },
-                // P1 item 5 deferral surfaced explicitly so the gap is queryable.
+                // Epic 38 follow-up #21 — the REAL release status (created|failed),
+                // replacing the prior hardcoded "deferred", plus the release URL.
                 new SetOutput
-                    { Id = "OutReleaseStatus", OutputName = new("releaseStatus"), OutputValue = new(_ => (object)"deferred") },
+                    { Id = "OutReleaseStatus", OutputName = new("releaseStatus"), OutputValue = new(ctx => (object)releaseStatus.Get(ctx)) },
+                new SetOutput
+                    { Id = "OutReleaseUrl", OutputName = new("releaseUrl"), OutputValue = new(ctx => (object)releaseUrl.Get(ctx)) },
                 new SetOutput
                     { Id = "OutRollbackStatus", OutputName = new("rollbackStatus"), OutputValue = new(ctx => (object)rollbackStatus.Get(ctx)) },
             }
@@ -410,8 +470,9 @@ public class DeploymentPipelineWorkflow : WorkflowBase
                 // Rollback
                 emitRollbackStarted, rollbackCall, extractRollbackResult, rollbackOk,
                 emitRollbackSuccess, emitRollbackFailed,
-                // Success terminal
-                setReleaseTag, setSuccess, emitPipelineSuccess,
+                // Success terminal (+ Epic 38 follow-up #21 release step)
+                setReleaseTag, createRelease, setReleaseCreated, setReleaseFailed,
+                setSuccess, emitPipelineSuccess,
                 // Failure terminals
                 setQaFailed, setUatFailed, setProdFailed, emitPipelineFailed,
                 setOutputs, finish,
@@ -481,8 +542,16 @@ public class DeploymentPipelineWorkflow : WorkflowBase
                 ConnectOutcome(rollbackOk, "False", emitRollbackFailed),
                 Connect(emitRollbackFailed, setProdFailed),
 
-                // ── Success terminal ──
-                Connect(setReleaseTag, setSuccess),
+                // ── Success terminal (+ Epic 38 follow-up #21 release step) ──
+                // Prod succeeded → compute tag → cut the real release (mediated).
+                // A release failure is surfaced (releaseStatus=failed + the loud
+                // RELEASE.CREATED.FAILED event) but does NOT undo the successful
+                // deploy — both outcomes proceed to the success terminal.
+                Connect(setReleaseTag, createRelease),
+                ConnectOutcome(createRelease, "Created", setReleaseCreated),
+                ConnectOutcome(createRelease, "Error", setReleaseFailed),
+                Connect(setReleaseCreated, setSuccess),
+                Connect(setReleaseFailed, setSuccess),
                 Connect(setSuccess, emitPipelineSuccess),
                 Connect(emitPipelineSuccess, setOutputs),
 
@@ -734,7 +803,8 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         Variable<string> stageResult, Variable<string> stageError,
         Variable<string> completedStages, Variable<string> rollbackStatus,
         Variable<string>? approver = null, Variable<string>? feedback = null,
-        Variable<string>? releaseTag = null, bool isRollback = false)
+        Variable<string>? releaseTag = null, Variable<string>? releaseStatus = null,
+        Variable<string>? releaseUrl = null, bool isRollback = false)
     {
         var emit = new EmitDeploymentEventActivity
         {
@@ -762,10 +832,18 @@ public class DeploymentPipelineWorkflow : WorkflowBase
                 if (!string.IsNullOrEmpty(rb)) data["rollbackStatus"] = rb;
                 if (approver != null) data["approver"] = approver.Get(ctx);
                 if (feedback != null) data["feedback"] = feedback.Get(ctx);
-                if (releaseTag != null)
+                if (releaseTag != null) data["releaseTag"] = releaseTag.Get(ctx);
+                if (releaseStatus != null)
                 {
-                    data["releaseTag"] = releaseTag.Get(ctx);
-                    data["releaseStatus"] = "deferred"; // P1 item 5 — no real release seam yet.
+                    // Epic 38 follow-up #21 — the REAL release status (created|failed)
+                    // set by CreateReleaseActivity, replacing the prior "deferred".
+                    var rs = releaseStatus.Get(ctx);
+                    if (!string.IsNullOrEmpty(rs)) data["releaseStatus"] = rs;
+                }
+                if (releaseUrl != null)
+                {
+                    var ru = releaseUrl.Get(ctx);
+                    if (!string.IsNullOrEmpty(ru)) data["releaseUrl"] = ru;
                 }
                 return JsonSerializer.Serialize(data);
             }),

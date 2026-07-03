@@ -24,6 +24,11 @@ public static class GitEventTypes
     public const string FileChangesReadOperation = "file_changes_read";
     public const string BranchDeleteOperation = "branch_delete";
 
+    // Epic 38 follow-up #21 — the deployment-pipeline release step (create a
+    // GitHub release/tag for the shipped version). Same guard→token→platform→
+    // one-event mediation plane as the git-platform ops above.
+    public const string ReleaseCreateOperation = "release_create";
+
     public const string BranchCreatedSuccess = "GIT.BRANCH_CREATED.SUCCESS";
     public const string BranchCreatedFailed = "GIT.BRANCH_CREATED.FAILED";
 
@@ -47,6 +52,9 @@ public static class GitEventTypes
 
     public const string BranchDeletedSuccess = "GIT.BRANCH_DELETED.SUCCESS";
     public const string BranchDeletedFailed = "GIT.BRANCH_DELETED.FAILED";
+
+    public const string ReleaseCreatedSuccess = "GIT.RELEASE_CREATED.SUCCESS";
+    public const string ReleaseCreatedFailed = "GIT.RELEASE_CREATED.FAILED";
 }
 
 /// <summary>

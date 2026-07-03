@@ -214,6 +214,38 @@ public class GitEndpointsTests
     }
 
     [Test]
+    public async Task Post_Release_ValidBearer_ReconstructsRepo_And_Returns200()
+    {
+        var tenant = Guid.NewGuid();
+        _tenantContext.SetTenantId(tenant);
+        _git.NextRelease = new GitMediationResult
+        {
+            Success = true, Outcome = "Created", ReleaseTag = "deploy-abc1234",
+            ReleaseUrl = "https://gh/releases/1", ReleaseId = 1, CredentialSource = "byok",
+        };
+
+        using var client = AuthedClient();
+        client.DefaultRequestHeaders.Add("X-Tenant-Id", tenant.ToString());
+
+        var resp = await client.PostAsJsonAsync("/api/v1/git/acme/widgets/releases", new
+        {
+            tagName = "deploy-abc1234",
+            targetRef = "abc1234def",
+            name = "Release deploy-abc1234",
+            body = "notes",
+            issueNumber = 7,
+            correlationId = "wf-3",
+        });
+
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        _git.LastRepo.Should().Be("acme/widgets");
+        _git.LastTenantId.Should().Be(tenant, "the acting tenant comes from ITenantContext (X-Tenant-Id), not the body");
+        var body = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("success").GetBoolean().Should().BeTrue();
+        body.GetProperty("releaseUrl").GetString().Should().Be("https://gh/releases/1");
+    }
+
+    [Test]
     public async Task Get_Comments_Success_Returns200()
     {
         _git.NextComments = new GitMediationResult
@@ -285,6 +317,17 @@ public class GitEndpointsTests
         {
             LastTenantId = tenantId; LastRepo = repo;
             return Task.FromResult(new GitMediationResult { Success = true, Outcome = "Deleted", BranchDeleted = true });
+        }
+
+        public GitMediationResult? NextRelease { get; set; }
+
+        public Task<GitMediationResult> CreateReleaseAsync(Guid? tenantId, string repo, CreateReleaseRequest body, CancellationToken ct = default)
+        {
+            LastTenantId = tenantId; LastRepo = repo;
+            return Task.FromResult(NextRelease ?? new GitMediationResult
+            {
+                Success = true, Outcome = "Created", ReleaseTag = body.TagName, ReleaseUrl = "https://gh/releases/1", ReleaseId = 1,
+            });
         }
     }
 

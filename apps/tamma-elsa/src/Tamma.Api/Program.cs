@@ -2627,6 +2627,13 @@ app.MapDelete("/api/v1/git/{owner}/{repo}/branches", GitEndpoints.DeleteBranch)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitDeleteBranch");
 
+// ── Epic 38 follow-up #21 — deployment-pipeline release step. Create a GitHub
+// release/tag for the shipped version. Same engine-only plane + guard→token→
+// platform→one-event mediation as the git-platform ops above.
+app.MapPost("/api/v1/git/{owner}/{repo}/releases", GitEndpoints.CreateRelease)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitCreateRelease");
+
 // ── Story 38 (Phase 1) — CI (GitHub Actions) step mediation ──
 // Same engine-only plane + guard→token→platform→one-event mediation as git.
 app.MapPost("/api/v1/ci/{owner}/{repo}/test-runs", CiEndpoints.TriggerTests)

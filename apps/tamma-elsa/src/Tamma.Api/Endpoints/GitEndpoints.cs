@@ -99,5 +99,13 @@ public static class GitEndpoints
         return result.ToHttpResult();
     }
 
+    public static async Task<IResult> CreateRelease(
+        string owner, string repo, CreateReleaseRequest body,
+        ITenantContext tenantContext, IGitMediationService git, CancellationToken ct)
+    {
+        var result = await git.CreateReleaseAsync(tenantContext.TenantId, Repo(owner, repo), body, ct).ConfigureAwait(false);
+        return result.ToHttpResult();
+    }
+
     private static string Repo(string owner, string repo) => $"{owner}/{repo}";
 }

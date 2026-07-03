@@ -51,6 +51,11 @@ public sealed record GitMediationResult
     public IReadOnlyList<GitCommitDto>? Commits { get; init; }
     public IReadOnlyList<GitFileChangeDto>? FileChanges { get; init; }
 
+    // ── release (Epic 38 follow-up #21 — deployment-pipeline release step) ──
+    public long? ReleaseId { get; init; }
+    public string? ReleaseUrl { get; init; }
+    public string? ReleaseTag { get; init; }
+
     // ── failure-only (key-free) ──
     public string? FailureCode { get; init; }   // REPO_NOT_AUTHORIZED | GIT_CONFLICT | NOT_MERGEABLE | NOT_FOUND | PLATFORM_ERROR | GIT_TOKEN_UNAVAILABLE
     public string? FailureReason { get; init; }  // key-free

@@ -93,6 +93,13 @@ public sealed class GitMediationService : IGitMediationService
         => ExecuteGuardedAsync(tenantId, repo, GitEventTypes.BranchDeleteOperation, GitEventTypes.BranchDeletedFailed, correlationId, ct,
             () => DeleteBranchCoreAsync(tenantId, repo, branchName, correlationId, ct));
 
+    public Task<GitMediationResult> CreateReleaseAsync(Guid? tenantId, string repo, CreateReleaseRequest body, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        return ExecuteGuardedAsync(tenantId, repo, GitEventTypes.ReleaseCreateOperation, GitEventTypes.ReleaseCreatedFailed, body.CorrelationId, ct,
+            () => CreateReleaseCoreAsync(tenantId, repo, body, ct));
+    }
+
     /// <summary>
     /// F3 — run one mediation op body; convert any unexpected exception (DB read,
     /// secret decrypt, client mint, transport) into a typed key-free
@@ -577,6 +584,53 @@ public sealed class GitMediationService : IGitMediationService
         };
         await EmitAsync(GitEventTypes.BranchDeletedSuccess, op, tenantId, repo, correlationId, cred.Source, null,
             new { branchName }, ct).ConfigureAwait(false);
+        return ok;
+    }
+
+    // ===================================================================
+    // Create release (Epic 38 follow-up #21) — deployment-pipeline release step
+    // ===================================================================
+
+    private async Task<GitMediationResult> CreateReleaseCoreAsync(Guid? tenantId, string repo, CreateReleaseRequest body, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        var op = GitEventTypes.ReleaseCreateOperation;
+
+        var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.ReleaseCreatedFailed, body.CorrelationId, ct).ConfigureAwait(false);
+        if (gate is not null) return gate;
+
+        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        if (cred is null)
+            return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.ReleaseCreatedFailed, body.CorrelationId, ct).ConfigureAwait(false);
+
+        var github = _githubFactory.Create(cred.Token);
+        var request = new Tamma.Core.Interfaces.ReleaseCreationRequest
+        {
+            TagName = body.TagName,
+            TargetCommitish = body.TargetRef,
+            Name = string.IsNullOrWhiteSpace(body.Name) ? body.TagName : body.Name,
+            Body = body.Body,
+            Draft = body.Draft,
+            Prerelease = body.Prerelease,
+        };
+
+        var res = await github.CreateGitHubReleaseAsync(repo, request).ConfigureAwait(false);
+
+        if (!res.Success)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.ReleaseCreatedFailed, body.CorrelationId, cred.Source, res.Error, new { tag = body.TagName }, ct).ConfigureAwait(false);
+
+        var ok = new GitMediationResult
+        {
+            Success = true,
+            CredentialSource = cred.Source,
+            Outcome = "Created",
+            ReleaseId = res.Data!.Id,
+            ReleaseUrl = res.Data.HtmlUrl,
+            ReleaseTag = res.Data.TagName ?? body.TagName,
+            CorrelationId = body.CorrelationId,
+        };
+        await EmitAsync(GitEventTypes.ReleaseCreatedSuccess, op, tenantId, repo, body.CorrelationId, cred.Source, null,
+            new { tag = ok.ReleaseTag, releaseId = res.Data.Id }, ct).ConfigureAwait(false);
         return ok;
     }
 

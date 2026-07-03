@@ -30,4 +30,11 @@ public interface IGitMediationService
     /// <summary>Delete <paramref name="branchName"/> (the standalone delete the
     /// composite exposes, distinct from the verified post-merge delete). Write op.</summary>
     Task<GitMediationResult> DeleteBranchAsync(Guid? tenantId, string repo, string branchName, string correlationId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Epic 38 follow-up #21 — create a GitHub release/tag for the shipped version
+    /// (the deployment-pipeline release step). Write op —
+    /// guard→token→platform→one-event.
+    /// </summary>
+    Task<GitMediationResult> CreateReleaseAsync(Guid? tenantId, string repo, CreateReleaseRequest body, CancellationToken ct = default);
 }
