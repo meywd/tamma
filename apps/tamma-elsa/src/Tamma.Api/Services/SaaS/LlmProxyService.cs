@@ -67,6 +67,15 @@ public sealed class LlmProxyService : ILlmProxyService
         // credential resolver, so the tag is derived from 34-3's mode alone
         // (AC5) — no competing key path introduced here.
         var model = string.IsNullOrWhiteSpace(request.Model) ? DefaultModel : request.Model!;
+
+        // Fix 1 — ONE per-call correlation id shared by BOTH sinks this call writes:
+        // the ProviderDiagnostic row AND the LLM.CALL.SUCCESS usage event. The
+        // dimensional rollup (ComputeTenantDimensionalRollupActivity) folds both into
+        // the same bucket; its dedup skips the event only when a diagnostic shares its
+        // correlationId, so the diagnostic stays authoritative and the call is counted
+        // ONCE (without this shared id the rollup double-counts cost/tokens/billed 2x).
+        var callId = Guid.NewGuid();
+
         var billingMode = await _billingModeTagger
             .ResolveTagAsync(tenantId, ProviderKey, credentialSource: null, ct);
 
@@ -80,7 +89,7 @@ public sealed class LlmProxyService : ILlmProxyService
                     "LLM chat rejected: tenant {TenantId} over budget (spent={Spent}, limit={Limit})",
                     t, budget.Spent, budget.Limit);
                 await EmitUsageEventAsync(
-                    tenantId, model, billingMode, success: false, reason: "budget_exceeded",
+                    tenantId, model, billingMode, callId, success: false, reason: "budget_exceeded",
                     tokensUsed: 0, cost: 0m, durationMs: 0, ct);
                 return Error("budget_exceeded", "tenant budget exceeded");
             }
@@ -104,11 +113,11 @@ public sealed class LlmProxyService : ILlmProxyService
                     (int)response.StatusCode, Truncate(errorBody, 500));
 
                 await RecordDiagnosticAsync(
-                    tenantId, model, billingMode, sw.Elapsed.TotalMilliseconds,
+                    tenantId, model, billingMode, callId, sw.Elapsed.TotalMilliseconds,
                     tokensUsed: 0, cost: 0m, success: false,
                     errorMessage: $"http_{(int)response.StatusCode}", ct);
                 await EmitUsageEventAsync(
-                    tenantId, model, billingMode, success: false,
+                    tenantId, model, billingMode, callId, success: false,
                     reason: $"http_{(int)response.StatusCode}",
                     tokensUsed: 0, cost: 0m, durationMs: sw.Elapsed.TotalMilliseconds, ct);
 
@@ -120,11 +129,11 @@ public sealed class LlmProxyService : ILlmProxyService
             var cost = EstimateCost(model, parsed.PromptTokens, parsed.CompletionTokens);
 
             await RecordDiagnosticAsync(
-                tenantId, model, billingMode, sw.Elapsed.TotalMilliseconds,
+                tenantId, model, billingMode, callId, sw.Elapsed.TotalMilliseconds,
                 tokensUsed: parsed.TotalTokens, cost: cost, success: true,
                 errorMessage: null, ct);
             await EmitUsageEventAsync(
-                tenantId, model, billingMode, success: true, reason: null,
+                tenantId, model, billingMode, callId, success: true, reason: null,
                 tokensUsed: parsed.TotalTokens, cost: cost,
                 durationMs: sw.Elapsed.TotalMilliseconds, ct,
                 inputTokens: parsed.PromptTokens, outputTokens: parsed.CompletionTokens);
@@ -145,11 +154,11 @@ public sealed class LlmProxyService : ILlmProxyService
             _logger.LogError(ex, "LLM proxy upstream call failed");
 
             await RecordDiagnosticAsync(
-                tenantId, model, billingMode, sw.Elapsed.TotalMilliseconds,
+                tenantId, model, billingMode, callId, sw.Elapsed.TotalMilliseconds,
                 tokensUsed: 0, cost: 0m, success: false,
                 errorMessage: ex.GetType().Name, ct);
             await EmitUsageEventAsync(
-                tenantId, model, billingMode, success: false, reason: ex.GetType().Name,
+                tenantId, model, billingMode, callId, success: false, reason: ex.GetType().Name,
                 tokensUsed: 0, cost: 0m, durationMs: sw.Elapsed.TotalMilliseconds, ct);
 
             return Error("upstream_error", "upstream request failed");
@@ -244,6 +253,7 @@ public sealed class LlmProxyService : ILlmProxyService
         Guid? tenantId,
         string model,
         string billingMode,
+        Guid callId,
         double durationMs,
         int tokensUsed,
         decimal cost,
@@ -260,6 +270,9 @@ public sealed class LlmProxyService : ILlmProxyService
             // Story 34-3 / 35-2 — stamp the per-call billing posture the tagger
             // resolved so the markup engine + analytics never re-bill a BYOK call.
             BillingMode = billingMode,
+            // Fix 1 — the per-call correlation id shared with the LLM.CALL.SUCCESS
+            // usage event, so the dimensional rollup dedup counts this call ONCE.
+            CorrelationId = callId,
             TenantId = tenantId,
             Model = model,
             RequestType = "chat",
@@ -283,6 +296,7 @@ public sealed class LlmProxyService : ILlmProxyService
         Guid? tenantId,
         string model,
         string billingMode,
+        Guid callId,
         bool success,
         string? reason,
         int tokensUsed,
@@ -311,6 +325,11 @@ public sealed class LlmProxyService : ILlmProxyService
                     provider = ProviderKey,
                     model,
                     reason,
+                    // Fix 1 — the shared per-call id the paired ProviderDiagnostic also
+                    // carries. The dimensional rollup folds the diagnostic (authoritative
+                    // for cost/tokens) and SKIPS this event when their correlationId
+                    // matches, so a proxied call is counted ONCE (not 2x).
+                    correlationId = callId.ToString(),
                 }),
                 Metadata = JsonSerializer.Serialize(new
                 {

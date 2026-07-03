@@ -85,6 +85,29 @@ public class TenantProviderBillingResolverTests
         (await NewResolver(db).ResolveModeAsync(tenantId, "ANTHROPIC")).Should().Be(MetricBillingMode.Byok);
     }
 
+    // ── Fix 2 — the call site uses the vendor handle "anthropic-claude"; the owner
+    //    row is stored under the canonical family key "anthropic". Canonical
+    //    normalization must make them MATCH (else a declared BYOK row is silently
+    //    ignored and the tenant is billed platform markup on their own key). ──
+    [Test]
+    public async Task ResolveMode_CanonicalizesVendorHandle_MatchesOwnerRow()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = NewContext();
+        // Owner row stored under the CANONICAL provider key.
+        db.TenantProviderBillings.Add(Row(tenantId, "anthropic", "byok"));
+        await db.SaveChangesAsync();
+
+        var resolver = NewResolver(db);
+        // The proxy resolves under the vendor handle "anthropic-claude".
+        (await resolver.ResolveModeAsync(tenantId, "anthropic-claude"))
+            .Should().Be(MetricBillingMode.Byok,
+                "'anthropic-claude' canonicalizes to 'anthropic' — the declared BYOK row must match");
+        // Mixed case + vendor handle still canonicalizes.
+        (await resolver.ResolveModeAsync(tenantId, "Anthropic-Claude"))
+            .Should().Be(MetricBillingMode.Byok);
+    }
+
     [Test]
     public async Task ResolveMode_IgnoresDisabledRow_FallsBackToPlatform()
     {

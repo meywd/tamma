@@ -155,6 +155,46 @@ public class LlmProxyServiceTests
             Times.Once);
     }
 
+    // ─── Fix 1 — the diagnostic and the usage event share ONE per-call
+    //     correlation id so the dimensional rollup dedup counts the call ONCE. ──
+    [Test]
+    public async Task ChatAsync_StampsSharedCorrelationId_OnDiagnosticAndUsageEvent()
+    {
+        var tenantId = Guid.NewGuid();
+        ProviderDiagnostic? capturedDiag = null;
+        DomainEvent? capturedEvent = null;
+
+        _diagnostics
+            .Setup(d => d.RecordEventAsync(It.IsAny<ProviderDiagnostic>(), It.IsAny<CancellationToken>()))
+            .Callback((ProviderDiagnostic p, CancellationToken _) => capturedDiag = p)
+            .ReturnsAsync(Guid.NewGuid());
+        _events
+            .Setup(e => e.AppendAsync(It.IsAny<DomainEvent>()))
+            .ReturnsAsync((DomainEvent d) => d)
+            .Callback((DomainEvent d) => capturedEvent = d);
+
+        SetupHttp(HttpStatusCode.OK, """
+            { "model": "claude-sonnet-4.5", "content": [ { "type": "text", "text": "ok" } ],
+              "usage": { "input_tokens": 5, "output_tokens": 7 } }
+            """);
+
+        var service = CreateService();
+        await service.ChatAsync(
+            new ChatRequest("claude-sonnet-4.5", new[] { new ChatMessage("user", "hi") }, 32, null),
+            tenantId);
+
+        capturedDiag.Should().NotBeNull();
+        capturedEvent.Should().NotBeNull();
+        capturedDiag!.CorrelationId.Should().NotBeNull(
+            "the diagnostic must carry the per-call correlation id so the rollup dedup can fire");
+
+        using var doc = JsonDocument.Parse(capturedEvent!.Tags!);
+        var eventCorr = doc.RootElement.GetProperty("correlationId").GetString();
+        eventCorr.Should().Be(capturedDiag.CorrelationId!.Value.ToString(),
+            "the event's correlationId tag must equal the diagnostic's CorrelationId — both describe ONE call, "
+            + "so the dimensional rollup folds them once (no 2x double-count)");
+    }
+
     [Test]
     public async Task ChatAsync_NullTenant_EmitsNoUsageEvent()
     {

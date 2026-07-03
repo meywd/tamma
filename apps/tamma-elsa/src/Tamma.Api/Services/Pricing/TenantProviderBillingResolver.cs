@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Tamma.Api.Services.Billing;
 using Tamma.Core;
 using Tamma.Core.Enums;
 using Tamma.Data;
@@ -46,7 +47,12 @@ public sealed class TenantProviderBillingResolver : ITenantProviderBillingResolv
             return MetricBillingMode.PlatformProvided;
         }
 
-        var normalized = (provider ?? string.Empty).Trim().ToLowerInvariant();
+        // Fix 2 — canonicalize the (possibly vendor-handle / mixed-case) provider to
+        // the lowercase family key the owner row is stored under, so a call keyed
+        // "anthropic-claude" matches an owner row keyed "anthropic". r.ProviderKey is
+        // ALSO lowercased for the compare so a legacy mixed-case stored key still
+        // matches; the write path is documented to persist the canonical key.
+        var normalized = BillingProviderKey.Canonicalize(provider);
 
         var mode = await _db.TenantProviderBillings
             .AsNoTracking()

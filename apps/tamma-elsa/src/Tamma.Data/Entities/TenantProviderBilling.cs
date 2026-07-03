@@ -8,7 +8,10 @@ namespace Tamma.Data.Entities;
 /// <c>ITenantProviderPricingModeResolver</c>) and the 35-2 billing-mode tagger
 /// both READ this row; Story 32-3's runtime credential resolver reports what
 /// key physically resolved and is reconciled against this DECLARED intent
-/// (disagreement ⇒ <c>BILLING.MODE.MISMATCH</c>, 32-3 wins).
+/// (disagreement ⇒ <c>BILLING.MODE.MISMATCH</c>, 32-3 wins). NOTE: that reconcile
+/// branch is latent today — <c>LlmProxyService</c> calls the tagger with
+/// <c>credentialSource: null</c>, so only the DECLARED (34-3) mode is used. Wiring
+/// the 32-3 credential source into the proxy is a tracked follow-up.
 ///
 /// <para><b>Default is absence.</b> There is no back-fill row: a
 /// <c>(tenant, provider)</c> with no <c>active</c> row — and every single-user
@@ -17,8 +20,13 @@ namespace Tamma.Data.Entities;
 /// <c>active</c> row with <see cref="Mode"/> = <c>"byok"</c>.</para>
 ///
 /// <para><b>ProviderKey overload:</b> <see cref="ProviderKey"/> here is the
-/// provider identifier (<c>"anthropic"</c>) — the same value as
-/// <c>ProviderDiagnostic.ProviderKey</c> — NOT the Cranl tenancy backend label.</para>
+/// CANONICAL provider FAMILY key (<c>"anthropic"</c>) — NOT the Cranl tenancy
+/// backend label. It is NOT necessarily byte-identical to
+/// <c>ProviderDiagnostic.ProviderKey</c>, which carries the vendor HANDLE
+/// (<c>"anthropic-claude"</c>): the read path canonicalizes the handle to the
+/// family key via <c>BillingProviderKey.Canonicalize</c> before matching this row,
+/// and a BYOK write endpoint MUST persist the canonical (lowercase family) key here
+/// so the match is exact.</para>
 /// </summary>
 public class TenantProviderBilling
 {

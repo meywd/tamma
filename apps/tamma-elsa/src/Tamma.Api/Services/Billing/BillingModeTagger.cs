@@ -42,6 +42,11 @@ public sealed class BillingModeTagger : IBillingModeTagger
         string? credentialSource = null,
         CancellationToken ct = default)
     {
+        // Fix 2 — canonicalize the provider to the family key the owner row is stored
+        // under BEFORE resolution + logging, so the owner lookup and every reader agree
+        // on one key (the vendor handle "anthropic-claude" resolves the "anthropic" row).
+        providerKey = BillingProviderKey.Canonicalize(providerKey);
+
         // 1) The DECLARED mode from the 34-3 owner (default: platform).
         var declared = await _owner.ResolveModeAsync(tenantId, providerKey, ct).ConfigureAwait(false);
         var token = declared.ToToken();
