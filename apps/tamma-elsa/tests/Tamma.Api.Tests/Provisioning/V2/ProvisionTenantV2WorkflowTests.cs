@@ -6,6 +6,7 @@ using Moq;
 using NUnit.Framework;
 using Tamma.Api.Services.Provisioning;
 using Tamma.Api.Services.Provisioning.V2;
+using Tamma.Api.Services.Secrets;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -72,14 +73,24 @@ public sealed class ProvisionTenantV2WorkflowTests
         return tenant;
     }
 
+    /// <summary>The fake cabinet the last <see cref="Build"/> wired into the
+    /// workflow's Story 30-3 secret registrar. Tests inspect / script it
+    /// (e.g. <c>_secretStore.CreateCalls</c>, <c>_secretStore.OnCreate</c>).</summary>
+    private FakeSecretStore _secretStore = null!;
+
     private ProvisionTenantV2Workflow Build(
         TenantProviderRegistry registry,
-        IPlatformEventPublisher? events = null)
+        IPlatformEventPublisher? events = null,
+        IProvisioningSecretRegistrar? registrar = null)
     {
         var publisher = events ?? Mock.Of<IPlatformEventPublisher>();
+        _secretStore = new FakeSecretStore();
+        var secretRegistrar = registrar ?? new ProvisioningSecretRegistrar(
+            _secretStore, NullLogger<ProvisioningSecretRegistrar>.Instance);
         return new ProvisionTenantV2Workflow(
             _db,
             registry,
+            secretRegistrar,
             publisher,
             TimeProvider.System,
             NullLogger<ProvisionTenantV2Workflow>.Instance)
@@ -499,5 +510,97 @@ public sealed class ProvisionTenantV2WorkflowTests
         result.Status.FailureReason.Should().Be("cranl_app_deploy_failed",
             "probe surfaces the provider's failure short-code");
         fake.DeprovisionCalls.Should().HaveCount(1, "compensation runs once");
+    }
+
+    // ── Step 6: RegisterSecrets (Story 30-3) ────────────────────────
+
+    [Test]
+    public async Task ExecuteAsync_DedicatedCompute_RegistersHmacSecretAtStep6()
+    {
+        var tenant = await SeedAsync();
+        var fake = new FakeTenantInfrastructureProvider("cranl");
+        fake.EnqueueReady();
+
+        var workflow = Build(RegistryWith(fake));
+
+        var result = await workflow.ExecuteAsync(
+            PayloadFor(tenant.Id, "cranl", ProvisioningTopology.DedicatedCompute),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(ProvisionTenantV2OutcomeKind.Completed);
+        _secretStore.CreateCalls.Should().ContainSingle(
+            "dedicated compute registers the per-tenant TAMMA_SHARED_SECRET shadow");
+        _secretStore.CreateCalls[0].Name.Should().Be("cranl/app-env-hmac");
+        _secretStore.CreateCalls[0].Scope.Should().Be(SecretScope.Tenant);
+        _secretStore.CreateCalls[0].TenantId.Should().Be(tenant.Id);
+    }
+
+    [Test]
+    public async Task ExecuteAsync_NonDedicatedTopology_RegistersNoSecrets_GuardedNoOp()
+    {
+        var tenant = await SeedAsync();
+        // Default fake caps support DatabaseOnly | DedicatedCompute.
+        var fake = new FakeTenantInfrastructureProvider("cranl");
+        fake.EnqueueReady();
+
+        var workflow = Build(RegistryWith(fake));
+
+        var result = await workflow.ExecuteAsync(
+            PayloadFor(tenant.Id, "cranl", ProvisioningTopology.DatabaseOnly),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(ProvisionTenantV2OutcomeKind.Completed,
+            "the guarded no-op completes the step cleanly and reaches Ready");
+        _secretStore.CreateCalls.Should().BeEmpty(
+            "a database-only tenant has no per-tenant engine, so nothing is registered");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_SecretRegistrationThrows_FailsStepLoudAndCompensates()
+    {
+        var tenant = await SeedAsync();
+        var fake = new FakeTenantInfrastructureProvider("cranl");
+        fake.EnqueueReady();
+
+        var workflow = Build(RegistryWith(fake));
+        // Script a cabinet failure at Step 6 (e.g. fail-closed backend).
+        _secretStore.OnCreate = _ => throw new InvalidOperationException("fail_closed_backend");
+
+        var result = await workflow.ExecuteAsync(
+            PayloadFor(tenant.Id, "cranl", ProvisioningTopology.DedicatedCompute),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(ProvisionTenantV2OutcomeKind.Failed);
+        result.Status.FailureReason.Should().Be(
+            ProvisioningFailureReasons.SecretRegistrationFailed,
+            "a genuine registration failure fails the saga step loud, not silently");
+        fake.ProvisionCalls.Should().HaveCount(1, "Step 4 ran before Step 6 failed");
+        fake.DeprovisionCalls.Should().HaveCount(1,
+            "compensation tears down the ExecuteProvision resources");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_DedicatedCompute_LaterStepFails_CompensationRetiresHmacSecret()
+    {
+        var tenant = await SeedAsync();
+        var fake = new FakeTenantInfrastructureProvider("cranl");
+        // Registers the HMAC at Step 6, then the probe (Step 7) observes Failed.
+        fake.EnqueueProviderFailure("cranl_app_deploy_failed", "deploy returned 500");
+
+        var workflow = Build(RegistryWith(fake));
+
+        var result = await workflow.ExecuteAsync(
+            PayloadFor(tenant.Id, "cranl", ProvisioningTopology.DedicatedCompute),
+            CancellationToken.None);
+
+        result.Kind.Should().Be(ProvisionTenantV2OutcomeKind.Failed);
+        _secretStore.CreateCalls.Should().ContainSingle("the HMAC was registered at Step 6");
+
+        var hmacRef = SecretRef.ForTenant(
+            tenant.Id, ProvisioningSecretRegistrar.HmacSecretName);
+        _secretStore.RetireVersionCalls.Should().ContainSingle()
+            .Which.Should().Be((hmacRef, 1),
+                "register_secrets compensation retires the secret it registered");
+        fake.DeprovisionCalls.Should().HaveCount(1, "execute_provision compensation also runs");
     }
 }

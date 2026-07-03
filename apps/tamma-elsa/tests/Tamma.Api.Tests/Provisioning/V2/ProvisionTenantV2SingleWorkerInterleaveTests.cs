@@ -76,9 +76,15 @@ public sealed class ProvisionTenantV2SingleWorkerInterleaveTests
             new ITenantInfrastructureProvider[] { new NullTenantProvider(), fake }));
         // Small probe interval so the deferred saga's VisibleAt window is short;
         // large enough that tick-2 runs before it re-opens.
+        // Story 30-3 — real registrar backed by a throwaway fake cabinet
+        // (Step 6 registers the HMAC harmlessly; this suite asserts single-worker
+        // interleave, not secret registration).
+        services.AddScoped<IProvisioningSecretRegistrar>(_ => new ProvisioningSecretRegistrar(
+            new FakeSecretStore(), NullLogger<ProvisioningSecretRegistrar>.Instance));
         services.AddScoped(sp => new ProvisionTenantV2Workflow(
             sp.GetRequiredService<ControlPlaneDbContext>(),
             sp.GetRequiredService<TenantProviderRegistry>(),
+            sp.GetRequiredService<IProvisioningSecretRegistrar>(),
             sp.GetRequiredService<IPlatformEventPublisher>(),
             sp.GetRequiredService<TimeProvider>(),
             NullLogger<ProvisionTenantV2Workflow>.Instance)
