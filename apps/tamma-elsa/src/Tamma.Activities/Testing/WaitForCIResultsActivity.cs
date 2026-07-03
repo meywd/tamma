@@ -130,7 +130,7 @@ public class WaitForCIResultsActivity : Activity
                 {
                     RunId = runId,
                     Status = input.GetValueOrDefault("Status")?.ToString() ?? "Unknown",
-                    BuildPassed = input.TryGetValue("BuildPassed", out var bp) && bp is true,
+                    BuildPassed = input.TryGetValue("BuildPassed", out var bp) && ResumeInput.AsBool(bp),
                     TotalTests = input.TryGetValue("TotalTests", out var tt) && tt is int totalTests ? totalTests : 0,
                     PassedTests = input.TryGetValue("PassedTests", out var pt) && pt is int passedTests ? passedTests : 0,
                     FailedTests = input.TryGetValue("FailedTests", out var ft) && ft is int failedTests ? failedTests : 0,

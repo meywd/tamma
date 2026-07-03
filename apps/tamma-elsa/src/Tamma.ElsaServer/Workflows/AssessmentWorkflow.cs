@@ -6,6 +6,7 @@ using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using System.Text.Json;
+using Tamma.Activities;
 using Tamma.Activities.Assessment;
 using Tamma.Activities.Assessment.Models;
 using Tamma.Api.Services.Agents;
@@ -691,16 +692,12 @@ public class AssessmentWorkflow : WorkflowBase
     /// Returns <c>false</c> if the dictionary is null, the key is absent, or the
     /// value is falsy — fail-closed by design.
     /// </summary>
-    private static bool ReadSuccessFlag(IDictionary<string, object>? result)
+    internal static bool ReadSuccessFlag(IDictionary<string, object>? result)
     {
         if (result == null) return false;
         if (!result.TryGetValue("success", out var s)) return false;
-        return s switch
-        {
-            bool b    => b,
-            string str => bool.TryParse(str, out var r) && r,
-            _         => false,
-        };
+        // Tolerant read (#15 sibling) — boxed bool / string / JsonElement, fail-closed.
+        return ResumeInput.AsBool(s);
     }
 
     /// <summary>

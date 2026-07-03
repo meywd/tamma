@@ -8,6 +8,7 @@ using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
+using Tamma.Activities;
 using Tamma.Activities.ADL;
 using Tamma.Activities.ADL.Models;
 using Tamma.Activities.CodeIndex;
@@ -258,12 +259,8 @@ public class ReviewFixWorkflow : WorkflowBase
                 var result = llmResultVar.Get(ctx);
                 if (result != null && result.TryGetValue("success", out var s))
                 {
-                    return (object)(s switch
-                    {
-                        bool b => b,
-                        string str => bool.TryParse(str, out var r) && r,
-                        _ => false,
-                    });
+                    // Tolerant read (#15 sibling) — boxed bool / string / JsonElement, fail-closed.
+                    return (object)ResumeInput.AsBool(s);
                 }
                 // No readable success flag → treat as a failed generation (never a
                 // silent success).

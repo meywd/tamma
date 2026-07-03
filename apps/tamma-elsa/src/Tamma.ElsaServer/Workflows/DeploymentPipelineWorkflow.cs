@@ -138,6 +138,12 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         // "deferred"). CreateReleaseActivity sets these on its outcome.
         var releaseStatus = builder.WithVariable<string>("ReleaseStatus", "");
         var releaseUrl = builder.WithVariable<string>("ReleaseUrl", "");
+        // #21 audit fidelity — CreateRelease's ErrorCode is captured in its OWN
+        // variable, kept SEPARATE from the shared `stageError` that seeds a
+        // PIPELINE.SUCCESS `reason`. A release-step failure is surfaced via
+        // releaseStatus="failed" + the loud RELEASE.CREATED.FAILED event, never as the
+        // success event's reason (which stays reserved for genuine stage failures).
+        var releaseError = builder.WithVariable<string>("ReleaseError", "");
 
         var decisionVar = builder.WithVariable<string>("Decision", "");
         var feedbackVar = builder.WithVariable<string>("Feedback", "");
@@ -370,7 +376,11 @@ public class DeploymentPipelineWorkflow : WorkflowBase
             TenantId = new Input<string?>(ctx => tenantId.Get(ctx)),
             ReleaseUrl = new Output<string?>(releaseUrl),
             ReleaseTag = new Output<string?>(releaseTag),
-            ErrorCode = new Output<string?>(stageError),
+            // #21 — route the release-step error into its OWN variable, NOT the shared
+            // `stageError`. That keeps a PIPELINE.SUCCESS event's `reason` reserved for
+            // genuine STAGE failures; the release failure stays observable via
+            // releaseStatus="failed" + the loud RELEASE.CREATED.FAILED DCB event.
+            ErrorCode = new Output<string?>(releaseError),
         };
         createRelease.SetDisplayText("Create Release");
 
@@ -821,35 +831,69 @@ public class DeploymentPipelineWorkflow : WorkflowBase
                 // Rollback emits report the rollback's own status (started rows have
                 // no rollbackStatus yet → "started"); stage emits report stageResult.
                 var status = SelectEmitStatus(isRollback, stageResult.Get(ctx), rollbackStatus.Get(ctx));
-                var data = new Dictionary<string, object?>
-                {
-                    ["status"] = status,
-                    ["completedStages"] = completedStages.Get(ctx),
-                };
-                var err = stageError.Get(ctx);
-                if (!string.IsNullOrEmpty(err)) data["reason"] = err;
-                var rb = rollbackStatus.Get(ctx);
-                if (!string.IsNullOrEmpty(rb)) data["rollbackStatus"] = rb;
-                if (approver != null) data["approver"] = approver.Get(ctx);
-                if (feedback != null) data["feedback"] = feedback.Get(ctx);
-                if (releaseTag != null) data["releaseTag"] = releaseTag.Get(ctx);
-                if (releaseStatus != null)
-                {
-                    // Epic 38 follow-up #21 — the REAL release status (created|failed)
-                    // set by CreateReleaseActivity, replacing the prior "deferred".
-                    var rs = releaseStatus.Get(ctx);
-                    if (!string.IsNullOrEmpty(rs)) data["releaseStatus"] = rs;
-                }
-                if (releaseUrl != null)
-                {
-                    var ru = releaseUrl.Get(ctx);
-                    if (!string.IsNullOrEmpty(ru)) data["releaseUrl"] = ru;
-                }
+                // `reason` is sourced ONLY from the shared stage-error variable: a
+                // release-step failure is surfaced via releaseStatus="failed" (+ the
+                // loud RELEASE.CREATED.FAILED event), NOT here — so a PIPELINE.SUCCESS
+                // event's reason stays reserved for genuine stage failures (#21).
+                var data = BuildDeployEventData(
+                    status,
+                    completedStages.Get(ctx),
+                    reason: stageError.Get(ctx),
+                    rollbackStatus: rollbackStatus.Get(ctx),
+                    approver: approver != null ? approver.Get(ctx) : null,
+                    feedback: feedback != null ? feedback.Get(ctx) : null,
+                    releaseTag: releaseTag != null ? releaseTag.Get(ctx) : null,
+                    releaseStatus: releaseStatus != null ? releaseStatus.Get(ctx) : null,
+                    releaseUrl: releaseUrl != null ? releaseUrl.Get(ctx) : null);
                 return JsonSerializer.Serialize(data);
             }),
         };
         emit.SetDisplayText(label);
         return emit;
+    }
+
+    /// <summary>
+    /// Build the audit-data dictionary an <see cref="EmitDeploymentEventActivity"/>
+    /// node serialises into its <c>DataJson</c> payload. Pure (no Elsa context) —
+    /// exposed for unit testing.
+    ///
+    /// <para><b>#21 audit fidelity:</b> <paramref name="reason"/> is sourced ONLY from
+    /// the shared stage-error variable — a genuine STAGE/deploy failure. A release-step
+    /// failure is surfaced via <paramref name="releaseStatus"/><c>="failed"</c> (+ the
+    /// loud <c>RELEASE.CREATED.FAILED</c> event) and NEVER as <paramref name="reason"/>,
+    /// so a <c>PIPELINE.SUCCESS</c> event (<c>status:"success"</c>) can never carry a
+    /// misleading release-step error as its reason.</para>
+    ///
+    /// <para>Presence rules mirror the emit node exactly: <paramref name="reason"/> /
+    /// <paramref name="rollbackStatus"/> / <paramref name="releaseStatus"/> /
+    /// <paramref name="releaseUrl"/> are omitted when null-or-empty; the optional
+    /// <paramref name="approver"/> / <paramref name="feedback"/> / <paramref name="releaseTag"/>
+    /// are included whenever supplied (non-null), even if empty.</para>
+    /// </summary>
+    public static Dictionary<string, object?> BuildDeployEventData(
+        string status,
+        string completedStages,
+        string? reason,
+        string? rollbackStatus,
+        string? approver = null,
+        string? feedback = null,
+        string? releaseTag = null,
+        string? releaseStatus = null,
+        string? releaseUrl = null)
+    {
+        var data = new Dictionary<string, object?>
+        {
+            ["status"] = status,
+            ["completedStages"] = completedStages,
+        };
+        if (!string.IsNullOrEmpty(reason)) data["reason"] = reason;
+        if (!string.IsNullOrEmpty(rollbackStatus)) data["rollbackStatus"] = rollbackStatus;
+        if (approver != null) data["approver"] = approver;
+        if (feedback != null) data["feedback"] = feedback;
+        if (releaseTag != null) data["releaseTag"] = releaseTag;
+        if (!string.IsNullOrEmpty(releaseStatus)) data["releaseStatus"] = releaseStatus;
+        if (!string.IsNullOrEmpty(releaseUrl)) data["releaseUrl"] = releaseUrl;
+        return data;
     }
 
     private static FlowConnection Connect(IActivity source, IActivity target)
