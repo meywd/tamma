@@ -141,28 +141,41 @@ public class DetectProgressActivity : Activity
     /// </summary>
     private async ValueTask OnResumeAsync(ActivityExecutionContext context)
     {
-        var input = context.WorkflowInput;
+        var result = ReadProgressResult(context.WorkflowInput);
 
-        var progressDetected = input.TryGetValue("ProgressDetected", out var pd) && pd is true;
+        _logger?.LogInformation(
+            "Progress detection resumed (external): Detected={Detected}, Type={Type}",
+            result.ProgressDetected, result.ProgressType);
+
+        context.Set(ProgressDetected, result.ProgressDetected);
+        context.Set(TimedOut, false);
+        context.Set(Result, result);
+
+        await context.CompleteActivityAsync();
+    }
+
+    /// <summary>
+    /// Pure read-back of the progress fields from the bookmark resume input (exposed for unit
+    /// testing; mirrors the <see cref="ResolveWaitMinutes(int, int?, string)"/> extraction).
+    /// <see cref="ProgressDetectionResult.ProgressDetected"/> is coerced via
+    /// <see cref="BlockerResumeInput.AsBool"/> so it is correct whether the runtime delivers the
+    /// flag as a boxed <see cref="bool"/> (in-process) or as a <see cref="string"/> /
+    /// <see cref="System.Text.Json.JsonElement"/> (serializing dispatcher). The string fields
+    /// (<c>ProgressType</c>, <c>Details</c>) are informational and read via <c>.ToString()</c>,
+    /// which is already serialization-tolerant.
+    /// </summary>
+    internal static ProgressDetectionResult ReadProgressResult(IDictionary<string, object> input)
+    {
+        var progressDetected = input.TryGetValue("ProgressDetected", out var pd) && BlockerResumeInput.AsBool(pd);
         var progressType = input.TryGetValue("ProgressType", out var pt) ? pt?.ToString() : null;
         var details = input.TryGetValue("Details", out var d) ? d?.ToString() : null;
 
-        var result = new ProgressDetectionResult
+        return new ProgressDetectionResult
         {
             ProgressDetected = progressDetected,
             ProgressType = progressType,
             Details = details
         };
-
-        _logger?.LogInformation(
-            "Progress detection resumed (external): Detected={Detected}, Type={Type}",
-            progressDetected, progressType);
-
-        context.Set(ProgressDetected, progressDetected);
-        context.Set(TimedOut, false);
-        context.Set(Result, result);
-
-        await context.CompleteActivityAsync();
     }
 
     /// <summary>

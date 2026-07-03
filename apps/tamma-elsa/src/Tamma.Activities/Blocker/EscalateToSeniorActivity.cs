@@ -214,10 +214,7 @@ Please respond to this escalation via the Tamma API or reply in this thread.";
     /// </summary>
     private async ValueTask OnResumeAsync(ActivityExecutionContext context)
     {
-        var input = context.WorkflowInput;
-
-        var resolved = input.TryGetValue("Resolved", out var r) && r is true;
-        var seniorResponse = input.TryGetValue("SeniorResponse", out var sr) ? sr?.ToString() : null;
+        var (resolved, seniorResponse) = ReadSeniorOutcome(context.WorkflowInput);
 
         _logger?.LogInformation("Senior escalation resumed (external): Resolved={Resolved}", resolved);
 
@@ -226,6 +223,21 @@ Please respond to this escalation via the Tamma API or reply in this thread.";
         context.Set(SeniorResponse, seniorResponse);
 
         await context.CompleteActivityAsync();
+    }
+
+    /// <summary>
+    /// Pure read-back of the senior outcome from the bookmark resume input (exposed for unit
+    /// testing). <c>Resolved</c> is coerced via <see cref="BlockerResumeInput.AsBool"/> so it is
+    /// correct whether the runtime delivers the flag as a boxed <see cref="bool"/> (in-process)
+    /// or as a <see cref="string"/> / <see cref="System.Text.Json.JsonElement"/> (serializing
+    /// dispatcher). <c>SeniorResponse</c> is a string read via <c>.ToString()</c>, which is
+    /// already serialization-tolerant.
+    /// </summary>
+    internal static (bool Resolved, string? SeniorResponse) ReadSeniorOutcome(IDictionary<string, object> input)
+    {
+        var resolved = input.TryGetValue("Resolved", out var r) && BlockerResumeInput.AsBool(r);
+        var seniorResponse = input.TryGetValue("SeniorResponse", out var sr) ? sr?.ToString() : null;
+        return (resolved, seniorResponse);
     }
 
     /// <summary>
