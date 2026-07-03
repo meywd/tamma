@@ -95,6 +95,19 @@ public class EscalateToSeniorActivity : Activity
         _configuration = configuration;
     }
 
+    /// <summary>
+    /// The SINGLE canonical escalation-bookmark name (<c>blocker-escalation-{session}</c>).
+    /// Shared by the suspend side (<see cref="ExecuteAsync"/>) and the resume side
+    /// (<c>BlockerResumeEndpoint</c>) so the two match byte-for-byte — the same
+    /// suspend/resume-name-parity discipline as
+    /// <c>WaitForMergeApprovalActivity.BookmarkName</c>. The name is keyed by the
+    /// (globally-unique, unguessable) mentorship session id; the resume endpoint
+    /// additionally verifies the caller's tenant OWNS that session before it ever
+    /// resolves this name (IDOR guard on the Tamma.Api tier).
+    /// </summary>
+    public static string EscalationBookmarkName(Guid sessionId)
+        => $"blocker-escalation-{sessionId}";
+
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var sessionId = SessionId.Get(context);
@@ -135,7 +148,7 @@ public class EscalateToSeniorActivity : Activity
         //    suspends here until this resumes OR the durable SLA delay below fires.
         context.CreateBookmark(new CreateBookmarkArgs
         {
-            BookmarkName = $"blocker-escalation-{sessionId}",
+            BookmarkName = EscalationBookmarkName(sessionId),
             Callback = OnResumeAsync,
             AutoBurn = true
         });
@@ -201,10 +214,7 @@ Please respond to this escalation via the Tamma API or reply in this thread.";
     /// </summary>
     private async ValueTask OnResumeAsync(ActivityExecutionContext context)
     {
-        var input = context.WorkflowInput;
-
-        var resolved = input.TryGetValue("Resolved", out var r) && r is true;
-        var seniorResponse = input.TryGetValue("SeniorResponse", out var sr) ? sr?.ToString() : null;
+        var (resolved, seniorResponse) = ReadSeniorOutcome(context.WorkflowInput);
 
         _logger?.LogInformation("Senior escalation resumed (external): Resolved={Resolved}", resolved);
 
@@ -213,6 +223,21 @@ Please respond to this escalation via the Tamma API or reply in this thread.";
         context.Set(SeniorResponse, seniorResponse);
 
         await context.CompleteActivityAsync();
+    }
+
+    /// <summary>
+    /// Pure read-back of the senior outcome from the bookmark resume input (exposed for unit
+    /// testing). <c>Resolved</c> is coerced via <see cref="BlockerResumeInput.AsBool"/> so it is
+    /// correct whether the runtime delivers the flag as a boxed <see cref="bool"/> (in-process)
+    /// or as a <see cref="string"/> / <see cref="System.Text.Json.JsonElement"/> (serializing
+    /// dispatcher). <c>SeniorResponse</c> is a string read via <c>.ToString()</c>, which is
+    /// already serialization-tolerant.
+    /// </summary>
+    internal static (bool Resolved, string? SeniorResponse) ReadSeniorOutcome(IDictionary<string, object> input)
+    {
+        var resolved = input.TryGetValue("Resolved", out var r) && BlockerResumeInput.AsBool(r);
+        var seniorResponse = input.TryGetValue("SeniorResponse", out var sr) ? sr?.ToString() : null;
+        return (resolved, seniorResponse);
     }
 
     /// <summary>

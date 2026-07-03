@@ -2518,6 +2518,13 @@ adl.MapPost("/merge-approval/resume", AdlEndpoints.ResumeMergeApproval);
 // tenant+repo+SHA-scoped adl-deploy-prod-approval-{tenant}-{repo}-{issue}-{sha}
 // bookmark; approver derived server-side (I2); tenant-scoped (cross-tenant → 404).
 adl.MapPost("/deploy-approval/resume", AdlEndpoints.ResumeDeploymentApproval);
+// Blocker-diagnosis progressive-resolution ladder (follow-up #15). Resumes the
+// session-scoped blocker-progress-{session}-{level} / blocker-escalation-{session}
+// bookmark so a run can reach the Resolved terminal. WorkflowsManage = tenant
+// owner/admin (members 403); resolver derived server-side (I2). IDOR guard: the
+// handler verifies the caller's ambient tenant OWNS the session (tenant-scoped
+// session lookup) before forwarding — a cross-tenant/unknown session → 404.
+adl.MapPost("/blocker/resume", AdlEndpoints.ResumeBlocker);
 
 // ── GitHub App (no auth, webhook signature verification) ──
 // Audit finding 017 — webhook gets the GitHubWebhook policy (300/min). The

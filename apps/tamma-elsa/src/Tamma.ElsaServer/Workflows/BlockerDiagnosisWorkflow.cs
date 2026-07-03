@@ -53,19 +53,22 @@ namespace Tamma.ElsaServer.Workflows;
 /// resolution-history threading) remains a noted follow-up — out of scope for this
 /// correctness pass.</para>
 ///
-/// <para><b>Honest reachability of the <c>Resolved</c> terminal (FOLLOW-UP).</b> The
+/// <para><b>Reachability of the <c>Resolved</c> terminal (follow-up #15 — DONE).</b> The
 /// in-graph wiring for <c>Resolved</c> is correct: a <c>ProgressDetected</c> /
 /// <c>Resolved</c> / <c>SeniorResponse</c> resume at any level flips <c>isResolved</c> and
-/// short-circuits the ladder. However, the ONLY external resumer in the codebase today
+/// short-circuits the ladder. The generic resumer
 /// (<c>MentorshipController.ResumeSession</c> → <c>ElsaWorkflowService.ResumeWorkflowAsync</c>)
-/// hits Elsa's generic <c>/resume</c> with NO bookmark id and NO input, so it never supplies
-/// those keys. Until a blocker-specific resume endpoint exists — one that passes
-/// <c>ProgressDetected</c> / <c>Resolved</c> / <c>SeniorResponse</c> input and targets the
-/// progress / escalation bookmark, mirroring the secure <c>MergeApprovalResumeEndpoint</c> —
-/// a production run can only reach the <c>Escalated</c> or (durable) <c>Timeout</c> terminal,
-/// never <c>Resolved</c>. That endpoint is a tracked FOLLOW-UP (it touches Program.cs and is
-/// intentionally NOT added here to avoid colliding with a sibling endpoint-wiring PR); the
-/// graph fix stands as-is.</para>
+/// still hits Elsa's generic <c>/resume</c> with NO bookmark id and NO input, so it cannot
+/// supply those keys — but the blocker-specific resume endpoint that DOES now exists:
+/// <c>POST /api/adl/blocker/resume</c> (<c>AdlEndpoints.ResumeBlocker</c>) →
+/// <c>ElsaWorkflowService.ResumeBlockerResolutionAsync</c> → the engine seam
+/// <c>BlockerResumeEndpoint</c>. It targets the progress
+/// (<c>blocker-progress-{session}-{level}</c>) / escalation (<c>blocker-escalation-{session}</c>)
+/// bookmark and injects the <c>ProgressDetected</c> / <c>Resolved</c> / <c>SeniorResponse</c>
+/// input, mirroring the secure <c>MergeApprovalResumeEndpoint</c> (WorkflowsManage RBAC;
+/// server-derived resolver for I2; tenant-ownership check on the session so a cross-tenant
+/// resume 404s and never acts). A production run can therefore now reach the <c>Resolved</c>
+/// terminal, not only <c>Escalated</c> / (durable) <c>Timeout</c>.</para>
 /// </summary>
 public class BlockerDiagnosisWorkflow : WorkflowBase
 {

@@ -7,6 +7,8 @@ using Moq;
 using NUnit.Framework;
 using Tamma.Api.Endpoints;
 using Tamma.Api.Services;
+using Tamma.Core.Entities;
+using Tamma.Core.Interfaces;
 using Tamma.Data;
 
 namespace Tamma.Api.Tests.Endpoints;
@@ -311,6 +313,221 @@ public class AdlEndpointsTests
             It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(),
             It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()),
             Times.Never, "invalid input must be rejected up front, not forwarded");
+
+    // ================================================================
+    // Blocker-diagnosis progressive-resolution ladder (follow-up #15) —
+    // POST /api/adl/blocker/resume. Same RBAC (WorkflowsManage, enforced at the
+    // adl group registration) + I2 (server-derived resolver) posture as the
+    // merge/deploy gates. IDOR guard differs in MECHANISM only: the blocker
+    // bookmark is keyed by the (unguessable) session id, so ownership is enforced
+    // by a tenant-scoped session lookup (GetSessionAsync) BEFORE forwarding — a
+    // cross-tenant / unknown session 404s and never reaches the engine.
+    // ================================================================
+
+    /// <summary>A mentorship service that OWNS <paramref name="knownSessionId"/> (returns a
+    /// session for it) and treats every other id as cross-tenant / unknown (null).</summary>
+    private static Mock<IMentorshipService> MentorshipOwning(Guid knownSessionId)
+    {
+        var mentorship = new Mock<IMentorshipService>();
+        mentorship
+            .Setup(m => m.GetSessionAsync(knownSessionId))
+            .ReturnsAsync(new MentorshipSession { Id = knownSessionId });
+        mentorship
+            .Setup(m => m.GetSessionAsync(It.Is<Guid>(g => g != knownSessionId)))
+            .ReturnsAsync((MentorshipSession?)null);
+        return mentorship;
+    }
+
+    [Test]
+    public async Task ResumeBlocker_ProgressValid_ChecksOwnership_ForwardsCanonicalLevelAndDerivedResolver_Returns200()
+    {
+        var session = Guid.NewGuid();
+        var mentorship = MentorshipOwning(session);
+        _elsa
+            .Setup(s => s.ResumeBlockerResolutionAsync(
+                session, "progress", "Guidance", true, "commit", "pushed a fix", null, "alice@example.com"))
+            .ReturnsAsync(new MergeApprovalResumeResult(Resumed: true, GateNotFound: false, WorkflowInstanceId: "wf-b1"));
+
+        // Lower-case level on the wire must be canonicalised to the workflow's PascalCase.
+        var req = new AdlEndpoints.BlockerResolutionRequest(
+            session, "progress", "guidance", null, "commit", "pushed a fix", null);
+
+        var result = await AdlEndpoints.ResumeBlocker(
+            req, _elsa.Object, mentorship.Object, TenantContext(Guid.NewGuid()),
+            Principal("alice@example.com"), _loggerFactory);
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status200OK);
+        // Ownership was checked, and the canonical level + principal-derived resolver forwarded.
+        mentorship.Verify(m => m.GetSessionAsync(session), Times.Once);
+        _elsa.Verify(s => s.ResumeBlockerResolutionAsync(
+            session, "progress", "Guidance", true, "commit", "pushed a fix", null, "alice@example.com"), Times.Once);
+    }
+
+    [Test]
+    public async Task ResumeBlocker_EscalationValid_ForwardsResolvedAndDerivedResolver_Returns200()
+    {
+        var session = Guid.NewGuid();
+        var mentorship = MentorshipOwning(session);
+        _elsa
+            .Setup(s => s.ResumeBlockerResolutionAsync(
+                session, "escalation", null, false, null, null, "handled offline", "sr@corp.test"))
+            .ReturnsAsync(new MergeApprovalResumeResult(Resumed: true, GateNotFound: false, WorkflowInstanceId: "wf-b2"));
+
+        var req = new AdlEndpoints.BlockerResolutionRequest(
+            session, "escalation", null, Resolved: false, null, null, "handled offline");
+
+        var result = await AdlEndpoints.ResumeBlocker(
+            req, _elsa.Object, mentorship.Object, TenantContext(Guid.NewGuid()),
+            Principal("sr@corp.test"), _loggerFactory);
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status200OK);
+        _elsa.Verify(s => s.ResumeBlockerResolutionAsync(
+            session, "escalation", null, false, null, null, "handled offline", "sr@corp.test"), Times.Once);
+    }
+
+    [Test]
+    public async Task ResumeBlocker_ResolverDerivedFromPrincipal_NotForgeable()
+    {
+        // I2 — the resolver forwarded to the engine is the authenticated principal's identity.
+        // The request type carries no resolver field, so a client cannot forge it.
+        var session = Guid.NewGuid();
+        var mentorship = MentorshipOwning(session);
+        string? capturedResolver = null;
+        _elsa
+            .Setup(s => s.ResumeBlockerResolutionAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<bool>(),
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()))
+            .Callback<Guid, string, string?, bool, string?, string?, string?, string?>(
+                (_, _, _, _, _, _, _, resolver) => capturedResolver = resolver)
+            .ReturnsAsync(new MergeApprovalResumeResult(true, false, "wf-b3"));
+
+        var req = new AdlEndpoints.BlockerResolutionRequest(
+            session, "escalation", null, true, null, null, null);
+
+        await AdlEndpoints.ResumeBlocker(
+            req, _elsa.Object, mentorship.Object, TenantContext(Guid.NewGuid()),
+            Principal("bob@corp.test"), _loggerFactory);
+
+        capturedResolver.Should().Be("bob@corp.test",
+            "the resolver must be derived from the authenticated principal for non-repudiation");
+    }
+
+    [Test]
+    public async Task ResumeBlocker_CrossTenantOrUnknownSession_Returns404_NeverForwards()
+    {
+        // IDOR — a caller supplies a session id their tenant does NOT own. GetSessionAsync is
+        // tenant-scoped, so it resolves null → 404, and the resume is NEVER forwarded to the
+        // engine (no action on another tenant's blocker gate). Mirrors the merge/deploy
+        // cross-tenant → 404 guarantee.
+        var owned = Guid.NewGuid();
+        var mentorship = MentorshipOwning(owned);
+        var victimSession = Guid.NewGuid();
+
+        var req = new AdlEndpoints.BlockerResolutionRequest(
+            victimSession, "progress", "Hint", null, "commit", null, null);
+
+        var result = await AdlEndpoints.ResumeBlocker(
+            req, _elsa.Object, mentorship.Object, TenantContext(Guid.NewGuid()),
+            Principal("attacker@evil.test"), _loggerFactory);
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status404NotFound,
+            "a resume for a session the caller does not own must 404, never act");
+        VerifyBlockerNeverForwarded();
+    }
+
+    [Test]
+    public async Task ResumeBlocker_GateNotWaiting_Returns404()
+    {
+        // Caller owns the session, but no blocker wait is currently suspended (already
+        // advanced / resolved / timed out) — the engine reports GateNotFound → 404.
+        var session = Guid.NewGuid();
+        var mentorship = MentorshipOwning(session);
+        _elsa
+            .Setup(s => s.ResumeBlockerResolutionAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<bool>(),
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()))
+            .ReturnsAsync(new MergeApprovalResumeResult(Resumed: false, GateNotFound: true, WorkflowInstanceId: null));
+
+        var req = new AdlEndpoints.BlockerResolutionRequest(
+            session, "escalation", null, true, null, null, null);
+
+        var result = await AdlEndpoints.ResumeBlocker(
+            req, _elsa.Object, mentorship.Object, TenantContext(Guid.NewGuid()),
+            Principal("a@b.test"), _loggerFactory);
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status404NotFound,
+            "a resume for a gate that is not suspended must 404, not 500");
+    }
+
+    [Test]
+    public async Task ResumeBlocker_EmptySession_Returns400_NoForward()
+    {
+        var mentorship = new Mock<IMentorshipService>();
+        var req = new AdlEndpoints.BlockerResolutionRequest(
+            Guid.Empty, "progress", "Hint", null, null, null, null);
+
+        var result = await AdlEndpoints.ResumeBlocker(
+            req, _elsa.Object, mentorship.Object, TenantContext(Guid.NewGuid()),
+            Principal("a@b.test"), _loggerFactory);
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest);
+        VerifyBlockerNeverForwarded();
+        // A bad payload must be rejected BEFORE the ownership lookup is even attempted.
+        mentorship.Verify(m => m.GetSessionAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [TestCase("resolve")]
+    [TestCase("resume")]
+    [TestCase("progress; drop table")]
+    public async Task ResumeBlocker_UnknownKind_Returns400_NoForward(string kind)
+    {
+        var mentorship = new Mock<IMentorshipService>();
+        var req = new AdlEndpoints.BlockerResolutionRequest(
+            Guid.NewGuid(), kind, "Hint", null, null, null, null);
+
+        var result = await AdlEndpoints.ResumeBlocker(
+            req, _elsa.Object, mentorship.Object, TenantContext(Guid.NewGuid()),
+            Principal("a@b.test"), _loggerFactory);
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest,
+            "only progress|escalation are accepted");
+        VerifyBlockerNeverForwarded();
+    }
+
+    [TestCase(null)]
+    [TestCase("")]
+    [TestCase("Level5")]
+    [TestCase("escalation")] // not a progress level
+    public async Task ResumeBlocker_ProgressMissingOrBadLevel_Returns400_NoForward(string? level)
+    {
+        var mentorship = new Mock<IMentorshipService>();
+        var req = new AdlEndpoints.BlockerResolutionRequest(
+            Guid.NewGuid(), "progress", level, null, null, null, null);
+
+        var result = await AdlEndpoints.ResumeBlocker(
+            req, _elsa.Object, mentorship.Object, TenantContext(Guid.NewGuid()),
+            Principal("a@b.test"), _loggerFactory);
+
+        StatusCodeOf(result).Should().Be(StatusCodes.Status400BadRequest,
+            "kind=progress requires a Hint|Guidance|Assistance level");
+        VerifyBlockerNeverForwarded();
+    }
+
+    [Test]
+    public void CanonicalBlockerLevel_MapsCaseInsensitively_ElseNull()
+    {
+        AdlEndpoints.CanonicalBlockerLevel("hint").Should().Be("Hint");
+        AdlEndpoints.CanonicalBlockerLevel("  GUIDANCE ").Should().Be("Guidance");
+        AdlEndpoints.CanonicalBlockerLevel("Assistance").Should().Be("Assistance");
+        AdlEndpoints.CanonicalBlockerLevel("escalation").Should().BeNull();
+        AdlEndpoints.CanonicalBlockerLevel(null).Should().BeNull();
+    }
+
+    private void VerifyBlockerNeverForwarded() =>
+        _elsa.Verify(s => s.ResumeBlockerResolutionAsync(
+            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<bool>(),
+            It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<string?>()),
+            Times.Never, "invalid / unauthorized input must be rejected up front, not forwarded");
 
     private void VerifyNeverForwarded() =>
         _elsa.Verify(s => s.ResumeMergeApprovalAsync(
