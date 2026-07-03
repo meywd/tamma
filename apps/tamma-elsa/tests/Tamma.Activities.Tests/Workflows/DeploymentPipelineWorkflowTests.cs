@@ -1,6 +1,7 @@
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Management.Activities.SetOutput;
+using Elsa.Workflows.Memory;
 using Elsa.Workflows.Runtime.Activities;
 using FluentAssertions;
 using NUnit.Framework;
@@ -462,8 +463,67 @@ public class DeploymentPipelineWorkflowTests
     }
 
     // ================================================================
+    // Epic 38 follow-up #21 (audit fidelity) — a PIPELINE.SUCCESS event must not
+    // carry a release-step error as its `reason`.
+    // ================================================================
+
+    [Test]
+    public void ReleaseError_IsDecoupledFromStageError_SoPipelineSuccessReasonStaysClean()
+    {
+        // The release-step error (CreateRelease.ErrorCode) must be captured in its OWN
+        // variable, NOT the shared StageError that seeds a PIPELINE.SUCCESS `reason`.
+        // Routing it into StageError makes a successful pipeline emit a misleading
+        // release error as `reason` (status still "success").
+        var release = _flowchart.Activities
+            .OfType<CreateReleaseActivity>()
+            .Single(a => a.Id == "CreateRelease");
+
+        var boundVariable = ReadOutputVariableName(release.ErrorCode);
+        boundVariable.Should().Be("ReleaseError");
+        boundVariable.Should().NotBe("StageError",
+            "the release-step error must not pollute the shared StageError → PIPELINE.SUCCESS reason");
+    }
+
+    [Test]
+    public void PipelineSuccessAuditData_WithFailedRelease_CarriesFailedStatusButNoReason()
+    {
+        // A run where prod succeeded (the shared stage-error is empty) but CreateRelease
+        // returned Error: the emitted PIPELINE.SUCCESS payload is status=success +
+        // releaseStatus=failed, and its `reason` is ABSENT (reserved for stage failures).
+        var data = DeploymentPipelineWorkflow.BuildDeployEventData(
+            status: "success",
+            completedStages: "[\"qa\",\"uat\",\"production\"]",
+            reason: "",              // stageError is "" on the success path
+            rollbackStatus: "",
+            releaseStatus: "failed",
+            releaseUrl: "");
+
+        data["status"].Should().Be("success");
+        data["releaseStatus"].Should().Be("failed");
+        data.Should().NotContainKey("reason",
+            "a PIPELINE.SUCCESS event must not carry a release-step error as its reason");
+    }
+
+    [Test]
+    public void PipelineFailedAuditData_StillCarriesStageErrorAsReason()
+    {
+        // A genuine stage failure still populates `reason` on PIPELINE.FAILED, as before.
+        var data = DeploymentPipelineWorkflow.BuildDeployEventData(
+            status: "failed",
+            completedStages: "[\"qa\"]",
+            reason: "deploy reported status='failed'",
+            rollbackStatus: "");
+
+        data["status"].Should().Be("failed");
+        data["reason"].Should().Be("deploy reported status='failed'");
+    }
+
+    // ================================================================
     // Helpers (mirrors MergeApprovalWorkflowTests)
     // ================================================================
+
+    private static string? ReadOutputVariableName(Elsa.Workflows.Models.Output? output)
+        => (output?.MemoryBlockReference() as Variable)?.Name;
 
     private bool HasEdge(string sourceId, string? port, string targetId)
         => _flowchart.Connections.Any(c =>

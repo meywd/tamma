@@ -7,6 +7,7 @@ using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
+using Tamma.Activities;
 using Tamma.Activities.ADL;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
@@ -195,12 +196,8 @@ public class MergeApprovalWorkflow : WorkflowBase
             var result = subResult.Get(ctx);
             if (result != null && result.TryGetValue("success", out var s))
             {
-                return (object)(s switch
-                {
-                    bool b => b,
-                    string str => bool.TryParse(str, out var r) && r,
-                    _ => false,
-                });
+                // Tolerant read (#15 sibling) — boxed bool / string / JsonElement, fail-closed.
+                return (object)ResumeInput.AsBool(s);
             }
             // No readable success flag → treat as a failed merge (never a silent
             // success). The cycle's CRITICAL-1 switch routes escalated → reportError.

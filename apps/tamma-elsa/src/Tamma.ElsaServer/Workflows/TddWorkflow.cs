@@ -7,6 +7,7 @@ using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Runtime.Activities;
+using Tamma.Activities;
 using Tamma.Activities.CodeIndex;
 using Tamma.Activities.TDD;
 using Tamma.Activities.TDD.Models;
@@ -651,14 +652,11 @@ public class TddWorkflow : WorkflowBase
     // We tolerate missing keys / shape drift by falling back to safe defaults.
     // ================================================================
 
-    private static bool ExtractPassed(IDictionary<string, object>? result)
+    internal static bool ExtractPassed(IDictionary<string, object>? result)
     {
         if (result == null) return false;
-        if (result.TryGetValue("passed", out var p))
-        {
-            if (p is bool b) return b;
-            if (p is string s && bool.TryParse(s, out var parsed)) return parsed;
-        }
+        // Tolerant read (#15 sibling) — boxed bool / string / JsonElement, fail-closed.
+        if (result.TryGetValue("passed", out var p)) return ResumeInput.AsBool(p);
         return false;
     }
 

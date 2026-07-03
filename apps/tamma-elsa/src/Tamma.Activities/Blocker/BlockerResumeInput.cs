@@ -28,7 +28,5 @@ internal static class BlockerResumeInput
     /// string comparison. A <c>null</c> / missing value is <c>false</c>.
     /// </summary>
     internal static bool AsBool(object? value)
-        => value is bool b
-            ? b
-            : string.Equals(value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        => ResumeInput.AsBool(value);
 }
