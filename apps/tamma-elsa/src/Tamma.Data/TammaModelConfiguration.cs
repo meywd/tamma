@@ -1024,6 +1024,52 @@ internal static class TammaModelConfiguration
     }
 
     /// <summary>
+    /// Story 34-3 — the authoritative per-<c>(tenant, provider)</c> billing-mode
+    /// owner (<c>tenant_provider_billing</c>). CP-resident. The partial unique
+    /// index enforces at most one <c>active</c> row per <c>(TenantId, ProviderKey)</c>;
+    /// CHECKs pin <c>mode</c>/<c>status</c> to their closed domains and enforce the
+    /// byok↔secret XOR (a byok row MUST carry a secret name; a platform row MUST
+    /// NOT). FK to tenants cascades on tenant purge. Configured in the shared
+    /// single source so the model graph and the additive migration stay aligned
+    /// (same convention as <see cref="ConfigureTenantPlanAssignments"/>).
+    /// </summary>
+    public static void ConfigureTenantProviderBilling(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<TenantProviderBilling>(entity =>
+        {
+            entity.ToTable("tenant_provider_billing", t =>
+            {
+                t.HasCheckConstraint("ck_tpb_mode", "\"Mode\" IN ('platform','byok')");
+                t.HasCheckConstraint("ck_tpb_status", "\"Status\" IN ('active','disabled')");
+                // A byok row MUST carry a secret name; a platform row MUST NOT.
+                t.HasCheckConstraint(
+                    "ck_tpb_secret_xor",
+                    "(\"Mode\" = 'byok' AND \"SecretName\" IS NOT NULL) "
+                    + "OR (\"Mode\" = 'platform' AND \"SecretName\" IS NULL)");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.ProviderKey).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Mode).IsRequired().HasMaxLength(16).HasDefaultValue("platform");
+            entity.Property(e => e.SecretName).HasMaxLength(255);
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(16).HasDefaultValue("active");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // AC1 / AC12 — one ACTIVE row per (tenant, provider). Partial index.
+            entity.HasIndex(e => new { e.TenantId, e.ProviderKey })
+                .IsUnique()
+                .HasFilter("\"Status\" = 'active'")
+                .HasDatabaseName("ux_tpb_active_provider");
+
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
+    /// <summary>
     /// Story 35-1 — billing foundation entities. The tenant→Stripe customer
     /// mapping (<c>billing_customers</c>, unique <c>TenantId</c>) and the
     /// slug→Stripe-ids catalog (<c>billing_plan_prices</c>, unique
@@ -1591,6 +1637,8 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
             entity.Property(e => e.ProviderKey).IsRequired().HasMaxLength(100);
             entity.Property(e => e.Cost).HasPrecision(18, 6);
+            // Story 34-3 / 35-2 — per-call billing posture ("byok" | "platform").
+            entity.Property(e => e.BillingMode).IsRequired().HasMaxLength(16).HasDefaultValue("platform");
             entity.Property(e => e.Success).HasDefaultValue(true);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
 

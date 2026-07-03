@@ -1073,9 +1073,15 @@ builder.Services.AddScoped<
 builder.Services.AddPlanCatalog();
 
 // Story 34-5 — the canonical cost->price markup engine (pure IUsagePricingEngine)
-// + the DB-backed IMarginPolicyResolver + the (interim) per-tenant pricing-mode
-// resolver. CP-resident; platform-owned margin policies in both modes.
+// + the DB-backed IMarginPolicyResolver + the pricing-mode resolver. Story 34-3
+// repointed the pricing-mode resolver onto the authoritative per-(tenant, provider)
+// TenantProviderBilling owner. CP-resident; platform-owned margin policies in both modes.
 builder.Services.AddUsagePricingEngine();
+
+// Story 35-2 — the billing-mode tagger: reads the 34-3 owner + reconciles 32-3's
+// runtime credential source, producing the canonical billing_mode tag stamped on
+// LLM.CALL.* usage events + ProviderDiagnostic.BillingMode. Null seam in single-user.
+builder.Services.AddBillingModeTagging(builder.Configuration);
 
 // Story 34-6 — entitlement & quota resolution: the single read seam turning a
 // tenant's pinned plan assignment into a closed ResolvedEntitlements map, plus
@@ -2850,6 +2856,7 @@ using (var scope = app.Services.CreateScope())
                     mentorship_events, mentorship_sessions,
                     password_reset_tokens,
                     tenant_plan_assignments,
+                    tenant_provider_billing,
                     plan_features, plan_entitlements, plan_prices, plans,
                     margin_policies,
                     provider_model_prices, providers,

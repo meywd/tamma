@@ -150,6 +150,7 @@ public sealed class ComputeTenantDimensionalRollupActivity : TammaAsyncActivity
             {
                 d.ProviderKey, d.AgentType, d.ProjectId, d.CorrelationId,
                 d.InputTokens, d.OutputTokens, d.TokensUsed, d.Cost,
+                d.BillingMode,
             })
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -232,8 +233,9 @@ public sealed class ComputeTenantDimensionalRollupActivity : TammaAsyncActivity
 
         // 2) ProviderDiagnostic rows — provider (ProviderKey), agent (AgentType),
         //    repo (ProjectId). Diagnostics carry no workflow-definition; NULL.
-        //    BillingMode column is a Story 35-2 forward dep (absent today) —
-        //    resolves to the Platform default until 35-2 lands.
+        //    BillingMode (Story 34-3 column, populated by the 35-2 tagger on the
+        //    LLM-call path) is now the real per-call posture — a byok diagnostic
+        //    buckets under CostBasis.Byok, no longer the always-Platform stopgap.
         foreach (var d in diagnostics)
         {
             if (string.IsNullOrWhiteSpace(d.ProviderKey)) continue;
@@ -243,7 +245,7 @@ public sealed class ComputeTenantDimensionalRollupActivity : TammaAsyncActivity
                 NullIfEmpty(d.AgentType),
                 WorkflowDefinitionId: null,
                 NullIfEmpty(d.ProjectId),
-                ResolveCostBasis(billingModeTag: null, diagnosticBillingMode: null));
+                ResolveCostBasis(billingModeTag: null, diagnosticBillingMode: d.BillingMode));
 
             var m = GetOrAdd(measures, key);
             // The dominant writer (LlmProxyService.RecordDiagnosticAsync) sets only

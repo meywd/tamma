@@ -156,6 +156,10 @@ public class ControlPlaneDbContextModelTests
             // (keyed by tenant, alongside the plans catalog). One active row per
             // tenant (partial unique index).
             "tenant_plan_assignments",
+            // Story 34-3 — the authoritative per-(tenant, provider) billing-mode
+            // owner (BYOK vs platform-provided). CP-resident (keyed by tenant). One
+            // active row per (tenant, provider) via a partial unique index.
+            "tenant_provider_billing",
         }, because: "Story 28-1 PR D (Decision #4) — enumerate every "
             + "CP-resident table; the 11 + 4 mentorship tenant-resident "
             + "entities have moved to TenantDbContext. Story 31-2 adds "
@@ -172,6 +176,7 @@ public class ControlPlaneDbContextModelTests
             + "Story 34-11 adds providers + provider_model_prices. "
             + "Story 34-5 adds margin_policies. "
             + "Story 34-4 adds tenant_plan_assignments. "
+            + "Story 34-3 adds tenant_provider_billing. "
             + "Story 38-3 adds slack_outbox. "
             + "Story 37-2 adds audit_chain_checkpoints.");
     }

@@ -21,6 +21,18 @@ public class ProviderDiagnostic
     public int OutputTokens { get; set; }
 
     public decimal Cost { get; set; }
+
+    /// <summary>
+    /// Story 34-3 / 35-2 — the BYOK-vs-platform billing posture that governed
+    /// this call, as the lowercase <c>MetricBillingMode</c> token
+    /// (<c>"byok"</c> | <c>"platform"</c>, default <c>"platform"</c>). Written on
+    /// the LLM-call usage path from the 35-2 billing-mode tagger (which reads the
+    /// 34-3 owner and reconciles 32-3's credential source). The markup engine
+    /// (34-5) and the analytics dimensional rollup (36-2, <c>ResolveCostBasis</c>)
+    /// key off this column so a BYOK call is never token-marked-up / re-billed.
+    /// </summary>
+    public string BillingMode { get; set; } = "platform";
+
     public Guid? TenantId { get; set; }
     public string? Model { get; set; }
     public string? RequestType { get; set; }
