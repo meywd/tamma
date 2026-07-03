@@ -724,6 +724,15 @@ public class ControlPlaneDbContext : DbContext
     /// </summary>
     public DbSet<MarginPolicy> MarginPolicies => Set<MarginPolicy>();
 
+    /// <summary>
+    /// Story 34-3 — the authoritative per-<c>(tenant, provider)</c> billing-mode
+    /// owner (BYOK vs platform-provided). CP-resident (keyed by tenant). Single
+    /// source of truth the pricing-mode resolver + the 35-2 billing-mode tagger
+    /// read; the 32-3 runtime credential resolver reports what actually resolved
+    /// and is reconciled against this declared intent.
+    /// </summary>
+    public DbSet<TenantProviderBilling> TenantProviderBillings => Set<TenantProviderBilling>();
+
     // Story 28-1 PR D: the 11 + 4 mentorship tenant-resident entities
     // (AgentConfig, PromptOverride, ProviderHealth, ProviderDiagnostic,
     // SanitizationRule, WorkflowDefinition, WorkflowInstance, DomainEvent,
@@ -844,6 +853,12 @@ public class ControlPlaneDbContext : DbContext
         // enforces at most one active assignment per tenant; FKs to tenants
         // (Cascade) + plans (Restrict).
         TammaModelConfiguration.ConfigureTenantPlanAssignments(modelBuilder);
+
+        // Story 34-3 — the authoritative per-(tenant, provider) billing-mode
+        // owner. CP-resident (keyed by tenant, alongside the billing tables).
+        // One active row per (tenant, provider) via a partial unique index;
+        // CHECKs pin mode/status + the byok↔secret XOR. FK to tenants (Cascade).
+        TammaModelConfiguration.ConfigureTenantProviderBilling(modelBuilder);
     }
 
     /// <summary>

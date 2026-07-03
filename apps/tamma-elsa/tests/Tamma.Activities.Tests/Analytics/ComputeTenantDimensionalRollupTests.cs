@@ -123,6 +123,38 @@ public class ComputeTenantDimensionalRollupTests
         rows.Single(r => r.CostBasis == CostBasis.Platform).CostUsd.Should().Be(2.00m);
     }
 
+    // ── Story 34-3 / 35-2 (Reader C producer) — the ProviderDiagnostic.BillingMode
+    //    column is now READ (was the always-Platform phantom): a byok diagnostic
+    //    buckets under CostBasis.Byok, a platform diagnostic under Platform. ──
+    [Test]
+    public async Task ComputeAsync_ResolvesCostBasis_FromDiagnosticBillingMode()
+    {
+        var tenantId = Guid.NewGuid();
+        var db = _tenantFactory.Register(tenantId);
+        db.ProviderDiagnostics.AddRange(
+            new ProviderDiagnostic
+            {
+                Id = Guid.NewGuid(), ProviderKey = "anthropic", Model = "claude",
+                BillingMode = "byok", Cost = 1.00m, TokensUsed = 20, CreatedAt = Hour.AddMinutes(5),
+            },
+            new ProviderDiagnostic
+            {
+                Id = Guid.NewGuid(), ProviderKey = "openai", Model = "gpt",
+                BillingMode = "platform", Cost = 2.00m, TokensUsed = 40, CreatedAt = Hour.AddMinutes(6),
+            });
+        await db.SaveChangesAsync();
+
+        await RunAsync(tenantId, new FixedMarginPricing(0m));
+
+        var verify = await _tenantFactory.CreateAsync(tenantId);
+        var rows = await verify.AnalyticsUsageHourly.ToListAsync();
+
+        rows.Single(r => r.Provider == "anthropic").CostBasis
+            .Should().Be(CostBasis.Byok, "the diagnostic's BillingMode column is now read (not always Platform)");
+        rows.Single(r => r.Provider == "openai").CostBasis
+            .Should().Be(CostBasis.Platform);
+    }
+
     [Test]
     public async Task ComputeAsync_DefaultsToPlatform_WhenNoBillingMode()
     {

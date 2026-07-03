@@ -35,10 +35,17 @@ public static class PricingServiceCollectionExtensions
     /// Story 34-5 — the cost->price markup engine + its policy/mode resolvers.
     /// The engine is a pure singleton (depends only on the singleton
     /// <c>IProviderPricingService</c>); the resolvers are scoped (they read the
-    /// scoped <c>ControlPlaneDbContext</c>). The
-    /// <see cref="ITenantProviderPricingModeResolver"/> default reads the
-    /// per-tenant <c>BillingCustomer.BillingMode</c> until Story 34-3 swaps a
-    /// per-<c>(tenant, provider)</c> implementation behind the same seam.
+    /// scoped <c>ControlPlaneDbContext</c>).
+    ///
+    /// <para><b>34-3 wired:</b> the <see cref="ITenantProviderPricingModeResolver"/>
+    /// now reads the AUTHORITATIVE per-<c>(tenant, provider)</c>
+    /// <c>TenantProviderBilling</c> owner via
+    /// <see cref="TenantProviderBillingPricingModeResolver"/> (backed by
+    /// <see cref="ITenantProviderBillingResolver"/>). This is the "one-line swap
+    /// behind the seam" the interim
+    /// <see cref="BillingCustomerPricingModeResolver"/> (per-TENANT
+    /// <c>BillingCustomer.BillingMode</c>) anticipated — the engine + estimate
+    /// endpoint are unchanged.</para>
     /// </summary>
     public static IServiceCollection AddUsagePricingEngine(this IServiceCollection services)
     {
@@ -48,7 +55,11 @@ public static class PricingServiceCollectionExtensions
 
         services.TryAddSingleton<IUsagePricingEngine, UsagePricingEngine>();
         services.TryAddScoped<IMarginPolicyResolver, MarginPolicyResolver>();
-        services.TryAddScoped<ITenantProviderPricingModeResolver, BillingCustomerPricingModeResolver>();
+
+        // Story 34-3 — the authoritative per-(tenant, provider) owner reader …
+        services.TryAddScoped<ITenantProviderBillingResolver, TenantProviderBillingResolver>();
+        // … and the pricing-mode seam repointed onto it (Reader A repoint).
+        services.TryAddScoped<ITenantProviderPricingModeResolver, TenantProviderBillingPricingModeResolver>();
 
         return services;
     }

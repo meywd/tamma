@@ -7,10 +7,12 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Moq.Protected;
 using NUnit.Framework;
+using Tamma.Api.Services.Billing;
 using Tamma.Api.Services.Diagnostics;
 using Tamma.Api.Services.Diagnostics.Models;
 using Tamma.Api.Services.SaaS;
 using Tamma.Data.Entities;
+using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Tests.SaaS;
 
@@ -24,6 +26,8 @@ public class LlmProxyServiceTests
 {
     private Mock<IHttpClientFactory> _httpFactory = null!;
     private Mock<IDiagnosticsService> _diagnostics = null!;
+    private Mock<IBillingModeTagger> _billingModeTagger = null!;
+    private Mock<IEventRepository> _events = null!;
     private Mock<ILogger<LlmProxyService>> _logger = null!;
     private Mock<HttpMessageHandler> _handler = null!;
 
@@ -32,12 +36,23 @@ public class LlmProxyServiceTests
     {
         _httpFactory = new Mock<IHttpClientFactory>();
         _diagnostics = new Mock<IDiagnosticsService>();
+        _billingModeTagger = new Mock<IBillingModeTagger>();
+        _events = new Mock<IEventRepository>();
         _logger = new Mock<ILogger<LlmProxyService>>();
         _handler = new Mock<HttpMessageHandler>();
 
         // Default: no budget (unlimited).
         _diagnostics.Setup(d => d.GetBudgetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Budget(spent: 0m, limit: 1_000_000m, over: false));
+
+        // Story 35-2 — default the tagger to "platform" (owner-declared default).
+        _billingModeTagger
+            .Setup(t => t.ResolveTagAsync(
+                It.IsAny<Guid?>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BillingModeTokens.Platform);
+        _events
+            .Setup(e => e.AppendAsync(It.IsAny<DomainEvent>()))
+            .ReturnsAsync((DomainEvent d) => d);
     }
 
     private LlmProxyService CreateService()
@@ -48,7 +63,9 @@ public class LlmProxyServiceTests
         };
         _httpFactory.Setup(f => f.CreateClient("anthropic")).Returns(client);
 
-        return new LlmProxyService(_httpFactory.Object, _diagnostics.Object, _logger.Object);
+        return new LlmProxyService(
+            _httpFactory.Object, _diagnostics.Object, _billingModeTagger.Object,
+            _events.Object, _logger.Object);
     }
 
     // ─── Happy path ────────────────────────────────────────────────────────
@@ -95,6 +112,104 @@ public class LlmProxyServiceTests
                 p.Model == "claude-sonnet-4.5"),
             It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    // ─── Story 35-2 — billing_mode stamped on diagnostic + usage event ───────
+
+    [Test]
+    public async Task ChatAsync_Byok_StampsDiagnosticBillingMode_AndEmitsTaggedUsageEvent()
+    {
+        var tenantId = Guid.NewGuid();
+        // Owner-declared byok resolves through the tagger.
+        _billingModeTagger
+            .Setup(t => t.ResolveTagAsync(
+                tenantId, It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BillingModeTokens.Byok);
+
+        SetupHttp(HttpStatusCode.OK, """
+            {
+              "model": "claude-sonnet-4.5",
+              "content": [ { "type": "text", "text": "ok" } ],
+              "usage": { "input_tokens": 5, "output_tokens": 7 }
+            }
+            """);
+
+        var service = CreateService();
+        var resp = await service.ChatAsync(
+            new ChatRequest("claude-sonnet-4.5", new[] { new ChatMessage("user", "hi") }, 32, null),
+            tenantId);
+
+        resp.Success.Should().BeTrue();
+
+        // The diagnostic carries the resolved billing posture.
+        _diagnostics.Verify(d => d.RecordEventAsync(
+            It.Is<ProviderDiagnostic>(p => p.BillingMode == "byok"),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        // A tenant-scoped LLM.CALL.SUCCESS usage event carries the billing_mode tag.
+        _events.Verify(e => e.AppendAsync(
+            It.Is<DomainEvent>(ev =>
+                ev.Type == BillingModeEvents.LlmCallSuccess &&
+                ev.TenantId == tenantId &&
+                ev.Tags != null && ev.Tags.Contains("\"billing_mode\":\"byok\""))),
+            Times.Once);
+    }
+
+    // ─── Fix 1 — the diagnostic and the usage event share ONE per-call
+    //     correlation id so the dimensional rollup dedup counts the call ONCE. ──
+    [Test]
+    public async Task ChatAsync_StampsSharedCorrelationId_OnDiagnosticAndUsageEvent()
+    {
+        var tenantId = Guid.NewGuid();
+        ProviderDiagnostic? capturedDiag = null;
+        DomainEvent? capturedEvent = null;
+
+        _diagnostics
+            .Setup(d => d.RecordEventAsync(It.IsAny<ProviderDiagnostic>(), It.IsAny<CancellationToken>()))
+            .Callback((ProviderDiagnostic p, CancellationToken _) => capturedDiag = p)
+            .ReturnsAsync(Guid.NewGuid());
+        _events
+            .Setup(e => e.AppendAsync(It.IsAny<DomainEvent>()))
+            .ReturnsAsync((DomainEvent d) => d)
+            .Callback((DomainEvent d) => capturedEvent = d);
+
+        SetupHttp(HttpStatusCode.OK, """
+            { "model": "claude-sonnet-4.5", "content": [ { "type": "text", "text": "ok" } ],
+              "usage": { "input_tokens": 5, "output_tokens": 7 } }
+            """);
+
+        var service = CreateService();
+        await service.ChatAsync(
+            new ChatRequest("claude-sonnet-4.5", new[] { new ChatMessage("user", "hi") }, 32, null),
+            tenantId);
+
+        capturedDiag.Should().NotBeNull();
+        capturedEvent.Should().NotBeNull();
+        capturedDiag!.CorrelationId.Should().NotBeNull(
+            "the diagnostic must carry the per-call correlation id so the rollup dedup can fire");
+
+        using var doc = JsonDocument.Parse(capturedEvent!.Tags!);
+        var eventCorr = doc.RootElement.GetProperty("correlationId").GetString();
+        eventCorr.Should().Be(capturedDiag.CorrelationId!.Value.ToString(),
+            "the event's correlationId tag must equal the diagnostic's CorrelationId — both describe ONE call, "
+            + "so the dimensional rollup folds them once (no 2x double-count)");
+    }
+
+    [Test]
+    public async Task ChatAsync_NullTenant_EmitsNoUsageEvent()
+    {
+        // Single-user / anonymous — no billable-mode implication (AC8).
+        SetupHttp(HttpStatusCode.OK, """
+            { "model": "claude-sonnet-4.5", "content": [ { "type": "text", "text": "ok" } ],
+              "usage": { "input_tokens": 1, "output_tokens": 1 } }
+            """);
+
+        var service = CreateService();
+        await service.ChatAsync(
+            new ChatRequest("claude-sonnet-4.5", new[] { new ChatMessage("user", "hi") }, 32, null),
+            tenantId: null);
+
+        _events.Verify(e => e.AppendAsync(It.IsAny<DomainEvent>()), Times.Never);
     }
 
     [Test]
