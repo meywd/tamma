@@ -181,6 +181,14 @@ public static class SecretsServiceCollectionExtensions
         // construct this. Scoped to match EF context lifecycles.
         services.TryAddScoped<ISecretQueryService, SecretQueryService>();
 
+        // Story 29-1 concrete ISecretStore facade. Depends on the
+        // SecretsDbContext factory (above), the ISecretStoreBackend +
+        // ISecretAccessAuditor (from AddTammaSecrets), and TimeProvider.
+        // Scoped to match the EF context lifecycle. Only wired on the
+        // Postgres path — the bare AddTammaSecrets placeholder has no
+        // DbContext factory to back the facade's metadata surface.
+        services.TryAddScoped<ISecretStore, SecretStore>();
+
         return services;
     }
 

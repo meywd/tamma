@@ -408,11 +408,76 @@ builder.Services.AddSaaSServices();
 // by default). See docs/vendors/cranl/README.md for the provisioning flow.
 builder.Services.AddTenantProvisioning(builder.Configuration);
 
-// Platform secret cabinet (Epic 29). Story 29-1 wires only the
-// abstraction + a null auditor + an in-memory backend placeholder;
-// Story 29-2 swaps in the Postgres envelope-encrypted backend and the
-// real auditor.
-builder.Services.AddTammaSecrets();
+// Platform secret cabinet (Epic 29). Backend selection (Story 29-2):
+//   • KEK configured (TAMMA_SECRET_STORE_KEK_PRIMARY) + a secret-store
+//     connection string → the PERSISTENT Postgres envelope-encrypted
+//     backend (AddTammaPostgresSecrets). This is the REQUIRED production
+//     wiring: BYOK ciphertext survives restart. It ALSO registers
+//     IKekProvider (which the reveal + rotation writers require) and the
+//     Story 29-1 ISecretStore facade.
+//   • KEK absent → the VOLATILE in-memory placeholder, which is safe
+//     ONLY for dev/test. In Production we FAIL LOUD rather than silently
+//     backing real (tenant BYOK) secrets with volatile memory — a
+//     persistent secret whose ciphertext evaporates on restart is the
+//     exact silent failure this project forbids. The fail-closed backend
+//     lets startup succeed (health answers) but throws on any secret
+//     WRITE with a clear remediation message. Mirrors
+//     TenantSecretProtector's env-gated production hard-fail.
+var secretStoreConnString =
+    builder.Configuration.GetConnectionString("SecretStore")
+    ?? builder.Configuration.GetConnectionString("ControlPlane");
+var secretStoreKekConfigured = !string.IsNullOrWhiteSpace(
+    Environment.GetEnvironmentVariable(
+        Tamma.Api.Services.Secrets.Postgres.EnvKekProvider.PrimaryEnvVar));
+
+if (secretStoreKekConfigured && !string.IsNullOrWhiteSpace(secretStoreConnString))
+{
+    // EnvKekProvider.FromEnvironment() (resolved lazily) validates the KEK
+    // and fails fast on a malformed key; RemoveAll + AddSingleton inside
+    // the extension replaces the in-memory placeholder with the Postgres
+    // envelope-encrypted backend regardless of later AddTammaSecrets calls.
+    builder.Services.AddTammaPostgresSecrets(builder.Configuration);
+    Log.Information(
+        "Secret cabinet: persistent Postgres envelope-encrypted backend wired ({KekEnv} present).",
+        Tamma.Api.Services.Secrets.Postgres.EnvKekProvider.PrimaryEnvVar);
+}
+else
+{
+    builder.Services.AddTammaSecrets();
+
+    if (builder.Environment.IsProduction()
+        && !string.IsNullOrWhiteSpace(secretStoreConnString))
+    {
+        // Real deployment (has a DB) but no KEK → misconfigured. Do NOT
+        // silently persist real secrets to volatile memory. Swap the
+        // in-memory placeholder for the fail-closed guard: every secret
+        // WRITE throws; startup stays up so operators see the error at the
+        // first write, not a crash loop.
+        Log.Error(
+            "Secret cabinet MISCONFIGURED: a secret-store database is configured but " +
+            "{KekEnv} is not set. Secret WRITES will FAIL CLOSED (no plaintext is " +
+            "persisted to volatile memory). Set {KekEnv} to enable the persistent " +
+            "Postgres envelope-encrypted backend.",
+            Tamma.Api.Services.Secrets.Postgres.EnvKekProvider.PrimaryEnvVar,
+            Tamma.Api.Services.Secrets.Postgres.EnvKekProvider.PrimaryEnvVar);
+        builder.Services.RemoveAll<Tamma.Api.Services.Secrets.ISecretStoreBackend>();
+        builder.Services.AddSingleton<
+            Tamma.Api.Services.Secrets.ISecretStoreBackend,
+            Tamma.Api.Services.Secrets.FailClosedSecretStoreBackend>();
+    }
+    else if (!string.IsNullOrWhiteSpace(secretStoreConnString))
+    {
+        // Non-production with a DB but no KEK: volatile in-memory secrets
+        // are acceptable for dev/test, but the operator should know the
+        // ciphertext will not survive a restart.
+        Log.Warning(
+            "Secret cabinet: {KekEnv} not set — using the VOLATILE in-memory backend. " +
+            "Secret ciphertext will NOT survive a restart. Acceptable for dev/test only; " +
+            "set {KekEnv} for any persistent deployment.",
+            Tamma.Api.Services.Secrets.Postgres.EnvKekProvider.PrimaryEnvVar,
+            Tamma.Api.Services.Secrets.Postgres.EnvKekProvider.PrimaryEnvVar);
+    }
+}
 
 // Story 29-9 / 29-10: runtime resolver + stopgap migrator. The
 // resolver is the read-path abstraction over the cabinet + the

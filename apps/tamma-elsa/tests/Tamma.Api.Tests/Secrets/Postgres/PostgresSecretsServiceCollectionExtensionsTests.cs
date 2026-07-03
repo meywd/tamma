@@ -192,6 +192,25 @@ public class PostgresSecretsServiceCollectionExtensionsTests
     }
 
     [Test]
+    public void AddTammaPostgresSecrets_RegistersSecretStoreFacade()
+    {
+        // Backend-selection contract: with the KEK present (SetUp) the
+        // Postgres path also wires the concrete ISecretStore facade so
+        // consumers can depend on it. Resolved inside a scope because the
+        // facade is scoped (it opens short-lived DbContexts).
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddTammaPostgresSecrets(
+            Config(),
+            connectionString: "Host=localhost;Database=test;Username=u;Password=p");
+
+        var sp = services.BuildServiceProvider();
+        using var scope = sp.CreateScope();
+        scope.ServiceProvider.GetRequiredService<ISecretStore>()
+            .Should().BeOfType<SecretStore>();
+    }
+
+    [Test]
     public void AddTammaPostgresSecrets_StillRegistersAuditor()
     {
         // The Postgres extension must call AddTammaSecrets() under
