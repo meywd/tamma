@@ -90,4 +90,45 @@ public interface IEventRepository
             "QueryAgentTrailAsync is not implemented by this IEventRepository. " +
             "The per-agent action trail (Story 32-6) reads only through the " +
             "tenant-scoped EventRepository, which routes via ITenantDbContextFactory.");
+
+    /// <summary>
+    /// Story 32-23 (review fix) — tenant-scoped EXISTENCE check for a run by its
+    /// <paramref name="correlationId"/> (the workflow-instance id stamped into every
+    /// <c>AGENT.*</c> event's <c>Tags.correlationId</c>). Backs the run-tap ownership
+    /// guard: <c>true</c> iff at least one tenant-scoped event carries this
+    /// correlationId.
+    ///
+    /// <para><b>Volume-independent</b> — a single targeted <c>EXISTS</c> lookup that
+    /// returns the answer regardless of how many <c>AGENT.*</c> events the tenant has.
+    /// This replaces the retired recent-N (200) window scan that could age a busy
+    /// tenant's live run out of the window and false-404 the OWNER on their own run.</para>
+    ///
+    /// <para>The read is structurally scoped to the tenant's <c>t_&lt;hex&gt;</c>
+    /// schema — there is no cross-tenant read path. Default throws so a repository that
+    /// does not implement it is never a valid ownership source; the real
+    /// <c>EventRepository</c> overrides it.</para>
+    /// </summary>
+    Task<bool> ExistsByCorrelationIdAsync(Guid tenantId, string correlationId)
+        => throw new NotSupportedException(
+            "ExistsByCorrelationIdAsync is not implemented by this IEventRepository. " +
+            "The run-tap ownership guard (Story 32-23) reads only through the " +
+            "tenant-scoped EventRepository.");
+
+    /// <summary>
+    /// Story 32-23 (review fix) — ALL tenant-scoped events carrying
+    /// <paramref name="correlationId"/>, ordered oldest-first (by
+    /// <see cref="DomainEvent.SequenceNumber"/>) for replay catch-up + early-terminal
+    /// detection.
+    ///
+    /// <para><b>NOT capped</b> — returns every frame for the run regardless of how
+    /// many <c>AGENT.*</c> events the tenant has, so <c>?replay=true</c> never
+    /// truncates (unlike the retired recent-200 window scan). Tenant-scoped to the
+    /// caller's schema; there is no cross-tenant read path. Default throws — see
+    /// <see cref="ExistsByCorrelationIdAsync"/>.</para>
+    /// </summary>
+    Task<IReadOnlyList<DomainEvent>> ListByCorrelationIdAsync(Guid tenantId, string correlationId)
+        => throw new NotSupportedException(
+            "ListByCorrelationIdAsync is not implemented by this IEventRepository. " +
+            "The run-tap replay (Story 32-23) reads only through the tenant-scoped " +
+            "EventRepository.");
 }

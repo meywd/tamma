@@ -109,8 +109,6 @@ public sealed class LlmRunStreamBus : ILlmRunStreamBus
     {
         ArgumentException.ThrowIfNullOrEmpty(correlationId);
 
-        var topic = _topics.GetOrAdd(correlationId, static _ => new Topic());
-
         var channel = Channel.CreateBounded<RunStreamFrame>(
             new BoundedChannelOptions(Capacity)
             {
@@ -120,7 +118,28 @@ public sealed class LlmRunStreamBus : ILlmRunStreamBus
             });
 
         var id = Guid.NewGuid();
-        topic.Subscribers[id] = channel;
+
+        // Retry loop closes the Detach remove-on-empty race: if the topic we joined
+        // was concurrently reclaimed (its previous last subscriber detached between
+        // our GetOrAdd and our registration), re-create a fresh one and re-register.
+        // A concurrent Subscribe re-creating the topic is fine — the run gets a fresh
+        // seq. In practice this loops at most once (human dashboard taps, low fan-out).
+        Topic topic;
+        while (true)
+        {
+            topic = _topics.GetOrAdd(correlationId, static _ => new Topic());
+            topic.Subscribers[id] = channel;
+
+            if (_topics.TryGetValue(correlationId, out var current)
+                && ReferenceEquals(current, topic))
+            {
+                break;
+            }
+
+            // Lost the race — our topic was reclaimed out from under us. Drop the
+            // stale registration and retry against a fresh topic.
+            topic.Subscribers.TryRemove(id, out _);
+        }
 
         _logger?.LogDebug(
             "run-stream subscriber attached. correlationId={CorrelationId} subscriberCount={Count}",
@@ -133,17 +152,42 @@ public sealed class LlmRunStreamBus : ILlmRunStreamBus
     public int SubscriberCount(string correlationId)
         => _topics.TryGetValue(correlationId, out var topic) ? topic.Subscribers.Count : 0;
 
+    /// <summary>Test-only (InternalsVisibleTo) — the number of live topics. A topic
+    /// exists from its first <see cref="Subscribe"/> until its last subscriber
+    /// detaches (remove-on-empty) or a <c>final</c> frame tears it down. Used to
+    /// assert the singleton never leaks a zombie topic.</summary>
+    internal int TopicCount => _topics.Count;
+
+    /// <summary>Test-only (InternalsVisibleTo) — is there a live topic for
+    /// <paramref name="correlationId"/>?</summary>
+    internal bool HasTopic(string correlationId) => _topics.ContainsKey(correlationId);
+
     private void Detach(string correlationId, Guid id)
     {
         if (_topics.TryGetValue(correlationId, out var topic)
             && topic.Subscribers.TryRemove(id, out var ch))
         {
             ch.Writer.TryComplete();
-            // Intentionally DO NOT remove an empty topic here: keeping it until
-            // the run's `final` frame preserves per-run seq monotonicity across a
-            // subscriber that disconnects + reconnects mid-run. The topic is torn
-            // down deterministically on `final` (or bounded by process lifetime
-            // for a run that dies before emitting `final`).
+
+            // Story 32-23 (review fix) — reclaim the topic when its LAST subscriber
+            // leaves. The old behaviour (retain empty topics until `final`) leaked one
+            // entry per tapped-then-finished run into this process-global singleton: a
+            // run that finished (or aborted/cancelled) never publishes a `final`, so the
+            // topic was never torn down → permanent growth. Remove-on-empty accepts a
+            // seq reset if a subscriber disconnects and reconnects mid-run (a fresh
+            // Subscribe re-creates the topic with seq starting at 1).
+            //
+            // Race safety: TryRemove(KeyValuePair) removes the mapping ONLY if it still
+            // points at THIS exact topic instance, so a concurrent Subscribe that
+            // installed a new topic is never clobbered; Subscribe's own re-check/retry
+            // handles the inverse. A late PublishAsync to a since-removed topic stays a
+            // no-op (TryGetValue miss).
+            if (topic.Subscribers.IsEmpty)
+            {
+                ((ICollection<KeyValuePair<string, Topic>>)_topics)
+                    .Remove(new KeyValuePair<string, Topic>(correlationId, topic));
+            }
+
             _logger?.LogDebug(
                 "run-stream subscriber detached. correlationId={CorrelationId} subscriberCount={Count}",
                 correlationId, topic.Subscribers.Count);

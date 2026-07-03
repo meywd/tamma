@@ -367,6 +367,66 @@ public class EventRepository(
         return (rows, total);
     }
 
+    /// <inheritdoc />
+    public async Task<bool> ExistsByCorrelationIdAsync(Guid tenantId, string correlationId)
+    {
+        if (string.IsNullOrEmpty(correlationId))
+        {
+            return false;
+        }
+
+        await using var db = await tenantDbFactory.CreateAsync(tenantId);
+
+        // The correlationId predicate lives in the Tags JSONB. It is a PARAMETERIZED
+        // raw-SQL `->>` extraction (the column is jsonb) so it translates on Postgres
+        // against the values written into Tags — {correlationId} is bound as a
+        // parameter, never interpolated into the SQL text. The unqualified
+        // `domain_events` name resolves to the tenant schema via the per-tenant
+        // connection's search_path. The tenant defence-in-depth predicate + the
+        // EXISTS (from AnyAsync) compose in LINQ over the raw-SQL subquery.
+        //
+        // TODO(perf): expression index on ((Tags->>'correlationId')) — separate
+        // migration, mirroring ix_domain_events_tags_agentid on ((Tags->>'agentId'))
+        // (see AddAgentTrailAgentIdIndex). Without it this is a seq scan, but AnyAsync
+        // compiles to EXISTS(SELECT 1 …) so Postgres short-circuits on the first match —
+        // the lookup is volume-independent regardless, unlike the retired recent-200 scan.
+        return await db.DomainEvents
+            .FromSqlInterpolated($@"
+                SELECT * FROM domain_events
+                WHERE ""Tags""->>'correlationId' = {correlationId}")
+            .Where(e => e.TenantId == tenantId)
+            .AnyAsync();
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<DomainEvent>> ListByCorrelationIdAsync(
+        Guid tenantId, string correlationId)
+    {
+        if (string.IsNullOrEmpty(correlationId))
+        {
+            return Array.Empty<DomainEvent>();
+        }
+
+        await using var db = await tenantDbFactory.CreateAsync(tenantId);
+
+        // Same tenant-scoped PARAMETERIZED `->>` lookup as ExistsByCorrelationIdAsync,
+        // but returns EVERY event for the run (NOT capped) ordered oldest-first for
+        // replay. Volume-independent: the target run's events are returned regardless
+        // of how many other AGENT.* events the tenant has.
+        //
+        // TODO(perf): expression index on ((Tags->>'correlationId')) — separate
+        // migration (see ExistsByCorrelationIdAsync / AddAgentTrailAgentIdIndex).
+        var rows = await db.DomainEvents
+            .FromSqlInterpolated($@"
+                SELECT * FROM domain_events
+                WHERE ""Tags""->>'correlationId' = {correlationId}")
+            .Where(e => e.TenantId == tenantId)
+            .OrderBy(e => e.SequenceNumber)
+            .ToListAsync();
+
+        return rows;
+    }
+
     /// <summary>Map the <c>outcome</c> filter (<c>success|failed|partial</c>) to
     /// the terminal <c>AGENT.TASK.*</c> event type. Returns <c>null</c> when no
     /// (or an unrecognized) outcome is supplied — the caller then does not

@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Tamma.Api.Services.PromptStore;
@@ -44,10 +43,11 @@ public static class LlmRunStreamEndpoints
     /// quiet run (matches the admin SSE cadence).</summary>
     private static readonly TimeSpan KeepaliveInterval = TimeSpan.FromSeconds(30);
 
-    /// <summary>How many recent <c>AGENT.*</c> rows the ownership guard / replay
-    /// scan reads from the tenant store. A live run's <c>AGENT.RUN.STARTED</c>
-    /// (emitted before the loop) is always within this window.</summary>
-    private const int OwnershipScanLimit = 200;
+    /// <summary>The terminal <c>AGENT.RUN.*</c> event types. Their presence in the
+    /// tenant store means the run has already finished — the tap must NOT park on a
+    /// live <c>final</c> that will never come.</summary>
+    private static readonly string[] TerminalRunEventTypes =
+        { "AGENT.RUN.SUCCESS", "AGENT.RUN.FAILED" };
 
     public static async Task StreamRun(
         string correlationId,
@@ -69,15 +69,30 @@ public static class LlmRunStreamEndpoints
             return;
         }
 
+        // The run correlationId is the workflow-instance Guid. Reject a non-Guid
+        // route value with 400: it can never match a real run, it keeps the value
+        // newline-free (no SSE-line injection into the `: stream-open` comment below),
+        // and it hardens the tenant-scoped `Tags->>'correlationId'` lookups.
+        if (!Guid.TryParse(correlationId, out _))
+        {
+            http.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await http.Response.WriteAsync("correlationId must be a GUID", ct).ConfigureAwait(false);
+            return;
+        }
+
         // AC2 — SaaS ownership guard. A correlationId not owned by the caller's
-        // tenant returns 404 (never confirm existence cross-tenant). The read is
-        // structurally tenant-scoped (t_<hex>.domain_events), so a foreign run is
-        // physically absent from the caller's store. Single-user owns every run.
+        // tenant returns 404 (never confirm existence cross-tenant). The check is a
+        // targeted, tenant-scoped EXISTS on Tags.correlationId — volume-independent,
+        // so a busy tenant's live run whose AGENT.RUN.STARTED has aged past any
+        // recent-N window is STILL recognised as owned (no false 404 on one's own
+        // in-flight run). The read is structurally tenant-scoped
+        // (t_<hex>.domain_events), so a foreign run is physically absent from the
+        // caller's store. Single-user owns every run.
         Guid? tenantId = tenantContext.TenantId;
         if (modeProvider.Mode == TammaMode.SaaS)
         {
             if (tenantId is null
-                || !await OwnsRunAsync(eventRepo, tenantId.Value, correlationId).ConfigureAwait(false))
+                || !await eventRepo.ExistsByCorrelationIdAsync(tenantId.Value, correlationId).ConfigureAwait(false))
             {
                 logger.LogWarning(
                     "run-tap denied (cross-tenant / unknown run) => 404. correlationId={CorrelationId} callerTenantId={TenantId}",
@@ -96,25 +111,53 @@ public static class LlmRunStreamEndpoints
         var startedAt = timeProvider.GetUtcNow();
         var framesSent = 0;
         var reason = "run_complete";
+        var replayRequested = IsReplayRequested(http);
 
         logger.LogInformation(
             "run-tap opened. correlationId={CorrelationId} tenantId={TenantId} replay={Replay}",
-            correlationId, tenantId, IsReplayRequested(http));
-
-        // Subscribe BEFORE the (optional) replay read so no live frame produced
-        // between the catch-up read and the live tail is missed (the admin SSE
-        // resume idiom). Dispose detaches the channel — nothing leaks on
-        // disconnect.
-        using var subscription = bus.Subscribe(correlationId);
+            correlationId, tenantId, replayRequested);
 
         try
         {
             await WriteRawAsync(http, $": stream-open correlationId={correlationId}\n\n", token).ConfigureAwait(false);
 
-            // AC8 — optional catch-up from the tenant's DCB store, then live tail.
-            if (IsReplayRequested(http) && tenantId is not null)
+            // Read the run's stored DCB events once (when we have a tenant). Used for
+            // BOTH the early-terminal short-circuit and the optional replay catch-up.
+            // Single-user with a null tenant has no tenant-scoped read path, so it
+            // falls through to the live tail (unchanged).
+            IReadOnlyList<DomainEvent> stored = tenantId is not null
+                ? await eventRepo.ListByCorrelationIdAsync(tenantId.Value, correlationId).ConfigureAwait(false)
+                : Array.Empty<DomainEvent>();
+
+            // Early terminal check — if a terminal AGENT.RUN.SUCCESS/FAILED is already
+            // persisted, the run has finished. The terminal DCB event is written BEFORE
+            // the bus `final` frame (ManagedAgent), so if we can see it the live topic
+            // is already gone (or will be, without another subscriber). Do NOT Subscribe
+            // (that would recreate a zombie topic that never gets a `final`) and do NOT
+            // park on WaitToReadAsync for a live `final` that will never come — that is
+            // the 30-minute hang on a finished run. A replay tap streams the stored
+            // frames first; then both close promptly.
+            if (stored.Any(IsTerminalRunEvent))
             {
-                framesSent += await ReplayAsync(eventRepo, tenantId.Value, correlationId, http, token)
+                if (replayRequested)
+                {
+                    framesSent += await ReplayStoredAsync(stored, correlationId, http, token)
+                        .ConfigureAwait(false);
+                }
+                reason = "already_complete";
+                return; // finally writes the terminal `event: end`
+            }
+
+            // Live (not-yet-terminal) run. Subscribe BEFORE the (optional) replay read
+            // so no live frame produced between the catch-up read and the live tail is
+            // missed (the admin SSE resume idiom). Dispose detaches the channel and —
+            // with remove-on-empty — reclaims the topic, so nothing leaks on disconnect.
+            using var subscription = bus.Subscribe(correlationId);
+
+            // AC8 — optional catch-up from the tenant's DCB store, then live tail.
+            if (replayRequested)
+            {
+                framesSent += await ReplayStoredAsync(stored, correlationId, http, token)
                     .ConfigureAwait(false);
             }
 
@@ -209,29 +252,22 @@ public static class LlmRunStreamEndpoints
         }
     }
 
-    /// <summary>AC2 — does <paramref name="correlationId"/> belong to a run the
-    /// tenant owns? True iff at least one tenant-scoped <c>AGENT.*</c> event
-    /// carries this correlationId. A foreign run is physically absent from the
-    /// caller's schema, so this fails closed to 404.</summary>
-    internal static async Task<bool> OwnsRunAsync(
-        IEventRepository events, Guid tenantId, string correlationId)
-    {
-        var matches = await FindRunEventsAsync(events, tenantId, correlationId).ConfigureAwait(false);
-        return matches.Count > 0;
-    }
+    /// <summary>Is <paramref name="e"/> a terminal <c>AGENT.RUN.SUCCESS</c>/
+    /// <c>AGENT.RUN.FAILED</c> event? Its presence means the run has already
+    /// finished, so the tap must not wait for a live <c>final</c>.</summary>
+    private static bool IsTerminalRunEvent(DomainEvent e)
+        => Array.IndexOf(TerminalRunEventTypes, e.Type) >= 0;
 
     /// <summary>AC8 — replay the run's already-emitted DCB events (scrubbed,
-    /// key-free) as catch-up frames, oldest-first, then the caller switches to
-    /// the live tail. Returns the number of catch-up frames written.</summary>
-    private static async Task<int> ReplayAsync(
-        IEventRepository events, Guid tenantId, string correlationId, HttpContext http, CancellationToken ct)
+    /// key-free) as catch-up frames from <paramref name="stored"/> (already
+    /// oldest-first, tenant-scoped, and matched to this correlationId by
+    /// <see cref="IEventRepository.ListByCorrelationIdAsync"/> — the FULL set, never
+    /// truncated). Returns the number of catch-up frames written.</summary>
+    private static async Task<int> ReplayStoredAsync(
+        IReadOnlyList<DomainEvent> stored, string correlationId, HttpContext http, CancellationToken ct)
     {
-        var matches = await FindRunEventsAsync(events, tenantId, correlationId).ConfigureAwait(false);
-        // ListByTenantAsync returns most-recent-first; replay chronologically.
-        var ordered = matches.OrderBy(e => e.SequenceNumber).ToList();
-
         var count = 0;
-        foreach (var e in ordered)
+        foreach (var e in stored)
         {
             // Key-free catch-up payload: the fixed-vocabulary event type +
             // correlationId + the DCB sequence. Tags/Data bodies are NOT emitted.
@@ -247,51 +283,6 @@ public static class LlmRunStreamEndpoints
         }
 
         return count;
-    }
-
-    /// <summary>Reads the caller-tenant's recent <c>AGENT.*</c> events and keeps
-    /// those whose <c>Tags.correlationId</c> matches. The read is structurally
-    /// scoped to the tenant's <c>t_&lt;hex&gt;</c> schema by the repository —
-    /// there is no cross-tenant read path.</summary>
-    private static async Task<IReadOnlyList<DomainEvent>> FindRunEventsAsync(
-        IEventRepository events, Guid tenantId, string correlationId)
-    {
-        var (rows, _) = await events
-            .ListByTenantAsync(tenantId, "AGENT", OwnershipScanLimit, 0)
-            .ConfigureAwait(false);
-
-        var result = new List<DomainEvent>();
-        foreach (var e in rows)
-        {
-            if (string.Equals(TagsCorrelationId(e.Tags), correlationId, StringComparison.Ordinal))
-            {
-                result.Add(e);
-            }
-        }
-        return result;
-    }
-
-    private static string? TagsCorrelationId(string? tagsJson)
-    {
-        if (string.IsNullOrWhiteSpace(tagsJson) || tagsJson == "{}")
-        {
-            return null;
-        }
-        try
-        {
-            using var doc = JsonDocument.Parse(tagsJson);
-            if (doc.RootElement.ValueKind == JsonValueKind.Object
-                && doc.RootElement.TryGetProperty("correlationId", out var c)
-                && c.ValueKind == JsonValueKind.String)
-            {
-                return c.GetString();
-            }
-        }
-        catch (JsonException)
-        {
-            // Malformed tags never leak an exception to the client.
-        }
-        return null;
     }
 
     private static bool IsReplayRequested(HttpContext http)

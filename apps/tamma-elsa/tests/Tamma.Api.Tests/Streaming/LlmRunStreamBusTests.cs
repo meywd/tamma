@@ -132,6 +132,41 @@ public class LlmRunStreamBusTests
         bus.SubscriberCount("run-detach").Should().Be(0, "dispose detaches the channel so nothing leaks");
     }
 
+    [Test]
+    public void Detach_RemovesTopic_WhenLastSubscriberLeaves_NoZombieLeak()
+    {
+        // Review fix — a run tapped-then-disconnected (or a finished/aborted run that
+        // never publishes `final`) must NOT leak a topic into the process-global
+        // singleton. Removing the LAST subscriber reclaims the topic.
+        var bus = new LlmRunStreamBus();
+        var sub = bus.Subscribe("run-reclaim");
+        bus.TopicCount.Should().Be(1);
+        bus.HasTopic("run-reclaim").Should().BeTrue();
+
+        sub.Dispose();
+
+        bus.SubscriberCount("run-reclaim").Should().Be(0);
+        bus.HasTopic("run-reclaim").Should().BeFalse("the empty topic is reclaimed on the last detach");
+        bus.TopicCount.Should().Be(0, "no zombie topic lingers after the last subscriber leaves");
+    }
+
+    [Test]
+    public void Detach_KeepsTopic_WhileOtherSubscribersRemain_RemovesOnLast()
+    {
+        var bus = new LlmRunStreamBus();
+        var s1 = bus.Subscribe("run-multi");
+        var s2 = bus.Subscribe("run-multi");
+        bus.TopicCount.Should().Be(1);
+
+        s1.Dispose();
+        bus.HasTopic("run-multi").Should().BeTrue("one subscriber still remains");
+        bus.SubscriberCount("run-multi").Should().Be(1);
+
+        s2.Dispose();
+        bus.HasTopic("run-multi").Should().BeFalse("last subscriber left ⇒ topic reclaimed");
+        bus.TopicCount.Should().Be(0);
+    }
+
     private static RunStreamFrame Frame(string type)
         => new(type, "run", 0, new { x = 1 });
 
