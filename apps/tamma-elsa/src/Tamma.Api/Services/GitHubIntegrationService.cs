@@ -758,4 +758,69 @@ public class GitHubIntegrationService : IGitHubIntegrationService
             return IntegrationResult<bool>.Fail(ex.Message);
         }
     }
+
+    public async Task<IntegrationResult<GitHubReleaseResult>> CreateGitHubReleaseAsync(string repository, ReleaseCreationRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var httpClient = CreateGitHubClient();
+        // A request-scoped override (BYOK, resolved by the mediation layer) IS the
+        // token; only require the static GitHub:Token when no override is bound.
+        var token = _tokenOverride ?? _configuration["GitHub:Token"];
+        if (string.IsNullOrEmpty(token))
+        {
+            _logger.LogWarning("GitHub token not configured");
+            return IntegrationResult<GitHubReleaseResult>.Fail("GitHub token not configured");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.TagName))
+            return IntegrationResult<GitHubReleaseResult>.Fail("a non-empty release tag is required");
+
+        try
+        {
+            _logger.LogInformation("Creating release {Tag} in {Repo}", request.TagName, repository);
+
+            // Snake-case GitHub REST payload. target_commitish is only sent when
+            // supplied (GitHub defaults it to the repo's default branch otherwise,
+            // and ignores it entirely when the tag already exists).
+            var payload = new Dictionary<string, object?>
+            {
+                ["tag_name"] = request.TagName,
+                ["name"] = string.IsNullOrWhiteSpace(request.Name) ? request.TagName : request.Name,
+                ["body"] = request.Body ?? string.Empty,
+                ["draft"] = request.Draft,
+                ["prerelease"] = request.Prerelease,
+            };
+            if (!string.IsNullOrWhiteSpace(request.TargetCommitish))
+                payload["target_commitish"] = request.TargetCommitish;
+
+            var response = await httpClient.PostAsJsonAsync($"/repos/{repository}/releases", payload);
+            if (!response.IsSuccessStatusCode)
+            {
+                // Surface the status code + body so the mediation layer can classify
+                // the failure (422 tag exists / 403 permission / 404 repo) rather than
+                // collapsing every error into a bare throw.
+                var body = await response.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "Failed to create release {Tag} in {Repo}: {Status} {Body}",
+                    request.TagName, repository, (int)response.StatusCode, body);
+                return IntegrationResult<GitHubReleaseResult>.Fail($"{(int)response.StatusCode}: {body}");
+            }
+
+            var data = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var result = new GitHubReleaseResult
+            {
+                Success = true,
+                Id = data.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.Number ? id.GetInt64() : null,
+                HtmlUrl = data.TryGetProperty("html_url", out var url) ? url.GetString() : null,
+                TagName = data.TryGetProperty("tag_name", out var t) ? t.GetString() ?? request.TagName : request.TagName,
+            };
+            return IntegrationResult<GitHubReleaseResult>.Ok(result);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create GitHub release {Tag} in {Repo}", request.TagName, repository);
+            return IntegrationResult<GitHubReleaseResult>.Fail(ex.Message);
+        }
+    }
 }

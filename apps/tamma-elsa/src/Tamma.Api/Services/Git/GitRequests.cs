@@ -71,3 +71,21 @@ public sealed record UpdateIssueRequest
     public string? Status { get; init; } // open | closed (optional; today: no state change)
     public string CorrelationId { get; init; } = string.Empty;
 }
+
+/// <summary>
+/// <c>POST /api/v1/git/{owner}/{repo}/releases</c> (Epic 38 follow-up #21 —
+/// deployment-pipeline release step). The tag / title / notes are composed
+/// engine-side (pure, token-free); the API creates the release with the resolved
+/// per-tenant token. Carries NO token.
+/// </summary>
+public sealed record CreateReleaseRequest
+{
+    public string TagName { get; init; } = string.Empty;
+    public string? TargetRef { get; init; }   // SHA / branch the tag is created from
+    public string? Name { get; init; }         // release title (empty ⇒ TagName)
+    public string? Body { get; init; }         // release notes (Markdown)
+    public bool Draft { get; init; }
+    public bool Prerelease { get; init; }
+    public int IssueNumber { get; init; }
+    public string CorrelationId { get; init; } = string.Empty;
+}

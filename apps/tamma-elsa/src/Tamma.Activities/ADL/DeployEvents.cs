@@ -70,6 +70,20 @@ public static class DeployEvents
     public const string RollbackFailed = "DEPLOY.ROLLBACK.FAILED";
 
     /// <summary>
+    /// Epic 38 follow-up #21 — a git-platform release/tag was created for the
+    /// shipped version (the deployment-pipeline release step). Emitted by
+    /// <see cref="CreateReleaseActivity"/> after a successful production deploy.
+    /// </summary>
+    public const string ReleaseCreatedSuccess = "RELEASE.CREATED.SUCCESS";
+
+    /// <summary>
+    /// Epic 38 follow-up #21 — the release/tag create failed. Loud (error-status) —
+    /// the deploy itself still succeeded, but the release annotation is surfaced as
+    /// a failure (never silently swallowed).
+    /// </summary>
+    public const string ReleaseCreatedFailed = "RELEASE.CREATED.FAILED";
+
+    /// <summary>
     /// A <c>*.FAILED</c> / <c>*.REJECTED</c> deploy event carries an
     /// <c>error</c> status; everything else (<c>*.SUCCESS</c> /
     /// <c>*.STARTED</c> / <c>*.APPROVED</c> / <c>*.APPROVAL_REQUESTED</c>) is
@@ -77,7 +91,7 @@ public static class DeployEvents
     /// success (no-silent-failure rule).
     /// </summary>
     public static bool IsFailureType(string type)
-        => type is StageFailed or PipelineFailed or ProductionRejected or RollbackFailed;
+        => type is StageFailed or PipelineFailed or ProductionRejected or RollbackFailed or ReleaseCreatedFailed;
 
     /// <summary>
     /// Parse a tenant id from the loose string form threaded through the workflow

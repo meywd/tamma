@@ -134,6 +134,14 @@ public class IntegrationService : IIntegrationService
             : new GitHubMergeResult { Success = false, Error = result.Error };
     }
 
+    public async Task<GitHubReleaseResult> CreateGitHubReleaseAsync(string repository, ReleaseCreationRequest request)
+    {
+        var result = await _github.CreateGitHubReleaseAsync(repository, request);
+        return result.Success
+            ? result.Data!
+            : new GitHubReleaseResult { Success = false, Error = result.Error };
+    }
+
     public async Task<GitHubPullRequestDetail> GetGitHubPullRequestAsync(string repository, int pullRequestNumber)
     {
         var result = await _github.GetGitHubPullRequestAsync(repository, pullRequestNumber);

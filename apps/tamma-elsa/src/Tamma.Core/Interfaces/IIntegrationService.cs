@@ -129,6 +129,16 @@ public interface IGitHubIntegrationService
     /// <summary>Story 38-1 — remove a single label from an issue (idempotent: a 404
     /// "label not present" is treated as removed).</summary>
     Task<IntegrationResult<bool>> RemoveIssueLabelAsync(string repository, int issueNumber, string label);
+
+    /// <summary>
+    /// Epic 38 follow-up #21 (deployment-pipeline release step) — create a GitHub
+    /// release (and its tag) for the shipped version. Backs
+    /// <c>POST /api/v1/git/{owner}/{repo}/releases</c>. The release title / notes are
+    /// composed engine-side (pure, token-free); the API performs the create with the
+    /// resolved per-tenant token. An expected platform failure surfaces via
+    /// <c>Fail</c> (never a fabricated success) so the ADL pipeline can branch on it.
+    /// </summary>
+    Task<IntegrationResult<GitHubReleaseResult>> CreateGitHubReleaseAsync(string repository, ReleaseCreationRequest request);
 }
 
 /// <summary>
@@ -245,6 +255,10 @@ public interface IIntegrationService
 
     /// <summary>Get JIRA ticket details</summary>
     Task<JiraTicket?> GetJiraTicketAsync(string ticketId);
+
+    /// <summary>Create a GitHub release (and its tag) for a shipped version
+    /// (Epic 38 follow-up #21 — deployment-pipeline release step).</summary>
+    Task<GitHubReleaseResult> CreateGitHubReleaseAsync(string repository, ReleaseCreationRequest request);
 }
 
 // ============================================
@@ -308,6 +322,50 @@ public class GitHubMergeResult
 {
     public bool Success { get; set; }
     public string? MergeSha { get; set; }
+    public string? Error { get; set; }
+}
+
+/// <summary>
+/// Epic 38 follow-up #21 — the request to create a GitHub release for a shipped
+/// version. Composed engine-side (pure, token-free); the API performs the create
+/// with the resolved per-tenant token.
+/// </summary>
+public class ReleaseCreationRequest
+{
+    /// <summary>The git tag to create/point the release at (e.g. <c>deploy-a1b2c3d</c>).</summary>
+    public string TagName { get; set; } = string.Empty;
+
+    /// <summary>The commit-ish (SHA or branch) the tag is created from. Null/empty ⇒
+    /// the repository default branch (GitHub behaviour). Unused if the tag exists.</summary>
+    public string? TargetCommitish { get; set; }
+
+    /// <summary>The release title. Empty ⇒ the API falls back to <see cref="TagName"/>.</summary>
+    public string? Name { get; set; }
+
+    /// <summary>The release notes / body (Markdown).</summary>
+    public string? Body { get; set; }
+
+    /// <summary>Create as a draft (not published) release.</summary>
+    public bool Draft { get; set; }
+
+    /// <summary>Mark the release as a pre-release.</summary>
+    public bool Prerelease { get; set; }
+}
+
+/// <summary>Epic 38 follow-up #21 — the result of a create-release platform call.</summary>
+public class GitHubReleaseResult
+{
+    public bool Success { get; set; }
+
+    /// <summary>The GitHub release id (numeric).</summary>
+    public long? Id { get; set; }
+
+    /// <summary>The release's public HTML URL.</summary>
+    public string? HtmlUrl { get; set; }
+
+    /// <summary>The tag the release points at.</summary>
+    public string? TagName { get; set; }
+
     public string? Error { get; set; }
 }
 

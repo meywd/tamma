@@ -395,12 +395,70 @@ public class DeploymentPipelineWorkflowTests
     public void HappyPath_ReachesSuccess_ThroughPipelineSuccessEvent()
     {
         // QA success → UAT success → (dev) prod start → prod success → release tag
-        // → set success → PIPELINE.SUCCESS → outputs → finish.
+        // → CreateRelease → set success → PIPELINE.SUCCESS → outputs → finish.
         HasEdge("EmitProdSuccess", null, "SetReleaseTag").Should().BeTrue();
-        HasEdge("SetReleaseTag", null, "SetSuccess").Should().BeTrue();
+        HasEdge("SetReleaseTag", null, "CreateRelease").Should().BeTrue();
+        HasEdge("CreateRelease", "Created", "SetReleaseCreated").Should().BeTrue();
+        HasEdge("SetReleaseCreated", null, "SetSuccess").Should().BeTrue();
         HasEdge("SetSuccess", null, "EmitPipelineSuccess").Should().BeTrue();
         HasEdge("EmitPipelineSuccess", null, "SetOutputs").Should().BeTrue();
         HasEdge("SetOutputs", null, "Finish").Should().BeTrue();
+    }
+
+    // ================================================================
+    // Epic 38 follow-up #21 — the mediated release step (after prod success).
+    // ================================================================
+
+    [Test]
+    public void ReleaseStep_ExistsAsMediatedActivity_AfterASuccessfulProdDeploy()
+    {
+        // The real release is cut by CreateReleaseActivity (a thin TammaApiClient
+        // client — the engine holds NO git credential), and ONLY after prod success.
+        var release = _flowchart.Activities
+            .OfType<CreateReleaseActivity>()
+            .FirstOrDefault(a => a.Id == "CreateRelease");
+        release.Should().NotBeNull("a real CreateReleaseActivity must exist (the release is no longer 'deferred')");
+
+        // It sits on the prod-success path: prod success → compute tag → create release.
+        HasEdge("EmitProdSuccess", null, "SetReleaseTag").Should().BeTrue();
+        HasEdge("SetReleaseTag", null, "CreateRelease").Should().BeTrue();
+    }
+
+    [Test]
+    public void ReleaseStep_BothOutcomesReachSuccessTerminal_FailureIsSurfacedNotSilent()
+    {
+        // The deploy already succeeded; a release-create failure is surfaced
+        // (releaseStatus=failed via SetReleaseFailed) but does NOT undo the deploy —
+        // both outcomes proceed to the success terminal.
+        HasEdge("CreateRelease", "Created", "SetReleaseCreated").Should().BeTrue();
+        HasEdge("CreateRelease", "Error", "SetReleaseFailed").Should().BeTrue();
+        HasEdge("SetReleaseCreated", null, "SetSuccess").Should().BeTrue();
+        HasEdge("SetReleaseFailed", null, "SetSuccess").Should().BeTrue();
+
+        // The failure edge still records the loud FAILED signal + reaches the
+        // pipeline-success terminal, never a silent drop.
+        var reach = ReachableFromPort("CreateRelease", "Error");
+        reach.Should().Contain("SetReleaseFailed");
+        reach.Should().Contain("EmitPipelineSuccess");
+    }
+
+    [Test]
+    public void ReleaseStep_NeverReachedWhenProdFails()
+    {
+        // A failed prod deploy (retry exhausted) rolls back and terminates — it must
+        // NOT cut a release for a version that never shipped.
+        var reach = ReachableFromPort("ProdRetryCheck", "False");
+        reach.Should().NotContain("CreateRelease", "a failed prod deploy must never cut a release");
+    }
+
+    [Test]
+    public void ReleaseStep_OutputsCarryStatusAndUrl()
+    {
+        var outputSeq = _flowchart.Activities.OfType<Sequence>().FirstOrDefault(s => s.Id == "SetOutputs");
+        outputSeq.Should().NotBeNull();
+        var outputIds = outputSeq!.Activities.OfType<SetOutput>().Select(o => o.Id ?? "").ToList();
+        outputIds.Should().Contain("OutReleaseStatus");
+        outputIds.Should().Contain("OutReleaseUrl");
     }
 
     // ================================================================

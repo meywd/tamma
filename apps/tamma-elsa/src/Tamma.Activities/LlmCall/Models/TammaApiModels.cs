@@ -319,6 +319,24 @@ public sealed record GitUpdateIssueRequest
 }
 
 /// <summary>
+/// Epic 38 follow-up #21 — engine→API wire request for
+/// <c>POST /api/v1/git/{owner}/{repo}/releases</c> (deployment-pipeline release
+/// step). Mirrors <c>Tamma.Api.Services.Git.CreateReleaseRequest</c>. Carries NO
+/// token — the API resolves the per-tenant credential server-side.
+/// </summary>
+public sealed record GitCreateReleaseRequest
+{
+    [JsonPropertyName("tagName")] public string TagName { get; init; } = string.Empty;
+    [JsonPropertyName("targetRef")] public string? TargetRef { get; init; }
+    [JsonPropertyName("name")] public string? Name { get; init; }
+    [JsonPropertyName("body")] public string? Body { get; init; }
+    [JsonPropertyName("draft")] public bool Draft { get; init; }
+    [JsonPropertyName("prerelease")] public bool Prerelease { get; init; }
+    [JsonPropertyName("issueNumber")] public int IssueNumber { get; init; }
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
+/// <summary>
 /// Engine→API wire response for the git-mediation endpoints. Mirrors
 /// <c>Tamma.Api.Services.Git.GitMediationResult</c>. KEY-FREE: only the
 /// <see cref="CredentialSource"/> LABEL is ever present — never the token.
@@ -351,6 +369,11 @@ public sealed record GitCallResponse
     // Story 38 (Phase 1) — GitHub extra-op reads.
     [JsonPropertyName("commits")] public IReadOnlyList<GitCommitSummaryDto>? Commits { get; init; }
     [JsonPropertyName("fileChanges")] public IReadOnlyList<GitFileChangeDto>? FileChanges { get; init; }
+
+    // Epic 38 follow-up #21 — release create.
+    [JsonPropertyName("releaseId")] public long? ReleaseId { get; init; }
+    [JsonPropertyName("releaseUrl")] public string? ReleaseUrl { get; init; }
+    [JsonPropertyName("releaseTag")] public string? ReleaseTag { get; init; }
 
     [JsonPropertyName("failureCode")] public string? FailureCode { get; init; }
     [JsonPropertyName("failureReason")] public string? FailureReason { get; init; }
