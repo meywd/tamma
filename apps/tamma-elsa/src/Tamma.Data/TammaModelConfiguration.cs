@@ -1240,8 +1240,18 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.IpAddress).HasMaxLength(64);
             entity.Property(e => e.UserAgent).HasMaxLength(512);
             entity.Property(e => e.OccurredAt).HasColumnType("timestamp with time zone");
+            // Story 37-2 (code-review fix) — PayloadJson is stored as `text`, NOT
+            // `jsonb`. The hash-chain (AC2) is computed at insert over the in-memory
+            // payload STRING, and verification recomputes it over the value read
+            // back from this column. `jsonb` does not round-trip its input text —
+            // Postgres reorders object keys, strips whitespace, and normalizes
+            // numbers/unicode — so write-bytes != read-bytes and EVERY chain would
+            // verify as TAMPERED. `text` preserves the exact bytes, making the
+            // recompute deterministic. No code uses jsonb operators on this column
+            // (the only jsonb-aware read is `"PayloadJson"::text ILIKE` in
+            // AuditQueryService, and `text::text` is a no-op), so text is safe.
             entity.Property(e => e.PayloadJson)
-                .HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+                .HasColumnType("text").HasDefaultValueSql("'{}'");
             // Story 37-2 — tamper-evidence hash chain. The hash columns were
             // reserved by 37-1; 37-2 adds the per-scope monotonic sequence and a
             // UNIQUE index over it (one chain per physical table — the CP table

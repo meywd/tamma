@@ -139,6 +139,27 @@ public sealed class AuditChainVerifier : IAuditChainVerifier
             }
         }
 
+        // ── tail-truncation / checkpoint-deletion detection ──
+        // record_hash is unkeyed, so deleting recent records leaves no trace in
+        // the chain itself. The only external anchor is a signed checkpoint — and
+        // checkpoints are append-only (DB trigger) + HMAC-signed, so the highest
+        // checkpoint head_sequence for the scope is a lower bound on how many
+        // records once existed. If the live chain head has regressed below it,
+        // the tail was clipped. This runs regardless of the requested [from,to]
+        // range because it reads the TRUE current head, not the range's last row.
+        var maxCheckpointHead = await _checkpoints.GetMaxHeadSequenceAsync(scope, ct)
+            .ConfigureAwait(false);
+        if (maxCheckpointHead is long maxCp)
+        {
+            var currentHead = await _records.GetHeadAsync(scope, ct).ConfigureAwait(false);
+            var currentHeadSeq = currentHead?.Sequence ?? 0;
+            if (currentHeadSeq < maxCp)
+            {
+                return ChainVerificationResult.Broken(
+                    ChainBreakReason.HeadBelowCheckpoint, null, maxCp, verified, checkpoint);
+            }
+        }
+
         return ChainVerificationResult.Ok(lastSeq, lastHash, verified, checkpoint);
     }
 }

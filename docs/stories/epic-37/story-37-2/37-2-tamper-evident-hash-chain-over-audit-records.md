@@ -294,6 +294,19 @@ Verification only works if `canonical(record)` is byte-identical at write time a
 
 The Postgres trigger blocks accidental ORM writes but a DBA with `ALTER TABLE` can disable it. That is acceptable: the cryptographic chain + signed external-key checkpoints are what make tampering *detectable*. State this in the runbook so operators don't treat the trigger as the security boundary.
 
+### Payload column is `text`, not `jsonb` (code-review fix — CRITICAL)
+
+`audit_records.PayloadJson` is stored as **`text`**, NOT `jsonb`. The chain hash (AC2) is computed at INSERT over the in-memory payload STRING, and verification recomputes it over the value read back from the column — so the stored representation must round-trip byte-for-byte. `jsonb` does **not**: Postgres reorders object keys, strips whitespace, and normalizes numbers/unicode, so write-bytes ≠ read-bytes and **every** chain would verify as `Tampered` at `chain_sequence = 1`. `text` preserves the exact bytes. No code uses jsonb operators on this column (the only jsonb-aware read is `"PayloadJson"::text ILIKE` in `AuditQueryService`, and `text::text` is a no-op cast), so `text` is safe. If a future feature needs server-side JSON operators on the payload, add a separate computed/generated `jsonb` column — do NOT change the hashed column back to `jsonb`. There is a Postgres round-trip verify test (`AuditChainPostgresVerifyTests`) guarding this.
+
+### Checkpointing MUST be enabled for the full tamper-evidence guarantee (op-note — code-review fix)
+
+`record_hash` is unkeyed, so the chain alone cannot detect **tail-truncation** (deletion of the most recent records) — the remaining records still form a self-consistent chain. The only thing that reveals a clipped tail is a **signed checkpoint** whose `head_sequence` exceeds the current chain head. Two hardening pieces make this work:
+
+1. `audit_chain_checkpoints` has its **own append-only trigger** (rejects `DELETE`/`UPDATE`) so an attacker cannot delete the covering checkpoint after clipping records.
+2. The verifier asserts the live chain head `>= MAX(checkpoint.head_sequence)` for the scope; a regression is reported as `ChainBreakReason.HeadBelowCheckpoint`.
+
+**Operational dependency:** these only bite if checkpoints actually exist. `AuditChainCheckpointScheduler.RunOnStartup` is **opt-in (`false`)** — mirroring the projector — so periodic checkpointing MUST be explicitly enabled in each deployment (or checkpoints written on demand via `POST /api/admin/audit/checkpoint`) for the full tamper-evidence guarantee against tail-truncation. Document this in the runbook. The default is intentionally left opt-in in this fix (flipping it is an operational change, not a code fix).
+
 ### Signing key, not env key (AC5)
 
 Per the spec boundary, the checkpoint signature key comes from the Epic 29 cabinet via `ISecretStore`, encrypted at rest by `TenantSecretProtector` (AES-GCM). Do NOT add a `appsettings`/`env` signing key — that would make a config-file reader able to forge checkpoints. The cabinet read is itself audited (`ISecretAccessAuditor`), so signing-key access leaves a trail.

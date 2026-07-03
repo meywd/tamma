@@ -10,6 +10,17 @@ namespace Tamma.Data.Migrations.Tenant
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // Story 37-2 (code-review fix) — re-type PayloadJson jsonb -> text so the
+            // exact insert-time bytes the hash-chain is computed over round-trip
+            // identically on read-back (jsonb reorders keys / strips whitespace /
+            // normalizes numbers, which would make every chain verify as TAMPERED).
+            migrationBuilder.Sql(
+                "ALTER TABLE audit_records ALTER COLUMN \"PayloadJson\" DROP DEFAULT;");
+            migrationBuilder.Sql(
+                "ALTER TABLE audit_records ALTER COLUMN \"PayloadJson\" TYPE text USING \"PayloadJson\"::text;");
+            migrationBuilder.Sql(
+                "ALTER TABLE audit_records ALTER COLUMN \"PayloadJson\" SET DEFAULT '{}';");
+
             migrationBuilder.AddColumn<long>(
                 name: "ChainSequence",
                 table: "audit_records",
@@ -38,6 +49,14 @@ namespace Tamma.Data.Migrations.Tenant
             migrationBuilder.DropColumn(
                 name: "ChainSequence",
                 table: "audit_records");
+
+            // Revert PayloadJson text -> jsonb.
+            migrationBuilder.Sql(
+                "ALTER TABLE audit_records ALTER COLUMN \"PayloadJson\" DROP DEFAULT;");
+            migrationBuilder.Sql(
+                "ALTER TABLE audit_records ALTER COLUMN \"PayloadJson\" TYPE jsonb USING \"PayloadJson\"::jsonb;");
+            migrationBuilder.Sql(
+                "ALTER TABLE audit_records ALTER COLUMN \"PayloadJson\" SET DEFAULT '{}'::jsonb;");
         }
     }
 }

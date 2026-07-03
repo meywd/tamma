@@ -112,7 +112,7 @@ public class AuditChainMigrationTests
         var act = async () =>
         {
             await using var cmd = new NpgsqlCommand(
-                "UPDATE audit_records SET \"PayloadJson\"='{\"tampered\":true}'::jsonb WHERE \"Id\"=@id;", conn);
+                "UPDATE audit_records SET \"PayloadJson\"='{\"tampered\":true}' WHERE \"Id\"=@id;", conn);
             cmd.Parameters.AddWithValue("id", id);
             await cmd.ExecuteNonQueryAsync();
         };
@@ -133,7 +133,7 @@ public class AuditChainMigrationTests
               ("Id","ActionCode","Category","Severity","Outcome","OccurredAt",
                "SourceEventId","SourceSequenceNumber","PayloadJson","TenantId","UserId")
             VALUES (@id,'SECRET.REVEAL','secret','high','success', now(),
-                    @src, 1, '{}'::jsonb, NULL, @uid);
+                    @src, 1, '{}', NULL, @uid);
             """, conn))
         {
             insert.Parameters.AddWithValue("id", id);
@@ -177,7 +177,7 @@ public class AuditChainMigrationTests
                "SourceEventId","SourceSequenceNumber","PayloadJson","TenantId","UserId",
                "ChainSequence","PrevRecordHash","RecordHash")
             VALUES (@id,'SECRET.REVEAL','secret','high','success', now(),
-                    @src, @seq, '{}'::jsonb, NULL, @uid,
+                    @src, @seq, '{}', NULL, @uid,
                     @seq,
                     '0000000000000000000000000000000000000000000000000000000000000000',
                     '1111111111111111111111111111111111111111111111111111111111111111');

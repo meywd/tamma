@@ -23,6 +23,14 @@ public enum ChainBreakReason
 
     /// <summary>A checkpoint's <c>head_hash</c> != the recomputed chain head at its sequence.</summary>
     CheckpointHeadMismatch,
+
+    /// <summary>
+    /// The live chain head <c>chain_sequence</c> is BELOW the highest signed
+    /// checkpoint's <c>head_sequence</c> — records were deleted from the tail
+    /// (tail-truncation). A surviving append-only checkpoint proves those records
+    /// once existed, so a regressed head is proof of deletion.
+    /// </summary>
+    HeadBelowCheckpoint,
 }
 
 /// <summary>The status half of a <see cref="ChainVerificationResult"/>.</summary>

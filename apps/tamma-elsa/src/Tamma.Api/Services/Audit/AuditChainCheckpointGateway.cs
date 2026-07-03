@@ -40,6 +40,18 @@ public sealed class AuditChainCheckpointGateway : IAuditChainCheckpointGateway
     public Task<bool> VerifySignatureAsync(AuditChainCheckpointView checkpoint, CancellationToken ct) =>
         _signer.VerifyAsync(checkpoint, ct);
 
+    public async Task<long?> GetMaxHeadSequenceAsync(AuditChainScope scope, CancellationToken ct)
+    {
+        var discriminator = scope.Discriminator;
+        var tenantId = scope.Kind == AuditChainScopeKind.Tenant ? scope.TenantId : null;
+
+        // Max<long?> over an empty set is null (no checkpoints for this scope yet).
+        return await _cp.AuditChainCheckpoints.AsNoTracking()
+            .Where(c => c.Scope == discriminator && c.TenantId == tenantId)
+            .MaxAsync(c => (long?)c.HeadSequence, ct)
+            .ConfigureAwait(false);
+    }
+
     internal static AuditChainCheckpointView ToView(AuditChainCheckpoint row) =>
         new()
         {

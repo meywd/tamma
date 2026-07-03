@@ -59,4 +59,13 @@ public interface IAuditChainCheckpointGateway
     /// unavailable (never treats "no key" as "valid").
     /// </summary>
     Task<bool> VerifySignatureAsync(AuditChainCheckpointView checkpoint, CancellationToken ct);
+
+    /// <summary>
+    /// The highest <c>head_sequence</c> across ALL signed checkpoints for the
+    /// scope (ignoring any range bound), or null when the scope has no
+    /// checkpoints. The verifier compares this against the live chain head to
+    /// detect tail-truncation: a signed, append-only checkpoint proves records up
+    /// to its head once existed, so the live head must never regress below it.
+    /// </summary>
+    Task<long?> GetMaxHeadSequenceAsync(AuditChainScope scope, CancellationToken ct);
 }

@@ -135,5 +135,8 @@ public class AuditChainRepositoryChainingTests
 
         public Task<bool> VerifySignatureAsync(AuditChainCheckpointView checkpoint, CancellationToken ct) =>
             Task.FromResult(true);
+
+        public Task<long?> GetMaxHeadSequenceAsync(AuditChainScope scope, CancellationToken ct) =>
+            Task.FromResult<long?>(null);
     }
 }

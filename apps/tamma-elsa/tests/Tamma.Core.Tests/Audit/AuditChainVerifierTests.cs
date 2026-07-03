@@ -215,6 +215,35 @@ public class AuditChainVerifierTests
     }
 
     [Test]
+    public async Task Tail_Truncated_Below_A_Surviving_Checkpoint_Is_Detected()
+    {
+        // Records 4 and 5 were deleted (attacker with DB write access), leaving a
+        // clean, self-consistent 1..3. But a signed, append-only checkpoint still
+        // anchors head=5 — proof those records once existed.
+        var chain = BuildChain(3);
+        var cp = new AuditChainCheckpointView
+        {
+            Id = Guid.NewGuid(),
+            Scope = Scope.Discriminator,
+            TenantId = null,
+            HeadSequence = 5,
+            HeadHash = new string('a', 64),
+            SignedAt = DateTime.UtcNow,
+            Signature = new byte[] { 1 },
+            KeyVersion = 1,
+        };
+
+        // Verify with to=3 so the covering-checkpoint block (which filters
+        // head_sequence <= to) finds nothing — the surviving max checkpoint at 5
+        // is what must reveal the truncation.
+        var result = await VerifierFor(chain, cp).VerifyAsync(Scope, from: null, to: 3, default);
+
+        result.Status.Should().Be(ChainVerificationStatus.Tampered);
+        result.FirstBrokenLink!.Reason.Should().Be(ChainBreakReason.HeadBelowCheckpoint);
+        result.FirstBrokenLink.ChainSequence.Should().Be(5, "the checkpoint proves head reached 5");
+    }
+
+    [Test]
     public async Task Mid_Chain_Range_Anchors_Prev_From_Prior_Record()
     {
         var chain = BuildChain(5);
@@ -270,5 +299,8 @@ public class AuditChainVerifierTests
 
         public Task<bool> VerifySignatureAsync(AuditChainCheckpointView checkpoint, CancellationToken ct) =>
             Task.FromResult(_signatureValid);
+
+        public Task<long?> GetMaxHeadSequenceAsync(AuditChainScope scope, CancellationToken ct) =>
+            Task.FromResult(_cp?.HeadSequence);
     }
 }

@@ -95,14 +95,17 @@ public class AuditRecordModelTests
         entity.FindProperty("ChainSequence")!.IsNullable.Should().BeTrue();
     }
 
-    // ── AC4 — payload is jsonb; occurred_at is timestamptz ──
+    // ── AC4 — payload is text (Story 37-2 fix); occurred_at is timestamptz ──
 
     [Test]
-    public void Payload_Is_Jsonb_And_OccurredAt_Is_TimestampTz()
+    public void Payload_Is_Text_And_OccurredAt_Is_TimestampTz()
     {
         using var ctx = Cp();
         var entity = ctx.Model.FindEntityType(typeof(AuditRecord))!;
-        entity.FindProperty("PayloadJson")!.GetColumnType().Should().Be("jsonb");
+        // Story 37-2 (code-review fix) — PayloadJson is stored as text, not jsonb,
+        // so the hash-chain preimage round-trips byte-for-byte (jsonb would reorder
+        // keys / normalize and make every chain verify as TAMPERED).
+        entity.FindProperty("PayloadJson")!.GetColumnType().Should().Be("text");
         entity.FindProperty("OccurredAt")!.GetColumnType().Should().Be("timestamp with time zone");
     }
 

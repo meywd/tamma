@@ -727,8 +727,8 @@ namespace Tamma.Data.Migrations.Tenant
                     b.Property<string>("PayloadJson")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("jsonb")
-                        .HasDefaultValueSql("'{}'::jsonb");
+                        .HasColumnType("text")
+                        .HasDefaultValueSql("'{}'");
 
                     b.Property<string>("PrevRecordHash")
                         .HasMaxLength(128)

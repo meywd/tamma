@@ -11,6 +11,17 @@ namespace Tamma.Data.Migrations.ControlPlane
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // Story 37-2 (code-review fix) — re-type PayloadJson jsonb -> text so the
+            // exact insert-time bytes the hash-chain is computed over round-trip
+            // identically on read-back (jsonb reorders keys / strips whitespace /
+            // normalizes numbers, which would make every chain verify as TAMPERED).
+            migrationBuilder.Sql(
+                "ALTER TABLE audit_records ALTER COLUMN \"PayloadJson\" DROP DEFAULT;");
+            migrationBuilder.Sql(
+                "ALTER TABLE audit_records ALTER COLUMN \"PayloadJson\" TYPE text USING \"PayloadJson\"::text;");
+            migrationBuilder.Sql(
+                "ALTER TABLE audit_records ALTER COLUMN \"PayloadJson\" SET DEFAULT '{}';");
+
             migrationBuilder.AddColumn<long>(
                 name: "ChainSequence",
                 table: "audit_records",
@@ -50,11 +61,18 @@ namespace Tamma.Data.Migrations.ControlPlane
 
             // Story 37-2 (AC11) — append-only defence-in-depth trigger.
             migrationBuilder.Sql(AuditRecordsAppendOnlyTrigger.UpSql);
+
+            // Story 37-2 (code-review fix, AC7 hardening) — the signed checkpoints
+            // are the anchor that reveals tail-truncation, so make them write-once
+            // too. Without this, deleting recent records + the covering checkpoint
+            // would verify as Ok.
+            migrationBuilder.Sql(AuditChainCheckpointsAppendOnlyTrigger.UpSql);
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.Sql(AuditChainCheckpointsAppendOnlyTrigger.DownSql);
             migrationBuilder.Sql(AuditRecordsAppendOnlyTrigger.DownSql);
 
             migrationBuilder.DropTable(
@@ -67,6 +85,14 @@ namespace Tamma.Data.Migrations.ControlPlane
             migrationBuilder.DropColumn(
                 name: "ChainSequence",
                 table: "audit_records");
+
+            // Revert PayloadJson text -> jsonb.
+            migrationBuilder.Sql(
+                "ALTER TABLE audit_records ALTER COLUMN \"PayloadJson\" DROP DEFAULT;");
+            migrationBuilder.Sql(
+                "ALTER TABLE audit_records ALTER COLUMN \"PayloadJson\" TYPE jsonb USING \"PayloadJson\"::jsonb;");
+            migrationBuilder.Sql(
+                "ALTER TABLE audit_records ALTER COLUMN \"PayloadJson\" SET DEFAULT '{}'::jsonb;");
         }
     }
 }
