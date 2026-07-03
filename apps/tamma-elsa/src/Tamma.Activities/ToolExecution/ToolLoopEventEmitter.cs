@@ -39,7 +39,11 @@ public class ToolLoopEventEmitter
         {
             turnNumber,
             messageCount,
-            estimatedTokens
+            estimatedTokens,
+            // Story 32-23 — thread the correlationId (== workflowInstanceId) into the
+            // sink payload so a bus-backed IToolLoopEventSink can route the event to
+            // the right per-run stream. The NullToolLoopEventSink ignores it.
+            workflowInstanceId
         };
 
         _logger.LogDebug(
@@ -60,7 +64,9 @@ public class ToolLoopEventEmitter
         {
             turnNumber,
             toolName,
-            toolCallId
+            toolCallId,
+            // Story 32-23 — correlationId (== workflowInstanceId) for bus routing.
+            workflowInstanceId
         };
 
         _logger.LogDebug(
@@ -84,7 +90,9 @@ public class ToolLoopEventEmitter
             toolName,
             toolCallId,
             success,
-            durationMs
+            durationMs,
+            // Story 32-23 — correlationId (== workflowInstanceId) for bus routing.
+            workflowInstanceId
         };
 
         _logger.LogDebug(
@@ -106,7 +114,9 @@ public class ToolLoopEventEmitter
             turnNumber,
             totalTools,
             totalDurationMs,
-            cumulativeTokens
+            cumulativeTokens,
+            // Story 32-23 — correlationId (== workflowInstanceId) for bus routing.
+            workflowInstanceId
         };
 
         _logger.LogDebug(
@@ -129,7 +139,9 @@ public class ToolLoopEventEmitter
             totalToolCalls,
             totalDurationMs,
             totalTokens,
-            exhausted
+            exhausted,
+            // Story 32-23 — correlationId (== workflowInstanceId) for bus routing.
+            workflowInstanceId
         };
 
         _logger.LogDebug(
