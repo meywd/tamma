@@ -192,6 +192,7 @@ const WIKI_PAGE_MAP: Record<string, { outPath: string; order: number }> = {
   'Multi-Tenant-Provisioning.md': { outPath: 'multi-tenant-provisioning.md', order: 10 },
   'Multi-Git-Platform.md': { outPath: 'multi-git-platform.md', order: 11 },
   'Identity-Providers.md': { outPath: 'identity-providers.md', order: 12 },
+  'Event-Schema-and-Catalog.md': { outPath: 'event-schema-and-catalog.md', order: 13 },
   'Epics.md': { outPath: 'epics/index.md', order: 0 },
   'Stories.md': { outPath: 'stories/index.md', order: 0 },
   'Contributing.md': { outPath: 'contributing.md', order: 99 },

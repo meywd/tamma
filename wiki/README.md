@@ -10,6 +10,7 @@ This directory contains the source markdown files for the Tamma GitHub Wiki.
 - **Epics.md** - Index of all 26 epics with links
 - **Roadmap.md** - Project roadmap with all 26 epics and timeline
 - **Architecture.md** - System architecture (dual TypeScript + C#/ELSA stack)
+- **Event-Schema-and-Catalog.md** - Epic 4 DCB event schema reference: `DomainEvent` shape, tags taxonomy, metadata envelope, and the `AGGREGATE.ACTION.STATUS` catalog (Story 4-1)
 - **Stories.md** - Index of all user stories across all 26 epics (~221 stories, 50+ task plans)
 - **Contributing.md** - Contributing guidelines for developers
 
