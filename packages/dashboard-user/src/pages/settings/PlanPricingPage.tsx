@@ -7,10 +7,13 @@
  * an entitlement-delta preview. It NEVER shows platform cost or margin — only the
  * sell price (AC6/AC7).
  *
- * Per-mode gating (AC11): `canMutate = role !== 'member'` — a SaaS `member` sees
- * everything read-only (no change-plan control), while a single-user sole user
- * (no role) and SaaS owner/admin can change the plan. The server is authoritative
- * (SettingsManage on the subscribe route) — the UI gate is UX-only.
+ * Per-mode gating (AC11): the change-plan control matches the SERVER, which
+ * gates `POST /api/pricing/subscribe` with `SettingsManage` = `settings:manage`
+ * = OWNER-ONLY (Permissions.cs). So `canMutate = role === 'owner' || role === ''`
+ * — the SaaS `owner` and the single-user sole user (no membership role → `''`)
+ * can change the plan; a SaaS `tenant_admin` (and `member`) get the plan/
+ * entitlements READ-ONLY, because a `tenant_admin` subscribe would 403. The UI
+ * gate is UX-only — the server stays authoritative.
  *
  * Deferred (dependency endpoints not shipped): BYOK per-provider mode toggle
  * (34-3), credit balance + trial banner + promo redeem (34-7). They land with
@@ -32,8 +35,10 @@ import { UpgradePlanModal } from '../../components/pricing/UpgradePlanModal';
 export function PlanPricingPage(): JSX.Element {
   const { user } = useAuth();
   const role = user?.role ?? '';
-  // member is the only read-only case; sole user (single-user, no role) + owner/admin mutate.
-  const canMutate = role !== 'member';
+  // Change-plan mirrors the server's owner-only SettingsManage on the subscribe
+  // route: only a SaaS owner or the single-user sole user (no role → '') may
+  // mutate. A tenant_admin (and member) are read-only — an admin subscribe 403s.
+  const canMutate = role === 'owner' || role === '';
 
   const [entitlements, setEntitlements] = useState<ResolvedEntitlementsResponse | null>(null);
   const [plans, setPlans] = useState<PlanSnapshotDto[]>([]);
@@ -92,7 +97,7 @@ export function PlanPricingPage(): JSX.Element {
         <h1 className="text-2xl font-bold text-gray-900">Plan &amp; Pricing</h1>
         <p className="mt-1 text-sm text-gray-500">
           Your current plan, entitlement headroom, and cost estimates.
-          {!canMutate && ' You have read-only access; ask an admin to change the plan.'}
+          {!canMutate && ' You have read-only access; ask an owner to change the plan.'}
         </p>
       </div>
 
@@ -109,7 +114,7 @@ export function PlanPricingPage(): JSX.Element {
           <h2 className="text-lg font-medium text-gray-900">No active plan</h2>
           <p className="mt-1 text-sm text-gray-500">
             Your organization is not on a plan yet.
-            {canMutate ? ' Choose one to get started.' : ' Ask an admin to choose a plan.'}
+            {canMutate ? ' Choose one to get started.' : ' Ask an owner to choose a plan.'}
           </p>
           {canMutate && plans.length > 0 && (
             <button

@@ -24,6 +24,11 @@ import { ApiError } from '../../api/client';
 interface DeltaLine {
   metric: string;
   kind: 'gain' | 'loss' | 'same';
+  // How the metric changed set-membership between the two plans:
+  //  - 'compare' → present on BOTH plans; the limits are compared
+  //  - 'added'   → present on the TARGET only → a newly granted entitlement
+  //  - 'removed' → present on CURRENT only → an entitlement the target drops
+  change: 'compare' | 'added' | 'removed';
   detail: string;
   violation: boolean;
 }
@@ -39,7 +44,19 @@ function limitText(limit: number | null): string {
   return limit === null ? 'Unlimited' : String(limit);
 }
 
-/** Pure set-diff of target-plan entitlements vs the current resolved set + usage. */
+/**
+ * Pure set-diff of target-plan entitlements vs the current resolved set + usage.
+ *
+ * `GET /api/pricing/entitlements` and a `PlanSnapshot` each return ONLY the
+ * metrics that plan GRANTS — plans define different subsets (e.g. starter omits
+ * rag_storage_mb / benchmark_retention_days). So there are THREE cases, and a
+ * metric absent from a plan means "not granted", NOT "unlimited":
+ *   (a) present on BOTH   → compare limits (server semantic: limitValue null ⇒
+ *                           unlimited, correct only for a PRESENT metric);
+ *   (b) present on TARGET only → an ADDED entitlement (a new capability → gain);
+ *   (c) present on CURRENT only → a REMOVED entitlement (capability dropped → loss).
+ * An absent metric is NEVER folded into Infinity/"Unlimited".
+ */
 export function computeDelta(
   current: ResolvedEntitlementLine[],
   target: PlanSnapshotDto,
@@ -55,12 +72,41 @@ export function computeDelta(
 
   for (const metric of metrics) {
     const cur = currentByMetric.get(metric);
-    const curLimit = cur ? cur.limitValue : null;
+    const hasCurrent = cur !== undefined;
     const hasTarget = targetByMetric.has(metric);
-    const tgtLimit = hasTarget ? (targetByMetric.get(metric) ?? null) : null;
     const usage = cur?.currentUsage ?? 0;
 
-    // Unlimited === Infinity for comparison.
+    // (b) ADDED — granted by the target but not held today. A new capability
+    // (gain). It can still be an immediate over-limit if we already meter usage
+    // for it, so keep the violation check honest.
+    if (hasTarget && !hasCurrent) {
+      const tgtLimit = targetByMetric.get(metric) ?? null;
+      lines.push({
+        metric: prettyMetric(metric),
+        kind: 'gain',
+        change: 'added',
+        detail: `New — ${limitText(tgtLimit)}`,
+        violation: tgtLimit !== null && usage > tgtLimit,
+      });
+      continue;
+    }
+
+    // (c) REMOVED — held today but dropped by the target. A lost capability
+    // (loss). There is no new limit to breach, so it is never a violation.
+    if (hasCurrent && !hasTarget) {
+      lines.push({
+        metric: prettyMetric(metric),
+        kind: 'loss',
+        change: 'removed',
+        detail: 'Removed',
+        violation: false,
+      });
+      continue;
+    }
+
+    // (a) PRESENT on both → compare limits. null ⇒ unlimited (Infinity).
+    const curLimit = cur ? cur.limitValue : null;
+    const tgtLimit = targetByMetric.get(metric) ?? null;
     const curVal = curLimit === null ? Infinity : curLimit;
     const tgtVal = tgtLimit === null ? Infinity : tgtLimit;
 
@@ -76,6 +122,7 @@ export function computeDelta(
     lines.push({
       metric: prettyMetric(metric),
       kind,
+      change: 'compare',
       detail: `${limitText(curLimit)} → ${limitText(tgtLimit)}`,
       violation,
     });
@@ -199,7 +246,15 @@ export function UpgradePlanModal({
                   >
                     <span className="font-medium">{d.metric}</span>
                     <span>
-                      {d.kind === 'gain' ? '▲ ' : d.kind === 'loss' ? '▼ ' : ''}
+                      {d.change === 'added'
+                        ? '＋ '
+                        : d.change === 'removed'
+                          ? '－ '
+                          : d.kind === 'gain'
+                            ? '▲ '
+                            : d.kind === 'loss'
+                              ? '▼ '
+                              : ''}
                       {d.detail}
                       {d.violation ? ' — over new limit' : ''}
                     </span>

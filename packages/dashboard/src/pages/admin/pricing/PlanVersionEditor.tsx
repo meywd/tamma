@@ -303,6 +303,21 @@ function PlanEditorForm({
       setFormError('Display name is required.');
       return;
     }
+    // Fix 3: a non-empty limit MUST parse to a finite number. Only a blank means
+    // "unlimited" (null). A typo like "10O0" → NaN must be a VALIDATION ERROR,
+    // never silently coerced to null/unlimited. Guard only the collection we
+    // actually send (create always sends; version sends only when replacing).
+    if (replaceEntitlements) {
+      const invalid = entitlements.find(
+        (e) => e.limit.trim() !== '' && !Number.isFinite(Number(e.limit)),
+      );
+      if (invalid) {
+        setFormError(
+          `Entitlement limit "${invalid.limit}" for ${invalid.metricKey} is not a number. Leave blank for unlimited.`,
+        );
+        return;
+      }
+    }
     setSaving(true);
     try {
       let snapshot: PlanSnapshot;

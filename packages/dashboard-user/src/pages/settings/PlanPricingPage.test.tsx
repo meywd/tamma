@@ -111,6 +111,26 @@ describe('PlanPricingPage', () => {
     expect(screen.getByText(/read-only/i)).toBeInTheDocument();
   });
 
+  // Fix 1: the subscribe route is owner-only (SettingsManage). A tenant_admin
+  // would 403, so the client must NOT offer the change-plan control to admins.
+  it('renders tenant_admin as read-only (no change-plan control) to match owner-only server', async () => {
+    mockAuth.mockReturnValue({ user: { id: 'u3', email: 'ad@b', role: 'admin', tenantId: 't1' } });
+    renderPage();
+    await waitFor(() => expect(screen.getByText('Pro')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Change plan' })).toBeNull();
+    expect(screen.getByText(/read-only/i)).toBeInTheDocument();
+  });
+
+  // Sole user (single-user mode) — no membership role → role resolves to ''.
+  // Owner-equivalent; the change-plan control is enabled.
+  it('renders the change-plan control for the single-user sole user (empty role)', async () => {
+    mockAuth.mockReturnValue({ user: { id: 'u4', email: 'solo@b', role: '', tenantId: null } });
+    renderPage();
+    await waitFor(() => expect(screen.getByText('Pro')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Change plan' })).toBeInTheDocument();
+    expect(screen.queryByText(/read-only/i)).toBeNull();
+  });
+
   it('renders an empty state when the tenant has no active plan (404)', async () => {
     mockApi.getEntitlements.mockRejectedValue(new ApiError(404, 'API error', { error: 'no_active_assignment' }));
     renderPage();

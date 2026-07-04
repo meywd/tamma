@@ -95,4 +95,45 @@ describe('CustomPlanPanel', () => {
     expect(await screen.findByText(/Tenant ID is required/i)).toBeInTheDocument();
     expect(mockApi.mintCustomPlan).not.toHaveBeenCalled();
   });
+
+  // Fix 3: a non-numeric limit must block the mint with an inline error, NOT be
+  // coerced to null/unlimited via NaN.
+  it('blocks mint when an entitlement limit is a non-numeric typo (NaN)', async () => {
+    render(<CustomPlanPanel />);
+    await waitFor(() => expect(mockApi.listPlans).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText('Tenant ID'), { target: { value: 'tnt-9' } });
+    fireEvent.change(screen.getByLabelText('Custom plan display name'), {
+      target: { value: 'Bespoke' },
+    });
+    // "10O0" (letter O) → Number(...) === NaN.
+    fireEvent.change(screen.getByLabelText('Custom entitlement limit 0'), {
+      target: { value: '10O0' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Mint custom plan' }));
+
+    expect(await screen.findByText(/is not a number/i)).toBeInTheDocument();
+    expect(mockApi.mintCustomPlan).not.toHaveBeenCalled();
+  });
+
+  it('mints with a blank limit (unlimited → null) and a valid number', async () => {
+    render(<CustomPlanPanel />);
+    await waitFor(() => expect(mockApi.listPlans).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText('Tenant ID'), { target: { value: 'tnt-9' } });
+    fireEvent.change(screen.getByLabelText('Custom plan display name'), {
+      target: { value: 'Bespoke' },
+    });
+    // First entitlement row: blank → unlimited (null). Add a second with a number.
+    fireEvent.click(screen.getByRole('button', { name: '+ Add' }));
+    fireEvent.change(screen.getByLabelText('Custom entitlement limit 1'), {
+      target: { value: '42' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Mint custom plan' }));
+
+    await waitFor(() => expect(mockApi.mintCustomPlan).toHaveBeenCalled());
+    const body = mockApi.mintCustomPlan.mock.calls[0]![0];
+    expect(body.entitlements[0].limitValue).toBeNull();
+    expect(body.entitlements[1].limitValue).toBe(42);
+  });
 });

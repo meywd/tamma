@@ -77,6 +77,18 @@ export function CustomPlanPanel(): JSX.Element {
       setFormError('Display name is required.');
       return;
     }
+    // Fix 3: a non-empty limit MUST parse to a finite number. Only a blank means
+    // "unlimited" (null). A typo like "10O0" → NaN must be a VALIDATION ERROR,
+    // never silently coerced to null/unlimited.
+    const invalidLimit = entitlements.find(
+      (e) => e.limit.trim() !== '' && !Number.isFinite(Number(e.limit)),
+    );
+    if (invalidLimit) {
+      setFormError(
+        `Entitlement limit "${invalidLimit.limit}" for ${invalidLimit.metricKey} is not a number. Leave blank for unlimited.`,
+      );
+      return;
+    }
     setSaving(true);
     try {
       const plan = await adminPricingApi.mintCustomPlan({

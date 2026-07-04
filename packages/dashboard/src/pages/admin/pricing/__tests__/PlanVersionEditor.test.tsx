@@ -75,6 +75,42 @@ describe('PlanVersionEditor', () => {
     expect(mockApi.createPlan).not.toHaveBeenCalled();
   });
 
+  // Fix 3: a non-numeric limit must block submit with an inline error, NOT be
+  // coerced to null/unlimited via NaN.
+  it('blocks save when an entitlement limit is a non-numeric typo (NaN)', async () => {
+    render(<PlanVersionEditor />);
+    await waitFor(() => expect(screen.getByText('Pro')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'New plan' }));
+    fireEvent.change(screen.getByLabelText('Slug'), { target: { value: 'starter' } });
+    fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Starter' } });
+    // "10O0" (letter O) → Number(...) === NaN.
+    fireEvent.change(screen.getByLabelText('Entitlement limit 0'), { target: { value: '10O0' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText(/is not a number/i)).toBeInTheDocument();
+    expect(mockApi.createPlan).not.toHaveBeenCalled();
+  });
+
+  it('allows save with a blank limit (unlimited → null) and a valid number', async () => {
+    render(<PlanVersionEditor />);
+    await waitFor(() => expect(screen.getByText('Pro')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'New plan' }));
+    fireEvent.change(screen.getByLabelText('Slug'), { target: { value: 'starter' } });
+    fireEvent.change(screen.getByLabelText('Display name'), { target: { value: 'Starter' } });
+    // First row: blank → unlimited (null). Add a second row with a valid number.
+    // Three collections each render a "+ Add"; Entitlements is the first.
+    fireEvent.click(screen.getAllByRole('button', { name: '+ Add' })[0]!);
+    fireEvent.change(screen.getByLabelText('Entitlement limit 1'), { target: { value: '250' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(mockApi.createPlan).toHaveBeenCalled());
+    const body = mockApi.createPlan.mock.calls[0]![0];
+    expect(body.entitlements[0].limitValue).toBeNull();
+    expect(body.entitlements[1].limitValue).toBe(250);
+  });
+
   it('surfaces the 409 affected-tenant count and forces deprecate on confirm', async () => {
     mockApi.deprecateVersion
       .mockRejectedValueOnce(

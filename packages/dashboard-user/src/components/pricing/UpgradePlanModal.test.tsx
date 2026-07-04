@@ -69,6 +69,58 @@ describe('computeDelta', () => {
     expect(seats?.kind).toBe('loss');
     expect(seats?.violation).toBe(true);
   });
+
+  // Fix 2: an ABSENT metric means "not granted", NOT "unlimited". Metric ordinal
+  // 5 = rag_storage_mb (present on target only) is an ADDED entitlement → a GAIN
+  // labelled with its new finite limit, never "Unlimited".
+  it('labels a metric the target ADDS as a gain with the new limit, not "Unlimited"', () => {
+    const current = [ent({ metricKey: 'seats', limitValue: 5 })];
+    const target = plan([
+      { metricKey: 3, limitValue: 5, period: 'monthly', overageMode: 'block' }, // seats unchanged
+      { metricKey: 5, limitValue: 500, period: 'monthly', overageMode: 'meter' }, // rag_storage_mb ADDED
+    ]);
+
+    const delta = computeDelta(current, target);
+    const rag = delta.find((d) => d.metric === 'Rag Storage Mb');
+    expect(rag?.kind).toBe('gain');
+    expect(rag?.change).toBe('added');
+    expect(rag?.detail).toMatch(/500/);
+    expect(rag?.detail).not.toMatch(/Unlimited/i);
+    expect(rag?.violation).toBe(false);
+    // seats unchanged (5→5) is filtered out.
+    expect(delta.find((d) => d.metric === 'Seats')).toBeUndefined();
+  });
+
+  // A downgrade that DROPS a metric the tenant holds today is a LOSS of that
+  // capability — it must NOT read as "500 → Unlimited" (the old Infinity bug).
+  it('labels a metric the target DROPS as a loss ("Removed"), not "→ Unlimited"', () => {
+    const current = [
+      ent({ metricKey: 'seats', limitValue: 5 }),
+      ent({ metricKey: 'rag_storage_mb', limitValue: 500, currentUsage: 100 }),
+    ];
+    // Target has only seats (unchanged); rag_storage_mb is absent → dropped.
+    const target = plan([{ metricKey: 3, limitValue: 5, period: 'monthly', overageMode: 'block' }]);
+
+    const delta = computeDelta(current, target);
+    const rag = delta.find((d) => d.metric === 'Rag Storage Mb');
+    expect(rag?.kind).toBe('loss');
+    expect(rag?.change).toBe('removed');
+    expect(rag?.detail).not.toMatch(/Unlimited/i);
+    expect(rag?.violation).toBe(false);
+  });
+
+  // Present-on-both with the target dropping to unlimited stays correct: a
+  // present metric whose target limit is null IS genuinely unlimited (a gain).
+  it('treats a present metric with null target limit as unlimited (gain)', () => {
+    const current = [ent({ metricKey: 'seats', limitValue: 5, currentUsage: 3 })];
+    const target = plan([{ metricKey: 3, limitValue: null, period: 'total', overageMode: 'allow' }]);
+
+    const delta = computeDelta(current, target);
+    const seats = delta.find((d) => d.metric === 'Seats');
+    expect(seats?.kind).toBe('gain');
+    expect(seats?.change).toBe('compare');
+    expect(seats?.detail).toMatch(/Unlimited/i);
+  });
 });
 
 describe('UpgradePlanModal', () => {
