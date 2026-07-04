@@ -19,6 +19,11 @@ vi.mock('../QuickLinksTab.js', () => ({
 vi.mock('../AuditLogTab.js', () => ({
   AuditLogTab: () => <div data-testid="audit-log-tab">Audit Log Tab Content</div>,
 }));
+// Story 34-9 — stub the pricing tab so this layout test stays isolated from
+// the pricing endpoints (the panel's own tests cover the data flow).
+vi.mock('../pricing/PricingTab.js', () => ({
+  PricingTab: () => <div data-testid="pricing-tab">Pricing Tab Content</div>,
+}));
 
 describe('AdminLayout', () => {
   const user = userEvent.setup();
@@ -79,5 +84,15 @@ describe('AdminLayout', () => {
     expect(auditLogBtn).toBeInTheDocument();
     await user.click(auditLogBtn);
     expect(screen.getByTestId('audit-log-tab')).toBeInTheDocument();
+  });
+
+  // Story 34-9 (AC1) — the platform-owner Pricing tab is present and switches in.
+  it('shows the Pricing tab and switches to it', async () => {
+    render(<AdminLayout />);
+    const pricingBtn = screen.getByText('Pricing');
+    expect(pricingBtn).toBeInTheDocument();
+    await user.click(pricingBtn);
+    expect(screen.getByTestId('pricing-tab')).toBeInTheDocument();
+    expect(screen.queryByTestId('users-tab')).not.toBeInTheDocument();
   });
 });
