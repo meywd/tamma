@@ -9,13 +9,14 @@ namespace Tamma.Api.Services.Pricing;
 /// 32-3's <c>ProviderCredentialEndpoints</c> secret write and Story integration-BYOK's
 /// <see cref="Integrations.IIntegrationCredentialCabinet"/> — same cabinet, same slug.
 ///
-/// <para>The key is stored under the CANONICAL cabinet slug
+/// <para>The key is stored under the cabinet slug
 /// <c>provider/&lt;providerKey&gt;/api-key</c> (scope <c>Tenant</c>, purpose
 /// <c>ApiKey</c>) — the SAME name Story 32-3's <c>IProviderCredentialResolver</c> reads
 /// at LLM-call time, so the key written here on enable is the key 32-3 later resolves.
-/// <paramref name="providerCanonical"/> MUST already be the lowercase canonical family
-/// key (<c>BillingProviderKey.Canonicalize</c>) so the resolver's canonicalized read
-/// matches.</para>
+/// <paramref name="providerCanonical"/> MUST already be the RAW provider IDENTITY
+/// (<c>ProviderIdentity.Normalize</c> — <c>Trim().ToLowerInvariant()</c>, NO alias-family
+/// reduction) so the resolver's read for that same handle matches
+/// (<c>gemini</c> stays <c>gemini</c>, never the rate-card family <c>google</c>).</para>
 ///
 /// <para><b>Write</b> is idempotent (remove-then-create) so a re-enable rotates the
 /// key to a new v1-active immediately (matching the one-active-row owner invariant).

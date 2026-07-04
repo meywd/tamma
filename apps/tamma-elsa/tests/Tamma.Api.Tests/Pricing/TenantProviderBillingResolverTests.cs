@@ -85,27 +85,37 @@ public class TenantProviderBillingResolverTests
         (await NewResolver(db).ResolveModeAsync(tenantId, "ANTHROPIC")).Should().Be(MetricBillingMode.Byok);
     }
 
-    // ── Fix 2 — the call site uses the vendor handle "anthropic-claude"; the owner
-    //    row is stored under the canonical family key "anthropic". Canonical
-    //    normalization must make them MATCH (else a declared BYOK row is silently
-    //    ignored and the tenant is billed platform markup on their own key). ──
+    // ── The read matches on the RAW provider IDENTITY the proxy passes (Trim + lower,
+    //    NO alias-family reduction) — the SAME handle 34-3 persists and 32-3 reads. A
+    //    "gemini" BYOK row is read for a "gemini" call, and is DISTINCT from the rate-card
+    //    family "google" (keying on the family would silently unbill / mis-tag the wrong
+    //    provider). Mixed case still matches (case-insensitive on the identity). ──
     [Test]
-    public async Task ResolveMode_CanonicalizesVendorHandle_MatchesOwnerRow()
+    public async Task ResolveMode_KeysOnRawProviderIdentity_NotRateCardFamily()
     {
         var tenantId = Guid.NewGuid();
         await using var db = NewContext();
-        // Owner row stored under the CANONICAL provider key.
-        db.TenantProviderBillings.Add(Row(tenantId, "anthropic", "byok"));
+        // Owner rows keyed on the RAW handle.
+        db.TenantProviderBillings.AddRange(
+            Row(tenantId, "gemini", "byok"),
+            Row(tenantId, "github-copilot", "byok"));
         await db.SaveChangesAsync();
 
         var resolver = NewResolver(db);
-        // The proxy resolves under the vendor handle "anthropic-claude".
-        (await resolver.ResolveModeAsync(tenantId, "anthropic-claude"))
-            .Should().Be(MetricBillingMode.Byok,
-                "'anthropic-claude' canonicalizes to 'anthropic' — the declared BYOK row must match");
-        // Mixed case + vendor handle still canonicalizes.
-        (await resolver.ResolveModeAsync(tenantId, "Anthropic-Claude"))
-            .Should().Be(MetricBillingMode.Byok);
+
+        // The raw handle matches its own row.
+        (await resolver.ResolveModeAsync(tenantId, "gemini")).Should().Be(MetricBillingMode.Byok);
+        (await resolver.ResolveModeAsync(tenantId, "GEMINI")).Should().Be(
+            MetricBillingMode.Byok, "the identity match is case-insensitive");
+        (await resolver.ResolveModeAsync(tenantId, "github-copilot")).Should().Be(MetricBillingMode.Byok);
+
+        // The rate-card FAMILY is a DIFFERENT identity — a "google" / "openai" call does
+        // NOT pick up the gemini / github-copilot BYOK row (fail-before: the old
+        // family-canonicalized read collapsed gemini→google and matched wrongly).
+        (await resolver.ResolveModeAsync(tenantId, "google")).Should().Be(
+            MetricBillingMode.PlatformProvided, "'gemini' BYOK must not leak onto a 'google' call");
+        (await resolver.ResolveModeAsync(tenantId, "openai")).Should().Be(
+            MetricBillingMode.PlatformProvided, "'github-copilot' BYOK must not leak onto an 'openai' call");
     }
 
     [Test]

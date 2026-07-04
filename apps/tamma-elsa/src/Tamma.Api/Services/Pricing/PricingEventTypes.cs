@@ -16,14 +16,14 @@ public static class PricingEventTypes
     /// Story 34-3 (AC9) — a tenant enabled BYOK for a <c>(tenant, provider)</c>: their
     /// own key was stored in the Epic 29 cabinet and the authoritative
     /// <c>TenantProviderBilling</c> owner row flipped to <c>byok</c>. Tagged
-    /// <c>tenantId</c>, <c>provider</c> (canonical family key), <c>mode=byok</c>.
+    /// <c>tenantId</c>, <c>provider</c> (raw provider identity), <c>mode=byok</c>.
     /// </summary>
     public const string ByokEnabled = "PRICING.BYOK.ENABLED";
 
     /// <summary>
     /// Story 34-3 (AC9) — a tenant disabled BYOK for a <c>(tenant, provider)</c>: the
     /// owner row flipped back to <c>platform</c> and the cabinet secret was retired.
-    /// Tagged <c>tenantId</c>, <c>provider</c> (canonical family key), <c>mode=platform</c>.
+    /// Tagged <c>tenantId</c>, <c>provider</c> (raw provider identity), <c>mode=platform</c>.
     /// </summary>
     public const string ByokDisabled = "PRICING.BYOK.DISABLED";
 }

@@ -1,9 +1,11 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Tamma.Api.Auth;
 using Tamma.Api.Services.Billing;
 using Tamma.Api.Services.Pricing;
+using Tamma.Api.Services.Providers;
 using Tamma.Api.Services.PromptStore;
 using Tamma.Api.Services.Security;
 using Tamma.Core;
@@ -358,24 +360,26 @@ public static class PricingEndpoints
             });
         }
 
-        var canonical = BillingProviderKey.Canonicalize(provider);
-        if (canonical.Length == 0)
+        var normalized = ProviderIdentity.Normalize(provider);
+        if (normalized.Length == 0)
         {
             return Results.BadRequest(new { error = "invalid_provider" });
         }
 
         // 32-4 SaaS eligibility gate — only api-key providers are BYOK-eligible in
         // SaaS. A cli-token / unknown provider (fail-closed) → 422. Single-user is
-        // a hard no-op ("CLI providers are single-user only"). Uses the canonical
-        // family key so a vendor handle ("anthropic-claude") still classifies.
+        // a hard no-op ("CLI providers are single-user only"). Keyed on the RAW
+        // provider IDENTITY the auth lookup classifies (github-copilot ≠ openai) — the
+        // same handle 34-3 persists and 32-3 reads, so eligibility and the credential
+        // read never diverge.
         if (modeProvider.Mode == TammaMode.SaaS)
         {
-            var authModel = await authLookup.AuthModelAsync(canonical, ct).ConfigureAwait(false);
+            var authModel = await authLookup.AuthModelAsync(normalized, ct).ConfigureAwait(false);
             if (authModel != ProviderAuthModel.ApiKey)
             {
                 logger.LogWarning(
                     "BYOK enable rejected — provider not SaaS-eligible: tenantId={TenantId} provider={Provider}",
-                    tid, canonical);
+                    tid, normalized);
                 return Results.UnprocessableEntity(new { error = "CLI providers are single-user only" });
             }
         }
@@ -383,7 +387,7 @@ public static class PricingEndpoints
         try
         {
             var result = await billing
-                .EnableByokAsync(tid, canonical, apiKey, user.GetUserId(), ct)
+                .EnableByokAsync(tid, normalized, apiKey, user.GetUserId(), ct)
                 .ConfigureAwait(false);
             // Reveal-safe: provider + mode + keySet only, NEVER the key.
             return Results.Ok(new { provider = result.Provider, mode = result.Mode, keySet = result.KeySet });
@@ -392,7 +396,34 @@ public static class PricingEndpoints
         {
             return Results.BadRequest(new { error = "invalid_provider" });
         }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            // Two concurrent first-time enables raced past the check-then-insert window
+            // and both INSERTed; the loser hits ux_tpb_active_provider (Postgres 23505).
+            // Surface 409 (a retry re-resolves the now-existing active row and supersedes)
+            // instead of leaking the DbUpdateException as a 500.
+            logger.LogWarning(
+                "BYOK enable conflict (concurrent first enable) for tenantId={TenantId} provider={Provider}.",
+                tid, normalized);
+            return Results.Conflict(new
+            {
+                error = "BYOK_ENABLE_CONFLICT",
+                detail = "a concurrent enable for this provider won; retry.",
+            });
+        }
     }
+
+    /// <summary>
+    /// Detects the Postgres <c>23505</c> unique-violation raised when two concurrent
+    /// first-time BYOK enables race past the service's check-then-insert window and both
+    /// INSERT, tripping the <c>ux_tpb_active_provider</c> partial unique index. Only the
+    /// exact <c>SqlState == "23505"</c> maps to 409 — any other
+    /// <see cref="DbUpdateException"/> stays a fault. Mirrors the <c>PromptEndpoints</c> /
+    /// <c>ConventionStoreEndpoints</c> pattern.
+    /// </summary>
+    internal static bool IsUniqueViolation(DbUpdateException ex) =>
+        ex.InnerException is Npgsql.PostgresException pg
+        && string.Equals(pg.SqlState, "23505", StringComparison.Ordinal);
 
     // ── DELETE /api/pricing/providers/{provider}/byok ── (PricingManage)
     //
@@ -417,14 +448,14 @@ public static class PricingEndpoints
             return Results.NotFound();
         }
 
-        var canonical = BillingProviderKey.Canonicalize(provider);
-        if (canonical.Length == 0)
+        var normalized = ProviderIdentity.Normalize(provider);
+        if (normalized.Length == 0)
         {
             return Results.BadRequest(new { error = "invalid_provider" });
         }
 
         var result = await billing
-            .DisableByokAsync(tid, canonical, user.GetUserId(), ct)
+            .DisableByokAsync(tid, normalized, user.GetUserId(), ct)
             .ConfigureAwait(false);
         return Results.Ok(new { provider = result.Provider, mode = result.Mode, keySet = result.KeySet });
     }
@@ -449,13 +480,13 @@ public static class PricingEndpoints
             return Results.NotFound(new { error = "no_active_tenant" });
         }
 
-        var canonical = BillingProviderKey.Canonicalize(provider);
-        if (canonical.Length == 0)
+        var normalized = ProviderIdentity.Normalize(provider);
+        if (normalized.Length == 0)
         {
             return Results.BadRequest(new { error = "invalid_provider" });
         }
 
-        var result = await billing.GetModeAsync(tid, canonical, ct).ConfigureAwait(false);
+        var result = await billing.GetModeAsync(tid, normalized, ct).ConfigureAwait(false);
         return Results.Ok(new { provider = result.Provider, mode = result.Mode, keySet = result.KeySet });
     }
 

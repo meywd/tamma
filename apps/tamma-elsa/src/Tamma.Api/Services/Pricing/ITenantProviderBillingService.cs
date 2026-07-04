@@ -12,8 +12,11 @@ namespace Tamma.Api.Services.Pricing;
 /// Story 32-3's credential cache, and emits <c>PRICING.BYOK.ENABLED</c>. <b>Disable</b>
 /// flips the owner row back to <c>platform</c> (secret ref tombstoned), retires the
 /// cabinet secret, invalidates the cache, and emits <c>PRICING.BYOK.DISABLED</c>. The
-/// provider key is ALWAYS stored / matched under
-/// <c>BillingProviderKey.Canonicalize</c> so it lines up with the resolver's read.</para>
+/// provider key is ALWAYS the RAW provider IDENTITY
+/// (<c>ProviderIdentity.Normalize</c> — <c>Trim().ToLowerInvariant()</c>, NO
+/// alias-family reduction) for both the owner row and the cabinet slug, so it lines up
+/// byte-for-byte with the credential resolver's read for that same handle
+/// (<c>github-copilot</c> ≠ <c>openai</c>).</para>
 /// </summary>
 public interface ITenantProviderBillingService
 {
@@ -54,7 +57,7 @@ public interface ITenantProviderBillingService
 
 /// <summary>
 /// Reveal-SAFE projection of a <c>(tenant, provider)</c> billing mode. Carries the
-/// canonical provider key, the mode wire token (<c>byok</c> | <c>platform</c>) and a
+/// raw-identity provider key, the mode wire token (<c>byok</c> | <c>platform</c>) and a
 /// <c>KeySet</c> flag — NEVER the API key value (Epic 29 reveal-once rule).
 /// </summary>
 public sealed record ByokModeResult(string Provider, string Mode, bool KeySet);
