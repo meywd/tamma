@@ -2660,6 +2660,12 @@ adl.MapPost("/deploy-approval/resume", AdlEndpoints.ResumeDeploymentApproval);
 // handler verifies the caller's ambient tenant OWNS the session (tenant-scoped
 // session lookup) before forwarding — a cross-tenant/unknown session → 404.
 adl.MapPost("/blocker/resume", AdlEndpoints.ResumeBlocker);
+// Clarifying-questions answer gate (Story 3.5). Resumes the tenant+session-scoped
+// clarify-answers-{tenant}-{session} bookmark with the stakeholder's answers so the
+// workflow can incorporate them. WorkflowsManage = tenant owner/admin (members 403);
+// resolver derived server-side (I2). IDOR guard: the engine folds the caller's ambient
+// tenant id into the bookmark name, so a cross-tenant/unknown session → 404.
+adl.MapPost("/clarify/resume", AdlEndpoints.ResumeClarify);
 
 // ── GitHub App (no auth, webhook signature verification) ──
 // Audit finding 017 — webhook gets the GitHubWebhook policy (300/min). The

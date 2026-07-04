@@ -84,6 +84,22 @@ public interface IElsaWorkflowService
     Task<MergeApprovalResumeResult> ResumeBlockerResolutionAsync(
         Guid sessionId, string kind, string? level, bool resolved,
         string? progressType, string? details, string? seniorResponse, string? resolver);
+
+    /// <summary>
+    /// Story 3.5 — resume the clarifying-questions workflow's answer gate. Forwards to the
+    /// engine's in-process resume endpoint (which owns <c>IBookmarkStore</c>/
+    /// <c>IWorkflowRuntime</c>), which looks up the tenant+session-scoped
+    /// <c>clarify-answers-{tenant}-{session}</c> bookmark and runs the owning instance with
+    /// <c>{Answered, Answers}</c> injected as input. A 404 (no wait suspended) is surfaced as
+    /// <see cref="MergeApprovalResumeResult.GateNotFound"/> rather than thrown.
+    ///
+    /// <para>SECURITY — the bookmark name folds in <paramref name="tenantId"/> (the caller's
+    /// ambient tenant, derived server-side by <c>AdlEndpoints</c>), so a caller can only ever
+    /// resolve a gate in its OWN tenant (cross-tenant → 404). <paramref name="resolver"/> is
+    /// the server-derived acting identity (I2), logged by the engine for the audit trail.</para>
+    /// </summary>
+    Task<MergeApprovalResumeResult> ResumeClarifyingQuestionsAsync(
+        Guid sessionId, string? tenantId, string answers, string? resolver);
 }
 
 /// <summary>Outcome of a merge-approval (or deploy-approval) gate resume.</summary>
