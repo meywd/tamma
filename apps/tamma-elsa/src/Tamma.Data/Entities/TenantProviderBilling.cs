@@ -19,14 +19,15 @@ namespace Tamma.Data.Entities;
 /// (the current reality). BYOK is opt-in and only ever the result of an explicit
 /// <c>active</c> row with <see cref="Mode"/> = <c>"byok"</c>.</para>
 ///
-/// <para><b>ProviderKey overload:</b> <see cref="ProviderKey"/> here is the
-/// CANONICAL provider FAMILY key (<c>"anthropic"</c>) — NOT the Cranl tenancy
-/// backend label. It is NOT necessarily byte-identical to
-/// <c>ProviderDiagnostic.ProviderKey</c>, which carries the vendor HANDLE
-/// (<c>"anthropic-claude"</c>): the read path canonicalizes the handle to the
-/// family key via <c>BillingProviderKey.Canonicalize</c> before matching this row,
-/// and a BYOK write endpoint MUST persist the canonical (lowercase family) key here
-/// so the match is exact.</para>
+/// <para><b>ProviderKey overload:</b> <see cref="ProviderKey"/> here is the RAW
+/// provider IDENTITY (<c>ProviderIdentity.Normalize</c> — <c>Trim().ToLowerInvariant()</c>,
+/// NO alias-family reduction), e.g. <c>"gemini"</c> / <c>"github-copilot"</c> — NOT the
+/// Cranl tenancy backend label and NOT the rate-card family (which would collapse
+/// <c>gemini</c>→<c>google</c>, <c>github-copilot</c>→<c>openai</c> and clobber a sibling
+/// provider's key). This is the SAME handle Story 32-3's credential resolver reads and
+/// the LLM proxy passes, so both the BYOK write (34-3) and the billing-mode read match
+/// this row on that raw handle exactly. (The pricing/rate-card path keeps its own
+/// alias-family map — that answers "what does a call cost", not "whose key is this".)</para>
 /// </summary>
 public class TenantProviderBilling
 {

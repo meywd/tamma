@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Tamma.Api.Services.Pricing;
+using Tamma.Api.Services.Providers;
 using Tamma.Core;
 using Tamma.Core.Enums;
 using Tamma.Data.Entities;
@@ -42,10 +43,11 @@ public sealed class BillingModeTagger : IBillingModeTagger
         string? credentialSource = null,
         CancellationToken ct = default)
     {
-        // Fix 2 — canonicalize the provider to the family key the owner row is stored
-        // under BEFORE resolution + logging, so the owner lookup and every reader agree
-        // on one key (the vendor handle "anthropic-claude" resolves the "anthropic" row).
-        providerKey = BillingProviderKey.Canonicalize(providerKey);
+        // Key on the RAW provider IDENTITY (Trim + lower, NO alias-family reduction)
+        // BEFORE resolution + logging, so the owner lookup and every reader agree on the
+        // one handle the proxy passes and 34-3 persisted — never collapsed to a rate-card
+        // family (github-copilot ≠ openai, gemini ≠ google).
+        providerKey = ProviderIdentity.Normalize(providerKey);
 
         // 1) The DECLARED mode from the 34-3 owner (default: platform).
         var declared = await _owner.ResolveModeAsync(tenantId, providerKey, ct).ConfigureAwait(false);
