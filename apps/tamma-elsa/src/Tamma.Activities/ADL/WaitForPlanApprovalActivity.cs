@@ -6,6 +6,7 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.ADL.Models;
+using Tamma.Activities.Core;
 
 namespace Tamma.Activities.ADL;
 
@@ -20,6 +21,13 @@ namespace Tamma.Activities.ADL;
 ///   - Approved: plan accepted
 ///   - Rejected: plan rejected, cycle should end
 ///   - EditRequested: plan needs revision, loop back to plan generation
+///
+/// <para>Events (Story 4-6): emits <c>PLAN_APPROVAL.REQUESTED</c> at the RAISE point
+/// (when the gate suspends on its bookmark) and a <c>PLAN_APPROVAL.DECISION.*</c> event on
+/// resume, via <c>TammaEventEmitter.Emit</c> into the durable engine event drain — the same
+/// path <see cref="EmitMergeApprovalEventActivity"/> uses. This keeps the plan-approval gate
+/// auditable on the DCB stream (request + decision) consistent with the merge / deploy
+/// approval gates.</para>
 /// </summary>
 [Activity(
     "Tamma.ADL",
@@ -38,6 +46,10 @@ public class WaitForPlanApprovalActivity : Activity
     [Input(Description = "Generated plan JSON to present for approval", UIHint = "json-editor")]
     public Input<string> PlanJson { get; set; } = default!;
 
+    /// <summary>Tenant id (Story 4-6 — empty / single-user → platform-scope approval event).</summary>
+    [Input(Description = "Tenant id (empty / single-user → platform-scope approval event)")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     [Output(Description = "Approval result with decision and feedback")]
     public Output<string?> ApprovalResultJson { get; set; } = default!;
 
@@ -55,11 +67,19 @@ public class WaitForPlanApprovalActivity : Activity
     protected override void Execute(ActivityExecutionContext context)
     {
         var issueNumber = IssueNumber.Get(context);
+        var tenantId = PlanApprovalEvents.ParseTenantId(TenantId.Get(context));
         var bookmarkName = $"adl-plan-approval-{issueNumber}";
 
         _logger?.LogInformation(
             "Creating plan approval bookmark {BookmarkName} for issue #{IssueNumber}",
             bookmarkName, issueNumber);
+
+        // Story 4-6 — emit PLAN_APPROVAL.REQUESTED at the RAISE point so the approval request
+        // is on the DCB audit stream the moment the gate suspends (mirrors the merge / deploy
+        // approval-request events). The decision is emitted on resume below.
+        TammaEventEmitter.Emit(context, this, _logger,
+            BuildTammaEvent(PlanApprovalEvents.Requested, issueNumber, tenantId,
+                decision: null, approvedBy: null, feedback: null));
 
         context.CreateBookmark(
             new CreateBookmarkArgs
@@ -94,6 +114,19 @@ public class WaitForPlanApprovalActivity : Activity
             "Plan approval received for issue #{IssueNumber}: {Decision}",
             IssueNumber.Get(context), result.Decision);
 
+        // Story 4-6 — emit the human decision as a PLAN_APPROVAL.DECISION.* DCB event on the
+        // resuming edge so the approver / feedback context is captured durably (a rejection is
+        // a LOUD error-status row, never a silent approve).
+        var issueNumber = IssueNumber.Get(context);
+        var tenantId = PlanApprovalEvents.ParseTenantId(TenantId.Get(context));
+        TammaEventEmitter.Emit(context, this, _logger,
+            BuildTammaEvent(
+                PlanApprovalEvents.DecisionEventType(result.Decision),
+                issueNumber, tenantId,
+                decision: result.Decision.ToString().ToLowerInvariant(),
+                approvedBy: result.ApprovedBy,
+                feedback: feedback));
+
         var outcome = result.Decision switch
         {
             ApprovalDecision.Approve => "Approved",
@@ -112,4 +145,46 @@ public class WaitForPlanApprovalActivity : Activity
         "edit" => ApprovalDecision.Edit,
         _ => ApprovalDecision.Reject
     };
+
+    /// <summary>
+    /// Map the plan-approval gate inputs onto a <see cref="TammaEvent"/> expressed as the
+    /// engine's transient-list event so the merged drain persists it. Tags carry the
+    /// queryable DCB index keys (<c>issueId</c>/<c>issueNumber</c>/<c>tenantId</c>/
+    /// <c>decision</c>/<c>approver</c>); <c>Data</c> carries the decision payload. Status is
+    /// driven off the event type (a rejection is a LOUD error row). Pure (no Elsa context) —
+    /// exposed for unit testing the mapping. Mirrors
+    /// <see cref="EmitMergeApprovalEventActivity.BuildTammaEvent"/>.
+    /// </summary>
+    public static TammaEvent BuildTammaEvent(
+        string type,
+        int issueNumber,
+        Guid? tenantId,
+        string? decision,
+        string? approvedBy,
+        string? feedback)
+    {
+        var tags = new Dictionary<string, object?>
+        {
+            ["issueId"] = issueNumber.ToString(),
+            ["issueNumber"] = issueNumber.ToString(),
+        };
+        if (tenantId is not null) tags["tenantId"] = tenantId.Value.ToString("D");
+        if (!string.IsNullOrWhiteSpace(decision)) tags["decision"] = decision;
+        if (!string.IsNullOrWhiteSpace(approvedBy)) tags["approver"] = approvedBy;
+
+        var data = new Dictionary<string, object?>
+        {
+            ["decision"] = decision ?? "",
+            ["approver"] = approvedBy ?? "",
+            ["feedback"] = feedback ?? "",
+        };
+
+        return new TammaEvent
+        {
+            EventType = type,
+            Status = PlanApprovalEvents.StatusForEvent(type),
+            Tags = tags,
+            Data = data,
+        };
+    }
 }
