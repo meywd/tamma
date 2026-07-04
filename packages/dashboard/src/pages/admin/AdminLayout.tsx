@@ -13,8 +13,10 @@ import { ApiKeysTab } from './ApiKeysTab.js';
 import { HealthTab } from './HealthTab.js';
 import { QuickLinksTab } from './QuickLinksTab.js';
 import { AuditLogTab } from './AuditLogTab.js';
+// Story 34-9 — platform-owner pricing & plan-management dashboards.
+import { PricingTab } from './pricing/PricingTab.js';
 
-type AdminTab = 'users' | 'api-keys' | 'health' | 'links' | 'audit-log' | 'tenants';
+type AdminTab = 'users' | 'api-keys' | 'health' | 'links' | 'audit-log' | 'tenants' | 'pricing';
 
 interface TabDef {
   id: AdminTab;
@@ -24,6 +26,7 @@ interface TabDef {
 const TABS: TabDef[] = [
   { id: 'users', label: 'Users' },
   { id: 'tenants', label: 'Tenants' },
+  { id: 'pricing', label: 'Pricing' },
   { id: 'api-keys', label: 'API Keys' },
   { id: 'health', label: 'System Health' },
   { id: 'links', label: 'Quick Links' },
@@ -76,6 +79,7 @@ export function AdminLayout(): JSX.Element {
       <div>
         {activeTab === 'users' && <UsersTab />}
         {activeTab === 'tenants' && <TenantsLinkPanel />}
+        {activeTab === 'pricing' && <PricingTab />}
         {activeTab === 'api-keys' && <ApiKeysTab />}
         {activeTab === 'health' && <HealthTab />}
         {activeTab === 'links' && <QuickLinksTab />}
