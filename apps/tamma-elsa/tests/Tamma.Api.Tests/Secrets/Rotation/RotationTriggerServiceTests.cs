@@ -174,5 +174,7 @@ public sealed class RotationTriggerServiceTests
             Task.FromResult(new MergeApprovalResumeResult(false, false, null));
         public Task<MergeApprovalResumeResult> ResumeBlockerResolutionAsync(Guid sid, string k, string? l, bool res, string? pt, string? det, string? sr, string? resolver) =>
             Task.FromResult(new MergeApprovalResumeResult(false, false, null));
+        public Task<MergeApprovalResumeResult> ResumeClarifyingQuestionsAsync(Guid sid, string? t, string answers, string? resolver) =>
+            Task.FromResult(new MergeApprovalResumeResult(false, false, null));
     }
 }

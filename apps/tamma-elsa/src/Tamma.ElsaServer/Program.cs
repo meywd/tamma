@@ -417,6 +417,16 @@ app.MapPost("/elsa/api/adl/blocker/resume",
     Tamma.ElsaServer.Endpoints.BlockerResumeEndpoint.Resume)
     .RequireAuthorization();
 
+// Story 3.5 — in-process resume seam for the clarifying-questions workflow's
+// human-answer gate. Tamma.Api's RBAC-gated, tenant-scoped POST /api/adl/clarify/resume
+// forwards here; this endpoint looks up the tenant+session-scoped
+// clarify-answers-{tenant}-{session} bookmark and runs the owning instance with the
+// {Answered, Answers} payload injected. Same engine-control-surface /
+// RequireAuthorization rationale as the merge/deploy/blocker gates.
+app.MapPost("/elsa/api/adl/clarify/resume",
+    Tamma.ElsaServer.Endpoints.ClarifyResumeEndpoint.Resume)
+    .RequireAuthorization();
+
 app.UseSerilogRequestLogging();
 
 Log.Information("Tamma ELSA Server starting up...");
