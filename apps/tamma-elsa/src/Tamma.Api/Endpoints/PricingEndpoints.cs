@@ -1,8 +1,11 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Tamma.Api.Auth;
+using Tamma.Api.Services.Billing;
 using Tamma.Api.Services.Pricing;
 using Tamma.Api.Services.PromptStore;
+using Tamma.Api.Services.Security;
 using Tamma.Core;
 using Tamma.Core.Enums;
 using Tamma.Data;
@@ -289,7 +292,200 @@ public static class PricingEndpoints
             return Tamma.Api.Endpoints.Admin.AdminTenantsEndpoints.MapPlanAssignmentError(ex);
         }
     }
+
+    // ── BYOK toggle (Story 34-3) ──────────────────────────────────────────
+    // The tenant chooses, per provider, byok (their own key) vs platform
+    // (Tamma's key). The tenant is resolved STRICTLY from ITenantContext (SaaS)
+    // / the sole user's instance (single-user) — a caller-supplied tenantId is
+    // never accepted, so there is no cross-tenant IDOR (stronger than the spec's
+    // route-tenant 404). Writes are gated to tenant_owner / tenant_admin by the
+    // PricingManage route policy (member → 403). The raw key is NEVER echoed
+    // back (reveal-once cabinet rule) — responses carry { provider, mode, keySet }.
+
+    private const int MinByokKeyLength = 8;
+    private const int MaxByokKeyLength = 8192;
+
+    // ── POST /api/pricing/providers/{provider}/byok ── (PricingManage)
+    //
+    // Body { apiKey }. Stores the key in the tenant's Epic 29 cabinet under the
+    // canonical slug 32-3 reads, flips the (tenant, provider) owner row to byok,
+    // invalidates 32-3's credential cache, emits PRICING.BYOK.ENABLED. A provider
+    // that is NOT SaaS-eligible (a cli-token harness provider, or an unknown
+    // provider — fail-closed) is rejected 422 in SaaS via Story 32-4's
+    // IProviderAuthLookup (single-user is unaffected — CLI providers are
+    // single-user only). Idempotent: a re-enable rotates the key + updates the
+    // one active row (never a duplicate).
+    public static async Task<IResult> EnableByok(
+        string provider,
+        EnableByokRequest? body,
+        ClaimsPrincipal user,
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider,
+        IProviderAuthLookup authLookup,
+        [FromServices] ITenantProviderBillingService billing,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("Tamma.Api.Endpoints.PricingEndpoints");
+
+        if (string.IsNullOrWhiteSpace(provider))
+        {
+            return Results.BadRequest(new { error = "invalid_provider" });
+        }
+
+        var apiKey = body?.ApiKey;
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return Results.BadRequest(new { error = "invalid_key", detail = "apiKey is required." });
+        }
+        if (apiKey.Length is < MinByokKeyLength or > MaxByokKeyLength)
+        {
+            return Results.BadRequest(new
+            {
+                error = "invalid_key",
+                detail = $"apiKey must be between {MinByokKeyLength} and {MaxByokKeyLength} chars.",
+            });
+        }
+
+        // Tenant strictly from context (never the body). Single-user resolves to
+        // the sole user's personal tenant, so this is populated in both modes.
+        if (tenantContext.TenantId is not Guid tid)
+        {
+            return Results.BadRequest(new
+            {
+                error = "no_tenant_context",
+                detail = "enabling BYOK requires tenant context.",
+            });
+        }
+
+        var canonical = BillingProviderKey.Canonicalize(provider);
+        if (canonical.Length == 0)
+        {
+            return Results.BadRequest(new { error = "invalid_provider" });
+        }
+
+        // 32-4 SaaS eligibility gate — only api-key providers are BYOK-eligible in
+        // SaaS. A cli-token / unknown provider (fail-closed) → 422. Single-user is
+        // a hard no-op ("CLI providers are single-user only"). Uses the canonical
+        // family key so a vendor handle ("anthropic-claude") still classifies.
+        if (modeProvider.Mode == TammaMode.SaaS)
+        {
+            var authModel = await authLookup.AuthModelAsync(canonical, ct).ConfigureAwait(false);
+            if (authModel != ProviderAuthModel.ApiKey)
+            {
+                logger.LogWarning(
+                    "BYOK enable rejected — provider not SaaS-eligible: tenantId={TenantId} provider={Provider}",
+                    tid, canonical);
+                return Results.UnprocessableEntity(new { error = "CLI providers are single-user only" });
+            }
+        }
+
+        try
+        {
+            var result = await billing
+                .EnableByokAsync(tid, canonical, apiKey, user.GetUserId(), ct)
+                .ConfigureAwait(false);
+            // Reveal-safe: provider + mode + keySet only, NEVER the key.
+            return Results.Ok(new { provider = result.Provider, mode = result.Mode, keySet = result.KeySet });
+        }
+        catch (ArgumentException)
+        {
+            return Results.BadRequest(new { error = "invalid_provider" });
+        }
+    }
+
+    // ── DELETE /api/pricing/providers/{provider}/byok ── (PricingManage)
+    //
+    // Flips the (tenant, provider) owner row back to platform, retires the cabinet
+    // secret, invalidates 32-3's credential cache, emits PRICING.BYOK.DISABLED.
+    // Idempotent (a disable with no active byok row still returns mode=platform).
+    public static async Task<IResult> DisableByok(
+        string provider,
+        ClaimsPrincipal user,
+        ITenantContext tenantContext,
+        [FromServices] ITenantProviderBillingService billing,
+        ILoggerFactory loggerFactory,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(provider))
+        {
+            return Results.BadRequest(new { error = "invalid_provider" });
+        }
+
+        if (tenantContext.TenantId is not Guid tid)
+        {
+            return Results.NotFound();
+        }
+
+        var canonical = BillingProviderKey.Canonicalize(provider);
+        if (canonical.Length == 0)
+        {
+            return Results.BadRequest(new { error = "invalid_provider" });
+        }
+
+        var result = await billing
+            .DisableByokAsync(tid, canonical, user.GetUserId(), ct)
+            .ConfigureAwait(false);
+        return Results.Ok(new { provider = result.Provider, mode = result.Mode, keySet = result.KeySet });
+    }
+
+    // ── GET /api/pricing/providers/{provider} ── (MemberAccess: read)
+    //
+    // The current mode for the caller's OWN (tenant, provider) + whether a key is
+    // set. Never returns the key value (keySet only).
+    public static async Task<IResult> GetProviderMode(
+        string provider,
+        ITenantContext tenantContext,
+        [FromServices] ITenantProviderBillingService billing,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(provider))
+        {
+            return Results.BadRequest(new { error = "invalid_provider" });
+        }
+
+        if (tenantContext.TenantId is not Guid tid)
+        {
+            return Results.NotFound(new { error = "no_active_tenant" });
+        }
+
+        var canonical = BillingProviderKey.Canonicalize(provider);
+        if (canonical.Length == 0)
+        {
+            return Results.BadRequest(new { error = "invalid_provider" });
+        }
+
+        var result = await billing.GetModeAsync(tid, canonical, ct).ConfigureAwait(false);
+        return Results.Ok(new { provider = result.Provider, mode = result.Mode, keySet = result.KeySet });
+    }
+
+    // ── GET /api/pricing/providers ── (MemberAccess: read)
+    //
+    // The caller's OWN active per-provider modes. Empty when no tenant context or
+    // no explicit rows (platform is the default). Never returns any key value.
+    public static async Task<IResult> ListProviderModes(
+        ITenantContext tenantContext,
+        [FromServices] ITenantProviderBillingService billing,
+        CancellationToken ct)
+    {
+        if (tenantContext.TenantId is not Guid tid)
+        {
+            return Results.Ok(new { providers = Array.Empty<object>() });
+        }
+
+        var modes = await billing.ListModesAsync(tid, ct).ConfigureAwait(false);
+        var providers = modes
+            .Select(m => new { provider = m.Provider, mode = m.Mode, keySet = m.KeySet })
+            .ToList();
+        return Results.Ok(new { providers });
+    }
 }
 
 /// <summary>Story 34-4 — request body for <c>POST /api/pricing/subscribe</c>.</summary>
 public sealed record SubscribeRequest(string PlanSlug);
+
+/// <summary>
+/// Story 34-3 — request body for <c>POST /api/pricing/providers/{provider}/byok</c>.
+/// The key is write-only; it is stored in the Epic 29 cabinet and NEVER echoed back.
+/// </summary>
+public sealed record EnableByokRequest(string? ApiKey);

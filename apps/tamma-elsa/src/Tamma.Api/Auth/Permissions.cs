@@ -60,6 +60,15 @@ public static class Permissions
         // Single-user mode is unaffected — every signed-up user is auto-owner
         // of their personal tenant.
         ["agents:manage"] = ["admin", "owner"],
+        // Story 34-3 — BYOK pricing-mode management. Mirrors prompts:manage /
+        // conventions:manage / agents:manage: CLAUDE.md "Operating Modes" makes
+        // per-(tenant, provider) BYOK a tenant-scoped setting reachable by
+        // tenant_owner OR tenant_admin (member → 403). The owner-only
+        // settings:manage (the spec's SettingsManage label) would 403 every
+        // tenant_admin, so the dedicated pricing:manage permission grants
+        // admin+owner reach. Single-user mode is unaffected — every signed-up
+        // user is auto-owner of their personal tenant.
+        ["pricing:manage"] = ["admin", "owner"],
     };
 
     public static bool HasPermission(string? role, string? permission)
