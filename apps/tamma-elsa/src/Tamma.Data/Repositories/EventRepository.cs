@@ -431,6 +431,107 @@ public class EventRepository(
         return rows;
     }
 
+    /// <inheritdoc />
+    public async Task<(IReadOnlyList<DomainEvent> Events, int? Total)> QueryEventsAsync(
+        Guid tenantId,
+        string? type, bool typeIsPrefix,
+        string? correlationId,
+        string? actor,
+        DateTimeOffset? from, DateTimeOffset? to,
+        long? cursor, int limit, bool includeTotal = false)
+    {
+        // Story 4-7 — the hard tenant guard. An empty tenant is not a cross-tenant
+        // scan we implement; it is a bug. Mirror QueryAgentTrailAsync /
+        // QueryWithPaginationAsync so a cross-tenant read is unimplementable through
+        // this repository, not merely unauthorized. The endpoint returns an empty
+        // page for a missing tenant BEFORE reaching here, so this guard only fires
+        // on an internal caller that forgot to scope.
+        if (tenantId == Guid.Empty)
+        {
+            throw new NotSupportedException(
+                "QueryEventsAsync requires a non-empty tenant id. The time-travel " +
+                "event query (Story 4-7) is ALWAYS tenant-scoped — there is no " +
+                "cross-tenant or platform-admin read path. See " +
+                ".dev/decisions/story-28-1-design-calls.md Decision #2.");
+        }
+
+        await using var db = await tenantDbFactory.CreateAsync(tenantId);
+
+        // The correlationId + actor(userId) predicates live in the Tags JSONB. They
+        // are PARAMETERIZED raw-SQL `->>` extractions (the column is jsonb) so they
+        // translate on Postgres against the values in Tags — every value is BOUND as
+        // a parameter, never interpolated into the SQL text. Optional filters use the
+        // `({param}::text IS NULL OR ...)` idiom (same as QueryAgentTrailAsync's
+        // role/provider). The `::text` casts pin the parameter type so Postgres does
+        // not reject the `$n IS NULL` predicate with "could not determine data type of
+        // parameter" when a filter is omitted (NULL). The unqualified `domain_events`
+        // name resolves to the tenant schema via the per-tenant connection's
+        // search_path.
+        //
+        // When supplied, `"Tags"->>'correlationId' = $1` is served by the btree
+        // EXPRESSION index `ix_domain_events_tags_correlationid` and
+        // `"Tags"->>'userId' = $2` by `ix_domain_events_tags_userid` (both raw-SQL
+        // expression indexes — see the AddDomainEvents*Index migrations). Non-JSONB
+        // filters (tenant defence-in-depth, type, time range, cursor, order, take)
+        // compose in LINQ over the raw-SQL subquery.
+        IQueryable<DomainEvent> query = db.DomainEvents
+            .FromSqlInterpolated($@"
+                SELECT * FROM domain_events
+                WHERE ({correlationId}::text IS NULL OR ""Tags""->>'correlationId' = {correlationId})
+                  AND ({actor}::text IS NULL OR ""Tags""->>'userId' = {actor})");
+
+        // Defence-in-depth tenant predicate (structural isolation is the per-tenant
+        // connection; this keeps the slice tight during the transitional shared-DB
+        // phase where multiple tenants may still share a physical database).
+        query = query.Where(e => e.TenantId == tenantId);
+
+        if (!string.IsNullOrEmpty(type))
+        {
+            if (typeIsPrefix)
+            {
+                var like = type + "%";
+                query = query.Where(e => EF.Functions.Like(e.Type, like));
+            }
+            else
+            {
+                query = query.Where(e => e.Type == type);
+            }
+        }
+
+        // Half-open window [from, to): inclusive lower bound, exclusive upper.
+        if (from is { } f)
+        {
+            var fromUtc = f.UtcDateTime;
+            query = query.Where(e => e.CreatedAt >= fromUtc);
+        }
+        if (to is { } t)
+        {
+            var toUtc = t.UtcDateTime;
+            query = query.Where(e => e.CreatedAt < toUtc);
+        }
+
+        // Opt-in total — an UNBOUNDED COUNT(*) over the filtered stream; skipped by
+        // default so paging relies on hasMore/nextCursor and Total stays null ("not
+        // computed", not "zero"). Counted BEFORE the cursor predicate so it reflects
+        // the full match set, not just the remaining tail.
+        int? total = includeTotal ? await query.CountAsync() : null;
+
+        if (cursor is { } c)
+        {
+            // SequenceNumber DESC page: everything strictly older than the last
+            // sequence number the caller saw. Immune to same-millisecond CreatedAt
+            // collisions.
+            query = query.Where(e => e.SequenceNumber < c);
+        }
+
+        var rows = await query
+            .OrderByDescending(e => e.SequenceNumber)
+            .Take(limit)
+            .ToListAsync();
+
+        return (rows, total);
+    }
+
     /// <summary>Map the <c>outcome</c> filter (<c>success|failed|partial</c>) to
     /// the terminal <c>AGENT.TASK.*</c> event type. Returns <c>null</c> when no
     /// (or an unrecognized) outcome is supplied — the caller then does not

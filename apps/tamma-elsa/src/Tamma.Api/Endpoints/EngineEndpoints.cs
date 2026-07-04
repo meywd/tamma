@@ -126,6 +126,131 @@ public static class EngineEndpoints
     }
 
     /// <summary>
+    /// Story 4-7 (event query API for time-travel) — the tenant-scoped,
+    /// keyset-paginated query surface over the <c>domain_events</c> DCB stream.
+    /// Where <see cref="GetHistory"/> is the simple offset-paged dashboard
+    /// timeline (exact type + issue), this is the richer time-travel query:
+    /// filter by a time window, correlation id, actor, and event type
+    /// (exact OR prefix), paginate with a stable keyset cursor.
+    ///
+    /// <para>Query parameters (all optional):
+    /// <list type="bullet">
+    ///   <item><c>type</c> — event type. Exact match unless <c>prefix=true</c>,
+    ///     then <c>LIKE 'type%'</c> (e.g. <c>type=AGENT.TASK&amp;prefix=true</c>
+    ///     matches every <c>AGENT.TASK.*</c>).</item>
+    ///   <item><c>correlationId</c> — the run / workflow-instance correlation id
+    ///     (matches <c>Tags.correlationId</c>).</item>
+    ///   <item><c>actor</c> — the acting principal (matches the DCB
+    ///     <c>Tags.userId</c> convention).</item>
+    ///   <item><c>from</c>/<c>to</c> — ISO-8601 half-open time window on the
+    ///     event timestamp: <c>from &lt;= t &lt; to</c>.</item>
+    ///   <item><c>cursor</c> — last <c>sequenceNumber</c> seen; the next page is
+    ///     strictly older. Must be a positive integer.</item>
+    ///   <item><c>limit</c> — page size, clamped to 1..200, default 50.</item>
+    ///   <item><c>includeTotal</c> — when <c>true</c>, also compute the exact
+    ///     match count (an unbounded scan; off by default — pagination uses the
+    ///     cursor and <c>total</c> is <c>null</c> = "not computed").</item>
+    /// </list></para>
+    ///
+    /// <para><b>Fail-loud.</b> An inverted time window (<c>from &gt; to</c>) or a
+    /// non-positive <c>cursor</c> returns <c>400</c> rather than silently running
+    /// a full scan. Non-numeric <c>cursor</c>/<c>from</c>/<c>to</c> are rejected by
+    /// model binding (also <c>400</c>).</para>
+    ///
+    /// <para><b>Tenant-scoped.</b> The read is bound to
+    /// <see cref="ITenantContext.TenantId"/>; a request with no resolved tenant
+    /// gets an empty page (never another tenant's events). Cross-tenant / platform
+    /// scope is NOT exposed here — that stays on the admin surface.</para>
+    ///
+    /// <para>Point-in-time state RECONSTRUCTION (replaying the filtered slice into
+    /// a materialized snapshot) is deferred to Story 4-8 (#191); this endpoint is
+    /// the query/filter half only.</para>
+    /// </summary>
+    public static async Task<IResult> QueryEvents(
+        IEventRepository eventRepo,
+        ITenantContext tc,
+        string? type,
+        bool? prefix,
+        string? correlationId,
+        string? actor,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        long? cursor,
+        int? limit,
+        bool? includeTotal)
+    {
+        // Fail-loud on bad input rather than a silent full-scan.
+        if (from is { } f && to is { } t && f > t)
+        {
+            return Results.BadRequest(new
+            {
+                error = "invalid time range: 'from' must be less than or equal to 'to'",
+            });
+        }
+        if (cursor is { } c && c < 1)
+        {
+            return Results.BadRequest(new
+            {
+                error = "invalid cursor: must be a positive sequenceNumber returned by a prior page",
+            });
+        }
+
+        var take = Math.Clamp(limit ?? 50, 1, 200);
+
+        // No tenant bound (anonymous in dev-permissive mode, or a JWT missing the
+        // active_tenant_id claim): the endpoint is tenant-scoped by design — return
+        // an empty page rather than crashing the per-tenant DbContext factory with
+        // Guid.Empty (and never leaking cross-tenant rows).
+        if (tc.TenantId is not Guid tenantId || tenantId == Guid.Empty)
+        {
+            return Results.Ok(new
+            {
+                events = Array.Empty<object>(),
+                total = (int?)null,
+                limit = take,
+                nextCursor = (long?)null,
+                hasMore = false,
+            });
+        }
+
+        var (rows, total) = await eventRepo.QueryEventsAsync(
+            tenantId,
+            type: string.IsNullOrWhiteSpace(type) ? null : type,
+            typeIsPrefix: prefix ?? false,
+            correlationId: string.IsNullOrWhiteSpace(correlationId) ? null : correlationId,
+            actor: string.IsNullOrWhiteSpace(actor) ? null : actor,
+            from: from,
+            to: to,
+            cursor: cursor,
+            limit: take,
+            includeTotal: includeTotal ?? false);
+
+        // A full page implies there may be more; the cursor is the last (oldest)
+        // sequence number on this page. A short page is the end of the stream.
+        var nextCursor = rows.Count == take && rows.Count > 0
+            ? rows[^1].SequenceNumber
+            : (long?)null;
+
+        return Results.Ok(new
+        {
+            events = rows.Select(e => new
+            {
+                e.Id,
+                e.Type,
+                tags = SafeParseJson(e.Tags),
+                data = SafeParseJson(e.Data),
+                e.CreatedAt,
+                e.IssueNumber,
+                e.SequenceNumber,
+            }),
+            total,
+            limit = take,
+            nextCursor,
+            hasMore = nextCursor is not null,
+        });
+    }
+
+    /// <summary>
     /// Audit finding 012: streams engine / workflow / task-queue lifecycle
     /// events as continuous Server-Sent Events, backed by
     /// <see cref="IEngineLifecycleBus"/>. Publishers (workflow domain-event
