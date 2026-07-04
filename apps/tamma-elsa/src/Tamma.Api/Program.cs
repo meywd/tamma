@@ -2591,6 +2591,10 @@ engine.MapGet("/state", EngineEndpoints.GetState);
 engine.MapGet("/stats", EngineEndpoints.GetStats);
 engine.MapGet("/plan", EngineEndpoints.GetPlan);
 engine.MapGet("/history", EngineEndpoints.GetHistory);
+// Story 4-7 — time-travel event query: tenant-scoped, keyset-paginated read over
+// domain_events with time-range / correlationId / actor / type (exact|prefix)
+// filters. Inherits WorkflowsView (read-only, tenant-scoped) from the group.
+engine.MapGet("/events/query", EngineEndpoints.QueryEvents);
 engine.MapGet("/events/state", EngineEndpoints.GetEventsState);
 engine.MapGet("/events/logs", EngineEndpoints.GetEventsLogs);
 engine.MapPost("/store-context", EngineEndpoints.StoreContext).RequireAuthorization("WorkflowsManage");

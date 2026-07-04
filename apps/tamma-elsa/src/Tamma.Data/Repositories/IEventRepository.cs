@@ -131,4 +131,58 @@ public interface IEventRepository
             "ListByCorrelationIdAsync is not implemented by this IEventRepository. " +
             "The run-tap replay (Story 32-23) reads only through the tenant-scoped " +
             "EventRepository.");
+
+    /// <summary>
+    /// Story 4-7 (event query API for time-travel) — the general tenant-scoped,
+    /// keyset-paginated read over the <c>domain_events</c> DCB stream that backs
+    /// <c>GET /api/engine/events/query</c>. This is the QUERY/filter surface; the
+    /// point-in-time state RECONSTRUCTION (replaying the filtered slice into a
+    /// materialized state snapshot) is deferred to Story 4-8 (#191).
+    ///
+    /// <para><b>Filters</b> (all optional, composed with AND):
+    /// <list type="bullet">
+    ///   <item><paramref name="type"/> — event type. Exact match by default;
+    ///     prefix match (<c>LIKE 'type%'</c>) when <paramref name="typeIsPrefix"/>
+    ///     is <c>true</c> (e.g. <c>"AGENT.TASK"</c> matches every
+    ///     <c>AGENT.TASK.*</c>).</item>
+    ///   <item><paramref name="correlationId"/> — the workflow-instance /
+    ///     run correlation id stamped into <c>Tags.correlationId</c> (served by
+    ///     <c>ix_domain_events_tags_correlationid</c>).</item>
+    ///   <item><paramref name="actor"/> — the acting principal, matched against
+    ///     the DCB <c>Tags.userId</c> convention (served by
+    ///     <c>ix_domain_events_tags_userid</c>).</item>
+    ///   <item><paramref name="from"/>/<paramref name="to"/> — half-open time
+    ///     window on <see cref="DomainEvent.CreatedAt"/>: <c>from &lt;= t &lt; to</c>.</item>
+    /// </list></para>
+    ///
+    /// <para><b>Tenant isolation is structural.</b> The read is physically scoped
+    /// to the tenant's <c>t_&lt;hex&gt;.domain_events</c> schema via
+    /// <c>ITenantDbContextFactory</c>, with a defence-in-depth <c>TenantId</c>
+    /// predicate. An empty <paramref name="tenantId"/> throws
+    /// <see cref="NotSupportedException"/> — the same hard guard
+    /// <see cref="QueryAgentTrailAsync"/> uses — so a cross-tenant read is
+    /// unimplementable through this method, not merely unauthorized.</para>
+    ///
+    /// <para><b>Cursor.</b> Pages on <see cref="DomainEvent.SequenceNumber"/>
+    /// (the server-side <c>BIGSERIAL</c> total order), never
+    /// <see cref="DomainEvent.CreatedAt"/> (same-millisecond collisions).
+    /// <paramref name="cursor"/> is the last <c>SequenceNumber</c> seen; the next
+    /// page is <c>SequenceNumber &lt; cursor</c>, most-recent first. Pagination
+    /// relies on <c>hasMore</c>/<c>nextCursor</c>, NOT on the total.</para>
+    ///
+    /// <para><b>Total is opt-in</b> (an unbounded <c>COUNT(*)</c>): computed only
+    /// when <paramref name="includeTotal"/> is <c>true</c>; otherwise the returned
+    /// <c>Total</c> is <c>null</c> ("not computed", NOT "zero").</para>
+    /// </summary>
+    Task<(IReadOnlyList<DomainEvent> Events, int? Total)> QueryEventsAsync(
+        Guid tenantId,
+        string? type, bool typeIsPrefix,
+        string? correlationId,
+        string? actor,
+        DateTimeOffset? from, DateTimeOffset? to,
+        long? cursor, int limit, bool includeTotal = false)
+        => throw new NotSupportedException(
+            "QueryEventsAsync is not implemented by this IEventRepository. " +
+            "The time-travel event query (Story 4-7) reads only through the " +
+            "tenant-scoped EventRepository, which routes via ITenantDbContextFactory.");
 }
