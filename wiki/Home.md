@@ -7,6 +7,9 @@
 - [Project Roadmap](Roadmap) - All 31 epics with timeline, status, and layer placement
 - [Architecture](Architecture) - System architecture overview (three deployment modes, `IAgentExecutor`, pluggable backends)
 - [Deployment](Deployment) - Docker stack, least-privilege app-role runbook, env vars, Redis/Cranl activation
+- [Installation & Setup](Installation) - Docker Compose stack, `.env`, health checks, VPS/qa-tag deploy (Story 5-9a)
+- [Usage & Configuration](Usage-and-Configuration) - CLI commands, operating modes, `.tamma/config.json`, prompts, providers, BYOK (Story 5-9b)
+- [API Reference](API-Reference) - REST surface, RBAC policies, SSE streams, webhooks, DCB event catalog (Story 5-9c)
 - [Agent Dispatch](Agent-Dispatch) - Epic 19 completion: `LocalExecutor`, `GitHubActionsExecutor`, webhook mode, TS `execute-agent` CLI
 - [Security](Security) - Schema-per-tenant isolation, rate limiting, API key hashing, content sanitization, libsodium, webhook tenant-scoping
 - [GitHub Integration](GitHub-Integration) - Octokit App client, OAuth flows, Actions dispatch

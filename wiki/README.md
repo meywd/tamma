@@ -10,6 +10,9 @@ This directory contains the source markdown files for the Tamma GitHub Wiki.
 - **Epics.md** - Index of all 26 epics with links
 - **Roadmap.md** - Project roadmap with all 26 epics and timeline
 - **Architecture.md** - System architecture (dual TypeScript + C#/ELSA stack)
+- **Installation.md** - Installation & setup: Docker Compose stack, `.env`, health checks, VPS/qa-tag deploy (Story 5-9a)
+- **Usage-and-Configuration.md** - CLI commands, operating modes, `.tamma/config.json`, prompt store, providers, BYOK (Story 5-9b)
+- **API-Reference.md** - REST surface, RBAC policies, SSE streams, webhooks, DCB event catalog (Story 5-9c)
 - **Stories.md** - Index of all user stories across all 26 epics (~221 stories, 50+ task plans)
 - **Contributing.md** - Contributing guidelines for developers
 
