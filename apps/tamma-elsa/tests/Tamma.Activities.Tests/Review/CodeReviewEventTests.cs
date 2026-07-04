@@ -33,6 +33,8 @@ public class CodeReviewEventTests
         CodeReviewEvents.MergedSuccess.Should().Be("CODE_REVIEW.MERGED.SUCCESS");
         CodeReviewEvents.MergedFailed.Should().Be("CODE_REVIEW.MERGED.FAILED");
         CodeReviewEvents.Escalated.Should().Be("CODE_REVIEW.ESCALATED");
+        // Story 4-6 — escalation resolution companion to the raise-time ESCALATED.
+        CodeReviewEvents.EscalationResolved.Should().Be("CODE_REVIEW.ESCALATION_RESOLVED");
         CodeReviewEvents.Failed.Should().Be("CODE_REVIEW.FAILED");
     }
 
@@ -51,6 +53,52 @@ public class CodeReviewEventTests
         // An escalation is an expected, auditable hand-off — success-status (the rejection
         // that may follow is recorded as CODE_REVIEW.FAILED).
         CodeReviewEvents.StatusForEvent(CodeReviewEvents.Escalated).Should().Be("success");
+        // Story 4-6 — an escalation RESOLVED by the senior is a normal (success) audit row.
+        CodeReviewEvents.StatusForEvent(CodeReviewEvents.EscalationResolved).Should().Be("success");
+    }
+
+    // ================================================================
+    // Story 4-6 — escalation RAISE / RESOLVE DCB event mapping
+    // ================================================================
+
+    [Test]
+    public void BuildTammaEvent_EscalationRaised_HasSuccessStatusTagsAndReasonData()
+    {
+        // The event EscalateReviewActivity pushes into tamma:events at the RAISE point
+        // (before the suspending senior-wait). Success-status: the raise is an auditable
+        // hand-off, not a failure.
+        var tenant = Guid.NewGuid();
+        var evt = EmitCodeReviewEventActivity.BuildTammaEvent(
+            CodeReviewEvents.Escalated,
+            sessionId: "sess-9", storyId: "story-9", juniorId: "junior-9", tenantId: tenant,
+            prNumber: 42, prUrl: null, iteration: 3,
+            mergeSha: null, reason: "MaxIterationsReached",
+            detail: "Maximum fix iterations reached during code review.");
+
+        evt.EventType.Should().Be("CODE_REVIEW.ESCALATED");
+        evt.Status.Should().Be("success");
+        evt.Tags!["sessionId"].Should().Be("sess-9");
+        evt.Tags["storyId"].Should().Be("story-9");
+        evt.Tags["juniorId"].Should().Be("junior-9");
+        evt.Tags["prId"].Should().Be("42");
+        evt.Tags["tenantId"].Should().Be(tenant.ToString("D"));
+        evt.Data["reason"].Should().Be("MaxIterationsReached");
+    }
+
+    [Test]
+    public void BuildTammaEvent_EscalationResolved_IsSuccess_DistinctFromEscalated()
+    {
+        // The RESOLVE companion emitted on the Resolved→merge edge.
+        var evt = EmitCodeReviewEventActivity.BuildTammaEvent(
+            CodeReviewEvents.EscalationResolved,
+            sessionId: "sess-9", storyId: "story-9", juniorId: "junior-9", tenantId: null,
+            prNumber: 42, prUrl: null, iteration: 3,
+            mergeSha: null, reason: null,
+            detail: "Escalation resolved by senior developer.");
+
+        evt.EventType.Should().Be("CODE_REVIEW.ESCALATION_RESOLVED");
+        evt.EventType.Should().NotBe(CodeReviewEvents.Escalated);
+        evt.Status.Should().Be("success");
     }
 
     [Test]
