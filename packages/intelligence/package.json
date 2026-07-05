@@ -18,6 +18,10 @@
       "types": "./dist/indexer/index.d.ts",
       "import": "./dist/indexer/index.js"
     },
+    "./embedding": {
+      "types": "./dist/indexer/embedding/index.d.ts",
+      "import": "./dist/indexer/embedding/index.js"
+    },
     "./knowledge-base": {
       "types": "./dist/knowledge-base/index.d.ts",
       "import": "./dist/knowledge-base/index.js"
@@ -41,7 +45,6 @@
   },
   "dependencies": {
     "@tamma/observability": "workspace:*",
-    "@tamma/providers": "workspace:*",
     "@tamma/shared": "workspace:*",
     "chromadb": "^3.4.3",
     "pg": "^8.20.0"

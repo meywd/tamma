@@ -37,11 +37,17 @@ import {
   type CollectionOptions,
   type VectorMetadata,
 } from '@tamma/intelligence/vector-store';
+// Import EmbeddingService from the NARROW `/embedding` subpath — NOT the full
+// `/indexer` barrel. The barrel transitively value-imports `typescript` (a
+// devDependency of @tamma/intelligence, pruned in the `--prod` runtime image)
+// via the TypeScript chunker, which would fail ESM link-time resolution and
+// crash-loop `node dist/server.js` even with no vector-store env. The sidecar
+// never uses the chunker, so this subpath keeps the prod import graph clean.
 import {
   EmbeddingService,
   type EmbeddingProviderType,
   type EmbeddingProviderConfig,
-} from '@tamma/intelligence/indexer';
+} from '@tamma/intelligence/embedding';
 import {
   createRAGPipeline,
   type RAGPipeline,

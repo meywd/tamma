@@ -3,9 +3,19 @@
  *
  * Uses the TypeScript compiler API to parse and chunk TypeScript and JavaScript files
  * into semantic units (functions, classes, interfaces, etc.).
+ *
+ * NOTE: `typescript` is a devDependency of @tamma/intelligence and is pruned from
+ * the `--prod` runtime image (e.g. the intelligence sidecar). It is therefore
+ * imported LAZILY, via `await import('typescript')` inside {@link TypeScriptChunker.chunk},
+ * rather than as a top-level value import. This keeps merely *importing* the
+ * `./indexer` barrel (or any module that re-exports this class) safe on a
+ * prod-pruned graph: `typescript` is only required when a file is actually
+ * chunked, which never happens on the KB HTTP sidecar's boot path. The top-level
+ * import below is `import type`, so it is erased at compile time and creates no
+ * runtime dependency.
  */
 
-import * as ts from 'typescript';
+import type * as ts from 'typescript';
 import { BaseChunker } from './base-chunker.js';
 import type {
   CodeChunk,
@@ -13,6 +23,22 @@ import type {
   SupportedLanguage,
   ChunkType,
 } from '../types.js';
+
+/** The runtime shape of the lazily-loaded `typescript` module. */
+type TsModule = typeof import('typescript');
+
+/**
+ * Memoized lazy loader for the `typescript` compiler API. Importing this module
+ * (and therefore the `./indexer` barrel) does NOT require `typescript` to be
+ * installed; it is only resolved on first chunk of a TS/JS file.
+ */
+let tsModulePromise: Promise<TsModule> | undefined;
+function loadTypeScript(): Promise<TsModule> {
+  if (!tsModulePromise) {
+    tsModulePromise = import('typescript');
+  }
+  return tsModulePromise;
+}
 
 /**
  * Extract information from a TypeScript AST node
@@ -43,20 +69,25 @@ export class TypeScriptChunker extends BaseChunker {
     fileId: string,
     strategy: ChunkingStrategy,
   ): Promise<CodeChunk[]> {
+    // Lazily resolve the compiler API. See the module-level note: `typescript`
+    // is a devDependency and may be absent in a prod-pruned runtime image, so we
+    // only load it when a file is actually chunked.
+    const tsm = await loadTypeScript();
+
     const chunks: CodeChunk[] = [];
     let chunkIndex = 0;
 
     // Parse the content using TypeScript compiler API
-    const sourceFile = ts.createSourceFile(
+    const sourceFile = tsm.createSourceFile(
       filePath,
       content,
-      ts.ScriptTarget.Latest,
+      tsm.ScriptTarget.Latest,
       true, // setParentNodes
-      this.getScriptKind(filePath),
+      this.getScriptKind(tsm, filePath),
     );
 
     // Extract imports
-    const imports = this.extractImports(sourceFile);
+    const imports = this.extractImports(tsm, sourceFile);
 
     // Create imports chunk if preserveImports is enabled
     if (strategy.preserveImports && imports.content) {
@@ -79,7 +110,7 @@ export class TypeScriptChunker extends BaseChunker {
     }
 
     // Extract top-level declarations
-    const declarations = this.extractDeclarations(sourceFile, content);
+    const declarations = this.extractDeclarations(tsm, sourceFile, content);
 
     // Group small declarations if enabled
     const groupedDeclarations = strategy.groupRelatedCode
@@ -189,28 +220,28 @@ export class TypeScriptChunker extends BaseChunker {
   /**
    * Get TypeScript script kind from file extension
    */
-  private getScriptKind(filePath: string): ts.ScriptKind {
+  private getScriptKind(tsm: TsModule, filePath: string): ts.ScriptKind {
     const ext = filePath.toLowerCase().split('.').pop();
     switch (ext) {
       case 'ts':
-        return ts.ScriptKind.TS;
+        return tsm.ScriptKind.TS;
       case 'tsx':
-        return ts.ScriptKind.TSX;
+        return tsm.ScriptKind.TSX;
       case 'js':
       case 'mjs':
       case 'cjs':
-        return ts.ScriptKind.JS;
+        return tsm.ScriptKind.JS;
       case 'jsx':
-        return ts.ScriptKind.JSX;
+        return tsm.ScriptKind.JSX;
       default:
-        return ts.ScriptKind.TS;
+        return tsm.ScriptKind.TS;
     }
   }
 
   /**
    * Extract import statements from source file
    */
-  private extractImports(sourceFile: ts.SourceFile): {
+  private extractImports(tsm: TsModule, sourceFile: ts.SourceFile): {
     content: string;
     modules: string[];
     startLine: number;
@@ -221,20 +252,20 @@ export class TypeScriptChunker extends BaseChunker {
     const modules: string[] = [];
     let endPosition = 0;
 
-    ts.forEachChild(sourceFile, (node) => {
-      if (ts.isImportDeclaration(node)) {
+    tsm.forEachChild(sourceFile, (node) => {
+      if (tsm.isImportDeclaration(node)) {
         imports.push(node);
         endPosition = Math.max(endPosition, node.end);
 
         // Extract module specifier
-        if (node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+        if (node.moduleSpecifier && tsm.isStringLiteral(node.moduleSpecifier)) {
           modules.push(node.moduleSpecifier.text);
         }
       } else if (
-        ts.isImportEqualsDeclaration(node) ||
-        (ts.isExpressionStatement(node) &&
-          ts.isCallExpression(node.expression) &&
-          ts.isIdentifier(node.expression.expression) &&
+        tsm.isImportEqualsDeclaration(node) ||
+        (tsm.isExpressionStatement(node) &&
+          tsm.isCallExpression(node.expression) &&
+          tsm.isIdentifier(node.expression.expression) &&
           node.expression.expression.text === 'require')
       ) {
         imports.push(node);
@@ -260,23 +291,24 @@ export class TypeScriptChunker extends BaseChunker {
    * Extract top-level declarations from source file
    */
   private extractDeclarations(
+    tsm: TsModule,
     sourceFile: ts.SourceFile,
     _content: string,
   ): NodeInfo[] {
     const declarations: NodeInfo[] = [];
 
     const visit = (node: ts.Node, parentName?: string) => {
-      const nodeInfo = this.getNodeInfo(node, sourceFile, parentName);
+      const nodeInfo = this.getNodeInfo(tsm, node, sourceFile, parentName);
       if (nodeInfo) {
         declarations.push(nodeInfo);
       }
 
       // For classes, also extract methods
-      if (ts.isClassDeclaration(node) && node.name) {
+      if (tsm.isClassDeclaration(node) && node.name) {
         const className = node.name.text;
         node.members.forEach((member) => {
-          if (ts.isMethodDeclaration(member) || ts.isPropertyDeclaration(member)) {
-            const memberInfo = this.getNodeInfo(member, sourceFile, className);
+          if (tsm.isMethodDeclaration(member) || tsm.isPropertyDeclaration(member)) {
+            const memberInfo = this.getNodeInfo(tsm, member, sourceFile, className);
             if (memberInfo && this.estimateTokens(memberInfo.content) > 100) {
               // Only extract large methods/properties separately
               declarations.push(memberInfo);
@@ -286,7 +318,7 @@ export class TypeScriptChunker extends BaseChunker {
       }
     };
 
-    ts.forEachChild(sourceFile, (node) => visit(node));
+    tsm.forEachChild(sourceFile, (node) => visit(node));
 
     return declarations;
   }
@@ -295,6 +327,7 @@ export class TypeScriptChunker extends BaseChunker {
    * Get information about a node
    */
   private getNodeInfo(
+    tsm: TsModule,
     node: ts.Node,
     sourceFile: ts.SourceFile,
     _parentScope?: string,
@@ -305,34 +338,34 @@ export class TypeScriptChunker extends BaseChunker {
     const exports: string[] = [];
 
     // Check for export modifiers
-    if (ts.canHaveModifiers(node)) {
-      const modifiers = ts.getModifiers(node);
+    if (tsm.canHaveModifiers(node)) {
+      const modifiers = tsm.getModifiers(node);
       if (modifiers) {
         isExported = modifiers.some(
           (m) =>
-            m.kind === ts.SyntaxKind.ExportKeyword ||
-            m.kind === ts.SyntaxKind.DefaultKeyword,
+            m.kind === tsm.SyntaxKind.ExportKeyword ||
+            m.kind === tsm.SyntaxKind.DefaultKeyword,
         );
       }
     }
 
     // Function declarations
-    if (ts.isFunctionDeclaration(node)) {
+    if (tsm.isFunctionDeclaration(node)) {
       name = node.name?.text ?? 'anonymous';
       chunkType = 'function';
       if (isExported) exports.push(name);
     }
     // Arrow functions / function expressions assigned to variables
-    else if (ts.isVariableStatement(node)) {
+    else if (tsm.isVariableStatement(node)) {
       const declarations = node.declarationList.declarations;
       if (declarations.length > 0) {
         const decl = declarations[0]!;
-        if (ts.isIdentifier(decl.name)) {
+        if (tsm.isIdentifier(decl.name)) {
           name = decl.name.text;
           if (decl.initializer) {
             if (
-              ts.isArrowFunction(decl.initializer) ||
-              ts.isFunctionExpression(decl.initializer)
+              tsm.isArrowFunction(decl.initializer) ||
+              tsm.isFunctionExpression(decl.initializer)
             ) {
               chunkType = 'function';
             }
@@ -342,43 +375,43 @@ export class TypeScriptChunker extends BaseChunker {
       }
     }
     // Class declarations
-    else if (ts.isClassDeclaration(node)) {
+    else if (tsm.isClassDeclaration(node)) {
       name = node.name?.text ?? 'anonymous';
       chunkType = 'class';
       if (isExported) exports.push(name);
     }
     // Interface declarations
-    else if (ts.isInterfaceDeclaration(node)) {
+    else if (tsm.isInterfaceDeclaration(node)) {
       name = node.name.text;
       chunkType = 'interface';
       if (isExported) exports.push(name);
     }
     // Type alias declarations
-    else if (ts.isTypeAliasDeclaration(node)) {
+    else if (tsm.isTypeAliasDeclaration(node)) {
       name = node.name.text;
       chunkType = 'type';
       if (isExported) exports.push(name);
     }
     // Enum declarations
-    else if (ts.isEnumDeclaration(node)) {
+    else if (tsm.isEnumDeclaration(node)) {
       name = node.name.text;
       chunkType = 'enum';
       if (isExported) exports.push(name);
     }
     // Method declarations (within classes)
-    else if (ts.isMethodDeclaration(node)) {
-      if (ts.isIdentifier(node.name)) {
+    else if (tsm.isMethodDeclaration(node)) {
+      if (tsm.isIdentifier(node.name)) {
         name = node.name.text;
       }
       chunkType = 'function';
     }
     // Export declarations
-    else if (ts.isExportDeclaration(node)) {
+    else if (tsm.isExportDeclaration(node)) {
       // Skip export declarations, they're typically re-exports
       return null;
     }
     // Import declarations - skip
-    else if (ts.isImportDeclaration(node)) {
+    else if (tsm.isImportDeclaration(node)) {
       return null;
     }
     // Other statements - skip small ones
@@ -393,7 +426,7 @@ export class TypeScriptChunker extends BaseChunker {
     const content = sourceFile.text.slice(startPos, endPos).trim();
 
     // Extract JSDoc comment if present
-    const jsDocComment = this.extractJSDoc(node, sourceFile);
+    const jsDocComment = this.extractJSDoc(tsm, node, sourceFile);
 
     return {
       name,
@@ -410,10 +443,10 @@ export class TypeScriptChunker extends BaseChunker {
   /**
    * Extract JSDoc comment from a node
    */
-  private extractJSDoc(node: ts.Node, sourceFile: ts.SourceFile): string | undefined {
+  private extractJSDoc(tsm: TsModule, node: ts.Node, sourceFile: ts.SourceFile): string | undefined {
     const fullText = sourceFile.text;
     const nodeStart = node.getFullStart();
-    const leadingComments = ts.getLeadingCommentRanges(fullText, nodeStart);
+    const leadingComments = tsm.getLeadingCommentRanges(fullText, nodeStart);
 
     if (!leadingComments || leadingComments.length === 0) {
       return undefined;

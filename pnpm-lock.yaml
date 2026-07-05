@@ -441,9 +441,6 @@ importers:
       '@tamma/observability':
         specifier: workspace:*
         version: link:../observability
-      '@tamma/providers':
-        specifier: workspace:*
-        version: link:../providers
       '@tamma/shared':
         specifier: workspace:*
         version: link:../shared
