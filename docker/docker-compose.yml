@@ -80,6 +80,42 @@ services:
       - tamma-net
 
   # ---------------------------------------------------------------------------
+  # Infrastructure: Ollama (local embedding model server)
+  #
+  # Serves a self-hosted nomic-embed-text model (768-dim) so KB vector search
+  # and RAG embeddings run locally — no OpenAI key, no per-token cost. The
+  # model is pulled on first boot into the persisted volume (instant on every
+  # later boot). intelligence-server's ollama embedder initializes config-only
+  # (network-free), so it depends_on ollama with `service_started` — the
+  # sidecar boots + reports "configured" immediately and the first embed call
+  # simply waits for the one-time pull to finish. The healthcheck below is for
+  # ops visibility (passes once the model is present).
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:0.31.1
+    restart: unless-stopped
+    volumes:
+      - tamma-ollama-data:/root/.ollama
+    environment:
+      OLLAMA_HOST: "0.0.0.0"
+    # Start the server, wait until it answers, pull the embedding model, then
+    # hand the foreground back to it. Deliberately NO shell $vars — docker
+    # compose would interpolate them; bare `wait` blocks on the backgrounded
+    # `ollama serve`.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - "ollama serve & until ollama list >/dev/null 2>&1; do sleep 1; done; ollama pull nomic-embed-text; wait"
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list | grep -q nomic-embed-text || exit 1"]
+      interval: 15s
+      timeout: 10s
+      start_period: 180s
+      retries: 5
+    networks:
+      - tamma-net
+
+  # ---------------------------------------------------------------------------
   # Intelligence sidecar (TypeScript Fastify bridge to @tamma/intelligence)
   #
   # The C# API delegates its 30 /api/kb/* knowledge-base endpoints here over
@@ -95,10 +131,18 @@ services:
       INTELLIGENCE_PORT: "4100"
       INTELLIGENCE_HOST: "0.0.0.0"
       CHROMADB_URL: http://chromadb:8000
+      # Self-hosted embeddings via the local Ollama server (no OpenAI key/cost).
+      # 768-dim nomic-embed-text; overridable via .env if a cloud provider is
+      # ever wanted (set EMBEDDING_PROVIDER=openai + OPENAI_API_KEY).
+      EMBEDDING_PROVIDER: ${INTELLIGENCE_EMBEDDING_PROVIDER:-ollama}
+      EMBEDDING_MODEL: ${INTELLIGENCE_EMBEDDING_MODEL:-nomic-embed-text}
+      EMBEDDING_BASE_URL: ${INTELLIGENCE_EMBEDDING_BASE_URL:-http://ollama:11434}
       LOG_LEVEL: ${INTELLIGENCE_LOG_LEVEL:-info}
     depends_on:
       chromadb:
         condition: service_healthy
+      ollama:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:4100/health"]
       interval: 15s
@@ -411,6 +455,7 @@ volumes:
   tamma-pg-data:
   tamma-rmq-data:
   tamma-chroma-data:
+  tamma-ollama-data:
   tamma-engine-workdir:
   tamma-os-data:
 
