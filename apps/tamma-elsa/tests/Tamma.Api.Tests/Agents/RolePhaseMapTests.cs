@@ -11,11 +11,12 @@ namespace Tamma.Api.Tests.Agents;
 /// The 8 roles: developer, tester, security, devops, architect, product_owner,
 /// senior_developer, tech_writer.
 ///
-/// The 76 actions are the union of the per-role action sets in SPEC §4
+/// The 77 actions are the union of the per-role action sets in SPEC §4
 /// (72 original + 2 assessment actions: generate-assessment-questions,
 /// analyze-assessment-response under product_owner — added in assessment P0 —
 /// + 1 research action under product_owner, Story 3.4
-/// + 1 score-ambiguity action under product_owner, Story 3.6).
+/// + 1 score-ambiguity action under product_owner, Story 3.6
+/// + 1 decompose-issue action under senior_developer, Story 2.14).
 /// Which (role, action) pairs are valid is the per-role eligibility matrix.
 /// </summary>
 [TestFixture]
@@ -43,14 +44,15 @@ public class RolePhaseMapTests
     }
 
     [Test]
-    public void ValidActions_Should_Contain_Seventy_Six_Actions()
+    public void ValidActions_Should_Contain_Seventy_Seven_Actions()
     {
         // 72 original actions + 2 assessment actions added in assessment P0
         // (generate-assessment-questions, analyze-assessment-response under product_owner)
         // + 1 research action (Story 3.4 — dedicated research token under product_owner)
         // + 1 score-ambiguity action (Story 3.6 — dedicated ambiguity-scoring token
-        // under product_owner).
-        RolePhaseMap.ValidActions.Should().HaveCount(76);
+        // under product_owner) + 1 decompose-issue action (Story 2.14 — dedicated
+        // issue-decomposition token under senior_developer).
+        RolePhaseMap.ValidActions.Should().HaveCount(77);
     }
 
     [Test]
@@ -411,6 +413,40 @@ public class RolePhaseMapTests
     {
         // score-ambiguity is a product_owner-only action; a developer must not be eligible.
         RolePhaseMap.IsRoleEligibleForPhase("score-ambiguity", "developer").Should().BeFalse();
+    }
+
+    // -----------------------------------------------------------------------
+    // Story 2.14 — dedicated decompose-issue action (senior_developer-eligible)
+    // -----------------------------------------------------------------------
+
+    [Test]
+    public void ValidActions_Contains_DecomposeIssue()
+    {
+        RolePhaseMap.ValidActions.Should().Contain("decompose-issue");
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_DecomposeIssue_SeniorDeveloper_Returns_True()
+    {
+        // Breaking a complex issue into implementable sub-tasks is the tech-lead's charter (the
+        // senior_developer identity prompt is literally "decompose complex tasks"), so the
+        // dedicated decompose-issue action is eligible for senior_developer (Story 2.14 —
+        // IssueDecompositionWorkflow dispatches (senior_developer, decompose-issue)).
+        RolePhaseMap.IsRoleEligibleForPhase("decompose-issue", "senior_developer").Should().BeTrue();
+    }
+
+    [Test]
+    public void GetEligibleRolesForPhase_DecomposeIssue_Is_SeniorDeveloper_Only()
+    {
+        RolePhaseMap.GetEligibleRolesForPhase("decompose-issue")
+            .Should().BeEquivalentTo(new[] { "senior_developer" });
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_DecomposeIssue_Developer_Returns_False()
+    {
+        // decompose-issue is a senior_developer-only action; a plain developer must not be eligible.
+        RolePhaseMap.IsRoleEligibleForPhase("decompose-issue", "developer").Should().BeFalse();
     }
 
     // -----------------------------------------------------------------------

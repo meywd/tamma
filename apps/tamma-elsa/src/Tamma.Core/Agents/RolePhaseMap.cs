@@ -86,7 +86,8 @@ public static class RolePhaseMap
                 AgentAction.TriageTechnical,
                 AgentAction.SummarizeTechnical,
                 AgentAction.ResolveBlocker,
-                AgentAction.MentorFeedback),
+                AgentAction.MentorFeedback,
+                AgentAction.DecomposeIssue),
 
             // developer — implementation
             [AgentRole.Developer] = FreezeSet(

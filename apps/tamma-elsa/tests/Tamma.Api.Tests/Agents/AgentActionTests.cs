@@ -28,8 +28,9 @@ public class AgentActionTests
         // analyze-assessment-response) added in assessment P0 + 1 research action
         // (Story 3.4 — dedicated research/investigate token under product_owner)
         // + 1 score-ambiguity action (Story 3.6 — dedicated ambiguity-scoring token
-        // under product_owner).
-        Enum.GetValues<AgentAction>().Length.Should().Be(76);
+        // under product_owner) + 1 decompose-issue action (Story 2.14 — dedicated
+        // issue-decomposition token under senior_developer).
+        Enum.GetValues<AgentAction>().Length.Should().Be(77);
     }
 
     [TestCase("context-scan", AgentAction.ContextScan)]
@@ -37,6 +38,7 @@ public class AgentActionTests
     [TestCase("code-review-security", AgentAction.CodeReviewSecurity)]
     [TestCase("research", AgentAction.Research)]
     [TestCase("score-ambiguity", AgentAction.ScoreAmbiguity)]
+    [TestCase("decompose-issue", AgentAction.DecomposeIssue)]
     public void Parse_resolves_canonical_wire(string wire, AgentAction expected)
     {
         AgentActionExtensions.Parse(wire).Should().Be(expected);

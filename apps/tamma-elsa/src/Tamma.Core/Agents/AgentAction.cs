@@ -54,6 +54,7 @@ public enum AgentAction
     [Wire("summarize-technical")] SummarizeTechnical,
     [Wire("resolve-blocker")] ResolveBlocker,
     [Wire("mentor-feedback")] MentorFeedback,
+    [Wire("decompose-issue")] DecomposeIssue,
 
     // developer
     [Wire("plan-fix")] PlanFix,
