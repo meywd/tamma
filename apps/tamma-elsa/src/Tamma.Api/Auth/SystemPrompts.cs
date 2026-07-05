@@ -243,6 +243,10 @@ public static class SystemPrompts
         //    ResearchParsing recovers; NOT a transitional family) ──
         AgentAction.Research => ResearchBody,
 
+        // ── score-ambiguity (Story 3.6 — real per-cell body producing the structured score
+        //    JSON AmbiguityParsing recovers; NOT a transitional family) ──
+        AgentAction.ScoreAmbiguity => ScoreAmbiguityBody,
+
         // ── summarize / documentation / write-ups → Summarize ──
         AgentAction.SummarizeStakeholder => Summarize,
         AgentAction.SummarizeTechnical => Summarize,
@@ -791,6 +795,81 @@ public static class SystemPrompts
         Variables: ["role", "workItemJson", "findings", "conventions"],
         EnableTools: false,
         MaxTokens: 4096);
+
+    // -----------------------------------------------------------------------
+    // Ambiguity-scoring body builder (Story 3.6)
+    //
+    // Purpose-written for the AmbiguityScoringWorkflow llm-call dispatch
+    // (Tamma.ElsaServer/Workflows/AmbiguityScoringWorkflow.cs). It scores how
+    // ambiguous / underspecified a requirement is and returns the EXACT JSON object
+    // AmbiguityParsing.ParseAssessment recovers:
+    //   { "score", "confidence", "rationale", "ambiguities":[{ "type","description",
+    //     "severity","recommendation" }] }
+    // The parser fails closed on a missing / out-of-range score or a missing
+    // rationale, so the template is explicit that both are load-bearing (resolution
+    // is tenant→system→error — this body is never empty/plain).
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Prompt for <c>(product_owner, score-ambiguity)</c>: score how ambiguous /
+    /// underspecified the given requirement is and emit a structured assessment as the JSON
+    /// <see cref="Tamma.Activities.Ambiguity.AmbiguityParsing"/> parses. Variables:
+    /// <c>workItemJson</c> (the requirement under assessment) and <c>contextFindings</c>
+    /// (any domain / codebase context that informs the scoring).
+    /// </summary>
+    private static PromptTemplate ScoreAmbiguityBody(string role, string action) => new(
+        Role: role,
+        Action: action,
+        Template:
+            "You are a {{role}} scoring how ambiguous or underspecified a requirement is, so the " +
+            "team can decide whether to ask clarifying questions before implementation begins.\n\n" +
+            "## Requirement / Work Item\n{{workItemJson}}\n\n" +
+            "## Context (domain / codebase / prior decisions)\n{{contextFindings}}\n\n" +
+            "## Conventions\n{{conventions}}\n\n" +
+            "## Instructions\n\n" +
+            "<thinking>\n" +
+            "1. Read the requirement and identify every place where it is unclear, incomplete, " +
+            "self-contradictory, or relies on unstated assumptions\n" +
+            "2. Classify each problem by TYPE: `vague` (imprecise wording), `missing` (required " +
+            "information absent), `contradictory` (conflicting statements), or `implicit` (unstated " +
+            "assumptions / constraints)\n" +
+            "3. Weigh each problem by how much it would impact development if left unresolved " +
+            "(severity: `low` / `medium` / `high`), considering the context above\n" +
+            "4. For each problem, write a specific, actionable recommendation for resolving it\n" +
+            "5. Aggregate into a single overall ambiguity SCORE in [0,1] — 0.0 = crystal clear and " +
+            "fully specified, 1.0 = so ambiguous it cannot be implemented as written\n" +
+            "6. State your confidence in the assessment\n" +
+            "</thinking>\n\n" +
+            "Base the assessment on the requirement and context provided — do NOT invent problems " +
+            "that are not there. A genuinely clear requirement should score near 0 with an empty " +
+            "`ambiguities` list; do not manufacture ambiguities to justify a higher score.\n\n" +
+            "Return ONLY a single JSON object (no markdown fences, no prose outside it) of this EXACT shape:\n" +
+            "```json\n" +
+            "{\n" +
+            "  \"score\": 0.0,\n" +
+            "  \"confidence\": 0.0,\n" +
+            "  \"rationale\": \"1-3 sentence explanation of the overall score\",\n" +
+            "  \"ambiguities\": [\n" +
+            "    {\n" +
+            "      \"type\": \"vague|missing|contradictory|implicit\",\n" +
+            "      \"description\": \"what is unclear / missing / contradictory / implicit\",\n" +
+            "      \"severity\": \"low|medium|high\",\n" +
+            "      \"recommendation\": \"a specific action to resolve this ambiguity\"\n" +
+            "    }\n" +
+            "  ]\n" +
+            "}\n" +
+            "```\n\n" +
+            "Requirements (the downstream parser fails closed if these are not met):\n" +
+            "- `score` MUST be a decimal between 0.0 and 1.0 — it is load-bearing.\n" +
+            "- `rationale` MUST be a non-empty explanation of the score — it is load-bearing.\n" +
+            "- `confidence` is a decimal between 0.0 and 1.0.\n" +
+            "- `ambiguities` MAY be empty when the requirement is genuinely clear; otherwise each " +
+            "item MUST carry a non-empty `description`.\n" +
+            "- `type` MUST be one of: `vague`, `missing`, `contradictory`, `implicit`.",
+        SystemPrompt: SystemFor(role),
+        Variables: ["role", "workItemJson", "contextFindings", "conventions"],
+        EnableTools: false,
+        MaxTokens: 2048);
 
     // -----------------------------------------------------------------------
     // Role-specific review lenses (inlined in plan-review / code-review bodies)

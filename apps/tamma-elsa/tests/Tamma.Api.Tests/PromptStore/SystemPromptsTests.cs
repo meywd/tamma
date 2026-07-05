@@ -243,6 +243,51 @@ public class SystemPromptsTests
     }
 
     // ------------------------------------------------------------------
+    // Story 3.6 — the score-ambiguity cell under product_owner. The
+    // AmbiguityScoringWorkflow dispatches (product_owner, score-ambiguity);
+    // resolution is tenant→system→error, so the system default MUST be a real,
+    // non-empty body that instructs the exact structured-score JSON schema
+    // AmbiguityParsing.ParseAssessment recovers.
+    // ------------------------------------------------------------------
+
+    [Test]
+    public void ScoreAmbiguityAction_ExistsInTaxonomy_ProductOwner()
+    {
+        var score = SystemPrompts.GetRoleAction("product_owner", "score-ambiguity");
+
+        score.Should().NotBeNull(
+            "score-ambiguity must be in product_owner's RolePhaseMap action set with a " +
+            "non-empty SystemPrompts template (Story 3.6 taxonomy)");
+
+        score!.Template.Should().NotBeNullOrWhiteSpace(
+            "score-ambiguity template must not be empty (resolution is tenant→system→error)");
+
+        score.Variables.Should().Contain("workItemJson")
+            .And.Contain("contextFindings",
+                "score-ambiguity must declare the variables AmbiguityScoringWorkflow passes " +
+                "in the llm-call dispatch");
+    }
+
+    [Test]
+    public void ScoreAmbiguityAction_Template_DocumentsTheParserSchema()
+    {
+        // The body must instruct the EXACT JSON keys AmbiguityParsing.ParseAssessment reads:
+        // score + confidence + rationale + ambiguities[] {type, description, severity, recommendation}.
+        var score = SystemPrompts.GetRoleAction("product_owner", "score-ambiguity");
+
+        score.Should().NotBeNull();
+        var body = score!.Template;
+        body.Should().Contain("\"score\"");
+        body.Should().Contain("\"rationale\"");
+        body.Should().Contain("\"confidence\"");
+        body.Should().Contain("\"ambiguities\"");
+        body.Should().Contain("\"type\"");
+        body.Should().Contain("\"description\"");
+        body.Should().Contain("\"severity\"");
+        body.Should().Contain("\"recommendation\"");
+    }
+
+    // ------------------------------------------------------------------
     // Audit prompts/001 — role-tailored review-lens shape is retained on the
     // review-family cells. The PlanReview body is used by the per-role
     // plan-review lens actions; CodeReview by the code-review lens actions.

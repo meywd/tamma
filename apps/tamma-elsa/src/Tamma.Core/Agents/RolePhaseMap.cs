@@ -57,7 +57,8 @@ public static class RolePhaseMap
                 AgentAction.ReviewScope,
                 AgentAction.GenerateAssessmentQuestions,
                 AgentAction.AnalyzeAssessmentResponse,
-                AgentAction.Research),
+                AgentAction.Research,
+                AgentAction.ScoreAmbiguity),
 
             // architect — system design, technical strategy
             [AgentRole.Architect] = FreezeSet(
