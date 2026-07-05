@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Tamma.Activities.Core;
 using Tamma.Activities.LlmCall;
 using Tamma.Activities.TDD.Models;
 
@@ -103,17 +104,35 @@ public class WriteImplementationActivity : CodeActivity<ImplementationResult>
                 "TDD GREEN phase: Generated implementation across {FileCount} files for session {SessionId}",
                 result.ImplementationFiles.Count, sessionId);
 
+            // Story 4-5 (AC1) — capture the code-file write as a DCB event. The
+            // GREEN phase produced implementation code; emit CODE.GENERATED.SUCCESS
+            // (or the loud CODE.GENERATED.FAILED when generation yielded no code) so
+            // every code change is on the audit stream.
+            TammaEventEmitter.Emit(context, this, _logger,
+                CodeEvents.BuildGenerated(result.Success, storyId, sessionId,
+                    CodeEvents.OperationImplementation, result.ImplementationFiles,
+                    testCount: null, result.ErrorMessage));
+
             context.SetResult(result);
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "TDD GREEN phase: Error generating implementation for session {SessionId}", sessionId);
 
-            context.SetResult(new ImplementationResult
+            var failed = new ImplementationResult
             {
                 Success = false,
                 ErrorMessage = $"Implementation generation failed: {ex.Message}"
-            });
+            };
+
+            // Story 4-5 (AC1) — the failure edge is auditable too (loud, error-status);
+            // a failed code generation is never a silent non-event.
+            TammaEventEmitter.Emit(context, this, _logger,
+                CodeEvents.BuildGenerated(success: false, storyId, sessionId,
+                    CodeEvents.OperationImplementation, failed.ImplementationFiles,
+                    testCount: null, failed.ErrorMessage));
+
+            context.SetResult(failed);
         }
     }
 

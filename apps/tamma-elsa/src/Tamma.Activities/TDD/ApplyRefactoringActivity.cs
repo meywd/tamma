@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Tamma.Activities.Core;
 using Tamma.Activities.LlmCall;
 using Tamma.Activities.TDD.Models;
 
@@ -99,17 +100,31 @@ public class ApplyRefactoringActivity : CodeActivity<RefactoringResult>
                 "TDD REFACTOR phase: Applied refactoring to {FileCount} files for session {SessionId}",
                 result.FilesChanged.Count, sessionId);
 
+            // Story 4-5 (AC1) — the REFACTOR phase modified implementation code;
+            // capture it as a DCB event (CODE.REFACTORED.*) so refactors are audited
+            // alongside test/implementation generation.
+            TammaEventEmitter.Emit(context, this, _logger,
+                CodeEvents.BuildRefactored(result.Success, storyId, sessionId,
+                    result.FilesChanged, result.ErrorMessage));
+
             context.SetResult(result);
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "TDD REFACTOR phase: Error applying refactoring for session {SessionId}", sessionId);
 
-            context.SetResult(new RefactoringResult
+            var failed = new RefactoringResult
             {
                 Success = false,
                 ErrorMessage = $"Refactoring failed: {ex.Message}"
-            });
+            };
+
+            // Story 4-5 (AC1) — loud, error-status failure edge.
+            TammaEventEmitter.Emit(context, this, _logger,
+                CodeEvents.BuildRefactored(success: false, storyId, sessionId,
+                    failed.FilesChanged, failed.ErrorMessage));
+
+            context.SetResult(failed);
         }
     }
 

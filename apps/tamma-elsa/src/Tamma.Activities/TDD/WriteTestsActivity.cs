@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Tamma.Activities.Core;
 using Tamma.Activities.LlmCall;
 using Tamma.Activities.TDD.Models;
 
@@ -110,17 +111,33 @@ public class WriteTestsActivity : CodeActivity<TestGenerationResult>
                 "TDD RED phase: Generated {TestCount} tests across {FileCount} files for session {SessionId}",
                 result.TestCount, result.TestFiles.Count, sessionId);
 
+            // Story 4-5 (AC1) — the RED phase authored test files; capture the code
+            // write as a DCB event (CODE.GENERATED.* with operation=testing) so test
+            // authoring is on the audit stream alongside implementation.
+            TammaEventEmitter.Emit(context, this, _logger,
+                CodeEvents.BuildGenerated(result.Success, storyId, sessionId,
+                    CodeEvents.OperationTesting, result.TestFiles,
+                    testCount: result.TestCount, result.ErrorMessage));
+
             context.SetResult(result);
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "TDD RED phase: Error generating tests for session {SessionId}", sessionId);
 
-            context.SetResult(new TestGenerationResult
+            var failed = new TestGenerationResult
             {
                 Success = false,
                 ErrorMessage = $"Test generation failed: {ex.Message}"
-            });
+            };
+
+            // Story 4-5 (AC1) — loud, error-status failure edge (never a silent non-event).
+            TammaEventEmitter.Emit(context, this, _logger,
+                CodeEvents.BuildGenerated(success: false, storyId, sessionId,
+                    CodeEvents.OperationTesting, failed.TestFiles,
+                    testCount: failed.TestCount, failed.ErrorMessage));
+
+            context.SetResult(failed);
         }
     }
 
