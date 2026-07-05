@@ -420,6 +420,97 @@ public static class AdlEndpoints
         }
     }
 
+    // ================================================================
+    // Design-proposal human review gate (Story 3.7) —
+    // POST /api/adl/design/resume. Same RBAC (WorkflowsManage, enforced at the
+    // route group) + I2 (server-derived reviewer) posture as the merge/deploy
+    // gates. The cross-tenant guard uses the SAME mechanism as the merge gate:
+    // the caller's ambient tenant id is folded into the bookmark name by the
+    // engine, so a caller can only resume a gate in its OWN tenant (a cross-
+    // tenant/unknown session → 404). This is table-free — Story 3.7 mints no
+    // design-proposal row (NON-MIGRATION).
+    // ================================================================
+
+    /// <summary>The design review decisions accepted (case-insensitive). Anything else is
+    /// rejected with 400 up front so the caller never forwards an arbitrary string that
+    /// would silently route the gate.</summary>
+    private static readonly HashSet<string> AllowedDesignDecisions =
+        new(StringComparer.OrdinalIgnoreCase) { "approve", "reject" };
+
+    /// <summary>
+    /// Resume request for the design-proposal review gate. <c>Reviewer</c> is intentionally
+    /// absent — the acting identity is derived from the authenticated caller (I2), never
+    /// trusted from the client.
+    /// </summary>
+    public sealed record DesignReviewRequest(
+        Guid SessionId,
+        string Decision,       // "approve" | "reject"
+        string? Feedback);
+
+    /// <summary>
+    /// Resume the design-proposal workflow with a reviewer's approve/reject decision.
+    /// Route: <c>POST /api/adl/design/resume</c>.
+    /// </summary>
+    public static async Task<IResult> ResumeDesign(
+        [FromBody] DesignReviewRequest req,
+        [FromServices] IElsaWorkflowService elsa,
+        [FromServices] ITenantContext tenantContext,
+        ClaimsPrincipal principal,
+        [FromServices] ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("Tamma.Api.AdlEndpoints");
+
+        if (req.SessionId == Guid.Empty)
+            return Results.BadRequest(new { error = "sessionId is required" });
+        if (string.IsNullOrWhiteSpace(req.Decision) || !AllowedDesignDecisions.Contains(req.Decision.Trim()))
+            return Results.BadRequest(new { error = "decision must be one of: approve, reject" });
+
+        var approved = string.Equals(req.Decision.Trim(), "approve", StringComparison.OrdinalIgnoreCase);
+
+        // SECURITY (IDOR) — scope the resume to the caller's ambient tenant. The engine folds
+        // this tenant id into the bookmark name, so a caller can only ever resolve a gate in
+        // its OWN tenant. (Ambient null = self-hosted single-user scope.)
+        var tenantId = tenantContext.TenantId?.ToString();
+
+        // I2 — the reviewer is the authenticated caller, derived server-side. A client-supplied
+        // reviewer is never honoured so the audit trail can't be forged.
+        var reviewer = ResolveApprover(principal);
+
+        try
+        {
+            var result = await elsa.ResumeDesignApprovalAsync(
+                req.SessionId, tenantId, approved, req.Feedback, reviewer);
+
+            if (result.GateNotFound)
+            {
+                return Results.NotFound(new
+                {
+                    error = "gate_not_waiting",
+                    detail = "No design-proposal review is currently suspended for this session.",
+                });
+            }
+
+            logger.LogInformation(
+                "Drove design gate for session {SessionId} with decision {Decision} (reviewer {Reviewer})",
+                req.SessionId, LogSanitizer.Clean(req.Decision), LogSanitizer.Clean(reviewer));
+
+            return Results.Ok(new
+            {
+                resumed = result.Resumed,
+                workflowInstanceId = result.WorkflowInstanceId,
+                approved,
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Failed to resume design gate for session {SessionId}", req.SessionId);
+            return Results.Problem(
+                detail: "Failed to resume the design-proposal review gate.",
+                statusCode: StatusCodes.Status502BadGateway);
+        }
+    }
+
     /// <summary>Map a case-insensitive level onto the workflow's exact PascalCase segment
     /// ("Hint"/"Guidance"/"Assistance"); null for anything else.</summary>
     internal static string? CanonicalBlockerLevel(string? level)

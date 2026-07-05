@@ -511,6 +511,51 @@ public partial class ElsaWorkflowService : IElsaWorkflowService
             WorkflowInstanceId: result?.WorkflowInstanceId);
     }
 
+    /// <summary>
+    /// Story 3.7 — forward a design-proposal review-gate resume to the engine's in-process
+    /// resume endpoint, which looks up the tenant+session-scoped
+    /// <c>design-approval-{tenant}-{session}</c> bookmark and runs the owning instance with
+    /// <c>{Approved, Feedback}</c> injected as input. A 404 (no gate waiting) is surfaced as
+    /// <see cref="MergeApprovalResumeResult.GateNotFound"/> rather than thrown.
+    /// </summary>
+    public async Task<MergeApprovalResumeResult> ResumeDesignApprovalAsync(
+        Guid sessionId, string? tenantId, bool approved, string? feedback, string? reviewer)
+    {
+        _logger.LogInformation(
+            "Resuming design gate for session {SessionId} (approved={Approved})", sessionId, approved);
+
+        await EnsureHealthyAsync();
+
+        var payload = new
+        {
+            sessionId,
+            // Tenant scopes the engine's bookmark lookup (folded into the name).
+            tenantId,
+            approved,
+            feedback,
+            // I2 — server-derived acting identity, forwarded for the engine's audit log.
+            reviewer,
+        };
+
+        var response = await _httpClient.PostAsJsonAsync(
+            "/elsa/api/adl/design/resume", payload, JsonOptions);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning(
+                "No design gate waiting for session {SessionId}", sessionId);
+            return new MergeApprovalResumeResult(Resumed: false, GateNotFound: true, WorkflowInstanceId: null);
+        }
+
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<EngineResumeResponse>(JsonOptions);
+        return new MergeApprovalResumeResult(
+            Resumed: result?.Resumed ?? true,
+            GateNotFound: false,
+            WorkflowInstanceId: result?.WorkflowInstanceId);
+    }
+
     private sealed class EngineResumeResponse
     {
         public bool Resumed { get; set; }

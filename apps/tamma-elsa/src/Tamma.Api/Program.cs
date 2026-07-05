@@ -2716,6 +2716,13 @@ adl.MapPost("/blocker/resume", AdlEndpoints.ResumeBlocker);
 // resolver derived server-side (I2). IDOR guard: the engine folds the caller's ambient
 // tenant id into the bookmark name, so a cross-tenant/unknown session → 404.
 adl.MapPost("/clarify/resume", AdlEndpoints.ResumeClarify);
+// Design-proposal review gate (Story 3.7). Resumes the tenant+session-scoped
+// design-approval-{tenant}-{session} bookmark with the reviewer's approve/reject
+// decision so the workflow can finalise (approved → implementation, rejected →
+// feedback captured). WorkflowsManage = tenant owner/admin (members 403); reviewer
+// derived server-side (I2). IDOR guard: the engine folds the caller's ambient tenant
+// id into the bookmark name, so a cross-tenant/unknown session → 404.
+adl.MapPost("/design/resume", AdlEndpoints.ResumeDesign);
 
 // ── GitHub App (no auth, webhook signature verification) ──
 // Audit finding 017 — webhook gets the GitHubWebhook policy (300/min). The
