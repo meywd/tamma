@@ -24,11 +24,12 @@
  *       anywhere in its reachable set (the chunker stays lazy).
  */
 
+import { execSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 // ── Locate the built @tamma/intelligence package (deterministic path walk) ──
 const testFile = fileURLToPath(import.meta.url);
@@ -51,6 +52,31 @@ function resolveSubpath(subpath: string): string {
   if (!entry?.import) throw new Error(`No export for .${subpath} in @tamma/intelligence`);
   return path.resolve(intelDir, entry.import);
 }
+
+/** Repo root = the directory that contains `packages/`. */
+const repoRoot = path.resolve(packagesDir, '..');
+
+/** The dist entrypoints this test crawls; all must be compiled to exist. */
+const REQUIRED_DIST_ENTRIES = ['/embedding', '/vector-store', '/rag', '/indexer'];
+
+/**
+ * These assertions walk the COMPILED `dist` graph (type-only imports erased —
+ * the ground truth for what the runtime links). The CI `TypeScript Tests` job
+ * runs `pnpm vitest run` WITHOUT building workspace packages first (cross-package
+ * source imports resolve via vitest aliases, so no build is needed for the OTHER
+ * suites), which leaves `@tamma/intelligence`'s dist absent. So build it here on
+ * demand — idempotent (a no-op when the dist is already fresh) — rather than
+ * weakening the check to run against source (which would defeat the type-erasure
+ * ground truth). `tsc --build` also builds the referenced projects it needs.
+ */
+beforeAll(() => {
+  const built = REQUIRED_DIST_ENTRIES.every((subpath) => existsSync(resolveSubpath(subpath)));
+  if (built) return;
+  execSync('pnpm --filter @tamma/intelligence run build', {
+    cwd: repoRoot,
+    stdio: 'inherit',
+  });
+}, 180_000);
 
 /**
  * Extract the STATIC import/re-export/side-effect specifiers from a compiled

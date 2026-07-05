@@ -28,6 +28,7 @@ export default defineConfig({
       { find: /^@tamma\/shared\/config$/, replacement: pkg('shared', 'config/index.ts') },
       { find: /^@tamma\/shared$/, replacement: pkg('shared') },
       { find: /^@tamma\/intelligence\/vector-store$/, replacement: pkg('intelligence', 'vector-store/index.ts') },
+      { find: /^@tamma\/intelligence\/embedding$/, replacement: pkg('intelligence', 'indexer/embedding/index.ts') },
       { find: /^@tamma\/intelligence\/indexer$/, replacement: pkg('intelligence', 'indexer/index.ts') },
       { find: /^@tamma\/intelligence\/knowledge-base$/, replacement: pkg('intelligence', 'knowledge-base/index.ts') },
       { find: /^@tamma\/intelligence\/rag$/, replacement: pkg('intelligence', 'rag/index.ts') },
