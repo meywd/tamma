@@ -11,6 +11,7 @@
 #   PostgreSQL:       2G
 #   RabbitMQ:       512M
 #   ChromaDB:         1G
+#   Ollama:           2G   (nomic-embed-text, local KB/RAG embeddings)
 #   elsa-server:      1G
 #   tamma-api:        768M  (consolidated C# API)
 #   tamma-engine:     1G
@@ -18,14 +19,16 @@
 #   elsa-studio:      128M
 #   nginx-proxy:      128M
 #   ─────────────────────
-#   Total:          ~6.8G  (leaves ~9.2G for OS, Docker, and headroom)
+#   Total:          ~8.8G  (leaves ~7.2G for OS, Docker, and headroom)
 #
 # With observability profile (+opensearch +dashboards):
 #   opensearch:       3G
 #   opensearch-dashboards: 1.5G
 #   opensearch-setup: 128M
 #   ─────────────────────
-#   Total:         ~11.8G  (leaves ~4.2G for OS and Docker)
+#   Total:         ~13.4G  (sum of LIMITS/caps, not reservations — actual RSS
+#                           is far lower; but do not run the observability
+#                           profile + ollama on a 16GB box without headroom care)
 # =============================================================================
 
 services:
@@ -52,6 +55,14 @@ services:
         limits:
           cpus: "1.0"
           memory: 1G
+
+  ollama:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
 
   elsa-server:
     restart: unless-stopped
