@@ -17,6 +17,10 @@ namespace Tamma.Api.Endpoints;
 ///   <item><c>GET /api/v1/runs/{runId}</c> — a single run's DCB event/log
 ///     timeline + the tenant's OWN recorded per-run cost
 ///     (<see cref="IEventRepository.ListByCorrelationIdAsync"/>).</item>
+///   <item><c>GET /api/v1/runs/summary</c> — Story 23-5 Workflow Monitor:
+///     per-status + per-definition instance counts over an optional time
+///     window (<see cref="IWorkflowRepository.SummarizeInstancesAsync"/>).
+///     Counts only — no cost/economics.</item>
 /// </list>
 ///
 /// <para><b>Tenant is resolved strictly from
@@ -228,7 +232,79 @@ public static class ReposRunsEndpoints
         });
     }
 
+    // ─── GET /api/v1/runs/summary ─────────────────────────────────────────
+
+    /// <summary>
+    /// Story 23-5 Workflow Monitor: aggregate the caller's tenant's workflow
+    /// instances into per-status and per-definition counts over an optional
+    /// <c>[from, to)</c> window. Backs the monitor's metric cards + filters.
+    ///
+    /// <para>Tenant is resolved strictly from <see cref="ITenantContext"/>; a
+    /// null / empty ambient tenant <b>FAILS CLOSED</b> with
+    /// <c>404 no_active_tenant</c> BEFORE any repository call (mirrors
+    /// <see cref="ListRuns"/> and the Story 23-6 / #283 fix).</para>
+    ///
+    /// <para><b>No economics leak.</b> The projection is pure instance counts —
+    /// it never reads or returns any cost, price, margin or spend figure.</para>
+    ///
+    /// <para><c>from</c>/<c>to</c> are ISO-8601 strings parsed as UTC
+    /// (<see cref="System.Globalization.DateTimeStyles.AssumeUniversal"/> +
+    /// <see cref="System.Globalization.DateTimeStyles.AdjustToUniversal"/>) so a
+    /// naive/offset timestamp can't drift the window by the host timezone.
+    /// Unparseable values are ignored (treated as no bound).</para>
+    /// </summary>
+    public static async Task<IResult> GetRunsSummary(
+        IWorkflowRepository workflows,
+        ITenantContext tc,
+        string? from,
+        string? to)
+    {
+        if (tc.TenantId is not Guid tenantId || tenantId == Guid.Empty)
+        {
+            return Results.NotFound(new { error = "no_active_tenant" });
+        }
+
+        var fromUtc = ParseUtc(from);
+        var toUtc = ParseUtc(to);
+
+        var summary = await workflows
+            .SummarizeInstancesAsync(tenantId, fromUtc, toUtc)
+            .ConfigureAwait(false);
+
+        return Results.Ok(new
+        {
+            tenantId,
+            from = fromUtc,
+            to = toUtc,
+            total = summary.Total,
+            byStatus = summary.ByStatus
+                .Select(s => new { status = s.Status, count = s.Count })
+                .ToList(),
+            byDefinition = summary.ByDefinition
+                .Select(d => new { definitionId = d.DefinitionId, definitionName = d.DefinitionName, count = d.Count })
+                .ToList(),
+        });
+    }
+
     // ─── Projections / helpers ────────────────────────────────────────────
+
+    /// <summary>
+    /// Parse an ISO-8601 query string to a UTC-kind <see cref="DateTime"/>;
+    /// null / blank / unparseable → null (no window bound). A trailing 'Z' or a
+    /// naive value is treated as UTC so the window is host-timezone independent.
+    /// </summary>
+    private static DateTime? ParseUtc(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return DateTime.TryParse(
+            value,
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal
+                | System.Globalization.DateTimeStyles.AdjustToUniversal,
+            out var parsed)
+            ? parsed
+            : null;
+    }
 
     private static object ToRunSummary(WorkflowInstance i) => new
     {
