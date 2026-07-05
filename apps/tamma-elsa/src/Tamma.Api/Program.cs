@@ -2692,6 +2692,19 @@ engine.MapPost("/platform-events", EngineEndpoints.AppendPlatformEvents)
 // from the TS contract.
 engine.MapGet("/agent-available", EngineEndpoints.AgentAvailable);
 
+// ── User dashboard: Repos & Workflow Runs (Story 21-4) ──
+// Tenant-facing read surface behind the SPA's /repos + /runs destinations.
+// Tenant is resolved strictly from ITenantContext inside each handler (no
+// path/body tenant → no IDOR); a null/empty tenant fails closed with
+// 404 no_active_tenant (mirrors the Story 23-6 / #283 diagnostics fix). All
+// three are member-level reads over data that already exists (connected
+// installations + the DCB run event stream); per-run cost is the tenant's OWN
+// recorded spend (no platform margin). Kept out of the health region so the
+// concurrent System Health work (#277) does not conflict.
+app.MapGet("/api/v1/repos", ReposRunsEndpoints.ListRepos).RequireAuthorization("MemberAccess");
+app.MapGet("/api/v1/runs", ReposRunsEndpoints.ListRuns).RequireAuthorization("MemberAccess");
+app.MapGet("/api/v1/runs/{runId:guid}", ReposRunsEndpoints.GetRunDetail).RequireAuthorization("MemberAccess");
+
 // ── Workflows ──
 var workflows = app.MapGroup("/api/workflows").RequireAuthorization("WorkflowsView");
 workflows.MapPost("/definitions", WorkflowEndpoints.CreateDefinition).RequireAuthorization("WorkflowsManage");

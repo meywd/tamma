@@ -30,6 +30,15 @@ const MEMBER_NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    // Story 21-4: tenant-facing Repos & Workflow Runs. Member-visible — the
+    // API scopes every read to the caller's tenant.
+    label: 'Workspace',
+    items: [
+      { to: '/repos', label: 'Repositories' },
+      { to: '/runs', label: 'Workflow Runs' },
+    ],
+  },
+  {
     // Story 18-8: tenant-admin user-mgmt UI. Visible to all members; the
     // TenantAdminGuard renders a friendly 403 if the user lacks admin/
     // owner role inside their active tenant.
