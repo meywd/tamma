@@ -277,6 +277,132 @@ public sealed class DiagnosticsService : IDiagnosticsService
     }
 
     /// <inheritdoc />
+    public async Task<ProviderDiagnosticsDeepReport> GetDeepReportAsync(
+        Guid? tenantId,
+        DateTime from,
+        DateTime to,
+        string? providerKey,
+        CancellationToken ct = default)
+    {
+        if (to <= from)
+        {
+            return new ProviderDiagnosticsDeepReport(
+                from, to, Array.Empty<ProviderDiagnosticSummary>(), 0, 0, 0, 0m);
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IDiagnosticsRepository>();
+        var rows = await repo.FetchDetailAsync(from, to, tenantId, providerKey);
+
+        var summaries = rows
+            .GroupBy(r => r.ProviderKey)
+            .Select(BuildProviderSummary)
+            .OrderByDescending(s => s.TotalCalls)
+            .ThenBy(s => s.ProviderKey, StringComparer.Ordinal)
+            .ToList();
+
+        long totalCalls = summaries.Sum(s => s.TotalCalls);
+        long totalErrors = summaries.Sum(s => s.FailureCount);
+        long totalTokens = summaries.Sum(s => s.TotalTokens);
+        decimal totalCost = summaries.Sum(s => s.TotalCost);
+
+        return new ProviderDiagnosticsDeepReport(
+            From: from,
+            To: to,
+            Providers: summaries,
+            TotalCalls: totalCalls,
+            TotalErrors: totalErrors,
+            TotalTokens: totalTokens,
+            TotalCost: totalCost);
+    }
+
+    private static ProviderDiagnosticSummary BuildProviderSummary(
+        IGrouping<string, DiagnosticsDetailRow> group)
+    {
+        var rows = group.ToList();
+        var totalCalls = (long)rows.Count;
+        var successCount = (long)rows.Count(r => r.Success);
+        var failureCount = totalCalls - successCount;
+        var successRate = totalCalls > 0 ? (double)successCount / totalCalls : 0.0;
+        var errorRate = totalCalls > 0 ? (double)failureCount / totalCalls : 0.0;
+
+        var durations = rows.Select(r => r.RequestDurationMs).OrderBy(v => v).ToList();
+        var latency = new LatencyPercentiles(
+            P50: Percentile(durations, 50),
+            P95: Percentile(durations, 95),
+            P99: Percentile(durations, 99),
+            Max: durations.Count > 0 ? durations[^1] : 0.0,
+            Avg: durations.Count > 0 ? durations.Average() : 0.0);
+
+        var totalTokens = rows.Sum(r => (long)r.TokensUsed);
+        var inputTokens = rows.Sum(r => (long)r.InputTokens);
+        var outputTokens = rows.Sum(r => (long)r.OutputTokens);
+        var totalCost = rows.Sum(r => r.Cost);
+
+        // Error-class breakdown — only failed calls, grouped by ErrorCode.
+        var errors = rows
+            .Where(r => !r.Success)
+            .GroupBy(r => string.IsNullOrWhiteSpace(r.ErrorCode) ? "unknown" : r.ErrorCode!)
+            .Select(g => new { Key = g.Key, Count = (long)g.Count() })
+            .OrderByDescending(e => e.Count)
+            .ThenBy(e => e.Key, StringComparer.Ordinal)
+            .Select(e => new ProviderErrorClass(
+                ErrorClass: e.Key,
+                Count: e.Count,
+                Share: failureCount > 0 ? (double)e.Count / failureCount : 0.0))
+            .ToList();
+
+        // Per-model usage — availability + cost comparison.
+        var models = rows
+            .GroupBy(r => string.IsNullOrWhiteSpace(r.Model) ? "unknown" : r.Model!)
+            .Select(g =>
+            {
+                var mRows = g.ToList();
+                var mCalls = (long)mRows.Count;
+                var mSuccess = (long)mRows.Count(r => r.Success);
+                return new ProviderModelUsage(
+                    Model: g.Key,
+                    TotalCalls: mCalls,
+                    SuccessCount: mSuccess,
+                    SuccessRate: mCalls > 0 ? (double)mSuccess / mCalls : 0.0,
+                    TotalCost: mRows.Sum(r => r.Cost),
+                    TotalTokens: mRows.Sum(r => (long)r.TokensUsed),
+                    AvgLatencyMs: mRows.Count > 0 ? mRows.Average(r => r.RequestDurationMs) : 0.0);
+            })
+            .OrderByDescending(m => m.TotalCalls)
+            .ThenBy(m => m.Model, StringComparer.Ordinal)
+            .ToList();
+
+        return new ProviderDiagnosticSummary(
+            ProviderKey: group.Key,
+            TotalCalls: totalCalls,
+            SuccessCount: successCount,
+            FailureCount: failureCount,
+            SuccessRate: successRate,
+            ErrorRate: errorRate,
+            Latency: latency,
+            TotalTokens: totalTokens,
+            InputTokens: inputTokens,
+            OutputTokens: outputTokens,
+            TotalCost: totalCost,
+            Errors: errors,
+            Models: models);
+    }
+
+    /// <summary>
+    /// Nearest-rank percentile over an ascending-sorted list of values.
+    /// Returns 0 for an empty list. <paramref name="p"/> is in [0, 100].
+    /// </summary>
+    private static double Percentile(IReadOnlyList<double> sortedAscending, double p)
+    {
+        if (sortedAscending.Count == 0) return 0.0;
+        if (sortedAscending.Count == 1) return sortedAscending[0];
+        var rank = (int)Math.Ceiling(p / 100.0 * sortedAscending.Count);
+        var index = Math.Clamp(rank - 1, 0, sortedAscending.Count - 1);
+        return sortedAscending[index];
+    }
+
+    /// <inheritdoc />
     public async Task<BudgetStatus> GetBudgetAsync(Guid accountId, CancellationToken ct = default)
     {
         var cfg = _budgetProvider.GetConfig(accountId);

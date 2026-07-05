@@ -2618,6 +2618,10 @@ providers.MapPost("/chain/resolve", ProviderEndpoints.ResolveChain);
 providers.MapGet("/diagnostics", ProviderEndpoints.GetDiagnostics);
 providers.MapGet("/diagnostics/query", ProviderEndpoints.QueryDiagnostics);
 providers.MapGet("/diagnostics/report", ProviderEndpoints.GetReport);
+// Story 23-6 — deep provider diagnostics (latency percentiles / error classes /
+// token+cost analytics / per-model usage). Tenant-scoped read, inherits the
+// group's SettingsView gate. No platform margin exposed (Story 34-5 rule).
+providers.MapGet("/diagnostics/deep", ProviderEndpoints.GetDeepDiagnostics);
 providers.MapGet("/diagnostics/budget/{accountId}", ProviderEndpoints.GetBudget);
 providers.MapPut("/diagnostics/budget/{accountId}", ProviderEndpoints.UpdateBudget)
     .RequireAuthorization("SettingsManage").RequireRateLimiting("ConfigWrite");

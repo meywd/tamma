@@ -364,6 +364,30 @@ public static class ProviderEndpoints
         return Results.Ok(report);
     }
 
+    /// <summary>
+    /// Story 23-6 — deep provider diagnostics: per-provider latency percentiles
+    /// (p50/p95/p99), error-class breakdown, token/cost analytics and per-model
+    /// usage over a time range. Tenant-scoped via the ambient
+    /// <see cref="ITenantContext"/> — a tenant sees only its own diagnostics and
+    /// its own recorded spend, never a platform margin (Story 34-5 rule). A
+    /// cross-tenant platform view lives on the <c>/api/admin/analytics/*</c>
+    /// (PlatformOwnerAccess) surface, not here.
+    /// </summary>
+    public static async Task<IResult> GetDeepDiagnostics(
+        [FromServices] IDiagnosticsService service,
+        [FromServices] ITenantContext tc,
+        DateTime? from,
+        DateTime? to,
+        string? providerKey)
+    {
+        var fromDt = from ?? DateTime.UtcNow.AddDays(-1);
+        var toDt = to ?? DateTime.UtcNow;
+
+        var report = await service.GetDeepReportAsync(
+            tc.TenantId, fromDt, toDt, providerKey);
+        return Results.Ok(report);
+    }
+
     private static bool TryParseGroupBy(string raw, out DimensionGroup result)
     {
         switch (raw.Trim().ToLowerInvariant())

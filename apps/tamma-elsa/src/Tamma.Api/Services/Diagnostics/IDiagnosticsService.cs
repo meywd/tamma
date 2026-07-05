@@ -43,6 +43,22 @@ public interface IDiagnosticsService
         DimensionGroup groupBy,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Story 23-6 — build the deep per-provider diagnostics report over the
+    /// half-open range <c>[from, to)</c>: latency percentiles (p50/p95/p99),
+    /// error-class breakdown, token/cost analytics and per-model usage. Scoped
+    /// to <paramref name="tenantId"/> (the caller's own tenant); a
+    /// <paramref name="providerKey"/> optionally narrows to one provider. The
+    /// report exposes only the tenant's own usage/spend — never a platform
+    /// margin (Story 34-5 estimate-leak rule).
+    /// </summary>
+    Task<ProviderDiagnosticsDeepReport> GetDeepReportAsync(
+        Guid? tenantId,
+        DateTime from,
+        DateTime to,
+        string? providerKey,
+        CancellationToken ct = default);
+
     /// <summary>Compute current-period budget status for the given account (tenant).</summary>
     Task<BudgetStatus> GetBudgetAsync(Guid accountId, CancellationToken ct = default);
 

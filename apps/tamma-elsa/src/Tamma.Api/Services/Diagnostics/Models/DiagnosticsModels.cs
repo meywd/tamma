@@ -162,3 +162,115 @@ public sealed record DimensionReport(
     DateTime To,
     DimensionGroup GroupBy,
     IReadOnlyList<DimensionBucket> Groups);
+
+// ──────────────────────────────────────────────────────────────────────────
+// Story 23-6 — Provider Diagnostics (Deep). Aggregations over the EXISTING
+// per-tenant ProviderDiagnostic table (no new column / table). All figures are
+// the calling tenant's OWN recorded usage/spend — the same tenant-scoped
+// `Cost` already surfaced by the /diagnostics/report + /query endpoints. This
+// report deliberately carries NO platform margin / markup / cost-basis field
+// (mirrors the Story 34-5 estimate-leak rule): a tenant sees its usage and its
+// own spend, never platform-internal economics.
+// ──────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Latency percentile summary for a set of calls (all in milliseconds).
+/// Percentiles use the nearest-rank method over the sorted duration list.
+/// </summary>
+/// <param name="P50">Median request duration (ms).</param>
+/// <param name="P95">95th percentile request duration (ms).</param>
+/// <param name="P99">99th percentile request duration (ms).</param>
+/// <param name="Max">Maximum observed request duration (ms).</param>
+/// <param name="Avg">Mean request duration (ms).</param>
+public sealed record LatencyPercentiles(
+    double P50,
+    double P95,
+    double P99,
+    double Max,
+    double Avg);
+
+/// <summary>
+/// One error-class row grouped by <see cref="ProviderDiagnostic.ErrorCode"/>
+/// (falls back to <c>"unknown"</c> when the provider returned no structured
+/// code). Only failed calls contribute.
+/// </summary>
+/// <param name="ErrorClass">Structured error code (e.g. <c>rate_limit</c>) or <c>"unknown"</c>.</param>
+/// <param name="Count">Number of failed calls in this class.</param>
+/// <param name="Share">Fraction (0..1) of this provider's total errors in this class.</param>
+public sealed record ProviderErrorClass(
+    string ErrorClass,
+    long Count,
+    double Share);
+
+/// <summary>
+/// Per-model usage inside a provider — powers the "model availability + cost
+/// comparison" view. <c>Cost</c>/<c>Tokens</c> are the tenant's own recorded
+/// spend, never a platform margin.
+/// </summary>
+/// <param name="Model">Model name (e.g. <c>claude-sonnet-4</c>) or <c>"unknown"</c>.</param>
+/// <param name="TotalCalls">Calls issued against this model.</param>
+/// <param name="SuccessCount">Subset that succeeded.</param>
+/// <param name="SuccessRate">Fraction (0..1) of successful calls.</param>
+/// <param name="TotalCost">Sum of <c>Cost</c> for this model (USD).</param>
+/// <param name="TotalTokens">Sum of <c>TokensUsed</c> for this model.</param>
+/// <param name="AvgLatencyMs">Average request duration (ms).</param>
+public sealed record ProviderModelUsage(
+    string Model,
+    long TotalCalls,
+    long SuccessCount,
+    double SuccessRate,
+    decimal TotalCost,
+    long TotalTokens,
+    double AvgLatencyMs);
+
+/// <summary>
+/// Deep per-provider diagnostics summary: latency percentiles, error-class
+/// breakdown, token/cost analytics, per-model usage and success/failure rates.
+/// </summary>
+/// <param name="ProviderKey">Provider key (e.g. <c>anthropic-claude</c>).</param>
+/// <param name="TotalCalls">Total calls in the window.</param>
+/// <param name="SuccessCount">Successful calls.</param>
+/// <param name="FailureCount">Failed calls.</param>
+/// <param name="SuccessRate">Fraction (0..1) of successful calls.</param>
+/// <param name="ErrorRate">Fraction (0..1) of failed calls.</param>
+/// <param name="Latency">Latency percentile summary (ms).</param>
+/// <param name="TotalTokens">Sum of <c>TokensUsed</c>.</param>
+/// <param name="InputTokens">Sum of <c>InputTokens</c>.</param>
+/// <param name="OutputTokens">Sum of <c>OutputTokens</c>.</param>
+/// <param name="TotalCost">Sum of <c>Cost</c> (USD) — the tenant's own spend.</param>
+/// <param name="Errors">Error-class breakdown (descending by count).</param>
+/// <param name="Models">Per-model usage (descending by call count).</param>
+public sealed record ProviderDiagnosticSummary(
+    string ProviderKey,
+    long TotalCalls,
+    long SuccessCount,
+    long FailureCount,
+    double SuccessRate,
+    double ErrorRate,
+    LatencyPercentiles Latency,
+    long TotalTokens,
+    long InputTokens,
+    long OutputTokens,
+    decimal TotalCost,
+    IReadOnlyList<ProviderErrorClass> Errors,
+    IReadOnlyList<ProviderModelUsage> Models);
+
+/// <summary>
+/// Full deep provider-diagnostics report over the half-open range
+/// <c>[from, to)</c>. Ordered by call volume (busiest provider first).
+/// </summary>
+/// <param name="From">Inclusive start of the range (UTC).</param>
+/// <param name="To">Exclusive end of the range (UTC).</param>
+/// <param name="Providers">Per-provider summaries (descending by call count).</param>
+/// <param name="TotalCalls">Grand total calls across all providers.</param>
+/// <param name="TotalErrors">Grand total failed calls across all providers.</param>
+/// <param name="TotalTokens">Grand total tokens across all providers.</param>
+/// <param name="TotalCost">Grand total spend across all providers (USD).</param>
+public sealed record ProviderDiagnosticsDeepReport(
+    DateTime From,
+    DateTime To,
+    IReadOnlyList<ProviderDiagnosticSummary> Providers,
+    long TotalCalls,
+    long TotalErrors,
+    long TotalTokens,
+    decimal TotalCost);

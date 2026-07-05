@@ -185,6 +185,62 @@ public class DiagnosticsRepository(
         return grouped;
     }
 
+    /// <inheritdoc />
+    public async Task<List<DiagnosticsDetailRow>> FetchDetailAsync(
+        DateTime from,
+        DateTime to,
+        Guid? tenantId,
+        string? providerKey)
+    {
+        var fromUtc = DateTime.SpecifyKind(from, DateTimeKind.Utc);
+        var toUtc = DateTime.SpecifyKind(to, DateTimeKind.Utc);
+
+        var rows = new List<DiagnosticsDetailRow>();
+        if (tenantId is Guid tid)
+        {
+            await using var db = await tenantDbFactory.CreateAsync(tid);
+            rows.AddRange(await DetailQuery(db, tid, fromUtc, toUtc, providerKey).ToListAsync());
+        }
+        else
+        {
+            var tenantIds = await ActiveTenantIdsAsync(default);
+            foreach (var t in tenantIds)
+            {
+                await using var db = await tenantDbFactory.CreateAsync(t);
+                rows.AddRange(await DetailQuery(db, t, fromUtc, toUtc, providerKey).ToListAsync());
+            }
+        }
+        return rows;
+    }
+
+    private static IQueryable<DiagnosticsDetailRow> DetailQuery(
+        TenantDbContext db,
+        Guid tid,
+        DateTime fromUtc,
+        DateTime toUtc,
+        string? providerKey)
+    {
+        // Wave A.5 transitional shared-DB phase — explicit tenant predicate.
+        var query = db.ProviderDiagnostics
+            .Where(d => d.TenantId == tid
+                        && d.CreatedAt >= fromUtc
+                        && d.CreatedAt < toUtc);
+        if (!string.IsNullOrEmpty(providerKey))
+            query = query.Where(d => d.ProviderKey == providerKey);
+
+        // Columnar projection — only the fields the deep report needs.
+        return query.Select(d => new DiagnosticsDetailRow(
+            d.ProviderKey,
+            d.Model,
+            d.RequestDurationMs,
+            d.Success,
+            d.ErrorCode,
+            d.Cost,
+            d.InputTokens,
+            d.OutputTokens,
+            d.TokensUsed));
+    }
+
     private static async Task<(List<ProviderDiagnostic> Items, int Total)> PageAsync(
         IQueryable<ProviderDiagnostic> baseQuery,
         string? providerKey,
