@@ -161,4 +161,59 @@ public class WorkflowRepository(
             .ToListAsync();
         return (instances, total);
     }
+
+    public async Task<WorkflowInstanceSummary> SummarizeInstancesAsync(
+        Guid tenantId, DateTime? from, DateTime? to)
+    {
+        // Structurally tenant-scoped: the tenant db + the TenantId equality both
+        // fence the aggregate to this tenant's rows. Callers pass a concrete
+        // tenant id (the endpoint fails closed on a null/empty ambient tenant
+        // BEFORE reaching here), so there is no cross-tenant fan-out.
+        await using var db = await tenantDbFactory.CreateAsync(tenantId);
+        var query = db.WorkflowInstances.Where(i => i.TenantId == tenantId);
+        if (from.HasValue)
+            query = query.Where(i => i.CreatedAt >= from.Value);
+        if (to.HasValue)
+            query = query.Where(i => i.CreatedAt < to.Value);
+
+        // Per-status counts: a single GROUP BY status COUNT(*) in SQL. The record
+        // is materialised in memory (anonymous SQL projection → record) so EF only
+        // has to translate the group/count, never a record constructor.
+        var byStatusRaw = await query
+            .GroupBy(i => i.Status)
+            .Select(g => new { Status = g.Key, Count = g.Count() })
+            .ToListAsync();
+
+        // Per-definition counts: GROUP BY definition_id COUNT(*). Names are joined
+        // in memory from the tenant's definition list (a small set) so the SQL stays
+        // a plain grouped count and there is no string[]/array-parameter predicate.
+        var byDefinitionRaw = await query
+            .GroupBy(i => i.DefinitionId)
+            .Select(g => new { DefinitionId = g.Key, Count = g.Count() })
+            .ToListAsync();
+
+        var definitionNames = await db.WorkflowDefinitions
+            .Where(d => d.TenantId == tenantId)
+            .Select(d => new { d.Id, d.Name })
+            .ToListAsync();
+        var nameById = definitionNames.ToDictionary(d => d.Id, d => d.Name);
+
+        var byStatus = byStatusRaw
+            .Select(s => new WorkflowStatusCount(s.Status, s.Count))
+            .OrderByDescending(s => s.Count)
+            .ToList();
+
+        var byDefinition = byDefinitionRaw
+            .Select(d => new WorkflowDefinitionCount(
+                d.DefinitionId,
+                nameById.TryGetValue(d.DefinitionId, out var name) && !string.IsNullOrWhiteSpace(name)
+                    ? name
+                    : d.DefinitionId.ToString(),
+                d.Count))
+            .OrderByDescending(d => d.Count)
+            .ToList();
+
+        var total = byStatusRaw.Sum(s => s.Count);
+        return new WorkflowInstanceSummary(total, byStatus, byDefinition);
+    }
 }

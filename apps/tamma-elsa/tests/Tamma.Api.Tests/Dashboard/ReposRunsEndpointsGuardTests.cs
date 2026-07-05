@@ -148,6 +148,95 @@ public class ReposRunsEndpointsGuardTests
         repo.RequestedPage.Should().Be(3);
     }
 
+    // ── /api/v1/runs/summary (Story 23-5 Workflow Monitor) ────────────────
+
+    [Test]
+    public async Task GetRunsSummary_NullTenant_FailsClosed_WithoutCallingRepo()
+    {
+        var repo = new RecordingWorkflowRepo();
+
+        var result = await ReposRunsEndpoints.GetRunsSummary(
+            repo, new FakeTenantContext(null), from: null, to: null);
+
+        StatusOf(result).Should().Be(404);
+        ErrorOf(result).Should().Be("no_active_tenant");
+        repo.SummaryCalled.Should().BeFalse("the guard must reject before aggregating instances");
+    }
+
+    [Test]
+    public async Task GetRunsSummary_EmptyTenant_FailsClosed_WithoutCallingRepo()
+    {
+        var repo = new RecordingWorkflowRepo();
+
+        var result = await ReposRunsEndpoints.GetRunsSummary(
+            repo, new FakeTenantContext(Guid.Empty), from: null, to: null);
+
+        StatusOf(result).Should().Be(404);
+        ErrorOf(result).Should().Be("no_active_tenant");
+        repo.SummaryCalled.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task GetRunsSummary_ConcreteTenant_ProjectsCountsAndParsesWindowAsUtc()
+    {
+        var tenant = Guid.NewGuid();
+        var defId = Guid.NewGuid();
+        var repo = new RecordingWorkflowRepo
+        {
+            Summary = new WorkflowInstanceSummary(
+                Total: 3,
+                ByStatus: new List<WorkflowStatusCount>
+                {
+                    new("completed", 2),
+                    new("failed", 1),
+                },
+                ByDefinition: new List<WorkflowDefinitionCount>
+                {
+                    new(defId, "code-workflow", 3),
+                }),
+        };
+
+        var result = await ReposRunsEndpoints.GetRunsSummary(
+            repo, new FakeTenantContext(tenant),
+            from: "2026-04-16T00:00:00.000Z", to: "2026-04-17T00:00:00.000Z");
+
+        StatusOf(result).Should().Be(200);
+        repo.RequestedTenant.Should().Be(tenant);
+        // A trailing-Z window is parsed to UTC-kind (host-timezone independent).
+        repo.RequestedFrom.Should().Be(new DateTime(2026, 4, 16, 0, 0, 0, DateTimeKind.Utc));
+        repo.RequestedFrom!.Value.Kind.Should().Be(DateTimeKind.Utc);
+        repo.RequestedTo.Should().Be(new DateTime(2026, 4, 17, 0, 0, 0, DateTimeKind.Utc));
+
+        var root = await CaptureJson(result);
+        root.GetProperty("total").GetInt32().Should().Be(3);
+        var byStatus = root.GetProperty("byStatus");
+        byStatus.GetArrayLength().Should().Be(2);
+        byStatus[0].GetProperty("status").GetString().Should().Be("completed");
+        byStatus[0].GetProperty("count").GetInt32().Should().Be(2);
+        var byDef = root.GetProperty("byDefinition");
+        byDef[0].GetProperty("definitionId").GetGuid().Should().Be(defId);
+        byDef[0].GetProperty("definitionName").GetString().Should().Be("code-workflow");
+        byDef[0].GetProperty("count").GetInt32().Should().Be(3);
+        // No economics leak: the summary carries counts only — never a cost field.
+        root.TryGetProperty("totalCostUsd", out _).Should().BeFalse();
+        root.TryGetProperty("costUsd", out _).Should().BeFalse();
+    }
+
+    [Test]
+    public async Task GetRunsSummary_UnparseableWindow_IsIgnored_NoBound()
+    {
+        var tenant = Guid.NewGuid();
+        var repo = new RecordingWorkflowRepo();
+
+        var result = await ReposRunsEndpoints.GetRunsSummary(
+            repo, new FakeTenantContext(tenant), from: "not-a-date", to: "");
+
+        StatusOf(result).Should().Be(200);
+        repo.SummaryCalled.Should().BeTrue();
+        repo.RequestedFrom.Should().BeNull("an unparseable from is treated as no lower bound");
+        repo.RequestedTo.Should().BeNull();
+    }
+
     // ── /api/v1/runs/{runId} ──────────────────────────────────────────────
 
     [Test]
@@ -362,11 +451,15 @@ public class ReposRunsEndpointsGuardTests
     {
         public bool ListCalled { get; private set; }
         public bool GetCalled { get; private set; }
+        public bool SummaryCalled { get; private set; }
         public Guid? RequestedTenant { get; private set; }
+        public DateTime? RequestedFrom { get; private set; }
+        public DateTime? RequestedTo { get; private set; }
         public int RequestedPage { get; private set; }
         public int RequestedPageSize { get; private set; }
         public List<WorkflowInstance> Instances { get; } = new();
         public WorkflowInstance? InstanceById { get; set; }
+        public WorkflowInstanceSummary? Summary { get; set; }
 
         public Task<(List<WorkflowInstance> Instances, int Total)> ListInstancesAsync(
             Guid? definitionId, Guid? tenantId, int page, int pageSize)
@@ -376,6 +469,19 @@ public class ReposRunsEndpointsGuardTests
             RequestedPage = page;
             RequestedPageSize = pageSize;
             return Task.FromResult((Instances.ToList(), Instances.Count));
+        }
+
+        public Task<WorkflowInstanceSummary> SummarizeInstancesAsync(
+            Guid tenantId, DateTime? from, DateTime? to)
+        {
+            SummaryCalled = true;
+            RequestedTenant = tenantId;
+            RequestedFrom = from;
+            RequestedTo = to;
+            return Task.FromResult(Summary ?? new WorkflowInstanceSummary(
+                0,
+                new List<WorkflowStatusCount>(),
+                new List<WorkflowDefinitionCount>()));
         }
 
         public Task<WorkflowInstance?> GetInstanceAsync(Guid id)

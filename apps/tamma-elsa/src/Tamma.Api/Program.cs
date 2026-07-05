@@ -2719,6 +2719,10 @@ engine.MapGet("/agent-available", EngineEndpoints.AgentAvailable);
 // concurrent System Health work (#277) does not conflict.
 app.MapGet("/api/v1/repos", ReposRunsEndpoints.ListRepos).RequireAuthorization("MemberAccess");
 app.MapGet("/api/v1/runs", ReposRunsEndpoints.ListRuns).RequireAuthorization("MemberAccess");
+// Story 23-5 Workflow Monitor: windowed per-status/per-definition instance counts
+// (literal segment — never collides with the {runId:guid} route below). Counts
+// only; same fail-closed tenant scoping, no economics.
+app.MapGet("/api/v1/runs/summary", ReposRunsEndpoints.GetRunsSummary).RequireAuthorization("MemberAccess");
 app.MapGet("/api/v1/runs/{runId:guid}", ReposRunsEndpoints.GetRunDetail).RequireAuthorization("MemberAccess");
 
 // ── Workflows ──
