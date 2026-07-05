@@ -100,6 +100,23 @@ public interface IElsaWorkflowService
     /// </summary>
     Task<MergeApprovalResumeResult> ResumeClarifyingQuestionsAsync(
         Guid sessionId, string? tenantId, string answers, string? resolver);
+
+    /// <summary>
+    /// Story 3.7 — resume the design-proposal workflow's human review gate. Forwards to the
+    /// engine's in-process resume endpoint (which owns <c>IBookmarkStore</c>/
+    /// <c>IWorkflowRuntime</c>), which looks up the tenant+session-scoped
+    /// <c>design-approval-{tenant}-{session}</c> bookmark and runs the owning instance with
+    /// <c>{Approved, Feedback}</c> injected as input (the gate branches Approved/Rejected off
+    /// the flag). A 404 (no wait suspended) is surfaced as
+    /// <see cref="MergeApprovalResumeResult.GateNotFound"/> rather than thrown.
+    ///
+    /// <para>SECURITY — the bookmark name folds in <paramref name="tenantId"/> (the caller's
+    /// ambient tenant, derived server-side by <c>AdlEndpoints</c>), so a caller can only ever
+    /// resolve a gate in its OWN tenant (cross-tenant → 404). <paramref name="reviewer"/> is
+    /// the server-derived acting identity (I2), logged by the engine for the audit trail.</para>
+    /// </summary>
+    Task<MergeApprovalResumeResult> ResumeDesignApprovalAsync(
+        Guid sessionId, string? tenantId, bool approved, string? feedback, string? reviewer);
 }
 
 /// <summary>Outcome of a merge-approval (or deploy-approval) gate resume.</summary>
