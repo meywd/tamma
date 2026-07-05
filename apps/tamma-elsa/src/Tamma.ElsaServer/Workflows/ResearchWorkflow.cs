@@ -30,7 +30,7 @@ namespace Tamma.ElsaServer.Workflows;
 ///      (Story 7-1F multi-role scan) — same reuse as <see cref="AssessmentWorkflow"/>
 ///   4. Emit RESEARCH.CONTEXT_GATHERED
 ///   5. Synthesize a ranked research report via DispatchWorkflow("llm-call")
-///      role=product_owner / action=summarize-stakeholder
+///      role=product_owner / action=research
 ///   6. Parse the synthesis fail-closed (empty/unparseable → error terminal)
 ///   7a. On success: emit RESEARCH.COMPLETED, set outputs (report, confidence, findings)
 ///   7b. On failure: emit RESEARCH.FAILED (LOUD) and route to the ResearchError terminal
@@ -46,13 +46,13 @@ namespace Tamma.ElsaServer.Workflows;
 /// proceeds with a fabricated report. Prompt resolution is tenant→system→error (the
 /// <c>llm-call</c> registry never falls back to an empty/plain prompt).
 ///
-/// NOTE (taxonomy): Tamma's action taxonomy has no dedicated <c>research</c>/<c>investigate</c>
-/// action (the legacy TS <c>researcher</c> role maps onto <c>product_owner</c> in
-/// <c>RolePhaseMap.LegacyRoleAliases</c>). The synthesis therefore dispatches the closest
-/// eligible pair, <c>product_owner</c> / <c>summarize-stakeholder</c>, so the workflow is
-/// taxonomy-drift-clean and prompt resolution works. A future story that adds a dedicated
-/// research action + a structured-findings prompt template (a cross-cutting taxonomy change)
-/// only needs to swap the action constant below.
+/// NOTE (taxonomy): the synthesis dispatches the dedicated <c>(product_owner, research)</c>
+/// pair (Story 3.4). The <c>research</c> action is a first-class member of the
+/// <see cref="AgentAction"/> taxonomy and is eligible for <c>product_owner</c> in
+/// <c>RolePhaseMap</c> (consistent with the legacy TS <c>researcher</c> role aliasing onto
+/// <c>product_owner</c>). Its system-default prompt template (<c>SystemPrompts.ResearchBody</c>)
+/// emits the ranked-findings JSON <see cref="ResearchParsing"/> parses, so the happy path
+/// produces a real <c>RESEARCH.COMPLETED</c> report rather than failing closed.
 /// </summary>
 public class ResearchWorkflow : WorkflowBase
 {
@@ -182,16 +182,16 @@ public class ResearchWorkflow : WorkflowBase
             WorkflowDefinitionId = new("llm-call"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                // No dedicated research action exists; product_owner/summarize-stakeholder
-                // is the closest eligible pair (see class remarks). tenant→system→error.
+                // Dedicated research action (Story 3.4): (product_owner, research) resolves the
+                // structured-findings prompt template that yields the ranked-findings JSON
+                // ResearchParsing recovers. Prompt resolution is tenant→system→error.
                 ["role"]     = AgentRole.ProductOwner.ToWire(),
-                ["action"]   = AgentAction.SummarizeStakeholder.ToWire(),
+                ["action"]   = AgentAction.Research.ToWire(),
                 ["tenantId"] = tenantId.Get(ctx),
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["workItemJson"] = BuildWorkItem(topic.Get(ctx), workItemJson.Get(ctx), issueId.Get(ctx)),
                     ["findings"]     = researchContext.Get(ctx) ?? "",
-                    ["audience"]     = "engineering-team",
                 },
                 ["enableTools"] = false,
             }),

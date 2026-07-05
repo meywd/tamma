@@ -202,6 +202,47 @@ public class SystemPromptsTests
     }
 
     // ------------------------------------------------------------------
+    // Story 3.4 — the research cell under product_owner. The ResearchWorkflow
+    // dispatches (product_owner, research); resolution is tenant→system→error, so
+    // the system default MUST be a real, non-empty body that instructs the exact
+    // ranked-findings JSON schema ResearchParsing.ParseReport recovers.
+    // ------------------------------------------------------------------
+
+    [Test]
+    public void ResearchAction_ExistsInTaxonomy_ProductOwner()
+    {
+        var research = SystemPrompts.GetRoleAction("product_owner", "research");
+
+        research.Should().NotBeNull(
+            "research must be in product_owner's RolePhaseMap action set with a non-empty " +
+            "SystemPrompts template (Story 3.4 taxonomy)");
+
+        research!.Template.Should().NotBeNullOrWhiteSpace(
+            "research template must not be empty (resolution is tenant→system→error)");
+
+        research.Variables.Should().Contain("workItemJson")
+            .And.Contain("findings",
+                "research must declare the variables ResearchWorkflow passes in the llm-call dispatch");
+    }
+
+    [Test]
+    public void ResearchAction_Template_DocumentsTheParserSchema()
+    {
+        // The body must instruct the EXACT JSON keys ResearchParsing.ParseReport reads:
+        // summary + findings[] {title, summary, relevance, confidence, citations} + overallConfidence.
+        var research = SystemPrompts.GetRoleAction("product_owner", "research");
+
+        research.Should().NotBeNull();
+        var body = research!.Template;
+        body.Should().Contain("\"summary\"");
+        body.Should().Contain("\"findings\"");
+        body.Should().Contain("\"relevance\"");
+        body.Should().Contain("\"confidence\"");
+        body.Should().Contain("\"citations\"");
+        body.Should().Contain("\"overallConfidence\"");
+    }
+
+    // ------------------------------------------------------------------
     // Audit prompts/001 — role-tailored review-lens shape is retained on the
     // review-family cells. The PlanReview body is used by the per-role
     // plan-review lens actions; CodeReview by the code-review lens actions.
