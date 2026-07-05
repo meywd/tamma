@@ -43,9 +43,9 @@ Dashboards hit the event query API from Epic 4 (`GET /api/v1/events?...`), the m
 | Alert system | Threshold-based alerts → Slack/email/webhook | planned | In progress (5-6) |
 | Feedback collection | In-app feedback form → events + GitHub issue sync | planned | In progress (5-7) |
 | Integration test suite | End-to-end smoke across CLI + server + engine | `packages/cli/src/cli.integration.test.ts` + workflow smoke | Done (5-8) |
-| Installation & setup docs | npm / Docker / binary install guides | [Wiki: Deployment](Deployment) | Drafted (5-9a) |
-| Usage & config docs | CLI commands, config file, provider/platform setup | `CLAUDE.md`, [Wiki: Architecture](Architecture) | Drafted (5-9b) |
-| API reference | REST + SSE + webhook reference | Backlog (5-9c) | Backlog |
+| Installation & setup docs | Docker Compose stack, `.env`, health checks, VPS/qa-tag deploy | [Wiki: Installation](Installation) | Done (5-9a) |
+| Usage & config docs | CLI commands, operating modes, `.tamma/config.json`, prompts, providers, BYOK | [Wiki: Usage & Configuration](Usage-and-Configuration) | Done (5-9b) |
+| API reference | REST surface, RBAC, SSE, webhooks, DCB event catalog | [Wiki: API Reference](API-Reference) | Done (5-9c) |
 | Documentation website | Searchable site | `apps/wiki-site/` — live at wiki.tamma.dev | In progress (5-9d) |
 | Video walkthrough | 5-10 min demo | Backlog (5-9e) | Backlog |
 | Alpha release prep | Release checklist + bundle | `.github/workflows/release.yml` | Done (5-10) |
@@ -187,12 +187,13 @@ TammaActivity       EventRepository    Pino Logger   Prometheus    Dashboard (Re
 
 - 5-2 Metrics Collection Infrastructure — Prometheus client choice pending (`prom-client` TS vs `prometheus-net` C#).
 - 5-4 Dev Velocity Dashboard — depends on 5-2 + 5-5.
-- 5-9a Installation docs, 5-9b Usage docs — first-draft content exists in [Deployment](Deployment) and [Architecture](Architecture); not yet consolidated as a single onboarding flow.
-
 **Backlog:**
 
-- 5-9c API reference — OpenAPI spec generation is planned but no endpoint renders schema yet.
 - 5-9e Video walkthrough — nice-to-have, not blocking alpha.
+
+**Done (this sprint):**
+
+- 5-9a / 5-9b / 5-9c — the documentation trio landed as dedicated wiki pages, re-based off the legacy npm/binary framing onto the current C# Docker/ELSA stack: [Installation](Installation), [Usage & Configuration](Usage-and-Configuration), [API Reference](API-Reference). The API reference is a markdown companion to the Swashbuckle OpenAPI doc (Swagger UI at `/swagger`, Development-only).
 
 **Drift from briefs:**
 

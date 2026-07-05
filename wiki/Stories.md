@@ -141,9 +141,9 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 5-6 | Alert System for Critical Issues | In Progress |
 | 5-7 | Feedback Collection System | In Progress |
 | 5-8 | Integration Testing Suite | Done |
-| 5-9a | Installation & Setup Documentation | Drafted |
-| 5-9b | Usage & Configuration Documentation | Drafted |
-| 5-9c | API Reference Documentation | Backlog |
+| 5-9a | Installation & Setup Documentation | Done — [Installation](Installation) |
+| 5-9b | Usage & Configuration Documentation | Done — [Usage & Configuration](Usage-and-Configuration) |
+| 5-9c | API Reference Documentation | Done — [API Reference](API-Reference) |
 | 5-9d | Full Documentation Website | Backlog |
 | 5-9e | Video Walkthrough | Backlog |
 | 5-10 | Alpha Release Preparation | Done |
