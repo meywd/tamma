@@ -28,6 +28,10 @@ import { LoadingSpinner } from './components/common/LoadingSpinner.js';
 import { LoginPage } from './pages/LoginPage.js';
 import { AccountPage } from './pages/AccountPage.js';
 import { MyApiKeysPage } from './pages/MyApiKeysPage.js';
+// Story 21-4 — tenant-facing Repos & Workflow Runs dashboard pages.
+import { ReposPage } from './pages/repos/ReposPage.js';
+import { RunsPage } from './pages/runs/RunsPage.js';
+import { RunDetailPage } from './pages/runs/RunDetailPage.js';
 import { OrganizationLayout } from './pages/organization/OrganizationLayout.js';
 import { TenantAdminGuard } from './guards/TenantAdminGuard.js';
 // Story 18-4: onboarding wizard. Lives outside AppLayout because new
@@ -95,6 +99,12 @@ export const router = createBrowserRouter([
       { path: '/', element: <Navigate to="/account" replace /> },
       { path: '/account', element: <AccountPage /> },
       { path: '/keys', element: <MyApiKeysPage /> },
+      // Story 21-4 — member-level Repos & Workflow Runs pages. AuthGuard is
+      // applied at the layout above; the API scopes every read to the caller's
+      // tenant (null tenant fails closed 404), so no in-route role guard.
+      { path: '/repos', element: <ReposPage /> },
+      { path: '/runs', element: <RunsPage /> },
+      { path: '/runs/:runId', element: <RunDetailPage /> },
       // Tenant-admin routes (Story 18-8) — gated by TenantAdminGuard which
       // reads the caller's role inside their currently-active tenant from
       // /auth/me, NOT the platform role.
