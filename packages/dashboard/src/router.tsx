@@ -36,6 +36,10 @@ import { TenantAdminGuard } from './guards/TenantAdminGuard.js';
 import { OnboardingPage } from './pages/onboarding/OnboardingPage.js';
 import { OnboardingSuccessPage } from './pages/onboarding/OnboardingSuccessPage.js';
 import { OnboardingErrorPage } from './pages/onboarding/OnboardingErrorPage.js';
+// Epic 23 (Story 23-12) — operator monitoring section. Lazy-loaded pages,
+// each already wrapped in AdminGuard, mounted inside the authenticated
+// AppLayout below.
+import { monitoringRoutes } from './pages/monitoring/index.js';
 
 const AdminLayout = React.lazy(() =>
   import('./pages/admin/AdminLayout.js').then((m) => ({ default: m.AdminLayout })),
@@ -228,6 +232,9 @@ export const router = createBrowserRouter([
           </TenantAdminGuard>
         ),
       },
+      // Epic 23 (Story 23-12) — monitoring section routes (overview + 10 pages).
+      // Each element is already gated by AdminGuard and lazy-loaded.
+      ...monitoringRoutes,
     ],
   },
 ]);
