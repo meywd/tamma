@@ -34,7 +34,7 @@ export class Ranker implements IRanker {
     const chunkMap = new Map<string, RetrievedChunk>();
 
     // Calculate RRF scores for each source
-    for (const [source, chunks] of sourceResults) {
+    for (const [_source, chunks] of sourceResults) {
       // Get weight for this source (default to 1.0 if not specified)
       const weight = 1.0; // Weights are applied during retrieval
 
@@ -107,7 +107,7 @@ export class Ranker implements IRanker {
       let bestMMRScore = -Infinity;
 
       for (let i = 0; i < normalizedChunks.length; i++) {
-        const candidate = normalizedChunks[i];
+        const candidate = normalizedChunks[i]!;
         const relevance = candidate.normalizedScore;
 
         // Calculate max similarity to already selected documents
@@ -131,7 +131,7 @@ export class Ranker implements IRanker {
       }
 
       // Add best candidate to selected
-      const bestChunk = normalizedChunks[bestIdx];
+      const bestChunk = normalizedChunks[bestIdx]!;
       selected.push({
         ...bestChunk,
         fusedScore: bestChunk.fusedScore,

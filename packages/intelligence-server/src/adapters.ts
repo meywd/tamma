@@ -15,6 +15,12 @@
  *     ragPipeline: await createRagPipelineFromEnv(),
  *   };
  *   await startServer({ services: bundle });
+ *
+ * The concrete `createVectorStoreFromEnv` / `createRagPipelineFromEnv` (and the
+ * `buildIntelligenceBundleFromEnv` composition root that `startServer` calls)
+ * are implemented in `./env-composition.ts`, which imports the real ChromaDB /
+ * pgvector providers + OpenAI embedder from `@tamma/intelligence` and bridges
+ * them through the adapters below.
  */
 
 import type {

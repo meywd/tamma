@@ -53,7 +53,7 @@ export abstract class BaseChunker implements ICodeChunker {
       parentScope?: string;
       imports?: string[];
       exports?: string[];
-      docstring?: string;
+      docstring?: string | undefined;
     },
   ): CodeChunk {
     const hash = calculateHash(content);
@@ -100,7 +100,7 @@ export abstract class BaseChunker implements ICodeChunker {
     let overlapLines: string[] = [];
 
     for (let i = 0; i < lines.length; i++) {
-      currentChunkLines.push(lines[i]);
+      currentChunkLines.push(lines[i]!);
       const currentContent = currentChunkLines.join('\n');
       const currentTokens = this.estimateTokens(currentContent);
 
@@ -120,12 +120,12 @@ export abstract class BaseChunker implements ICodeChunker {
         overlapLines = [];
         let overlapTokenCount = 0;
         for (let j = currentChunkLines.length - 1; j >= 0 && overlapTokenCount < overlapTokens; j--) {
-          overlapLines.unshift(currentChunkLines[j]);
+          overlapLines.unshift(currentChunkLines[j]!);
           overlapTokenCount = this.estimateTokens(overlapLines.join('\n'));
         }
 
         // Start new chunk with overlap + current line
-        currentChunkLines = [...overlapLines, lines[i]];
+        currentChunkLines = [...overlapLines, lines[i]!];
         currentChunkStart = currentChunkStart + (currentChunkLines.length - overlapLines.length - 1);
       }
     }

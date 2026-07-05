@@ -74,7 +74,7 @@ export class OllamaEmbeddingProvider extends BaseEmbeddingProvider {
     this.ensureInitialized();
 
     const embeddings = await this.embedBatch([text]);
-    return embeddings[0];
+    return embeddings[0]!;
   }
 
   /**
@@ -154,8 +154,8 @@ export class OllamaEmbeddingProvider extends BaseEmbeddingProvider {
       const data = (await response.json()) as OllamaEmbedResponse;
 
       // Update dimensions from actual response if not known
-      if (data.embeddings.length > 0 && data.embeddings[0].length !== this._dimensions) {
-        this._dimensions = data.embeddings[0].length;
+      if (data.embeddings.length > 0 && data.embeddings[0]!.length !== this._dimensions) {
+        this._dimensions = data.embeddings[0]!.length;
       }
 
       return data.embeddings;

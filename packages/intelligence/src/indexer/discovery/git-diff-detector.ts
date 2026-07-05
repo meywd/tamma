@@ -194,8 +194,8 @@ export class GitDiffDetector {
       const parts = trimmed.split('\t');
       if (parts.length < 2) continue;
 
-      const statusCode = parts[0].charAt(0);
-      const filePath = parts[1];
+      const statusCode = parts[0]!.charAt(0);
+      const filePath = parts[1]!;
 
       let changeType: ChangeType;
       switch (statusCode) {

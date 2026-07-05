@@ -73,7 +73,7 @@ export class FileWatcher {
         const watcher = fs.watch(
           resolvedPath,
           { recursive: true },
-          (eventType, filename) => {
+          (_eventType, filename) => {
             if (filename) {
               this.handleChange(resolvedPath, filename);
             }

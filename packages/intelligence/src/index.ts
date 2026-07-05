@@ -19,6 +19,12 @@ export * from './knowledge-base/index.js';
 // RAG Pipeline Module
 export * from './rag/index.js';
 
+// Disambiguate names exported by more than one of the modules above.
+// An explicit named re-export takes precedence over `export *`, resolving TS2308.
+export { InvalidConfigError, NotInitializedError } from './vector-store/index.js';
+export { EmbeddingError } from './indexer/index.js';
+export type { IEmbeddingProvider } from './indexer/index.js';
+
 // Context Aggregator Module
 // Re-export with explicit names to avoid conflicts with rag/vector-store modules
 export type {

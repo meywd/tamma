@@ -159,23 +159,23 @@ export interface RAGQuery {
  */
 export interface ChunkMetadata {
   /** Source file path */
-  filePath?: string;
+  filePath?: string | undefined;
   /** Starting line number */
-  startLine?: number;
+  startLine?: number | undefined;
   /** Ending line number */
-  endLine?: number;
+  endLine?: number | undefined;
   /** URL (for web sources) */
-  url?: string;
+  url?: string | undefined;
   /** Date of the content */
   date?: Date;
   /** Author of the content */
   author?: string;
   /** Title of the content */
-  title?: string;
+  title?: string | undefined;
   /** Programming language */
-  language?: string;
+  language?: string | undefined;
   /** Symbols (function names, class names, etc.) */
-  symbols?: string[];
+  symbols?: string[] | undefined;
 }
 
 /**
@@ -191,11 +191,11 @@ export interface RetrievedChunk {
   /** Relevance score from source */
   score: number;
   /** Fused score after RRF/ranking */
-  fusedScore?: number;
+  fusedScore?: number | undefined;
   /** Chunk metadata */
   metadata: ChunkMetadata;
   /** Embedding vector (for MMR calculation) */
-  embedding?: number[];
+  embedding?: number[] | undefined;
 }
 
 /**
@@ -288,11 +288,11 @@ export interface ProcessedQuery {
   /** Extracted entities */
   entities: ExtractedEntity[];
   /** Decomposed sub-queries (for complex queries) */
-  decomposed?: string[];
+  decomposed?: string[] | undefined;
   /** Detected language */
-  language?: string;
+  language?: string | undefined;
   /** Query embedding */
-  embedding?: number[];
+  embedding?: number[] | undefined;
   /** Classified intent */
   intent?: QueryIntent;
 }
@@ -315,7 +315,7 @@ export interface RelevanceFeedback {
   /** Relevance rating */
   rating: RelevanceRating;
   /** Optional comment */
-  comment?: string;
+  comment?: string | undefined;
   /** Feedback timestamp */
   timestamp: Date;
 }

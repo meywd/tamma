@@ -291,23 +291,23 @@ export class NoOpRAGCache extends RAGCache {
     super({ enabled: false, ttlSeconds: 0, maxEntries: 0 });
   }
 
-  getCachedResult(): RAGResult | null {
+  override getCachedResult(): RAGResult | null {
     return null;
   }
 
-  cacheResult(): void {
+  override cacheResult(): void {
     // No-op
   }
 
-  getCachedEmbedding(): number[] | null {
+  override getCachedEmbedding(): number[] | null {
     return null;
   }
 
-  cacheEmbedding(): void {
+  override cacheEmbedding(): void {
     // No-op
   }
 
-  getStats(): RAGCacheStats {
+  override getStats(): RAGCacheStats {
     return {
       queryCount: 0,
       embeddingCount: 0,

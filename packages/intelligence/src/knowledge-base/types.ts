@@ -17,8 +17,6 @@ import type {
   UpdateKnowledgeEntry,
   KnowledgeListResult,
   KnowledgeImportResult,
-  KnowledgeMatch,
-  KnowledgeType,
 } from '@tamma/shared';
 
 // === Configuration Types ===
@@ -426,9 +424,9 @@ export interface MatchContext {
   /** Task description */
   taskDescription: string;
   /** File paths involved */
-  filePaths?: string[];
+  filePaths?: string[] | undefined;
   /** Technologies involved */
-  technologies?: string[];
+  technologies?: string[] | undefined;
   /** Task plan approach */
   planApproach?: string;
 }

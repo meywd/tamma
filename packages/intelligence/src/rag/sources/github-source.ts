@@ -196,7 +196,7 @@ export class PullRequestsSource extends GitHubBaseSource {
     super('prs', 'pr');
   }
 
-  protected buildSearchText(entry: GitHubEntry): string {
+  protected override buildSearchText(entry: GitHubEntry): string {
     const base = super.buildSearchText(entry);
 
     // Add file paths with higher weight for PRs
@@ -216,7 +216,7 @@ export class CommitsSource extends GitHubBaseSource {
     super('commits', 'commit');
   }
 
-  protected buildMetadata(entry?: GitHubEntry): ChunkMetadata {
+  protected override buildMetadata(entry?: GitHubEntry): ChunkMetadata {
     if (!entry) {
       return {};
     }

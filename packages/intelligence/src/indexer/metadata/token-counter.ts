@@ -62,7 +62,7 @@ export function estimateTokensApproximate(text: string): number {
   let i = 0;
 
   while (i < text.length) {
-    const char = text[i];
+    const char = text[i]!;
 
     // Whitespace characters
     if (/\s/.test(char)) {
@@ -73,7 +73,7 @@ export function estimateTokensApproximate(text: string): number {
         i++;
       } else {
         // Skip consecutive spaces, they often get merged
-        while (i < text.length && /[ \t]/.test(text[i])) {
+        while (i < text.length && /[ \t]/.test(text[i]!)) {
           i++;
         }
         count++;
@@ -84,7 +84,7 @@ export function estimateTokensApproximate(text: string): number {
     // Numbers are usually 1 token per digit or grouped
     if (/\d/.test(char)) {
       const numStart = i;
-      while (i < text.length && /[\d.]/.test(text[i])) {
+      while (i < text.length && /[\d.]/.test(text[i]!)) {
         i++;
       }
       const numLen = i - numStart;
@@ -102,7 +102,7 @@ export function estimateTokensApproximate(text: string): number {
     // Words (alphanumeric sequences)
     if (/[a-zA-Z_]/.test(char)) {
       const wordStart = i;
-      while (i < text.length && /[a-zA-Z0-9_]/.test(text[i])) {
+      while (i < text.length && /[a-zA-Z0-9_]/.test(text[i]!)) {
         i++;
       }
       const word = text.slice(wordStart, i);

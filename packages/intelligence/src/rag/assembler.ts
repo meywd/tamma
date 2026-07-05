@@ -139,7 +139,7 @@ export class ContextAssembler implements IContextAssembler {
     const parts: string[] = [];
 
     for (let i = 0; i < chunks.length; i++) {
-      const chunk = chunks[i];
+      const chunk = chunks[i]!;
       const location = this.formatLocation(chunk);
       const scoreText = includeScores
         ? ` (relevance: ${(chunk.fusedScore ?? chunk.score).toFixed(2)})`

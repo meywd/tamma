@@ -97,7 +97,7 @@ export class OpenAIEmbeddingProvider extends BaseEmbeddingProvider {
     this.ensureInitialized();
 
     const embeddings = await this.embedBatch([text]);
-    return embeddings[0];
+    return embeddings[0]!;
   }
 
   /**

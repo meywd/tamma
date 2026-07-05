@@ -634,8 +634,8 @@ export class PgVectorStore extends BaseVectorStore {
       id: string;
       embedding: number[];
       distance: number;
-      content?: string;
-      metadata?: VectorMetadata;
+      content?: string | undefined;
+      metadata?: VectorMetadata | undefined;
     }> = result.rows.map((row) => {
       const r = row as Record<string, unknown>;
       return {

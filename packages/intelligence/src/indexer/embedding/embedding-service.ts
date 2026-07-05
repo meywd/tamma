@@ -15,7 +15,7 @@ import { OpenAIEmbeddingProvider } from './openai-embedding-provider.js';
 import { CohereEmbeddingProvider } from './cohere-embedding-provider.js';
 import { OllamaEmbeddingProvider } from './ollama-embedding-provider.js';
 import { MockEmbeddingProvider } from './mock-embedding-provider.js';
-import { EmbeddingError, EmbeddingRateLimitError } from '../errors.js';
+import { EmbeddingError } from '../errors.js';
 import { calculateHash } from '../metadata/hash-calculator.js';
 
 /**
@@ -156,16 +156,16 @@ export class EmbeddingService {
     // Check cache for each text
     if (this.config.enableCache) {
       for (let i = 0; i < texts.length; i++) {
-        const cached = this.getFromCache(texts[i]);
+        const cached = this.getFromCache(texts[i]!);
         if (cached) {
           results[i] = cached;
         } else {
-          uncachedTexts.push({ index: i, text: texts[i] });
+          uncachedTexts.push({ index: i, text: texts[i]! });
         }
       }
     } else {
       for (let i = 0; i < texts.length; i++) {
-        uncachedTexts.push({ index: i, text: texts[i] });
+        uncachedTexts.push({ index: i, text: texts[i]! });
       }
     }
 
@@ -181,8 +181,8 @@ export class EmbeddingService {
 
       // Store results and cache
       for (let j = 0; j < batch.length; j++) {
-        const { index, text } = batch[j];
-        const embedding = embeddings[j];
+        const { index, text } = batch[j]!;
+        const embedding = embeddings[j]!;
         results[index] = embedding;
 
         if (this.config.enableCache) {
@@ -211,7 +211,7 @@ export class EmbeddingService {
     // Create indexed chunks
     const indexedChunks: IndexedChunk[] = chunks.map((chunk, i) => ({
       ...chunk,
-      embedding: embeddings[i],
+      embedding: embeddings[i]!,
       indexedAt: new Date(),
     }));
 

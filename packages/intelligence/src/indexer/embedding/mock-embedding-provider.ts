@@ -100,7 +100,7 @@ export class MockEmbeddingProvider extends BaseEmbeddingProvider {
     // Use the hash bytes to seed a simple PRNG
     let seed = 0;
     for (let i = 0; i < Math.min(hash.length, 8); i++) {
-      seed = (seed << 4) | parseInt(hash[i], 16);
+      seed = (seed << 4) | parseInt(hash[i]!, 16);
     }
 
     // Generate deterministic pseudo-random values

@@ -90,7 +90,10 @@ export class VectorSource extends BaseRAGSource {
 
     // Apply filters if specified
     if (options.filter) {
-      searchQuery.filter = this.buildFilter(options.filter);
+      const builtFilter = this.buildFilter(options.filter);
+      if (builtFilter) {
+        searchQuery.filter = builtFilter;
+      }
     }
 
     try {

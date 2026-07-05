@@ -8,8 +8,7 @@
   },
   "references": [
     { "path": "../shared" },
-    { "path": "../observability" },
-    { "path": "../providers" }
+    { "path": "../observability" }
   ],
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]

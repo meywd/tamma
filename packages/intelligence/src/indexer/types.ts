@@ -56,13 +56,13 @@ export interface CodeChunk {
   /** 1-indexed end line */
   endLine: number;
   /** Parent class/module name (for methods) */
-  parentScope?: string;
+  parentScope?: string | undefined;
   /** Import dependencies */
   imports: string[];
   /** Exported symbols */
   exports: string[];
   /** JSDoc/docstring if present */
-  docstring?: string;
+  docstring?: string | undefined;
   /** Estimated token count */
   tokenCount: number;
   /** Content hash for change detection */
@@ -148,7 +148,7 @@ export interface IndexerConfig {
   /** Enable file watcher */
   enableFileWatcher: boolean;
   /** Cron expression for scheduled indexing */
-  scheduleCron?: string;
+  scheduleCron?: string | undefined;
 
   // === Performance ===
   /** Max concurrent file processing */
@@ -227,7 +227,7 @@ export interface IndexStatus {
   /** Path to the indexed project */
   projectPath: string;
   /** When the index was last updated */
-  lastIndexedAt?: Date;
+  lastIndexedAt?: Date | undefined;
   /** Total number of indexed files */
   totalFiles: number;
   /** Total number of chunks */
@@ -309,7 +309,7 @@ export interface ICodeChunker {
  */
 export interface EmbeddingProviderConfig {
   /** API key (for cloud providers) */
-  apiKey?: string;
+  apiKey?: string | undefined;
   /** Base URL (for self-hosted) */
   baseUrl?: string;
   /** Model identifier */

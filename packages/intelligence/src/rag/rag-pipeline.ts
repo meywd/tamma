@@ -17,7 +17,7 @@ import type {
   FeedbackStats,
   ProcessedQuery,
 } from './types.js';
-import { NotInitializedError, InvalidConfigError } from './errors.js';
+import { NotInitializedError } from './errors.js';
 import { RAGCache, createRAGCache } from './cache.js';
 import { QueryProcessor, createQueryProcessor } from './query-processor.js';
 import { Ranker, createRanker } from './ranker.js';
@@ -67,8 +67,8 @@ export class RAGPipeline implements IRAGPipeline {
   private feedbackTracker: FeedbackTracker;
 
   // External dependencies
-  private embeddingService?: EmbeddingService;
-  private vectorStore?: IVectorStore;
+  private embeddingService?: EmbeddingService | undefined;
+  private vectorStore?: IVectorStore | undefined;
 
   constructor(config?: Partial<RAGConfig>) {
     // Import default config

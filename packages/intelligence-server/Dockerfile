@@ -16,14 +16,15 @@ FROM node:22-alpine AS deps
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 WORKDIR /app
 
-# Copy only the manifests the intelligence-server needs. The sidecar itself
-# does not import @tamma/intelligence at compile time (services use narrow
-# adapter interfaces) so the set of workspace packages we must install for
-# runtime is small: shared, observability, providers, intelligence.
+# Copy only the manifests the intelligence-server needs. Its runtime closure is
+# small: intelligence-server → { @tamma/intelligence, @tamma/shared } and
+# @tamma/intelligence → { @tamma/observability, @tamma/shared, chromadb, pg }.
+# NOTE: @tamma/intelligence deliberately does NOT depend on @tamma/providers
+# (which drags in @tamma/cost-monitor + heavy AI SDKs) — the sidecar never uses
+# it, so providers/cost-monitor are intentionally absent from this build context.
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/observability/package.json packages/observability/
-COPY packages/providers/package.json packages/providers/
 COPY packages/intelligence/package.json packages/intelligence/
 COPY packages/intelligence-server/package.json packages/intelligence-server/
 
@@ -37,14 +38,14 @@ FROM deps AS build
 COPY tsconfig.json ./
 COPY packages/shared packages/shared
 COPY packages/observability packages/observability
-COPY packages/providers packages/providers
 COPY packages/intelligence packages/intelligence
 COPY packages/intelligence-server packages/intelligence-server
 
-# Build only the intelligence-server. It references @tamma/shared via
-# `references` in tsconfig, so shared is built first. @tamma/intelligence is
-# NOT required for compilation (sidecar uses narrow local interfaces), so we
-# skip its pre-existing strict-mode build errors.
+# Build the intelligence-server. Via tsconfig `references` it builds its deps
+# first: @tamma/intelligence → { @tamma/shared, @tamma/observability }. That
+# chain must NOT reach @tamma/providers/@tamma/cost-monitor (which are not in
+# this build context) — @tamma/intelligence's tsconfig references only shared +
+# observability, so `tsc --build` stays inside the copied packages.
 RUN pnpm --filter @tamma/shared --filter @tamma/intelligence-server run build
 
 # `pnpm prune --prod --filter` isn't supported in pnpm 9; re-install prod-only
