@@ -31,6 +31,7 @@ public enum AgentAction
     [Wire("generate-assessment-questions")] GenerateAssessmentQuestions,
     [Wire("analyze-assessment-response")] AnalyzeAssessmentResponse,
     [Wire("research")] Research,
+    [Wire("score-ambiguity")] ScoreAmbiguity,
 
     // architect
     [Wire("triage-technical")] TriageTechnical,

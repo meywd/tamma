@@ -11,10 +11,11 @@ namespace Tamma.Api.Tests.Agents;
 /// The 8 roles: developer, tester, security, devops, architect, product_owner,
 /// senior_developer, tech_writer.
 ///
-/// The 75 actions are the union of the per-role action sets in SPEC §4
+/// The 76 actions are the union of the per-role action sets in SPEC §4
 /// (72 original + 2 assessment actions: generate-assessment-questions,
 /// analyze-assessment-response under product_owner — added in assessment P0 —
-/// + 1 research action under product_owner, Story 3.4).
+/// + 1 research action under product_owner, Story 3.4
+/// + 1 score-ambiguity action under product_owner, Story 3.6).
 /// Which (role, action) pairs are valid is the per-role eligibility matrix.
 /// </summary>
 [TestFixture]
@@ -42,12 +43,14 @@ public class RolePhaseMapTests
     }
 
     [Test]
-    public void ValidActions_Should_Contain_Seventy_Five_Actions()
+    public void ValidActions_Should_Contain_Seventy_Six_Actions()
     {
         // 72 original actions + 2 assessment actions added in assessment P0
         // (generate-assessment-questions, analyze-assessment-response under product_owner)
-        // + 1 research action (Story 3.4 — dedicated research token under product_owner).
-        RolePhaseMap.ValidActions.Should().HaveCount(75);
+        // + 1 research action (Story 3.4 — dedicated research token under product_owner)
+        // + 1 score-ambiguity action (Story 3.6 — dedicated ambiguity-scoring token
+        // under product_owner).
+        RolePhaseMap.ValidActions.Should().HaveCount(76);
     }
 
     [Test]
@@ -375,6 +378,39 @@ public class RolePhaseMapTests
     {
         // research is a product_owner-only action; a developer must not be eligible.
         RolePhaseMap.IsRoleEligibleForPhase("research", "developer").Should().BeFalse();
+    }
+
+    // -----------------------------------------------------------------------
+    // Story 3.6 — dedicated score-ambiguity action (product_owner-eligible)
+    // -----------------------------------------------------------------------
+
+    [Test]
+    public void ValidActions_Contains_ScoreAmbiguity()
+    {
+        RolePhaseMap.ValidActions.Should().Contain("score-ambiguity");
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_ScoreAmbiguity_ProductOwner_Returns_True()
+    {
+        // Requirement clarity is a product_owner concern (consistent with clarify-requirements
+        // and research), so the dedicated score-ambiguity action is eligible for product_owner
+        // (Story 3.6 — AmbiguityScoringWorkflow dispatches (product_owner, score-ambiguity)).
+        RolePhaseMap.IsRoleEligibleForPhase("score-ambiguity", "product_owner").Should().BeTrue();
+    }
+
+    [Test]
+    public void GetEligibleRolesForPhase_ScoreAmbiguity_Is_ProductOwner_Only()
+    {
+        RolePhaseMap.GetEligibleRolesForPhase("score-ambiguity")
+            .Should().BeEquivalentTo(new[] { "product_owner" });
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_ScoreAmbiguity_Developer_Returns_False()
+    {
+        // score-ambiguity is a product_owner-only action; a developer must not be eligible.
+        RolePhaseMap.IsRoleEligibleForPhase("score-ambiguity", "developer").Should().BeFalse();
     }
 
     // -----------------------------------------------------------------------
