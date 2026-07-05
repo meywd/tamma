@@ -1,12 +1,21 @@
 
 import { NavLink } from 'react-router-dom';
 import { useCurrentUser } from '../../hooks/admin/useCurrentUser.js';
+// Story 23-12 — operator monitoring section nav manifest.
+import { MONITORING_NAV_ITEMS } from '../../pages/monitoring/monitoring-nav.js';
 
 import type { JSX } from "react";
 
+interface NavItem {
+  to: string;
+  label: string;
+  /** When true, only highlight on an exact path match (for index routes). */
+  end?: boolean;
+}
+
 interface NavGroup {
   label: string;
-  items: { to: string; label: string }[];
+  items: NavItem[];
 }
 
 const MEMBER_NAV_GROUPS: NavGroup[] = [
@@ -29,6 +38,17 @@ const MEMBER_NAV_GROUPS: NavGroup[] = [
   },
 ];
 
+// Story 23-12 — "Monitoring" group sits between Settings and Administration and
+// is admin/owner-only. An "Overview" landing route leads the section-specific
+// pages, which are sourced from the shared monitoring nav manifest.
+const MONITORING_NAV_GROUP: NavGroup = {
+  label: 'Monitoring',
+  items: [
+    { to: '/monitoring', label: 'Overview', end: true },
+    ...MONITORING_NAV_ITEMS.map((item) => ({ to: item.to, label: item.label })),
+  ],
+};
+
 const ADMIN_NAV_GROUPS: NavGroup[] = [
   ...MEMBER_NAV_GROUPS,
   {
@@ -45,6 +65,7 @@ const ADMIN_NAV_GROUPS: NavGroup[] = [
       { to: '/settings/budget', label: 'Budget & Cost' },
     ],
   },
+  MONITORING_NAV_GROUP,
   {
     label: 'Administration',
     items: [
@@ -78,7 +99,7 @@ export function Sidebar(): JSX.Element {
               <li key={item.to}>
                 <NavLink
                   to={item.to}
-                  end={item.to === '/'}
+                  end={item.end ?? item.to === '/'}
                   className={({ isActive }) =>
                     `block w-full px-5 py-2.5 text-sm border-l-3 transition-colors ${
                       isActive
