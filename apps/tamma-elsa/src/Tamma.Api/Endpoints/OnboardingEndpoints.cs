@@ -1,7 +1,10 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Tamma.Data;
+using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Endpoints;
@@ -19,13 +22,20 @@ namespace Tamma.Api.Endpoints;
 /// non-empty <c>installations</c> array on its next poll and advances
 /// to the success step.
 ///
-/// We deliberately keep this endpoint surface tight — a single status read
-/// + a single install-redirect — so the bulk of the install flow stays in
+/// The read + redirect stay tight — the bulk of the install flow lives in
 /// <see cref="Services.GitHub.InstallationRouterService"/> (already
-/// implemented). The full install plan in
+/// implemented). Two NON-MIGRATION write slices land here on top of that:
+/// <list type="bullet">
+///   <item><see cref="SetRepoActive"/> (AC4) — flip the EXISTING
+///     <c>IsActive</c> flag on one connected repo (activate / deactivate).</item>
+///   <item><see cref="CompleteOnboarding"/> (AC6/AC7) — record the
+///     onboarding-complete milestone by emitting the
+///     <c>ONBOARDING.COMPLETED.SUCCESS</c> DCB event.</item>
+/// </list>
+/// The remaining wider surface in
 /// <c>docs/stories/epic-18/18-4-github-app-installation-onboarding-impl-plan.md</c>
-/// describes a much wider surface (per-repo activation, settings,
-/// first-run workflow); those land in follow-up stories.
+/// (installation settings persisted on a jsonb column, the live first-run
+/// test workflow) is the SEPARATE settings-column migration lane.
 /// </summary>
 public static class OnboardingEndpoints
 {
@@ -152,6 +162,241 @@ public static class OnboardingEndpoints
         return Results.Redirect(redirect);
     }
 
+    // ─── Repo activate / deactivate (Story 18-4 AC4) ─────────────────────────
+
+    /// <summary>
+    /// Flip the <c>IsActive</c> flag on ONE repo connected through a GitHub
+    /// App installation. Active repos are the ones Tamma watches for issues
+    /// and runs workflows on — GitHub App permission grants access; this
+    /// endpoint decides which of the granted repos Tamma actually monitors.
+    /// The WRITE counterpart to the Story 21-4 <c>GET /api/v1/repos</c> read.
+    ///
+    /// <para><b>Tenant is resolved strictly from
+    /// <see cref="ITenantContext"/></b> (populated per-request from the
+    /// caller's principal), never from a route/body value — no IDOR surface.
+    /// A null / empty ambient tenant <b>FAILS CLOSED</b> with
+    /// <c>404 no_active_tenant</c> BEFORE any repository call, mirroring the
+    /// Story 23-6 (#283) fix. An installation that does not belong to the
+    /// caller's OWN tenant returns <c>404 installation_not_found</c> — a
+    /// foreign installation is indistinguishable from a non-existent one.</para>
+    ///
+    /// <para><b>Idempotent.</b> We only FLIP an EXISTING repo row's flag; we
+    /// never create a schema column or a repo row here. Re-issuing the same
+    /// state is a no-op (<c>changed:false</c>, no duplicate DCB event). A
+    /// state change emits <c>REPO.ACTIVATED.SUCCESS</c> /
+    /// <c>REPO.DEACTIVATED.SUCCESS</c> for the audit trail.</para>
+    /// </summary>
+    public static async Task<IResult> SetRepoActive(
+        long installationId,
+        long repoId,
+        SetRepoActiveRequest? request,
+        IInstallationRepository installations,
+        IEventRepository events,
+        ITenantContext tenantContext,
+        ClaimsPrincipal principal)
+    {
+        // Fail closed (Story 23-6 / #283): a null-or-empty ambient tenant on
+        // this tenant-scoped write must NOT touch another tenant's installs.
+        if (tenantContext.TenantId is not Guid tenantId || tenantId == Guid.Empty)
+        {
+            return Results.NotFound(new { error = "no_active_tenant" });
+        }
+
+        if (request is null)
+        {
+            return Results.BadRequest(new { error = "missing_body" });
+        }
+        var active = request.Active;
+
+        // A foreign / unknown installation is a 404 — never leak that a given
+        // installation id exists under a different tenant.
+        var install = await installations.GetByInstallationIdAsync(installationId);
+        if (install is null || install.TenantId != tenantId)
+        {
+            return Results.NotFound(new { error = "installation_not_found" });
+        }
+
+        // We FLIP the flag on a repo that is ALREADY connected through this
+        // installation — we do not synthesize new repo rows from a bare id.
+        var repo = install.Repos.FirstOrDefault(r => r.RepoId == repoId);
+        if (repo is null)
+        {
+            return Results.NotFound(new { error = "repo_not_found" });
+        }
+
+        var changed = repo.IsActive != active;
+        if (changed)
+        {
+            if (active)
+            {
+                // AddRepoAsync reactivates the existing row (IsActive = true);
+                // idempotent and preserves the stored full name.
+                await installations.AddRepoAsync(install.Id, repoId, repo.RepoFullName);
+            }
+            else
+            {
+                // RemoveRepoAsync is a soft-flip to IsActive = false.
+                await installations.RemoveRepoAsync(install.Id, repoId);
+            }
+
+            await EmitRepoStateEvent(
+                events,
+                tenantId,
+                ResolveUserId(principal),
+                active ? "REPO.ACTIVATED.SUCCESS" : "REPO.DEACTIVATED.SUCCESS",
+                installationId,
+                repoId,
+                repo.RepoFullName,
+                active);
+        }
+
+        return Results.Ok(new
+        {
+            installationId,
+            repoId,
+            repoFullName = repo.RepoFullName,
+            active,
+            changed,
+        });
+    }
+
+    // ─── First-run / onboarding-complete (Story 18-4 AC6/AC7) ────────────────
+
+    /// <summary>
+    /// Record that the caller's tenant has finished onboarding and emit the
+    /// <c>ONBOARDING.COMPLETED.SUCCESS</c> DCB event (AC7). There is NO
+    /// persisted "onboarding complete" column — the append-only event stream
+    /// IS the record of the milestone (non-migration slice). The event's
+    /// <c>data</c> captures what was set up (linked installation + active-repo
+    /// counts) so the audit trail explains the completion.
+    ///
+    /// <para><b>Tenant from <see cref="ITenantContext"/></b>; a null / empty
+    /// ambient tenant fails closed with <c>404 no_active_tenant</c>.</para>
+    ///
+    /// <para><b>Idempotent.</b> If the tenant already has an
+    /// <c>ONBOARDING.COMPLETED.SUCCESS</c> event we return the prior
+    /// completion timestamp WITHOUT appending a duplicate — re-running the
+    /// wizard's "finish" button never double-emits.</para>
+    /// </summary>
+    public static async Task<IResult> CompleteOnboarding(
+        IInstallationRepository installations,
+        IEventRepository events,
+        ITenantContext tenantContext,
+        ClaimsPrincipal principal)
+    {
+        if (tenantContext.TenantId is not Guid tenantId || tenantId == Guid.Empty)
+        {
+            return Results.NotFound(new { error = "no_active_tenant" });
+        }
+
+        // Idempotency: onboarding is completed once. A prior completion event
+        // short-circuits so we never append a duplicate milestone.
+        var existing = await events.GetLastByTypeAsync(tenantId, OnboardingCompletedEventType);
+        if (existing is not null)
+        {
+            return Results.Ok(new
+            {
+                completed = true,
+                alreadyCompleted = true,
+                completedAt = existing.CreatedAt,
+            });
+        }
+
+        // Summarize what was set up for the event payload — a record of the
+        // milestone, not a new persisted column.
+        var installs = await installations.ListByTenantAsync(tenantId);
+        var installationCount = installs.Count(i => i.SuspendedAt is null);
+        var activeRepoCount = installs.Sum(i => i.Repos.Count(r => r.IsActive));
+
+        var completedAt = DateTime.UtcNow;
+        var userId = ResolveUserId(principal);
+        await EmitOnboardingCompleted(
+            events, tenantId, userId, installationCount, activeRepoCount, completedAt);
+
+        return Results.Ok(new
+        {
+            completed = true,
+            alreadyCompleted = false,
+            installationCount,
+            activeRepoCount,
+            completedAt,
+        });
+    }
+
+    // ─── DCB event emission ──────────────────────────────────────────────────
+
+    /// <summary>Canonical event type for the onboarding-complete milestone (AC7).</summary>
+    public const string OnboardingCompletedEventType = "ONBOARDING.COMPLETED.SUCCESS";
+
+    private static async Task EmitRepoStateEvent(
+        IEventRepository events,
+        Guid tenantId,
+        Guid? userId,
+        string type,
+        long installationId,
+        long repoId,
+        string repoFullName,
+        bool active)
+    {
+        await events.AppendAsync(new DomainEvent
+        {
+            Id = Guid.NewGuid(),
+            Type = type,
+            TenantId = tenantId,
+            Tags = JsonSerializer.Serialize(new
+            {
+                tenantId = tenantId.ToString(),
+                userId = userId?.ToString(),
+            }),
+            Metadata = JsonSerializer.Serialize(new
+            {
+                workflowVersion = "1.0.0",
+                eventSource = "system",
+            }),
+            Data = JsonSerializer.Serialize(new
+            {
+                installationId,
+                repoId,
+                repoFullName,
+                active,
+            }),
+            CreatedAt = DateTime.UtcNow,
+        });
+    }
+
+    private static async Task EmitOnboardingCompleted(
+        IEventRepository events,
+        Guid tenantId,
+        Guid? userId,
+        int installationCount,
+        int activeRepoCount,
+        DateTime completedAt)
+    {
+        await events.AppendAsync(new DomainEvent
+        {
+            Id = Guid.NewGuid(),
+            Type = OnboardingCompletedEventType,
+            TenantId = tenantId,
+            Tags = JsonSerializer.Serialize(new
+            {
+                tenantId = tenantId.ToString(),
+                userId = userId?.ToString(),
+            }),
+            Metadata = JsonSerializer.Serialize(new
+            {
+                workflowVersion = "1.0.0",
+                eventSource = "system",
+            }),
+            Data = JsonSerializer.Serialize(new
+            {
+                installationCount,
+                activeRepoCount,
+                completedAt,
+            }),
+            CreatedAt = completedAt,
+        });
+    }
+
     // ─── Helpers ────────────────────────────────────────────────────────────
 
     private static Guid? ResolveUserId(ClaimsPrincipal principal)
@@ -235,3 +480,10 @@ public sealed record OnboardingInstallationDto(
     IReadOnlyList<OnboardingRepoDto> Repos);
 
 public sealed record OnboardingRepoDto(long RepoId, string FullName);
+
+/// <summary>
+/// Body for <c>PATCH /api/v1/onboarding/repos/{installationId}/{repoId}</c> —
+/// the desired activation state for the repo. <c>true</c> = Tamma monitors it,
+/// <c>false</c> = it stays connected on GitHub but Tamma ignores it.
+/// </summary>
+public sealed record SetRepoActiveRequest(bool Active);
