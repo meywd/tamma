@@ -37,6 +37,12 @@ public static class ReposRunsEndpoints
     private const int DefaultRunLimit = 25;
     private const int MaxRunLimit = 100;
 
+    // Cap on the DCB events materialised for a single run-detail timeline. A pathological
+    // 100k-event run would otherwise load fully into memory (own-tenant, but still a
+    // DoS/memory risk). Over the cap → the response returns the capped oldest-first slice
+    // with truncated:true rather than silently dropping the tail or OOM-ing.
+    private const int MaxRunDetailEvents = 10_000;
+
     // ─── GET /api/v1/repos ────────────────────────────────────────────────
 
     /// <summary>
@@ -147,11 +153,13 @@ public static class ReposRunsEndpoints
             return Results.NotFound(new { error = "run_not_found" });
         }
 
-        // Full run timeline from the DCB store. ListByCorrelationIdAsync is
-        // structurally tenant-scoped (it throws on an empty tenant) and matches
-        // Tags->>'correlationId' == runId, oldest-first.
-        var timeline = await events
-            .ListByCorrelationIdAsync(tenantId, runId.ToString())
+        // Run timeline from the DCB store. The bounded ListByCorrelationIdAsync is
+        // structurally tenant-scoped (it THROWS on an empty tenant — guarded above) and
+        // matches Tags->>'correlationId' == runId, oldest-first, capped to
+        // MaxRunDetailEvents. Over the cap → truncated:true (the tail is signalled, not
+        // silently dropped, and the fetch never materialises an unbounded run).
+        var (timeline, truncated) = await events
+            .ListByCorrelationIdAsync(tenantId, runId.ToString(), MaxRunDetailEvents)
             .ConfigureAwait(false);
 
         decimal totalCostUsd = 0m;
@@ -214,6 +222,7 @@ public static class ReposRunsEndpoints
             filesChanged,
             totalCostUsd,
             eventCount = timeline.Count,
+            truncated,
             events = eventDtos,
             logs,
         });

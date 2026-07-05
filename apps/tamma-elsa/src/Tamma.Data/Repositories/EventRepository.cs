@@ -404,6 +404,19 @@ public class EventRepository(
     public async Task<IReadOnlyList<DomainEvent>> ListByCorrelationIdAsync(
         Guid tenantId, string correlationId)
     {
+        // Hard tenant guard (parity with QueryEventsAsync / QueryAgentTrailAsync): an
+        // empty tenant is a bug, not a cross-tenant scan we implement. Callers 404 a null
+        // tenant BEFORE reaching here (replay + repos-runs + run-tap), so this is
+        // defence-in-depth — a null/empty tenant must never reach a real query.
+        if (tenantId == Guid.Empty)
+        {
+            throw new NotSupportedException(
+                "ListByCorrelationIdAsync requires a non-empty tenant id. The run replay " +
+                "(Story 4-8) / run-tap (Story 32-23) reads are ALWAYS tenant-scoped — " +
+                "there is no cross-tenant read path. See " +
+                ".dev/decisions/story-28-1-design-calls.md Decision #2.");
+        }
+
         if (string.IsNullOrEmpty(correlationId))
         {
             return Array.Empty<DomainEvent>();
@@ -429,6 +442,50 @@ public class EventRepository(
             .ToListAsync();
 
         return rows;
+    }
+
+    /// <inheritdoc />
+    public async Task<(IReadOnlyList<DomainEvent> Events, bool Truncated)> ListByCorrelationIdAsync(
+        Guid tenantId, string correlationId, int maxEvents)
+    {
+        // Same hard tenant guard as the uncapped overload (defence-in-depth).
+        if (tenantId == Guid.Empty)
+        {
+            throw new NotSupportedException(
+                "ListByCorrelationIdAsync (bounded) requires a non-empty tenant id. The " +
+                "read-endpoint replay/run-detail fetch is ALWAYS tenant-scoped — there is " +
+                "no cross-tenant read path. See " +
+                ".dev/decisions/story-28-1-design-calls.md Decision #2.");
+        }
+
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxEvents, 1);
+
+        if (string.IsNullOrEmpty(correlationId))
+        {
+            return (Array.Empty<DomainEvent>(), false);
+        }
+
+        await using var db = await tenantDbFactory.CreateAsync(tenantId);
+
+        // Same tenant-scoped, index-served `->>'correlationId'` lookup as the uncapped
+        // overload, but bounded. Fetch maxEvents + 1 so we can DETECT truncation without a
+        // separate COUNT: > maxEvents rows means the run exceeds the cap → return the
+        // first maxEvents (oldest-first) and flag Truncated so the caller signals it.
+        var rows = await db.DomainEvents
+            .FromSqlInterpolated($@"
+                SELECT * FROM domain_events
+                WHERE ""Tags""->>'correlationId' = {correlationId}")
+            .Where(e => e.TenantId == tenantId)
+            .OrderBy(e => e.SequenceNumber)
+            .Take(maxEvents + 1)
+            .ToListAsync();
+
+        if (rows.Count > maxEvents)
+        {
+            return (rows.Take(maxEvents).ToList(), true);
+        }
+
+        return (rows, false);
     }
 
     /// <inheritdoc />

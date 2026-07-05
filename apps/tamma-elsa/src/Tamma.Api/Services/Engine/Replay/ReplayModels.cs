@@ -49,6 +49,11 @@ namespace Tamma.Api.Services.Engine.Replay;
 /// both <see cref="AiDecisions"/> and here) in order.</param>
 /// <param name="Delta">Populated only when a <c>from</c> marker was supplied — the
 /// pure diff between the fold-to-<c>from</c> and the fold-to-<c>upTo</c> (AC6).</param>
+/// <param name="Truncated"><c>true</c> when the run has MORE events than the read cap
+/// (<see cref="ReplayService"/>'s bounded <c>ListByCorrelationIdAsync</c>) — the fold
+/// then reflects only the capped oldest-first slice. A pathological run signals
+/// truncation rather than silently dropping the tail or materialising unbounded (the
+/// "no silent truncation" rule + a DoS/memory guard).</param>
 public sealed record ReplayResult(
     string CorrelationId,
     int EventsReplayed,
@@ -65,7 +70,17 @@ public sealed record ReplayResult(
     IReadOnlyList<ReplayArtifact> CodeChanges,
     IReadOnlyList<ReplayApproval> Approvals,
     IReadOnlyList<ReplayError> Errors,
-    ReplayDelta? Delta);
+    ReplayDelta? Delta,
+    bool Truncated = false);
+
+/// <summary>
+/// Story 4-8 (review hardening) — thrown when a replay <c>from</c> marker resolves to a
+/// point strictly AFTER the <c>upTo</c> replay point. The delta between two prefix folds
+/// would then be a meaningless empty diff (the <c>from</c> fold is a superset of the
+/// <c>upTo</c> fold), so the read fails loud; <see cref="Tamma.Api.Endpoints.EngineEndpoints.ReplayRun"/>
+/// maps it to <c>400</c> rather than returning a misleading <c>200</c> with a zero delta.
+/// </summary>
+public sealed class ReplayRangeException(string message) : Exception(message);
 
 /// <summary>One event in the reconstructed timeline (the ordered black-box trail).</summary>
 /// <param name="Category">Domain bucket: <c>ai</c> | <c>code</c> | <c>approval</c> |

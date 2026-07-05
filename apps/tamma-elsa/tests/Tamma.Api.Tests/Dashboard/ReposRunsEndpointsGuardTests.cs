@@ -245,6 +245,38 @@ public class ReposRunsEndpointsGuardTests
         root.GetProperty("events").GetArrayLength().Should().Be(3);
         root.GetProperty("logs").GetArrayLength().Should().Be(3);
         root.GetProperty("durationMs").GetDouble().Should().Be(TimeSpan.FromMinutes(3).TotalMilliseconds);
+        root.GetProperty("truncated").GetBoolean().Should().BeFalse(
+            "a run under the fetch cap reports truncated:false");
+    }
+
+    [Test]
+    public async Task GetRunDetail_TruncatedTimeline_SetsTruncatedFlag()
+    {
+        var tenant = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+        var t = new DateTime(2026, 4, 16, 12, 0, 0, DateTimeKind.Utc);
+        var workflows = new RecordingWorkflowRepo
+        {
+            InstanceById = new WorkflowInstance
+            {
+                Id = runId, DefinitionId = Guid.NewGuid(), TenantId = tenant, Status = "running",
+            },
+        };
+        // The bounded fetch reports Truncated == true when the run exceeds the cap. The
+        // endpoint must SURFACE that flag (no silent drop) — proven here via the fake.
+        var events = new RecordingEventRepo
+        {
+            ForceTruncated = true,
+            Timeline = { Event(runId, tenant, "AGENT.TASK.STARTED", t) },
+        };
+
+        var result = await ReposRunsEndpoints.GetRunDetail(
+            runId, workflows, events, new FakeTenantContext(tenant));
+
+        StatusOf(result).Should().Be(200);
+        var root = await CaptureJson(result);
+        root.GetProperty("truncated").GetBoolean().Should().BeTrue(
+            "a run over the fetch cap must be signalled as truncated, not silently dropped");
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
@@ -365,14 +397,21 @@ public class ReposRunsEndpointsGuardTests
         public bool Called { get; private set; }
         public Guid? RequestedTenant { get; private set; }
         public string? RequestedCorrelationId { get; private set; }
+        public bool ForceTruncated { get; set; }
         public List<DomainEvent> Timeline { get; } = new();
 
-        public Task<IReadOnlyList<DomainEvent>> ListByCorrelationIdAsync(Guid tenantId, string correlationId)
+        // GetRunDetail now reads via the BOUNDED overload. Record the same call metadata
+        // and surface a Truncated flag (forced for the truncation-plumbing test, else
+        // derived from the requested cap).
+        public Task<(IReadOnlyList<DomainEvent> Events, bool Truncated)> ListByCorrelationIdAsync(
+            Guid tenantId, string correlationId, int maxEvents)
         {
             Called = true;
             RequestedTenant = tenantId;
             RequestedCorrelationId = correlationId;
-            return Task.FromResult<IReadOnlyList<DomainEvent>>(Timeline.ToList());
+            var truncated = ForceTruncated || Timeline.Count > maxEvents;
+            var events = (IReadOnlyList<DomainEvent>)Timeline.Take(maxEvents).ToList();
+            return Task.FromResult((events, truncated));
         }
 
         public Task<DomainEvent> AppendAsync(DomainEvent evt) => throw new NotSupportedException();

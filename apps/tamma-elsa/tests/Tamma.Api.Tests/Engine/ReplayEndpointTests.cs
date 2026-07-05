@@ -129,6 +129,115 @@ public class ReplayEndpointTests
         doc.GetProperty("stepReached").GetString().Should().Be("A.TWO");
     }
 
+    // ── Fix A: upTo timestamp Kind — offset CONVERTED, offset-less pinned to UTC ─
+
+    // A UTC day so the seeded events sit at explicit UTC hours regardless of host TZ.
+    private static readonly DateTime TzDay = new(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    [Test]
+    public async Task Replay_UpToTimestamp_WithExplicitOffset_ConvertsToUtc_TzIndependent()
+    {
+        var tenantId = Guid.NewGuid();
+        // Events at 09:00Z, 10:00Z, 11:00Z (explicit UTC hours).
+        await SeedRunAsync(tenantId, "run-tz-offset", new[]
+        {
+            ("Z.NINE", TzDay.AddHours(9)),
+            ("Z.TEN", TzDay.AddHours(10)),
+            ("Z.ELEVEN", TzDay.AddHours(11)),
+        });
+
+        // 12:00+02:00 == 10:00Z. A CONVERTED bound keeps the 09:00Z + 10:00Z events (2).
+        // A relabel-to-12:00Z bug would keep all three — this assertion fails on ANY host
+        // if the offset is dropped instead of converted (TZ-independent).
+        var doc = await CallOkAsync(tenantId, "run-tz-offset", upTo: "2026-07-01T12:00:00+02:00");
+
+        doc.GetProperty("eventsReplayed").GetInt32().Should().Be(2,
+            "an explicit +02:00 offset must be CONVERTED to 10:00Z, not relabelled to 12:00Z");
+        doc.GetProperty("stepReached").GetString().Should().Be("Z.TEN");
+    }
+
+    [Test]
+    public async Task Replay_UpToTimestamp_OffsetLess_PinnedToUtc()
+    {
+        var tenantId = Guid.NewGuid();
+        // Events at 11:00Z, 12:00Z, 13:00Z.
+        await SeedRunAsync(tenantId, "run-tz-naive", new[]
+        {
+            ("N.ELEVEN", TzDay.AddHours(11)),
+            ("N.TWELVE", TzDay.AddHours(12)),
+            ("N.THIRTEEN", TzDay.AddHours(13)),
+        });
+
+        // An offset-less ISO string is pinned to UTC (12:00Z) — NOT shifted by the host
+        // offset. Keeps 11:00Z + 12:00Z (2 events).
+        var doc = await CallOkAsync(tenantId, "run-tz-naive", upTo: "2026-07-01T12:00:00");
+
+        doc.GetProperty("eventsReplayed").GetInt32().Should().Be(2,
+            "an offset-less timestamp is treated as UTC (12:00Z), not host-local");
+        doc.GetProperty("stepReached").GetString().Should().Be("N.TWELVE");
+    }
+
+    // ── Fix B: from > upTo is a 400 (not a silent empty delta) ─────────────────
+
+    [Test]
+    public async Task Replay_FromAfterUpTo_Returns400()
+    {
+        var tenantId = Guid.NewGuid();
+        await SeedRunAsync(tenantId, "run-badrange", new[]
+        {
+            "WORKFLOW.STEP_STARTED",
+            "LLM.CALL.SUCCESS",
+            "CODE.GENERATED.SUCCESS",
+            "WORKFLOW.COMPLETED",
+        });
+        var seqs = (await _events.ListByCorrelationIdAsync(tenantId, "run-badrange"))
+            .Select(e => e.SequenceNumber).ToList();
+
+        // upTo = seq[1], from = seq[3] → from is strictly AFTER upTo. The delta would be a
+        // meaningless empty diff (newer ⊂ older); it must fail loud with 400.
+        var (status, _) = await CallAsync(
+            tenantId, "run-badrange", upTo: seqs[1].ToString(), from: seqs[3].ToString());
+
+        status.Should().Be(StatusCodes.Status400BadRequest,
+            "'from' after 'upTo' is an invalid range, not a silent 200 with a zero delta");
+    }
+
+    [Test]
+    public async Task Replay_FromEqualsUpTo_ReturnsEmptyDelta_200()
+    {
+        var tenantId = Guid.NewGuid();
+        await SeedRunAsync(tenantId, "run-eqrange", new[]
+        {
+            "WORKFLOW.STEP_STARTED",
+            "LLM.CALL.SUCCESS",
+            "CODE.GENERATED.SUCCESS",
+        });
+        var seqs = (await _events.ListByCorrelationIdAsync(tenantId, "run-eqrange"))
+            .Select(e => e.SequenceNumber).ToList();
+
+        // from == upTo is a valid (degenerate) range: the delta is legitimately empty.
+        var doc = await CallOkAsync(
+            tenantId, "run-eqrange", upTo: seqs[2].ToString(), from: seqs[2].ToString());
+
+        var delta = doc.GetProperty("delta");
+        delta.GetProperty("fromSequenceNumber").GetInt64().Should().Be(seqs[2]);
+        delta.GetProperty("addedEventCount").GetInt32().Should().Be(0);
+    }
+
+    // ── Fix C: run-detail/replay full-slice fetch is bounded + truncation flag ──
+
+    [Test]
+    public async Task Replay_UnderCap_NotTruncated()
+    {
+        var tenantId = Guid.NewGuid();
+        await SeedRunAsync(tenantId, "run-small", new[] { "A.ONE", "A.TWO", "A.THREE" });
+
+        var doc = await CallOkAsync(tenantId, "run-small");
+
+        doc.GetProperty("truncated").GetBoolean().Should().BeFalse(
+            "a run well under the cap must report truncated:false");
+    }
+
     // ── diff (from) ───────────────────────────────────────────────────────────
 
     [Test]
