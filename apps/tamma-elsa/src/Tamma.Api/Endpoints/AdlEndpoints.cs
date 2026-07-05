@@ -339,6 +339,87 @@ public static class AdlEndpoints
         }
     }
 
+    // ================================================================
+    // Clarifying-questions human-answer gate (Story 3.5) —
+    // POST /api/adl/clarify/resume. Same RBAC (WorkflowsManage, enforced at
+    // the route group) + I2 (server-derived resolver) posture as the merge/
+    // deploy gates. The cross-tenant guard uses the SAME mechanism as the merge
+    // gate: the caller's ambient tenant id is folded into the bookmark name by
+    // the engine, so a caller can only resume a gate in its OWN tenant (a
+    // cross-tenant/unknown session → 404). This is table-free — Story 3.5 mints
+    // no clarify-session row (NON-MIGRATION).
+    // ================================================================
+
+    /// <summary>
+    /// Resume request for the clarifying-questions answer gate. <c>Resolver</c> is
+    /// intentionally absent — the acting identity is derived from the authenticated
+    /// caller (I2), never trusted from the client.
+    /// </summary>
+    public sealed record ClarifyAnswersRequest(
+        Guid SessionId,
+        string Answers);
+
+    /// <summary>
+    /// Resume the clarifying-questions workflow with a stakeholder's answers.
+    /// Route: <c>POST /api/adl/clarify/resume</c>.
+    /// </summary>
+    public static async Task<IResult> ResumeClarify(
+        [FromBody] ClarifyAnswersRequest req,
+        [FromServices] IElsaWorkflowService elsa,
+        [FromServices] ITenantContext tenantContext,
+        ClaimsPrincipal principal,
+        [FromServices] ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("Tamma.Api.AdlEndpoints");
+
+        if (req.SessionId == Guid.Empty)
+            return Results.BadRequest(new { error = "sessionId is required" });
+        if (string.IsNullOrWhiteSpace(req.Answers))
+            return Results.BadRequest(new { error = "answers is required" });
+
+        // SECURITY (IDOR) — scope the resume to the caller's ambient tenant. The engine
+        // folds this tenant id into the bookmark name, so a caller can only ever resolve a
+        // gate in its OWN tenant. (Ambient null = self-hosted single-user scope.)
+        var tenantId = tenantContext.TenantId?.ToString();
+
+        // I2 — the resolver is the authenticated caller, derived server-side. A
+        // client-supplied resolver is never honoured so the audit trail can't be forged.
+        var resolver = ResolveApprover(principal);
+
+        try
+        {
+            var result = await elsa.ResumeClarifyingQuestionsAsync(
+                req.SessionId, tenantId, req.Answers, resolver);
+
+            if (result.GateNotFound)
+            {
+                return Results.NotFound(new
+                {
+                    error = "gate_not_waiting",
+                    detail = "No clarifying-questions wait is currently suspended for this session.",
+                });
+            }
+
+            logger.LogInformation(
+                "Drove clarify gate for session {SessionId} (resolver {Resolver})",
+                req.SessionId, LogSanitizer.Clean(resolver));
+
+            return Results.Ok(new
+            {
+                resumed = result.Resumed,
+                workflowInstanceId = result.WorkflowInstanceId,
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Failed to resume clarify gate for session {SessionId}", req.SessionId);
+            return Results.Problem(
+                detail: "Failed to resume the clarifying-questions gate.",
+                statusCode: StatusCodes.Status502BadGateway);
+        }
+    }
+
     /// <summary>Map a case-insensitive level onto the workflow's exact PascalCase segment
     /// ("Hint"/"Guidance"/"Assistance"); null for anything else.</summary>
     internal static string? CanonicalBlockerLevel(string? level)

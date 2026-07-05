@@ -38,8 +38,17 @@ namespace Tamma.Activities.Review;
 ///     (carries the iteration number).</description></item>
 ///   <item><description><c>CODE_REVIEW.MERGED.SUCCESS</c> / <c>.FAILED</c> — the PR was
 ///     merged (carries the merge sha + strategy) or merge failed irrecoverably.</description></item>
-///   <item><description><c>CODE_REVIEW.ESCALATED</c> — the review was escalated to a senior
-///     (carries the reason).</description></item>
+///   <item><description><c>CODE_REVIEW.ESCALATED</c> — Story 4-6: the review was escalated
+///     to a senior. Emitted at the RAISE point (when <see cref="EscalateReviewActivity"/>
+///     suspends awaiting the senior) so an escalation is auditable the moment it is
+///     triggered — regardless of whether the senior later resolves, rejects, or the SLA
+///     expires. Mirrors <c>BLOCKER.ESCALATED</c> (emitted before the blocker escalation
+///     wait). Carries the reason.</description></item>
+///   <item><description><c>CODE_REVIEW.ESCALATION_RESOLVED</c> — Story 4-6: the senior
+///     resolved the escalation (approved / fixed) and the run proceeds to merge. The
+///     resolution companion to <c>CODE_REVIEW.ESCALATED</c> (a rejection is recorded as
+///     <c>CODE_REVIEW.FAILED</c>; an SLA expiry as the timed-out <c>CODE_REVIEW.FAILED</c>
+///     terminal).</description></item>
 ///   <item><description><c>CODE_REVIEW.FAILED</c> — terminal: the review ended without a
 ///     merge (validation failure, senior rejection). LOUD (error-status) — never a silent
 ///     false success.</description></item>
@@ -54,7 +63,13 @@ public static class CodeReviewEvents
     public const string IterationStarted = "CODE_REVIEW.ITERATION.STARTED";
     public const string MergedSuccess = "CODE_REVIEW.MERGED.SUCCESS";
     public const string MergedFailed = "CODE_REVIEW.MERGED.FAILED";
+
+    /// <summary>Story 4-6 — an escalation was RAISED (senior notified, workflow suspended).</summary>
     public const string Escalated = "CODE_REVIEW.ESCALATED";
+
+    /// <summary>Story 4-6 — an escalation was RESOLVED by the senior (proceeding to merge).</summary>
+    public const string EscalationResolved = "CODE_REVIEW.ESCALATION_RESOLVED";
+
     public const string Failed = "CODE_REVIEW.FAILED";
 
     /// <summary>

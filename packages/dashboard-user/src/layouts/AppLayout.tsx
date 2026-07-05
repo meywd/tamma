@@ -27,6 +27,9 @@ export function AppLayout(): JSX.Element {
           <Link to="/runs" className="px-2 py-1.5 rounded hover:bg-gray-100">
             Runs
           </Link>
+          <Link to="/settings/billing" className="px-2 py-1.5 rounded hover:bg-gray-100">
+            Billing
+          </Link>
           <Link to="/settings" className="px-2 py-1.5 rounded hover:bg-gray-100">
             Settings
           </Link>

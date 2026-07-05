@@ -5,6 +5,7 @@ using Elsa.Workflows.Activities.Flowchart.Attributes;
 using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
+using Tamma.Activities.Core;
 using Tamma.Activities.LlmCall;
 using Tamma.Activities.Review.Models;
 using Microsoft.Extensions.Configuration;
@@ -61,6 +62,14 @@ public class EscalateReviewActivity : Activity
     [Input(Description = "Junior developer ID")]
     public Input<string> JuniorId { get; set; } = default!;
 
+    /// <summary>Story id under review (Story 4-6 — DCB escalation-raised event tag).</summary>
+    [Input(Description = "Story id under review (escalation-event tag)")]
+    public Input<string?> StoryId { get; set; } = new((string?)null);
+
+    /// <summary>Tenant id (Story 4-6 — empty / single-user → platform-scope escalation event).</summary>
+    [Input(Description = "Tenant id (empty / single-user → platform-scope escalation event)")]
+    public Input<string?> TenantId { get; set; } = new((string?)null);
+
     /// <summary>Escalation reason</summary>
     [Input(Description = "Reason for escalation")]
     public Input<EscalationReason> Reason { get; set; } = default!;
@@ -95,6 +104,8 @@ public class EscalateReviewActivity : Activity
         var sessionId = SessionId.Get(context);
         var prNumber = PRNumber.Get(context);
         var juniorId = JuniorId.Get(context);
+        var storyId = StoryId.Get(context);
+        var tenantId = TenantId.Get(context);
         var reason = Reason.Get(context);
         var iterations = IterationsAttempted.Get(context);
         var message = EscalationMessage.Get(context);
@@ -163,6 +174,27 @@ public class EscalateReviewActivity : Activity
                 "Error during escalation notification for session {SessionId}", sessionId);
             // Continue to create the bookmark even if notifications fail
         }
+
+        // Story 4-6 — emit CODE_REVIEW.ESCALATED at the RAISE point (before the suspending
+        // wait) so the escalation is on the DCB audit stream the moment it is triggered,
+        // regardless of the eventual outcome (resolved / rejected / SLA-expired). Mirrors
+        // BLOCKER.ESCALATED (emitted before the blocker escalation wait). The MentorshipEvent
+        // row logged above feeds the mentorship state machine; this DCB event feeds the
+        // platform audit / time-travel stream. Emitted here (outside the notification
+        // try/catch) so a failed Slack notification never suppresses the audit row.
+        var escalatedEvt = EmitCodeReviewEventActivity.BuildTammaEvent(
+            CodeReviewEvents.Escalated,
+            sessionId: sessionId.ToString(),
+            storyId: storyId,
+            juniorId: juniorId,
+            tenantId: CodeReviewEvents.ParseTenantId(tenantId),
+            prNumber: prNumber,
+            prUrl: null,
+            iteration: iterations,
+            mergeSha: null,
+            reason: reason.ToString(),
+            detail: message);
+        TammaEventEmitter.Emit(context, this, _logger, escalatedEvt);
 
         var bookmarkName = $"escalate-{sessionId}-{prNumber}";
 

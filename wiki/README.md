@@ -13,6 +13,7 @@ This directory contains the source markdown files for the Tamma GitHub Wiki.
 - **Installation.md** - Installation & setup: Docker Compose stack, `.env`, health checks, VPS/qa-tag deploy (Story 5-9a)
 - **Usage-and-Configuration.md** - CLI commands, operating modes, `.tamma/config.json`, prompt store, providers, BYOK (Story 5-9b)
 - **API-Reference.md** - REST surface, RBAC policies, SSE streams, webhooks, DCB event catalog (Story 5-9c)
+- **Event-Schema-and-Catalog.md** - Epic 4 DCB event schema reference: `DomainEvent` shape, tags taxonomy, metadata envelope, and the `AGGREGATE.ACTION.STATUS` catalog (Story 4-1)
 - **Stories.md** - Index of all user stories across all 26 epics (~221 stories, 50+ task plans)
 - **Contributing.md** - Contributing guidelines for developers
 

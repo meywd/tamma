@@ -656,6 +656,30 @@ builder.Services.AddScoped<Tamma.Api.Services.EmailMediation.IEmailMediationServ
 // factory signal are already present.
 builder.Services.AddIntegrationCredentialResolution();
 
+// Story 34-3 — BYOK toggle WRITE side. TenantProviderBillingService enables /
+// disables BYOK: it writes the tenant's key into the Epic 29 cabinet (via the
+// governed ProviderByokSecretCabinet, under the canonical provider/<name>/api-key
+// slug Story 32-3 reads), upserts the one active TenantProviderBilling owner row
+// the read-side resolver consumes, invalidates 32-3's credential cache, and emits
+// PRICING.BYOK.*. Scoped (composes the scoped ControlPlaneDbContext + ISecretStore
+// facade). The cabinet is only meaningful with the secret store wired — guarded on
+// the SecretsDbContext factory exactly like AddIntegrationCredentialResolution.
+// NON-migration: reuses the existing tenant_provider_billing owner table + the
+// secrets / secret_versions cabinet tables.
+if (builder.Services.Any(d =>
+    d.ServiceType == typeof(IDbContextFactory<Tamma.Api.Services.Secrets.Postgres.SecretsDbContext>)))
+{
+    builder.Services.TryAddScoped<
+        Tamma.Api.Services.Pricing.IProviderByokSecretCabinet,
+        Tamma.Api.Services.Pricing.ProviderByokSecretCabinet>();
+    // The service composes the cabinet, so it is only wired when the secret store
+    // is present (the byok endpoints are inert — and 500 rather than silently
+    // mis-store — without it). Mirrors AddIntegrationCredentialResolution's guard.
+    builder.Services.TryAddScoped<
+        Tamma.Api.Services.Pricing.ITenantProviderBillingService,
+        Tamma.Api.Services.Pricing.TenantProviderBillingService>();
+}
+
 // Story 32-5 (T4) — provider-side DI for the server-side tool loop, FORMALIZED
 // in the API process (replacing T3's best-effort GetService factory). The loop
 // (extracted verbatim into InlineToolLoopRunner) now executes HERE, where the
@@ -1484,6 +1508,18 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("agents:manage"));
         });
+        // Story 34-3 — BYOK pricing-mode management (enable/disable). Mirrors
+        // PromptManage / ConventionManage / AgentManage: CLAUDE.md "Operating
+        // Modes" makes per-(tenant, provider) BYOK a tenant-scoped setting
+        // reachable by tenant_owner OR tenant_admin (member → 403). The spec
+        // names SettingsManage, but that policy is owner-only (settings:manage)
+        // and would 403 every tenant_admin, so the dedicated PricingManage gate
+        // (pricing:manage, admin+owner) is used for the BYOK mutations.
+        options.AddPolicy("PricingManage", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("pricing:manage"));
+        });
         options.AddPolicy("WorkflowsView", p =>
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
@@ -1575,7 +1611,7 @@ else if (builder.Environment.IsDevelopment())
             .Build();
         // Register all named policies with permissive default
         foreach (var name in new[] { "AdminAccess", "OwnerAccess", "PlatformOwnerAccess", "MemberAccess", "SettingsView",
-            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
+            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "PricingManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
             "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny", "EngineServiceOnly" })
         {
             options.AddPolicy(name, p => p.AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement()));
@@ -2119,6 +2155,20 @@ pricing.MapGet("/plans/{slug}", Tamma.Api.Endpoints.PricingEndpoints.GetPublicPl
 pricing.MapPost("/subscribe", Tamma.Api.Endpoints.PricingEndpoints.Subscribe)
     .RequireAuthorization("SettingsManage");
 
+// Story 34-3 — per-(tenant, provider) BYOK toggle. Reads inherit the group's
+// MemberAccess (any authenticated tenant member sees their OWN modes); the byok
+// mutations use PricingManage (tenant_owner OR tenant_admin — a member-role
+// caller gets 403). The tenant is resolved STRICTLY from ITenantContext (never a
+// route/body tenantId), so there is no cross-tenant IDOR. The 422 SaaS-eligibility
+// gate (cli-token / unknown provider) is applied inside EnableByok via Story 32-4's
+// IProviderAuthLookup. Reveal-safe: responses carry { provider, mode, keySet }.
+pricing.MapGet("/providers", Tamma.Api.Endpoints.PricingEndpoints.ListProviderModes);
+pricing.MapGet("/providers/{provider}", Tamma.Api.Endpoints.PricingEndpoints.GetProviderMode);
+pricing.MapPost("/providers/{provider}/byok", Tamma.Api.Endpoints.PricingEndpoints.EnableByok)
+    .RequireAuthorization("PricingManage");
+pricing.MapDelete("/providers/{provider}/byok", Tamma.Api.Endpoints.PricingEndpoints.DisableByok)
+    .RequireAuthorization("PricingManage");
+
 var orgs = app.MapGroup("/api/v1/orgs").RequireAuthorization("MemberAccess");
 orgs.MapPost("/", OrgEndpoints.CreateOrg);
 orgs.MapPost("/invites/accept", OrgEndpoints.AcceptInvite);
@@ -2591,6 +2641,10 @@ engine.MapGet("/state", EngineEndpoints.GetState);
 engine.MapGet("/stats", EngineEndpoints.GetStats);
 engine.MapGet("/plan", EngineEndpoints.GetPlan);
 engine.MapGet("/history", EngineEndpoints.GetHistory);
+// Story 4-7 — time-travel event query: tenant-scoped, keyset-paginated read over
+// domain_events with time-range / correlationId / actor / type (exact|prefix)
+// filters. Inherits WorkflowsView (read-only, tenant-scoped) from the group.
+engine.MapGet("/events/query", EngineEndpoints.QueryEvents);
 engine.MapGet("/events/state", EngineEndpoints.GetEventsState);
 engine.MapGet("/events/logs", EngineEndpoints.GetEventsLogs);
 engine.MapPost("/store-context", EngineEndpoints.StoreContext).RequireAuthorization("WorkflowsManage");
@@ -2656,6 +2710,12 @@ adl.MapPost("/deploy-approval/resume", AdlEndpoints.ResumeDeploymentApproval);
 // handler verifies the caller's ambient tenant OWNS the session (tenant-scoped
 // session lookup) before forwarding — a cross-tenant/unknown session → 404.
 adl.MapPost("/blocker/resume", AdlEndpoints.ResumeBlocker);
+// Clarifying-questions answer gate (Story 3.5). Resumes the tenant+session-scoped
+// clarify-answers-{tenant}-{session} bookmark with the stakeholder's answers so the
+// workflow can incorporate them. WorkflowsManage = tenant owner/admin (members 403);
+// resolver derived server-side (I2). IDOR guard: the engine folds the caller's ambient
+// tenant id into the bookmark name, so a cross-tenant/unknown session → 404.
+adl.MapPost("/clarify/resume", AdlEndpoints.ResumeClarify);
 
 // ── GitHub App (no auth, webhook signature verification) ──
 // Audit finding 017 — webhook gets the GitHubWebhook policy (300/min). The

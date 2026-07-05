@@ -446,6 +446,10 @@ public class CodeReviewWorkflow : WorkflowBase
             SessionId = Expr<Guid>(ctx => sessionIdGuid.Get(ctx)),
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
+            // Story 4-6 — thread the DCB escalation-event tags so the raise-time
+            // CODE_REVIEW.ESCALATED event carries storyId + tenantId.
+            StoryId = Expr<string?>(ctx => storyId.Get(ctx)),
+            TenantId = Expr<string?>(ctx => tenantId.Get(ctx)),
             Reason = new(EscalationReason.MaxIterationsReached),
             IterationsAttempted = Expr<int>(ctx => iteration.Get(ctx)),
             EscalationMessage = new("Maximum fix iterations reached during code review."),
@@ -460,6 +464,10 @@ public class CodeReviewWorkflow : WorkflowBase
             SessionId = Expr<Guid>(ctx => sessionIdGuid.Get(ctx)),
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
+            // Story 4-6 — thread the DCB escalation-event tags so the raise-time
+            // CODE_REVIEW.ESCALATED event carries storyId + tenantId.
+            StoryId = Expr<string?>(ctx => storyId.Get(ctx)),
+            TenantId = Expr<string?>(ctx => tenantId.Get(ctx)),
             Reason = new(EscalationReason.ReviewTimeout),
             IterationsAttempted = Expr<int>(ctx => iteration.Get(ctx)),
             EscalationMessage = new("Review or fix submission timed out."),
@@ -474,6 +482,10 @@ public class CodeReviewWorkflow : WorkflowBase
             SessionId = Expr<Guid>(ctx => sessionIdGuid.Get(ctx)),
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
+            // Story 4-6 — thread the DCB escalation-event tags so the raise-time
+            // CODE_REVIEW.ESCALATED event carries storyId + tenantId.
+            StoryId = Expr<string?>(ctx => storyId.Get(ctx)),
+            TenantId = Expr<string?>(ctx => tenantId.Get(ctx)),
             Reason = new(EscalationReason.Other),
             IterationsAttempted = Expr<int>(ctx => iteration.Get(ctx)),
             EscalationMessage = new("Automated fix guidance could not be generated."),
@@ -487,6 +499,10 @@ public class CodeReviewWorkflow : WorkflowBase
             SessionId = Expr<Guid>(ctx => sessionIdGuid.Get(ctx)),
             PRNumber = Expr<int>(ctx => prNumber.Get(ctx)),
             JuniorId = Expr<string>(ctx => juniorId.Get(ctx)),
+            // Story 4-6 — thread the DCB escalation-event tags so the raise-time
+            // CODE_REVIEW.ESCALATED event carries storyId + tenantId.
+            StoryId = Expr<string?>(ctx => storyId.Get(ctx)),
+            TenantId = Expr<string?>(ctx => tenantId.Get(ctx)),
             Reason = new(EscalationReason.MergeConflict),
             IterationsAttempted = Expr<int>(ctx => iteration.Get(ctx)),
             EscalationMessage = new("CI not green or merge failed after retry; senior review required."),
@@ -504,9 +520,13 @@ public class CodeReviewWorkflow : WorkflowBase
         };
         captureEscalated.SetDisplayText("Capture Escalation Resolution");
 
-        var emitEscalated = EmitEvent("EmitEscalated", "Emit Escalated",
-            CodeReviewEvents.Escalated, sessionId, storyId, juniorId, tenantId,
-            prNumber, prUrl, iteration, mergeShaVar, new("Escalated to senior developer."));
+        // Story 4-6 — the RESOLVE companion to the raise-time CODE_REVIEW.ESCALATED (emitted
+        // by EscalateReviewActivity at suspend). This fires on the Resolved→merge edge, so the
+        // senior's resolution is a distinct audit row (a rejection instead lands on
+        // CODE_REVIEW.FAILED; an SLA expiry on the timed-out terminal).
+        var emitEscalated = EmitEvent("EmitEscalated", "Emit Escalation Resolved",
+            CodeReviewEvents.EscalationResolved, sessionId, storyId, juniorId, tenantId,
+            prNumber, prUrl, iteration, mergeShaVar, new("Escalation resolved by senior developer."));
 
         // ---- Merge re-escalation loop bound (#IMPORTANT) -------------------------------
         // The merge-failure escalation resolving routes back to MergeAndComplete; count the

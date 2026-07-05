@@ -6,6 +6,7 @@
 
 - [Project Roadmap](Roadmap) - All 31 epics with timeline, status, and layer placement
 - [Architecture](Architecture) - System architecture overview (three deployment modes, `IAgentExecutor`, pluggable backends)
+- [Event Schema & Catalog](Event-Schema-and-Catalog) - Epic 4 DCB event schema: `DomainEvent` shape, tags taxonomy, and the full `AGGREGATE.ACTION.STATUS` catalog
 - [Deployment](Deployment) - Docker stack, least-privilege app-role runbook, env vars, Redis/Cranl activation
 - [Installation & Setup](Installation) - Docker Compose stack, `.env`, health checks, VPS/qa-tag deploy (Story 5-9a)
 - [Usage & Configuration](Usage-and-Configuration) - CLI commands, operating modes, `.tamma/config.json`, prompts, providers, BYOK (Story 5-9b)

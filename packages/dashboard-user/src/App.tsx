@@ -27,6 +27,8 @@ import { TenantAlertChannels } from './pages/alerts/TenantAlertChannels';
 import { PlatformPicker } from './pages/onboarding/PlatformPicker';
 import { PlatformInstallForm } from './pages/onboarding/PlatformInstallForm';
 import { ConnectedPlatforms } from './pages/settings/ConnectedPlatforms';
+// Story 34-9 — tenant Plan & Pricing page.
+import { PlanPricingPage } from './pages/settings/PlanPricingPage';
 
 import type { JSX } from "react";
 
@@ -47,6 +49,9 @@ export function App(): JSX.Element {
           >
             <Route path="/" element={<DashboardHome />} />
             <Route path="/alerts" element={<TenantAlertFeed />} />
+            {/* Story 34-9 — Plan & Pricing. Rendered for all members; the page
+                itself gates mutations (member = read-only) so members can VIEW. */}
+            <Route path="/settings/billing" element={<PlanPricingPage />} />
             <Route
               path="/settings/alerts"
               element={

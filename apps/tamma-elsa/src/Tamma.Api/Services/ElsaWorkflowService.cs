@@ -467,6 +467,50 @@ public partial class ElsaWorkflowService : IElsaWorkflowService
             WorkflowInstanceId: result?.WorkflowInstanceId);
     }
 
+    /// <summary>
+    /// Story 3.5 — forward a clarifying-questions answer-gate resume to the engine's
+    /// in-process resume endpoint, which looks up the tenant+session-scoped
+    /// <c>clarify-answers-{tenant}-{session}</c> bookmark and runs the owning instance with
+    /// <c>{Answered, Answers}</c> injected as input. A 404 (no gate waiting) is surfaced as
+    /// <see cref="MergeApprovalResumeResult.GateNotFound"/> rather than thrown.
+    /// </summary>
+    public async Task<MergeApprovalResumeResult> ResumeClarifyingQuestionsAsync(
+        Guid sessionId, string? tenantId, string answers, string? resolver)
+    {
+        _logger.LogInformation(
+            "Resuming clarify gate for session {SessionId}", sessionId);
+
+        await EnsureHealthyAsync();
+
+        var payload = new
+        {
+            sessionId,
+            // Tenant scopes the engine's bookmark lookup (folded into the name).
+            tenantId,
+            answers,
+            // I2 — server-derived acting identity, forwarded for the engine's audit log.
+            resolver,
+        };
+
+        var response = await _httpClient.PostAsJsonAsync(
+            "/elsa/api/adl/clarify/resume", payload, JsonOptions);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning(
+                "No clarify gate waiting for session {SessionId}", sessionId);
+            return new MergeApprovalResumeResult(Resumed: false, GateNotFound: true, WorkflowInstanceId: null);
+        }
+
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<EngineResumeResponse>(JsonOptions);
+        return new MergeApprovalResumeResult(
+            Resumed: result?.Resumed ?? true,
+            GateNotFound: false,
+            WorkflowInstanceId: result?.WorkflowInstanceId);
+    }
+
     private sealed class EngineResumeResponse
     {
         public bool Resumed { get; set; }
