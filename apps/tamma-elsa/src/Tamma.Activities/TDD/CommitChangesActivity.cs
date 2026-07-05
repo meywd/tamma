@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Tamma.Activities.Core;
 using Tamma.Activities.TDD.Models;
 
 namespace Tamma.Activities.TDD;
@@ -97,6 +98,13 @@ public class CommitChangesActivity : CodeActivity<CommitResult>
                 _logger?.LogWarning(
                     "TDD Commit: No files to commit for session {SessionId}", sessionId);
 
+                // Story 4-5 (AC2) — an empty change set is a loud COMMIT.CREATED.FAILED
+                // (no commit happened; never a silent non-event).
+                TammaEventEmitter.Emit(context, this, _logger,
+                    CommitEvents.BuildCreated(success: false, storyId, sessionId,
+                        sha: null, commitMessage, branchName, repositoryUrl, allFiles,
+                        error: "No files to commit"));
+
                 context.SetResult(new CommitResult
                 {
                     Success = false,
@@ -127,11 +135,25 @@ public class CommitChangesActivity : CodeActivity<CommitResult>
                 "TDD Commit: {Status} for session {SessionId}. SHA={Sha}, Message=\"{Message}\"",
                 result.Success ? "Committed" : "Failed", sessionId, result.CommitSha, result.CommitMessage);
 
+            // Story 4-5 (AC2) — capture the commit as a DCB event
+            // (COMMIT.CREATED.SUCCESS/FAILED) carrying sha / message / branch /
+            // file-count so every commit is on the audit stream.
+            TammaEventEmitter.Emit(context, this, _logger,
+                CommitEvents.BuildCreated(result.Success, storyId, sessionId,
+                    result.CommitSha, result.CommitMessage, branchName, repositoryUrl,
+                    result.FilesCommitted, result.ErrorMessage));
+
             context.SetResult(result);
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "TDD Commit: Error creating commit for session {SessionId}", sessionId);
+
+            // Story 4-5 (AC2) — loud, error-status failure edge.
+            TammaEventEmitter.Emit(context, this, _logger,
+                CommitEvents.BuildCreated(success: false, storyId, sessionId,
+                    sha: null, commitMessage, branchName, repositoryUrl, allFiles,
+                    error: $"Commit failed: {ex.Message}"));
 
             context.SetResult(new CommitResult
             {
