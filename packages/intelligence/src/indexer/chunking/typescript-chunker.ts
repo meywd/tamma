@@ -13,7 +13,6 @@ import type {
   SupportedLanguage,
   ChunkType,
 } from '../types.js';
-import { ParseError } from '../errors.js';
 
 /**
  * Extract information from a TypeScript AST node
@@ -24,7 +23,7 @@ interface NodeInfo {
   startLine: number;
   endLine: number;
   content: string;
-  docstring?: string;
+  docstring?: string | undefined;
   exports: string[];
   isExported: boolean;
 }
@@ -89,8 +88,8 @@ export class TypeScriptChunker extends BaseChunker {
 
     // Create chunks for each declaration or group
     for (const group of groupedDeclarations) {
-      const firstDecl = group[0];
-      const lastDecl = group[group.length - 1];
+      const firstDecl = group[0]!;
+      const lastDecl = group[group.length - 1]!;
 
       // Combine content for grouped declarations
       const combinedContent = group.map(d => d.content).join('\n\n');
@@ -158,7 +157,7 @@ export class TypeScriptChunker extends BaseChunker {
     }
 
     // If no declarations found, create a single module chunk
-    if (chunks.length === 0 || (chunks.length === 1 && chunks[0].chunkType === 'imports')) {
+    if (chunks.length === 0 || (chunks.length === 1 && chunks[0]!.chunkType === 'imports')) {
       const moduleContent = strategy.preserveImports
         ? content.slice(imports.endPosition).trim()
         : content;
@@ -247,8 +246,8 @@ export class TypeScriptChunker extends BaseChunker {
       return { content: '', modules: [], startLine: 0, endLine: 0, endPosition: 0 };
     }
 
-    const firstImport = imports[0];
-    const lastImport = imports[imports.length - 1];
+    const firstImport = imports[0]!;
+    const lastImport = imports[imports.length - 1]!;
     const startLine = sourceFile.getLineAndCharacterOfPosition(firstImport.pos).line + 1;
     const endLine = sourceFile.getLineAndCharacterOfPosition(lastImport.end).line + 1;
 
@@ -298,7 +297,7 @@ export class TypeScriptChunker extends BaseChunker {
   private getNodeInfo(
     node: ts.Node,
     sourceFile: ts.SourceFile,
-    parentScope?: string,
+    _parentScope?: string,
   ): NodeInfo | null {
     let name = 'anonymous';
     let chunkType: ChunkType = 'block';
@@ -327,7 +326,7 @@ export class TypeScriptChunker extends BaseChunker {
     else if (ts.isVariableStatement(node)) {
       const declarations = node.declarationList.declarations;
       if (declarations.length > 0) {
-        const decl = declarations[0];
+        const decl = declarations[0]!;
         if (ts.isIdentifier(decl.name)) {
           name = decl.name.text;
           if (decl.initializer) {
@@ -422,7 +421,7 @@ export class TypeScriptChunker extends BaseChunker {
 
     // Find the last JSDoc comment before the node
     for (let i = leadingComments.length - 1; i >= 0; i--) {
-      const comment = leadingComments[i];
+      const comment = leadingComments[i]!;
       const commentText = fullText.slice(comment.pos, comment.end);
 
       if (commentText.startsWith('/**')) {

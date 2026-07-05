@@ -18,8 +18,6 @@ import type {
   UpdateKnowledgeEntry,
   KnowledgeListResult,
   KnowledgeImportResult,
-  KnowledgePriority,
-  AgentType,
 } from '@tamma/shared';
 import type {
   IKnowledgeService,
@@ -41,16 +39,6 @@ import { PreTaskChecker } from './checkers/pre-task-checker.js';
 import { LearningCaptureService } from './capture/learning-capture.js';
 
 /**
- * Priority value mapping for filtering
- */
-const PRIORITY_VALUES: Record<KnowledgePriority, number> = {
-  low: 1,
-  medium: 2,
-  high: 3,
-  critical: 4,
-};
-
-/**
  * Knowledge service implementation
  */
 export class KnowledgeService implements IKnowledgeService {
@@ -63,7 +51,6 @@ export class KnowledgeService implements IKnowledgeService {
   private relevanceRanker: RelevanceRanker;
   private preTaskChecker: PreTaskChecker;
   private learningCapture: LearningCaptureService;
-  private initialized = false;
 
   constructor(store?: IKnowledgeStore, config?: Partial<KnowledgeConfig>) {
     this.config = { ...DEFAULT_KNOWLEDGE_CONFIG, ...config };
@@ -107,11 +94,10 @@ export class KnowledgeService implements IKnowledgeService {
         this.config.capture
       );
     }
-    this.initialized = true;
   }
 
   async dispose(): Promise<void> {
-    this.initialized = false;
+    // No resources to release; provided for interface completeness.
   }
 
   /**
@@ -128,7 +114,9 @@ export class KnowledgeService implements IKnowledgeService {
     // Build filter for applicable entries
     const baseFilter: KnowledgeFilter = {
       enabled: true,
-      priority: query.minPriority,
+      ...(query.minPriority !== undefined
+        ? { priority: query.minPriority }
+        : {}),
     };
 
     // Get all potentially relevant entries
@@ -357,12 +345,13 @@ export class KnowledgeService implements IKnowledgeService {
 
     // Create knowledge entry from pending learning
     const now = new Date();
+    const details = pending.whatWorked || pending.whatFailed || pending.rootCause;
     const entry: KnowledgeEntry = {
       id: randomUUID(),
       type: 'learning',
       title: edits?.title ?? pending.suggestedTitle,
       description: edits?.description ?? pending.suggestedDescription,
-      details: pending.whatWorked || pending.whatFailed || pending.rootCause,
+      ...(details !== undefined ? { details } : {}),
       scope: 'global',
       projectId: pending.projectId,
       keywords: edits?.keywords ?? pending.suggestedKeywords,
@@ -428,7 +417,7 @@ export class KnowledgeService implements IKnowledgeService {
 
   async recordApplication(
     knowledgeId: string,
-    taskId: string,
+    _taskId: string,
     helpful: boolean
   ): Promise<void> {
     await this.store.incrementApplied(knowledgeId);

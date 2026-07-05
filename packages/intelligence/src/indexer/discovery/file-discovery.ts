@@ -244,7 +244,7 @@ export class FileDiscovery {
 
     let i = 0;
     while (i < pattern.length) {
-      const char = pattern[i];
+      const char = pattern[i]!;
 
       if (char === '*') {
         if (pattern[i + 1] === '*') {

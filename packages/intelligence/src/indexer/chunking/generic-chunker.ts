@@ -128,7 +128,7 @@ export class GenericChunker extends BaseChunker {
     name?: string;
     startLine: number;
     endLine: number;
-    docstring?: string;
+    docstring?: string | undefined;
   }> {
     const lines = content.split('\n');
     const sections: Array<{
@@ -136,7 +136,7 @@ export class GenericChunker extends BaseChunker {
       name?: string;
       startLine: number;
       endLine: number;
-      docstring?: string;
+      docstring?: string | undefined;
     }> = [];
 
     // Language-specific patterns
@@ -144,7 +144,7 @@ export class GenericChunker extends BaseChunker {
 
     let i = 0;
     while (i < lines.length) {
-      const line = lines[i];
+      const line = lines[i]!;
       const lineNumber = i + 1;
 
       // Check for function/class definitions
@@ -247,7 +247,7 @@ export class GenericChunker extends BaseChunker {
    * Find end of Python indentation-based block
    */
   private findPythonBlockEnd(lines: string[], startIndex: number): number {
-    const startLine = lines[startIndex];
+    const startLine = lines[startIndex]!;
     const startIndent = this.getIndentation(startLine);
 
     // Find the colon that starts the block
@@ -259,7 +259,7 @@ export class GenericChunker extends BaseChunker {
 
     // Look for the first line with content at the block's indentation level
     for (let i = startIndex + 1; i < lines.length; i++) {
-      const line = lines[i];
+      const line = lines[i]!;
       const trimmed = line.trim();
 
       // Skip empty lines and comments
@@ -286,7 +286,7 @@ export class GenericChunker extends BaseChunker {
     let foundOpenBrace = false;
 
     for (let i = startIndex; i < lines.length; i++) {
-      const line = lines[i];
+      const line = lines[i]!;
 
       // Count braces, ignoring strings and comments
       for (const char of line) {
@@ -311,7 +311,7 @@ export class GenericChunker extends BaseChunker {
   private getIndentation(line: string): number {
     const match = line.match(/^(\s*)/);
     if (!match) return 0;
-    const spaces = match[1];
+    const spaces = match[1]!;
     // Convert tabs to 4 spaces
     return spaces.replace(/\t/g, '    ').length;
   }
@@ -359,7 +359,7 @@ export class GenericChunker extends BaseChunker {
   /**
    * Extract Python docstring (triple-quoted string)
    */
-  private extractPythonDocstring(lines: string[], startIndex: number): string | undefined {
+  private extractPythonDocstring(_lines: string[], _startIndex: number): string | undefined {
     // Check for docstring in the line after the definition
     // Python docstrings are inside the function
     return undefined;
@@ -373,7 +373,7 @@ export class GenericChunker extends BaseChunker {
     let i = startIndex;
 
     while (i >= 0) {
-      const line = lines[i].trim();
+      const line = lines[i]!.trim();
       if (line.startsWith('//')) {
         comments.unshift(line.slice(2).trim());
         i--;
@@ -395,7 +395,7 @@ export class GenericChunker extends BaseChunker {
     let i = startIndex;
 
     while (i >= 0) {
-      const line = lines[i].trim();
+      const line = lines[i]!.trim();
       if (line.startsWith('///')) {
         comments.unshift(line.slice(3).trim());
         i--;
@@ -422,7 +422,7 @@ export class GenericChunker extends BaseChunker {
     const commentLines: string[] = [];
 
     while (i >= 0) {
-      const line = lines[i].trim();
+      const line = lines[i]!.trim();
 
       if (line.endsWith('*/') && !inComment) {
         inComment = true;

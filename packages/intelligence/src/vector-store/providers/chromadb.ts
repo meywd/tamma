@@ -9,6 +9,7 @@ import type {
   ChromaClient as ChromaClientType,
   Collection as ChromaCollection,
   IncludeEnum,
+  Where,
 } from 'chromadb';
 import type {
   VectorStoreConfig,
@@ -319,7 +320,7 @@ export class ChromaDBVectorStore extends BaseVectorStore {
     // ChromaDB doesn't have a direct count with filter, so we need to query
     const whereClause = toChromaDBFilter(filter);
     const result = await col.get({
-      where: whereClause as Record<string, unknown>,
+      where: whereClause as unknown as Where,
       include: [],
     });
 
@@ -343,7 +344,7 @@ export class ChromaDBVectorStore extends BaseVectorStore {
       queryEmbeddings: number[][];
       nResults: number;
       include: IncludeEnum[];
-      where?: Record<string, unknown>;
+      where?: Where;
     } = {
       queryEmbeddings: [query.embedding],
       nResults: query.topK,
@@ -351,7 +352,7 @@ export class ChromaDBVectorStore extends BaseVectorStore {
     };
 
     if (query.filter && !isEmptyFilter(query.filter)) {
-      queryParams.where = toChromaDBFilter(query.filter) as Record<string, unknown>;
+      queryParams.where = toChromaDBFilter(query.filter) as unknown as Where;
     }
 
     const result = await col.query(queryParams);
@@ -422,7 +423,7 @@ export class ChromaDBVectorStore extends BaseVectorStore {
       queryEmbeddings: number[][];
       nResults: number;
       include: IncludeEnum[];
-      where?: Record<string, unknown>;
+      where?: Where;
     } = {
       queryEmbeddings: [query.embedding],
       nResults: query.topK * 2, // Get more results for fusion
@@ -430,7 +431,7 @@ export class ChromaDBVectorStore extends BaseVectorStore {
     };
 
     if (query.filter && !isEmptyFilter(query.filter)) {
-      vectorQueryParams.where = toChromaDBFilter(query.filter) as Record<string, unknown>;
+      vectorQueryParams.where = toChromaDBFilter(query.filter) as unknown as Where;
     }
 
     const vectorResults = await col.query(vectorQueryParams);
@@ -440,7 +441,7 @@ export class ChromaDBVectorStore extends BaseVectorStore {
       queryTexts: string[];
       nResults: number;
       include: IncludeEnum[];
-      where?: Record<string, unknown>;
+      where?: Where;
     } = {
       queryTexts: [query.text],
       nResults: query.topK * 2,
@@ -448,7 +449,7 @@ export class ChromaDBVectorStore extends BaseVectorStore {
     };
 
     if (query.filter && !isEmptyFilter(query.filter)) {
-      textQueryParams.where = toChromaDBFilter(query.filter) as Record<string, unknown>;
+      textQueryParams.where = toChromaDBFilter(query.filter) as unknown as Where;
     }
 
     const textResults = await col.query(textQueryParams);
@@ -582,7 +583,7 @@ export class ChromaDBVectorStore extends BaseVectorStore {
       queryEmbeddings: number[][];
       nResults: number;
       include: IncludeEnum[];
-      where?: Record<string, unknown>;
+      where?: Where;
     } = {
       queryEmbeddings: [query.embedding],
       nResults: fetchK,
@@ -590,7 +591,7 @@ export class ChromaDBVectorStore extends BaseVectorStore {
     };
 
     if (query.filter && !isEmptyFilter(query.filter)) {
-      queryParams.where = toChromaDBFilter(query.filter) as Record<string, unknown>;
+      queryParams.where = toChromaDBFilter(query.filter) as unknown as Where;
     }
 
     const result = await col.query(queryParams);
@@ -611,8 +612,8 @@ export class ChromaDBVectorStore extends BaseVectorStore {
       id: string;
       embedding: number[];
       distance: number;
-      metadata?: VectorMetadata;
-      content?: string;
+      metadata?: VectorMetadata | undefined;
+      content?: string | undefined;
     }> = [];
 
     for (let i = 0; i < ids.length; i++) {

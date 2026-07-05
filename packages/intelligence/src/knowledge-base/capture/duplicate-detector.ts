@@ -107,7 +107,9 @@ export class DuplicateDetector {
     // Get existing learnings to compare against
     const { entries } = await this.store.list({
       types: ['learning'],
-      projectId: this.options.projectScopeOnly ? capture.projectId : undefined,
+      ...(this.options.projectScopeOnly
+        ? { projectId: capture.projectId }
+        : {}),
       enabled: true,
       limit: 100,
     });

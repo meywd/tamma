@@ -4,7 +4,6 @@
  * Simple in-memory implementation of the knowledge store for development and testing.
  */
 
-import { randomUUID } from 'node:crypto';
 import type {
   KnowledgeEntry,
   KnowledgeFilter,

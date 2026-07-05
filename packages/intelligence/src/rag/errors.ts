@@ -26,7 +26,7 @@ export enum RAGErrorCode {
  */
 export class RAGError extends Error {
   readonly code: RAGErrorCode;
-  readonly cause?: Error;
+  override readonly cause?: Error | undefined;
 
   constructor(code: RAGErrorCode, message: string, cause?: Error) {
     super(message);
@@ -52,7 +52,7 @@ export class NotInitializedError extends RAGError {
  * Error thrown for invalid configuration
  */
 export class InvalidConfigError extends RAGError {
-  readonly field?: string;
+  readonly field?: string | undefined;
 
   constructor(message: string, field?: string) {
     super(RAGErrorCode.INVALID_CONFIG, message);
@@ -80,7 +80,7 @@ export class QueryProcessingError extends RAGError {
  * Error thrown when retrieval fails
  */
 export class RetrievalError extends RAGError {
-  readonly source?: string;
+  readonly source?: string | undefined;
 
   constructor(message: string, source?: string, cause?: Error) {
     super(RAGErrorCode.RETRIEVAL_FAILED, message, cause);

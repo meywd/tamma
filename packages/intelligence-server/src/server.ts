@@ -18,6 +18,7 @@ import { RagManagementService } from './services/RagManagementService.js';
 import { McpManagementService } from './services/McpManagementService.js';
 import { ContextTestingService } from './services/ContextTestingService.js';
 import { AnalyticsService } from './services/AnalyticsService.js';
+import { buildIntelligenceBundleFromEnv } from './env-composition.js';
 import type { IntelligenceServicesBundle } from './types.js';
 
 export interface BuildServerOptions {
@@ -199,7 +200,25 @@ export async function startServer(opts: {
   host?: string;
   services?: IntelligenceServicesBundle;
 } = {}): Promise<FastifyInstance> {
-  const app = await buildServer({ ...(opts.services ? { services: opts.services } : {}) });
+  // Compose the real service bundle from env (ChromaDB/pgvector + embedder +
+  // RAG). When no vector-store env is configured this returns an empty bundle
+  // and every endpoint keeps its `not_configured` stub behaviour. When a store
+  // IS configured but unreachable at boot, degrade to stubs rather than crash
+  // so the sidecar still serves /health and the C# proxy can render a banner.
+  let services = opts.services;
+  if (!services) {
+    try {
+      services = await buildIntelligenceBundleFromEnv();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[intelligence-server] failed to build services from env; booting in not_configured mode:',
+        err instanceof Error ? err.message : err,
+      );
+      services = {};
+    }
+  }
+  const app = await buildServer({ services });
   const port = opts.port ?? Number.parseInt(process.env['INTELLIGENCE_PORT'] ?? '4100', 10);
   const host = opts.host ?? process.env['INTELLIGENCE_HOST'] ?? '0.0.0.0';
   await app.listen({ port, host });

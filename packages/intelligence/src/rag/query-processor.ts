@@ -101,7 +101,7 @@ function collapseWhitespace(text: string): string {
       inWhitespace = true;
     } else {
       inWhitespace = false;
-      result.push(text[i]);
+      result.push(text[i]!);
     }
   }
   // Trim trailing space
@@ -133,7 +133,7 @@ function countWords(text: string): number {
  * Query processor implementation
  */
 export class QueryProcessor implements IQueryProcessor {
-  private embeddingService?: EmbeddingService;
+  private embeddingService?: EmbeddingService | undefined;
 
   constructor(embeddingService?: EmbeddingService) {
     this.embeddingService = embeddingService;

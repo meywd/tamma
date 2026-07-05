@@ -8,6 +8,17 @@
 
 export { buildServer, registerKbRoutes, startServer } from './server.js';
 export { adaptVectorStore, adaptRagPipeline } from './adapters.js';
+export {
+  buildIntelligenceBundleFromEnv,
+  createVectorStoreFromEnv,
+  createRagPipelineFromEnv,
+  createEmbedderFromEnv,
+  buildRagPipeline,
+  wrapVectorStore,
+  resolveVectorStoreConfig,
+  hasVectorStoreEnv,
+  EMBEDDER_MISSING_MESSAGE,
+} from './env-composition.js';
 export { IndexManagementService } from './services/IndexManagementService.js';
 export { VectorDbManagementService } from './services/VectorDbManagementService.js';
 export { RagManagementService } from './services/RagManagementService.js';

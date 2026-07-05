@@ -149,7 +149,7 @@ export class GitignoreParser {
     // Escape special regex characters except * and ?
     let i = 0;
     while (i < pattern.length) {
-      const char = pattern[i];
+      const char = pattern[i]!;
 
       if (char === '*') {
         // Check for **

@@ -154,13 +154,14 @@ export class LearningCaptureService {
   ): LearningCapture {
     const title = this.generateTitle(outcome, 'success');
     const description = this.generateDescription(outcome, 'success');
+    const whatWorked = this.extractWhatWorked(outcome);
 
     return {
       taskId: outcome.taskId,
       projectId: outcome.projectId,
       outcome: 'success',
       description: outcome.output ?? 'Task completed successfully',
-      whatWorked: this.extractWhatWorked(outcome),
+      ...(whatWorked !== undefined ? { whatWorked } : {}),
       suggestedTitle: title,
       suggestedDescription: description,
       suggestedKeywords: keywords,
@@ -178,14 +179,15 @@ export class LearningCaptureService {
   ): LearningCapture {
     const title = this.generateTitle(outcome, 'failure');
     const description = this.generateDescription(outcome, 'failure');
+    const rootCause = this.extractRootCause(outcome);
 
     return {
       taskId: outcome.taskId,
       projectId: outcome.projectId,
       outcome: 'failure',
       description: outcome.error ?? 'Task failed',
-      whatFailed: outcome.error,
-      rootCause: this.extractRootCause(outcome),
+      ...(outcome.error !== undefined ? { whatFailed: outcome.error } : {}),
+      ...(rootCause !== undefined ? { rootCause } : {}),
       suggestedTitle: title,
       suggestedDescription: description,
       suggestedKeywords: keywords,
@@ -203,14 +205,15 @@ export class LearningCaptureService {
   ): LearningCapture {
     const title = this.generateTitle(outcome, 'partial');
     const description = this.generateDescription(outcome, 'partial');
+    const whatWorked = this.extractWhatWorked(outcome);
 
     return {
       taskId: outcome.taskId,
       projectId: outcome.projectId,
       outcome: 'partial',
       description: outcome.output ?? 'Task partially completed',
-      whatWorked: this.extractWhatWorked(outcome),
-      whatFailed: outcome.error,
+      ...(whatWorked !== undefined ? { whatWorked } : {}),
+      ...(outcome.error !== undefined ? { whatFailed: outcome.error } : {}),
       suggestedTitle: title,
       suggestedDescription: description,
       suggestedKeywords: keywords,

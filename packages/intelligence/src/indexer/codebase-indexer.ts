@@ -24,18 +24,15 @@ import type {
   IndexerEventType,
   ChunkingStrategy,
 } from './types.js';
-import { DEFAULT_INDEXER_CONFIG, mergeConfig, validateConfig } from './config.js';
+import { mergeConfig, validateConfig } from './config.js';
 import { FileDiscovery, createFileDiscovery, createGitDiffDetector } from './discovery/index.js';
-import type { GitDiffDetector } from './discovery/index.js';
 import { ChunkerFactory, chunkerFactory } from './chunking/index.js';
 import { EmbeddingService, type EmbeddingServiceConfig } from './embedding/index.js';
 import {
   generateFileId,
   calculateHash,
-  calculateFileHash,
 } from './metadata/index.js';
 import {
-  IndexerError,
   FileReadError,
   NotInitializedError,
   OperationCancelledError,
@@ -228,7 +225,7 @@ export class CodebaseIndexer implements ICodebaseIndexer {
           throw new OperationCancelledError('indexProject');
         }
 
-        const file = files[i];
+        const file = files[i]!;
         this.emitProgress({
           phase: 'chunking',
           filesTotal: files.length,
@@ -541,7 +538,7 @@ export class CodebaseIndexer implements ICodebaseIndexer {
   /**
    * Clear the entire index for a project
    */
-  async clearIndex(projectPath: string): Promise<void> {
+  async clearIndex(_projectPath: string): Promise<void> {
     if (this.vectorStore) {
       const exists = await this.vectorStore.collectionExists(this.collectionName);
       if (exists) {
@@ -749,7 +746,7 @@ export class CodebaseIndexer implements ICodebaseIndexer {
    */
   private async processFile(
     file: DiscoveredFile,
-    projectPath: string,
+    _projectPath: string,
   ): Promise<CodeChunk[]> {
     // Read file content
     let content: string;
@@ -830,10 +827,10 @@ export class CodebaseIndexer implements ICodebaseIndexer {
       name: chunk.name,
       startLine: chunk.startLine,
       endLine: chunk.endLine,
-      parentScope: chunk.parentScope,
+      ...(chunk.parentScope !== undefined ? { parentScope: chunk.parentScope } : {}),
       imports: chunk.imports,
       exports: chunk.exports,
-      docstring: chunk.docstring,
+      ...(chunk.docstring !== undefined ? { docstring: chunk.docstring } : {}),
       hash: chunk.hash,
       indexedAt: chunk.indexedAt.toISOString(),
     };
@@ -851,7 +848,7 @@ export class CodebaseIndexer implements ICodebaseIndexer {
    */
   private async filterChangedFiles(
     files: DiscoveredFile[],
-    projectPath: string,
+    _projectPath: string,
   ): Promise<DiscoveredFile[]> {
     const changedFiles: DiscoveredFile[] = [];
 
