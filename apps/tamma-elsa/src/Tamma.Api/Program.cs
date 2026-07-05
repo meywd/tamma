@@ -2374,6 +2374,22 @@ app.MapGet("/api/v1/onboarding/status", OnboardingEndpoints.GetStatus)
 app.MapGet("/api/v1/onboarding/install-github", OnboardingEndpoints.InstallGitHub)
     .RequireAuthorization("MemberAccess");
 
+// Story 18-4 AC4/AC7 non-migration write slices (WRITE counterparts to the
+// Story 21-4 GET /api/v1/repos read; tenant resolved strictly from
+// ITenantContext, null-tenant fails closed → 404, no IDOR):
+//   PATCH .../onboarding/repos/{installationId}/{repoId} — flip the EXISTING
+//     IsActive flag on a repo of the caller's OWN installation. Gated by
+//     PlatformsManage (tenant_owner/tenant_admin → member 403): managing which
+//     repos Tamma monitors is a platform-admin action, same policy as the
+//     platform-install write above. Idempotent; emits REPO.(DE)ACTIVATED.SUCCESS.
+//   POST .../onboarding/complete — record onboarding completion + emit
+//     ONBOARDING.COMPLETED.SUCCESS (the DCB event IS the record; no new column).
+//     MemberAccess, matching the sibling wizard endpoints. Idempotent.
+app.MapPatch("/api/v1/onboarding/repos/{installationId:long}/{repoId:long}", OnboardingEndpoints.SetRepoActive)
+    .RequireAuthorization("PlatformsManage");
+app.MapPost("/api/v1/onboarding/complete", OnboardingEndpoints.CompleteOnboarding)
+    .RequireAuthorization("MemberAccess");
+
 // ── Story 31-9 — onboarding platform picker + installation API ──
 // GET /platforms returns the list of platforms the picker renders +
 // per-kind capability flags, marking deferred kinds (Bitbucket /
