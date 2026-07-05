@@ -109,6 +109,7 @@ public class TaxonomyDriftBuildTests
         "ContextGatheringWorkflow",
         "DebuggingWorkflow",
         "DeploymentPipelineWorkflow",
+        "IssueDecompositionWorkflow",   // Story 2.14: dispatches the dedicated (senior_developer, decompose-issue) pair
         "MentorshipWorkflow",
         "PlanGenerationWorkflow",
         "PlanReviewWorkflow",

@@ -247,6 +247,10 @@ public static class SystemPrompts
         //    JSON AmbiguityParsing recovers; NOT a transitional family) ──
         AgentAction.ScoreAmbiguity => ScoreAmbiguityBody,
 
+        // ── decompose-issue (Story 2.14 — real per-cell body producing the ordered sub-task
+        //    JSON DecompositionParsing recovers; NOT a transitional family) ──
+        AgentAction.DecomposeIssue => DecomposeIssueBody,
+
         // ── summarize / documentation / write-ups → Summarize ──
         AgentAction.SummarizeStakeholder => Summarize,
         AgentAction.SummarizeTechnical => Summarize,
@@ -870,6 +874,97 @@ public static class SystemPrompts
         Variables: ["role", "workItemJson", "contextFindings", "conventions"],
         EnableTools: false,
         MaxTokens: 2048);
+
+    // -----------------------------------------------------------------------
+    // Issue-decomposition body builder (Story 2.14)
+    //
+    // Purpose-written for the IssueDecompositionWorkflow llm-call dispatch
+    // (Tamma.ElsaServer/Workflows/IssueDecompositionWorkflow.cs). It breaks a
+    // complex issue into an ORDERED set of smaller, implementable sub-tasks — each
+    // with a rationale, a definition of done, a rough sizing, a complexity, and its
+    // declared prerequisite dependencies — and returns the EXACT JSON object
+    // DecompositionParsing.ParseDecomposition recovers:
+    //   { "summary", "subtasks":[{ "id","title","description","acceptanceCriteria",
+    //     "estimateHours","complexity","dependsOn":[...] }] }
+    // The parser fails closed on a missing summary or zero usable sub-tasks, so the
+    // template is explicit that both are load-bearing (resolution is
+    // tenant→system→error — this body is never empty/plain). Sub-task ids +
+    // dependsOn are the FOUNDATION contract for Story 2.15 (#138 dependency mapping)
+    // and Story 2.16 (#139 sequencing).
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Prompt for <c>(senior_developer, decompose-issue)</c>: break a complex issue into an
+    /// ordered set of smaller, implementable sub-tasks (with rationale, sizing and dependencies)
+    /// and emit the structured decomposition as the JSON
+    /// <see cref="Tamma.Activities.Decomposition.DecompositionParsing"/> parses. Variables:
+    /// <c>workItemJson</c> (the issue under decomposition) and <c>findings</c> (the codebase /
+    /// prior-art context that informs the breakdown's scope/dependency judgement).
+    /// </summary>
+    private static PromptTemplate DecomposeIssueBody(string role, string action) => new(
+        Role: role,
+        Action: action,
+        Template:
+            "You are a {{role}} decomposing a complex issue into an ORDERED set of smaller, " +
+            "independently implementable sub-tasks so the team can deliver it incrementally with " +
+            "continuous integration.\n\n" +
+            "## Issue / Work Item\n{{workItemJson}}\n\n" +
+            "## Gathered Context (codebase / prior art)\n{{findings}}\n\n" +
+            "## Conventions\n{{conventions}}\n\n" +
+            "## Instructions\n\n" +
+            "<thinking>\n" +
+            "1. Understand the issue's full intent and business value — the decomposition MUST " +
+            "preserve it (the sub-tasks together must fully deliver the parent issue)\n" +
+            "2. Use the gathered context to judge scope, integration points, and where the natural " +
+            "seams are (vertical slices, then supporting layers)\n" +
+            "3. Break the work into sub-tasks each sized ROUGHLY 2-8 hours, each with a clear " +
+            "definition of done — small enough to implement and review in one pass\n" +
+            "4. Assign each sub-task a short STABLE id (e.g. `ST-1`, `ST-2`) — dependencies " +
+            "reference these ids\n" +
+            "5. For each sub-task, declare which OTHER sub-tasks (by id) must be completed first in " +
+            "`dependsOn` (a prerequisite / blocking relationship). Independent sub-tasks have an " +
+            "empty `dependsOn`\n" +
+            "6. Order the `subtasks` array so prerequisites come before the sub-tasks that depend " +
+            "on them (a sensible initial implementation sequence)\n" +
+            "7. Rate each sub-task's `complexity` as `low`, `medium`, or `high`\n" +
+            "</thinking>\n\n" +
+            "Base the breakdown on the issue and context provided — do NOT invent scope the issue " +
+            "does not call for, and do NOT fabricate dependencies. Only reference sub-task ids you " +
+            "actually define.\n\n" +
+            "Return ONLY a single JSON object (no markdown fences, no prose outside it) of this " +
+            "EXACT shape:\n" +
+            "```json\n" +
+            "{\n" +
+            "  \"summary\": \"1-3 sentence overview of the breakdown and how it preserves the " +
+            "issue's intent\",\n" +
+            "  \"subtasks\": [\n" +
+            "    {\n" +
+            "      \"id\": \"ST-1\",\n" +
+            "      \"title\": \"short headline for the sub-task\",\n" +
+            "      \"description\": \"what to implement in this sub-task\",\n" +
+            "      \"acceptanceCriteria\": \"the definition of done for this sub-task\",\n" +
+            "      \"estimateHours\": 4,\n" +
+            "      \"complexity\": \"low|medium|high\",\n" +
+            "      \"dependsOn\": [\"ST-0\"]\n" +
+            "    }\n" +
+            "  ]\n" +
+            "}\n" +
+            "```\n\n" +
+            "Requirements (the downstream parser fails closed if these are not met):\n" +
+            "- `summary` MUST be a non-empty overview — it is load-bearing (it records intent " +
+            "preservation).\n" +
+            "- `subtasks` MUST contain at least one sub-task; each MUST carry a non-empty `id` and " +
+            "at least a `title` or `description`.\n" +
+            "- `id`s MUST be unique within the decomposition.\n" +
+            "- `estimateHours` is a number (rough hours); `complexity` is one of `low`, `medium`, " +
+            "`high`.\n" +
+            "- Every entry in `dependsOn` MUST be the `id` of another sub-task in this " +
+            "decomposition (no self-references, no dangling ids).\n" +
+            "- Order `subtasks` so each sub-task's prerequisites appear before it.",
+        SystemPrompt: SystemFor(role),
+        Variables: ["role", "workItemJson", "findings", "conventions"],
+        EnableTools: false,
+        MaxTokens: 4096);
 
     // -----------------------------------------------------------------------
     // Role-specific review lenses (inlined in plan-review / code-review bodies)
