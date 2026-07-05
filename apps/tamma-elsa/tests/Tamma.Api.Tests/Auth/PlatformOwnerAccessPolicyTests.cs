@@ -183,6 +183,11 @@ public class PlatformOwnerAccessPolicyTests
         // tenant-owner who is not a platform admin must NOT read it (the
         // tenant-facing /api/pricing/* surface only ever exposes the sell price).
         "/api/admin/pricing/overview",
+        // Story 23-8 — the Infrastructure Monitor exposes SYSTEM/PLATFORM-level
+        // process internals (CPU / memory / disk / uptime / dependency status).
+        // These are not tenant-scoped, so a tenant-owner who is not a platform
+        // admin must NOT read them (Finding C1).
+        "/api/admin/monitoring/infrastructure",
     };
 
     [Test]
