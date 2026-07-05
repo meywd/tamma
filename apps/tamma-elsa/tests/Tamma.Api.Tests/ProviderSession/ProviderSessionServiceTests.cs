@@ -286,6 +286,9 @@ internal sealed class RecordingDiagnosticsService : IDiagnosticsService
     public Task<DimensionReport> GetDimensionReportAsync(Guid? tenantId, DateTime from, DateTime to, DimensionGroup groupBy, CancellationToken ct = default)
         => Task.FromResult(new DimensionReport(from, to, groupBy, Array.Empty<DimensionBucket>()));
 
+    public Task<ProviderDiagnosticsDeepReport> GetDeepReportAsync(Guid? tenantId, DateTime from, DateTime to, string? providerKey, CancellationToken ct = default)
+        => Task.FromResult(new ProviderDiagnosticsDeepReport(from, to, Array.Empty<ProviderDiagnosticSummary>(), 0, 0, 0, 0m));
+
     public Task<BudgetStatus> GetBudgetAsync(Guid accountId, CancellationToken ct = default)
         => Task.FromResult(new BudgetStatus(accountId, DateTime.UtcNow, DateTime.UtcNow, 0m, 0m, 0m, 0, 0, false, false));
 

@@ -337,6 +337,9 @@ public class ProviderChainResolverBudgetTests
         public Task<DimensionReport> GetDimensionReportAsync(
             Guid? tenantId, DateTime from, DateTime to, DimensionGroup groupBy, CancellationToken ct = default) =>
             throw new NotSupportedException();
+        public Task<ProviderDiagnosticsDeepReport> GetDeepReportAsync(
+            Guid? tenantId, DateTime from, DateTime to, string? providerKey, CancellationToken ct = default) =>
+            throw new NotSupportedException();
         public IReadOnlyList<ProviderDiagnostic> GetRecentEvents(Guid? tenantId, int limit = 50) =>
             throw new NotSupportedException();
     }

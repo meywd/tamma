@@ -86,11 +86,28 @@ public class DiagnosticsRepository(
         return (items, total);
     }
 
+    /// <summary>
+    /// Normalise a date-boundary to a <see cref="DateTimeKind.Utc"/> instant by
+    /// CONVERTING rather than relabeling. A <c>Local</c> value is converted via
+    /// <see cref="DateTime.ToUniversalTime"/>; an <c>Unspecified</c> value is
+    /// assumed UTC; a <c>Utc</c> value is returned as-is. Replaces the earlier
+    /// <c>DateTime.SpecifyKind(_, Utc)</c> which relabeled a client offset and
+    /// shifted the query window (Story 23-6 review, Fix 3). The endpoint already
+    /// parses with <c>AssumeUniversal | AdjustToUniversal</c>, so callers now
+    /// hand us Kind=Utc; this stays correct for any direct caller too.
+    /// </summary>
+    private static DateTime ToUtc(DateTime value) => value.Kind switch
+    {
+        DateTimeKind.Utc => value,
+        DateTimeKind.Local => value.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+    };
+
     /// <inheritdoc />
     public async Task<decimal> GetCostSumAsync(Guid? tenantId, DateTime from, DateTime to)
     {
-        var fromUtc = DateTime.SpecifyKind(from, DateTimeKind.Utc);
-        var toUtc = DateTime.SpecifyKind(to, DateTimeKind.Utc);
+        var fromUtc = ToUtc(from);
+        var toUtc = ToUtc(to);
 
         if (tenantId is Guid tid)
         {
@@ -127,8 +144,8 @@ public class DiagnosticsRepository(
         if (bucket <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(bucket), "Bucket must be positive.");
 
-        var fromUtc = DateTime.SpecifyKind(from, DateTimeKind.Utc);
-        var toUtc = DateTime.SpecifyKind(to, DateTimeKind.Utc);
+        var fromUtc = ToUtc(from);
+        var toUtc = ToUtc(to);
 
         // Per-tenant fan-out collects rows then aggregates client-side.
         // The bucket window is bounded by the API's BucketSize choice so
@@ -185,6 +202,62 @@ public class DiagnosticsRepository(
         return grouped;
     }
 
+    /// <inheritdoc />
+    public async Task<List<DiagnosticsDetailRow>> FetchDetailAsync(
+        DateTime from,
+        DateTime to,
+        Guid? tenantId,
+        string? providerKey)
+    {
+        var fromUtc = ToUtc(from);
+        var toUtc = ToUtc(to);
+
+        var rows = new List<DiagnosticsDetailRow>();
+        if (tenantId is Guid tid)
+        {
+            await using var db = await tenantDbFactory.CreateAsync(tid);
+            rows.AddRange(await DetailQuery(db, tid, fromUtc, toUtc, providerKey).ToListAsync());
+        }
+        else
+        {
+            var tenantIds = await ActiveTenantIdsAsync(default);
+            foreach (var t in tenantIds)
+            {
+                await using var db = await tenantDbFactory.CreateAsync(t);
+                rows.AddRange(await DetailQuery(db, t, fromUtc, toUtc, providerKey).ToListAsync());
+            }
+        }
+        return rows;
+    }
+
+    private static IQueryable<DiagnosticsDetailRow> DetailQuery(
+        TenantDbContext db,
+        Guid tid,
+        DateTime fromUtc,
+        DateTime toUtc,
+        string? providerKey)
+    {
+        // Wave A.5 transitional shared-DB phase — explicit tenant predicate.
+        var query = db.ProviderDiagnostics
+            .Where(d => d.TenantId == tid
+                        && d.CreatedAt >= fromUtc
+                        && d.CreatedAt < toUtc);
+        if (!string.IsNullOrEmpty(providerKey))
+            query = query.Where(d => d.ProviderKey == providerKey);
+
+        // Columnar projection — only the fields the deep report needs.
+        return query.Select(d => new DiagnosticsDetailRow(
+            d.ProviderKey,
+            d.Model,
+            d.RequestDurationMs,
+            d.Success,
+            d.ErrorCode,
+            d.Cost,
+            d.InputTokens,
+            d.OutputTokens,
+            d.TokensUsed));
+    }
+
     private static async Task<(List<ProviderDiagnostic> Items, int Total)> PageAsync(
         IQueryable<ProviderDiagnostic> baseQuery,
         string? providerKey,
@@ -200,12 +273,12 @@ public class DiagnosticsRepository(
             query = query.Where(d => d.ProviderKey == providerKey);
         if (from.HasValue)
         {
-            var fromUtc = DateTime.SpecifyKind(from.Value, DateTimeKind.Utc);
+            var fromUtc = ToUtc(from.Value);
             query = query.Where(d => d.CreatedAt >= fromUtc);
         }
         if (to.HasValue)
         {
-            var toUtc = DateTime.SpecifyKind(to.Value, DateTimeKind.Utc);
+            var toUtc = ToUtc(to.Value);
             query = query.Where(d => d.CreatedAt <= toUtc);
         }
         if (success.HasValue)
@@ -239,12 +312,12 @@ public class DiagnosticsRepository(
                 query = query.Where(d => d.ProviderKey == providerKey);
             if (from.HasValue)
             {
-                var fromUtc = DateTime.SpecifyKind(from.Value, DateTimeKind.Utc);
+                var fromUtc = ToUtc(from.Value);
                 query = query.Where(d => d.CreatedAt >= fromUtc);
             }
             if (to.HasValue)
             {
-                var toUtc = DateTime.SpecifyKind(to.Value, DateTimeKind.Utc);
+                var toUtc = ToUtc(to.Value);
                 query = query.Where(d => d.CreatedAt <= toUtc);
             }
             if (success.HasValue)

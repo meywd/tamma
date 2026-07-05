@@ -54,7 +54,47 @@ public interface IDiagnosticsRepository
         DateTime to,
         TimeSpan bucket,
         Guid? tenantId);
+
+    /// <summary>
+    /// Story 23-6 — fetch a lightweight per-call projection over the half-open
+    /// range <c>[from, to)</c> for the deep provider-diagnostics report
+    /// (latency percentiles / error classification / per-model usage). Only the
+    /// columns the report needs are selected. Cross-tenant aggregation
+    /// (<c>tenantId == null</c>) fans out over the registry of active tenants,
+    /// mirroring <see cref="AggregateAsync"/>. <paramref name="providerKey"/>
+    /// optionally narrows to a single provider.
+    /// </summary>
+    Task<List<DiagnosticsDetailRow>> FetchDetailAsync(
+        DateTime from,
+        DateTime to,
+        Guid? tenantId,
+        string? providerKey);
 }
+
+/// <summary>
+/// Lightweight per-call projection for the Story 23-6 deep report. Carries only
+/// the columns the aggregation needs — latency, success/error, per-model
+/// token/cost — so a multi-day window materialises cheaply.
+/// </summary>
+/// <param name="ProviderKey">Provider key.</param>
+/// <param name="Model">Model name (nullable — bucketed as "unknown").</param>
+/// <param name="RequestDurationMs">Request duration in milliseconds.</param>
+/// <param name="Success">Whether the call succeeded.</param>
+/// <param name="ErrorCode">Structured provider error code (nullable).</param>
+/// <param name="Cost">Recorded cost (USD) — the tenant's own spend.</param>
+/// <param name="InputTokens">Input (prompt) tokens.</param>
+/// <param name="OutputTokens">Output (completion) tokens.</param>
+/// <param name="TokensUsed">Total tokens billed.</param>
+public sealed record DiagnosticsDetailRow(
+    string ProviderKey,
+    string? Model,
+    double RequestDurationMs,
+    bool Success,
+    string? ErrorCode,
+    decimal Cost,
+    int InputTokens,
+    int OutputTokens,
+    int TokensUsed);
 
 /// <summary>
 /// Low-level repository projection for a single aggregated bucket. The
