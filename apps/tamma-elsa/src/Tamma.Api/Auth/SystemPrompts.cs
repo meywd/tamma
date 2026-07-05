@@ -239,6 +239,10 @@ public static class SystemPrompts
         AgentAction.GenerateAssessmentQuestions => GenerateAssessmentQuestionsBody,
         AgentAction.AnalyzeAssessmentResponse => AnalyzeAssessmentResponseBody,
 
+        // ── research (Story 3.4 — real per-cell body producing the ranked-findings JSON
+        //    ResearchParsing recovers; NOT a transitional family) ──
+        AgentAction.Research => ResearchBody,
+
         // ── summarize / documentation / write-ups → Summarize ──
         AgentAction.SummarizeStakeholder => Summarize,
         AgentAction.SummarizeTechnical => Summarize,
@@ -251,8 +255,8 @@ public static class SystemPrompts
         AgentAction.WriteRunbook => Summarize,
         AgentAction.UpdateChangelog => Summarize,
 
-        // Exhaustive over the 72-token AgentAction enum. A newly-added token with
-        // no arm here is a hard failure rather than a silent default — keeps the
+        // Exhaustive over the AgentAction enum. A newly-added token with no arm
+        // here is a hard failure rather than a silent default — keeps the
         // transitional mapping honest until 27-16 replaces it.
         _ => throw new TammaError(
             "PROMPT.SEED.NO_BODY_FAMILY",
@@ -716,6 +720,77 @@ public static class SystemPrompts
         Variables: ["storyContext", "questions", "response", "skillLevel"],
         EnableTools: false,
         MaxTokens: 2048);
+
+    // -----------------------------------------------------------------------
+    // Research-specific body builder (Story 3.4)
+    //
+    // Purpose-written for the ResearchWorkflow llm-call dispatch
+    // (Tamma.ElsaServer/Workflows/ResearchWorkflow.cs). It synthesises the
+    // codebase / prior-art context already gathered by the context-gathering
+    // sub-workflow into a RANKED, confidence-scored research report and returns
+    // the EXACT JSON object ResearchParsing.ParseReport recovers:
+    //   { "topic", "summary", "findings":[{ "title","summary","relevance",
+    //     "confidence","citations":[...] }], "overallConfidence" }
+    // The parser fails closed on a missing summary or zero usable findings, so the
+    // template is explicit that both are load-bearing (resolution is
+    // tenant→system→error — this body is never empty/plain).
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// Prompt for <c>(product_owner, research)</c>: investigate the given work item
+    /// using the gathered context and emit a ranked, confidence-scored research
+    /// report as the structured JSON <see cref="Tamma.Activities.Research.ResearchParsing"/>
+    /// parses. Variables: <c>workItemJson</c> (the topic / issue under investigation)
+    /// and <c>findings</c> (the codebase / prior-art context from context-gathering).
+    /// </summary>
+    private static PromptTemplate ResearchBody(string role, string action) => new(
+        Role: role,
+        Action: action,
+        Template:
+            "You are a {{role}} investigating a work item to produce a ranked, " +
+            "confidence-scored research report for the engineering team.\n\n" +
+            "## Work Item / Topic\n{{workItemJson}}\n\n" +
+            "## Gathered Context (codebase / prior art)\n{{findings}}\n\n" +
+            "## Conventions\n{{conventions}}\n\n" +
+            "## Instructions\n\n" +
+            "<thinking>\n" +
+            "1. Identify the concrete question(s) the work item raises that research must answer\n" +
+            "2. Mine the gathered context for evidence — relevant files, existing patterns, prior decisions, gaps\n" +
+            "3. Distil each piece of evidence into a discrete finding: what was learned and why it matters\n" +
+            "4. Score each finding for RELEVANCE (how directly it bears on the topic) and CONFIDENCE " +
+            "(how well the gathered context supports it), each a decimal in [0,1]\n" +
+            "5. Attach citations (file paths, URLs, or doc references from the context) that back each finding\n" +
+            "6. Rank findings most-relevant-first, then compute an overall confidence across them\n" +
+            "</thinking>\n\n" +
+            "Base every finding on the gathered context — do NOT invent findings or citations that the " +
+            "context does not support. If the context is thin, return only the findings it genuinely supports.\n\n" +
+            "Return ONLY a single JSON object (no markdown fences, no prose outside it) of this EXACT shape:\n" +
+            "```json\n" +
+            "{\n" +
+            "  \"topic\": \"the question / topic investigated\",\n" +
+            "  \"summary\": \"1-3 sentence overview of what the research concluded\",\n" +
+            "  \"findings\": [\n" +
+            "    {\n" +
+            "      \"title\": \"short headline for the finding\",\n" +
+            "      \"summary\": \"what was learned and why it matters\",\n" +
+            "      \"relevance\": 0.0,\n" +
+            "      \"confidence\": 0.0,\n" +
+            "      \"citations\": [\"path/to/file.cs\", \"https://...\"]\n" +
+            "    }\n" +
+            "  ],\n" +
+            "  \"overallConfidence\": 0.0\n" +
+            "}\n" +
+            "```\n\n" +
+            "Requirements (the downstream parser fails closed if these are not met):\n" +
+            "- `summary` MUST be a non-empty overview — it is load-bearing.\n" +
+            "- `findings` MUST contain at least one real finding, each with a non-empty `title` or `summary`.\n" +
+            "- `relevance` and `confidence` are decimals between 0.0 and 1.0.\n" +
+            "- Order `findings` by `relevance` descending, then `confidence` descending.\n" +
+            "- `overallConfidence` is a decimal in [0,1] reflecting confidence across the findings.",
+        SystemPrompt: SystemFor(role),
+        Variables: ["role", "workItemJson", "findings", "conventions"],
+        EnableTools: false,
+        MaxTokens: 4096);
 
     // -----------------------------------------------------------------------
     // Role-specific review lenses (inlined in plan-review / code-review bodies)

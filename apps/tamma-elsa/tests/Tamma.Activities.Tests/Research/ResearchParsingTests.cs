@@ -99,6 +99,40 @@ public class ResearchParsingTests
             "empty-shell findings (no title and no summary) must be dropped, not admitted blank");
     }
 
+    /// <summary>
+    /// A sample matching the EXACT shape the (product_owner, research) system-default
+    /// prompt template (SystemPrompts.ResearchBody, Story 3.4) instructs the LLM to
+    /// emit. Proves the template's documented output is parseable end-to-end, so the
+    /// ResearchWorkflow happy path emits a real RESEARCH.COMPLETED report.
+    /// </summary>
+    private const string TemplateShapedReport =
+        """
+        {
+          "topic": "per-tenant rate limiting",
+          "summary": "No rate limiter exists; requests are unbounded per tenant. A token-bucket middleware keyed by tenant id is the lowest-risk introduction.",
+          "findings": [
+            { "title": "No existing limiter", "summary": "The API pipeline has no rate-limiting middleware today.", "relevance": 0.95, "confidence": 0.9, "citations": ["src/Tamma.Api/Program.cs"] },
+            { "title": "Tenant id already on context", "summary": "Every request already resolves a tenant id that a limiter can key on.", "relevance": 0.8, "confidence": 0.85, "citations": ["src/Tamma.Api/Auth/TenantContext.cs"] }
+          ],
+          "overallConfidence": 0.88
+        }
+        """;
+
+    [Test]
+    public void ParseReport_TemplateShapedOutput_RecoversRankedReport()
+    {
+        var report = ResearchParsing.ParseReport(TemplateShapedReport, topic: "fallback");
+
+        report.Should().NotBeNull(
+            "the (product_owner, research) template's documented JSON shape must parse into a real report");
+        report!.Topic.Should().Be("per-tenant rate limiting");
+        report.Summary.Should().NotBeNullOrWhiteSpace();
+        report.Findings.Should().HaveCount(2);
+        report.OverallConfidence.Should().Be(0.88m);
+        report.Findings[0].Title.Should().Be("No existing limiter", "ranked by relevance descending");
+        report.Findings[0].Citations.Should().Contain("src/Tamma.Api/Program.cs");
+    }
+
     // ── Fail-closed cases (all → null) ─────────────────────────────────
     [TestCase(null)]
     [TestCase("")]

@@ -25,13 +25,15 @@ public class AgentActionTests
     public void Has_the_expected_token_count()
     {
         // 72 original + 2 assessment actions (generate-assessment-questions,
-        // analyze-assessment-response) added in assessment P0.
-        Enum.GetValues<AgentAction>().Length.Should().Be(74);
+        // analyze-assessment-response) added in assessment P0 + 1 research action
+        // (Story 3.4 — dedicated research/investigate token under product_owner).
+        Enum.GetValues<AgentAction>().Length.Should().Be(75);
     }
 
     [TestCase("context-scan", AgentAction.ContextScan)]
     [TestCase("implement-feature", AgentAction.ImplementFeature)]
     [TestCase("code-review-security", AgentAction.CodeReviewSecurity)]
+    [TestCase("research", AgentAction.Research)]
     public void Parse_resolves_canonical_wire(string wire, AgentAction expected)
     {
         AgentActionExtensions.Parse(wire).Should().Be(expected);

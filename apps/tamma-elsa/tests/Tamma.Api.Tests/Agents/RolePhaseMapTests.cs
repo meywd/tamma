@@ -11,9 +11,10 @@ namespace Tamma.Api.Tests.Agents;
 /// The 8 roles: developer, tester, security, devops, architect, product_owner,
 /// senior_developer, tech_writer.
 ///
-/// The 74 actions are the union of the per-role action sets in SPEC §4
+/// The 75 actions are the union of the per-role action sets in SPEC §4
 /// (72 original + 2 assessment actions: generate-assessment-questions,
-/// analyze-assessment-response under product_owner — added in assessment P0).
+/// analyze-assessment-response under product_owner — added in assessment P0 —
+/// + 1 research action under product_owner, Story 3.4).
 /// Which (role, action) pairs are valid is the per-role eligibility matrix.
 /// </summary>
 [TestFixture]
@@ -41,11 +42,12 @@ public class RolePhaseMapTests
     }
 
     [Test]
-    public void ValidActions_Should_Contain_Seventy_Four_Actions()
+    public void ValidActions_Should_Contain_Seventy_Five_Actions()
     {
         // 72 original actions + 2 assessment actions added in assessment P0
-        // (generate-assessment-questions, analyze-assessment-response under product_owner).
-        RolePhaseMap.ValidActions.Should().HaveCount(74);
+        // (generate-assessment-questions, analyze-assessment-response under product_owner)
+        // + 1 research action (Story 3.4 — dedicated research token under product_owner).
+        RolePhaseMap.ValidActions.Should().HaveCount(75);
     }
 
     [Test]
@@ -340,6 +342,39 @@ public class RolePhaseMapTests
         RolePhaseMap.ValidActions.Should().Contain("review-testability");
         RolePhaseMap.ValidActions.Should().Contain("review-operability");
         RolePhaseMap.ValidActions.Should().Contain("review-scope");
+    }
+
+    // -----------------------------------------------------------------------
+    // Story 3.4 — dedicated research action (product_owner-eligible)
+    // -----------------------------------------------------------------------
+
+    [Test]
+    public void ValidActions_Contains_Research()
+    {
+        RolePhaseMap.ValidActions.Should().Contain("research");
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_Research_ProductOwner_Returns_True()
+    {
+        // The legacy 'researcher' role aliases onto product_owner, so the dedicated
+        // research action is eligible for product_owner (Story 3.4 — ResearchWorkflow
+        // dispatches (product_owner, research)).
+        RolePhaseMap.IsRoleEligibleForPhase("research", "product_owner").Should().BeTrue();
+    }
+
+    [Test]
+    public void GetEligibleRolesForPhase_Research_Is_ProductOwner_Only()
+    {
+        RolePhaseMap.GetEligibleRolesForPhase("research")
+            .Should().BeEquivalentTo(new[] { "product_owner" });
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_Research_Developer_Returns_False()
+    {
+        // research is a product_owner-only action; a developer must not be eligible.
+        RolePhaseMap.IsRoleEligibleForPhase("research", "developer").Should().BeFalse();
     }
 
     // -----------------------------------------------------------------------

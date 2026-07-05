@@ -30,6 +30,7 @@ public enum AgentAction
     [Wire("review-scope")] ReviewScope,
     [Wire("generate-assessment-questions")] GenerateAssessmentQuestions,
     [Wire("analyze-assessment-response")] AnalyzeAssessmentResponse,
+    [Wire("research")] Research,
 
     // architect
     [Wire("triage-technical")] TriageTechnical,

@@ -112,6 +112,7 @@ public class TaxonomyDriftBuildTests
         "PlanGenerationWorkflow",
         "PlanReviewWorkflow",
         "PullRequestWorkflow",
+        "ResearchWorkflow",             // Story 3.4: dispatches the dedicated (product_owner, research) synthesis pair
         "ReviewFixWorkflow",
         "TaskCreationWorkflow",
         "TaskReviewWorkflow",
