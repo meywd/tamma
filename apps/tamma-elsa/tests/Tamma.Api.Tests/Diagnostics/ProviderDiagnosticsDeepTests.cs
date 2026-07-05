@@ -166,6 +166,9 @@ public class ProviderDiagnosticsDeepTests
             durationMs: 250, success: true, tokensUsed: 1500, cost: 0.03m);
 
         using var client = DiagnosticsTestHarness.CreateClient();
+        // Tenant-scoped route — present the seeded tenant so the fail-closed
+        // guard passes and the concrete-tenant path returns only its data.
+        client.DefaultRequestHeaders.Add(DiagnosticsTestHarness.TenantHeader, tenant.ToString());
         var fromStr = Uri.EscapeDataString(t.AddHours(-1).ToString("O"));
         var toStr = Uri.EscapeDataString(t.AddMinutes(1).ToString("O"));
 

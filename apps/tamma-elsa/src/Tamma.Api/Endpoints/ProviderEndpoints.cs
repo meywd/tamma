@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Tamma.Api.Dtos.Providers;
@@ -269,9 +270,48 @@ public static class ProviderEndpoints
 
     // ── Diagnostics endpoints (owned by Agent 3 — do not modify) ─────────────
 
-    public static async Task<IResult> GetDiagnostics(IDiagnosticsRepository repo, int? limit, int? offset)
+    /// <summary>
+    /// Max half-open <c>[from,to)</c> window a diagnostics read may span. Guards
+    /// against a caller (e.g. <c>from=1970&amp;to=2100</c>) forcing an unbounded
+    /// in-memory materialization of the diagnostics table (Story 23-6 review,
+    /// Fix 2 — DoS). Reads spanning more than this are rejected with 400.
+    /// </summary>
+    private static readonly TimeSpan MaxDiagnosticsWindow = TimeSpan.FromDays(90);
+
+    /// <summary>
+    /// Parse an ISO-8601 date-boundary query value to a <see cref="DateTimeKind.Utc"/>
+    /// instant. Uses <see cref="DateTimeStyles.AssumeUniversal"/> (no-offset ⇒ UTC) +
+    /// <see cref="DateTimeStyles.AdjustToUniversal"/> (offset/Z ⇒ CONVERT to UTC) so a
+    /// client offset (e.g. <c>+02:00</c>) is converted, never relabeled — matching
+    /// <c>AgentDispatchEndpoints.ParseCreatedAfterUtc</c> and the project's TZ rule.
+    /// The default minimal-API <c>DateTime</c> query binding parses a value to
+    /// Kind=Local on a non-UTC host, which a downstream <c>SpecifyKind(_, Utc)</c>
+    /// then relabels — shifting the window. Binding as a raw string + this parse
+    /// yields the correct instant with Kind=Utc regardless of host TZ (Story 23-6
+    /// review, Fix 3). Callers pass only non-empty values here.
+    /// </summary>
+    internal static bool TryParseUtcBoundary(string raw, out DateTime value)
+        => DateTime.TryParse(raw, CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out value);
+
+    public static async Task<IResult> GetDiagnostics(
+        IDiagnosticsRepository repo,
+        [FromServices] ITenantContext tc,
+        int? limit,
+        int? offset)
     {
-        var (items, total) = await repo.QueryAsync(null, null, null, limit ?? 50, offset ?? 0);
+        // Fail closed (Story 23-6 review, Fix 1): a null tenant on this
+        // tenant-scoped SettingsView route must NOT fan out over every
+        // tenant's diagnostics. Reject before touching the repository.
+        if (tc.TenantId is null)
+        {
+            return Results.NotFound(new { error = "no_active_tenant" });
+        }
+
+        var (items, total) = await repo.QueryAsync(
+            providerKey: null, from: null, to: null,
+            limit: limit ?? 50, offset: offset ?? 0,
+            tenantId: tc.TenantId, success: null, model: null);
         return Results.Ok(new { items = items.Select(d => new { d.Id, d.ProviderKey, d.RequestDurationMs, d.TokensUsed, d.Cost, d.Success, d.CreatedAt }), total });
     }
 
@@ -284,18 +324,43 @@ public static class ProviderEndpoints
         [FromServices] IDiagnosticsService service,
         [FromServices] ITenantContext tc,
         string? providerKey,
-        DateTime? from,
-        DateTime? to,
+        string? from,
+        string? to,
         int? limit,
         int? offset,
         bool? success,
         string? model)
     {
+        // Fail closed (Story 23-6 review, Fix 1): a null tenant on this
+        // tenant-scoped SettingsView route must NOT fan out over every
+        // tenant's diagnostics. Reject before the service reaches the
+        // cross-tenant StreamAcrossTenantsAsync path.
+        if (tc.TenantId is null)
+        {
+            return Results.NotFound(new { error = "no_active_tenant" });
+        }
+
+        // Fix 3 — CONVERT any client offset to UTC rather than relabel it.
+        DateTime? fromDt = null;
+        DateTime? toDt = null;
+        if (!string.IsNullOrWhiteSpace(from))
+        {
+            if (!TryParseUtcBoundary(from, out var f))
+                return Results.BadRequest(new { error = "invalid_from" });
+            fromDt = f;
+        }
+        if (!string.IsNullOrWhiteSpace(to))
+        {
+            if (!TryParseUtcBoundary(to, out var t))
+                return Results.BadRequest(new { error = "invalid_to" });
+            toDt = t;
+        }
+
         var filter = new DiagnosticsFilter
         {
             ProviderKey = providerKey,
-            From = from,
-            To = to,
+            From = fromDt,
+            To = toDt,
             Success = success,
             Model = model,
             Limit = Math.Clamp(limit ?? 50, 1, 500),
@@ -336,13 +401,34 @@ public static class ProviderEndpoints
     public static async Task<IResult> GetReport(
         [FromServices] IDiagnosticsService service,
         [FromServices] ITenantContext tc,
-        DateTime? from,
-        DateTime? to,
+        string? from,
+        string? to,
         string? bucketSize,
         string? groupBy)
     {
-        var fromDt = from ?? DateTime.UtcNow.AddDays(-1);
-        var toDt = to ?? DateTime.UtcNow;
+        // Fail closed (Story 23-6 review, Fix 1): a null tenant on this
+        // tenant-scoped SettingsView route must NOT fan out over every
+        // tenant's economics (GetReportAsync → AggregateAsync fans out on a
+        // null tenant). Reject before the service call.
+        if (tc.TenantId is null)
+        {
+            return Results.NotFound(new { error = "no_active_tenant" });
+        }
+
+        // Fix 3 — CONVERT any client offset to UTC rather than relabel it.
+        var fromDt = DateTime.UtcNow.AddDays(-1);
+        var toDt = DateTime.UtcNow;
+        if (!string.IsNullOrWhiteSpace(from) && !TryParseUtcBoundary(from, out fromDt))
+            return Results.BadRequest(new { error = "invalid_from" });
+        if (!string.IsNullOrWhiteSpace(to) && !TryParseUtcBoundary(to, out toDt))
+            return Results.BadRequest(new { error = "invalid_to" });
+
+        // Fix 2 — reject an over-wide window before AggregateAsync materializes
+        // the whole range in memory.
+        if (toDt - fromDt > MaxDiagnosticsWindow)
+        {
+            return Results.BadRequest(new { error = "window_too_large", maxDays = MaxDiagnosticsWindow.TotalDays });
+        }
 
         if (!string.IsNullOrWhiteSpace(groupBy))
         {
@@ -376,12 +462,35 @@ public static class ProviderEndpoints
     public static async Task<IResult> GetDeepDiagnostics(
         [FromServices] IDiagnosticsService service,
         [FromServices] ITenantContext tc,
-        DateTime? from,
-        DateTime? to,
+        string? from,
+        string? to,
         string? providerKey)
     {
-        var fromDt = from ?? DateTime.UtcNow.AddDays(-1);
-        var toDt = to ?? DateTime.UtcNow;
+        // Fail closed (Story 23-6 review, Fix 1): a null tenant on this
+        // tenant-scoped SettingsView route must NOT fan out over every
+        // tenant's per-model economics. FetchDetailAsync loops
+        // ActiveTenantIdsAsync() on a null tenant — a cross-tenant economics
+        // dump. Reject BEFORE the service call. The cross-tenant view lives on
+        // PlatformOwnerAccess admin routes, never here.
+        if (tc.TenantId is null)
+        {
+            return Results.NotFound(new { error = "no_active_tenant" });
+        }
+
+        // Fix 3 — CONVERT any client offset to UTC rather than relabel it.
+        var fromDt = DateTime.UtcNow.AddDays(-1);
+        var toDt = DateTime.UtcNow;
+        if (!string.IsNullOrWhiteSpace(from) && !TryParseUtcBoundary(from, out fromDt))
+            return Results.BadRequest(new { error = "invalid_from" });
+        if (!string.IsNullOrWhiteSpace(to) && !TryParseUtcBoundary(to, out toDt))
+            return Results.BadRequest(new { error = "invalid_to" });
+
+        // Fix 2 — reject an over-wide window before FetchDetailAsync
+        // materializes the whole range in memory to compute percentiles.
+        if (toDt - fromDt > MaxDiagnosticsWindow)
+        {
+            return Results.BadRequest(new { error = "window_too_large", maxDays = MaxDiagnosticsWindow.TotalDays });
+        }
 
         var report = await service.GetDeepReportAsync(
             tc.TenantId, fromDt, toDt, providerKey);

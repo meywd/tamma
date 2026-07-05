@@ -88,6 +88,7 @@ public class DiagnosticsEndpointsIntegrationTests
         // across CP-listed tenants in production code.
         var tenantId = Guid.NewGuid();
         await EnsureTenantAsync(tenantId);
+        _client.DefaultRequestHeaders.Add(DiagnosticsTestHarness.TenantHeader, tenantId.ToString());
         using (var scope = DiagnosticsTestHarness.CreateScope())
         {
             var factory = scope.ServiceProvider
@@ -121,6 +122,7 @@ public class DiagnosticsEndpointsIntegrationTests
         // Story 28-1 PR D — provider_diagnostics live on the tenant DB.
         var tenantId = Guid.NewGuid();
         await EnsureTenantAsync(tenantId);
+        _client.DefaultRequestHeaders.Add(DiagnosticsTestHarness.TenantHeader, tenantId.ToString());
         using (var scope = DiagnosticsTestHarness.CreateScope())
         {
             var factory = scope.ServiceProvider
@@ -151,6 +153,7 @@ public class DiagnosticsEndpointsIntegrationTests
         // Story 28-1 PR D — provider_diagnostics live on the tenant DB.
         var tenantId = Guid.NewGuid();
         await EnsureTenantAsync(tenantId);
+        _client.DefaultRequestHeaders.Add(DiagnosticsTestHarness.TenantHeader, tenantId.ToString());
 
         using (var scope = DiagnosticsTestHarness.CreateScope())
         {
@@ -180,6 +183,12 @@ public class DiagnosticsEndpointsIntegrationTests
     [Test]
     public async Task GetReport_EmptyRange_ReturnsZeroes()
     {
+        // Tenant-scoped route — present a concrete (provisioned) tenant so the
+        // fail-closed guard passes; the range still holds no rows.
+        var tenantId = Guid.NewGuid();
+        await EnsureTenantAsync(tenantId);
+        _client.DefaultRequestHeaders.Add(DiagnosticsTestHarness.TenantHeader, tenantId.ToString());
+
         var from = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         var fromStr = Uri.EscapeDataString(from.ToString("O"));
         var toStr = Uri.EscapeDataString(from.AddHours(1).ToString("O"));
