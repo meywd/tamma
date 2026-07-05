@@ -1133,6 +1133,11 @@ builder.Services.AddHealthChecks()
 // Mirrors the TS /api/admin/health behavior.
 builder.Services.AddScoped<IAdminHealthService, AdminHealthService>();
 
+// Story 23-8 — Infrastructure Monitor metrics. A live, read-only snapshot of the
+// API process + host (runtime / CPU / memory / disk / uptime) composed with the
+// admin health probes. No new infra: reads GC / Process / DriveInfo / cgroup only.
+builder.Services.AddScoped<IInfrastructureMetricsService, InfrastructureMetricsService>();
+
 // Story 5.6 / 1.5-37 (Wave C.1) — alert core: sink, dispatcher,
 // four channels (email / slack / pagerduty / webhook), rate
 // limiter, secret reader. Registered before any caller so
@@ -1831,6 +1836,16 @@ admin.MapGet("/tenants/{tenantId:guid}/events/stream",
 // Story 28-R2 / C1: PlatformOwnerAccess (cross-tenant infra state).
 admin.MapGet("/diagnostics/platform-queues",
         Tamma.Api.Endpoints.Admin.PlatformQueuesAdminEndpoints.GetDiagnostics)
+    .RequireAuthorization("PlatformOwnerAccess");
+
+// Story 23-8 — Infrastructure Monitor. Live system/host metrics (runtime, CPU,
+// memory, disk, uptime) + coarse dependency up/down status. These are
+// SYSTEM/PLATFORM-level (not tenant-scoped), so PlatformOwnerAccess: a regular
+// member / tenant-owner who is not a platform admin gets 403 and never sees
+// process internals. Read-only; exposes no connection string / secret / tenant
+// data (dependency detail is allowlist-sanitized).
+admin.MapGet("/monitoring/infrastructure",
+        Tamma.Api.Endpoints.Admin.AdminInfrastructureMonitoringEndpoints.GetInfrastructure)
     .RequireAuthorization("PlatformOwnerAccess");
 
 // Story 28-12 — KEK rotation. Platform-owner only because rotating
