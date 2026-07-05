@@ -315,8 +315,15 @@ public static class EngineEndpoints
                 }
                 upToSeq = seq;
             }
+            // Parse with AssumeUniversal | AdjustToUniversal (matching
+            // AgentDispatchEndpoints.ParseCreatedAfterUtc): an offset-less ISO string is
+            // PINNED to UTC (not treated as server-local then shifted by .UtcDateTime —
+            // masked on the UTC VPS/CI), and an explicit offset is CONVERTED to UTC. The
+            // downstream fold compares against the UTC-kind CreatedAt, so the boundary is
+            // the same instant on every host (the recurring TZ lesson).
             else if (DateTimeOffset.TryParse(
-                         upTo, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var ts))
+                         upTo, CultureInfo.InvariantCulture,
+                         DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var ts))
             {
                 upToTs = ts;
             }
@@ -349,7 +356,18 @@ public static class EngineEndpoints
             return Results.NotFound(new { error = "run not found", correlationId });
         }
 
-        var result = await replay.ReplayAsync(tenantId, correlationId, upToSeq, upToTs, fromSeq);
+        ReplayResult? result;
+        try
+        {
+            result = await replay.ReplayAsync(tenantId, correlationId, upToSeq, upToTs, fromSeq);
+        }
+        catch (ReplayRangeException ex)
+        {
+            // `from` resolved to a point AFTER `upTo` — the delta would be a
+            // meaningless empty diff (newer ⊂ older). Fail loud rather than 200.
+            return Results.BadRequest(new { error = ex.Message });
+        }
+
         if (result is null)
         {
             return Results.NotFound(new { error = "run not found", correlationId });

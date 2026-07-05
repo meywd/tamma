@@ -133,6 +133,29 @@ public interface IEventRepository
             "EventRepository.");
 
     /// <summary>
+    /// Story 4-8 / 21-4 (review hardening) — BOUNDED variant of
+    /// <see cref="ListByCorrelationIdAsync(Guid,string)"/> for the read-endpoint callers
+    /// (replay + run-detail) that materialise a whole run in memory. Returns at most
+    /// <paramref name="maxEvents"/> events (oldest-first by
+    /// <see cref="DomainEvent.SequenceNumber"/>) plus <c>Truncated</c> = <c>true</c> when
+    /// the run has MORE events than the cap — so a pathological 100k-event run is capped
+    /// rather than materialised unbounded (a DoS/memory guard), and the caller SIGNALS the
+    /// truncation to the client instead of silently dropping the tail.
+    ///
+    /// <para>Uses the same tenant-scoped <c>Tags-&gt;&gt;'correlationId'</c> lookup
+    /// (served by <c>ix_domain_events_tags_correlationid</c>) as the uncapped overload;
+    /// only a <c>LIMIT</c> is added. Throws on <see cref="Guid.Empty"/> — there is no
+    /// cross-tenant read path. Default throws — see
+    /// <see cref="ExistsByCorrelationIdAsync"/>.</para>
+    /// </summary>
+    Task<(IReadOnlyList<DomainEvent> Events, bool Truncated)> ListByCorrelationIdAsync(
+        Guid tenantId, string correlationId, int maxEvents)
+        => throw new NotSupportedException(
+            "ListByCorrelationIdAsync (bounded) is not implemented by this " +
+            "IEventRepository. The bounded read-endpoint replay/run-detail fetch reads " +
+            "only through the tenant-scoped EventRepository.");
+
+    /// <summary>
     /// Story 4-7 (event query API for time-travel) — the general tenant-scoped,
     /// keyset-paginated read over the <c>domain_events</c> DCB stream that backs
     /// <c>GET /api/engine/events/query</c>. This is the QUERY/filter surface; the

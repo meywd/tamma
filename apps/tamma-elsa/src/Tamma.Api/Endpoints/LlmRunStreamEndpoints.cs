@@ -121,12 +121,14 @@ public static class LlmRunStreamEndpoints
         {
             await WriteRawAsync(http, $": stream-open correlationId={correlationId}\n\n", token).ConfigureAwait(false);
 
-            // Read the run's stored DCB events once (when we have a tenant). Used for
+            // Read the run's stored DCB events once (when we have a real tenant). Used for
             // BOTH the early-terminal short-circuit and the optional replay catch-up.
-            // Single-user with a null tenant has no tenant-scoped read path, so it
-            // falls through to the live tail (unchanged).
-            IReadOnlyList<DomainEvent> stored = tenantId is not null
-                ? await eventRepo.ListByCorrelationIdAsync(tenantId.Value, correlationId).ConfigureAwait(false)
+            // Single-user with a null (or empty) tenant has no tenant-scoped read path, so
+            // it falls through to the live tail (unchanged). The `!= Guid.Empty` guard keeps
+            // an empty ambient tenant off the tenant-scoped read, which now throws on
+            // Guid.Empty (defence-in-depth parity with the other correlation reads).
+            IReadOnlyList<DomainEvent> stored = tenantId is { } tid && tid != Guid.Empty
+                ? await eventRepo.ListByCorrelationIdAsync(tid, correlationId).ConfigureAwait(false)
                 : Array.Empty<DomainEvent>();
 
             // Early terminal check — if a terminal AGENT.RUN.SUCCESS/FAILED is already
