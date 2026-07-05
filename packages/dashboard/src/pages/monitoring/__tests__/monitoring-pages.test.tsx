@@ -12,6 +12,10 @@ vi.mock('../../../hooks/admin/useCurrentUser.js', () => ({
   useCurrentUser: () => mockUseCurrentUser(),
 }));
 
+function okResponse(body: unknown): Response {
+  return { ok: true, status: 200, json: async () => body } as unknown as Response;
+}
+
 function renderInRouter(node: React.ReactNode, path = '/monitoring/health') {
   return render(<MemoryRouter initialEntries={[path]}>{node}</MemoryRouter>);
 }
@@ -40,9 +44,20 @@ describe('MonitoringOverviewPage', () => {
 });
 
 describe('monitoring page RBAC (mirrors the route AdminGuard)', () => {
-  afterEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    // System Health composes existing endpoints on mount — stub fetch so the
+    // page renders without hitting the network.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(okResponse({}))),
+    );
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
 
-  it('renders the page + scaffold empty-state for an admin', () => {
+  it('renders the System Health overview for an admin', () => {
     mockUseCurrentUser.mockReturnValue({
       user: { id: 'u1', role: 'admin' },
       loading: false,
@@ -54,7 +69,8 @@ describe('monitoring page RBAC (mirrors the route AdminGuard)', () => {
       </AdminGuard>,
     );
     expect(screen.getByRole('heading', { name: 'System Health' })).toBeInTheDocument();
-    expect(screen.getByText(/coming soon/i)).toBeInTheDocument();
+    // The overview renders its composed sections, not the scaffold placeholder.
+    expect(screen.getByRole('heading', { name: 'Services' })).toBeInTheDocument();
   });
 
   it('does NOT render the page for a non-admin member', () => {
