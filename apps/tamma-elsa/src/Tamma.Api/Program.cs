@@ -874,6 +874,11 @@ builder.Services.AddSingleton<Tamma.Api.Services.Engine.IContextStore,
     Tamma.Api.Services.Engine.InMemoryContextStore>();
 builder.Services.AddScoped<Tamma.Api.Services.Engine.IExecuteTaskService,
     Tamma.Api.Services.Engine.ExecuteTaskService>();
+// Story 4-8 — black-box replay: tenant-scoped point-in-time state reconstruction
+// (a pure read-fold over the DCB domain_events store via the 4-7 event query API).
+// Scoped: reads through the request-scoped tenant EventRepository.
+builder.Services.AddScoped<Tamma.Api.Services.Engine.Replay.IReplayService,
+    Tamma.Api.Services.Engine.Replay.ReplayService>();
 if (builder.Configuration.GetValue<long?>("GitHub:AppId") is long appId && appId > 0
     && !string.IsNullOrWhiteSpace(builder.Configuration["GitHub:PrivateKey"]))
 {
@@ -2649,6 +2654,12 @@ engine.MapGet("/history", EngineEndpoints.GetHistory);
 // domain_events with time-range / correlationId / actor / type (exact|prefix)
 // filters. Inherits WorkflowsView (read-only, tenant-scoped) from the group.
 engine.MapGet("/events/query", EngineEndpoints.QueryEvents);
+// Story 4-8 — black-box replay: reconstruct a run's point-in-time state by folding
+// its ordered DCB event slice (a pure, read-only fold over domain_events; no Elsa
+// re-run). Inherits WorkflowsView (read-only, tenant-scoped) from the group;
+// null-tenant fails closed (404). ?upTo={seq|timestamp} = as-of point; ?from={seq}
+// adds a diff (AC6).
+engine.MapGet("/runs/{correlationId}/replay", EngineEndpoints.ReplayRun);
 engine.MapGet("/events/state", EngineEndpoints.GetEventsState);
 engine.MapGet("/events/logs", EngineEndpoints.GetEventsLogs);
 engine.MapPost("/store-context", EngineEndpoints.StoreContext).RequireAuthorization("WorkflowsManage");

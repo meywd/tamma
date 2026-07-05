@@ -2,10 +2,12 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
+using System.Globalization;
 using Tamma.Api.Auth;
 using Tamma.Api.Dtos.Engine;
 using Tamma.Api.Services.Engine;
 using Tamma.Api.Services.Engine.Lifecycle;
+using Tamma.Api.Services.Engine.Replay;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -248,6 +250,112 @@ public static class EngineEndpoints
             nextCursor,
             hasMore = nextCursor is not null,
         });
+    }
+
+    /// <summary>
+    /// Story 4-8 (black-box replay for debugging) — the RECONSTRUCTION half Story
+    /// 4-7 deferred. Reconstructs a run's point-in-time state by folding its ordered
+    /// DCB event slice (from Story 4-7's
+    /// <see cref="IEventRepository.ListByCorrelationIdAsync"/>) into a read-only
+    /// <see cref="ReplayResult"/> — a pure, deterministic left-fold over recorded
+    /// events. It re-executes nothing and mutates nothing (no Elsa runtime, no
+    /// writes): time-travel for debugging, not re-run.
+    ///
+    /// <para>Route: <c>GET /api/engine/runs/{correlationId}/replay?upTo={seq|timestamp}&amp;from={seq}</c>.</para>
+    ///
+    /// <para>Query parameters:
+    /// <list type="bullet">
+    ///   <item><c>upTo</c> — the point-in-time marker. Either a positive
+    ///     <c>SequenceNumber</c> (replay up to and including that event) OR an
+    ///     ISO-8601 timestamp (replay up to and including that instant). Omitted =
+    ///     replay the whole run. A value that is neither → <c>400</c>; a
+    ///     non-positive sequence → <c>400</c>.</item>
+    ///   <item><c>from</c> — optional positive <c>SequenceNumber</c>; when supplied
+    ///     the result carries a <see cref="ReplayDelta"/> diff of everything after
+    ///     that point up to <c>upTo</c> (AC6). A non-positive value → <c>400</c>.</item>
+    /// </list></para>
+    ///
+    /// <para><b>Tenant-scoped, null-tenant fail-closed.</b> The read is bound to
+    /// <see cref="ITenantContext.TenantId"/>; a request with no resolved tenant is a
+    /// <c>404</c> (the run is not visible) — never another tenant's run. A run whose
+    /// correlationId this tenant does not own returns no events → <c>404</c>. So a
+    /// tenant can only replay THEIR OWN run (no IDOR).</para>
+    ///
+    /// <para>Point-in-time semantics: an <c>upTo</c> before the run began returns a
+    /// known-but-empty state (<c>200</c>, <c>eventsReplayed = 0</c>); an <c>upTo</c>
+    /// beyond the last event returns the full state. Determinism: the same slice
+    /// always folds to the same result.</para>
+    /// </summary>
+    public static async Task<IResult> ReplayRun(
+        string correlationId,
+        IReplayService replay,
+        ITenantContext tc,
+        string? upTo,
+        string? from)
+    {
+        if (string.IsNullOrWhiteSpace(correlationId))
+        {
+            return Results.BadRequest(new { error = "correlationId is required" });
+        }
+
+        // Parse upTo — a positive sequenceNumber OR an ISO-8601 timestamp. Fail loud
+        // on anything else rather than silently replaying the whole run.
+        long? upToSeq = null;
+        DateTimeOffset? upToTs = null;
+        if (!string.IsNullOrWhiteSpace(upTo))
+        {
+            if (long.TryParse(upTo, NumberStyles.Integer, CultureInfo.InvariantCulture, out var seq))
+            {
+                if (seq < 1)
+                {
+                    return Results.BadRequest(new
+                    {
+                        error = "invalid upTo: a sequenceNumber must be a positive integer",
+                    });
+                }
+                upToSeq = seq;
+            }
+            else if (DateTimeOffset.TryParse(
+                         upTo, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var ts))
+            {
+                upToTs = ts;
+            }
+            else
+            {
+                return Results.BadRequest(new
+                {
+                    error = "invalid upTo: expected a positive sequenceNumber or an ISO-8601 timestamp",
+                });
+            }
+        }
+
+        long? fromSeq = null;
+        if (!string.IsNullOrWhiteSpace(from))
+        {
+            if (!long.TryParse(from, NumberStyles.Integer, CultureInfo.InvariantCulture, out var f) || f < 1)
+            {
+                return Results.BadRequest(new
+                {
+                    error = "invalid from: a sequenceNumber must be a positive integer",
+                });
+            }
+            fromSeq = f;
+        }
+
+        // Null-tenant fail-closed: no resolved tenant → the run is not visible to the
+        // caller → 404. Never a cross-tenant read (mirrors 4-7 + the #283 fix).
+        if (tc.TenantId is not Guid tenantId || tenantId == Guid.Empty)
+        {
+            return Results.NotFound(new { error = "run not found", correlationId });
+        }
+
+        var result = await replay.ReplayAsync(tenantId, correlationId, upToSeq, upToTs, fromSeq);
+        if (result is null)
+        {
+            return Results.NotFound(new { error = "run not found", correlationId });
+        }
+
+        return Results.Ok(result);
     }
 
     /// <summary>
