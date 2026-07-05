@@ -87,9 +87,13 @@ services:
   # model is pulled on first boot into the persisted volume (instant on every
   # later boot). intelligence-server's ollama embedder initializes config-only
   # (network-free), so it depends_on ollama with `service_started` — the
-  # sidecar boots + reports "configured" immediately and the first embed call
-  # simply waits for the one-time pull to finish. The healthcheck below is for
-  # ops visibility (passes once the model is present).
+  # sidecar boots + reports "configured" immediately without blocking on the
+  # one-time pull. (An embed call landing in the ~60s first-boot pull window
+  # gets a model-not-found from Ollama; the embedder holds no bad state, so the
+  # next call after the pull succeeds. Nothing embeds at boot — RAG indexing is
+  # on-demand.) The healthcheck below is for ops visibility (passes once the
+  # model is present); using it as a `service_healthy` gate would instead block
+  # the deploy on the pull, so it is deliberately not a dependency condition.
   # ---------------------------------------------------------------------------
   ollama:
     image: ollama/ollama:0.31.1
