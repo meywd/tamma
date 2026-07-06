@@ -338,6 +338,20 @@ export async function buildRagPipeline(
 ): Promise<IRagPipeline> {
   const collectionName =
     env['KB_RAG_COLLECTION'] ?? env['KB_INDEX_COLLECTION'] ?? DEFAULT_RAG_COLLECTION;
+  // The RAG pipeline's vector-source hard-requires its collection to exist at
+  // initialize() and throws `Collection '<name>' does not exist` otherwise. On a
+  // fresh / never-indexed store the collection has not been created yet (the
+  // codebase-indexer creates it lazily on first index), so a configured-but-
+  // empty deployment would throw here and degrade the ENTIRE bundle to
+  // not_configured. Ensure it exists (empty, at the embedder's dimensions) so
+  // the sidecar boots fully configured; this mirrors the indexer's own
+  // collectionExists→createCollection guard (codebase-indexer.ts), so a later
+  // index run sees it and skips re-creation. No-op when it already exists.
+  if (!(await store.collectionExists(collectionName))) {
+    await store.createCollection(collectionName, {
+      dimensions: embeddingService.getDimensions(),
+    });
+  }
   const pipeline = createRAGPipeline();
   await pipeline.initialize({ embeddingService, vectorStore: store, collectionName });
   return adaptRagPipeline(wrapRagPipeline(pipeline));

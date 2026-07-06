@@ -20,6 +20,7 @@ import {
   buildIntelligenceBundleFromEnv,
   createVectorStoreFromEnv,
   createRagPipelineFromEnv,
+  buildRagPipeline,
   wrapVectorStore,
 } from '../env-composition.js';
 import type { IntelligenceServicesBundle, IRagPipeline } from '../types.js';
@@ -173,6 +174,7 @@ function makeInMemoryStore() {
   };
   return {
     listCollections: async () => [...collections.keys()],
+    collectionExists: async (name: string) => collections.has(name),
     createCollection: async (name: string) => {
       ensure(name);
     },
@@ -234,6 +236,38 @@ const fakeRag: IRagPipeline = {
   getFeedbackOverview: () => ({ totalFeedback: 0, averageRelevance: 0 }),
   configure: () => undefined,
 };
+
+describe('buildRagPipeline — bootstraps a missing RAG collection', () => {
+  it('creates the codebase collection on a fresh store so the pipeline initializes (no throw, no bundle degrade)', async () => {
+    const store = makeInMemoryStore();
+    const embedder = await createEmbedderFromEnv({ EMBEDDING_PROVIDER: 'mock' });
+    if (!embedder) throw new Error('mock embedder should be defined');
+    // A fresh / never-indexed store: the RAG collection does not exist yet.
+    // Before the fix, VectorSource.doInitialize threw `Collection 'codebase'
+    // does not exist` here, which degraded the ENTIRE sidecar bundle to
+    // not_configured (reproduced in prod: the sidecar reported not_configured
+    // even with ChromaDB + Ollama wired and healthy).
+    expect(await store.collectionExists('codebase')).toBe(false);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pipeline = await buildRagPipeline(store as any, embedder, {});
+    expect(pipeline).toBeDefined();
+    // The collection was bootstrapped, so a later index run + RAG retrieval work.
+    expect(await store.collectionExists('codebase')).toBe(true);
+  });
+
+  it('honours KB_RAG_COLLECTION and is a no-op when the collection already exists', async () => {
+    const store = makeInMemoryStore();
+    await store.createCollection('kb-custom');
+    const embedder = await createEmbedderFromEnv({ EMBEDDING_PROVIDER: 'mock' });
+    if (!embedder) throw new Error('mock embedder should be defined');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pipeline = await buildRagPipeline(store as any, embedder, {
+      KB_RAG_COLLECTION: 'kb-custom',
+    });
+    expect(pipeline).toBeDefined();
+    expect(await store.listCollections()).toContain('kb-custom');
+  });
+});
 
 describe('configured store — endpoints return REAL data via wrapVectorStore', () => {
   async function makeConfiguredApp() {
