@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Status
 
-**Active Development**: 30 Elsa workflows implemented, TypeScript API + CLI operational, deployed on Hetzner VPS with Docker. Wiki site live at wiki.tamma.dev.
+**Active Development**: C#/.NET 8 backend — 30+ Elsa workflows + the `Tamma.Api` (ASP.NET Core Minimal API) on PostgreSQL, deployed on a Hetzner VPS via Docker Compose (qa-tag–gated). A TypeScript `intelligence-server` sidecar (KB/RAG) + React dashboards run alongside. Wiki site live at wiki.tamma.dev.
 
 ## Project Overview
 
@@ -20,16 +20,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Technology Stack
 
-- **Language**: TypeScript 5.7+ (strict mode)
-- **Runtime**: Node.js 22 LTS
-- **Database**: PostgreSQL 17 (event store, task queue)
-- **API Framework**: Fastify 5.x
-- **Package Manager**: pnpm 9+ (monorepo with workspaces)
-- **Testing**: Vitest 3.x (10-20x faster than Jest)
-- **Build**: esbuild + tsc (esbuild for bundling, tsc for type checking)
-- **CLI**: Ink 5.x (React for CLIs)
-- **Logging**: Pino (5x faster than Winston)
-- **Date/Time**: dayjs (6kb, moment-compatible)
+> **Stack reality — read this first.** The **active backend is C#/.NET 8**, NOT TypeScript. The old TS toolchain (Fastify/Ink/Vitest/Pino/dayjs) describes the **legacy `packages/*`**, most of which has been superseded by / extracted into the C# app. The only TS that runs in production is the **`intelligence-server` sidecar** (KB/RAG) and the **React dashboards**. Do not cite the TS stack as the primary runtime.
+
+**Active backend — C#/.NET (`apps/tamma-elsa`)**
+- **Language/Runtime**: C# 13 on **.NET 8** (`LangVersion=latest`)
+- **Workflow engine**: **Elsa 3** (`Elsa.*`, EF Core Postgres persistence); **Elsa.Studio** (Blazor WASM) for the studio UI
+- **API**: **ASP.NET Core Minimal APIs** (`Tamma.Api`)
+- **Data/ORM**: **EF Core** + Npgsql on **PostgreSQL 17**
+- **Event store**: a **custom `EventRepository` (EF Core)** over the `domain_events` table — DCB pattern, **no third-party event-store library** (not Emmett, not EventStoreDB, not Marten)
+- **Messaging**: RabbitMQ
+- **Testing**: **NUnit** + FluentAssertions + Moq + Testcontainers (`dotnet test`)
+
+**Sidecar & frontend (TypeScript — still live)**
+- **`intelligence-server`**: Fastify sidecar bridging `@tamma/intelligence` (vector store: ChromaDB/pgvector; embeddings via **local Ollama**, `nomic-embed-text`). The C# API proxies `/api/kb/*` here.
+- **Dashboards**: React + Vite (`packages/dashboard`, `packages/dashboard-user`), Vitest
+- **Package manager**: pnpm 9 (monorepo)
+
+**Legacy TS (`packages/*` — largely superseded/extracted):** Ink CLI, provider/platform/orchestrator packages, Pino, dayjs. Historical — verify against the C# app before treating any of it as current.
 
 ## Repository Structure
 
@@ -482,14 +489,16 @@ await eventStore.append({
 
 ## Key Architectural Decisions
 
-1. **Node.js 22 LTS** over Bun: Production stability, crypto performance (10x faster for security scanning)
-2. **PostgreSQL + Emmett** over EventStoreDB: Unified storage, JSONB flexibility, lower operational complexity
-3. **Fastify** over Express/Hono: Fastest Node.js framework, native TypeScript, schema validation
-4. **Server-Sent Events** over WebSocket: Simpler, unidirectional, HTTP/2 multiplexing, lower overhead
-5. **Vitest** over Jest: 10-20x faster, native TypeScript, ESM support
-6. **Pino** over Winston: 5x faster, structured JSON, zero-copy logging
-7. **pnpm** over npm/yarn: Fastest, 70-80% disk savings, monorepo-optimized
-8. **DCB Pattern** over aggregate-per-stream: Simpler cross-aggregate queries, flexible tagging, better audit trail
+> **Historical (TypeScript-era) rationale.** These record WHY early choices were made. The active stack is now **C#/.NET 8 + Elsa + EF Core/Postgres** (see Technology Stack) — where a decision names a TS tool, it applies only to the legacy `packages/*` + the TS sidecar/dashboards, **not** the C# backend. The current equivalent is noted in **bold** where it differs.
+
+1. **Node.js 22 LTS** over Bun (legacy TS): production stability, crypto performance
+2. **PostgreSQL** over EventStoreDB: unified storage, JSONB flexibility, lower operational complexity. **Current: a custom EF Core `EventRepository` over the `domain_events` table — Emmett (a Node library) was dropped in the C# port; there is no third-party event-store engine.**
+3. **Fastify** over Express/Hono (legacy TS / the sidecar): fastest Node framework. **C# backend uses ASP.NET Core Minimal APIs.**
+4. **Server-Sent Events** over WebSocket: simpler, unidirectional, HTTP/2 multiplexing, lower overhead (still current for streaming)
+5. **Vitest** over Jest (legacy TS / sidecar / dashboards). **C# backend uses NUnit.**
+6. **Pino** over Winston (legacy TS). **C# backend uses .NET's built-in `Microsoft.Extensions.Logging`.**
+7. **pnpm** over npm/yarn: monorepo tooling for the TS packages/sidecar/dashboards
+8. **DCB Pattern** over aggregate-per-stream: simpler cross-aggregate queries, flexible tagging, better audit trail (**still current** in the C# event store)
 
 ## Self-Maintenance Goal
 
