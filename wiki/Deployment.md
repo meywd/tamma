@@ -4,23 +4,27 @@ This page covers environment variables, the least-privilege app-role runbook, an
 
 ## Docker Compose stack
 
-Production deployment runs on Hetzner CPX42 (16 GB). Services (see `docker-compose.yml`):
+Production deployment runs on Hetzner CPX42 (16 GB). Services (see `docker/docker-compose.yml`; memory column = prod limit from `docker-compose.prod.yml`):
 
 | Service | Tech | Memory | Purpose |
 |---------|------|--------|---------|
-| postgres | 17 | 2 GB | Data, events, ELSA state |
-| rabbitmq | Latest | 512 MB | Message broker |
+| postgres | Postgres 17 | 2 GB | Data, events, ELSA state |
+| rabbitmq | RabbitMQ 3.13 | 512 MB | Message broker |
+| chromadb | Chroma 1.5.8 | 1 GB | Vector store (KB/RAG) |
+| ollama | Ollama 0.31.1 | 2 GB | Local embedding server (`nomic-embed-text`, 768-dim) — self-hosted KB/RAG embeddings, no OpenAI key or per-token cost |
+| intelligence-server | Node.js 22 (Fastify) | — (no prod limit) | KB/RAG sidecar backing the C# API's `/api/kb/*` endpoints |
 | elsa-server | .NET 8 | 1 GB | ELSA workflow engine |
-| tamma-api-dotnet | .NET 8 | 512 MB | .NET REST API (this is the Tamma.Api surface) |
-| tamma-api | Node.js 22 | 512 MB | Fastify REST API (legacy, being ported out) |
+| tamma-api | .NET 8 | 768 MB | Consolidated C# REST API (the `Tamma.Api` surface — the old `tamma-api-dotnet` / Node Fastify split no longer exists) |
 | tamma-engine | Node.js 22 | 1 GB | TypeScript engine |
 | tamma-dashboard | nginx | 256 MB | React SPA |
 | elsa-studio | nginx | 128 MB | Custom Blazor WASM |
-| nginx-proxy | nginx | 128 MB | Reverse proxy |
-| chromadb | Latest | 1 GB | Vector store |
-| opensearch (opt-in) | 2.x | 3 GB | Log aggregation |
+| oauth2-proxy | oauth2-proxy v7.7.1 | 128 MB | GitHub OAuth `auth_request` gate |
+| nginx-proxy | nginx 1.27 | 128 MB | Reverse proxy |
+| opensearch (+ dashboards, opt-in) | 2.19 | 3 GB (+1.5 GB) | Log aggregation (`observability` profile) |
 
-Deploy is **layered** (postgres → rabbitmq → elsa → APIs → dashboard + nginx) so in-flight upgrades never race their own dependencies. DNS + SSL via Cloudflare (`app.tamma.dev`, `api.tamma.dev`, `elsa.tamma.dev`, `wiki.tamma.dev`).
+Memory budget (sum of prod limits, not reservations): **~8.8 GB** without the observability profile, **~13.4 GB** with it — fits the 16 GB VPS, but mind headroom when running observability + ollama together.
+
+Deploy is **layered** (postgres + rabbitmq + chromadb → elsa-server → tamma-api — which pulls up ollama + intelligence-server via `depends_on` — → engine + dashboard + studio + proxies) so in-flight upgrades never race their own dependencies. DNS + SSL via Cloudflare (`app.tamma.dev`, `api.tamma.dev`, `elsa.tamma.dev`, `wiki.tamma.dev`).
 
 ## Core environment variables
 
@@ -54,6 +58,19 @@ When both `AppId` > 0 and `PrivateKey` are set, DI swaps in `OctokitGitHubAppCli
 | `ConnectionStrings:Redis` | StackExchange.Redis connection string. |
 
 When set, the API swaps `InMemoryDistributedRateLimitBackend` → `RedisDistributedRateLimitBackend` (Lua `INCR + EXPIRE`). Multi-pod-safe. Unset means single-pod in-process rate limiting (safe default, matches pre-Redis behaviour).
+
+### KB / RAG sidecar embeddings (optional overrides; defaults to local Ollama)
+
+The `intelligence-server` sidecar's embedding config is passed through compose with self-hosted defaults — **no OpenAI key is required**:
+
+| Variable (`docker/.env`) | Default | Purpose |
+|-----|---------|---------|
+| `INTELLIGENCE_EMBEDDING_PROVIDER` | `ollama` | Embedding provider. Set `openai` (plus an API key) only if a cloud provider is wanted. |
+| `INTELLIGENCE_EMBEDDING_MODEL` | `nomic-embed-text` | 768-dim local embedding model, pulled by the `ollama` service on first boot. |
+| `INTELLIGENCE_EMBEDDING_BASE_URL` | `http://ollama:11434` | Embedding API endpoint (the in-stack Ollama server). |
+| `INTELLIGENCE_LOG_LEVEL` | `info` | Sidecar log level. |
+
+Compose maps these onto the sidecar's own env (`EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` / `EMBEDDING_BASE_URL`); the vector store is fixed to `CHROMADB_URL=http://chromadb:8000`. The sidecar bootstraps its RAG collection (`KB_RAG_COLLECTION`, default `codebase`) at boot — a fresh, never-indexed deployment reports **configured** (retrieval just returns nothing until content is indexed). With no vector-store env at all, the sidecar degrades to its `not_configured` stubs instead of crashing. The `ollama` service has **no host port mapping** — its API is unauthenticated and must stay internal to `tamma-net`; the model persists in the `tamma-ollama-data` volume, so the pull cost is first-boot-only.
 
 ### Cranl (optional; activates per-tenant provisioning)
 

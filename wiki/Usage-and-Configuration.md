@@ -1,6 +1,6 @@
 # Usage & Configuration
 
-How to run Tamma and configure its behaviour: the two operating modes and their entry points, the CLI commands, the per-repo `.tamma/config.json`, convention templates, the prompt-override store, provider/platform configuration, and BYOK (bring-your-own-key).
+How to run Tamma and configure its behaviour: the two operating modes and their entry points, the CLI commands, the per-repo `.tamma/config.json`, convention templates, the prompt-override store, provider/platform and KB/RAG configuration, and BYOK (bring-your-own-key).
 
 Related: [Installation & Setup](Installation) · [API Reference](API-Reference) · [Architecture](Architecture) · [Prompt Store (Epic 27)](Epics/Epic-27-Prompt-Store).
 
@@ -151,6 +151,16 @@ Provider health/diagnostics endpoints live under `/api/providers/*`; settings un
 ### Git platforms
 
 GitHub is the live platform (Octokit App client, activated by `GitHub:AppId` + `GitHub:PrivateKey` env — see [GitHub Integration](GitHub-Integration)). Gitea / Forgejo / GitLab drivers are covered by [Multi Git Platform](Multi-Git-Platform); their inbound webhooks are documented in [API Reference → Webhooks](API-Reference#webhooks).
+
+### KB / RAG (knowledge base)
+
+The C# API's `/api/kb/*` endpoints proxy to the **`intelligence-server` sidecar**, whose composition root (`packages/intelligence-server/src/env-composition.ts`) builds a real vector store + embedder from env:
+
+- **Vector store:** ChromaDB via `CHROMADB_URL` (or `CHROMADB_HOST`/`CHROMADB_PORT`), or pgvector via `KB_PGVECTOR_CONNECTION_STRING` / `PGVECTOR_URL` / `VECTOR_DB_URL`; force a backend with `KB_VECTOR_STORE` (alias `VECTOR_STORE_PROVIDER`). In the Docker stack this is wired to the in-stack ChromaDB.
+- **Embeddings:** in the Docker stack these default to **local Ollama `nomic-embed-text`** (768-dim) — `EMBEDDING_PROVIDER=ollama`, `EMBEDDING_BASE_URL=http://ollama:11434` — so KB vector search and RAG run **with no OpenAI key or per-token cost**. A cloud provider is opt-in: `EMBEDDING_PROVIDER=openai` + `OPENAI_API_KEY` (or `EMBEDDING_API_KEY`), `EMBEDDING_MODEL` to pick the model. (Outside the compose stack, the sidecar's bare default provider is `openai`, which needs a key.)
+- **Collection bootstrap:** the RAG collection (`KB_RAG_COLLECTION`, fallback `KB_INDEX_COLLECTION`, default `codebase`) is **created automatically at boot** if missing (at the embedder's dimensions), so a fresh, never-indexed deployment reports **configured** — retrieval simply returns nothing until content is indexed. Only when no vector-store env is set at all do the KB endpoints degrade to `not_configured` stubs; a store that is configured but unreachable degrades to stubs at boot rather than crashing.
+
+The compose-level knobs (`INTELLIGENCE_EMBEDDING_PROVIDER/MODEL/BASE_URL`) are documented in [Deployment → KB / RAG sidecar embeddings](Deployment#kb--rag-sidecar-embeddings-optional-overrides-defaults-to-local-ollama).
 
 ## BYOK — bring your own key
 

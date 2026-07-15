@@ -35,7 +35,8 @@ Service names, images, and internal ports are from `docker/docker-compose.yml`. 
 | `postgres` | `postgres:17-alpine` | Data, DCB events, ELSA state | 5432 | `pg_isready -U $POSTGRES_USER` | 2G / 2 cpu |
 | `rabbitmq` | `rabbitmq:3.13-management-alpine` | Message broker | 5672 / 15672 | `rabbitmq-diagnostics check_running` | 512M / 1 cpu |
 | `chromadb` | `chromadb/chroma:1.5.8` | Vector store (RAG) | 8000 | HTTP probe of `/api/v2/heartbeat` | 1G / 1 cpu |
-| `intelligence-server` | built (`packages/intelligence-server`) | TS Fastify sidecar for `/api/kb/*` | 4100 | `curl -fsS http://localhost:4100/health` | — |
+| `ollama` | `ollama/ollama:0.31.1` | Local embedding server (`nomic-embed-text`, 768-dim) for KB/RAG — no OpenAI key/cost. **No host port** (unauthenticated API, internal-only) | 11434 | `ollama list \| grep nomic-embed-text` (ops visibility only — deliberately not a `service_healthy` gate) | 2G / 2 cpu |
+| `intelligence-server` | built (`packages/intelligence-server`) | TS Fastify sidecar for `/api/kb/*` — real ChromaDB vector store + Ollama embeddings wired via env | 4100 | `curl -fsS http://localhost:4100/health` | — |
 | `elsa-server` | built (`apps/tamma-elsa/…/Tamma.ElsaServer`) | ELSA .NET 8 workflow engine | 5000 | `curl -f http://localhost:5000/health` | 1G / 1 cpu |
 | `elsa-studio` | built (`Tamma.Studio`) | Blazor WASM designer (nginx) | 80 | — | 128M |
 | `tamma-api` | built (`Tamma.Api`) | Consolidated **C#** REST API | 3100 | `curl -f http://localhost:3100/api/health` | 768M / 1 cpu |
@@ -46,7 +47,9 @@ Service names, images, and internal ports are from `docker/docker-compose.yml`. 
 | `opensearch` | `opensearchproject/opensearch:2.19.0` | Log aggregation (profile `observability`) | 9200 | cluster-health green/yellow | 3G / 2 cpu |
 | `opensearch-dashboards` | `…/opensearch-dashboards:2.19.0` | Log viz (profile `observability`) | 5601 | `/api/status` probe | 1.5G |
 
-Network: `tamma-net` (bridge). Volumes: `tamma-pg-data`, `tamma-rmq-data`, `tamma-chroma-data`, `tamma-engine-workdir`, `tamma-os-data`.
+Network: `tamma-net` (bridge). Volumes: `tamma-pg-data`, `tamma-rmq-data`, `tamma-chroma-data`, `tamma-ollama-data`, `tamma-engine-workdir`, `tamma-os-data`.
+
+The `ollama` entrypoint serves, waits for the API, pulls `nomic-embed-text` (~60s, first boot only — the model persists in `tamma-ollama-data`), then keeps serving. The sidecar's Ollama embedder initializes config-only (network-free), so `intelligence-server` waits on ollama with `service_started` — it boots and reports **configured** without blocking on the pull. An embed call landing inside the first-boot pull window gets a model-not-found from Ollama; the next call after the pull succeeds (nothing embeds at boot — RAG indexing is on-demand). The sidecar also creates its RAG collection (`codebase`) on an empty ChromaDB at boot, so a fresh deployment is fully configured rather than `not_configured`.
 
 Note: `tamma-api` is the **C# .NET 8** API (built from `Tamma.Api/Dockerfile`, port 3100, health `/api/health`). The consolidation onto a single C# API already happened — an older separate `tamma-api-dotnet` service no longer exists.
 
@@ -58,6 +61,8 @@ Services start in dependency layers so an in-flight upgrade never races its own 
 Layer 1:  postgres  rabbitmq  chromadb          (wait: healthy)
 Layer 2:  elsa-server                            (wait: /health)
 Layer 3:  tamma-api                              (wait: /api/health)
+          └─ pulls up ollama + intelligence-server via depends_on
+             (intelligence-server: chromadb healthy + ollama started)
 Layer 4:  tamma-engine  tamma-dashboard  elsa-studio
           oauth2-proxy  nginx-proxy
 ```
@@ -94,6 +99,8 @@ Copy `docker/.env.example` to `docker/.env` and fill it in. Config uses ASP.NET 
 | `DASHBOARD_URL` | `https://app.tamma.dev` |
 
 **Optional (commented in `.env.example`, shown with defaults):** `POSTGRES_USER=tamma`, `POSTGRES_DB=tamma`, `RABBITMQ_USER=tamma`, `RABBITMQ_PASSWORD=tamma`, `LOG_LEVEL=info`, plus the OpenSearch block (`OPENSEARCH_URL`, `OPENSEARCH_ENABLED`, `LOG_INDEX_PREFIX`).
+
+**KB/RAG embeddings (optional overrides; defaults in compose, absent from `.env.example`):** `INTELLIGENCE_EMBEDDING_PROVIDER=ollama`, `INTELLIGENCE_EMBEDDING_MODEL=nomic-embed-text`, `INTELLIGENCE_EMBEDDING_BASE_URL=http://ollama:11434`, `INTELLIGENCE_LOG_LEVEL=info`. The defaults run embeddings fully self-hosted on the in-stack `ollama` service — no OpenAI key required. To use a cloud provider instead, set `INTELLIGENCE_EMBEDDING_PROVIDER=openai` plus an API key. See [Deployment → KB / RAG sidecar embeddings](Deployment#kb--rag-sidecar-embeddings-optional-overrides-defaults-to-local-ollama).
 
 For the full env-var reference — including the least-privilege `TammaAppDb` role, Redis, Cranl provisioning, SMTP, and tenant-backup keys — see [Deployment](Deployment#core-environment-variables). Two variables consumed in production but **absent** from `.env.example`: `TAMMA_APP_DB_PASSWORD` (activates the least-privilege `tamma_app` DB role) and `CRANL_ENCRYPTION_KEY` (only when Cranl provisioning is enabled).
 
@@ -140,7 +147,7 @@ docker compose \
   --env-file ../.env up -d
 ```
 
-`docker-compose.prod.yml` applies per-service memory/CPU limits and exposes only `nginx-proxy` on 80/443 — every other service is reachable through the proxy. Budget: ~6.8 GB without observability, ~11.8 GB with it (fits the 16 GB VPS).
+`docker-compose.prod.yml` applies per-service memory/CPU limits and exposes only `nginx-proxy` on 80/443 — every other service is reachable through the proxy. Budget (sum of limits, not reservations): ~8.8 GB without observability (includes the 2G ollama cap), ~13.4 GB with it — fits the 16 GB VPS, but don't run observability + ollama on a 16 GB box without headroom care.
 
 ## Health checks
 
@@ -151,7 +158,10 @@ docker compose \
 | `GET /health/live` | tamma-api | Liveness only (no dependency checks). |
 | `GET /health/ready` | tamma-api | Readiness — checks tagged `ready` (Postgres, KEK, least-privilege role). |
 | `GET /health` | elsa-server (5000) | ELSA engine health. |
-| `GET /health` | intelligence-server (4100) | KB sidecar health. |
+| `GET /health` | intelligence-server (4100) | KB sidecar health. A fresh stack boots **configured** (the RAG collection is auto-created on an empty ChromaDB); only a stack with no vector-store env degrades to `not_configured` stubs. |
+| `GET /api/admin/monitoring/infrastructure` | tamma-api (3100) | Platform-owner infra-metrics snapshot: .NET runtime, CPU/memory/uptime, disks, and dependency connectivity (Postgres, ELSA, RabbitMQ, ChromaDB, OpenSearch). Backs the dashboard's Infrastructure Monitor page. |
+
+The `ollama` container healthcheck (`ollama list | grep nomic-embed-text`) passes only once the model is present — it exists for ops visibility and is deliberately **not** used as a `service_healthy` dependency gate (that would block deploys on the one-time model pull).
 
 Public surface (through nginx): `https://api.tamma.dev/api/health`, `https://app.tamma.dev/`, `https://elsa.tamma.dev/health` (the ELSA `/health` route is proxied unauthenticated).
 
