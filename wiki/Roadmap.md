@@ -2,7 +2,7 @@
 
 Comprehensive roadmap covering **33 epics** from foundation through SaaS platform, including five newly scoped epics from the 2026-04-20/21 planning sweep (Epics 28, 29, 30, 31, 33). _(Epics 27 and 32 are now defined; previous roadmap text marking them "reserved" was stale.)_
 
-_Last audited: 2026-04-21 (auth-foundation sprint + Wave-2 planning + prioritization)._
+_Last audited: 2026-07-15 (main-branch sync: Epic 23 monitoring pages, Epic 3 assessment workflows, Epic 4 capture + replay, 2-14 decomposition, 18-4 onboarding slices, 21-4 dashboard pages, Epic 6 KB/RAG + Ollama)._
 
 ## Prioritization (Wave A → D)
 
@@ -38,11 +38,11 @@ Review-finding cross-reference: see [Port Audit → Code review (2026-04-20)](Po
 |------|------|---------|------|--------|
 | **Epic 1** | Foundation & Core Infrastructure | 15 | 10 | Near Complete |
 | **Epic 1.5** | Infrastructure & Deployment | 10 | 9 | Near Complete (K8s in progress) |
-| **Epic 2** | Autonomous Development Loop | 20 | 13 | Near Complete |
-| **Epic 3** | Quality Gates & Intelligence | 12 | 8 | Near Complete |
-| **Epic 4** | Event Sourcing & Audit Trail | 8 | 6 | Near Complete |
+| **Epic 2** | Autonomous Development Loop | 20 | 14 | Near Complete (2-14 decomposition landed 2026-07) |
+| **Epic 3** | Quality Gates & Intelligence | 13 | 11 | Near Complete (3-4/3-6/3-7 landed 2026-07) |
+| **Epic 4** | Event Sourcing & Audit Trail | 8 | 7 | Near Complete (4-5 capture + 4-8 replay landed 2026-07) |
 | **Epic 5** | Observability Dashboard & Docs | 14 | 4 | Partially Implemented |
-| **Epic 6** | Context & Knowledge Management | 10 | 9 | Near Complete |
+| **Epic 6** | Context & Knowledge Management | 10 | 9 | Near Complete (KB/RAG sidecar live w/ local Ollama embeddings, 2026-07) |
 | **Epic 7** | Autonomous Mentorship Workflow | 9 | 8 | Near Complete |
 | **Epic 8** | Distribution & Installation | 8 | 8 | Completed |
 | **Epic 9** | Config-Driven Multi-Agent Management | 11 | 11 | Completed |
@@ -54,12 +54,12 @@ Review-finding cross-reference: see [Port Audit → Code review (2026-04-20)](Po
 | **Epic 15** | Observability & Log Aggregation | 1 | 1 | Completed |
 | **Epic 16** | Unified Auth, User Management & Admin | 6 | 6 | Completed |
 | **Epic 17** | Multi-Tenancy Foundation | 5 | 0 | Drafted |
-| **Epic 18** | End-User Auth & Registration | 5 (+ 18-7, 18-8) | 1 | Partially Implemented |
+| **Epic 18** | End-User Auth & Registration | 5 (+ 18-6/18-7/18-8) | 4 | Partially Implemented (18-4 onboarding slices landed 2026-07; 18-4 still in progress) |
 | **Epic 19** | GitHub App Agent Dispatch | 6 | 5 | **Completed** (19-6 follow-up drafted) |
 | **Epic 20** | Billing & Payments | 5 | 0 | Drafted |
-| **Epic 21** | Marketing Site & User Dashboard | 5 | 1 | Partially (Midnight Ocean live) |
+| **Epic 21** | Marketing Site & User Dashboard | 5 | 2 | Partially (21-4 Repos & Runs pages landed 2026-07; marketing site extracted to standalone repo) |
 | **Epic 22** | CLI Mode Preservation | 5 | 0 | Drafted |
-| **Epic 23** | System Monitoring & Observability Dashboard | 12 | 0 | Drafted (26 task plans) |
+| **Epic 23** | System Monitoring & Observability Dashboard | 12 | 8 | In Progress — 23-1..23-6, 23-8, 23-12 landed 2026-07; 23-7/23-9/23-10 remain (23-11 superseded) |
 | **Epic 24** | Realtime Voice Conversation | 7 | 1 | Drafted (24 task plans) |
 | **Epic 25** | Documentation & Wiki Site | 1 | 1 | Completed |
 | **Epic 26** | Project Management & Triage | 4 | 0 | Drafted |
@@ -147,7 +147,10 @@ Beyond the numbered findings, Epic 31 closes the "GitHub-hard-coding" design-int
 Completed / Near Complete:
   Epic 1   (Foundation)              [NEAR COMPLETE - 10/15]
   Epic 1.5 (Infrastructure)          [NEAR COMPLETE - 9/10]
-  Epic 6   (Context & Knowledge)     [NEAR COMPLETE - 9/10]
+  Epic 2   (Autonomous Loop)         [NEAR COMPLETE - 14/20 — 2-14 decomposition landed 2026-07]
+  Epic 3   (Quality Gates)           [NEAR COMPLETE - 11/13 — 3-4/3-6/3-7 landed 2026-07]
+  Epic 4   (Event Sourcing)          [NEAR COMPLETE - 7/8 — 4-5 capture + 4-8 replay landed 2026-07]
+  Epic 6   (Context & Knowledge)     [NEAR COMPLETE - 9/10 — KB/RAG sidecar live w/ Ollama embeddings]
   Epic 7   (Mentorship Workflow)     [NEAR COMPLETE - 8/9]
   Epic 8   (Distribution)            [COMPLETED]
   Epic 9   (Multi-Agent Management)  [COMPLETED]
@@ -158,18 +161,21 @@ Completed / Near Complete:
   Epic 15  (Log Aggregation)         [COMPLETED]
   Epic 16  (Unified Auth & Admin)    [COMPLETED]
   Epic 19  (Agent Dispatch)          [COMPLETED - 19-6 follow-up drafted]
-  Epic 21  (Marketing Site)          [PARTIAL - landing live]
+  Epic 21  (Marketing/User Dashboard) [PARTIAL - 21-4 Repos & Runs pages live]
   Epic 25  (Wiki Site)               [COMPLETED]
 
+In progress:
+  Epic 18  (End-User Auth)           [4 done — 18-4 onboarding slices landed 2026-07, still in progress]
+  Epic 23  (Monitoring Dashboard)    [IN PROGRESS - 8/12 pages landed 2026-07]
+
 Active planning (Wave-2):
-  Epic 18  (End-User Auth)           [1 done + 18-7/18-8 new]
   Epic 28  (Database-per-Tenant)     [NEW - briefs + 12 plans]
   Epic 29  (Secret Management)       [NEW - briefs + 10 plans]
   Epic 30  (Multi-Tenant Provisioning) [NEW - briefs + 10 plans]
   Epic 31  (Multi Git Platform)      [NEW - briefs only]
 
 Drafted / Future:
-  Epic 2-5, 10, 17, 20, 22-24, 26
+  Epic 5, 10, 17, 20, 22, 24, 26
   Epic 33  (Per-Tenant IdP)          [DEFERRED STUB - trigger-gated]
 ```
 

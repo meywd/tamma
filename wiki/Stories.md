@@ -60,7 +60,7 @@ Each story includes:
 
 ---
 
-## Epic 2: Autonomous Development Loop (Near Complete -- 13/20 Done)
+## Epic 2: Autonomous Development Loop (Near Complete -- 14/20 Done)
 
 | Story | Title | Status |
 |-------|-------|--------|
@@ -77,7 +77,7 @@ Each story includes:
 | 2-11 | Auto-Next Issue Selection | Done |
 | 2-12 | Intelligent Provider Selection | Done |
 | 2-13 | Prompt Engineering Optimization | Done |
-| 2-14 | Issue Decomposition Engine | Ready for Dev |
+| 2-14 | Issue Decomposition Engine | Done |
 | 2-15 | Task Dependency Mapping | Ready for Dev |
 | 2-16 | Incremental Task Sequencing | Ready for Dev |
 | 2-17 | Context Gathering Redesign | Drafted |
@@ -89,17 +89,17 @@ Each story includes:
 
 ---
 
-## Epic 3: Quality Gates & Intelligence (Near Complete -- 8/12 Done)
+## Epic 3: Quality Gates & Intelligence (Near Complete -- 11/12 Done)
 
 | Story | Title | Status |
 |-------|-------|--------|
 | 3-1 | Build Automation Gate Implementation | Done |
 | 3-2 | Test Execution Gate Implementation | Done |
 | 3-3 | Escalation Workflow Implementation | Done |
-| 3-4 | Research Workflow Implementation | Drafted |
+| 3-4 | Research Workflow Implementation | Done |
 | 3-5 | Clarifying Questions Workflow Implementation | Drafted |
-| 3-6 | Ambiguity Scoring Implementation | Drafted |
-| 3-7 | Design Proposal Workflow Implementation | Drafted |
+| 3-6 | Ambiguity Scoring Implementation | Done |
+| 3-7 | Design Proposal Workflow Implementation | Done |
 | 3-8 | Static Analysis Gate Implementation | Done |
 | 3-9 | Security Scanning Gate Implementation | Done |
 | 3-10 | Agent Performance Monitoring | Done |
@@ -110,7 +110,7 @@ Each story includes:
 
 ---
 
-## Epic 4: Event Sourcing & Audit Trail (Near Complete -- 6/8 Done)
+## Epic 4: Event Sourcing & Audit Trail (Near Complete -- 7/8 Done)
 
 | Story | Title | Status |
 |-------|-------|--------|
@@ -121,7 +121,7 @@ Each story includes:
 | 4-5 | Event Capture - Code Changes & Git Operations | Done |
 | 4-6 | Event Capture - Approvals & Escalations | Done |
 | 4-7 | Event Query API for Time-Travel | Done |
-| 4-8 | Black-Box Replay for Debugging | Drafted |
+| 4-8 | Black-Box Replay for Debugging | Done |
 
 [Detailed Breakdown](Epics/Epic-4-Event-Sourcing) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-4)
 
@@ -153,6 +153,8 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 ---
 
 ## Epic 6: Context & Knowledge Management (Near Complete -- 10/11 Done)
+
+2026-07 update: the KB/RAG `intelligence-server` sidecar is now wired to a real vector store (`createVectorStoreFromEnv`/`RagPipeline`), with self-hosted embeddings via local Ollama (`nomic-embed-text`) and RAG collection bootstrap so the sidecar boots configured.
 
 | Story | Title | Package | Status |
 |-------|-------|---------|--------|
@@ -357,7 +359,7 @@ Engine exists as an imperative state machine (`packages/orchestrator/src/engine.
 | 18-1 | User Registration & Email Verification | Drafted |
 | 18-2 | User Login & Session Management | In Progress |
 | 18-3 | Organization/Tenant Creation | Drafted |
-| 18-4 | GitHub App Installation Onboarding | Done |
+| 18-4 | GitHub App Installation Onboarding | In Progress (non-migration slices landed 2026-07: repo activate/deactivate + `ONBOARDING.COMPLETED`) |
 | 18-5 | User-Facing Dashboard Shell | In Progress |
 
 [Detailed Breakdown](Epics/Epic-18-User-Auth) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-18)
@@ -394,14 +396,14 @@ Engine exists as an imperative state machine (`packages/orchestrator/src/engine.
 
 ## Epic 21: Marketing Site & User Dashboard (Partially Implemented)
 
-Marketing site exists at `apps/marketing-site/` with Midnight Ocean redesign. Wiki site at `apps/wiki-site/`. User dashboard not yet implemented.
+Marketing site extracted to a standalone repo (Midnight Ocean redesign). Wiki site at `apps/wiki-site/`. User dashboard (`packages/dashboard-user`) now has Repos & Workflow Runs pages (21-4, landed 2026-07).
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 21-1 | Marketing Landing Page | Done |
+| 21-1 | Marketing Landing Page | Done (site extracted to standalone repo) |
 | 21-2 | Pricing Page + Stripe Checkout | Drafted |
 | 21-3 | Documentation Site | In Progress |
-| 21-4 | User Dashboard -- Repos & Workflow Runs | Drafted |
+| 21-4 | User Dashboard -- Repos & Workflow Runs | Done |
 | 21-5 | User Dashboard -- Settings & Billing | Drafted |
 
 [Detailed Breakdown](Epics/Epic-21-Marketing-Dashboard) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-21)
@@ -422,24 +424,24 @@ Marketing site exists at `apps/marketing-site/` with Midnight Ocean redesign. Wi
 
 ---
 
-## Epic 23: System Monitoring & Observability Dashboard (Drafted -- 26 Task Plans)
+## Epic 23: System Monitoring & Observability Dashboard (In Progress -- 8/12 Done)
 
-All 12 stories now have detailed implementation-ready task plan breakdowns.
+Eight monitoring pages landed on `main` in 2026-07: the nav/layout foundation (23-12) plus System Health, Agent Monitor, Event Store Explorer, Configuration Audit, Workflow Monitor, Provider Diagnostics, and Infrastructure Monitor.
 
 | Story | Title | Task Plans | Status |
 |-------|-------|------------|--------|
-| 23-1 | System Health Dashboard (Overview) | 2 | Planned |
-| 23-2 | Agent Monitor (Realtime) | 2 | Planned |
-| 23-3 | Event Store Explorer | 2 | Planned |
-| 23-4 | Configuration Audit | 2 | Planned |
-| 23-5 | Workflow Monitor | 2 | Planned |
-| 23-6 | Provider Diagnostics (Deep) | 2 | Planned |
+| 23-1 | System Health Dashboard (Overview) | 2 | Done |
+| 23-2 | Agent Monitor (Realtime) | 2 | Done |
+| 23-3 | Event Store Explorer | 2 | Done |
+| 23-4 | Configuration Audit | 2 | Done |
+| 23-5 | Workflow Monitor | 2 | Done |
+| 23-6 | Provider Diagnostics (Deep) | 2 | Done |
 | 23-7 | Log Explorer (OpenSearch) | 2 | Planned |
-| 23-8 | Infrastructure Monitor | 2 | Planned |
+| 23-8 | Infrastructure Monitor | 2 | Done |
 | 23-9 | Knowledge Base Monitor | 2 | Planned |
 | 23-10 | Security & Access Audit | 2 | Planned |
-| 23-11 | Monitoring API Foundation | 3 | Planned |
-| 23-12 | Dashboard Navigation & Layout | 3 | Planned |
+| 23-11 | Monitoring API Foundation | 3 | Superseded (C# `Tamma.Api` port replaced the TS Fastify foundation) |
+| 23-12 | Dashboard Navigation & Layout | 3 | Done |
 
 [Detailed Breakdown](Epics/Epic-23-System-Monitoring) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-23)
 
@@ -633,8 +635,8 @@ Stories progress through the following stages:
 | Total epics | 33 (Epic 32 skipped) |
 | Epics completed | 10 (8, 9, 11, 13, 14, 15, 16, 19, 21 — landing page only, 25) |
 | Epics near complete | 8 (1, 1.5, 2, 3, 4, 6, 7, 12) |
-| Epics partially implemented | 5 (5, 17, 18, 21, 22) |
-| Epics drafted | 5 (10, 20, 23, 24, 26) |
+| Epics partially implemented | 6 (5, 17, 18, 21, 22, 23) |
+| Epics drafted | 4 (10, 20, 24, 26) |
 | Epics newly scoped (Wave-2) | 5 (27, 28, 29, 30, 31) + 1 deferred (33) |
 | Detailed task plans (Epic 23) | 26 |
 | Detailed task plans (Epic 24) | 24 |
