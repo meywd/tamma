@@ -1,8 +1,8 @@
 # Epic 6: Context & Knowledge Management
 
-**Status:** Near Complete (9/10 done; 6-2 in progress)
+**Status:** Near Complete (9/10 done; 6-2 in progress — production KB/RAG sidecar wired to a real vector store + self-hosted Ollama embeddings, 2026-07-05/06)
 **Stories:** 10 (6-1 through 6-10) — plus 6-11 (drafted)
-**Packages:** `@tamma/intelligence`, `@tamma/mcp-client`, `@tamma/cost-monitor`, `@tamma/gates`, `@tamma/scrum-master`, `@tamma/dashboard`, `@tamma/api`
+**Packages:** `@tamma/intelligence`, `@tamma/intelligence-server` (sidecar), `@tamma/mcp-client`, `@tamma/cost-monitor`, `@tamma/gates`, `@tamma/scrum-master`, `@tamma/dashboard`, `@tamma/api`
 
 ## Overview
 
@@ -44,6 +44,8 @@ Knowledge base entries live separately from code chunks. `KnowledgeService` mana
 | Pre-task checker | Queries knowledge base before agent execution | `packages/intelligence/src/knowledge-base/pre-task-checker.ts` | Done |
 | Matchers | Keyword, pattern, semantic, relevance ranking | `packages/intelligence/src/knowledge-base/matchers/` | Done |
 | **Knowledge-base UI** | Dashboard pages for index / vector / RAG / MCP / context / analytics | `packages/dashboard/src/pages/knowledge-base/` | Done (6-6) |
+| **Intelligence sidecar composition root** | Env-driven wiring of a real vector store (ChromaDB/pgvector) + embedder + RAG pipeline into the KB sidecar; graceful degrade to `not_configured` when no env is set | `packages/intelligence-server/src/env-composition.ts`, `server.ts` | Done (2026-07-05) |
+| **Self-hosted embeddings (Ollama)** | Local `nomic-embed-text` (768-dim) model server in Docker Compose — KB/RAG embeddings with no OpenAI key or per-token cost | `docker/docker-compose.yml`, `docker-compose.prod.yml` (`ollama` service) | Done (2026-07-05) |
 | **LLM Cost Monitor** | `CostTracker`, `LimitManager`, `AlertManager`, pricing config, storage | `packages/cost-monitor/src/*` | Done (6-7) |
 | **Agent Permissions** | `PermissionEnforcer`, `PermissionResolver`, violations | `packages/gates/src/permissions/`, `violations/` | Done (6-8) |
 | **Scrum Master** | Plan / approve / implement / review / learn loop orchestration | `packages/scrum-master/src/*` | Done (6-10) |
@@ -215,10 +217,13 @@ Elsa workflow      ContextAggregator    RAGPipeline    IVectorStore   KnowledgeS
 - **Agent Permissions** (6-8) — enforcer + resolver + defaults + violation recorder + alerter.
 - **Agent Knowledge Base** (6-9) — recommendations / prohibitions / learnings with 4 matcher types.
 - **Scrum Master** (6-10) — full service with supervisor, approval workflow, learning capture, agent coordinator.
+- **Production sidecar wiring** (2026-07-05/06) — the `intelligence-server` KB/RAG sidecar's composition root (`env-composition.ts`) now builds a **real** `@tamma/intelligence` vector store (ChromaDB preferred, pgvector fallback) + embedding service + RAG pipeline from environment variables, replacing the `not_configured` stubs whenever a store is configured (unconfigured deployments still boot and degrade gracefully). The RAG collection is bootstrapped at composition time (created empty at the embedder's dimensions if missing) so a fresh, never-indexed deployment boots `configured` instead of `not_configured`.
+- **Self-hosted embeddings** (2026-07-05) — Docker Compose now runs a local **Ollama** service serving `nomic-embed-text` (768-dim); the model is pulled once into a persisted volume on first boot and the sidecar's Ollama embedder initializes config-only, so embeddings run with **no OpenAI key and no per-token cost**.
+- **Prod-image hardening** (2026-07-05) — the sidecar imports `EmbeddingService` via the narrow `@tamma/intelligence/embedding` subpath instead of the `/indexer` barrel (which transitively value-imported the `typescript` devDependency and crash-looped the `--prod`-pruned Docker image); guarded by a prod-import-graph test + a prod-pruned boot smoke test, plus a Dockerfile fix.
 
 **In progress:**
 
-- 6-2 Vector Database Integration — 5 adapters (ChromaDB, pgvector, Pinecone, Qdrant, Weaviate) exist; production uses ChromaDB; some adapters need integration tests.
+- 6-2 Vector Database Integration — 5 adapters (ChromaDB, pgvector, Pinecone, Qdrant, Weaviate) exist; production uses ChromaDB (wired end-to-end via the sidecar composition root above); some adapters need integration tests.
 
 **Drift from briefs:**
 
@@ -239,6 +244,8 @@ Elsa workflow      ContextAggregator    RAGPipeline    IVectorStore   KnowledgeS
   - [Epic 27: Prompt Store](Epic-27-Prompt-Store.md) — prompt template injection of knowledge.
 - **Code paths:**
   - `packages/intelligence/src/` — indexer, vector store, RAG, knowledge base, context aggregator.
+  - `packages/intelligence-server/src/env-composition.ts` — sidecar composition root (real vector store + embedder + RAG from env).
+  - `docker/docker-compose.yml`, `docker/docker-compose.prod.yml` — `ollama` service for self-hosted embeddings.
   - `packages/mcp-client/src/` — MCP client.
   - `packages/cost-monitor/src/` — cost tracking + limits + alerts.
   - `packages/gates/src/permissions/` — agent permissions.

@@ -1,6 +1,6 @@
 # Epic 3: Quality Gates & Intelligence Layer
 
-**Status:** Near Complete (8/12 done; 3-4..3-7 drafted)
+**Status:** Complete (12/12 done — intelligence-gate stories 3-4..3-7 landed 2026-07-04/05 as standalone Elsa sub-workflows)
 **Stories:** 12 (3-1 through 3-12)
 **MVP Critical:** All 12 stories
 **Tech Spec:** [tech-spec-epic-3.md](https://github.com/meywd/tamma/blob/main/docs/stories/epic-3/tech-spec-epic-3.md)
@@ -19,7 +19,7 @@ Quality gates sit **around** loop steps, not inside them. Each gate is an Elsa w
 
 The TypeScript `@tamma/gates` package implements the **permission side** (layered on top, also consumed by Epic 6): `PermissionEnforcer` evaluates each tool/command request from an agent against a per-agent / per-project policy and returns allow / deny / require_approval. `PermissionResolver` merges global + project + agent-specific policies. Violations route to `ViolationRecorder` and `ViolationAlerter`.
 
-Intelligence gates (ambiguity detection, complexity assessment, research, multi-option design) live as LLM-backed activities inside `ContextGatheringWorkflow` and `PlanGenerationWorkflow` — they run before code generation, not after. The outputs (ambiguity score, complexity estimate, knowledge-gap queue) become workflow variables that later stages read.
+Intelligence gates (ambiguity detection, clarifying questions, complexity assessment, research, multi-option design) landed as **standalone Elsa sub-workflows** — `AmbiguityScoringWorkflow`, `ClarifyingQuestionsWorkflow`, `AssessmentWorkflow`, `ResearchWorkflow`, `DesignProposalWorkflow` — that a parent flow dispatches before code generation, not after. They share one skeleton: (optionally) gather context by reusing `DispatchWorkflow("context-gathering")` → call the LLM through the mediated `DispatchWorkflow("llm-call")` path (the engine holds no LLM credential) → parse the response **fail-closed** (empty/unparseable output emits a LOUD `*.FAILED` event and routes to an error terminal — never a fabricated result) → emit typed DCB events and set outputs (score, report, proposal) that the parent reads.
 
 ## Components
 
@@ -41,10 +41,10 @@ Intelligence gates (ambiguity detection, complexity assessment, research, multi-
 | `PermissionEnforcer` | Per-agent / per-project tool + command policy evaluation | `packages/gates/src/permissions/permission-enforcer.ts` | Done |
 | `PermissionResolver` | Merge global → project → agent policies | `packages/gates/src/permissions/permission-resolver.ts` | Done |
 | `ViolationRecorder` + `ViolationAlerter` | Capture + alert on permission violations | `packages/gates/src/violations/` | Done |
-| Research activities | Generate research queries, call web / docs, classify findings | `docs/stories/epic-3/story-3-4/` | Drafted |
-| Clarifying questions | LLM generates questions for ambiguous requirements | `docs/stories/epic-3/story-3-5/` | Drafted |
-| Ambiguity detection | Score issue body 0-100, branch workflow on threshold | `docs/stories/epic-3/story-3-6/` | Drafted |
-| Multi-option design | Generate 2-3 design proposals for complex features | `docs/stories/epic-3/story-3-7/` | Drafted |
+| `ResearchWorkflow` | Gather codebase/prior-art context, synthesize a ranked confidence-scored research report via mediated LLM; `RESEARCH.*` events | `Tamma.ElsaServer/Workflows/ResearchWorkflow.cs`, `Tamma.Activities/Research/*` | Done (3-4) |
+| `ClarifyingQuestionsWorkflow` | LLM generates questions for ambiguous requirements + secure resume endpoint; `CLARIFY.*` events | `Tamma.ElsaServer/Workflows/ClarifyingQuestionsWorkflow.cs` | Done (3-5) |
+| `AmbiguityScoringWorkflow` | Score requirement ambiguity 0..1 via mediated LLM, fail-closed parse, threshold policy routes to clarification; `AMBIGUITY.*` events | `Tamma.ElsaServer/Workflows/AmbiguityScoringWorkflow.cs`, `Tamma.Activities/Ambiguity/*` | Done (3-6) |
+| `DesignProposalWorkflow` | Generate multi-alternative design proposal, deliver to issue, suspend on approval bookmark, secure resume; `DESIGN.*` events | `Tamma.ElsaServer/Workflows/DesignProposalWorkflow.cs`, `Tamma.Activities/Design/*` | Done (3-7) |
 | Agent performance monitoring | Track per-provider / per-task success + latency + cost | `packages/providers/src/provider-health.ts` | Done (3-10) |
 | Cost-aware AI usage | Budget limits (daily/weekly/monthly), alerts, emergency halt | `packages/cost-monitor/src/*` | Done (3-11) |
 | Task complexity assessment | LLM-scored complexity → route to appropriate agent | `Tamma.Activities/Assessment/*` | Done (3-12) |
@@ -183,20 +183,17 @@ SingleIssueCycle  CiWithDebugRetry   DebuggingWorkflow   AI Agent   GitHub      
 - **Agent performance monitoring** (3-10) — `provider-health.ts` tracks success / latency / cost per provider.
 - **Cost-aware usage** (3-11) — `@tamma/cost-monitor` package with tracker, limit manager, alert manager, pricing config, budget reports.
 - **Task complexity assessment** (3-12) — `Tamma.Activities/Assessment/*` (skill profile, complexity classification, question generation).
-
-**Drafted:**
-
-- 3-4 Research Capability for Unfamiliar Concepts — story brief + context XML; activity not yet landed.
-- 3-5 Clarifying Questions for Ambiguous Requirements — story brief exists; partial overlap with `Assessment` activities.
-- 3-6 Ambiguity Detection Scoring — scoring approach defined; not wired into `ContextGatheringWorkflow` yet.
-- 3-7 Multi-Option Design Proposals — story brief exists; not yet a standalone activity.
+- **Research capability** (3-4, landed 2026-07-05) — `ResearchWorkflow`: context-gathering reuse → mediated `llm-call` (role `product_owner` / action `research`, with a dedicated structured-findings prompt template in `SystemPrompts`) → fail-closed parse into a ranked, confidence-scored findings report. Emits `RESEARCH.STARTED / CONTEXT_GATHERED / COMPLETED / FAILED`. Autonomous — no human gate.
+- **Clarifying questions** (3-5, landed 2026-07-04) — `ClarifyingQuestionsWorkflow` with a secure resume endpoint; generates questions via mediated LLM and suspends until answers arrive (`CLARIFY.*` events).
+- **Ambiguity scoring** (3-6, landed 2026-07-05) — `AmbiguityScoringWorkflow`: mediated `llm-call` (role `product_owner` / action `score-ambiguity`) produces a 0..1 score + typed itemised breakdown; fail-closed parse (out-of-range score → `AMBIGUITY.FAILED`); pure `AmbiguityThresholds` policy (default 0.5, caller-overridable, clamped to [0,1]) routes score ≥ threshold to clarification (`AMBIGUITY.CLARIFICATION_TRIGGERED`) vs proceed (`AMBIGUITY.BELOW_THRESHOLD`).
+- **Multi-option design proposals** (3-7, landed 2026-07-05) — `DesignProposalWorkflow`: mediated `llm-call` (role `architect` / action `plan-system-design`) generates a proposal with multiple alternatives + trade-off analysis, delivers it to the issue, suspends on an approval bookmark with a durable SLA timeout, and resumes via the secure `DesignResumeEndpoint` (in both `Tamma.Api` and the Elsa server). Emits `DESIGN.PROPOSAL.GENERATED / DELIVERED / APPROVED / REJECTED / FAILED` and `DESIGN.REVIEW.TIMED_OUT`.
 
 **Drift from briefs:**
 
 - The original Epic 3 put "escalation workflow" as a single story (3-3). Actual implementation spreads across `BlockerDiagnosisWorkflow` (stalled agents), `CiWithDebugRetryWorkflow` / `TddWithDebugRetryWorkflow` retry-exhaustion paths, and `EscalateToSeniorActivity`. Wiki page now reflects the fuller structure.
 - Story 3-9 "security scanning" is more developed than the brief: in addition to SAST integration, the `Security/` activities subtree provides a full runtime gate (ActionGate + ContentSanitizer + ProviderAllowlist). This work landed partly under Epic 11 scope.
 - The 3-11 cost-monitoring package lives at `packages/cost-monitor/` rather than inside `@tamma/gates` — it's structurally closer to Epic 6.
-- Some tracking docs mark ambiguity detection (3-6) as Done; the wiki lists Drafted because the scoring activity is not yet wired into the production `ContextGatheringWorkflow` — only research prototypes exist.
+- The intelligence gates (3-4..3-7) landed as **standalone dispatchable sub-workflows** rather than activities embedded inside `ContextGatheringWorkflow` / `PlanGenerationWorkflow` as the briefs sketched. Ambiguity scoring uses a 0..1 decimal score with a 0.5 default clarify threshold, not the brief's 0-100 scale with >70/>90 bands; a parent flow wires the `decision="clarify"` output to `ClarifyingQuestionsWorkflow`.
 
 ## See also
 
@@ -212,7 +209,8 @@ SingleIssueCycle  CiWithDebugRetry   DebuggingWorkflow   AI Agent   GitHub      
   - [Epic 11: Security](Epic-11-Security.md) — broader security epic.
 - **Code paths:**
   - `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/DebuggingWorkflow.cs`, `BlockerDiagnosisWorkflow.cs`, `CiWithDebugRetryWorkflow.cs`, `TddWithDebugRetryWorkflow.cs`.
-  - `apps/tamma-elsa/src/Tamma.Activities/Debug/`, `Blocker/`, `Security/`, `Assessment/`.
+  - `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/ResearchWorkflow.cs`, `ClarifyingQuestionsWorkflow.cs`, `AmbiguityScoringWorkflow.cs`, `DesignProposalWorkflow.cs` — intelligence gates (3-4..3-7).
+  - `apps/tamma-elsa/src/Tamma.Activities/Debug/`, `Blocker/`, `Security/`, `Assessment/`, `Research/`, `Ambiguity/`, `Design/`.
   - `packages/gates/src/permissions/`, `packages/gates/src/violations/`.
   - `packages/cost-monitor/src/` (cost-aware usage).
   - `packages/providers/src/provider-health.ts` (agent performance monitoring).

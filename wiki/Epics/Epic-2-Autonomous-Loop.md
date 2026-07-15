@@ -1,6 +1,6 @@
 # Epic 2: Autonomous Development Loop
 
-**Status:** Near Complete (13/20 done; 3 drafted for workflow redesign; 4 ready-for-dev)
+**Status:** Near Complete (14/20 done — 2-14 landed 2026-07-05; 2-15/2-16 ready-for-dev; 2-17..2-20 drafted for workflow redesign)
 **Stories:** 20 (2-1 through 2-20)
 **Tech Spec:** [tech-spec-epic-2.md](https://github.com/meywd/tamma/blob/main/docs/stories/epic-2/tech-spec-epic-2.md)
 **Retrospective:** Completed
@@ -43,7 +43,8 @@ The TypeScript mirror (`packages/orchestrator/src/engine.ts` — `TammaEngine`) 
 | `TammaEngine` (TS mirror) | In-process engine for CLI mode | `packages/orchestrator/src/engine.ts` | Done |
 | Intelligent provider selection | Route task to best provider by task type + cost + availability | `packages/providers/src/provider-chain.ts` | Done (2-12) |
 | Prompt engineering | Per-role prompt library + A/B testing scaffold | `packages/providers/src/agent-prompt-registry.ts` | Done (2-13) |
-| Issue decomposition engine | Break large issue into task graph | `docs/stories/epic-2/story-2-14/`, `story-2-15`, `story-2-16` | Ready-for-dev |
+| `IssueDecompositionWorkflow` | Break a complex issue into an ordered, dependency-declared sub-task set via mediated LLM; `DECOMPOSITION.*` events | `Tamma.ElsaServer/Workflows/IssueDecompositionWorkflow.cs`, `Tamma.Activities/Decomposition/*` | Done (2-14) |
+| Task dependency graph + incremental sequencing | Full graph-based dependency resolution / execution | `docs/stories/epic-2/story-2-15/`, `story-2-16` | Ready-for-dev |
 
 ## Class diagram
 
@@ -183,10 +184,11 @@ Every activity auto-emits `{activity}.{action}.{status}` events to the event sto
 - 33 Elsa workflow files in `Tamma.ElsaServer/Workflows/`, backed by ~150 activity classes in `Tamma.Activities/`.
 - Priority-based selection (2-20) — `SelectWorkItemActivity` has 3 outcomes (Selected / NothingFound / NeedsTriage) and ranks across issues, security alerts (Dependabot + CodeQL), failed CI on main, stale PRs.
 - `TammaEngine` TypeScript mirror for CLI mode — same pipeline, in-process.
+- **Issue Decomposition (2-14)** — landed 2026-07-05 as `IssueDecompositionWorkflow` (post-pivot architecture). Gathers codebase/prior-art context by reusing `DispatchWorkflow("context-gathering")`, then decomposes the issue via the mediated `llm-call` path (role `senior_developer` / action `decompose-issue` — the engine holds no LLM credential) into an ORDERED set of sub-tasks, each with rationale, definition-of-done, sizing, complexity, and declared prerequisite dependencies. Parsing is fail-closed (empty/unparseable/no-subtasks → `DECOMPOSITION.FAILED` + error terminal, never a fabricated breakdown). Emits `DECOMPOSITION.STARTED / CONTEXT_GATHERED / COMPLETED / FAILED` DCB events. Decomposition is autonomous — the AC7 "human approval before executing sub-tasks" is a downstream orchestration concern of the parent flow.
 
 **Ready for dev:**
 
-- 2-14 Issue Decomposition Engine, 2-15 Task Dependency Mapping, 2-16 Incremental Task Sequencing — context XMLs exist; partial support via `TaskCreationWorkflow` but full graph-based dependency resolution not implemented.
+- 2-15 Task Dependency Mapping, 2-16 Incremental Task Sequencing — context XMLs exist; 2-14's workflow declares per-sub-task prerequisite dependencies, but full graph-based dependency resolution / incremental execution is not implemented.
 
 **Drafted (workflow optimization wave 2):**
 

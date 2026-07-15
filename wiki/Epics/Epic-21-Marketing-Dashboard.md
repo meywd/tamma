@@ -1,15 +1,15 @@
 # Epic 21: Marketing Site & User Dashboard
 
-**Status:** Partially Implemented (Midnight Ocean marketing redesign live on tamma.dev; 4 stories still drafted/in-progress)
+**Status:** Partially Implemented (Midnight Ocean marketing redesign live on tamma.dev; 21-4 Repos & Workflow Runs landed 2026-07-05; 3 stories still drafted/in-progress)
 **Stories:** 5 (21-1 through 21-5)
-**Estimated Effort:** 128 hours (20 delivered; ~108 remaining)
+**Estimated Effort:** 128 hours (52 delivered; ~76 remaining)
 **Packages:** `apps/marketing-site`, `apps/wiki-site`, `packages/dashboard`
 
 ## Overview
 
 Epic 21 is the public-facing half of the Tamma SaaS. It pairs a marketing site at `tamma.dev` (acquisition funnel: hero, pricing, docs, blog, legal) with a user-facing dashboard at `app.tamma.dev/user/*` (self-service: repos, runs, settings, billing). Together they serve every visitor who has not yet signed up, every user managing their own workflows, and every tenant-admin managing organization billing.
 
-The marketing landing page is live — the Midnight Ocean redesign ships as a Cloudflare Worker running vanilla HTML/CSS with a `/api/signup` endpoint backed by Cloudflare KV. The wiki is live at `wiki.tamma.dev`. The pricing page, docs section, user-dashboard repos view, user-dashboard settings/billing view, and Stripe checkout are all still planned.
+The marketing landing page is live — the Midnight Ocean redesign ships as a Cloudflare Worker running vanilla HTML/CSS with a `/api/signup` endpoint backed by Cloudflare KV. The wiki is live at `wiki.tamma.dev`. The Repos & Workflow Runs dashboard pages landed 2026-07-05 (21-4). The pricing page, docs section, user-dashboard settings/billing view, and Stripe checkout are still planned.
 
 The admin dashboard at `app.tamma.dev` already exists (Epic 5 / Epic 16) and hosts settings, agents, provider health, knowledge-base management, and — as of 2026-04-22 — the Story 27-4 prompt store admin UI. The user dashboard lives in the **same** React SPA under a `/user/*` route prefix so both surfaces share auth, layout, and the `tamma_session` JWT cookie.
 
@@ -29,17 +29,17 @@ wiki.tamma.dev  (Cloudflare Worker — wiki-site, Epic 25)
 
 app.tamma.dev   (Hetzner VPS — packages/dashboard React SPA)
   /                     Admin shell (KB, agents, settings, prompts, health)
-  /user/repos           Connected repositories                    (21-4 planned)
-  /user/runs            Workflow run history + SSE live status    (21-4 planned)
-  /user/runs/:runId     Event timeline, logs, 14-step progress    (21-4 planned)
+  /repos                Connected repositories                    (21-4 done — shipped without the /user prefix)
+  /runs                 Workflow run history                      (21-4 done)
+  /runs/:runId          DCB event timeline + run detail           (21-4 done)
   /user/settings        Profile, org, API keys                    (21-5 planned)
   /user/billing         Subscription, invoices, Stripe portal     (21-5 planned)
 
-api.tamma.dev   (Fastify on VPS)
-  /api/v1/repos         User-scoped repo CRUD
-  /api/v1/runs          Workflow run list + detail
-  /api/v1/events/stream SSE for live run status
-  /webhooks/stripe      Stripe checkout / invoice webhooks
+api.tamma.dev   (Tamma.Api — ASP.NET Core Minimal API)
+  /api/v1/repos         Tenant-scoped connected repos (over github_installations)   (21-4 done)
+  /api/v1/runs          Workflow run list over the DCB run events                   (21-4 done)
+  /api/v1/runs/:runId   Single run's event/log detail                               (21-4 done)
+  /webhooks/stripe      Stripe checkout / invoice webhooks        (21-2 planned)
 ```
 
 All three public surfaces share the root domain `*.tamma.dev` with Cloudflare Full SSL and origin certificates. The SPA and the marketing site share the `tamma_session` JWT cookie on `.tamma.dev`.
@@ -144,8 +144,8 @@ The production landing page (`public/index.html`) has:
 1. **Prospect lands on tamma.dev** and sees Midnight Ocean hero, features, how-it-works, and "Get started free" CTA. Submitting the email form POSTs to `api/signup` which writes to Cloudflare KV with a 5-per-hour IP rate limit. (Live today.)
 2. **Prospect browses docs at tamma.dev/docs** — getting-started, CLI reference, API reference, GitHub App setup. (21-3 in progress; see Epic 25 for the separate wiki surface.)
 3. **Prospect picks a plan on tamma.dev/pricing**, clicks "Subscribe", is redirected into Stripe Checkout, returns to `app.tamma.dev/user/repos` with a verified session and a provisioned tenant. (21-2 planned.)
-4. **Logged-in user opens `/user/repos`** to see their connected GitHub repositories, click "View Runs" on a repo, "Pause" a repo, or "Disconnect" one with a confirm dialog. (21-4 planned.)
-5. **Logged-in user opens `/user/runs`**, filters by repo + status + date range, and clicks a row to open the run detail with the DCB event timeline, the 14-step orchestrator progress, logs, and PR link. Live-running workflows pulse in the list via SSE. (21-4 planned.)
+4. **Logged-in user opens `/repos`** to see the tenant's connected repositories (built over `github_installations`). The page is read-only; "Add repository" and repo activate/deactivate reuse the existing onboarding flow at `/onboarding` (see Epic 18 story 18-4). (21-4 shipped 2026-07-05.)
+5. **Logged-in user opens `/runs`**, filters by status, and clicks a row to open `/runs/:runId` with the run's DCB event/log timeline. (21-4 shipped 2026-07-05 — read-only over the DCB run events; SSE live-pulse not yet wired.)
 6. **Logged-in user manages settings** at `/user/settings`: profile name, org name, personal API keys (create, name, revoke). (21-5 planned.)
 7. **Tenant owner manages billing** at `/user/billing`: current plan, usage metrics, invoice history, change plan, and "Open Stripe Portal" for card updates. (21-5 planned.)
 8. **Admin user still sees the existing admin shell** (knowledge base, agents, prompts, health) — user routes are additive, no existing surface breaks.
@@ -192,7 +192,7 @@ The SPA at `app.tamma.dev` is served by Nginx from the shared VPS; the marketing
 | 21-1 | Marketing Landing Page (Midnight Ocean) | P0 | 20h | Done |
 | 21-2 | Pricing Page + Stripe Checkout | P1 | 24h | Drafted |
 | 21-3 | Documentation Site | P1 | 28h | In Progress (wiki live via Epic 25; marketing-side docs pending) |
-| 21-4 | User Dashboard — Repos & Workflow Runs | P0 | 32h | Drafted |
+| 21-4 | User Dashboard — Repos & Workflow Runs | P0 | 32h | Done (2026-07-05) |
 | 21-5 | User Dashboard — Settings & Billing | P1 | 24h | Drafted |
 
 ## Dependencies
@@ -219,8 +219,9 @@ The SPA at `app.tamma.dev` is served by Nginx from the shared VPS; the marketing
 ## Current state
 
 - **Live**: marketing site at tamma.dev with Midnight Ocean redesign (hero, features, how-it-works, 6-feature grid, 4-step flow, CTA, dark mode, Lighthouse >= 90). Email signup backed by Cloudflare KV with IP rate limiting. Full SEO metadata (Open Graph, Twitter, JSON-LD). wiki.tamma.dev also live via Epic 25. Admin dashboard at app.tamma.dev already hosts `/admin/prompts` (Epic 27 Story 27-4 landed 2026-04-22).
+- **Landed 2026-07-05 (21-4)**: tenant-facing **Repos & Workflow Runs** pages in the shared dashboard SPA — `ReposPage` (`/repos`, over `github_installations`), `RunsPage` (`/runs`, status filter + shared `DataTable`), `RunDetailPage` (`/runs/:runId`, single run's DCB event/log detail), plus a "Workspace" sidebar section. Backed by new C# `ReposRunsEndpoints` in `Tamma.Api`: `GET /api/v1/repos`, `GET /api/v1/runs`, `GET /api/v1/runs/{runId}` — member-visible, every read tenant-scoped (null tenant fails closed 404). Drift from the plan: routes ship at `/repos` + `/runs` (no `/user/*` prefix) inside the existing admin shell, the API is `Tamma.Api` (not Fastify), and SSE live status is not yet wired.
 - **In progress**: documentation site — marketing docs section scope still planned; the standalone wiki at wiki.tamma.dev (Epic 25) covers public documentation today.
-- **Drafted**: pricing page with Stripe Checkout (21-2), user dashboard repos + runs (21-4), user dashboard settings + billing (21-5). All three are additive — no existing admin surface breaks.
+- **Drafted**: pricing page with Stripe Checkout (21-2) and user dashboard settings + billing (21-5). Both are additive — no existing admin surface breaks.
 - **Deferred**: blog / changelog (will likely land inside the wiki site rather than marketing-site to avoid duplicating markdown renderers).
 
 ## See also
@@ -238,4 +239,4 @@ The SPA at `app.tamma.dev` is served by Nginx from the shared VPS; the marketing
 
 ---
 
-_Last updated: 2026-04-22_
+_Last updated: 2026-07-15_
