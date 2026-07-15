@@ -1,6 +1,6 @@
 # Event Schema & Catalog (Epic 4 — Story 4-1)
 
-_Last updated: 2026-07-04._
+_Last updated: 2026-07-15._
 
 This page is the maintainable reference for Tamma's **DCB (Dynamic Consistency Boundary)** event schema and the catalog of event **types** the running system emits. It is the shipped answer to [Story 4-1: Event Schema Design](https://github.com/meywd/tamma/blob/main/docs/stories/epic-4/story-4-1/4-1-event-schema-design.md) — re-based on the **current C# stack**. The original brief sketched a TypeScript `BaseEvent`/`Emmett` design; production landed on a custom EF Core implementation. Where the two differ, this page describes what the code actually does and maps it back to the story's acceptance criteria in [§9](#9-acceptance-criteria--shipped-schema).
 
@@ -19,7 +19,8 @@ Every claim here is grounded in a file you can open. Pair it with [Architecture]
 | Workflow event model + emitter | `apps/tamma-elsa/src/Tamma.Activities/Core/TammaActivity.cs` (`TammaEvent`, `TammaEventEmitter`) |
 | Engine drain ingestion | `apps/tamma-elsa/src/Tamma.Api/Endpoints/EngineEndpoints.cs` (`POST /api/engine/events`) |
 | Time-travel read | `EngineEndpoints.GetHistory` → `GET /api/engine/history` (Story 4-7) |
-| Event-type catalogs | `**/*Events.cs` (24 classes) + `**/*EventTypes.cs` (18 classes) + inline audit catalogs |
+| Event-type catalogs | `**/*Events.cs` (33 classes) + `**/*EventTypes.cs` (21 classes) + inline audit catalogs |
+| Black-box replay (fold + endpoint) | `apps/tamma-elsa/src/Tamma.Api/Services/Engine/Replay/{ReplayReconstructor,ReplayService,ReplayModels}.cs` → `GET /api/engine/runs/{correlationId}/replay` (Story 4-8) |
 
 **Two physical streams, one logical model.** Tenant-scoped events live in each tenant's `t_<hex>.domain_events` table (schema-per-tenant isolation). Platform-lifecycle events that have no tenant (`TenantId == null` — e.g. `TENANT.PROVISIONED.SUCCESS`, `EMAIL.QUEUED.SUCCESS`) live in the control-plane `platform_events` table and are projected back into `DomainEvent` shape on read so callers see one model. See the class comment on `EventRepository` for the routing matrix (Story 28-1 Decision #2).
 
@@ -63,7 +64,7 @@ Rules the codebase holds to:
 - **`*.FAILED` / `*.REJECTED` are loud** — a failed operation is always its own audit row, never a silent success. `DeployEvents.IsFailureType` is the pattern: catalogs expose a helper that classifies which types are failures so no code path can report a false success.
 - **Aggregate prefixes are stable** — dashboards, the audit prefix-query (`TENANT.MEMBER` matches every `TENANT.MEMBER_*`), and alert rules key off them.
 
-As of this writing the source defines **324 distinct event-type constants across 54 aggregate prefixes** (grep of `const string … = "AGGREGATE.ACTION…"` under `apps/tamma-elsa/src`, migrations excluded). [§10](#10-event-catalog) enumerates them by domain.
+As of this writing the source defines **363 distinct event-type constants across 62 aggregate prefixes** (grep of `const string … = "AGGREGATE.ACTION…"` under `apps/tamma-elsa/src`, migrations excluded). [§10](#10-event-catalog) enumerates them by domain.
 
 ---
 
@@ -91,6 +92,11 @@ Common tags (not every event sets every tag):
 | `agentId` / `agentVersion` | Which agent + config version ran | `AgentTrailTags.Build` |
 | `promptRef` | **Reference** to the prompt (never the prompt body — AC6 of Story 32-6) | Agent trail |
 | `iteration` | Loop iteration counter | Agent trail |
+| `sessionId` | Unguessable per-run session id of an assessment/TDD sub-workflow run | Research / Ambiguity / Clarify / Design / Decomposition emit activities, TDD `CodeEvents`/`CommitEvents` |
+| `storyId` | Story being implemented by the TDD cycle | TDD `CodeEvents`/`CommitEvents` builders |
+| `operation` | Code-change discriminator: `implementation` / `testing` / `refactoring` | `CodeEvents` (Story 4-5) |
+| `branch` / `sha` | Git branch / commit SHA of an atomic TDD commit (`sha` on success only) | `CommitEvents.BuildCreated` |
+| `channel` | Delivery channel for questions / design proposals (e.g. the issue) | Clarify / Design emit activities |
 | `credentialSource` | Which credential plane served the call (platform vs BYOK) | Agent trail |
 | `billing_mode` | `platform` vs `byok` — lets metering split billable from non-billable with no join | `BillingModeEvents` (Story 35-2) |
 | `stripeEventId` / `eventType` / `stripeObjectId` | Stripe webhook forensics (no body leaked) | Billing webhook projections |
@@ -158,10 +164,20 @@ From the `domain_events` block in `TammaModelConfiguration.cs`:
 | Tenant audit log (prefix-match, cursor) | `ListByTenantAsync` | `GET /api/v1/orgs/{tenantId}/audit` (Story 18-7; `MemberAccess`) |
 | Per-agent action trail (Tags JSONB predicates) | `QueryAgentTrailAsync` | agent endpoints (Story 32-6) |
 | Run existence / replay by correlation id | `ExistsByCorrelationIdAsync` / `ListByCorrelationIdAsync` | run-tap (Story 32-23) |
+| Black-box replay — point-in-time state reconstruction (pure fold, read-only) | `ListByCorrelationIdAsync(maxEvents)` → `ReplayService` / `ReplayReconstructor` | `GET /api/engine/runs/{correlationId}/replay?upTo={seq\|timestamp}&from={seq}` (Story 4-8; `WorkflowsView`) |
 | Platform-lifecycle scan (tenant-less) | `QueryAsync(tenantId: null, type: prefix)` | admin, via `platform_events` |
 | Audit-chain integrity | — | `GET /api/v1/orgs/{tenantId}/audit/verify`, `GET /api/v1/admin/audit/verify`, `POST /api/v1/admin/audit/checkpoint` |
 
 Pagination and replay page on `SequenceNumber` (immune to same-millisecond `CreatedAt` collisions); the exact `total` on a trail read is opt-in (`includeTotal`) because it is an unbounded `COUNT(*)` over the audit stream.
+
+**Black-box replay (Story 4-8).** `ReplayReconstructor` is a **pure, deterministic left-fold** over a run's ordered event slice — no I/O, no clock, no Elsa runtime, no writes; the same slice always yields the same `ReplayResult`. It categorizes events into AI decisions, code changes, approval points and errors, derives the step reached + terminal status, and (with `from`) returns a `ReplayDelta` diff of two folds. Tenant-scoped and null-tenant fail-closed: no resolved tenant or a foreign/unknown `correlationId` → `404` (no IDOR). An `upTo` before the run began is a known-but-empty state (`200`, `eventsReplayed = 0`).
+
+**Read-endpoint hardening (2026-07)** — defensive fixes shared by the replay + run-detail reads:
+
+- **UTC-pinned timestamp bounds**: a timestamp `upTo` is parsed with `AssumeUniversal | AdjustToUniversal` — an offset-less ISO-8601 string is pinned to UTC (never treated as server-local) and an explicit offset is converted, so the boundary is the same instant on every host.
+- **`from > upTo` is a loud `400`** (`ReplayRangeException` → BadRequest), not a silent `200` with a meaningless empty delta. Bad/non-positive `upTo`/`from` values are also `400`.
+- **Bounded run-event fetch**: `ListByCorrelationIdAsync(tenantId, correlationId, maxEvents)` fetches `maxEvents + 1` to detect overflow; replay caps at **10,000 events** (`ReplayService.MaxReplayEvents`) and a run over the cap returns the capped oldest-first slice with `truncated: true` — no silent drop, no unbounded materialisation.
+- **Empty-tenant guard**: `ListByCorrelationIdAsync` throws on `Guid.Empty` (parity with `QueryEventsAsync` / `QueryAgentTrailAsync`), so an unresolved tenant can never widen a read.
 
 ---
 
@@ -172,7 +188,7 @@ The Story 4-1 brief was written against an aspirational TypeScript `BaseEvent`. 
 | Story 4-1 AC | Shipped realization |
 |---|---|
 | **AC1** base fields `eventId, timestamp, eventType, actorType, actorId, payload, metadata` | `Id`, `CreatedAt` (+ `Tags.emittedAt`), `Type`, **actor lives in `Tags`** (`userId` / `eventSource` / `provider`) rather than dedicated `actorType`/`actorId` columns, `Data` = payload, `Metadata`. |
-| **AC2** types for issue selection, AI req/resp, code changes, Git ops, approvals, escalations, errors | Shipped as the ADL, `AGENT`/`LLM`, `GIT`, `MERGE_APPROVAL`/`DEPLOY.PRODUCTION`, `*.ESCALATED`, and `*.FAILED` families — see [§10](#10-event-catalog). |
+| **AC2** types for issue selection, AI req/resp, code changes, Git ops, approvals, escalations, errors | Shipped as the ADL, `AGENT`/`LLM`, `GIT`, `CODE`/`COMMIT` (Story 4-5 closed the code-change/commit gaps), `MERGE_APPROVAL`/`DEPLOY.PRODUCTION`, `*.ESCALATED`, and `*.FAILED` families — see [§10](#10-event-catalog). |
 | **AC3** schema versioning | `Metadata.workflowVersion` + append-only new types (no in-place event edits). |
 | **AC4** correlation ids linking related events | `Tags.correlationId` (workflow-instance id), backed by an expression index; `ListByCorrelationIdAsync` returns a whole run in order. |
 | **AC5** schema validated (JSON Schema / Protobuf) | Realized as **type-safe C# catalog constants** (`*Events.cs` / `*EventTypes.cs`) + the `TammaEvent → DomainEvent` projection + a build-time guardrail (`TAMMA001`). No runtime JSON-Schema validator ships. |
@@ -202,7 +218,19 @@ Grouped by domain. Each group cites its catalog class; the listed strings are th
 | `TriageEvents` | `TRIAGE.PANEL.STARTED/COMPLETED/PARTIAL/FAILED` |
 | `TriagePoDecisionEvents` | `TRIAGE.PO_DECISION.STARTED/COMPLETED/FAILED/SKIPPED` |
 
-### 10.2 Quality gates, testing, debugging (`Tamma.Activities/{Testing,Review,Blocker,Debug}`)
+### 10.2 Assessment, research & design workflows (`Tamma.Activities/{Research,Ambiguity,Clarify,Design,Decomposition}`)
+
+The Epic-2/3 assessment sub-workflows (2026-07): each mirrors the same skeleton (gather context → mediated `llm-call` → fail-closed parse → emit) and emits through a dedicated `Emit*EventActivity`. Common tags: `sessionId`, `issueId`, `tenantId` (empty/single-user → platform-scope, `TenantId` null); each catalog exposes a `StatusForEvent` helper so the `.FAILED` terminal is always a loud error-status row, never a false success.
+
+| Catalog | Event types |
+|---|---|
+| `ResearchEvents` (Story 3.4, `research` workflow) | `RESEARCH.STARTED`, `RESEARCH.CONTEXT_GATHERED`, `RESEARCH.COMPLETED` (data: `findingCount`, `confidence`), `RESEARCH.FAILED` |
+| `ClarifyEvents` (Story 3.5, `clarifying-questions` workflow) | `CLARIFY.QUESTIONS.GENERATED/DELIVERED/FAILED`, `CLARIFY.ANSWERS.RECEIVED/TIMED_OUT`, `CLARIFY.REQUIREMENTS.CLARIFIED`, `CLARIFY.INCORPORATION.FAILED` (tags add `channel`; data: `questionCount`, `detail`) |
+| `AmbiguityEvents` (Story 3.6, `ambiguity-scoring` workflow) | `AMBIGUITY.STARTED`, `AMBIGUITY.SCORED`, `AMBIGUITY.CLARIFICATION_TRIGGERED`, `AMBIGUITY.BELOW_THRESHOLD`, `AMBIGUITY.FAILED` (data: `score` 0..1, `ambiguityCount`, `confidence`, `threshold`, `detail`) |
+| `DesignEvents` (Story 3.7, `design-proposal` workflow) | `DESIGN.PROPOSAL.GENERATED/DELIVERED/APPROVED/REJECTED`, `DESIGN.PROPOSAL.FAILED`, `DESIGN.REVIEW.TIMED_OUT` (both loud error-status; tags add `channel`; data: `alternativeCount`, `reviewer`, `detail`) |
+| `DecompositionEvents` (Story 2.14, `issue-decomposition` workflow) | `DECOMPOSITION.STARTED`, `DECOMPOSITION.CONTEXT_GATHERED`, `DECOMPOSITION.COMPLETED` (data: `subtaskCount`), `DECOMPOSITION.FAILED` |
+
+### 10.3 Quality gates, testing, debugging & TDD code/commit audit (`Tamma.Activities/{Testing,Review,Blocker,Debug,TDD}`)
 
 | Catalog | Event types |
 |---|---|
@@ -210,8 +238,12 @@ Grouped by domain. Each group cites its catalog class; the listed strings are th
 | `CodeReviewEvents` | `CODE_REVIEW.PR_CREATED.SUCCESS/FAILED`, `CODE_REVIEW.GUIDANCE_DELIVERED.SUCCESS/FAILED`, `CODE_REVIEW.ITERATION.STARTED`, `CODE_REVIEW.MERGED.SUCCESS/FAILED`, `CODE_REVIEW.ESCALATED`, `CODE_REVIEW.FAILED` |
 | `BlockerEvents` | `BLOCKER.DIAGNOSED.SUCCESS/FAILED`, `BLOCKER.RESOLUTION_ATTEMPTED`, `BLOCKER.PROGRESS_DETECTED`, `BLOCKER.PROGRESS_TIMED_OUT`, `BLOCKER.ESCALATED`, `BLOCKER.RESOLVED`, `BLOCKER.TIMED_OUT` |
 | `DebugEvents` | `DEBUG.SESSION.STARTED`, `DEBUG.DIAGNOSIS.SUCCESS/FAILED`, `DEBUG.HYPOTHESIS.SELECTED`, `DEBUG.FIX.ATTEMPTED`, `DEBUG.TESTS.PASSED/FAILED`, `DEBUG.REGRESSION_TEST.INVALID`, `DEBUG.RESOLVED.SUCCESS`, `DEBUG.ESCALATED.FAILED` |
+| `CodeEvents` (Story 4-5 AC1, `Tamma.Activities/TDD`) | `CODE.GENERATED.SUCCESS/FAILED` (RED test authoring + GREEN implementation, told apart by the `operation` tag: `testing` / `implementation`), `CODE.REFACTORED.SUCCESS/FAILED` (REFACTOR phase, `operation=refactoring`). Tags: `storyId`, `sessionId`, `operation`; data: `operation`, `source: "ai_generated"`, `files`, `fileCount`, optional `testCount`, failure `reason`. Emitted by `WriteTestsActivity` / `WriteImplementationActivity` / `ApplyRefactoringActivity`; `IsFailureType` classifies the loud FAILED types. |
+| `CommitEvents` (Story 4-5 AC2, `Tamma.Activities/TDD`) | `COMMIT.CREATED.SUCCESS/FAILED` — the atomic TDD commit (`CommitChangesActivity`), fired on all three edges (no-files, engine-callback result, exception). Tags: `storyId`, `sessionId`, `branch`, `repository` (+ `sha` on success); data: `sha`, `message`, `branch`, `fileCount`, `files`, failure `reason`. |
 
-### 10.3 Agents, LLM & tools (`Tamma.Api/Services/{Agents,AgentDispatch}`, `Billing/BillingModeEvents`)
+> Story 4-5's coverage pass confirmed branch / PR / merge / release git operations were **already** covered (`BranchEvents`, `PrEvents`, `MergeEvents`, `DeployEvents` + the server-side `GitEventTypes` `GIT.*` family in [§10.5](#105-integrations-tammaapiservicesgitcijiraemailnotifications)) — `CODE.*` and `COMMIT.*` fill the two gaps so every code change and git operation the loop makes is a DCB event. `CODE.GENERATED.FAILED` is the emitter that fulfils the `SensitiveActionCatalog` code of the same name.
+
+### 10.4 Agents, LLM & tools (`Tamma.Api/Services/{Agents,AgentDispatch}`, `Billing/BillingModeEvents`)
 
 | Catalog | Event types |
 |---|---|
@@ -226,7 +258,7 @@ Grouped by domain. Each group cites its catalog class; the listed strings are th
 
 > **On "BYOK":** there is no `PRICING.BYOK.*` event type. BYOK is represented as the **`billing_mode` tag** (`byok` vs `platform`) on `LLM.CALL.*`, plus `PROVIDER_KEY.CHANGED.SUCCESS` when a tenant sets/clears its own key. Metering splits billable from non-billable off that tag with no join.
 
-### 10.4 Integrations (`Tamma.Api/Services/{Git,Ci,Jira,Email,Notifications}`)
+### 10.5 Integrations (`Tamma.Api/Services/{Git,Ci,Jira,Email,Notifications}`)
 
 | Catalog | Event types |
 |---|---|
@@ -236,7 +268,7 @@ Grouped by domain. Each group cites its catalog class; the listed strings are th
 | `EmailEventTypes` | `EMAIL.QUEUED.SUCCESS`, `EMAIL.SENT.SUCCESS`, `EMAIL.SENT.FAILED` |
 | `NotificationSlackEventTypes` | `NOTIFICATION.SLACK.SENT.SUCCESS`, `NOTIFICATION.SLACK.SEND.FAILED` |
 
-### 10.5 Config: prompts, conventions, providers, credentials
+### 10.6 Config: prompts, conventions, providers, credentials
 
 | Catalog | Event types |
 |---|---|
@@ -246,7 +278,7 @@ Grouped by domain. Each group cites its catalog class; the listed strings are th
 | Config-change audit (inline) | `PROVIDER_CHAIN.CHANGED.SUCCESS`, `PROVIDER_KEY.CHANGED.SUCCESS`, `INTEGRATION_CREDENTIAL.CHANGED.SUCCESS`, `SANITIZATION_RULE.CHANGED.SUCCESS`, `BUDGET.CONFIG.CHANGED.SUCCESS` |
 | `PricingEventTypes` (+ inline) | `PRICING.MARGIN.UPDATED`, `PRICING.MARGIN.NO_POLICY`, `PRICING.UNKNOWN_MODEL` |
 
-### 10.6 Billing & plans (`Tamma.Api/Services/{Billing,Pricing}`)
+### 10.7 Billing & plans (`Tamma.Api/Services/{Billing,Pricing}`)
 
 | Catalog | Event types |
 |---|---|
@@ -256,21 +288,22 @@ Grouped by domain. Each group cites its catalog class; the listed strings are th
 | `PlanAssignmentEventTypes` | `TENANT.PLAN.CHANGED`, `TENANT.PLAN.CANCELLED`, `PLAN.UPDATED` |
 | `EntitlementEventTypes` | `ENTITLEMENT.RESOLVED.SUCCESS`, `ENTITLEMENT.RESOLVED.FAILED` |
 
-### 10.7 Analytics (`Tamma.Activities/Analytics`, `Tamma.Api/Services/Analytics`)
+### 10.8 Analytics (`Tamma.Activities/Analytics`, `Tamma.Api/Services/Analytics`)
 
 | Catalog | Event types |
 |---|---|
 | `AnalyticsRollupEvents` | `ANALYTICS.ROLLUP.TENANT_COMPLETED/TENANT_SKIPPED/TENANT_FAILED`, `ANALYTICS.ROLLUP.PLATFORM_COMPLETED`, `ANALYTICS.ROLLUP.HOUR_COMPLETED`, `ANALYTICS.ROLLUP.DIMENSIONAL_LAG`, `ANALYTICS.PURGE.HOURLY/FAILED/USAGE_HOURLY/USAGE_HOURLY_FAILED`, `ANALYTICS.COMPACT.DAILY` |
 | `CostAnalyticsEvents` | `ANALYTICS.COST.BUDGET_PROJECTED_EXCEEDED` |
 
-### 10.8 Tenancy, provisioning & platform (`Tamma.Activities/TenantLifecycle`, `Tamma.Platforms`)
+### 10.9 Tenancy, onboarding, provisioning & platform (`Tamma.Activities/TenantLifecycle`, `Tamma.Platforms`, `Tamma.Api/Endpoints/OnboardingEndpoints.cs`)
 
 | Catalog | Event types |
 |---|---|
 | `TenantLifecycleEvents` | `TENANT.PROVISIONING_REQUESTED`, `TENANT.PROVISION.STEP_STARTED/STEP_COMPLETED/STEP_FAILED`, `TENANT.CREATED.SUCCESS`, `TENANT.PROVISIONED.SUCCESS`, `TENANT.PROVISION.FAILED`, `TENANT.DELETE.REQUESTED/STARTED/STEP_STARTED/STEP_COMPLETED/STEP_FAILED/STEP_SKIPPED/ABORTED/FAILED`, `TENANT.DELETED.SUCCESS`, `TENANT.DELETE_CANCELLED` |
 | `PlatformInstallationEventTypes` (in `PlatformInstallationEvents.cs`) | `PLATFORM.INSTALLATION.CONNECTED.SUCCESS`, `PLATFORM.INSTALLATION.DISCONNECTED.SUCCESS`, `TENANT.SWITCH_ORG.SUCCESS` |
+| Onboarding (Story 18-4, inline in `OnboardingEndpoints.cs`) | `REPO.ACTIVATED.SUCCESS` / `REPO.DEACTIVATED.SUCCESS` — a connected repo's `IsActive` flag flipped via `PATCH /api/v1/onboarding/repos/{installationId}/{repoId}` (idempotent: a no-op flip emits nothing; tags: `tenantId`, `userId`; data: `installationId`, `repoId`, `repoFullName`, `active`). `ONBOARDING.COMPLETED.SUCCESS` — the first-run milestone via `POST /api/v1/onboarding/complete`; the append-only event **is** the record (no persisted flag column), idempotent via `GetLastByTypeAsync` (tags: `tenantId`, `userId`; data: `installationCount`, `activeRepoCount`, `completedAt`). |
 
-### 10.9 Auth, audit, security & secrets (`Tamma.Core/Audit`, `Tamma.Api/Services/{Audit,Secrets}`, `Tamma.Activities/SecretsRotation`)
+### 10.10 Auth, audit, security & secrets (`Tamma.Core/Audit`, `Tamma.Api/Services/{Audit,Secrets}`, `Tamma.Activities/SecretsRotation`)
 
 | Catalog | Event types |
 |---|---|
@@ -280,7 +313,7 @@ Grouped by domain. Each group cites its catalog class; the listed strings are th
 | Secret access/rotation (inline) | `SECRET.READ/WRITE/REVEAL`, `SECRET.ROTATE.STARTED/SUCCESS/FAILED`, `SECRET.MIGRATED.SUCCESS/SKIPPED/FAILED`, `SECRET.VERSION.RETIRED/REVOKED`, and the `SECRET.ROTATION.*` saga family (`REQUESTED`, `STAGED`, `SWITCHED`, `ACTIVATED`, `RETIRE_SCHEDULED`, `RETIRED`, `COMPLETED`, `FAILED`, `REJECTED`, `PROBE.SUCCESS/FAILED`, `PUSH.SUCCESS/FAILED`, `POOL.DRAINED`, `COMPENSATION.STARTED/SUCCESS/FAILED`, `ROLLBACK.ROLE_DISABLED`, `CRANL.ENV_PUSHED/RELOAD_TRIGGERED/RATE_LIMIT_HIT`) |
 | KEK rotation (inline) | `SECRETS.KEK.ROTATION.STARTED/COMPLETED/FAILED` |
 
-> This is a representative map, not a line-by-line dump of all 324 constants — the giant `SECRET.ROTATION.*` saga family is summarized. The catalog **classes** named above are the authoritative source; grep `apps/tamma-elsa/src` for the exact current set.
+> This is a representative map, not a line-by-line dump of all 363 constants — the giant `SECRET.ROTATION.*` saga family is summarized. The catalog **classes** named above are the authoritative source; grep `apps/tamma-elsa/src` for the exact current set.
 
 ---
 
