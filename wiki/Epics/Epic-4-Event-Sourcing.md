@@ -1,6 +1,6 @@
 # Epic 4: Event Sourcing & Audit Trail
 
-**Status:** Near Complete (6/8 done; 4-2 in progress; 4-8 drafted)
+**Status:** Near Complete (7/8 done; 4-2 in progress; 4-8 black-box replay landed 2026-07-05 as an API endpoint)
 **Stories:** 8 (4-1 through 4-8)
 **Tech Spec:** [tech-spec-epic-4.md](https://github.com/meywd/tamma/blob/main/docs/stories/epic-4/tech-spec-epic-4.md)
 
@@ -18,7 +18,7 @@ Events flow through three layers. At the bottom, `Tamma.Activities.Core.TammaAct
 
 The middle layer is the **query API** (Story 4-7): `GET /api/v1/events?since=&until=&type=&correlationId=&issueNumber=` returns chronologically-ordered pages (default 100 events). The `TenantDbContext` applies a row-level-security filter per tenant so operators querying across tenants only see their own data.
 
-The top layer is **replay** (Story 4-8, drafted): `tamma replay --correlation-id <id>` streams the event sequence for a given workflow, optionally in interactive step-by-step mode, and renders an HTML report. Replay doesn't re-execute activities — it reconstructs the state machine by projecting events, so a bug can be reproduced exactly without a live provider connection.
+The top layer is **replay** (Story 4-8, landed 2026-07-05): `GET /api/engine/runs/{correlationId}/replay?upTo={seq|timestamp}&from={seq}` reconstructs a run's point-in-time state as a **pure, deterministic left-fold** over the run's ordered DCB event slice (`ReplayReconstructor` — no I/O, no clock, no re-execution, no writes). `upTo` slices by sequence number or ISO-8601 timestamp (omitted = whole run; a point before the run began is a valid empty-state view, not a 404); `from` adds a `ReplayDelta` diff of everything after that point. The read is tenant-scoped and fails closed — a null tenant or another tenant's correlationId returns 404, never leaked events.
 
 ## Components
 
@@ -37,10 +37,10 @@ The top layer is **replay** (Story 4-8, drafted): `tamma replay --correlation-id
 | `@tamma/events` package | Placeholder — full TS DCB impl not landed | `packages/events/src/index.ts` | Stub |
 | Issue-selection events | `ISSUE.SELECTED.SUCCESS`, `ISSUE.ANALYZED.SUCCESS` | emitted by `SelectWorkItemActivity`, `ValidateWorkItemActivity` | Done (4-3) |
 | AI-provider events | `AI.REQUEST.*`, `AI.RESPONSE.*`, token usage, cost | emitted by `InstrumentedAgentProvider`, `InstrumentedLlmProvider` | Done (4-4) |
-| Code / Git events | `CODE.GENERATED.*`, `COMMIT.CREATED.*`, `BRANCH.CREATED.*`, `PR.CREATED.*`, `PR.MERGED.*` | emitted from `CreateBranchActivity`, `CreatePullRequestActivity`, `MergePullRequestActivity` | Done (4-5) |
+| Code / Git events | `CODE.GENERATED.*`, `CODE.REFACTORED.*`, `COMMIT.CREATED.*`, `BRANCH.CREATED.*`, `PR.CREATED.*`, `PR.MERGED.*` | `Tamma.Activities/TDD/CodeEvents.cs`, `CommitEvents.cs` + `WriteTestsActivity`, `WriteImplementationActivity`, `ApplyRefactoringActivity`, `CommitChangesActivity`; plus `CreateBranchActivity`, `CreatePullRequestActivity`, `MergePullRequestActivity` | Done (4-5) |
 | Approval / escalation events | `APPROVAL.REQUESTED`, `APPROVAL.PROVIDED`, `ESCALATION.TRIGGERED`, `ESCALATION.RESOLVED` | emitted from `WaitForPlanApprovalActivity`, `EscalateToSeniorActivity` | Done (4-6) |
-| Replay command | `tamma replay --correlation-id ...` | Drafted | Drafted (4-8) |
-| HTML export | Formatted replay report | Drafted | Drafted (4-8) |
+| Replay endpoint | `GET /api/engine/runs/{correlationId}/replay` — point-in-time reconstruction via pure fold | `Tamma.Api/Services/Engine/Replay/*` (`ReplayReconstructor`, `ReplayService`, `ReplayModels`), `Tamma.Api/Endpoints/EngineEndpoints.cs` | Done (4-8) |
+| Replay CLI / HTML export | `tamma replay --correlation-id ...` interactive mode + formatted report | Drafted | Drafted (4-8 follow-on) |
 
 ## Class diagram
 
@@ -168,7 +168,7 @@ Elsa Workflow                TammaActivity             IEventRepository       Po
 
 - **Compliance officer** wants **to prove a PR was merged only after human approval**: query `/api/v1/events?prId=456&type=APPROVAL.PROVIDED` → confirm event exists → query same PR for `PR.MERGED.SUCCESS` → confirm the approval timestamp is before the merge timestamp.
 - **Incident responder** wants **to reconstruct the state of a failing issue at 14:32:07**: query `/api/v1/events?issueNumber=123&until=2026-04-22T14:32:07Z` → project the event sequence into state → identify which retry attempt was running, what provider was selected, what tokens were spent.
-- **Developer debugging a flaky bug** wants **to replay events exactly**: `tamma replay --correlation-id <workflow-id> --interactive` → step through each event → see the exact prompt sent, the exact response received, the exact fix applied → diagnose without re-running cost-bearing AI calls (Story 4-8, drafted).
+- **Developer debugging a flaky bug** wants **to replay events exactly**: `GET /api/engine/runs/<correlationId>/replay?upTo=<seq>` → the pure fold reconstructs the run's state at that exact event → see which step was running, what succeeded/failed and the recorded payloads → diagnose without re-running cost-bearing AI calls (Story 4-8; a `from=` param adds a delta diff between two points).
 - **Cost auditor** wants **monthly AI spend by provider**: query `?type=AI.RESPONSE.SUCCESS&since=<start-of-month>` → sum `data.usage.cost` grouped by `tags.provider` → cross-check against cost-monitor storage.
 - **Platform admin** wants **to see everything a specific user did this week**: query `?userId=<uuid>&since=<7-days-ago>` → timeline of their actions across issues, PRs, approvals — all from the one table, no joins.
 - **Plugin developer** wants **to add a custom event type**: set `EventType = "PLUGIN.MY_ACTION.SUCCESS"` on the activity class + set tags — no schema migration needed; the JSONB columns accept arbitrary shapes.
@@ -195,13 +195,14 @@ Elsa Workflow                TammaActivity             IEventRepository       Po
 - Event store (partial, 4-2) — EF / PostgreSQL path via `EventRepository`. The brief picked Emmett; actual impl is EF + Postgres with the same shape.
 - Issue-selection + analysis events (4-3) — emitted by `SelectWorkItemActivity`, `ValidateWorkItemActivity`.
 - AI-provider events (4-4) — `InstrumentedAgentProvider` and `InstrumentedLlmProvider` decorators in `@tamma/providers` capture request/response with token usage.
-- Code + Git events (4-5) — `CreateBranchActivity`, `CreatePullRequestActivity`, `MergePullRequestActivity` all emit through `TammaActivity` base class.
+- Code + Git events (4-5) — completed 2026-07-05: the TDD activities (`WriteTestsActivity`, `WriteImplementationActivity`, `ApplyRefactoringActivity`, `CommitChangesActivity`) now emit typed `CODE.GENERATED.SUCCESS/FAILED`, `CODE.REFACTORED.SUCCESS/FAILED` (with an `operation` tag: implementation / testing / refactoring) and `COMMIT.CREATED.SUCCESS/FAILED` events via `TDD/CodeEvents.cs` + `CommitEvents.cs`, alongside the existing branch/PR/merge events from `CreateBranchActivity`, `CreatePullRequestActivity`, `MergePullRequestActivity`.
 - Approval + escalation events (4-6) — `WaitForPlanApprovalActivity`, `EscalateToSeniorActivity`.
-- Event query API (4-7) — `GET /api/v1/events` endpoints in `Tamma.Api/Endpoints/Events/`.
+- Event query API (4-7) — `GET /api/v1/events` endpoints in `Tamma.Api/Endpoints/Events/`; `IEventRepository.ListByCorrelationIdAsync` returns a run's full ordered event slice (with an empty-tenant guard added in the 2026-07-05 read-endpoint hardening).
+- Black-box replay (4-8) — landed 2026-07-05: `ReplayReconstructor` (pure deterministic fold over the DCB event slice) + `ReplayService` + `GET /api/engine/runs/{correlationId}/replay`. Tenant-scoped, read-only, supports `upTo` (sequence or timestamp) point-in-time views and `from` delta diffs. A follow-up hardening pass (same day) added UTC date-bound normalization, `from > upTo` → 400 validation, and bounded run-event fetches.
 
 **Stubbed / drafted:**
 
-- 4-8 Black-Box Replay — story brief exists; replay command not implemented.
+- 4-8 CLI surface (`tamma replay --interactive`) and the HTML report export are not implemented — replay shipped as the API endpoint above.
 - `@tamma/events` TypeScript package is a placeholder. `@tamma/shared/event-store.ts` ships `InMemoryEventStore` for the CLI path.
 
 **Drift from briefs:**
@@ -209,6 +210,7 @@ Elsa Workflow                TammaActivity             IEventRepository       Po
 - The original 4-2 picked Emmett as the event-store library. Actual implementation uses EF Core + PostgreSQL directly — same DCB shape (single stream + JSONB tags), different plumbing. This matches the broader "single source of truth in C# / Elsa" project decision.
 - The brief references `workflowVersion` metadata; implementation uses Elsa's workflow version concept rather than a hand-rolled metadata field, and adds `activityId` + `workflowInstanceId` to every event automatically via `TammaActivity`.
 - Epic 10 Story 10-3 is where the production event store actually landed; Epic 4 stories 4-1..4-7 are the *spec*. The overlap is documented but the work lives in the Epic 10 tree.
+- The 4-8 brief described replay as a CLI command with interactive stepping and HTML export; what shipped is an HTTP endpoint over a pure reconstruction core (`ReplayReconstructor`) — same "project events, never re-execute" semantics, different surface.
 - Retention policy (brief mentions 6 months hot + 2 years archival) is not yet enforced — retention story is implicit in Epic 10 ops scope.
 
 ## See also
@@ -226,5 +228,7 @@ Elsa Workflow                TammaActivity             IEventRepository       Po
   - `apps/tamma-elsa/src/Tamma.Data/Repositories/EventRepository.cs` — EF Core event store.
   - `apps/tamma-elsa/src/Tamma.Activities/Core/TammaActivity.cs` — auto-emission base class.
   - `apps/tamma-elsa/src/Tamma.Api/Endpoints/Events/` — query API.
+  - `apps/tamma-elsa/src/Tamma.Api/Services/Engine/Replay/` — black-box replay (4-8).
+  - `apps/tamma-elsa/src/Tamma.Activities/TDD/CodeEvents.cs`, `CommitEvents.cs` — code/git event coverage (4-5).
   - `packages/shared/src/event-store.ts` — TS interface + in-memory impl.
   - `packages/providers/src/instrumented-agent-provider.ts`, `instrumented-llm-provider.ts` — AI event instrumentation.

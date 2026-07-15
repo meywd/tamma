@@ -1,5 +1,5 @@
 # generated: 2025-10-29
-# updated: 2026-06-17 (added Epics 32/34/35/36/37 — 59 drafted stories for agents/pricing/billing/analytics/audit; Epic 20 superseded)
+# updated: 2026-07-15 (main-branch sync: 2-14 decomposition, 3-4/3-6/3-7 assessment workflows, 4-5/4-8 event capture+replay, 18-4 slices, 21-4 repos/runs pages, 8 Epic-23 monitoring pages, Epic-6 KB/RAG sidecar+Ollama)
 # project: Tamma
 # project_key: Tamma
 # tracking_system: file-system
@@ -83,7 +83,7 @@ development_status:
   2-11-auto-next-issue-selection: done              # ADL orchestrator loops to next item with cooldown + limit checks; routing tests cover cycle behavior.
   2-12-intelligent-provider-selection: in-progress  # Health+circuit+budget fallback chain done; AC1-3/5 task-classification & weighted cost/complexity scoring not implemented.
   2-13-prompt-engineering-optimization: done        # Prompts resolved from DB-backed registry with role/action + conventions injection; covered by tests.
-  2-14-issue-decomposition-engine: ready-for-dev    # Spec exists; no decomposition engine code in TS packages or C# engine.
+  2-14-issue-decomposition-engine: done             # IssueDecompositionWorkflow shipped (a984a26): mediated LLM, ordered sub-tasks + deps, DECOMPOSITION.* events.
   2-15-task-dependency-mapping: ready-for-dev       # Spec exists; dependency-mapping not implemented anywhere.
   2-16-incremental-task-sequencing: ready-for-dev   # Spec exists; incremental sequencing not implemented. Depends on 2-14/2-15.
   epic-2-retrospective: completed
@@ -96,10 +96,10 @@ development_status:
   3-1-build-automation-gate-implementation: done    # TriggerCI/WaitForCI wired; TestingWorkflow has max-3 retry+autofix loop. Gate activities themselves lack unit tests.
   3-2-test-execution-gate-implementation: done      # Coverage/Evaluate/QualityReport activities real and wired; consume pre-parsed data, no dedicated unit tests.
   3-3-escalation-workflow-implementation: done      # Escalation activities wired into 3 workflows and covered by routing/review tests.
-  3-4-research-workflow-implementation: drafted     # No research workflow/activity in Elsa or TS packages; spec only.
-  3-5-clarifying-questions-workflow-implementation: drafted # No clarifying-questions workflow exists; grep matches were prompt-text substrings only.
-  3-6-ambiguity-scoring-implementation: drafted     # No ambiguity scoring code; only incidental 'ambiguous' substrings in comments.
-  3-7-design-proposal-workflow-implementation: drafted # No design-proposal workflow anywhere; spec only.
+  3-4-research-workflow-implementation: done        # ResearchWorkflow (Assessment skeleton, mediated LLM, RESEARCH.* events) + research action/prompt template emitting real findings (9827eb9, 7151b96).
+  3-5-clarifying-questions-workflow-implementation: done # ClarifyingQuestionsWorkflow + secure resume endpoint shipped (12a8468, 2026-07-04): Assessment skeleton, mediated LLM, CLARIFY.* events.
+  3-6-ambiguity-scoring-implementation: done        # Ambiguity scoring shipped (30e9aa5): mediated LLM, fail-closed parse, AMBIGUITY.* events.
+  3-7-design-proposal-workflow-implementation: done # DesignProposalWorkflow shipped (9b4deb2): Assessment skeleton, mediated LLM, approval gate + secure resume, DESIGN.* events.
   3-8-static-analysis-gate-implementation: done     # CheckLintingActivity real and wired into TestingWorkflow; no dedicated unit test.
   3-9-security-scanning-gate-implementation: done   # CheckSecurityActivity real and wired into TestingWorkflow; no dedicated unit test.
   3-10-agent-performance-monitoring: done           # Instrumented providers + diagnostics telemetry pipeline implemented and tested.
@@ -114,10 +114,10 @@ development_status:
   4-2-event-store-backend-selection: in-progress    # Append+ordered+filtered reads work (TS in-mem + C# Postgres). No file/EventStore backends, no configurable backend selection, no retention policy (AC5/6/7 unmet)
   4-3-event-capture-issue-selection-analysis: done  # Engine emits ISSUE_SELECTED + ISSUE_ANALYZED with title/url/contextLength/relatedIssues, persisted via event store, tested
   4-4-event-capture-ai-provider-interactions: in-progress # Instrumented providers capture diagnostics, but no dedicated AIRequest/AIResponse events, no prompt/response blob storage, masking or provider rationale (AC1-5 unmet)
-  4-5-event-capture-code-changes-git-operations: in-progress # PR/branch events emitted, but no CodeFileWrittenEvent, no CommitCreatedEvent, no diffs in blob storage (AC1/2/6 unmet)
+  4-5-event-capture-code-changes-git-operations: done # DCB event coverage for code changes & git operations landed (2e6f18d), closing the AC1/2/6 gaps.
   4-6-event-capture-approvals-escalations: in-progress # Plan approve/reject events + escalation activities exist, but no dedicated ApprovalRequested/EscalationTriggered/Resolved events with channel/resolution/time-to-resolve (AC1/3/4/6 unmet)
   4-7-event-query-api-for-time-travel: done         # Paginated, filterable, tenant-scoped, auth-gated history endpoint backed by QueryWithPaginationAsync; tested. No state-projection-at-T query (AC4 unmet)
-  4-8-black-box-replay-for-debugging: drafted       # No replay CLI command or state-reconstruction mechanism implemented; only event capture + query exist
+  4-8-black-box-replay-for-debugging: done          # Black-box replay landed (a079477): point-in-time state reconstruction via pure fold over the DCB event slice; read-endpoint hardening follow-up (3c5894e).
   epic-4-retrospective: optional
 
   epic-5: contexted
@@ -150,6 +150,7 @@ development_status:
   6-10-scrum-master-task-loop: done                 # ScrumMasterService + AgentCoordinator + TaskSupervisor + ApprovalWorkflow with tests
   epic-6-retrospective: optional
   6-11-context-api-wiring: done                     # Doc says Drafted but engine+kb endpoints fully implemented in Tamma.Api, wired+auth'd, real GitHub/Intelligence backing, tested. Done. Not tracked in sprint-status.
+  6-12-kb-rag-sidecar-production-wiring: done       # Untracked (no story doc): KB/RAG sidecar wired to real vector store (createVectorStoreFromEnv/RagPipeline) + prod-image fixes (d8896ae, 7a34f37, 3be01bc); self-hosted Ollama embeddings, nomic-embed-text (7a4cb91, 5a867f1); RAG collection bootstrap (fae205d).
 
   epic-7: contexted
   7-1-mentorship-workflow: done                     # MentorshipWorkflow+controller+service+state tests all present; no stubs.
@@ -255,7 +256,7 @@ development_status:
   18-1-user-registration-email-verification: done   # Register/verify/resend done in C# AuthEndpoints; argon2id+strength+common-pw+email outbox+events+tests. (TS api in doc is obsolete)
   18-2-user-login-session-management: done          # Email+pwd login, lockout, refresh-token rotation/reuse-detect, logout, switch-org, JWT cookie all implemented with broad tests.
   18-3-organization-tenant-creation: done           # Org=tenant create/members/invites/roles/transfer/settings done with M:N membership store + tests. AC13 RLS superseded by schema-per-tenant; scoping still met.
-  18-4-github-app-installation-onboarding: in-progress # Tracker says done but only onboarding status + install-github redirect built; repo select/activate, install settings, first-run, completion event NOT implemented.
+  18-4-github-app-installation-onboarding: in-progress # Non-migration slices landed (a5deab6): repo activate/deactivate (AC4) + first-run ONBOARDING.COMPLETED event (AC6/7). jsonb install-settings migration slice still outstanding.
   18-5-user-facing-dashboard-shell: in-progress     # dash app shell, auth pages, guards, home, settings exist + tested; missing onboarding wizard, org switcher, /repos, /runs/:id, reset-pw routes.
   epic-18-retrospective: optional
   18-6-password-reset: in-progress                  # Backend reset request/confirm done (expiry, single-use, session revoke, no-enum) + email test; reset-password UI page not built yet.
@@ -282,7 +283,7 @@ development_status:
   21-1-marketing-landing-page: superseded           # Landing page built but apps/marketing-site extracted to a standalone repo (4cc8b406); no longer in this monorepo.
   21-2-pricing-page: superseded                     # Tied to extracted marketing-site repo; no Stripe/pricing code present here. Superseded by repo extraction.
   21-3-documentation-site: drafted                  # wiki-site is a project wiki, not the spec'd Astro /docs; no docs content. Marketing host extracted. Only doc exists.
-  21-4-user-dashboard-repos-runs: in-progress       # dashboard-user exists w/ recent-runs+stats on home, but no Repos/Runs/RunDetail pages, filters, or SSE. Partial.
+  21-4-user-dashboard-repos-runs: done              # Repos & Workflow Runs dashboard pages shipped over installations + DCB run events (9a9913a).
   21-5-user-dashboard-settings-billing: drafted     # No billing/settings(profile/API-key) views; only ConnectedPlatforms (Story 31-9). Story doc only.
   epic-21-retrospective: optional
 
@@ -295,18 +296,18 @@ development_status:
   epic-22-retrospective: optional
 
   epic-23: contexted
-  23-1-system-health-dashboard: drafted             # No monitoring/health page built; HealthTab is a separate admin tab, not this story's AC. Spec only.
-  23-2-agent-monitor: drafted                       # No realtime agent monitor page; AgentsPage is config-focused. Spec only.
-  23-3-event-store-explorer: drafted                # No event store explorer page. Spec only.
-  23-4-configuration-audit: drafted                 # No config audit page; settings pages edit not audit. Spec only.
-  23-5-workflow-monitor: drafted                    # No workflow monitor dashboard page. Spec only.
-  23-6-provider-diagnostics: drafted                # ProviderHealthPage is settings health, not deep diagnostics (histograms/token analytics). Spec only.
+  23-1-system-health-dashboard: done                # System Health overview page composing existing health/diagnostics/event sources (f89c72c).
+  23-2-agent-monitor: done                          # Agent Monitor realtime page — active agents + live tool-loop tail via the 32-23 stream (0a2458d).
+  23-3-event-store-explorer: done                   # Event Store Explorer page — search/filter/detail over the DCB store via the 4-7 query API (112e6ce).
+  23-4-configuration-audit: done                    # Configuration Audit page — effective config + change history (35200bb).
+  23-5-workflow-monitor: done                       # Workflow Monitor page — workflow instances/status/durations over existing workflow data (b2ca20f).
+  23-6-provider-diagnostics: done                   # Provider Diagnostics page — latency/error/cost aggregations (07352c1) + fail-closed null-tenant / max-window clamp / UTC bounds fix (2e694ec).
   23-7-log-explorer: drafted                        # No log explorer page (needs OpenSearch tail). Spec only.
-  23-8-infrastructure-monitor: drafted              # No infrastructure monitor page. Spec only.
+  23-8-infrastructure-monitor: done                 # Infrastructure Monitor page + lightweight infra-metrics endpoint (runtime/disk/dependency health, platform-owner) (116d619).
   23-9-knowledge-base-monitor: drafted              # KB dashboard is feature/config UI from KB epic, not this story's monitoring page. Spec only.
   23-10-security-access-audit: drafted              # No security/access audit monitoring page. Spec only.
   23-11-monitoring-api-foundation: superseded       # Foundation targets deleted TS packages/api Fastify backend; superseded by C# Tamma.Api port. Needs respec.
-  23-12-dashboard-navigation: drafted               # No Monitoring nav group, MonitoringLayout, primitives, or useMonitoringSSE built. Spec only.
+  23-12-dashboard-navigation: done                  # Monitoring dashboard nav + layout + shared primitives — foundation for the Epic-23 pages (fb6dd05).
   epic-23-retrospective: optional
 
   epic-24: contexted

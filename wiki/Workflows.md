@@ -2,7 +2,7 @@
 
 Tamma uses [ELSA Workflows](https://elsa-workflows.github.io/elsa-core/) (C# .NET 8) as its orchestration engine. All workflows are **code-first** (defined in C# classes extending `WorkflowBase`) and rendered as visual flowcharts in ELSA Studio.
 
-This page is the index for all 30 workflows in the system.
+This page is the index for the 35 development-orchestration workflows in the system. Five additional platform/operations workflows (tenant provisioning, secret rotation, analytics rollup) are listed [at the end](#platform--operations-workflows) without dedicated pages — see [Multi-Tenant Provisioning](Multi-Tenant-Provisioning) for the tenant lifecycle ones.
 
 ## Workflow Inventory
 
@@ -38,6 +38,11 @@ This page is the index for all 30 workflows in the system.
 | 28 | **Triage Context Gathering** | `triage-context-gathering` | Gather context for triage: code usage, deps, CVE, changelog | [Details](Workflow-Triage-Context-Gathering) |
 | 29 | **Triage Panel Review** | `triage-panel-review` | 4-role panel reviews item for triage (security/dev/devops/qa) | [Details](Workflow-Triage-Panel-Review) |
 | 30 | **Triage PO Decision** | `triage-po-decision` | PO makes final triage decision based on panel review | [Details](Workflow-Triage-PO-Decision) |
+| 31 | **Issue Decomposition** | `issue-decomposition` | Decompose a complex issue into ordered sub-tasks with dependencies via mediated LLM | [Details](Workflow-Issue-Decomposition) |
+| 32 | **Research** | `research` | Autonomous investigation: context gathering + ranked, confidence-scored research report | [Details](Workflow-Research) |
+| 33 | **Ambiguity Scoring** | `ambiguity-scoring` | Score requirement ambiguity (0..1 + itemised breakdown), threshold decides clarify vs proceed | [Details](Workflow-Ambiguity-Scoring) |
+| 34 | **Clarifying Questions** | `clarifying-questions` | LLM-generated clarifying questions, human answers via bookmark, incorporate into clarified requirement | [Details](Workflow-Clarifying-Questions) |
+| 35 | **Design Proposal** | `design-proposal` | Generate design proposal (alternatives + trade-offs), deliver to issue, human approve/reject gate | [Details](Workflow-Design-Proposal) |
 
 ## Dependency Diagram
 
@@ -104,6 +109,27 @@ Mentorship (independent top-level)
   +-- Debugging
         +-- LLM Call
         +-- Testing Pipeline
+
+Requirement-intelligence sub-workflows (Epics 2/3 — dispatched on demand by a parent flow)
+  |
+  +-- Ambiguity Scoring (autonomous, no bookmark)
+  |     +-- LLM Call (product_owner/score-ambiguity)
+  |     +-- decision output: "clarify" → parent dispatches Clarifying Questions;
+  |         "proceed" → parent continues
+  +-- Clarifying Questions
+  |     +-- LLM Call (product_owner/clarify-requirements — generate questions)
+  |     +-- WaitForClarifyingAnswers (bookmark + durable SLA, blocks)
+  |     +-- LLM Call (product_owner/clarify-requirements — incorporate answers)
+  +-- Research (autonomous, no bookmark)
+  |     +-- Context Gathering
+  |     +-- LLM Call (product_owner/research)
+  +-- Issue Decomposition (autonomous, no bookmark)
+  |     +-- Context Gathering
+  |     +-- LLM Call (senior_developer/decompose-issue)
+  +-- Design Proposal
+        +-- LLM Call (architect/plan-system-design)
+        +-- Deliver Design Proposal (mediated git seam, issue comment)
+        +-- WaitForDesignApproval (bookmark + durable SLA, blocks)
 ```
 
 ## Versioning
@@ -134,6 +160,8 @@ Several workflows pause and wait for external events (human approval, CI results
 - **Code Review** -- `MonitorReviewActivity` and `WaitForFixesActivity` pause for PR events
 - **Assessment** -- `WaitForResponseActivity` pauses for junior developer response
 - **Blocker Diagnosis** -- `DetectProgressActivity` and `EscalateToSeniorActivity` pause for progress/senior input
+- **Clarifying Questions** -- `WaitForClarifyingAnswersActivity` pauses for human answers (durable SLA timeout, resumed via `POST /api/adl/clarify/resume`)
+- **Design Proposal** -- `WaitForDesignApprovalActivity` pauses for the reviewer's approve/reject decision (durable SLA timeout, resumed via `POST /api/adl/design/resume`)
 
 ### Security
 
@@ -142,6 +170,20 @@ All workflows that construct LLM prompts from user-supplied data (issue titles, 
 ### Code Index Updates
 
 Workflows that modify code files (`TDD Cycle`, `Testing Pipeline`, `Review Fix`, `Debugging`) fire `UpdateCodeIndexActivity` after commits to keep the vector DB code index current.
+
+## Platform / Operations Workflows
+
+Five further Elsa workflows run platform plumbing rather than the development loop. They live in the same `Workflows/` folder but have no dedicated wiki pages:
+
+| Workflow | Definition ID | Description |
+|----------|---------------|-------------|
+| **Create Tenant** | `create-tenant` | Provision a new tenant: placement + role + schema + migration + encrypted creds + activate |
+| **Delete Tenant** | `delete-tenant` | Tear down a tenant: mark deleting, evict pool, backup, drop schema + role (continue-on-error; triggered via `TenantDeleteRequestedTrigger`) |
+| **Clean Up Failed Tenant** | `clean-up-failed-tenant` | Operator-triggered best-effort teardown for a tenant in a damaged state (triggered via `TenantCleanupRequestedTrigger`) |
+| **Rotate Secret** | `rotate-secret` | Generic secret-rotation saga: mint → push → probe → activate → retire (postgres/cranl/hmac/generic-http handlers) |
+| **Hourly Analytics Rollup** | `hourly-analytics-rollup` | Rolls `platform_events` + per-tenant `domain_events` into `platform_analytics_hourly` (armed by `HourlyAnalyticsRollupScheduler`) |
+
+See [Multi-Tenant Provisioning](Multi-Tenant-Provisioning) for the tenant lifecycle context.
 
 ---
 
