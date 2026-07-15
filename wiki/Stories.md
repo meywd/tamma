@@ -89,7 +89,7 @@ Each story includes:
 
 ---
 
-## Epic 3: Quality Gates & Intelligence (Near Complete -- 11/12 Done)
+## Epic 3: Quality Gates & Intelligence (Near Complete -- 12/13 Done)
 
 | Story | Title | Status |
 |-------|-------|--------|
@@ -97,7 +97,7 @@ Each story includes:
 | 3-2 | Test Execution Gate Implementation | Done |
 | 3-3 | Escalation Workflow Implementation | Done |
 | 3-4 | Research Workflow Implementation | Done |
-| 3-5 | Clarifying Questions Workflow Implementation | Drafted |
+| 3-5 | Clarifying Questions Workflow Implementation | Done (landed 2026-07-04: `ClarifyingQuestionsWorkflow` + secure resume endpoint, `CLARIFY.*` events) |
 | 3-6 | Ambiguity Scoring Implementation | Done |
 | 3-7 | Design Proposal Workflow Implementation | Done |
 | 3-8 | Static Analysis Gate Implementation | Done |
@@ -105,6 +105,7 @@ Each story includes:
 | 3-10 | Agent Performance Monitoring | Done |
 | 3-11 | Cost-Aware AI Usage | Done |
 | 3-12 | Task Complexity Assessment | Done |
+| 3-13 | Intelligent Test Execution Pipeline | Ready for Dev |
 
 [Detailed Breakdown](Epics/Epic-3-Quality-Gates) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-3)
 

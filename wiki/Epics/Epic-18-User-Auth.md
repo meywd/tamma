@@ -1,6 +1,6 @@
 # Epic 18: End-User Auth & Registration
 
-**Status:** Partially implemented — 18-4 done (non-migration slices completed 2026-07-05); 18-2/18-5 in progress; 18-1/18-3/18-6 drafted; 18-7/18-8 scoped 2026-04-21
+**Status:** Partially implemented — 18-4 nearly done (non-migration slices landed 2026-07-05; jsonb install-settings migration lane outstanding); 18-2/18-5 in progress; 18-1/18-3/18-6 drafted; 18-7/18-8 scoped 2026-04-21
 **Stories:** 8 (18-1 through 18-8)
 **Layer:** Layer 3 (Platform Ops)
 **Depends on:** Epic 16 (unified auth), Epic 17 (tenant model), Epic 1.5 (Fastify API + GitHub App)
@@ -278,7 +278,7 @@ sequenceDiagram
 | 18-1 Registration + Email Verification | Drafted | Waits on Story 29 for hardened secret rotation of email-verification HMAC |
 | 18-2 Login + Session Mgmt | **In Progress** | Dual auth (email+password + GitHub OAuth) + refresh rotation |
 | 18-3 Organisation/Tenant Creation | Drafted | `OrgEndpoints.cs` already carries the full hierarchy-respecting mutation set |
-| **18-4 GitHub App Install Onboarding** | **Done** (2026-04-21; non-migration slices completed 2026-07-05) | Status endpoint, state-encoded install redirect, webhook + callback linking, repo selection. 2026-07-05 added the remaining non-migration slices: `PATCH /api/v1/onboarding/repos/{installationId}/{repoId}` toggles a connected repo's `IsActive` flag (AC4, emitting `REPO.ACTIVATED.SUCCESS` / `REPO.DEACTIVATED.SUCCESS`), and an onboarding-complete endpoint (AC6/AC7) that emits `ONBOARDING.COMPLETED.SUCCESS` — idempotent via the event stream (a prior completion event is returned, not re-emitted); there is no persisted "onboarding complete" column, the append-only DCB stream is the source of truth |
+| **18-4 GitHub App Install Onboarding** | **In Progress** (core landed 2026-04-21; non-migration slices completed 2026-07-05; jsonb install-settings migration lane outstanding) | Status endpoint, state-encoded install redirect, webhook + callback linking, repo selection. 2026-07-05 added the remaining non-migration slices: `PATCH /api/v1/onboarding/repos/{installationId}/{repoId}` toggles a connected repo's `IsActive` flag (AC4, emitting `REPO.ACTIVATED.SUCCESS` / `REPO.DEACTIVATED.SUCCESS`), and an onboarding-complete endpoint (AC6/AC7) that emits `ONBOARDING.COMPLETED.SUCCESS` — idempotent via the event stream (a prior completion event is returned, not re-emitted); there is no persisted "onboarding complete" column, the append-only DCB stream is the source of truth |
 | 18-5 Dashboard Shell (`dash.tamma.dev`) | **In Progress** | React SPA scaffold + layout + projects + settings routes |
 | 18-6 Password Reset | Drafted | Reuses the email outbox + token lifecycle |
 | **18-7 Tenant-admin User Mgmt API gaps** | Planned (14h, added 2026-04-21) | Resend invite, tenant-scoped audit endpoint, `TENANT.MEMBER_ROLE_CHANGED.SUCCESS` event |

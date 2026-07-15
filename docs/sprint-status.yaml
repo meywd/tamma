@@ -97,7 +97,7 @@ development_status:
   3-2-test-execution-gate-implementation: done      # Coverage/Evaluate/QualityReport activities real and wired; consume pre-parsed data, no dedicated unit tests.
   3-3-escalation-workflow-implementation: done      # Escalation activities wired into 3 workflows and covered by routing/review tests.
   3-4-research-workflow-implementation: done        # ResearchWorkflow (Assessment skeleton, mediated LLM, RESEARCH.* events) + research action/prompt template emitting real findings (9827eb9, 7151b96).
-  3-5-clarifying-questions-workflow-implementation: drafted # No clarifying-questions workflow exists; grep matches were prompt-text substrings only.
+  3-5-clarifying-questions-workflow-implementation: done # ClarifyingQuestionsWorkflow + secure resume endpoint shipped (12a8468, 2026-07-04): Assessment skeleton, mediated LLM, CLARIFY.* events.
   3-6-ambiguity-scoring-implementation: done        # Ambiguity scoring shipped (30e9aa5): mediated LLM, fail-closed parse, AMBIGUITY.* events.
   3-7-design-proposal-workflow-implementation: done # DesignProposalWorkflow shipped (9b4deb2): Assessment skeleton, mediated LLM, approval gate + secure resume, DESIGN.* events.
   3-8-static-analysis-gate-implementation: done     # CheckLintingActivity real and wired into TestingWorkflow; no dedicated unit test.

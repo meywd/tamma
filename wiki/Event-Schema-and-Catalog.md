@@ -64,7 +64,7 @@ Rules the codebase holds to:
 - **`*.FAILED` / `*.REJECTED` are loud** — a failed operation is always its own audit row, never a silent success. `DeployEvents.IsFailureType` is the pattern: catalogs expose a helper that classifies which types are failures so no code path can report a false success.
 - **Aggregate prefixes are stable** — dashboards, the audit prefix-query (`TENANT.MEMBER` matches every `TENANT.MEMBER_*`), and alert rules key off them.
 
-As of this writing the source defines **363 distinct event-type constants across 62 aggregate prefixes** (grep of `const string … = "AGGREGATE.ACTION…"` under `apps/tamma-elsa/src`, migrations excluded). [§10](#10-event-catalog) enumerates them by domain.
+As of this writing the source defines **365 distinct event-type constants across 62 aggregate prefixes** (grep of `const string … = "AGGREGATE.ACTION…"` under `apps/tamma-elsa/src`, migrations excluded). [§10](#10-event-catalog) enumerates them by domain.
 
 ---
 
@@ -313,7 +313,7 @@ The Epic-2/3 assessment sub-workflows (2026-07): each mirrors the same skeleton 
 | Secret access/rotation (inline) | `SECRET.READ/WRITE/REVEAL`, `SECRET.ROTATE.STARTED/SUCCESS/FAILED`, `SECRET.MIGRATED.SUCCESS/SKIPPED/FAILED`, `SECRET.VERSION.RETIRED/REVOKED`, and the `SECRET.ROTATION.*` saga family (`REQUESTED`, `STAGED`, `SWITCHED`, `ACTIVATED`, `RETIRE_SCHEDULED`, `RETIRED`, `COMPLETED`, `FAILED`, `REJECTED`, `PROBE.SUCCESS/FAILED`, `PUSH.SUCCESS/FAILED`, `POOL.DRAINED`, `COMPENSATION.STARTED/SUCCESS/FAILED`, `ROLLBACK.ROLE_DISABLED`, `CRANL.ENV_PUSHED/RELOAD_TRIGGERED/RATE_LIMIT_HIT`) |
 | KEK rotation (inline) | `SECRETS.KEK.ROTATION.STARTED/COMPLETED/FAILED` |
 
-> This is a representative map, not a line-by-line dump of all 363 constants — the giant `SECRET.ROTATION.*` saga family is summarized. The catalog **classes** named above are the authoritative source; grep `apps/tamma-elsa/src` for the exact current set.
+> This is a representative map, not a line-by-line dump of all 365 constants — the giant `SECRET.ROTATION.*` saga family is summarized. The catalog **classes** named above are the authoritative source; grep `apps/tamma-elsa/src` for the exact current set.
 
 ---
 

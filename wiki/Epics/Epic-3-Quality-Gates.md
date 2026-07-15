@@ -1,6 +1,6 @@
 # Epic 3: Quality Gates & Intelligence Layer
 
-**Status:** Complete (12/12 done — intelligence-gate stories 3-4..3-7 landed 2026-07-04/05 as standalone Elsa sub-workflows)
+**Status:** Near Complete (12/13 done — intelligence-gate stories 3-4..3-7 landed 2026-07-04/05 as standalone Elsa sub-workflows; 3-13 intelligent test-execution pipeline still ready-for-dev)
 **Stories:** 12 (3-1 through 3-12)
 **MVP Critical:** All 12 stories
 **Tech Spec:** [tech-spec-epic-3.md](https://github.com/meywd/tamma/blob/main/docs/stories/epic-3/tech-spec-epic-3.md)

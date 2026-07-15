@@ -39,7 +39,7 @@ Review-finding cross-reference: see [Port Audit → Code review (2026-04-20)](Po
 | **Epic 1** | Foundation & Core Infrastructure | 15 | 10 | Near Complete |
 | **Epic 1.5** | Infrastructure & Deployment | 10 | 9 | Near Complete (K8s in progress) |
 | **Epic 2** | Autonomous Development Loop | 20 | 14 | Near Complete (2-14 decomposition landed 2026-07) |
-| **Epic 3** | Quality Gates & Intelligence | 13 | 11 | Near Complete (3-4/3-6/3-7 landed 2026-07) |
+| **Epic 3** | Quality Gates & Intelligence | 13 | 12 | Near Complete (3-4/3-5/3-6/3-7 landed 2026-07; 3-13 remains) |
 | **Epic 4** | Event Sourcing & Audit Trail | 8 | 7 | Near Complete (4-5 capture + 4-8 replay landed 2026-07) |
 | **Epic 5** | Observability Dashboard & Docs | 14 | 4 | Partially Implemented |
 | **Epic 6** | Context & Knowledge Management | 10 | 9 | Near Complete (KB/RAG sidecar live w/ local Ollama embeddings, 2026-07) |
@@ -148,7 +148,7 @@ Completed / Near Complete:
   Epic 1   (Foundation)              [NEAR COMPLETE - 10/15]
   Epic 1.5 (Infrastructure)          [NEAR COMPLETE - 9/10]
   Epic 2   (Autonomous Loop)         [NEAR COMPLETE - 14/20 — 2-14 decomposition landed 2026-07]
-  Epic 3   (Quality Gates)           [NEAR COMPLETE - 11/13 — 3-4/3-6/3-7 landed 2026-07]
+  Epic 3   (Quality Gates)           [NEAR COMPLETE - 12/13 — 3-4/3-5/3-6/3-7 landed 2026-07]
   Epic 4   (Event Sourcing)          [NEAR COMPLETE - 7/8 — 4-5 capture + 4-8 replay landed 2026-07]
   Epic 6   (Context & Knowledge)     [NEAR COMPLETE - 9/10 — KB/RAG sidecar live w/ Ollama embeddings]
   Epic 7   (Mentorship Workflow)     [NEAR COMPLETE - 8/9]

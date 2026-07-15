@@ -107,7 +107,7 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 | Epic 1 | Foundation & Core Infrastructure | 10/15 | 2 in progress, 3 ready |
 | Epic 1.5 | Infrastructure & Deployment | 9/10 | Kubernetes deployment in progress |
 | Epic 2 | Autonomous Development Loop | 14/20 | Provider selection, dependency mapping + sequencing, prompt overhauls |
-| Epic 3 | Quality Gates & Intelligence | 11/13 | Clarifying-questions workflow + intelligent test pipeline |
+| Epic 3 | Quality Gates & Intelligence | 12/13 | Intelligent test-execution pipeline (3-13) |
 | Epic 4 | Event Sourcing & Audit Trail | 7/8 | Event store backend selection in progress |
 | Epic 6 | Context & Knowledge Management | 10/11 | Vector DB provider stubs (sidecar now live w/ Ollama embeddings) |
 | Epic 7 | Mentorship Workflow | 8/9 | TDD sub-workflow in progress |
