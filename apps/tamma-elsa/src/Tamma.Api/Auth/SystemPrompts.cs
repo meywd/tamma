@@ -53,10 +53,14 @@ public sealed record PromptTemplate(
 /// <b>Transitional bodies (SPEC §3.5).</b> The body text for each of the ~72
 /// cells is, in this story, MIGRATED from the 10 original action body builders
 /// (<see cref="ContextScan"/>, <see cref="Plan"/>, …) by mapping each specific
-/// action to its closest body family. These are real, non-empty prompt bodies —
-/// NOT placeholders — and serve as the authoritative system defaults until Story
-/// 27-16 codegen regenerates per-cell authoritative bodies. The mapping lives in
-/// <see cref="BodyBuilderFor"/>; the rationale per cell is documented there.
+/// action to its closest body family. The bodies follow the thin-prompt style:
+/// a one-line task statement, the injected <c>{{variable}}</c> context sections,
+/// any hard task constraints, and the output contract — project specifics arrive
+/// via <c>{{conventions}}</c>/context, never hardcoded prompt text. These are
+/// real, non-empty prompt bodies — NOT placeholders — and serve as the
+/// authoritative system defaults until Story 27-16 codegen regenerates per-cell
+/// authoritative bodies. The mapping lives in <see cref="BodyBuilderFor"/>; the
+/// rationale per cell is documented there.
 /// </para>
 /// </summary>
 public static class SystemPrompts
@@ -77,21 +81,21 @@ public static class SystemPrompts
         new Dictionary<string, string>
         {
             ["developer"] =
-                "You are an expert software developer working on the Tamma project. You write production-quality TypeScript code that passes strict compilation, follows established conventions, and includes proper error handling. You have deep expertise in Node.js, Fastify, PostgreSQL, and event-driven architectures.",
+                "You are an expert software developer who writes production-quality code with proper error handling. Follow the project's conventions and context provided in each task.",
             ["tester"] =
-                "You are a testing specialist for the Tamma project. You write thorough, maintainable tests using Vitest 3.x with colocated test files. You have expertise in unit testing, integration testing, contract testing, and mocking strategies using MSW and vi.mock.",
+                "You are a testing specialist who writes thorough, maintainable unit, integration, and contract tests. Follow the project's conventions and context provided in each task.",
             ["security"] =
-                "You are a security engineer specializing in application security for TypeScript/Node.js systems. You identify vulnerabilities (OWASP Top 10), review code for injection attacks, credential leaks, and insecure configurations. You validate input sanitization, authentication flows, and authorization boundaries.",
+                "You are a security engineer specializing in application security: you identify vulnerabilities (OWASP Top 10), injection attacks, credential leaks, insecure configurations, and weak authentication or authorization boundaries. Follow the project's conventions and context provided in each task.",
             ["devops"] =
-                "You are a DevOps engineer specializing in CI/CD pipelines, Docker containerization, Kubernetes orchestration, and infrastructure automation. You evaluate deployment strategies, infrastructure impact, and operational concerns for the Tamma platform.",
+                "You are a DevOps engineer specializing in CI/CD pipelines, containerization, and infrastructure automation, evaluating deployment strategies and operational concerns. Follow the project's conventions and context provided in each task.",
             ["architect"] =
-                "You are a software architect specializing in distributed systems, microservices, and event-driven architectures. You review system design, interface contracts, service boundaries, and architectural patterns. You have deep knowledge of DDD, CQRS, event sourcing, and the Tamma DCB pattern.",
+                "You are a software architect specializing in distributed systems and event-driven architectures, with deep knowledge of DDD, CQRS, and event sourcing. Follow the project's conventions and context provided in each task.",
             ["product_owner"] =
-                "You are a product owner with expertise in agile development, user story management, and feature prioritization. You assess business value, scope decisions, and user impact. You communicate clearly with both technical and non-technical stakeholders.",
+                "You are a product owner with expertise in agile development, user story management, and feature prioritization, assessing business value, scope, and user impact. Follow the project's conventions and context provided in each task.",
             ["senior_developer"] =
-                "You are a senior developer and technical lead on the Tamma project. You create detailed implementation plans, decompose complex tasks, and make technology decisions. You balance code quality with delivery speed and mentor other developers through your plans.",
+                "You are a senior developer and technical lead who creates detailed implementation plans, decomposes complex tasks, and balances code quality with delivery speed. Follow the project's conventions and context provided in each task.",
             ["tech_writer"] =
-                "You are a technical writer who produces clear, concise documentation for developer audiences. You summarize technical findings, write issue comments, create PR descriptions, and produce changelog entries. You use precise language and avoid ambiguity.",
+                "You are a technical writer who produces clear, concise, unambiguous documentation for developer audiences. Follow the project's conventions and context provided in each task.",
         });
 
     // -----------------------------------------------------------------------
@@ -283,11 +287,11 @@ public static class SystemPrompts
     // Individual action body builders (migrated bodies — TRANSITIONAL, §3.5)
     //
     // Each builder takes (role, action) and is role-parameterized via {{role}}
-    // and SystemFor(role). The body text is preserved from the original 10
-    // builders; the Action field is now the SPECIFIC taxonomy action token (e.g.
-    // "plan-implementation"), not the old generic one ("plan"). The deliberate
-    // review-lens behaviour (RoleReviewLens / RoleReviewLensForCodeReview) is
-    // retained.
+    // and SystemFor(role). The bodies are thin-prompt style (task statement +
+    // injected context sections + output contract); the Action field is the
+    // SPECIFIC taxonomy action token (e.g. "plan-implementation"), not the old
+    // generic one ("plan"). The deliberate review-lens behaviour (RoleReviewLens
+    // / RoleReviewLensForCodeReview) is retained.
     //
     // These are the system defaults until Story 27-16 regenerates authoritative
     // per-cell bodies (SPEC §3.5 "transitional seed" state).
@@ -300,21 +304,6 @@ public static class SystemPrompts
             "You are a {{role}} scanning a codebase for a {{workItemType}} work item.\n\n" +
             "## Work Item\n{{workItemJson}}\n\n" +
             "## Previous Findings\n{{previousFindings}}\n\n" +
-            "## Instructions\n\n" +
-            "<thinking>\n" +
-            "1. Identify what files, interfaces, and modules are relevant to this work item\n" +
-            "2. Determine dependencies and downstream consumers that may be affected\n" +
-            "3. Note any existing patterns or conventions that must be followed\n" +
-            "4. Flag potential risks or conflicts with ongoing work\n" +
-            "</thinking>\n\n" +
-            "Scan the codebase and provide structured findings:\n\n" +
-            "<findings>\n" +
-            "- **Relevant Files**: List files directly related to this work item with a one-line description of their role\n" +
-            "- **Interfaces & Types**: Key interfaces/types that will be created, modified, or consumed\n" +
-            "- **Dependencies**: External packages, internal modules, and services involved\n" +
-            "- **Conventions**: Project patterns observed that must be followed (naming, error handling, testing)\n" +
-            "- **Risks**: Potential conflicts, breaking changes, or areas needing extra care\n" +
-            "</findings>\n\n" +
             "Output your findings as a JSON object:\n" +
             "```json\n{\n  \"relevantFiles\": [{\"path\": \"...\", \"reason\": \"...\"}],\n  \"interfaces\": [{\"name\": \"...\", \"location\": \"...\", \"impact\": \"create|modify|consume\"}],\n  \"dependencies\": [{\"name\": \"...\", \"type\": \"internal|external\"}],\n  \"conventions\": [\"...\"],\n  \"risks\": [{\"description\": \"...\", \"severity\": \"low|medium|high\"}]\n}\n```",
         SystemPrompt: SystemFor(role),
@@ -330,24 +319,7 @@ public static class SystemPrompts
             "## Work Item\n{{workItemJson}}\n\n" +
             "## Context\n{{contextFindings}}\n\n" +
             "## Conventions\n{{conventions}}\n\n" +
-            "## Instructions\n\n" +
-            "<thinking>\n" +
-            "1. Break down the work item into discrete, ordered tasks\n" +
-            "2. For each task, identify which files need changes and what the changes are\n" +
-            "3. Consider the testing strategy for each task\n" +
-            "4. Identify dependencies between tasks (what must happen first)\n" +
-            "5. Estimate relative complexity of each task\n" +
-            "</thinking>\n\n" +
-            "<plan>\n" +
-            "Produce a structured implementation plan:\n\n" +
-            "For each task:\n" +
-            "- **Task ID**: Sequential identifier (T1, T2, ...)\n" +
-            "- **Description**: What this task accomplishes\n" +
-            "- **Files**: Which files to create or modify\n" +
-            "- **Dependencies**: Which tasks must complete before this one\n" +
-            "- **Complexity**: small | medium | large\n" +
-            "- **Testing**: What tests are needed for this task\n" +
-            "</plan>\n\n" +
+            "Break the work item into discrete, ordered tasks.\n\n" +
             "Output as JSON:\n" +
             "```json\n{\n  \"tasks\": [\n    {\n      \"id\": \"T1\",\n      \"description\": \"...\",\n      \"files\": [{\"path\": \"...\", \"action\": \"create|modify\"}],\n      \"dependencies\": [],\n      \"complexity\": \"small|medium|large\",\n      \"testing\": \"...\"\n    }\n  ],\n  \"totalComplexity\": \"small|medium|large\",\n  \"estimatedDuration\": \"...\"\n}\n```",
         SystemPrompt: SystemFor(role),
@@ -363,27 +335,10 @@ public static class SystemPrompts
             "## Work Item\n{{workItemJson}}\n\n" +
             "## Plan\n{{planJson}}\n\n" +
             "## Conventions\n{{conventions}}\n\n" +
-            "## Instructions\n\n" +
-            "<thinking>\n" +
-            "1. Verify the plan addresses all requirements in the work item\n" +
-            "2. Check for missing tasks or overlooked edge cases\n" +
-            "3. Review from your specific expertise as a {{role}}:\n" +
+            "Verify the plan addresses all requirements in the work item. " +
+            "Review with your {{role}} lens:\n" +
             RoleReviewLens(role) +
-            "4. Identify risks or improvements\n" +
-            "</thinking>\n\n" +
-            "<review>\n" +
-            "For each issue found:\n" +
-            "- **Task**: Which task ID is affected (or \"General\" for plan-wide issues)\n" +
-            "- **Severity**: critical | major | minor | suggestion\n" +
-            "- **Category**: missing-task | security | performance | convention | testing | architecture\n" +
-            "- **Issue**: Description of the problem\n" +
-            "- **Recommendation**: Specific suggestion to fix it\n" +
-            "</review>\n\n" +
-            "<verdict>\n" +
-            "- **Decision**: APPROVE | REQUEST_CHANGES | NEEDS_DISCUSSION\n" +
-            "- **Summary**: 1-3 sentence summary of the review\n" +
-            "- **Blocking Issues**: List any critical/major issues that must be resolved\n" +
-            "</verdict>\n\n" +
+            "\n" +
             "Output as JSON:\n" +
             "```json\n{\n  \"issues\": [\n    {\n      \"task\": \"T1|General\",\n      \"severity\": \"critical|major|minor|suggestion\",\n      \"category\": \"...\",\n      \"issue\": \"...\",\n      \"recommendation\": \"...\"\n    }\n  ],\n  \"verdict\": {\n    \"decision\": \"APPROVE|REQUEST_CHANGES|NEEDS_DISCUSSION\",\n    \"summary\": \"...\",\n    \"blockingIssues\": []\n  }\n}\n```",
         SystemPrompt: SystemFor(role),
@@ -401,29 +356,10 @@ public static class SystemPrompts
             "## Current Task\n{{currentTask}}\n\n" +
             "## Conventions\n{{conventions}}\n\n" +
             "## Existing Code Context\n{{codeContext}}\n\n" +
-            "## Instructions\n\n" +
-            "<thinking>\n" +
-            "1. Analyze the requirements for this specific task\n" +
-            "2. Check existing code patterns that should be followed\n" +
-            "3. Identify edge cases and error conditions\n" +
-            "4. Plan the implementation order (interfaces first, then implementations, then tests)\n" +
-            "</thinking>\n\n" +
-            "<implementation>\n" +
-            "For each file, provide the complete implementation.\n\n" +
-            "Rules:\n" +
-            "- Follow the import order: Node.js built-ins, external deps, internal packages (@tamma/*), relative\n" +
-            "- Use async/await exclusively, never .then()/.catch()\n" +
-            "- All errors must use the TammaError class with code, message, context, retryable, severity\n" +
-            "- Boolean functions must use is/has/should prefix\n" +
-            "- Private functions must use _ prefix\n" +
-            "- Constants must use SCREAMING_SNAKE_CASE\n" +
-            "- Files use kebab-case, test files are colocated as *.test.ts\n" +
-            "- All imports use .js extension (ESM)\n" +
-            "- Never mutate state -- always create new objects with spread\n" +
-            "- TypeScript strict mode: no implicit any, no unchecked index access\n\n" +
+            "For each file, provide the complete implementation. " +
+            "Follow the project conventions provided above.\n\n" +
             "Output each file as:\n" +
-            "```path/to/file.ts\n// file contents\n```\n" +
-            "</implementation>",
+            "```path/to/file\n// file contents\n```",
         SystemPrompt: SystemFor(role),
         Variables: ["role", "workItemJson", "planJson", "currentTask", "conventions", "codeContext"],
         EnableTools: true,
@@ -433,38 +369,14 @@ public static class SystemPrompts
         Role: role,
         Action: action,
         Template:
-            "You are a {{role}} writing tests for the Tamma project.\n\n" +
+            "You are a {{role}} writing tests.\n\n" +
             "## Test Target\n{{testTarget}}\n\n" +
             "## Source Code\n{{sourceCode}}\n\n" +
             "## Conventions\n{{conventions}}\n\n" +
-            "## Instructions\n\n" +
-            "<thinking>\n" +
-            "1. Identify the public API surface to test\n" +
-            "2. List happy path scenarios\n" +
-            "3. List error/edge case scenarios\n" +
-            "4. Identify dependencies that need mocking (use MSW for HTTP, vi.mock for modules)\n" +
-            "5. Determine coverage targets (80% line, 75% branch, 85% function)\n" +
-            "</thinking>\n\n" +
-            "<test_plan>\n" +
-            "List each test case with:\n" +
-            "- Description (should read like documentation)\n" +
-            "- Category: unit | integration | edge-case | error-handling\n" +
-            "- Expected behavior\n" +
-            "</test_plan>\n\n" +
-            "<tests>\n" +
-            "Write the test file. Rules:\n" +
-            "- Use describe/it blocks with descriptive names\n" +
-            "- Each test should test ONE thing\n" +
-            "- Use vi.mock() factories that are self-contained (hoisted -- put mock classes inside factory)\n" +
-            "- Mock external APIs with MSW\n" +
-            "- Assert specific values, not just truthiness\n" +
-            "- Test error paths explicitly (expect(...).rejects.toThrow)\n" +
-            "- Clean up after each test (afterEach)\n" +
-            "- Use beforeEach for common setup\n" +
-            "- Prefer toBe/toEqual over toBeTruthy\n\n" +
+            "Write the test file, covering happy paths, error paths, and edge cases. " +
+            "Follow the project conventions provided above.\n\n" +
             "File format:\n" +
-            "```path/to/file.test.ts\n// test contents\n```\n" +
-            "</tests>",
+            "```path/to/file\n// test contents\n```",
         SystemPrompt: SystemFor(role),
         Variables: ["role", "testTarget", "sourceCode", "conventions"],
         EnableTools: true,
@@ -478,29 +390,11 @@ public static class SystemPrompts
             "## Target Code\n{{targetCode}}\n\n" +
             "## Refactoring Goal\n{{refactoringGoal}}\n\n" +
             "## Conventions\n{{conventions}}\n\n" +
-            "## Instructions\n\n" +
-            "<thinking>\n" +
-            "1. Understand the current code structure and its purpose\n" +
-            "2. Identify code smells, duplication, or convention violations\n" +
-            "3. Plan refactoring steps that preserve behavior (no functional changes)\n" +
-            "4. Consider impact on tests and downstream consumers\n" +
-            "5. Verify the refactoring improves readability, maintainability, or performance\n" +
-            "</thinking>\n\n" +
-            "<analysis>\n" +
-            "- **Current Issues**: List specific problems in the code\n" +
-            "- **Proposed Changes**: Describe each refactoring step\n" +
-            "- **Risk Assessment**: What could break and how to verify it doesn't\n" +
-            "</analysis>\n\n" +
-            "<refactored>\n" +
+            "The refactoring must preserve behavior — no functional changes. " +
+            "Follow the project conventions provided above.\n\n" +
             "Provide the complete refactored code for each file.\n\n" +
             "Output each file as:\n" +
-            "```path/to/file.ts\n// refactored contents\n```\n" +
-            "</refactored>\n\n" +
-            "<verification>\n" +
-            "- Commands to run to verify the refactoring works\n" +
-            "- Expected test outcomes\n" +
-            "- Any manual verification steps needed\n" +
-            "</verification>",
+            "```path/to/file\n// refactored contents\n```",
         SystemPrompt: SystemFor(role),
         Variables: ["role", "targetCode", "refactoringGoal", "conventions"],
         EnableTools: true,
@@ -514,31 +408,10 @@ public static class SystemPrompts
             "## PR Description\n{{prDescription}}\n\n" +
             "## Diff\n{{diff}}\n\n" +
             "## Conventions\n{{conventions}}\n\n" +
-            "## Instructions\n\n" +
-            "<thinking>\n" +
-            "1. Read the full diff to understand the change's intent\n" +
-            "2. Check each file against project conventions\n" +
-            "3. Review from your expertise as a {{role}}:\n" +
+            "Review with your {{role}} lens:\n" +
             RoleReviewLensForCodeReview(role) +
-            "4. Identify logical errors, edge cases, and missing error handling\n" +
-            "5. Verify test coverage for new/changed code paths\n" +
-            "</thinking>\n\n" +
-            "<review>\n" +
-            "For each issue found:\n" +
-            "- **File**: path/to/file.ts\n" +
-            "- **Line**: line number or range\n" +
-            "- **Severity**: critical | major | minor | style\n" +
-            "- **Category**: bug | security | performance | convention | test-coverage\n" +
-            "- **Issue**: Description of the problem\n" +
-            "- **Fix**: Specific code change to resolve it\n\n" +
-            "If no issues are found, explicitly state \"No issues found\" with a brief explanation of what you verified.\n" +
-            "</review>\n\n" +
-            "<summary>\n" +
-            "- 1-3 sentence summary of the review\n" +
-            "- **Decision**: APPROVE | REQUEST_CHANGES | COMMENT\n" +
-            "- **Files Reviewed**: count\n" +
-            "- **Issues Found**: count by severity\n" +
-            "</summary>\n\n" +
+            "\n" +
+            "If no issues are found, explicitly state \"No issues found\" with a brief explanation of what you verified.\n\n" +
             "Output as JSON:\n" +
             "```json\n{\n  \"issues\": [\n    {\n      \"file\": \"...\",\n      \"line\": \"...\",\n      \"severity\": \"critical|major|minor|style\",\n      \"category\": \"bug|security|performance|convention|test-coverage\",\n      \"issue\": \"...\",\n      \"fix\": \"...\"\n    }\n  ],\n  \"summary\": {\n    \"decision\": \"APPROVE|REQUEST_CHANGES|COMMENT\",\n    \"text\": \"...\",\n    \"filesReviewed\": 0,\n    \"issuesBySeverity\": {\"critical\": 0, \"major\": 0, \"minor\": 0, \"style\": 0}\n  }\n}\n```",
         SystemPrompt: SystemFor(role),
@@ -553,24 +426,7 @@ public static class SystemPrompts
             "You are a {{role}} triaging an issue or alert.\n\n" +
             "## Issue / Alert\n{{issueJson}}\n\n" +
             "## Repository Context\n{{repoContext}}\n\n" +
-            "## Instructions\n\n" +
-            "<thinking>\n" +
-            "1. Understand the issue description and any error details\n" +
-            "2. Classify the issue type (bug, feature, task, chore, security)\n" +
-            "3. Assess severity and impact on users/system\n" +
-            "4. Determine priority based on severity and business impact\n" +
-            "5. Identify which team or role should own this\n" +
-            "6. Estimate effort required\n" +
-            "</thinking>\n\n" +
-            "<triage>\n" +
-            "- **Type**: bug | feature | task | chore | security\n" +
-            "- **Severity**: critical | high | medium | low\n" +
-            "- **Priority**: P0 (immediate) | P1 (this sprint) | P2 (next sprint) | P3 (backlog)\n" +
-            "- **Owner Role**: developer | tester | security | devops | architect\n" +
-            "- **Estimated Effort**: small (< 1 day) | medium (1-3 days) | large (3-5 days) | epic (> 5 days)\n" +
-            "- **Labels**: suggested labels for the issue\n" +
-            "- **Related Issues**: any known related or duplicate issues\n" +
-            "</triage>\n\n" +
+            "Classify the issue's type, severity, priority, owning role, and estimated effort.\n\n" +
             "Output as JSON:\n" +
             "```json\n{\n  \"type\": \"...\",\n  \"severity\": \"...\",\n  \"priority\": \"P0|P1|P2|P3\",\n  \"ownerRole\": \"...\",\n  \"estimatedEffort\": \"small|medium|large|epic\",\n  \"labels\": [\"...\"],\n  \"relatedIssues\": [],\n  \"reasoning\": \"...\"\n}\n```",
         SystemPrompt: SystemFor(role),
@@ -586,14 +442,7 @@ public static class SystemPrompts
             "## Work Item\n{{workItemJson}}\n\n" +
             "## Findings\n{{findings}}\n\n" +
             "## Target Audience\n{{audience}}\n\n" +
-            "## Instructions\n\n" +
-            "<thinking>\n" +
-            "1. Identify the key findings that the audience needs to know\n" +
-            "2. Determine the appropriate level of technical detail for the audience\n" +
-            "3. Structure the summary for quick scanning (headers, bullet points)\n" +
-            "4. Highlight any action items or decisions needed\n" +
-            "</thinking>\n\n" +
-            "Write a concise summary suitable for posting as a GitHub issue comment.\n\n" +
+            "Write a concise summary suitable for posting as an issue comment, pitched at the target audience.\n\n" +
             "Format:\n" +
             "## Summary\n" +
             "Brief 1-2 sentence overview.\n\n" +
@@ -619,31 +468,7 @@ public static class SystemPrompts
             "## Relevant Code\n{{relevantCode}}\n\n" +
             "## Conventions\n{{conventions}}\n\n" +
             "## Recent Changes\n{{recentChanges}}\n\n" +
-            "## Instructions\n\n" +
-            "<thinking>\n" +
-            "1. Parse the error message and stack trace to identify the immediate cause\n" +
-            "2. Identify the root cause (not just the symptom)\n" +
-            "3. Check if this is a known pattern (common TypeScript/Node.js issues)\n" +
-            "4. Determine the minimal fix that addresses the root cause\n" +
-            "5. Verify the fix doesn't introduce regressions\n" +
-            "</thinking>\n\n" +
-            "<diagnosis>\n" +
-            "- **Error**: One-line description of the error\n" +
-            "- **Root Cause**: Explanation of why this happens\n" +
-            "- **Affected Files**: List of files involved\n" +
-            "- **Fix Strategy**: Approach to resolve\n" +
-            "- **Confidence**: high | medium | low (based on available evidence)\n" +
-            "</diagnosis>\n\n" +
-            "<fix>\n" +
-            "Provide the exact code changes needed.\n\n" +
-            "For each file:\n" +
-            "```path/to/file.ts\n// fixed contents\n```\n" +
-            "</fix>\n\n" +
-            "<verification>\n" +
-            "- Commands to run to verify the fix\n" +
-            "- Expected output\n" +
-            "- Edge cases to test\n" +
-            "</verification>\n\n" +
+            "Identify the root cause (not just the symptom) and provide the minimal fix that addresses it.\n\n" +
             "Output as JSON:\n" +
             "```json\n{\n  \"diagnosis\": {\n    \"error\": \"...\",\n    \"rootCause\": \"...\",\n    \"affectedFiles\": [\"...\"],\n    \"fixStrategy\": \"...\",\n    \"confidence\": \"high|medium|low\"\n  },\n  \"fix\": {\n    \"files\": [{\"path\": \"...\", \"changes\": \"...\"}]\n  },\n  \"verification\": {\n    \"commands\": [\"...\"],\n    \"expectedOutput\": \"...\",\n    \"edgeCases\": [\"...\"]\n  }\n}\n```",
         SystemPrompt: SystemFor(role),
@@ -675,14 +500,10 @@ public static class SystemPrompts
             "## Story Context\n{{storyContext}}\n\n" +
             "## Developer Skill Level\n{{skillLevel}}\n\n" +
             "## Previously Identified Gaps (do not re-ask about these)\n{{previousGaps}}\n\n" +
-            "## Instructions\n\n" +
-            "Generate exactly {{questionCount}} assessment questions that:\n" +
-            "- Are appropriate for a {{skillLevel}} developer (calibrate depth and terminology accordingly)\n" +
-            "- Test understanding of the story's requirements, technical approach, and edge cases\n" +
-            "- Cover different aspects: functional requirements, technical design, testing considerations, risks\n" +
-            "- Avoid topics already covered in the previousGaps list above\n" +
-            "- Are open-ended enough to reveal genuine understanding (not yes/no)\n" +
-            "- Are specific to THIS story, not generic software engineering questions\n\n" +
+            "Generate exactly {{questionCount}} open-ended (not yes/no) assessment questions calibrated to a " +
+            "{{skillLevel}} developer, specific to THIS story (not generic software engineering), covering the " +
+            "story's requirements, technical design, testing considerations, edge cases, and risks — avoiding " +
+            "topics already covered in the previously identified gaps above.\n\n" +
             "Return ONLY a JSON array of question strings with no wrapper object:\n" +
             "```json\n[\"Question 1 text?\", \"Question 2 text?\", ...]\n```\n\n" +
             "Do not include numbering, explanations, or any text outside the JSON array.",
@@ -709,13 +530,9 @@ public static class SystemPrompts
             "## Assessment Questions\n{{questions}}\n\n" +
             "## Developer's Response\n{{response}}\n\n" +
             "## Developer Skill Level\n{{skillLevel}}\n\n" +
-            "## Instructions\n\n" +
-            "Analyze the developer's response against the questions and story context. Assess:\n" +
-            "- **Correctness**: Are the answers factually correct and complete?\n" +
-            "- **Depth**: Does the developer show genuine understanding or superficial familiarity?\n" +
-            "- **Gaps**: What knowledge gaps are revealed that could cause problems during implementation?\n" +
-            "- **Strengths**: What does the developer clearly understand well?\n" +
-            "- **Readiness**: Given their {{skillLevel}} level, are they ready to implement this story?\n\n" +
+            "Analyze the developer's response against the questions and story context: assess correctness, " +
+            "depth of understanding, knowledge gaps that could cause problems during implementation, " +
+            "strengths, and readiness to implement this story. " +
             "Calibrate your confidence score to the developer's {{skillLevel}} level — a junior developer " +
             "is not expected to have senior-level depth; assess relative to appropriate expectations.\n\n" +
             "Return ONLY a JSON object (no markdown fences, no wrapper):\n" +
@@ -760,16 +577,6 @@ public static class SystemPrompts
             "## Work Item / Topic\n{{workItemJson}}\n\n" +
             "## Gathered Context (codebase / prior art)\n{{findings}}\n\n" +
             "## Conventions\n{{conventions}}\n\n" +
-            "## Instructions\n\n" +
-            "<thinking>\n" +
-            "1. Identify the concrete question(s) the work item raises that research must answer\n" +
-            "2. Mine the gathered context for evidence — relevant files, existing patterns, prior decisions, gaps\n" +
-            "3. Distil each piece of evidence into a discrete finding: what was learned and why it matters\n" +
-            "4. Score each finding for RELEVANCE (how directly it bears on the topic) and CONFIDENCE " +
-            "(how well the gathered context supports it), each a decimal in [0,1]\n" +
-            "5. Attach citations (file paths, URLs, or doc references from the context) that back each finding\n" +
-            "6. Rank findings most-relevant-first, then compute an overall confidence across them\n" +
-            "</thinking>\n\n" +
             "Base every finding on the gathered context — do NOT invent findings or citations that the " +
             "context does not support. If the context is thin, return only the findings it genuinely supports.\n\n" +
             "Return ONLY a single JSON object (no markdown fences, no prose outside it) of this EXACT shape:\n" +
@@ -783,7 +590,7 @@ public static class SystemPrompts
             "      \"summary\": \"what was learned and why it matters\",\n" +
             "      \"relevance\": 0.0,\n" +
             "      \"confidence\": 0.0,\n" +
-            "      \"citations\": [\"path/to/file.cs\", \"https://...\"]\n" +
+            "      \"citations\": [\"path/to/file\", \"https://...\"]\n" +
             "    }\n" +
             "  ],\n" +
             "  \"overallConfidence\": 0.0\n" +
@@ -830,20 +637,8 @@ public static class SystemPrompts
             "## Requirement / Work Item\n{{workItemJson}}\n\n" +
             "## Context (domain / codebase / prior decisions)\n{{contextFindings}}\n\n" +
             "## Conventions\n{{conventions}}\n\n" +
-            "## Instructions\n\n" +
-            "<thinking>\n" +
-            "1. Read the requirement and identify every place where it is unclear, incomplete, " +
-            "self-contradictory, or relies on unstated assumptions\n" +
-            "2. Classify each problem by TYPE: `vague` (imprecise wording), `missing` (required " +
-            "information absent), `contradictory` (conflicting statements), or `implicit` (unstated " +
-            "assumptions / constraints)\n" +
-            "3. Weigh each problem by how much it would impact development if left unresolved " +
-            "(severity: `low` / `medium` / `high`), considering the context above\n" +
-            "4. For each problem, write a specific, actionable recommendation for resolving it\n" +
-            "5. Aggregate into a single overall ambiguity SCORE in [0,1] — 0.0 = crystal clear and " +
-            "fully specified, 1.0 = so ambiguous it cannot be implemented as written\n" +
-            "6. State your confidence in the assessment\n" +
-            "</thinking>\n\n" +
+            "The overall score runs 0.0 = crystal clear and fully specified to 1.0 = so ambiguous it " +
+            "cannot be implemented as written. " +
             "Base the assessment on the requirement and context provided — do NOT invent problems " +
             "that are not there. A genuinely clear requirement should score near 0 with an empty " +
             "`ambiguities` list; do not manufacture ambiguities to justify a higher score.\n\n" +
@@ -911,23 +706,8 @@ public static class SystemPrompts
             "## Issue / Work Item\n{{workItemJson}}\n\n" +
             "## Gathered Context (codebase / prior art)\n{{findings}}\n\n" +
             "## Conventions\n{{conventions}}\n\n" +
-            "## Instructions\n\n" +
-            "<thinking>\n" +
-            "1. Understand the issue's full intent and business value — the decomposition MUST " +
-            "preserve it (the sub-tasks together must fully deliver the parent issue)\n" +
-            "2. Use the gathered context to judge scope, integration points, and where the natural " +
-            "seams are (vertical slices, then supporting layers)\n" +
-            "3. Break the work into sub-tasks each sized ROUGHLY 2-8 hours, each with a clear " +
-            "definition of done — small enough to implement and review in one pass\n" +
-            "4. Assign each sub-task a short STABLE id (e.g. `ST-1`, `ST-2`) — dependencies " +
-            "reference these ids\n" +
-            "5. For each sub-task, declare which OTHER sub-tasks (by id) must be completed first in " +
-            "`dependsOn` (a prerequisite / blocking relationship). Independent sub-tasks have an " +
-            "empty `dependsOn`\n" +
-            "6. Order the `subtasks` array so prerequisites come before the sub-tasks that depend " +
-            "on them (a sensible initial implementation sequence)\n" +
-            "7. Rate each sub-task's `complexity` as `low`, `medium`, or `high`\n" +
-            "</thinking>\n\n" +
+            "Break the work into sub-tasks each sized ROUGHLY 2-8 hours with a clear definition of " +
+            "done; together the sub-tasks must fully deliver the parent issue's intent. " +
             "Base the breakdown on the issue and context provided — do NOT invent scope the issue " +
             "does not call for, and do NOT fabricate dependencies. Only reference sub-task ids you " +
             "actually define.\n\n" +
