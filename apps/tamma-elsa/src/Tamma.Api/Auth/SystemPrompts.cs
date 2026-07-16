@@ -426,9 +426,11 @@ public static class SystemPrompts
             "You are a {{role}} triaging an issue or alert.\n\n" +
             "## Issue / Alert\n{{issueJson}}\n\n" +
             "## Repository Context\n{{repoContext}}\n\n" +
-            "Classify the issue's type, severity, priority, owning role, and estimated effort.\n\n" +
+            "Classify the issue's type, severity, priority, owning role, and estimated effort. " +
+            "Priority: P0 = immediate, P1 = this sprint, P2 = next sprint, P3 = backlog. " +
+            "Effort: small < 1 day, medium 1-3 days, large 3-5 days, epic > 5 days.\n\n" +
             "Output as JSON:\n" +
-            "```json\n{\n  \"type\": \"...\",\n  \"severity\": \"...\",\n  \"priority\": \"P0|P1|P2|P3\",\n  \"ownerRole\": \"...\",\n  \"estimatedEffort\": \"small|medium|large|epic\",\n  \"labels\": [\"...\"],\n  \"relatedIssues\": [],\n  \"reasoning\": \"...\"\n}\n```",
+            "```json\n{\n  \"type\": \"bug|feature|task|chore|security\",\n  \"severity\": \"critical|high|medium|low\",\n  \"priority\": \"P0|P1|P2|P3\",\n  \"ownerRole\": \"developer|tester|security|devops|architect\",\n  \"estimatedEffort\": \"small|medium|large|epic\",\n  \"labels\": [\"...\"],\n  \"relatedIssues\": [],\n  \"reasoning\": \"...\"\n}\n```",
         SystemPrompt: SystemFor(role),
         Variables: ["role", "issueJson", "repoContext"],
         EnableTools: false,

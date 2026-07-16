@@ -151,7 +151,7 @@ public class WriteImplementationActivity : CodeActivity<ImplementationResult>
             ? $"\n\nExisting code context:\n{codeContext}"
             : "";
 
-        return $@"Write the MINIMUM implementation needed to make ALL the following tests pass. Do not over-engineer and do not break any existing tests — write just enough simple, focused code to satisfy the tests.
+        return $@"Write the MINIMUM implementation needed to make ALL the following tests pass. Do not over-engineer and do not break any existing tests — write just enough simple, focused code to satisfy the tests, following the project's coding conventions.
 
 Task: {taskDescription}
 
