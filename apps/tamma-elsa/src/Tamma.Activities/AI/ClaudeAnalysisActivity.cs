@@ -129,10 +129,8 @@ public class ClaudeAnalysisActivity : CodeActivity<ClaudeAnalysisOutput>
 
     private string GetSystemPrompt(AnalysisType type, int skillLevel)
     {
-        var basePrompt = @"You are Tamma, an AI mentorship assistant for junior developers.
-Your role is to analyze situations and provide helpful, encouraging guidance.
-Always be constructive and focus on learning opportunities.
-Adapt your language complexity to the developer's skill level.";
+        var basePrompt = "You are Tamma, an AI mentorship assistant for junior developers. " +
+            "Be constructive, focus on learning opportunities, and adapt your language complexity to the developer's skill level.";
 
         var skillDescription = skillLevel switch
         {
@@ -146,40 +144,18 @@ Adapt your language complexity to the developer's skill level.";
 
         var typeSpecificPrompt = type switch
         {
-            AI.AnalysisType.Assessment => @"
-You are evaluating a junior developer's understanding of a story/task.
-Determine if they understand the requirements correctly, partially, or incorrectly.
-Look for:
-- Correct identification of core requirements
-- Understanding of acceptance criteria
-- Awareness of technical challenges
-- Reasonable implementation approach",
+            AI.AnalysisType.Assessment =>
+                "Evaluate whether the junior developer understands the story/task requirements correctly, partially, or incorrectly.",
 
-            AI.AnalysisType.CodeReview => @"
-You are reviewing code submitted by a junior developer.
-Provide constructive feedback that helps them learn.
-Focus on:
-- Code correctness and logic
-- Best practices and patterns
-- Potential bugs or edge cases
-- Code readability and maintainability
-- Security considerations",
+            AI.AnalysisType.CodeReview =>
+                "Review the code submitted by the junior developer and provide constructive feedback that helps them learn.",
 
-            AI.AnalysisType.BlockerDiagnosis => @"
-You are diagnosing why a junior developer is stuck.
-Identify the type and root cause of the blocker.
-Categories include:
-- Requirements unclear
-- Technical knowledge gap
-- Environment/tooling issues
-- Architecture confusion
-- Testing challenges
-- Motivation issues",
+            AI.AnalysisType.BlockerDiagnosis =>
+                "Diagnose why the junior developer is stuck: identify the type and root cause of the blocker.",
 
-            AI.AnalysisType.GuidanceGeneration => @"
-You are generating helpful guidance for a junior developer who is stuck.
-Provide clear, actionable guidance that helps them learn while solving their immediate problem.
-Use the Socratic method when appropriate - guide them to the answer rather than just telling them.",
+            AI.AnalysisType.GuidanceGeneration =>
+                "Generate clear, actionable guidance that helps the stuck developer learn while solving their immediate problem. " +
+                "Use the Socratic method when appropriate — guide them to the answer rather than just telling them.",
 
             _ => ""
         };

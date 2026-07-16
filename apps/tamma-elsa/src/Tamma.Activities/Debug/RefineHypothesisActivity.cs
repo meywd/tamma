@@ -108,8 +108,7 @@ public class RefineHypothesisActivity : CodeActivity<DiagnosisResult>
     {
         var sb = new System.Text.StringBuilder();
 
-        sb.AppendLine("You are a debugging specialist (role: debugger). The previous fix attempt did NOT work.");
-        sb.AppendLine("Refine the hypotheses based on the new information below.");
+        sb.AppendLine("The previous fix attempt did NOT work. Refine the hypotheses based on the new information below.");
         sb.AppendLine();
         sb.AppendLine("## Hypothesis That Was Tried");
         sb.AppendLine(triedJson);
@@ -128,11 +127,7 @@ public class RefineHypothesisActivity : CodeActivity<DiagnosisResult>
         sb.AppendLine("## Full Context of All Previous Attempts");
         sb.AppendLine(iterationCtxJson);
         sb.AppendLine();
-        sb.AppendLine("## Instructions");
-        sb.AppendLine("- DO NOT suggest the same fix approach that already failed");
-        sb.AppendLine("- Generate NEW or REFINED hypotheses based on what we learned");
-        sb.AppendLine("- If the error changed, that's useful information about what's happening");
-        sb.AppendLine("- Rank new hypotheses by confidence");
+        sb.AppendLine("Do NOT suggest the same fix approach that already failed — generate NEW or REFINED hypotheses based on what was learned (a changed error is useful signal), ranked by confidence.");
         sb.AppendLine();
         sb.AppendLine(@"## Required Output Format (JSON)
 {

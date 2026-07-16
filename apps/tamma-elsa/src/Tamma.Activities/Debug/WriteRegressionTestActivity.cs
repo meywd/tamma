@@ -121,8 +121,7 @@ public class WriteRegressionTestActivity : CodeActivity<TestGenerationResult>
     {
         var sb = new System.Text.StringBuilder();
 
-        sb.AppendLine("You are a test specialist (role: tester). Write a regression test that REPRODUCES this bug.");
-        sb.AppendLine("The test MUST FAIL with the current buggy code — if it passes, it's not correctly reproducing the bug.");
+        sb.AppendLine("Write a regression test that REPRODUCES this bug. The test MUST FAIL with the current buggy code — if it passes, it's not correctly reproducing the bug.");
         sb.AppendLine();
         sb.AppendLine($"## Story: {storyId}");
         sb.AppendLine();

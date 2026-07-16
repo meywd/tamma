@@ -159,20 +159,13 @@ public class ApplyReviewFixesActivity : Activity
             commentSections.AppendLine();
         }
 
-        return $@"You are a code reviewer fix assistant. You need to apply fixes for the following review comments on repository {repository}, branch {branchName}.
+        return $@"Generate corrected code for the following review comments on repository {repository}, branch {branchName}.
 
 ## Review Comments to Address
 
 {commentSections}
 
-## Instructions
-
-1. For each review comment above, generate the corrected code
-2. Maintain all existing functionality — only fix what each comment asks for
-3. If a comment is a question, add a code comment explaining the answer
-4. If a comment is praise, skip it (no changes needed)
-5. Prioritize bug fixes and security issues over style changes
-6. Keep fixes minimal and focused — do not refactor unrelated code
+Fix only what each comment asks for — keep fixes minimal and preserve all existing functionality. Answer question comments with an explanatory code comment, skip praise comments, and prioritize bug fixes and security issues over style changes.
 
 ## Response Format
 

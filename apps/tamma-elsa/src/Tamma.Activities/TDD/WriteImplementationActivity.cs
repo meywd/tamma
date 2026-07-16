@@ -151,7 +151,7 @@ public class WriteImplementationActivity : CodeActivity<ImplementationResult>
             ? $"\n\nExisting code context:\n{codeContext}"
             : "";
 
-        return $@"You are a TDD implementer. Write the MINIMUM implementation needed to make ALL the following tests pass. Do not over-engineer — write just enough code to satisfy the tests.
+        return $@"Write the MINIMUM implementation needed to make ALL the following tests pass. Do not over-engineer and do not break any existing tests — write just enough simple, focused code to satisfy the tests.
 
 Task: {taskDescription}
 
@@ -163,12 +163,6 @@ Tests to satisfy:
 {contextSection}
 
 {guidance}
-
-Requirements:
-1. Write the minimum code to make all tests pass
-2. Do not break any existing tests
-3. Follow the project's coding conventions
-4. Keep the implementation simple and focused
 
 Respond with JSON: {{""implementationCode"": ""..."", ""implementationFiles"": [""...""]}}";
     }

@@ -119,7 +119,7 @@ public class AnalyzeCodeActivity : CodeActivity<RefactoringAnalysis>
     {
         var guidance = SkillLevelPromptDetail.GetRefactoringGuidance(skillLevel);
 
-        return $@"You are a code reviewer. Identify refactoring opportunities in the code that was just written during a TDD cycle. Focus on improvements that maintain correctness while improving quality.
+        return $@"Identify refactoring opportunities in the code that was just written during a TDD cycle. Suggest only improvements that maintain correctness while improving quality.
 
 Tests:
 ```
@@ -132,13 +132,6 @@ Implementation:
 ```
 
 {guidance}
-
-Analyze for:
-1. Code duplication
-2. Naming improvements
-3. Design pattern opportunities
-4. Simplification possibilities
-5. Performance improvements (if obvious)
 
 Respond with JSON:
 {{

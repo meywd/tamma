@@ -159,7 +159,7 @@ public class WriteTestsActivity : CodeActivity<TestGenerationResult>
 
         if (isRewrite && !string.IsNullOrEmpty(previousTestCode))
         {
-            return $@"You are a TDD tester. The following tests were written but they PASS without any implementation, meaning they don't actually test the new behavior. Rewrite them to genuinely test the NEW functionality that needs to be implemented.
+            return $@"Rewrite the following tests: they PASS without any implementation, so they do not actually test the new behavior. The rewritten tests must genuinely exercise the NEW functionality and FAIL until the implementation is written.
 
 Task: {taskDescription}
 {filesSection}
@@ -170,29 +170,18 @@ Previous tests that incorrectly passed:
 {previousTestCode}
 ```
 
-Rewrite these tests so they:
-1. Actually test the new behavior described in the task
-2. Will FAIL until the implementation is written
-3. Are meaningful and cover edge cases
-
 {guidance}
 
 Respond with JSON: {{""testCode"": ""..."", ""testFiles"": [""...""], ""testCount"": N}}";
         }
 
-        return $@"You are a TDD tester. Write failing tests for the following task. These tests MUST fail initially because the implementation does not exist yet.
+        return $@"Write failing tests for the following task. The tests MUST fail until the implementation is written, cover edge cases, and follow the project's existing test patterns.
 
 Task: {taskDescription}
 {filesSection}
 {contextSection}
 
 {guidance}
-
-Write tests that:
-1. Cover the happy path for the task
-2. Cover edge cases and error conditions
-3. Will FAIL until the implementation is written
-4. Follow the project's existing test patterns
 
 Respond with JSON: {{""testCode"": ""..."", ""testFiles"": [""...""], ""testCount"": N}}";
     }

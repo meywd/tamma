@@ -153,7 +153,7 @@ public class AIDiagnosisActivity : CodeActivity<DiagnosisResult>
     {
         var sb = new System.Text.StringBuilder();
 
-        sb.AppendLine("You are a debugging specialist (role: debugger). Analyze the following context and generate ranked root cause hypotheses.");
+        sb.AppendLine("Analyze the following debug context and generate ranked root cause hypotheses.");
         sb.AppendLine();
         sb.AppendLine($"## Debug Mode: {mode}");
         sb.AppendLine();
