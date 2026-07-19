@@ -232,18 +232,29 @@ jobs:
         run: |
           rc=0
           failed=""
+          mkdir -p /tmp/test-logs
           for proj in tests/*/; do
             name=$(basename "$proj")
             echo "::group::$name"
-            if ! dotnet test "$proj" --no-build -c Release --verbosity minimal --logger trx --blame-hang --blame-hang-timeout 8m; then
-              echo "PROJECT-FAILED: $name (exit $?)"
+            if dotnet test "$proj" --no-build -c Release --verbosity minimal --logger trx --blame-hang --blame-hang-timeout 8m > "/tmp/test-logs/$name.log" 2>&1; then
+              tail -4 "/tmp/test-logs/$name.log"
+            else
+              echo "PROJECT-FAILED: $name"
               failed="$failed $name"
               rc=1
             fi
             echo "::endgroup::"
           done
           echo "==== TEST RECAP ===="
-          if [ $rc -ne 0 ]; then echo "FAILED PROJECTS:$failed"; else echo "ALL PROJECTS PASSED"; fi
+          if [ $rc -ne 0 ]; then
+            echo "FAILED PROJECTS:$failed"
+            for n in $failed; do
+              echo "---- OUTPUT OF FAILED PROJECT $n (tail 400) ----"
+              tail -400 "/tmp/test-logs/$n.log"
+            done
+          else
+            echo "ALL PROJECTS PASSED"
+          fi
           exit $rc
 
       - name: Upload test results
