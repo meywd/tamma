@@ -162,7 +162,6 @@ public class ContractBindingTests
             // TestCaseCreationWorkflow inline ExtractValidate (TestCaseCreationWorkflow.cs
             // ~l.123-193): accepts a bare JSON array OR an object with "testCases"|"tests";
             // anything else → validation error → retry → error output.
-            // NOTE: currently baselined in KnownContractViolations — see below.
             [("tester", "write-tests")] = new("TestCaseCreationWorkflow.ExtractValidate",
             [
                 AnyOf("\"testCases\"", "\"tests\"", "JSON array"),
@@ -189,7 +188,6 @@ public class ContractBindingTests
             // DeploymentPipelineWorkflow.ParseStageStatus (DeploymentPipelineWorkflow.cs
             // ~l.669-702): FAIL-CLOSED — a stage only succeeds on an explicit
             // status:"success"; a reply with no "status" field is a failed deploy.
-            // NOTE: currently baselined in KnownContractViolations — see below.
             [("devops", "deploy")] = new("DeploymentPipelineWorkflow.ParseStageStatus",
             [
                 One("\"status\""),
@@ -214,20 +212,11 @@ public class ContractBindingTests
     private static readonly IReadOnlyDictionary<(string Role, string Action), string> KnownContractViolations =
         new Dictionary<(string, string), string>
         {
-            // The write-tests template instructs FILE-FORMAT output ("```path/to/file")
-            // while TestCaseCreationWorkflow's validator requires a JSON array or a
-            // "testCases"/"tests" object — every first attempt can only pass by luck
-            // (brackets inside test code) and otherwise burns the 2 retries.
-            [("tester", "write-tests")] =
-                "template instructs file-format output, not the JSON testCases/tests shape the validator requires",
-
-            // deploy.md / rollback.md instruct file-format output with NO status field,
-            // while ParseStageStatus fail-closed requires an explicit status:"success"
-            // to promote a stage — as shipped, a stage can never parse as succeeded.
-            [("devops", "deploy")] =
-                "template instructs file-format output and never asks for the status field ParseStageStatus requires",
-            [("devops", "rollback")] =
-                "template instructs file-format output and never asks for the status field ParseStageStatus requires",
+            // EMPTY — the three violations discovered while authoring this test
+            // ((tester, write-tests) and (devops, deploy)/(devops, rollback), whose
+            // templates instructed file-format output their parsers fail closed on)
+            // have been fixed: the templates now instruct the JSON shapes their
+            // callers' parsers require. Entries may only ever be REMOVED, never added.
         };
 
     // ====================================================================
