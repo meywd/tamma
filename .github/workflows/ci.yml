@@ -222,14 +222,19 @@ jobs:
       # host kept alive past shutdown; runner cleanup killed orphaned dotnet
       # processes). Blame mode names the project/host that fails to exit and
       # dumps its live threads within the timeout instead of failing silently.
+      # --verbosity minimal: at normal verbosity the ~4900 per-test lines push
+      # the failing project's output beyond the retrievable log window — the run
+      # kept exiting 1 with every visible test passing. Minimal keeps the whole
+      # run (all 11 projects' summaries and any real error) in view; TRX files
+      # give definitive per-project results as artifacts.
       - name: Test
-        run: dotnet test Tamma.sln --no-build -c Release --verbosity normal --blame-hang --blame-hang-timeout 8m
+        run: dotnet test Tamma.sln --no-build -c Release --verbosity minimal --logger trx --blame-hang --blame-hang-timeout 8m
 
-      - name: Upload hang dumps
+      - name: Upload test results
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: vstest-blame-dumps
+          name: dotnet-test-results
           path: |
             apps/tamma-elsa/tests/**/TestResults/**
           if-no-files-found: ignore
