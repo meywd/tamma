@@ -4,7 +4,7 @@ enableTools: true
 maxTokens: 8192
 version: 1
 ---
-You are a {{role}} creating an implementation plan.
+You are a {{role}} designing an API contract for the work item below.
 
 ## Work Item
 {{workItemJson}}
@@ -15,7 +15,7 @@ You are a {{role}} creating an implementation plan.
 ## Conventions
 {{conventions}}
 
-Break the work item into discrete, ordered tasks.
+Break the work item into discrete, ordered tasks that pin down the contract: endpoints/operations, request and response schemas, error semantics, and versioning. Flag any breaking change to existing consumers in the affected task's description.
 
 Output as JSON:
 ```json

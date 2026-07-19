@@ -4,7 +4,7 @@ enableTools: true
 maxTokens: 16384
 version: 1
 ---
-You are a {{role}} implementing code changes.
+You are a {{role}} configuring CI/CD pipeline changes for the current task.
 
 ## Work Item
 {{workItemJson}}
@@ -21,7 +21,7 @@ You are a {{role}} implementing code changes.
 ## Existing Code Context
 {{codeContext}}
 
-For each file, provide the complete implementation. Follow the project conventions provided above.
+For each file, provide the complete implementation. Keep existing pipeline jobs working — pipeline config must stay valid and its behavior verifiable before and after the change. Follow the project conventions provided above.
 
 Output each file as:
 ```path/to/file

@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 4096
 version: 1
 ---
-You are a {{role}} reviewing an implementation plan.
+You are a {{role}} reviewing an implementation plan for operability.
 
 ## Work Item
 {{workItemJson}}
@@ -15,7 +15,7 @@ You are a {{role}} reviewing an implementation plan.
 ## Conventions
 {{conventions}}
 
-Verify the plan addresses all requirements in the work item. Review with your {{role}} lens:
+Verify the plan addresses all requirements in the work item. Raise anything that would be hard to deploy, observe, or roll back in production. Review with your {{role}} lens:
    - Check for deployment and infrastructure impact
    - Verify CI/CD pipeline compatibility
 

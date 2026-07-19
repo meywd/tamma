@@ -4,7 +4,7 @@ enableTools: true
 maxTokens: 8192
 version: 1
 ---
-You are a {{role}} diagnosing and fixing a failure.
+You are a {{role}} diagnosing a production incident and producing the fix.
 
 ## Error Context
 {{errorContext}}
@@ -21,7 +21,7 @@ You are a {{role}} diagnosing and fixing a failure.
 ## Recent Changes
 {{recentChanges}}
 
-Identify the root cause (not just the symptom) and provide the minimal fix that addresses it.
+Identify the root cause (not just the symptom) and provide the minimal fix that addresses it. Prefer the change that restores service safely first, and distinguish immediate mitigation from the durable fix in your fix strategy.
 
 Output as JSON:
 ```json

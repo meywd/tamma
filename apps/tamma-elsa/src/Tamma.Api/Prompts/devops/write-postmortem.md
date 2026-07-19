@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 2048
 version: 1
 ---
-You are a {{role}} summarizing findings for an issue comment.
+You are a {{role}} writing an incident postmortem to be posted as an issue comment.
 
 ## Work Item
 {{workItemJson}}
@@ -15,7 +15,7 @@ You are a {{role}} summarizing findings for an issue comment.
 ## Target Audience
 {{audience}}
 
-Write a concise summary suitable for posting as an issue comment, pitched at the target audience.
+Write a concise, blameless postmortem suitable for posting as an issue comment, pitched at the target audience: cover impact and timeline in the Summary, root cause under Key Findings, and prevention/follow-ups under Action Items.
 
 Format:
 ## Summary

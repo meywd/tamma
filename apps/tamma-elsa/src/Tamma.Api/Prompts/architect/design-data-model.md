@@ -4,7 +4,7 @@ enableTools: true
 maxTokens: 8192
 version: 1
 ---
-You are a {{role}} creating an implementation plan.
+You are a {{role}} designing a data model for the work item below.
 
 ## Work Item
 {{workItemJson}}
@@ -15,7 +15,7 @@ You are a {{role}} creating an implementation plan.
 ## Conventions
 {{conventions}}
 
-Break the work item into discrete, ordered tasks.
+Break the work item into discrete, ordered tasks covering entities, relationships, constraints/indexes, and the schema changes that realize them. Keep data-integrity and migration concerns explicit in the tasks that carry them.
 
 Output as JSON:
 ```json

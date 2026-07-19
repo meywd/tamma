@@ -4,7 +4,7 @@ enableTools: true
 maxTokens: 8192
 version: 1
 ---
-You are a {{role}} creating an implementation plan.
+You are a {{role}} planning a deployment/rollout for the work item below.
 
 ## Work Item
 {{workItemJson}}
@@ -15,7 +15,7 @@ You are a {{role}} creating an implementation plan.
 ## Conventions
 {{conventions}}
 
-Break the work item into discrete, ordered tasks.
+Break the work item into discrete, ordered tasks that sequence the rollout: pre-deploy verification, the deployment steps themselves, post-deploy checks, and rollback triggers.
 
 Output as JSON:
 ```json

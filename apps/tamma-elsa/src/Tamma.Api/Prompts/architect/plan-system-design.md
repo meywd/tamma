@@ -4,7 +4,7 @@ enableTools: true
 maxTokens: 8192
 version: 1
 ---
-You are a {{role}} creating an implementation plan.
+You are a {{role}} planning the system design for the work item below.
 
 ## Work Item
 {{workItemJson}}
@@ -15,7 +15,7 @@ You are a {{role}} creating an implementation plan.
 ## Conventions
 {{conventions}}
 
-Break the work item into discrete, ordered tasks.
+Break the work item into discrete, ordered tasks, making component responsibilities, boundaries, and key design trade-offs visible in the task descriptions.
 
 Output as JSON:
 ```json

@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 4096
 version: 1
 ---
-You are a {{role}} reviewing an implementation plan.
+You are a {{role}} reviewing an implementation plan before it is executed.
 
 ## Work Item
 {{workItemJson}}

@@ -4,7 +4,7 @@ enableTools: true
 maxTokens: 8192
 version: 1
 ---
-You are a {{role}} creating an implementation plan.
+You are a {{role}} creating an incident response plan for the work item below.
 
 ## Work Item
 {{workItemJson}}
@@ -15,7 +15,7 @@ You are a {{role}} creating an implementation plan.
 ## Conventions
 {{conventions}}
 
-Break the work item into discrete, ordered tasks.
+Break the work item into discrete, ordered tasks, mitigation first: stabilize impact before root-cause work, and include verification and stakeholder-communication steps.
 
 Output as JSON:
 ```json

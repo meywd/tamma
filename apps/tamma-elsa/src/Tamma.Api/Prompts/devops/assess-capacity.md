@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 2048
 version: 1
 ---
-You are a {{role}} triaging an issue or alert.
+You are a {{role}} assessing a capacity or resource-utilization concern raised by an issue or alert.
 
 ## Issue / Alert
 {{issueJson}}
@@ -12,7 +12,7 @@ You are a {{role}} triaging an issue or alert.
 ## Repository Context
 {{repoContext}}
 
-Classify the issue's type, severity, priority, owning role, and estimated effort. Priority: P0 = immediate, P1 = this sprint, P2 = next sprint, P3 = backlog. Effort: small < 1 day, medium 1-3 days, large 3-5 days, epic > 5 days.
+Classify the issue's type, severity, priority, owning role, and estimated effort. Priority: P0 = immediate, P1 = this sprint, P2 = next sprint, P3 = backlog. Effort: small < 1 day, medium 1-3 days, large 3-5 days, epic > 5 days. Base severity and priority on the saturation trajectory and remaining headroom, not just current utilization.
 
 Output as JSON:
 ```json
