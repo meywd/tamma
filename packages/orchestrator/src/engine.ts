@@ -490,9 +490,11 @@ export class TammaEngine {
   ): Promise<DevelopmentPlan> {
     await this.setState(EngineState.PLANNING);
 
-    const planPrompt = `You are analyzing a GitHub issue to create a development plan.
+    const planPrompt = `Create a development plan for the GitHub issue below.
 
 ${context}
+
+If requirements are ambiguous, note the ambiguity in the risks array and make reasonable assumptions.
 
 Generate a structured development plan as JSON with the following fields:
 - issueNumber: ${issue.number}
@@ -502,9 +504,6 @@ Generate a structured development plan as JSON with the following fields:
 - testingStrategy: How to test the changes
 - estimatedComplexity: "low", "medium", or "high"
 - risks: Array of potential risks or concerns
-
-If requirements are ambiguous, note the ambiguity in the risks array and make reasonable assumptions.
-Consider multiple implementation options where appropriate and choose the best one, noting alternatives in the approach.
 
 Return ONLY valid JSON matching the schema.`;
 
@@ -752,7 +751,7 @@ Return ONLY valid JSON matching the schema.`;
     await this.setState(EngineState.IMPLEMENTING);
     const { owner, repo } = this.config.github;
 
-    const implPrompt = `You are an autonomous coding agent. Implement the following plan for issue #${issue.number}.
+    const implPrompt = `Implement the plan below for issue #${issue.number}.
 
 ## Issue: ${issue.title}
 ${issue.body}
@@ -767,15 +766,7 @@ ${plan.fileChanges.map((fc) => `- [${fc.action}] ${fc.filePath}: ${fc.descriptio
 ## Testing Strategy
 ${plan.testingStrategy}
 
-## Instructions
-1. Implement all the file changes described in the plan.
-2. Write or update tests as described in the testing strategy.
-3. Ensure TypeScript compiles without errors (run: npx tsc --noEmit).
-4. Ensure all tests pass (run the project's test command).
-5. Git add, commit, and push your changes to the branch: ${branch}
-   - Use remote: origin
-   - Repository: ${owner}/${repo}
-   - Commit message should reference issue #${issue.number}
+Ensure the project builds and all tests pass, then commit and push your changes to branch ${branch} (remote: origin, repository: ${owner}/${repo}) with a commit message referencing issue #${issue.number}.
 
 Follow existing project conventions and patterns.`;
 

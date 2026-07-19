@@ -48,6 +48,35 @@ public static class DebugEvents
     public const string ReasonRegressionInvalid = "regression-test-did-not-reproduce-bug";
 
     /// <summary>
+    /// Diagnosis-failure reasons stamped on <c>DEBUG.DIAGNOSIS.FAILED</c> via
+    /// <see cref="Models.DiagnosisResult.FailureReason"/>: the LLM reply could not be
+    /// parsed into hypotheses, or the mediated LLM call itself failed. The activity
+    /// NEVER fabricates a fallback hypothesis for these cases — that would flip the
+    /// caller gate to a false <c>DEBUG.DIAGNOSIS.SUCCESS</c> on garbage output.
+    /// </summary>
+    public const string ReasonDiagnosisParseFailure = "diagnosis-parse-failure";
+    public const string ReasonDiagnosisCallFailed = "diagnosis-call-failed";
+
+    /// <summary>
+    /// Caller gate for the diagnosis step: a diagnosis counts as produced only when it
+    /// did not fail (<see cref="Models.DiagnosisResult.FailureReason"/> empty) AND it
+    /// carries at least one hypothesis. Kept here (pure, context-free) so the
+    /// <c>DebuggingWorkflow</c> FlowDecision and unit tests share one predicate.
+    /// </summary>
+    public static bool IsDiagnosisProduced(Models.DiagnosisResult? result) =>
+        result?.Hypotheses != null
+        && result.Hypotheses.Count > 0
+        && string.IsNullOrEmpty(result.FailureReason);
+
+    /// <summary>
+    /// Reason to stamp on <c>DEBUG.DIAGNOSIS.FAILED</c>: the result's own failure
+    /// reason when it carries one, else the legacy genuinely-empty-hypotheses reason
+    /// (<see cref="ReasonNoHypothesis"/>).
+    /// </summary>
+    public static string DiagnosisFailureReason(Models.DiagnosisResult? result) =>
+        string.IsNullOrEmpty(result?.FailureReason) ? ReasonNoHypothesis : result!.FailureReason!;
+
+    /// <summary>
     /// Parse a tenant id from the loose string form threaded through the workflow inputs.
     /// Returns <c>null</c> for empty / single-user / unparseable values (debug events in
     /// single-user mode are platform-scope, TenantId null). Mirrors

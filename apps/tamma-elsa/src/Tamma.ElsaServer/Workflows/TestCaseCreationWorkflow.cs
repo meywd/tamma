@@ -11,6 +11,7 @@ using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
 using Tamma.Api.Services.Agents;
+using Tamma.ElsaServer.Workflows.Helpers;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -82,19 +83,34 @@ public class TestCaseCreationWorkflow : WorkflowBase
         {
             Id = "GenerateTests", Name = "Generate Tests",
             WorkflowDefinitionId = new("llm-call"),
-            Input = new(ctx => new Dictionary<string, object>
+            Input = new(ctx =>
             {
-                ["role"] = AgentRole.Tester.ToWire(),
-                ["action"] = AgentAction.WriteTests.ToWire(),
-                ["variables"] = new Dictionary<string, object>
+                var variables = new Dictionary<string, object>
                 {
                     ["tasksJson"] = tasksJson.Get(ctx),
                     ["contextIds"] = contextIds.Get(ctx),
                     ["repository"] = repository.Get(ctx),
                     ["branchName"] = branchName.Get(ctx),
-                    ["validationErrors"] = validationErrors.Get(ctx),
-                },
-                ["enableTools"] = true,
+                };
+
+                // On retry, surface the prior attempt's validation errors through
+                // testTarget — a variable the WriteTests template actually declares
+                // ({{testTarget}}). The old "validationErrors" key was undeclared in
+                // the template and silently dropped at render, so retries
+                // re-prompted blind. First attempt: key omitted entirely so the
+                // rendered prompt is unchanged from before.
+                var feedback = ValidationFeedbackHelper.AppendFeedback(
+                    baseValue: null, validationErrors.Get(ctx));
+                if (feedback.Length > 0)
+                    variables["testTarget"] = feedback;
+
+                return new Dictionary<string, object>
+                {
+                    ["role"] = AgentRole.Tester.ToWire(),
+                    ["action"] = AgentAction.WriteTests.ToWire(),
+                    ["variables"] = variables,
+                    ["enableTools"] = true,
+                };
             }),
             WaitForCompletion = new(true),
             Result = new(llmResult),

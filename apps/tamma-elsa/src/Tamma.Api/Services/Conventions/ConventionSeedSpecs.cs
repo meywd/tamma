@@ -16,7 +16,7 @@ public sealed record ConventionSeedSpec(string Role, string Action, string Body)
 ///
 /// <para><b>Single source of truth.</b> The <c>(role, action)</c> keyset is
 /// derived by iterating <see cref="RolePhaseMap.EligibleActions"/> — the
-/// IDENTICAL iteration <c>SystemPrompts.BuildRoleActionTemplates()</c> uses for
+/// IDENTICAL iteration <c>PromptFileLoader.Build</c> (behind <c>SystemPrompts</c>) uses for
 /// the prompt registry. Both the prompt seed (in code) and the convention seed
 /// (DB rows) thus key off the same frozen taxonomy and CANNOT drift; the
 /// anti-drift test (Story 27-16 AC2/AC5) asserts the three keysets — prompt

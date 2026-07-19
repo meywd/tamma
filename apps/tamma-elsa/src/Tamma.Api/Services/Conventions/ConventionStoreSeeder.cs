@@ -29,7 +29,7 @@ public sealed class ConventionStoreSeederOptions
 /// <para><b>Single source of truth / anti-drift.</b> The <c>(role, action)</c>
 /// keyset comes from <see cref="ConventionSeedSpecs.Build"/>, which iterates
 /// <c>RolePhaseMap.EligibleActions</c> — the IDENTICAL iteration the prompt
-/// registry (<c>SystemPrompts.BuildRoleActionTemplates</c>) uses. The two seeds
+/// registry (<c>PromptFileLoader.Build</c> behind <c>SystemPrompts</c>) uses. The two seeds
 /// share one source, so they cannot drift; an anti-drift test pins the three
 /// keysets (prompt registry, convention seed, taxonomy) set-equal.</para>
 ///

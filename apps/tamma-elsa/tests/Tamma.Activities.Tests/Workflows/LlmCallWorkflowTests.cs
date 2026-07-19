@@ -1,4 +1,5 @@
 using System.Reflection;
+using Elsa.Expressions.Models;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
@@ -9,6 +10,7 @@ using Elsa.Workflows.Runtime.Activities;
 using FluentAssertions;
 using Moq;
 using NUnit.Framework;
+using Tamma.Activities.LlmCall;
 using Tamma.ElsaServer.Workflows;
 
 namespace Tamma.Activities.Tests.Workflows;
@@ -187,5 +189,180 @@ public class LlmCallWorkflowTests
 
         setOutputs.Should().NotBeNull(
             "LlmCallWorkflow should have a SetOutputs terminal node");
+    }
+
+    // ================================================================
+    // Typed-dispatch prompt fix (Story 32-5 T6 follow-up) — the
+    // registry-rendered prompt / role / action / variables / registry
+    // MaxTokens must be wired from the workflow variables into
+    // CallLlmInlineActivity, and the ResolvePrompt MaxTokens output must
+    // be bound (it was previously dropped).
+    // ================================================================
+
+    [Test]
+    public void HasRegistryMaxTokensVariable()
+    {
+        var varNames = _builder.Object.Variables
+            .Where(v => v.Name != null).Select(v => v.Name).ToList();
+
+        varNames.Should().Contain("RegistryMaxTokens",
+            "the registry-resolved MaxTokens output needs a variable to land in");
+    }
+
+    [Test]
+    public void ResolvePrompt_BindsMaxTokensOutput_ToRegistryMaxTokensVariable()
+    {
+        var resolvePrompt = _flowchart.Activities
+            .OfType<ResolvePromptFromRegistryActivity>()
+            .FirstOrDefault(a => a.Id == "ResolvePrompt");
+        resolvePrompt.Should().NotBeNull();
+
+        resolvePrompt!.MaxTokens.Should().NotBeNull(
+            "the MaxTokens output must be bound — previously it was dropped, so the registry MaxTokens never reached the provider");
+
+        var boundBlock = resolvePrompt.MaxTokens.MemoryBlockReference();
+        var registryVar = _builder.Object.Variables.First(v => v.Name == "RegistryMaxTokens");
+        boundBlock.Should().BeSameAs(registryVar,
+            "the MaxTokens output must write the RegistryMaxTokens workflow variable");
+    }
+
+    [Test]
+    public void CallLlm_TypedDispatchProps_ReadTheWorkflowVariables()
+    {
+        // The load-bearing wiring for THE BUG: on typed dispatches the wire
+        // request is built from these props, so each must evaluate to the
+        // corresponding workflow variable's value.
+        var callLlm = WalkAll(_flowchart)
+            .OfType<Tamma.Activities.LlmCall.CallLlmInlineActivity>()
+            .FirstOrDefault(a => a.Id == "CallLlm");
+        callLlm.Should().NotBeNull("the retry loop must contain the CallLlm activity");
+
+        var ctx = CreateContextWithVariables(new Dictionary<string, object?>
+        {
+            ["TaskPrompt"] = "RENDERED-REGISTRY-PROMPT",
+            ["AgentRole"] = "architect",
+            ["Action"] = "plan-implementation",
+            ["VariablesJson"] = "{\"conventions\":\"use tabs\"}",
+            ["RegistryMaxTokens"] = 8192,
+        });
+
+        EvaluateInput(callLlm!.RenderedPromptProp, ctx).Should().Be("RENDERED-REGISTRY-PROMPT",
+            "RenderedPromptProp must read the registry-rendered TaskPrompt variable");
+        EvaluateInput(callLlm.AgentRoleProp, ctx).Should().Be("architect",
+            "AgentRoleProp must read the AgentRole variable");
+        EvaluateInput(callLlm.ActionProp, ctx).Should().Be("plan-implementation",
+            "ActionProp must read the Action variable");
+        EvaluateInput(callLlm.VariablesJsonProp, ctx).Should().Be("{\"conventions\":\"use tabs\"}",
+            "VariablesJsonProp must read the merged VariablesJson variable");
+        EvaluateInput(callLlm.RegistryMaxTokensProp, ctx).Should().Be(8192,
+            "RegistryMaxTokensProp must read the RegistryMaxTokens variable");
+    }
+
+    // ================================================================
+    // Helpers for the typed-dispatch wiring tests
+    // ================================================================
+
+    /// <summary>Depth-first walk over the built activity graph, descending into
+    /// the container types LlmCallWorkflow uses (Flowchart / Sequence / If /
+    /// While / ForEach&lt;string&gt;).</summary>
+    private static IEnumerable<IActivity> WalkAll(IActivity activity)
+    {
+        yield return activity;
+
+        var children = activity switch
+        {
+            Flowchart f => f.Activities.AsEnumerable(),
+            Sequence s => s.Activities.AsEnumerable(),
+            If i => new[] { i.Then, i.Else }.Where(a => a != null).Cast<IActivity>(),
+            While w => w.Body != null ? new[] { w.Body } : Enumerable.Empty<IActivity>(),
+            ForEach<string> fe => fe.Body != null ? new[] { fe.Body } : Enumerable.Empty<IActivity>(),
+            _ => Enumerable.Empty<IActivity>(),
+        };
+
+        foreach (var child in children)
+            foreach (var descendant in WalkAll(child))
+                yield return descendant;
+    }
+
+    /// <summary>Builds a minimal <see cref="ExpressionExecutionContext"/> with
+    /// every workflow variable declared, and the named ones pre-set — so a
+    /// delegate-backed <c>Input&lt;T&gt;</c> can be evaluated for real (the
+    /// pattern established by <c>UpdateIssueStatusWorkflowTests</c>).</summary>
+    private ExpressionExecutionContext CreateContextWithVariables(Dictionary<string, object?> values)
+    {
+        var memory = new MemoryRegister(new Dictionary<string, MemoryBlock>());
+        var ctx = new ExpressionExecutionContext(
+            NullServiceProvider.Instance, memory, null, null, null, default);
+
+        var counter = 0;
+        foreach (var variable in _builder.Object.Variables)
+        {
+            EnsureUniqueId(variable, ref counter);
+            try { memory.Declare(variable); } catch { /* duplicate ids resolve below */ }
+        }
+
+        foreach (var variable in _builder.Object.Variables)
+        {
+            if (variable.Name != null && values.TryGetValue(variable.Name, out var value))
+                variable.Set(ctx, value);
+        }
+
+        return ctx;
+    }
+
+    /// <summary>Extracts the delegate behind a delegate-backed input and invokes
+    /// it against the given context.</summary>
+    private static object? EvaluateInput(object input, ExpressionExecutionContext ctx)
+    {
+        var expression = input.GetType()
+            .GetProperty("Expression", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            ?.GetValue(input) as Expression;
+
+        expression.Should().NotBeNull("the prop must be wired to an expression (not left at its literal default)");
+        expression!.Value.Should().BeAssignableTo<Delegate>(
+            "the prop must be delegate-backed (reading a workflow variable), not a literal");
+
+        return UnwrapAsyncResult(((Delegate)expression.Value!).DynamicInvoke(ctx));
+    }
+
+    /// <summary>
+    /// Elsa builds the variable-reading delegate sync or async depending on
+    /// which expression descriptors are registered in static state when the
+    /// workflow is built — parallel test fixtures make that order-dependent.
+    /// DynamicInvoke then returns either the value or an unawaited
+    /// Task&lt;T&gt;/ValueTask&lt;T&gt; whose ToString prints the inner value,
+    /// so assertions must unwrap before comparing.
+    /// </summary>
+    private static object? UnwrapAsyncResult(object? result)
+    {
+        if (result is null) return null;
+        var type = result.GetType();
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(ValueTask<>))
+            result = type.GetMethod("AsTask")!.Invoke(result, null);
+        if (result is Task task)
+        {
+            task.GetAwaiter().GetResult();
+            return task.GetType().GetProperty("Result")?.GetValue(task);
+        }
+        return result;
+    }
+
+    private static void EnsureUniqueId(MemoryBlockReference reference, ref int counter)
+    {
+        try { if (!string.IsNullOrEmpty(reference.Id)) return; }
+        catch { return; }
+        var idProp = typeof(MemoryBlockReference).GetProperty("Id",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (idProp?.CanWrite == true)
+        {
+            try { idProp.SetValue(reference, $"__llmwf_{counter++}"); }
+            catch { /* leave as-is */ }
+        }
+    }
+
+    private sealed class NullServiceProvider : IServiceProvider
+    {
+        public static readonly NullServiceProvider Instance = new();
+        public object? GetService(Type serviceType) => null;
     }
 }

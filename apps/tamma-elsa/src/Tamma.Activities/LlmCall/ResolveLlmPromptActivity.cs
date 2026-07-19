@@ -146,7 +146,5 @@ public class ResolveLlmPromptActivity : CodeActivity<ResolvedPrompt>
 
     private const string HardcodedFallbackPrompt =
         "You are Tamma, an AI-powered development assistant. " +
-        "Provide clear, accurate, and helpful responses. " +
-        "Focus on actionable guidance and best practices. " +
-        "Be concise but thorough.";
+        "Provide clear, accurate, and helpful responses.";
 }

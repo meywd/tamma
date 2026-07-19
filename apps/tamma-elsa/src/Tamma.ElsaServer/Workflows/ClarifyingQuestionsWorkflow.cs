@@ -30,7 +30,8 @@ namespace Tamma.ElsaServer.Workflows;
 ///      role=product_owner / action=clarify-requirements
 ///   3. Deliver questions to the issue (mediated git seam) — emit CLARIFY.QUESTIONS.DELIVERED
 ///   4. Wait for answers (bookmark, durable SLA timeout)
-///   5a. On answer: incorporate via DispatchWorkflow("llm-call"), emit
+///   5a. On answer: incorporate via DispatchWorkflow("llm-call")
+///       role=product_owner / action=incorporate-answers, emit
 ///       CLARIFY.REQUIREMENTS.CLARIFIED, set outputs
 ///   5b. On timeout: emit CLARIFY.ANSWERS.TIMED_OUT (LOUD), set outputs
 ///
@@ -258,7 +259,7 @@ public class ClarifyingQuestionsWorkflow : WorkflowBase
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["role"]     = AgentRole.ProductOwner.ToWire(),
-                ["action"]   = AgentAction.ClarifyRequirements.ToWire(),
+                ["action"]   = AgentAction.IncorporateAnswers.ToWire(),
                 ["tenantId"] = tenantId.Get(ctx),
                 ["variables"] = new Dictionary<string, object>
                 {

@@ -218,5 +218,50 @@ jobs:
       - name: Build
         run: dotnet build Tamma.sln --no-restore -c Release
 
+      # --blame-hang: the run twice exited 1 with all tests passing (a test
+      # host kept alive past shutdown; runner cleanup killed orphaned dotnet
+      # processes). Blame mode names the project/host that fails to exit and
+      # dumps its live threads within the timeout instead of failing silently.
+      # Per-project loop with an explicit PROJECT-FAILED marker and a final
+      # recap: the solution-level run kept exiting 1 while Tamma.Api.Tests
+      # (4860 tests, the log-dominating last project) passed — the failing
+      # project's output was always pushed beyond the retrievable log window.
+      # The recap block at the end of the step names every failing project
+      # regardless of how much output preceded it.
       - name: Test
-        run: dotnet test Tamma.sln --no-build -c Release --verbosity normal
+        run: |
+          rc=0
+          failed=""
+          mkdir -p /tmp/test-logs
+          for proj in tests/*/; do
+            name=$(basename "$proj")
+            echo "::group::$name"
+            if dotnet test "$proj" --no-build -c Release --verbosity minimal --logger trx --blame-hang --blame-hang-timeout 8m > "/tmp/test-logs/$name.log" 2>&1; then
+              tail -4 "/tmp/test-logs/$name.log"
+            else
+              echo "PROJECT-FAILED: $name"
+              failed="$failed $name"
+              rc=1
+            fi
+            echo "::endgroup::"
+          done
+          echo "==== TEST RECAP ===="
+          if [ $rc -ne 0 ]; then
+            echo "FAILED PROJECTS:$failed"
+            for n in $failed; do
+              echo "---- OUTPUT OF FAILED PROJECT $n (tail 400) ----"
+              tail -400 "/tmp/test-logs/$n.log"
+            done
+          else
+            echo "ALL PROJECTS PASSED"
+          fi
+          exit $rc
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-test-results
+          path: |
+            apps/tamma-elsa/tests/**/TestResults/**
+          if-no-files-found: ignore

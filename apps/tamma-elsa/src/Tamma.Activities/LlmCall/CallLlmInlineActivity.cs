@@ -72,6 +72,34 @@ public class CallLlmInlineActivity : CodeActivity
     [Input(Description = "Tenant id (GUID string) for BYOK credential resolution; empty = single-user/platform")]
     public Input<string?> TenantIdProp { get; set; } = new((string?)null);
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Typed-dispatch props (Story 32-5 T6 follow-up — typed-path prompt fix).
+    //
+    // On the TYPED dispatch path (agentRole/action/variables workflow inputs)
+    // the legacy InputJson is empty, so the InputJson-only mapping used to send
+    // Prompt="" / Role="developer" / Action=null — the registry-rendered
+    // prompt never reached the provider. These props carry the workflow's
+    // resolved values (taskPromptVar / agentRoleVar / actionVar /
+    // variablesJsonVar / the registry MaxTokens output). When present they
+    // take precedence in <see cref="BuildLlmCallRequest"/>; when absent the
+    // legacy InputJson mapping is byte-identical to before.
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Input(Description = "Resolved agent role (typed dispatch); empty = derive from InputJson")]
+    public Input<string?> AgentRoleProp { get; set; } = new((string?)null);
+
+    [Input(Description = "Registry action (typed dispatch); empty = derive from InputJson OperationName")]
+    public Input<string?> ActionProp { get; set; } = new((string?)null);
+
+    [Input(Description = "Registry-rendered prompt (typed dispatch); empty = InputJson UserPrompt")]
+    public Input<string?> RenderedPromptProp { get; set; } = new((string?)null);
+
+    [Input(Description = "Merged template variables JSON (registry path only; requires a non-empty action)")]
+    public Input<string?> VariablesJsonProp { get; set; } = new((string?)null);
+
+    [Input(Description = "Registry-resolved max tokens (registry path only; 0 = unset → InputJson/legacy default)")]
+    public Input<int> RegistryMaxTokensProp { get; set; } = new(0);
+
     private readonly ILogger<CallLlmInlineActivity>? _logger;
     private readonly TammaApiClient? _apiClient;
 
@@ -130,6 +158,11 @@ public class CallLlmInlineActivity : CodeActivity
         var enableToolLoop = EnableToolLoopProp.Get(context);
         var toolLoopConfigJson = ToolLoopConfigJsonProp.Get(context);
         var tenantIdRaw = TenantIdProp.Get(context);
+        var agentRole = AgentRoleProp.Get(context);
+        var action = ActionProp.Get(context);
+        var renderedPrompt = RenderedPromptProp.Get(context);
+        var variablesJson = VariablesJsonProp.Get(context);
+        var registryMaxTokens = RegistryMaxTokensProp.Get(context);
 
         var input = ParseInput(inputJson);
         var toolLoopConfig = ParseToolLoopConfig(toolLoopConfigJson);
@@ -145,7 +178,8 @@ public class CallLlmInlineActivity : CodeActivity
         // engine forwards NO system prompt.
         var request = BuildLlmCallRequest(
             input, providerName, systemPrompt, toolsJson, model,
-            enableToolLoop, toolLoopConfig, tenantIdRaw, correlationId);
+            enableToolLoop, toolLoopConfig, tenantIdRaw, correlationId,
+            agentRole, action, renderedPrompt, variablesJson, registryMaxTokens);
 
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
         var tenantHeader = string.IsNullOrWhiteSpace(tenantIdRaw) ? null : tenantIdRaw!.Trim();
@@ -191,6 +225,21 @@ public class CallLlmInlineActivity : CodeActivity
     /// Map the activity's input props into the wire <see cref="LlmCallApiRequest"/>.
     /// Static + context-free so it is unit-testable (the convention used by
     /// <see cref="ResolvePromptFromRegistryActivity.CallResolveAsync"/>).
+    ///
+    /// <para><b>Typed dispatch fix.</b> The trailing optional parameters carry the
+    /// workflow's TYPED values (agentRoleVar / actionVar / the registry-rendered
+    /// taskPromptVar / merged variablesJsonVar / the registry MaxTokens output).
+    /// When present they win over the legacy <paramref name="input"/> mapping —
+    /// this is what makes the registry-rendered prompt actually reach the
+    /// provider on typed dispatches (where InputJson is empty). When absent
+    /// (null/empty/0) the legacy InputJson mapping is byte-identical to before.</para>
+    ///
+    /// <para><b>Registry-path gating.</b> The merged template variables and the
+    /// registry-resolved MaxTokens apply ONLY when a non-empty typed
+    /// <paramref name="action"/> is present (the registry path). The empty-action
+    /// fallback path writes a hard-coded 4096 MaxTokens and a placeholder
+    /// variables bag ({"conventions": …}); letting those through would override a
+    /// legacy caller's explicit <c>input.MaxTokens</c> / empty variables.</para>
     /// </summary>
     public static LlmCallApiRequest BuildLlmCallRequest(
         LlmCallWorkflowInput input,
@@ -201,7 +250,12 @@ public class CallLlmInlineActivity : CodeActivity
         bool enableToolLoop,
         ToolLoopConfig toolLoopConfig,
         string? tenantIdRaw,
-        string correlationId)
+        string correlationId,
+        string? agentRole = null,
+        string? action = null,
+        string? renderedPrompt = null,
+        string? variablesJson = null,
+        int registryMaxTokens = 0)
     {
         // Finding I-1 — the API renders the prompt AUTHORITATIVELY (Epic 27,
         // (principal, role, action) resolution). The engine forwards NO system
@@ -213,22 +267,40 @@ public class CallLlmInlineActivity : CodeActivity
         _ = systemPrompt;
         var tools = DeserializeResolvedTools(toolsJson)?.Select(t => t.Name).ToList();
 
+        // Typed values win when present; otherwise the legacy InputJson mapping
+        // below is unchanged.
+        var role = !string.IsNullOrWhiteSpace(agentRole)
+            ? agentRole!
+            // Canonical AgentRole wire default — the endpoint 422s on an unknown role.
+            : (string.IsNullOrWhiteSpace(input.Role) ? "developer" : input.Role);
+        var wireAction = !string.IsNullOrWhiteSpace(action)
+            ? action
+            : (string.IsNullOrWhiteSpace(input.OperationName) ? null : input.OperationName);
+        var prompt = !string.IsNullOrWhiteSpace(renderedPrompt) ? renderedPrompt! : input.UserPrompt;
+
+        // Registry path only (see XML doc): variables + registry MaxTokens are
+        // gated on a non-empty TYPED action.
+        var onRegistryPath = !string.IsNullOrWhiteSpace(action);
+        var variables = onRegistryPath
+            ? ParseVariables(variablesJson)
+            : new Dictionary<string, object?>();
+        var maxTokens = onRegistryPath && registryMaxTokens > 0 ? registryMaxTokens : input.MaxTokens;
+
         return new LlmCallApiRequest
         {
             TenantId = ParseTenantId(tenantIdRaw),
             Provider = string.IsNullOrWhiteSpace(providerName) ? null : providerName,
-            // Canonical AgentRole wire default — the endpoint 422s on an unknown role.
-            Role = string.IsNullOrWhiteSpace(input.Role) ? "developer" : input.Role,
-            Action = string.IsNullOrWhiteSpace(input.OperationName) ? null : input.OperationName,
-            Prompt = input.UserPrompt,
-            Variables = new Dictionary<string, object?>(),
+            Role = role,
+            Action = wireAction,
+            Prompt = prompt,
+            Variables = variables,
             Model = model,
             Tools = tools is { Count: > 0 } ? tools : null,
             EnableToolLoop = enableToolLoop,
             ToolLoopConfig = enableToolLoop ? toolLoopConfig : null,
             Params = new LlmCallApiParams
             {
-                MaxTokens = input.MaxTokens,
+                MaxTokens = maxTokens,
                 Temperature = input.Temperature,
                 BudgetCapUsd = input.BudgetCapUsd,
             },
@@ -377,6 +449,25 @@ public class CallLlmInlineActivity : CodeActivity
         if (string.IsNullOrWhiteSpace(json)) return new LlmCallWorkflowInput();
         try { return JsonSerializer.Deserialize<LlmCallWorkflowInput>(json) ?? new LlmCallWorkflowInput(); }
         catch { return new LlmCallWorkflowInput(); }
+    }
+
+    /// <summary>
+    /// Parse the merged variables JSON (typed dispatch, registry path) into the
+    /// wire variables map. Empty / whitespace / unparseable ⇒ empty map (the
+    /// legacy wire shape).
+    /// </summary>
+    private static Dictionary<string, object?> ParseVariables(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new Dictionary<string, object?>();
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, object?>>(json)
+                ?? new Dictionary<string, object?>();
+        }
+        catch
+        {
+            return new Dictionary<string, object?>();
+        }
     }
 
     private static ToolLoopConfig ParseToolLoopConfig(string? json)

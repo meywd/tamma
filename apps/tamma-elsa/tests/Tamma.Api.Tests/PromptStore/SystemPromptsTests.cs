@@ -25,7 +25,7 @@ public class SystemPromptsTests
     [Test]
     public void RoleActionTemplates_MatchesJaggedTaxonomyCellCount()
     {
-        // 85 cells (72 distinct action tokens; shared tokens repeat across
+        // 87 cells (79 distinct action tokens; shared tokens repeat across
         // roles). Asserted against the live taxonomy so it never drifts.
         SystemPrompts.RoleActionTemplates.Should().HaveCount(ExpectedCellCount);
     }

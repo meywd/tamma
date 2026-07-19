@@ -1,0 +1,3 @@
+# Prompt registry files are parsed by an LF-only front-matter loader
+# (PromptFileLoader) — CRLF would fail startup loudly. Pin them to LF.
+apps/tamma-elsa/src/Tamma.Api/Prompts/**/*.md text eol=lf

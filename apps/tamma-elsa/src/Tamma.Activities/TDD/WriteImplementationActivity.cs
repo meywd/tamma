@@ -151,7 +151,7 @@ public class WriteImplementationActivity : CodeActivity<ImplementationResult>
             ? $"\n\nExisting code context:\n{codeContext}"
             : "";
 
-        return $@"You are a TDD implementer. Write the MINIMUM implementation needed to make ALL the following tests pass. Do not over-engineer — write just enough code to satisfy the tests.
+        return $@"Write the MINIMUM implementation needed to make ALL the following tests pass. Do not over-engineer and do not break any existing tests — write just enough simple, focused code to satisfy the tests, following the project's coding conventions.
 
 Task: {taskDescription}
 
@@ -163,12 +163,6 @@ Tests to satisfy:
 {contextSection}
 
 {guidance}
-
-Requirements:
-1. Write the minimum code to make all tests pass
-2. Do not break any existing tests
-3. Follow the project's coding conventions
-4. Keep the implementation simple and focused
 
 Respond with JSON: {{""implementationCode"": ""..."", ""implementationFiles"": [""...""]}}";
     }
@@ -186,11 +180,13 @@ Respond with JSON: {{""implementationCode"": ""..."", ""implementationFiles"": [
         });
     }
 
-    private static ImplementationResult ParseImplementationResponse(string response)
+    internal static ImplementationResult ParseImplementationResponse(string response)
     {
         try
         {
-            var json = JsonSerializer.Deserialize<JsonElement>(response);
+            // LLM replies are often markdown-fenced / prose-wrapped — slice the
+            // embedded JSON object (shared idiom) before deserializing.
+            var json = JsonSerializer.Deserialize<JsonElement>(JsonSlice.ExtractObject(response) ?? response);
 
             var code = json.TryGetProperty("implementationCode", out var ic)
                 ? ic.GetString() ?? ""

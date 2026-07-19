@@ -410,12 +410,11 @@ public class DebuggingWorkflow : WorkflowBase
         { Id = "serializeDiagnosis", Name = "Serialize Diagnosis Hypotheses" };
         serializeDiagnosis.SetDisplayText("Serialize Diagnosis Hypotheses");
 
-        // #8: DEBUG.DIAGNOSIS.SUCCESS / .FAILED (failed == zero usable hypotheses)
+        // #8: DEBUG.DIAGNOSIS.SUCCESS / .FAILED (failed == diagnosis failed — e.g.
+        // unparseable LLM output / failed call — OR zero usable hypotheses). Shared
+        // predicate: DebugEvents.IsDiagnosisProduced.
         var diagnosisProduced = new FlowDecision(ctx =>
-        {
-            var result = diagnosisResultVar.Get(ctx);
-            return result?.Hypotheses != null && result.Hypotheses.Count > 0;
-        })
+            DebugEvents.IsDiagnosisProduced(diagnosisResultVar.Get(ctx)))
         { Id = "diagnosisProduced", Name = "Diagnosis Produced?" };
         diagnosisProduced.SetDisplayText("Diagnosis Produced?");
 
@@ -442,7 +441,9 @@ public class DebuggingWorkflow : WorkflowBase
             TenantId = new Input<string?>(ctx => tenantId.Get(ctx)),
             Iteration = new Input<int>(ctx => currentIteration.Get(ctx)),
             MaxIterations = new Input<int>(ctx => maxIterations.Get(ctx)),
-            Reason = new Input<string?>(_ => DebugEvents.ReasonNoHypothesis),
+            // Carry the diagnosis's own failure reason (e.g. diagnosis-parse-failure)
+            // into the event data; genuinely-empty hypotheses keep the legacy reason.
+            Reason = new Input<string?>(ctx => DebugEvents.DiagnosisFailureReason(diagnosisResultVar.Get(ctx))),
         };
         emitDiagnosisFailed.SetDisplayText("Emit DEBUG.DIAGNOSIS.FAILED");
 

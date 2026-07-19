@@ -29,8 +29,10 @@ public class AgentActionTests
         // (Story 3.4 — dedicated research/investigate token under product_owner)
         // + 1 score-ambiguity action (Story 3.6 — dedicated ambiguity-scoring token
         // under product_owner) + 1 decompose-issue action (Story 2.14 — dedicated
-        // issue-decomposition token under senior_developer).
-        Enum.GetValues<AgentAction>().Length.Should().Be(77);
+        // issue-decomposition token under senior_developer) + 1 incorporate-answers
+        // (product_owner) and 1 propose-design (architect) — taxonomy split so each
+        // (role, action) cell carries exactly one output contract.
+        Enum.GetValues<AgentAction>().Length.Should().Be(79);
     }
 
     [TestCase("context-scan", AgentAction.ContextScan)]

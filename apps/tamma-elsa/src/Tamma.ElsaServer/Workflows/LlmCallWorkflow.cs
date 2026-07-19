@@ -88,6 +88,12 @@ public class LlmCallWorkflow : WorkflowBase
         var resolvedSystemPromptVar = builder.WithVariable<string>("ResolvedSystemPrompt", "");
         var resolvedToolsJsonVar = builder.WithVariable<string>("ResolvedToolsJson", "");
 
+        // Registry-resolved MaxTokens (ResolvePromptFromRegistryActivity output).
+        // 0 = not yet resolved; the activity always writes ≥ 4096 once it runs.
+        // Applied to the wire Params.MaxTokens only on the registry path (non-
+        // empty action) — see CallLlmInlineActivity.BuildLlmCallRequest.
+        var registryMaxTokensVar = builder.WithVariable<int>("RegistryMaxTokens", 0);
+
         // Story 27-13 — conventions resolved from the convention store (or the
         // legacy `.tamma/config.json` string for the empty-action passthrough
         // path). Feeds {{conventions}} in the prompt-render variables.
@@ -280,6 +286,7 @@ public class LlmCallWorkflow : WorkflowBase
             ResolvedPrompt = new Output<string>(taskPromptVar), // overrides taskPrompt with rendered template
             ResolvedSystemPrompt = new Output<string>(resolvedSystemPromptVar),
             EnableTools = new Output<bool>(enableToolLoopVar),
+            MaxTokens = new Output<int>(registryMaxTokensVar),
         };
         resolvePrompt.SetDisplayText("Resolve Prompt");
 
@@ -519,6 +526,10 @@ public class LlmCallWorkflow : WorkflowBase
                                                         BuildRetryLoop(
                                                             inputVar,
                                                             taskPromptVar,
+                                                            agentRoleVar,
+                                                            actionVar,
+                                                            variablesJsonVar,
+                                                            registryMaxTokensVar,
                                                             currentProviderVar,
                                                             resolvedSystemPromptVar,
                                                             resolvedToolsJsonVar,
@@ -743,6 +754,10 @@ public class LlmCallWorkflow : WorkflowBase
     private static While BuildRetryLoop(
         Variable<string> inputVar,
         Variable<string> taskPromptVar,
+        Variable<string> agentRoleVar,
+        Variable<string> actionVar,
+        Variable<string> variablesJsonVar,
+        Variable<int> registryMaxTokensVar,
         Variable<string> currentProviderVar,
         Variable<string> resolvedSystemPromptVar,
         Variable<string> resolvedToolsJsonVar,
@@ -898,7 +913,17 @@ public class LlmCallWorkflow : WorkflowBase
                     ToolLoopConfigJsonProp = new(context => toolLoopConfigJsonVar.Get(context)),
                     // Story 32-3 (AC3) — thread the tenant id for BYOK credential
                     // resolution (same pattern as the prompt/convention steps).
-                    TenantIdProp = new(context => tenantIdVar.Get(context))
+                    TenantIdProp = new(context => tenantIdVar.Get(context)),
+                    // Typed-dispatch fix — thread the registry-rendered prompt +
+                    // role/action/variables + registry MaxTokens so the wire
+                    // request carries them on typed dispatches (where InputJson
+                    // is empty). BuildLlmCallRequest prefers these when present
+                    // and keeps the legacy InputJson mapping otherwise.
+                    AgentRoleProp = new(context => agentRoleVar.Get(context)),
+                    ActionProp = new(context => actionVar.Get(context)),
+                    RenderedPromptProp = new(context => taskPromptVar.Get(context)),
+                    VariablesJsonProp = new(context => variablesJsonVar.Get(context)),
+                    RegistryMaxTokensProp = new(context => registryMaxTokensVar.Get(context))
                 }, "Call LLM"),
                 WithLabel(new RecordDiagnosticsInlineActivity
                 {

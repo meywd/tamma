@@ -28,7 +28,7 @@ namespace Tamma.ElsaServer.Workflows;
 /// Flow:
 ///   1. Read inputs (issue/requirement + constraints + tenantId; mint a session id if none)
 ///   2. Generate the design proposal via DispatchWorkflow("llm-call")
-///      role=architect / action=plan-system-design
+///      role=architect / action=propose-design
 ///   3. Deliver the proposal to the issue (mediated git seam) — emit DESIGN.PROPOSAL.DELIVERED
 ///   4. Wait for the review decision (bookmark, durable SLA timeout)
 ///   5a. On approve: emit DESIGN.PROPOSAL.APPROVED, set outputs (proceed to implementation)
@@ -124,7 +124,7 @@ public class DesignProposalWorkflow : WorkflowBase
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["role"]     = AgentRole.Architect.ToWire(),
-                ["action"]   = AgentAction.PlanSystemDesign.ToWire(),
+                ["action"]   = AgentAction.ProposeDesign.ToWire(),
                 ["tenantId"] = tenantId.Get(ctx),
                 ["variables"] = new Dictionary<string, object>
                 {

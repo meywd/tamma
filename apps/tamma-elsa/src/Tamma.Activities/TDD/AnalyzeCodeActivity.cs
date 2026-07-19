@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Tamma.Activities.Core;
 using Tamma.Activities.LlmCall;
 using Tamma.Activities.TDD.Models;
 
@@ -119,7 +120,7 @@ public class AnalyzeCodeActivity : CodeActivity<RefactoringAnalysis>
     {
         var guidance = SkillLevelPromptDetail.GetRefactoringGuidance(skillLevel);
 
-        return $@"You are a code reviewer. Identify refactoring opportunities in the code that was just written during a TDD cycle. Focus on improvements that maintain correctness while improving quality.
+        return $@"Identify refactoring opportunities in the code that was just written during a TDD cycle. Suggest only improvements that maintain correctness while improving quality.
 
 Tests:
 ```
@@ -132,13 +133,6 @@ Implementation:
 ```
 
 {guidance}
-
-Analyze for:
-1. Code duplication
-2. Naming improvements
-3. Design pattern opportunities
-4. Simplification possibilities
-5. Performance improvements (if obvious)
 
 Respond with JSON:
 {{
@@ -186,11 +180,13 @@ Respond with JSON:
         });
     }
 
-    private static RefactoringAnalysis ParseAnalysisResponse(string response, double confidenceThreshold)
+    internal static RefactoringAnalysis ParseAnalysisResponse(string response, double confidenceThreshold)
     {
         try
         {
-            var json = JsonSerializer.Deserialize<JsonElement>(response);
+            // LLM replies are often markdown-fenced / prose-wrapped — slice the
+            // embedded JSON object (shared idiom) before deserializing.
+            var json = JsonSerializer.Deserialize<JsonElement>(JsonSlice.ExtractObject(response) ?? response);
 
             var hasSuggestions = json.TryGetProperty("hasSuggestions", out var hs) && hs.GetBoolean();
             var confidence = json.TryGetProperty("confidence", out var conf) ? conf.GetDouble() : 0;

@@ -308,6 +308,17 @@ public class DiagnosisResult
 
     /// <summary>Summary of the analysis</summary>
     public string AnalysisSummary { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Machine-readable failure reason when the diagnosis did NOT produce a usable
+    /// result (e.g. <see cref="DebugEvents.ReasonDiagnosisParseFailure"/> when the
+    /// LLM reply was unparseable, <see cref="DebugEvents.ReasonDiagnosisCallFailed"/>
+    /// when the mediated call itself failed). <c>null</c>/empty means the diagnosis
+    /// ran to completion (its hypothesis list may still legitimately be empty).
+    /// A failed diagnosis NEVER carries fabricated hypotheses — the caller gate in
+    /// <c>DebuggingWorkflow</c> routes on this to DEBUG.DIAGNOSIS.FAILED.
+    /// </summary>
+    public string? FailureReason { get; set; }
 }
 
 /// <summary>

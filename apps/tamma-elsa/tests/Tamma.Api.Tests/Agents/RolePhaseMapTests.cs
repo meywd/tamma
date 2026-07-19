@@ -11,12 +11,15 @@ namespace Tamma.Api.Tests.Agents;
 /// The 8 roles: developer, tester, security, devops, architect, product_owner,
 /// senior_developer, tech_writer.
 ///
-/// The 77 actions are the union of the per-role action sets in SPEC §4
+/// The 79 actions are the union of the per-role action sets in SPEC §4
 /// (72 original + 2 assessment actions: generate-assessment-questions,
 /// analyze-assessment-response under product_owner — added in assessment P0 —
 /// + 1 research action under product_owner, Story 3.4
 /// + 1 score-ambiguity action under product_owner, Story 3.6
-/// + 1 decompose-issue action under senior_developer, Story 2.14).
+/// + 1 decompose-issue action under senior_developer, Story 2.14
+/// + 1 incorporate-answers action under product_owner and 1 propose-design
+/// action under architect — taxonomy split so each (role, action) cell carries
+/// exactly one output contract).
 /// Which (role, action) pairs are valid is the per-role eligibility matrix.
 /// </summary>
 [TestFixture]
@@ -44,15 +47,19 @@ public class RolePhaseMapTests
     }
 
     [Test]
-    public void ValidActions_Should_Contain_Seventy_Seven_Actions()
+    public void ValidActions_Should_Contain_Seventy_Nine_Actions()
     {
         // 72 original actions + 2 assessment actions added in assessment P0
         // (generate-assessment-questions, analyze-assessment-response under product_owner)
         // + 1 research action (Story 3.4 — dedicated research token under product_owner)
         // + 1 score-ambiguity action (Story 3.6 — dedicated ambiguity-scoring token
         // under product_owner) + 1 decompose-issue action (Story 2.14 — dedicated
-        // issue-decomposition token under senior_developer).
-        RolePhaseMap.ValidActions.Should().HaveCount(77);
+        // issue-decomposition token under senior_developer)
+        // + 1 incorporate-answers action (product_owner — answer incorporation split
+        // out of clarify-requirements) + 1 propose-design action (architect — design
+        // proposal split out of plan-system-design), so each (role, action) cell
+        // carries exactly one output contract.
+        RolePhaseMap.ValidActions.Should().HaveCount(79);
     }
 
     [Test]
@@ -413,6 +420,57 @@ public class RolePhaseMapTests
     {
         // score-ambiguity is a product_owner-only action; a developer must not be eligible.
         RolePhaseMap.IsRoleEligibleForPhase("score-ambiguity", "developer").Should().BeFalse();
+    }
+
+    // -----------------------------------------------------------------------
+    // Taxonomy split — one (role, action) cell = one output contract.
+    // incorporate-answers (product_owner): ClarifyingQuestionsWorkflow's answer
+    // incorporation dispatch, split out of clarify-requirements.
+    // propose-design (architect): DesignProposalWorkflow's proposal dispatch,
+    // split out of plan-system-design.
+    // -----------------------------------------------------------------------
+
+    [Test]
+    public void ValidActions_Contains_IncorporateAnswers()
+    {
+        RolePhaseMap.ValidActions.Should().Contain("incorporate-answers");
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_IncorporateAnswers_ProductOwner_Returns_True()
+    {
+        // Answer incorporation belongs to the same role that asked the clarifying
+        // questions (ClarifyingQuestionsWorkflow dispatches
+        // (product_owner, incorporate-answers) for its second llm-call).
+        RolePhaseMap.IsRoleEligibleForPhase("incorporate-answers", "product_owner").Should().BeTrue();
+    }
+
+    [Test]
+    public void GetEligibleRolesForPhase_IncorporateAnswers_Is_ProductOwner_Only()
+    {
+        RolePhaseMap.GetEligibleRolesForPhase("incorporate-answers")
+            .Should().BeEquivalentTo(new[] { "product_owner" });
+    }
+
+    [Test]
+    public void ValidActions_Contains_ProposeDesign()
+    {
+        RolePhaseMap.ValidActions.Should().Contain("propose-design");
+    }
+
+    [Test]
+    public void IsRoleEligibleForPhase_ProposeDesign_Architect_Returns_True()
+    {
+        // Design proposals are the architect's charter (DesignProposalWorkflow
+        // dispatches (architect, propose-design)).
+        RolePhaseMap.IsRoleEligibleForPhase("propose-design", "architect").Should().BeTrue();
+    }
+
+    [Test]
+    public void GetEligibleRolesForPhase_ProposeDesign_Is_Architect_Only()
+    {
+        RolePhaseMap.GetEligibleRolesForPhase("propose-design")
+            .Should().BeEquivalentTo(new[] { "architect" });
     }
 
     // -----------------------------------------------------------------------

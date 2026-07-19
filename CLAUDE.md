@@ -608,7 +608,7 @@ CREATE TABLE prompt_overrides (
 );
 ```
 
-System defaults remain in code (e.g. `SystemPrompts.cs`). Overrides in Postgres. The Prompt Store reads the appropriate column based on mode and applies the per-mode resolution order above.
+System defaults live as repo files — `apps/tamma-elsa/src/Tamma.Api/Prompts/{role}/{action}.md` (one per taxonomy cell) plus `Prompts/{role}/_system.md` (role identity preambles), front matter carrying variables/enableTools/maxTokens/version — embedded in the binary and loaded at startup by `PromptFileLoader` (fail-loud: a taxonomy cell without a file, or a file outside the taxonomy, refuses to start). `SystemPrompts` is a facade over the loaded set. Overrides in Postgres. The Prompt Store reads the appropriate column based on mode and applies the per-mode resolution order above.
 
 ### API
 

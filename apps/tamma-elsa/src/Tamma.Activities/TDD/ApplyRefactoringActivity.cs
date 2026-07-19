@@ -139,7 +139,7 @@ public class ApplyRefactoringActivity : CodeActivity<RefactoringResult>
 
         var guidance = SkillLevelPromptDetail.GetRefactoringGuidance(skillLevel);
 
-        return $@"You are a TDD implementer applying refactoring. Apply the following refactoring suggestions to the implementation code. The refactored code MUST still pass all existing tests.
+        return $@"Apply the following refactoring suggestions to the implementation code. The refactored code MUST still pass all existing tests — do not change test files, and keep changes minimal and focused.
 
 Current implementation:
 ```
@@ -155,12 +155,6 @@ Refactoring suggestions to apply:
 {suggestionsText}
 
 {guidance}
-
-Requirements:
-1. Apply the suggested refactorings
-2. Maintain all existing functionality (tests must still pass)
-3. Do not change test files
-4. Keep changes minimal and focused
 
 Respond with JSON: {{""refactoredCode"": ""..."", ""filesChanged"": [""...""]}}";
     }
