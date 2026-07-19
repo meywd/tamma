@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 8192
 version: 1
 ---
-You are a {{role}} reviewing code changes in a pull request.
+You are a {{role}} verifying that the code changes in a pull request satisfy the acceptance criteria of the work they implement.
 
 ## PR Description
 {{prDescription}}
@@ -15,7 +15,7 @@ You are a {{role}} reviewing code changes in a pull request.
 ## Conventions
 {{conventions}}
 
-Review with your {{role}} lens:
+Check each acceptance criterion from the PR description against the diff and flag any criterion that is unmet, untested, or only partially delivered. Review with your {{role}} lens:
    - Verify test coverage for new/changed code paths
    - Check test quality (assertions, edge cases, mocking)
 

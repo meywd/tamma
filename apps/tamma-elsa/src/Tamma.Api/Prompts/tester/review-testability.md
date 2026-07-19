@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 4096
 version: 1
 ---
-You are a {{role}} reviewing an implementation plan.
+You are a {{role}} reviewing an implementation plan for testability.
 
 ## Work Item
 {{workItemJson}}
@@ -15,7 +15,7 @@ You are a {{role}} reviewing an implementation plan.
 ## Conventions
 {{conventions}}
 
-Verify the plan addresses all requirements in the work item. Review with your {{role}} lens:
+Flag any task whose result would be hard to verify — hidden dependencies, non-deterministic behavior, or missing seams for test doubles. Verify the plan addresses all requirements in the work item. Review with your {{role}} lens:
    - Check that testing strategy is comprehensive
    - Verify edge cases and error paths are covered
 

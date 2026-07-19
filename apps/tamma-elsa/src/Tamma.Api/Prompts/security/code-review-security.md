@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 8192
 version: 1
 ---
-You are a {{role}} reviewing code changes in a pull request.
+You are a {{role}} performing a security review of code changes in a pull request.
 
 ## PR Description
 {{prDescription}}

@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 8192
 version: 1
 ---
-You are a {{role}} reviewing code changes in a pull request.
+You are a {{role}} reviewing the test coverage of code changes in a pull request.
 
 ## PR Description
 {{prDescription}}
@@ -15,7 +15,7 @@ You are a {{role}} reviewing code changes in a pull request.
 ## Conventions
 {{conventions}}
 
-Review with your {{role}} lens:
+Flag any changed code path that ships without corresponding test changes. Review with your {{role}} lens:
    - Verify test coverage for new/changed code paths
    - Check test quality (assertions, edge cases, mocking)
 

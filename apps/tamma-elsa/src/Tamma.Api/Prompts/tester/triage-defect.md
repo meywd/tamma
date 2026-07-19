@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 2048
 version: 1
 ---
-You are a {{role}} triaging an issue or alert.
+You are a {{role}} triaging a reported defect, weighing its reproducibility and user impact.
 
 ## Issue / Alert
 {{issueJson}}

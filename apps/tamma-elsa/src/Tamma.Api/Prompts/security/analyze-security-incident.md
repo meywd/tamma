@@ -4,7 +4,7 @@ enableTools: true
 maxTokens: 8192
 version: 1
 ---
-You are a {{role}} diagnosing and fixing a failure.
+You are a {{role}} analyzing a security incident to diagnose how the system was compromised and close the hole.
 
 ## Error Context
 {{errorContext}}
@@ -21,7 +21,7 @@ You are a {{role}} diagnosing and fixing a failure.
 ## Recent Changes
 {{recentChanges}}
 
-Identify the root cause (not just the symptom) and provide the minimal fix that addresses it.
+Establish the attack path — entry point, exploited weakness, and potential exposure. Identify the root cause (not just the symptom) and provide the minimal fix that addresses it.
 
 Output as JSON:
 ```json
