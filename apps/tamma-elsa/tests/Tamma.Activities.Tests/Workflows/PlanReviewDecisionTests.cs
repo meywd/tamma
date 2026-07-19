@@ -55,6 +55,101 @@ public class PlanReviewDecisionTests
     }
 
     // ================================================================
+    // ParseRoleVerdict — object-shaped verdict (the shape the PlanReview
+    // prompt template actually instructs: {"verdict":{"decision":...}})
+    // ================================================================
+
+    [Test]
+    public void ParseRoleVerdict_ObjectVerdict_Approve_ReturnsApprove()
+    {
+        // Conforming reply per SystemPrompts.PlanReview — previously threw on
+        // GetString() and landed the pessimistic "concerns" default.
+        var json = """
+        {
+            "issues": [],
+            "verdict": {"decision": "APPROVE", "summary": "Plan is solid", "blockingIssues": []}
+        }
+        """;
+
+        var (verdict, comments, _) = ReviewAggregationHelper.ParseRoleVerdict(json);
+
+        verdict.Should().Be("approve");
+        comments.Should().Be("Plan is solid");
+    }
+
+    [Test]
+    public void ParseRoleVerdict_ObjectVerdict_RequestChanges_ReturnsConcerns()
+    {
+        var json = """
+        {
+            "issues": [{"task": "T1", "severity": "major", "issue": "No rollback"}],
+            "verdict": {
+                "decision": "REQUEST_CHANGES",
+                "summary": "Missing rollback plan",
+                "blockingIssues": ["No rollback strategy"]
+            }
+        }
+        """;
+
+        var (verdict, comments, _) = ReviewAggregationHelper.ParseRoleVerdict(json);
+
+        verdict.Should().Be("concerns");
+        comments.Should().Contain("Missing rollback plan");
+        comments.Should().Contain("No rollback strategy");
+    }
+
+    [Test]
+    public void ParseRoleVerdict_ObjectVerdict_NeedsDiscussion_ReturnsConcerns()
+    {
+        var json = """{"verdict": {"decision": "NEEDS_DISCUSSION", "summary": "Scope unclear"}}""";
+
+        var (verdict, comments, _) = ReviewAggregationHelper.ParseRoleVerdict(json);
+
+        verdict.Should().Be("concerns");
+        comments.Should().Be("Scope unclear");
+    }
+
+    [Test]
+    public void ParseRoleVerdict_ObjectVerdict_CaseInsensitiveDecision_ReturnsApprove()
+    {
+        var json = """{"verdict": {"decision": "approve"}}""";
+
+        var (verdict, _, _) = ReviewAggregationHelper.ParseRoleVerdict(json);
+
+        verdict.Should().Be("approve");
+    }
+
+    [Test]
+    public void ParseRoleVerdict_ObjectVerdict_UnknownOrMissingDecision_ReturnsConcerns()
+    {
+        var (verdictUnknown, _, _) = ReviewAggregationHelper.ParseRoleVerdict(
+            """{"verdict": {"decision": "SHIP_IT"}}""");
+        var (verdictMissing, _, _) = ReviewAggregationHelper.ParseRoleVerdict(
+            """{"verdict": {"summary": "no decision field"}}""");
+
+        verdictUnknown.Should().Be("concerns");
+        verdictMissing.Should().Be("concerns");
+    }
+
+    [Test]
+    public void ParseRoleVerdict_ObjectVerdict_TopLevelCommentsWin()
+    {
+        var json = """
+        {
+            "verdict": {"decision": "APPROVE", "summary": "inner summary"},
+            "comments": "explicit top-level comments",
+            "suggestedChanges": "rename x"
+        }
+        """;
+
+        var (verdict, comments, suggestedChanges) = ReviewAggregationHelper.ParseRoleVerdict(json);
+
+        verdict.Should().Be("approve");
+        comments.Should().Be("explicit top-level comments");
+        suggestedChanges.Should().Be("rename x");
+    }
+
+    // ================================================================
     // AggregateVerdicts
     // ================================================================
 

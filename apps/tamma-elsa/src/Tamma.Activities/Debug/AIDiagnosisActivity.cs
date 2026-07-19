@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Tamma.Activities.Core;
 using Tamma.Activities.Debug.Models;
 using Tamma.Activities.LlmCall;
 
@@ -129,20 +130,13 @@ public class AIDiagnosisActivity : CodeActivity<DiagnosisResult>
         {
             _logger?.LogError(ex, "AI diagnosis failed for session {SessionId}", sessionId);
 
-            // Return a fallback hypothesis
+            // No fabricated fallback hypothesis: a failed diagnosis returns a failed
+            // result (empty hypotheses + FailureReason) so the caller gate routes to
+            // DEBUG.DIAGNOSIS.FAILED instead of reporting a false success.
             context.SetResult(new DiagnosisResult
             {
                 AnalysisSummary = $"AI diagnosis failed: {ex.Message}",
-                Hypotheses = new List<Hypothesis>
-                {
-                    new Hypothesis
-                    {
-                        Rank = 1,
-                        Description = "Unable to generate hypothesis — AI diagnosis failed",
-                        Confidence = 0.1m,
-                        SuggestedFix = "Manual investigation required"
-                    }
-                }
+                FailureReason = DebugEvents.ReasonDiagnosisCallFailed
             });
         }
     }
@@ -218,11 +212,13 @@ public class AIDiagnosisActivity : CodeActivity<DiagnosisResult>
         return sb.ToString();
     }
 
-    private DiagnosisResult ParseDiagnosisResponse(string response)
+    internal DiagnosisResult ParseDiagnosisResponse(string response)
     {
         try
         {
-            var json = JsonSerializer.Deserialize<JsonElement>(response);
+            // LLMs routinely wrap the requested JSON in markdown fences / prose —
+            // slice first '{' to last '}' (shared idiom) before deserializing.
+            var json = JsonSerializer.Deserialize<JsonElement>(JsonSlice.ExtractObject(response) ?? response);
             var result = new DiagnosisResult();
 
             if (json.TryGetProperty("analysis_summary", out var summary))
@@ -268,19 +264,15 @@ public class AIDiagnosisActivity : CodeActivity<DiagnosisResult>
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "Failed to parse AI diagnosis response");
+
+            // No fabricated rank-1 hypothesis on parse failure — that flipped the
+            // caller gate (Hypotheses.Count > 0) to DEBUG.DIAGNOSIS.SUCCESS on
+            // garbage output. Return a failed result carrying the parse-failure
+            // reason so DebuggingWorkflow routes to DEBUG.DIAGNOSIS.FAILED.
             return new DiagnosisResult
             {
                 AnalysisSummary = $"Failed to parse response: {ex.Message}",
-                Hypotheses = new List<Hypothesis>
-                {
-                    new Hypothesis
-                    {
-                        Rank = 1,
-                        Description = "Parse failure — raw response available for manual review",
-                        Confidence = 0.1m,
-                        SuggestedFix = "Review raw LLM output"
-                    }
-                }
+                FailureReason = DebugEvents.ReasonDiagnosisParseFailure
             };
         }
     }

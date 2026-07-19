@@ -180,11 +180,13 @@ Respond with JSON: {{""implementationCode"": ""..."", ""implementationFiles"": [
         });
     }
 
-    private static ImplementationResult ParseImplementationResponse(string response)
+    internal static ImplementationResult ParseImplementationResponse(string response)
     {
         try
         {
-            var json = JsonSerializer.Deserialize<JsonElement>(response);
+            // LLM replies are often markdown-fenced / prose-wrapped — slice the
+            // embedded JSON object (shared idiom) before deserializing.
+            var json = JsonSerializer.Deserialize<JsonElement>(JsonSlice.ExtractObject(response) ?? response);
 
             var code = json.TryGetProperty("implementationCode", out var ic)
                 ? ic.GetString() ?? ""

@@ -209,11 +209,13 @@ Respond with JSON: {{""testCode"": ""..."", ""testFiles"": [""...""], ""testCoun
         });
     }
 
-    private static TestGenerationResult ParseTestGenerationResponse(string response, List<string> fallbackFiles)
+    internal static TestGenerationResult ParseTestGenerationResponse(string response, List<string> fallbackFiles)
     {
         try
         {
-            var json = JsonSerializer.Deserialize<JsonElement>(response);
+            // LLM replies are often markdown-fenced / prose-wrapped — slice the
+            // embedded JSON object (shared idiom) before deserializing.
+            var json = JsonSerializer.Deserialize<JsonElement>(JsonSlice.ExtractObject(response) ?? response);
 
             var testCode = json.TryGetProperty("testCode", out var tc)
                 ? tc.GetString() ?? ""

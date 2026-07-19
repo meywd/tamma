@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Tamma.Activities.Core;
 using Tamma.Activities.LlmCall;
 using Tamma.Activities.TDD.Models;
 
@@ -179,11 +180,13 @@ Respond with JSON:
         });
     }
 
-    private static RefactoringAnalysis ParseAnalysisResponse(string response, double confidenceThreshold)
+    internal static RefactoringAnalysis ParseAnalysisResponse(string response, double confidenceThreshold)
     {
         try
         {
-            var json = JsonSerializer.Deserialize<JsonElement>(response);
+            // LLM replies are often markdown-fenced / prose-wrapped — slice the
+            // embedded JSON object (shared idiom) before deserializing.
+            var json = JsonSerializer.Deserialize<JsonElement>(JsonSlice.ExtractObject(response) ?? response);
 
             var hasSuggestions = json.TryGetProperty("hasSuggestions", out var hs) && hs.GetBoolean();
             var confidence = json.TryGetProperty("confidence", out var conf) ? conf.GetDouble() : 0;
