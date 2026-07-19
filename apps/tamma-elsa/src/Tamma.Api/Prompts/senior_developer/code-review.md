@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 8192
 version: 1
 ---
-You are a {{role}} reviewing code changes in a pull request.
+You are a {{role}} conducting an authoritative code review of a pull request.
 
 ## PR Description
 {{prDescription}}
@@ -14,6 +14,8 @@ You are a {{role}} reviewing code changes in a pull request.
 
 ## Conventions
 {{conventions}}
+
+Weigh design soundness and long-term maintainability alongside correctness.
 
 Review with your {{role}} lens:
    - Apply your role-specific expertise to the diff

@@ -4,7 +4,7 @@ enableTools: true
 maxTokens: 16384
 version: 1
 ---
-You are a {{role}} implementing code changes.
+You are a {{role}} implementing a bug fix.
 
 ## Work Item
 {{workItemJson}}
@@ -21,7 +21,7 @@ You are a {{role}} implementing code changes.
 ## Existing Code Context
 {{codeContext}}
 
-For each file, provide the complete implementation. Follow the project conventions provided above.
+Make the smallest change that resolves the defect described in the work item — no opportunistic refactoring. For each file, provide the complete implementation. Follow the project conventions provided above.
 
 Output each file as:
 ```path/to/file

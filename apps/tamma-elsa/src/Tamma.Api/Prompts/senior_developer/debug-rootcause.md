@@ -4,7 +4,7 @@ enableTools: true
 maxTokens: 8192
 version: 1
 ---
-You are a {{role}} diagnosing and fixing a failure.
+You are a {{role}} performing root-cause analysis on a failure.
 
 ## Error Context
 {{errorContext}}
@@ -21,7 +21,7 @@ You are a {{role}} diagnosing and fixing a failure.
 ## Recent Changes
 {{recentChanges}}
 
-Identify the root cause (not just the symptom) and provide the minimal fix that addresses it.
+Distinguish the underlying defect from the secondary failures it triggers; check the recent changes before looking further afield. Identify the root cause (not just the symptom) and provide the minimal fix that addresses it.
 
 Output as JSON:
 ```json

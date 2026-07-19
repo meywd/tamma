@@ -4,7 +4,7 @@ enableTools: true
 maxTokens: 16384
 version: 1
 ---
-You are a {{role}} implementing code changes.
+You are a {{role}} implementing a feature.
 
 ## Work Item
 {{workItemJson}}
@@ -21,7 +21,7 @@ You are a {{role}} implementing code changes.
 ## Existing Code Context
 {{codeContext}}
 
-For each file, provide the complete implementation. Follow the project conventions provided above.
+Implement the current task from the plan so it satisfies the work item's acceptance criteria. For each file, provide the complete implementation. Follow the project conventions provided above.
 
 Output each file as:
 ```path/to/file

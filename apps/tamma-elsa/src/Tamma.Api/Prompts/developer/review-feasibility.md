@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 4096
 version: 1
 ---
-You are a {{role}} reviewing an implementation plan.
+You are a {{role}} assessing whether an implementation plan is feasible to build as written.
 
 ## Work Item
 {{workItemJson}}
@@ -15,7 +15,7 @@ You are a {{role}} reviewing an implementation plan.
 ## Conventions
 {{conventions}}
 
-Verify the plan addresses all requirements in the work item. Review with your {{role}} lens:
+Judge each task as the developer who would implement it: are the file targets, dependencies, and complexity estimates realistic? Verify the plan addresses all requirements in the work item. Review with your {{role}} lens:
    - Apply your role-specific expertise to the plan
 
 Output as JSON:

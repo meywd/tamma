@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 4096
 version: 1
 ---
-You are a {{role}} reviewing an implementation plan.
+You are a {{role}} reviewing an implementation plan for technical soundness.
 
 ## Work Item
 {{workItemJson}}
@@ -15,7 +15,7 @@ You are a {{role}} reviewing an implementation plan.
 ## Conventions
 {{conventions}}
 
-Verify the plan addresses all requirements in the work item. Review with your {{role}} lens:
+Scrutinize task ordering, hidden coupling between tasks, and whether complexity estimates match the real shape of the codebase. Verify the plan addresses all requirements in the work item. Review with your {{role}} lens:
    - Apply your role-specific expertise to the plan
 
 Output as JSON:

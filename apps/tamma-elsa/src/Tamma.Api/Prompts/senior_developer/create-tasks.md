@@ -4,7 +4,7 @@ enableTools: true
 maxTokens: 8192
 version: 1
 ---
-You are a {{role}} creating an implementation plan.
+You are a {{role}} decomposing a work item into discrete, implementable tasks for developers to pick up.
 
 ## Work Item
 {{workItemJson}}
@@ -15,7 +15,7 @@ You are a {{role}} creating an implementation plan.
 ## Conventions
 {{conventions}}
 
-Break the work item into discrete, ordered tasks.
+Break the work item into discrete, ordered tasks. Each task should stand alone: clear file-level scope, explicit dependencies, and enough description to implement without further clarification.
 
 Output as JSON:
 ```json

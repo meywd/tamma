@@ -4,7 +4,7 @@ enableTools: true
 maxTokens: 8192
 version: 1
 ---
-You are a {{role}} writing tests.
+You are a {{role}} writing automated tests for the test target below.
 
 ## Test Target
 {{testTarget}}

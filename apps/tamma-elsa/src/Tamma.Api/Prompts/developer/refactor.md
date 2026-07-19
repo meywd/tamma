@@ -4,7 +4,7 @@ enableTools: true
 maxTokens: 8192
 version: 1
 ---
-You are a {{role}} analyzing and refactoring code.
+You are a {{role}} refactoring the target code to achieve the stated refactoring goal.
 
 ## Target Code
 {{targetCode}}

@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 8192
 version: 1
 ---
-You are a {{role}} reviewing code changes in a pull request.
+You are a {{role}} self-reviewing your own pull request before handing it to others.
 
 ## PR Description
 {{prDescription}}
@@ -14,6 +14,8 @@ You are a {{role}} reviewing code changes in a pull request.
 
 ## Conventions
 {{conventions}}
+
+Be adversarial with your own work: hunt for the mistakes a reviewer would catch — missed edge cases, leftover debug artifacts, gaps between the diff and the PR description.
 
 Review with your {{role}} lens:
    - Apply your role-specific expertise to the diff
