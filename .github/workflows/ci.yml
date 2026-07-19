@@ -218,5 +218,18 @@ jobs:
       - name: Build
         run: dotnet build Tamma.sln --no-restore -c Release
 
+      # --blame-hang: the run twice exited 1 with all tests passing (a test
+      # host kept alive past shutdown; runner cleanup killed orphaned dotnet
+      # processes). Blame mode names the project/host that fails to exit and
+      # dumps its live threads within the timeout instead of failing silently.
       - name: Test
-        run: dotnet test Tamma.sln --no-build -c Release --verbosity normal
+        run: dotnet test Tamma.sln --no-build -c Release --verbosity normal --blame-hang --blame-hang-timeout 8m
+
+      - name: Upload hang dumps
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vstest-blame-dumps
+          path: |
+            apps/tamma-elsa/tests/**/TestResults/**
+          if-no-files-found: ignore
