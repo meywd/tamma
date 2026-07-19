@@ -62,6 +62,14 @@
     <EmbeddedResource Include="Auth/common-passwords.txt">
       <LogicalName>Tamma.Api.Auth.common-passwords.txt</LogicalName>
     </EmbeddedResource>
+    <!-- System prompt registry files (one per RolePhaseMap (role, action) cell
+         plus one _system.md per role). Loaded at static init by
+         Auth/PromptFileLoader.cs; the LogicalName keeps the path verbatim
+         (forward slashes) so role/action parsing is deterministic instead of
+         relying on MSBuild's default resource-name mangling. -->
+    <EmbeddedResource Include="Prompts/**/*.md">
+      <LogicalName>Prompts/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>
