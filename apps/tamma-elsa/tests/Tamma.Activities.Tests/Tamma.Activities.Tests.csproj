@@ -28,6 +28,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Tamma.Activities\Tamma.Activities.csproj" />
     <ProjectReference Include="..\..\src\Tamma.ElsaServer\Tamma.ElsaServer.csproj" />
+    <!-- ContractBindingTests needs SystemPrompts (the file-backed prompt registry)
+         to bind dispatch-site (role, action) cells to their callers' parser contracts. -->
+    <ProjectReference Include="..\..\src\Tamma.Api\Tamma.Api.csproj" />
   </ItemGroup>
 
 </Project>

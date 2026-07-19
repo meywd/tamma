@@ -156,7 +156,9 @@ public class TaxonomyDriftBuildTests
             // that this stays empty until a genuinely non-reflectable dispatch reappears.
         };
 
-    private sealed record DispatchPair(string Workflow, string DispatchId, string Role, string Action);
+    // Internal (not private): ContractBindingTests reuses the same enumeration so
+    // its coverage guard sees EXACTLY the dispatch pairs this drift test checks.
+    internal sealed record DispatchPair(string Workflow, string DispatchId, string Role, string Action);
 
     // ====================================================================
     // AC1 + AC2 + AC6 — every emitted (role, action) is eligible
@@ -327,7 +329,7 @@ public class TaxonomyDriftBuildTests
     /// materialising the Input delegate, PLUS the curated supplement for the
     /// dispatches that can't be materialised.
     /// </summary>
-    private static IReadOnlyList<DispatchPair> EnumerateAllDispatchPairs()
+    internal static IReadOnlyList<DispatchPair> EnumerateAllDispatchPairs()
     {
         var (materialized, _) = ScanLlmCallDispatches();
 
