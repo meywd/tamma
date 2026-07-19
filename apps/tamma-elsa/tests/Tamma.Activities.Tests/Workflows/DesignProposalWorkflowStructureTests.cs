@@ -15,7 +15,7 @@ namespace Tamma.Activities.Tests.Workflows;
 /// 1. Builds and has DefinitionId "design-proposal".
 /// 2. Threads <c>TenantId</c> so the prompt registry resolves tenant-scoped prompts
 ///    (resolution is tenant→system→error — never empty/plain) for role=architect /
-///    action=plan-system-design.
+///    action=propose-design.
 /// 3. Generates the design proposal via <c>DispatchWorkflow("llm-call")</c> (mediated —
 ///    the engine holds no LLM credential, TAMMA001) rather than any in-engine provider call.
 /// 4. Delivers the proposal to the reviewer via <see cref="DeliverDesignProposalActivity"/>.
@@ -57,7 +57,7 @@ public class DesignProposalWorkflowStructureTests
             .Any(v => v.Name == "TenantId")
             .Should().BeTrue(
                 "the workflow must thread TenantId so llm-call resolves tenant-scoped prompts " +
-                "(tenant→system→error) for architect/plan-system-design");
+                "(tenant→system→error) for architect/propose-design");
     }
 
     [Test]

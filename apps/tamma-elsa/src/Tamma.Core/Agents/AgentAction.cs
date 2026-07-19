@@ -32,6 +32,7 @@ public enum AgentAction
     [Wire("analyze-assessment-response")] AnalyzeAssessmentResponse,
     [Wire("research")] Research,
     [Wire("score-ambiguity")] ScoreAmbiguity,
+    [Wire("incorporate-answers")] IncorporateAnswers,
 
     // architect
     [Wire("triage-technical")] TriageTechnical,
@@ -44,6 +45,7 @@ public enum AgentAction
     [Wire("plan-review")] PlanReview,
     [Wire("code-review-architecture")] CodeReviewArchitecture,
     [Wire("assess-technical-risk")] AssessTechnicalRisk,
+    [Wire("propose-design")] ProposeDesign,
 
     // senior_developer
     [Wire("create-tasks")] CreateTasks,

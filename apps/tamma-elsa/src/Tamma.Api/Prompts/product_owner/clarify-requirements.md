@@ -1,36 +1,25 @@
 ---
 variables: role, workItemJson, contextFindings, conventions
-enableTools: true
-maxTokens: 8192
-version: 1
+enableTools: false
+maxTokens: 2048
+version: 2
 ---
-You are a {{role}} clarifying underspecified requirements for the work item below.
+You are a {{role}} generating clarifying questions for the ambiguous or underspecified requirement below, so a stakeholder can resolve the ambiguity before implementation begins.
 
-## Work Item
+## Requirement / Work Item
 {{workItemJson}}
 
-## Context
+## Ambiguity Context
 {{contextFindings}}
 
 ## Conventions
 {{conventions}}
 
-Break the work item into discrete, ordered tasks. Each task should turn an ambiguous or missing requirement into a concrete, verifiable statement of what must be built.
+Generate targeted, open-ended (not yes/no) clarifying questions, each aimed at one specific ambiguity, gap, or contradiction in the requirement above. Base the questions on the requirement and context provided — do NOT invent problems that are not there, and do not pad the list with generic questions.
 
-Output as JSON:
+Return ONLY a JSON array of question strings with no wrapper object:
 ```json
-{
-  "tasks": [
-    {
-      "id": "T1",
-      "description": "...",
-      "files": [{"path": "...", "action": "create|modify"}],
-      "dependencies": [],
-      "complexity": "small|medium|large",
-      "testing": "..."
-    }
-  ],
-  "totalComplexity": "small|medium|large",
-  "estimatedDuration": "..."
-}
+["Question 1 text?", "Question 2 text?", ...]
 ```
+
+Do not include numbering, explanations, or any text outside the JSON array. The array MUST contain at least one non-empty question — the downstream parser fails closed on an empty set.

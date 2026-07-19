@@ -15,7 +15,7 @@ namespace Tamma.Api.Services.Agents;
 ///
 /// This is a CLEAN CUT to the new typed action vocabulary (Story 27-15). The
 /// old flat 8×10 string vocabulary is gone; the union of the per-role action
-/// sets is the 72-token <see cref="AgentAction"/> enum. Which <c>(role,
+/// sets is the 79-token <see cref="AgentAction"/> enum. Which <c>(role,
 /// action)</c> pairs are valid is the per-role eligibility matrix below — shared
 /// tokens (<c>context-scan</c>, <c>code-review</c>, <c>plan-review</c>,
 /// <c>write-tests</c>) appear in multiple role sets intentionally; the role half
@@ -58,7 +58,8 @@ public static class RolePhaseMap
                 AgentAction.GenerateAssessmentQuestions,
                 AgentAction.AnalyzeAssessmentResponse,
                 AgentAction.Research,
-                AgentAction.ScoreAmbiguity),
+                AgentAction.ScoreAmbiguity,
+                AgentAction.IncorporateAnswers),
 
             // architect — system design, technical strategy
             [AgentRole.Architect] = FreezeSet(
@@ -72,7 +73,8 @@ public static class RolePhaseMap
                 AgentAction.WriteAdr,
                 AgentAction.PlanReview,
                 AgentAction.CodeReviewArchitecture,
-                AgentAction.AssessTechnicalRisk),
+                AgentAction.AssessTechnicalRisk,
+                AgentAction.ProposeDesign),
 
             // senior_developer — tech lead: decomposition, review, mentorship
             [AgentRole.SeniorDeveloper] = FreezeSet(
@@ -197,7 +199,7 @@ public static class RolePhaseMap
         Enum.GetValues<AgentRole>().Select(r => r.ToWire()).ToFrozenSet();
 
     /// <summary>
-    /// The 72 workflow actions, as wire strings, derived from
+    /// The 79 workflow actions, as wire strings, derived from
     /// <see cref="AgentAction"/> (the union of the per-role §4 sets).
     /// </summary>
     public static readonly FrozenSet<string> ValidActions =

@@ -105,7 +105,7 @@ public class TaxonomyDriftBuildTests
         "AmbiguityScoringWorkflow",     // Story 3.6: dispatches the dedicated (product_owner, score-ambiguity) scoring pair
         "AssessmentWorkflow",           // P0 fix 2026-06-30: dispatches generate-assessment-questions + analyze-assessment-response
         "BlockerDiagnosisWorkflow",
-        "ClarifyingQuestionsWorkflow",  // Story 3.5: dispatches clarify-requirements (generate questions + incorporate answers)
+        "ClarifyingQuestionsWorkflow",  // Story 3.5: dispatches clarify-requirements (generate questions) + incorporate-answers
         "ContextGatheringWorkflow",
         "DebuggingWorkflow",
         "DeploymentPipelineWorkflow",

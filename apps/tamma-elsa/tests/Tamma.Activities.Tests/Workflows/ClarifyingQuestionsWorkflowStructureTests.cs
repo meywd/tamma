@@ -56,7 +56,7 @@ public class ClarifyingQuestionsWorkflowStructureTests
             .Any(v => v.Name == "TenantId")
             .Should().BeTrue(
                 "the workflow must thread TenantId so llm-call resolves tenant-scoped prompts " +
-                "(tenant→system→error) for clarify-requirements");
+                "(tenant→system→error) for clarify-requirements / incorporate-answers");
     }
 
     [Test]
