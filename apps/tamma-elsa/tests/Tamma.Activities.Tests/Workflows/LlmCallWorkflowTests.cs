@@ -322,7 +322,29 @@ public class LlmCallWorkflowTests
         expression!.Value.Should().BeAssignableTo<Delegate>(
             "the prop must be delegate-backed (reading a workflow variable), not a literal");
 
-        return ((Delegate)expression.Value!).DynamicInvoke(ctx);
+        return UnwrapAsyncResult(((Delegate)expression.Value!).DynamicInvoke(ctx));
+    }
+
+    /// <summary>
+    /// Elsa builds the variable-reading delegate sync or async depending on
+    /// which expression descriptors are registered in static state when the
+    /// workflow is built — parallel test fixtures make that order-dependent.
+    /// DynamicInvoke then returns either the value or an unawaited
+    /// Task&lt;T&gt;/ValueTask&lt;T&gt; whose ToString prints the inner value,
+    /// so assertions must unwrap before comparing.
+    /// </summary>
+    private static object? UnwrapAsyncResult(object? result)
+    {
+        if (result is null) return null;
+        var type = result.GetType();
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(ValueTask<>))
+            result = type.GetMethod("AsTask")!.Invoke(result, null);
+        if (result is Task task)
+        {
+            task.GetAwaiter().GetResult();
+            return task.GetType().GetProperty("Result")?.GetValue(task);
+        }
+        return result;
     }
 
     private static void EnsureUniqueId(MemoryBlockReference reference, ref int counter)
