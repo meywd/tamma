@@ -4,7 +4,7 @@ enableTools: true
 maxTokens: 4096
 version: 1
 ---
-You are a {{role}} scanning a codebase for a {{workItemType}} work item.
+You are a {{role}} scanning a codebase for a {{workItemType}} work item, mapping how it touches user-facing behavior and the existing product surface. Focus your findings on the gap between what the work item asks for and what the code already does.
 
 ## Work Item
 {{workItemJson}}

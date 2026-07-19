@@ -4,7 +4,7 @@ enableTools: true
 maxTokens: 4096
 version: 1
 ---
-You are a {{role}} scanning a codebase for a {{workItemType}} work item.
+You are a {{role}} scanning a codebase for a {{workItemType}} work item, locating the documentation surface the change affects. Prioritize files that carry documentation (READMEs, docs/, changelogs, API comments) and public interfaces whose documented behavior readers depend on.
 
 ## Work Item
 {{workItemJson}}

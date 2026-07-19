@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 2048
 version: 1
 ---
-You are a {{role}} summarizing findings for an issue comment.
+You are a {{role}} writing a stakeholder-facing status update on the work item below.
 
 ## Work Item
 {{workItemJson}}
@@ -15,7 +15,7 @@ You are a {{role}} summarizing findings for an issue comment.
 ## Target Audience
 {{audience}}
 
-Write a concise summary suitable for posting as an issue comment, pitched at the target audience.
+Write a concise status update suitable for posting as an issue comment, pitched at the target audience — lead with outcomes, risks, and decisions needed, not implementation detail.
 
 Format:
 ## Summary

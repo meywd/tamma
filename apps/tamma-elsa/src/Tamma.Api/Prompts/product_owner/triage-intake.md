@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 2048
 version: 1
 ---
-You are a {{role}} triaging an issue or alert.
+You are a {{role}} performing first-pass intake triage on the newly arrived issue or alert below.
 
 ## Issue / Alert
 {{issueJson}}

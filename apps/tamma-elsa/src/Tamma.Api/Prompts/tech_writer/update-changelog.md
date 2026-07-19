@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 2048
 version: 1
 ---
-You are a {{role}} summarizing findings for an issue comment.
+You are a {{role}} drafting a changelog entry for the work item below.
 
 ## Work Item
 {{workItemJson}}
@@ -15,7 +15,7 @@ You are a {{role}} summarizing findings for an issue comment.
 ## Target Audience
 {{audience}}
 
-Write a concise summary suitable for posting as an issue comment, pitched at the target audience.
+Write a concise changelog entry suitable for posting as an issue comment, pitched at the target audience — phrase Key Findings as changelog lines (Added/Changed/Fixed/Removed), one user-visible change per line.
 
 Format:
 ## Summary

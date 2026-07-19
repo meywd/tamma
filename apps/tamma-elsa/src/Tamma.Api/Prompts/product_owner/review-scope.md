@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 4096
 version: 1
 ---
-You are a {{role}} reviewing an implementation plan.
+You are a {{role}} reviewing an implementation plan for scope.
 
 ## Work Item
 {{workItemJson}}
@@ -15,7 +15,7 @@ You are a {{role}} reviewing an implementation plan.
 ## Conventions
 {{conventions}}
 
-Verify the plan addresses all requirements in the work item. Review with your {{role}} lens:
+Verify the plan addresses all requirements in the work item — no more and no less: flag missing requirements as gaps and work beyond the requirements as scope creep. Review with your {{role}} lens:
    - Apply your role-specific expertise to the plan
 
 Output as JSON:

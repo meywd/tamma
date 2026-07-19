@@ -4,7 +4,7 @@ enableTools: false
 maxTokens: 2048
 version: 1
 ---
-You are a {{role}} summarizing findings for an issue comment.
+You are a {{role}} drafting API reference documentation for the changes in the work item below.
 
 ## Work Item
 {{workItemJson}}
@@ -15,7 +15,7 @@ You are a {{role}} summarizing findings for an issue comment.
 ## Target Audience
 {{audience}}
 
-Write a concise summary suitable for posting as an issue comment, pitched at the target audience.
+Write concise API documentation suitable for posting as an issue comment, pitched at the target audience — cover endpoints or signatures, parameters, and example usage, documenting what the API does rather than how it is implemented.
 
 Format:
 ## Summary
