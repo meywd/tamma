@@ -97,13 +97,18 @@ public class PlanGenerationWorkflow : WorkflowBase
                 ["variables"] = new Dictionary<string, object>
                 {
                     ["workItemJson"] = workItemJson.Get(ctx),
-                    ["contextFindings"] = poSummary.Get(ctx),
+                    // Retry feedback is merged INTO contextFindings — a variable the
+                    // Plan-family template actually declares ({{contextFindings}}).
+                    // A separate "validationErrors" key is undeclared in the template
+                    // and was silently dropped at render, so retries re-prompted
+                    // blind. First attempt (no errors) passes poSummary unchanged.
+                    ["contextFindings"] = ValidationFeedbackHelper.AppendFeedback(
+                        poSummary.Get(ctx), validationErrors.Get(ctx)),
                     ["poSummary"] = poSummary.Get(ctx),
                     ["contextIds"] = contextIds.Get(ctx),
                     ["repository"] = repository.Get(ctx),
                     ["reviewNotes"] = reviewNotes.Get(ctx),
                     ["revisionNumber"] = revisionNumber.Get(ctx),
-                    ["validationErrors"] = validationErrors.Get(ctx),
                 },
                 ["enableTools"] = true,
             }),

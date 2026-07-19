@@ -11,6 +11,7 @@ using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
 using Tamma.Api.Services.Agents;
+using Tamma.ElsaServer.Workflows.Helpers;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
@@ -87,20 +88,35 @@ public class TaskCreationWorkflow : WorkflowBase
         {
             Id = "GenerateTasks", Name = "Generate Tasks",
             WorkflowDefinitionId = new("llm-call"),
-            Input = new(ctx => new Dictionary<string, object>
+            Input = new(ctx =>
             {
-                ["role"] = AgentRole.SeniorDeveloper.ToWire(),
-                ["action"] = AgentAction.CreateTasks.ToWire(),
-                ["tenantId"] = tenantId.Get(ctx),
-                ["variables"] = new Dictionary<string, object>
+                var variables = new Dictionary<string, object>
                 {
                     ["planJson"] = planJson.Get(ctx),
                     ["contextIds"] = contextIds.Get(ctx),
                     ["workItemJson"] = workItemJson.Get(ctx),
                     ["repository"] = repository.Get(ctx),
-                    ["validationErrors"] = validationErrors.Get(ctx),
-                },
-                ["enableTools"] = true,
+                };
+
+                // On retry, surface the prior attempt's validation errors through
+                // contextFindings — a variable the Plan-family template actually
+                // declares ({{contextFindings}}). The old "validationErrors" key was
+                // undeclared in the template and silently dropped at render, so
+                // retries re-prompted blind. First attempt: key omitted entirely so
+                // the rendered prompt is unchanged from before.
+                var feedback = ValidationFeedbackHelper.AppendFeedback(
+                    baseValue: null, validationErrors.Get(ctx));
+                if (feedback.Length > 0)
+                    variables["contextFindings"] = feedback;
+
+                return new Dictionary<string, object>
+                {
+                    ["role"] = AgentRole.SeniorDeveloper.ToWire(),
+                    ["action"] = AgentAction.CreateTasks.ToWire(),
+                    ["tenantId"] = tenantId.Get(ctx),
+                    ["variables"] = variables,
+                    ["enableTools"] = true,
+                };
             }),
             WaitForCompletion = new(true),
             Result = new(llmResult),
