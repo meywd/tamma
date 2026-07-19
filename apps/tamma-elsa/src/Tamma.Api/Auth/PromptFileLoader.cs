@@ -150,7 +150,9 @@ internal static class PromptFileLoader
         foreach (var (role, actions) in RolePhaseMap.EligibleActions)
         {
             var roleWire = role.ToWire();
-            var systemPrompt = SystemFor(systemPrompts, roleWire);
+            // Every role's preamble is guaranteed present by the
+            // MISSING_SYSTEM_PROMPT check above.
+            var systemPrompt = systemPrompts[roleWire];
             foreach (var action in actions)
             {
                 var actionWire = action.ToWire();
@@ -190,10 +192,6 @@ internal static class PromptFileLoader
         bool EnableTools,
         int MaxTokens,
         int Version);
-
-    /// <summary>Preserves the old <c>SystemFor</c> developer fallback.</summary>
-    private static string SystemFor(IReadOnlyDictionary<string, string> systemPrompts, string role)
-        => systemPrompts.TryGetValue(role, out var s) ? s : systemPrompts["developer"];
 
     private static (string Role, string Name) SplitPath(string path)
     {

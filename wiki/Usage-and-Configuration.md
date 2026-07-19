@@ -57,7 +57,7 @@ Config resolution is layered (lowest → highest precedence): **defaults → `~/
 
 ### The `conventions` field and `{{conventions}}`
 
-The `conventions` string is rendered into every LLM prompt through the `{{conventions}}` template variable (the role templates in `SystemPrompts.cs` embed a `## Conventions\n{{conventions}}` block; `LlmCallWorkflow` supplies the resolved value). You typically start from a **convention template** (below), customise it, and paste it into `conventions`.
+The `conventions` string is rendered into every LLM prompt through the `{{conventions}}` template variable (the per-cell prompt files under `Tamma.Api/Prompts/` embed a `## Conventions\n{{conventions}}` block; `LlmCallWorkflow` supplies the resolved value). You typically start from a **convention template** (below), customise it, and paste it into `conventions`.
 
 > Server-side note: the C# engine's `GET /api/engine/repo-config` reader is currently a **stub returning `{configured: false}`**. The `conventions` string is still resolved for prompts through the convention store / the callback JSON that `ReadRepoConventionsActivity` parses.
 
@@ -97,7 +97,7 @@ POST       /api/admin/conventions/{role}/{action}/reset
 
 ## Prompt-override store
 
-Tamma ships immutable **system default** prompts in code and lets you override them per mode. Data model:
+Tamma ships immutable **system default** prompts as repo files — `apps/tamma-elsa/src/Tamma.Api/Prompts/{role}/{action}.md` (one per taxonomy cell, front matter carrying variables/enableTools/maxTokens/version) plus `Prompts/{role}/_system.md` role identity preambles — embedded in the binary and loaded at startup (fail-loud on any drift between files and the taxonomy). You override them per mode. Data model:
 
 ```
 System defaults (shipped, immutable):
