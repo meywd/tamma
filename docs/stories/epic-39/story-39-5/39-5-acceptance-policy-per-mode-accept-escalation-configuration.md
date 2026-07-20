@@ -18,7 +18,7 @@ Then, before writing any code, check the knowledge base:
 ## User Story
 
 As a **platform operator (full-auto) or supervising user (supervised mode)**,
-I want **acceptance rules that are configurable, editable in the admin UI, and read by the acceptor at decision time — where the accept gate always submits the document to an acceptor (the orchestrator in full-auto, a human in supervised mode) and the orchestrator receives the resolved rules either rendered into its decision prompt or fetched via MCP**,
+I want **acceptance rules that are configurable, editable in the admin UI, and read by the acceptor at decision time — where the accept gate always submits the document to an acceptor over its real-time channel (the long-running orchestrator agent in full-auto, a human on the user channel in supervised mode), and the orchestrator reads the resolved rules through its tools before deciding**,
 So that "who decides" is always an actor applying stated, inspectable rules — never an if-else in workflow code that skips the decision — and changing what "acceptable" means is a configuration edit in the admin UI, not a code change.
 
 ## Priority
@@ -27,10 +27,12 @@ P0 — The 39-6 lifecycle's ACCEPT stage is a direct consumer: without the accep
 
 ## Architectural Context (READ FIRST)
 
-**The settled design (do not regress to an if-else):** the lifecycle's accept stage ALWAYS submits the finished document (plus its `Review` and lineage) to an **acceptor**. The operating mode selects only WHO that acceptor is:
+**The settled design (do not regress to an if-else, and not an llm-call):** the lifecycle's accept stage ALWAYS submits the finished document (plus its `Review` and lineage) as an `AcceptanceRequest` on the acceptor's real-time channel (39-18) and suspends on the 39-8 gate. The operating mode selects only WHO that acceptor is:
 
-- **full-auto** → the orchestrator is the acceptor: an `llm-call` decision turn whose prompt carries the resolved acceptance rules (or which fetches them via an MCP tool), returning a typed `AcceptanceDecision`.
-- **supervised (70%)** → a human is the acceptor, via the 39-8 bookmark suspend/resume gate.
+- **full-auto** → the **orchestrator agent** (39-17): a long-running LLM process with the platform as its context and tools over git, the event store, logs, workflows, documents, and these acceptance rules. It consumes the request off the workflow↔orchestrator channel, reads the effective rules via its `get_acceptance_rules` tool, and answers a typed `AcceptanceDecision`. The accept step talks to it over the channel — it is NOT an embedded `llm-call` dispatch.
+- **supervised (70%)** → a **human** on the user channel, deciding through the same 39-8 resume surface.
+
+Both paths are structurally identical: persist request → publish on channel → suspend → decision arrives → guardrails → resume.
 
 Deterministic code enforces only the **hard guardrails around** the acceptor's decision — round bounds, the blocking-review invariant, always-escalate classes. It validates and clamps the decision; it never makes it.
 
@@ -42,7 +44,7 @@ Rules are **configuration over the static vocabulary** — the README's "vocabul
 - The `prompt_overrides` storage pattern (CLAUDE.md "Prompt Store Architecture" + `apps/tamma-elsa/src/Tamma.Data/TammaModelConfiguration.cs`): **single-user mode keys overrides by `user_id`; SaaS mode keys by `tenant_id`; exactly-one XOR CHECK; static system defaults shipped in code/files with a per-principal override layer in Postgres.** The CLAUDE.md universal rule applies verbatim: design both scoping models, never ship the single-user model and assume it works for SaaS.
 - `apps/tamma-elsa/src/Tamma.Api/Services/PromptStore/PromptStoreService.cs` — the resolution-order facade shape (principal override → system default) this story's resolver mirrors
 - RBAC precedent: in SaaS, rule writes are `tenant_owner`/`tenant_admin` only, members read-only — same matrix as the prompt store (CLAUDE.md RBAC table)
-- The orchestrator read path precedent: `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/LlmCallWorkflow.cs`'s conventions resolution (Story 27-13) — config resolved server-side and injected as a `{{conventions}}` prompt variable. The `{{acceptanceRules}}` injection follows the same seam.
+- The server-side config-resolution precedent: `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/LlmCallWorkflow.cs`'s conventions resolution (Story 27-13) — config resolved server-side, never trusted from the client. The rules payload embedded in each `AcceptanceRequest` follows the same discipline.
 
 **Operating-mode axes are two, not one.** Single-user vs SaaS decides *who owns the config* (`ITammaModeProvider`). Full-auto vs supervised decides *who the acceptor is* and is itself a configured value (defaulting to supervised, per the epic README's "supervised (70%)" reality). Do not conflate them.
 
@@ -50,15 +52,17 @@ Rules are **configuration over the static vocabulary** — the README's "vocabul
 
 - 39-6 `DocumentLifecycleWorkflow` — its ACCEPT stage submits to the acceptor defined here; reads `MaxRevisionRounds`/`MaxRepairAttempts` bounds; receives escalation criteria (e.g. ambiguity threshold feeding `AmbiguityAboveThreshold`)
 - 39-7 review producers — read reviewer-role selection and panel composition from the rules
-- 39-8 escalation surface — hosts the human-acceptor suspend gate and receives the rules-driven "always escalate this class" routing (e.g. breaking changes), which the README pins as **configuration, not a hardcoded rule**
+- 39-8 escalation surface — hosts the suspend gate both acceptor paths resume through, and receives the rules-driven "always escalate this class" routing (e.g. breaking changes), which the README pins as **configuration, not a hardcoded rule**
+- 39-17 orchestrator agent — the full-auto acceptor; carries `get_acceptance_rules` in its toolset
+- 39-18 channels — transport for `AcceptanceRequest`/`AcceptanceDecision` on both acceptor paths
 
 ## Acceptance Criteria
 
 1. **Rules model in `Tamma.Core`.** An `AcceptanceRules` record (+ nested records) in `apps/tamma-elsa/src/Tamma.Core/Documents/Policy/AcceptanceRules.cs` expressing at minimum: `GateMode` (`FullAuto | Supervised` — selecting the acceptor actor, never whether the gate runs); **decision guidance** for the orchestrator-acceptor (the rule content it reasons over: what warrants acceptance, revision, or escalation per document type — structured knobs plus operator-authored guidance text); `MaxRevisionRounds` and `MaxValidationRepairAttempts` (bounded, defaults documented); escalation criteria including an ambiguity-score threshold and a configurable list of always-escalate document/action classes; and reviewer selection (single reviewer role vs panel composition + quorum reference) for 39-7. All enums closed; no stringly-typed knobs outside the guidance text.
 
-2. **The acceptor contract.** A closed `AcceptanceDecision` type (`Accept | RequestRevision(notes) | Escalate(reason)`) that BOTH acceptors return through the same seam (`IDocumentAcceptor` or equivalent): the **orchestrator acceptor** is an `llm-call` decision turn against a new dedicated taxonomy cell (a `decide-acceptance` action minted in `AgentAction`/`RolePhaseMap`; role assignment settled at implementation against the taxonomy; one cell = one contract — its prompt's output contract IS the `AcceptanceDecision` parser, bound in `ContractBindingTests`); the **human acceptor** is the 39-8 suspend/resume gate mapped onto the same decision type. The lifecycle code never branches into an auto-accept shortcut — a test asserts the accept stage submits to an acceptor in both modes.
+2. **The acceptor contract.** A closed `AcceptanceDecision` type (`Accept | RequestRevision(notes) | Escalate(reason)`) that BOTH acceptors return through the same seam: the accept stage builds an `AcceptanceRequest` (document + `Review` + lineage + the resolved rules payload + the decision-session id) and publishes it on the acceptor's 39-18 channel — the workflow↔orchestrator channel for the 39-17 agent in full-auto, the user channel for a human in supervised mode — then suspends on the 39-8 gate until the decision resumes it. The lifecycle code never branches into an auto-accept shortcut and never embeds an accept-decision `llm-call` — a test asserts the accept stage publishes and suspends in both modes.
 
-3. **Orchestrator read path — prompt or MCP, same resolver.** The resolved effective rules reach the orchestrator-acceptor at decision time through one of two supported channels, both reading the same `IAcceptanceRulesResolver`: **(a) prompt injection (default)** — the rules rendered into the decision cell's `{{acceptanceRules}}` variable server-side in `LlmCallWorkflow`, exactly the `{{conventions}}` seam; **(b) MCP** — a `get_acceptance_rules` tool exposed to tool-enabled decision turns returning the same resolved payload. The story implements (a) fully and delivers (b) at least as the resolver-backed tool endpoint with the wiring documented, so a tool-enabled acceptor can switch channels without a model change. A test pins that both channels serialize the identical resolved rules.
+3. **Orchestrator read path — a tool over the resolver.** The resolved effective rules reach the orchestrator-acceptor two mutually pinning ways, both from `IAcceptanceRulesResolver`: **(a)** a `get_acceptance_rules` tool in the 39-17 agent's toolset (MCP-style), which the agent calls at decision time; **(b)** the same resolved payload embedded in the `AcceptanceRequest` for context and audit (the decision event records the rules version decided under). A test pins that both serialize the identical resolved rules for the same principal + document type.
 
 4. **Per-document-type overrides.** The effective rules for a `(documentTypeKey)` resolve as: per-type override → default — so e.g. `Decomposition` can run full-auto while `Design` stays human-gated in the same deployment. Unknown document-type keys in an override are rejected fail-loud against the 39-2 `DocumentTypeRegistry` (a typo cannot silently create dead config).
 
@@ -74,16 +78,16 @@ Rules are **configuration over the static vocabulary** — the README's "vocabul
 
 - Keep the rules *model* (`Tamma.Core`, no dependencies) separate from the *resolver/storage/API* (`Tamma.Api`/`Tamma.Data`) — 39-6 runs in the Elsa server process and should depend only on the model + the resolver interface.
 - The always-escalate class list is how the README's "whether breaking changes always escalate is acceptance-rules configuration, not a hardcoded rule" lands — express it as document-type keys and/or `AgentAction` wire names, validated against the registries.
-- The `decide-acceptance` prompt cell follows every PR #475 rule: file-backed under `Prompts/{role}/decide-acceptance.md`, purpose-built body, output contract bound to the `AcceptanceDecision` parser in `ContractBindingTests`, count pins updated. Its `{{acceptanceRules}}` variable is resolved server-side — the caller never passes rules from the client.
-- Supervised-mode submission feeds 39-8's bookmark suspend; `Escalate` decisions feed 39-8's escalation events. This story defines the acceptor contract + rules; 39-6/39-8 wire the machinery.
+- There is NO accept-decision prompt cell in the taxonomy: the accept step never dispatches `llm-call`. The full-auto decision happens inside the 39-17 agent's own session; the rules payload in the `AcceptanceRequest` is resolved server-side — the caller never passes rules from the client.
+- Both acceptor submissions feed 39-8's bookmark suspend; `Escalate` decisions feed 39-8's escalation events. This story defines the acceptor contract + rules; 39-6 publishes, 39-18 transports, 39-8 resumes.
 - Storage migration mirrors the prompt/audit discipline: additive migration, `dotnet ef migrations has-pending-model-changes` reports none, config in `TammaModelConfiguration.cs`.
-- The MCP channel's transport (which MCP server hosts `get_acceptance_rules`, how tool-enabled cells reach it) may land as documented wiring rather than a shipped server if the platform's MCP surface is not yet in place — the requirement this story cannot skip is that the resolver seam serves both channels identically.
+- `get_acceptance_rules` registers in the 39-17 toolset like any other tool (MCP-style over `IAcceptanceRulesResolver`) — this story ships the resolver + tool contract; the agent host that mounts it is 39-17's scope.
 
 ## Dependencies
 
 - **Prerequisite:** 39-2 (registry for type-key validation, envelope), 39-4 (`Review` decision enum the guardrails read).
-- **Prerequisite (in place):** `ITammaModeProvider` / `TammaMode.cs`; the `prompt_overrides` per-mode XOR pattern; the `{{conventions}}` injection seam in `LlmCallWorkflow`; CLAUDE.md two-scoping-models rule.
-- **Feeds:** 39-6 (ACCEPT stage submits to the acceptor; guardrails around it), 39-7 (reviewer selection/panel composition), 39-8 (human-acceptor gate + escalation routing).
+- **Prerequisite (in place):** `ITammaModeProvider` / `TammaMode.cs`; the `prompt_overrides` per-mode XOR pattern; CLAUDE.md two-scoping-models rule.
+- **Feeds:** 39-6 (ACCEPT stage publishes the request; guardrails around the decision), 39-7 (reviewer selection/panel composition), 39-8 (suspend gate + escalation routing), 39-17 (rules tool + decision guidance), 39-18 (request/decision message payloads).
 
 ## Estimated Effort
 
@@ -95,3 +99,4 @@ Rules are **configuration over the static vocabulary** — the README's "vocabul
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-19 | 1.0.0   | Initial story creation | Claude |
 | 2026-07-20 | 2.0.0   | Redesign per review: accept gate always submits to an acceptor (mode selects the actor — orchestrator in full-auto, human in supervised — never an if-else); rules configurable + admin UI; orchestrator reads rules at decision time via prompt injection or MCP; pure `Decide` reframed as guardrails around the acceptor | Claude |
+| 2026-07-20 | 3.0.0   | Acceptor transport redesign: the orchestrator is the long-running agent (39-17), reached over the 39-18 real-time channel — the accept step publishes an `AcceptanceRequest` and suspends, never dispatches an `llm-call`; `decide-acceptance` taxonomy cell dropped; rules read via the agent's `get_acceptance_rules` tool | Claude |

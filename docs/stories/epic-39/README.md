@@ -32,14 +32,18 @@ lifecycle, and makes every workflow resumable by design.
    `RoundsExhausted`, `ValidationExhausted`) — which escalates to the
    orchestrator/human **with the full document lineage attached**, never a bare
    failure. The accept gate **always submits the document to an acceptor** —
-   it is never an if-else that skips the decision. Mode selects only WHO the
-   acceptor is: full-auto = the orchestrator; supervised (70%) = a human via
-   suspend/resume. Both acceptors decide against the same **configurable
-   acceptance rules** — admin-editable configuration the orchestrator reads at
-   decision time (rendered into its decision prompt, or fetched via MCP), never
-   hardcoded threshold logic. "Who decides" becomes: the document's validator,
-   then a Review document about it, then the acceptor applying the configured
-   rules.
+   it is never an if-else that skips the decision, and never an embedded
+   `llm-call`. The lifecycle publishes an `AcceptanceRequest` on the acceptor's
+   real-time channel and suspends; the decision resumes it. Mode selects only
+   WHO the acceptor is: full-auto = the **orchestrator agent** — a long-running
+   LLM process with the platform as its context and tools over git, the event
+   store, logs, workflows, and documents — reached over the
+   workflow↔orchestrator channel; supervised (70%) = a human on the user
+   channel. Both acceptors decide against the same **configurable acceptance
+   rules** — admin-editable configuration the orchestrator reads through its
+   tools at decision time, never hardcoded threshold logic. "Who decides"
+   becomes: the document's validator, then a Review document about it, then
+   the acceptor applying the configured rules.
 
 3. **Resumable by design.** Every lifecycle workflow either suspends on a
    bookmark awaiting input (the generalized Design-Proposal pattern) or, after a
@@ -73,6 +77,15 @@ lifecycle, and makes every workflow resumable by design.
   enforces only the hard guardrails around that decision (round bounds, the
   blocking-review invariant, always-escalate classes); it never impersonates
   the decision itself.
+- **The orchestrator is a resident agent, not a per-turn call.** A long-running
+  LLM process (39-17) holding platform-wide context, with tools to everything —
+  git, the DCB event store, logs, workflow control, the document store, the
+  acceptance rules — and reachable over real-time channels (39-18):
+  workflow↔orchestrator for acceptance/escalation/guidance traffic, and a
+  separate user channel for humans. The accept step talks to it over its
+  channel; it is never reached through an embedded `llm-call`. The Elsa
+  workflows remain the execution substrate — the agent decides, it does not
+  execute.
 - **Prose stays prose.** Tech-writer outputs (changelog, ADR, postmortem,
   release notes) are markdown with an audience tag — no forced structure.
 
@@ -105,10 +118,12 @@ lifecycle, and makes every workflow resumable by design.
             |  REVIEW (single reviewer or panel -> Review doc)     |
             |     |  concerns: notes -> REVISE (bounded rounds)     |
             |  ACCEPT (submit to acceptor -- always)               |
-            |     |  full-auto:  acceptor = orchestrator, reads    |
-            |     |              configured rules (prompt or MCP)  |
-            |     |  supervised: acceptor = human, bookmark        |
-            |     |              suspend -> resume with decision    |
+            |     |  publish AcceptanceRequest on the acceptor's   |
+            |     |  real-time channel + suspend on the gate:      |
+            |     |  full-auto:  acceptor = orchestrator agent     |
+            |     |              (long-running, rules via tools)   |
+            |     |  supervised: acceptor = human (user channel)   |
+            |     |  decision arrives -> guardrails -> resume       |
             +-----|------------------------------------------------+
                   |
         done ----+---- typed unhandleable outcome
@@ -140,6 +155,8 @@ lineage, which is also what re-entry reads to resume from the latest state.
 | 39-14 | Planning Family Migration — PlanGeneration + PlanReview onto unified Review | P1 | drafted | 5-7 days |
 | 39-15 | Remaining Producers Migration — Triage, TestSpec, TaskCreation, Diagnosis | P2 | drafted | 5-7 days |
 | 39-16 | Prompt Contracts Generated From Document Types (single source) | P1 | drafted | 3-4 days |
+| 39-17 | Orchestrator Agent — long-running LLM process, platform context & tools | P0 | drafted | 6-8 days |
+| 39-18 | Real-Time Channels — workflow↔orchestrator + user↔orchestrator (SignalR) | P0 | drafted | 5-7 days |
 
 ## Supersedes / absorbs
 
@@ -165,6 +182,11 @@ lineage, which is also what re-entry reads to resume from the latest state.
   `ContractBindingTests`, working prompt delivery.
 - Elsa 3 bookmarks + the secure tenant-folded resume pattern (DesignProposal /
   Clarify endpoints) as the suspend/resume mechanism to generalize.
+- The agent-dispatch executor stack (`Tamma.Activities/AgentDispatch/*`) and the
+  multi-provider abstraction as the substrate for the 39-17 orchestrator agent;
+  the SSE streaming surface (`ILlmRunStreamBus`, admin SSE endpoint) as the
+  one-way precedent the 39-18 bidirectional channels sit beside (SSE decision
+  unchanged for one-way streams — ADR records the scope split).
 - DCB event store + Story 4-7 query API + Story 4-8 replay for latest-state
   reconstruction.
 - Operating-mode detection (single-user vs SaaS; full-auto vs supervised) for the
