@@ -509,3 +509,22 @@ development_status:
   38-4-build-time-guardrail-analyzer: drafted         # Build-Time Guardrail Analyzer (rule-1 enforcement) [P1]
   epic-38-retrospective: optional
 
+  epic-39: contexted   # NEW Typed Work Documents & the Universal Workflow Lifecycle (added 2026-07-19; all stories drafted)
+  39-1-workflow-io-and-lifecycle-audit: drafted       # Workflow I/O & Lifecycle Audit (consumes/produces map, gap analysis) [P0]
+  39-2-document-core-envelope-type-registry-lineage-drift-tests: drafted # Document Core — Envelope, Type Registry, Lineage, Drift Tests [P0]
+  39-3-document-types-batch-1-decomposition-findings-ambiguity-clarification: drafted # Document Types Batch 1 — Decomposition, Findings, AmbiguityAssessment, Clarification [P0]
+  39-4-document-types-batch-2-plan-design-review-triage-diagnosis-testspec: drafted # Document Types Batch 2 — Plan, Design, Review (unified), TriageDecision, Diagnosis, TestSpec [P0]
+  39-5-acceptance-policy-per-mode-accept-escalation-configuration: drafted # Acceptance Policy — per-mode accept/escalation configuration [P0]
+  39-6-document-lifecycle-workflow-generic-produce-validate-review-revise-accept: drafted # DocumentLifecycleWorkflow — generic produce/validate/review/revise/accept [P0]
+  39-7-review-producers-single-reviewer-and-panel-onto-unified-review: drafted # Review Producers — single reviewer + panel onto the unified Review type [P0]
+  39-8-escalation-and-approval-surface-events-suspend-resume-lineage: drafted # Escalation & Approval Surface — events, suspend/resume, lineage payload [P0]
+  39-9-deterministic-repair-ring-validator-feedback-repair-in-managed: drafted # Deterministic Repair Ring — validator feedback repair in the managed layer [P1]
+  39-10-resumable-by-design-standard-bookmarks-latest-state-re-entry: drafted # Resumable-by-Design Standard — bookmarks + latest-state re-entry + structural test [P0]
+  39-11-document-store-and-lineage-api: drafted       # Document Store & Lineage API [P1]
+  39-12-pilot-migration-issuedecomposition-onto-the-lifecycle: drafted # Pilot Migration — IssueDecomposition onto the lifecycle [P0]
+  39-13-assessment-family-migration-research-ambiguity-clarify-design: drafted # Assessment Family Migration — Research, Ambiguity, Clarify, DesignProposal [P1]
+  39-14-planning-family-migration-plangeneration-planreview-unified: drafted # Planning Family Migration — PlanGeneration + PlanReview onto unified Review [P1]
+  39-15-remaining-producers-migration-triage-testspec-taskcreation-diag: drafted # Remaining Producers Migration — Triage, TestSpec, TaskCreation, Diagnosis [P2]
+  39-16-prompt-contracts-generated-from-document-types: drafted # Prompt Contracts Generated From Document Types (single source) [P1]
+  epic-39-retrospective: optional
+
