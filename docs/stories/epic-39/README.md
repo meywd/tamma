@@ -95,7 +95,9 @@ lifecycle, and makes every workflow resumable by design.
   orchestrator as their primary interface — ask about anything they may see,
   initiate workflows conversationally — on a surface distinct from the Task
   View, which lists the concrete decisions/reviews/approvals assigned to them
-  (each backed by a suspended workflow). Both surfaces are scoped by access.
+  (each backed by a suspended workflow). Both surfaces are scoped by access —
+  and fully recorded: every chat turn is a `CHAT.*` DCB event like everything
+  else in the system; the history view is a projection of the stream.
 - **Access is a model, enforced server-side.** Tenants hold multiple repos,
   users, teams, and roles; users receive tasks only for workflows they
   initiated or repos they have access to (directly or via team). One audience
