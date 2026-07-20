@@ -514,7 +514,7 @@ development_status:
   39-2-document-core-envelope-type-registry-lineage-drift-tests: drafted # Document Core — Envelope, Type Registry, Lineage, Drift Tests [P0]
   39-3-document-types-batch-1-decomposition-findings-ambiguity-clarification: drafted # Document Types Batch 1 — Decomposition, Findings, AmbiguityAssessment, Clarification [P0]
   39-4-document-types-batch-2-plan-design-review-triage-diagnosis-testspec: drafted # Document Types Batch 2 — Plan, Design, Review (unified), TriageDecision, Diagnosis, TestSpec [P0]
-  39-5-acceptance-policy-per-mode-accept-escalation-configuration: drafted # Acceptance Policy — per-mode accept/escalation configuration [P0]
+  39-5-acceptance-policy-per-mode-accept-escalation-configuration: drafted # Acceptance Rules — configurable policy, admin UI, orchestrator read path [P0]
   39-6-document-lifecycle-workflow-generic-produce-validate-review-revise-accept: drafted # DocumentLifecycleWorkflow — generic produce/validate/review/revise/accept [P0]
   39-7-review-producers-single-reviewer-and-panel-onto-unified-review: drafted # Review Producers — single reviewer + panel onto the unified Review type [P0]
   39-8-escalation-and-approval-surface-events-suspend-resume-lineage: drafted # Escalation & Approval Surface — events, suspend/resume, lineage payload [P0]

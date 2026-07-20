@@ -19,7 +19,7 @@ Then, before writing any code, check the knowledge base:
 
 As a **platform architect designing Epic 39's typed-document layer**,
 I want a **complete, per-workflow map of what every Elsa workflow consumes and produces today (informal shapes), how it decides "ok vs not-ok", whether it has any review-with-notes loop, and whether it can resume after a stop**,
-So that the document type definitions (39-2..39-4), the acceptance policy (39-5), and the generic lifecycle (39-6) are grounded in the real current behavior — and every gap (parse-ok?→done:dead decisions, missing review loops, restart-from-scratch workflows) is classified and traceable to the story that closes it.
+So that the document type definitions (39-2..39-4), the acceptance rules (39-5), and the generic lifecycle (39-6) are grounded in the real current behavior — and every gap (parse-ok?→done:dead decisions, missing review loops, restart-from-scratch workflows) is classified and traceable to the story that closes it.
 
 ## Priority
 

@@ -36,7 +36,7 @@ P0 — **The story that proves the whole stack.** The generic pieces (39-2..39-8
 **What it lands on (all Epic 39):**
 - `Decomposition` document type (39-3): unique task IDs, no dangling/self/cyclic `dependsOn`, 2–8h sizing, prerequisite ordering — the domain rules that replace the hand parser's checks and power the validator.
 - `DocumentLifecycleWorkflow` (39-6): the generic produce → validate → review → revise → accept graph; reviewer/panel selection is **policy-driven** (39-5/39-7), not hardcoded.
-- Accept gate (39-8): full-auto = acceptance policy applies; supervised = bookmark suspend for human approval via the generalized resume surface.
+- Accept (39-5/39-8): always submits to the acceptor — full-auto = the orchestrator's `decide-acceptance` turn with the resolved acceptance rules injected; supervised = bookmark suspend for human approval via the generalized resume surface. Never an if-else that skips the decision.
 - Resumable standard (39-10): declaration + idempotent guards + canonical bookmark names; store reads via 39-11.
 
 ## Acceptance Criteria

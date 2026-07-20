@@ -23,7 +23,7 @@ So that human oversight is verifiable from the event stream (the old Story 4-6 g
 
 ## Priority
 
-P0 — This is the exception sink of the entire epic: every 39-6 unhandleable outcome (`ReviewUndecidable`, `AmbiguityAboveThreshold`, `RoundsExhausted`, `ValidationExhausted`) and every supervised-mode ACCEPT GATE lands here. It also delivers the audit-oversight event capture the platform has owed since Epic 4. Without it, supervised mode (the 70% case) has no gate and full-auto has no exception path.
+P0 — This is the exception sink of the entire epic: every 39-6 unhandleable outcome (`ReviewUndecidable`, `AmbiguityAboveThreshold`, `RoundsExhausted`, `ValidationExhausted`) and every human-acceptor gate (supervised mode's side of the 39-5 acceptor contract) lands here. It also delivers the audit-oversight event capture the platform has owed since Epic 4. Without it, supervised mode (the 70% case) has no gate and full-auto has no exception path.
 
 **This story absorbs Story 4-6** (`docs/stories/4-6-event-capture-approvals-escalations.md`, status ready-for-dev): the `APPROVAL.*` / `ESCALATION.*` event family specified there ships here, extended with document lineage, channel, and resolution timing. 4-6 should be marked superseded-by-39-8 when this story lands.
 
@@ -41,13 +41,13 @@ P0 — This is the exception sink of the entire epic: every 39-6 unhandleable ou
 
 ## Acceptance Criteria
 
-1. **Event family defined and emitted.** `APPROVAL.REQUESTED`, `APPROVAL.PROVIDED`, `ESCALATION.TRIGGERED`, `ESCALATION.RESOLVED` constants ship in an `ApprovalEvents`-style class and are emitted through the standard persistence path. `APPROVAL.REQUESTED` fires when a supervised gate suspends; `APPROVAL.PROVIDED` on resume (decision, decider identity server-derived, feedback); `ESCALATION.TRIGGERED` on every 39-6 unhandleable outcome and every policy always-escalate hit; `ESCALATION.RESOLVED` when an escalation is dispositioned (resolved/overridden/abandoned, with resolution note). All tagged with `issueId`, `documentId`, `documentType`, `correlationId`.
+1. **Event family defined and emitted.** `APPROVAL.REQUESTED`, `APPROVAL.PROVIDED`, `ESCALATION.TRIGGERED`, `ESCALATION.RESOLVED` constants ship in an `ApprovalEvents`-style class and are emitted through the standard persistence path. `APPROVAL.REQUESTED` fires whenever the 39-6 ACCEPT stage submits to an acceptor — **both acceptors**: on human-gate suspend AND when the orchestrator-acceptor decision turn is dispatched (so full-auto decisions are as auditable as human ones); `APPROVAL.PROVIDED` on the decision (decider = server-derived human identity, or `orchestrator` with the effective-rules reference it decided under; feedback/notes); `ESCALATION.TRIGGERED` on every 39-6 unhandleable outcome and every rules always-escalate hit; `ESCALATION.RESOLVED` when an escalation is dispositioned (resolved/overridden/abandoned, with resolution note). All tagged with `issueId`, `documentId`, `documentType`, `correlationId`.
 
 2. **Story 4-6 coverage subsumed, explicitly.** A mapping table in the story-completion notes shows each 4-6 acceptance criterion satisfied by this surface (approval events with approver + timestamp; escalation events with reason; resolution capture), and `docs/stories/4-6-event-capture-approvals-escalations.md` is updated to `Status: superseded-by-39-8`.
 
 3. **Channel + timing data.** Both `APPROVAL.*` and `ESCALATION.*` events carry a `channel` field (closed set: `orchestrator | user | api`) recording who/what the request was routed to, and the `*.PROVIDED`/`*.RESOLVED` events carry time-to-resolve (computable from the paired `REQUESTED`/`TRIGGERED` event and ALSO denormalized as `durationMs` in the resolving event's data, so dashboards don't need stream joins). A test asserts the pairing is reconstructable from the stream alone via `correlationId`.
 
-4. **Generic suspend gate.** One reusable wait activity (e.g. `WaitForDocumentDecisionActivity`) registers a bookmark named by a single canonical builder folding **tenant + an unguessable decision-session Guid** (the `DesignResumeEndpoint` posture), suspends the calling lifecycle, and on resume reads the injected decision (`Approved`/`Rejected` + feedback + server-derived decider) from workflow input. The 39-6 supervised ACCEPT GATE uses this activity; no new per-document-type gate copies are needed.
+4. **Generic suspend gate.** One reusable wait activity (e.g. `WaitForDocumentDecisionActivity`) registers a bookmark named by a single canonical builder folding **tenant + an unguessable decision-session Guid** (the `DesignResumeEndpoint` posture), suspends the calling lifecycle, and on resume reads the injected decision (mapped onto the 39-5 `AcceptanceDecision` type + feedback + server-derived decider) from workflow input. The 39-6 human-acceptor path uses this activity; no new per-document-type gate copies are needed.
 
 5. **Secure tenant-folded resume endpoint.** A generic engine-side resume endpoint (e.g. `DocumentDecisionResumeEndpoint` beside the five existing `*ResumeEndpoint.cs`) mirrors the `DesignResumeEndpoint` security posture exactly: tenant id folded into the bookmark name server-side (cross-tenant attempts 404, never act), collision ⇒ 409 refusal (never resume `bookmarks[0]`), engine route authorized for the Tamma.Api→engine hop only, with `Tamma.Api` exposing the RBAC-gated public surface (e.g. `POST /api/documents/decisions/{sessionId}/resume`) that derives tenant + decider from the authenticated principal — never trusted from the client. Per-mode: SaaS deciders are tenant members per RBAC; single-user mode folds the sole user's scope.
 
@@ -61,13 +61,13 @@ P0 — This is the exception sink of the entire epic: every 39-6 unhandleable ou
 
 - **Extract, don't multiply.** The five existing resume endpoints stay as-is (their gates are workflow-specific); the *new* generic gate + endpoint is what future lifecycles use. Folding the five legacy gates onto the generic surface is 39-13/39-14 migration work — note it, don't do it here.
 - The bookmark-name builder must live in ONE place shared by the wait activity and the endpoint (the `DesignResumeEndpoint.BookmarkName` → `WaitForDesignApprovalActivity.ApprovalBookmarkName` delegation pattern) so suspend/resume names can never drift.
-- `channel=orchestrator` covers full-auto escalations consumed by the orchestrating workflow/operator queue; `user` covers supervised human gates; `api` covers programmatic deciders (e.g. an external system driving the public endpoint). The closed set is deliberately small — extend by conscious enum edit, drift-tested.
+- `channel=orchestrator` covers full-auto acceptor decisions and full-auto escalations consumed by the orchestrating workflow/operator queue; `user` covers supervised human gates; `api` covers programmatic deciders (e.g. an external system driving the public endpoint). The closed set is deliberately small — extend by conscious enum edit, drift-tested.
 - Escalation *notification* delivery (email/push/dashboards) is out of scope — this story defines the events + resume surface; notification fan-out rides the existing alerting/notification infrastructure separately.
 - Time-to-resolve data + channel is exactly what the epic README promises from absorbing 4-6 — keep the field names stable; the 39-11 lineage API and dashboards will query them.
 
 ## Dependencies
 
-- **Prerequisite:** 39-2 (lineage model), 39-6 (outcome enum + the gate's call-site — lockstep landing), 39-5 (channel routing / always-escalate policy).
+- **Prerequisite:** 39-2 (lineage model), 39-6 (outcome enum + the gate's call-site — lockstep landing), 39-5 (acceptor contract / `AcceptanceDecision` / always-escalate rules).
 - **Prerequisite (in place):** Elsa 3 bookmarks + the five `*ResumeEndpoint.cs` specimens; DCB store + `EventPersistenceMiddleware`; `ITammaModeProvider`.
 - **Absorbs:** Story 4-6 (`docs/stories/4-6-event-capture-approvals-escalations.md`) — mark superseded on landing.
 - **Feeds:** 39-10 (suspended-on-bookmark is one of the two legal resumability postures), 39-11 (lineage/approval queries), 39-13/39-14 (legacy gate migrations).
@@ -81,3 +81,4 @@ P0 — This is the exception sink of the entire epic: every 39-6 unhandleable ou
 | Date       | Version | Changes                | Author |
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-19 | 1.0.0   | Initial story creation | Claude |
+| 2026-07-20 | 1.1.0   | Aligned with the 39-5 acceptor redesign: `APPROVAL.*` events cover both acceptors (orchestrator decisions emit with `channel=orchestrator` + effective-rules reference), gate maps onto `AcceptanceDecision` | Claude |

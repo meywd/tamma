@@ -23,7 +23,7 @@ So that every producer the 39-1 audit mapped has a first-class type, and — cri
 
 ## Priority
 
-P0 — `Review` is the keystone of the whole epic: 39-6's lifecycle emits a `Review` for every reviewed document, 39-7's single-reviewer and panel producers write it, and 39-5's acceptance policy reads its decision. The other five types unblock the planning-family (39-14) and remaining-producer (39-15) migrations. Until `Review` exists, the lifecycle has no typed way to say "concerns, with notes."
+P0 — `Review` is the keystone of the whole epic: 39-6's lifecycle emits a `Review` for every reviewed document, 39-7's single-reviewer and panel producers write it, and 39-5's guardrails and acceptor read its decision. The other five types unblock the planning-family (39-14) and remaining-producer (39-15) migrations. Until `Review` exists, the lifecycle has no typed way to say "concerns, with notes."
 
 ## Architectural Context (READ FIRST)
 

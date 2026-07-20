@@ -31,10 +31,15 @@ lifecycle, and makes every workflow resumable by design.
    unhandleable outcome** (`ReviewUndecidable`, `AmbiguityAboveThreshold`,
    `RoundsExhausted`, `ValidationExhausted`) — which escalates to the
    orchestrator/human **with the full document lineage attached**, never a bare
-   failure. The accept gate is **mode-aware**: full-auto = the orchestrator
-   applies a configured acceptance policy; supervised (70%) = a human gate via
-   suspend/resume. "Who decides" becomes: the document's validator, then a
-   Review document about it, then the policy.
+   failure. The accept gate **always submits the document to an acceptor** —
+   it is never an if-else that skips the decision. Mode selects only WHO the
+   acceptor is: full-auto = the orchestrator; supervised (70%) = a human via
+   suspend/resume. Both acceptors decide against the same **configurable
+   acceptance rules** — admin-editable configuration the orchestrator reads at
+   decision time (rendered into its decision prompt, or fetched via MCP), never
+   hardcoded threshold logic. "Who decides" becomes: the document's validator,
+   then a Review document about it, then the acceptor applying the configured
+   rules.
 
 3. **Resumable by design.** Every lifecycle workflow either suspends on a
    bookmark awaiting input (the generalized Design-Proposal pattern) or, after a
@@ -58,9 +63,16 @@ lifecycle, and makes every workflow resumable by design.
   giving a queryable lineage per issue: Issue → Findings → Decomposition → Plan
   → Reviews → outcome.
 - **Humans in full-auto sit at three positions only**: intent (the issue and its
-  acceptance criteria), policy (thresholds/config, set once), exceptions (the
-  escalation sink). Whether any action class always escalates (e.g. breaking
-  changes) is acceptance-policy configuration, not a hardcoded rule.
+  acceptance criteria), policy (the acceptance rules, edited in the admin UI),
+  exceptions (the escalation sink). Whether any action class always escalates
+  (e.g. breaking changes) is acceptance-rules configuration, not a hardcoded
+  rule.
+- **The acceptor is an actor, not a branch.** Accepting a document is always a
+  decision taken by someone — the orchestrator in full-auto, a human in
+  supervised mode — against the configured acceptance rules. Deterministic code
+  enforces only the hard guardrails around that decision (round bounds, the
+  blocking-review invariant, always-escalate classes); it never impersonates
+  the decision itself.
 - **Prose stays prose.** Tech-writer outputs (changelog, ADR, postmortem,
   release notes) are markdown with an audience tag — no forced structure.
 
@@ -92,9 +104,11 @@ lifecycle, and makes every workflow resumable by design.
             |     |  repair turn (innermost ring)                  |
             |  REVIEW (single reviewer or panel -> Review doc)     |
             |     |  concerns: notes -> REVISE (bounded rounds)     |
-            |  ACCEPT GATE (mode-aware)                            |
-            |     |  full-auto: orchestrator applies policy        |
-            |     |  supervised: bookmark suspend -> human resume   |
+            |  ACCEPT (submit to acceptor -- always)               |
+            |     |  full-auto:  acceptor = orchestrator, reads    |
+            |     |              configured rules (prompt or MCP)  |
+            |     |  supervised: acceptor = human, bookmark        |
+            |     |              suspend -> resume with decision    |
             +-----|------------------------------------------------+
                   |
         done ----+---- typed unhandleable outcome
@@ -114,7 +128,7 @@ lineage, which is also what re-entry reads to resume from the latest state.
 | 39-2 | Document Core — Envelope, Type Registry, Lineage, Drift Tests | P0 | drafted | 4-5 days |
 | 39-3 | Document Types Batch 1 — Decomposition, Findings, AmbiguityAssessment, Clarification | P0 | drafted | 4-5 days |
 | 39-4 | Document Types Batch 2 — Plan, Design, Review (unified), TriageDecision, Diagnosis, TestSpec | P0 | drafted | 5-6 days |
-| 39-5 | Acceptance Policy — per-mode accept/escalation configuration | P0 | drafted | 3-4 days |
+| 39-5 | Acceptance Rules — configurable policy, admin UI, orchestrator read path | P0 | drafted | 5-7 days |
 | 39-6 | DocumentLifecycleWorkflow — generic produce/validate/review/revise/accept | P0 | drafted | 6-8 days |
 | 39-7 | Review Producers — single reviewer + panel onto the unified Review type | P0 | drafted | 4-6 days |
 | 39-8 | Escalation & Approval Surface — events, suspend/resume, lineage payload | P0 | drafted | 4-5 days |
@@ -154,5 +168,5 @@ lineage, which is also what re-entry reads to resume from the latest state.
 - DCB event store + Story 4-7 query API + Story 4-8 replay for latest-state
   reconstruction.
 - Operating-mode detection (single-user vs SaaS; full-auto vs supervised) for the
-  acceptance policy's per-mode ownership — the CLAUDE.md two-scoping-models rule
-  applies to policy configuration.
+  acceptance rules' per-mode ownership — the CLAUDE.md two-scoping-models rule
+  applies to the rules configuration.

@@ -63,7 +63,7 @@ P1 — The planning family carries the platform's only existing review-with-note
 
 ## Dependencies
 
-- **Blocking:** 39-12 (pilot + accepted `Decomposition` as input), 39-4 (`Plan` + unified `Review` types), 39-5 (round/acceptance policy), 39-6 (lifecycle revise rounds), 39-7 (single/panel review producers + aggregation), 39-10/39-11 (resume, store).
+- **Blocking:** 39-12 (pilot + accepted `Decomposition` as input), 39-4 (`Plan` + unified `Review` types), 39-5 (round bounds/acceptance rules), 39-6 (lifecycle revise rounds), 39-7 (single/panel review producers + aggregation), 39-10/39-11 (resume, store).
 - **Optional:** 39-9 (repair ring) for plan validation failures — gated by data, off by default.
 - **Unblocks:** 39-15 (last migration wave), full Issue → Decomposition → Plan → Reviews lineage for dashboards and Stories 2-15/2-16 consumers.
 

@@ -59,12 +59,12 @@ P1 — First family fan-out after the 39-12 pilot proves the stack. The assessme
 - **Order within the story:** Research → AmbiguityScoring (pure produce+accept, no suspend) first; then Clarify (suspend mid-lifecycle); DesignProposal last (accept-gate replacement). Each lands independently green.
 - **Endpoint preservation strategy.** Prefer thin forwarders over route aliasing: keep `DesignResumeEndpoint` / `ClarifyResumeEndpoint` files as adapters that validate the legacy payload then call the generic resume service — deleting them entirely is 39-8's future cleanup once dashboards migrate, not this story's job.
 - **Clarification is one document, two phases** — resist modeling Questions and Resolution as two document types. The 39-3 `Clarification` type owns the phase semantics; the lifecycle suspend sits between its phases.
-- **Threshold config:** the ambiguity threshold moves to acceptance policy (39-5) with per-mode ownership per the CLAUDE.md two-scoping-models rule (single-user: user-owned; SaaS: tenant-owned). Do not leave it in `appsettings` as a global.
+- **Threshold config:** the ambiguity threshold moves to the acceptance rules (39-5) with per-mode ownership per the CLAUDE.md two-scoping-models rule (single-user: user-owned; SaaS: tenant-owned). Do not leave it in `appsettings` as a global.
 - The `ContractBindingTests` binding-map entries for the four cells follow the 39-12 pattern (point at document-type validators) until 39-16 replaces the mechanism.
 
 ## Dependencies
 
-- **Blocking:** 39-12 (pilot template proven), 39-3/39-4 (the four document types), 39-5 (threshold/acceptance policy), 39-6/39-7/39-8 (lifecycle, review, gate), 39-10/39-11 (resume standard, store).
+- **Blocking:** 39-12 (pilot template proven), 39-3/39-4 (the four document types), 39-5 (threshold/acceptance rules), 39-6/39-7/39-8 (lifecycle, review, gate), 39-10/39-11 (resume standard, store).
 - **Existing surface preserved:** `ClarifyResumeEndpoint` / `DesignResumeEndpoint` contracts and their test suites.
 - **Unblocks:** full assessment-phase lineage for dashboards; 39-14 proceeds in parallel after 39-12 (no ordering constraint between 39-13 and 39-14).
 
