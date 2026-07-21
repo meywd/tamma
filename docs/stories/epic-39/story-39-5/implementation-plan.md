@@ -84,7 +84,7 @@ When this story is done, `apps/tamma-elsa/src/Tamma.Core/Documents/Policy/` hold
        public sealed record Reject([property: JsonPropertyName("reason")] string Reason) : AcceptanceDecision;  // HUMAN-ONLY (design review 2026-07-21): a final "no" → state Rejected
        public sealed record Escalate(AcceptanceEscalationReason Reason, string Detail) : AcceptanceDecision;
    }
-   public abstract record AcceptanceRouting   // DecideSelf | AssignToUser(Guid Assignee, AssignmentBasis Basis)
+   public abstract record AcceptanceRouting   // DecideSelf | AssignToRole(string RoleWire, AssignmentBasis Basis) — role-addressed, never an exact user (design review 2026-07-21); 39-20 resolves the role's audience
    ```
 
    `AcceptanceEscalationReason` + `AssignmentBasis` (`[Wire] Initiator | RepoAccess`) are `[Wire]` enums; `AcceptanceEscalationReasonExtensions.ToLifecycleOutcome()` maps per D10 (returns `DocumentLifecycleOutcome?`).
@@ -212,7 +212,7 @@ C# tests in `apps/tamma-elsa/tests/Tamma.Api.Tests/AcceptanceRules/` (service/en
 - **Must land first: 39-2** (`DocumentTypeKey`, `DocumentTypeRegistry`, `DocumentEnvelope`, `DocumentLifecycleOutcome`, `EnumWire` reuse) — D9; its implementation plan is complete. Steps 1–6 compile against it.
 - **Lockstep: 39-4** — guardrails target its `ReviewDecision` spellings via the `ReviewFacts` projection (D8); whichever lands second performs the one-line enum reconciliation.
 - **Lockstep obligation on 39-6**: the workflow-level "publishes and suspends regardless of autonomy level" test (D7) — record it in 39-6's plan; 39-6 also consumes `AcceptanceRequestFactory`, `AcceptanceGuardrails`, and the resolver interface only (never `Tamma.Api` types).
-- **Stubbed, not pulled in**: 39-17 agent host (tool is constructed by `GetAcceptanceRulesToolFactory`; tests exercise the `IToolExecutor` directly with a Moq'd `IAcceptanceRulesResolver`); 39-18 channel (the `AcceptanceRequest` record is transport-agnostic JSON; no SignalR here); 39-8 gate (decision-session id is minted here, resume surface is theirs); 39-20 eligibility (`AssignToUser.Basis` enum defined here; the resolver that validates assignees is 39-20's).
+- **Stubbed, not pulled in**: 39-17 agent host (tool is constructed by `GetAcceptanceRulesToolFactory`; tests exercise the `IToolExecutor` directly with a Moq'd `IAcceptanceRulesResolver`); 39-18 channel (the `AcceptanceRequest` record is transport-agnostic JSON; no SignalR here); 39-8 gate (decision-session id is minted here, resume surface is theirs); 39-20 eligibility (`AssignToRole.Basis` enum defined here; the resolver that computes the role's audience is 39-20's).
 - **In place, verified**: `ITammaModeProvider`/`TammaMode`, `prompt_overrides` XOR pattern + repositories, `Permissions.Matrix` + policy plumbing, `IToolExecutor` seam, admin dashboard scaffolding, Testcontainers test precedent.
 
 ## Risks & Mitigations

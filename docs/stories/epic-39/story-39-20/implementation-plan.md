@@ -78,22 +78,25 @@ When this story is done, the control plane holds a first-class access model — 
    public interface ITaskAudienceResolver
    {
        Task<bool> CanSeeAsync(Guid userId, TaskRef task, CancellationToken ct = default);
-       Task<IReadOnlyList<EligibleAssignee>> EligibleAssigneesAsync(TaskRef task, CancellationToken ct = default);
+       Task<IReadOnlyList<EligibleAssignee>> EligibleAudienceAsync(TaskRef task, string roleWire, CancellationToken ct = default);
+       // role-addressed (design review 2026-07-21): holders of the tenant role ∩ CanSee — assignment never targets an exact user
    }
    ```
 
-   `TaskAudienceResolver` deps: `IRepoAccessRepository`, `ITenantMembershipRepository`, `IUserRepoScopeCache`. `CanSeeAsync`: initiator match → true; else resolve repo (by `RepositoryId`, else `GetByFullNameAsync`; no row ⇒ tenant-visible fallback per D2) → scope lookup (cache, miss ⇒ `GetUserRepoScopeAsync` + fill). `EligibleAssigneesAsync`: initiator (if member) + `GetRepoAudienceAsync`, permission-filtered via `Permissions.HasPermission(tenantRole, task.RequiredPermission)`, ordered per D5. If 39-18 already landed, DELETE `InitiatorOnlyTaskAudienceResolver` and swap the DI registration; its `ChannelTaskRef` call sites move to `TaskRef` (mechanical widen).
+   `TaskAudienceResolver` deps: `IRepoAccessRepository`, `ITenantMembershipRepository`, `IUserRepoScopeCache`. `CanSeeAsync`: initiator match → true; else resolve repo (by `RepositoryId`, else `GetByFullNameAsync`; no row ⇒ tenant-visible fallback per D2) → scope lookup (cache, miss ⇒ `GetUserRepoScopeAsync` + fill). `EligibleAudienceAsync`: role-holders (tenant/team role match) ∩ (initiator + `GetRepoAudienceAsync`), permission-filtered via `Permissions.HasPermission(tenantRole, task.RequiredPermission)`, ordered per D5. If 39-18 already landed, DELETE `InitiatorOnlyTaskAudienceResolver` and swap the DI registration; its `ChannelTaskRef` call sites move to `TaskRef` (mechanical widen).
 
 7. **CREATE the task assignment surface** — `apps/tamma-elsa/src/Tamma.Api/Services/Tasks/TaskEvents.cs` (constants + `StatusForEvent`) and `TaskAssignmentService.cs : ITaskAssignmentService` (D7/D8; interface from 39-17, created at `Tamma.Api/Services/Orchestrator/ITaskAssignmentService.cs` with the 39-17-pinned shape if absent):
 
    ```csharp
-   Task<AssignmentResult> AssignAsync(Guid tenantId, TaskRef task, Guid assigneeUserId,
+   Task<AssignmentResult> AssignAsync(Guid tenantId, TaskRef task, string roleWire,
        string basis /* "initiator" | "repo-access" */, string? autonomyContextRef, CancellationToken ct);
-   Task<AssignmentResult> ReassignAsync(...previousAssigneeUserId, ...);   // emits TASK.REASSIGNED
-   Task CompleteAsync(Guid tenantId, TaskRef task, Guid completedByUserId, CancellationToken ct);
+   // validates EligibleAudienceAsync(task, roleWire) non-empty (unknown role / empty audience ⇒ typed refusal); emits TASK.ASSIGNED with role + resolved audience
+   Task<AssignmentResult> ReassignAsync(...previousRoleWire, ...);   // emits TASK.REASSIGNED (role → role)
+   Task CompleteAsync(Guid tenantId, TaskRef task, Guid completedByUserId, string surface /* "task-view" | "chat" */, CancellationToken ct);
+   // authorizes completedByUserId ∈ current audience at act time; emits TASK.COMPLETED with the completing user + surface
    ```
 
-   Fail-loud `IEventRepository.AppendAsync` with data `{assigneeUserId, basis, autonomyContextRef, requiredPermission}` and tags `issueId`/`documentId`/`tenantId`/`userId` (the `EmitTenantEvent` tag shape).
+   Fail-loud `IEventRepository.AppendAsync` with data `{roleWire, audienceUserIds, basis, autonomyContextRef, requiredPermission}` (`COMPLETED`: `{completedByUserId, surface}`) and tags `issueId`/`documentId`/`tenantId`/`userId` (the `EmitTenantEvent` tag shape).
 
 8. **CREATE `WorkflowInitiationAuthorizer.cs`** in `Services/Access/` (D10), implementing 39-19's `IWorkflowInitiationAuthorizer` (the seam is DEFINED by 39-19's step 5, incl. its `workflowName`/`repoRef` signature — create the interface file only if 39-19 has not landed; whichever story lands second reconciles path + signature to one interface) — composes `IGitRepoAuthorizer` + `EffectiveAccess` ≥ `contribute`; denial emits `REPO.ACCESS_CHECK.DENIED` (best-effort) and returns a typed deny with reason. Registration replaces 39-19's `TenantMembershipInitiationAuthorizer` default.
 
@@ -113,7 +116,7 @@ When this story is done, the control plane holds a first-class access model — 
 
 Constants in `Tamma.Api/Services/Access/AccessEvents.cs` and `Tamma.Api/Services/Tasks/TaskEvents.cs` (AGGREGATE.ACTION.STATUS):
 
-- **Task routing (fail-loud, D8):** `TASK.ASSIGNED`, `TASK.REASSIGNED`, `TASK.COMPLETED` (the canonical suffix-less names 39-8/39-17/39-19 consume) — data: assignee, basis (`initiator | repo-access`), `autonomyContextRef`, `requiredPermission`; tags: `issueId`, `documentId`, `tenantId`, `userId`.
+- **Task routing (fail-loud, D8):** `TASK.ASSIGNED`, `TASK.REASSIGNED`, `TASK.COMPLETED` (the canonical suffix-less names 39-8/39-17/39-19 consume) — `ASSIGNED`/`REASSIGNED` data: addressed role, resolved audience user ids, basis (`initiator | repo-access`), `autonomyContextRef`, `requiredPermission`; `COMPLETED` data: completing user, surface (`task-view | chat`); tags: `issueId`, `documentId`, `tenantId`, `userId`.
 - **Access CRUD (best-effort, org precedent):** `TEAM.CREATED.SUCCESS`, `TEAM.UPDATED.SUCCESS`, `TEAM.DELETED.SUCCESS`, `TEAM.MEMBER_ADDED.SUCCESS`, `TEAM.MEMBER_REMOVED.SUCCESS`, `TEAM.MEMBER_ROLE_CHANGED.SUCCESS`, `REPO.REGISTERED.SUCCESS`, `REPO.VISIBILITY_CHANGED.SUCCESS`, `REPO.GRANT_UPSERTED.SUCCESS`, `REPO.GRANT_REVOKED.SUCCESS`, `REPO.ACCESS_CHECK.DENIED`.
 - **Consumed/relied on, not emitted here:** the `initiatedBy` dispatch tag (39-19 AC2 — feeds `TaskRef.InitiatorUserId`), `APPROVAL.*`/`ESCALATION.*` (39-8), `GUIDANCE.*` (39-18), `CHAT.*` (39-19).
 
@@ -124,7 +127,7 @@ NUnit + FluentAssertions + Moq in `apps/tamma-elsa/tests/Tamma.Api.Tests/Access/
 - **`RepoAccessLevelsTests` + `EffectiveAccessCompositionTests`** — level ranks/`IsAtLeast` pins; D4 truth table: owner/admin ⇒ admin everywhere; member + tenant-visible ⇒ contribute; member + restricted + no grant ⇒ none; direct vs team grant max-wins; maintainer team-role adds NO repo access (never-bypass clause). **AC6.**
 - **`TaskAudienceResolverTests`** (Moq'd repositories + real cache with fake `TimeProvider`) — both predicate directions: initiator-only user sees exactly their initiated task; direct-grant user sees repo tasks; **team-transitive case** (user ∈ team, team granted on repo ⇒ CanSee true + appears in EligibleAssignees with basis `repo-access`); restricted repo hides from ungranted member; no-catalogue-row fallback = tenant-visible; `EligibleAssigneesAsync` ordering pin + `RequiredPermission="workflows:manage"` filters member-role candidates out; `CanSeeAsync` ignores `RequiredPermission`. **AC3.**
 - **`UserRepoScopeCacheTests`** — hit/miss/TTL-expiry with fake clock; `InvalidateTenant` evicts all tenant entries; resolver consults repositories exactly once across repeated `CanSeeAsync` calls (Moq `Times.Once` — the "cheap" clause). **AC3 (technical note).**
-- **`TaskAssignmentServiceTests`** (Moq'd resolver + `IEventRepository`) — in-set assignment emits `TASK.ASSIGNED` with basis/autonomy-context/tags; **out-of-set assignee ⇒ typed refusal, zero events, zero delivery** (the server-validated clause); reassign emits previous+new; complete emits `TASK.COMPLETED`; append failure fails the call (fail-loud pin). **AC4 (assignment), AC5.**
+- **`TaskAssignmentServiceTests`** (Moq'd resolver + `IEventRepository`) — role assignment with non-empty audience emits `TASK.ASSIGNED` with role/audience/basis/autonomy-context/tags; **unknown role or empty audience ⇒ typed refusal, zero events, zero delivery** (the server-validated clause); reassign emits previous+new role; complete authorizes the completing user against the audience at act time (out-of-audience ⇒ refusal) and emits `TASK.COMPLETED` with user+surface; append failure fails the call (fail-loud pin). **AC4 (assignment), AC5.**
 - **`TeamEndpointsTests` + `RepoAccessEndpointsTests`** (`OrgEndpointHandlerTests` style, Moq'd repos + `HttpContext.Items` role seeding) — member 403 on every write, admin/owner 200; grant/visibility/team-member mutations emit their events and invalidate the cache; maintainer can mutate own-team members but not grants; validation (bad level/role/visibility → 400). **AC1, AC2 (endpoints).**
 - **`WorkflowInitiationAuthorizerTests`** — tenant-fence deny passes through (Moq'd `IGitRepoAuthorizer`); member on restricted repo without grant ⇒ deny + `REPO.ACCESS_CHECK.DENIED`; contribute grant ⇒ allow; read-only grant ⇒ deny (initiation needs ≥ contribute). **AC4 (initiation).**
 - **`TaskAudiencePinTests`** — D11 reflection pin over the `Tamma.Api` assembly (39-17 `OrchestratorMediationPinTests` style): one production `ITaskAudienceResolver` impl; grant/team repository interfaces confined to the allowlisted constructors. **AC3 (architecture-test clause).**
@@ -140,7 +143,7 @@ NUnit + FluentAssertions + Moq in `apps/tamma-elsa/tests/Tamma.Api.Tests/Access/
 | 2 — repo grants, closed levels, default posture + grandfathering documented, admin UI + endpoints | 1–3, 9, 10, 11 (D2/D3/D12) | `RepoAccessEndpointsTests`, `TeamsRepoAccessMigrationTests` (backfill pin), `AccessAdminPage` suite; design doc |
 | 3 — one resolver, both directions, team-transitive, all consumers via it | 4–6 (D5/D6), 11 (D11) | `TaskAudienceResolverTests`, `UserRepoScopeCacheTests`, `TaskAudiencePinTests` |
 | 4 — enforcement at every surface | 6 (39-18 fan-out swap), 7 (D7), 8 (D10); Task View/chat = 39-19 lockstep via the same resolver | `TaskAssignmentServiceTests` (out-of-set refusal), `WorkflowInitiationAuthorizerTests`, `AccessModelModeParityTests`; consumer wiring re-pinned in 39-18/39-19 per their plans |
-| 5 — TASK.* events with assignee, basis, autonomy context, issue/document tags | 7 (D8) | `TaskAssignmentServiceTests` (payload + fail-loud pins) |
+| 5 — TASK.* events with role+audience (ASSIGNED), completing user+surface (COMPLETED), basis, autonomy context, issue/document tags | 7 (D8) | `TaskAssignmentServiceTests` (payload + fail-loud pins) |
 | 6 — matrix extension not fork; composition rule documented + tested | 4 (D4), 9 (D9), 11 (D12) | `EffectiveAccessCompositionTests`, `TeamEndpointsTests`/`RepoAccessEndpointsTests` (403 parity), Permissions.Matrix diff review |
 | 7 — two scoping models proven | 6 (no mode branch), 11 | `AccessModelModeParityTests` (both modes, exact sets) |
 
@@ -150,7 +153,7 @@ NUnit + FluentAssertions + Moq in `apps/tamma-elsa/tests/Tamma.Api.Tests/Access/
 - **No hard compile-time prerequisite on 39-2/39-5** (D3) — this story can land first in the epic's user-facing cluster; that is deliberate given every P0 surface routes through it.
 - **Lockstep — 39-18:** owns `ChannelOutboxService` fan-out; whichever lands second performs the D5 stub swap (`InitiatorOnlyTaskAudienceResolver` → `TaskAudienceResolver`, `ChannelTaskRef` → `TaskRef`). **Lockstep — 39-17:** `ITaskAssignmentService` interface identity (create-or-adopt, D7); the agent consumes `EligibleAssigneesAsync` output and must observe typed refusals. **Lockstep — 39-19:** stamps `initiatedBy` at dispatch (feeds `TaskRef.InitiatorUserId`), consumes the resolver for Task View listing + chat refusals, and calls `IWorkflowInitiationAuthorizer` + `CompleteAsync`; until it lands, initiator-based visibility is exercised only through tests constructing `TaskRef` directly (nothing here blocks on it). **Lockstep — 39-8:** `CompleteAsync` call on resume.
 - **Stubbed, not pulled in:** 39-5's `AssignmentBasis` enum (string constants until it lands, D3); the orchestrator agent itself (assignment tested through the service seam with Moq'd resolver).
-- **Feeds:** 39-5 autonomy routing (the eligible-assignee input), 39-19 both surfaces, 39-18 delivery scoping, 39-17 assignment validation.
+- **Feeds:** 39-5 autonomy routing (the role-audience input), 39-19 both surfaces, 39-18 delivery scoping, 39-17 assignment validation.
 
 ## Risks & Mitigations
 

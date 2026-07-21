@@ -39,9 +39,11 @@ lifecycle, and makes every workflow resumable by design.
    git, the event store, logs, workflows, and documents — reads the
    **configurable acceptance rules and the autonomy level (70–100)** through
    its tools and decides WHO decides: itself (the higher the level, the more
-   it self-decides), or a human it assigns the decision to — picked from the
-   users eligible for that task (workflow initiator or repo access, through
-   teams/roles/permissions) — landing it in that user's Task View. Either
+   it self-decides), or humans — by assigning the decision to a **tenant role,
+   never an exact user**: it lands in the Task View of every role-holder
+   within their visibility scope (workflow initiator or repo access, through
+   teams/roles/permissions), can equally be handled by asking the
+   orchestrator in chat, and the first authorized completion wins. Either
    decision resumes the same gate. "Who decides" becomes: the document's
    validator, then a Review document about it, then the orchestrator routing
    per the configured rules and autonomy dial.
@@ -77,8 +79,8 @@ lifecycle, and makes every workflow resumable by design.
   assigned tasks). Whether any action class always escalates (e.g. breaking
   changes) is acceptance-rules configuration, not a hardcoded rule.
 - **The acceptor is an actor, not a branch.** Accepting a document is always a
-  decision taken by someone — the orchestrator, or the user it assigns the
-  decision to — against the configured acceptance rules. Deterministic code
+  decision taken by someone — the orchestrator, or a holder of the role it
+  assigns the decision to — against the configured acceptance rules. Deterministic code
   enforces only the hard guardrails around that decision (round bounds, the
   blocking-review invariant, always-escalate classes); it never impersonates
   the decision itself.

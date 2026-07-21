@@ -23,7 +23,7 @@ So that in a real organization the orchestrator's task assignments, the Task Vie
 
 ## Priority
 
-P0 — Every user-facing piece of the epic routes through this: the orchestrator's autonomy routing (39-5/39-17) must pick assignees from an eligibility set this story defines; 39-19's two surfaces filter by it; 39-18's channel groups must not deliver a task to an ineligible user.
+P0 — Every user-facing piece of the epic routes through this: the orchestrator's autonomy routing (39-5/39-17) addresses roles whose audience this story computes; 39-19's two surfaces filter by it; 39-18's channel groups must not deliver a task to an ineligible user.
 
 ## Architectural Context (READ FIRST)
 
@@ -42,11 +42,11 @@ P0 — Every user-facing piece of the epic routes through this: the orchestrator
 
 2. **Repo access grants.** A repo registered to a tenant carries access grants: to teams and/or individual users, with an access level (at minimum `read | contribute | admin` — closed enum). Default posture decided and documented (existing tenants' repos grandfathered as tenant-visible to avoid a breaking lockout, with a migration note). Admin UI + endpoints to manage grants (owner/admin).
 
-3. **One eligibility resolver.** An `ITaskAudienceResolver` (name illustrative) implementing the visibility predicate — `CanSee(user, task)` ⇔ user initiated the task's workflow ∨ user has access to the task's repo — plus `EligibleAssignees(task)` (the ordered candidate set the orchestrator picks from, filterable by role/permission requirements a task type declares, e.g. "acceptance of a Plan requires `workflows:manage`"). Both directions covered by tests including the team-transitive case (user in team, team granted on repo). All consumers (39-18 channel groups, 39-19 Task View, orchestrator assignment) call this resolver — no consumer re-implements the predicate, asserted by an architecture test where feasible.
+3. **One eligibility resolver.** An `ITaskAudienceResolver` (name illustrative) implementing the visibility predicate — `CanSee(user, task)` ⇔ user initiated the task's workflow ∨ user has access to the task's repo — plus `EligibleAudience(task, role)` (the set an assignment reaches: **holders of the addressed tenant role ∩ the visibility predicate** — assignment targets a role, never an exact user, settled design review 2026-07-21; filterable by permission requirements a task type declares, e.g. "acceptance of a Plan requires `workflows:manage`"). Both directions covered by tests including the team-transitive case (user in team, team granted on repo). All consumers (39-18 channel groups, 39-19 Task View, orchestrator assignment) call this resolver — no consumer re-implements the predicate, asserted by an architecture test where feasible.
 
-4. **Enforcement at every surface.** Channel delivery (39-18): hub group membership per task computed from the resolver, server-side. Task View (39-19): listing filtered by it. Chat: answers/actions about a repo the user lacks access to are refused (39-19 AC1/AC2). Workflow initiation: requires the initiating user's permission on the target repo. Orchestrator assignment (39-17): only from `EligibleAssignees` — the agent literally cannot address a task to an out-of-set user (server-validated, not agent-honor-system).
+4. **Enforcement at every surface.** Channel delivery (39-18): hub group membership per task computed from the resolver, server-side. Task View (39-19): listing filtered by it. Chat: answers/actions about a repo the user lacks access to are refused (39-19 AC1/AC2). Workflow initiation: requires the initiating user's permission on the target repo. Orchestrator assignment (39-17): only to a role with a non-empty `EligibleAudience` — the agent literally cannot address a task to an individual, an unknown role, or an empty audience (server-validated, not agent-honor-system). Completion (Task View or chat) is authorized per-user against the same audience at act time.
 
-5. **Task events.** `TASK.ASSIGNED`, `TASK.REASSIGNED`, `TASK.COMPLETED` DCB events (AGGREGATE.ACTION.STATUS convention) carrying assignee, the eligibility basis (`initiator | repo-access`), the autonomy context reference, and `issueId`/`documentId` tags — so "who was asked, why them, who answered" is auditable from the stream.
+5. **Task events.** `TASK.ASSIGNED`, `TASK.REASSIGNED`, `TASK.COMPLETED` DCB events (AGGREGATE.ACTION.STATUS convention): `ASSIGNED`/`REASSIGNED` carry the addressed role + the resolved audience (user ids at assignment time) + the eligibility basis (`initiator | repo-access`) + the autonomy context reference; `COMPLETED` carries the actual completing user and surface (`task-view | chat`); all tagged `issueId`/`documentId` — so "which role was asked, who could see it, who answered, from where" is auditable from the stream.
 
 6. **Permission matrix extension, not fork.** New permission keys land in `Permissions.Matrix` following the established pattern (`repos:manage`, `tasks:assign`, …, each with a comment naming this story); the role hierarchy stays `member < admin < owner`; team-level roles compose with (never bypass) tenant roles — the effective permission is the union of tenant-role grants and team grants scoped to that team's repos, and the composition rule is documented + tested.
 
@@ -63,7 +63,7 @@ P0 — Every user-facing piece of the epic routes through this: the orchestrator
 
 - **Prerequisite (in place):** `Permissions.Matrix` + auth middleware, `users`/org membership, `ITammaModeProvider`.
 - **Lockstep:** 39-19 (surfaces that consume the resolver), 39-18 (channel groups), 39-17 (assignment validation).
-- **Feeds:** 39-5 autonomy routing (eligible-assignee input), Task View, chat authorization.
+- **Feeds:** 39-5 autonomy routing (role-audience input), Task View, chat authorization.
 
 ## Estimated Effort
 
