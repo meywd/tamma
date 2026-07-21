@@ -42,7 +42,7 @@ When this story is done, the user dashboard (`packages/dashboard-user`) has two 
 
 1. **CREATE `apps/tamma-elsa/src/Tamma.Api/Services/Chat/ChatEvents.cs`; MODIFY `apps/tamma-elsa/src/Tamma.Core/Redaction/CredentialRedactor.cs`.** Constants catalogue (file shape of `PromptEventsService`'s constant block, standalone static class): `MessageReceived = "CHAT.MESSAGE.RECEIVED"`, `MessageSent = "CHAT.MESSAGE.SENT"`, `WorkflowInitiated = "CHAT.WORKFLOW.INITIATED"`, `WorkflowRefused = "CHAT.WORKFLOW.REFUSED"`; doc-comment pins the tag set (`userId`, `tenantId`, `conversationId`, `turnId`, `correlationId = conversationId`, `issueId` when known) and D3's fail-loud posture. Redactor: add `public static string Clean(string? value, int maxLength)`; the existing `Clean(string?)` delegates with `MaxLength` (byte-identical, pinned).
 
-2. **CREATE `apps/tamma-elsa/src/Tamma.Api/Services/Chat/EventStoreChatTranscriptRecorder.cs`.** Implements 39-17's `IChatTranscriptRecorder` (its no-op default is replaced in DI):
+2. **CREATE `apps/tamma-elsa/src/Tamma.Api/Services/Chat/EventStoreChatTranscriptRecorder.cs`.** Implements 39-17's `IChatTranscriptRecorder` — the SOLE registration (39-17 registers no default; `OrchestratorChatService` ctor-requires the recorder, so chat cannot be wired without it — settled design review 2026-07-21):
 
    ```csharp
    public sealed class EventStoreChatTranscriptRecorder : IChatTranscriptRecorder
