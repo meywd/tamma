@@ -25,10 +25,9 @@ public class WorkflowInterfaceGraphTests
     /// </summary>
     private static readonly HashSet<DocumentTypeKey> PendingImplementations = new()
     {
-        DocumentTypeKey.Findings,
-        DocumentTypeKey.AmbiguityAssessment,
-        DocumentTypeKey.Clarification,
-        DocumentTypeKey.Decomposition,
+        // Findings, AmbiguityAssessment, Clarification, Decomposition were
+        // implemented + registered by Story 39-3 — removed from the ratchet. The
+        // remaining 6 land in Story 39-4.
         DocumentTypeKey.Plan,
         DocumentTypeKey.Design,
         DocumentTypeKey.Review,
