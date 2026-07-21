@@ -31,10 +31,22 @@ lifecycle, and makes every workflow resumable by design.
    unhandleable outcome** (`ReviewUndecidable`, `AmbiguityAboveThreshold`,
    `RoundsExhausted`, `ValidationExhausted`) — which escalates to the
    orchestrator/human **with the full document lineage attached**, never a bare
-   failure. The accept gate is **mode-aware**: full-auto = the orchestrator
-   applies a configured acceptance policy; supervised (70%) = a human gate via
-   suspend/resume. "Who decides" becomes: the document's validator, then a
-   Review document about it, then the policy.
+   failure. The accept gate **always submits the document to the
+   orchestrator** — it is never an if-else that skips the decision, and never
+   an embedded `llm-call`. The lifecycle publishes an `AcceptanceRequest` on
+   the workflow↔orchestrator channel and suspends; the orchestrator agent — a
+   long-running LLM process with the platform as its context and tools over
+   git, the event store, logs, workflows, and documents — reads the
+   **configurable acceptance rules and the autonomy level (70–100)** through
+   its tools and decides WHO decides: itself (the higher the level, the more
+   it self-decides), or humans — by assigning the decision to a **tenant role,
+   never an exact user**: it lands in the Task View of every role-holder
+   within their visibility scope (workflow initiator or repo access, through
+   teams/roles/permissions), can equally be handled by asking the
+   orchestrator in chat, and the first authorized completion wins. Either
+   decision resumes the same gate. "Who decides" becomes: the document's
+   validator, then a Review document about it, then the orchestrator routing
+   per the configured rules and autonomy dial.
 
 3. **Resumable by design.** Every lifecycle workflow either suspends on a
    bookmark awaiting input (the generalized Design-Proposal pattern) or, after a
@@ -57,10 +69,48 @@ lifecycle, and makes every workflow resumable by design.
   (`issueId` on every instance — the existing DCB tag convention formalized),
   giving a queryable lineage per issue: Issue → Findings → Decomposition → Plan
   → Reviews → outcome.
-- **Humans in full-auto sit at three positions only**: intent (the issue and its
-  acceptance criteria), policy (thresholds/config, set once), exceptions (the
-  escalation sink). Whether any action class always escalates (e.g. breaking
-  changes) is acceptance-policy configuration, not a hardcoded rule.
+- **Autonomy is a dial, not a mode.** A configured autonomy level from **70
+  (supervised baseline — the orchestrator assigns nearly every decision to a
+  human) to 100 (full auto — the orchestrator decides everything the rules
+  allow)**, admin-editable, per-document-type overridable, and read when
+  needed — never cached into a running workflow. At any level, humans sit at
+  three positions: intent (the issue and its acceptance criteria), policy (the
+  rules + the dial, edited in the admin UI), exceptions (escalations and
+  assigned tasks). Whether any action class always escalates (e.g. breaking
+  changes) is acceptance-rules configuration, not a hardcoded rule.
+- **The acceptor is an actor, not a branch.** Accepting a document is always a
+  decision taken by someone — the orchestrator, or a holder of the role it
+  assigns the decision to — against the configured acceptance rules. Deterministic code
+  enforces only the hard guardrails around that decision (round bounds, the
+  blocking-review invariant, always-escalate classes); it never impersonates
+  the decision itself.
+- **The orchestrator is a resident agent, not a per-turn call — one per
+  tenant.** A long-running LLM process (39-17) holding platform-wide context,
+  with tools to everything —
+  git, the DCB event store, logs, workflow control, the document store, the
+  acceptance rules — and reachable over real-time channels (39-18):
+  workflow↔orchestrator for acceptance/escalation/guidance traffic, and a
+  separate user channel for humans. In SaaS the boundary is the tenant,
+  drawn once: the tenant's automation config (rules + autonomy level), the
+  tenant's orchestrator process, the tenant's channels, and the tenant's
+  knowledge (RAG index in the tenant schema, 39-21) — tools hard-scoped to
+  the tenant, context and traffic never crossing. The accept step talks to it over its
+  channel; it is never reached through an embedded `llm-call`. The Elsa
+  workflows remain the execution substrate — the agent decides and routes, it
+  does not execute.
+- **Chat is the front door; the Task View is the inbox.** Users talk WITH the
+  orchestrator as their primary interface — ask about anything they may see,
+  initiate workflows conversationally — on a surface distinct from the Task
+  View, which lists the concrete decisions/reviews/approvals assigned to them
+  (each backed by a suspended workflow). Both surfaces are scoped by access —
+  and fully recorded: every chat turn is a `CHAT.*` DCB event like everything
+  else in the system; the history view is a projection of the stream.
+- **Access is a model, enforced server-side.** Tenants hold multiple repos,
+  users, teams, and roles; users receive tasks only for workflows they
+  initiated or repos they have access to (directly or via team). One audience
+  resolver implements that predicate for task delivery, Task View listing,
+  chat answers, workflow initiation, and the orchestrator's assignment choices
+  — the agent picks from the eligible set, it cannot widen it.
 - **Prose stays prose.** Tech-writer outputs (changelog, ADR, postmortem,
   release notes) are markdown with an audience tag — no forced structure.
 
@@ -92,9 +142,14 @@ lifecycle, and makes every workflow resumable by design.
             |     |  repair turn (innermost ring)                  |
             |  REVIEW (single reviewer or panel -> Review doc)     |
             |     |  concerns: notes -> REVISE (bounded rounds)     |
-            |  ACCEPT GATE (mode-aware)                            |
-            |     |  full-auto: orchestrator applies policy        |
-            |     |  supervised: bookmark suspend -> human resume   |
+            |  ACCEPT (submit to the orchestrator -- always)       |
+            |     |  publish AcceptanceRequest on the workflow<->   |
+            |     |  orchestrator channel + suspend on the gate;   |
+            |     |  the orchestrator reads rules + autonomy level |
+            |     |  (70-100) via its tools and routes:            |
+            |     |    decide itself  (more, the higher the dial)  |
+            |     |    or assign to an eligible user's Task View   |
+            |     |  decision arrives -> guardrails -> resume       |
             +-----|------------------------------------------------+
                   |
         done ----+---- typed unhandleable outcome
@@ -114,7 +169,7 @@ lineage, which is also what re-entry reads to resume from the latest state.
 | 39-2 | Document Core — Envelope, Type Registry, Lineage, Drift Tests | P0 | drafted | 4-5 days |
 | 39-3 | Document Types Batch 1 — Decomposition, Findings, AmbiguityAssessment, Clarification | P0 | drafted | 4-5 days |
 | 39-4 | Document Types Batch 2 — Plan, Design, Review (unified), TriageDecision, Diagnosis, TestSpec | P0 | drafted | 5-6 days |
-| 39-5 | Acceptance Policy — per-mode accept/escalation configuration | P0 | drafted | 3-4 days |
+| 39-5 | Acceptance Rules — configurable policy, admin UI, orchestrator read path | P0 | drafted | 5-7 days |
 | 39-6 | DocumentLifecycleWorkflow — generic produce/validate/review/revise/accept | P0 | drafted | 6-8 days |
 | 39-7 | Review Producers — single reviewer + panel onto the unified Review type | P0 | drafted | 4-6 days |
 | 39-8 | Escalation & Approval Surface — events, suspend/resume, lineage payload | P0 | drafted | 4-5 days |
@@ -126,6 +181,11 @@ lineage, which is also what re-entry reads to resume from the latest state.
 | 39-14 | Planning Family Migration — PlanGeneration + PlanReview onto unified Review | P1 | drafted | 5-7 days |
 | 39-15 | Remaining Producers Migration — Triage, TestSpec, TaskCreation, Diagnosis | P2 | drafted | 5-7 days |
 | 39-16 | Prompt Contracts Generated From Document Types (single source) | P1 | drafted | 3-4 days |
+| 39-17 | Orchestrator Agent — long-running LLM process, platform context & tools | P0 | drafted | 6-8 days |
+| 39-18 | Real-Time Channels — workflow↔orchestrator + user↔orchestrator (SignalR) | P0 | drafted | 5-7 days |
+| 39-19 | Orchestrator Chat — primary user interface, and the Task View | P0 | drafted | 6-8 days |
+| 39-20 | Teams, Roles, Repo Access & Task Routing | P0 | drafted | 6-8 days |
+| 39-21 | RAG in C# — per-tenant knowledge isolation and grounding | P1 | drafted | 8-10 days |
 
 ## Supersedes / absorbs
 
@@ -151,8 +211,14 @@ lineage, which is also what re-entry reads to resume from the latest state.
   `ContractBindingTests`, working prompt delivery.
 - Elsa 3 bookmarks + the secure tenant-folded resume pattern (DesignProposal /
   Clarify endpoints) as the suspend/resume mechanism to generalize.
+- The agent-dispatch executor stack (`Tamma.Activities/AgentDispatch/*`) and the
+  multi-provider abstraction as the substrate for the 39-17 orchestrator agent;
+  the SSE streaming surface (`ILlmRunStreamBus`, admin SSE endpoint) as the
+  one-way precedent the 39-18 bidirectional channels sit beside (SSE decision
+  unchanged for one-way streams — ADR records the scope split).
 - DCB event store + Story 4-7 query API + Story 4-8 replay for latest-state
   reconstruction.
-- Operating-mode detection (single-user vs SaaS; full-auto vs supervised) for the
-  acceptance policy's per-mode ownership — the CLAUDE.md two-scoping-models rule
-  applies to policy configuration.
+- Operating-mode detection (single-user vs SaaS) for the acceptance rules' and
+  access model's per-mode ownership — the CLAUDE.md two-scoping-models rule
+  applies to both; the autonomy level (70–100) is itself rules configuration,
+  not a deployment mode.

@@ -36,14 +36,14 @@ P0 — **The story that proves the whole stack.** The generic pieces (39-2..39-8
 **What it lands on (all Epic 39):**
 - `Decomposition` document type (39-3): unique task IDs, no dangling/self/cyclic `dependsOn`, 2–8h sizing, prerequisite ordering — the domain rules that replace the hand parser's checks and power the validator.
 - `DocumentLifecycleWorkflow` (39-6): the generic produce → validate → review → revise → accept graph; reviewer/panel selection is **policy-driven** (39-5/39-7), not hardcoded.
-- Accept gate (39-8): full-auto = acceptance policy applies; supervised = bookmark suspend for human approval via the generalized resume surface.
+- Accept (39-5/39-8/39-17): always publishes the `AcceptanceRequest` to the orchestrator and suspends on the generalized gate; the orchestrator decides itself or assigns to an eligible user per the autonomy level. Never an if-else that skips the decision, never an embedded accept-decision `llm-call`.
 - Resumable standard (39-10): declaration + idempotent guards + canonical bookmark names; store reads via 39-11.
 
 ## Acceptance Criteria
 
 1. **Rebuilt on the lifecycle.** `IssueDecompositionWorkflow` is re-implemented as a thin binding over `DocumentLifecycleWorkflow`: it declares `consumes: [issue context]` / `produces: Decomposition`, binds the `(senior_developer, decompose-issue)` cell as the produce step, and contributes no bespoke parse/branch/terminal logic of its own. The old inline parse + `DecompositionError` Finish terminal are deleted from the graph.
 
-2. **Full ring behavior.** Produced output is validated by the `Decomposition` type's validator (dangling/cyclic `dependsOn`, sizing, ordering). Validation failure follows the lifecycle path (bounded repair if 39-9 gates decomposition on; otherwise straight to review/escalation). Review produces a typed `Review` document via the policy-selected reviewer or panel; reviewer concerns drive bounded revise rounds with notes; acceptance is mode-aware (full-auto policy / supervised human gate).
+2. **Full ring behavior.** Produced output is validated by the `Decomposition` type's validator (dangling/cyclic `dependsOn`, sizing, ordering). Validation failure follows the lifecycle path (bounded repair if 39-9 gates decomposition on; otherwise straight to review/escalation). Review produces a typed `Review` document via the policy-selected reviewer or panel; reviewer concerns drive bounded revise rounds with notes; acceptance is orchestrator-routed per the autonomy level (self-decide or assign to an eligible user).
 
 3. **Typed unhandleable outcomes, no dead ends.** Every non-success exit is one of the lifecycle's typed outcomes (`ValidationExhausted`, `RoundsExhausted`, `ReviewUndecidable`) escalated with full document lineage attached (39-8). A structure test asserts the compiled graph contains **no** bespoke error Finish terminal and no path that ends without either an accepted document or a typed escalation.
 
@@ -61,7 +61,7 @@ P0 — **The story that proves the whole stack.** The generic pieces (39-2..39-8
 
 - **This story is deliberately small in new machinery** — its value is integration proof. If the migration needs a new hook in 39-6/39-8/39-11, the fix belongs in THOSE components (with their tests), not as a decomposition special case. Any special case discovered here is a design bug in the generic layer; file it back before working around it.
 - **Sub-task output shape compatibility.** Downstream consumers today read the sub-task output of `DECOMPOSITION.COMPLETED`. Keep the event's data payload shape stable (sourced from the accepted `Decomposition` document) even though the internal representation is now typed.
-- **Reviewer selection** comes from acceptance/review policy (39-5/39-7) — expected default: a single architect-role review of decompositions in full-auto, panel optional by config. Do not hardcode the reviewer cell in the workflow binding.
+- **Reviewer selection** comes from acceptance/review rules (39-5/39-7) — expected default: a single architect-role review of decompositions, panel optional by config. Do not hardcode the reviewer cell in the workflow binding.
 - **Lenient-fallback note:** the old workflow had a documented lenient path (falling back to a coarse breakdown rather than failing closed, see the workflow doc comment around line 64). Under the lifecycle this becomes a validator/policy decision — if the product wants a fallback decomposition, express it as an acceptance-policy rule, not a parser leniency.
 - Migration order within the story: land the lifecycle binding behind the existing workflow name/definition id so dispatch call sites (orchestrator, triage routing) are untouched.
 

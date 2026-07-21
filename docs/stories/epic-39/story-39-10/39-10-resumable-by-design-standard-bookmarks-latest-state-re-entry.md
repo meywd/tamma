@@ -23,7 +23,7 @@ So that a deploy, a pod eviction, or a week-long human approval never costs a wo
 
 ## Priority
 
-P0 — Third pillar of Epic 39 ("Resumable by design", epic README). 39-12's pilot migration must land on a workflow that already knows what "resumable" means, and the supervised accept gate (39-8) is a suspend that only makes sense if resume is guaranteed. This story turns the existing DesignProposal/Clarify pattern from a per-workflow favor into an authoring standard.
+P0 — Third pillar of Epic 39 ("Resumable by design", epic README). 39-12's pilot migration must land on a workflow that already knows what "resumable" means, and the accept gate (39-8) is a suspend that only makes sense if resume is guaranteed. This story turns the existing DesignProposal/Clarify pattern from a per-workflow favor into an authoring standard.
 
 ## Architectural Context (READ FIRST)
 
@@ -59,7 +59,7 @@ Two resume modes exist today, both proven but neither standardized:
 
 7. **One proven re-entry integration test.** An integration test (Testcontainers Postgres, existing pattern) runs a lifecycle workflow to a mid-point (e.g. document produced and accepted, next stage pending), **kills the workflow instance** (simulated crash — no graceful suspend), starts a fresh instance for the same issue, and asserts: it re-enters at the correct position, does not re-produce the accepted document, completes, and the final event stream contains exactly one acceptance per document.
 
-8. **Escalation suspends are resumable too.** The supervised accept gate and the escalation sink (39-8) suspend via the same canonical bookmark mechanism, so a human answering days later — possibly after a deploy — resumes correctly. A test resumes a bookmark created before a simulated restart (new host, same store) and asserts the workflow continues on the right branch.
+8. **Escalation suspends are resumable too.** The accept gate and the escalation sink (39-8) suspend via the same canonical bookmark mechanism, so a human answering days later — possibly after a deploy — resumes correctly. A test resumes a bookmark created before a simulated restart (new host, same store) and asserts the workflow continues on the right branch.
 
 ## Technical Notes
 
