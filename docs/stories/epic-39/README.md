@@ -82,12 +82,16 @@ lifecycle, and makes every workflow resumable by design.
   enforces only the hard guardrails around that decision (round bounds, the
   blocking-review invariant, always-escalate classes); it never impersonates
   the decision itself.
-- **The orchestrator is a resident agent, not a per-turn call.** A long-running
-  LLM process (39-17) holding platform-wide context, with tools to everything —
+- **The orchestrator is a resident agent, not a per-turn call — one per
+  tenant.** A long-running LLM process (39-17) holding platform-wide context,
+  with tools to everything —
   git, the DCB event store, logs, workflow control, the document store, the
   acceptance rules — and reachable over real-time channels (39-18):
   workflow↔orchestrator for acceptance/escalation/guidance traffic, and a
-  separate user channel for humans. The accept step talks to it over its
+  separate user channel for humans. In SaaS the boundary is the tenant,
+  drawn once across the triad: the tenant's automation config (rules +
+  autonomy level), the tenant's orchestrator process, the tenant's channels
+  — tools hard-scoped to the tenant, context and traffic never crossing. The accept step talks to it over its
   channel; it is never reached through an embedded `llm-call`. The Elsa
   workflows remain the execution substrate — the agent decides and routes, it
   does not execute.
