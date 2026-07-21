@@ -89,9 +89,10 @@ lifecycle, and makes every workflow resumable by design.
   acceptance rules — and reachable over real-time channels (39-18):
   workflow↔orchestrator for acceptance/escalation/guidance traffic, and a
   separate user channel for humans. In SaaS the boundary is the tenant,
-  drawn once across the triad: the tenant's automation config (rules +
-  autonomy level), the tenant's orchestrator process, the tenant's channels
-  — tools hard-scoped to the tenant, context and traffic never crossing. The accept step talks to it over its
+  drawn once: the tenant's automation config (rules + autonomy level), the
+  tenant's orchestrator process, the tenant's channels, and the tenant's
+  knowledge (RAG index in the tenant schema, 39-21) — tools hard-scoped to
+  the tenant, context and traffic never crossing. The accept step talks to it over its
   channel; it is never reached through an embedded `llm-call`. The Elsa
   workflows remain the execution substrate — the agent decides and routes, it
   does not execute.
@@ -182,6 +183,7 @@ lineage, which is also what re-entry reads to resume from the latest state.
 | 39-18 | Real-Time Channels — workflow↔orchestrator + user↔orchestrator (SignalR) | P0 | drafted | 5-7 days |
 | 39-19 | Orchestrator Chat — primary user interface, and the Task View | P0 | drafted | 6-8 days |
 | 39-20 | Teams, Roles, Repo Access & Task Routing | P0 | drafted | 6-8 days |
+| 39-21 | RAG in C# — per-tenant knowledge isolation and grounding | P1 | drafted | 8-10 days |
 
 ## Supersedes / absorbs
 

@@ -69,7 +69,7 @@ This store follows the established Epic 28 schema-per-tenant + Epic 37 projectio
 - **Stories 39-3/39-4 (document types)** — the concrete validators behind AC2. Blocking for full coverage; the store can land with batch-1 types only.
 - **Story 39-6 (lifecycle)** — the writer; wires store writes to lifecycle transitions.
 - **Epic 28** — `TenantDbContext`, schema-per-tenant, tenant-context guard conventions (existing).
-- **Consumed by:** 39-10 (latest-accepted re-entry read), 39-8 (lineage-attached escalations), 39-12..39-15 (every migrated workflow persists through it), dashboards (lineage rendering).
+- **Consumed by:** 39-10 (latest-accepted re-entry read), 39-8 (lineage-attached escalations), 39-12..39-15 (every migrated workflow persists through it), 39-21 (accepted documents indexed into the tenant's RAG knowledge on `DOCUMENT.ACCEPTED`), dashboards (lineage rendering).
 
 ## Estimated Effort
 

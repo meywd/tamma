@@ -530,5 +530,6 @@ development_status:
   39-18-real-time-channels-workflow-orchestrator-and-user-orchestrator: drafted # Real-Time Channels — workflow↔orchestrator + user↔orchestrator (SignalR) [P0]
   39-19-orchestrator-chat-primary-user-interface-and-task-view: drafted # Orchestrator Chat — primary user interface, and the Task View [P0]
   39-20-teams-roles-repo-access-and-task-routing: drafted # Teams, Roles, Repo Access & Task Routing [P0]
+  39-21-rag-in-csharp-per-tenant-knowledge-isolation-and-grounding: drafted # RAG in C# — per-tenant knowledge isolation and grounding [P1]
   epic-39-retrospective: optional
 
