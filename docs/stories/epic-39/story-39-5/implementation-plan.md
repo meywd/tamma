@@ -75,17 +75,21 @@ When this story is done, `apps/tamma-elsa/src/Tamma.Core/Documents/Policy/` hold
    [JsonPolymorphic(TypeDiscriminatorPropertyName = "kind")]
    [JsonDerivedType(typeof(Accept), "accept")]
    [JsonDerivedType(typeof(RequestRevision), "request-revision")]
+   [JsonDerivedType(typeof(Reject), "reject")]
    [JsonDerivedType(typeof(Escalate), "escalate")]
    public abstract record AcceptanceDecision
    {
        public sealed record Accept : AcceptanceDecision;
        public sealed record RequestRevision([property: JsonPropertyName("notes")] string Notes) : AcceptanceDecision;
+       public sealed record Reject([property: JsonPropertyName("reason")] string Reason) : AcceptanceDecision;  // HUMAN-ONLY (design review 2026-07-21): a final "no" → state Rejected
        public sealed record Escalate(AcceptanceEscalationReason Reason, string Detail) : AcceptanceDecision;
    }
    public abstract record AcceptanceRouting   // DecideSelf | AssignToUser(Guid Assignee, AssignmentBasis Basis)
    ```
 
    `AcceptanceEscalationReason` + `AssignmentBasis` (`[Wire] Initiator | RepoAccess`) are `[Wire]` enums; `AcceptanceEscalationReasonExtensions.ToLifecycleOutcome()` maps per D10 (returns `DocumentLifecycleOutcome?`).
+
+   **`Reject` is human-only (settled design review 2026-07-21): the orchestrator cannot reject without escalating.** Rejection is a decided, final "no" — only a human may take it (via the 39-19 Task View / 39-8 resume, decider channel `user` or `api`). The orchestrator's self-decision vocabulary is effectively `Accept | RequestRevision | Escalate`: if it judges a document should be rejected, it escalates (or assigns) so a human confirms. Enforced in `AcceptanceGuardrails.Clamp`, not by prompt: a `Reject` arriving with channel `orchestrator` clamps to `Escalate(RejectRequiresHuman)`.
 
 4. **CREATE `apps/tamma-elsa/src/Tamma.Core/Documents/Policy/AcceptanceRequest.cs`** (AC2, AC3) — the channel payload + its only factory:
 
@@ -130,13 +134,14 @@ When this story is done, `apps/tamma-elsa/src/Tamma.Core/Documents/Policy/` hold
    public enum ReviewDecision { [Wire("approve")] Approve, [Wire("request-changes")] RequestChanges,
        [Wire("needs-discussion")] NeedsDiscussion }
    public sealed record AcceptanceGateContext(DocumentTypeKey DocumentType, string? AgentActionWire,
-       ReviewFacts Review, int RoundsUsed, AcceptanceRules Rules);
+       ReviewFacts Review, int RoundsUsed, AcceptanceRules Rules, ApprovalChannel DeciderChannel);  // channel = 39-8's server-derived orchestrator|user|api
    public static class AcceptanceGuardrails
    {
        public static bool TryPreGate(AcceptanceGateContext ctx, out AcceptanceDecision.Escalate escalation);
        // AlwaysEscalate class match → Escalate(AlwaysEscalateClass); RoundsUsed >= MaxRevisionRounds → Escalate(RoundsExhausted)
        public static AcceptanceDecision Clamp(AcceptanceDecision proposed, AcceptanceGateContext ctx);
        // Accept + (Approve is false OR HasBlockingIssues) → Escalate(BlockingReviewViolation)  [forged approval]
+       // Reject + DeciderChannel == Orchestrator → Escalate(RejectRequiresHuman)  [reject is human-only — the orch cannot reject without escalating]
        // RequestRevision with RoundsUsed+1 > MaxRevisionRounds → Escalate(RoundsExhausted); otherwise pass through
    }
    ```
@@ -181,7 +186,7 @@ C# tests in `apps/tamma-elsa/tests/Tamma.Api.Tests/AcceptanceRules/` (service/en
 
 - **`AcceptanceRulesModelTests`** (Core.Tests) — `Validate()` rejects autonomy 69/101, accepts 70/100; rejects absurd bounds (0 rounds, 11 rounds, negative repair, threshold 1.1); rejects unknown always-escalate keys per kind and unknown reviewer roles; accepts a fully-populated valid record; closed-enum wire round-trips (`EscalationClassKind`, `ReviewerMode`, `AcceptanceRulesSource`, `AcceptanceEscalationReason` incl. `ToLifecycleOutcome` mapping pins). **AC1, AC4 (validation half), AC8 (bounds-rejection clause).**
 - **`AcceptanceDefaultsDriftTests`** (Core.Tests) — pins every default value exactly (`AutonomyLevel.Should().Be(70)`, rounds 2, repair 2, threshold 0.7, `AlwaysEscalate.Should().BeEmpty()`, reviewer mode/role, guidance non-empty), `RolePhaseMapTests` narrative-comment style so changing a default is a conscious reviewed edit. **AC5.**
-- **`AcceptanceContractTests`** (Core.Tests) — `AcceptanceDecision`/`AcceptanceRouting` polymorphic JSON round-trips with pinned `kind` discriminators; the derived-type sets are pinned (exactly 3 and 2 — no `AutoAccept` can appear unnoticed); for every autonomy level 70..100, `AcceptanceRequestFactory.Create` returns a request whose shape is identical modulo rules payload (the D7 no-branch pin); factory rejects a review envelope whose type is not `review`. **AC2 (contract half).**
+- **`AcceptanceContractTests`** (Core.Tests) — `AcceptanceDecision`/`AcceptanceRouting` polymorphic JSON round-trips with pinned `kind` discriminators; the derived-type sets are pinned (exactly 4 and 2 — `accept | request-revision | reject | escalate`; no `AutoAccept` can appear unnoticed); `Reject` with channel `orchestrator` clamps to `Escalate(RejectRequiresHuman)` while `user`/`api` pass through (the human-only pin); for every autonomy level 70..100, `AcceptanceRequestFactory.Create` returns a request whose shape is identical modulo rules payload (the D7 no-branch pin); factory rejects a review envelope whose type is not `review`. **AC2 (contract half).**
 - **`AcceptanceGuardrailsTests`** (Core.Tests) — pre-gate: matching always-escalate class (by document type and by agent action) short-circuits to `Escalate(AlwaysEscalateClass)`; rounds exhausted → `Escalate(RoundsExhausted)`; **forged-approval test**: `Clamp(Accept)` with `ReviewFacts(Approve, HasBlockingIssues: true)` and with `(RequestChanges, false)` both yield `Escalate(BlockingReviewViolation)`; `RequestRevision` past budget → `Escalate(RoundsExhausted)`; legitimate `Accept`/`RequestRevision` pass through untouched. **Property-style** (D11): 1000 seeded-random decision sequences against random valid rules always terminate in `Accept`/`Escalate` within `MaxRevisionRounds + 1` gate passes. **AC8.**
 - **`AcceptanceRulesServiceTests`** (Api.Tests, Moq'd repository) — resolution ordering per mode: type override → base override → static default, source + version reported correctly (`PromptStoreServiceTests` style); `ResolveForTenantAsync` never consults user rows and vice versa; upsert of unknown `documentTypeKey` throws before repository touch; corrupt `RulesJson` on read throws `TammaError`; mutation events emitted (`PromptEventsServiceTests` style). **AC4, AC6.**
 - **`AcceptanceRulesToolParityTests`** (Api.Tests) — the AC3 pin: for the same principal + document type, `GetAcceptanceRulesTool.ExecuteAsync` output JSON equals `AcceptanceRulesJson`-serialized `ResolvedAcceptanceRules` embedded via `AcceptanceRequestFactory` — byte-identical; tool ignores/errors on a principal smuggled into `argumentsJson`; tool never throws on bad input. **AC3.**
