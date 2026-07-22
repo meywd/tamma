@@ -411,6 +411,36 @@ builder.Services.AddScoped<Tamma.Core.Documents.Policy.IAcceptanceRulesResolver>
 builder.Services.AddScoped<Tamma.Api.Services.AcceptanceRules.GetAcceptanceRulesToolFactory>();
 // Story 39-8 — the escalation disposition surface (appends ESCALATION.RESOLVED, FAIL-LOUD).
 builder.Services.AddScoped<Tamma.Api.Services.Documents.EscalationDispositionService>();
+// Story 39-8 / 39-18 (D7) — the shared document-decision submission path. BOTH the
+// REST endpoint and the orchestrator hub drive the SAME 39-8 idempotent resume
+// surface through this service (the hub never applies a decision itself).
+builder.Services.AddScoped<Tamma.Api.Services.Documents.DocumentDecisionSubmissionService>();
+
+// ── Story 39-18: Real-time channels (SignalR hubs + outbox) ──
+// D1 — SignalR ships in the shared framework (no new server package). Its JSON
+// protocol is taught the DocumentJson converters (DocumentState wire enum +
+// millisecond timestamps) so ChannelEnvelope payloads round-trip exactly like the
+// engine→API hop; ChannelAudience / the polymorphic ChannelMessage carry their own
+// [JsonConverter]/[JsonPolymorphic] attributes.
+builder.Services.AddSignalR().AddJsonProtocol(o =>
+{
+    foreach (var converter in Tamma.Core.Documents.DocumentJson.Options.Converters)
+        o.PayloadSerializerOptions.Converters.Add(converter);
+});
+// The per-tenant channel outbox (source of truth; transport is not — AC6).
+builder.Services.AddScoped<Tamma.Data.Repositories.IChannelOutboxRepository,
+    Tamma.Data.Repositories.ChannelOutboxRepository>();
+builder.Services.AddScoped<Tamma.Api.Services.Channels.ChannelOutboxService>();
+// D9 — 39-20's audience resolver, STUBBED fail-closed (initiator-only) until it lands.
+builder.Services.AddScoped<Tamma.Api.Services.Access.ITaskAudienceResolver,
+    Tamma.Api.Services.Access.InitiatorOnlyTaskAudienceResolver>();
+// D8 — chat relay is OFF until 39-19's OrchestratorChatService lands: the stand-in
+// refuses every message with an agent-offline result and records nothing.
+builder.Services.AddScoped<Tamma.Api.Services.Channels.IOrchestratorChatRelay,
+    Tamma.Api.Services.Channels.AgentOfflineChatRelay>();
+// D6 — the slow sweeper re-publishes stale unacked rows (crash / missed-reconnect).
+builder.Services.AddSingleton<Tamma.Api.Services.Channels.ChannelOutboxSweeperOptions>();
+builder.Services.AddHostedService<Tamma.Api.Services.Channels.ChannelOutboxSweeper>();
 builder.Services.AddProviderHealthServices();
 builder.Services.AddDiagnosticsServices();
 builder.Services.AddSanitizationServices();
@@ -1430,6 +1460,20 @@ if (!string.IsNullOrEmpty(jwtSecret))
         {
             OnMessageReceived = ctx =>
             {
+                // Story 39-18 (D10) — browser WebSockets cannot set Authorization, so
+                // SignalR sends the JWT as the `access_token` query param. Accept it
+                // ONLY under /hubs paths (the standard ASP.NET pattern, scoped so the
+                // query token never leaks onto other routes / their logs).
+                if (string.IsNullOrEmpty(ctx.Token) &&
+                    ctx.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                {
+                    var queryToken = ctx.Request.Query["access_token"].ToString();
+                    if (!string.IsNullOrEmpty(queryToken))
+                    {
+                        ctx.Token = queryToken;
+                    }
+                }
+
                 if (string.IsNullOrEmpty(ctx.Token) &&
                     ctx.Request.Cookies.TryGetValue("tamma_session", out var cookieJwt) &&
                     !string.IsNullOrEmpty(cookieJwt))
@@ -1449,6 +1493,9 @@ if (!string.IsNullOrEmpty(jwtSecret))
     // I4 / Story 32-5 Finding C2 — handler for the EngineServiceOnly policy
     // (service-principal-only: engine→API callbacks + POST /api/v1/llm/call).
     builder.Services.AddScoped<IAuthorizationHandler, ServicePrincipalHandler>();
+    // Story 39-18 (D10) — handler for the OrchestratorChannel policy (the
+    // workflow↔orchestrator hub: service-principal OR orchestrator-claim only).
+    builder.Services.AddScoped<IAuthorizationHandler, OrchestratorChannelHandler>();
 
     builder.Services.AddAuthorization(options =>
     {
@@ -1587,6 +1634,17 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.RequireAuthenticatedUser();
             p.AddRequirements(new ServicePrincipalRequirement());
         });
+        // Story 39-18 (D10) — the workflow↔orchestrator hub gate. Authenticated AND
+        // (service principal OR the 39-8 D6 orchestrator claim). A tenant
+        // member/admin/owner JWT authenticates but is neither, so it is rejected
+        // (AC5's "reject non-orchestrator principals"). Same trust class as
+        // EngineServiceOnly (the resume-family posture), applied to the hub.
+        options.AddPolicy("OrchestratorChannel", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.RequireAuthenticatedUser();
+            p.AddRequirements(new OrchestratorChannelRequirement());
+        });
         // Story 16-5 AC 7: DELETE /api/workflows/* must be owner-only.
         // workflows:delete maps to ["owner"] in the permission matrix.
         options.AddPolicy("WorkflowsDelete", p =>
@@ -1654,7 +1712,7 @@ else if (builder.Environment.IsDevelopment())
         // Register all named policies with permissive default
         foreach (var name in new[] { "AdminAccess", "OwnerAccess", "PlatformOwnerAccess", "MemberAccess", "SettingsView",
             "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "PricingManage", "AcceptanceRulesManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
-            "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny", "EngineServiceOnly" })
+            "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny", "EngineServiceOnly", "OrchestratorChannel" })
         {
             options.AddPolicy(name, p => p.AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement()));
         }
@@ -2786,6 +2844,14 @@ engine.MapPost("/documents", DocumentEndpoints.PersistFromEngine)
 engine.MapPost("/documents/{documentId:guid}/status", DocumentEndpoints.SetStatusFromEngine)
     .RequireAuthorization("EngineServiceOnly");
 
+// ── Story 39-18: engine→API channel enqueue seam (D2) ──
+// The lifecycle engine publishes AcceptanceRequest / escalation / guidance messages
+// here; the API mints the durable channel_outbox row(s) + best-effort SignalR fan-out.
+// Gated EngineServiceOnly (same rationale as /events): the service principal only, so
+// a user JWT can never forge a channel message into another tenant's stream.
+engine.MapPost("/channel/outbox", ChannelEndpoints.EnqueueFromEngine)
+    .RequireAuthorization("EngineServiceOnly");
+
 // ── User dashboard: Repos & Workflow Runs (Story 21-4) ──
 // Tenant-facing read surface behind the SPA's /repos + /runs destinations.
 // Tenant is resolved strictly from ITenantContext inside each handler (no
@@ -3289,6 +3355,23 @@ using (var scope = app.Services.CreateScope())
         throw;
     }
 }
+
+// ── Story 39-18: Real-time channel hubs (D2/D5/D10) ──
+// Two SEPARATE hubs (never one hub with per-method role checks):
+//  - /hubs/orchestrator — the workflow↔orchestrator channel. Engine-internal TRUST
+//    POSTURE (not a process boundary): gated by the OrchestratorChannel policy (the
+//    same service-principal/orchestrator-only class as EngineServiceOnly — the
+//    resume-family posture). MUST be excluded from public API docs + nginx exposure
+//    (like the /api/engine callbacks); only the tenant's orchestrator agent / tests
+//    connect here.
+//  - /hubs/user — the user↔orchestrator/platform channel. MemberAccess; groups are
+//    derived server-side from the principal (tenant + per-user), never client-joinable.
+// Browser clients authenticate via the ?access_token= query param (scoped to /hubs in
+// the JwtBearer OnMessageReceived above); the single-instance fan-out caveat is the
+// inherited ILlmRunStreamBus stance (see the ADR) — the outbox makes it safe, slower
+// on failover.
+app.MapHub<Tamma.Api.Hubs.OrchestratorChannelHub>("/hubs/orchestrator");
+app.MapHub<Tamma.Api.Hubs.UserChannelHub>("/hubs/user");
 
 Log.Information("Tamma API starting up...");
 

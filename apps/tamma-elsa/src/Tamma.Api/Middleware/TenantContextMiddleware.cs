@@ -97,6 +97,13 @@ public class TenantContextMiddleware(RequestDelegate next)
         "/api/convention-templates",
         "/health",
         "/swagger",
+        // Story 39-18 — the real-time channel hubs. A hub connection self-scopes:
+        // OnConnectedAsync derives the tenant (and, on the user hub, the user) from
+        // the authenticated principal's claims and joins the corresponding group.
+        // The SignalR negotiate/connect requests must therefore bypass DB-backed
+        // tenant resolution (which would 404 `tenant_not_found` before the hub ever
+        // runs) — the same self-scoping posture as the engine callbacks.
+        "/hubs",
     };
 
     public async Task InvokeAsync(
