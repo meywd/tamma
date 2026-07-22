@@ -194,7 +194,7 @@ public class DocumentLifecycleWorkflowStructureTests
     // ── AC5 — constant pins ────────────────────────────────────────────
 
     [Test]
-    public void DocumentEvents_HasExactlyTheTenConstants()
+    public void DocumentEvents_HasExactlyTheExpectedConstants()
     {
         var constants = typeof(DocumentEvents)
             .GetFields(BindingFlags.Public | BindingFlags.Static)
@@ -215,7 +215,11 @@ public class DocumentLifecycleWorkflowStructureTests
             "DOCUMENT.REVISION_STARTED",
             "DOCUMENT.VALIDATED.FAILED",
             "DOCUMENT.VALIDATED.SUCCESS",
-        }, "the DOCUMENT.* catalogue is pinned to exactly the ten Story 39-6 event types");
+            // Story 39-7 — panel-producer markers appended to the same catalogue.
+            "DOCUMENT.REVIEW_PANEL_STARTED",
+            "DOCUMENT.REVIEW_PANEL_COMPLETED",
+            "DOCUMENT.REVIEW_PANEL_UNDECIDABLE",
+        }, "the DOCUMENT.* catalogue is the ten Story 39-6 event types plus the three Story 39-7 panel markers");
     }
 
     [Test]

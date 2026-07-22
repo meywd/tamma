@@ -39,6 +39,13 @@ public static class DocumentEvents
     public const string Rejected = "DOCUMENT.REJECTED";
     public const string Escalated = "DOCUMENT.ESCALATED";
 
+    // Story 39-7 — panel-producer lifecycle markers. STARTED is informational;
+    // COMPLETED is a success row; UNDECIDABLE is a LOUD error row (an undecidable
+    // panel must never be recorded as a successful review).
+    public const string ReviewPanelStarted = "DOCUMENT.REVIEW_PANEL_STARTED";
+    public const string ReviewPanelCompleted = "DOCUMENT.REVIEW_PANEL_COMPLETED";
+    public const string ReviewPanelUndecidable = "DOCUMENT.REVIEW_PANEL_UNDECIDABLE";
+
     /// <summary>
     /// Parse a tenant id from the loose string form threaded through the workflow
     /// inputs. Returns <c>null</c> for empty / single-user / unparseable values
@@ -63,8 +70,10 @@ public static class DocumentEvents
         ValidatedFailed => "error",
         Rejected => "error",
         Escalated => "error",
+        ReviewPanelUndecidable => "error",
         ReviewRequested => "started",
         RevisionStarted => "started",
+        ReviewPanelStarted => "started",
         _ => "success",
     };
 }
