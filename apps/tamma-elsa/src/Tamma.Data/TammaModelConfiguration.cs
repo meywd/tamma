@@ -1537,6 +1537,41 @@ internal static class TammaModelConfiguration
             ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
         });
 
+        // ── AcceptanceRulesOverride ──
+        // Story 39-5: dual-scoping, mirrors PromptOverride exactly. Single-user
+        // rows carry user_id (tenant_id IS NULL); SaaS rows carry tenant_id
+        // (user_id IS NULL). The principal_xor CHECK enforces exactly-one.
+        // DocumentTypeKey NULL = the principal BASE row (the deployment-wide
+        // dial); a non-null key = a per-type override. The unique index covers
+        // BOTH principal keys + the type key with NULLS NOT DISTINCT (PG15+;
+        // production runs PG17) so the (null, tid, key) and (uid, null, key)
+        // row spaces are disjoint and the (principal, NULL-key) base rows dedupe.
+        modelBuilder.Entity<AcceptanceRulesOverride>(entity =>
+        {
+            entity.ToTable("acceptance_rules_overrides", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_acceptance_rules_overrides_principal_xor",
+                    "(\"UserId\" IS NOT NULL AND \"TenantId\" IS NULL) " +
+                    "OR (\"UserId\" IS NULL AND \"TenantId\" IS NOT NULL)");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.DocumentTypeKey).HasMaxLength(64);
+            entity.Property(e => e.RulesJson).IsRequired().HasColumnType("jsonb");
+            entity.Property(e => e.Version).HasDefaultValue(1);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            entity.HasIndex(e => new { e.UserId, e.TenantId, e.DocumentTypeKey })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("IX_acceptance_rules_overrides_UserId_TenantId_DocumentTypeKey");
+
+            if (omitTenantIdColumn) entity.Ignore(e => e.TenantId);
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
+        });
+
         // ── Convention ──
         // Story 27-8: two-tier convention store.
         //   tenant_id IS NULL  → system default (shipped by Tamma, seeded in 27-16)

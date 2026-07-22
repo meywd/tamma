@@ -155,6 +155,8 @@ public static class DependencyInjection
         // Tenant-scoped repositories (use ITenantDbContextFactory internally).
         services.AddScoped<IAgentConfigRepository, AgentConfigRepository>();
         services.AddScoped<IPromptRepository, PromptRepository>();
+        // Story 39-5 — tenant-resident acceptance-rules overrides.
+        services.AddScoped<IAcceptanceRulesRepository, AcceptanceRulesRepository>();
         services.AddScoped<IConventionRepository, ConventionRepository>();
         services.AddScoped<IProviderHealthRepository, ProviderHealthRepository>();
         services.AddScoped<IDiagnosticsRepository, DiagnosticsRepository>();

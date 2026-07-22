@@ -69,6 +69,15 @@ public static class Permissions
         // admin+owner reach. Single-user mode is unaffected — every signed-up
         // user is auto-owner of their personal tenant.
         ["pricing:manage"] = ["admin", "owner"],
+        // Story 39-5 — acceptance-rules management. Mirrors prompts:manage /
+        // conventions:manage: CLAUDE.md "Prompt Store Architecture / RBAC" (the
+        // acceptance-rules store follows the same tenant-scoped RBAC) requires
+        // PUT/DELETE of a tenant override to be reachable by tenant_owner OR
+        // tenant_admin (member → 403). The owner-only settings:manage would 403
+        // every tenant_admin, so the dedicated acceptance-rules:manage permission
+        // grants admin+owner reach. Single-user mode is unaffected — every
+        // signed-up user is auto-owner of their personal tenant.
+        ["acceptance-rules:manage"] = ["admin", "owner"],
     };
 
     public static bool HasPermission(string? role, string? permission)

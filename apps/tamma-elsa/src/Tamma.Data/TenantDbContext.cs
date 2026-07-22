@@ -51,6 +51,9 @@ public class TenantDbContext : DbContext
     // ── Tenant-scoped entities ──
     public DbSet<AgentConfig> AgentConfigs => Set<AgentConfig>();
     public DbSet<PromptOverride> PromptOverrides => Set<PromptOverride>();
+    // Story 39-5 — tenant-resident acceptance-rules overrides (dual-scoped like
+    // prompt_overrides: user_id in single-user mode, tenant_id in SaaS mode).
+    public DbSet<AcceptanceRulesOverride> AcceptanceRulesOverrides => Set<AcceptanceRulesOverride>();
     // Story 32-2 — SaaS tenant-keyed role→agent selections (the single-user
     // user-keyed rows live on the CP context). Same table shape, two homes.
     public DbSet<AgentRoleSelection> AgentRoleSelections => Set<AgentRoleSelection>();
