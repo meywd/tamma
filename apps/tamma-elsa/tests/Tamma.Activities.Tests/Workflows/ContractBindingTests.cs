@@ -369,6 +369,62 @@ public class ContractBindingTests
     }
 
     // ====================================================================
+    // Data-driven dispatch allowlist (Story 39-6 D3)
+    // ====================================================================
+
+    /// <summary>
+    /// Story 39-6 (D3) — the generic <c>DocumentLifecycleWorkflow</c> dispatches
+    /// <c>llm-call</c> with a <c>(role, action)</c> read from workflow variables (the
+    /// producer spec is an INPUT), so its produce/repair/revise sites materialise no
+    /// constant pair and cannot join <see cref="Bindings"/> / <see cref="IntentionallyUnbound"/>
+    /// (those are keyed by a concrete pair). The contract for these dispatches is
+    /// carried by the PRODUCER's OWN cell — already bound by the producing family's
+    /// entries when a concrete workflow (39-12+) points at this sub-workflow. Each
+    /// site is justified here and cross-checked against
+    /// <c>TaxonomyDriftBuildTests.EnumerateDataDrivenDispatches</c> so the two guards
+    /// agree on exactly which sites are data-driven.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<(string Workflow, string DispatchId), string>
+        DataDrivenDispatchJustifications = new Dictionary<(string, string), string>
+        {
+            [("DocumentLifecycleWorkflow", "DispatchProduce")] =
+                "contract is carried by the producer's own cell (already bound by the producing family's " +
+                "entries); the lifecycle's (role, action) is an input, validated fail-loud at Init (39-6 D2).",
+            [("DocumentLifecycleWorkflow", "DispatchRepair")] =
+                "repair re-dispatch of the same producer spec — same cell, same binding (39-6 D2).",
+            [("DocumentLifecycleWorkflow", "DispatchRevise")] =
+                "revise re-dispatch of the same producer spec — same cell, same binding (39-6 D2).",
+        };
+
+    [Test]
+    public void EveryDataDrivenDispatch_IsJustifiedAndInSyncWithDrift()
+    {
+        // The justified allowlist here must match EXACTLY the data-driven dispatch set
+        // the drift test discovers — no unjustified escapees, no stale entries.
+        var discovered = TaxonomyDriftBuildTests.EnumerateDataDrivenDispatches().ToHashSet();
+        var justified = DataDrivenDispatchJustifications.Keys.ToHashSet();
+
+        var unjustified = discovered.Except(justified)
+            .Select(k => $"  {k.Workflow}.{k.DispatchId}")
+            .ToList();
+        var stale = justified.Except(discovered)
+            .Select(k => $"  {k.Workflow}.{k.DispatchId}")
+            .ToList();
+
+        unjustified.Should().BeEmpty(
+            "every data-driven llm-call dispatch must carry a written justification in " +
+            "DataDrivenDispatchJustifications (its contract is carried by the producer's own cell):" +
+            Environment.NewLine + string.Join(Environment.NewLine, unjustified));
+
+        stale.Should().BeEmpty(
+            "these DataDrivenDispatchJustifications entries no longer correspond to a data-driven dispatch:" +
+            Environment.NewLine + string.Join(Environment.NewLine, stale));
+
+        foreach (var (_, reason) in DataDrivenDispatchJustifications)
+            reason.Should().NotBeNullOrWhiteSpace("every data-driven dispatch justification must be non-empty");
+    }
+
+    // ====================================================================
     // Test 2 — coverage guard
     // ====================================================================
 

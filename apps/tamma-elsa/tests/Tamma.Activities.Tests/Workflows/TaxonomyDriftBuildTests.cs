@@ -156,6 +156,32 @@ public class TaxonomyDriftBuildTests
             // that this stays empty until a genuinely non-reflectable dispatch reappears.
         };
 
+    /// <summary>
+    /// Story 39-6 (Design Decision D3) — dispatch sites whose <c>(role, action)</c>
+    /// is DATA-DRIVEN: the Input delegate materialises (it does not throw) but reads
+    /// the role/action from workflow VARIABLES that default to <c>""</c>, so no
+    /// compile-time constant pair can be extracted. Keyed by
+    /// <c>(WorkflowTypeName, DispatchActivityId)</c>. Each entry documents that the
+    /// pair is input-driven AND runtime-validated fail-loud at the workflow's Init
+    /// (per D2) — cross-checked by <c>DocumentLifecycleWorkflowStructureTests</c>,
+    /// which asserts the lifecycle's Init calls
+    /// <c>DocumentLifecycleHelper.ValidateProducerSpec</c>. The coverage guard
+    /// <see cref="DataDrivenDispatchAllowList_StaysInSyncWithReality"/> keeps this list
+    /// in exact sync with reality so a NEW data-driven dispatch cannot silently escape
+    /// the drift check (it would neither materialise a pair NOR be non-materialisable).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<(string Workflow, string DispatchId), string>
+        DataDrivenDispatchAllowList = new Dictionary<(string, string), string>
+        {
+            [("DocumentLifecycleWorkflow", "DispatchProduce")] =
+                "input-driven (producerRole/producerAction workflow variables default to \"\"); the pair is " +
+                "validated fail-loud at Init via DocumentLifecycleHelper.ValidateProducerSpec (39-6 D2/D3).",
+            [("DocumentLifecycleWorkflow", "DispatchRepair")] =
+                "input-driven repair re-dispatch of the same producer spec; validated at Init (39-6 D2/D3).",
+            [("DocumentLifecycleWorkflow", "DispatchRevise")] =
+                "input-driven revise re-dispatch of the same producer spec; validated at Init (39-6 D2/D3).",
+        };
+
     // Internal (not private): ContractBindingTests reuses the same enumeration so
     // its coverage guard sees EXACTLY the dispatch pairs this drift test checks.
     internal sealed record DispatchPair(string Workflow, string DispatchId, string Role, string Action);
@@ -224,13 +250,45 @@ public class TaxonomyDriftBuildTests
     }
 
     [Test]
+    public void DataDrivenDispatchAllowList_StaysInSyncWithReality()
+    {
+        // Story 39-6 (D3). A DATA-DRIVEN dispatch (Input materialises but role/action
+        // resolve to the "" workflow-variable defaults) contributes NO constant pair to
+        // the drift check AND is not "non-materialisable" — so without this guard it
+        // would silently escape both checks. The allowlist must list EXACTLY the
+        // data-driven llm-call dispatches: no stale entries, no unlisted escapees.
+        var (_, _, dataDriven) = ScanLlmCallDispatches();
+        var actual = dataDriven.Select(d => (d.Workflow, d.DispatchId)).ToHashSet();
+        var listed = DataDrivenDispatchAllowList.Keys.ToHashSet();
+
+        var unlistedEscapees = actual.Except(listed)
+            .Select(k => $"  {k.Workflow}.{k.DispatchId}")
+            .ToList();
+        var staleEntries = listed.Except(actual)
+            .Select(k => $"  {k.Workflow}.{k.DispatchId}")
+            .ToList();
+
+        unlistedEscapees.Should().BeEmpty(
+            "these llm-call dispatch sites read their (role, action) from workflow variables that " +
+            "default to \"\" and are NOT in DataDrivenDispatchAllowList, so their pair escapes the drift " +
+            "check entirely. Add each to the allowlist with a justification AND ensure the workflow's Init " +
+            "validates role/action fail-loud (39-6 D2/D3):" + Environment.NewLine +
+            string.Join(Environment.NewLine, unlistedEscapees));
+
+        staleEntries.Should().BeEmpty(
+            "these DataDrivenDispatchAllowList entries no longer correspond to a data-driven llm-call " +
+            "dispatch and should be removed:" + Environment.NewLine +
+            string.Join(Environment.NewLine, staleEntries));
+    }
+
+    [Test]
     public void NonMaterializableSupplement_StaysInSyncWithReality()
     {
         // The supplement must list EXACTLY the llm-call dispatches that fail to
         // materialise — no stale entries (a site that became materialisable),
         // and crucially no unlisted escapees (a new GetInput-using dispatch that
         // would otherwise slip past the eligibility check entirely).
-        var (_, nonMaterializable) = ScanLlmCallDispatches();
+        var (_, nonMaterializable, _) = ScanLlmCallDispatches();
         var actual = nonMaterializable.Select(d => (d.Workflow, d.DispatchId)).ToHashSet();
         var listed = NonMaterializableSupplement.Keys.ToHashSet();
 
@@ -331,7 +389,7 @@ public class TaxonomyDriftBuildTests
     /// </summary>
     internal static IReadOnlyList<DispatchPair> EnumerateAllDispatchPairs()
     {
-        var (materialized, _) = ScanLlmCallDispatches();
+        var (materialized, _, _) = ScanLlmCallDispatches();
 
         var supplemented = NonMaterializableSupplement
             .Select(kv => new DispatchPair(kv.Key.Workflow, kv.Key.DispatchId, kv.Value.Role, kv.Value.Action));
@@ -339,17 +397,30 @@ public class TaxonomyDriftBuildTests
         return materialized.Concat(supplemented).ToList();
     }
 
+    /// <summary>
+    /// Story 39-6 (D3) — the data-driven llm-call dispatch sites (materialise but
+    /// resolve empty role/action from workflow variables). Exposed so
+    /// <c>ContractBindingTests</c> can cross-check its justified allowlist against the
+    /// SAME discovery this drift test uses.
+    /// </summary>
+    internal static IReadOnlyList<(string Workflow, string DispatchId)> EnumerateDataDrivenDispatches()
+    {
+        var (_, _, dataDriven) = ScanLlmCallDispatches();
+        return dataDriven.Select(d => (d.Workflow, d.DispatchId)).ToList();
+    }
+
     private sealed record DispatchRef(string Workflow, string DispatchId);
 
     /// <summary>
     /// Walk every workflow in the assembly, find every <c>llm-call</c>
     /// <see cref="DispatchWorkflow"/> that carries a role + action, and split
-    /// them into (materialised pairs, non-materialisable refs).
+    /// them into (materialised pairs, non-materialisable refs, data-driven refs).
     /// </summary>
-    private static (List<DispatchPair> Materialized, List<DispatchRef> NonMaterializable) ScanLlmCallDispatches()
+    private static (List<DispatchPair> Materialized, List<DispatchRef> NonMaterializable, List<DispatchRef> DataDriven) ScanLlmCallDispatches()
     {
         var materialized = new List<DispatchPair>();
         var nonMaterializable = new List<DispatchRef>();
+        var dataDriven = new List<DispatchRef>();
 
         foreach (var workflow in DiscoverWorkflows())
         {
@@ -375,6 +446,10 @@ public class TaxonomyDriftBuildTests
                     var action = ReadString(input!, "action");
                     if (!string.IsNullOrEmpty(role) && !string.IsNullOrEmpty(action))
                         materialized.Add(new DispatchPair(workflowName, dispatchId, role!, action!));
+                    else
+                        // Materialised but role/action resolved to the "" variable defaults —
+                        // a DATA-DRIVEN dispatch (39-6 D3). Tracked separately so it can't escape.
+                        dataDriven.Add(new DispatchRef(workflowName, dispatchId));
                 }
                 else
                 {
@@ -383,7 +458,7 @@ public class TaxonomyDriftBuildTests
             }
         }
 
-        return (materialized, nonMaterializable);
+        return (materialized, nonMaterializable, dataDriven);
     }
 
     /// <summary>
