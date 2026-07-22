@@ -178,5 +178,7 @@ public sealed class RotationTriggerServiceTests
             Task.FromResult(new MergeApprovalResumeResult(false, false, null));
         public Task<MergeApprovalResumeResult> ResumeDesignApprovalAsync(Guid sid, string? t, bool approved, string? feedback, string? reviewer) =>
             Task.FromResult(new MergeApprovalResumeResult(false, false, null));
+        public Task<MergeApprovalResumeResult> ResumeDocumentDecisionAsync(Guid sid, string? t, string decisionJson, string? feedback, string? deciderId, string? deciderDisplay, string channel, string? rulesReference) =>
+            Task.FromResult(new MergeApprovalResumeResult(false, false, null));
     }
 }

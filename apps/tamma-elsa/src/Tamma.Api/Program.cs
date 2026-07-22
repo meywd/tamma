@@ -409,6 +409,8 @@ builder.Services.AddScoped<Tamma.Api.Services.AcceptanceRules.AcceptanceRulesSer
 builder.Services.AddScoped<Tamma.Core.Documents.Policy.IAcceptanceRulesResolver>(
     sp => sp.GetRequiredService<Tamma.Api.Services.AcceptanceRules.AcceptanceRulesService>());
 builder.Services.AddScoped<Tamma.Api.Services.AcceptanceRules.GetAcceptanceRulesToolFactory>();
+// Story 39-8 — the escalation disposition surface (appends ESCALATION.RESOLVED, FAIL-LOUD).
+builder.Services.AddScoped<Tamma.Api.Services.Documents.EscalationDispositionService>();
 builder.Services.AddProviderHealthServices();
 builder.Services.AddDiagnosticsServices();
 builder.Services.AddSanitizationServices();
@@ -2838,6 +2840,20 @@ adl.MapPost("/clarify/resume", AdlEndpoints.ResumeClarify);
 // derived server-side (I2). IDOR guard: the engine folds the caller's ambient tenant
 // id into the bookmark name, so a cross-tenant/unknown session → 404.
 adl.MapPost("/design/resume", AdlEndpoints.ResumeDesign);
+
+// ── Story 39-8: generic document-decision gate + escalation disposition ──
+// The ONE generic decision gate's public surface (resume) + the escalation disposition
+// surface. D10 — AuthenticatedAny, DEVIATING from the adl group's WorkflowsManage: AC5 says
+// SaaS deciders are tenant MEMBERS per RBAC, and the whole point of orchestrator-assigned
+// decisions (Task View, 39-20) is that member users decide — WorkflowsManage (owner/admin)
+// would 403 exactly the assigned decider. Security still holds: tenant folding + a 128-bit
+// session id (cross-tenant → 404, unguessable within tenant). Per-assignee authorization
+// ("only the user the orchestrator assigned") is 39-20's ITaskAudienceResolver — recorded
+// here as explicit MIGRATION DEBT (the convention-store-deviation style), not an oversight.
+// Single-user mode folds the sole user's scope (ambient tenant null → "none" segment).
+var documents = app.MapGroup("/api/documents").RequireAuthorization("AuthenticatedAny");
+documents.MapPost("/decisions/{sessionId}/resume", DocumentDecisionEndpoints.ResumeDecision);
+documents.MapPost("/escalations/{escalationId}/resolve", DocumentDecisionEndpoints.ResolveEscalation);
 
 // ── GitHub App (no auth, webhook signature verification) ──
 // Audit finding 017 — webhook gets the GitHubWebhook policy (300/min). The

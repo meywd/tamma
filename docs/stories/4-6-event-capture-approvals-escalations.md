@@ -1,6 +1,6 @@
 # Story 4.6: Event Capture - Approvals & Escalations
 
-Status: ready-for-dev
+Status: superseded-by-39-8
 
 ## Story
 
