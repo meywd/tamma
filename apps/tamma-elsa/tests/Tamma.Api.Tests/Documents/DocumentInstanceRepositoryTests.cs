@@ -98,7 +98,8 @@ public class DocumentInstanceRepositoryTests
         r2.Revision.Should().Be(2);
         var priorReloaded = await repo.GetByIdAsync(tenant, r1.Id, CancellationToken.None);
         priorReloaded!.Status.Should().Be("superseded");
-        priorReloaded.BodyJson.Should().Be(r1.BodyJson, "the prior body is never mutated");
+        DocumentTestData.SameJson(priorReloaded.BodyJson, r1.BodyJson)
+            .Should().BeTrue("the prior body is never mutated (jsonb re-serializes, so compare semantically)");
     }
 
     [Test]
@@ -128,7 +129,8 @@ public class DocumentInstanceRepositoryTests
             tenant, row.Id, DocumentInstanceStatus.Validated, Guid.NewGuid(), CancellationToken.None);
 
         updated.Status.Should().Be("validated");
-        updated.BodyJson.Should().Be(row.BodyJson);
+        DocumentTestData.SameJson(updated.BodyJson, row.BodyJson)
+            .Should().BeTrue("SetStatus never touches the body (jsonb re-serializes, so compare semantically)");
     }
 
     [Test]

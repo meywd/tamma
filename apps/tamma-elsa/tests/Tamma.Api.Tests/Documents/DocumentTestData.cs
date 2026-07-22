@@ -49,6 +49,18 @@ internal static class DocumentTestData
         return doc.RootElement.Clone();
     }
 
+    /// <summary>
+    /// Semantic JSON equality. The <c>body</c> column is <c>jsonb</c>, which Postgres
+    /// re-serializes on read (whitespace stripped, object keys reordered), so a row
+    /// read back never matches the raw <c>GetRawText()</c> text of the in-memory
+    /// insert result byte-for-byte. Compare the parsed values instead — the store's
+    /// contract is that the body is preserved as a document, not as exact bytes.
+    /// </summary>
+    public static bool SameJson(string a, string b) =>
+        System.Text.Json.Nodes.JsonNode.DeepEquals(
+            System.Text.Json.Nodes.JsonNode.Parse(a),
+            System.Text.Json.Nodes.JsonNode.Parse(b));
+
     /// <summary>Build a stored row (assembler/guard tests — no DB).</summary>
     public static DocumentInstance Row(
         Guid id, string issueId, string type, string status, int revision,
