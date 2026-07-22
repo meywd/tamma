@@ -157,6 +157,14 @@ Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorE
         Tamma.Activities.Analytics.NullAnalyticsPricingConfig>(builder.Services);
 builder.Services.AddSingleton<Tamma.Activities.Analytics.DimensionalProjectionMetrics>();
 
+// Story 39-6 (D6) — the ACCEPT stage publishes the AcceptanceRequest through this
+// seam. The default no-op logging publisher keeps the 39-8 gate suspending (the
+// request "waits, never defaulted"); Story 39-18 swaps in the outbox+SignalR
+// delivery behind the same interface.
+Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions
+    .TryAddSingleton<Tamma.Activities.Documents.IAcceptanceRequestPublisher,
+        Tamma.Activities.Documents.LoggingAcceptanceRequestPublisher>(builder.Services);
+
 // Round-2 review M3 — bridge that polls platform_events for new
 // TENANT.CLEANUP.REQUESTED rows and re-publishes the matching Elsa
 // event so CleanUpFailedTenantWorkflow's starter trigger fires. The
