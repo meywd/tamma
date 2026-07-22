@@ -1,6 +1,7 @@
 using FluentAssertions;
 using NUnit.Framework;
 using Tamma.Api.Auth;
+using Tamma.ElsaServer.Workflows.Helpers;
 
 namespace Tamma.Activities.Tests.Workflows;
 
@@ -394,6 +395,13 @@ public class ContractBindingTests
                 "repair re-dispatch of the same producer spec — same cell, same binding (39-6 D2).",
             [("DocumentLifecycleWorkflow", "DispatchRevise")] =
                 "revise re-dispatch of the same producer spec — same cell, same binding (39-6 D2).",
+            // Story 39-7 — the single-reviewer producer's llm-call reads its (role, action)
+            // from workflow variables (ReviewerRole/ReviewerAction), resolved fail-loud at
+            // Init via ReviewerSelectionHelper.Resolve. Its reviewer cell contracts are
+            // classified in ReviewProducerDispatchablePairs / IntentionallyUnbound.
+            [("SingleReviewerWorkflow", "DispatchReviewerCall")] =
+                "input-driven reviewer (role, action) resolved from policy at Init (39-7 D3); the reviewer " +
+                "cell's contract is classified via AllDispatchablePairs (ReviewProducerDispatchablePairs).",
         };
 
     [Test]
@@ -422,6 +430,96 @@ public class ContractBindingTests
 
         foreach (var (_, reason) in DataDrivenDispatchJustifications)
             reason.Should().NotBeNullOrWhiteSpace("every data-driven dispatch justification must be non-empty");
+    }
+
+    // ====================================================================
+    // Review-producer dispatchable pairs (Story 39-7 D9)
+    // ====================================================================
+
+    /// <summary>
+    /// Story 39-7 (D9) — the review-producer <c>(role, action)</c> pairs that are
+    /// reachable ONLY via policy (the single-reviewer / panel producers dispatch a
+    /// data-driven llm-call), so they are emitted by NO compiled dispatch site and
+    /// cannot join <see cref="Bindings"/> / <see cref="IntentionallyUnbound"/> (whose
+    /// staleness guard requires a live emitter). The classification test asserts every
+    /// pair <see cref="ReviewerSelectionHelper.AllDispatchablePairs"/> can dispatch is
+    /// classified in one of the three tables — so a reviewer cell reachable by the
+    /// producers but bound nowhere fails the build. Pairs already emitted by a compiled
+    /// site (the 7 plan-review-family pairs from PlanReviewWorkflow, and
+    /// <c>(senior_developer, code-review)</c> from CodeReviewWorkflow) stay in
+    /// <see cref="IntentionallyUnbound"/>; the remaining code-review specialisations
+    /// live here.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<(string Role, string Action), string> ReviewProducerDispatchablePairs =
+        new Dictionary<(string, string), string>
+        {
+            [("developer", "code-review")] =
+                "diff-review producer pair (D3 diff map): developer reviews a diff via code-review; reachable " +
+                "only through the single-reviewer producer's policy-selected dispatch, no compiled emitter.",
+            [("architect", "code-review-architecture")] =
+                "diff-review producer pair (D3 diff map): architect reviews a diff via code-review-architecture; " +
+                "policy-only, no compiled emitter.",
+            [("security", "code-review-security")] =
+                "diff-review producer pair (D3 diff map): security reviews a diff via code-review-security; " +
+                "policy-only, no compiled emitter.",
+            [("tester", "code-review-coverage")] =
+                "diff-review producer pair (D3 diff map): tester reviews a diff via code-review-coverage; " +
+                "policy-only, no compiled emitter.",
+        };
+
+    [Test]
+    public void EveryReviewProducerDispatchablePair_IsClassified()
+    {
+        // AC4 (build-gate half) — every (role, action) the review producers can
+        // dispatch must be BOUND, IntentionallyUnbound, or in the review-producer
+        // table. A new reviewer cell reachable by policy but classified nowhere fails.
+        var unclassified = ReviewerSelectionHelper.AllDispatchablePairs
+            .Where(p => !Bindings.ContainsKey((p.Role, p.Action)) &&
+                        !IntentionallyUnbound.ContainsKey((p.Role, p.Action)) &&
+                        !ReviewProducerDispatchablePairs.ContainsKey((p.Role, p.Action)))
+            .Select(p => $"  ({p.Role}, {p.Action})")
+            .ToList();
+
+        unclassified.Should().BeEmpty(
+            "every reviewer (role, action) the 39-7 producers can dispatch (ReviewerSelectionHelper." +
+            "AllDispatchablePairs) must be classified — Bindings, IntentionallyUnbound, or " +
+            "ReviewProducerDispatchablePairs:" + Environment.NewLine +
+            string.Join(Environment.NewLine, unclassified));
+    }
+
+    [Test]
+    public void ReviewProducerDispatchablePairs_HasNoStaleEntries()
+    {
+        // Every entry must be a real dispatchable producer pair AND not already covered
+        // by IntentionallyUnbound (that would be dead weight / a contradiction).
+        var dispatchable = ReviewerSelectionHelper.AllDispatchablePairs
+            .Select(p => (p.Role, p.Action)).ToHashSet();
+
+        var stale = ReviewProducerDispatchablePairs.Keys
+            .Where(k => !dispatchable.Contains(k))
+            .Select(k => $"  stale (not dispatchable): ({k.Role}, {k.Action})")
+            .ToList();
+        var overlap = ReviewProducerDispatchablePairs.Keys
+            .Where(k => IntentionallyUnbound.ContainsKey(k) || Bindings.ContainsKey(k))
+            .Select(k => $"  redundant (already classified elsewhere): ({k.Role}, {k.Action})")
+            .ToList();
+
+        stale.Concat(overlap).ToList().Should().BeEmpty(
+            "ReviewProducerDispatchablePairs must list ONLY policy-only dispatchable pairs not classified " +
+            "elsewhere:" + Environment.NewLine + string.Join(Environment.NewLine, stale.Concat(overlap)));
+
+        foreach (var (_, reason) in ReviewProducerDispatchablePairs)
+            reason.Should().NotBeNullOrWhiteSpace("every review-producer pair must carry a justification");
+    }
+
+    [Test]
+    public void ReviewerSelectionHelper_AllDispatchablePairs_HasTwelveEligiblePairs()
+    {
+        // Pin the D9 surface: 7 document + 5 diff = 12, each taxonomy-eligible.
+        var pairs = ReviewerSelectionHelper.AllDispatchablePairs;
+        pairs.Should().HaveCount(12, "7 document-review pairs + 5 diff-review pairs");
+        pairs.Should().OnlyContain(p => Tamma.Api.Services.Agents.RolePhaseMap.IsRoleEligibleForPhase(p.Action, p.Role),
+            "every dispatchable review pair must be taxonomy-eligible");
     }
 
     // ====================================================================

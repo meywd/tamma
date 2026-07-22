@@ -180,6 +180,15 @@ public class TaxonomyDriftBuildTests
                 "input-driven repair re-dispatch of the same producer spec; validated at Init (39-6 D2/D3).",
             [("DocumentLifecycleWorkflow", "DispatchRevise")] =
                 "input-driven revise re-dispatch of the same producer spec; validated at Init (39-6 D2/D3).",
+            // Story 39-7 (D9) — the single-reviewer producer's one llm-call reads its
+            // (role, action) from the ReviewerRole/ReviewerAction workflow variables
+            // (default ""), resolved + validated fail-loud at Init via
+            // ReviewerSelectionHelper.Resolve. The panel + router workflows dispatch only
+            // the review-single-reviewer / review-panel sub-workflows (not llm-call), so
+            // they contribute ZERO llm-call dispatch pairs and appear nowhere here.
+            [("SingleReviewerWorkflow", "DispatchReviewerCall")] =
+                "input-driven (ReviewerRole/ReviewerAction workflow variables default to \"\"); the pair is " +
+                "resolved + validated fail-loud at Init via ReviewerSelectionHelper.Resolve (39-7 D3/D9).",
         };
 
     // Internal (not private): ContractBindingTests reuses the same enumeration so
