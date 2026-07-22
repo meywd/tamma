@@ -2777,6 +2777,15 @@ engine.MapPost("/platform-events", EngineEndpoints.AppendPlatformEvents)
 // from the TS contract.
 engine.MapGet("/agent-available", EngineEndpoints.AgentAvailable);
 
+// ── Story 39-11: engine→API document store write seam (D6) ──
+// The lifecycle engine (Tamma.ElsaServer) registers no repository, so it persists
+// documents through this fail-loud HTTP hop (mirrors /events). Gated
+// EngineServiceOnly (same rationale as /events): the service principal only.
+engine.MapPost("/documents", DocumentEndpoints.PersistFromEngine)
+    .RequireAuthorization("EngineServiceOnly");
+engine.MapPost("/documents/{documentId:guid}/status", DocumentEndpoints.SetStatusFromEngine)
+    .RequireAuthorization("EngineServiceOnly");
+
 // ── User dashboard: Repos & Workflow Runs (Story 21-4) ──
 // Tenant-facing read surface behind the SPA's /repos + /runs destinations.
 // Tenant is resolved strictly from ITenantContext inside each handler (no
@@ -2793,6 +2802,21 @@ app.MapGet("/api/v1/runs", ReposRunsEndpoints.ListRuns).RequireAuthorization("Me
 // only; same fail-closed tenant scoping, no economics.
 app.MapGet("/api/v1/runs/summary", ReposRunsEndpoints.GetRunsSummary).RequireAuthorization("MemberAccess");
 app.MapGet("/api/v1/runs/{runId:guid}", ReposRunsEndpoints.GetRunDetail).RequireAuthorization("MemberAccess");
+
+// ── Story 39-11: Document store lineage reads ──
+// Tenant-facing document trail + latest-accepted-state reads + single-document
+// fetch. Mapped PER-ROUTE with MemberAccess (D9 / AC5 — story wins for its own
+// routes), independent of 39-8's `/api/documents` MapGroup (AuthenticatedAny) for
+// the decision-resume surface below: the {documentId:guid} constraint + distinct
+// literal segments (issues/, decisions/, escalations/) keep them from colliding.
+// Fail-closed null-tenant guard + entity-level TenantId re-check live in the
+// handlers (ReposRunsEndpoints posture).
+app.MapGet("/api/documents/issues/{issueId}/lineage", DocumentEndpoints.GetIssueLineage)
+    .RequireAuthorization("MemberAccess");
+app.MapGet("/api/documents/issues/{issueId}/latest", DocumentEndpoints.GetLatestAccepted)
+    .RequireAuthorization("MemberAccess");
+app.MapGet("/api/documents/{documentId:guid}", DocumentEndpoints.GetDocument)
+    .RequireAuthorization("MemberAccess");
 
 // ── Workflows ──
 var workflows = app.MapGroup("/api/workflows").RequireAuthorization("WorkflowsView");

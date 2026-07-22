@@ -82,6 +82,11 @@ public class TenantDbContext : DbContext
     // live in the CP audit_records.
     public DbSet<AuditRecord> AuditRecords => Set<AuditRecord>();
 
+    // Story 39-11 — tenant-resident document instances (the read-optimized
+    // document product layer over this tenant's domain_events stream). Written
+    // exclusively through IDocumentInstanceRepository; rebuildable from events.
+    public DbSet<DocumentInstance> Documents => Set<DocumentInstance>();
+
     /// <summary>
     /// Tenant-scoped API keys (Story 28-7). The tenant DB api_keys table
     /// is locked to <c>Scope = 'tenant'</c> via a CHECK constraint; user /

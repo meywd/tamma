@@ -65,6 +65,15 @@ public class EmitDocumentEventActivity : Activity
     [Input(Description = "Optional structured JSON payload (e.g. outcome / lineage summary)")]
     public Input<string?> DataJson { get; set; } = new((string?)null);
 
+    // Story 39-11 (Design Decision D6) — additive, optional. When set to a valid
+    // Guid string, it becomes the emitted TammaEvent.Id so the durable
+    // domain_events row carries the SAME id the store stamps as
+    // correlating_event_id — the AC7 store↔stream linkage. Unset (the pre-39-11
+    // behaviour) leaves the auto-minted per-event id untouched. Purely additive:
+    // no existing tag/data mapping or event structure changes.
+    [Input(Description = "Optional pre-minted event id (Guid string) — the AC7 store↔stream linkage")]
+    public Input<string?> EventId { get; set; } = new((string?)null);
+
     [JsonConstructor]
     public EmitDocumentEventActivity() { }
 
@@ -88,6 +97,13 @@ public class EmitDocumentEventActivity : Activity
 
         var evt = BuildTammaEvent(
             type, documentId, documentType, round, issueId, correlationId, sessionId, tenantId, detail, dataJson);
+
+        // D6 — override the auto-minted id with the pre-minted transition event id
+        // when supplied, so the store's correlating_event_id resolves to THIS row.
+        var eventId = EventId.Get(context);
+        if (!string.IsNullOrWhiteSpace(eventId) && Guid.TryParse(eventId, out var preMinted))
+            evt.Id = preMinted;
+
         TammaEventEmitter.Emit(context, this, _logger, evt);
 
         _logger?.LogInformation(

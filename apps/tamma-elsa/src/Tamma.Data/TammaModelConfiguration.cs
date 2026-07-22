@@ -1340,6 +1340,87 @@ internal static class TammaModelConfiguration
     }
 
     /// <summary>
+    /// Story 39-11 — configure the tenant-resident <c>document_instances</c> table
+    /// (the read-optimized document product layer over the DCB stream). Called
+    /// ONLY from <see cref="ConfigureTenantEntities"/> — the CP context never sees
+    /// this table (document instances are tenant data). Copies the sectioned shape
+    /// of <see cref="ConfigureAuditEntities"/>.
+    ///
+    /// <para>Every column carries an explicit snake_case <c>HasColumnName</c>
+    /// (Design Decision D1, per AC1's column list). <c>id</c> is CLIENT-SET from the
+    /// envelope's UUID v7 — NO <c>gen_random_uuid()</c> default. The status CHECK
+    /// pins the 7-value store vocabulary (D3); the unique filtered index on
+    /// <c>supersedes_document_id</c> keeps the supersession chain linear (D4).</para>
+    /// </summary>
+    public static void ConfigureDocumentEntities(
+        ModelBuilder modelBuilder, Guid? fixedTenantId = null)
+    {
+        modelBuilder.Entity<DocumentInstance>(entity =>
+        {
+            entity.ToTable("document_instances", t =>
+            {
+                // Store status is a closed 7-value enum (D3) — a buggy writer can't
+                // stash junk. Mirrors DocumentInstanceStatus's wire strings exactly.
+                t.HasCheckConstraint(
+                    "ck_document_instances_status",
+                    "status IN ('draft','validated','in_review','accepted','rejected','superseded','escalated')");
+            });
+            entity.HasKey(e => e.Id);
+            // Client-set id = the envelope's UUID v7 (NO gen_random_uuid() default);
+            // the envelope id IS the row id (AC7 store↔stream linkage).
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.DocumentType).HasColumnName("document_type").IsRequired().HasMaxLength(64);
+            entity.Property(e => e.IssueId).HasColumnName("issue_id").IsRequired();
+            entity.Property(e => e.ProducedByRole).HasColumnName("produced_by_role").IsRequired().HasMaxLength(64);
+            entity.Property(e => e.ProducedByAction).HasColumnName("produced_by_action").IsRequired().HasMaxLength(64);
+            entity.Property(e => e.ProducedByWorkflow).HasColumnName("produced_by_workflow").HasMaxLength(128);
+            entity.Property(e => e.SchemaVersion).HasColumnName("schema_version").IsRequired();
+            entity.Property(e => e.CorrelationId).HasColumnName("correlation_id");
+            entity.Property(e => e.Revision).HasColumnName("revision").IsRequired();
+            entity.Property(e => e.Status).HasColumnName("status").IsRequired().HasMaxLength(16);
+            entity.Property(e => e.SupersedesDocumentId).HasColumnName("supersedes_document_id");
+            entity.Property(e => e.ParentDocumentId).HasColumnName("parent_document_id");
+            entity.Property(e => e.CorrelatingEventId).HasColumnName("correlating_event_id");
+            entity.Property(e => e.TenantId).HasColumnName("tenant_id");
+            entity.Property(e => e.BodyJson)
+                .HasColumnName("body").HasColumnType("jsonb")
+                .IsRequired().HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.CreatedAt)
+                .HasColumnName("created_at").HasColumnType("timestamp with time zone");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnName("updated_at").HasColumnType("timestamp with time zone");
+
+            // Lineage render hot path (AC1): grouped-by-issue reads filtered by
+            // type + status; and the first-produced ordering read.
+            entity.HasIndex(e => new { e.IssueId, e.DocumentType, e.Status })
+                .HasDatabaseName("IX_document_instances_issue_type_status");
+            entity.HasIndex(e => new { e.IssueId, e.CreatedAt })
+                .HasDatabaseName("IX_document_instances_issue_created");
+
+            // Supersession self-reference (D4): the prior revision. Restrict so a
+            // superseded row can't be deleted out from under its successor
+            // (immutable history — there is no delete API anyway).
+            entity.HasOne<DocumentInstance>()
+                .WithMany()
+                .HasForeignKey(e => e.SupersedesDocumentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Chain linearity (D4): at most ONE row may supersede a given prior.
+            // Filtered so the many revision-1 rows (supersedes IS NULL) don't
+            // collide on a single NULL.
+            entity.HasIndex(e => e.SupersedesDocumentId)
+                .IsUnique()
+                .HasFilter("supersedes_document_id IS NOT NULL")
+                .HasDatabaseName("UX_document_instances_supersedes");
+
+            // Tenant-context defence-in-depth: the established no-op filter seam
+            // (schema + connection is the real isolation plane; the repository
+            // carries an explicit TenantId predicate for the shared-DB phase).
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
+        });
+    }
+
+    /// <summary>
     /// Story 37-1 — configure the <c>audit_projector_cursor</c> table. Lives in
     /// the control plane only.
     ///
@@ -1931,6 +2012,12 @@ internal static class TammaModelConfiguration
         // domain_events stream. The SAME table shape is also configured on the
         // CP context for platform-scope rows — one physical schema, two homes.
         ConfigureAuditEntities(modelBuilder, fixedTenantId);
+
+        // ── Document instances (Story 39-11) ──
+        // Tenant-resident read-optimized document product layer over the DCB
+        // stream. Tenant model ONLY — the CP context never carries this table
+        // (document instances are tenant data).
+        ConfigureDocumentEntities(modelBuilder, fixedTenantId);
 
         // ── Agent role selections (Story 32-2) ──
         // SaaS tenant-keyed role→agent selections. The SAME table shape is also
