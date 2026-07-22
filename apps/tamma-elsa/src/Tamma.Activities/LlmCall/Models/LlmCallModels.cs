@@ -162,6 +162,52 @@ public class ProviderAttemptDiagnostic
     /// (Epics 34/35, 32-9/32-10) branch on this tag.
     /// </summary>
     public string? CredentialSource { get; set; }
+
+    /// <summary>
+    /// Story 39-9 (AC4) — a small closed-vocabulary classifier for WHY this attempt
+    /// failed (see <see cref="DiagnosticFailureCodes"/>). ADDITIVE and nullable:
+    /// older serialized diagnostics (JSON without this field) deserialize to
+    /// <c>null</c>, and default STJ ignores it for unaware readers — existing
+    /// consumers are unaffected. The load-bearing value is
+    /// <see cref="DiagnosticFailureCodes.ContentValidation"/>: a diagnostic so tagged
+    /// is EXCLUDED from circuit-breaker failure recording (a content failure is the
+    /// provider working fine on a wrong document — it must never open the breaker).
+    /// <c>null</c> ⇒ unclassified (classify only what is certain).
+    /// </summary>
+    public string? FailureCode { get; set; }
+}
+
+/// <summary>
+/// Story 39-9 (AC4, Design Decision D6) — the small, closed vocabulary for
+/// <see cref="ProviderAttemptDiagnostic.FailureCode"/>. The ONLY value with
+/// behaviour attached is <see cref="ContentValidation"/> (breaker exclusion); the
+/// rest classify transport/rate-limit/budget for diagnostics.
+/// </summary>
+public static class DiagnosticFailureCodes
+{
+    /// <summary>A deterministic document-validation failure — the provider worked;
+    /// the output is wrong. EXCLUDED from circuit-breaker failure recording.</summary>
+    public const string ContentValidation = "content_validation";
+
+    /// <summary>A transport / connectivity / 5xx / timeout failure (breaker's business).</summary>
+    public const string Transport = "transport";
+
+    /// <summary>A provider rate-limit (HTTP 429) failure.</summary>
+    public const string RateLimit = "rate_limit";
+
+    /// <summary>A budget-exhaustion failure.</summary>
+    public const string Budget = "budget";
+
+    /// <summary>
+    /// Story 39-9 (AC5, D6) — the SHARED pure predicate both diagnostic recorders use
+    /// to decide whether a diagnostic counts as a PROVIDER failure for the circuit
+    /// breaker. A content-validation failure counts as NEITHER a failure NOR a success
+    /// (it records nothing): it must never increment the breaker's failure count, and
+    /// it must never reset a healthy provider's counters either. Everything else that
+    /// did not succeed is a real provider failure.
+    /// </summary>
+    public static bool CountsAsProviderFailure(ProviderAttemptDiagnostic d) =>
+        !d.Succeeded && d.FailureCode != ContentValidation;
 }
 
 // ============================================================

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Tamma.Api.Services.Agents;
+using Tamma.Core;
 using Tamma.Core.Logging;
 using Tamma.Data;
 
@@ -70,7 +71,40 @@ public static class LlmCallEndpoints
         // a different tenant for the gate / budget / credential path. null ⇒
         // single-user / platform scope.
         var authoritativeTenantId = tenantContext.TenantId;
-        var managedRequest = ManagedAgentRequest.From(request, authoritativeTenantId);
+
+        // Story 39-9 (D2) — compose the document-content validation delegate from the
+        // wire document-type KEY (a delegate cannot ride HTTP). Fail-loud: an unknown /
+        // unregistered key throws a TammaError, which we map to the same non-retryable
+        // AGENT_UNRESOLVED 422-in-200 envelope config failures use (fail-closed — never
+        // "skip validation"). A null/empty key ⇒ null ⇒ no validation (the default for
+        // the 30+ existing dispatchers; zero behaviour change).
+        DocumentContentValidation? documentValidation;
+        try
+        {
+            documentValidation = DocumentValidationBinder.Bind(request.DocumentType);
+        }
+        catch (TammaError ex)
+        {
+            logger.LogWarning(
+                "call-LLM rejected an unknown/unregistered documentType; failing the run as "
+                + "AGENT_UNRESOLVED (422). documentType={DocumentType}, correlationId={CorrelationId}, code={Code}",
+                LogSanitizer.Clean(request.DocumentType),
+                LogSanitizer.Clean(request.CorrelationId),
+                LogSanitizer.Clean(ex.Code));
+
+            var unresolved = new AgentRunResult
+            {
+                Success = false,
+                Role = request.Role,
+                CorrelationId = request.CorrelationId,
+                FailureCode = AgentRunFailureCodes.AgentUnresolved,
+                FailureReason = "unknown or unregistered documentType",
+                HttpStatusCode = 422,
+            };
+            return mapper.ToHttpResult(unresolved);
+        }
+
+        var managedRequest = ManagedAgentRequest.From(request, authoritativeTenantId, documentValidation);
 
         logger.LogInformation(
             "call-LLM received: correlationId={CorrelationId}, role={Role}, persona={Persona}, "

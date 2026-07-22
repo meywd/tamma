@@ -1,6 +1,24 @@
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Core.Documents;
 
 namespace Tamma.Api.Services.Agents;
+
+/// <summary>
+/// Story 39-9 (D2) — the composed document-content validation seam handed to
+/// <c>ManagedAgent</c> / the runner. It carries the document-type wire KEY (for
+/// event tags) plus a pure <see cref="Validate"/> delegate built API-side over
+/// <c>DocumentTypeRegistry.Resolve(key).Validate</c> (a delegate cannot cross
+/// HTTP). Composition is done by <see cref="DocumentValidationBinder.Bind"/>;
+/// <c>ManagedAgent</c> and the runner never touch the registry — keeping them
+/// unit-testable with fake validators.
+/// </summary>
+/// <param name="DocumentTypeKey">The document-type wire key (event tag only).</param>
+/// <param name="Validate">Produced-document text → validation verdict. Never throws
+/// for malformed input — returns an invalid result with a synthetic
+/// <c>PAYLOAD_NOT_JSON</c> violation.</param>
+public sealed record DocumentContentValidation(
+    string DocumentTypeKey,
+    Func<string, DocumentValidationResult> Validate);
 
 /// <summary>
 /// Story 32-5 — the INTERNAL input to <see cref="IManagedAgent.RunAsync"/>,
@@ -75,6 +93,18 @@ public sealed record ManagedAgentRequest
     /// <summary>Workflow instance id. Always set.</summary>
     public required string CorrelationId { get; init; }
 
+    /// <summary>Story 39-9 (D2/D10) — the composed document-content validation seam.
+    /// <c>null</c> ⇒ no validation runs (the repair ring is invisible; behaviour
+    /// byte-identical to before). Composed API-side by
+    /// <see cref="DocumentValidationBinder.Bind"/> from the wire
+    /// <see cref="LlmCallRequest.DocumentType"/> key.</summary>
+    public DocumentContentValidation? DocumentValidation { get; init; }
+
+    /// <summary>Story 39-9 (D10) — the issue id, threaded through as an additive
+    /// optional input purely for the <c>LLM.*</c> event tags (AC6). <c>null</c>/empty
+    /// for the 30+ existing dispatchers ⇒ zero behaviour change.</summary>
+    public string? IssueId { get; init; }
+
     /// <summary>
     /// Pure mapping from the wire request to the internal request. The tenant
     /// scope is the <paramref name="authoritativeTenantId"/> derived from the
@@ -90,7 +120,17 @@ public sealed record ManagedAgentRequest
     /// thin client may still send it, but it carries no server-side authority.
     /// Every other field is carried forward verbatim.</para>
     /// </summary>
-    public static ManagedAgentRequest From(LlmCallRequest request, Guid? authoritativeTenantId) =>
+    /// <param name="documentValidation">Story 39-9 (D2) — the composed
+    /// document-content validation seam, built by the endpoint from
+    /// <see cref="LlmCallRequest.DocumentType"/> via
+    /// <see cref="DocumentValidationBinder.Bind"/> BEFORE this mapping (so a bad
+    /// document-type key can fail loud at the endpoint, never here). <c>null</c> ⇒
+    /// no validation. The delegate is composed outside this pure map because a
+    /// registry lookup + fail-loud is not a pure mapping concern.</param>
+    public static ManagedAgentRequest From(
+        LlmCallRequest request,
+        Guid? authoritativeTenantId,
+        DocumentContentValidation? documentValidation = null) =>
         new()
         {
             TenantId = authoritativeTenantId,
@@ -108,5 +148,8 @@ public sealed record ManagedAgentRequest
             ToolLoopConfig = request.ToolLoopConfig,
             Params = request.Params,
             CorrelationId = request.CorrelationId,
+            // Story 39-9 (D10) — additive pass-throughs (default empty ⇒ no change).
+            DocumentValidation = documentValidation,
+            IssueId = request.IssueId,
         };
 }

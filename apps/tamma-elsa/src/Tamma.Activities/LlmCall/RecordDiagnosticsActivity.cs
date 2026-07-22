@@ -103,7 +103,7 @@ public class RecordDiagnosticsActivity : CodeActivity<string>
         {
             cbStates = CheckCircuitBreakerActivity.RecordSuccess(cbStates, providerName);
         }
-        else
+        else if (DiagnosticFailureCodes.CountsAsProviderFailure(diagnostic))
         {
             var config = LoadProviderConfig(providerName);
             cbStates = CheckCircuitBreakerActivity.RecordFailure(
@@ -111,6 +111,8 @@ public class RecordDiagnosticsActivity : CodeActivity<string>
                 config.CircuitBreakerFailureThreshold,
                 config.CircuitBreakerCooldownSeconds);
         }
+        // Story 39-9 (AC5, D6) — else: a content_validation failure records NEITHER
+        // failure NOR success; the breaker state is left untouched.
 
         // 3. Update budget
         if (diagnostic.Succeeded || diagnostic.PromptTokens > 0)
@@ -191,12 +193,16 @@ public class RecordDiagnosticsActivity : CodeActivity<string>
                     await apiClient.RecordProviderSuccessAsync(
                         providerName, accountId, context.CancellationToken).ConfigureAwait(false);
                 }
-                else
+                else if (DiagnosticFailureCodes.CountsAsProviderFailure(diagnostic))
                 {
                     await apiClient.RecordProviderFailureAsync(
                         providerName, diagnostic.ErrorMessage, accountId, context.CancellationToken)
                         .ConfigureAwait(false);
                 }
+                // Story 39-9 (AC5, D6) — else: a content_validation failure is NEVER
+                // reported into the shared breaker via RecordProviderFailureAsync
+                // (nor as a success). The RecordDiagnosticsAsync ingest above still
+                // captures it as a general diagnostic — only the breaker path is excluded.
             }
             catch (Exception apiEx)
             {

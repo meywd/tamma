@@ -53,7 +53,7 @@ public class InlineToolLoopRunnerTests
 
         var result = await runner.RunAsync(
             "anthropic", Config(), Model, "system", "user", 4096, 0.7,
-            tools, enableToolLoop: true, new ToolLoopConfig(), "corr-1", CancellationToken.None);
+            tools, enableToolLoop: true, new ToolLoopConfig(), "corr-1", repair: null, CancellationToken.None);
 
         result.Response.Success.Should().BeTrue();
         result.Response.ResponseText.Should().Be("All done.");
@@ -78,7 +78,7 @@ public class InlineToolLoopRunnerTests
 
         var result = await runner.RunAsync(
             "anthropic", Config(), Model, "system", "user", 4096, 0.7,
-            tools: null, enableToolLoop: true, new ToolLoopConfig(), "corr-2", CancellationToken.None);
+            tools: null, enableToolLoop: true, new ToolLoopConfig(), "corr-2", repair: null, CancellationToken.None);
 
         result.Response.Success.Should().BeTrue();
         result.Turns.Should().Be(1);
@@ -107,7 +107,7 @@ public class InlineToolLoopRunnerTests
 
         var result = await runner.RunAsync(
             "anthropic", Config(), Model, "system", "user", 4096, 0.7,
-            tools, enableToolLoop: true, new ToolLoopConfig { MaxSteps = 2 }, "corr-3", CancellationToken.None);
+            tools, enableToolLoop: true, new ToolLoopConfig { MaxSteps = 2 }, "corr-3", repair: null, CancellationToken.None);
 
         result.Exhausted.Should().BeTrue();
         result.Turns.Should().Be(2);
@@ -139,7 +139,7 @@ public class InlineToolLoopRunnerTests
 
         await runner.RunAsync(
             "anthropic", Config(), Model, "system", "user", 4096, 0.7,
-            tools, enableToolLoop: true, new ToolLoopConfig(), "corr-4", CancellationToken.None);
+            tools, enableToolLoop: true, new ToolLoopConfig(), "corr-4", repair: null, CancellationToken.None);
 
         handler.CapturedBodies.Should().HaveCount(2);
         handler.CapturedBodies[1].Should().NotContain("<script>", "tool output is sanitized before feedback");
@@ -158,7 +158,7 @@ public class InlineToolLoopRunnerTests
 
         var result = await runner.RunAsync(
             "anthropic", Config(), Model, "system", "user", 4096, 0.7,
-            tools: null, enableToolLoop: true, new ToolLoopConfig(), "corr-5", CancellationToken.None);
+            tools: null, enableToolLoop: true, new ToolLoopConfig(), "corr-5", repair: null, CancellationToken.None);
 
         result.Response.Success.Should().BeFalse();
         result.Response.HttpStatusCode.Should().Be(429, "the upstream status is preserved for RetryCheck");

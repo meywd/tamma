@@ -69,6 +69,14 @@ public class LlmCallWorkflow : WorkflowBase
         var sessionIdVar = builder.WithVariable<string>("SessionId", "");
         var tenantIdVar = builder.WithVariable<string>("TenantId", "");
 
+        // Story 39-9 (D10) — additive/optional repair-ring inputs. Default empty ⇒
+        // zero behaviour change for the 30+ existing dispatchers. documentType is the
+        // wire KEY gating the server-side repair ring; issueId rides through for the
+        // LLM.* event tags; contentValidation surfaces the wire block back to callers.
+        var documentTypeVar = builder.WithVariable<string>("DocumentType", "");
+        var issueIdVar = builder.WithVariable<string>("IssueId", "");
+        var contentValidationVar = builder.WithVariable<string>("ContentValidationJson", "");
+
         // Legacy input support
         var inputVar = builder.WithVariable<string>("InputJson", "");
 
@@ -157,6 +165,12 @@ public class LlmCallWorkflow : WorkflowBase
 
                 // Tenant ID for tenant-scoped prompt resolution (Story 27-6)
                 tenantIdVar.Set(context, context.GetInput<string>("tenantId") ?? "");
+
+                // Story 39-9 (D10) — additive/optional repair-ring inputs. Read
+                // unconditionally so both the typed-role and legacy-InputJson paths
+                // carry them; empty ⇒ no validation (the default).
+                documentTypeVar.Set(context, context.GetInput<string>("documentType") ?? "");
+                issueIdVar.Set(context, context.GetInput<string>("issueId") ?? "");
 
                 var role = context.GetInput<string>("agentRole") ?? context.GetInput<string>("role");
                 if (!string.IsNullOrWhiteSpace(role))
@@ -544,7 +558,9 @@ public class LlmCallWorkflow : WorkflowBase
                                                             workflowOutputVar,
                                                             enableToolLoopVar,
                                                             toolLoopConfigJsonVar,
-                                                            tenantIdVar)
+                                                            tenantIdVar,
+                                                            documentTypeVar,
+                                                            issueIdVar)
                                                     }
                                                 }, "Budget OK")
                                             }, "Budget Exhausted?")
@@ -691,7 +707,16 @@ public class LlmCallWorkflow : WorkflowBase
                         var output = SafeDeserialize<LlmCallWorkflowOutput>(outputJson);
                         return (object)(output?.ToolLoopExhausted ?? false);
                     })
-                }, "Output: toolLoopExhausted")
+                }, "Output: toolLoopExhausted"),
+                // Story 39-9 (D10) — surface the content-validation wire block back to
+                // the caller (empty when no validator ran). Additive output.
+                WithLabel(new SetOutput
+                {
+                    Id = "OutputContentValidation",
+                    Name = "Output: contentValidation",
+                    OutputName = new("contentValidation"),
+                    OutputValue = new(context => (object)(contentValidationVar.Get(context) ?? ""))
+                }, "Output: contentValidation")
             }
         };
         setOutputs.SetDisplayText("Set Outputs");
@@ -772,7 +797,9 @@ public class LlmCallWorkflow : WorkflowBase
         Variable<string> workflowOutputVar,
         Variable<bool> enableToolLoopVar,
         Variable<string> toolLoopConfigJsonVar,
-        Variable<string> tenantIdVar)
+        Variable<string> tenantIdVar,
+        Variable<string> documentTypeVar,
+        Variable<string> issueIdVar)
     {
         var whileLoop = new While((string?)null);
         whileLoop.Id = "RetryLoop";
@@ -923,7 +950,10 @@ public class LlmCallWorkflow : WorkflowBase
                     ActionProp = new(context => actionVar.Get(context)),
                     RenderedPromptProp = new(context => taskPromptVar.Get(context)),
                     VariablesJsonProp = new(context => variablesJsonVar.Get(context)),
-                    RegistryMaxTokensProp = new(context => registryMaxTokensVar.Get(context))
+                    RegistryMaxTokensProp = new(context => registryMaxTokensVar.Get(context)),
+                    // Story 39-9 (D10) — thread the additive/optional repair-ring inputs.
+                    DocumentTypeProp = new(context => documentTypeVar.Get(context)),
+                    IssueIdProp = new(context => issueIdVar.Get(context))
                 }, "Call LLM"),
                 WithLabel(new RecordDiagnosticsInlineActivity
                 {

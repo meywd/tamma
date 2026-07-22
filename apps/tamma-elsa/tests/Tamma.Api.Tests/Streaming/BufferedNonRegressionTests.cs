@@ -132,7 +132,8 @@ public class BufferedNonRegressionTests
         runner.Setup(r => r.RunAsync(It.IsAny<string>(), It.IsAny<LlmProviderConfig>(),
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
                 It.IsAny<double>(), It.IsAny<IReadOnlyList<ResolvedTool>?>(), It.IsAny<bool>(),
-                It.IsAny<ToolLoopConfig>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                It.IsAny<ToolLoopConfig>(), It.IsAny<string>(), It.IsAny<RepairRingPlan?>(),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(new InlineToolLoopResult
             {
                 Response = new NormalizedLlmResponse

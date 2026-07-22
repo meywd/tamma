@@ -100,6 +100,19 @@ public class CallLlmInlineActivity : CodeActivity
     [Input(Description = "Registry-resolved max tokens (registry path only; 0 = unset → InputJson/legacy default)")]
     public Input<int> RegistryMaxTokensProp { get; set; } = new(0);
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Story 39-9 (D10) — additive/optional repair-ring inputs. Default empty ⇒
+    // zero behaviour change for the 30+ existing dispatchers. `documentType` is the
+    // wire KEY whose validator gates the repair ring server-side; `issueId` rides
+    // through purely for the LLM.* event tags (AC6).
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Input(Description = "Story 39-9 — document-type key gating the repair ring (empty = no validation)")]
+    public Input<string?> DocumentTypeProp { get; set; } = new((string?)null);
+
+    [Input(Description = "Story 39-9 — issue id for LLM.* event tags (empty = none)")]
+    public Input<string?> IssueIdProp { get; set; } = new((string?)null);
+
     private readonly ILogger<CallLlmInlineActivity>? _logger;
     private readonly TammaApiClient? _apiClient;
 
@@ -163,6 +176,8 @@ public class CallLlmInlineActivity : CodeActivity
         var renderedPrompt = RenderedPromptProp.Get(context);
         var variablesJson = VariablesJsonProp.Get(context);
         var registryMaxTokens = RegistryMaxTokensProp.Get(context);
+        var documentType = DocumentTypeProp.Get(context);
+        var issueId = IssueIdProp.Get(context);
 
         var input = ParseInput(inputJson);
         var toolLoopConfig = ParseToolLoopConfig(toolLoopConfigJson);
@@ -179,7 +194,8 @@ public class CallLlmInlineActivity : CodeActivity
         var request = BuildLlmCallRequest(
             input, providerName, systemPrompt, toolsJson, model,
             enableToolLoop, toolLoopConfig, tenantIdRaw, correlationId,
-            agentRole, action, renderedPrompt, variablesJson, registryMaxTokens);
+            agentRole, action, renderedPrompt, variablesJson, registryMaxTokens,
+            documentType, issueId);
 
         var apiClient = _apiClient ?? context.GetRequiredService<TammaApiClient>();
         var tenantHeader = string.IsNullOrWhiteSpace(tenantIdRaw) ? null : tenantIdRaw!.Trim();
@@ -255,7 +271,9 @@ public class CallLlmInlineActivity : CodeActivity
         string? action = null,
         string? renderedPrompt = null,
         string? variablesJson = null,
-        int registryMaxTokens = 0)
+        int registryMaxTokens = 0,
+        string? documentType = null,
+        string? issueId = null)
     {
         // Finding I-1 — the API renders the prompt AUTHORITATIVELY (Epic 27,
         // (principal, role, action) resolution). The engine forwards NO system
@@ -305,6 +323,9 @@ public class CallLlmInlineActivity : CodeActivity
                 BudgetCapUsd = input.BudgetCapUsd,
             },
             CorrelationId = correlationId,
+            // Story 39-9 (D10) — additive/optional; null/empty ⇒ omitted on the wire.
+            DocumentType = string.IsNullOrWhiteSpace(documentType) ? null : documentType,
+            IssueId = string.IsNullOrWhiteSpace(issueId) ? null : issueId,
         };
     }
 
@@ -345,6 +366,9 @@ public class CallLlmInlineActivity : CodeActivity
             PromptTokens = response.Usage.PromptTokens,
             CompletionTokens = response.Usage.CompletionTokens,
             CredentialSource = response.CredentialSource,
+            // Story 39-9 (AC4, D6) — classify the failure for the diagnostic (and, for
+            // content_validation, the breaker exclusion). Only classify what is certain.
+            FailureCode = response.Success ? null : ClassifyFailureCode(response.FailureCode, httpStatus),
         };
 
         var normalized = new NormalizedLlmResponse
@@ -365,12 +389,38 @@ public class CallLlmInlineActivity : CodeActivity
                     .ToList(),
         };
 
+        // Story 39-9 (D10) — surface the content-validation block as a workflow
+        // variable (empty when absent, i.e. no validator ran).
+        var contentValidationJson = response.ContentValidation is null
+            ? string.Empty
+            : JsonSerializer.Serialize(response.ContentValidation);
+
         return new MappedLlmVariables(
             diagnostic,
             normalized,
             response.Usage.ToolLoopTokens,
             response.Usage.ToolLoopTurns,
-            response.Usage.ToolLoopExhausted);
+            response.Usage.ToolLoopExhausted,
+            contentValidationJson);
+    }
+
+    /// <summary>
+    /// Story 39-9 (AC4, D6) — map a wire failure code / HTTP status to the closed
+    /// diagnostic vocabulary. CONTENT_VALIDATION_FAILED → content_validation (the
+    /// breaker-exclusion signal); BUDGET_EXCEEDED → budget; 429 → rate_limit;
+    /// 0 / 5xx → transport; anything else stays null (classify only what is certain).
+    /// </summary>
+    internal static string? ClassifyFailureCode(string? wireFailureCode, int httpStatus)
+    {
+        if (string.Equals(wireFailureCode, "CONTENT_VALIDATION_FAILED", StringComparison.Ordinal))
+            return DiagnosticFailureCodes.ContentValidation;
+        if (string.Equals(wireFailureCode, "BUDGET_EXCEEDED", StringComparison.Ordinal))
+            return DiagnosticFailureCodes.Budget;
+        if (httpStatus == 429)
+            return DiagnosticFailureCodes.RateLimit;
+        if (httpStatus == 0 || (httpStatus >= 500 && httpStatus <= 599))
+            return DiagnosticFailureCodes.Transport;
+        return null;
     }
 
     /// <summary>
@@ -396,6 +446,8 @@ public class CallLlmInlineActivity : CodeActivity
             ErrorMessage = message,
             DurationMs = durationMs,
             StartedAtUtc = startedAtUtc,
+            // Story 39-9 (AC4) — a null-body / raw-5xx result is a TRANSPORT failure.
+            FailureCode = DiagnosticFailureCodes.Transport,
         };
         var normalized = new NormalizedLlmResponse
         {
@@ -403,7 +455,7 @@ public class CallLlmInlineActivity : CodeActivity
             HttpStatusCode = 0,
             ErrorMessage = message,
         };
-        return new MappedLlmVariables(diagnostic, normalized, 0, 0, false);
+        return new MappedLlmVariables(diagnostic, normalized, 0, 0, false, string.Empty);
     }
 
     /// <summary>
@@ -419,6 +471,8 @@ public class CallLlmInlineActivity : CodeActivity
         context.SetVariable("ToolLoopTokens", v.ToolLoopTokens);
         context.SetVariable("ToolLoopTurns", v.ToolLoopTurns);
         context.SetVariable("ToolLoopExhausted", v.ToolLoopExhausted);
+        // Story 39-9 (D10) — the content-validation block (empty when no validator ran).
+        context.SetVariable("ContentValidationJson", v.ContentValidationJson);
     }
 
     private static string ComposeFailureMessage(string? failureCode, string? failureReason)
@@ -497,4 +551,5 @@ public sealed record MappedLlmVariables(
     NormalizedLlmResponse Response,
     int ToolLoopTokens,
     int ToolLoopTurns,
-    bool ToolLoopExhausted);
+    bool ToolLoopExhausted,
+    string ContentValidationJson);

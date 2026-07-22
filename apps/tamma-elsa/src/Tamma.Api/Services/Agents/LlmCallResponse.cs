@@ -76,7 +76,35 @@ public sealed record LlmCallResponse
     /// engine's <c>RetryCheck</c> + circuit breaker keep working. <c>null</c> on
     /// success or when no HTTP call was made.</summary>
     public int? HttpStatusCode { get; init; }
+
+    /// <summary>Story 39-9 (AC3) — the KEY-FREE content-validation block. Present when
+    /// a document validator ran (the produce dispatch supplied a <c>documentType</c>);
+    /// <c>null</c> otherwise (the default for the 30+ existing dispatchers). Story 39-6
+    /// consumes it (violations + per-turn history) to build its
+    /// <c>ValidationExhausted</c> lineage.</summary>
+    public ContentValidationDto? ContentValidation { get; init; }
 }
+
+/// <summary>
+/// Story 39-9 (AC3, design §wire) — the KEY-FREE content-validation projection carried
+/// on <see cref="LlmCallResponse.ContentValidation"/>. Deterministic-validator output
+/// only: a valid flag, the repair-turn count, the FINAL violations, and the ordered
+/// per-turn history. Never carries a key, a prompt body, or a provider error.
+/// </summary>
+public sealed record ContentValidationDto(
+    bool Valid,
+    int RepairTurns,
+    IReadOnlyList<ContentViolationDto> Violations,
+    IReadOnlyList<RepairTurnDto> History);
+
+/// <summary>Story 39-9 — a single domain-phrased violation (stable code + message).</summary>
+public sealed record ContentViolationDto(string Code, string Message);
+
+/// <summary>Story 39-9 — one turn's validation verdict (turn 0 = initial produce).</summary>
+public sealed record RepairTurnDto(
+    int Turn,
+    bool Valid,
+    IReadOnlyList<ContentViolationDto> Violations);
 
 /// <summary>
 /// Story 32-5 (design §2.3) — token usage projection. Token COUNT fields only —

@@ -1,6 +1,45 @@
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Core.Documents;
 
 namespace Tamma.Api.Services.Agents;
+
+/// <summary>
+/// Story 39-9 (D1/D2) — the deterministic repair-ring plan handed to
+/// <see cref="IInlineToolLoopRunner.RunAsync"/>. The runner is registry-free: it
+/// sees only the composed <see cref="Validate"/> delegate (built API-side over
+/// <c>DocumentTypeRegistry.Resolve(key).Validate</c> with a fence-strip / parse
+/// front — a delegate cannot ride HTTP), the gate flag, and the already-clamped
+/// turn cap. This keeps the ring unit-testable with fake validators.
+/// </summary>
+/// <param name="DocumentTypeKey">The document-type wire key (event tag only).</param>
+/// <param name="Validate">Pure validator: produced-document text → verdict. Never
+/// throws for a malformed payload — it returns an invalid result carrying a
+/// synthetic <c>PAYLOAD_NOT_JSON</c> violation.</param>
+/// <param name="RepairEnabled">Whether repair turns run for this type
+/// (<c>EnabledDocumentTypes</c> membership). When <c>false</c>, the runner
+/// validates ONCE and never appends a repair turn (AC9).</param>
+/// <param name="MaxRepairTurns">The already-clamped
+/// <c>RepairRingOptions.EffectiveMaxRepairTurns</c> (0..2) — the runner does no
+/// clamping of its own.</param>
+public sealed record RepairRingPlan(
+    string DocumentTypeKey,
+    Func<string, DocumentValidationResult> Validate,
+    bool RepairEnabled,
+    int MaxRepairTurns);
+
+/// <summary>
+/// Story 39-9 (D4) — the validation verdict for a single turn in the repair ring.
+/// Turn 0 is the initial produce validation; turns 1..N are repair re-validations.
+/// The runner returns the ordered history; <c>ManagedAgent</c> replays it into the
+/// <c>LLM.*</c> DCB events (the runner stays event-store-free).
+/// </summary>
+/// <param name="Turn">0 = initial produce validation; 1..N = repair turns.</param>
+/// <param name="Valid">Whether the document validated on this turn.</param>
+/// <param name="Violations">The domain-phrased violations (empty when valid).</param>
+public sealed record RepairTurnRecord(
+    int Turn,
+    bool Valid,
+    IReadOnlyList<DocumentViolation> Violations);
 
 /// <summary>
 /// Story 32-5 (AC4) — the extracted, reusable agentic tool-loop seam.
@@ -25,6 +64,12 @@ public interface IInlineToolLoopRunner
     /// request-scoped <c>ApiKey</c>). Returns the final response plus cumulative
     /// token totals, completed turns, and whether the loop exhausted maxSteps.
     /// </summary>
+    /// <param name="repair">Story 39-9 (D1) — the deterministic repair-ring plan,
+    /// or <c>null</c> when no document validation applies (behaviour then byte-identical
+    /// to before the ring existed). This parameter has NO DEFAULT VALUE by design:
+    /// C# expression trees reject omitted optional arguments (CS0854), so a defaulted
+    /// parameter would silently break strict Moq setups — an explicit parameter makes
+    /// every call site a conscious edit.</param>
     Task<InlineToolLoopResult> RunAsync(
         string provider,
         LlmProviderConfig providerConfig,
@@ -37,6 +82,7 @@ public interface IInlineToolLoopRunner
         bool enableToolLoop,
         ToolLoopConfig loopConfig,
         string correlationId,
+        RepairRingPlan? repair,
         CancellationToken ct);
 
     /// <summary>
@@ -87,6 +133,26 @@ public sealed record InlineToolLoopResult
     /// <summary>Key-free per-tool-call summaries. Empty in the verbatim extraction
     /// (the loop tracks a count only); populated by a follow-on.</summary>
     public IReadOnlyList<ToolCallSummary> ToolCalls { get; init; } = Array.Empty<ToolCallSummary>();
+
+    // --- Story 39-9 (D1) — deterministic repair-ring outcome (additive) --------
+
+    /// <summary>Story 39-9 — the final content-validation verdict: <c>true</c> when
+    /// the produced (or repaired) document passed its validator, <c>false</c> when it
+    /// still failed after exhausting the ring, and <c>null</c> when NO validator was
+    /// supplied (<c>repair == null</c>) — behaviour then byte-identical to before the
+    /// ring existed.</summary>
+    public bool? ContentValid { get; init; }
+
+    /// <summary>Story 39-9 — the number of repair turns actually run (0 when the
+    /// initial produce validated, when repair was gated off, or when no validator
+    /// was supplied). Counted SEPARATELY from <see cref="Turns"/> (tool-loop turns).</summary>
+    public int RepairTurns { get; init; }
+
+    /// <summary>Story 39-9 — the ordered per-turn validation history (turn 0 = the
+    /// initial produce validation; 1..N = repair re-validations). Empty when no
+    /// validator was supplied. <c>ManagedAgent</c> replays this into the <c>LLM.*</c>
+    /// DCB events.</summary>
+    public IReadOnlyList<RepairTurnRecord> RepairHistory { get; init; } = Array.Empty<RepairTurnRecord>();
 }
 
 /// <summary>

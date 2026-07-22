@@ -82,10 +82,14 @@ public class RecordDiagnosticsInlineActivity : CodeActivity
         {
             cbStates = CheckCircuitBreakerActivity.RecordSuccess(cbStates, providerName);
         }
-        else
+        else if (DiagnosticFailureCodes.CountsAsProviderFailure(diagnostic))
         {
             cbStates = CheckCircuitBreakerActivity.RecordFailure(cbStates, providerName);
         }
+        // Story 39-9 (AC5, D6) — else: a content_validation failure is the provider
+        // working fine on a wrong document. It records NEITHER a failure (must never
+        // open the breaker on a healthy provider) NOR a success (it did not succeed) —
+        // the breaker state is left untouched.
 
         // 3. Update budget (simple cost estimate)
         BudgetState? budget;

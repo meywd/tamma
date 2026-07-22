@@ -102,6 +102,18 @@ public sealed record LlmCallRequest
     /// <summary>Workflow instance id — links the run back to the parent workflow
     /// and tags every DCB event. Required.</summary>
     public required string CorrelationId { get; init; }
+
+    /// <summary>Story 39-9 (D2/D10) — the document-type wire KEY (e.g.
+    /// <c>decomposition</c>) whose deterministic validator gates the repair ring.
+    /// <c>null</c>/empty ⇒ no validation (the ring is invisible — the default for the
+    /// 30+ existing dispatchers). Additive/optional: old JSON deserializes clean.
+    /// The endpoint composes the validator delegate from this key server-side (a
+    /// delegate cannot ride HTTP); an unknown key fails loud.</summary>
+    public string? DocumentType { get; init; }
+
+    /// <summary>Story 39-9 (D10) — the issue id, additive/optional, threaded through
+    /// purely for the <c>LLM.*</c> event tags (AC6). <c>null</c> ⇒ no change.</summary>
+    public string? IssueId { get; init; }
 }
 
 /// <summary>
