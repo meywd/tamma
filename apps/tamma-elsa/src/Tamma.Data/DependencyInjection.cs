@@ -158,6 +158,9 @@ public static class DependencyInjection
         // Story 39-5 — tenant-resident acceptance-rules overrides.
         services.AddScoped<IAcceptanceRulesRepository, AcceptanceRulesRepository>();
         services.AddScoped<IConventionRepository, ConventionRepository>();
+        // Story 39-11 — the sole writer/reader of the tenant-resident
+        // document_instances store (immutable revisions + supersession).
+        services.AddScoped<IDocumentInstanceRepository, DocumentInstanceRepository>();
         services.AddScoped<IProviderHealthRepository, ProviderHealthRepository>();
         services.AddScoped<IDiagnosticsRepository, DiagnosticsRepository>();
         services.AddScoped<ISanitizationRepository, SanitizationRepository>();

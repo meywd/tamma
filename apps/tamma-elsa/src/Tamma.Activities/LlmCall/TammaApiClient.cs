@@ -565,6 +565,87 @@ public class TammaApiClient
         }
     }
 
+    // ----- Document store persist (Story 39-11, D6) --------------------
+
+    /// <summary>
+    /// Persist a document instance to the tenant's <c>document_instances</c> store
+    /// via <c>POST /api/engine/documents</c> (<c>EngineServiceOnly</c>).
+    ///
+    /// <para><b>FAIL-LOUD</b> — unlike the best-effort <see cref="AppendEventsAsync"/>
+    /// event drain, a non-2xx or transport failure THROWS. The document is the
+    /// lifecycle's product, not telemetry; the caller (persist activity) must fault,
+    /// not swallow.</para>
+    /// </summary>
+    public async Task PersistDocumentAsync(
+        Models.PersistDocumentRequest request,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/engine/documents";
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = JsonContent.Create(request, options: JsonOpts),
+        };
+        AddTenantHeader(httpRequest, tenantId);
+        using var response = await _httpClient.SendAsync(httpRequest, ct).ConfigureAwait(false);
+        await RecordHealthAsync(
+            response.IsSuccessStatusCode, (int)response.StatusCode, null, ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await SafeReadBodyAsync(response, ct).ConfigureAwait(false);
+            _logger.LogWarning(
+                "Tamma API POST /api/engine/documents returned {Status}: {Body}",
+                (int)response.StatusCode, body);
+            throw new HttpRequestException(
+                $"Persist document failed: HTTP {(int)response.StatusCode}. {body}");
+        }
+    }
+
+    /// <summary>
+    /// Transition a persisted document's status via
+    /// <c>POST /api/engine/documents/{documentId}/status</c>
+    /// (<c>EngineServiceOnly</c>). FAIL-LOUD (non-2xx / transport throws).
+    /// </summary>
+    public async Task SetDocumentStatusAsync(
+        Guid documentId,
+        string status,
+        Guid? correlatingEventId,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/engine/documents/{documentId}/status";
+        var body = new Models.SetDocumentStatusRequest(status, correlatingEventId);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = JsonContent.Create(body, options: JsonOpts),
+        };
+        AddTenantHeader(httpRequest, tenantId);
+        using var response = await _httpClient.SendAsync(httpRequest, ct).ConfigureAwait(false);
+        await RecordHealthAsync(
+            response.IsSuccessStatusCode, (int)response.StatusCode, null, ct).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            var responseBody = await SafeReadBodyAsync(response, ct).ConfigureAwait(false);
+            _logger.LogWarning(
+                "Tamma API POST /api/engine/documents/{Id}/status returned {Status}: {Body}",
+                documentId, (int)response.StatusCode, responseBody);
+            throw new HttpRequestException(
+                $"Set document status failed: HTTP {(int)response.StatusCode}. {responseBody}");
+        }
+    }
+
+    private static async Task<string> SafeReadBodyAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            return await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+        {
+            return "(response body unavailable)";
+        }
+    }
+
     // ----- Platform event append ----------------------------------------
 
     /// <summary>

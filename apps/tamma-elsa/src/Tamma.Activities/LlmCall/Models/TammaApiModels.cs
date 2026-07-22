@@ -281,6 +281,25 @@ public record AppendEventsRequest(
 );
 
 /// <summary>
+/// Story 39-11 — POST body for <c>/api/engine/documents</c>. The envelope rides
+/// as a JSON string (serialized via <c>DocumentJson</c>) so the API
+/// re-deserializes through the same canonical options; the tenant is asserted by
+/// the <c>X-Tenant-Id</c> header. camelCase to match the API DTO binding.
+/// </summary>
+public record PersistDocumentRequest(
+    [property: JsonPropertyName("envelopeJson")] string EnvelopeJson,
+    [property: JsonPropertyName("correlatingEventId")] Guid? CorrelatingEventId
+);
+
+/// <summary>
+/// Story 39-11 — POST body for <c>/api/engine/documents/{documentId}/status</c>.
+/// </summary>
+public record SetDocumentStatusRequest(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("correlatingEventId")] Guid? CorrelatingEventId
+);
+
+/// <summary>
 /// POST body for <c>/api/engine/platform-events</c> — a BATCH of platform
 /// events the Elsa engine forwards to the Tamma API for durable audit storage.
 /// </summary>
