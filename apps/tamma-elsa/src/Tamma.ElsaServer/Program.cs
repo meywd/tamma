@@ -437,6 +437,18 @@ app.MapPost("/elsa/api/adl/design/resume",
     Tamma.ElsaServer.Endpoints.DesignResumeEndpoint.Resume)
     .RequireAuthorization();
 
+// Story 39-8 — in-process resume seam for the ONE generic document-decision gate.
+// Tamma.Api's RBAC-gated, tenant-scoped POST /api/documents/decisions/{sessionId}/resume
+// forwards here; this endpoint looks up the tenant+session-scoped
+// document-decision-{tenant}-{session} bookmark and runs the owning instance with the
+// {DecisionJson, Feedback, DeciderId, DeciderDisplay, Channel, RulesReference} payload
+// injected (the gate maps DecisionJson onto the 39-5 AcceptanceDecision and branches
+// Accept/RequestRevision/Reject/Escalate off it). Same engine-control-surface /
+// RequireAuthorization rationale as the merge/deploy/blocker/clarify/design gates.
+app.MapPost("/elsa/api/documents/decision/resume",
+    Tamma.ElsaServer.Endpoints.DocumentDecisionResumeEndpoint.Resume)
+    .RequireAuthorization();
+
 app.UseSerilogRequestLogging();
 
 Log.Information("Tamma ELSA Server starting up...");

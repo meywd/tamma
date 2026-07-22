@@ -84,3 +84,27 @@ P0 — This is the exception sink of the entire epic: every 39-6 unhandleable ou
 | 2026-07-19 | 1.0.0   | Initial story creation | Claude |
 | 2026-07-20 | 1.1.0   | Aligned with the 39-5 acceptor redesign: `APPROVAL.*` events cover both acceptors (orchestrator decisions emit with `channel=orchestrator` + effective-rules reference), gate maps onto `AcceptanceDecision` | Claude |
 | 2026-07-20 | 1.2.0   | Channel-transport alignment: both acceptor paths suspend on the one generic gate and resume through this surface via the 39-18 channels; no channel applies a decision directly | Claude |
+
+## Completion Notes
+
+### AC2 — Story 4-6 coverage subsumed (mapping table)
+
+Story 4-6 (`docs/stories/4-6-event-capture-approvals-escalations.md`, now `Status: superseded-by-39-8`) specified the `APPROVAL.*` / `ESCALATION.*` event family for audit-oversight capture. Every 4-6 acceptance criterion is satisfied by this surface, extended with document lineage, channel, and resolution timing:
+
+| 4-6 AC | 39-8 mechanism | Where |
+|---|---|---|
+| AC1 — approval REQUESTED captured | `APPROVAL.REQUESTED` emitted at the gate's `Execute` (request+suspend is one atomic site) with `channel=orchestrator` + `requestedAtUtc` + `rulesReference` | `Tamma.Activities/Documents/WaitForDocumentDecisionActivity.cs` (`BuildRequestedEvent`); `ApprovalEvents.Requested` |
+| AC2 — approval PROVIDED with approver + timestamp | `APPROVAL.PROVIDED` emitted at the resume callback with server-derived `deciderId`/`deciderDisplay`, `channel`, `decisionKind`, `feedback`, `durationMs` | `WaitForDocumentDecisionActivity.cs` (`BuildProvidedEvent`); decider derived in `Tamma.Api/Endpoints/DocumentDecisionEndpoints.cs` (`ResolveApprover`) |
+| AC3 — escalation TRIGGERED with reason | `ESCALATION.TRIGGERED` (LOUD error row) with typed `outcome`, full `lineage`, `rulesReference`, `channel` | `Tamma.Activities/Documents/EmitEscalationEventActivity.cs`; `ApprovalEvents.EscalationTriggered` |
+| AC4 — resolution capture (note + timing) | `ESCALATION.RESOLVED` with `disposition`, `note`, `resolvedBy`, `channel`, denormalized `durationMs` | `Tamma.Api/Services/Documents/EscalationDispositionService.cs`; `POST /api/documents/escalations/{escalationId}/resolve` |
+| AC5 — pairing reconstructable from the stream | `correlationId`(+`sessionId`/`escalationId`) tags on all four events; duration recomputable and denormalized | `ApprovalPairingReconstructionTests` |
+| AC6 — channel recorded | closed `channel` set (`orchestrator \| user \| api`), server-derived on resume, never body-trusted | `ApprovalChannels.Derive` in `DocumentDecisionEndpoints.cs`; `ApprovalChannel` (39-5) |
+
+### AC8 / D11 — legacy escalation reconciliation (documentation only, zero code change)
+
+Per Design Decision D11, the two pre-existing ad-hoc escalation call-sites are recorded as MIGRATION DEBT for Stories 39-14/39-15 rather than retro-emitting `ESCALATION.TRIGGERED` (which would double-count escalation dashboards and carries no `documentId`/lineage). Both files are left UNCHANGED by this story:
+
+- `apps/tamma-elsa/src/Tamma.Activities/Review/EscalateReviewActivity.cs` — already emits `CODE_REVIEW.ESCALATED` at the raise point (the mentorship-scoped 4-6 partial). Migration to the unified `ESCALATION.*` surface is 39-14/39-15 work.
+- `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/SingleIssueCycleWorkflow.cs` — the merge-gate "Escalated" terminal region; `CodeReviewWorkflow` emits `CODE_REVIEW.ESCALATION_RESOLVED`. Same migration debt.
+
+No existing behavior regresses; the decision is recorded here with file pointers as D11 requires.

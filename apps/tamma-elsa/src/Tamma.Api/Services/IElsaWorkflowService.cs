@@ -117,6 +117,25 @@ public interface IElsaWorkflowService
     /// </summary>
     Task<MergeApprovalResumeResult> ResumeDesignApprovalAsync(
         Guid sessionId, string? tenantId, bool approved, string? feedback, string? reviewer);
+
+    /// <summary>
+    /// Story 39-8 — resume the ONE generic document-decision gate. Forwards to the engine's
+    /// in-process resume endpoint (which owns <c>IBookmarkStore</c>/<c>IWorkflowRuntime</c>),
+    /// which looks up the tenant+session-scoped <c>document-decision-{tenant}-{session}</c>
+    /// bookmark and runs the owning instance with the
+    /// <c>{DecisionJson, Feedback, DeciderId, DeciderDisplay, Channel, RulesReference}</c>
+    /// payload injected (the gate maps <c>DecisionJson</c> onto the 39-5 <c>AcceptanceDecision</c>
+    /// and branches Accept/RequestRevision/Reject/Escalate off it). A 404 (no wait suspended) is
+    /// surfaced as <see cref="MergeApprovalResumeResult.GateNotFound"/> rather than thrown.
+    ///
+    /// <para>SECURITY — the bookmark name folds in <paramref name="tenantId"/> (the caller's
+    /// ambient tenant, derived server-side), so a caller can only ever resolve a gate in its OWN
+    /// tenant (cross-tenant → 404). <paramref name="deciderId"/>/<paramref name="channel"/> are
+    /// server-derived (D6/D7), never trusted from the client body.</para>
+    /// </summary>
+    Task<MergeApprovalResumeResult> ResumeDocumentDecisionAsync(
+        Guid sessionId, string? tenantId, string decisionJson, string? feedback,
+        string? deciderId, string? deciderDisplay, string channel, string? rulesReference);
 }
 
 /// <summary>Outcome of a merge-approval (or deploy-approval) gate resume.</summary>

@@ -556,6 +556,55 @@ public partial class ElsaWorkflowService : IElsaWorkflowService
             WorkflowInstanceId: result?.WorkflowInstanceId);
     }
 
+    /// <summary>
+    /// Story 39-8 — forward a document-decision gate resume to the engine's in-process resume
+    /// endpoint, which looks up the tenant+session-scoped
+    /// <c>document-decision-{tenant}-{session}</c> bookmark and runs the owning instance with
+    /// the decision payload injected. A 404 (no gate waiting) is surfaced as
+    /// <see cref="MergeApprovalResumeResult.GateNotFound"/> rather than thrown.
+    /// </summary>
+    public async Task<MergeApprovalResumeResult> ResumeDocumentDecisionAsync(
+        Guid sessionId, string? tenantId, string decisionJson, string? feedback,
+        string? deciderId, string? deciderDisplay, string channel, string? rulesReference)
+    {
+        _logger.LogInformation(
+            "Resuming document-decision gate for session {SessionId} (channel={Channel})", sessionId, channel);
+
+        await EnsureHealthyAsync();
+
+        var payload = new
+        {
+            sessionId,
+            // Tenant scopes the engine's bookmark lookup (folded into the name).
+            tenantId,
+            decisionJson,
+            feedback,
+            // Server-derived identity + channel (D6/D7), forwarded for the engine's audit log.
+            deciderId,
+            deciderDisplay,
+            channel,
+            rulesReference,
+        };
+
+        var response = await _httpClient.PostAsJsonAsync(
+            "/elsa/api/documents/decision/resume", payload, JsonOptions);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning(
+                "No document-decision gate waiting for session {SessionId}", sessionId);
+            return new MergeApprovalResumeResult(Resumed: false, GateNotFound: true, WorkflowInstanceId: null);
+        }
+
+        response.EnsureSuccessStatusCode();
+
+        var result = await response.Content.ReadFromJsonAsync<EngineResumeResponse>(JsonOptions);
+        return new MergeApprovalResumeResult(
+            Resumed: result?.Resumed ?? true,
+            GateNotFound: false,
+            WorkflowInstanceId: result?.WorkflowInstanceId);
+    }
+
     private sealed class EngineResumeResponse
     {
         public bool Resumed { get; set; }
