@@ -25,15 +25,11 @@ public class WorkflowInterfaceGraphTests
     /// </summary>
     private static readonly HashSet<DocumentTypeKey> PendingImplementations = new()
     {
-        // Findings, AmbiguityAssessment, Clarification, Decomposition were
-        // implemented + registered by Story 39-3 — removed from the ratchet. The
-        // remaining 6 land in Story 39-4.
-        DocumentTypeKey.Plan,
-        DocumentTypeKey.Design,
-        DocumentTypeKey.Review,
-        DocumentTypeKey.TriageDecision,
-        DocumentTypeKey.Diagnosis,
-        DocumentTypeKey.TestSpec,
+        // EMPTY — Story 39-3 registered Findings/AmbiguityAssessment/Clarification/
+        // Decomposition and Story 39-4 registered the remaining six (Plan, Design,
+        // Review, TriageDecision, Diagnosis, TestSpec). The vocabulary is complete, so
+        // NO type key is pending; a re-added entry for a registered key fails
+        // Pending_entry_is_not_already_registered by design.
     };
 
     [Test]

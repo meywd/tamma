@@ -21,7 +21,7 @@ public static class DocumentTypeRegistry
 {
     // The compile-time registration list.
     //   39-3 appends +4 IDocumentType implementations (bumps the count pin 0 -> 4)  <-- DONE
-    //   39-4 appends the remaining +6 (bumps the count pin 4 -> 10)
+    //   39-4 appends the remaining +6 (bumps the count pin 4 -> 10)                  <-- DONE
     // and each shrinks the WorkflowInterfaceGraphTests PendingImplementations
     // ratchet accordingly.
     private static readonly IReadOnlyList<IDocumentType> s_registrations = new IDocumentType[]
@@ -30,6 +30,13 @@ public static class DocumentTypeRegistry
         new FindingsDocumentType(),
         new AmbiguityAssessmentDocumentType(),
         new ClarificationDocumentType(),
+        // 39-4 — Batch 2 (vocabulary complete at 10).
+        new PlanDocumentType(),
+        new DesignDocumentType(),
+        new ReviewDocumentType(),
+        new TriageDecisionDocumentType(),
+        new DiagnosisDocumentType(),
+        new TestSpecDocumentType(),
     };
 
     private static readonly IReadOnlyDictionary<string, IDocumentType> s_index =
