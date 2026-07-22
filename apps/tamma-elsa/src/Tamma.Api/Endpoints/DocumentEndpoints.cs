@@ -40,7 +40,7 @@ public static class DocumentEndpoints
 
         var rows = await repo.ListByIssueAsync(tenantId, issueId, ct).ConfigureAwait(false);
         var lineage = LineageAssembler.Assemble(issueId, rows);
-        return Results.Json(lineage, DocumentJson.Options);
+        return Results.Json(lineage, DocumentJson.Options, statusCode: StatusCodes.Status200OK);
     }
 
     // ─── GET /api/documents/issues/{issueId}/latest (AC4) ─────────────────────
@@ -61,7 +61,7 @@ public static class DocumentEndpoints
 
         var rows = await repo.GetLatestAcceptedAsync(tenantId, issueId, ct).ConfigureAwait(false);
         var latest = LineageAssembler.AssembleLatest(issueId, rows);
-        return Results.Json(latest, DocumentJson.Options);
+        return Results.Json(latest, DocumentJson.Options, statusCode: StatusCodes.Status200OK);
     }
 
     // ─── GET /api/documents/{documentId} (AC5) ────────────────────────────────
@@ -83,7 +83,7 @@ public static class DocumentEndpoints
         if (row is null || row.TenantId != tenantId)
             return Results.NotFound(new { error = "document_not_found" });
 
-        return Results.Json(LineageAssembler.AssembleDocument(row), DocumentJson.Options);
+        return Results.Json(LineageAssembler.AssembleDocument(row), DocumentJson.Options, statusCode: StatusCodes.Status200OK);
     }
 
     // ─── POST /api/engine/documents (D6) ──────────────────────────────────────
