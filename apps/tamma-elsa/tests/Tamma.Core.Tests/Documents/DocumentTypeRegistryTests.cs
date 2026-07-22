@@ -28,10 +28,13 @@ public class DocumentTypeRegistryTests
         // bump this pin consciously:
         //   Story 39-3 registers +4  (0 -> 4)  <-- DONE (Decomposition, Findings,
         //                                        AmbiguityAssessment, Clarification)
-        //   Story 39-4 registers +6  (4 -> 10, matching the DocumentTypeKey count)
+        //   Story 39-4 registers +6  (4 -> 10) <-- DONE (Plan, Design, Review,
+        //                                        TriageDecision, Diagnosis, TestSpec) —
+        //                                        the vocabulary is now COMPLETE, matching
+        //                                        the DocumentTypeKey member count.
         // Same posture as RolePhaseMapTests' HaveCount(79): the number moving is a
         // conscious, reviewed edit here, never an accident.
-        DocumentTypeRegistry.All.Should().HaveCount(4);
+        DocumentTypeRegistry.All.Should().HaveCount(10);
     }
 
     // -----------------------------------------------------------------------
@@ -108,15 +111,16 @@ public class DocumentTypeRegistryTests
     }
 
     [Test]
-    public void Resolve_valid_but_unimplemented_key_throws_not_registered()
+    public void Every_vocabulary_key_now_resolves_to_an_implementation()
     {
-        // 'decomposition' is now registered by 39-3; use a still-unimplemented key
-        // (Plan — 39-4 scope) to exercise the NOT_REGISTERED fail-loud path.
-        var byString = () => DocumentTypeRegistry.Resolve("plan");
-        byString.Should().Throw<TammaError>().Which.Code.Should().Be("DOCUMENT.TYPE.NOT_REGISTERED");
-
-        var byEnum = () => DocumentTypeRegistry.Resolve(DocumentTypeKey.Plan);
-        byEnum.Should().Throw<TammaError>().Which.Code.Should().Be("DOCUMENT.TYPE.NOT_REGISTERED");
+        // 39-4 completed the vocabulary — all 10 DocumentTypeKey members are now
+        // registered, so no valid key hits the NOT_REGISTERED fail-loud path anymore
+        // (that path stays for defense, but is unreachable via a real key).
+        foreach (var key in Enum.GetValues<DocumentTypeKey>())
+        {
+            var resolve = () => DocumentTypeRegistry.Resolve(key);
+            resolve.Should().NotThrow($"vocabulary key '{key.ToWire()}' must have a registered implementation");
+        }
     }
 
     [Test]
