@@ -1,4 +1,5 @@
 using Tamma.Core;
+using Tamma.Core.Documents.Types;
 
 namespace Tamma.Core.Documents;
 
@@ -18,12 +19,18 @@ namespace Tamma.Core.Documents;
 /// </summary>
 public static class DocumentTypeRegistry
 {
-    // The compile-time registration list. EMPTY at 39-2 by design (D3):
-    //   39-3 appends +4 IDocumentType implementations (bumps the count pin 0 -> 4)
+    // The compile-time registration list.
+    //   39-3 appends +4 IDocumentType implementations (bumps the count pin 0 -> 4)  <-- DONE
     //   39-4 appends the remaining +6 (bumps the count pin 4 -> 10)
     // and each shrinks the WorkflowInterfaceGraphTests PendingImplementations
     // ratchet accordingly.
-    private static readonly IReadOnlyList<IDocumentType> s_registrations = Array.Empty<IDocumentType>();
+    private static readonly IReadOnlyList<IDocumentType> s_registrations = new IDocumentType[]
+    {
+        new DecompositionDocumentType(),
+        new FindingsDocumentType(),
+        new AmbiguityAssessmentDocumentType(),
+        new ClarificationDocumentType(),
+    };
 
     private static readonly IReadOnlyDictionary<string, IDocumentType> s_index =
         BuildIndex(s_registrations);

@@ -21,16 +21,17 @@ public class DocumentTypeRegistryTests
     // -----------------------------------------------------------------------
 
     [Test]
-    public void All_registered_types_count_is_pinned_at_zero()
+    public void All_registered_types_count_is_pinned()
     {
-        // 39-2 ships the vocabulary (DocumentTypeKey, 10 members) but ZERO
-        // IDocumentType implementations — consciously (Design Decision D3). The
-        // implementations arrive later and bump this pin:
-        //   Story 39-3 registers +4  (0 -> 4)
+        // 39-2 shipped the vocabulary (DocumentTypeKey, 10 members) with ZERO
+        // IDocumentType implementations. The implementations arrive in stages and
+        // bump this pin consciously:
+        //   Story 39-3 registers +4  (0 -> 4)  <-- DONE (Decomposition, Findings,
+        //                                        AmbiguityAssessment, Clarification)
         //   Story 39-4 registers +6  (4 -> 10, matching the DocumentTypeKey count)
         // Same posture as RolePhaseMapTests' HaveCount(79): the number moving is a
         // conscious, reviewed edit here, never an accident.
-        DocumentTypeRegistry.All.Should().HaveCount(0);
+        DocumentTypeRegistry.All.Should().HaveCount(4);
     }
 
     // -----------------------------------------------------------------------
@@ -75,9 +76,22 @@ public class DocumentTypeRegistryTests
                 using var doc = JsonDocument.Parse(example.PayloadJson);
                 var result = type.Validate(doc.RootElement);
                 if (example.IsValid)
+                {
                     result.IsValid.Should().BeTrue($"valid example '{example.Name}' must pass {type.Key}.Validate");
+                    example.ExpectedViolationCodes.Should().BeEmpty(
+                        $"valid example '{example.Name}' declares no expected violation codes");
+                }
                 else
+                {
                     result.IsValid.Should().BeFalse($"invalid example '{example.Name}' must fail {type.Key}.Validate");
+
+                    // D9: an invalid example must emit EXACTLY its declared codes.
+                    example.ExpectedViolationCodes.Should().NotBeEmpty(
+                        $"invalid example '{example.Name}' must declare the codes it expects (D9)");
+                    result.Violations.Select(v => v.Code).Should().BeEquivalentTo(
+                        example.ExpectedViolationCodes,
+                        $"invalid example '{example.Name}' must emit exactly its ExpectedViolationCodes");
+                }
             }
         }
     }
@@ -96,11 +110,26 @@ public class DocumentTypeRegistryTests
     [Test]
     public void Resolve_valid_but_unimplemented_key_throws_not_registered()
     {
-        var byString = () => DocumentTypeRegistry.Resolve("decomposition");
+        // 'decomposition' is now registered by 39-3; use a still-unimplemented key
+        // (Plan — 39-4 scope) to exercise the NOT_REGISTERED fail-loud path.
+        var byString = () => DocumentTypeRegistry.Resolve("plan");
         byString.Should().Throw<TammaError>().Which.Code.Should().Be("DOCUMENT.TYPE.NOT_REGISTERED");
 
-        var byEnum = () => DocumentTypeRegistry.Resolve(DocumentTypeKey.Decomposition);
+        var byEnum = () => DocumentTypeRegistry.Resolve(DocumentTypeKey.Plan);
         byEnum.Should().Throw<TammaError>().Which.Code.Should().Be("DOCUMENT.TYPE.NOT_REGISTERED");
+    }
+
+    [Test]
+    public void Registered_39_3_keys_resolve_to_their_implementations()
+    {
+        DocumentTypeRegistry.Resolve(DocumentTypeKey.Decomposition).PayloadClrType
+            .Should().Be(typeof(Tamma.Core.Documents.Types.Decomposition));
+        DocumentTypeRegistry.Resolve(DocumentTypeKey.Findings).PayloadClrType
+            .Should().Be(typeof(Tamma.Core.Documents.Types.Findings));
+        DocumentTypeRegistry.Resolve(DocumentTypeKey.AmbiguityAssessment).PayloadClrType
+            .Should().Be(typeof(Tamma.Core.Documents.Types.AmbiguityAssessment));
+        DocumentTypeRegistry.Resolve(DocumentTypeKey.Clarification).PayloadClrType
+            .Should().Be(typeof(Tamma.Core.Documents.Types.Clarification));
     }
 
     // -----------------------------------------------------------------------
