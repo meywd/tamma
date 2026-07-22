@@ -399,6 +399,16 @@ builder.Services.AddScoped<Tamma.Api.Middleware.ProxyHeaderAuthMiddleware>();
 // Hardening workstreams — ported from the deleted TS API services.
 // Each extension method owns its own service registrations.
 builder.Services.AddPromptStoreServices();
+// Story 39-5 — acceptance-rules resolver + events + tool factory. The service
+// implements IAcceptanceRulesResolver (consumed by the 39-17 tool factory and,
+// in later stories, the 39-6 workflow). The GetAcceptanceRulesTool itself is NOT
+// registered as an IToolExecutor (Design Decision D6) — the factory mints
+// principal-bound instances per tenant-agent session.
+builder.Services.AddScoped<Tamma.Api.Services.AcceptanceRules.AcceptanceRulesEventsService>();
+builder.Services.AddScoped<Tamma.Api.Services.AcceptanceRules.AcceptanceRulesService>();
+builder.Services.AddScoped<Tamma.Core.Documents.Policy.IAcceptanceRulesResolver>(
+    sp => sp.GetRequiredService<Tamma.Api.Services.AcceptanceRules.AcceptanceRulesService>());
+builder.Services.AddScoped<Tamma.Api.Services.AcceptanceRules.GetAcceptanceRulesToolFactory>();
 builder.Services.AddProviderHealthServices();
 builder.Services.AddDiagnosticsServices();
 builder.Services.AddSanitizationServices();
@@ -1530,6 +1540,16 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("pricing:manage"));
         });
+        // Story 39-5 — Acceptance Rules tenant-admin policy. Mirrors PromptManage
+        // exactly: PUT/DELETE of a tenant acceptance-rules override must be
+        // reachable by tenant_owner OR tenant_admin (admin+owner here); member-role
+        // callers hit 403. The owner-only SettingsManage would 403 every
+        // tenant_admin, so the dedicated AcceptanceRulesManage gate is used.
+        options.AddPolicy("AcceptanceRulesManage", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("acceptance-rules:manage"));
+        });
         options.AddPolicy("WorkflowsView", p =>
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
@@ -1621,7 +1641,7 @@ else if (builder.Environment.IsDevelopment())
             .Build();
         // Register all named policies with permissive default
         foreach (var name in new[] { "AdminAccess", "OwnerAccess", "PlatformOwnerAccess", "MemberAccess", "SettingsView",
-            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "PricingManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
+            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "PricingManage", "AcceptanceRulesManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
             "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny", "EngineServiceOnly" })
         {
             options.AddPolicy(name, p => p.AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement()));
@@ -2609,6 +2629,28 @@ var adminConventions = app.MapGroup("/api/admin/conventions").RequireAuthorizati
 adminConventions.MapPut("/{role}/{action}", ConventionStoreEndpoints.UpsertSystemDefault);
 adminConventions.MapDelete("/{role}/{action}", ConventionStoreEndpoints.DeleteSystemDefault);
 adminConventions.MapPost("/{role}/{action}/reset", ConventionStoreEndpoints.ResetSystemDefault);
+
+// ── Acceptance Rules (Story 39-5) ──
+// Configurable per-document-type acceptance policy (autonomy dial + bounds +
+// escalation + reviewer selection + guidance). RBAC parity with the prompt/
+// convention stores, with the SAME DELIBERATE read-gate deviation as the
+// convention store: reads use AuthenticatedAny (any authed tenant member) rather
+// than SettingsView (admin/owner) because AC7 requires reads for any tenant
+// member — the orchestrator + role-holders all need to see the effective rules,
+// not just admins. Writes are gated by AcceptanceRulesManage (tenant_owner/
+// tenant_admin; member → 403).
+//
+// Route ordering (mirrors prompt/convention stores): the specific literal route
+// (/defaults) MUST be registered BEFORE the parameterized /{documentTypeKey} so
+// "defaults" is not swallowed by the {documentTypeKey} route. The literal `base`
+// segment addresses the principal base row (the dial) and is handled inside
+// GetResolved / Upsert / Delete.
+var acceptanceRules = app.MapGroup("/api/acceptance-rules").RequireAuthorization("AuthenticatedAny");
+acceptanceRules.MapGet("/", AcceptanceRulesEndpoints.ListEffective);
+acceptanceRules.MapGet("/defaults", AcceptanceRulesEndpoints.GetDefaults);
+acceptanceRules.MapGet("/{documentTypeKey}", AcceptanceRulesEndpoints.GetResolved);
+acceptanceRules.MapPut("/{documentTypeKey}", AcceptanceRulesEndpoints.Upsert).RequireAuthorization("AcceptanceRulesManage");
+acceptanceRules.MapDelete("/{documentTypeKey}", AcceptanceRulesEndpoints.Delete).RequireAuthorization("AcceptanceRulesManage");
 
 // ── Settings / Config ──
 // Rate limit (finding 020): ConfigRead default for the group; ConfigWrite

@@ -12,6 +12,7 @@ import { PromptsPage } from './pages/settings/PromptsPage.js';
 import { PromptsAdminPage } from './pages/admin/prompts/PromptsAdminPage.js';
 // Story 27-11 — platform-admin convention management UI.
 import { ConventionsAdminPage } from './pages/admin/conventions/ConventionsAdminPage.js';
+import { AcceptanceRulesAdminPage } from './pages/admin/acceptance-rules/AcceptanceRulesAdminPage.js';
 // Story 27-12 — tenant convention management UI.
 import { ConventionsPage } from './pages/settings/ConventionsPage.js';
 // Story 28-11 — platform-admin tenant-status UX.
@@ -195,6 +196,15 @@ export const router = createBrowserRouter([
         element: (
           <AdminGuard>
             <ConventionsAdminPage />
+          </AdminGuard>
+        ),
+      },
+      // Story 39-5: acceptance-rules (autonomy dial + policy) management UI.
+      {
+        path: '/admin/acceptance-rules',
+        element: (
+          <AdminGuard>
+            <AcceptanceRulesAdminPage />
           </AdminGuard>
         ),
       },
