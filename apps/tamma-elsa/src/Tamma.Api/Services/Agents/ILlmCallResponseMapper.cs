@@ -70,6 +70,15 @@ public static class AgentRunFailureCodes
     /// <summary>The tool loop exhausted maxSteps with no usable response.</summary>
     public const string LoopExhausted = "LOOP_EXHAUSTED";
 
+    /// <summary>Story 39-9 (D5) — the produced document still failed its deterministic
+    /// validator after the repair ring was exhausted. A CONTENT failure (the provider
+    /// worked; the output is wrong — think 422 vs 503), NOT a transport/provider
+    /// problem: the mapper stamps body <c>httpStatusCode</c> 422 (NOT in RetryCheck's
+    /// transient set), and the diagnostic path excludes it from the circuit breaker.
+    /// The final violations + per-turn history ride on the result for the 39-6
+    /// <c>ValidationExhausted</c> lineage.</summary>
+    public const string ContentValidationFailed = "CONTENT_VALIDATION_FAILED";
+
     /// <summary>A SaaS gate denial of a CLI-token / unknown provider ⇒ 400.</summary>
     public const string SaasProviderNotAllowed = "SAAS_PROVIDER_NOT_ALLOWED";
 

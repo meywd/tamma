@@ -1,3 +1,5 @@
+using Tamma.Core.Documents;
+
 namespace Tamma.Api.Services.Agents;
 
 /// <summary>
@@ -89,4 +91,24 @@ public sealed record AgentRunResult
     /// circuit breaker keep working. <c>null</c> on success or when no HTTP call
     /// was made.</summary>
     public int? HttpStatusCode { get; init; }
+
+    // --- Story 39-9 — deterministic repair-ring outcome (additive) -----------
+
+    /// <summary>Story 39-9 — the content-validation verdict: <c>true</c> when the
+    /// produced (or repaired) document passed, <c>false</c> on an exhausted content
+    /// failure, <c>null</c> when no validator applied.</summary>
+    public bool? ContentValid { get; init; }
+
+    /// <summary>Story 39-9 — the number of repair turns run (0 when the initial
+    /// produce validated, repair was gated off, or no validator applied).</summary>
+    public int RepairTurns { get; init; }
+
+    /// <summary>Story 39-9 (AC3) — the ordered per-turn validation history, carried
+    /// on the result for the 39-6 <c>ValidationExhausted</c> escalation lineage.
+    /// <c>null</c> when no validator applied.</summary>
+    public IReadOnlyList<RepairTurnRecord>? RepairHistory { get; init; }
+
+    /// <summary>Story 39-9 (AC3) — the FINAL validator violations on a content
+    /// failure (empty/<c>null</c> on success or when no validator applied).</summary>
+    public IReadOnlyList<DocumentViolation>? ContentViolations { get; init; }
 }

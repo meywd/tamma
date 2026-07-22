@@ -163,6 +163,15 @@ public sealed record LlmCallApiRequest
     [JsonPropertyName("toolLoopConfig")] public ToolLoopConfig? ToolLoopConfig { get; init; }
     [JsonPropertyName("params")] public LlmCallApiParams Params { get; init; } = new();
     [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+
+    /// <summary>Story 39-9 (D2/D10) — the document-type wire KEY gating the repair
+    /// ring. Additive/optional: null/omitted ⇒ no validation (the default for the
+    /// 30+ existing dispatchers).</summary>
+    [JsonPropertyName("documentType")] public string? DocumentType { get; init; }
+
+    /// <summary>Story 39-9 (D10) — the issue id, additive/optional, for the
+    /// <c>LLM.*</c> event tags (AC6).</summary>
+    [JsonPropertyName("issueId")] public string? IssueId { get; init; }
 }
 
 /// <summary>
@@ -200,6 +209,39 @@ public sealed record LlmCallApiResponse
     [JsonPropertyName("failureCode")] public string? FailureCode { get; init; }
     [JsonPropertyName("failureReason")] public string? FailureReason { get; init; }
     [JsonPropertyName("httpStatusCode")] public int? HttpStatusCode { get; init; }
+
+    /// <summary>Story 39-9 (AC3) — the KEY-FREE content-validation block. Mirrors
+    /// <c>Tamma.Api.Services.Agents.ContentValidationDto</c>. Null when no validator
+    /// ran (additive — old readers ignore it).</summary>
+    [JsonPropertyName("contentValidation")] public LlmCallContentValidationDto? ContentValidation { get; init; }
+}
+
+/// <summary>Story 39-9 — the content-validation projection. Mirrors
+/// <c>Tamma.Api.Services.Agents.ContentValidationDto</c>.</summary>
+public sealed record LlmCallContentValidationDto
+{
+    [JsonPropertyName("valid")] public bool Valid { get; init; }
+    [JsonPropertyName("repairTurns")] public int RepairTurns { get; init; }
+    [JsonPropertyName("violations")] public IReadOnlyList<LlmCallContentViolationDto> Violations { get; init; }
+        = Array.Empty<LlmCallContentViolationDto>();
+    [JsonPropertyName("history")] public IReadOnlyList<LlmCallRepairTurnDto> History { get; init; }
+        = Array.Empty<LlmCallRepairTurnDto>();
+}
+
+/// <summary>Story 39-9 — a single violation. Mirrors <c>ContentViolationDto</c>.</summary>
+public sealed record LlmCallContentViolationDto
+{
+    [JsonPropertyName("code")] public string Code { get; init; } = string.Empty;
+    [JsonPropertyName("message")] public string Message { get; init; } = string.Empty;
+}
+
+/// <summary>Story 39-9 — one repair-turn verdict. Mirrors <c>RepairTurnDto</c>.</summary>
+public sealed record LlmCallRepairTurnDto
+{
+    [JsonPropertyName("turn")] public int Turn { get; init; }
+    [JsonPropertyName("valid")] public bool Valid { get; init; }
+    [JsonPropertyName("violations")] public IReadOnlyList<LlmCallContentViolationDto> Violations { get; init; }
+        = Array.Empty<LlmCallContentViolationDto>();
 }
 
 /// <summary>Token usage projection. Mirrors <c>Tamma.Api.Services.Agents.UsageDto</c>.</summary>

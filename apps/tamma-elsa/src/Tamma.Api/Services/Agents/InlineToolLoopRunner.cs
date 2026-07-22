@@ -79,14 +79,18 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         bool enableToolLoop,
         ToolLoopConfig loopConfig,
         string correlationId,
+        RepairRingPlan? repair,
         CancellationToken ct)
     {
         // The loop already folds the cumulative totals onto the response's
         // PromptTokens/CompletionTokens (their sum == the old TotalTokens), so
         // we discard the redundant scalar and surface the split counts below.
-        var (response, _, turns, exhausted) = await AgenticToolLoop(
-            provider, providerConfig, model, systemPrompt, userPrompt,
-            maxTokens, temperature, tools, loopConfig, correlationId, ct);
+        // Story 39-9 — the loop also runs the deterministic repair ring (when
+        // `repair` is supplied) inside the SAME conversation before returning.
+        var (response, _, turns, exhausted, contentValid, repairTurns, repairHistory) =
+            await AgenticToolLoop(
+                provider, providerConfig, model, systemPrompt, userPrompt,
+                maxTokens, temperature, tools, loopConfig, correlationId, repair, ct);
 
         return new InlineToolLoopResult
         {
@@ -96,7 +100,12 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
             InputTokens = response.PromptTokens,
             OutputTokens = response.CompletionTokens,
             Turns = turns,
-            Exhausted = exhausted
+            Exhausted = exhausted,
+            // Story 39-9 (D1) — repair-ring outcome. All default (ContentValid == null)
+            // when no validator was supplied ⇒ behaviour byte-identical to before.
+            ContentValid = contentValid,
+            RepairTurns = repairTurns,
+            RepairHistory = repairHistory,
         };
     }
 
@@ -107,7 +116,8 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     /// <summary>
     /// Multi-turn agentic tool loop. Calls LLM, executes tools, feeds results back, repeats.
     /// </summary>
-    private async Task<(NormalizedLlmResponse Response, int TotalTokens, int Turns, bool Exhausted)>
+    private async Task<(NormalizedLlmResponse Response, int TotalTokens, int Turns, bool Exhausted,
+            bool? ContentValid, int RepairTurns, IReadOnlyList<RepairTurnRecord> RepairHistory)>
         AgenticToolLoop(
             string providerName,
             LlmProviderConfig providerConfig,
@@ -119,6 +129,7 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
             IReadOnlyList<ResolvedTool>? tools,
             ToolLoopConfig loopConfig,
             string workflowInstanceId,
+            RepairRingPlan? repair,
             CancellationToken cancellationToken)
     {
         var messages = new List<ConversationMessage>
@@ -537,14 +548,95 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
             }
         }
 
+        // ═══ Story 39-9 — deterministic repair ring (AC1, AC2, D3, D9) ═══
+        // Runs HERE — the only place the `messages` conversation, the resolved
+        // provider config, the model, and the `tools` declarations are all in
+        // scope — so validate-then-repair happens inside the SAME conversation
+        // before the loop returns. When `repair` is null (no document validation)
+        // this whole block is skipped and behaviour is byte-identical to before.
+        bool? contentValid = null;
+        var repairTurns = 0;
+        var repairHistory = new List<RepairTurnRecord>();
+
+        if (repair is not null && lastResponse.Success && !string.IsNullOrEmpty(lastResponse.ResponseText))
+        {
+            // Preserve the PRODUCED document in the conversation (AC1). The main loop
+            // breaks on end_turn WITHOUT appending the final assistant text, so append
+            // it here — otherwise the repair turn would ask the model to "fix the
+            // document you produced" with that document absent from the history.
+            messages.Add(new ConversationMessage { Role = "assistant", Content = lastResponse.ResponseText });
+
+            // Turn 0 — validate the produced document. The validator never throws
+            // (a malformed payload yields a synthetic PAYLOAD_NOT_JSON violation).
+            var verdict = repair.Validate(lastResponse.ResponseText!);
+            contentValid = verdict.IsValid;
+            repairHistory.Add(new RepairTurnRecord(0, verdict.IsValid, verdict.Violations));
+
+            while (!verdict.IsValid
+                   && repair.RepairEnabled
+                   && repairTurns < repair.MaxRepairTurns)
+            {
+                // Append the harness-generated, redacted repair message to the SAME
+                // conversation (D9 — redaction at the append site, since violation
+                // messages may quote model output). No system prompt / prior turns
+                // are dropped — the conversation is not restarted (AC1).
+                var repairMessage = ToolOutputHelper.RedactSecrets(
+                    RepairMessageComposer.Compose(verdict.Violations));
+                messages.Add(new ConversationMessage { Role = "user", Content = repairMessage });
+
+                // Re-invoke ONCE (D3 — a repair turn is one model call; NO tool
+                // execution). Same client/config/tools declarations (Anthropic
+                // requires the tools when history carries tool blocks). Repair turns
+                // NEVER touch loopConfig.MaxSteps / completedTurns.
+                var repairResponse = providerName.Equals("anthropic", StringComparison.OrdinalIgnoreCase)
+                    ? await CallAnthropicMultiTurn(
+                        httpClient, providerConfig, model, messages, maxTokens, temperature, tools)
+                    : await CallOpenAiMultiTurn(
+                        httpClient, providerConfig, model, messages, maxTokens, temperature, tools);
+
+                repairTurns++;
+
+                // A transport failure DURING a repair turn is orthogonal: it is a
+                // provider failure, surfaced exactly as today (breaker/retry
+                // semantics apply upstream), and it ends the ring. The content
+                // verdict axis is not conflated with the transport axis.
+                if (!repairResponse.Success)
+                {
+                    lastResponse = repairResponse;
+                    break;
+                }
+
+                // Accumulate the repair-turn token spend so budget accounting stays
+                // truthful (these land on the cumulative totals written below).
+                totalPromptTokens += repairResponse.PromptTokens;
+                totalCompletionTokens += repairResponse.CompletionTokens;
+                lastResponse = repairResponse;
+
+                // Preserve the repaired document in the conversation for any further
+                // turn (again the produce loop's end_turn break would drop it).
+                messages.Add(new ConversationMessage
+                {
+                    Role = "assistant",
+                    Content = repairResponse.ResponseText,
+                });
+
+                // Re-validate. A ToolUse stop with no usable text simply re-validates
+                // as invalid and consumes the turn (D3) — bounded by MaxRepairTurns.
+                verdict = repair.Validate(repairResponse.ResponseText ?? string.Empty);
+                contentValid = verdict.IsValid;
+                repairHistory.Add(new RepairTurnRecord(repairTurns, verdict.IsValid, verdict.Violations));
+            }
+        }
+
         // Update token counts on last response to reflect cumulative totals
+        // (INCLUDING any repair-turn spend accumulated above).
         lastResponse.PromptTokens = totalPromptTokens;
         lastResponse.CompletionTokens = totalCompletionTokens;
 
         var totalTokens = totalPromptTokens + totalCompletionTokens;
         var turns = completedTurns;
 
-        return (lastResponse, totalTokens, turns, exhausted);
+        return (lastResponse, totalTokens, turns, exhausted, contentValid, repairTurns, repairHistory);
     }
 
     // =======================================================================

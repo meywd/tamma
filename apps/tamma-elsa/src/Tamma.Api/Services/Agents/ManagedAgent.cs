@@ -1,11 +1,14 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Tamma.Activities.LlmCall.Credentials;
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Activities.LlmCall.Tools;
 using Tamma.Api.Services.Providers;
 using Tamma.Api.Services.Security;
 using Tamma.Core;
+using Tamma.Core.Documents;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -73,6 +76,10 @@ public sealed class ManagedAgent : IManagedAgent
     // byte-for-byte identical whether 0 or N tap subscribers are attached (AC6),
     // and a publish failure NEVER faults the run (AC5, log-and-swallow).
     private readonly Tamma.Api.Services.Streaming.ILlmRunStreamBus? _runStreamBus;
+    // Story 39-9 — GLOBAL repair-ring config (bounds + per-type gate). Optional
+    // trailing ctor arg (null ⇒ new RepairRingOptions() = default OFF, cap 1) so the
+    // existing unit-test ctors are unchanged; DI-registered in the API host.
+    private readonly RepairRingOptions _repairOptions;
     private readonly ILogger<ManagedAgent> _logger;
 
     // NOTE: the process mode (single-user vs SaaS) is NOT a dependency here — the
@@ -92,7 +99,8 @@ public sealed class ManagedAgent : IManagedAgent
         ILogger<ManagedAgent> logger,
         Tamma.Activities.Security.IContentSanitizer? sanitizer = null,
         IAgentTrailEmitter? trail = null,
-        Tamma.Api.Services.Streaming.ILlmRunStreamBus? runStreamBus = null)
+        Tamma.Api.Services.Streaming.ILlmRunStreamBus? runStreamBus = null,
+        IOptions<RepairRingOptions>? repairOptions = null)
     {
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _budget = budget ?? throw new ArgumentNullException(nameof(budget));
@@ -115,6 +123,10 @@ public sealed class ManagedAgent : IManagedAgent
         // the terminal `final` frame is published as a side-effect after the run
         // completes. Absent ⇒ no publish (older unit-test ctors).
         _runStreamBus = runStreamBus;
+        // Optional (Story 39-9): the global repair-ring config. When absent, the
+        // default is repair OFF for every document type (EnabledDocumentTypes empty)
+        // with a hard cap of 2 and a default of 1 — the mechanism ships dark.
+        _repairOptions = repairOptions?.Value ?? new RepairRingOptions();
     }
 
     /// <inheritdoc />
@@ -290,6 +302,18 @@ public sealed class ManagedAgent : IManagedAgent
                 ApiKey = credential.ApiKey, // request-scoped; dropped after the call
             };
 
+            // ── Story 39-9 — build the deterministic repair-ring plan (AC1/AC9). ──
+            // null DocumentValidation ⇒ null plan ⇒ the runner's ring is inert and
+            // behaviour is byte-identical to before. The gate + already-clamped cap
+            // come from the GLOBAL RepairRingOptions (no per-call knob — D8).
+            var repairPlan = request.DocumentValidation is null
+                ? null
+                : new RepairRingPlan(
+                    request.DocumentValidation.DocumentTypeKey,
+                    request.DocumentValidation.Validate,
+                    _repairOptions.IsEnabledFor(request.DocumentValidation.DocumentTypeKey),
+                    _repairOptions.EffectiveMaxRepairTurns);
+
             InlineToolLoopResult loop;
             try
             {
@@ -305,6 +329,7 @@ public sealed class ManagedAgent : IManagedAgent
                     enableToolLoop: request.EnableToolLoop,
                     loopConfig: request.ToolLoopConfig ?? new ToolLoopConfig(),
                     correlationId: request.CorrelationId,
+                    repair: repairPlan,
                     ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { throw; }
@@ -351,6 +376,35 @@ public sealed class ManagedAgent : IManagedAgent
                     .ConfigureAwait(false);
             }
 
+            // ── Story 39-9 — repair-ring events + typed content-failure (D4/D5). ──
+            // We reach here ONLY on a transport-successful loop (provider-error and
+            // loop-exhausted paths already returned). Replay the per-turn validation
+            // history into the LLM.* DCB events (best-effort — D4), then map an
+            // exhausted content failure to the typed, non-transient
+            // CONTENT_VALIDATION_FAILED (422): never a provider error, never a bare
+            // exception, and it NEVER trips the circuit breaker (D6).
+            if (repairPlan is not null && loop.RepairHistory.Count > 0)
+            {
+                await EmitRepairEventsAsync(ctx, request, repairPlan, loop, ct).ConfigureAwait(false);
+            }
+
+            if (loop.ContentValid == false)
+            {
+                var finalViolations = loop.RepairHistory.Count > 0
+                    ? loop.RepairHistory[^1].Violations
+                    : (IReadOnlyList<DocumentViolation>)Array.Empty<DocumentViolation>();
+
+                // Token counts (INCLUDING repair-turn spend) ride the result via
+                // FailTerminalAsync's inTok/outTok so budget accounting stays truthful.
+                return await FailTerminalAsync(ctx, sw, AgentRunFailureCodes.ContentValidationFailed,
+                    "produced document failed deterministic validation after the repair ring was exhausted",
+                    httpStatus: 422,
+                    inTok, outTok, toolLoopTokens, loop.Turns, loop.Exhausted, ct,
+                    contentValid: false, repairTurns: loop.RepairTurns,
+                    repairHistory: loop.RepairHistory, contentViolations: finalViolations)
+                    .ConfigureAwait(false);
+            }
+
             // ── 7. meter (cost basis + markup + usage) ──
             var costBasis = _pricing.Compute(ctx.Provider, ctx.Model, inTok, outTok);
             var price = _markup.Apply(costBasis, ctx.CredentialSource, ctx.Provider, ctx.Model, request.TenantId);
@@ -380,6 +434,12 @@ public sealed class ManagedAgent : IManagedAgent
                 CorrelationId = request.CorrelationId,
                 CredentialSource = ctx.CredentialSource,
                 ResponseText = loop.Response.ResponseText,
+                // Story 39-9 — the repair-ring outcome rides the success result too
+                // (additive; all null/empty when no validator applied).
+                ContentValid = loop.ContentValid,
+                RepairTurns = loop.RepairTurns,
+                RepairHistory = repairPlan is null ? null : loop.RepairHistory,
+                ContentViolations = null,
             };
 
             await EmitUsageAsync(result, request.TenantId, ct).ConfigureAwait(false);
@@ -424,7 +484,10 @@ public sealed class ManagedAgent : IManagedAgent
     /// run is the terminal <c>AGENT.RUN.FAILED</c> DCB event, not a usage row.</para></summary>
     private async Task<AgentRunResult> FailTerminalAsync(
         RunContext ctx, Stopwatch sw, string failureCode, string reason, int? httpStatus,
-        int inTok, int outTok, int toolLoopTokens, int turns, bool exhausted, CancellationToken ct)
+        int inTok, int outTok, int toolLoopTokens, int turns, bool exhausted, CancellationToken ct,
+        bool? contentValid = null, int repairTurns = 0,
+        IReadOnlyList<RepairTurnRecord>? repairHistory = null,
+        IReadOnlyList<DocumentViolation>? contentViolations = null)
     {
         _logger.LogWarning(
             "Managed run failed: failureCode={FailureCode}, httpStatus={HttpStatus}, "
@@ -452,6 +515,11 @@ public sealed class ManagedAgent : IManagedAgent
             FailureCode = failureCode,
             FailureReason = reason,
             HttpStatusCode = httpStatus,
+            // Story 39-9 — additive; set only on the CONTENT_VALIDATION_FAILED path.
+            ContentValid = contentValid,
+            RepairTurns = repairTurns,
+            RepairHistory = repairHistory,
+            ContentViolations = contentViolations,
         };
 
         await EmitAsync(AgentRunEventTypes.Failed, ctx, failureCode, ct).ConfigureAwait(false);
@@ -603,6 +671,113 @@ public sealed class ManagedAgent : IManagedAgent
             // NOT swallowed silently into losing the run — the run still returns.
             _logger.LogError(ex,
                 "AGENT.RUN.* event append failed (type={Type}); the run result still returns. "
+                + "correlationId={CorrelationId}, tenantId={TenantId}",
+                type, ctx.CorrelationId, ctx.TenantId);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Story 39-9 — repair-ring DCB events (best-effort; D4). The runner returns
+    // the per-turn history free of any event-store dependency; ManagedAgent — which
+    // already owns IEventRepository and the best-effort EmitAsync posture — replays
+    // it into LLM.VALIDATION.FAILED / LLM.REPAIR.SUCCEEDED / LLM.REPAIR.EXHAUSTED.
+    // Tags carry issueId/documentType/role/action/repairTurn/correlationId/tenantId
+    // so per-(role, action) × documentType rates are computable from events alone (AC7).
+    // -----------------------------------------------------------------------
+
+    private async Task EmitRepairEventsAsync(
+        RunContext ctx, ManagedAgentRequest request, RepairRingPlan plan,
+        InlineToolLoopResult loop, CancellationToken ct)
+    {
+        // One LLM.VALIDATION.FAILED per failed validation (including turn 0). Data
+        // carries the redacted violation summaries (code + domain-phrased message).
+        foreach (var record in loop.RepairHistory)
+        {
+            if (record.Valid)
+            {
+                continue;
+            }
+
+            var summaries = record.Violations
+                .Select(v => new
+                {
+                    code = v.Code,
+                    message = ToolOutputHelper.RedactSecrets(v.Message ?? string.Empty),
+                })
+                .ToArray();
+
+            await EmitRepairEventAsync(
+                RepairRingEventTypes.ValidationFailed, ctx, request, plan.DocumentTypeKey,
+                repairTurn: record.Turn,
+                data: new { violations = summaries },
+                ct).ConfigureAwait(false);
+        }
+
+        // LLM.REPAIR.SUCCEEDED — the first repair turn (turn > 0) that validated.
+        var succeeded = loop.RepairHistory.FirstOrDefault(r => r.Turn > 0 && r.Valid);
+        if (succeeded is not null)
+        {
+            await EmitRepairEventAsync(
+                RepairRingEventTypes.RepairSucceeded, ctx, request, plan.DocumentTypeKey,
+                repairTurn: succeeded.Turn,
+                data: new { turn = succeeded.Turn },
+                ct).ConfigureAwait(false);
+        }
+
+        // LLM.REPAIR.EXHAUSTED — cap hit, still invalid, and repair was ENABLED (a
+        // gate-off run never exhausts: it emits only LLM.VALIDATION.FAILED — AC9).
+        if (loop.ContentValid == false && plan.RepairEnabled && loop.RepairTurns >= plan.MaxRepairTurns)
+        {
+            var finalViolationCount = loop.RepairHistory.Count > 0
+                ? loop.RepairHistory[^1].Violations.Count
+                : 0;
+
+            await EmitRepairEventAsync(
+                RepairRingEventTypes.RepairExhausted, ctx, request, plan.DocumentTypeKey,
+                repairTurn: loop.RepairTurns,
+                data: new { turnCount = loop.RepairTurns, finalViolationCount },
+                ct).ConfigureAwait(false);
+        }
+    }
+
+    private async Task EmitRepairEventAsync(
+        string type, RunContext ctx, ManagedAgentRequest request, string documentType,
+        int repairTurn, object data, CancellationToken ct)
+    {
+        try
+        {
+            var tagsObj = new
+            {
+                issueId = request.IssueId,
+                documentType,
+                role = ctx.Role,
+                action = request.Action,
+                repairTurn,
+                correlationId = ctx.CorrelationId,
+                tenantId = ctx.TenantId?.ToString(),
+            };
+
+            await _events.AppendAsync(new DomainEvent
+            {
+                Id = Guid.NewGuid(),
+                Type = type,
+                TenantId = ctx.TenantId,
+                Tags = JsonSerializer.Serialize(tagsObj),
+                Metadata = JsonSerializer.Serialize(new
+                {
+                    workflowVersion = "1.0.0",
+                    eventSource = "system",
+                }),
+                Data = JsonSerializer.Serialize(data),
+                CreatedAt = DateTime.UtcNow,
+            }).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Best-effort (D4): an append failure is logged at ERROR, never swallowed
+            // into losing the run — the run result still returns.
+            _logger.LogError(ex,
+                "LLM.* repair event append failed (type={Type}); the run result still returns. "
                 + "correlationId={CorrelationId}, tenantId={TenantId}",
                 type, ctx.CorrelationId, ctx.TenantId);
         }

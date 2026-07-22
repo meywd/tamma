@@ -767,6 +767,16 @@ builder.Services.AddScoped<Tamma.Api.Services.Agents.IInlineToolLoopRunner,
 builder.Services.AddScoped<Tamma.Api.Services.Agents.IManagedAgent,
     Tamma.Api.Services.Agents.ManagedAgent>();
 
+// Story 39-9 — the GLOBAL deterministic repair-ring config (bounds + per-type gate).
+// Default OFF for every document type (EnabledDocumentTypes empty), default 1 turn,
+// hard cap 2 by clamp. Bound from the "RepairRing" section (TenantBackupOptions block
+// pattern). ManagedAgent reads it to build the per-call RepairRingPlan.
+builder.Services.AddOptions<Tamma.Api.Services.Agents.RepairRingOptions>()
+    .Configure(opts =>
+        builder.Configuration
+            .GetSection(Tamma.Api.Services.Agents.RepairRingOptions.SectionName)
+            .Bind(opts));
+
 // Story 32-6 — the per-agent ACTION TRAIL emitter. The single seam ManagedAgent
 // (and later 32-7 panels / 32-8 review gate) calls to record AGENT.TASK.* /
 // AGENT.TOOL_CALL.* / AGENT.ITERATION.* / AGENT.PANEL.* / REVIEW.BUG.* events into

@@ -46,7 +46,32 @@ public sealed class LlmCallResponseMapper : ILlmCallResponseMapper
             FailureCode = run.FailureCode,
             FailureReason = run.FailureReason,
             HttpStatusCode = run.HttpStatusCode,
+            ContentValidation = ToContentValidationDto(run),
         };
+    }
+
+    /// <summary>Story 39-9 — project the repair-ring outcome onto the wire block.
+    /// <c>null</c> when no validator applied (<see cref="AgentRunResult.ContentValid"/>
+    /// is <c>null</c>) ⇒ additive, zero change for existing dispatchers.</summary>
+    private static ContentValidationDto? ToContentValidationDto(AgentRunResult run)
+    {
+        if (run.ContentValid is null)
+        {
+            return null;
+        }
+
+        var finalViolations = (run.ContentViolations ?? Array.Empty<Tamma.Core.Documents.DocumentViolation>())
+            .Select(v => new ContentViolationDto(v.Code, v.Message))
+            .ToList();
+
+        var history = (run.RepairHistory ?? Array.Empty<RepairTurnRecord>())
+            .Select(t => new RepairTurnDto(
+                t.Turn,
+                t.Valid,
+                t.Violations.Select(v => new ContentViolationDto(v.Code, v.Message)).ToList()))
+            .ToList();
+
+        return new ContentValidationDto(run.ContentValid.Value, run.RepairTurns, finalViolations, history);
     }
 
     /// <inheritdoc />
@@ -87,6 +112,14 @@ public sealed class LlmCallResponseMapper : ILlmCallResponseMapper
             // is NOT in RetryCheck's transient set {0, 429, 502, 503, 504}, so the
             // engine will NOT retry a config failure against the same provider.
             AgentRunFailureCodes.AgentUnresolved => Results.Ok(WithBodyStatus(body, 422)),
+            // Story 39-9 (D5) — CONTENT_VALIDATION_FAILED is a CONTENT failure (the
+            // provider worked; the document is wrong). It rides a 200 success:false
+            // envelope with a body httpStatusCode of 422 (Unprocessable Entity), which
+            // is NOT in RetryCheck's transient set {0, 429, 502, 503, 504}, so the
+            // provider chain does NOT retry it — the lifecycle maps it to
+            // ValidationExhausted. (The breaker exclusion is enforced engine-side.)
+            AgentRunFailureCodes.ContentValidationFailed =>
+                Results.Ok(WithBodyStatus(body, body.HttpStatusCode ?? 422)),
             // PROVIDER_ERROR / PROVIDER_CREDENTIAL_UNAVAILABLE / BUDGET_EXCEEDED /
             // LOOP_EXHAUSTED / anything else ⇒ 200 success:false (+ preserved
             // httpStatusCode inside the body).

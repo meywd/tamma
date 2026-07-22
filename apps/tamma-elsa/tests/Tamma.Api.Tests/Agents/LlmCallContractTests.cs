@@ -648,4 +648,113 @@ public class LlmCallContractTests
         apiResp.CorrelationId.Should().Be("corr-e");
         apiResp.DurationMs.Should().Be(99);
     }
+
+    // ---------------------------------------------------------------
+    // Story 39-9 — additive wire fields (documentType/issueId, contentValidation)
+    // are optional and key-free; old JSON (without them) deserializes clean.
+    // ---------------------------------------------------------------
+
+    [Test]
+    public void WireContract_RepairFields_SurviveBothDirections()
+    {
+        var engineReq = new LlmCallApiRequest
+        {
+            Role = "developer",
+            Prompt = "decompose",
+            CorrelationId = "corr-39-9",
+            DocumentType = "decomposition",
+            IssueId = "ISSUE-42",
+        };
+
+        var json = JsonSerializer.Serialize(engineReq, EngineOpts);
+        var apiReq = JsonSerializer.Deserialize<LlmCallRequest>(json, ApiOpts);
+
+        apiReq!.DocumentType.Should().Be("decomposition");
+        apiReq.IssueId.Should().Be("ISSUE-42");
+
+        // And back: API → engine.
+        var apiReq2 = new LlmCallRequest
+        {
+            Role = "developer",
+            Prompt = "decompose",
+            CorrelationId = "corr-39-9",
+            DocumentType = "plan",
+            IssueId = "ISSUE-7",
+        };
+        var json2 = JsonSerializer.Serialize(apiReq2, ApiOpts);
+        var engineReq2 = JsonSerializer.Deserialize<LlmCallApiRequest>(json2, EngineOpts);
+        engineReq2!.DocumentType.Should().Be("plan");
+        engineReq2.IssueId.Should().Be("ISSUE-7");
+    }
+
+    [Test]
+    public void WireContract_ContentValidation_ResponseBlock_SurvivesEngineToApi()
+    {
+        var apiResp = new LlmCallResponse
+        {
+            Success = false,
+            CorrelationId = "c",
+            FailureCode = "CONTENT_VALIDATION_FAILED",
+            HttpStatusCode = 422,
+            ContentValidation = new ContentValidationDto(
+                Valid: false,
+                RepairTurns: 1,
+                Violations: new[] { new ContentViolationDto("MISSING_FIELD", "Field 'x' required.") },
+                History: new[]
+                {
+                    new RepairTurnDto(0, false, new[] { new ContentViolationDto("MISSING_FIELD", "Field 'x' required.") }),
+                    new RepairTurnDto(1, false, new[] { new ContentViolationDto("MISSING_FIELD", "Field 'x' required.") }),
+                }),
+        };
+
+        // API serializes (CamelCase) → engine deserializes ([JsonPropertyName]).
+        var json = JsonSerializer.Serialize(apiResp, ApiOpts);
+        var engineResp = JsonSerializer.Deserialize<LlmCallApiResponse>(json, EngineOpts);
+
+        engineResp!.ContentValidation.Should().NotBeNull();
+        engineResp.ContentValidation!.Valid.Should().BeFalse();
+        engineResp.ContentValidation.RepairTurns.Should().Be(1);
+        engineResp.ContentValidation.Violations.Should().ContainSingle()
+            .Which.Code.Should().Be("MISSING_FIELD");
+        engineResp.ContentValidation.History.Should().HaveCount(2);
+    }
+
+    [Test]
+    public void WireContract_OldJson_WithoutRepairFields_DeserializesClean()
+    {
+        // A request/response serialized before Story 39-9 (no documentType/issueId/
+        // contentValidation). STJ ignores unknown members; missing members default.
+        const string oldReq = """{"role":"developer","prompt":"p","correlationId":"c"}""";
+        var req = JsonSerializer.Deserialize<LlmCallApiRequest>(oldReq, EngineOpts);
+        req!.DocumentType.Should().BeNull();
+        req.IssueId.Should().BeNull();
+
+        const string oldResp = """{"success":true,"correlationId":"c"}""";
+        var resp = JsonSerializer.Deserialize<LlmCallApiResponse>(oldResp, EngineOpts);
+        resp!.ContentValidation.Should().BeNull();
+    }
+
+    [Test]
+    public void ContentValidationDtos_ExposeNoKeyBearingProperty()
+    {
+        var types = new[]
+        {
+            typeof(ContentValidationDto),
+            typeof(ContentViolationDto),
+            typeof(RepairTurnDto),
+        };
+        var banned = new[] { "Key", "ApiKey", "Secret", "Credential", "Token" };
+
+        foreach (var type in types)
+        {
+            foreach (var prop in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                foreach (var bad in banned)
+                {
+                    prop.Name.Contains(bad, StringComparison.OrdinalIgnoreCase)
+                        .Should().BeFalse($"{type.Name}.{prop.Name} matched banned fragment '{bad}'");
+                }
+            }
+        }
+    }
 }
