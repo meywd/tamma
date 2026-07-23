@@ -313,7 +313,9 @@ public class AssessmentFamilyLifecycleExecutionTests
 
     private static List<string?> CapturedTypes(CapturingHandler capture) =>
         capture.Bodies
-            .SelectMany(b => JsonDocument.Parse(b).RootElement.GetProperty("events").EnumerateArray())
+            .SelectMany(b => JsonDocument.Parse(b).RootElement.TryGetProperty("events", out var evs)
+                ? evs.EnumerateArray()
+                : System.Linq.Enumerable.Empty<JsonElement>())
             .Select(e => e.GetProperty("eventType").GetString())
             .ToList();
 

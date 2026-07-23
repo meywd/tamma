@@ -89,6 +89,16 @@ public class DocumentLifecycleWorkflow : WorkflowBase
         var acceptRequestedAtUtc = builder.WithVariable<string>("AcceptRequestedAtUtc", "");
         var acceptanceRequestJson = builder.WithVariable<string>("AcceptanceRequestJson", "");
 
+        // ── Story 39-11 (D6 / AC7) persist↔emit linkage ────────────────
+        // The pre-minted DOCUMENT.* transition event id, minted ONCE per
+        // persisting transition into this durable workflow variable (Elsa
+        // replays it across suspend/resume — never a bare Guid.NewGuid() at
+        // two sites). It is threaded to BOTH the emit
+        // (EmitDocumentEventActivity.EventId) and the adjacent persist
+        // (PersistDocumentInstanceActivity.CorrelatingEventId) so the
+        // domain_events row and the document_instances row share one id.
+        var transitionEventId = builder.WithVariable<string>("TransitionEventId", "");
+
         // ── Dispatch result containers ─────────────────────────────────
         var produceResult = builder.WithVariable<IDictionary<string, object>?>();
         var repairResult = builder.WithVariable<IDictionary<string, object>?>();
@@ -494,6 +504,9 @@ public class DocumentLifecycleWorkflow : WorkflowBase
             "EmitRevisionStarted", "Emit Revision Started", DocumentEvents.RevisionStarted,
             currentDocId, documentType, currentRound, issueId, correlationId, sessionId, tenantId,
             "Revision started");
+        // AC7 — thread the pre-minted transition id so the emitted event and the
+        // adjacent PersistRevised row (the about-to-be-superseded draft) share it.
+        emitRevisionStarted.EventId = new(ctx => transitionEventId.Get(ctx));
 
         var prepareRevision = new SetVariable
         {
@@ -680,6 +693,12 @@ public class DocumentLifecycleWorkflow : WorkflowBase
             currentDocId, documentType, currentRound, issueId, correlationId, sessionId, tenantId, escalateOutcome, "Document rejected (human decision)");
         var emitEscalated = TerminalEmit("EmitEscalated", "Emit Escalated", DocumentEvents.Escalated,
             currentDocId, documentType, currentRound, issueId, correlationId, sessionId, tenantId, escalateOutcome, "Document escalated");
+        // AC7 — each terminal emit shares its pre-minted id with the adjacent
+        // Persist{Accepted|Rejected|Escalated} row (persisted AFTER the finalize
+        // that stamps the terminal DocumentState onto the envelope).
+        emitAccepted.EventId = new(ctx => transitionEventId.Get(ctx));
+        emitRejected.EventId = new(ctx => transitionEventId.Get(ctx));
+        emitEscalated.EventId = new(ctx => transitionEventId.Get(ctx));
 
         var finalizeAccepted = Finalize("FinalizeAccepted", "Finalize Accepted",
             stateJson, DocumentState.Accepted, outStatus, outOutcome, outDocId, outLifecycleResult, outDocJson,
@@ -690,6 +709,46 @@ public class DocumentLifecycleWorkflow : WorkflowBase
         var finalizeEscalated = Finalize("FinalizeEscalated", "Finalize Escalated",
             stateJson, DocumentState.Escalated, outStatus, outOutcome, outDocId, outLifecycleResult, outDocJson,
             currentDocId, currentDocJson, currentRound, TerminalKind.Escalated, escalateOutcome);
+
+        // ================================================================
+        // Story 39-11 (D6) — document_instances persist wiring
+        // ================================================================
+        // The store is an INSERT-ONLY read model keyed on the envelope id, where a
+        // superseding revise inserts a new row AND flips its predecessor to
+        // 'superseded' (DocumentInstanceRepository, D4). So each distinct envelope
+        // is persisted EXACTLY ONCE — re-inserting the same id would violate the
+        // primary key. Two write points cover every distinct draft with no
+        // double-insert:
+        //   • PersistRevised — persists the CURRENT draft at REVISION_STARTED, just
+        //     BEFORE it is superseded, so the supersession chain has its ancestor.
+        //   • Persist{Accepted|Rejected|Escalated} — persists the FINAL draft AFTER
+        //     its terminal Finalize stamps Accepted/Rejected/Escalated, so
+        //     GetLatestAcceptedAsync returns the accepted body and the terminal
+        //     row's supersedes-lookup resolves the ancestor written above.
+        // A draft is superseded XOR terminal, never both, so no id is written twice.
+        // Each persist is fail-loud: a store failure FAULTS the run (the document is
+        // the product, not telemetry).
+        var mintRevisionEventId = MintEventId("MintRevisionEventId", "Mint Revision Event Id", transitionEventId);
+        var mintAcceptedEventId = MintEventId("MintAcceptedEventId", "Mint Accepted Event Id", transitionEventId);
+        var mintRejectedEventId = MintEventId("MintRejectedEventId", "Mint Rejected Event Id", transitionEventId);
+        var mintEscalatedEventId = MintEventId("MintEscalatedEventId", "Mint Escalated Event Id", transitionEventId);
+
+        var persistRevised = PersistDoc("PersistRevised", "Persist Revised",
+            currentDocJson, transitionEventId, tenantId);
+        var persistAccepted = PersistDoc("PersistAccepted", "Persist Accepted",
+            currentDocJson, transitionEventId, tenantId);
+        var persistRejected = PersistDoc("PersistRejected", "Persist Rejected",
+            currentDocJson, transitionEventId, tenantId);
+        var persistEscalated = PersistDoc("PersistEscalated", "Persist Escalated",
+            currentDocJson, transitionEventId, tenantId);
+
+        // An escalation can be reached with NO draft ever produced (a producer that
+        // never returned a parseable payload → validation exhausted). Nothing to
+        // persist there; gate the escalate persist on a present envelope so the
+        // fail-loud "non-empty EnvelopeJson" guard is not tripped on empty state.
+        var escalateHasDocumentGate = new FlowDecision(ctx => !string.IsNullOrWhiteSpace(currentDocJson.Get(ctx)))
+        { Id = "EscalateHasDocumentGate", Name = "Escalated Document To Persist?" };
+        escalateHasDocumentGate.SetDisplayText("Escalated Document To Persist?");
 
         // 39-10 (D6) — Complete short-circuit terminal: the document of this type is ALREADY
         // accepted. Emits NO second DOCUMENT.ACCEPTED (DOCUMENT.REENTERED was emitted by
@@ -756,8 +815,11 @@ public class DocumentLifecycleWorkflow : WorkflowBase
                 buildAcceptanceRequest, hasDeliveryGate, dispatchDelivery, publishRequest, waitForDecision, applyGuardrails,
                 acceptGate, rejectGate, reviseGate,
                 seedValidationExhausted, seedAmbiguity, seedRounds, seedUndecidable,
+                mintRevisionEventId, mintAcceptedEventId, mintRejectedEventId, mintEscalatedEventId,
                 emitAccepted, emitRejected, emitEscalated,
                 finalizeAccepted, finalizeRejected, finalizeEscalated,
+                persistRevised, persistAccepted, persistRejected, persistEscalated,
+                escalateHasDocumentGate,
                 setOutputs, finish,
             },
             Connections =
@@ -800,12 +862,17 @@ public class DocumentLifecycleWorkflow : WorkflowBase
 
                 ConnectOutcome(routeAccept, "True", buildAcceptanceRequest),
                 ConnectOutcome(routeAccept, "False", routeRevise),
-                ConnectOutcome(routeRevise, "True", emitRevisionStarted),
+                ConnectOutcome(routeRevise, "True", mintRevisionEventId),
                 ConnectOutcome(routeRevise, "False", routeRounds),
                 ConnectOutcome(routeRounds, "True", seedRounds),
                 ConnectOutcome(routeRounds, "False", seedUndecidable),
 
-                Connect(emitRevisionStarted, prepareRevision),
+                // REVISE — mint the transition id, emit REVISION_STARTED, then
+                // persist the current (about-to-be-superseded) draft BEFORE the new
+                // revision is minted, so the supersession chain has its ancestor.
+                Connect(mintRevisionEventId, emitRevisionStarted),
+                Connect(emitRevisionStarted, persistRevised),
+                Connect(persistRevised, prepareRevision),
                 Connect(prepareRevision, dispatchRevise),
                 Connect(dispatchRevise, ingestRevise),
                 Connect(ingestRevise, validateDraft),
@@ -821,26 +888,39 @@ public class DocumentLifecycleWorkflow : WorkflowBase
                 ConnectOutcome(waitForDecision, "Reject", applyGuardrails),
                 ConnectOutcome(waitForDecision, "Escalate", applyGuardrails),
                 Connect(applyGuardrails, acceptGate),
-                ConnectOutcome(acceptGate, "True", emitAccepted),
+                ConnectOutcome(acceptGate, "True", mintAcceptedEventId),
                 ConnectOutcome(acceptGate, "False", rejectGate),
-                ConnectOutcome(rejectGate, "True", emitRejected),
+                ConnectOutcome(rejectGate, "True", mintRejectedEventId),
                 ConnectOutcome(rejectGate, "False", reviseGate),
-                ConnectOutcome(reviseGate, "True", emitRevisionStarted),
-                ConnectOutcome(reviseGate, "False", emitEscalated),
+                ConnectOutcome(reviseGate, "True", mintRevisionEventId),
+                ConnectOutcome(reviseGate, "False", mintEscalatedEventId),
 
-                // Escalate seeds → shared escalated terminal
-                Connect(seedValidationExhausted, emitEscalated),
-                Connect(seedAmbiguity, emitEscalated),
-                Connect(seedRounds, emitEscalated),
-                Connect(seedUndecidable, emitEscalated),
+                // Escalate seeds → mint the escalate transition id → shared escalated terminal
+                Connect(seedValidationExhausted, mintEscalatedEventId),
+                Connect(seedAmbiguity, mintEscalatedEventId),
+                Connect(seedRounds, mintEscalatedEventId),
+                Connect(seedUndecidable, mintEscalatedEventId),
 
-                // Terminals
+                // Terminals — mint id → emit → finalize (stamps the terminal
+                // DocumentState) → persist the final envelope → outputs. The persist
+                // sits AFTER finalize so the store row carries the accepted / rejected
+                // / escalated status (not the pre-terminal reviewed state).
+                Connect(mintAcceptedEventId, emitAccepted),
                 Connect(emitAccepted, finalizeAccepted),
-                Connect(finalizeAccepted, setOutputs),
+                Connect(finalizeAccepted, persistAccepted),
+                Connect(persistAccepted, setOutputs),
+
+                Connect(mintRejectedEventId, emitRejected),
                 Connect(emitRejected, finalizeRejected),
-                Connect(finalizeRejected, setOutputs),
+                Connect(finalizeRejected, persistRejected),
+                Connect(persistRejected, setOutputs),
+
+                Connect(mintEscalatedEventId, emitEscalated),
                 Connect(emitEscalated, finalizeEscalated),
-                Connect(finalizeEscalated, setOutputs),
+                Connect(finalizeEscalated, escalateHasDocumentGate),
+                ConnectOutcome(escalateHasDocumentGate, "True", persistEscalated),
+                ConnectOutcome(escalateHasDocumentGate, "False", setOutputs),
+                Connect(persistEscalated, setOutputs),
 
                 Connect(setOutputs, finish),
             }
@@ -938,6 +1018,47 @@ public class DocumentLifecycleWorkflow : WorkflowBase
         };
         sv.SetDisplayText(name);
         return sv;
+    }
+
+    /// <summary>
+    /// Story 39-11 (AC7) — mint a fresh transition event id into a durable workflow
+    /// variable, ONCE per persisting transition. A UUID v7 (time-sortable, the house
+    /// mint used at Init for the session id) written to a persisted variable so Elsa
+    /// replays the same value across suspend/resume — the emit and its adjacent
+    /// persist read it from the variable, never a second <c>Guid.NewGuid()</c>.
+    /// </summary>
+    private static SetVariable MintEventId(string id, string name, Variable<string> target)
+    {
+        var sv = new SetVariable
+        {
+            Id = id, Name = name,
+            Variable = target,
+            Value = new(_ => (object)UuidV7.NewGuid().ToString()),
+        };
+        sv.SetDisplayText(name);
+        return sv;
+    }
+
+    /// <summary>
+    /// Story 39-11 (D6) — a document_instances persist node. Serializes the current
+    /// envelope (<paramref name="envelopeJson"/> is the <c>DocumentJson.Serialize</c>
+    /// output already held in the lifecycle's <c>CurrentDocumentJson</c> variable) and
+    /// correlates the store row to the pre-minted transition event id (AC7). Fail-loud
+    /// by construction — a persist failure FAULTS the run.
+    /// </summary>
+    private static PersistDocumentInstanceActivity PersistDoc(
+        string id, string name,
+        Variable<string> envelopeJson, Variable<string> eventId, Variable<string> tenantId)
+    {
+        var p = new PersistDocumentInstanceActivity
+        {
+            Id = id, Name = name,
+            EnvelopeJson = new(ctx => envelopeJson.Get(ctx)),
+            CorrelatingEventId = new(ctx => eventId.Get(ctx)),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+        };
+        p.SetDisplayText(name);
+        return p;
     }
 
     private enum TerminalKind { Accepted, Rejected, Escalated }
