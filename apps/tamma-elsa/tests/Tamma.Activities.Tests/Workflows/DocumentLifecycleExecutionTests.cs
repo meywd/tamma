@@ -271,6 +271,10 @@ public class DocumentLifecycleExecutionTests
         services.AddLogging();
         services.AddSingleton(publisher);
         services.AddSingleton<IAcceptanceRequestPublisher>(publisher);
+        // Story 39-10 — the lifecycle's Init now consults ILifecycleReEntryService. These
+        // scenarios are all fresh dispatches, so the Null seam (always Produce) preserves
+        // the pre-39-10 behaviour. LifecycleReEntryIntegrationTests wires the real service.
+        services.AddSingleton<ILifecycleReEntryService, NullLifecycleReEntryService>();
 
         services.AddElsa(elsa =>
         {

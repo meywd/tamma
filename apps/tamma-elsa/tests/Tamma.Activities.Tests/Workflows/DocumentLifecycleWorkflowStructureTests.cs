@@ -219,7 +219,10 @@ public class DocumentLifecycleWorkflowStructureTests
             "DOCUMENT.REVIEW_PANEL_STARTED",
             "DOCUMENT.REVIEW_PANEL_COMPLETED",
             "DOCUMENT.REVIEW_PANEL_UNDECIDABLE",
-        }, "the DOCUMENT.* catalogue is the ten Story 39-6 event types plus the three Story 39-7 panel markers");
+            // Story 39-10 — crash re-entry marker (D9 conscious pin bump).
+            "DOCUMENT.REENTERED",
+        }, "the DOCUMENT.* catalogue is the ten Story 39-6 event types, the three Story 39-7 panel markers, " +
+           "and the Story 39-10 DOCUMENT.REENTERED re-entry marker");
     }
 
     [Test]

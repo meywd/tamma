@@ -13,6 +13,7 @@ using Tamma.Activities.Documents;
 using Tamma.Api.Services.Agents;
 using Tamma.Core.Documents;
 using Tamma.Core.Documents.Policy;
+using Tamma.Core.Documents.Resume;
 using Tamma.Core.Documents.Types;
 using Tamma.ElsaServer.Workflows.Helpers;
 using ExprContext = Elsa.Expressions.Models.ExpressionExecutionContext;
@@ -39,7 +40,18 @@ namespace Tamma.ElsaServer.Workflows;
 /// <c>llm-call</c> and NO branch that skips the decision (D5). The workflow exits as
 /// <c>accepted</c>, <c>rejected</c>, or one of the four typed <c>escalated</c>
 /// outcomes, each carrying full lineage (D7); parents switch on <c>status</c> first.</para>
+///
+/// <para><b>Story 39-10 (D6).</b> Resumable by construction: it SUSPENDS on the
+/// canonical <see cref="WaitForDocumentDecisionActivity"/> bookmark AND re-enters from
+/// the latest accepted state after a crash — declared <c>[ResumeBehavior(Both)]</c> and
+/// enforced by <c>ResumableStandardStructuralTests</c>. Init consults
+/// <see cref="ComputeReEntryPositionActivity"/> and routes idempotent guards:
+/// <c>Complete</c> short-circuits to the accepted terminal (emitting
+/// <c>DOCUMENT.REENTERED</c>, never a second <c>DOCUMENT.ACCEPTED</c>); <c>Review</c>
+/// skips produce/validate; <c>Accept</c> re-suspends on the recovered session; <c>Produce</c>
+/// runs fresh.</para>
 /// </summary>
+[ResumeBehavior(ResumeMode.Both, SuspendActivities = new[] { typeof(WaitForDocumentDecisionActivity) })]
 public class DocumentLifecycleWorkflow : WorkflowBase
 {
     /// <summary>The stable review-producer definition-id contract 39-7 adopts (D10).</summary>
@@ -98,6 +110,11 @@ public class DocumentLifecycleWorkflow : WorkflowBase
         var decisionJson = builder.WithVariable<string>("DecisionJson", "");
         var decisionChannel = builder.WithVariable<string>("DecisionChannel", "orchestrator");
 
+        // ── Story 39-10 re-entry (D6) ──────────────────────────────────
+        var reEntryPositionJson = builder.WithVariable<string>("ReEntryPositionJson", "");
+        var reEntryDocJson = builder.WithVariable<string>("ReEntryDocumentJson", "");
+        var reEntryStage = builder.WithVariable<string>("ReEntryStage", "produce");
+
         // ── Terminal outputs ───────────────────────────────────────────
         var outStatus = builder.WithVariable<string>("OutStatus", "");
         var outOutcome = builder.WithVariable<string>("OutOutcome", "");
@@ -150,6 +167,70 @@ public class DocumentLifecycleWorkflow : WorkflowBase
             })
         };
         init.SetDisplayText("Init");
+
+        // ================================================================
+        // RE-ENTRY (39-10, D6) — reconstruct resume position + idempotent guards
+        // ================================================================
+        var computeReEntry = new ComputeReEntryPositionActivity
+        {
+            Id = "ComputeReEntryPosition", Name = "Compute Re-Entry Position",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentType = new(ctx => documentType.Get(ctx)),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            CorrelationId = new(ctx => correlationId.Get(ctx)),
+            PositionJson = new(reEntryPositionJson),
+            ExistingDocumentJson = new(reEntryDocJson),
+        };
+        computeReEntry.SetDisplayText("Compute Re-Entry Position");
+
+        var applyReEntry = new SetVariable
+        {
+            Id = "ApplyReEntry", Name = "Apply Re-Entry",
+            Variable = reEntryStage,
+            Value = new(ctx =>
+            {
+                var position = DocumentLifecycleHelper.DeserializeReEntryPosition(reEntryPositionJson.Get(ctx));
+                if (position is null)
+                    return "produce";
+
+                var existingJson = reEntryDocJson.Get(ctx);
+                DocumentEnvelope? existing = null;
+                if (!string.IsNullOrWhiteSpace(existingJson))
+                {
+                    try { existing = DocumentJson.Deserialize(existingJson); }
+                    catch (JsonException) { existing = null; }
+                }
+
+                var state = DocumentLifecycleHelper.Deserialize(stateJson.Get(ctx));
+                state = DocumentLifecycleHelper.ApplyReEntry(state, position, existing);
+                stateJson.Set(ctx, DocumentLifecycleHelper.Serialize(state));
+                UpdateCurrent(ctx, state, currentDocId, currentDocJson, currentRound);
+
+                // Accept re-entry re-suspends on the SAME recovered decision session (D6).
+                if (position.ResumeAt == LifecycleResumeStage.Accept &&
+                    position.PendingDecisionSessionId is Guid recovered && recovered != Guid.Empty)
+                    sessionId.Set(ctx, recovered.ToString());
+
+                return position.ResumeAt switch
+                {
+                    LifecycleResumeStage.Complete => "complete",
+                    LifecycleResumeStage.Accept => "accept",
+                    LifecycleResumeStage.Review => "review",
+                    _ => "produce",
+                };
+            })
+        };
+        applyReEntry.SetDisplayText("Apply Re-Entry");
+
+        var reEntryCompleteGate = new FlowDecision(ctx => reEntryStage.Get(ctx) == "complete")
+        { Id = "ReEntryCompleteGate", Name = "Already Accepted?" };
+        reEntryCompleteGate.SetDisplayText("Already Accepted?");
+        var reEntryReviewGate = new FlowDecision(ctx => reEntryStage.Get(ctx) == "review")
+        { Id = "ReEntryReviewGate", Name = "Re-enter At Review?" };
+        reEntryReviewGate.SetDisplayText("Re-enter At Review?");
+        var reEntryAcceptGate = new FlowDecision(ctx => reEntryStage.Get(ctx) == "accept")
+        { Id = "ReEntryAcceptGate", Name = "Re-enter At Accept?" };
+        reEntryAcceptGate.SetDisplayText("Re-enter At Accept?");
 
         // ================================================================
         // PRODUCE — dispatch llm-call (agentRole/action/variables + documentType/issueId)
@@ -559,6 +640,26 @@ public class DocumentLifecycleWorkflow : WorkflowBase
             stateJson, DocumentState.Escalated, outStatus, outOutcome, outDocId, outLifecycleResult,
             currentDocId, currentDocJson, currentRound, TerminalKind.Escalated, escalateOutcome);
 
+        // 39-10 (D6) — Complete short-circuit terminal: the document of this type is ALREADY
+        // accepted. Emits NO second DOCUMENT.ACCEPTED (DOCUMENT.REENTERED was emitted by
+        // ComputeReEntryPosition) and does NOT re-transition the already-accepted envelope.
+        var finalizeReenteredComplete = new SetVariable
+        {
+            Id = "FinalizeReenteredComplete", Name = "Finalize Reentered Complete",
+            Variable = outStatus,
+            Value = new(ctx =>
+            {
+                var state = DocumentLifecycleHelper.Deserialize(stateJson.Get(ctx));
+                var docId = state.Current?.Id ?? Guid.Empty;
+                var result = DocumentLifecycleHelper.BuildAccepted(state, docId);
+                outOutcome.Set(ctx, result.Outcome?.ToWire() ?? "");
+                outDocId.Set(ctx, result.DocumentId?.ToString() ?? "");
+                outLifecycleResult.Set(ctx, JsonSerializer.Serialize(result, DocumentJson.Options));
+                return result.Status;
+            })
+        };
+        finalizeReenteredComplete.SetDisplayText("Finalize Reentered Complete");
+
         var setOutputs = new Sequence
         {
             Id = "SetOutputs", Name = "Set Outputs",
@@ -586,6 +687,8 @@ public class DocumentLifecycleWorkflow : WorkflowBase
             Activities =
             {
                 init,
+                computeReEntry, applyReEntry,
+                reEntryCompleteGate, reEntryReviewGate, reEntryAcceptGate, finalizeReenteredComplete,
                 dispatchProduce, ingestProduce, emitProduced,
                 validateDraft, emitValidated, validationGate,
                 repairCheck, prepareRepair, dispatchRepair, ingestRepair,
@@ -602,7 +705,18 @@ public class DocumentLifecycleWorkflow : WorkflowBase
             },
             Connections =
             {
-                Connect(init, dispatchProduce),
+                // 39-10 re-entry gate chain (D6): Init → compute → apply → guards.
+                Connect(init, computeReEntry),
+                Connect(computeReEntry, applyReEntry),
+                Connect(applyReEntry, reEntryCompleteGate),
+                ConnectOutcome(reEntryCompleteGate, "True", finalizeReenteredComplete),
+                ConnectOutcome(reEntryCompleteGate, "False", reEntryReviewGate),
+                ConnectOutcome(reEntryReviewGate, "True", emitReviewRequested),
+                ConnectOutcome(reEntryReviewGate, "False", reEntryAcceptGate),
+                ConnectOutcome(reEntryAcceptGate, "True", buildAcceptanceRequest),
+                ConnectOutcome(reEntryAcceptGate, "False", dispatchProduce),
+                Connect(finalizeReenteredComplete, setOutputs),
+
                 Connect(dispatchProduce, ingestProduce),
                 Connect(ingestProduce, emitProduced),
                 Connect(emitProduced, validateDraft),

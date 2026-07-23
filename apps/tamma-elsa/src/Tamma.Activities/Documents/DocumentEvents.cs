@@ -46,6 +46,12 @@ public static class DocumentEvents
     public const string ReviewPanelCompleted = "DOCUMENT.REVIEW_PANEL_COMPLETED";
     public const string ReviewPanelUndecidable = "DOCUMENT.REVIEW_PANEL_UNDECIDABLE";
 
+    // Story 39-10 (Design Decision D9) — crash re-entry is an operation, so it emits
+    // an event. Recorded when a fresh instance re-enters an issue at a non-Produce
+    // stage (Review / Accept / Complete) instead of running from scratch — the
+    // Complete short-circuit emits THIS, never a second DOCUMENT.ACCEPTED. A success row.
+    public const string Reentered = "DOCUMENT.REENTERED";
+
     /// <summary>
     /// Parse a tenant id from the loose string form threaded through the workflow
     /// inputs. Returns <c>null</c> for empty / single-user / unparseable values

@@ -248,6 +248,17 @@ builder.Services.AddSingleton<
 
 builder.Services.AddTammaData(connectionString, appConnectionString, controlPlaneConnectionString);
 
+// Story 39-10 (D1/D7) — crash re-entry. 39-11 has landed, so the REAL
+// LifecycleReEntryService is the default in the API host too (it shares the same
+// engine seam). Documents:ReEntryDisabled=true swaps in the Null seam without touching
+// the lifecycle.
+if (builder.Configuration.GetValue<bool>("Documents:ReEntryDisabled"))
+    builder.Services.AddScoped<Tamma.Activities.Documents.ILifecycleReEntryService,
+        Tamma.Activities.Documents.NullLifecycleReEntryService>();
+else
+    builder.Services.AddScoped<Tamma.Activities.Documents.ILifecycleReEntryService,
+        Tamma.Activities.Documents.LifecycleReEntryService>();
+
 // ── Story 28-4 / unified-tenancy Phase 3 — tenant connection pool ──
 //
 // The LRU-cached LruPooledTenantConnectionResolver is the ONLY tenant
