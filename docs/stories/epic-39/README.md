@@ -52,7 +52,8 @@ lifecycle, and makes every workflow resumable by design.
    bookmark awaiting input (the generalized Design-Proposal pattern) or, after a
    crash/restart, **re-enters from the latest accepted state** reconstructed from
    the document store + DCB events — never from scratch. This becomes an
-   authoring standard with a structural test, not a per-workflow favor.
+   authoring standard with a structural test, not a per-workflow favor. See the
+   [Resumable-Workflow Authoring Standard](./resumable-workflow-standard.md) (Story 39-10).
 
 ## Design principles (settled)
 

@@ -1,8 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Tamma.Activities;
 using Tamma.Core;
 using Tamma.Core.Documents;
 using Tamma.Core.Documents.Policy;
+using Tamma.Core.Documents.Resume;
 using Tamma.Core.Documents.Types;
 
 namespace Tamma.ElsaServer.Workflows.Helpers;
@@ -501,6 +503,128 @@ public static class DocumentLifecycleHelper
             RepairAttemptsUsed: state.RepairAttempts,
             LastViolations: state.LastViolations,
             RulesReference: state.RulesReference);
+    }
+
+    // ====================================================================
+    // Story 39-10 (D6/D10) — crash re-entry guards
+    // ====================================================================
+
+    /// <summary>
+    /// The tolerant read-back of a re-entry position payload (D10). Mirrors the
+    /// <c>ClarifyResumeReadBackTests</c> matrix: the position JSON may arrive as a
+    /// <see cref="string"/> or a <see cref="JsonElement"/> (in-process vs serializing
+    /// runtime), and every boolean flag coerces via <see cref="ResumeInput.AsBool"/>
+    /// (never <c>is true</c>). A missing/garbage payload fail-closes to a fresh Produce.
+    /// </summary>
+    public sealed record ReEntryReadResult(
+        LifecycleResumePosition? Position, bool SkipProduce, bool SkipReview, bool ShortCircuitAccepted)
+    {
+        public static readonly ReEntryReadResult Fresh = new(null, false, false, false);
+
+        /// <summary>The coarse resume stage (Produce when there is no usable position).</summary>
+        public LifecycleResumeStage Stage => Position?.ResumeAt ?? LifecycleResumeStage.Produce;
+    }
+
+    /// <summary>Deserialize a re-entry position from its JSON form (null on empty/garbage).</summary>
+    public static LifecycleResumePosition? DeserializeReEntryPosition(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<LifecycleResumePosition>(json, DocumentJson.Options);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Read a re-entry position + derived skip flags from a resume/output dictionary,
+    /// tolerant of serialization (D10). When <c>PositionJson</c> is present the flags are
+    /// DERIVED from the position; otherwise explicit boolean flags
+    /// (<c>SkipProduce</c>/<c>SkipReview</c>/<c>ShortCircuit</c>) are read via
+    /// <see cref="ResumeInput.AsBool"/>. Missing everything → fresh Produce (fail-closed).
+    /// </summary>
+    public static ReEntryReadResult ReadReEntryPosition(IDictionary<string, object>? input)
+    {
+        if (input is null) return ReEntryReadResult.Fresh;
+
+        LifecycleResumePosition? position = null;
+        if (input.TryGetValue("PositionJson", out var raw))
+            position = DeserializeReEntryPosition(CoerceJson(raw));
+
+        if (position is not null)
+            return new ReEntryReadResult(
+                position, ShouldSkipProduce(position), ShouldSkipReview(position), ShouldShortCircuitAccepted(position));
+
+        return new ReEntryReadResult(
+            null, ReadFlag(input, "SkipProduce"), ReadFlag(input, "SkipReview"), ReadFlag(input, "ShortCircuit"));
+    }
+
+    private static bool ReadFlag(IDictionary<string, object> input, string key)
+        => input.TryGetValue(key, out var v) && ResumeInput.AsBool(v);
+
+    private static string? CoerceJson(object? raw) => raw switch
+    {
+        null => null,
+        string s => s,
+        JsonElement je => je.ValueKind == JsonValueKind.String ? je.GetString() : je.GetRawText(),
+        _ => raw.ToString(),
+    };
+
+    /// <summary>Re-entry skips the produce+validate stage for any non-Produce position.</summary>
+    public static bool ShouldSkipProduce(LifecycleResumePosition? position)
+        => position is not null && position.ResumeAt
+            is LifecycleResumeStage.Review or LifecycleResumeStage.Accept or LifecycleResumeStage.Complete;
+
+    /// <summary>Re-entry skips the review stage once past it (Accept/Complete).</summary>
+    public static bool ShouldSkipReview(LifecycleResumePosition? position)
+        => position is not null && position.ResumeAt
+            is LifecycleResumeStage.Accept or LifecycleResumeStage.Complete;
+
+    /// <summary>An already-accepted document short-circuits to the accepted terminal (no re-emit).</summary>
+    public static bool ShouldShortCircuitAccepted(LifecycleResumePosition? position)
+        => position is not null && position.ResumeAt == LifecycleResumeStage.Complete;
+
+    /// <summary>
+    /// Fold a reconstructed re-entry position into the freshly-seeded loop state (D6). A
+    /// Produce position (or a missing existing body) is a passthrough — today's behaviour.
+    /// A skip-produce position appends the stored revision as the current draft (in its
+    /// stored state) so the guarded stage reviews/accepts it instead of re-producing;
+    /// an Accept position additionally synthesizes a recovered review envelope so the
+    /// acceptance request can be rebuilt.
+    /// </summary>
+    public static LifecycleState ApplyReEntry(
+        LifecycleState state, LifecycleResumePosition position, DocumentEnvelope? existing)
+    {
+        if (position.ResumeAt == LifecycleResumeStage.Produce || existing is null)
+            return state;
+
+        var round = Math.Max(0, (position.ExistingRevision ?? 1) - 1);
+        var withDraft = AppendDraft(state, existing) with { Round = round };
+
+        if (position.ResumeAt == LifecycleResumeStage.Accept)
+        {
+            // Fresh-dispatch Accept re-entry needs a review envelope for the acceptance
+            // request. (The surviving-bookmark AC8 path resumes the live gate directly and
+            // does NOT pass through here.) Synthesize a minimal recovered review.
+            var reviewer = new DocumentProducer
+            {
+                Role = state.ProducerRole,
+                Action = state.ProducerAction,
+                WorkflowDefinitionId = "document-review",
+            };
+            using var doc = JsonDocument.Parse(
+                "{\"decision\":\"approve\",\"summary\":\"recovered on re-entry\",\"issues\":[]}");
+            var review = DocumentEnvelope.CreateDraft(
+                DocumentTypeKey.Review, 1, state.IssueId,
+                string.IsNullOrWhiteSpace(state.CorrelationId) ? state.IssueId : state.CorrelationId,
+                reviewer, doc.RootElement, now: DateTimeOffset.UtcNow);
+            withDraft = AppendReview(withDraft, review);
+        }
+
+        return withDraft;
     }
 
     // ====================================================================

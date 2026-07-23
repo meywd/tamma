@@ -125,10 +125,7 @@ public class WaitForDocumentDecisionActivity : Activity
     /// sides so the names always agree.
     /// </summary>
     public static string DecisionBookmarkName(string? tenantId, Guid sessionId)
-    {
-        var tenant = WaitForMergeApprovalActivity.NormalizeSegment(tenantId);
-        return $"document-decision-{tenant}-{sessionId}";
-    }
+        => LifecycleBookmarks.ForDecisionSession(tenantId, sessionId);
 
     protected override void Execute(ActivityExecutionContext context)
     {

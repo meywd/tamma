@@ -175,6 +175,17 @@ Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorE
         builder.Services,
         sp => sp.GetRequiredService<Tamma.Activities.Documents.EngineChannelPublisher>());
 
+// Story 39-10 (D1/D7) — crash re-entry. 39-11 has landed, so the REAL
+// LifecycleReEntryService (over IDocumentInstanceRepository + IEventRepository) is the
+// default. The Null seam stays a config-flag fallback: set Documents:ReEntryDisabled=true
+// to disable a bad latest-accepted read by DI swap WITHOUT touching the lifecycle.
+if (builder.Configuration.GetValue<bool>("Documents:ReEntryDisabled"))
+    builder.Services.AddScoped<Tamma.Activities.Documents.ILifecycleReEntryService,
+        Tamma.Activities.Documents.NullLifecycleReEntryService>();
+else
+    builder.Services.AddScoped<Tamma.Activities.Documents.ILifecycleReEntryService,
+        Tamma.Activities.Documents.LifecycleReEntryService>();
+
 // Round-2 review M3 — bridge that polls platform_events for new
 // TENANT.CLEANUP.REQUESTED rows and re-publishes the matching Elsa
 // event so CleanUpFailedTenantWorkflow's starter trigger fires. The
