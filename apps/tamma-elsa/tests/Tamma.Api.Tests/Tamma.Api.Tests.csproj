@@ -19,6 +19,10 @@
     <PackageReference Include="Moq" Version="4.20.70" />
     <PackageReference Include="FluentAssertions" Version="6.12.0" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.0" />
+    <!-- Story 39-18 — SignalR client for the channel hub integration suites
+         (WebApplicationFactory + Testcontainers). Server-side SignalR ships in the
+         shared framework; only the test/client side needs this package. -->
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="8.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.0" />
     <PackageReference Include="Testcontainers.PostgreSql" Version="3.10.0" />

@@ -157,13 +157,23 @@ Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorE
         Tamma.Activities.Analytics.NullAnalyticsPricingConfig>(builder.Services);
 builder.Services.AddSingleton<Tamma.Activities.Analytics.DimensionalProjectionMetrics>();
 
-// Story 39-6 (D6) — the ACCEPT stage publishes the AcceptanceRequest through this
-// seam. The default no-op logging publisher keeps the 39-8 gate suspending (the
-// request "waits, never defaulted"); Story 39-18 swaps in the outbox+SignalR
-// delivery behind the same interface.
+// Story 39-6 (D6) → Story 39-18 (D2) — the ACCEPT stage publishes the
+// AcceptanceRequest through this seam. Story 39-18 REPLACES the no-op logging
+// publisher with the real EngineChannelPublisher: it POSTs the ChannelEnvelope to
+// POST /api/engine/channel/outbox (EngineServiceOnly) where the API mints the
+// durable outbox row + best-effort SignalR fan-out. A transport failure is logged
+// ERROR and swallowed (the gate still suspends — the request "waits, never
+// defaulted"). Registered as BOTH IAcceptanceRequestPublisher (39-6's seam) and
+// IEngineChannelPublisher (the broader envelope seam) via one instance.
+builder.Services.AddSingleton<Tamma.Activities.Documents.EngineChannelPublisher>();
 Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions
-    .TryAddSingleton<Tamma.Activities.Documents.IAcceptanceRequestPublisher,
-        Tamma.Activities.Documents.LoggingAcceptanceRequestPublisher>(builder.Services);
+    .TryAddSingleton<Tamma.Activities.Documents.IAcceptanceRequestPublisher>(
+        builder.Services,
+        sp => sp.GetRequiredService<Tamma.Activities.Documents.EngineChannelPublisher>());
+Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions
+    .TryAddSingleton<Tamma.Activities.Documents.IEngineChannelPublisher>(
+        builder.Services,
+        sp => sp.GetRequiredService<Tamma.Activities.Documents.EngineChannelPublisher>());
 
 // Round-2 review M3 — bridge that polls platform_events for new
 // TENANT.CLEANUP.REQUESTED rows and re-publishes the matching Elsa

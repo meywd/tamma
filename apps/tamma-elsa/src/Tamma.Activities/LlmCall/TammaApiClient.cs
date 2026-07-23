@@ -646,6 +646,53 @@ public class TammaApiClient
         }
     }
 
+    // ----- Channel outbox enqueue (Story 39-18, D2) --------------------
+
+    /// <summary>
+    /// Story 39-18 — enqueue a channel message to the tenant's <c>channel_outbox</c>
+    /// via <c>POST /api/engine/channel/outbox</c> (<c>EngineServiceOnly</c>). The
+    /// <paramref name="envelopeJson"/> is the <c>ChannelEnvelope</c> serialized with
+    /// <c>DocumentJson.Options</c> (the server deserializes it with the same options,
+    /// mints the outbox row(s), and best-effort publishes to the hub group).
+    ///
+    /// <para>Best-effort like <see cref="AppendEventsAsync"/>: a non-2xx or transport
+    /// failure returns <c>false</c> (the 39-6 gate still suspends; the request is
+    /// recoverable via the suspended bookmark). It never throws — the caller
+    /// (<c>EngineChannelPublisher</c>) logs ERROR and continues.</para>
+    /// </summary>
+    public virtual async Task<bool> PostChannelOutboxAsync(
+        string envelopeJson, string? tenantId = null, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(envelopeJson)) return true; // nothing to enqueue.
+
+        var url = $"{_baseUrl}/api/engine/channel/outbox";
+        var body = new { envelopeJson };
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, url)
+            {
+                Content = JsonContent.Create(body, options: JsonOpts),
+            };
+            AddTenantHeader(request, tenantId);
+            using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            await RecordHealthAsync(
+                response.IsSuccessStatusCode, (int)response.StatusCode, null, ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Tamma API POST /api/engine/channel/outbox returned {Status}", (int)response.StatusCode);
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex, "Tamma API POST /api/engine/channel/outbox failed");
+            await RecordHealthAsync(false, null, ex.GetType().Name, ct).ConfigureAwait(false);
+            return false;
+        }
+    }
+
     // ----- Platform event append ----------------------------------------
 
     /// <summary>

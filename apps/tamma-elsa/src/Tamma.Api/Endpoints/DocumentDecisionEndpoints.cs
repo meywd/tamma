@@ -26,17 +26,6 @@ namespace Tamma.Api.Endpoints;
 /// </summary>
 public static class DocumentDecisionEndpoints
 {
-    /// <summary>The decision kinds the gate accepts (the closed 39-5 discriminator set). Anything
-    /// else is 400'd up front so the caller never forwards a kind that would silently route the
-    /// gate — the <c>AllowedDesignDecisions</c> posture.</summary>
-    private static readonly HashSet<string> AllowedDecisionKinds =
-        new(StringComparer.OrdinalIgnoreCase) { "accept", "request-revision", "reject", "escalate" };
-
-    private static readonly JsonSerializerOptions DecisionJsonOptions = new()
-    {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
-
     /// <summary>
     /// Public decision request. The decider + channel are intentionally ABSENT — they are
     /// derived from the authenticated principal (D6/D7), never trusted from the client.
@@ -69,27 +58,23 @@ public static class DocumentDecisionEndpoints
 
         if (sessionId == Guid.Empty)
             return Results.BadRequest(new { error = "sessionId is required" });
-        if (string.IsNullOrWhiteSpace(req.Kind) || !AllowedDecisionKinds.Contains(req.Kind.Trim()))
+        if (!DocumentDecisionSubmissionService.IsAllowedKind(req.Kind))
             return Results.BadRequest(new { error = "kind must be one of: accept, request-revision, reject, escalate" });
-
-        // Build the 39-5 AcceptanceDecision server-side from the validated kind.
-        var decision = BuildDecision(req);
-        var decisionJson = JsonSerializer.Serialize(decision, DecisionJsonOptions);
 
         // SECURITY (IDOR) — scope the resume to the caller's ambient tenant; the engine folds it
         // into the bookmark name so a caller can only resolve a gate in its OWN tenant.
-        var tenantId = tenantContext.TenantId?.ToString();
+        var tenantId = tenantContext.TenantId;
 
         // D7 — decider derived server-side (non-repudiation). D6 — channel derived from the
-        // authenticated principal, NEVER read from the body.
+        // authenticated principal, NEVER read from the body. Both the build + the resume live in
+        // the shared DocumentDecisionSubmissionService so the hub (39-18) drives the SAME path.
         var deciderId = ResolveApprover(principal);
         var channel = ApprovalChannels.Derive(principal);
+        var submission = new DocumentDecisionSubmissionService(elsa);
 
         try
         {
-            var result = await elsa.ResumeDocumentDecisionAsync(
-                sessionId, tenantId, decisionJson, req.Feedback,
-                deciderId, deciderId, channel.ToWire(), rulesReference: null);
+            var result = await submission.SubmitAsync(sessionId, req, tenantId, deciderId, channel);
 
             if (result.GateNotFound)
             {
@@ -186,34 +171,6 @@ public static class DocumentDecisionEndpoints
     // ================================================================
     // Server-side derivations (copied from AdlEndpoints — I2)
     // ================================================================
-
-    /// <summary>
-    /// Build the 39-5 <see cref="AcceptanceDecision"/> from the validated public request. A
-    /// human REJECT passes through (it clamps to Escalate only on the orchestrator channel, which
-    /// 39-6's guardrail applies); an escalate reason wire is parsed, defaulting to
-    /// <c>AcceptorJudgment</c> when a human simply chose to escalate.
-    /// </summary>
-    internal static AcceptanceDecision BuildDecision(DecisionRequest req) =>
-        req.Kind.Trim().ToLowerInvariant() switch
-        {
-            "accept" => new AcceptanceDecision.Accept(),
-            "request-revision" => new AcceptanceDecision.RequestRevision(req.Notes ?? req.Feedback ?? string.Empty),
-            "reject" => new AcceptanceDecision.Reject(req.Reason ?? req.Feedback ?? string.Empty),
-            _ => new AcceptanceDecision.Escalate(
-                ParseEscalationReason(req.Reason),
-                req.Detail ?? req.Feedback ?? req.Reason ?? string.Empty),
-        };
-
-    private static AcceptanceEscalationReason ParseEscalationReason(string? wire)
-    {
-        if (!string.IsNullOrWhiteSpace(wire))
-        {
-            foreach (var reason in Enum.GetValues<AcceptanceEscalationReason>())
-                if (string.Equals(reason.ToWire(), wire, StringComparison.OrdinalIgnoreCase))
-                    return reason;
-        }
-        return AcceptanceEscalationReason.AcceptorJudgment;
-    }
 
     /// <summary>
     /// Derive the decider identity from the authenticated principal (I2):

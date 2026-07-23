@@ -1995,6 +1995,44 @@ internal static class TammaModelConfiguration
             // explicit in the repository APIs.
         });
 
+        // ── ChannelOutboxMessage (Story 39-18, D4) ──
+        // The workflow↔orchestrator / user↔orchestrator channel store-and-forward
+        // outbox. Mirrors email_outbox (status transitions, lease semantics) minus
+        // SMTP; PayloadJson is the whole ChannelEnvelope as jsonb for clean replay.
+        modelBuilder.Entity<ChannelOutboxMessage>(entity =>
+        {
+            entity.ToTable("channel_outbox");
+            entity.HasKey(e => e.Id);
+            // Id IS the ChannelEnvelope message id (UUID v7) — client-set, NO
+            // gen_random_uuid() default so ordering by Id is time-ordered replay.
+            entity.Property(e => e.TenantId).IsRequired();
+            entity.Property(e => e.Audience).IsRequired().HasMaxLength(20);
+            entity.Property(e => e.Kind).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.PayloadJson)
+                .HasColumnName("PayloadJson").HasColumnType("jsonb")
+                .IsRequired().HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(20).HasDefaultValue("pending");
+            entity.Property(e => e.Attempts).HasDefaultValue(0);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+
+            // Per-recipient unacked replay (connect-time + sweeper) and the
+            // per-audience drain the sweeper walks.
+            entity.HasIndex(e => new { e.TenantId, e.RecipientUserId, e.Status })
+                .HasDatabaseName("IX_channel_outbox_tenant_recipient_status");
+            entity.HasIndex(e => new { e.TenantId, e.Audience, e.Status })
+                .HasDatabaseName("IX_channel_outbox_tenant_audience_status");
+
+            if (omitTenantIdColumn)
+            {
+                entity.Ignore(e => e.TenantId);
+            }
+
+            // No query filter — the outbox is shared infra; tenant scoping is
+            // explicit in the repository APIs (the per-tenant schema is the real
+            // isolation plane, the repository carries a TenantId predicate).
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
+        });
+
         // ── Analytics usage fact tables (Story 36-1) ──
         // Per-tenant dimensional usage/cost/performance store. Schema-only here
         // (Story 36-2 owns population). Mirrors ConfigurePlatformAnalyticsHourly

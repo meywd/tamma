@@ -66,6 +66,7 @@ public class TenantDbContext : DbContext
     public DbSet<Entities.DomainEvent> DomainEvents => Set<Entities.DomainEvent>();
     public DbSet<QueuedTask> QueuedTasks => Set<QueuedTask>();
     public DbSet<EmailOutboxMessage> EmailOutbox => Set<EmailOutboxMessage>();
+    public DbSet<ChannelOutboxMessage> ChannelOutbox => Set<ChannelOutboxMessage>();
     public DbSet<BudgetConfig> BudgetConfigs => Set<BudgetConfig>();
 
     // Story 36-1 — per-tenant dimensional analytics fact tables (hourly +
