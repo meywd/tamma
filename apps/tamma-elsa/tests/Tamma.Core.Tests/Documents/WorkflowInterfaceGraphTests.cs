@@ -104,6 +104,10 @@ public class WorkflowInterfaceGraphTests
             "ambiguity-scoring",
             "clarifying-questions",
             "design-proposal",
+            // Story 39-14 — the planning family: plan-generation (consumes decomposition,
+            // produces plan) and plan-review (reader) are now backed by real bindings.
+            "plan-generation",
+            "plan-review",
         };
 
         DocumentTypeRegistry.WorkflowInterfaces

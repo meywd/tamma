@@ -64,8 +64,8 @@ public class ResumableStandardStructuralTests
             ["MergeApprovalWorkflow"] = "legacy merge-approval bookmark-suspend gate (not yet on the canonical builder; retired by a 39-13+ migration).",
             ["MergeWorkflow"] = "merge side-effect workflow, no document lifecycle (burn-down: 39-15+).",
             ["PanelReviewWorkflow"] = "39-7 panel-review router, delegates to reviewer sub-workflows (burn-down: 39-12+).",
-            ["PlanGenerationWorkflow"] = "plan producer leaf, runs to completion (burn-down: 39-13+).",
-            ["PlanReviewWorkflow"] = "plan-review panel, runs to completion (burn-down: 39-13+).",
+            // PlanGenerationWorkflow + PlanReviewWorkflow burned down in Story 39-14 — both now
+            // declare [ResumeBehavior(LatestStateReEntry)] with the ComputeReEntryPositionActivity gate.
             ["PullRequestWorkflow"] = "PR side-effect workflow, no suspend gate (burn-down: 39-15+).",
             ["ReviewFixWorkflow"] = "review-fix loop, no human suspend gate (burn-down: 39-14+).",
             ["RotateSecretWorkflow"] = "platform secret-rotation saga, no document lifecycle (burn-down: n/a — platform).",

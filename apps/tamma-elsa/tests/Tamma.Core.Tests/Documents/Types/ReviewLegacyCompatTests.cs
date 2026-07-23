@@ -7,9 +7,9 @@ namespace Tamma.Core.Tests.Documents.Types;
 
 /// <summary>
 /// Story 39-4 AC2/AC8 — the legacy verdict ingest + decision-mapping table (D1/D4),
-/// pure (no baseline parser; the two-parsers-one-truth cross-check against
-/// <c>ReviewAggregationHelper.ParseRoleVerdict</c> lives in the Activities.Tests
-/// cross-parser suite per D8). Parse failure yields a TYPED error and NO document —
+/// pure (no baseline parser; the legacy-verdict fold check lives in the
+/// Activities.Tests cross-parser suite per D8 — its old-parser baseline was retired
+/// in Story 39-14). Parse failure yields a TYPED error and NO document —
 /// never a defaulted "concerns".
 /// </summary>
 [TestFixture]

@@ -3,69 +3,109 @@ using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Management.Activities.SetOutput;
-using Elsa.Workflows.Memory;
-using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
-using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
-using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
-
+using System.Text.Json;
+using Tamma.Activities.Context;
+using Tamma.Activities.Documents;
 using Tamma.Api.Services.Agents;
+using Tamma.Core.Documents.Resume;
 using Tamma.ElsaServer.Workflows.Helpers;
+using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
+
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// Plan Generation — architect LLM produces an implementation blueprint.
+/// Story 39-14 — Plan Generation, re-implemented as a THIN BINDING over
+/// <see cref="DocumentLifecycleWorkflow"/> (<c>DefinitionId = "document-lifecycle"</c>),
+/// producing a typed <see cref="Tamma.Core.Documents.Types.Plan"/> reviewed via the unified
+/// <see cref="Tamma.Core.Documents.Types.Review"/> (39-7 panel). The public surface is
+/// byte-stable (D1): same <c>DefinitionId = "plan-generation"</c>, same inputs
+/// (<c>repository</c>/<c>issueNumber</c>/<c>poSummary</c>/<c>contextIds</c>/<c>workItemJson</c>/
+/// <c>reviewNotes</c>/<c>revisionNumber</c>/<c>tenantId</c>, plus additive <c>issueId?</c> /
+/// <c>acceptanceRulesJson?</c>), same <c>planJson</c>/<c>error</c> outputs plus additive
+/// <c>status</c>/<c>outcome</c>/<c>documentId</c>/<c>decision</c>/<c>reviewNotes</c>. The
+/// SingleIssueCycle dispatch site (by definition id) is untouched.
 ///
-/// Prompts come from the prompt registry (role=architect, action=plan-system-design).
-/// No inline prompts. No approval step (approval is in SingleIssueCycle).
+/// <para><b>What changed (the epic's charter).</b> The bespoke validation-retry loop — the
+/// <c>ValidationErrors</c> loop-back, the <c>OutErr</c> terminal, the <c>maxRetries</c> counter,
+/// the hand parser (<c>PlanValidationHelper</c>) — is DELETED. Validation failure now flows
+/// through the generic validate → repair/revise → review → accept rings and, at worst, exits as
+/// a typed escalation (<c>validation-exhausted</c> / <c>rounds-exhausted</c> /
+/// <c>review-undecidable</c>) with full lineage — never a dead terminal. Plan review runs INSIDE
+/// the lifecycle via 39-7's producers (a 7-role panel by default policy, D3); the panel's
+/// discussion rounds ARE the lifecycle's revise rounds. The binding contributes NO parse, NO
+/// verdict gate, and ZERO <see cref="Finish"/> activities.</para>
 ///
-/// Validates the plan has required fields. Retries on invalid (max 2).
+/// <para><b>Consumes the accepted decomposition (D4).</b> On a fresh run it fetches the latest
+/// accepted <c>decomposition</c> for the issue (the 39-12 pilot's output) and folds its JSON into
+/// the DECLARED <c>contextFindings</c> producer variable ahead of <c>poSummary</c> — NOT a new
+/// <c>decompositionJson</c> key, which the shared Plan-family template does not declare and would
+/// silently drop at render (the <see cref="ValidationFeedbackHelper"/> render-drop lesson).
+/// Repair/revise notes land in that SAME declared carrier via <c>feedbackVariableName =
+/// "contextFindings"</c> (39-6 D11).</para>
 ///
-/// Flow:
-///   Init → Generate Plan (llm-call) → Validate → Valid?
-///     ├─ Yes → Output → Finish
-///     └─ No → Retry? → Yes → feed errors back → Generate Plan
-///                     → No → Error Output → Finish
+/// <para><b>Resumable per the standard (D9).</b> Declared <c>[ResumeBehavior(LatestStateReEntry)]</c>
+/// with the generic <see cref="ComputeReEntryPositionActivity"/> gate — the accept-gate suspend
+/// happens inside the dispatched child lifecycle, which the parent awaits via
+/// <c>WaitForCompletion</c>. Removed from the legacy resume allowlist.</para>
 /// </summary>
+[ResumeBehavior(ResumeMode.LatestStateReEntry)]
 public class PlanGenerationWorkflow : WorkflowBase
 {
+    private const string PlanDocumentType = "plan";
+    private const string DecompositionDocumentType = "decomposition";
+
     protected override void Build(IWorkflowBuilder builder)
     {
         builder.Name = "Plan Generation";
         builder.DefinitionId = "plan-generation";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description = "Architect LLM generates implementation plan via prompt registry";
+        builder.Description = "Generate a reviewed implementation plan via the generic document lifecycle (produce → validate → review(panel) → revise → accept)";
 
-        // ================================================================
-        // Variables
-        // ================================================================
-        var repository = builder.WithVariable<string>("Repository", "");
-        var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
-        var poSummary = builder.WithVariable<string>("POSummary", "");
-        var contextIds = builder.WithVariable<string>("ContextIds", "[]");
-        var workItemJson = builder.WithVariable<string>("WorkItemJson", "");
-        var reviewNotes = builder.WithVariable<string>("ReviewNotes", "");
-        var revisionNumber = builder.WithVariable<int>("RevisionNumber", 0);
-        var tenantId = builder.WithVariable<string>("TenantId", "");
+        // ── Inputs (compat set + additive) ─────────────────────────────
+        var repository      = builder.WithVariable<string>("Repository", "");
+        var issueNumber     = builder.WithVariable<int>("IssueNumber", 0);
+        var poSummary       = builder.WithVariable<string>("POSummary", "");
+        var contextIds      = builder.WithVariable<string>("ContextIds", "[]");
+        var workItemJson    = builder.WithVariable<string>("WorkItemJson", "");
+        var reviewNotes     = builder.WithVariable<string>("ReviewNotes", "");
+        var revisionNumber  = builder.WithVariable<int>("RevisionNumber", 0);
+        var tenantId        = builder.WithVariable<string>("TenantId", "");
+        var issueId         = builder.WithVariable<string>("IssueId", "");
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
 
-        var planJson = builder.WithVariable<string>("PlanJson", "");
-        var planValid = builder.WithVariable<bool>("PlanValid", false);
-        var validationErrors = builder.WithVariable<string>("ValidationErrors", "");
-        var retryCount = builder.WithVariable<int>("RetryCount", 0);
-        var maxRetries = builder.WithVariable<int>("MaxRetries", 2);
+        // ── Consumed decomposition (D4) ────────────────────────────────
+        var decompositionJson = builder.WithVariable<string>("DecompositionJson", "");
+        var decompositionFound = builder.WithVariable<bool>();
+        var decompositionDocId = builder.WithVariable<string>();
+        var decompositionLineage = builder.WithVariable<string>();
 
-        var llmResult = builder.WithVariable<IDictionary<string, object>?>();
+        // ── 39-10 re-entry position (D9) ───────────────────────────────
+        var reEntryPositionJson = builder.WithVariable<string>();
+        var reEntryDocJson  = builder.WithVariable<string>();
+        var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
 
-        // ================================================================
-        // 1. Init
-        // ================================================================
-        var init = new SetVariable
+        // ── Dispatched-workflow result + typed exit ────────────────────
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
+        var lifecycleAccepted = builder.WithVariable<bool>();
+        var exitStatus      = builder.WithVariable<string>("ExitStatus", "");
+        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "");
+        var exitDocId       = builder.WithVariable<string>("ExitDocId", "");
+        var planJson        = builder.WithVariable<string>("PlanJson", "");
+        var decisionNotes   = builder.WithVariable<string>("DecisionNotes", "");
+        var legacyDecision  = builder.WithVariable<string>("LegacyDecision", "needsHuman");
+        var failureDetail   = builder.WithVariable<string>("FailureDetail", "");
+        var outputStatus    = builder.WithVariable<string>();
+        var outputError     = builder.WithVariable<string>("OutputError", "");
+
+        // ── Step 1: Read inputs ────────────────────────────────────────
+        var readInputs = new SetVariable
         {
-            Id = "Init", Name = "Initialize",
+            Id = "ReadInputs", Name = "Read Inputs",
             Variable = repository,
-            Value = new Input<object?>(ctx =>
+            Value = new(ctx =>
             {
                 var repo = ctx.GetInput<string>("repository") ?? "";
                 issueNumber.Set(ctx, ctx.GetInput<int>("issueNumber"));
@@ -75,148 +115,207 @@ public class PlanGenerationWorkflow : WorkflowBase
                 reviewNotes.Set(ctx, ctx.GetInput<string>("reviewNotes") ?? "");
                 revisionNumber.Set(ctx, ctx.GetInput<int>("revisionNumber"));
                 tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
-                var inputMaxRetries = ctx.GetInput<int?>("maxRetries");
-                if (inputMaxRetries.HasValue) maxRetries.Set(ctx, inputMaxRetries.Value);
+                acceptanceRulesJson.Set(ctx, ctx.GetInput<string>("acceptanceRulesJson") ?? "");
+
+                // Issue identity: explicit input else derived "{repo}#{n}" (D4 — SingleIssueCycle passes none).
+                var explicitIssueId = ctx.GetInput<string>("issueId") ?? "";
+                issueId.Set(ctx, string.IsNullOrWhiteSpace(explicitIssueId)
+                    ? PlanBindingHelper.DeriveIssueId(repo, ctx.GetInput<int>("issueNumber"))
+                    : explicitIssueId);
                 return (object)repo;
             })
         };
-        init.SetDisplayText("Initialize");
+        readInputs.SetDisplayText("Read Inputs");
 
-        // ================================================================
-        // 2. Generate Plan (via LlmCallWorkflow — prompt from registry)
-        // ================================================================
-        var generatePlan = new DispatchWorkflow
+        // ── Step 2: Compute 39-10 re-entry position (D9) ───────────────
+        var computeReEntry = new ComputeReEntryPositionActivity
         {
-            Id = "GeneratePlan", Name = "Generate Plan",
-            WorkflowDefinitionId = new("llm-call"),
-            Input = new(ctx => new Dictionary<string, object>
-            {
-                ["role"] = AgentRole.Architect.ToWire(),
-                ["action"] = AgentAction.PlanSystemDesign.ToWire(),
-                ["tenantId"] = tenantId.Get(ctx),
-                ["variables"] = new Dictionary<string, object>
-                {
-                    ["workItemJson"] = workItemJson.Get(ctx),
-                    // Retry feedback is merged INTO contextFindings — a variable the
-                    // Plan-family template actually declares ({{contextFindings}}).
-                    // A separate "validationErrors" key is undeclared in the template
-                    // and was silently dropped at render, so retries re-prompted
-                    // blind. First attempt (no errors) passes poSummary unchanged.
-                    ["contextFindings"] = ValidationFeedbackHelper.AppendFeedback(
-                        poSummary.Get(ctx), validationErrors.Get(ctx)),
-                    ["poSummary"] = poSummary.Get(ctx),
-                    ["contextIds"] = contextIds.Get(ctx),
-                    ["repository"] = repository.Get(ctx),
-                    ["reviewNotes"] = reviewNotes.Get(ctx),
-                    ["revisionNumber"] = revisionNumber.Get(ctx),
-                },
-                ["enableTools"] = true,
-            }),
-            WaitForCompletion = new(true),
-            Result = new(llmResult),
+            Id = "ComputeReEntryPosition", Name = "Compute Re-Entry Position",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentType = new(PlanDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            CorrelationId = new(ctx => issueId.Get(ctx)),
+            PositionJson = new(reEntryPositionJson),
+            ExistingDocumentJson = new(reEntryDocJson),
         };
-        generatePlan.SetDisplayText("Generate Plan");
+        computeReEntry.SetDisplayText("Compute Re-Entry Position");
 
-        // ================================================================
-        // 3. Extract + Validate
-        // ================================================================
-        var extractAndValidate = new SetVariable
+        var readPositionStage = new SetVariable
         {
-            Id = "ExtractValidate", Name = "Extract & Validate",
-            Variable = planJson,
-            Value = new Input<object?>(ctx =>
+            Id = "ReadPositionStage", Name = "Read Position Stage",
+            Variable = positionStage,
+            Value = new(ctx =>
             {
-                var result = llmResult.Get(ctx);
-                var output = "";
-                if (result != null && result.TryGetValue("llmResponse", out var r))
-                    output = r?.ToString() ?? "";
-
-                var (json, isValid, errors) = PlanValidationHelper.ValidatePlan(output);
-                planValid.Set(ctx, isValid);
-                validationErrors.Set(ctx, errors);
-                return (object)json;
+                var position = DocumentLifecycleHelper.DeserializeReEntryPosition(reEntryPositionJson.Get(ctx));
+                return position?.ResumeAt switch
+                {
+                    LifecycleResumeStage.Complete => "complete",
+                    LifecycleResumeStage.Accept => "accept",
+                    LifecycleResumeStage.Review => "review",
+                    _ => "produce",
+                };
             })
         };
-        extractAndValidate.SetDisplayText("Extract & Validate");
+        readPositionStage.SetDisplayText("Read Position Stage");
 
-        // ================================================================
-        // 4. Valid?
-        // ================================================================
-        var isValid = new FlowDecision(ctx => planValid.Get(ctx))
-        { Id = "PlanValid", Name = "Plan Valid?" };
-        isValid.SetDisplayText("Plan Valid?");
+        // ── Step 3: FreshRun gate — fetch the consumed decomposition only on a fresh run (D4/D9) ──
+        var freshRun = new FlowDecision(ctx => positionStage.Get(ctx) == "produce")
+        { Id = "FreshRun", Name = "Fresh Run?" };
+        freshRun.SetDisplayText("Fresh Run?");
 
-        // ================================================================
-        // 5. Retry logic
-        // ================================================================
-        var incrementRetry = new SetVariable
+        var fetchDecomposition = new FetchLatestAcceptedDocumentActivity
         {
-            Id = "IncrRetry", Name = "Increment Retry",
-            Variable = retryCount,
-            Value = new Input<object?>(ctx => (object)(retryCount.Get(ctx) + 1))
+            Id = "FetchDecomposition", Name = "Fetch Accepted Decomposition",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentTypeKey = new(DecompositionDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Found = new(decompositionFound),
+            DocumentId = new(decompositionDocId),
+            DocumentJson = new(decompositionJson),
+            LineageJson = new(decompositionLineage),
         };
-        incrementRetry.SetDisplayText("Increment Retry");
+        fetchDecomposition.SetDisplayText("Fetch Accepted Decomposition");
 
-        var canRetry = new FlowDecision(ctx => retryCount.Get(ctx) < maxRetries.Get(ctx))
-        { Id = "CanRetry", Name = "Can Retry?" };
-        canRetry.SetDisplayText("Can Retry?");
-
-        // ================================================================
-        // 6. Outputs
-        // ================================================================
-        var setOutputs = new SetOutput
-        { Id = "OutPlan", OutputName = new("planJson"), OutputValue = new(ctx => (object)planJson.Get(ctx)) };
-        setOutputs.SetDisplayText("Output Plan");
-
-        var setErrorOutputs = new Sequence
+        // ── Step 4: Dispatch the generic document lifecycle ────────────
+        var dispatchLifecycle = new DispatchWorkflow
         {
-            Id = "SetErrorOutputs", Name = "Error Outputs",
+            Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
+            WorkflowDefinitionId = new("document-lifecycle"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["documentType"]          = PlanDocumentType,
+                ["producerRole"]          = AgentRole.Architect.ToWire(),
+                ["producerAction"]        = AgentAction.PlanSystemDesign.ToWire(),
+                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                {
+                    ["workItemJson"] = workItemJson.Get(ctx) ?? "",
+                    // D4 — the consumed decomposition is folded into the DECLARED contextFindings
+                    // carrier ahead of poSummary; NOT a new (render-dropped) decompositionJson key.
+                    ["contextFindings"] = PlanBindingHelper.MergeDecompositionIntoCarrier(
+                        poSummary.Get(ctx) ?? "", decompositionJson.Get(ctx) ?? ""),
+                    ["poSummary"]      = poSummary.Get(ctx) ?? "",
+                    ["contextIds"]     = contextIds.Get(ctx) ?? "[]",
+                    ["repository"]     = repository.Get(ctx) ?? "",
+                    ["reviewNotes"]    = reviewNotes.Get(ctx) ?? "",
+                    ["revisionNumber"] = revisionNumber.Get(ctx),
+                }),
+                // 39-6 D11 — repair/revise notes land in the DECLARED carrier, not a dropped key.
+                ["feedbackVariableName"] = "contextFindings",
+                ["issueId"]             = issueId.Get(ctx) ?? "",
+                ["correlationId"]       = issueId.Get(ctx) ?? "",
+                ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                // D3 — behavior-preserving default rules (rounds 3 / repair 2 / 7-role panel) unless
+                // the caller/store passes an explicit override.
+                ["acceptanceRulesJson"] = string.IsNullOrWhiteSpace(acceptanceRulesJson.Get(ctx))
+                    ? PlanBindingHelper.DefaultPlanRulesJson()
+                    : acceptanceRulesJson.Get(ctx)!,
+            }),
+            WaitForCompletion = new(true),
+            Result = new(lifecycleResult),
+        };
+        dispatchLifecycle.SetDisplayText("Dispatch Document Lifecycle");
+
+        // ── Step 5: Read the typed lifecycle exit (fail-closed) ────────
+        var readLifecycleExit = new SetVariable
+        {
+            Id = "ReadLifecycleExit", Name = "Read Lifecycle Exit",
+            Variable = planJson,
+            Value = new(ctx =>
+            {
+                var exit = LifecycleBindingHelper.ReadLifecycleResult(lifecycleResult.Get(ctx));
+                var accepted = LifecycleBindingHelper.IsAccepted(exit);
+
+                lifecycleAccepted.Set(ctx, accepted);
+                exitStatus.Set(ctx, exit.Status);
+                exitOutcome.Set(ctx, exit.Outcome ?? "");
+                exitDocId.Set(ctx, exit.DocumentId ?? "");
+                decisionNotes.Set(ctx, exit.DecisionNotes);
+                legacyDecision.Set(ctx, PlanBindingHelper.MapDecisionForLegacyOutput(exit));
+                failureDetail.Set(ctx, PlanBindingHelper.BuildFailureDetail(exit));
+                // status: "completed" on acceptance (compat, D1); else the typed exit status.
+                outputStatus.Set(ctx, accepted ? "completed" : exit.Status);
+                // planJson is the accepted body, "" otherwise (parent's empty-plan edge fires, D1).
+                var body = accepted ? exit.DocumentJson : "";
+                // error/reviewNotes compat: the decider's notes on acceptance, the failure detail otherwise.
+                outputError.Set(ctx, accepted ? "" : PlanBindingHelper.BuildFailureDetail(exit));
+                return body;
+            })
+        };
+        readLifecycleExit.SetDisplayText("Read Lifecycle Exit");
+
+        // ── Step 6: Accepted? (typed) ──────────────────────────────────
+        var lifecycleAcceptedGate = new FlowDecision(ctx => lifecycleAccepted.Get(ctx))
+        { Id = "LifecycleAccepted", Name = "Lifecycle Accepted?" };
+        lifecycleAcceptedGate.SetDisplayText("Lifecycle Accepted?");
+
+        // D5 — keep ONE StoreRoleFindingActivity persisting the accepted review to the vector
+        // store so the CONTEXT.STORE_ROLE.* family continues at its equivalent transition.
+        var storeAggregateReview = new StoreRoleFindingActivity
+        {
+            Id = "StoreAggregateReview", Name = "Store Aggregate Plan Review",
+            Repository = new(ctx => repository.Get(ctx)),
+            IssueNumber = new(ctx => issueNumber.Get(ctx)),
+            Role = new("plan-review"),
+            FindingsJson = new(ctx => JsonSerializer.Serialize(new Dictionary<string, object>
+            {
+                ["decision"] = legacyDecision.Get(ctx),
+                ["documentId"] = exitDocId.Get(ctx),
+                ["notes"] = decisionNotes.Get(ctx),
+            })),
+            ContextId = new(new Elsa.Workflows.Memory.Variable<string>()),
+        };
+        storeAggregateReview.SetDisplayText("Store Aggregate Plan Review");
+
+        // ── Step 7: Expose output — the single terminal region (D2, AC3) ──
+        var exposeOutput = new Sequence
+        {
+            Id = "ExposeOutput", Name = "Expose Output",
             Activities =
             {
-                new SetOutput { Id = "OutErrPlan", OutputName = new("planJson"), OutputValue = new(_ => (object)"") },
-                new SetOutput { Id = "OutErr", OutputName = new("error"), OutputValue = new(ctx => (object)validationErrors.Get(ctx)) },
+                WithLabel(new SetOutput { Id = "OutputPlan", Name = "Output Plan", OutputName = new("planJson"), OutputValue = new(ctx => (object)(planJson.Get(ctx) ?? "")) }, "Output Plan"),
+                WithLabel(new SetOutput { Id = "OutputError", Name = "Output Error", OutputName = new("error"), OutputValue = new(ctx => (object)(outputError.Get(ctx) ?? "")) }, "Output Error"),
+                WithLabel(new SetOutput { Id = "OutputStatus", Name = "Output Status", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }, "Output Status"),
+                WithLabel(new SetOutput { Id = "OutputOutcome", Name = "Output Outcome", OutputName = new("outcome"), OutputValue = new(ctx => (object)(exitOutcome.Get(ctx) ?? "")) }, "Output Outcome"),
+                WithLabel(new SetOutput { Id = "OutputDocumentId", Name = "Output Document Id", OutputName = new("documentId"), OutputValue = new(ctx => (object)(exitDocId.Get(ctx) ?? "")) }, "Output Document Id"),
+                WithLabel(new SetOutput { Id = "OutputDecision", Name = "Output Decision", OutputName = new("decision"), OutputValue = new(ctx => (object)(legacyDecision.Get(ctx) ?? "")) }, "Output Decision"),
+                WithLabel(new SetOutput { Id = "OutputReviewNotes", Name = "Output Review Notes", OutputName = new("reviewNotes"), OutputValue = new(ctx => (object)(decisionNotes.Get(ctx) ?? "")) }, "Output Review Notes"),
             }
         };
-        setErrorOutputs.SetDisplayText("Error Outputs");
+        exposeOutput.SetDisplayText("Expose Output");
 
-        var finish = new Finish { Id = "Finish", Name = "Complete" };
-        finish.SetDisplayText("Complete");
-
-        // ================================================================
-        // Flowchart
-        // ================================================================
+        // ── Build the flowchart ────────────────────────────────────────
         builder.Root = new Flowchart
         {
             Id = "PlanGenerationFlowchart",
-            Start = init,
+            Name = "Plan Generation Flowchart",
+            Start = readInputs,
             Activities =
             {
-                init, generatePlan, extractAndValidate, isValid,
-                incrementRetry, canRetry,
-                setOutputs, setErrorOutputs, finish,
+                readInputs, computeReEntry, readPositionStage, freshRun,
+                fetchDecomposition, dispatchLifecycle, readLifecycleExit,
+                lifecycleAcceptedGate, storeAggregateReview, exposeOutput,
             },
             Connections =
             {
-                Connect(init, generatePlan),
-                Connect(generatePlan, extractAndValidate),
-                Connect(extractAndValidate, isValid),
+                new(readInputs, computeReEntry),
+                new(computeReEntry, readPositionStage),
+                new(readPositionStage, freshRun),
 
-                ConnectOutcome(isValid, "True", setOutputs),
-                Connect(setOutputs, finish),
+                // Fresh run → fetch the consumed decomposition → dispatch.
+                new(new FlowEndpoint(freshRun, "True"),  new FlowEndpoint(fetchDecomposition)),
+                new(fetchDecomposition, dispatchLifecycle),
+                // Re-entry → straight to dispatch (a re-entry does not re-fetch, D9).
+                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(dispatchLifecycle)),
 
-                ConnectOutcome(isValid, "False", incrementRetry),
-                Connect(incrementRetry, canRetry),
+                new(dispatchLifecycle, readLifecycleExit),
+                new(readLifecycleExit, lifecycleAcceptedGate),
 
-                ConnectOutcome(canRetry, "True", generatePlan), // retry
-                ConnectOutcome(canRetry, "False", setErrorOutputs), // give up
-                Connect(setErrorOutputs, finish),
+                // Accepted → persist the aggregate review → expose outputs.
+                new(new FlowEndpoint(lifecycleAcceptedGate, "True"),  new FlowEndpoint(storeAggregateReview)),
+                new(storeAggregateReview, exposeOutput),
+                // Not accepted → planJson="" so the parent's empty-plan edge fires (D1).
+                new(new FlowEndpoint(lifecycleAcceptedGate, "False"), new FlowEndpoint(exposeOutput)),
             }
         };
     }
-
-    private static FlowConnection Connect(IActivity source, IActivity target)
-        => new(new FlowEndpoint(source), new FlowEndpoint(target));
-
-    private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
-        => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
 }

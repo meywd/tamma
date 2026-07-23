@@ -150,11 +150,14 @@ public class ContractBindingTests
                 One("\"alternatives\""), One("\"name\""), One("\"tradeoffs\""),
             ]),
 
-            // PlanGenerationWorkflow → PlanValidationHelper.ValidatePlan
-            // (Tamma.ElsaServer/Workflows/Helpers/PlanValidationHelper.cs): invalid
-            // unless the plan carries "tasks"|"steps" AND "fileMap"|"files"|"filesToModify".
-            // The shipped template uses "tasks" + "files".
-            [("architect", "plan-system-design")] = new("PlanValidationHelper.ValidatePlan",
+            // PlanGenerationWorkflow (39-14) binds the (architect, plan-system-design) cell as
+            // the produce step of its document-lifecycle binding; the shape authority is now the
+            // typed validator Tamma.Core/Documents/Types/Plan.cs (PlanDocumentType.Validate) —
+            // subsumes what the retired PlanValidationHelper.ValidatePlan checked (root
+            // "tasks"|"steps" + "fileMap"|"files"|"filesToModify"). Tokens unchanged (39-4 D5
+            // pinned round-trip compatibility; the shipped template uses "tasks" + "files"); only
+            // the parser authority migrated.
+            [("architect", "plan-system-design")] = new("PlanDocumentType.Validate",
             [
                 AnyOf("\"tasks\"", "\"steps\""),
                 AnyOf("\"fileMap\"", "\"files\"", "\"filesToModify\""),
@@ -288,18 +291,18 @@ public class ContractBindingTests
                 "needs-human-review decision and out-of-vocab fields are clamped to defaults with notes",
 
             // ---- review panels: missing fields degrade to a conservative verdict -----
-            // TaskReviewWorkflow/PlanReviewWorkflow aggregate with TryGetProperty and
-            // default a missing "verdict" to "concerns" (and the PO decision to
-            // "needsHuman") — the panel can only get MORE cautious, never fail closed.
-            [("architect", "plan-review")] = "panel review: lenient verdict parse, missing fields default to 'concerns'",
-            [("senior_developer", "plan-review")] = "panel review: lenient verdict parse, missing fields default to 'concerns'",
-            [("security", "plan-review-security")] = "panel review: lenient verdict parse, missing fields default to 'concerns'",
-            [("developer", "review-feasibility")] = "panel review: lenient verdict parse, missing fields default to 'concerns'",
-            [("tester", "review-testability")] = "panel review: lenient verdict parse, missing fields default to 'concerns'",
-            [("devops", "review-operability")] = "panel review: lenient verdict parse, missing fields default to 'concerns'",
-            [("product_owner", "review-scope")] =
-                "panel review + PlanReviewWorkflow PO decision: lenient parse, unparseable output defaults " +
-                "to 'needsHuman' (conservative degrade, not fail-closed)",
+            // These 4 plan-review-family pairs are STILL emitted by a compiled site —
+            // TaskReviewWorkflow's 4-role panel (Architect/SeniorDeveloper → plan-review,
+            // Developer → review-feasibility, Tester → review-testability). PlanReviewWorkflow
+            // (their other former emitter) became a zero-dispatch shim in Story 39-14, but
+            // TaskReviewWorkflow keeps them live here. The other 3 plan-review-family pairs
+            // (security plan-review-security, devops review-operability, product_owner
+            // review-scope) had NO other compiled emitter, so they moved to
+            // ReviewProducerDispatchablePairs (policy-only).
+            [("architect", "plan-review")] = "panel review (TaskReviewWorkflow): lenient verdict parse, missing fields default to 'concerns'",
+            [("senior_developer", "plan-review")] = "panel review (TaskReviewWorkflow): lenient verdict parse, missing fields default to 'concerns'",
+            [("developer", "review-feasibility")] = "panel review (TaskReviewWorkflow): lenient verdict parse, missing fields default to 'concerns'",
+            [("tester", "review-testability")] = "panel review (TaskReviewWorkflow): lenient verdict parse, missing fields default to 'concerns'",
 
             // ---- triage panel: quorum-gated, per-role failure tolerated --------------
             // TriagePanelReviewWorkflow leaves an unparseable role review as the "{}"
@@ -452,15 +455,29 @@ public class ContractBindingTests
     /// staleness guard requires a live emitter). The classification test asserts every
     /// pair <see cref="ReviewerSelectionHelper.AllDispatchablePairs"/> can dispatch is
     /// classified in one of the three tables — so a reviewer cell reachable by the
-    /// producers but bound nowhere fails the build. Pairs already emitted by a compiled
-    /// site (the 7 plan-review-family pairs from PlanReviewWorkflow, and
-    /// <c>(senior_developer, code-review)</c> from CodeReviewWorkflow) stay in
-    /// <see cref="IntentionallyUnbound"/>; the remaining code-review specialisations
-    /// live here.
+    /// producers but bound nowhere fails the build. As of Story 39-14 the 3 PlanReview-EXCLUSIVE
+    /// plan-review-family pairs (security plan-review-security, devops review-operability,
+    /// product_owner review-scope) live HERE — PlanReviewWorkflow became a zero-dispatch shim and
+    /// they have no OTHER compiled emitter, so they would go stale in
+    /// <see cref="IntentionallyUnbound"/>. (The other 4 plan-review-family pairs stay in
+    /// <see cref="IntentionallyUnbound"/> — TaskReviewWorkflow's compiled panel still emits them.)
+    /// <c>(senior_developer, code-review)</c> also stays in <see cref="IntentionallyUnbound"/>
+    /// (emitted by CodeReviewWorkflow); the code-review specialisations live here too.
     /// </summary>
     private static readonly IReadOnlyDictionary<(string Role, string Action), string> ReviewProducerDispatchablePairs =
         new Dictionary<(string, string), string>
         {
+            // Document-review producer pairs with NO compiled emitter after Story 39-14 (only
+            // PlanReviewWorkflow dispatched them; it is now a zero-dispatch shim) — reachable ONLY
+            // via the panel producer's policy-selected dispatch.
+            [("security", "plan-review-security")] =
+                "document-review producer pair: security reviews a plan via plan-review-security; policy-only after 39-14.",
+            [("devops", "review-operability")] =
+                "document-review producer pair: devops reviews a plan via review-operability; policy-only after 39-14.",
+            [("product_owner", "review-scope")] =
+                "document-review producer pair: product_owner reviews a plan via review-scope; policy-only after " +
+                "39-14 (the bespoke PO-decision phase was deleted, D2).",
+
             [("developer", "code-review")] =
                 "diff-review producer pair (D3 diff map): developer reviews a diff via code-review; reachable " +
                 "only through the single-reviewer producer's policy-selected dispatch, no compiled emitter.",

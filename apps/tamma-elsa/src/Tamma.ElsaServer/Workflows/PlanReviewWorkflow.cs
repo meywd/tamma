@@ -1,1051 +1,178 @@
-using System.Text.Json;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Management.Activities.SetOutput;
-using Elsa.Workflows.Memory;
-using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
-using Tamma.Activities.Context;
-using Tamma.Api.Services.Agents;
+using Tamma.Activities.Documents;
+using Tamma.Core.Documents.Resume;
 using Tamma.ElsaServer.Workflows.Helpers;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
-using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// Plan Review — structured multi-agent debate with 3 phases.
+/// Story 39-14 (Design Decision D1/D2) — Plan Review, reduced to a deterministic READ-THROUGH
+/// SHIM over the document store. Plan review no longer exists as an independent produce-verdict
+/// pipeline: it runs INSIDE the Plan lifecycle's review stage (39-7 panel producers, driven by
+/// <see cref="PlanGenerationWorkflow"/>), emitting typed <see cref="Tamma.Core.Documents.Types.Review"/>
+/// documents to the store. This shim keeps the <c>DefinitionId = "plan-review"</c> call site
+/// (SingleIssueCycle) live and maps the store's latest accepted <c>plan</c> + its round lineage
+/// onto the legacy output shape.
 ///
-/// Phase 1: Independent Review — 7 sequential role reviews (architect, developer, tester,
-///          security, devops, product_owner, senior_developer). Each review is stored immediately.
+/// <para><b>Zero LLM, zero dispatch.</b> The 3-phase debate — 7 role reviews, 7 rebuttals, the
+/// PO-decision phase, the anonymization, the <c>concerns</c>-laundering verdict parse — is DELETED.
+/// The shim has NO <see cref="DispatchWorkflow"/> node and NO <see cref="Finish"/>: it is a pure
+/// store read, so a re-run is an idempotent read (declared <c>[ResumeBehavior(LatestStateReEntry)]</c>).</para>
 ///
-/// Phase 2: Rebuttal Round — 7 sequential calls where each role sees ALL reviews (anonymized,
-///          no role labels). Each role outputs responses to concerns and a revisedVerdict.
-///          If all revisedVerdicts are "approve", early termination to approved output.
-///
-/// Phase 3: PO Decision — product_owner sees all reviews + rebuttals and decides:
-///          approved → output, needsHuman → output, needsModification → update plan,
-///          increment round, loop back to Phase 2 (max rounds from input, default 3).
-///
-/// Inputs: repository, issueNumber, planJson, contextIds, workItemJson, maxRetries
-/// Outputs: decision, planJson, reviewNotes, deferred, split, discussionLog, suggestionsJson
+/// <para><b>Legacy output mapping (D1).</b> <c>decision</c>: an accepted plan present →
+/// <c>"approved"</c>; none → <c>"needsHuman"</c> (the review already happened inside the lifecycle,
+/// so <c>needsModification</c> is unreachable here). <c>planJson</c>: the accepted body, else the
+/// input passthrough. <c>deferred</c>/<c>split</c>: always <c>"[]"</c> — defer/split retire from
+/// the review surface (D2; scope routing is the orchestrator's job). <c>discussionLog</c>: a round
+/// projection from the plan's lineage. <c>suggestionsJson</c>: <c>"[]"</c>.</para>
 /// </summary>
+[ResumeBehavior(ResumeMode.LatestStateReEntry)]
 public class PlanReviewWorkflow : WorkflowBase
 {
-    // The 7 reviewing roles
-    private static readonly string[] ReviewRoles =
-    [
-        "architect",
-        "developer",
-        "tester",
-        "security",
-        "devops",
-        "product_owner",
-        "senior_developer",
-    ];
+    private const string PlanDocumentType = "plan";
 
     protected override void Build(IWorkflowBuilder builder)
     {
         builder.Name = "Plan Review";
         builder.DefinitionId = "plan-review";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description = "Structured multi-agent debate: independent review, rebuttal round, PO decision";
+        builder.Description = "Read-through shim over the document store: maps the latest accepted plan + review lineage to the legacy review output (39-14 D1)";
 
-        // ================================================================
-        // Variables
-        // ================================================================
-        var tenantId = builder.WithVariable<string>("TenantId", "");
-        var repository = builder.WithVariable<string>("Repository", "");
-        var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
-        var planJson = builder.WithVariable<string>("PlanJson", "");
-        var contextIds = builder.WithVariable<string>("ContextIds", "[]");
+        // ── Inputs (compat set) ────────────────────────────────────────
+        var repository   = builder.WithVariable<string>("Repository", "");
+        var issueNumber  = builder.WithVariable<int>("IssueNumber", 0);
+        var planJsonIn   = builder.WithVariable<string>("PlanJson", "");
+        var contextIds   = builder.WithVariable<string>("ContextIds", "[]");
         var workItemJson = builder.WithVariable<string>("WorkItemJson", "");
+        var tenantId     = builder.WithVariable<string>("TenantId", "");
+        var issueId      = builder.WithVariable<string>("IssueId", "");
 
-        // Per-role review results (JSON strings)
-        var architectReview = builder.WithVariable<string>("ArchitectReview", "{}");
-        var developerReview = builder.WithVariable<string>("DeveloperReview", "{}");
-        var testerReview = builder.WithVariable<string>("TesterReview", "{}");
-        var securityReview = builder.WithVariable<string>("SecurityReview", "{}");
-        var devopsReview = builder.WithVariable<string>("DevOpsReview", "{}");
-        var productOwnerReview = builder.WithVariable<string>("ProductOwnerReview", "{}");
-        var seniorDeveloperReview = builder.WithVariable<string>("SeniorDeveloperReview", "{}");
+        // ── 39-10 re-entry position (trivial pure read) ────────────────
+        var reEntryPositionJson = builder.WithVariable<string>();
+        var reEntryDocJson  = builder.WithVariable<string>();
 
-        // Aggregation
-        var allReviewsJson = builder.WithVariable<string>("AllReviewsJson", "[]");
-        var anonymizedReviewsJson = builder.WithVariable<string>("AnonymizedReviewsJson", "[]");
+        // ── Store read result ──────────────────────────────────────────
+        var planFound    = builder.WithVariable<bool>();
+        var acceptedDocId = builder.WithVariable<string>();
+        var acceptedPlanJson = builder.WithVariable<string>("AcceptedPlanJson", "{}");
+        var lineageJson  = builder.WithVariable<string>("LineageJson", "{}");
 
-        // Per-role rebuttal results (JSON strings)
-        var architectRebuttal = builder.WithVariable<string>("ArchitectRebuttal", "{}");
-        var developerRebuttal = builder.WithVariable<string>("DeveloperRebuttal", "{}");
-        var testerRebuttal = builder.WithVariable<string>("TesterRebuttal", "{}");
-        var securityRebuttal = builder.WithVariable<string>("SecurityRebuttal", "{}");
-        var devopsRebuttal = builder.WithVariable<string>("DevOpsRebuttal", "{}");
-        var productOwnerRebuttal = builder.WithVariable<string>("ProductOwnerRebuttal", "{}");
-        var seniorDeveloperRebuttal = builder.WithVariable<string>("SeniorDeveloperRebuttal", "{}");
-
-        var allRebuttalsJson = builder.WithVariable<string>("AllRebuttalsJson", "[]");
-
-        // Discussion / rounds
-        var roundCount = builder.WithVariable<int>("RoundCount", 0);
-        var maxRounds = builder.WithVariable<int>("MaxRounds", 3);
+        // ── Mapped legacy outputs ──────────────────────────────────────
+        var decision     = builder.WithVariable<string>("Decision", "needsHuman");
+        var planJsonOut  = builder.WithVariable<string>("PlanJsonOut", "");
+        var reviewNotes  = builder.WithVariable<string>("ReviewNotes", "");
         var discussionLog = builder.WithVariable<string>("DiscussionLog", "[]");
-        var phase = builder.WithVariable<string>("Phase", "review");
 
-        // Final outputs
-        var decision = builder.WithVariable<string>("Decision", "needsHuman");
-        var reviewNotes = builder.WithVariable<string>("ReviewNotes", "");
-        var deferred = builder.WithVariable<string>("Deferred", "[]");
-        var split = builder.WithVariable<string>("Split", "[]");
-        var suggestionsJson = builder.WithVariable<string>("SuggestionsJson", "[]");
-
-        // Shared LLM result
-        var llmResult = builder.WithVariable<IDictionary<string, object>?>();
-
-        // Early termination flag
-        var allRebuttalApproved = builder.WithVariable<string>("AllRebuttalApproved", "false");
-
-        // Role-variable mapping for Phase 1 extraction
-        var roleReviewVariables = new Dictionary<string, Variable<string>>
+        // ── Step 1: Read inputs ────────────────────────────────────────
+        var readInputs = new SetVariable
         {
-            ["architect"] = architectReview,
-            ["developer"] = developerReview,
-            ["tester"] = testerReview,
-            ["security"] = securityReview,
-            ["devops"] = devopsReview,
-            ["product_owner"] = productOwnerReview,
-            ["senior_developer"] = seniorDeveloperReview,
-        };
-
-        // Role-variable mapping for Phase 2 rebuttal extraction
-        var roleRebuttalVariables = new Dictionary<string, Variable<string>>
-        {
-            ["architect"] = architectRebuttal,
-            ["developer"] = developerRebuttal,
-            ["tester"] = testerRebuttal,
-            ["security"] = securityRebuttal,
-            ["devops"] = devopsRebuttal,
-            ["product_owner"] = productOwnerRebuttal,
-            ["senior_developer"] = seniorDeveloperRebuttal,
-        };
-
-        // ================================================================
-        // 1. Init — read inputs, set round count to 1
-        // ================================================================
-        var init = new SetVariable
-        {
-            Id = "Init", Name = "Initialize",
+            Id = "ReadInputs", Name = "Read Inputs",
             Variable = repository,
-            Value = new Input<object?>(ctx =>
+            Value = new(ctx =>
             {
                 var repo = ctx.GetInput<string>("repository") ?? "";
                 issueNumber.Set(ctx, ctx.GetInput<int>("issueNumber"));
-                planJson.Set(ctx, ctx.GetInput<string>("planJson") ?? "");
+                planJsonIn.Set(ctx, ctx.GetInput<string>("planJson") ?? "");
                 contextIds.Set(ctx, ctx.GetInput<string>("contextIds") ?? "[]");
                 workItemJson.Set(ctx, ctx.GetInput<string>("workItemJson") ?? "");
                 tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
-                roundCount.Set(ctx, 1);
-                var inputMaxRounds = ctx.GetInput<int?>("maxRetries");
-                if (inputMaxRounds.HasValue) maxRounds.Set(ctx, inputMaxRounds.Value);
-                discussionLog.Set(ctx, "[]");
-                phase.Set(ctx, "review");
+
+                var explicitIssueId = ctx.GetInput<string>("issueId") ?? "";
+                issueId.Set(ctx, string.IsNullOrWhiteSpace(explicitIssueId)
+                    ? PlanBindingHelper.DeriveIssueId(repo, ctx.GetInput<int>("issueNumber"))
+                    : explicitIssueId);
                 return (object)repo;
             })
         };
-        init.SetDisplayText("Initialize");
+        readInputs.SetDisplayText("Read Inputs");
 
-        // ================================================================
-        // Phase 1: Independent Review — 7 sequential role reviews
-        // Each role: action="plan-review", gets plan + context
-        // After each extraction, persist the review via StoreRoleFindingActivity
-        // ================================================================
-
-        // Architect review
-        var phase1ArchCall = RoleReviewDispatch("Phase1ArchReview", "Phase 1: Architect Review", AgentRole.Architect,
-            repository, planJson, contextIds, workItemJson, allReviewsJson, tenantId, llmResult);
-        var extractPhase1Arch = ExtractReview(architectReview, llmResult, "architect",
-            "ExtractPhase1Arch", "Extract Phase 1 Architect Review");
-        var storePhase1Arch = StoreReviewRole("StorePhase1Arch", "Store Phase 1 Architect Review", "architect",
-            repository, issueNumber, architectReview);
-
-        // Developer review
-        var phase1DevCall = RoleReviewDispatch("Phase1DevReview", "Phase 1: Developer Review", AgentRole.Developer,
-            repository, planJson, contextIds, workItemJson, allReviewsJson, tenantId, llmResult);
-        var extractPhase1Dev = ExtractReview(developerReview, llmResult, "developer",
-            "ExtractPhase1Dev", "Extract Phase 1 Developer Review");
-        var storePhase1Dev = StoreReviewRole("StorePhase1Dev", "Store Phase 1 Developer Review", "developer",
-            repository, issueNumber, developerReview);
-
-        // Tester review
-        var phase1TesterCall = RoleReviewDispatch("Phase1TesterReview", "Phase 1: Tester Review", AgentRole.Tester,
-            repository, planJson, contextIds, workItemJson, allReviewsJson, tenantId, llmResult);
-        var extractPhase1Tester = ExtractReview(testerReview, llmResult, "tester",
-            "ExtractPhase1Tester", "Extract Phase 1 Tester Review");
-        var storePhase1Tester = StoreReviewRole("StorePhase1Tester", "Store Phase 1 Tester Review", "tester",
-            repository, issueNumber, testerReview);
-
-        // Security review
-        var phase1SecCall = RoleReviewDispatch("Phase1SecReview", "Phase 1: Security Review", AgentRole.Security,
-            repository, planJson, contextIds, workItemJson, allReviewsJson, tenantId, llmResult);
-        var extractPhase1Sec = ExtractReview(securityReview, llmResult, "security",
-            "ExtractPhase1Sec", "Extract Phase 1 Security Review");
-        var storePhase1Sec = StoreReviewRole("StorePhase1Sec", "Store Phase 1 Security Review", "security",
-            repository, issueNumber, securityReview);
-
-        // DevOps review
-        var phase1DevOpsCall = RoleReviewDispatch("Phase1DevOpsReview", "Phase 1: DevOps Review", AgentRole.Devops,
-            repository, planJson, contextIds, workItemJson, allReviewsJson, tenantId, llmResult);
-        var extractPhase1DevOps = ExtractReview(devopsReview, llmResult, "devops",
-            "ExtractPhase1DevOps", "Extract Phase 1 DevOps Review");
-        var storePhase1DevOps = StoreReviewRole("StorePhase1DevOps", "Store Phase 1 DevOps Review", "devops",
-            repository, issueNumber, devopsReview);
-
-        // Product Owner review
-        var phase1POCall = RoleReviewDispatch("Phase1POReview", "Phase 1: PO Review", AgentRole.ProductOwner,
-            repository, planJson, contextIds, workItemJson, allReviewsJson, tenantId, llmResult);
-        var extractPhase1PO = ExtractReview(productOwnerReview, llmResult, "product_owner",
-            "ExtractPhase1PO", "Extract Phase 1 PO Review");
-        var storePhase1PO = StoreReviewRole("StorePhase1PO", "Store Phase 1 PO Review", "product_owner",
-            repository, issueNumber, productOwnerReview);
-
-        // Senior Developer review
-        var phase1SrDevCall = RoleReviewDispatch("Phase1SrDevReview", "Phase 1: Senior Dev Review", AgentRole.SeniorDeveloper,
-            repository, planJson, contextIds, workItemJson, allReviewsJson, tenantId, llmResult);
-        var extractPhase1SrDev = ExtractReview(seniorDeveloperReview, llmResult, "senior_developer",
-            "ExtractPhase1SrDev", "Extract Phase 1 Senior Dev Review");
-        var storePhase1SrDev = StoreReviewRole("StorePhase1SrDev", "Store Phase 1 Senior Dev Review", "senior_developer",
-            repository, issueNumber, seniorDeveloperReview);
-
-        // ================================================================
-        // Aggregate Phase 1 Reviews — collect all reviews into allReviewsJson
-        // and build anonymized version for Phase 2
-        // ================================================================
-        var aggregateReviews = new SetVariable
+        // ── Step 2: Compute 39-10 re-entry position (clause c — a harmless idempotent read) ──
+        var computeReEntry = new ComputeReEntryPositionActivity
         {
-            Id = "AggregateReviews", Name = "Aggregate Reviews",
-            Variable = allReviewsJson,
-            Value = new Input<object?>(ctx =>
-            {
-                var reviews = new List<object>();
-
-                foreach (var role in ReviewRoles)
-                {
-                    var reviewJson = roleReviewVariables[role].Get(ctx);
-                    var (verdict, comments, suggestedChanges) = ReviewAggregationHelper.ParseRoleVerdict(reviewJson);
-
-                    reviews.Add(new Dictionary<string, object>
-                    {
-                        ["role"] = role,
-                        ["verdict"] = verdict,
-                        ["comments"] = comments,
-                        ["suggestedChanges"] = suggestedChanges,
-                    });
-                }
-
-                var reviewsArray = JsonSerializer.Serialize(reviews);
-
-                // Append to discussion log
-                var currentLog = discussionLog.Get(ctx);
-                var logEntries = new List<object>();
-                try
-                {
-                    if (!string.IsNullOrWhiteSpace(currentLog) && currentLog != "[]")
-                        logEntries = JsonSerializer.Deserialize<List<object>>(currentLog) ?? [];
-                }
-                catch { /* start fresh */ }
-
-                var round = roundCount.Get(ctx);
-                foreach (var review in reviews)
-                {
-                    logEntries.Add(new Dictionary<string, object>
-                    {
-                        ["round"] = round,
-                        ["type"] = "phase1-review",
-                        ["data"] = review,
-                    });
-                }
-                discussionLog.Set(ctx, JsonSerializer.Serialize(logEntries));
-
-                return (object)reviewsArray;
-            })
+            Id = "ComputeReEntryPosition", Name = "Compute Re-Entry Position",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentType = new(PlanDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            CorrelationId = new(ctx => issueId.Get(ctx)),
+            PositionJson = new(reEntryPositionJson),
+            ExistingDocumentJson = new(reEntryDocJson),
         };
-        aggregateReviews.SetDisplayText("Aggregate Phase 1 Reviews");
+        computeReEntry.SetDisplayText("Compute Re-Entry Position");
 
-        // ================================================================
-        // Build Anonymized Reviews for Phase 2
-        // Strip role names, replace with reviewerIndex
-        // ================================================================
-        var buildAnonymized = new SetVariable
+        // ── Step 3: Fetch the latest accepted plan + lineage ───────────
+        var fetchAcceptedPlan = new FetchLatestAcceptedDocumentActivity
         {
-            Id = "BuildAnonymized", Name = "Build Anonymized Reviews",
-            Variable = anonymizedReviewsJson,
-            Value = new Input<object?>(ctx =>
-            {
-                var allReviews = allReviewsJson.Get(ctx);
-                var anonymized = new List<object>();
-
-                try
-                {
-                    if (!string.IsNullOrWhiteSpace(allReviews) && allReviews != "[]")
-                    {
-                        using var doc = JsonDocument.Parse(allReviews);
-                        var index = 1;
-                        foreach (var review in doc.RootElement.EnumerateArray())
-                        {
-                            var entry = new Dictionary<string, object>
-                            {
-                                ["reviewerIndex"] = index,
-                            };
-                            if (review.TryGetProperty("verdict", out var v))
-                                entry["verdict"] = v.GetString() ?? "concerns";
-                            if (review.TryGetProperty("comments", out var c))
-                                entry["comments"] = c.GetString() ?? "";
-                            if (review.TryGetProperty("suggestedChanges", out var s))
-                                entry["suggestedChanges"] = s.GetString() ?? "";
-
-                            anonymized.Add(entry);
-                            index++;
-                        }
-                    }
-                }
-                catch { /* fallback to empty */ }
-
-                return (object)JsonSerializer.Serialize(anonymized);
-            })
+            Id = "FetchLatestAcceptedPlan", Name = "Fetch Latest Accepted Plan",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentTypeKey = new(PlanDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Found = new(planFound),
+            DocumentId = new(acceptedDocId),
+            DocumentJson = new(acceptedPlanJson),
+            LineageJson = new(lineageJson),
         };
-        buildAnonymized.SetDisplayText("Build Anonymized Reviews");
+        fetchAcceptedPlan.SetDisplayText("Fetch Latest Accepted Plan");
 
-        // ================================================================
-        // Phase 2: Rebuttal Round — 7 sequential calls, each role sees
-        // ALL reviews (anonymized) and their own Phase 1 review
-        // ================================================================
-
-        // Architect rebuttal
-        var phase2ArchCall = RebuttalDispatch("Phase2ArchRebuttal", "Phase 2: Architect Rebuttal", AgentRole.Architect,
-            repository, planJson, contextIds, anonymizedReviewsJson, architectReview, roundCount, tenantId, llmResult);
-        var extractPhase2Arch = ExtractRebuttal(architectRebuttal, llmResult,
-            "ExtractPhase2Arch", "Extract Phase 2 Architect Rebuttal");
-        var storePhase2Arch = StoreReviewRole("StorePhase2Arch", "Store Phase 2 Architect Rebuttal", "architect-rebuttal",
-            repository, issueNumber, architectRebuttal);
-
-        // Developer rebuttal
-        var phase2DevCall = RebuttalDispatch("Phase2DevRebuttal", "Phase 2: Developer Rebuttal", AgentRole.Developer,
-            repository, planJson, contextIds, anonymizedReviewsJson, developerReview, roundCount, tenantId, llmResult);
-        var extractPhase2Dev = ExtractRebuttal(developerRebuttal, llmResult,
-            "ExtractPhase2Dev", "Extract Phase 2 Developer Rebuttal");
-        var storePhase2Dev = StoreReviewRole("StorePhase2Dev", "Store Phase 2 Developer Rebuttal", "developer-rebuttal",
-            repository, issueNumber, developerRebuttal);
-
-        // Tester rebuttal
-        var phase2TesterCall = RebuttalDispatch("Phase2TesterRebuttal", "Phase 2: Tester Rebuttal", AgentRole.Tester,
-            repository, planJson, contextIds, anonymizedReviewsJson, testerReview, roundCount, tenantId, llmResult);
-        var extractPhase2Tester = ExtractRebuttal(testerRebuttal, llmResult,
-            "ExtractPhase2Tester", "Extract Phase 2 Tester Rebuttal");
-        var storePhase2Tester = StoreReviewRole("StorePhase2Tester", "Store Phase 2 Tester Rebuttal", "tester-rebuttal",
-            repository, issueNumber, testerRebuttal);
-
-        // Security rebuttal
-        var phase2SecCall = RebuttalDispatch("Phase2SecRebuttal", "Phase 2: Security Rebuttal", AgentRole.Security,
-            repository, planJson, contextIds, anonymizedReviewsJson, securityReview, roundCount, tenantId, llmResult);
-        var extractPhase2Sec = ExtractRebuttal(securityRebuttal, llmResult,
-            "ExtractPhase2Sec", "Extract Phase 2 Security Rebuttal");
-        var storePhase2Sec = StoreReviewRole("StorePhase2Sec", "Store Phase 2 Security Rebuttal", "security-rebuttal",
-            repository, issueNumber, securityRebuttal);
-
-        // DevOps rebuttal
-        var phase2DevOpsCall = RebuttalDispatch("Phase2DevOpsRebuttal", "Phase 2: DevOps Rebuttal", AgentRole.Devops,
-            repository, planJson, contextIds, anonymizedReviewsJson, devopsReview, roundCount, tenantId, llmResult);
-        var extractPhase2DevOps = ExtractRebuttal(devopsRebuttal, llmResult,
-            "ExtractPhase2DevOps", "Extract Phase 2 DevOps Rebuttal");
-        var storePhase2DevOps = StoreReviewRole("StorePhase2DevOps", "Store Phase 2 DevOps Rebuttal", "devops-rebuttal",
-            repository, issueNumber, devopsRebuttal);
-
-        // Product Owner rebuttal
-        var phase2POCall = RebuttalDispatch("Phase2PORebuttal", "Phase 2: PO Rebuttal", AgentRole.ProductOwner,
-            repository, planJson, contextIds, anonymizedReviewsJson, productOwnerReview, roundCount, tenantId, llmResult);
-        var extractPhase2PO = ExtractRebuttal(productOwnerRebuttal, llmResult,
-            "ExtractPhase2PO", "Extract Phase 2 PO Rebuttal");
-        var storePhase2PO = StoreReviewRole("StorePhase2PO", "Store Phase 2 PO Rebuttal", "product_owner-rebuttal",
-            repository, issueNumber, productOwnerRebuttal);
-
-        // Senior Developer rebuttal
-        var phase2SrDevCall = RebuttalDispatch("Phase2SrDevRebuttal", "Phase 2: Senior Dev Rebuttal", AgentRole.SeniorDeveloper,
-            repository, planJson, contextIds, anonymizedReviewsJson, seniorDeveloperReview, roundCount, tenantId, llmResult);
-        var extractPhase2SrDev = ExtractRebuttal(seniorDeveloperRebuttal, llmResult,
-            "ExtractPhase2SrDev", "Extract Phase 2 Senior Dev Rebuttal");
-        var storePhase2SrDev = StoreReviewRole("StorePhase2SrDev", "Store Phase 2 Senior Dev Rebuttal", "senior_developer-rebuttal",
-            repository, issueNumber, seniorDeveloperRebuttal);
-
-        // ================================================================
-        // Aggregate Rebuttals + Check Early Termination
-        // ================================================================
-        var aggregateRebuttals = new SetVariable
+        // ── Step 4: Map to legacy outputs ──────────────────────────────
+        var mapOutputs = new SetVariable
         {
-            Id = "AggregateRebuttals", Name = "Aggregate Rebuttals",
-            Variable = allRebuttalsJson,
-            Value = new Input<object?>(ctx =>
-            {
-                var rebuttals = new List<object>();
-                var allApprove = true;
-
-                foreach (var role in ReviewRoles)
-                {
-                    var rebuttalJson = roleRebuttalVariables[role].Get(ctx);
-                    var rebuttalEntry = new Dictionary<string, object>
-                    {
-                        ["role"] = role,
-                        ["rebuttal"] = rebuttalJson,
-                    };
-                    rebuttals.Add(rebuttalEntry);
-
-                    // Check revisedVerdict
-                    try
-                    {
-                        if (!string.IsNullOrWhiteSpace(rebuttalJson) && rebuttalJson != "{}")
-                        {
-                            using var doc = JsonDocument.Parse(rebuttalJson);
-                            if (doc.RootElement.TryGetProperty("revisedVerdict", out var rv))
-                            {
-                                var verdict = rv.GetString() ?? "";
-                                if (verdict != "approve")
-                                    allApprove = false;
-                            }
-                            else
-                            {
-                                allApprove = false;
-                            }
-                        }
-                        else
-                        {
-                            allApprove = false;
-                        }
-                    }
-                    catch
-                    {
-                        allApprove = false;
-                    }
-                }
-
-                allRebuttalApproved.Set(ctx, allApprove ? "true" : "false");
-
-                var rebuttalsArray = JsonSerializer.Serialize(rebuttals);
-
-                // Append to discussion log
-                var currentLog = discussionLog.Get(ctx);
-                var logEntries = new List<object>();
-                try
-                {
-                    if (!string.IsNullOrWhiteSpace(currentLog) && currentLog != "[]")
-                        logEntries = JsonSerializer.Deserialize<List<object>>(currentLog) ?? [];
-                }
-                catch { /* start fresh */ }
-
-                var round = roundCount.Get(ctx);
-                foreach (var rebuttal in rebuttals)
-                {
-                    logEntries.Add(new Dictionary<string, object>
-                    {
-                        ["round"] = round,
-                        ["type"] = "phase2-rebuttal",
-                        ["data"] = rebuttal,
-                    });
-                }
-                discussionLog.Set(ctx, JsonSerializer.Serialize(logEntries));
-
-                return (object)rebuttalsArray;
-            })
-        };
-        aggregateRebuttals.SetDisplayText("Aggregate Rebuttals");
-
-        // ================================================================
-        // Early Termination Check — all revisedVerdict == "approve"?
-        // ================================================================
-        var earlyTermination = new FlowDecision(ctx => allRebuttalApproved.Get(ctx) == "true")
-        { Id = "EarlyTermination", Name = "All Rebuttals Approve?" };
-        earlyTermination.SetDisplayText("All Rebuttals Approve?");
-
-        // ================================================================
-        // Set Approved (from early termination)
-        // ================================================================
-        var setApprovedEarly = new SetVariable
-        {
-            Id = "SetApprovedEarly", Name = "Set Approved (Early)",
+            Id = "MapToLegacyOutputs", Name = "Map To Legacy Outputs",
             Variable = decision,
-            Value = new Input<object?>(ctx =>
+            Value = new(ctx =>
             {
-                reviewNotes.Set(ctx, "All 7 reviewers approved the plan during rebuttal round (unanimous consensus).");
-                return (object)"approved";
+                var found = planFound.Get(ctx);
+                planJsonOut.Set(ctx, found ? acceptedPlanJson.Get(ctx) : planJsonIn.Get(ctx));
+                discussionLog.Set(ctx, PlanBindingHelper.BuildDiscussionLogProjection(lineageJson.Get(ctx)));
+                reviewNotes.Set(ctx, found
+                    ? "Plan accepted through the document lifecycle (unified review)."
+                    : "No accepted plan for this issue — escalating to human.");
+                return (object)PlanBindingHelper.MapDecisionForLegacyOutput(found);
             })
         };
-        setApprovedEarly.SetDisplayText("Set Approved (Early Consensus)");
+        mapOutputs.SetDisplayText("Map To Legacy Outputs");
 
-        // ================================================================
-        // Phase 3: PO Decision — product_owner sees all reviews + rebuttals
-        // ================================================================
-        var phase3PODecisionCall = new DispatchWorkflow
+        // ── Step 5: Expose the legacy output shape ─────────────────────
+        var exposeOutput = new Sequence
         {
-            Id = "Phase3PODecision", Name = "Phase 3: PO Decision",
-            WorkflowDefinitionId = new("llm-call"),
-            Input = new(ctx => new Dictionary<string, object>
-            {
-                ["role"] = AgentRole.ProductOwner.ToWire(),
-                ["action"] = AgentAction.ReviewScope.ToWire(),
-                ["tenantId"] = tenantId.Get(ctx),
-                ["variables"] = new Dictionary<string, object>
-                {
-                    ["planJson"] = planJson.Get(ctx),
-                    ["allReviews"] = allReviewsJson.Get(ctx),
-                    ["allRebuttals"] = allRebuttalsJson.Get(ctx),
-                    ["phase"] = "po-decision",
-                    ["roundNumber"] = roundCount.Get(ctx),
-                },
-                ["enableTools"] = true,
-            }),
-            WaitForCompletion = new(true),
-            Result = new(llmResult),
-        };
-        phase3PODecisionCall.SetDisplayText("Phase 3: PO Decision");
-
-        // ================================================================
-        // Extract PO Decision
-        // ================================================================
-        var extractPODecision = new SetVariable
-        {
-            Id = "ExtractPODecision", Name = "Extract PO Decision",
-            Variable = decision,
-            Value = new Input<object?>(ctx =>
-            {
-                var result = llmResult.Get(ctx);
-                var output = "";
-                if (result != null && result.TryGetValue("llmResponse", out var r))
-                    output = r?.ToString() ?? "";
-
-                // Try to extract JSON from the response
-                var poDecision = "needsHuman";
-                var suggestions = "[]";
-                var modifiedPlan = "";
-                var notes = "";
-
-                try
-                {
-                    var jsonStart = output.IndexOf('{');
-                    var jsonEnd = output.LastIndexOf('}');
-                    if (jsonStart >= 0 && jsonEnd > jsonStart)
-                    {
-                        var extracted = output[jsonStart..(jsonEnd + 1)];
-                        using var doc = JsonDocument.Parse(extracted);
-                        var root = doc.RootElement;
-
-                        if (root.TryGetProperty("decision", out var d))
-                            poDecision = d.GetString() ?? "needsHuman";
-                        if (root.TryGetProperty("suggestions", out var s))
-                            suggestions = s.GetRawText();
-                        if (root.TryGetProperty("modifiedPlan", out var mp))
-                        {
-                            modifiedPlan = mp.ValueKind == JsonValueKind.String
-                                ? mp.GetString() ?? ""
-                                : mp.GetRawText();
-                        }
-                        if (root.TryGetProperty("notes", out var n))
-                            notes = n.GetString() ?? "";
-
-                        // Also check for deferred/split in PO output
-                        if (root.TryGetProperty("deferred", out var def))
-                            deferred.Set(ctx, def.GetRawText());
-                        if (root.TryGetProperty("split", out var sp))
-                            split.Set(ctx, sp.GetRawText());
-                    }
-                }
-                catch
-                {
-                    poDecision = "needsHuman";
-                    notes = $"Failed to parse PO decision: {output}";
-                }
-
-                suggestionsJson.Set(ctx, suggestions);
-                reviewNotes.Set(ctx, notes);
-
-                // If needsModification and there's a modifiedPlan, update planJson
-                if (poDecision == "needsModification" && !string.IsNullOrWhiteSpace(modifiedPlan))
-                    planJson.Set(ctx, modifiedPlan);
-
-                // Append to discussion log
-                var currentLog = discussionLog.Get(ctx);
-                var logEntries = new List<object>();
-                try
-                {
-                    if (!string.IsNullOrWhiteSpace(currentLog) && currentLog != "[]")
-                        logEntries = JsonSerializer.Deserialize<List<object>>(currentLog) ?? [];
-                }
-                catch { /* start fresh */ }
-
-                var round = roundCount.Get(ctx);
-                logEntries.Add(new Dictionary<string, object>
-                {
-                    ["round"] = round,
-                    ["type"] = "phase3-po-decision",
-                    ["decision"] = poDecision,
-                    ["notes"] = notes,
-                    ["suggestions"] = suggestions,
-                });
-                discussionLog.Set(ctx, JsonSerializer.Serialize(logEntries));
-
-                return (object)poDecision;
-            })
-        };
-        extractPODecision.SetDisplayText("Extract PO Decision");
-
-        // Store PO decision
-        var storePODecisionActivity = new StoreRoleFindingActivity
-        {
-            Id = "StorePODecision", Name = "Store PO Decision",
-            Repository = new Input<string>(ctx => repository.Get(ctx)),
-            IssueNumber = new Input<int>(ctx => issueNumber.Get(ctx)),
-            Role = new Input<string>(ctx => $"po-decision-round-{roundCount.Get(ctx)}"),
-            FindingsJson = new Input<string>(ctx =>
-            {
-                var decisionData = new Dictionary<string, object>
-                {
-                    ["decision"] = decision.Get(ctx),
-                    ["notes"] = reviewNotes.Get(ctx),
-                    ["suggestions"] = suggestionsJson.Get(ctx),
-                };
-                return JsonSerializer.Serialize(decisionData);
-            }),
-            ContextId = new Output<string>(new Variable<string>()),
-        };
-        storePODecisionActivity.SetDisplayText("Store PO Decision");
-
-        // ================================================================
-        // PO Decision Routing
-        // ================================================================
-
-        // Check: approved?
-        var poApprovedCheck = new FlowDecision(ctx => decision.Get(ctx) == "approved")
-        { Id = "POApprovedCheck", Name = "PO Approved?" };
-        poApprovedCheck.SetDisplayText("PO: Approved?");
-
-        // Check: needsHuman?
-        var poNeedsHumanCheck = new FlowDecision(ctx => decision.Get(ctx) == "needsHuman")
-        { Id = "PONeedsHumanCheck", Name = "PO Needs Human?" };
-        poNeedsHumanCheck.SetDisplayText("PO: Needs Human?");
-
-        // needsModification path: increment round, check max
-        var incrementRound = new SetVariable
-        {
-            Id = "IncrRound", Name = "Increment Round",
-            Variable = roundCount,
-            Value = new Input<object?>(ctx => (object)(roundCount.Get(ctx) + 1))
-        };
-        incrementRound.SetDisplayText("Increment Round");
-
-        var canContinue = new FlowDecision(ctx => roundCount.Get(ctx) <= maxRounds.Get(ctx))
-        { Id = "CanContinue", Name = "Round <= Max?" };
-        canContinue.SetDisplayText("Round <= Max?");
-
-        // ================================================================
-        // Max rounds exceeded — force needsHuman
-        // ================================================================
-        var forceNeedsHuman = new SetVariable
-        {
-            Id = "ForceNeedsHuman", Name = "Force Needs Human",
-            Variable = decision,
-            Value = new Input<object?>(ctx =>
-            {
-                reviewNotes.Set(ctx, $"Max review rounds ({maxRounds.Get(ctx)}) exceeded without consensus. Escalating to human.");
-                return (object)"needsHuman";
-            })
-        };
-        forceNeedsHuman.SetDisplayText("Force Needs Human");
-
-        // ================================================================
-        // Set Outputs
-        // ================================================================
-        var setOutputs = new Sequence
-        {
-            Id = "SetOutputs", Name = "Set Outputs",
+            Id = "ExposeOutput", Name = "Expose Output",
             Activities =
             {
-                new SetOutput
-                    { Id = "OutDecision", OutputName = new("decision"), OutputValue = new(ctx => (object)decision.Get(ctx)) },
-                new SetOutput
-                    { Id = "OutPlanJson", OutputName = new("planJson"), OutputValue = new(ctx => (object)planJson.Get(ctx)) },
-                new SetOutput
-                    { Id = "OutReviewNotes", OutputName = new("reviewNotes"), OutputValue = new(ctx => (object)reviewNotes.Get(ctx)) },
-                new SetOutput
-                    { Id = "OutDeferred", OutputName = new("deferred"), OutputValue = new(ctx => (object)deferred.Get(ctx)) },
-                new SetOutput
-                    { Id = "OutSplit", OutputName = new("split"), OutputValue = new(ctx => (object)split.Get(ctx)) },
-                new SetOutput
-                    { Id = "OutDiscussionLog", OutputName = new("discussionLog"), OutputValue = new(ctx => (object)discussionLog.Get(ctx)) },
-                new SetOutput
-                    { Id = "OutSuggestionsJson", OutputName = new("suggestionsJson"), OutputValue = new(ctx => (object)suggestionsJson.Get(ctx)) },
+                WithLabel(new SetOutput { Id = "OutDecision", Name = "Output Decision", OutputName = new("decision"), OutputValue = new(ctx => (object)(decision.Get(ctx) ?? "needsHuman")) }, "Output Decision"),
+                WithLabel(new SetOutput { Id = "OutPlanJson", Name = "Output Plan Json", OutputName = new("planJson"), OutputValue = new(ctx => (object)(planJsonOut.Get(ctx) ?? "")) }, "Output Plan Json"),
+                WithLabel(new SetOutput { Id = "OutReviewNotes", Name = "Output Review Notes", OutputName = new("reviewNotes"), OutputValue = new(ctx => (object)(reviewNotes.Get(ctx) ?? "")) }, "Output Review Notes"),
+                WithLabel(new SetOutput { Id = "OutDeferred", Name = "Output Deferred", OutputName = new("deferred"), OutputValue = new(_ => (object)"[]") }, "Output Deferred"),
+                WithLabel(new SetOutput { Id = "OutSplit", Name = "Output Split", OutputName = new("split"), OutputValue = new(_ => (object)"[]") }, "Output Split"),
+                WithLabel(new SetOutput { Id = "OutDiscussionLog", Name = "Output Discussion Log", OutputName = new("discussionLog"), OutputValue = new(ctx => (object)(discussionLog.Get(ctx) ?? "[]")) }, "Output Discussion Log"),
+                WithLabel(new SetOutput { Id = "OutSuggestionsJson", Name = "Output Suggestions Json", OutputName = new("suggestionsJson"), OutputValue = new(_ => (object)"[]") }, "Output Suggestions Json"),
             }
         };
-        setOutputs.SetDisplayText("Set Outputs");
+        exposeOutput.SetDisplayText("Expose Output");
 
-        var finish = new Finish { Id = "Finish", Name = "Complete" };
-        finish.SetDisplayText("Complete");
-
-        // ================================================================
-        // Flowchart
-        // ================================================================
+        // ── Build the flowchart ────────────────────────────────────────
         builder.Root = new Flowchart
         {
             Id = "PlanReviewFlowchart",
-            Start = init,
+            Name = "Plan Review Flowchart",
+            Start = readInputs,
             Activities =
             {
-                // Init
-                init,
-
-                // Phase 1: 7 role reviews (sequential) with per-role persistence
-                phase1ArchCall, extractPhase1Arch, storePhase1Arch,
-                phase1DevCall, extractPhase1Dev, storePhase1Dev,
-                phase1TesterCall, extractPhase1Tester, storePhase1Tester,
-                phase1SecCall, extractPhase1Sec, storePhase1Sec,
-                phase1DevOpsCall, extractPhase1DevOps, storePhase1DevOps,
-                phase1POCall, extractPhase1PO, storePhase1PO,
-                phase1SrDevCall, extractPhase1SrDev, storePhase1SrDev,
-
-                // Aggregate + anonymize
-                aggregateReviews, buildAnonymized,
-
-                // Phase 2: 7 rebuttals (sequential) with per-role persistence
-                phase2ArchCall, extractPhase2Arch, storePhase2Arch,
-                phase2DevCall, extractPhase2Dev, storePhase2Dev,
-                phase2TesterCall, extractPhase2Tester, storePhase2Tester,
-                phase2SecCall, extractPhase2Sec, storePhase2Sec,
-                phase2DevOpsCall, extractPhase2DevOps, storePhase2DevOps,
-                phase2POCall, extractPhase2PO, storePhase2PO,
-                phase2SrDevCall, extractPhase2SrDev, storePhase2SrDev,
-
-                // Aggregate rebuttals + early termination check
-                aggregateRebuttals, earlyTermination,
-
-                // Early termination path
-                setApprovedEarly,
-
-                // Phase 3: PO Decision
-                phase3PODecisionCall, extractPODecision, storePODecisionActivity,
-                poApprovedCheck, poNeedsHumanCheck,
-
-                // Round management
-                incrementRound, canContinue, forceNeedsHuman,
-
-                // Outputs
-                setOutputs, finish,
+                readInputs, computeReEntry, fetchAcceptedPlan, mapOutputs, exposeOutput,
             },
             Connections =
             {
-                // Init → Phase 1 sequential role reviews with per-role persistence
-                Connect(init, phase1ArchCall),
-                Connect(phase1ArchCall, extractPhase1Arch),
-                Connect(extractPhase1Arch, storePhase1Arch),
-                Connect(storePhase1Arch, phase1DevCall),
-
-                Connect(phase1DevCall, extractPhase1Dev),
-                Connect(extractPhase1Dev, storePhase1Dev),
-                Connect(storePhase1Dev, phase1TesterCall),
-
-                Connect(phase1TesterCall, extractPhase1Tester),
-                Connect(extractPhase1Tester, storePhase1Tester),
-                Connect(storePhase1Tester, phase1SecCall),
-
-                Connect(phase1SecCall, extractPhase1Sec),
-                Connect(extractPhase1Sec, storePhase1Sec),
-                Connect(storePhase1Sec, phase1DevOpsCall),
-
-                Connect(phase1DevOpsCall, extractPhase1DevOps),
-                Connect(extractPhase1DevOps, storePhase1DevOps),
-                Connect(storePhase1DevOps, phase1POCall),
-
-                Connect(phase1POCall, extractPhase1PO),
-                Connect(extractPhase1PO, storePhase1PO),
-                Connect(storePhase1PO, phase1SrDevCall),
-
-                Connect(phase1SrDevCall, extractPhase1SrDev),
-                Connect(extractPhase1SrDev, storePhase1SrDev),
-
-                // → Aggregate reviews → anonymize → Phase 2
-                Connect(storePhase1SrDev, aggregateReviews),
-                Connect(aggregateReviews, buildAnonymized),
-
-                // Phase 2 sequential rebuttals
-                Connect(buildAnonymized, phase2ArchCall),
-                Connect(phase2ArchCall, extractPhase2Arch),
-                Connect(extractPhase2Arch, storePhase2Arch),
-                Connect(storePhase2Arch, phase2DevCall),
-
-                Connect(phase2DevCall, extractPhase2Dev),
-                Connect(extractPhase2Dev, storePhase2Dev),
-                Connect(storePhase2Dev, phase2TesterCall),
-
-                Connect(phase2TesterCall, extractPhase2Tester),
-                Connect(extractPhase2Tester, storePhase2Tester),
-                Connect(storePhase2Tester, phase2SecCall),
-
-                Connect(phase2SecCall, extractPhase2Sec),
-                Connect(extractPhase2Sec, storePhase2Sec),
-                Connect(storePhase2Sec, phase2DevOpsCall),
-
-                Connect(phase2DevOpsCall, extractPhase2DevOps),
-                Connect(extractPhase2DevOps, storePhase2DevOps),
-                Connect(storePhase2DevOps, phase2POCall),
-
-                Connect(phase2POCall, extractPhase2PO),
-                Connect(extractPhase2PO, storePhase2PO),
-                Connect(storePhase2PO, phase2SrDevCall),
-
-                Connect(phase2SrDevCall, extractPhase2SrDev),
-                Connect(extractPhase2SrDev, storePhase2SrDev),
-
-                // → Aggregate rebuttals → early termination check
-                Connect(storePhase2SrDev, aggregateRebuttals),
-                Connect(aggregateRebuttals, earlyTermination),
-
-                // Early termination: all approve → set approved → outputs → finish
-                ConnectOutcome(earlyTermination, "True", setApprovedEarly),
-                Connect(setApprovedEarly, setOutputs),
-
-                // Not all approve → Phase 3: PO Decision
-                ConnectOutcome(earlyTermination, "False", phase3PODecisionCall),
-                Connect(phase3PODecisionCall, extractPODecision),
-                Connect(extractPODecision, storePODecisionActivity),
-                Connect(storePODecisionActivity, poApprovedCheck),
-
-                // PO approved → outputs → finish
-                ConnectOutcome(poApprovedCheck, "True", setOutputs),
-
-                // PO not approved → check needsHuman
-                ConnectOutcome(poApprovedCheck, "False", poNeedsHumanCheck),
-
-                // PO needsHuman → outputs → finish
-                ConnectOutcome(poNeedsHumanCheck, "True", setOutputs),
-
-                // PO needsModification → increment round → check max
-                ConnectOutcome(poNeedsHumanCheck, "False", incrementRound),
-                Connect(incrementRound, canContinue),
-
-                // round <= max → loop back to Phase 2 (rebuild anonymized → rebuttals)
-                ConnectOutcome(canContinue, "True", buildAnonymized),
-
-                // round > max → force needsHuman → outputs
-                ConnectOutcome(canContinue, "False", forceNeedsHuman),
-                Connect(forceNeedsHuman, setOutputs),
-
-                // Outputs → finish
-                Connect(setOutputs, finish),
+                new(readInputs, computeReEntry),
+                new(computeReEntry, fetchAcceptedPlan),
+                new(fetchAcceptedPlan, mapOutputs),
+                new(mapOutputs, exposeOutput),
             }
         };
     }
-
-    // ================================================================
-    // Helper: Create a DispatchWorkflow for a Phase 1 role review
-    // ================================================================
-    private static DispatchWorkflow RoleReviewDispatch(
-        string id, string displayName, AgentRole role,
-        Variable<string> repository, Variable<string> planJson,
-        Variable<string> contextIds, Variable<string> workItemJson,
-        Variable<string> allReviewsJson, Variable<string> tenantId,
-        Variable<IDictionary<string, object>?> result)
-    {
-        var dispatch = new DispatchWorkflow
-        {
-            Id = id, Name = displayName,
-            WorkflowDefinitionId = new("llm-call"),
-            Input = new(ctx => new Dictionary<string, object>
-            {
-                ["role"] = role.ToWire(),
-                ["action"] = RolePhaseMap.GetReviewActionForRole(role).ToWire(),
-                ["tenantId"] = tenantId.Get(ctx),
-                ["variables"] = new Dictionary<string, object>
-                {
-                    ["planJson"] = planJson.Get(ctx),
-                    ["contextIds"] = contextIds.Get(ctx),
-                    ["workItemJson"] = workItemJson.Get(ctx),
-                    ["previousReviews"] = allReviewsJson.Get(ctx),
-                },
-                ["enableTools"] = true,
-            }),
-            WaitForCompletion = new(true),
-            Result = new(result),
-        };
-        dispatch.SetDisplayText(displayName);
-        return dispatch;
-    }
-
-    // ================================================================
-    // Helper: Create a DispatchWorkflow for a Phase 2 rebuttal
-    // ================================================================
-    private static DispatchWorkflow RebuttalDispatch(
-        string id, string displayName, AgentRole role,
-        Variable<string> repository, Variable<string> planJson,
-        Variable<string> contextIds, Variable<string> anonymizedReviewsJson,
-        Variable<string> previousReview, Variable<int> roundCount,
-        Variable<string> tenantId,
-        Variable<IDictionary<string, object>?> result)
-    {
-        var dispatch = new DispatchWorkflow
-        {
-            Id = id, Name = displayName,
-            WorkflowDefinitionId = new("llm-call"),
-            Input = new(ctx => new Dictionary<string, object>
-            {
-                ["role"] = role.ToWire(),
-                ["action"] = RolePhaseMap.GetReviewActionForRole(role).ToWire(),
-                ["tenantId"] = tenantId.Get(ctx),
-                ["variables"] = new Dictionary<string, object>
-                {
-                    ["planJson"] = planJson.Get(ctx),
-                    ["allReviews"] = anonymizedReviewsJson.Get(ctx),
-                    ["phase"] = "rebuttal",
-                    ["previousReview"] = previousReview.Get(ctx),
-                    ["roundNumber"] = roundCount.Get(ctx),
-                },
-                ["enableTools"] = true,
-            }),
-            WaitForCompletion = new(true),
-            Result = new(result),
-        };
-        dispatch.SetDisplayText(displayName);
-        return dispatch;
-    }
-
-    // ================================================================
-    // Helper: Extract a role's review from llmResult into a variable (Phase 1)
-    // ================================================================
-    private static SetVariable ExtractReview(
-        Variable<string> target,
-        Variable<IDictionary<string, object>?> llmResult,
-        string role,
-        string id, string displayName)
-    {
-        var sv = new SetVariable
-        {
-            Id = id, Name = displayName,
-            Variable = target,
-            Value = new Input<object?>(ctx =>
-            {
-                var result = llmResult.Get(ctx);
-                if (result != null && result.TryGetValue("llmResponse", out var r))
-                {
-                    var output = r?.ToString() ?? "{}";
-
-                    // Try to extract JSON from the response
-                    var jsonStart = output.IndexOf('{');
-                    var jsonEnd = output.LastIndexOf('}');
-                    if (jsonStart >= 0 && jsonEnd > jsonStart)
-                    {
-                        var jsonCandidate = output[jsonStart..(jsonEnd + 1)];
-                        try
-                        {
-                            // Validate it's parseable JSON
-                            JsonDocument.Parse(jsonCandidate);
-                            return (object)jsonCandidate;
-                        }
-                        catch
-                        {
-                            // Not valid JSON — wrap as comments
-                        }
-                    }
-
-                    // Fallback: wrap raw text as a concerns review
-                    return (object)JsonSerializer.Serialize(new Dictionary<string, string>
-                    {
-                        ["verdict"] = "concerns",
-                        ["comments"] = output,
-                        ["suggestedChanges"] = "",
-                    });
-                }
-                return (object)"{}";
-            })
-        };
-        sv.SetDisplayText(displayName);
-        return sv;
-    }
-
-    // ================================================================
-    // Helper: Extract a role's rebuttal from llmResult into a variable (Phase 2)
-    // ================================================================
-    private static SetVariable ExtractRebuttal(
-        Variable<string> target,
-        Variable<IDictionary<string, object>?> llmResult,
-        string id, string displayName)
-    {
-        var sv = new SetVariable
-        {
-            Id = id, Name = displayName,
-            Variable = target,
-            Value = new Input<object?>(ctx =>
-            {
-                var result = llmResult.Get(ctx);
-                if (result != null && result.TryGetValue("llmResponse", out var r))
-                {
-                    var output = r?.ToString() ?? "{}";
-
-                    // Try to extract JSON from the response
-                    var jsonStart = output.IndexOf('{');
-                    var jsonEnd = output.LastIndexOf('}');
-                    if (jsonStart >= 0 && jsonEnd > jsonStart)
-                    {
-                        var jsonCandidate = output[jsonStart..(jsonEnd + 1)];
-                        try
-                        {
-                            JsonDocument.Parse(jsonCandidate);
-                            return (object)jsonCandidate;
-                        }
-                        catch
-                        {
-                            // Not valid JSON — wrap with default structure
-                        }
-                    }
-
-                    // Fallback: wrap raw text as a "concerns" rebuttal
-                    return (object)JsonSerializer.Serialize(new Dictionary<string, object>
-                    {
-                        ["responses"] = Array.Empty<object>(),
-                        ["revisedVerdict"] = "concerns",
-                        ["rawText"] = output,
-                    });
-                }
-                return (object)"{}";
-            })
-        };
-        sv.SetDisplayText(displayName);
-        return sv;
-    }
-
-    // ================================================================
-    // Helper: Store a role's review/rebuttal result immediately after extraction
-    // ================================================================
-    private static StoreRoleFindingActivity StoreReviewRole(
-        string id, string name, string role,
-        Variable<string> repository, Variable<int> issueNumber,
-        Variable<string> reviewVar)
-    {
-        var store = new StoreRoleFindingActivity
-        {
-            Id = id, Name = name,
-            Repository = new Input<string>(ctx => repository.Get(ctx)),
-            IssueNumber = new Input<int>(ctx => issueNumber.Get(ctx)),
-            Role = new Input<string>(role),
-            FindingsJson = new Input<string>(ctx => reviewVar.Get(ctx)),
-            ContextId = new Output<string>(new Variable<string>()),
-        };
-        store.SetDisplayText(name);
-        return store;
-    }
-
-    // ================================================================
-    // Connection helpers
-    // ================================================================
-    private static FlowConnection Connect(IActivity source, IActivity target)
-        => new(new FlowEndpoint(source), new FlowEndpoint(target));
-
-    private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
-        => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
 }

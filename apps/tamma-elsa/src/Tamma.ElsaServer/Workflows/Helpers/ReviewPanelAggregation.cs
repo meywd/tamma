@@ -15,7 +15,7 @@ namespace Tamma.ElsaServer.Workflows.Helpers;
 ///
 /// <para><b>Default config = <see cref="PanelDecisionRule.Unanimous"/> +
 /// <see cref="PanelAggregationRules.MinimumUsableReviews"/> = roster size</b> ⇒
-/// behavioural parity with <see cref="ReviewAggregationHelper.AggregateVerdicts"/>
+/// behavioural parity with the retired legacy <c>AggregateVerdicts</c>
 /// (<c>All(approve)</c>). Deliberate divergences (AC8): an empty panel is
 /// <see cref="PanelUndecidableReason.EmptyPanel"/> (NOT approved — the old
 /// <c>All()</c>-on-empty bug); a garbage/failed member drops the panel below quorum
@@ -72,7 +72,7 @@ public static class ReviewPanelAggregation
 
     /// <summary>
     /// The default aggregation config for a roster of <paramref name="rosterSize"/>:
-    /// unanimous + full-roster minimum — the <see cref="ReviewAggregationHelper.AggregateVerdicts"/>
+    /// unanimous + full-roster minimum — the legacy <c>AggregateVerdicts</c>
     /// parity configuration.
     /// </summary>
     public static PanelAggregationRules DefaultsFor(int rosterSize) =>

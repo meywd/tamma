@@ -15,7 +15,7 @@ namespace Tamma.ElsaServer.Workflows.Helpers;
 /// stage transition, round/repair accounting, violation-feedback composition,
 /// ambiguity-threshold check, and outcome/lineage assembly lives here so the
 /// fail-closed behaviour is unit-testable without a workflow runtime (the
-/// <see cref="TriagePoDecisionHelper"/> / <see cref="ReviewAggregationHelper"/>
+/// <see cref="TriagePoDecisionHelper"/> / the legacy plan-review aggregation
 /// precedent).
 ///
 /// <para>All loop state lives in a single serializable <see cref="LifecycleState"/>

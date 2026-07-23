@@ -76,86 +76,27 @@ public class ValidationRetryFeedbackTests
     }
 
     [Test]
-    public void AppendFeedback_PlanValidationHelperErrors_FlowVerbatim()
+    public void AppendFeedback_ValidatorErrors_FlowVerbatim()
     {
-        // Use the REAL validator output, not a hand-written string.
-        var (_, isValid, errors) = PlanValidationHelper.ValidatePlan("{\"foo\": 1}");
-        isValid.Should().BeFalse("a plan without tasks/steps or a file map must fail validation");
-
+        // The validate step joins individual errors with "; "; the helper must unpack
+        // each into its own bullet verbatim. (The PlanGeneration retry-loop cases were
+        // retired in Story 39-14 — the lifecycle now owns validate → repair/revise; the
+        // render-drop contract stays pinned on ValidationFeedbackHelper here.)
+        const string errors = "Missing 'tasks' or 'steps'; Missing file map";
         var merged = ValidationFeedbackHelper.AppendFeedback("ctx", errors);
 
-        merged.Should().Contain("Missing 'tasks' or 'steps'",
-            "PlanValidationHelper error strings must flow through verbatim");
-        merged.Should().Contain("Missing file map");
+        merged.Should().Contain("- Missing 'tasks' or 'steps'",
+            "validator error strings must flow through verbatim, one bullet each");
+        merged.Should().Contain("- Missing file map");
     }
 
     // ====================================================================
-    // PlanGenerationWorkflow — carrier: contextFindings (Plan family template)
+    // Story 39-14 — PlanGeneration's bespoke validate→retry loop is RETIRED.
+    // Its carrier-merge contract now lives inside the document-lifecycle binding;
+    // PlanBindingHelperTests pins the merged contextFindings arrives (with NO dead
+    // decompositionJson/validationErrors key) at this story's dispatch seam. The
+    // TaskCreation / TestCaseCreation sections below stay (39-15 scope).
     // ====================================================================
-
-    [Test]
-    public void PlanGeneration_FirstAttempt_ContextFindingsIsPoSummary_AndNoValidationErrorsKey()
-    {
-        var vars = MaterializeDispatchVariables(
-            new PlanGenerationWorkflow(), "GeneratePlan",
-            new Dictionary<string, string> { ["POSummary"] = "PO summary text" });
-
-        vars["contextFindings"].Should().Be("PO summary text",
-            "first attempt must pass contextFindings exactly as before the fix");
-        vars.Should().NotContainKey("validationErrors",
-            "the undeclared (render-dropped) validationErrors key must be gone");
-    }
-
-    [Test]
-    public void PlanGeneration_FirstAttempt_VariableKeys_UnchangedFromToday()
-    {
-        var vars = MaterializeDispatchVariables(new PlanGenerationWorkflow(), "GeneratePlan");
-
-        vars.Keys.Should().BeEquivalentTo(new[]
-        {
-            "workItemJson", "contextFindings", "poSummary", "contextIds",
-            "repository", "reviewNotes", "revisionNumber",
-        }, "first-attempt dispatch variables must match the pre-fix set minus the dead validationErrors key");
-    }
-
-    [Test]
-    public void PlanGeneration_Retry_MergesValidationErrorsIntoDeclaredContextFindings()
-    {
-        var vars = MaterializeDispatchVariables(
-            new PlanGenerationWorkflow(), "GeneratePlan",
-            new Dictionary<string, string>
-            {
-                ["POSummary"] = "PO summary text",
-                ["ValidationErrors"] = SampleErrors,
-            });
-
-        var contextFindings = vars["contextFindings"].Should().BeOfType<string>().Subject;
-        contextFindings.Should().StartWith("PO summary text",
-            "the original context must be preserved ahead of the feedback block");
-        contextFindings.Should().Contain(ValidationFeedbackHelper.FeedbackHeader);
-        contextFindings.Should().Contain("- Missing 'tasks' or 'steps'");
-        contextFindings.Should().Contain("- Missing file map");
-
-        vars.Should().NotContainKey("validationErrors");
-    }
-
-    [Test]
-    public void PlanGeneration_Retry_PlanValidationHelperErrors_ReachDispatchVerbatim()
-    {
-        // End-to-end within the loop's seam: feed the REAL validator's error string
-        // (as ExtractValidate stores it into the ValidationErrors variable) and
-        // assert it reaches the dispatch under the declared key, verbatim.
-        var (_, isValid, errors) = PlanValidationHelper.ValidatePlan("not json at all");
-        isValid.Should().BeFalse();
-        errors.Should().Be("Empty plan");
-
-        var vars = MaterializeDispatchVariables(
-            new PlanGenerationWorkflow(), "GeneratePlan",
-            new Dictionary<string, string> { ["ValidationErrors"] = errors });
-
-        vars["contextFindings"].Should().BeOfType<string>()
-            .Which.Should().Contain("- Empty plan");
-    }
 
     // ====================================================================
     // TaskCreationWorkflow — carrier: contextFindings (shared Plan family template)
