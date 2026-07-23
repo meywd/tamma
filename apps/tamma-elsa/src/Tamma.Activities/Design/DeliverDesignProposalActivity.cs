@@ -146,7 +146,8 @@ public class DeliverDesignProposalActivity : CodeActivity<DesignDeliveryResult>
 
         try
         {
-            var proposal = JsonSerializer.Deserialize<DesignProposal>(proposalJson ?? "");
+            var proposal = JsonSerializer.Deserialize<Tamma.Core.Documents.Types.Design>(
+                proposalJson ?? "", Tamma.Core.Documents.DocumentJson.Options);
             if (proposal is not null && !string.IsNullOrWhiteSpace(proposal.Summary))
             {
                 sb.AppendLine("**Summary**");

@@ -3,13 +3,13 @@ using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Management.Activities.SetOutput;
-using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using System.Text.Json;
-using Tamma.Activities;
 using Tamma.Activities.Ambiguity;
-using Tamma.Activities.Ambiguity.Models;
+using Tamma.Activities.Documents;
 using Tamma.Api.Services.Agents;
+using Tamma.Core.Documents.Resume;
+using Tamma.ElsaServer.Workflows.Helpers;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
@@ -17,88 +17,68 @@ using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// Story 3.6 — Ambiguity Scoring sub-workflow. Given an issue / requirement it uses the LLM
-/// (via the MEDIATED <c>llm-call</c> path — the engine holds no LLM credential, TAMMA001) to
-/// score how ambiguous / underspecified the requirement is (a 0..1 score + a typed, itemised
-/// breakdown with specific recommendations), then compares the score to a caller-supplied
-/// threshold to DECIDE whether to trigger clarification before proceeding. Every transition is
-/// emitted as an <c>AMBIGUITY.*</c> DCB event.
+/// Story 39-13 — Ambiguity Scoring, re-implemented as a THIN BINDING over
+/// <see cref="DocumentLifecycleWorkflow"/>, producing a typed
+/// <see cref="Tamma.Core.Documents.Types.AmbiguityAssessment"/> document. The public surface
+/// is byte-stable (D1): same <c>DefinitionId = "ambiguity-scoring"</c>, same outputs
+/// (<c>sessionId</c>/<c>status</c>/<c>score</c>/<c>ambiguityCount</c>/<c>confidence</c>/
+/// <c>threshold</c>/<c>decision</c>/<c>assessment</c>) plus additive <c>outcome</c>/
+/// <c>documentId</c>.
 ///
-/// Flow:
-///   1. Read inputs (issue/requirement + optional context + tenantId + threshold; mint a
-///      session id if none)
-///   2. Emit AMBIGUITY.STARTED
-///   3. Score the requirement via DispatchWorkflow("llm-call")
-///      role=product_owner / action=score-ambiguity
-///   4. Parse the response fail-closed (empty/unparseable/out-of-range score → error terminal)
-///   5a. On success: emit AMBIGUITY.SCORED, then apply the threshold policy:
-///        - score ≥ threshold → emit AMBIGUITY.CLARIFICATION_TRIGGERED (decision="clarify")
-///        - score &lt; threshold → emit AMBIGUITY.BELOW_THRESHOLD (decision="proceed")
-///       and set outputs (score, breakdown, decision).
-///   5b. On failure: emit AMBIGUITY.FAILED (LOUD) and route to the AmbiguityError terminal.
-///
-/// Reuses the <see cref="ResearchWorkflow"/> / <see cref="AssessmentWorkflow"/> skeleton
-/// (llm-call → parse → fail-closed gate + error terminal). The scoring is AUTONOMOUS — there is
-/// no human gate / bookmark; the clarification it can trigger is handled by the sibling
-/// <see cref="ClarifyingQuestionsWorkflow"/> (Story 3.5), which a parent flow dispatches on the
-/// <c>decision="clarify"</c> output.
-///
-/// Fail-closed: if the scoring <c>llm-call</c> returns success=false, or the response cannot be
-/// parsed into a valid in-range score with a rationale, the workflow emits a LOUD
-/// <c>AMBIGUITY.FAILED</c> event and routes to the AmbiguityError terminal — it NEVER proceeds
-/// with a fabricated score. Prompt resolution is tenant→system→error (the <c>llm-call</c>
-/// registry never falls back to an empty/plain prompt).
-///
-/// NOTE (taxonomy): the scoring dispatches the dedicated <c>(product_owner, score-ambiguity)</c>
-/// pair (Story 3.6). The <c>score-ambiguity</c> action is a first-class member of the
-/// <see cref="AgentAction"/> taxonomy and is eligible for <c>product_owner</c> in
-/// <c>RolePhaseMap</c> (requirement clarity is a product_owner concern, consistent with
-/// <c>clarify-requirements</c> and <c>research</c>). Its system-default prompt template
-/// (<c>SystemPrompts.ScoreAmbiguityBody</c>) emits the structured JSON
-/// <see cref="AmbiguityParsing"/> parses, so the happy path produces a real
-/// <c>AMBIGUITY.SCORED</c> assessment rather than failing closed.
+/// <para><b>The threshold branch is RETIRED (D7).</b> "Ambiguity above threshold" is no
+/// longer an inline <c>ComputeDecision</c>/<c>ShouldClarify</c> branch; it is the typed
+/// <c>ambiguity-above-threshold</c> lifecycle outcome raised by the 39-5/39-6 policy
+/// machinery (threshold = acceptance-rules config, NOT a workflow constant), which the
+/// orchestrator routes to the Clarification lifecycle. This binding contains NO dispatch of
+/// <c>clarifying-questions</c> (AC4's no-edge pin) and no threshold constant. The legacy
+/// <c>threshold</c>/<c>decision</c> outputs are compat-only projections of the typed exit.</para>
 /// </summary>
+[ResumeBehavior(ResumeMode.LatestStateReEntry)]
 public class AmbiguityScoringWorkflow : WorkflowBase
 {
+    private const string AmbiguityAssessmentDocumentType = "ambiguity-assessment";
+
     protected override void Build(IWorkflowBuilder builder)
     {
         builder.Name = "AmbiguityScoring";
         builder.DefinitionId = "ambiguity-scoring";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description = "Score how ambiguous/underspecified a requirement is via the mediated LLM and decide whether to trigger clarification";
+        builder.Description = "Score how ambiguous/underspecified a requirement is via the generic document lifecycle; above-threshold routes to clarification as a typed outcome";
 
-        // ── Workflow variables ──────────────────────────────────────────
+        // ── Inputs (legacy `threshold` input retired — the threshold is acceptance-rules config, 39-5) ──
         var sessionId        = builder.WithVariable<Guid>();
         var issueId          = builder.WithVariable<string>();
         var requirement      = builder.WithVariable<string>();
         var ambiguityContext = builder.WithVariable<string>();
         var tenantId         = builder.WithVariable<string>("TenantId", "");
-        var threshold        = builder.WithVariable<double>();
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
 
-        var assessmentJson   = builder.WithVariable<string>();
-        var score            = builder.WithVariable<double>();
-        var ambiguityCount   = builder.WithVariable<int>();
-        var confidence       = builder.WithVariable<double>();
-        var decision         = builder.WithVariable<string>();
+        // ── 39-10 re-entry position ────────────────────────────────────
+        var reEntryPositionJson = builder.WithVariable<string>();
+        var reEntryDocJson  = builder.WithVariable<string>();
+        var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
 
-        // llm-call result container
-        var scoreLlm         = builder.WithVariable<IDictionary<string, object>?>();
-
-        // Success flag (fail-closed guard) + threshold decision
-        var ambiguityLlmOk   = builder.WithVariable<bool>();
-        var shouldClarify    = builder.WithVariable<bool>();
-
-        // Captured parse output
-        var assessment       = builder.WithVariable<AmbiguityAssessment>();
-
-        // Output variable (readable by a parent workflow)
-        var outputStatus     = builder.WithVariable<string>();
+        // ── Dispatched-workflow result + typed exit ────────────────────
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
+        var lifecycleAccepted = builder.WithVariable<bool>();
+        var isAmbiguity     = builder.WithVariable<bool>();
+        var hasAssessment   = builder.WithVariable<bool>();
+        var exitStatus      = builder.WithVariable<string>("ExitStatus", "");
+        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "");
+        var exitDocId       = builder.WithVariable<string>("ExitDocId", "");
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
+        var score           = builder.WithVariable<double>();
+        var ambiguityCount  = builder.WithVariable<int>();
+        var confidence      = builder.WithVariable<double>();
+        var threshold       = builder.WithVariable<double>();
+        var decision        = builder.WithVariable<string>("Decision", "");
+        var failureDetail   = builder.WithVariable<string>("FailureDetail", "");
+        var outputStatus    = builder.WithVariable<string>();
 
         // ── Step 1: Read inputs ────────────────────────────────────────
         var readInputs = new SetVariable
         {
-            Id = "ReadInputs",
-            Name = "Read Inputs",
+            Id = "ReadInputs", Name = "Read Inputs",
             Variable = sessionId,
             Value = new(context =>
             {
@@ -109,22 +89,51 @@ public class AmbiguityScoringWorkflow : WorkflowBase
                 requirement.Set(context, context.GetInput<string>("requirement") ?? string.Empty);
                 ambiguityContext.Set(context, context.GetInput<string>("context") ?? string.Empty);
                 tenantId.Set(context, context.GetInput<string>("tenantId") ?? string.Empty);
-
-                // Resolve the effective clarify threshold (caller value clamped to [0,1];
-                // ≤ 0 / unset → default). Kept in decimal by the pure policy, exposed as double
-                // to the workflow variables.
-                var requested = (decimal)context.GetInput<double>("threshold");
-                threshold.Set(context, (double)AmbiguityThresholds.Resolve(requested));
+                acceptanceRulesJson.Set(context, context.GetInput<string>("acceptanceRulesJson") ?? string.Empty);
                 return sid;
             })
         };
         readInputs.SetDisplayText("Read Inputs");
 
-        // ── Step 2: Emit AMBIGUITY.STARTED ─────────────────────────────
+        // ── Step 2: Compute 39-10 re-entry position ────────────────────
+        var computeReEntry = new ComputeReEntryPositionActivity
+        {
+            Id = "ComputeReEntryPosition", Name = "Compute Re-Entry Position",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentType = new(AmbiguityAssessmentDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            CorrelationId = new(ctx => issueId.Get(ctx)),
+            PositionJson = new(reEntryPositionJson),
+            ExistingDocumentJson = new(reEntryDocJson),
+        };
+        computeReEntry.SetDisplayText("Compute Re-Entry Position");
+
+        var readPositionStage = new SetVariable
+        {
+            Id = "ReadPositionStage", Name = "Read Position Stage",
+            Variable = positionStage,
+            Value = new(ctx =>
+            {
+                var position = DocumentLifecycleHelper.DeserializeReEntryPosition(reEntryPositionJson.Get(ctx));
+                return position?.ResumeAt switch
+                {
+                    LifecycleResumeStage.Complete => "complete",
+                    LifecycleResumeStage.Accept => "accept",
+                    LifecycleResumeStage.Review => "review",
+                    _ => "produce",
+                };
+            })
+        };
+        readPositionStage.SetDisplayText("Read Position Stage");
+
+        // ── Step 3: FreshRun gate — STARTED only on a fresh run ────────
+        var freshRun = new FlowDecision(ctx => positionStage.Get(ctx) == "produce")
+        { Id = "FreshRun", Name = "Fresh Run?" };
+        freshRun.SetDisplayText("Fresh Run?");
+
         var emitStarted = new EmitAmbiguityEventActivity
         {
-            Id = "EmitAmbiguityStarted",
-            Name = "Emit Ambiguity Started",
+            Id = "EmitAmbiguityStarted", Name = "Emit Ambiguity Started",
             EventType = new(AmbiguityEvents.Started),
             SessionId = new(ctx => sessionId.Get(ctx).ToString()),
             IssueId = new(ctx => issueId.Get(ctx)),
@@ -133,77 +142,74 @@ public class AmbiguityScoringWorkflow : WorkflowBase
         };
         emitStarted.SetDisplayText("Emit Ambiguity Started");
 
-        // ── Step 3: Score the requirement via llm-call ─────────────────
-        var scoreAmbiguityLlm = new DispatchWorkflow
+        // ── Step 4: Dispatch the generic document lifecycle ────────────
+        var dispatchLifecycle = new DispatchWorkflow
         {
-            Id = "ScoreAmbiguityLlm",
-            Name = "Score Ambiguity (LLM)",
-            WorkflowDefinitionId = new("llm-call"),
+            Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
+            WorkflowDefinitionId = new("document-lifecycle"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                // Dedicated scoring action (Story 3.6): (product_owner, score-ambiguity) resolves
-                // the structured-score prompt template that yields the JSON AmbiguityParsing
-                // recovers. Prompt resolution is tenant→system→error.
-                ["role"]     = AgentRole.ProductOwner.ToWire(),
-                ["action"]   = AgentAction.ScoreAmbiguity.ToWire(),
-                ["tenantId"] = tenantId.Get(ctx),
-                ["variables"] = new Dictionary<string, object>
+                ["documentType"]          = AmbiguityAssessmentDocumentType,
+                ["producerRole"]          = AgentRole.ProductOwner.ToWire(),
+                ["producerAction"]        = AgentAction.ScoreAmbiguity.ToWire(),
+                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
                 {
                     ["workItemJson"]    = requirement.Get(ctx) ?? "",
                     ["contextFindings"] = ambiguityContext.Get(ctx) ?? "",
                     ["conventions"]     = "",
-                },
-                ["enableTools"] = false,
+                }),
+                ["issueId"]             = issueId.Get(ctx) ?? "",
+                ["correlationId"]       = issueId.Get(ctx) ?? "",
+                ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
             }),
             WaitForCompletion = new(true),
-            Result = new(scoreLlm),
+            Result = new(lifecycleResult),
         };
-        scoreAmbiguityLlm.SetDisplayText("Score Ambiguity (LLM)");
+        dispatchLifecycle.SetDisplayText("Dispatch Document Lifecycle");
 
-        // ── Step 4: Parse the response (fail-closed) ───────────────────
-        var parseAmbiguity = new SetVariable
+        // ── Step 5: Read the typed lifecycle exit (fail-closed) ────────
+        var readLifecycleExit = new SetVariable
         {
-            Id = "ParseAmbiguity",
-            Name = "Parse Ambiguity",
+            Id = "ReadLifecycleExit", Name = "Read Lifecycle Exit",
             Variable = assessmentJson,
             Value = new(ctx =>
             {
-                var result = scoreLlm.Get(ctx);
-                if (!ReadSuccessFlag(result))
-                {
-                    ambiguityLlmOk.Set(ctx, false);
-                    return "{}";
-                }
+                var exit = LifecycleBindingHelper.ReadLifecycleResult(lifecycleResult.Get(ctx));
+                var accepted = LifecycleBindingHelper.IsAccepted(exit);
+                var ambiguity = AssessmentBindingHelper.IsAmbiguityOutcome(exit);
+                var (sc, count, conf) = AssessmentBindingHelper.ReadAssessment(exit.DocumentJson);
 
-                var text = result!.TryGetValue("llmResponse", out var r) ? r?.ToString() ?? "" : "";
-                var parsed = AmbiguityParsing.ParseAssessment(text);
-                if (parsed is null)
-                {
-                    // Fail-closed — no fabricated score.
-                    ambiguityLlmOk.Set(ctx, false);
-                    return "{}";
-                }
-
-                ambiguityLlmOk.Set(ctx, true);
-                assessment.Set(ctx, parsed);
-                score.Set(ctx, (double)parsed.Score);
-                ambiguityCount.Set(ctx, parsed.Ambiguities.Count);
-                confidence.Set(ctx, (double)parsed.Confidence);
-                return JsonSerializer.Serialize(parsed);
+                lifecycleAccepted.Set(ctx, accepted);
+                isAmbiguity.Set(ctx, ambiguity);
+                hasAssessment.Set(ctx, accepted || ambiguity);
+                exitStatus.Set(ctx, exit.Status);
+                exitOutcome.Set(ctx, exit.Outcome ?? "");
+                exitDocId.Set(ctx, exit.DocumentId ?? "");
+                score.Set(ctx, sc);
+                ambiguityCount.Set(ctx, count);
+                confidence.Set(ctx, conf);
+                threshold.Set(ctx, AssessmentBindingHelper.EffectiveAmbiguityThreshold(acceptanceRulesJson.Get(ctx)));
+                decision.Set(ctx, ambiguity ? "clarify" : accepted ? "proceed" : "");
+                failureDetail.Set(ctx, AssessmentBindingHelper.BuildFailureDetail(exit));
+                outputStatus.Set(ctx, (accepted || ambiguity) ? "scored" : exit.Status);
+                return exit.DocumentJson;
             })
         };
-        parseAmbiguity.SetDisplayText("Parse Ambiguity");
+        readLifecycleExit.SetDisplayText("Read Lifecycle Exit");
 
-        // Fail-closed gate: route to error terminal if scoring failed / unparseable.
-        var ambiguitySuccessCheck = new FlowDecision(ctx => ambiguityLlmOk.Get(ctx))
-        { Id = "AmbiguityLlmOk", Name = "Ambiguity LLM OK?" };
-        ambiguitySuccessCheck.SetDisplayText("Ambiguity LLM OK?");
+        // ── Step 6: routing (typed values only) ────────────────────────
+        var hasAssessmentGate = new FlowDecision(ctx => hasAssessment.Get(ctx))
+        { Id = "HasAssessment", Name = "Has Assessment?" };
+        hasAssessmentGate.SetDisplayText("Has Assessment?");
 
-        // ── Step 5a: Success path — emit SCORED, then apply threshold ──
+        var wasCompleteReEntry = new FlowDecision(ctx => positionStage.Get(ctx) == "complete")
+        { Id = "WasCompleteReEntry", Name = "Was Complete Re-Entry?" };
+        wasCompleteReEntry.SetDisplayText("Was Complete Re-Entry?");
+
         var emitScored = new EmitAmbiguityEventActivity
         {
-            Id = "EmitAmbiguityScored",
-            Name = "Emit Ambiguity Scored",
+            Id = "EmitAmbiguityScored", Name = "Emit Ambiguity Scored",
             EventType = new(AmbiguityEvents.Scored),
             SessionId = new(ctx => sessionId.Get(ctx).ToString()),
             IssueId = new(ctx => issueId.Get(ctx)),
@@ -215,68 +221,51 @@ public class AmbiguityScoringWorkflow : WorkflowBase
         };
         emitScored.SetDisplayText("Emit Ambiguity Scored");
 
-        var computeDecision = new SetVariable
-        {
-            Id = "ComputeDecision",
-            Name = "Compute Decision",
-            Variable = shouldClarify,
-            Value = new(ctx =>
-            {
-                var clarify = AmbiguityThresholds.ShouldClarify(
-                    (decimal)score.Get(ctx), (decimal)threshold.Get(ctx));
-                decision.Set(ctx, clarify ? "clarify" : "proceed");
-                return clarify;
-            })
-        };
-        computeDecision.SetDisplayText("Compute Decision");
+        var isAmbiguityGate = new FlowDecision(ctx => isAmbiguity.Get(ctx))
+        { Id = "IsAmbiguity", Name = "Ambiguity Above Threshold?" };
+        isAmbiguityGate.SetDisplayText("Ambiguity Above Threshold?");
 
-        var shouldClarifyCheck = new FlowDecision(ctx => shouldClarify.Get(ctx))
-        { Id = "ShouldClarify", Name = "Should Clarify?" };
-        shouldClarifyCheck.SetDisplayText("Should Clarify?");
-
-        // ── Step 5a-i: above threshold → trigger clarification ─────────
         var emitClarificationTriggered = new EmitAmbiguityEventActivity
         {
-            Id = "EmitClarificationTriggered",
-            Name = "Emit Clarification Triggered",
+            Id = "EmitClarificationTriggered", Name = "Emit Clarification Triggered",
             EventType = new(AmbiguityEvents.ClarificationTriggered),
             SessionId = new(ctx => sessionId.Get(ctx).ToString()),
             IssueId = new(ctx => issueId.Get(ctx)),
             TenantId = new(ctx => tenantId.Get(ctx)),
             Score = new(ctx => (double?)score.Get(ctx)),
             Threshold = new(ctx => threshold.Get(ctx)),
-            Detail = new("Score met/exceeded the clarify threshold — routing to clarifying questions"),
+            Detail = new("Assessment exceeded the effective clarify threshold — the lifecycle exited ambiguity-above-threshold for orchestrator routing to clarification"),
         };
         emitClarificationTriggered.SetDisplayText("Emit Clarification Triggered");
 
-        // ── Step 5a-ii: below threshold → proceed as-is ────────────────
         var emitBelowThreshold = new EmitAmbiguityEventActivity
         {
-            Id = "EmitBelowThreshold",
-            Name = "Emit Below Threshold",
+            Id = "EmitBelowThreshold", Name = "Emit Below Threshold",
             EventType = new(AmbiguityEvents.BelowThreshold),
             SessionId = new(ctx => sessionId.Get(ctx).ToString()),
             IssueId = new(ctx => issueId.Get(ctx)),
             TenantId = new(ctx => tenantId.Get(ctx)),
             Score = new(ctx => (double?)score.Get(ctx)),
             Threshold = new(ctx => threshold.Get(ctx)),
-            Detail = new("Score below the clarify threshold — proceeding without clarification"),
+            Detail = new("Assessment accepted below the clarify threshold — proceeding without clarification"),
         };
         emitBelowThreshold.SetDisplayText("Emit Below Threshold");
 
-        var setOutputResult = new SetVariable
+        var emitFailed = new EmitAmbiguityEventActivity
         {
-            Id = "SetOutputResult",
-            Name = "Set Output Result",
-            Variable = outputStatus,
-            Value = new(_ => "scored")
+            Id = "EmitAmbiguityFailed", Name = "Emit Ambiguity Failed",
+            EventType = new(AmbiguityEvents.Failed),
+            SessionId = new(ctx => sessionId.Get(ctx).ToString()),
+            IssueId = new(ctx => issueId.Get(ctx)),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Detail = new(ctx => failureDetail.Get(ctx)),
         };
-        setOutputResult.SetDisplayText("Set Output Result");
+        emitFailed.SetDisplayText("Emit Ambiguity Failed");
 
+        // ── Step 7: Expose output — the single terminal region ─────────
         var exposeOutput = new Sequence
         {
-            Id = "ExposeOutput",
-            Name = "Expose Output",
+            Id = "ExposeOutput", Name = "Expose Output",
             Activities =
             {
                 WithLabel(new SetOutput { Id = "OutputSessionId", Name = "Output Session Id", OutputName = new("sessionId"), OutputValue = new(ctx => (object)sessionId.Get(ctx).ToString()) }, "Output Session Id"),
@@ -287,29 +276,11 @@ public class AmbiguityScoringWorkflow : WorkflowBase
                 WithLabel(new SetOutput { Id = "OutputThreshold", Name = "Output Threshold", OutputName = new("threshold"), OutputValue = new(ctx => (object)threshold.Get(ctx)) }, "Output Threshold"),
                 WithLabel(new SetOutput { Id = "OutputDecision", Name = "Output Decision", OutputName = new("decision"), OutputValue = new(ctx => (object)(decision.Get(ctx) ?? "")) }, "Output Decision"),
                 WithLabel(new SetOutput { Id = "OutputAssessment", Name = "Output Assessment", OutputName = new("assessment"), OutputValue = new(ctx => (object)(assessmentJson.Get(ctx) ?? "{}")) }, "Output Assessment"),
+                WithLabel(new SetOutput { Id = "OutputOutcome", Name = "Output Outcome", OutputName = new("outcome"), OutputValue = new(ctx => (object)(exitOutcome.Get(ctx) ?? "")) }, "Output Outcome"),
+                WithLabel(new SetOutput { Id = "OutputDocumentId", Name = "Output Document Id", OutputName = new("documentId"), OutputValue = new(ctx => (object)(exitDocId.Get(ctx) ?? "")) }, "Output Document Id"),
             }
         };
         exposeOutput.SetDisplayText("Expose Output");
-
-        // ── Step 5b: Fail-closed error terminal (LOUD event + Finish) ──
-        var emitAmbiguityFailed = new EmitAmbiguityEventActivity
-        {
-            Id = "EmitAmbiguityFailed",
-            Name = "Emit Ambiguity Failed",
-            EventType = new(AmbiguityEvents.Failed),
-            SessionId = new(ctx => sessionId.Get(ctx).ToString()),
-            IssueId = new(ctx => issueId.Get(ctx)),
-            TenantId = new(ctx => tenantId.Get(ctx)),
-            Detail = new("llm-call for ambiguity scoring failed or returned unparseable/out-of-range output"),
-        };
-        emitAmbiguityFailed.SetDisplayText("Emit Ambiguity Failed");
-
-        var ambiguityError = new Finish
-        {
-            Id = "AmbiguityError",
-            Name = "Ambiguity Error"
-        };
-        ambiguityError.SetDisplayText("Ambiguity Error");
 
         // ── Build the flowchart ────────────────────────────────────────
         builder.Root = new Flowchart
@@ -319,59 +290,37 @@ public class AmbiguityScoringWorkflow : WorkflowBase
             Start = readInputs,
             Activities =
             {
-                readInputs,
-                emitStarted,
-                scoreAmbiguityLlm,
-                parseAmbiguity,
-                ambiguitySuccessCheck,
-
-                // Success path
-                emitScored,
-                computeDecision,
-                shouldClarifyCheck,
-                emitClarificationTriggered,
-                emitBelowThreshold,
-                setOutputResult,
+                readInputs, computeReEntry, readPositionStage, freshRun, emitStarted,
+                dispatchLifecycle, readLifecycleExit,
+                hasAssessmentGate, wasCompleteReEntry, emitScored, isAmbiguityGate,
+                emitClarificationTriggered, emitBelowThreshold, emitFailed,
                 exposeOutput,
-
-                // Fail-closed error terminal
-                emitAmbiguityFailed,
-                ambiguityError,
             },
             Connections =
             {
-                new(readInputs, emitStarted),
-                new(emitStarted, scoreAmbiguityLlm),
-                new(scoreAmbiguityLlm, parseAmbiguity),
-                new(parseAmbiguity, ambiguitySuccessCheck),
+                new(readInputs, computeReEntry),
+                new(computeReEntry, readPositionStage),
+                new(readPositionStage, freshRun),
 
-                // Success path
-                new(new FlowEndpoint(ambiguitySuccessCheck, "True"),  new FlowEndpoint(emitScored)),
-                new(emitScored, computeDecision),
-                new(computeDecision, shouldClarifyCheck),
-                new(new FlowEndpoint(shouldClarifyCheck, "True"),  new FlowEndpoint(emitClarificationTriggered)),
-                new(new FlowEndpoint(shouldClarifyCheck, "False"), new FlowEndpoint(emitBelowThreshold)),
-                new(emitClarificationTriggered, setOutputResult),
-                new(emitBelowThreshold, setOutputResult),
-                new(setOutputResult, exposeOutput),
+                new(new FlowEndpoint(freshRun, "True"),  new FlowEndpoint(emitStarted)),
+                new(emitStarted, dispatchLifecycle),
+                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(dispatchLifecycle)),
 
-                // Fail-closed error path
-                new(new FlowEndpoint(ambiguitySuccessCheck, "False"), new FlowEndpoint(emitAmbiguityFailed)),
-                new(emitAmbiguityFailed, ambiguityError),
+                new(dispatchLifecycle, readLifecycleExit),
+                new(readLifecycleExit, hasAssessmentGate),
+
+                new(new FlowEndpoint(hasAssessmentGate, "True"),  new FlowEndpoint(wasCompleteReEntry)),
+                new(new FlowEndpoint(wasCompleteReEntry, "True"),  new FlowEndpoint(exposeOutput)),
+                new(new FlowEndpoint(wasCompleteReEntry, "False"), new FlowEndpoint(emitScored)),
+                new(emitScored, isAmbiguityGate),
+                new(new FlowEndpoint(isAmbiguityGate, "True"),  new FlowEndpoint(emitClarificationTriggered)),
+                new(new FlowEndpoint(isAmbiguityGate, "False"), new FlowEndpoint(emitBelowThreshold)),
+                new(emitClarificationTriggered, exposeOutput),
+                new(emitBelowThreshold, exposeOutput),
+
+                new(new FlowEndpoint(hasAssessmentGate, "False"), new FlowEndpoint(emitFailed)),
+                new(emitFailed, exposeOutput),
             }
         };
-    }
-
-    /// <summary>
-    /// Read the <c>success</c> flag from a dispatched workflow's Result dictionary. Returns
-    /// <c>false</c> if the dictionary is null, the key is absent, or the value is falsy —
-    /// fail-closed by design. Uses the tolerant <see cref="ResumeInput.AsBool"/> read (boxed
-    /// bool / string / JsonElement).
-    /// </summary>
-    internal static bool ReadSuccessFlag(IDictionary<string, object>? result)
-    {
-        if (result == null) return false;
-        if (!result.TryGetValue("success", out var s)) return false;
-        return ResumeInput.AsBool(s);
     }
 }

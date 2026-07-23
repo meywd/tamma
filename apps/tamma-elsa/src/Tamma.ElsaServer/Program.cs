@@ -478,6 +478,16 @@ app.MapPost("/elsa/api/documents/decision/resume",
     Tamma.ElsaServer.Endpoints.DocumentDecisionResumeEndpoint.Resume)
     .RequireAuthorization();
 
+// Story 39-13 — in-process resume seam for the ONE generic domain-input gate
+// (WaitForDocumentInputActivity). The legacy POST /api/adl/clarify/resume forwards here (via
+// ClarifyResumeEndpoint's adapter); this endpoint looks up the tenant+session-scoped
+// document-input-{tenant}-{session} bookmark and runs the owning instance with the
+// {Received, InputJson} payload injected. Same engine-control-surface / RequireAuthorization
+// rationale as the merge/deploy/blocker/clarify/design/decision gates.
+app.MapPost("/elsa/api/documents/input/resume",
+    Tamma.ElsaServer.Endpoints.DocumentInputResumeEndpoint.Resume)
+    .RequireAuthorization();
+
 app.UseSerilogRequestLogging();
 
 Log.Information("Tamma ELSA Server starting up...");

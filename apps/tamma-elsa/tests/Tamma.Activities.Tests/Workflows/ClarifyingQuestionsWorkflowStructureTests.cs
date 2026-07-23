@@ -1,134 +1,103 @@
+using System;
+using System.Linq;
+using System.Reflection;
+using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Runtime.Activities;
 using FluentAssertions;
 using NUnit.Framework;
 using Tamma.Activities.Clarify;
+using Tamma.Activities.Documents;
+using Tamma.Api.Services.Agents;
+using Tamma.Core.Documents.Resume;
 using Tamma.ElsaServer.Workflows;
 
 namespace Tamma.Activities.Tests.Workflows;
 
 /// <summary>
-/// Story 3.5 — structural verification for <see cref="ClarifyingQuestionsWorkflow"/>.
-///
-/// Asserts the workflow:
-/// 1. Builds and has DefinitionId "clarifying-questions".
-/// 2. Threads <c>TenantId</c> so the prompt registry resolves tenant-scoped prompts
-///    (resolution is tenant→system→error — never empty/plain).
-/// 3. Generates questions and incorporates answers via <c>DispatchWorkflow("llm-call")</c>
-///    (mediated — the engine holds no LLM credential, TAMMA001) rather than any in-engine
-///    provider call.
-/// 4. Suspends on the <see cref="WaitForClarifyingAnswersActivity"/> bookmark awaiting the
-///    human answers.
-/// 5. Is fail-closed: an <c>LlmCallError</c> terminal exists and <c>FlowDecision</c> gates
-///    check LLM-call success before proceeding.
-/// 6. Emits the required CLARIFY.* DCB events (generated / delivered / answers received)
-///    via <see cref="EmitClarifyEventActivity"/> nodes.
+/// Story 39-13 — structural pins for <see cref="ClarifyingQuestionsWorkflow"/>, rebuilt as a
+/// THIN binding that runs <c>document-lifecycle</c> TWICE (questions → suspend → resolution) with
+/// a generic <see cref="WaitForDocumentInputActivity"/> input gate between them (D2/D3). Covers
+/// AC1/AC3/AC5/AC6/AC8.
 /// </summary>
 [TestFixture]
 public class ClarifyingQuestionsWorkflowStructureTests
 {
     private static Flowchart Flowchart()
-    {
-        var builder = WorkflowTestHelper.BuildWorkflow(new ClarifyingQuestionsWorkflow());
-        return WorkflowTestHelper.GetFlowchart(builder);
-    }
+        => WorkflowTestHelper.GetFlowchart(WorkflowTestHelper.BuildWorkflow(new ClarifyingQuestionsWorkflow()));
+
+    private static System.Collections.Generic.List<IActivity> AllActivities() => StructureWalk.All(Flowchart());
 
     [Test]
     public void Workflow_BuildsWithoutError()
-    {
-        var act = () => WorkflowTestHelper.BuildWorkflow(new ClarifyingQuestionsWorkflow());
-        act.Should().NotThrow("ClarifyingQuestionsWorkflow.Build() must complete without exceptions");
-    }
+        => ((Action)(() => WorkflowTestHelper.BuildWorkflow(new ClarifyingQuestionsWorkflow()))).Should().NotThrow();
 
     [Test]
-    public void Workflow_HasCorrectDefinitionId()
-    {
-        var builder = WorkflowTestHelper.BuildWorkflow(new ClarifyingQuestionsWorkflow());
-        builder.Object.DefinitionId.Should().Be("clarifying-questions");
-    }
+    public void Workflow_HasStableDefinitionId()
+        => WorkflowTestHelper.BuildWorkflow(new ClarifyingQuestionsWorkflow()).Object.DefinitionId.Should().Be("clarifying-questions");
 
     [Test]
     public void Workflow_ThreadsTenantId()
+        => WorkflowTestHelper.BuildWorkflow(new ClarifyingQuestionsWorkflow()).Object.Variables.Any(v => v.Name == "TenantId")
+            .Should().BeTrue();
+
+    [Test]
+    public void Workflow_HasTwoLifecycleDispatches_NoLlmCall()
     {
-        var builder = WorkflowTestHelper.BuildWorkflow(new ClarifyingQuestionsWorkflow());
-        builder.Object.Variables
-            .Any(v => v.Name == "TenantId")
-            .Should().BeTrue(
-                "the workflow must thread TenantId so llm-call resolves tenant-scoped prompts " +
-                "(tenant→system→error) for clarify-requirements / incorporate-answers");
+        var lifecycle = AllActivities().OfType<DispatchWorkflow>()
+            .Where(d => StructureWalk.LiteralDefId(d) == "document-lifecycle").Select(d => d.Id).OrderBy(x => x).ToList();
+        lifecycle.Should().BeEquivalentTo(new[] { "DispatchRunA", "DispatchRunB" },
+            "the binding runs the clarification lifecycle twice — questions (Run A) and resolution (Run B)");
+        AllActivities().OfType<DispatchWorkflow>()
+            .Where(d => StructureWalk.LiteralDefId(d) == "llm-call").Should().BeEmpty();
     }
 
     [Test]
-    public void Workflow_DispatchesLlmCallForQuestionGeneration()
+    public void Workflow_HasExactlyOneInputGate_AndTheDeliverActivity()
     {
-        Flowchart().Activities
-            .OfType<DispatchWorkflow>()
-            .Should().Contain(d => d.Id == "GenerateQuestionsLlm",
-                "questions must be generated via the mediated llm-call (engine holds no LLM credential)");
+        AllActivities().OfType<WaitForDocumentInputActivity>().Should().ContainSingle(
+            "the wait-for-answers step rides ONE generic input gate (D3)");
+        AllActivities().OfType<DeliverClarifyingQuestionsActivity>().Should().ContainSingle(
+            "the accepted questions are delivered between Run A and the input gate");
     }
 
     [Test]
-    public void Workflow_DispatchesLlmCallForAnswerIncorporation()
+    public void RunA_And_RunB_MaterializeTheirCanonicalCells()
     {
-        Flowchart().Activities
-            .OfType<DispatchWorkflow>()
-            .Should().Contain(d => d.Id == "IncorporateAnswersLlm",
-                "the human answers must be incorporated via the mediated llm-call");
+        var pairs = TaxonomyDriftBuildTests.ScanLifecycleBindingDispatches();
+        pairs.Should().Contain(p => p.Workflow == "ClarifyingQuestionsWorkflow" && p.DispatchId == "DispatchRunA" &&
+            p.Role == AgentRole.ProductOwner.ToWire() && p.Action == AgentAction.ClarifyRequirements.ToWire());
+        pairs.Should().Contain(p => p.Workflow == "ClarifyingQuestionsWorkflow" && p.DispatchId == "DispatchRunB" &&
+            p.Role == AgentRole.ProductOwner.ToWire() && p.Action == AgentAction.IncorporateAnswers.ToWire());
+
+        (TaxonomyDriftBuildTests.MaterializeDispatchInput("ClarifyingQuestionsWorkflow", "DispatchRunA")!["documentType"] as string)
+            .Should().Be("clarification");
+        (TaxonomyDriftBuildTests.MaterializeDispatchInput("ClarifyingQuestionsWorkflow", "DispatchRunB")!["documentType"] as string)
+            .Should().Be("clarification");
     }
 
     [Test]
-    public void Workflow_SuspendsOnAnswerBookmark()
-    {
-        Flowchart().Activities
-            .OfType<WaitForClarifyingAnswersActivity>()
-            .Should().ContainSingle(a => a.Id == "WaitForAnswers",
-                "the workflow must suspend on the WaitForClarifyingAnswersActivity bookmark " +
-                "awaiting the human answers");
-    }
+    public void Workflow_HasNoFinishActivity()
+        => AllActivities().OfType<Finish>().Should().BeEmpty();
 
     [Test]
-    public void Workflow_HasFailClosedErrorTerminal()
-    {
-        Flowchart().Activities
-            .OfType<Finish>()
-            .Should().Contain(f => f.Id == "LlmCallError",
-                "a fail-closed LlmCallError terminal must exist — LLM-call failures route there, " +
-                "never proceeding with fabricated questions or a fabricated clarification");
-    }
+    public void Workflow_HasAllClarifyEmitNodes()
+        => AllActivities().OfType<EmitClarifyEventActivity>().Select(a => a.Id).ToHashSet()
+            .Should().Contain(new[]
+            {
+                "EmitQuestionsGenerated", "EmitQuestionsDelivered", "EmitAnswersReceived",
+                "EmitRequirementsClarified", "EmitQuestionsFailed", "EmitIncorporationFailed", "EmitTimedOut",
+            });
 
     [Test]
-    public void Workflow_HasSuccessGatesForBothLlmCalls()
+    public void Workflow_DeclaresBoth_WithTheInputGateAsSuspend_AndCarriesTheReEntryNode()
     {
-        var decisions = Flowchart().Activities.OfType<FlowDecision>().Select(d => d.Id).ToList();
-        decisions.Should().Contain("QuestionsLlmOk",
-            "question delivery must be gated behind a QuestionsLlmOk decision (fail-closed)");
-        decisions.Should().Contain("IncorporationLlmOk",
-            "the clarified output must be gated behind an IncorporationLlmOk decision (fail-closed)");
-    }
-
-    [Test]
-    public void Workflow_EmitsRequiredClarifyEvents()
-    {
-        var emitIds = Flowchart().Activities
-            .OfType<EmitClarifyEventActivity>()
-            .Select(a => a.Id)
-            .ToList();
-
-        emitIds.Should().Contain("EmitQuestionsGenerated",
-            "must emit CLARIFY.QUESTIONS.GENERATED when questions are produced");
-        emitIds.Should().Contain("EmitQuestionsDelivered",
-            "must emit CLARIFY.QUESTIONS.DELIVERED when questions are delivered");
-        emitIds.Should().Contain("EmitAnswersReceived",
-            "must emit CLARIFY.ANSWERS.RECEIVED when the human answers arrive");
-    }
-
-    [Test]
-    public void Workflow_DeliversQuestions()
-    {
-        Flowchart().Activities
-            .OfType<DeliverClarifyingQuestionsActivity>()
-            .Should().ContainSingle(a => a.Id == "DeliverClarifyingQuestions",
-                "the workflow must deliver the questions to the stakeholder");
+        var decl = typeof(ClarifyingQuestionsWorkflow).GetCustomAttribute<ResumeBehaviorAttribute>(inherit: false);
+        decl.Should().NotBeNull();
+        decl!.Mode.Should().Be(ResumeMode.Both,
+            "Clarify owns its input-gate bookmark AND re-enters from the latest accepted clarification state");
+        decl.SuspendActivities.Should().Contain(typeof(WaitForDocumentInputActivity));
+        AllActivities().OfType<ComputeReEntryPositionActivity>().Should().ContainSingle();
     }
 }

@@ -70,6 +70,22 @@ public static class LifecycleBookmarks
     }
 
     /// <summary>
+    /// Story 39-13 (D3) — the generic domain-input gate name
+    /// (<c>document-input-{tenant}-{session}</c>), mirroring
+    /// <see cref="ForDecisionSession"/>'s shape. Used by
+    /// <c>WaitForDocumentInputActivity</c> and <c>DocumentInputResumeEndpoint</c> so the
+    /// Clarify wait-for-answers gate (and any future domain-input gate) suspend and resume
+    /// compute byte-identical names. The session id is appended RAW (a Guid is already
+    /// delimiter-safe and unguessable); the tenant is normalized so a cross-tenant resume
+    /// can never resolve another tenant's gate.
+    /// </summary>
+    public static string ForDocumentInput(string? tenantId, Guid sessionId)
+    {
+        var tenant = WaitForMergeApprovalActivity.NormalizeSegment(tenantId);
+        return $"document-input-{tenant}-{sessionId}";
+    }
+
+    /// <summary>
     /// Story 39-10 (D4) — the CANONICAL-gate registry as production data: each
     /// sanctioned suspend-activity <see cref="Type"/> mapped to its gate prefix. The
     /// structural build gate walks built graphs for activity nodes whose type is in
@@ -83,5 +99,8 @@ public static class LifecycleBookmarks
         new Dictionary<Type, string>
         {
             [typeof(WaitForDocumentDecisionActivity)] = "document-decision",
+            // Story 39-13 (D3) — the generic domain-input gate (Clarify's wait-for-answers
+            // rides this; the legacy WaitForClarifyingAnswersActivity is retired).
+            [typeof(WaitForDocumentInputActivity)] = "document-input",
         };
 }

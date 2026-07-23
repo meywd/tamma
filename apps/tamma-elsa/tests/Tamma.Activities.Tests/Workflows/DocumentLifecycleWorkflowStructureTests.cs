@@ -212,6 +212,38 @@ public class DocumentLifecycleWorkflowStructureTests
             "the pre-39-12 output contract is preserved (additive-only)");
     }
 
+    // ── Story 39-13 (D5/D6) — pre-ACCEPT delivery hook + decision notes ──
+
+    [Test]
+    public void Workflow_HasOptionalDeliveryDispatch_BeforePublish()
+    {
+        // D5 — the optional pre-ACCEPT delivery site (variable-backed definition id, gated by
+        // HasDeliveryGate). It is NOT an llm-call/document-lifecycle literal, so it does not
+        // perturb the mediation pins above.
+        var delivery = AllActivities().OfType<DispatchWorkflow>().SingleOrDefault(d => d.Id == "DispatchDelivery");
+        delivery.Should().NotBeNull("the lifecycle carries the optional pre-ACCEPT delivery dispatch (39-13 D5)");
+        ReadLiteralDefId(delivery!).Should().BeNull("the delivery definition id is variable-backed (deliveryWorkflowDefinitionId input)");
+
+        AllActivities().OfType<FlowDecision>().Select(d => d.Id).Should().Contain("HasDeliveryGate",
+            "delivery is gated so a no-delivery lifecycle skips it entirely");
+
+        var fc = Flowchart();
+        fc.Connections.Any(c => c.Source.Activity.Id == "DispatchDelivery" && c.Target.Activity.Id == "PublishAcceptanceRequest")
+            .Should().BeTrue("delivery flows into the publish step, before the gate");
+    }
+
+    [Test]
+    public void Workflow_TerminalExposes_DecisionNotesOutput()
+    {
+        // D6d — the decider's notes are surfaced so a binding can mirror the legacy
+        // DESIGN.PROPOSAL.APPROVED/REJECTED Detail.
+        AllActivities()
+            .OfType<Elsa.Workflows.Management.Activities.SetOutput.SetOutput>()
+            .Select(o => o.OutputName.Expression?.Value as string)
+            .Should().Contain("decisionNotes",
+                "the lifecycle exposes the decider's notes as the additive 'decisionNotes' output (39-13 D6d)");
+    }
+
     // ── AC5 — constant pins ────────────────────────────────────────────
 
     [Test]

@@ -136,8 +136,9 @@ public class DeliverClarifyingQuestionsActivity : CodeActivity<ClarifyDeliveryRe
         }
     }
 
-    /// <summary>Format the clarifying-question set into a human-readable comment body.
-    /// Pure — exposed for unit testing.</summary>
+    /// <summary>Format the clarifying-question set into a human-readable comment body from the
+    /// typed 39-3 <see cref="Tamma.Core.Documents.Types.Clarification"/> questions-phase payload
+    /// (Story 39-13 D9). Pure — exposed for unit testing; fail-soft (falls back to raw json).</summary>
     public static string FormatQuestionMessage(string? questionsJson, Guid sessionId)
     {
         var sb = new StringBuilder();
@@ -148,20 +149,16 @@ public class DeliverClarifyingQuestionsActivity : CodeActivity<ClarifyDeliveryRe
 
         try
         {
-            var set = JsonSerializer.Deserialize<ClarifyQuestionSet>(questionsJson ?? "");
-            if (set is not null)
+            var doc = JsonSerializer.Deserialize<Tamma.Core.Documents.Types.Clarification>(
+                questionsJson ?? "", Tamma.Core.Documents.DocumentJson.Options);
+            if (doc is not null && doc.Questions.Count > 0)
             {
-                if (!string.IsNullOrWhiteSpace(set.ContextSummary))
-                {
-                    sb.AppendLine("**Context:**");
-                    sb.AppendLine(set.ContextSummary);
-                    sb.AppendLine();
-                }
-
-                for (var i = 0; i < set.Questions.Count; i++)
-                {
-                    sb.AppendLine($"{i + 1}. {set.Questions[i]}");
-                }
+                for (var i = 0; i < doc.Questions.Count; i++)
+                    sb.AppendLine($"{i + 1}. {doc.Questions[i]}");
+            }
+            else
+            {
+                sb.AppendLine(questionsJson);
             }
         }
         catch

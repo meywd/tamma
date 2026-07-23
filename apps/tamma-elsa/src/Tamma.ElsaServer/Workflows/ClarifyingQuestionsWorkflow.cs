@@ -3,13 +3,14 @@ using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Management.Activities.SetOutput;
-using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using System.Text.Json;
-using Tamma.Activities;
 using Tamma.Activities.Clarify;
 using Tamma.Activities.Clarify.Models;
+using Tamma.Activities.Documents;
 using Tamma.Api.Services.Agents;
+using Tamma.Core.Documents.Resume;
+using Tamma.ElsaServer.Workflows.Helpers;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
@@ -17,47 +18,38 @@ using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// Story 3.5 — Clarifying Questions sub-workflow. Given an ambiguous issue /
-/// requirement it uses the LLM (via the MEDIATED <c>llm-call</c> path — the engine
-/// holds no LLM credential, TAMMA001) to generate clarifying questions, DELIVERS them
-/// to the issue, SUSPENDS on a bookmark awaiting the human answers, then RESUMES (via
-/// the secure <c>ClarifyResumeEndpoint</c>) and incorporates the answers into a
-/// disambiguated requirement.
+/// Story 39-13 — Clarifying Questions, re-implemented as a THIN BINDING over
+/// <see cref="DocumentLifecycleWorkflow"/> that runs the lifecycle TWICE (D2), producing one
+/// <see cref="Tamma.Core.Documents.Types.Clarification"/> document across its two phases:
+/// Run A produces the <c>questions</c> phase via <c>(product_owner, clarify-requirements)</c>;
+/// the binding delivers the accepted questions and SUSPENDS on the generic
+/// <see cref="WaitForDocumentInputActivity"/> input gate (D3); on resume Run B produces the
+/// <c>resolution</c> phase via <c>(product_owner, incorporate-answers)</c>.
 ///
-/// Flow:
-///   1. Read inputs (issue/requirement + tenantId; mint a session id if none)
-///   2. Generate clarifying questions via DispatchWorkflow("llm-call")
-///      role=product_owner / action=clarify-requirements
-///   3. Deliver questions to the issue (mediated git seam) — emit CLARIFY.QUESTIONS.DELIVERED
-///   4. Wait for answers (bookmark, durable SLA timeout)
-///   5a. On answer: incorporate via DispatchWorkflow("llm-call")
-///       role=product_owner / action=incorporate-answers, emit
-///       CLARIFY.REQUIREMENTS.CLARIFIED, set outputs
-///   5b. On timeout: emit CLARIFY.ANSWERS.TIMED_OUT (LOUD), set outputs
+/// <para>The legacy bespoke pipeline (<c>llm-call</c> → <c>ClarifyParsing</c> →
+/// <c>WaitForClarifyingAnswersActivity</c> → <c>LlmCallError</c> Finish) is DELETED: NO parse,
+/// NO success-flag gate, ZERO <see cref="Finish"/>. The wait-for-answers ride the generic
+/// input gate; <c>ClarifyResumeEndpoint</c> is preserved as a thin adapter onto the generic
+/// input-resume surface. The public surface is byte-stable (D1): same
+/// <c>DefinitionId = "clarifying-questions"</c>, same outputs (<c>sessionId</c>/<c>status</c>/
+/// <c>clarifiedRequirement</c>/<c>resolved</c>) plus additive <c>outcome</c>/<c>documentId</c>.</para>
 ///
-/// Reuses the <see cref="AssessmentWorkflow"/> skeleton (llm-call → deliver →
-/// bookmark-wait → analyze/resume, fail-closed gates + error terminal).
-///
-/// Fail-closed: if either <c>llm-call</c> returns success=false, or the JSON response
-/// cannot be parsed into the expected shape, the workflow emits a LOUD
-/// <c>CLARIFY.*.FAILED</c> event and routes to the LlmCallError terminal — it NEVER
-/// proceeds with fabricated questions or a fabricated clarification. Prompt resolution
-/// is tenant→system→error (the <c>llm-call</c> registry never falls back to an
-/// empty/plain prompt).
-///
-/// CLARIFY.* DCB events (AGGREGATE.ACTION.STATUS) are emitted at every transition so
-/// the clarification is fully auditable and feeds the Epic-32 learning loop.
+/// <para>Declared <c>[ResumeBehavior(Both)]</c> — it owns the input-gate bookmark AND
+/// re-enters from the latest accepted clarification state after a crash (D10).</para>
 /// </summary>
+[ResumeBehavior(ResumeMode.Both, SuspendActivities = new[] { typeof(WaitForDocumentInputActivity) })]
 public class ClarifyingQuestionsWorkflow : WorkflowBase
 {
+    private const string ClarificationDocumentType = "clarification";
+
     protected override void Build(IWorkflowBuilder builder)
     {
         builder.Name = "ClarifyingQuestions";
         builder.DefinitionId = "clarifying-questions";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description = "Resolve requirement ambiguity via LLM-generated clarifying questions + human answers";
+        builder.Description = "Resolve requirement ambiguity via two clarification-lifecycle runs (questions → suspend → resolution) over the generic document lifecycle";
 
-        // ── Workflow variables ──────────────────────────────────────────
+        // ── Inputs ─────────────────────────────────────────────────────
         var sessionId       = builder.WithVariable<Guid>();
         var issueId         = builder.WithVariable<string>();
         var requirement     = builder.WithVariable<string>();
@@ -65,37 +57,41 @@ public class ClarifyingQuestionsWorkflow : WorkflowBase
         var issueNumber     = builder.WithVariable<int>();
         var ambiguityContext = builder.WithVariable<string>();
         var tenantId        = builder.WithVariable<string>("TenantId", "");
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
 
-        var questionsJson   = builder.WithVariable<string>();
+        // ── 39-10 re-entry position ────────────────────────────────────
+        var reEntryPositionJson = builder.WithVariable<string>();
+        var reEntryDocJson  = builder.WithVariable<string>();
+        var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
+        var existingResolved = builder.WithVariable<bool>();
+
+        // ── Run A / Run B state ────────────────────────────────────────
+        var runAResult      = builder.WithVariable<IDictionary<string, object>?>();
+        var runBResult      = builder.WithVariable<IDictionary<string, object>?>();
+        var runAAccepted    = builder.WithVariable<bool>();
+        var runBAccepted    = builder.WithVariable<bool>();
+        var questionsJson   = builder.WithVariable<string>("QuestionsJson", "{}");
+        var runADocId       = builder.WithVariable<string>("RunADocId", "");
         var questionCount   = builder.WithVariable<int>();
-        var answers         = builder.WithVariable<string>();
-        var clarifiedJson   = builder.WithVariable<string>();
+        var clarifiedJson   = builder.WithVariable<string>("ClarifiedJson", "{}");
+        var resolved        = builder.WithVariable<bool>();
+        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "");
+        var exitDocId       = builder.WithVariable<string>("ExitDocId", "");
+        var failureDetail   = builder.WithVariable<string>("FailureDetail", "");
 
-        // llm-call result containers
-        var questionLlm     = builder.WithVariable<IDictionary<string, object>?>();
-        var incorporateLlm  = builder.WithVariable<IDictionary<string, object>?>();
+        // ── Input-gate outputs ─────────────────────────────────────────
+        var deliveryResult  = builder.WithVariable<ClarifyDeliveryResult>();
+        var inputReceived   = builder.WithVariable<bool>();
+        var inputTimedOut   = builder.WithVariable<bool>();
+        var answers         = builder.WithVariable<string>("Answers", "");
 
-        // Success flags (fail-closed guards)
-        var questionsLlmOk      = builder.WithVariable<bool>();
-        var incorporationLlmOk  = builder.WithVariable<bool>();
-
-        // Activity output capture
-        var deliveryResult      = builder.WithVariable<ClarifyDeliveryResult>();
-        var waitAnswers         = builder.WithVariable<string>();
-        var waitAnswered        = builder.WithVariable<bool>();
-        var waitTimedOut        = builder.WithVariable<bool>();
-        var clarificationOutput = builder.WithVariable<ClarificationResult>();
-
-        // Output variables (readable by a parent workflow)
+        // ── Outputs ────────────────────────────────────────────────────
         var outputStatus        = builder.WithVariable<string>();
-        var outputClarifiedJson = builder.WithVariable<string>();
-        var outputResolved      = builder.WithVariable<bool>();
 
         // ── Step 1: Read inputs ────────────────────────────────────────
         var readInputs = new SetVariable
         {
-            Id = "ReadInputs",
-            Name = "Read Inputs",
+            Id = "ReadInputs", Name = "Read Inputs",
             Variable = sessionId,
             Value = new(context =>
             {
@@ -108,79 +104,118 @@ public class ClarifyingQuestionsWorkflow : WorkflowBase
                 issueNumber.Set(context, context.GetInput<int>("issueNumber"));
                 ambiguityContext.Set(context, context.GetInput<string>("ambiguityContext") ?? string.Empty);
                 tenantId.Set(context, context.GetInput<string>("tenantId") ?? string.Empty);
+                acceptanceRulesJson.Set(context, context.GetInput<string>("acceptanceRulesJson") ?? string.Empty);
                 return sid;
             })
         };
         readInputs.SetDisplayText("Read Inputs");
 
-        // ── Step 2: Generate clarifying questions via llm-call ─────────
-        var generateQuestionsLlm = new DispatchWorkflow
+        // ── Step 2: Compute 39-10 re-entry position ────────────────────
+        var computeReEntry = new ComputeReEntryPositionActivity
         {
-            Id = "GenerateQuestionsLlm",
-            Name = "Generate Clarifying Questions (LLM)",
-            WorkflowDefinitionId = new("llm-call"),
+            Id = "ComputeReEntryPosition", Name = "Compute Re-Entry Position",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentType = new(ClarificationDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            CorrelationId = new(ctx => issueId.Get(ctx)),
+            PositionJson = new(reEntryPositionJson),
+            ExistingDocumentJson = new(reEntryDocJson),
+        };
+        computeReEntry.SetDisplayText("Compute Re-Entry Position");
+
+        var readPositionStage = new SetVariable
+        {
+            Id = "ReadPositionStage", Name = "Read Position Stage",
+            Variable = positionStage,
+            Value = new(ctx =>
+            {
+                var position = DocumentLifecycleHelper.DeserializeReEntryPosition(reEntryPositionJson.Get(ctx));
+                var stage = position?.ResumeAt switch
+                {
+                    LifecycleResumeStage.Complete => "complete",
+                    LifecycleResumeStage.Accept => "accept",
+                    LifecycleResumeStage.Review => "review",
+                    _ => "produce",
+                };
+                // When a clarification document is already accepted, distinguish a completed
+                // RESOLUTION (short-circuit) from an accepted QUESTIONS phase (between runs —
+                // prime the questions and re-arm the input gate without re-delivering).
+                var existing = reEntryDocJson.Get(ctx);
+                var (qCount, res) = AssessmentBindingHelper.ReadClarification(existing);
+                existingResolved.Set(ctx, res);
+                if (stage == "complete" && !res)
+                {
+                    // Accepted questions phase — prime for the wait step.
+                    questionsJson.Set(ctx, string.IsNullOrWhiteSpace(existing) ? "{}" : existing);
+                    questionCount.Set(ctx, qCount);
+                }
+                if (stage == "complete" && res)
+                    clarifiedJson.Set(ctx, string.IsNullOrWhiteSpace(existing) ? "{}" : existing);
+                return stage;
+            })
+        };
+        readPositionStage.SetDisplayText("Read Position Stage");
+
+        // stage == complete → resolution done (short-circuit) OR between-runs (re-arm gate)
+        var reEntryCompleteGate = new FlowDecision(ctx => positionStage.Get(ctx) == "complete")
+        { Id = "ReEntryComplete", Name = "Clarification Already Accepted?" };
+        reEntryCompleteGate.SetDisplayText("Clarification Already Accepted?");
+
+        var resolutionDoneGate = new FlowDecision(ctx => existingResolved.Get(ctx))
+        { Id = "ResolutionDone", Name = "Resolution Complete?" };
+        resolutionDoneGate.SetDisplayText("Resolution Complete?");
+
+        // ── Run A — produce the questions phase ────────────────────────
+        var dispatchRunA = new DispatchWorkflow
+        {
+            Id = "DispatchRunA", Name = "Dispatch Clarification (Questions)",
+            WorkflowDefinitionId = new("document-lifecycle"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["role"]     = AgentRole.ProductOwner.ToWire(),
-                ["action"]   = AgentAction.ClarifyRequirements.ToWire(),
-                ["tenantId"] = tenantId.Get(ctx),
-                ["variables"] = new Dictionary<string, object>
+                ["documentType"]          = ClarificationDocumentType,
+                ["producerRole"]          = AgentRole.ProductOwner.ToWire(),
+                ["producerAction"]        = AgentAction.ClarifyRequirements.ToWire(),
+                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
                 {
                     ["workItemJson"]    = requirement.Get(ctx) ?? "",
                     ["contextFindings"] = ambiguityContext.Get(ctx) ?? "",
                     ["conventions"]     = "",
-                },
-                ["enableTools"] = false,
+                }),
+                ["issueId"]             = issueId.Get(ctx) ?? "",
+                ["correlationId"]       = issueId.Get(ctx) ?? "",
+                ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
             }),
             WaitForCompletion = new(true),
-            Result = new(questionLlm),
+            Result = new(runAResult),
         };
-        generateQuestionsLlm.SetDisplayText("Generate Clarifying Questions (LLM)");
+        dispatchRunA.SetDisplayText("Dispatch Clarification (Questions)");
 
-        // Parse llm-call response into a question set; set questionsLlmOk (fail-closed).
-        var parseQuestions = new SetVariable
+        var readRunAExit = new SetVariable
         {
-            Id = "ParseQuestions",
-            Name = "Parse Questions",
+            Id = "ReadRunAExit", Name = "Read Run A Exit",
             Variable = questionsJson,
             Value = new(ctx =>
             {
-                var result = questionLlm.Get(ctx);
-                if (!ReadSuccessFlag(result))
-                {
-                    questionsLlmOk.Set(ctx, false);
-                    return "{}";
-                }
-
-                var text = result!.TryGetValue("llmResponse", out var r) ? r?.ToString() ?? "" : "";
-                var qs = ClarifyParsing.ParseQuestions(text);
-                if (qs.Count == 0)
-                {
-                    // Fail-closed — no fabricated / empty question set.
-                    questionsLlmOk.Set(ctx, false);
-                    return "{}";
-                }
-
-                questionsLlmOk.Set(ctx, true);
-                questionCount.Set(ctx, qs.Count);
-                return JsonSerializer.Serialize(new ClarifyQuestionSet
-                {
-                    Questions = qs,
-                    ContextSummary = ambiguityContext.Get(ctx),
-                });
+                var exit = LifecycleBindingHelper.ReadLifecycleResult(runAResult.Get(ctx));
+                var accepted = LifecycleBindingHelper.IsAccepted(exit);
+                var (qCount, _) = AssessmentBindingHelper.ReadClarification(exit.DocumentJson);
+                runAAccepted.Set(ctx, accepted);
+                runADocId.Set(ctx, exit.DocumentId ?? "");
+                questionCount.Set(ctx, qCount);
+                failureDetail.Set(ctx, AssessmentBindingHelper.BuildFailureDetail(exit));
+                return exit.DocumentJson;
             })
         };
-        parseQuestions.SetDisplayText("Parse Questions");
+        readRunAExit.SetDisplayText("Read Run A Exit");
 
-        var questionsSuccessCheck = new FlowDecision(ctx => questionsLlmOk.Get(ctx))
-        { Id = "QuestionsLlmOk", Name = "Questions LLM OK?" };
-        questionsSuccessCheck.SetDisplayText("Questions LLM OK?");
+        var runAAcceptedGate = new FlowDecision(ctx => runAAccepted.Get(ctx))
+        { Id = "RunAAccepted", Name = "Questions Accepted?" };
+        runAAcceptedGate.SetDisplayText("Questions Accepted?");
 
-        // ── Step 3: Emit GENERATED + deliver + emit DELIVERED ──────────
         var emitQuestionsGenerated = new EmitClarifyEventActivity
         {
-            Id = "EmitQuestionsGenerated",
-            Name = "Emit Questions Generated",
+            Id = "EmitQuestionsGenerated", Name = "Emit Questions Generated",
             EventType = new(ClarifyEvents.QuestionsGenerated),
             SessionId = new(ctx => sessionId.Get(ctx).ToString()),
             IssueId = new(ctx => issueId.Get(ctx)),
@@ -191,8 +226,7 @@ public class ClarifyingQuestionsWorkflow : WorkflowBase
 
         var deliverQuestions = new DeliverClarifyingQuestionsActivity
         {
-            Id = "DeliverClarifyingQuestions",
-            Name = "Deliver Clarifying Questions",
+            Id = "DeliverClarifyingQuestions", Name = "Deliver Clarifying Questions",
             SessionId = new(ctx => sessionId.Get(ctx)),
             IssueId = new(ctx => issueId.Get(ctx)),
             Repository = new(ctx => repository.Get(ctx)),
@@ -205,8 +239,7 @@ public class ClarifyingQuestionsWorkflow : WorkflowBase
 
         var emitQuestionsDelivered = new EmitClarifyEventActivity
         {
-            Id = "EmitQuestionsDelivered",
-            Name = "Emit Questions Delivered",
+            Id = "EmitQuestionsDelivered", Name = "Emit Questions Delivered",
             EventType = new(ClarifyEvents.QuestionsDelivered),
             SessionId = new(ctx => sessionId.Get(ctx).ToString()),
             IssueId = new(ctx => issueId.Get(ctx)),
@@ -216,33 +249,23 @@ public class ClarifyingQuestionsWorkflow : WorkflowBase
         };
         emitQuestionsDelivered.SetDisplayText("Emit Questions Delivered");
 
-        // ── Step 4: Wait for answers (bookmark + durable SLA) ──────────
-        var waitForAnswers = new WaitForClarifyingAnswersActivity
+        // ── Suspend on the generic input gate (D3) ─────────────────────
+        var waitForInput = new WaitForDocumentInputActivity
         {
-            Id = "WaitForAnswers",
-            Name = "Wait For Answers",
+            Id = "WaitForDocumentInput", Name = "Wait For Document Input",
             SessionId = new(ctx => sessionId.Get(ctx)),
             TenantId = new(ctx => tenantId.Get(ctx)),
-            Answers = new(waitAnswers),
-            Answered = new(waitAnswered),
-            TimedOut = new(waitTimedOut),
+            TimeoutConfigKey = new("Clarify:AnswerTimeoutMinutes"),
+            InputJson = new(answers),
+            Received = new(inputReceived),
+            TimedOut = new(inputTimedOut),
         };
-        waitForAnswers.SetDisplayText("Wait For Answers");
+        waitForInput.SetDisplayText("Wait For Document Input");
 
-        // ── Step 5a: Answer path ───────────────────────────────────────
-        var storeAnswers = new SetVariable
-        {
-            Id = "StoreAnswers",
-            Name = "Store Answers",
-            Variable = answers,
-            Value = new(ctx => waitAnswers.Get(ctx) ?? string.Empty)
-        };
-        storeAnswers.SetDisplayText("Store Answers");
-
+        // ── Received path → Run B (resolution) ─────────────────────────
         var emitAnswersReceived = new EmitClarifyEventActivity
         {
-            Id = "EmitAnswersReceived",
-            Name = "Emit Answers Received",
+            Id = "EmitAnswersReceived", Name = "Emit Answers Received",
             EventType = new(ClarifyEvents.AnswersReceived),
             SessionId = new(ctx => sessionId.Get(ctx).ToString()),
             IssueId = new(ctx => issueId.Get(ctx)),
@@ -251,68 +274,61 @@ public class ClarifyingQuestionsWorkflow : WorkflowBase
         };
         emitAnswersReceived.SetDisplayText("Emit Answers Received");
 
-        var incorporateAnswersLlm = new DispatchWorkflow
+        var dispatchRunB = new DispatchWorkflow
         {
-            Id = "IncorporateAnswersLlm",
-            Name = "Incorporate Answers (LLM)",
-            WorkflowDefinitionId = new("llm-call"),
+            Id = "DispatchRunB", Name = "Dispatch Clarification (Resolution)",
+            WorkflowDefinitionId = new("document-lifecycle"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["role"]     = AgentRole.ProductOwner.ToWire(),
-                ["action"]   = AgentAction.IncorporateAnswers.ToWire(),
-                ["tenantId"] = tenantId.Get(ctx),
-                ["variables"] = new Dictionary<string, object>
+                ["documentType"]          = ClarificationDocumentType,
+                ["producerRole"]          = AgentRole.ProductOwner.ToWire(),
+                ["producerAction"]        = AgentAction.IncorporateAnswers.ToWire(),
+                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
                 {
                     ["workItemJson"]    = requirement.Get(ctx) ?? "",
                     ["contextFindings"] = BuildIncorporationContext(
                         ambiguityContext.Get(ctx), questionsJson.Get(ctx), answers.Get(ctx)),
                     ["conventions"]     = "",
-                },
-                ["enableTools"] = false,
+                }),
+                ["issueId"]             = issueId.Get(ctx) ?? "",
+                ["correlationId"]       = issueId.Get(ctx) ?? "",
+                // Cross-run lineage anchor (Run A's document); shared issueId/correlationId
+                // chain the two runs in the 39-11 lineage query.
+                ["supersedesDocumentId"] = runADocId.Get(ctx) ?? "",
+                ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
             }),
             WaitForCompletion = new(true),
-            Result = new(incorporateLlm),
+            Result = new(runBResult),
         };
-        incorporateAnswersLlm.SetDisplayText("Incorporate Answers (LLM)");
+        dispatchRunB.SetDisplayText("Dispatch Clarification (Resolution)");
 
-        var parseIncorporation = new SetVariable
+        var readRunBExit = new SetVariable
         {
-            Id = "ParseIncorporation",
-            Name = "Parse Incorporation",
+            Id = "ReadRunBExit", Name = "Read Run B Exit",
             Variable = clarifiedJson,
             Value = new(ctx =>
             {
-                var result = incorporateLlm.Get(ctx);
-                if (!ReadSuccessFlag(result))
-                {
-                    incorporationLlmOk.Set(ctx, false);
-                    return "{}";
-                }
-
-                var text = result!.TryGetValue("llmResponse", out var r) ? r?.ToString() ?? "" : "";
-                var parsed = ClarifyParsing.ParseClarification(text);
-                if (parsed is null)
-                {
-                    // Fail-closed — no fabricated clarification.
-                    incorporationLlmOk.Set(ctx, false);
-                    return "{}";
-                }
-
-                incorporationLlmOk.Set(ctx, true);
-                clarificationOutput.Set(ctx, parsed);
-                return JsonSerializer.Serialize(parsed);
+                var exit = LifecycleBindingHelper.ReadLifecycleResult(runBResult.Get(ctx));
+                var accepted = LifecycleBindingHelper.IsAccepted(exit);
+                var (_, res) = AssessmentBindingHelper.ReadClarification(exit.DocumentJson);
+                runBAccepted.Set(ctx, accepted);
+                resolved.Set(ctx, res);
+                exitOutcome.Set(ctx, exit.Outcome ?? "");
+                exitDocId.Set(ctx, exit.DocumentId ?? "");
+                failureDetail.Set(ctx, AssessmentBindingHelper.BuildFailureDetail(exit));
+                return exit.DocumentJson;
             })
         };
-        parseIncorporation.SetDisplayText("Parse Incorporation");
+        readRunBExit.SetDisplayText("Read Run B Exit");
 
-        var incorporationSuccessCheck = new FlowDecision(ctx => incorporationLlmOk.Get(ctx))
-        { Id = "IncorporationLlmOk", Name = "Incorporation LLM OK?" };
-        incorporationSuccessCheck.SetDisplayText("Incorporation LLM OK?");
+        var runBAcceptedGate = new FlowDecision(ctx => runBAccepted.Get(ctx))
+        { Id = "RunBAccepted", Name = "Resolution Accepted?" };
+        runBAcceptedGate.SetDisplayText("Resolution Accepted?");
 
         var emitRequirementsClarified = new EmitClarifyEventActivity
         {
-            Id = "EmitRequirementsClarified",
-            Name = "Emit Requirements Clarified",
+            Id = "EmitRequirementsClarified", Name = "Emit Requirements Clarified",
             EventType = new(ClarifyEvents.RequirementsClarified),
             SessionId = new(ctx => sessionId.Get(ctx).ToString()),
             IssueId = new(ctx => issueId.Get(ctx)),
@@ -321,54 +337,32 @@ public class ClarifyingQuestionsWorkflow : WorkflowBase
         };
         emitRequirementsClarified.SetDisplayText("Emit Requirements Clarified");
 
-        var setOutputResult = new SetVariable
+        // ── Failure / timeout emits ────────────────────────────────────
+        var emitQuestionsFailed = new EmitClarifyEventActivity
         {
-            Id = "SetOutputResult",
-            Name = "Set Output Result",
-            Variable = outputStatus,
-            Value = new(ctx =>
-            {
-                var parsed = clarificationOutput.Get(ctx);
-                outputClarifiedJson.Set(ctx, clarifiedJson.Get(ctx) ?? "{}");
-                outputResolved.Set(ctx, parsed?.Resolved ?? false);
-                return "clarified";
-            })
+            Id = "EmitQuestionsFailed", Name = "Emit Questions Failed",
+            EventType = new(ClarifyEvents.QuestionsFailed),
+            SessionId = new(ctx => sessionId.Get(ctx).ToString()),
+            IssueId = new(ctx => issueId.Get(ctx)),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Detail = new(ctx => failureDetail.Get(ctx)),
         };
-        setOutputResult.SetDisplayText("Set Output Result");
+        emitQuestionsFailed.SetDisplayText("Emit Questions Failed");
 
-        var exposeOutputResponse = new Sequence
+        var emitIncorporationFailed = new EmitClarifyEventActivity
         {
-            Id = "ExposeOutputResponse",
-            Name = "Expose Output Response",
-            Activities =
-            {
-                WithLabel(new SetOutput { Id = "OutputSessionId", Name = "Output Session Id", OutputName = new("sessionId"), OutputValue = new(ctx => (object)sessionId.Get(ctx).ToString()) }, "Output Session Id"),
-                WithLabel(new SetOutput { Id = "OutputStatus", Name = "Output Status", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }, "Output Status"),
-                WithLabel(new SetOutput { Id = "OutputClarifiedRequirement", Name = "Output Clarified Requirement", OutputName = new("clarifiedRequirement"), OutputValue = new(ctx => (object)(outputClarifiedJson.Get(ctx) ?? "{}")) }, "Output Clarified Requirement"),
-                WithLabel(new SetOutput { Id = "OutputResolved", Name = "Output Resolved", OutputName = new("resolved"), OutputValue = new(ctx => (object)outputResolved.Get(ctx)) }, "Output Resolved"),
-            }
+            Id = "EmitIncorporationFailed", Name = "Emit Incorporation Failed",
+            EventType = new(ClarifyEvents.IncorporationFailed),
+            SessionId = new(ctx => sessionId.Get(ctx).ToString()),
+            IssueId = new(ctx => issueId.Get(ctx)),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Detail = new(ctx => failureDetail.Get(ctx)),
         };
-        exposeOutputResponse.SetDisplayText("Expose Output Response");
-
-        // ── Step 5b: Timeout path ──────────────────────────────────────
-        var setTimeoutResult = new SetVariable
-        {
-            Id = "SetTimeoutResult",
-            Name = "Set Timeout Result",
-            Variable = outputStatus,
-            Value = new(ctx =>
-            {
-                outputClarifiedJson.Set(ctx, "{}");
-                outputResolved.Set(ctx, false);
-                return "timed_out";
-            })
-        };
-        setTimeoutResult.SetDisplayText("Set Timeout Result");
+        emitIncorporationFailed.SetDisplayText("Emit Incorporation Failed");
 
         var emitTimedOut = new EmitClarifyEventActivity
         {
-            Id = "EmitTimedOut",
-            Name = "Emit Timed Out",
+            Id = "EmitTimedOut", Name = "Emit Timed Out",
             EventType = new(ClarifyEvents.AnswersTimedOut),
             SessionId = new(ctx => sessionId.Get(ctx).ToString()),
             IssueId = new(ctx => issueId.Get(ctx)),
@@ -377,138 +371,116 @@ public class ClarifyingQuestionsWorkflow : WorkflowBase
         };
         emitTimedOut.SetDisplayText("Emit Timed Out");
 
-        var exposeOutputTimeout = new Sequence
+        // ── Status setters feeding the single output region ────────────
+        var setClarifiedStatus = new SetVariable
         {
-            Id = "ExposeOutputTimeout",
-            Name = "Expose Output Timeout",
+            Id = "SetClarifiedStatus", Name = "Set Clarified Status",
+            Variable = outputStatus, Value = new(_ => "clarified")
+        };
+        setClarifiedStatus.SetDisplayText("Set Clarified Status");
+
+        var setFailedStatus = new SetVariable
+        {
+            Id = "SetFailedStatus", Name = "Set Failed Status",
+            Variable = outputStatus,
+            Value = new(ctx => { resolved.Set(ctx, false); return "failed"; })
+        };
+        setFailedStatus.SetDisplayText("Set Failed Status");
+
+        var setTimeoutStatus = new SetVariable
+        {
+            Id = "SetTimeoutStatus", Name = "Set Timeout Status",
+            Variable = outputStatus,
+            Value = new(ctx => { resolved.Set(ctx, false); return "timed_out"; })
+        };
+        setTimeoutStatus.SetDisplayText("Set Timeout Status");
+
+        // ── Expose output — the single terminal region ─────────────────
+        var exposeOutput = new Sequence
+        {
+            Id = "ExposeOutput", Name = "Expose Output",
             Activities =
             {
-                WithLabel(new SetOutput { Id = "OutputSessionIdTimeout", Name = "Output Session Id (Timeout)", OutputName = new("sessionId"), OutputValue = new(ctx => (object)sessionId.Get(ctx).ToString()) }, "Output Session Id (Timeout)"),
-                WithLabel(new SetOutput { Id = "OutputStatusTimeout", Name = "Output Status (Timeout)", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }, "Output Status (Timeout)"),
-                WithLabel(new SetOutput { Id = "OutputResolvedTimeout", Name = "Output Resolved (Timeout)", OutputName = new("resolved"), OutputValue = new(ctx => (object)outputResolved.Get(ctx)) }, "Output Resolved (Timeout)"),
+                WithLabel(new SetOutput { Id = "OutputSessionId", Name = "Output Session Id", OutputName = new("sessionId"), OutputValue = new(ctx => (object)sessionId.Get(ctx).ToString()) }, "Output Session Id"),
+                WithLabel(new SetOutput { Id = "OutputStatus", Name = "Output Status", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }, "Output Status"),
+                WithLabel(new SetOutput { Id = "OutputClarifiedRequirement", Name = "Output Clarified Requirement", OutputName = new("clarifiedRequirement"), OutputValue = new(ctx => (object)(clarifiedJson.Get(ctx) ?? "{}")) }, "Output Clarified Requirement"),
+                WithLabel(new SetOutput { Id = "OutputResolved", Name = "Output Resolved", OutputName = new("resolved"), OutputValue = new(ctx => (object)resolved.Get(ctx)) }, "Output Resolved"),
+                WithLabel(new SetOutput { Id = "OutputOutcome", Name = "Output Outcome", OutputName = new("outcome"), OutputValue = new(ctx => (object)(exitOutcome.Get(ctx) ?? "")) }, "Output Outcome"),
+                WithLabel(new SetOutput { Id = "OutputDocumentId", Name = "Output Document Id", OutputName = new("documentId"), OutputValue = new(ctx => (object)(exitDocId.Get(ctx) ?? "")) }, "Output Document Id"),
             }
         };
-        exposeOutputTimeout.SetDisplayText("Expose Output Timeout");
-
-        // ── Fail-closed error terminals (LOUD events + Finish) ─────────
-        var emitQuestionsFailed = new EmitClarifyEventActivity
-        {
-            Id = "EmitQuestionsFailed",
-            Name = "Emit Questions Failed",
-            EventType = new(ClarifyEvents.QuestionsFailed),
-            SessionId = new(ctx => sessionId.Get(ctx).ToString()),
-            IssueId = new(ctx => issueId.Get(ctx)),
-            TenantId = new(ctx => tenantId.Get(ctx)),
-            Detail = new("llm-call for question generation failed or returned unparseable output"),
-        };
-        emitQuestionsFailed.SetDisplayText("Emit Questions Failed");
-
-        var emitIncorporationFailed = new EmitClarifyEventActivity
-        {
-            Id = "EmitIncorporationFailed",
-            Name = "Emit Incorporation Failed",
-            EventType = new(ClarifyEvents.IncorporationFailed),
-            SessionId = new(ctx => sessionId.Get(ctx).ToString()),
-            IssueId = new(ctx => issueId.Get(ctx)),
-            TenantId = new(ctx => tenantId.Get(ctx)),
-            Detail = new("llm-call for answer incorporation failed or returned unparseable output"),
-        };
-        emitIncorporationFailed.SetDisplayText("Emit Incorporation Failed");
-
-        var llmCallError = new Finish
-        {
-            Id = "LlmCallError",
-            Name = "LLM Call Error"
-        };
-        llmCallError.SetDisplayText("LLM Call Error");
+        exposeOutput.SetDisplayText("Expose Output");
 
         // ── Build the flowchart ────────────────────────────────────────
         builder.Root = new Flowchart
         {
             Id = "ClarifyingQuestionsFlowchart",
             Name = "Clarifying Questions Flowchart",
+            Start = readInputs,
             Activities =
             {
-                readInputs,
-                generateQuestionsLlm,
-                parseQuestions,
-                questionsSuccessCheck,
-                emitQuestionsGenerated,
-                deliverQuestions,
-                emitQuestionsDelivered,
-                waitForAnswers,
-
-                // Answer path
-                storeAnswers,
-                emitAnswersReceived,
-                incorporateAnswersLlm,
-                parseIncorporation,
-                incorporationSuccessCheck,
+                readInputs, computeReEntry, readPositionStage,
+                reEntryCompleteGate, resolutionDoneGate,
+                dispatchRunA, readRunAExit, runAAcceptedGate,
+                emitQuestionsGenerated, deliverQuestions, emitQuestionsDelivered,
+                waitForInput, emitAnswersReceived, dispatchRunB, readRunBExit, runBAcceptedGate,
                 emitRequirementsClarified,
-                setOutputResult,
-                exposeOutputResponse,
-
-                // Timeout path
-                setTimeoutResult,
-                emitTimedOut,
-                exposeOutputTimeout,
-
-                // Fail-closed error terminals
-                emitQuestionsFailed,
-                emitIncorporationFailed,
-                llmCallError
+                emitQuestionsFailed, emitIncorporationFailed, emitTimedOut,
+                setClarifiedStatus, setFailedStatus, setTimeoutStatus,
+                exposeOutput,
             },
             Connections =
             {
-                new(readInputs, generateQuestionsLlm),
-                new(generateQuestionsLlm, parseQuestions),
-                new(parseQuestions, questionsSuccessCheck),
-                new(new FlowEndpoint(questionsSuccessCheck, "True"),  new FlowEndpoint(emitQuestionsGenerated)),
-                new(new FlowEndpoint(questionsSuccessCheck, "False"), new FlowEndpoint(emitQuestionsFailed)),
-                new(emitQuestionsFailed, llmCallError),
+                new(readInputs, computeReEntry),
+                new(computeReEntry, readPositionStage),
+                new(readPositionStage, reEntryCompleteGate),
+
+                // Re-entry: already-accepted clarification → resolution done vs between-runs.
+                new(new FlowEndpoint(reEntryCompleteGate, "True"),  new FlowEndpoint(resolutionDoneGate)),
+                new(new FlowEndpoint(resolutionDoneGate, "True"),   new FlowEndpoint(setClarifiedStatus)),
+                new(new FlowEndpoint(resolutionDoneGate, "False"),  new FlowEndpoint(waitForInput)),
+                // Fresh / in-progress → Run A.
+                new(new FlowEndpoint(reEntryCompleteGate, "False"), new FlowEndpoint(dispatchRunA)),
+
+                new(dispatchRunA, readRunAExit),
+                new(readRunAExit, runAAcceptedGate),
+                new(new FlowEndpoint(runAAcceptedGate, "True"),  new FlowEndpoint(emitQuestionsGenerated)),
+                new(new FlowEndpoint(runAAcceptedGate, "False"), new FlowEndpoint(emitQuestionsFailed)),
 
                 new(emitQuestionsGenerated, deliverQuestions),
                 new(deliverQuestions, emitQuestionsDelivered),
-                new(emitQuestionsDelivered, waitForAnswers),
+                new(emitQuestionsDelivered, waitForInput),
 
-                // Answer path
-                new(new FlowEndpoint(waitForAnswers, "Answered"), new FlowEndpoint(storeAnswers)),
-                new(storeAnswers, emitAnswersReceived),
-                new(emitAnswersReceived, incorporateAnswersLlm),
-                new(incorporateAnswersLlm, parseIncorporation),
-                new(parseIncorporation, incorporationSuccessCheck),
-                new(new FlowEndpoint(incorporationSuccessCheck, "True"),  new FlowEndpoint(emitRequirementsClarified)),
-                new(new FlowEndpoint(incorporationSuccessCheck, "False"), new FlowEndpoint(emitIncorporationFailed)),
-                new(emitIncorporationFailed, llmCallError),
-                new(emitRequirementsClarified, setOutputResult),
-                new(setOutputResult, exposeOutputResponse),
+                // Received → Run B.
+                new(new FlowEndpoint(waitForInput, "Received"), new FlowEndpoint(emitAnswersReceived)),
+                new(emitAnswersReceived, dispatchRunB),
+                new(dispatchRunB, readRunBExit),
+                new(readRunBExit, runBAcceptedGate),
+                new(new FlowEndpoint(runBAcceptedGate, "True"),  new FlowEndpoint(emitRequirementsClarified)),
+                new(new FlowEndpoint(runBAcceptedGate, "False"), new FlowEndpoint(emitIncorporationFailed)),
+                new(emitRequirementsClarified, setClarifiedStatus),
 
-                // Timeout path
-                new(new FlowEndpoint(waitForAnswers, "Timeout"), new FlowEndpoint(setTimeoutResult)),
-                new(setTimeoutResult, emitTimedOut),
-                new(emitTimedOut, exposeOutputTimeout)
+                // Timeout.
+                new(new FlowEndpoint(waitForInput, "Timeout"), new FlowEndpoint(emitTimedOut)),
+                new(emitTimedOut, setTimeoutStatus),
+
+                // Failure emits → failed status.
+                new(emitQuestionsFailed, setFailedStatus),
+                new(emitIncorporationFailed, setFailedStatus),
+
+                // Single output region.
+                new(setClarifiedStatus, exposeOutput),
+                new(setFailedStatus, exposeOutput),
+                new(setTimeoutStatus, exposeOutput),
             }
         };
     }
 
     /// <summary>
-    /// Read the <c>success</c> flag from a dispatched workflow's Result dictionary.
-    /// Returns <c>false</c> if the dictionary is null, the key is absent, or the value
-    /// is falsy — fail-closed by design. Uses the tolerant <see cref="ResumeInput.AsBool"/>
-    /// read (boxed bool / string / JsonElement).
-    /// </summary>
-    internal static bool ReadSuccessFlag(IDictionary<string, object>? result)
-    {
-        if (result == null) return false;
-        if (!result.TryGetValue("success", out var s)) return false;
-        return ResumeInput.AsBool(s);
-    }
-
-    /// <summary>
-    /// Compose the context findings for the incorporation llm-call — the original
-    /// ambiguity context plus the asked questions and the stakeholder's answers, so the
-    /// model incorporates the answers into a disambiguated requirement. Pure; exposed
-    /// for unit testing.
+    /// Compose the context findings for the resolution (incorporate-answers) run — the
+    /// original ambiguity context plus the asked questions and the stakeholder's answers,
+    /// so the model incorporates the answers into a disambiguated requirement. Pure; exposed
+    /// for unit testing (kept from the pre-migration workflow).
     /// </summary>
     internal static string BuildIncorporationContext(string? ambiguityContext, string? questionsJson, string? answers)
     {

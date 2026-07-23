@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
-using Tamma.Activities.Clarify;
+using Tamma.Activities.Documents;
 using Tamma.ElsaServer.Endpoints;
 
 namespace Tamma.Activities.Tests.Endpoints;
@@ -16,8 +16,8 @@ namespace Tamma.Activities.Tests.Endpoints;
 /// Story 3.5 — the engine-side clarify resume seam (<c>POST /elsa/api/adl/clarify/resume</c>).
 /// Verifies it:
 ///   - computes the SAME tenant+session-scoped bookmark name as the suspend-side activity
-///     (<c>clarify-answers-{tenant}-{session}</c>) and resumes the matching (single) instance
-///     with the EXACT input keys the callback reads (<c>Answered</c> + <c>Answers</c>);
+///     (<c>document-input-{tenant}-{session}</c>) and resumes the matching (single) instance
+///     with the EXACT input keys the callback reads (<c>Received</c> + <c>InputJson</c>);
 ///   - is IDOR-safe: a caller scoped to a DIFFERENT tenant computes a different name and 404s
 ///     (never resolves the victim's gate);
 ///   - REFUSES with 409 when more than one instance matches a (unique) name rather than
@@ -70,7 +70,7 @@ public class ClarifyResumeEndpointTests
     {
         var session = Guid.NewGuid();
         var tenant = Guid.NewGuid().ToString();
-        var expected = WaitForClarifyingAnswersActivity.AnswersBookmarkName(tenant, session);
+        var expected = WaitForDocumentInputActivity.InputBookmarkName(tenant, session);
         SetupFind(expected, Bookmark(expected, "wf-c1"));
 
         var result = await Invoke(Req(session, tenant, "we mean 30s and PostgreSQL"));
@@ -78,8 +78,8 @@ public class ClarifyResumeEndpointTests
         StatusCodeOf(result).Should().Be(StatusCodes.Status200OK);
         _client.Verify(c => c.RunInstanceAsync(
             It.Is<RunWorkflowInstanceRequest>(r =>
-                (bool)r.Input!["Answered"] == true
-                && (string)r.Input!["Answers"] == "we mean 30s and PostgreSQL"),
+                (bool)r.Input!["Received"] == true
+                && (string)r.Input!["InputJson"] == "we mean 30s and PostgreSQL"),
             It.IsAny<CancellationToken>()), Times.Once);
         _runtime.Verify(r => r.CreateClientAsync("wf-c1", It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -93,8 +93,8 @@ public class ClarifyResumeEndpointTests
         var session = Guid.NewGuid();
         var tenantA = Guid.NewGuid().ToString();
         var tenantB = Guid.NewGuid().ToString();
-        var nameA = WaitForClarifyingAnswersActivity.AnswersBookmarkName(tenantA, session);
-        var nameB = WaitForClarifyingAnswersActivity.AnswersBookmarkName(tenantB, session);
+        var nameA = WaitForDocumentInputActivity.InputBookmarkName(tenantA, session);
+        var nameB = WaitForDocumentInputActivity.InputBookmarkName(tenantB, session);
         SetupFind(nameA, Bookmark(nameA, "wf-victim")); // A's gate is live
         SetupFind(nameB /* zero matches for B */);
 
@@ -111,7 +111,7 @@ public class ClarifyResumeEndpointTests
     {
         var session = Guid.NewGuid();
         var tenant = Guid.NewGuid().ToString();
-        var name = WaitForClarifyingAnswersActivity.AnswersBookmarkName(tenant, session);
+        var name = WaitForDocumentInputActivity.InputBookmarkName(tenant, session);
         SetupFind(name /* zero matches */);
 
         var result = await Invoke(Req(session, tenant));
@@ -127,7 +127,7 @@ public class ClarifyResumeEndpointTests
     {
         var session = Guid.NewGuid();
         var tenant = Guid.NewGuid().ToString();
-        var name = WaitForClarifyingAnswersActivity.AnswersBookmarkName(tenant, session);
+        var name = WaitForDocumentInputActivity.InputBookmarkName(tenant, session);
         SetupFind(name, Bookmark(name, "wf-a"), Bookmark(name, "wf-b"));
 
         var result = await Invoke(Req(session, tenant));

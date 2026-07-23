@@ -1,7 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
 using NUnit.Framework;
-using Tamma.Activities.Design;
 using Tamma.Core.Documents;
 using Tamma.Core.Documents.Types;
 using TypedDesign = Tamma.Core.Documents.Types.Design;
@@ -11,10 +10,10 @@ namespace Tamma.Activities.Tests.Documents.Types;
 
 /// <summary>
 /// Story 39-4 AC5/AC8 — the subsumption + round-trip half for <see cref="DesignDocumentType"/>
-/// (Design Decision D8). Invokes the OLD <c>DesignParsing.ParseProposal</c> baseline:
-/// every JSON-shaped input it fail-closes (null) the typed validator also rejects; and
-/// a valid typed <see cref="Design"/> re-serializes into a shape ParseProposal still
-/// recovers with matching summary/alternatives.
+/// (Design Decision D8). Story 39-13 D9: the legacy <c>DesignParsing.ParseProposal</c> baseline
+/// is retired with the parser, so the cross-parser rows are pruned; what remains asserts the
+/// typed validator on the same shapes (rejects the baseline negatives, accepts the round-tripped
+/// typed payload).
 /// </summary>
 [TestFixture]
 public class DesignCrossParserTests
@@ -27,17 +26,16 @@ public class DesignCrossParserTests
         return Type.Validate(doc.RootElement);
     }
 
-    // JSON-shaped negatives from DesignResumeReadBackTests.cs (baseline → null).
+    // JSON-shaped negatives the retired baseline fail-closed on — the typed validator rejects too.
     [TestCase("""{"recommendation":"do X"}""")]  // missing summary
     [TestCase("""{"summary":""}""")]              // empty summary
     public void Every_proposal_the_baseline_fail_closes_the_typed_validator_also_rejects(string json)
     {
-        DesignParsing.ParseProposal(json).Should().BeNull("baseline floor");
-        Validate(json).IsValid.Should().BeFalse("the typed validator must also reject what ParseProposal fail-closes");
+        Validate(json).IsValid.Should().BeFalse("the typed validator must reject what the retired ParseProposal fail-closed");
     }
 
     [Test]
-    public void Valid_typed_design_round_trips_through_the_old_parser()
+    public void Valid_typed_design_serializes_into_a_validator_accepted_shape()
     {
         var typed = new TypedDesign
         {
@@ -54,15 +52,8 @@ public class DesignCrossParserTests
 
         var json = JsonSerializer.Serialize(typed, DocumentJson.Options);
 
-        // Our validator is happy...
+        // Our validator is happy with the re-serialized typed payload.
         using (var doc = JsonDocument.Parse(json))
             Type.Validate(doc.RootElement).IsValid.Should().BeTrue();
-
-        // ...and the old parser recovers the same summary + alternatives.
-        var proposal = DesignParsing.ParseProposal(json);
-        proposal.Should().NotBeNull("the old parser must still parse the re-serialized typed payload");
-        proposal!.Summary.Should().Be("Token-bucket limiter as middleware.");
-        proposal.Alternatives.Should().HaveCount(2);
-        proposal.Alternatives.Select(a => a.Name).Should().Equal("Middleware", "Redis");
     }
 }

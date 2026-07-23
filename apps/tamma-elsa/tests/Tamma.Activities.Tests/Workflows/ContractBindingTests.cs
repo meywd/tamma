@@ -82,21 +82,26 @@ public class ContractBindingTests
     private static readonly IReadOnlyDictionary<(string Role, string Action), CellContract> Bindings =
         new Dictionary<(string, string), CellContract>
         {
-            // ResearchWorkflow → ResearchParsing.ParseReport (Tamma.Activities/Research/ResearchParsing.cs):
-            // fail-closed on missing "summary" / empty "findings"; per-finding slices
-            // "title"/"summary", "relevance", "confidence", "citations"; reads "overallConfidence".
-            [("product_owner", "research")] = new("ResearchParsing.ParseReport",
+            // ResearchWorkflow (39-13) binds (product_owner, research) as the produce step of its
+            // document-lifecycle binding; the shape authority is now the typed validator
+            // Tamma.Core/Documents/Types/Findings.cs (FindingsDocumentType.Validate) — strict on
+            // "summary" / non-empty "findings", per-finding "title"/"summary", "relevance",
+            // "confidence", "citations", and "overallConfidence". Token groups unchanged (39-3 D2
+            // pinned the wire shape verbatim); only the parser authority migrated.
+            [("product_owner", "research")] = new("FindingsDocumentType.Validate",
             [
                 One("\"summary\""), One("\"findings\""), One("\"title\""),
                 One("\"relevance\""), One("\"confidence\""), One("\"citations\""),
                 One("\"overallConfidence\""),
             ]),
 
-            // AmbiguityScoringWorkflow → AmbiguityParsing.ParseAssessment
-            // (Tamma.Activities/Ambiguity/AmbiguityParsing.cs): fail-closed on missing/
-            // out-of-range "score" and empty "rationale"; reads "confidence"; per-item
-            // slices "type", "description" (item fail-closed), "severity", "recommendation".
-            [("product_owner", "score-ambiguity")] = new("AmbiguityParsing.ParseAssessment",
+            // AmbiguityScoringWorkflow (39-13) binds (product_owner, score-ambiguity) as the
+            // produce step of its document-lifecycle binding; the shape authority is now the typed
+            // validator Tamma.Core/Documents/Types/AmbiguityAssessment.cs
+            // (AmbiguityAssessmentDocumentType.Validate) — strict on "score"/"rationale", reads
+            // "confidence", per-item "type"/"description"/"severity"/"recommendation". Tokens
+            // unchanged; only the parser authority migrated.
+            [("product_owner", "score-ambiguity")] = new("AmbiguityAssessmentDocumentType.Validate",
             [
                 One("\"score\""), One("\"confidence\""), One("\"rationale\""),
                 One("\"ambiguities\""), One("\"type\""), One("\"description\""),
@@ -117,28 +122,29 @@ public class ContractBindingTests
                 One("\"estimateHours\""), One("\"complexity\""), One("\"dependsOn\""),
             ]),
 
-            // ClarifyingQuestionsWorkflow → ClarifyParsing.ParseQuestions
-            // (Tamma.Activities/Clarify/ClarifyParsing.cs): primary shape is a BARE
-            // JSON array of question strings (empty parse → CLARIFY.*.FAILED terminal).
-            // No field name to pin — assert the template instructs a JSON array.
-            [("product_owner", "clarify-requirements")] = new("ClarifyParsing.ParseQuestions",
+            // ClarifyingQuestionsWorkflow (39-13) binds (product_owner, clarify-requirements) as
+            // Run A's produce step; the shape authority is now the typed validator
+            // Tamma.Core/Documents/Types/Clarification.cs (ClarificationDocumentType.Validate) —
+            // the questions phase instructs a bare JSON array of question strings. Token unchanged.
+            [("product_owner", "clarify-requirements")] = new("ClarificationDocumentType.Validate",
             [
                 One("JSON array"),
             ]),
 
-            // ClarifyingQuestionsWorkflow → ClarifyParsing.ParseClarification:
-            // fail-closed on missing/empty "clarifiedRequirement"; slices
-            // "remainingAmbiguities" and "resolved".
-            [("product_owner", "incorporate-answers")] = new("ClarifyParsing.ParseClarification",
+            // ClarifyingQuestionsWorkflow (39-13) binds (product_owner, incorporate-answers) as
+            // Run B's produce step; the shape authority is ClarificationDocumentType.Validate —
+            // the resolution phase slices "clarifiedRequirement"/"remainingAmbiguities"/"resolved".
+            [("product_owner", "incorporate-answers")] = new("ClarificationDocumentType.Validate",
             [
                 One("\"clarifiedRequirement\""), One("\"remainingAmbiguities\""), One("\"resolved\""),
             ]),
 
-            // DesignProposalWorkflow → DesignParsing.ParseProposal
-            // (Tamma.Activities/Design/DesignParsing.cs): fail-closed on missing
-            // "summary"; slices "recommendation", "constraintEvaluation", and
-            // "alternatives" items' "name"/"tradeoffs".
-            [("architect", "propose-design")] = new("DesignParsing.ParseProposal",
+            // DesignProposalWorkflow (39-13) binds (architect, propose-design) as the produce step
+            // of its document-lifecycle binding; the shape authority is now the typed validator
+            // Tamma.Core/Documents/Types/Design.cs (DesignDocumentType.Validate) — strict on
+            // "summary", slices "recommendation"/"constraintEvaluation" and "alternatives" items'
+            // "name"/"tradeoffs". Tokens unchanged; only the parser authority migrated.
+            [("architect", "propose-design")] = new("DesignDocumentType.Validate",
             [
                 One("\"summary\""), One("\"recommendation\""), One("\"constraintEvaluation\""),
                 One("\"alternatives\""), One("\"name\""), One("\"tradeoffs\""),

@@ -1,8 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
 using NUnit.Framework;
-using Tamma.Activities.Ambiguity;
-using Tamma.Activities.Research;
 using Tamma.Core.Documents;
 using Tamma.Core.Documents.Types;
 
@@ -56,14 +54,11 @@ public class BaselineSubsumptionTests
     [Test]
     public void Findings_json_negatives_rejected_by_both()
     {
-        ResearchParsing.ParseReport(NoSummaryReport).Should().BeNull("baseline floor");
-        Validate(Findings, NoSummaryReport).IsValid.Should().BeFalse("typed path must also reject a missing summary");
-
-        ResearchParsing.ParseReport(EmptyFindings).Should().BeNull("baseline floor");
-        Validate(Findings, EmptyFindings).IsValid.Should().BeFalse("typed path must also reject empty findings");
-
-        ResearchParsing.ParseReport(AllShellFindings).Should().BeNull("baseline floor");
-        Validate(Findings, AllShellFindings).IsValid.Should().BeFalse("typed path must also reject all-shell findings");
+        // Story 39-13 D9: the baseline ResearchParsing probe retired with the parser; the typed
+        // validator still rejects each JSON-shaped negative the baseline fail-closed on.
+        Validate(Findings, NoSummaryReport).IsValid.Should().BeFalse("typed path must reject a missing summary");
+        Validate(Findings, EmptyFindings).IsValid.Should().BeFalse("typed path must reject empty findings");
+        Validate(Findings, AllShellFindings).IsValid.Should().BeFalse("typed path must reject all-shell findings");
     }
 
     // ── Ambiguity JSON-shaped negatives (baseline → null) ────────────────────
@@ -77,21 +72,16 @@ public class BaselineSubsumptionTests
     public void Ambiguity_out_of_range_score_rejected_by_both(string raw)
     {
         var json = $$"""{ "score": {{raw}}, "rationale": "r" }""";
-        AmbiguityParsing.ParseAssessment(json).Should().BeNull("baseline floor");
-        Validate(Ambiguity, json).IsValid.Should().BeFalse("typed path must also reject an out-of-range score");
+        Validate(Ambiguity, json).IsValid.Should().BeFalse("typed path must reject an out-of-range score");
     }
 
     [Test]
     public void Ambiguity_json_negatives_rejected_by_both()
     {
-        AmbiguityParsing.ParseAssessment(NoScore).Should().BeNull("baseline floor");
-        Validate(Ambiguity, NoScore).IsValid.Should().BeFalse("typed path must also reject a missing score");
-
-        AmbiguityParsing.ParseAssessment(BadScore).Should().BeNull("baseline floor");
-        Validate(Ambiguity, BadScore).IsValid.Should().BeFalse("typed path must also reject a non-numeric score");
-
-        AmbiguityParsing.ParseAssessment(NoRationale).Should().BeNull("baseline floor");
-        Validate(Ambiguity, NoRationale).IsValid.Should().BeFalse("typed path must also reject a missing rationale");
+        // Story 39-13 D9: the baseline AmbiguityParsing probe retired with the parser.
+        Validate(Ambiguity, NoScore).IsValid.Should().BeFalse("typed path must reject a missing score");
+        Validate(Ambiguity, BadScore).IsValid.Should().BeFalse("typed path must reject a non-numeric score");
+        Validate(Ambiguity, NoRationale).IsValid.Should().BeFalse("typed path must reject a missing rationale");
     }
 
     // ── Text-level negatives: never reach Validate — throw at the JSON boundary (D8) ──
@@ -121,7 +111,7 @@ public class BaselineSubsumptionTests
         const string uncited =
             """{ "summary": "s", "findings": [ { "title": "F", "summary": "b", "relevance": 0.5, "confidence": 0.5 } ] }""";
 
-        ResearchParsing.ParseReport(uncited).Should().NotBeNull("baseline accepts a finding with no citations");
+        // Baseline accepted an uncited finding (parser now retired, D9); the typed validator rejects it.
         Validate(Findings, uncited).Violations.Select(v => v.Code)
             .Should().Contain(FindingsDocumentType.MissingEvidence,
                 "completion-notes: evidence required (product_owner/research)");
@@ -133,7 +123,7 @@ public class BaselineSubsumptionTests
         // completion-notes: "ranges rejected not clamped" — baseline CLAMPS ambiguity confidence.
         const string highConf = """{ "score": 0.5, "confidence": 1.4, "rationale": "r" }""";
 
-        AmbiguityParsing.ParseAssessment(highConf).Should().NotBeNull("baseline accepts and clamps confidence");
+        // Baseline clamped confidence (parser now retired, D9); the typed validator rejects out-of-range.
         Validate(Ambiguity, highConf).Violations.Select(v => v.Code)
             .Should().Contain(AmbiguityAssessmentDocumentType.ConfidenceOutOfRange,
                 "completion-notes: confidence rejected not clamped (product_owner/score-ambiguity)");
@@ -146,7 +136,7 @@ public class BaselineSubsumptionTests
         const string unclear =
             """{ "score": 0.5, "rationale": "r", "ambiguities": [ { "type": "unclear", "description": "d", "severity": "high" } ] }""";
 
-        AmbiguityParsing.ParseAssessment(unclear).Should().NotBeNull("baseline accepts and folds the label");
+        // Baseline folded "unclear" → vague (parser now retired, D9); the typed validator rejects it.
         Validate(Ambiguity, unclear).Violations.Select(v => v.Code)
             .Should().Contain(AmbiguityAssessmentDocumentType.UnknownAmbiguityType,
                 "completion-notes: strict label sets (product_owner/score-ambiguity)");
