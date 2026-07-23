@@ -1,72 +1,99 @@
-using System.Text.Json;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Management.Activities.SetOutput;
-using Elsa.Workflows.Memory;
-using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
-using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
-using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
-
+using System.Text.Json;
+using Tamma.Activities.Documents;
 using Tamma.Api.Services.Agents;
+using Tamma.Core.Documents.Resume;
 using Tamma.ElsaServer.Workflows.Helpers;
+using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
+
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// Task Creation — Senior dev LLM breaks the approved plan into detailed implementation tasks.
-/// Each task includes: files to modify, code changes, test approach, and dependencies (DAG).
+/// Story 39-15 — Task Creation, re-implemented as a THIN BINDING over
+/// <see cref="DocumentLifecycleWorkflow"/> (<c>DefinitionId = "document-lifecycle"</c>),
+/// producing a typed task-breakdown <see cref="Tamma.Core.Documents.Types.Plan"/> (39-4's
+/// mapping of <c>create-tasks</c> → documentType <c>plan</c>, D2). The public surface is
+/// byte-stable (D1): same <c>DefinitionId = "task-creation"</c>, same
+/// <c>repository</c>/<c>issueNumber</c>/<c>planJson</c>/<c>contextIds</c>/<c>workItemJson</c>/
+/// <c>tenantId</c> inputs (plus additive <c>issueId?</c> / <c>acceptanceRulesJson?</c>), same
+/// <c>tasksJson</c>/<c>error</c> outputs plus additive <c>status</c>/<c>outcome</c>/
+/// <c>documentId</c>/<c>parentDocumentId</c>. The SingleIssueCycle dispatch site (by definition
+/// id) and its bare-array tasks-gate are untouched — <c>tasksJson</c> is the accepted Plan's
+/// <c>tasks</c> array raw text (<c>"[]"</c> on non-accept).
 ///
-/// Validates output has a 'tasks' array. Retries on invalid (max 2).
+/// <para><b>What changed (the epic's charter).</b> The bespoke validate-retry loop — the
+/// <c>ValidationErrors</c> variable, the <c>maxRetries</c> counter, the inline JSON extract, the
+/// <c>OutErr</c> terminal, every <see cref="Finish"/> — is DELETED. Validation failure now flows
+/// through the generic validate → repair/revise → review → accept rings and, at worst, exits as a
+/// typed escalation with full lineage. Consumed content (the architect's <c>planJson</c>) is
+/// folded into the DECLARED <c>contextFindings</c> carrier — never a new undeclared key (the
+/// render-drop lesson) — and repair/revise notes land in that SAME carrier via
+/// <c>feedbackVariableName = "contextFindings"</c>.</para>
 ///
-/// Flow:
-///   Init → Generate Tasks (llm-call) → Extract & Validate → Valid?
-///     ├─ Yes → Output → Finish
-///     └─ No → Retry? → Yes → feed errors back → Generate Tasks
-///                      → No → Error Output → Finish
-///
-/// Inputs: repository, issueNumber, planJson, contextIds
-/// Outputs: tasksJson (JSON array of detailed task plans)
+/// <para><b>Two-plans disambiguation (D2).</b> Both <c>plan-generation</c> and this binding
+/// produce documentType <c>plan</c> per issue; the 39-11 read scopes by
+/// <c>(issueId, documentType)</c> with NO producer filter (FILED to 39-11), so the task-creation
+/// lifecycle is keyed on a producer-scoped issue id (<c>{issueId}#task-creation</c>) — isolating
+/// its re-entry / accepted-doc slice from the accepted system plan WITHOUT forking the type. The
+/// <c>planJson</c> input remains the runtime carrier for the consumed plan content.</para>
 /// </summary>
+[ResumeBehavior(ResumeMode.LatestStateReEntry)]
 public class TaskCreationWorkflow : WorkflowBase
 {
+    private const string PlanDocumentType = "plan";
+    private const string ProducerScope = "task-creation";
+
     protected override void Build(IWorkflowBuilder builder)
     {
         builder.Name = "Task Creation";
         builder.DefinitionId = "task-creation";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description = "Senior dev LLM breaks plan into deep implementation task plans";
+        builder.Description = "Break the approved plan into detailed implementation tasks via the generic document lifecycle (produce → validate → review → revise → accept)";
 
-        // ================================================================
-        // Variables
-        // ================================================================
-        var repository = builder.WithVariable<string>("Repository", "");
-        var issueNumber = builder.WithVariable<int>("IssueNumber", 0);
-        var planJson = builder.WithVariable<string>("PlanJson", "");
-        var contextIds = builder.WithVariable<string>("ContextIds", "[]");
-        var workItemJson = builder.WithVariable<string>("WorkItemJson", "");
+        // ── Inputs (compat set + additive) ─────────────────────────────
+        var repository      = builder.WithVariable<string>("Repository", "");
+        var issueNumber     = builder.WithVariable<int>("IssueNumber", 0);
+        var planJson        = builder.WithVariable<string>("PlanJson", "");
+        var contextIds      = builder.WithVariable<string>("ContextIds", "[]");
+        var workItemJson    = builder.WithVariable<string>("WorkItemJson", "");
+        var tenantId        = builder.WithVariable<string>("TenantId", "");
+        var issueId         = builder.WithVariable<string>("IssueId", "");
+        var scopedIssueId   = builder.WithVariable<string>("ScopedIssueId", "");
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
 
-        var tenantId = builder.WithVariable<string>("TenantId", "");
+        // ── Consumed system plan (D2 lineage anchor) ───────────────────
+        var consumedPlanFound = builder.WithVariable<bool>();
+        var consumedPlanDocId = builder.WithVariable<string>("ConsumedPlanDocId", "");
+        var consumedPlanJson  = builder.WithVariable<string>("ConsumedPlanJson", "");
+        var consumedPlanLineage = builder.WithVariable<string>();
 
-        var tasksJson = builder.WithVariable<string>("TasksJson", "[]");
-        var tasksValid = builder.WithVariable<bool>("TasksValid", false);
-        var validationErrors = builder.WithVariable<string>("ValidationErrors", "");
-        var retryCount = builder.WithVariable<int>("RetryCount", 0);
-        var maxRetries = builder.WithVariable<int>("MaxRetries", 2);
+        // ── 39-10 re-entry position (D8) ───────────────────────────────
+        var reEntryPositionJson = builder.WithVariable<string>();
+        var reEntryDocJson  = builder.WithVariable<string>();
+        var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
 
-        var llmResult = builder.WithVariable<IDictionary<string, object>?>();
+        // ── Dispatched-workflow result + typed exit ────────────────────
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
+        var lifecycleAccepted = builder.WithVariable<bool>();
+        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "");
+        var exitDocId       = builder.WithVariable<string>("ExitDocId", "");
+        var tasksJson       = builder.WithVariable<string>("TasksJson", "[]");
+        var outputStatus    = builder.WithVariable<string>();
+        var outputError     = builder.WithVariable<string>("OutputError", "");
 
-        // ================================================================
-        // 1. Init
-        // ================================================================
-        var init = new SetVariable
+        // ── Step 1: Read inputs ────────────────────────────────────────
+        var readInputs = new SetVariable
         {
-            Id = "Init", Name = "Initialize",
+            Id = "ReadInputs", Name = "Read Inputs",
             Variable = repository,
-            Value = new Input<object?>(ctx =>
+            Value = new(ctx =>
             {
                 var repo = ctx.GetInput<string>("repository") ?? "";
                 issueNumber.Set(ctx, ctx.GetInput<int>("issueNumber"));
@@ -74,213 +101,168 @@ public class TaskCreationWorkflow : WorkflowBase
                 contextIds.Set(ctx, ctx.GetInput<string>("contextIds") ?? "[]");
                 workItemJson.Set(ctx, ctx.GetInput<string>("workItemJson") ?? "");
                 tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
-                var inputMaxRetries = ctx.GetInput<int?>("maxRetries");
-                if (inputMaxRetries.HasValue) maxRetries.Set(ctx, inputMaxRetries.Value);
+                acceptanceRulesJson.Set(ctx, ctx.GetInput<string>("acceptanceRulesJson") ?? "");
+
+                var explicitIssueId = ctx.GetInput<string>("issueId") ?? "";
+                var baseIssueId = string.IsNullOrWhiteSpace(explicitIssueId)
+                    ? CreationBindingHelper.DeriveIssueId(repo, ctx.GetInput<int>("issueNumber"))
+                    : explicitIssueId;
+                issueId.Set(ctx, baseIssueId);
+                // D2 — producer-scoped resume anchor so re-entry does not collide with the system plan.
+                scopedIssueId.Set(ctx, CreationBindingHelper.ScopeIssueId(baseIssueId, ProducerScope));
                 return (object)repo;
             })
         };
-        init.SetDisplayText("Initialize");
+        readInputs.SetDisplayText("Read Inputs");
 
-        // ================================================================
-        // 2. Generate Tasks (via LlmCallWorkflow — prompt from registry)
-        // ================================================================
-        var generateTasks = new DispatchWorkflow
+        // ── Step 2: Compute 39-10 re-entry position (D8) ───────────────
+        var computeReEntry = new ComputeReEntryPositionActivity
         {
-            Id = "GenerateTasks", Name = "Generate Tasks",
-            WorkflowDefinitionId = new("llm-call"),
-            Input = new(ctx =>
-            {
-                var variables = new Dictionary<string, object>
-                {
-                    ["planJson"] = planJson.Get(ctx),
-                    ["contextIds"] = contextIds.Get(ctx),
-                    ["workItemJson"] = workItemJson.Get(ctx),
-                    ["repository"] = repository.Get(ctx),
-                };
-
-                // On retry, surface the prior attempt's validation errors through
-                // contextFindings — a variable the Plan-family template actually
-                // declares ({{contextFindings}}). The old "validationErrors" key was
-                // undeclared in the template and silently dropped at render, so
-                // retries re-prompted blind. First attempt: key omitted entirely so
-                // the rendered prompt is unchanged from before.
-                var feedback = ValidationFeedbackHelper.AppendFeedback(
-                    baseValue: null, validationErrors.Get(ctx));
-                if (feedback.Length > 0)
-                    variables["contextFindings"] = feedback;
-
-                return new Dictionary<string, object>
-                {
-                    ["role"] = AgentRole.SeniorDeveloper.ToWire(),
-                    ["action"] = AgentAction.CreateTasks.ToWire(),
-                    ["tenantId"] = tenantId.Get(ctx),
-                    ["variables"] = variables,
-                    ["enableTools"] = true,
-                };
-            }),
-            WaitForCompletion = new(true),
-            Result = new(llmResult),
+            Id = "ComputeReEntryPosition", Name = "Compute Re-Entry Position",
+            IssueId = new(ctx => scopedIssueId.Get(ctx)),
+            DocumentType = new(PlanDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            CorrelationId = new(ctx => scopedIssueId.Get(ctx)),
+            PositionJson = new(reEntryPositionJson),
+            ExistingDocumentJson = new(reEntryDocJson),
         };
-        generateTasks.SetDisplayText("Generate Tasks");
+        computeReEntry.SetDisplayText("Compute Re-Entry Position");
 
-        // ================================================================
-        // 3. Extract + Validate
-        // ================================================================
-        var extractAndValidate = new SetVariable
+        var readPositionStage = new SetVariable
         {
-            Id = "ExtractValidate", Name = "Extract & Validate",
-            Variable = tasksJson,
-            Value = new Input<object?>(ctx =>
+            Id = "ReadPositionStage", Name = "Read Position Stage",
+            Variable = positionStage,
+            Value = new(ctx =>
             {
-                var result = llmResult.Get(ctx);
-                var output = "";
-                if (result != null && result.TryGetValue("llmResponse", out var r))
-                    output = r?.ToString() ?? "";
-
-                // Extract JSON — look for array first, then object
-                var extracted = "";
-                var arrayStart = output.IndexOf('[');
-                var arrayEnd = output.LastIndexOf(']');
-                if (arrayStart >= 0 && arrayEnd > arrayStart)
+                var position = DocumentLifecycleHelper.DeserializeReEntryPosition(reEntryPositionJson.Get(ctx));
+                return position?.ResumeAt switch
                 {
-                    extracted = output[arrayStart..(arrayEnd + 1)];
-                }
-                else
-                {
-                    var jsonStart = output.IndexOf('{');
-                    var jsonEnd = output.LastIndexOf('}');
-                    if (jsonStart >= 0 && jsonEnd > jsonStart)
-                        extracted = output[jsonStart..(jsonEnd + 1)];
-                }
-
-                // Validate
-                var errors = new List<string>();
-                if (string.IsNullOrWhiteSpace(extracted))
-                {
-                    errors.Add("Empty tasks output");
-                }
-                else
-                {
-                    try
-                    {
-                        var doc = JsonDocument.Parse(extracted);
-                        var root = doc.RootElement;
-
-                        if (root.ValueKind == JsonValueKind.Array)
-                        {
-                            if (root.GetArrayLength() == 0)
-                                errors.Add("Tasks array is empty");
-                        }
-                        else if (root.ValueKind == JsonValueKind.Object)
-                        {
-                            if (root.TryGetProperty("tasks", out var tasksArr))
-                            {
-                                if (tasksArr.ValueKind != JsonValueKind.Array || tasksArr.GetArrayLength() == 0)
-                                    errors.Add("'tasks' property is empty or not an array");
-                                else
-                                    extracted = tasksArr.GetRawText(); // normalize to array
-                            }
-                            else
-                            {
-                                errors.Add("Missing 'tasks' array in response");
-                            }
-                        }
-                        else
-                        {
-                            errors.Add("Response is not a JSON array or object");
-                        }
-                    }
-                    catch (JsonException ex)
-                    {
-                        errors.Add($"Invalid JSON: {ex.Message}");
-                    }
-                }
-
-                tasksValid.Set(ctx, errors.Count == 0);
-                validationErrors.Set(ctx, string.Join("; ", errors));
-                return (object)extracted;
+                    LifecycleResumeStage.Complete => "complete",
+                    LifecycleResumeStage.Accept => "accept",
+                    LifecycleResumeStage.Review => "review",
+                    _ => "produce",
+                };
             })
         };
-        extractAndValidate.SetDisplayText("Extract & Validate");
+        readPositionStage.SetDisplayText("Read Position Stage");
 
-        // ================================================================
-        // 4. Valid?
-        // ================================================================
-        var isValid = new FlowDecision(ctx => tasksValid.Get(ctx))
-        { Id = "TasksValid", Name = "Tasks Valid?" };
-        isValid.SetDisplayText("Tasks Valid?");
+        // ── Step 3: FreshRun gate — fetch the consumed system plan only on a fresh run (D2/D8) ──
+        var freshRun = new FlowDecision(ctx => positionStage.Get(ctx) == "produce")
+        { Id = "FreshRun", Name = "Fresh Run?" };
+        freshRun.SetDisplayText("Fresh Run?");
 
-        // ================================================================
-        // 5. Retry logic
-        // ================================================================
-        var incrementRetry = new SetVariable
+        // The consumed plan is read on the BASE issue id (the system plan's scope).
+        var fetchConsumedPlan = new FetchLatestAcceptedDocumentActivity
         {
-            Id = "IncrRetry", Name = "Increment Retry",
-            Variable = retryCount,
-            Value = new Input<object?>(ctx => (object)(retryCount.Get(ctx) + 1))
+            Id = "FetchConsumedPlan", Name = "Fetch Accepted System Plan",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentTypeKey = new(PlanDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Found = new(consumedPlanFound),
+            DocumentId = new(consumedPlanDocId),
+            DocumentJson = new(consumedPlanJson),
+            LineageJson = new(consumedPlanLineage),
         };
-        incrementRetry.SetDisplayText("Increment Retry");
+        fetchConsumedPlan.SetDisplayText("Fetch Accepted System Plan");
 
-        var canRetry = new FlowDecision(ctx => retryCount.Get(ctx) < maxRetries.Get(ctx))
-        { Id = "CanRetry", Name = "Can Retry?" };
-        canRetry.SetDisplayText("Can Retry?");
-
-        // ================================================================
-        // 6. Outputs
-        // ================================================================
-        var setOutputs = new SetOutput
-        { Id = "OutTasks", OutputName = new("tasksJson"), OutputValue = new(ctx => (object)tasksJson.Get(ctx)) };
-        setOutputs.SetDisplayText("Output Tasks");
-
-        var setErrorOutputs = new Sequence
+        // ── Step 4: Dispatch the generic document lifecycle ────────────
+        var dispatchLifecycle = new DispatchWorkflow
         {
-            Id = "SetErrorOutputs", Name = "Error Outputs",
+            Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
+            WorkflowDefinitionId = new("document-lifecycle"),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["documentType"]          = PlanDocumentType,
+                ["producerRole"]          = AgentRole.SeniorDeveloper.ToWire(),
+                ["producerAction"]        = AgentAction.CreateTasks.ToWire(),
+                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                {
+                    ["workItemJson"] = workItemJson.Get(ctx) ?? "",
+                    // D2 — the consumed plan is the runtime carrier; fold it into the DECLARED
+                    // contextFindings variable (create-tasks.md declares {{contextFindings}}),
+                    // NOT a new (render-dropped) key.
+                    ["contextFindings"] = planJson.Get(ctx) ?? "",
+                    ["planJson"]     = planJson.Get(ctx) ?? "",
+                    ["contextIds"]   = contextIds.Get(ctx) ?? "[]",
+                    ["repository"]   = repository.Get(ctx) ?? "",
+                }),
+                // 39-6 D11 — repair/revise notes land in the DECLARED carrier.
+                ["feedbackVariableName"] = "contextFindings",
+                // D2 — producer-scoped issue id isolates this lifecycle's slice from the system plan.
+                ["issueId"]             = scopedIssueId.Get(ctx) ?? "",
+                ["correlationId"]       = scopedIssueId.Get(ctx) ?? "",
+                ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+            }),
+            WaitForCompletion = new(true),
+            Result = new(lifecycleResult),
+        };
+        dispatchLifecycle.SetDisplayText("Dispatch Document Lifecycle");
+
+        // ── Step 5: Read the typed lifecycle exit (fail-closed) ────────
+        var readLifecycleExit = new SetVariable
+        {
+            Id = "ReadLifecycleExit", Name = "Read Lifecycle Exit",
+            Variable = tasksJson,
+            Value = new(ctx =>
+            {
+                var exit = LifecycleBindingHelper.ReadLifecycleResult(lifecycleResult.Get(ctx));
+                var accepted = LifecycleBindingHelper.IsAccepted(exit);
+
+                lifecycleAccepted.Set(ctx, accepted);
+                exitOutcome.Set(ctx, exit.Outcome ?? "");
+                exitDocId.Set(ctx, exit.DocumentId ?? "");
+                outputStatus.Set(ctx, accepted ? "completed" : exit.Status);
+                outputError.Set(ctx, accepted ? "" : CreationBindingHelper.BuildFailureDetail(exit));
+                // tasksJson = the accepted Plan's tasks array raw text; "[]" on non-accept so the
+                // parent's tasks-gate + empty-tasks failure edge fire unchanged (D2).
+                return accepted
+                    ? CreationBindingHelper.ProjectTasksArray(exit.DocumentJson)
+                    : "[]";
+            })
+        };
+        readLifecycleExit.SetDisplayText("Read Lifecycle Exit");
+
+        // ── Step 6: Expose output — the single terminal region ─────────
+        var exposeOutput = new Sequence
+        {
+            Id = "ExposeOutput", Name = "Expose Output",
             Activities =
             {
-                new SetOutput { Id = "OutErrTasks", OutputName = new("tasksJson"), OutputValue = new(_ => (object)"[]") },
-                new SetOutput { Id = "OutErr", OutputName = new("error"), OutputValue = new(ctx => (object)validationErrors.Get(ctx)) },
+                WithLabel(new SetOutput { Id = "OutputTasks", Name = "Output Tasks", OutputName = new("tasksJson"), OutputValue = new(ctx => (object)(tasksJson.Get(ctx) ?? "[]")) }, "Output Tasks"),
+                WithLabel(new SetOutput { Id = "OutputError", Name = "Output Error", OutputName = new("error"), OutputValue = new(ctx => (object)(outputError.Get(ctx) ?? "")) }, "Output Error"),
+                WithLabel(new SetOutput { Id = "OutputStatus", Name = "Output Status", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }, "Output Status"),
+                WithLabel(new SetOutput { Id = "OutputOutcome", Name = "Output Outcome", OutputName = new("outcome"), OutputValue = new(ctx => (object)(exitOutcome.Get(ctx) ?? "")) }, "Output Outcome"),
+                WithLabel(new SetOutput { Id = "OutputDocumentId", Name = "Output Document Id", OutputName = new("documentId"), OutputValue = new(ctx => (object)(exitDocId.Get(ctx) ?? "")) }, "Output Document Id"),
+                WithLabel(new SetOutput { Id = "OutputParentDocumentId", Name = "Output Parent Document Id", OutputName = new("parentDocumentId"), OutputValue = new(ctx => (object)(consumedPlanDocId.Get(ctx) ?? "")) }, "Output Parent Document Id"),
             }
         };
-        setErrorOutputs.SetDisplayText("Error Outputs");
+        exposeOutput.SetDisplayText("Expose Output");
 
-        var finish = new Finish { Id = "Finish", Name = "Complete" };
-        finish.SetDisplayText("Complete");
-
-        // ================================================================
-        // Flowchart
-        // ================================================================
+        // ── Build the flowchart ────────────────────────────────────────
         builder.Root = new Flowchart
         {
             Id = "TaskCreationFlowchart",
-            Start = init,
+            Name = "Task Creation Flowchart",
+            Start = readInputs,
             Activities =
             {
-                init, generateTasks, extractAndValidate, isValid,
-                incrementRetry, canRetry,
-                setOutputs, setErrorOutputs, finish,
+                readInputs, computeReEntry, readPositionStage, freshRun,
+                fetchConsumedPlan, dispatchLifecycle, readLifecycleExit, exposeOutput,
             },
             Connections =
             {
-                Connect(init, generateTasks),
-                Connect(generateTasks, extractAndValidate),
-                Connect(extractAndValidate, isValid),
+                new(readInputs, computeReEntry),
+                new(computeReEntry, readPositionStage),
+                new(readPositionStage, freshRun),
 
-                ConnectOutcome(isValid, "True", setOutputs),
-                Connect(setOutputs, finish),
+                new(new FlowEndpoint(freshRun, "True"),  new FlowEndpoint(fetchConsumedPlan)),
+                new(fetchConsumedPlan, dispatchLifecycle),
+                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(dispatchLifecycle)),
 
-                ConnectOutcome(isValid, "False", incrementRetry),
-                Connect(incrementRetry, canRetry),
-
-                ConnectOutcome(canRetry, "True", generateTasks), // retry
-                ConnectOutcome(canRetry, "False", setErrorOutputs), // give up
-                Connect(setErrorOutputs, finish),
+                new(dispatchLifecycle, readLifecycleExit),
+                new(readLifecycleExit, exposeOutput),
             }
         };
     }
-
-    private static FlowConnection Connect(IActivity source, IActivity target)
-        => new(new FlowEndpoint(source), new FlowEndpoint(target));
-
-    private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
-        => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
 }

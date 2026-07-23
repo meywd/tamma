@@ -71,11 +71,15 @@ public class ResumableStandardStructuralTests
             ["RotateSecretWorkflow"] = "platform secret-rotation saga, no document lifecycle (burn-down: n/a — platform).",
             ["SingleIssueCycleWorkflow"] = "issue-cycle orchestration composite, delegates to sub-workflows (burn-down: 39-14+).",
             ["SingleReviewerWorkflow"] = "39-7 single-reviewer producer, runs to completion (burn-down: 39-12+).",
-            ["TaskCreationWorkflow"] = "task producer leaf, runs to completion (burn-down: 39-13+).",
+            // TaskCreationWorkflow burned down in Story 39-15 — it now declares
+            // [ResumeBehavior(LatestStateReEntry)] with the ComputeReEntryPositionActivity gate
+            // (rebuilt as a document-lifecycle binding producing a typed task-breakdown Plan).
             ["TaskReviewWorkflow"] = "task-review panel, runs to completion (burn-down: 39-13+).",
             ["TddWithDebugRetryWorkflow"] = "TDD retry loop, no human suspend gate (burn-down: 39-15+).",
             ["TddWorkflow"] = "TDD cycle composite, delegates to sub-workflows (burn-down: 39-15+).",
-            ["TestCaseCreationWorkflow"] = "test producer leaf, runs to completion (burn-down: 39-13+).",
+            // TestCaseCreationWorkflow burned down in Story 39-15 — it now declares
+            // [ResumeBehavior(LatestStateReEntry)] with the ComputeReEntryPositionActivity gate
+            // (rebuilt as a document-lifecycle binding producing a typed TestSpec that consumes the Plan).
             ["TestingWorkflow"] = "testing composite, delegates to sub-workflows (burn-down: 39-15+).",
             ["TriageContextGatheringWorkflow"] = "triage context-scan producer, no suspend gate (burn-down: 39-14+).",
             ["TriageItemCycleWorkflow"] = "triage item-cycle composite, delegates to sub-workflows (burn-down: 39-14+).",

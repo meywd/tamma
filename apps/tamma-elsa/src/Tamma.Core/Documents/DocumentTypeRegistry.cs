@@ -149,7 +149,9 @@ public static class DocumentTypeRegistry
             // (flipped non-provisional). plan-review is now a reader (consumes plan, produces
             // nothing) — the read-through shim.
             new WorkflowDocumentInterface("plan-generation",    new[] { DocumentTypeKey.Decomposition }, DocumentTypeKey.Plan, false),
-            new WorkflowDocumentInterface("task-creation",      empty, DocumentTypeKey.Plan,                true),
+            // Story 39-15 (D2) — task-creation CONSUMES the accepted (system) plan and PRODUCES a
+            // task-breakdown plan via its document-lifecycle binding (flipped non-provisional).
+            new WorkflowDocumentInterface("task-creation",      new[] { DocumentTypeKey.Plan }, DocumentTypeKey.Plan, false),
             new WorkflowDocumentInterface("design-proposal",    empty, DocumentTypeKey.Design,              false),
             new WorkflowDocumentInterface("plan-review",        new[] { DocumentTypeKey.Plan },          null,                 false),
             new WorkflowDocumentInterface("task-review",        empty, DocumentTypeKey.Review,              true),
@@ -157,7 +159,9 @@ public static class DocumentTypeRegistry
             new WorkflowDocumentInterface("triage-po-decision", empty, DocumentTypeKey.TriageDecision,      true),
             new WorkflowDocumentInterface("blocker-diagnosis",  empty, DocumentTypeKey.Diagnosis,           true),
             new WorkflowDocumentInterface("debugging",          empty, DocumentTypeKey.Diagnosis,           true),
-            new WorkflowDocumentInterface("test-case-creation", empty, DocumentTypeKey.TestSpec,            true),
+            // Story 39-15 (D3) — test-case-creation CONSUMES the task-breakdown plan and PRODUCES a
+            // TestSpec (with the cross-document task-ID validation ring) via its lifecycle binding.
+            new WorkflowDocumentInterface("test-case-creation", new[] { DocumentTypeKey.Plan }, DocumentTypeKey.TestSpec, false),
         };
     }
 }
