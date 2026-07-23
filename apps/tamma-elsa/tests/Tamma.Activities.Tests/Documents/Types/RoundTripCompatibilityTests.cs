@@ -4,13 +4,11 @@ using NUnit.Framework;
 using Tamma.Activities.Ambiguity;
 using Tamma.Activities.Clarify;
 using Tamma.Activities.Core;
-using Tamma.Activities.Decomposition;
 using Tamma.Activities.Research;
 using Tamma.Core.Documents;
 using Tamma.Core.Documents.Types;
 using TypedAmbiguity = Tamma.Core.Documents.Types.AmbiguityAssessment;
 using TypedClarification = Tamma.Core.Documents.Types.Clarification;
-using TypedDecomposition = Tamma.Core.Documents.Types.Decomposition;
 using TypedFindings = Tamma.Core.Documents.Types.Findings;
 
 namespace Tamma.Activities.Tests.Documents.Types;
@@ -27,7 +25,8 @@ namespace Tamma.Activities.Tests.Documents.Types;
 [TestFixture]
 public class RoundTripCompatibilityTests
 {
-    private static readonly DecompositionDocumentType DecompositionType = new();
+    // Story 39-12: the decomposition round-trip fixtures retired with DecompositionParsing (the
+    // "old parser re-parses the typed payload" transition-window proof ends with the old parser).
     private static readonly FindingsDocumentType FindingsType = new();
     private static readonly AmbiguityAssessmentDocumentType AmbiguityType = new();
     private static readonly ClarificationDocumentType ClarificationType = new();
@@ -48,90 +47,6 @@ public class RoundTripCompatibilityTests
                 "the typed validator's verdict on this baseline fixture must match the documented set " +
                 "(empty = valid; otherwise exactly the deliberate tightenings)");
         result.IsValid.Should().Be(expectedCodes.Length == 0);
-    }
-
-    // ── Decomposition fixtures ────────────────────────────────────────────────
-    private const string ValidDecomposition =
-        """
-        {
-          "summary": "Split the auth feature into a schema slice, an endpoint slice, and a UI slice.",
-          "subtasks": [
-            { "id": "ST-1", "title": "Add users table", "description": "schema + migration", "acceptanceCriteria": "applies cleanly", "estimateHours": 3, "complexity": "low", "dependsOn": [] },
-            { "id": "ST-2", "title": "Login endpoint", "description": "POST /login", "acceptanceCriteria": "200 + token", "estimateHours": 6, "complexity": "medium", "dependsOn": ["ST-1"] },
-            { "id": "ST-3", "title": "Login UI", "description": "form", "acceptanceCriteria": "user can log in", "estimateHours": 5, "complexity": "high", "dependsOn": ["ST-2"] }
-          ]
-        }
-        """;
-
-    private const string TemplateShapedDecomposition =
-        """
-        {
-          "summary": "Deliver rate limiting incrementally: middleware first, then config.",
-          "subtasks": [
-            { "id": "ST-1", "title": "Token-bucket middleware", "description": "limiter keyed by tenant id", "acceptanceCriteria": "over the limit → 429", "estimateHours": 6, "complexity": "medium", "dependsOn": [] },
-            { "id": "ST-2", "title": "Per-tenant config", "description": "read limit from config", "acceptanceCriteria": "configurable per tenant", "estimateHours": 4, "complexity": "low", "dependsOn": ["ST-1"] }
-          ]
-        }
-        """;
-
-    private const string MessyDecomposition =
-        """{ "summary": "s", "subtasks": [ { "id": "A", "title": "t", "complexity": "Trivial.", "estimateHours": -4 } ] }""";
-
-    private const string WithBadDepsDecomposition =
-        """
-        { "summary": "s", "subtasks": [
-          { "id": "ST-1", "title": "a", "dependsOn": ["ST-1", "ST-99"] },
-          { "id": "ST-2", "title": "b", "dependsOn": ["ST-1", "ST-1"] }
-        ] }
-        """;
-
-    private const string WithShellsDecomposition =
-        """
-        { "summary": "s", "subtasks": [
-          { "id": "", "title": "no id" },
-          { "id": "ST-1", "title": "", "description": "" },
-          { "id": "ST-2", "title": "real" },
-          { "id": "ST-2", "title": "duplicate id kept as first" }
-        ] }
-        """;
-
-    [Test]
-    public void Decomposition_valid_fixtures_round_trip()
-    {
-        foreach (var fixture in new[] { ValidDecomposition, TemplateShapedDecomposition })
-        {
-            AssertValidateCodes(DecompositionType, fixture);
-
-            var typed = DeserializeTyped<TypedDecomposition>(fixture);
-            var reserialized = JsonSerializer.Serialize(typed, DocumentJson.Options);
-
-            var parsed = DecompositionParsing.ParseDecomposition(reserialized);
-            parsed.Should().NotBeNull("the old parser must still parse the re-serialized typed payload");
-            parsed!.Summary.Should().NotBeNullOrWhiteSpace();
-            parsed.Subtasks.Should().NotBeEmpty();
-        }
-    }
-
-    [Test]
-    public void Decomposition_tightening_fixtures_round_trip()
-    {
-        AssertValidateCodes(DecompositionType, MessyDecomposition,
-            DecompositionDocumentType.SizingOutOfRange, DecompositionDocumentType.UnknownComplexity);
-        AssertValidateCodes(DecompositionType, WithBadDepsDecomposition,
-            DecompositionDocumentType.SelfDependsOn, DecompositionDocumentType.DanglingDependsOn,
-            DecompositionDocumentType.SizingOutOfRange);
-        AssertValidateCodes(DecompositionType, WithShellsDecomposition,
-            DecompositionDocumentType.TaskMissingId, DecompositionDocumentType.TaskEmptyShell,
-            DecompositionDocumentType.DuplicateTaskId, DecompositionDocumentType.SizingOutOfRange);
-
-        // The old parser still recovers a non-null decomposition from each re-serialized payload.
-        foreach (var fixture in new[] { MessyDecomposition, WithBadDepsDecomposition, WithShellsDecomposition })
-        {
-            var typed = DeserializeTyped<TypedDecomposition>(fixture);
-            var reserialized = JsonSerializer.Serialize(typed, DocumentJson.Options);
-            DecompositionParsing.ParseDecomposition(reserialized).Should().NotBeNull(
-                "even a fixture that trips a documented tightening must remain parseable by the old parser");
-        }
     }
 
     // ── Research (Findings) fixtures ──────────────────────────────────────────

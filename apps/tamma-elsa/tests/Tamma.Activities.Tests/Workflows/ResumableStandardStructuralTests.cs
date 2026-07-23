@@ -60,7 +60,6 @@ public class ResumableStandardStructuralTests
             ["DesignProposalWorkflow"] = "legacy Design bookmark-suspend gate (not yet on the canonical builder; retired by a 39-13+ migration).",
             ["DocumentReviewWorkflow"] = "39-7 review producer sub-workflow, runs to completion (burn-down: 39-12+).",
             ["HourlyAnalyticsRollupWorkflow"] = "scheduled analytics rollup, no document lifecycle (burn-down: n/a — platform).",
-            ["IssueDecompositionWorkflow"] = "the 39-12 pilot migration target — declares onto the lifecycle in 39-12 (burn-down: 39-12).",
             ["IssueTriageWorkflow"] = "triage orchestration composite, delegates to sub-workflows (burn-down: 39-14+).",
             ["LlmCallWorkflow"] = "the mediated llm-call leaf, runs to completion, holds no suspend gate (burn-down: n/a — infra leaf).",
             ["MentorshipWorkflow"] = "mentoring leaf, runs to completion (burn-down: 39-14+).",

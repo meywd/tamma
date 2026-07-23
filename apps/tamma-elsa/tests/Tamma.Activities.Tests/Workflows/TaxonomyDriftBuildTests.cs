@@ -72,6 +72,15 @@ public class TaxonomyDriftBuildTests
     private const string LlmCallDefinitionId = "llm-call";
 
     /// <summary>
+    /// Story 39-12 (Design Decision D5) — the generic lifecycle binding target. A
+    /// workflow that dispatches <c>document-lifecycle</c> (IssueDecompositionWorkflow and
+    /// the 39-13/14/15 family) rides its <c>(producerRole, producerAction)</c> INTO the
+    /// lifecycle inputs rather than a compiled <c>llm-call</c> site, so the drift
+    /// enumeration must see THROUGH the binding to keep the producer pair discovered.
+    /// </summary>
+    private const string LifecycleDefinitionId = "document-lifecycle";
+
+    /// <summary>
     /// Lower bound on the number of dispatch-site <c>(role, action)</c> pairs the
     /// enumeration must find. A COVERAGE TRIPWIRE: if the reflection ever silently
     /// stops resolving dispatch inputs (e.g. an Elsa upgrade changes the Input
@@ -109,7 +118,7 @@ public class TaxonomyDriftBuildTests
         "ContextGatheringWorkflow",
         "DebuggingWorkflow",
         "DeploymentPipelineWorkflow",
-        "IssueDecompositionWorkflow",   // Story 2.14: dispatches the dedicated (senior_developer, decompose-issue) pair
+        "IssueDecompositionWorkflow",   // Story 39-12: the pair is now dispatched via its document-lifecycle binding (producerRole/producerAction inputs), discovered by the lifecycle-binding walk (D5)
         "MentorshipWorkflow",
         "PlanGenerationWorkflow",
         "PlanReviewWorkflow",
@@ -259,6 +268,23 @@ public class TaxonomyDriftBuildTests
     }
 
     [Test]
+    public void LifecycleBindingWalk_FindsPairs_NotANoOp()
+    {
+        // Story 39-12 (D5) — the lifecycle-binding walk must actually resolve
+        // (producerRole, producerAction) pairs. A walk that silently finds nothing while a
+        // document-lifecycle binding exists (IssueDecompositionWorkflow) would hide the
+        // producer pair from the drift + contract gates. This tripwire fails on that
+        // collapse (same posture as Enumeration_FindsDispatchPairs_NotANoOp).
+        var pairs = ScanLifecycleBindingDispatches();
+
+        pairs.Should().NotBeEmpty(
+            "the document-lifecycle binding walk must resolve at least one (producerRole, producerAction) " +
+            "pair — IssueDecompositionWorkflow (39-12) binds (senior_developer, decompose-issue).");
+        pairs.Should().Contain(p => p.Workflow == "IssueDecompositionWorkflow",
+            "the 39-12 pilot binding must be discovered by the lifecycle-binding walk (D5).");
+    }
+
+    [Test]
     public void DataDrivenDispatchAllowList_StaysInSyncWithReality()
     {
         // Story 39-6 (D3). A DATA-DRIVEN dispatch (Input materialises but role/action
@@ -403,7 +429,46 @@ public class TaxonomyDriftBuildTests
         var supplemented = NonMaterializableSupplement
             .Select(kv => new DispatchPair(kv.Key.Workflow, kv.Key.DispatchId, kv.Value.Role, kv.Value.Action));
 
-        return materialized.Concat(supplemented).ToList();
+        // Story 39-12 (D5) — also see THROUGH document-lifecycle bindings: a binding rides
+        // its producer (role, action) into the lifecycle inputs, so the pair is discovered
+        // here (keeping the ContractBindingTests entry non-stale and the contributor visible).
+        return materialized.Concat(supplemented).Concat(ScanLifecycleBindingDispatches()).ToList();
+    }
+
+    /// <summary>
+    /// Story 39-12 (D5) — walk every workflow, find every <c>document-lifecycle</c>
+    /// <see cref="DispatchWorkflow"/>, materialise its Input delegate, and read the
+    /// <c>producerRole</c>/<c>producerAction</c> the binding hands the generic lifecycle.
+    /// Attributed to the BINDING workflow (its ExpectedContributingWorkflows entry). The
+    /// generic <c>DocumentLifecycleWorkflow</c> itself dispatches only <c>llm-call</c>
+    /// (data-driven), not <c>document-lifecycle</c>, so it contributes nothing here.
+    /// </summary>
+    internal static IReadOnlyList<DispatchPair> ScanLifecycleBindingDispatches()
+    {
+        var pairs = new List<DispatchPair>();
+
+        foreach (var workflow in DiscoverWorkflows())
+        {
+            var workflowName = workflow.GetType().Name;
+            var builder = WorkflowTestHelper.BuildWorkflow(workflow);
+            var root = builder.Object.Root;
+            if (root == null) continue;
+
+            foreach (var dispatch in CollectDispatchWorkflows(root))
+            {
+                if (ReadWorkflowDefinitionId(dispatch) != LifecycleDefinitionId)
+                    continue;
+                if (!TryMaterializeInputDictionary(dispatch, out var input))
+                    continue;
+
+                var role = ReadString(input!, "producerRole");
+                var action = ReadString(input!, "producerAction");
+                if (!string.IsNullOrEmpty(role) && !string.IsNullOrEmpty(action))
+                    pairs.Add(new DispatchPair(workflowName, dispatch.Id ?? "<no-id>", role!, action!));
+            }
+        }
+
+        return pairs;
     }
 
     /// <summary>
@@ -416,6 +481,31 @@ public class TaxonomyDriftBuildTests
     {
         var (_, _, dataDriven) = ScanLlmCallDispatches();
         return dataDriven.Select(d => (d.Workflow, d.DispatchId)).ToList();
+    }
+
+    /// <summary>
+    /// Story 39-12 — materialise the Input dictionary of a specific dispatch site
+    /// (<paramref name="workflowName"/>.<paramref name="dispatchId"/>) so a structure test
+    /// can pin the constant inputs it hands its sub-workflow (e.g. <c>documentType</c>).
+    /// Reuses the same delegate-invocation seam the drift enumeration relies on. Returns
+    /// <c>null</c> if the site is not found or its Input cannot be materialised.
+    /// </summary>
+    internal static IDictionary<string, object>? MaterializeDispatchInput(string workflowName, string dispatchId)
+    {
+        foreach (var workflow in DiscoverWorkflows())
+        {
+            if (workflow.GetType().Name != workflowName) continue;
+            var builder = WorkflowTestHelper.BuildWorkflow(workflow);
+            var root = builder.Object.Root;
+            if (root == null) continue;
+
+            foreach (var dispatch in CollectDispatchWorkflows(root))
+            {
+                if (dispatch.Id != dispatchId) continue;
+                return TryMaterializeInputDictionary(dispatch, out var input) ? input : null;
+            }
+        }
+        return null;
     }
 
     private sealed record DispatchRef(string Workflow, string DispatchId);

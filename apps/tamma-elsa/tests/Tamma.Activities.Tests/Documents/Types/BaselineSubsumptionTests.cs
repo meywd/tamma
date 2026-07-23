@@ -2,7 +2,6 @@ using System.Text.Json;
 using FluentAssertions;
 using NUnit.Framework;
 using Tamma.Activities.Ambiguity;
-using Tamma.Activities.Decomposition;
 using Tamma.Activities.Research;
 using Tamma.Core.Documents;
 using Tamma.Core.Documents.Types;
@@ -34,7 +33,9 @@ namespace Tamma.Activities.Tests.Documents.Types;
 [TestFixture]
 public class BaselineSubsumptionTests
 {
-    private static readonly DecompositionDocumentType Decomposition = new();
+    // Story 39-12: the decomposition baseline rows retired with DecompositionParsing (the
+    // "old parser still parses" transition-window purpose ends when the old parser ceases to
+    // exist). The typed-validator coverage lives in DecompositionDocumentTypeTests.
     private static readonly FindingsDocumentType Findings = new();
     private static readonly AmbiguityAssessmentDocumentType Ambiguity = new();
 
@@ -46,25 +47,6 @@ public class BaselineSubsumptionTests
 
     // Copied fixture constants from the baseline *ParsingTests.cs (in-assembly reuse,
     // per D7 — the parser tests live in this same project but are private constants).
-
-    // ── Decomposition JSON-shaped negatives (baseline → null) ────────────────
-    private const string NoSummary = """{ "subtasks": [ { "id": "ST-1", "title": "a" } ] }""";
-    private const string EmptySubtasks = """{ "summary": "s", "subtasks": [] }""";
-    private const string AllShells =
-        """{ "summary": "s", "subtasks": [ { "id": "", "title": "" }, { "id": "ST-1", "title": "", "description": "" } ] }""";
-
-    [Test]
-    public void Decomposition_json_negatives_rejected_by_both()
-    {
-        DecompositionParsing.ParseDecomposition(NoSummary).Should().BeNull("baseline floor");
-        Validate(Decomposition, NoSummary).IsValid.Should().BeFalse("typed path must also reject a missing summary");
-
-        DecompositionParsing.ParseDecomposition(EmptySubtasks).Should().BeNull("baseline floor");
-        Validate(Decomposition, EmptySubtasks).IsValid.Should().BeFalse("typed path must also reject empty subtasks");
-
-        DecompositionParsing.ParseDecomposition(AllShells).Should().BeNull("baseline floor");
-        Validate(Decomposition, AllShells).IsValid.Should().BeFalse("typed path must also reject all-shell subtasks");
-    }
 
     // ── Research JSON-shaped negatives (baseline → null) ─────────────────────
     private const string NoSummaryReport = """{ "findings": [ { "summary": "a" } ] }""";
@@ -113,16 +95,14 @@ public class BaselineSubsumptionTests
     }
 
     // ── Text-level negatives: never reach Validate — throw at the JSON boundary (D8) ──
+    // Story 39-12: the decomposition baseline-parser probe was dropped with DecompositionParsing;
+    // the type-agnostic JSON-boundary assertion (a loud rejection, never a silent default) stays.
     [TestCase("")]
     [TestCase("   ")]
     [TestCase("no json here at all")]
     [TestCase("{ not valid json")]
     public void Text_level_negatives_throw_at_the_json_boundary(string input)
     {
-        // The baseline parsers fail closed (null) on these; in the typed pipeline the
-        // 39-2 boundary throws BEFORE any Validate is reached — a loud rejection.
-        DecompositionParsing.ParseDecomposition(input).Should().BeNull("baseline floor");
-
         var act = () => JsonDocument.Parse(input);
         act.Should().Throw<JsonException>(
             "malformed / empty text cannot reach Validate — it fails loud at the JSON parse boundary (D8)");
@@ -130,50 +110,9 @@ public class BaselineSubsumptionTests
 
     // ── Lenient-spelling divergences: baseline ACCEPTED, typed path now REJECTS ──
     // Each assertion cites its completion-notes.md divergence entry (AC6 executable).
-
-    [Test]
-    public void Divergence_strict_complexity_label()
-    {
-        // completion-notes: "Strict label sets" — baseline folds "Trivial." → low; typed rejects.
-        const string messy = """{ "summary": "s", "subtasks": [ { "id": "A", "title": "t", "complexity": "Trivial.", "estimateHours": 4 } ] }""";
-
-        DecompositionParsing.ParseDecomposition(messy).Should().NotBeNull("baseline accepts and folds the label");
-        Validate(Decomposition, messy).Violations.Select(v => v.Code)
-            .Should().Contain(DecompositionDocumentType.UnknownComplexity,
-                "completion-notes: strict label sets (senior_developer/decompose-issue)");
-    }
-
-    [Test]
-    public void Divergence_dangling_and_self_now_loud()
-    {
-        // completion-notes: "dangling/self/duplicate now loud" — baseline prunes silently.
-        const string withBadDeps =
-            """
-            { "summary": "s", "subtasks": [
-              { "id": "ST-1", "title": "a", "estimateHours": 4, "dependsOn": ["ST-1", "ST-99"] },
-              { "id": "ST-2", "title": "b", "estimateHours": 4, "dependsOn": ["ST-1", "ST-1"] }
-            ] }
-            """;
-
-        DecompositionParsing.ParseDecomposition(withBadDeps).Should().NotBeNull("baseline accepts and prunes edges");
-        var codes = Validate(Decomposition, withBadDeps).Violations.Select(v => v.Code).ToList();
-        codes.Should().Contain(DecompositionDocumentType.SelfDependsOn,
-            "completion-notes: self-dependency now loud (senior_developer/decompose-issue)");
-        codes.Should().Contain(DecompositionDocumentType.DanglingDependsOn,
-            "completion-notes: dangling dependency now loud (senior_developer/decompose-issue)");
-    }
-
-    [Test]
-    public void Divergence_negative_and_missing_hours_now_out_of_range()
-    {
-        // completion-notes: "sizing 2–8h" — baseline clamped negatives to 0 and called 2–8h a soft guide.
-        const string negativeHours = """{ "summary": "s", "subtasks": [ { "id": "A", "title": "t", "estimateHours": -4 } ] }""";
-
-        DecompositionParsing.ParseDecomposition(negativeHours).Should().NotBeNull("baseline accepts and clamps to 0");
-        Validate(Decomposition, negativeHours).Violations.Select(v => v.Code)
-            .Should().Contain(DecompositionDocumentType.SizingOutOfRange,
-                "completion-notes: 2–8h sizing rule (senior_developer/decompose-issue)");
-    }
+    // Story 39-12: the three decomposition divergences (strict complexity, dangling/self,
+    // 2–8h sizing) retired with DecompositionParsing; the typed-side coverage lives in
+    // DecompositionDocumentTypeTests.
 
     [Test]
     public void Divergence_evidence_required()

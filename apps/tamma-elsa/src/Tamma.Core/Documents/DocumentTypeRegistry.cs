@@ -139,7 +139,9 @@ public static class DocumentTypeRegistry
             new WorkflowDocumentInterface("research",           empty, DocumentTypeKey.Findings,            true),
             new WorkflowDocumentInterface("ambiguity-scoring",  empty, DocumentTypeKey.AmbiguityAssessment, true),
             new WorkflowDocumentInterface("clarifying-questions", empty, DocumentTypeKey.Clarification,      true),
-            new WorkflowDocumentInterface("issue-decomposition", empty, DocumentTypeKey.Decomposition,      true),
+            // Story 39-12 (D9) — flipped non-provisional: the edge is now backed by a real
+            // document-lifecycle binding (IssueDecompositionWorkflow), not a seed guess.
+            new WorkflowDocumentInterface("issue-decomposition", empty, DocumentTypeKey.Decomposition,      false),
             new WorkflowDocumentInterface("plan-generation",    empty, DocumentTypeKey.Plan,                true),
             new WorkflowDocumentInterface("task-creation",      empty, DocumentTypeKey.Plan,                true),
             new WorkflowDocumentInterface("design-proposal",    empty, DocumentTypeKey.Design,              true),
