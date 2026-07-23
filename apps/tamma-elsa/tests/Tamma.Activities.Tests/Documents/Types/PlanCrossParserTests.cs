@@ -3,17 +3,19 @@ using FluentAssertions;
 using NUnit.Framework;
 using Tamma.Core.Documents;
 using Tamma.Core.Documents.Types;
-using Tamma.ElsaServer.Workflows.Helpers;
 using TypedPlan = Tamma.Core.Documents.Types.Plan;
 
 namespace Tamma.Activities.Tests.Documents.Types;
 
 /// <summary>
 /// Story 39-4 AC4/AC8 — the subsumption + round-trip half for <see cref="PlanDocumentType"/>
-/// (Design Decision D8). Invokes the OLD <c>PlanValidationHelper.ValidatePlan</c>
-/// baseline: every JSON-shaped input it rejects, the typed validator also rejects; and
-/// a fixture BOTH pass round-trips through the typed payload back to JSON the old
-/// checker still passes (root <c>files</c> preserved per D5).
+/// (Design Decision D8). The OLD <c>PlanValidationHelper.ValidatePlan</c> baseline this suite
+/// once cross-checked against was DELETED in Story 39-14 (its bespoke retry loop was subsumed
+/// by the document lifecycle); the recorded baseline verdicts are pinned inline as comments,
+/// and the assertions now stand on the typed validator alone: every input the old checker
+/// rejected the typed validator also rejects, and a valid fixture round-trips through the
+/// typed payload back to JSON the typed validator still accepts (root <c>files</c> preserved
+/// per D5).
 /// </summary>
 [TestFixture]
 public class PlanCrossParserTests
@@ -26,32 +28,28 @@ public class PlanCrossParserTests
         return Type.Validate(doc.RootElement);
     }
 
-    // JSON-shaped negatives from PlanValidationTests.cs.
-    [TestCase("{}")]                                            // EmptyJsonObject → "Empty plan"
-    [TestCase("""{"fileMap": {"src/foo.ts": "create"}}""")]      // MissingTasksField
-    [TestCase("""{"tasks": [{"id": "T1"}]}""")]                  // MissingFileMapField (no per-task files/testing)
-    public void Every_plan_the_baseline_rejects_the_typed_validator_also_rejects(string json)
+    // JSON-shaped negatives the retired PlanValidationHelper.ValidatePlan rejected.
+    [TestCase("{}")]                                            // old: "Empty plan"
+    [TestCase("""{"fileMap": {"src/foo.ts": "create"}}""")]      // old: MissingTasksField
+    [TestCase("""{"tasks": [{"id": "T1"}]}""")]                  // old: MissingFileMapField (no per-task files/testing)
+    public void Every_plan_the_baseline_rejected_the_typed_validator_also_rejects(string json)
     {
-        var (_, isValid, _) = PlanValidationHelper.ValidatePlan(json);
-        isValid.Should().BeFalse("baseline floor");
-
-        Validate(json).IsValid.Should().BeFalse("the typed validator must also reject what ValidatePlan rejects");
+        Validate(json).IsValid.Should().BeFalse("the typed validator must reject what the old ValidatePlan rejected");
     }
 
     [Test]
     public void Text_level_negative_throws_at_the_json_boundary()
     {
-        // "{not valid json}" → ValidatePlan reports "Invalid JSON"; in the typed pipeline
-        // it never reaches Validate — it fails loud at the JSON parse boundary (D8).
+        // "{not valid json}" → the old ValidatePlan reported "Invalid JSON"; in the typed
+        // pipeline it never reaches Validate — it fails loud at the JSON parse boundary (D8).
         const string malformed = "{not valid json}";
-        PlanValidationHelper.ValidatePlan(malformed).isValid.Should().BeFalse("baseline floor");
 
         var act = () => JsonDocument.Parse(malformed);
         act.Should().Throw<JsonException>();
     }
 
     [Test]
-    public void Valid_plan_round_trips_back_through_the_old_checker()
+    public void Valid_plan_round_trips_through_the_typed_payload()
     {
         const string fixture =
             """
@@ -64,15 +62,13 @@ public class PlanCrossParserTests
             }
             """;
 
-        // Both parsers accept it.
-        PlanValidationHelper.ValidatePlan(fixture).isValid.Should().BeTrue("baseline accepts the fixture");
+        // The old ValidatePlan accepted this fixture; the typed validator accepts it too.
         Validate(fixture).IsValid.Should().BeTrue("typed validator accepts the fixture");
 
-        // Deserialize → re-serialize → the OLD checker still passes (root files preserved).
+        // Deserialize → re-serialize → the typed validator still passes (root files preserved, D5).
         var typed = JsonSerializer.Deserialize<TypedPlan>(fixture, DocumentJson.Options)!;
         var reserialized = JsonSerializer.Serialize(typed, DocumentJson.Options);
 
-        var (_, stillValid, errors) = PlanValidationHelper.ValidatePlan(reserialized);
-        stillValid.Should().BeTrue($"the old checker must still pass the re-serialized typed payload (errors: {errors})");
+        Validate(reserialized).IsValid.Should().BeTrue("the re-serialized typed payload must still validate");
     }
 }

@@ -17,7 +17,7 @@ namespace Tamma.ElsaServer.Workflows.Helpers;
 /// <see cref="ReviewDocumentType"/> so blocking-issues⇒not-approvable is enforced.
 ///
 /// <para>No Elsa runtime dependency; same fail-closed posture as
-/// <see cref="ReviewAggregationHelper"/> — but this SUPERSEDES its parsing half.</para>
+/// the legacy plan-review aggregation — but this SUPERSEDES its parsing half.</para>
 /// </summary>
 public static class ReviewProducerHelper
 {

@@ -14,8 +14,15 @@ namespace Tamma.ElsaServer.Workflows.Helpers;
 /// variable the template already declares (e.g. <c>contextFindings</c> for the
 /// Plan family, <c>testTarget</c> for WriteTests).
 ///
-/// Pure logic, no Elsa runtime dependency (same style as
-/// <see cref="PlanValidationHelper"/>).
+/// <para>The Plan family's own bespoke retry loop is retired (Story 39-14): the
+/// generic <c>document-lifecycle</c> now owns validate → repair/revise, feeding
+/// notes back through its <c>feedbackVariableName = "contextFindings"</c> seam
+/// (39-6 D11) — the SAME declared-carrier discipline this helper established, so
+/// the render-drop lesson is preserved where the logic now lands. This helper
+/// stays the shared formatter for the legacy TaskCreation / TestCaseCreation
+/// producers (39-15 scope) and for the lifecycle's revise-notes rendering.</para>
+///
+/// Pure logic, no Elsa runtime dependency.
 /// </summary>
 public static class ValidationFeedbackHelper
 {
@@ -25,8 +32,7 @@ public static class ValidationFeedbackHelper
     /// <summary>
     /// The separator the validate steps use when joining individual error
     /// messages into the single ValidationErrors workflow variable
-    /// (<c>string.Join("; ", errors)</c> in PlanValidationHelper and the
-    /// task/test-case validate lambdas).
+    /// (<c>string.Join("; ", errors)</c> in the task/test-case validate lambdas).
     /// </summary>
     private const string ErrorJoinSeparator = "; ";
 

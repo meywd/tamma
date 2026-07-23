@@ -144,10 +144,14 @@ public static class DocumentTypeRegistry
             // Story 39-12 (D9) — flipped non-provisional: the edge is now backed by a real
             // document-lifecycle binding (IssueDecompositionWorkflow), not a seed guess.
             new WorkflowDocumentInterface("issue-decomposition", empty, DocumentTypeKey.Decomposition,      false),
-            new WorkflowDocumentInterface("plan-generation",    empty, DocumentTypeKey.Plan,                true),
+            // Story 39-14 (D4) — the first two-link typed chain: plan-generation CONSUMES the
+            // accepted decomposition and PRODUCES a plan via its document-lifecycle binding
+            // (flipped non-provisional). plan-review is now a reader (consumes plan, produces
+            // nothing) — the read-through shim.
+            new WorkflowDocumentInterface("plan-generation",    new[] { DocumentTypeKey.Decomposition }, DocumentTypeKey.Plan, false),
             new WorkflowDocumentInterface("task-creation",      empty, DocumentTypeKey.Plan,                true),
             new WorkflowDocumentInterface("design-proposal",    empty, DocumentTypeKey.Design,              false),
-            new WorkflowDocumentInterface("plan-review",        empty, DocumentTypeKey.Review,              true),
+            new WorkflowDocumentInterface("plan-review",        new[] { DocumentTypeKey.Plan },          null,                 false),
             new WorkflowDocumentInterface("task-review",        empty, DocumentTypeKey.Review,              true),
             new WorkflowDocumentInterface("code-review",        empty, DocumentTypeKey.Review,              true),
             new WorkflowDocumentInterface("triage-po-decision", empty, DocumentTypeKey.TriageDecision,      true),

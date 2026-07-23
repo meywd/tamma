@@ -93,8 +93,15 @@ public class TaxonomyDriftBuildTests
     /// workflow's dispatches vanishing within the slack — that is the job of
     /// <see cref="ExpectedContributingWorkflows"/> +
     /// <see cref="EveryKnownContributingWorkflow_StillEmitsPairs"/>.
+    ///
+    /// <para>Story 39-14 recount: PlanReviewWorkflow's 15 compiled llm-call dispatch sites
+    /// (7 role reviews + 7 rebuttals + the PO-decision phase) vanished when it became a
+    /// zero-dispatch read-through shim, and PlanGenerationWorkflow's single llm-call site
+    /// became a document-lifecycle binding pair (still counted, via the lifecycle-binding
+    /// walk) — so the observed pair count dropped by ~15 (from the 44 authoring-time figure
+    /// to ~29). Lowered 40 → 25, keeping the same "a few below observed" slack discipline.</para>
     /// </summary>
-    private const int MinExpectedDispatchPairs = 40;
+    private const int MinExpectedDispatchPairs = 25;
 
     /// <summary>
     /// The set of workflow type-names that each contribute ≥1 <c>(role, action)</c>
@@ -120,8 +127,8 @@ public class TaxonomyDriftBuildTests
         "DeploymentPipelineWorkflow",
         "IssueDecompositionWorkflow",   // Story 39-12: the pair is now dispatched via its document-lifecycle binding (producerRole/producerAction inputs), discovered by the lifecycle-binding walk (D5)
         "MentorshipWorkflow",
-        "PlanGenerationWorkflow",
-        "PlanReviewWorkflow",
+        "PlanGenerationWorkflow",       // Story 39-14: the (architect, plan-system-design) pair is now dispatched via its document-lifecycle binding, discovered by the lifecycle-binding walk (D5)
+        // PlanReviewWorkflow removed (Story 39-14): it became a zero-dispatch read-through shim over the store — it emits NO (role, action) dispatch pair, so it is no longer a contributor.
         "PullRequestWorkflow",
         "ResearchWorkflow",             // Story 3.4: dispatches the dedicated (product_owner, research) synthesis pair
         "ReviewFixWorkflow",

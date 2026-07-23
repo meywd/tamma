@@ -11,9 +11,10 @@ namespace Tamma.ElsaServer.Workflows.Helpers;
 /// degraded or wholly-failed panel is a loud signal the PO and audit trail can
 /// see — never a false "successful review".
 ///
-/// <para>Mirrors <see cref="ReviewAggregationHelper"/> (the <c>plan-review</c>
-/// sibling that demonstrates the intended bar): deterministic parse independent
-/// of LLM prose, structured fields surfaced for the decider.</para>
+/// <para>Mirrors the intended bar (the same deterministic posture 39-7's
+/// <see cref="ReviewPanelAggregation"/> now carries for the plan-review family):
+/// deterministic parse independent of LLM prose, structured fields surfaced for
+/// the decider.</para>
 /// </summary>
 public static class TriagePanelAggregationHelper
 {

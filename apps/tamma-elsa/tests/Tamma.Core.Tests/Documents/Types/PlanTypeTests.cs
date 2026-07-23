@@ -9,8 +9,8 @@ namespace Tamma.Core.Tests.Documents.Types;
 /// <summary>
 /// Story 39-4 AC4 — <see cref="PlanDocumentType"/> domain rules (per-task file map,
 /// per-task testing, resolvable dependencies via the shared graph check). Pure half;
-/// the subsumption/round-trip against <c>PlanValidationHelper</c> lives in
-/// Activities.Tests (D8).
+/// the subsumption/round-trip half lives in Activities.Tests (D8) — its old
+/// PlanValidationHelper baseline was retired in Story 39-14.
 /// </summary>
 [TestFixture]
 public class PlanTypeTests

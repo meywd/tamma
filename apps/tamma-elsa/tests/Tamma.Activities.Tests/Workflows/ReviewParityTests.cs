@@ -7,20 +7,15 @@ using Agg = Tamma.ElsaServer.Workflows.Helpers.ReviewPanelAggregation;
 namespace Tamma.Activities.Tests.Workflows;
 
 /// <summary>
-/// Story 39-7 (AC8) — the behavioural PARITY harness. Replays the recorded
-/// <c>ParseRoleVerdict</c> verdict fixtures (the corpus <see cref="PlanReviewDecisionTests"/>
-/// pins) through BOTH pipelines:
-/// <list type="bullet">
-///   <item>OLD: <c>AggregateVerdicts(fixtures.Select(ParseRoleVerdict))</c> — the
-///     <see cref="ReviewAggregationHelper"/> baseline 39-14 retires.</item>
-///   <item>NEW: <see cref="ReviewProducerHelper.MapReviewerReply"/> → panel members →
-///     <see cref="ReviewPanelAggregation.Aggregate"/> at the default (Unanimous +
-///     full-roster) config.</item>
-/// </list>
-/// Parity is asserted where behaviour is PRESERVED, and the Design Decision D6
-/// divergences (empty panel; a garbage/incomplete member) are asserted AS
-/// divergences with narrative comments — never silently. The invariant across every
-/// fixture: a set containing garbage NEVER produces a NEW <c>Approve</c>.
+/// Story 39-7 (AC8) — the recorded plan-review verdict corpus, replayed through the NEW
+/// pipeline (<see cref="ReviewProducerHelper.MapReviewerReply"/> → panel members →
+/// <see cref="ReviewPanelAggregation.Aggregate"/> at the default Unanimous + full-roster
+/// config). The OLD <c>ReviewAggregationHelper</c> baseline that this harness once ran the
+/// corpus against was DELETED in Story 39-14 (the migration that retired the bespoke
+/// plan-review pipeline), so the old-side parity calls are removed; the recorded
+/// expectations (what the old pipeline decided) are pinned inline as comments. The
+/// load-bearing invariant survives: a set containing garbage/invalid members NEVER produces
+/// a NEW <c>Approve</c>.
 /// </summary>
 [TestFixture]
 public class ReviewParityTests
@@ -41,32 +36,32 @@ public class ReviewParityTests
         DocumentType = "plan",
     };
 
-    // ── parity-preserved sets ──
+    // ── preserved-behaviour sets (old expectation pinned inline) ──
 
     [Test]
-    public void Parity_AllApprove_BothApprove()
+    public void AllApprove_NewApproves()
     {
+        // OLD: AggregateVerdicts == true.
         var fixtures = new[] { ApproveStr, ObjApprove };
-        OldApprove(fixtures).Should().BeTrue();
         var (decided, approve) = NewOutcome(fixtures);
         (decided && approve).Should().BeTrue("all-approve is preserved exactly");
     }
 
     [Test]
-    public void Parity_OneConcerns_BothNonApprove()
+    public void OneConcerns_NewNonApprove()
     {
+        // OLD: AggregateVerdicts == false.
         var fixtures = new[] { ApproveStr, ConcernsStr };
-        OldApprove(fixtures).Should().BeFalse();
         var (decided, approve) = NewOutcome(fixtures);
         decided.Should().BeTrue();
-        approve.Should().BeFalse("a concerns verdict makes both pipelines non-approve");
+        approve.Should().BeFalse("a concerns verdict makes the panel non-approve");
     }
 
     [Test]
-    public void Parity_NeedsDiscussionCountsAsNonApprove()
+    public void NeedsDiscussionCountsAsNonApprove()
     {
+        // OLD: AggregateVerdicts == false.
         var fixtures = new[] { ApproveStr, ObjNeedsDiscussion };
-        OldApprove(fixtures).Should().BeFalse();
         var (decided, approve) = NewOutcome(fixtures);
         decided.Should().BeTrue();
         approve.Should().BeFalse("needs-discussion counts as non-approve, matching the old 'concerns' mapping");
@@ -75,26 +70,24 @@ public class ReviewParityTests
     // ── documented divergences (D6) ──
 
     [Test]
-    public void Divergence_EmptyPanel_OldApproves_NewIsUndecidable()
+    public void Divergence_EmptyPanel_NewIsUndecidable()
     {
         // OLD BUG: AggregateVerdicts([]) == true (All() on empty). NEW: EmptyPanel
         // undecidable — a deliberate divergence 39-14 relies on (we do NOT reproduce
         // the empty-approves bug).
-        OldApprove(Array.Empty<string>()).Should().BeTrue("the old All()-on-empty bug approves an empty panel");
         var (decided, approve) = NewOutcome(Array.Empty<string>());
         decided.Should().BeFalse("DIVERGENCE: an empty panel is undecidable, never a phantom approval");
         approve.Should().BeFalse();
     }
 
     [Test]
-    public void Divergence_GarbageOrIncompleteMember_OldDecidesNonApprove_NewIsUndecidable()
+    public void Divergence_GarbageOrIncompleteMember_NewIsUndecidable()
     {
         // The object REQUEST_CHANGES fixture carries issues without a category/fix and
         // fix-less blocking issues → the strict Review type rejects it (routed to
         // repair). OLD laundered it to a "concerns" non-approve; NEW drops the panel
         // below quorum → undecidable. Deliberate D6 divergence — but still never approve.
         var fixtures = new[] { ApproveStr, ObjRequestChanges };
-        OldApprove(fixtures).Should().BeFalse("old laundered the incomplete member to a non-approve concerns");
         var (decided, approve) = NewOutcome(fixtures);
         decided.Should().BeFalse("DIVERGENCE: an unmappable/invalid member drops the panel below quorum → undecidable");
         approve.Should().BeFalse("the safe direction is preserved: never a false approval");
@@ -121,13 +114,7 @@ public class ReviewParityTests
         }
     }
 
-    // ── pipelines ──
-
-    private static bool OldApprove(IReadOnlyList<string> fixtures)
-    {
-        var verdicts = fixtures.Select(f => ReviewAggregationHelper.ParseRoleVerdict(f).verdict);
-        return ReviewAggregationHelper.AggregateVerdicts(verdicts);
-    }
+    // ── pipeline (new) ──
 
     private static (bool Decided, bool Approve) NewOutcome(IReadOnlyList<string> fixtures)
     {
