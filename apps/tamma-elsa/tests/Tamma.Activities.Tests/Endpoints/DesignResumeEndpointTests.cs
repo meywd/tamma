@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using NUnit.Framework;
-using Tamma.Activities.Design;
+using Tamma.Activities.Documents;
 using Tamma.ElsaServer.Endpoints;
 
 namespace Tamma.Activities.Tests.Endpoints;
@@ -16,14 +16,14 @@ namespace Tamma.Activities.Tests.Endpoints;
 /// Story 3.7 — the engine-side design resume seam (<c>POST /elsa/api/adl/design/resume</c>).
 /// Verifies it:
 ///   - computes the SAME tenant+session-scoped bookmark name as the suspend-side activity
-///     (<c>design-approval-{tenant}-{session}</c>) and resumes the matching (single) instance
-///     with the EXACT input keys the callback reads (<c>Approved</c> + <c>Feedback</c>);
+///     (<c>document-decision-{tenant}-{session}</c>) and resumes the matching (single) instance
+///     with the translated generic keys (<c>DecisionJson</c> accept/reject + <c>Feedback</c>);
 ///   - is IDOR-safe: a caller scoped to a DIFFERENT tenant computes a different name and 404s
 ///     (never resolves the victim's gate);
 ///   - REFUSES with 409 when more than one instance matches a (unique) name rather than
 ///     resuming an arbitrary <c>bookmarks[0]</c>;
 ///   - 404s when no bookmark matches (already decided / advanced / timed out);
-///   - injects <c>Approved=false</c> on a reject decision (the gate branches off the flag);
+///   - injects a reject DecisionJson on a reject decision;
 ///   - 400s a malformed request (empty session).
 /// </summary>
 [TestFixture]
@@ -72,7 +72,7 @@ public class DesignResumeEndpointTests
     {
         var session = Guid.NewGuid();
         var tenant = Guid.NewGuid().ToString();
-        var expected = WaitForDesignApprovalActivity.ApprovalBookmarkName(tenant, session);
+        var expected = LifecycleBookmarks.ForDecisionSession(tenant, session);
         SetupFind(expected, Bookmark(expected, "wf-d1"));
 
         var result = await Invoke(Req(session, tenant, approved: true, feedback: "ship it"));
@@ -80,8 +80,9 @@ public class DesignResumeEndpointTests
         StatusCodeOf(result).Should().Be(StatusCodes.Status200OK);
         _client.Verify(c => c.RunInstanceAsync(
             It.Is<RunWorkflowInstanceRequest>(r =>
-                (bool)r.Input!["Approved"] == true
-                && (string)r.Input!["Feedback"] == "ship it"),
+                ((string)r.Input!["DecisionJson"]).Contains("accept")
+                && (string)r.Input!["Feedback"] == "ship it"
+                && (string)r.Input!["Channel"] == "user"),
             It.IsAny<CancellationToken>()), Times.Once);
         _runtime.Verify(r => r.CreateClientAsync("wf-d1", It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -91,7 +92,7 @@ public class DesignResumeEndpointTests
     {
         var session = Guid.NewGuid();
         var tenant = Guid.NewGuid().ToString();
-        var expected = WaitForDesignApprovalActivity.ApprovalBookmarkName(tenant, session);
+        var expected = LifecycleBookmarks.ForDecisionSession(tenant, session);
         SetupFind(expected, Bookmark(expected, "wf-d2"));
 
         var result = await Invoke(Req(session, tenant, approved: false, feedback: "revise the data model"));
@@ -99,7 +100,7 @@ public class DesignResumeEndpointTests
         StatusCodeOf(result).Should().Be(StatusCodes.Status200OK);
         _client.Verify(c => c.RunInstanceAsync(
             It.Is<RunWorkflowInstanceRequest>(r =>
-                (bool)r.Input!["Approved"] == false
+                ((string)r.Input!["DecisionJson"]).Contains("reject")
                 && (string)r.Input!["Feedback"] == "revise the data model"),
             It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -113,8 +114,8 @@ public class DesignResumeEndpointTests
         var session = Guid.NewGuid();
         var tenantA = Guid.NewGuid().ToString();
         var tenantB = Guid.NewGuid().ToString();
-        var nameA = WaitForDesignApprovalActivity.ApprovalBookmarkName(tenantA, session);
-        var nameB = WaitForDesignApprovalActivity.ApprovalBookmarkName(tenantB, session);
+        var nameA = LifecycleBookmarks.ForDecisionSession(tenantA, session);
+        var nameB = LifecycleBookmarks.ForDecisionSession(tenantB, session);
         SetupFind(nameA, Bookmark(nameA, "wf-victim")); // A's gate is live
         SetupFind(nameB /* zero matches for B */);
 
@@ -131,7 +132,7 @@ public class DesignResumeEndpointTests
     {
         var session = Guid.NewGuid();
         var tenant = Guid.NewGuid().ToString();
-        var name = WaitForDesignApprovalActivity.ApprovalBookmarkName(tenant, session);
+        var name = LifecycleBookmarks.ForDecisionSession(tenant, session);
         SetupFind(name /* zero matches */);
 
         var result = await Invoke(Req(session, tenant));
@@ -147,7 +148,7 @@ public class DesignResumeEndpointTests
     {
         var session = Guid.NewGuid();
         var tenant = Guid.NewGuid().ToString();
-        var name = WaitForDesignApprovalActivity.ApprovalBookmarkName(tenant, session);
+        var name = LifecycleBookmarks.ForDecisionSession(tenant, session);
         SetupFind(name, Bookmark(name, "wf-a"), Bookmark(name, "wf-b"));
 
         var result = await Invoke(Req(session, tenant));

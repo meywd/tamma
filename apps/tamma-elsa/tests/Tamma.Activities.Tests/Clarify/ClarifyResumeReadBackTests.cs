@@ -1,19 +1,19 @@
 using System.Text.Json;
 using FluentAssertions;
 using NUnit.Framework;
-using Tamma.Activities.Clarify;
+using Tamma.Activities.Documents;
+using Tamma.ElsaServer.Endpoints;
 
 namespace Tamma.Activities.Tests.Clarify;
 
 /// <summary>
-/// Story 3.5 — the clarify workflow's resume callback must read its control-flow boolean
-/// (<c>Answered</c>) tolerant of a SERIALIZING workflow runtime (the #15/#437 lesson): the
-/// in-process runtime keeps the resumed value a boxed <see cref="bool"/>, but a distributed
-/// dispatcher round-trips it to a <see cref="string"/> or a <see cref="JsonElement"/>. A bare
-/// <c>is true</c> pattern only matches the boxed-bool path — under serialization it silently
-/// evaluates <c>false</c>, returning HTTP 200 while taking the WRONG branch. These tests also
-/// cover the fail-closed <see cref="ClarifyParsing"/> helpers and the canonical bookmark-name
-/// builder (suspend/resume parity + tenant folding).
+/// Story 39-13 (D3) — retargeted from the legacy <c>WaitForClarifyingAnswersActivity</c>: the
+/// clarify wait-for-answers now rides the generic <see cref="WaitForDocumentInputActivity"/>
+/// input gate, and <c>ClarifyResumeEndpoint</c> is a thin adapter onto it. The
+/// serialization-tolerance matrix (the #15/#437 lesson: never a bare <c>is true</c> on resume
+/// input) targets <see cref="WaitForDocumentInputActivity.ReadInput"/>; the bookmark-parity
+/// half asserts the adapter computes the SAME canonical input-bookmark name the gate suspends
+/// on. The <c>ClarifyParsing</c> rows retired with the parser (39-13 D9).
 /// </summary>
 [TestFixture]
 public class ClarifyResumeReadBackTests
@@ -28,137 +28,81 @@ public class ClarifyResumeReadBackTests
         return dict;
     }
 
-    // ── ReadAnswers — Answered coercion tolerant of serialization ──────────
+    // ── ReadInput — Received coercion tolerant of serialization ──────────
 
     [Test]
-    public void ReadAnswers_BoxedBoolTrue_ReachesAnswered()
+    public void ReadInput_BoxedBoolTrue_ReachesReceived()
     {
-        var (answered, answers) = WaitForClarifyingAnswersActivity.ReadAnswers(
-            Input(("Answered", true), ("Answers", "use OAuth2")));
-        answered.Should().BeTrue();
-        answers.Should().Be("use OAuth2");
+        var (received, inputJson) = WaitForDocumentInputActivity.ReadInput(
+            Input(("Received", true), ("InputJson", "use OAuth2")));
+        received.Should().BeTrue();
+        inputJson.Should().Be("use OAuth2");
     }
 
     [Test]
-    public void ReadAnswers_StringTrue_ReachesAnswered()
+    public void ReadInput_StringTrue_ReachesReceived()
     {
-        WaitForClarifyingAnswersActivity.ReadAnswers(Input(("Answered", "true"))).Answered.Should().BeTrue();
-        WaitForClarifyingAnswersActivity.ReadAnswers(Input(("Answered", "True"))).Answered.Should().BeTrue();
+        WaitForDocumentInputActivity.ReadInput(Input(("Received", "true"))).Received.Should().BeTrue();
+        WaitForDocumentInputActivity.ReadInput(Input(("Received", "True"))).Received.Should().BeTrue();
     }
 
     [Test]
-    public void ReadAnswers_JsonElementTrue_ReachesAnswered()
+    public void ReadInput_JsonElementTrue_ReachesReceived()
     {
-        WaitForClarifyingAnswersActivity.ReadAnswers(Input(("Answered", JsonBool(true)))).Answered.Should().BeTrue();
+        WaitForDocumentInputActivity.ReadInput(Input(("Received", JsonBool(true)))).Received.Should().BeTrue();
     }
 
     [Test]
-    public void ReadAnswers_FalseRepresentations_ReachNotAnswered()
+    public void ReadInput_FalseRepresentations_ReachNotReceived()
     {
-        WaitForClarifyingAnswersActivity.ReadAnswers(Input(("Answered", false))).Answered.Should().BeFalse();
-        WaitForClarifyingAnswersActivity.ReadAnswers(Input(("Answered", "false"))).Answered.Should().BeFalse();
-        WaitForClarifyingAnswersActivity.ReadAnswers(Input(("Answered", JsonBool(false)))).Answered.Should().BeFalse();
+        WaitForDocumentInputActivity.ReadInput(Input(("Received", false))).Received.Should().BeFalse();
+        WaitForDocumentInputActivity.ReadInput(Input(("Received", "false"))).Received.Should().BeFalse();
+        WaitForDocumentInputActivity.ReadInput(Input(("Received", JsonBool(false)))).Received.Should().BeFalse();
     }
 
     [Test]
-    public void ReadAnswers_MissingKey_ReachesNotAnswered()
+    public void ReadInput_MissingKey_ReachesNotReceived()
     {
-        var (answered, answers) = WaitForClarifyingAnswersActivity.ReadAnswers(Input(("Answers", "n/a")));
-        answered.Should().BeFalse();
-        answers.Should().Be("n/a");
+        var (received, inputJson) = WaitForDocumentInputActivity.ReadInput(Input(("InputJson", "n/a")));
+        received.Should().BeFalse();
+        inputJson.Should().Be("n/a");
     }
 
     [Test]
-    public void ReadAnswers_JsonElementAnswers_ReadThrough()
+    public void ReadInput_JsonElementInput_ReadThrough()
     {
         var input = Input(
-            ("Answered", JsonBool(true)),
-            ("Answers", (object)JsonDocument.Parse("\"the timeout is 30s\"").RootElement));
-        var (answered, answers) = WaitForClarifyingAnswersActivity.ReadAnswers(input);
-        answered.Should().BeTrue();
-        answers.Should().Be("the timeout is 30s");
+            ("Received", JsonBool(true)),
+            ("InputJson", (object)JsonDocument.Parse("\"the timeout is 30s\"").RootElement));
+        var (received, inputJson) = WaitForDocumentInputActivity.ReadInput(input);
+        received.Should().BeTrue();
+        inputJson.Should().Be("the timeout is 30s");
     }
 
-    // ── Canonical bookmark name — suspend/resume parity + tenant folding ───
+    // ── Bookmark parity — the adapter resolves the generic input gate ──────
 
     [Test]
-    public void AnswersBookmarkName_IsDeterministic_AndFoldsTenant()
+    public void Adapter_BookmarkName_MatchesTheGenericInputGate_AndFoldsTenant()
     {
         var session = Guid.NewGuid();
         var tenantA = Guid.NewGuid().ToString();
         var tenantB = Guid.NewGuid().ToString();
 
-        var a1 = WaitForClarifyingAnswersActivity.AnswersBookmarkName(tenantA, session);
-        var a2 = WaitForClarifyingAnswersActivity.AnswersBookmarkName(tenantA, session);
-        var b1 = WaitForClarifyingAnswersActivity.AnswersBookmarkName(tenantB, session);
+        var adapterName = ClarifyResumeEndpoint.BookmarkName(new(session, tenantA, "answers", null));
+        var gateName = WaitForDocumentInputActivity.InputBookmarkName(tenantA, session);
 
-        a1.Should().Be(a2, "the builder must be deterministic so suspend + resume names match byte-for-byte");
-        a1.Should().StartWith("clarify-answers-");
-        a1.Should().Contain(session.ToString());
-        a1.Should().NotBe(b1,
-            "folding the tenant into the name is the IDOR guard — a different tenant yields a " +
-            "different bookmark so a cross-tenant resume can never resolve this gate");
+        adapterName.Should().Be(gateName, "the adapter must compute the SAME name the gate suspends on");
+        adapterName.Should().StartWith("document-input-");
+        adapterName.Should().Contain(session.ToString());
+        adapterName.Should().NotBe(WaitForDocumentInputActivity.InputBookmarkName(tenantB, session),
+            "folding the tenant is the IDOR guard — a different tenant yields a different bookmark");
     }
 
     [Test]
-    public void AnswersBookmarkName_NullTenant_UsesStablePlaceholder()
+    public void InputBookmarkName_NullTenant_UsesStablePlaceholder()
     {
         var session = Guid.NewGuid();
-        WaitForClarifyingAnswersActivity.AnswersBookmarkName(null, session)
-            .Should().Be($"clarify-answers-none-{session}");
-    }
-
-    // ── ClarifyParsing.ParseQuestions — tolerant + fail-closed ─────────────
-
-    [Test]
-    public void ParseQuestions_BareJsonArray_Parses()
-    {
-        var qs = ClarifyParsing.ParseQuestions("Here you go: [\"What DB?\", \"What SLA?\"] done");
-        qs.Should().Equal("What DB?", "What SLA?");
-    }
-
-    [Test]
-    public void ParseQuestions_QuestionsObject_Parses()
-    {
-        var qs = ClarifyParsing.ParseQuestions("{\"questions\":[\"Q1\",\"Q2\",\"Q3\"]}");
-        qs.Should().Equal("Q1", "Q2", "Q3");
-    }
-
-    [Test]
-    public void ParseQuestions_ClarifyingQuestionsObject_Parses()
-    {
-        var qs = ClarifyParsing.ParseQuestions("{\"clarifyingQuestions\":[\"Only one\"]}");
-        qs.Should().Equal("Only one");
-    }
-
-    [Test]
-    public void ParseQuestions_Unparseable_IsEmpty_FailClosed()
-    {
-        ClarifyParsing.ParseQuestions("no json here").Should().BeEmpty();
-        ClarifyParsing.ParseQuestions("").Should().BeEmpty();
-        ClarifyParsing.ParseQuestions(null).Should().BeEmpty();
-        ClarifyParsing.ParseQuestions("[]").Should().BeEmpty();
-    }
-
-    // ── ClarifyParsing.ParseClarification — required field + fail-closed ───
-
-    [Test]
-    public void ParseClarification_FullObject_Parses()
-    {
-        var result = ClarifyParsing.ParseClarification(
-            "{\"clarifiedRequirement\":\"Use PostgreSQL 17\",\"remainingAmbiguities\":[\"none\"],\"resolved\":true}");
-        result.Should().NotBeNull();
-        result!.ClarifiedRequirement.Should().Be("Use PostgreSQL 17");
-        result.RemainingAmbiguities.Should().Equal("none");
-        result.Resolved.Should().BeTrue();
-    }
-
-    [Test]
-    public void ParseClarification_MissingRequirement_IsNull_FailClosed()
-    {
-        ClarifyParsing.ParseClarification("{\"resolved\":true}").Should().BeNull();
-        ClarifyParsing.ParseClarification("{\"clarifiedRequirement\":\"\"}").Should().BeNull();
-        ClarifyParsing.ParseClarification("not json").Should().BeNull();
-        ClarifyParsing.ParseClarification(null).Should().BeNull();
+        WaitForDocumentInputActivity.InputBookmarkName(null, session)
+            .Should().Be($"document-input-none-{session}");
     }
 }

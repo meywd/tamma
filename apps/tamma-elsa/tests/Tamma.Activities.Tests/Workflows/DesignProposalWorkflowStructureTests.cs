@@ -1,145 +1,111 @@
+using System;
+using System.Linq;
+using System.Reflection;
+using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Runtime.Activities;
 using FluentAssertions;
 using NUnit.Framework;
 using Tamma.Activities.Design;
+using Tamma.Api.Services.Agents;
+using Tamma.Activities.Documents;
+using Tamma.Core.Documents.Resume;
 using Tamma.ElsaServer.Workflows;
 
 namespace Tamma.Activities.Tests.Workflows;
 
 /// <summary>
-/// Story 3.7 — structural verification for <see cref="DesignProposalWorkflow"/>.
-///
-/// Asserts the workflow:
-/// 1. Builds and has DefinitionId "design-proposal".
-/// 2. Threads <c>TenantId</c> so the prompt registry resolves tenant-scoped prompts
-///    (resolution is tenant→system→error — never empty/plain) for role=architect /
-///    action=propose-design.
-/// 3. Generates the design proposal via <c>DispatchWorkflow("llm-call")</c> (mediated —
-///    the engine holds no LLM credential, TAMMA001) rather than any in-engine provider call.
-/// 4. Delivers the proposal to the reviewer via <see cref="DeliverDesignProposalActivity"/>.
-/// 5. Suspends on the <see cref="WaitForDesignApprovalActivity"/> bookmark awaiting the
-///    human review decision (approval gate).
-/// 6. Is fail-closed: an <c>LlmCallError</c> terminal exists and a <c>FlowDecision</c> gate
-///    checks LLM-call success before proceeding (never a fabricated design).
-/// 7. Emits the required DESIGN.* DCB events (generated / delivered / approved / rejected /
-///    failed / review timed out) via <see cref="EmitDesignEventActivity"/> nodes.
+/// Story 39-13 — structural pins for <see cref="DesignProposalWorkflow"/>, rebuilt as a THIN
+/// binding over <c>document-lifecycle</c> (produces <c>design</c>). The bespoke approval gate is
+/// retired (D4) — NO <c>WaitForDesignApproval</c> type anywhere; the delivery hook is threaded
+/// (D5). Covers AC1/AC2/AC3/AC5/AC6/AC8.
 /// </summary>
 [TestFixture]
 public class DesignProposalWorkflowStructureTests
 {
     private static Flowchart Flowchart()
-    {
-        var builder = WorkflowTestHelper.BuildWorkflow(new DesignProposalWorkflow());
-        return WorkflowTestHelper.GetFlowchart(builder);
-    }
+        => WorkflowTestHelper.GetFlowchart(WorkflowTestHelper.BuildWorkflow(new DesignProposalWorkflow()));
+
+    private static System.Collections.Generic.List<IActivity> AllActivities() => StructureWalk.All(Flowchart());
 
     [Test]
     public void Workflow_BuildsWithoutError()
-    {
-        var act = () => WorkflowTestHelper.BuildWorkflow(new DesignProposalWorkflow());
-        act.Should().NotThrow("DesignProposalWorkflow.Build() must complete without exceptions");
-    }
+        => ((Action)(() => WorkflowTestHelper.BuildWorkflow(new DesignProposalWorkflow()))).Should().NotThrow();
 
     [Test]
-    public void Workflow_HasCorrectDefinitionId()
-    {
-        var builder = WorkflowTestHelper.BuildWorkflow(new DesignProposalWorkflow());
-        builder.Object.DefinitionId.Should().Be("design-proposal");
-    }
+    public void Workflow_HasStableDefinitionId()
+        => WorkflowTestHelper.BuildWorkflow(new DesignProposalWorkflow()).Object.DefinitionId.Should().Be("design-proposal");
 
     [Test]
     public void Workflow_ThreadsTenantId()
+        => WorkflowTestHelper.BuildWorkflow(new DesignProposalWorkflow()).Object.Variables.Any(v => v.Name == "TenantId")
+            .Should().BeTrue();
+
+    [Test]
+    public void Workflow_HasExactlyOneDispatch_Lifecycle_NoLlmCall()
     {
-        var builder = WorkflowTestHelper.BuildWorkflow(new DesignProposalWorkflow());
-        builder.Object.Variables
-            .Any(v => v.Name == "TenantId")
-            .Should().BeTrue(
-                "the workflow must thread TenantId so llm-call resolves tenant-scoped prompts " +
-                "(tenant→system→error) for architect/propose-design");
+        AllActivities().OfType<DispatchWorkflow>().Select(d => d.Id).OrderBy(x => x)
+            .Should().BeEquivalentTo(new[] { "DispatchLifecycle" });
+        AllActivities().OfType<DispatchWorkflow>()
+            .Where(d => StructureWalk.LiteralDefId(d) == "llm-call").Should().BeEmpty();
+        StructureWalk.LiteralDefId(AllActivities().OfType<DispatchWorkflow>().Single(d => d.Id == "DispatchLifecycle"))
+            .Should().Be("document-lifecycle");
     }
 
     [Test]
-    public void Workflow_DispatchesLlmCallForProposalGeneration()
+    public void DispatchLifecycle_MaterializesCanonicalPair_DesignType_AndDeliveryHook()
     {
-        Flowchart().Activities
-            .OfType<DispatchWorkflow>()
-            .Should().Contain(d => d.Id == "GenerateProposalLlm",
-                "the design proposal must be generated via the mediated llm-call (engine holds no LLM credential)");
+        TaxonomyDriftBuildTests.ScanLifecycleBindingDispatches().Should().Contain(p =>
+            p.Workflow == "DesignProposalWorkflow" && p.DispatchId == "DispatchLifecycle" &&
+            p.Role == AgentRole.Architect.ToWire() && p.Action == AgentAction.ProposeDesign.ToWire());
+
+        var input = TaxonomyDriftBuildTests.MaterializeDispatchInput("DesignProposalWorkflow", "DispatchLifecycle");
+        input.Should().NotBeNull();
+        (input!["documentType"] as string).Should().Be("design");
+        (input!["deliveryWorkflowDefinitionId"] as string).Should().Be("design-proposal-delivery",
+            "the pre-ACCEPT delivery hook (D5) is threaded into the lifecycle dispatch");
     }
 
     [Test]
-    public void Workflow_DeliversProposal()
+    public void Workflow_HasNoWaitForDesignApprovalType_Anywhere()
+        => AllActivities().Any(a => a.GetType().Name.Contains("DesignApproval", StringComparison.Ordinal))
+            .Should().BeFalse("the bespoke WaitForDesignApprovalActivity is retired — the accept gate lives in the lifecycle");
+
+    [Test]
+    public void Workflow_HasNoBookmarkSuspendActivity()
+        => AllActivities().Where(a => a.GetType().Name.StartsWith("Wait", StringComparison.Ordinal))
+            .Should().BeEmpty("the accept-gate suspend is inside the dispatched document-lifecycle child (D4)");
+
+    [Test]
+    public void Workflow_HasNoFinishActivity()
+        => AllActivities().OfType<Finish>().Should().BeEmpty();
+
+    [Test]
+    public void Workflow_EveryGraphLeaf_IsTheSingleExposeOutputRegion()
     {
-        Flowchart().Activities
-            .OfType<DeliverDesignProposalActivity>()
-            .Should().ContainSingle(a => a.Id == "DeliverDesignProposal",
-                "the workflow must deliver the design proposal to the reviewer");
+        var fc = Flowchart();
+        var sources = fc.Connections.Select(c => c.Source.Activity.Id).ToHashSet();
+        fc.Activities.Where(a => !sources.Contains(a.Id)).Select(a => a.Id)
+            .Should().BeEquivalentTo(new[] { "ExposeOutput" });
     }
 
     [Test]
-    public void Workflow_SuspendsOnApprovalBookmark()
-    {
-        Flowchart().Activities
-            .OfType<WaitForDesignApprovalActivity>()
-            .Should().ContainSingle(a => a.Id == "WaitForApproval",
-                "the workflow must suspend on the WaitForDesignApprovalActivity bookmark " +
-                "awaiting the human review decision");
-    }
+    public void Workflow_HasExactlyTheExpectedFlowDecisions()
+        => AllActivities().OfType<FlowDecision>().Select(d => d.Id).OrderBy(x => x)
+            .Should().BeEquivalentTo(new[] { "LifecycleAccepted", "LifecycleRejected" });
 
     [Test]
-    public void Workflow_HasFailClosedErrorTerminal()
-    {
-        Flowchart().Activities
-            .OfType<Finish>()
-            .Should().Contain(f => f.Id == "LlmCallError",
-                "a fail-closed LlmCallError terminal must exist — an LLM-call failure routes there, " +
-                "never proceeding with a fabricated design");
-    }
+    public void Workflow_HasApprovedRejectedFailedEmitNodes()
+        => AllActivities().OfType<EmitDesignEventActivity>().Select(a => a.Id).ToHashSet()
+            .Should().Contain(new[] { "EmitProposalApproved", "EmitProposalRejected", "EmitProposalFailed" });
 
     [Test]
-    public void Workflow_HasSuccessGateForGeneration()
+    public void Workflow_DeclaresLatestStateReEntry_AndCarriesTheReEntryNode()
     {
-        Flowchart().Activities.OfType<FlowDecision>().Select(d => d.Id)
-            .Should().Contain("ProposalLlmOk",
-                "proposal delivery must be gated behind a ProposalLlmOk decision (fail-closed)");
-    }
-
-    [Test]
-    public void Workflow_EmitsRequiredDesignEvents()
-    {
-        var emitIds = Flowchart().Activities
-            .OfType<EmitDesignEventActivity>()
-            .Select(a => a.Id)
-            .ToList();
-
-        emitIds.Should().Contain("EmitProposalGenerated",
-            "must emit DESIGN.PROPOSAL.GENERATED when the proposal is produced");
-        emitIds.Should().Contain("EmitProposalDelivered",
-            "must emit DESIGN.PROPOSAL.DELIVERED when the proposal is delivered");
-        emitIds.Should().Contain("EmitProposalApproved",
-            "must emit DESIGN.PROPOSAL.APPROVED when the reviewer approves");
-        emitIds.Should().Contain("EmitProposalRejected",
-            "must emit DESIGN.PROPOSAL.REJECTED when the reviewer rejects");
-        emitIds.Should().Contain("EmitProposalFailed",
-            "must emit a LOUD DESIGN.PROPOSAL.FAILED on the fail-closed path");
-        emitIds.Should().Contain("EmitReviewTimedOut",
-            "must emit a LOUD DESIGN.REVIEW.TIMED_OUT when the review SLA expires");
-    }
-
-    [Test]
-    public void Workflow_ApprovalGate_HasApprovedRejectedTimeoutBranches()
-    {
-        var flow = Flowchart();
-
-        var outcomes = flow.Connections
-            .Where(c => c.Source.Activity.Id == "WaitForApproval")
-            .Select(c => c.Source.Port)
-            .ToList();
-
-        outcomes.Should().Contain("Approved", "the gate must branch on an approve decision");
-        outcomes.Should().Contain("Rejected", "the gate must branch on a reject decision");
-        outcomes.Should().Contain("Timeout", "the gate must branch on the durable review-SLA timeout");
+        var decl = typeof(DesignProposalWorkflow).GetCustomAttribute<ResumeBehaviorAttribute>(inherit: false);
+        decl.Should().NotBeNull();
+        decl!.Mode.Should().Be(ResumeMode.LatestStateReEntry);
+        AllActivities().OfType<ComputeReEntryPositionActivity>().Should().ContainSingle();
     }
 }

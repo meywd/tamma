@@ -3,13 +3,13 @@ using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Management.Activities.SetOutput;
-using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using System.Text.Json;
-using Tamma.Activities;
+using Tamma.Activities.Documents;
 using Tamma.Activities.Research;
-using Tamma.Activities.Research.Models;
 using Tamma.Api.Services.Agents;
+using Tamma.Core.Documents.Resume;
+using Tamma.ElsaServer.Workflows.Helpers;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
@@ -17,53 +17,34 @@ using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// Story 3.4 — Research sub-workflow. Given an issue / topic (typically when ambiguity is
-/// detected in a requirement) it investigates the codebase / prior art and uses the LLM
-/// (via the MEDIATED <c>llm-call</c> path — the engine holds no LLM credential, TAMMA001)
-/// to synthesize the gathered context into a ranked, confidence-scored research report,
-/// then emits the results as <c>RESEARCH.*</c> DCB events.
+/// Story 39-13 — Research, re-implemented as a THIN BINDING over
+/// <see cref="DocumentLifecycleWorkflow"/> (<c>DefinitionId = "document-lifecycle"</c>),
+/// producing a typed <see cref="Tamma.Core.Documents.Types.Findings"/> document through the
+/// shared produce → validate → review → revise → accept loop. The public surface is
+/// byte-stable (D1): same <c>DefinitionId = "research"</c>, same inputs, same outputs
+/// (<c>sessionId</c>/<c>status</c>/<c>report</c>/<c>findingCount</c>/<c>confidence</c>/
+/// <c>contextIds</c>) plus additive <c>outcome</c>/<c>documentId</c>.
 ///
-/// Flow:
-///   1. Read inputs (issue/topic + repository + tenantId; mint a session id if none)
-///   2. Emit RESEARCH.STARTED
-///   3. Gather codebase / prior-art context by REUSING DispatchWorkflow("context-gathering")
-///      (Story 7-1F multi-role scan) — same reuse as <see cref="AssessmentWorkflow"/>
-///   4. Emit RESEARCH.CONTEXT_GATHERED
-///   5. Synthesize a ranked research report via DispatchWorkflow("llm-call")
-///      role=product_owner / action=research
-///   6. Parse the synthesis fail-closed (empty/unparseable → error terminal)
-///   7a. On success: emit RESEARCH.COMPLETED, set outputs (report, confidence, findings)
-///   7b. On failure: emit RESEARCH.FAILED (LOUD) and route to the ResearchError terminal
-///
-/// Reuses the <see cref="AssessmentWorkflow"/> skeleton (gather-context → llm-call → parse
-/// → fail-closed gate + error terminal). The research is AUTONOMOUS — there is no human
-/// gate / bookmark (the ambiguity that triggers research is resolved by the sibling
-/// <see cref="ClarifyingQuestionsWorkflow"/>; research itself just investigates and reports).
-///
-/// Fail-closed: if the synthesis <c>llm-call</c> returns success=false, or the response
-/// cannot be parsed into a non-empty ranked report, the workflow emits a LOUD
-/// <c>RESEARCH.FAILED</c> event and routes to the ResearchError terminal — it NEVER
-/// proceeds with a fabricated report. Prompt resolution is tenant→system→error (the
-/// <c>llm-call</c> registry never falls back to an empty/plain prompt).
-///
-/// NOTE (taxonomy): the synthesis dispatches the dedicated <c>(product_owner, research)</c>
-/// pair (Story 3.4). The <c>research</c> action is a first-class member of the
-/// <see cref="AgentAction"/> taxonomy and is eligible for <c>product_owner</c> in
-/// <c>RolePhaseMap</c> (consistent with the legacy TS <c>researcher</c> role aliasing onto
-/// <c>product_owner</c>). Its system-default prompt template (<c>SystemPrompts.ResearchBody</c>)
-/// emits the ranked-findings JSON <see cref="ResearchParsing"/> parses, so the happy path
-/// produces a real <c>RESEARCH.COMPLETED</c> report rather than failing closed.
+/// <para>The old bespoke pipeline (<c>llm-call</c> → <c>ResearchParsing</c> → success-flag
+/// gate → <c>ResearchError</c> Finish) is DELETED: NO parse, NO success-flag gate, ZERO
+/// <see cref="Finish"/>. The binding gathers issue context (the <c>consumes</c> side),
+/// dispatches the lifecycle with the canonical <c>(product_owner, research)</c> producer
+/// cell, and lets the generic rings own all quality routing. Validation failure now exits
+/// as a typed escalation with full lineage — never a dead terminal.</para>
 /// </summary>
+[ResumeBehavior(ResumeMode.LatestStateReEntry)]
 public class ResearchWorkflow : WorkflowBase
 {
+    private const string FindingsDocumentType = "findings";
+
     protected override void Build(IWorkflowBuilder builder)
     {
         builder.Name = "Research";
         builder.DefinitionId = "research";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description = "Investigate an issue/topic and synthesize a ranked, confidence-scored research report via the mediated LLM";
+        builder.Description = "Investigate an issue/topic and synthesize a ranked, confidence-scored findings document via the generic document lifecycle";
 
-        // ── Workflow variables ──────────────────────────────────────────
+        // ── Inputs ─────────────────────────────────────────────────────
         var sessionId       = builder.WithVariable<Guid>();
         var issueId         = builder.WithVariable<string>();
         var topic           = builder.WithVariable<string>();
@@ -71,31 +52,36 @@ public class ResearchWorkflow : WorkflowBase
         var issueNumber     = builder.WithVariable<int>();
         var workItemJson    = builder.WithVariable<string>();
         var tenantId        = builder.WithVariable<string>("TenantId", "");
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
 
+        // ── Context (consumes side) ────────────────────────────────────
         var researchContext = builder.WithVariable<string>();
         var contextIds      = builder.WithVariable<string>("[]");
-        var reportJson      = builder.WithVariable<string>();
-        var findingCount    = builder.WithVariable<int>();
-        var overallConfidence = builder.WithVariable<double>();
 
-        // Dispatched-workflow result containers
+        // ── 39-10 re-entry position ────────────────────────────────────
+        var reEntryPositionJson = builder.WithVariable<string>();
+        var reEntryDocJson  = builder.WithVariable<string>();
+        var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
+
+        // ── Dispatched-workflow result containers ──────────────────────
         var contextGatherResult = builder.WithVariable<IDictionary<string, object>?>();
-        var synthesizeLlm       = builder.WithVariable<IDictionary<string, object>?>();
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
 
-        // Success flag (fail-closed guard)
-        var researchLlmOk   = builder.WithVariable<bool>();
-
-        // Captured parse output
-        var researchReport  = builder.WithVariable<ResearchReport>();
-
-        // Output variables (readable by a parent workflow)
+        // ── Typed lifecycle exit ───────────────────────────────────────
+        var lifecycleAccepted = builder.WithVariable<bool>();
+        var exitStatus      = builder.WithVariable<string>("ExitStatus", "");
+        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "");
+        var exitDocId       = builder.WithVariable<string>("ExitDocId", "");
+        var reportJson      = builder.WithVariable<string>("ReportJson", "{}");
+        var findingCount    = builder.WithVariable<int>();
+        var confidence      = builder.WithVariable<double>();
+        var failureDetail   = builder.WithVariable<string>("FailureDetail", "");
         var outputStatus    = builder.WithVariable<string>();
 
         // ── Step 1: Read inputs ────────────────────────────────────────
         var readInputs = new SetVariable
         {
-            Id = "ReadInputs",
-            Name = "Read Inputs",
+            Id = "ReadInputs", Name = "Read Inputs",
             Variable = sessionId,
             Value = new(context =>
             {
@@ -108,16 +94,51 @@ public class ResearchWorkflow : WorkflowBase
                 issueNumber.Set(context, context.GetInput<int>("issueNumber"));
                 workItemJson.Set(context, context.GetInput<string>("workItemJson") ?? string.Empty);
                 tenantId.Set(context, context.GetInput<string>("tenantId") ?? string.Empty);
+                acceptanceRulesJson.Set(context, context.GetInput<string>("acceptanceRulesJson") ?? string.Empty);
                 return sid;
             })
         };
         readInputs.SetDisplayText("Read Inputs");
 
-        // ── Step 2: Emit RESEARCH.STARTED ──────────────────────────────
+        // ── Step 2: Compute 39-10 re-entry position ────────────────────
+        var computeReEntry = new ComputeReEntryPositionActivity
+        {
+            Id = "ComputeReEntryPosition", Name = "Compute Re-Entry Position",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentType = new(FindingsDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            CorrelationId = new(ctx => issueId.Get(ctx)),
+            PositionJson = new(reEntryPositionJson),
+            ExistingDocumentJson = new(reEntryDocJson),
+        };
+        computeReEntry.SetDisplayText("Compute Re-Entry Position");
+
+        var readPositionStage = new SetVariable
+        {
+            Id = "ReadPositionStage", Name = "Read Position Stage",
+            Variable = positionStage,
+            Value = new(ctx =>
+            {
+                var position = DocumentLifecycleHelper.DeserializeReEntryPosition(reEntryPositionJson.Get(ctx));
+                return position?.ResumeAt switch
+                {
+                    LifecycleResumeStage.Complete => "complete",
+                    LifecycleResumeStage.Accept => "accept",
+                    LifecycleResumeStage.Review => "review",
+                    _ => "produce",
+                };
+            })
+        };
+        readPositionStage.SetDisplayText("Read Position Stage");
+
+        // ── Step 3: FreshRun gate — pre-produce region only on a fresh run ──
+        var freshRun = new FlowDecision(ctx => positionStage.Get(ctx) == "produce")
+        { Id = "FreshRun", Name = "Fresh Run?" };
+        freshRun.SetDisplayText("Fresh Run?");
+
         var emitStarted = new EmitResearchEventActivity
         {
-            Id = "EmitResearchStarted",
-            Name = "Emit Research Started",
+            Id = "EmitResearchStarted", Name = "Emit Research Started",
             EventType = new(ResearchEvents.Started),
             SessionId = new(ctx => sessionId.Get(ctx).ToString()),
             IssueId = new(ctx => issueId.Get(ctx)),
@@ -126,11 +147,9 @@ public class ResearchWorkflow : WorkflowBase
         };
         emitStarted.SetDisplayText("Emit Research Started");
 
-        // ── Step 3: Gather context via ContextGathering workflow (7-1F) ─
         var gatherContext = new DispatchWorkflow
         {
-            Id = "GatherContext",
-            Name = "Gather Context",
+            Id = "GatherContext", Name = "Gather Context",
             WorkflowDefinitionId = new("context-gathering"),
             Input = new(ctx => new Dictionary<string, object>
             {
@@ -146,8 +165,7 @@ public class ResearchWorkflow : WorkflowBase
 
         var storeContextResult = new SetVariable
         {
-            Id = "StoreContextResult",
-            Name = "Store Context Result",
+            Id = "StoreContextResult", Name = "Store Context Result",
             Variable = researchContext,
             Value = new(ctx =>
             {
@@ -161,11 +179,9 @@ public class ResearchWorkflow : WorkflowBase
         };
         storeContextResult.SetDisplayText("Store Context Result");
 
-        // ── Step 4: Emit RESEARCH.CONTEXT_GATHERED ─────────────────────
         var emitContextGathered = new EmitResearchEventActivity
         {
-            Id = "EmitContextGathered",
-            Name = "Emit Context Gathered",
+            Id = "EmitContextGathered", Name = "Emit Context Gathered",
             EventType = new(ResearchEvents.ContextGathered),
             SessionId = new(ctx => sessionId.Get(ctx).ToString()),
             IssueId = new(ctx => issueId.Get(ctx)),
@@ -174,129 +190,106 @@ public class ResearchWorkflow : WorkflowBase
         };
         emitContextGathered.SetDisplayText("Emit Context Gathered");
 
-        // ── Step 5: Synthesize a ranked research report via llm-call ───
-        var synthesizeResearchLlm = new DispatchWorkflow
+        // ── Step 4: Dispatch the generic document lifecycle ────────────
+        var dispatchLifecycle = new DispatchWorkflow
         {
-            Id = "SynthesizeResearchLlm",
-            Name = "Synthesize Research (LLM)",
-            WorkflowDefinitionId = new("llm-call"),
+            Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
+            WorkflowDefinitionId = new("document-lifecycle"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                // Dedicated research action (Story 3.4): (product_owner, research) resolves the
-                // structured-findings prompt template that yields the ranked-findings JSON
-                // ResearchParsing recovers. Prompt resolution is tenant→system→error.
-                ["role"]     = AgentRole.ProductOwner.ToWire(),
-                ["action"]   = AgentAction.Research.ToWire(),
-                ["tenantId"] = tenantId.Get(ctx),
-                ["variables"] = new Dictionary<string, object>
+                ["documentType"]          = FindingsDocumentType,
+                ["producerRole"]          = AgentRole.ProductOwner.ToWire(),
+                ["producerAction"]        = AgentAction.Research.ToWire(),
+                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
                 {
                     ["workItemJson"] = BuildWorkItem(topic.Get(ctx), workItemJson.Get(ctx), issueId.Get(ctx)),
                     ["findings"]     = researchContext.Get(ctx) ?? "",
-                },
-                ["enableTools"] = false,
+                    ["conventions"]  = "",
+                }),
+                ["issueId"]             = issueId.Get(ctx) ?? "",
+                ["correlationId"]       = issueId.Get(ctx) ?? "",
+                ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
             }),
             WaitForCompletion = new(true),
-            Result = new(synthesizeLlm),
+            Result = new(lifecycleResult),
         };
-        synthesizeResearchLlm.SetDisplayText("Synthesize Research (LLM)");
+        dispatchLifecycle.SetDisplayText("Dispatch Document Lifecycle");
 
-        // ── Step 6: Parse the synthesis (fail-closed) ──────────────────
-        var parseResearch = new SetVariable
+        // ── Step 5: Read the typed lifecycle exit (fail-closed) ────────
+        var readLifecycleExit = new SetVariable
         {
-            Id = "ParseResearch",
-            Name = "Parse Research",
+            Id = "ReadLifecycleExit", Name = "Read Lifecycle Exit",
             Variable = reportJson,
             Value = new(ctx =>
             {
-                var result = synthesizeLlm.Get(ctx);
-                if (!ReadSuccessFlag(result))
-                {
-                    researchLlmOk.Set(ctx, false);
-                    return "{}";
-                }
+                var exit = LifecycleBindingHelper.ReadLifecycleResult(lifecycleResult.Get(ctx));
+                var accepted = LifecycleBindingHelper.IsAccepted(exit);
+                var (fc, conf) = AssessmentBindingHelper.ReadFindings(exit.DocumentJson);
 
-                var text = result!.TryGetValue("llmResponse", out var r) ? r?.ToString() ?? "" : "";
-                var report = ResearchParsing.ParseReport(text, topic.Get(ctx));
-                if (report is null)
-                {
-                    // Fail-closed — no fabricated report.
-                    researchLlmOk.Set(ctx, false);
-                    return "{}";
-                }
-
-                researchLlmOk.Set(ctx, true);
-                researchReport.Set(ctx, report);
-                findingCount.Set(ctx, report.Findings.Count);
-                overallConfidence.Set(ctx, (double)report.OverallConfidence);
-                return JsonSerializer.Serialize(report);
+                lifecycleAccepted.Set(ctx, accepted);
+                exitStatus.Set(ctx, exit.Status);
+                exitOutcome.Set(ctx, exit.Outcome ?? "");
+                exitDocId.Set(ctx, exit.DocumentId ?? "");
+                findingCount.Set(ctx, fc);
+                confidence.Set(ctx, conf);
+                failureDetail.Set(ctx, AssessmentBindingHelper.BuildFailureDetail(exit));
+                outputStatus.Set(ctx, accepted ? "completed" : exit.Status);
+                return exit.DocumentJson;
             })
         };
-        parseResearch.SetDisplayText("Parse Research");
+        readLifecycleExit.SetDisplayText("Read Lifecycle Exit");
 
-        // Fail-closed gate: route to error terminal if synthesis failed / unparseable.
-        var researchSuccessCheck = new FlowDecision(ctx => researchLlmOk.Get(ctx))
-        { Id = "ResearchLlmOk", Name = "Research LLM OK?" };
-        researchSuccessCheck.SetDisplayText("Research LLM OK?");
+        // ── Step 6: Accepted? (typed) ──────────────────────────────────
+        var lifecycleAcceptedGate = new FlowDecision(ctx => lifecycleAccepted.Get(ctx))
+        { Id = "LifecycleAccepted", Name = "Lifecycle Accepted?" };
+        lifecycleAcceptedGate.SetDisplayText("Lifecycle Accepted?");
 
-        // ── Step 7a: Success path ──────────────────────────────────────
-        var emitResearchCompleted = new EmitResearchEventActivity
+        var wasCompleteReEntry = new FlowDecision(ctx => positionStage.Get(ctx) == "complete")
+        { Id = "WasCompleteReEntry", Name = "Was Complete Re-Entry?" };
+        wasCompleteReEntry.SetDisplayText("Was Complete Re-Entry?");
+
+        var emitCompleted = new EmitResearchEventActivity
         {
-            Id = "EmitResearchCompleted",
-            Name = "Emit Research Completed",
+            Id = "EmitResearchCompleted", Name = "Emit Research Completed",
             EventType = new(ResearchEvents.Completed),
             SessionId = new(ctx => sessionId.Get(ctx).ToString()),
             IssueId = new(ctx => issueId.Get(ctx)),
             TenantId = new(ctx => tenantId.Get(ctx)),
             FindingCount = new(ctx => findingCount.Get(ctx)),
-            Confidence = new(ctx => overallConfidence.Get(ctx)),
-            Detail = new("Ranked, confidence-scored research report synthesized"),
+            Confidence = new(ctx => confidence.Get(ctx)),
+            Detail = new("Ranked, confidence-scored findings document accepted"),
         };
-        emitResearchCompleted.SetDisplayText("Emit Research Completed");
+        emitCompleted.SetDisplayText("Emit Research Completed");
 
-        var setOutputResult = new SetVariable
+        var emitFailed = new EmitResearchEventActivity
         {
-            Id = "SetOutputResult",
-            Name = "Set Output Result",
-            Variable = outputStatus,
-            Value = new(_ => "completed")
+            Id = "EmitResearchFailed", Name = "Emit Research Failed",
+            EventType = new(ResearchEvents.Failed),
+            SessionId = new(ctx => sessionId.Get(ctx).ToString()),
+            IssueId = new(ctx => issueId.Get(ctx)),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Detail = new(ctx => failureDetail.Get(ctx)),
         };
-        setOutputResult.SetDisplayText("Set Output Result");
+        emitFailed.SetDisplayText("Emit Research Failed");
 
+        // ── Step 7: Expose output — the single terminal region ─────────
         var exposeOutput = new Sequence
         {
-            Id = "ExposeOutput",
-            Name = "Expose Output",
+            Id = "ExposeOutput", Name = "Expose Output",
             Activities =
             {
                 WithLabel(new SetOutput { Id = "OutputSessionId", Name = "Output Session Id", OutputName = new("sessionId"), OutputValue = new(ctx => (object)sessionId.Get(ctx).ToString()) }, "Output Session Id"),
                 WithLabel(new SetOutput { Id = "OutputStatus", Name = "Output Status", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }, "Output Status"),
                 WithLabel(new SetOutput { Id = "OutputReport", Name = "Output Report", OutputName = new("report"), OutputValue = new(ctx => (object)(reportJson.Get(ctx) ?? "{}")) }, "Output Report"),
                 WithLabel(new SetOutput { Id = "OutputFindingCount", Name = "Output Finding Count", OutputName = new("findingCount"), OutputValue = new(ctx => (object)findingCount.Get(ctx)) }, "Output Finding Count"),
-                WithLabel(new SetOutput { Id = "OutputConfidence", Name = "Output Confidence", OutputName = new("confidence"), OutputValue = new(ctx => (object)overallConfidence.Get(ctx)) }, "Output Confidence"),
+                WithLabel(new SetOutput { Id = "OutputConfidence", Name = "Output Confidence", OutputName = new("confidence"), OutputValue = new(ctx => (object)confidence.Get(ctx)) }, "Output Confidence"),
                 WithLabel(new SetOutput { Id = "OutputContextIds", Name = "Output Context Ids", OutputName = new("contextIds"), OutputValue = new(ctx => (object)(contextIds.Get(ctx) ?? "[]")) }, "Output Context Ids"),
+                WithLabel(new SetOutput { Id = "OutputOutcome", Name = "Output Outcome", OutputName = new("outcome"), OutputValue = new(ctx => (object)(exitOutcome.Get(ctx) ?? "")) }, "Output Outcome"),
+                WithLabel(new SetOutput { Id = "OutputDocumentId", Name = "Output Document Id", OutputName = new("documentId"), OutputValue = new(ctx => (object)(exitDocId.Get(ctx) ?? "")) }, "Output Document Id"),
             }
         };
         exposeOutput.SetDisplayText("Expose Output");
-
-        // ── Step 7b: Fail-closed error terminal (LOUD event + Finish) ──
-        var emitResearchFailed = new EmitResearchEventActivity
-        {
-            Id = "EmitResearchFailed",
-            Name = "Emit Research Failed",
-            EventType = new(ResearchEvents.Failed),
-            SessionId = new(ctx => sessionId.Get(ctx).ToString()),
-            IssueId = new(ctx => issueId.Get(ctx)),
-            TenantId = new(ctx => tenantId.Get(ctx)),
-            Detail = new("llm-call for research synthesis failed or returned unparseable output"),
-        };
-        emitResearchFailed.SetDisplayText("Emit Research Failed");
-
-        var researchError = new Finish
-        {
-            Id = "ResearchError",
-            Name = "Research Error"
-        };
-        researchError.SetDisplayText("Research Error");
 
         // ── Build the flowchart ────────────────────────────────────────
         builder.Root = new Flowchart
@@ -306,64 +299,44 @@ public class ResearchWorkflow : WorkflowBase
             Start = readInputs,
             Activities =
             {
-                readInputs,
-                emitStarted,
-                gatherContext,
-                storeContextResult,
-                emitContextGathered,
-                synthesizeResearchLlm,
-                parseResearch,
-                researchSuccessCheck,
-
-                // Success path
-                emitResearchCompleted,
-                setOutputResult,
+                readInputs, computeReEntry, readPositionStage, freshRun,
+                emitStarted, gatherContext, storeContextResult, emitContextGathered,
+                dispatchLifecycle, readLifecycleExit,
+                lifecycleAcceptedGate, wasCompleteReEntry, emitCompleted, emitFailed,
                 exposeOutput,
-
-                // Fail-closed error terminal
-                emitResearchFailed,
-                researchError,
             },
             Connections =
             {
-                new(readInputs, emitStarted),
+                new(readInputs, computeReEntry),
+                new(computeReEntry, readPositionStage),
+                new(readPositionStage, freshRun),
+
+                new(new FlowEndpoint(freshRun, "True"),  new FlowEndpoint(emitStarted)),
                 new(emitStarted, gatherContext),
                 new(gatherContext, storeContextResult),
                 new(storeContextResult, emitContextGathered),
-                new(emitContextGathered, synthesizeResearchLlm),
-                new(synthesizeResearchLlm, parseResearch),
-                new(parseResearch, researchSuccessCheck),
+                new(emitContextGathered, dispatchLifecycle),
+                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(dispatchLifecycle)),
 
-                // Success path
-                new(new FlowEndpoint(researchSuccessCheck, "True"),  new FlowEndpoint(emitResearchCompleted)),
-                new(emitResearchCompleted, setOutputResult),
-                new(setOutputResult, exposeOutput),
+                new(dispatchLifecycle, readLifecycleExit),
+                new(readLifecycleExit, lifecycleAcceptedGate),
 
-                // Fail-closed error path
-                new(new FlowEndpoint(researchSuccessCheck, "False"), new FlowEndpoint(emitResearchFailed)),
-                new(emitResearchFailed, researchError),
+                new(new FlowEndpoint(lifecycleAcceptedGate, "True"),  new FlowEndpoint(wasCompleteReEntry)),
+                new(new FlowEndpoint(wasCompleteReEntry, "False"), new FlowEndpoint(emitCompleted)),
+                new(emitCompleted, exposeOutput),
+                new(new FlowEndpoint(wasCompleteReEntry, "True"),  new FlowEndpoint(exposeOutput)),
+
+                new(new FlowEndpoint(lifecycleAcceptedGate, "False"), new FlowEndpoint(emitFailed)),
+                new(emitFailed, exposeOutput),
             }
         };
     }
 
     /// <summary>
-    /// Read the <c>success</c> flag from a dispatched workflow's Result dictionary.
-    /// Returns <c>false</c> if the dictionary is null, the key is absent, or the value is
-    /// falsy — fail-closed by design. Uses the tolerant <see cref="ResumeInput.AsBool"/>
-    /// read (boxed bool / string / JsonElement).
-    /// </summary>
-    internal static bool ReadSuccessFlag(IDictionary<string, object>? result)
-    {
-        if (result == null) return false;
-        if (!result.TryGetValue("success", out var s)) return false;
-        return ResumeInput.AsBool(s);
-    }
-
-    /// <summary>
-    /// Compose the work-item JSON handed to the context-gathering scan and the synthesis
-    /// prompt. Prefers an explicit <paramref name="workItemJson"/>; otherwise wraps the
-    /// free-text <paramref name="topic"/> (plus the issue id) into a minimal JSON object
-    /// so the downstream template has a stable shape. Pure; exposed for unit testing.
+    /// Compose the work-item JSON handed to the context-gathering scan and the findings
+    /// producer. Prefers an explicit <paramref name="workItemJson"/>; otherwise wraps the
+    /// free-text <paramref name="topic"/> (plus the issue id) into a minimal JSON object.
+    /// Pure; exposed for unit testing.
     /// </summary>
     internal static string BuildWorkItem(string? topic, string? workItemJson, string? issueId)
     {

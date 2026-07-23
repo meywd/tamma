@@ -1,10 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using NUnit.Framework;
-using Tamma.Activities.Ambiguity;
-using Tamma.Activities.Clarify;
 using Tamma.Activities.Core;
-using Tamma.Activities.Research;
 using Tamma.Core.Documents;
 using Tamma.Core.Documents.Types;
 using TypedAmbiguity = Tamma.Core.Documents.Types.AmbiguityAssessment;
@@ -107,14 +104,13 @@ public class RoundTripCompatibilityTests
         AssertValidateCodes(FindingsType, WithShellReport,
             FindingsDocumentType.FindingEmptyShell, FindingsDocumentType.MissingEvidence);
 
+        // Story 39-13 D9: the old-parser recovery half retired with ResearchParsing — every
+        // fixture still deserializes into the typed payload with its load-bearing fields intact.
         foreach (var fixture in new[] { ValidReport, TemplateShapedReport, NoOverallReport, NoTopicReport, WithShellReport })
         {
             var typed = DeserializeTyped<TypedFindings>(fixture);
-            var reserialized = JsonSerializer.Serialize(typed, DocumentJson.Options);
-            var parsed = ResearchParsing.ParseReport(reserialized, topic: "fallback");
-            parsed.Should().NotBeNull("the old parser must still parse the re-serialized typed payload");
-            parsed!.Summary.Should().NotBeNullOrWhiteSpace();
-            parsed.Findings.Should().NotBeEmpty();
+            typed.Summary.Should().NotBeNullOrWhiteSpace();
+            typed.Items.Should().NotBeEmpty();
         }
     }
 
@@ -163,13 +159,11 @@ public class RoundTripCompatibilityTests
         AssertValidateCodes(AmbiguityType, ZeroAssessment);
         AssertValidateCodes(AmbiguityType, NoConfAssessment);
 
+        // Story 39-13 D9: the old-parser recovery half retired with AmbiguityParsing.
         foreach (var fixture in new[] { ValidAssessment, TemplateShapedAssessment, ClearAssessment, ZeroAssessment, NoConfAssessment })
         {
             var typed = DeserializeTyped<TypedAmbiguity>(fixture);
-            var reserialized = JsonSerializer.Serialize(typed, DocumentJson.Options);
-            var parsed = AmbiguityParsing.ParseAssessment(reserialized);
-            parsed.Should().NotBeNull("the old parser must still parse the re-serialized typed payload");
-            parsed!.Rationale.Should().NotBeNullOrWhiteSpace();
+            typed.Rationale.Should().NotBeNullOrWhiteSpace();
         }
     }
 
@@ -199,12 +193,11 @@ public class RoundTripCompatibilityTests
     {
         AssertValidateCodes(ClarificationType, QuestionsClarification);
 
+        // Story 39-13 D9: the old-parser recovery half retired with ClarifyParsing — the typed
+        // payload still carries the questions array.
         var typed = DeserializeTyped<TypedClarification>(QuestionsClarification);
-        var reserialized = JsonSerializer.Serialize(typed, DocumentJson.Options);
-
-        var questions = ClarifyParsing.ParseQuestions(reserialized);
-        questions.Should().HaveCount(2, "the old ParseQuestions must still recover the questions array");
-        questions.Should().Contain("What is the target platform?");
+        typed.Questions.Should().HaveCount(2);
+        typed.Questions.Should().Contain("What is the target platform?");
     }
 
     [Test]
@@ -212,12 +205,9 @@ public class RoundTripCompatibilityTests
     {
         AssertValidateCodes(ClarificationType, ResolutionClarification);
 
+        // Story 39-13 D9: the old-parser recovery half retired with ClarifyParsing.
         var typed = DeserializeTyped<TypedClarification>(ResolutionClarification);
-        var reserialized = JsonSerializer.Serialize(typed, DocumentJson.Options);
-
-        var clarification = ClarifyParsing.ParseClarification(reserialized);
-        clarification.Should().NotBeNull("the old ParseClarification must still parse the re-serialized payload");
-        clarification!.ClarifiedRequirement.Should().Be("the full disambiguated requirement text");
-        clarification.Resolved.Should().BeTrue();
+        typed.ClarifiedRequirement.Should().Be("the full disambiguated requirement text");
+        typed.Resolved.Should().BeTrue();
     }
 }

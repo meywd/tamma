@@ -93,18 +93,27 @@ public class WorkflowInterfaceGraphTests
     [Test]
     public void Seeded_declarations_are_provisional_except_reconciled_bindings()
     {
-        // Story 39-12 (D9): the issue-decomposition → decomposition edge is flipped
-        // non-provisional — it is now backed by a real document-lifecycle binding
-        // (IssueDecompositionWorkflow), not the D6 README-derived seed guess. Every other
-        // edge stays provisional until its own migration (39-13/14/15) reconciles it.
+        // Story 39-12/39-13 (D9): edges backed by a real document-lifecycle binding are flipped
+        // non-provisional — issue-decomposition (39-12) plus the four assessment-family edges
+        // (research/ambiguity-scoring/clarifying-questions/design-proposal, 39-13). Every other
+        // edge stays provisional until its own migration (39-14/15) reconciles it.
+        var reconciled = new[]
+        {
+            "issue-decomposition",
+            "research",
+            "ambiguity-scoring",
+            "clarifying-questions",
+            "design-proposal",
+        };
+
         DocumentTypeRegistry.WorkflowInterfaces
-            .Where(i => i.WorkflowDefinitionId != "issue-decomposition")
+            .Where(i => !reconciled.Contains(i.WorkflowDefinitionId))
             .Should().OnlyContain(i => i.Provisional);
 
         DocumentTypeRegistry.WorkflowInterfaces
-            .Single(i => i.WorkflowDefinitionId == "issue-decomposition")
-            .Provisional.Should().BeFalse(
-                "the issue-decomposition edge is backed by the 39-12 lifecycle binding (D9)");
+            .Where(i => reconciled.Contains(i.WorkflowDefinitionId))
+            .Should().OnlyContain(i => !i.Provisional,
+                "edges backed by a real document-lifecycle binding (39-12/39-13 D9) are non-provisional");
     }
 
     private static bool IsRegistered(DocumentTypeKey key)

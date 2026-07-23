@@ -136,15 +136,17 @@ public static class DocumentTypeRegistry
         var empty = Array.Empty<DocumentTypeKey>();
         return new[]
         {
-            new WorkflowDocumentInterface("research",           empty, DocumentTypeKey.Findings,            true),
-            new WorkflowDocumentInterface("ambiguity-scoring",  empty, DocumentTypeKey.AmbiguityAssessment, true),
-            new WorkflowDocumentInterface("clarifying-questions", empty, DocumentTypeKey.Clarification,      true),
+            // Story 39-13 (D9) — flipped non-provisional: each edge is now backed by a real
+            // document-lifecycle binding (Research/Ambiguity/Clarify/Design), not a seed guess.
+            new WorkflowDocumentInterface("research",           empty, DocumentTypeKey.Findings,            false),
+            new WorkflowDocumentInterface("ambiguity-scoring",  empty, DocumentTypeKey.AmbiguityAssessment, false),
+            new WorkflowDocumentInterface("clarifying-questions", empty, DocumentTypeKey.Clarification,      false),
             // Story 39-12 (D9) — flipped non-provisional: the edge is now backed by a real
             // document-lifecycle binding (IssueDecompositionWorkflow), not a seed guess.
             new WorkflowDocumentInterface("issue-decomposition", empty, DocumentTypeKey.Decomposition,      false),
             new WorkflowDocumentInterface("plan-generation",    empty, DocumentTypeKey.Plan,                true),
             new WorkflowDocumentInterface("task-creation",      empty, DocumentTypeKey.Plan,                true),
-            new WorkflowDocumentInterface("design-proposal",    empty, DocumentTypeKey.Design,              true),
+            new WorkflowDocumentInterface("design-proposal",    empty, DocumentTypeKey.Design,              false),
             new WorkflowDocumentInterface("plan-review",        empty, DocumentTypeKey.Review,              true),
             new WorkflowDocumentInterface("task-review",        empty, DocumentTypeKey.Review,              true),
             new WorkflowDocumentInterface("code-review",        empty, DocumentTypeKey.Review,              true),

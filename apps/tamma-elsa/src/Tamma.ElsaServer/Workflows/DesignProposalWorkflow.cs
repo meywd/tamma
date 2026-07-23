@@ -3,13 +3,13 @@ using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Management.Activities.SetOutput;
-using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using System.Text.Json;
-using Tamma.Activities;
 using Tamma.Activities.Design;
-using Tamma.Activities.Design.Models;
+using Tamma.Activities.Documents;
 using Tamma.Api.Services.Agents;
+using Tamma.Core.Documents.Resume;
+using Tamma.ElsaServer.Workflows.Helpers;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
@@ -17,50 +17,39 @@ using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// Story 3.7 — Design Proposal sub-workflow. Given a complex requirement that needs a
-/// technical design it uses the LLM (via the MEDIATED <c>llm-call</c> path — the engine
-/// holds no LLM credential, TAMMA001) to generate a design PROPOSAL (summary + multiple
-/// alternatives with trade-off analysis + constraint evaluation), DELIVERS it to the issue,
-/// SUSPENDS on a bookmark awaiting a human approve/reject review decision, then RESUMES (via
-/// the secure <c>DesignResumeEndpoint</c>) and finalises — approved designs hand off to
-/// implementation, rejected designs capture the feedback.
+/// Story 39-13 — Design Proposal, re-implemented as a THIN BINDING over
+/// <see cref="DocumentLifecycleWorkflow"/>, producing a typed
+/// <see cref="Tamma.Core.Documents.Types.Design"/> document. The bespoke approval gate
+/// (<c>WaitForDesignApprovalActivity</c>) is RETIRED (D4): design acceptance rides 39-8's
+/// generic decision gate on the canonical tenant-folded bookmark. The binding threads its
+/// <c>sessionId</c> as the lifecycle's decision-session id so <c>DesignResumeEndpoint</c>
+/// (now a thin adapter) resolves the very gate the lifecycle suspended on.
 ///
-/// Flow:
-///   1. Read inputs (issue/requirement + constraints + tenantId; mint a session id if none)
-///   2. Generate the design proposal via DispatchWorkflow("llm-call")
-///      role=architect / action=propose-design
-///   3. Deliver the proposal to the issue (mediated git seam) — emit DESIGN.PROPOSAL.DELIVERED
-///   4. Wait for the review decision (bookmark, durable SLA timeout)
-///   5a. On approve: emit DESIGN.PROPOSAL.APPROVED, set outputs (proceed to implementation)
-///   5b. On reject:  emit DESIGN.PROPOSAL.REJECTED (feedback captured), set outputs
-///   5c. On timeout: emit DESIGN.REVIEW.TIMED_OUT (LOUD), set outputs
+/// <para>Delivery-to-issue survives via the filed-back pre-ACCEPT delivery hook (D5): the
+/// binding passes <c>deliveryWorkflowDefinitionId = "design-proposal-delivery"</c>, so the
+/// lifecycle dispatches the tiny <see cref="DesignDeliveryWorkflow"/> (which emits
+/// <c>DESIGN.PROPOSAL.GENERATED</c>/<c>DELIVERED</c>) BEFORE the human decides.</para>
 ///
-/// Reuses the <see cref="ClarifyingQuestionsWorkflow"/> / <see cref="AssessmentWorkflow"/>
-/// skeleton (llm-call → deliver → bookmark-wait → resume, fail-closed gates + error
-/// terminal).
-///
-/// Fail-closed: if the generation <c>llm-call</c> returns success=false, or the JSON
-/// response cannot be parsed into a design with a load-bearing summary, the workflow emits a
-/// LOUD <c>DESIGN.PROPOSAL.FAILED</c> event and routes to the LlmCallError terminal — it
-/// NEVER proceeds with a fabricated design a reviewer would then approve. Prompt resolution
-/// is tenant→system→error (the <c>llm-call</c> registry never falls back to an empty/plain
-/// prompt).
-///
-/// DESIGN.* DCB events (AGGREGATE.ACTION.STATUS) are emitted at every transition so the
-/// design decision is fully auditable and feeds the Epic-32 learning loop (Story-3.7 AC
-/// "System tracks design decisions and maintains decision audit trail" + "Proposals are
-/// versioned and stored for future reference and learning").
+/// <para>The public surface is byte-stable (D1): same <c>DefinitionId = "design-proposal"</c>,
+/// same outputs (<c>sessionId</c>/<c>status</c>/<c>designProposal</c>/<c>approved</c>) plus
+/// additive <c>outcome</c>/<c>documentId</c>. NO parse, NO success-flag gate, ZERO
+/// <see cref="Finish"/>. <c>DESIGN.REVIEW.TIMED_OUT</c> becomes unreachable (39-8 arms no SLA
+/// on decisions); the constant stays drift-safe.</para>
 /// </summary>
+[ResumeBehavior(ResumeMode.LatestStateReEntry)]
 public class DesignProposalWorkflow : WorkflowBase
 {
+    private const string DesignDocumentType = "design";
+    private const string DesignDeliveryDefinitionId = "design-proposal-delivery";
+
     protected override void Build(IWorkflowBuilder builder)
     {
         builder.Name = "DesignProposal";
         builder.DefinitionId = "design-proposal";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description = "Generate a reviewed technical design proposal for a complex requirement";
+        builder.Description = "Generate a reviewed technical design proposal via the generic document lifecycle (produce → validate → review → deliver → accept gate)";
 
-        // ── Workflow variables ──────────────────────────────────────────
+        // ── Inputs ─────────────────────────────────────────────────────
         var sessionId    = builder.WithVariable<Guid>();
         var issueId      = builder.WithVariable<string>();
         var requirement  = builder.WithVariable<string>();
@@ -69,34 +58,31 @@ public class DesignProposalWorkflow : WorkflowBase
         var constraints  = builder.WithVariable<string>();
         var conventions  = builder.WithVariable<string>();
         var tenantId     = builder.WithVariable<string>("TenantId", "");
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
 
-        var proposalJson    = builder.WithVariable<string>();
+        // ── 39-10 re-entry position ────────────────────────────────────
+        var reEntryPositionJson = builder.WithVariable<string>();
+        var reEntryDocJson  = builder.WithVariable<string>();
+        var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
+
+        // ── Dispatched-workflow result + typed exit ────────────────────
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
+        var lifecycleAccepted = builder.WithVariable<bool>();
+        var lifecycleRejected = builder.WithVariable<bool>();
+        var exitStatus      = builder.WithVariable<string>("ExitStatus", "");
+        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "");
+        var exitDocId       = builder.WithVariable<string>("ExitDocId", "");
+        var proposalJson    = builder.WithVariable<string>("ProposalJson", "{}");
         var alternativeCount = builder.WithVariable<int>();
-        var feedback        = builder.WithVariable<string>();
-
-        // llm-call result container
-        var proposalLlm = builder.WithVariable<IDictionary<string, object>?>();
-
-        // Success flag (fail-closed guard)
-        var proposalLlmOk = builder.WithVariable<bool>();
-
-        // Activity output capture
-        var deliveryResult = builder.WithVariable<DesignDeliveryResult>();
-        var waitApproved   = builder.WithVariable<bool>();
-        var waitFeedback   = builder.WithVariable<string>();
-        var waitTimedOut   = builder.WithVariable<bool>();
-        var proposalOutput = builder.WithVariable<DesignProposal>();
-
-        // Output variables (readable by a parent workflow)
-        var outputStatus       = builder.WithVariable<string>();
-        var outputProposalJson = builder.WithVariable<string>();
-        var outputApproved     = builder.WithVariable<bool>();
+        var decisionNotes   = builder.WithVariable<string>("DecisionNotes", "");
+        var failureDetail   = builder.WithVariable<string>("FailureDetail", "");
+        var approved        = builder.WithVariable<bool>();
+        var outputStatus    = builder.WithVariable<string>();
 
         // ── Step 1: Read inputs ────────────────────────────────────────
         var readInputs = new SetVariable
         {
-            Id = "ReadInputs",
-            Name = "Read Inputs",
+            Id = "ReadInputs", Name = "Read Inputs",
             Variable = sessionId,
             Value = new(context =>
             {
@@ -110,367 +96,194 @@ public class DesignProposalWorkflow : WorkflowBase
                 constraints.Set(context, context.GetInput<string>("constraints") ?? string.Empty);
                 conventions.Set(context, context.GetInput<string>("conventions") ?? string.Empty);
                 tenantId.Set(context, context.GetInput<string>("tenantId") ?? string.Empty);
+                acceptanceRulesJson.Set(context, context.GetInput<string>("acceptanceRulesJson") ?? string.Empty);
                 return sid;
             })
         };
         readInputs.SetDisplayText("Read Inputs");
 
-        // ── Step 2: Generate the design proposal via llm-call ──────────
-        var generateProposalLlm = new DispatchWorkflow
+        // ── Step 2: Compute 39-10 re-entry position ────────────────────
+        var computeReEntry = new ComputeReEntryPositionActivity
         {
-            Id = "GenerateProposalLlm",
-            Name = "Generate Design Proposal (LLM)",
-            WorkflowDefinitionId = new("llm-call"),
+            Id = "ComputeReEntryPosition", Name = "Compute Re-Entry Position",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentType = new(DesignDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            CorrelationId = new(ctx => issueId.Get(ctx)),
+            PositionJson = new(reEntryPositionJson),
+            ExistingDocumentJson = new(reEntryDocJson),
+        };
+        computeReEntry.SetDisplayText("Compute Re-Entry Position");
+
+        var readPositionStage = new SetVariable
+        {
+            Id = "ReadPositionStage", Name = "Read Position Stage",
+            Variable = positionStage,
+            Value = new(ctx =>
+            {
+                var position = DocumentLifecycleHelper.DeserializeReEntryPosition(reEntryPositionJson.Get(ctx));
+                return position?.ResumeAt switch
+                {
+                    LifecycleResumeStage.Complete => "complete",
+                    LifecycleResumeStage.Accept => "accept",
+                    LifecycleResumeStage.Review => "review",
+                    _ => "produce",
+                };
+            })
+        };
+        readPositionStage.SetDisplayText("Read Position Stage");
+
+        // ── Step 3: Dispatch the generic document lifecycle ────────────
+        var dispatchLifecycle = new DispatchWorkflow
+        {
+            Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
+            WorkflowDefinitionId = new("document-lifecycle"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["role"]     = AgentRole.Architect.ToWire(),
-                ["action"]   = AgentAction.ProposeDesign.ToWire(),
-                ["tenantId"] = tenantId.Get(ctx),
-                ["variables"] = new Dictionary<string, object>
+                ["documentType"]          = DesignDocumentType,
+                ["producerRole"]          = AgentRole.Architect.ToWire(),
+                ["producerAction"]        = AgentAction.ProposeDesign.ToWire(),
+                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
                 {
                     ["workItemJson"]    = requirement.Get(ctx) ?? "",
                     ["contextFindings"] = constraints.Get(ctx) ?? "",
                     ["repository"]      = repository.Get(ctx) ?? "",
                     ["conventions"]     = conventions.Get(ctx) ?? "",
-                },
-                ["enableTools"] = false,
+                }),
+                ["issueId"]             = issueId.Get(ctx) ?? "",
+                ["correlationId"]       = issueId.Get(ctx) ?? "",
+                // Thread the binding's sessionId as the lifecycle decision-session id so the
+                // DesignResumeEndpoint adapter resolves the same accept-gate bookmark (D4).
+                ["sessionId"]           = sessionId.Get(ctx),
+                ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                // Pre-ACCEPT delivery hook (D5): post the proposal to the issue before the human
+                // decides, emitting DESIGN.PROPOSAL.GENERATED/DELIVERED via the delivery workflow.
+                ["deliveryWorkflowDefinitionId"] = DesignDeliveryDefinitionId,
+                ["repository"]          = repository.Get(ctx) ?? "",
+                ["issueNumber"]         = issueNumber.Get(ctx),
             }),
             WaitForCompletion = new(true),
-            Result = new(proposalLlm),
+            Result = new(lifecycleResult),
         };
-        generateProposalLlm.SetDisplayText("Generate Design Proposal (LLM)");
+        dispatchLifecycle.SetDisplayText("Dispatch Document Lifecycle");
 
-        // Parse llm-call response into a DesignProposal; set proposalLlmOk (fail-closed).
-        var parseProposal = new SetVariable
+        // ── Step 4: Read the typed lifecycle exit (fail-closed) ────────
+        var readLifecycleExit = new SetVariable
         {
-            Id = "ParseProposal",
-            Name = "Parse Proposal",
+            Id = "ReadLifecycleExit", Name = "Read Lifecycle Exit",
             Variable = proposalJson,
             Value = new(ctx =>
             {
-                var result = proposalLlm.Get(ctx);
-                if (!ReadSuccessFlag(result))
-                {
-                    proposalLlmOk.Set(ctx, false);
-                    return "{}";
-                }
+                var exit = LifecycleBindingHelper.ReadLifecycleResult(lifecycleResult.Get(ctx));
+                var isAccepted = LifecycleBindingHelper.IsAccepted(exit);
+                var isRejected = string.Equals(exit.Status, "rejected", StringComparison.Ordinal);
 
-                var text = result!.TryGetValue("llmResponse", out var r) ? r?.ToString() ?? "" : "";
-                var parsed = DesignParsing.ParseProposal(text);
-                if (parsed is null)
-                {
-                    // Fail-closed — no fabricated / empty design proposal.
-                    proposalLlmOk.Set(ctx, false);
-                    return "{}";
-                }
-
-                proposalLlmOk.Set(ctx, true);
-                proposalOutput.Set(ctx, parsed);
-                alternativeCount.Set(ctx, parsed.Alternatives.Count);
-                return JsonSerializer.Serialize(parsed);
+                lifecycleAccepted.Set(ctx, isAccepted);
+                lifecycleRejected.Set(ctx, isRejected);
+                exitStatus.Set(ctx, exit.Status);
+                exitOutcome.Set(ctx, exit.Outcome ?? "");
+                exitDocId.Set(ctx, exit.DocumentId ?? "");
+                alternativeCount.Set(ctx, AssessmentBindingHelper.CountAlternatives(exit.DocumentJson));
+                decisionNotes.Set(ctx, exit.DecisionNotes);
+                failureDetail.Set(ctx, AssessmentBindingHelper.BuildFailureDetail(exit));
+                approved.Set(ctx, isAccepted);
+                outputStatus.Set(ctx, isAccepted ? "approved" : isRejected ? "rejected" : exit.Status);
+                return exit.DocumentJson;
             })
         };
-        parseProposal.SetDisplayText("Parse Proposal");
+        readLifecycleExit.SetDisplayText("Read Lifecycle Exit");
 
-        var proposalSuccessCheck = new FlowDecision(ctx => proposalLlmOk.Get(ctx))
-        { Id = "ProposalLlmOk", Name = "Proposal LLM OK?" };
-        proposalSuccessCheck.SetDisplayText("Proposal LLM OK?");
+        // ── Step 5: routing (typed values only) ────────────────────────
+        var acceptedGate = new FlowDecision(ctx => lifecycleAccepted.Get(ctx))
+        { Id = "LifecycleAccepted", Name = "Approved?" };
+        acceptedGate.SetDisplayText("Approved?");
 
-        // ── Step 3: Emit GENERATED + deliver + emit DELIVERED ──────────
-        var emitProposalGenerated = new EmitDesignEventActivity
+        var rejectedGate = new FlowDecision(ctx => lifecycleRejected.Get(ctx))
+        { Id = "LifecycleRejected", Name = "Rejected?" };
+        rejectedGate.SetDisplayText("Rejected?");
+
+        var emitApproved = new EmitDesignEventActivity
         {
-            Id = "EmitProposalGenerated",
-            Name = "Emit Proposal Generated",
-            EventType = new(DesignEvents.ProposalGenerated),
-            SessionId = new(ctx => sessionId.Get(ctx).ToString()),
-            IssueId = new(ctx => issueId.Get(ctx)),
-            TenantId = new(ctx => tenantId.Get(ctx)),
-            AlternativeCount = new(ctx => alternativeCount.Get(ctx)),
-        };
-        emitProposalGenerated.SetDisplayText("Emit Proposal Generated");
-
-        var deliverProposal = new DeliverDesignProposalActivity
-        {
-            Id = "DeliverDesignProposal",
-            Name = "Deliver Design Proposal",
-            SessionId = new(ctx => sessionId.Get(ctx)),
-            IssueId = new(ctx => issueId.Get(ctx)),
-            Repository = new(ctx => repository.Get(ctx)),
-            IssueNumber = new(ctx => issueNumber.Get(ctx)),
-            ProposalJson = new(ctx => proposalJson.Get(ctx)),
-            TenantId = new(ctx => tenantId.Get(ctx)),
-            Result = new(deliveryResult),
-        };
-        deliverProposal.SetDisplayText("Deliver Design Proposal");
-
-        var emitProposalDelivered = new EmitDesignEventActivity
-        {
-            Id = "EmitProposalDelivered",
-            Name = "Emit Proposal Delivered",
-            EventType = new(DesignEvents.ProposalDelivered),
-            SessionId = new(ctx => sessionId.Get(ctx).ToString()),
-            IssueId = new(ctx => issueId.Get(ctx)),
-            TenantId = new(ctx => tenantId.Get(ctx)),
-            Channel = new(ctx => deliveryResult.Get(ctx)?.Channel ?? "api"),
-            AlternativeCount = new(ctx => alternativeCount.Get(ctx)),
-        };
-        emitProposalDelivered.SetDisplayText("Emit Proposal Delivered");
-
-        // ── Step 4: Wait for the review decision (bookmark + durable SLA) ─
-        var waitForApproval = new WaitForDesignApprovalActivity
-        {
-            Id = "WaitForApproval",
-            Name = "Wait For Design Approval",
-            SessionId = new(ctx => sessionId.Get(ctx)),
-            TenantId = new(ctx => tenantId.Get(ctx)),
-            Approved = new(waitApproved),
-            Feedback = new(waitFeedback),
-            TimedOut = new(waitTimedOut),
-        };
-        waitForApproval.SetDisplayText("Wait For Design Approval");
-
-        // ── Step 5a: Approved path ─────────────────────────────────────
-        var storeApproved = new SetVariable
-        {
-            Id = "StoreApproved",
-            Name = "Store Approved",
-            Variable = feedback,
-            Value = new(ctx => waitFeedback.Get(ctx) ?? string.Empty)
-        };
-        storeApproved.SetDisplayText("Store Approved");
-
-        var emitProposalApproved = new EmitDesignEventActivity
-        {
-            Id = "EmitProposalApproved",
-            Name = "Emit Proposal Approved",
+            Id = "EmitProposalApproved", Name = "Emit Proposal Approved",
             EventType = new(DesignEvents.ProposalApproved),
             SessionId = new(ctx => sessionId.Get(ctx).ToString()),
             IssueId = new(ctx => issueId.Get(ctx)),
             TenantId = new(ctx => tenantId.Get(ctx)),
             AlternativeCount = new(ctx => alternativeCount.Get(ctx)),
-            Detail = new(ctx => feedback.Get(ctx)),
+            Detail = new(ctx => decisionNotes.Get(ctx)),
         };
-        emitProposalApproved.SetDisplayText("Emit Proposal Approved");
+        emitApproved.SetDisplayText("Emit Proposal Approved");
 
-        var setApprovedResult = new SetVariable
+        var emitRejected = new EmitDesignEventActivity
         {
-            Id = "SetApprovedResult",
-            Name = "Set Approved Result",
-            Variable = outputStatus,
-            Value = new(ctx =>
-            {
-                outputProposalJson.Set(ctx, proposalJson.Get(ctx) ?? "{}");
-                outputApproved.Set(ctx, true);
-                return "approved";
-            })
-        };
-        setApprovedResult.SetDisplayText("Set Approved Result");
-
-        var exposeApprovedOutput = new Sequence
-        {
-            Id = "ExposeApprovedOutput",
-            Name = "Expose Approved Output",
-            Activities =
-            {
-                WithLabel(new SetOutput { Id = "OutputSessionIdApproved", Name = "Output Session Id (Approved)", OutputName = new("sessionId"), OutputValue = new(ctx => (object)sessionId.Get(ctx).ToString()) }, "Output Session Id (Approved)"),
-                WithLabel(new SetOutput { Id = "OutputStatusApproved", Name = "Output Status (Approved)", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }, "Output Status (Approved)"),
-                WithLabel(new SetOutput { Id = "OutputProposalApproved", Name = "Output Proposal (Approved)", OutputName = new("designProposal"), OutputValue = new(ctx => (object)(outputProposalJson.Get(ctx) ?? "{}")) }, "Output Proposal (Approved)"),
-                WithLabel(new SetOutput { Id = "OutputApprovedApproved", Name = "Output Approved (Approved)", OutputName = new("approved"), OutputValue = new(ctx => (object)outputApproved.Get(ctx)) }, "Output Approved (Approved)"),
-            }
-        };
-        exposeApprovedOutput.SetDisplayText("Expose Approved Output");
-
-        // ── Step 5b: Rejected path ─────────────────────────────────────
-        var storeRejected = new SetVariable
-        {
-            Id = "StoreRejected",
-            Name = "Store Rejected",
-            Variable = feedback,
-            Value = new(ctx => waitFeedback.Get(ctx) ?? string.Empty)
-        };
-        storeRejected.SetDisplayText("Store Rejected");
-
-        var emitProposalRejected = new EmitDesignEventActivity
-        {
-            Id = "EmitProposalRejected",
-            Name = "Emit Proposal Rejected",
+            Id = "EmitProposalRejected", Name = "Emit Proposal Rejected",
             EventType = new(DesignEvents.ProposalRejected),
             SessionId = new(ctx => sessionId.Get(ctx).ToString()),
             IssueId = new(ctx => issueId.Get(ctx)),
             TenantId = new(ctx => tenantId.Get(ctx)),
             AlternativeCount = new(ctx => alternativeCount.Get(ctx)),
-            Detail = new(ctx => feedback.Get(ctx)),
+            Detail = new(ctx => decisionNotes.Get(ctx)),
         };
-        emitProposalRejected.SetDisplayText("Emit Proposal Rejected");
+        emitRejected.SetDisplayText("Emit Proposal Rejected");
 
-        var setRejectedResult = new SetVariable
+        var emitFailed = new EmitDesignEventActivity
         {
-            Id = "SetRejectedResult",
-            Name = "Set Rejected Result",
-            Variable = outputStatus,
-            Value = new(ctx =>
-            {
-                outputProposalJson.Set(ctx, proposalJson.Get(ctx) ?? "{}");
-                outputApproved.Set(ctx, false);
-                return "rejected";
-            })
-        };
-        setRejectedResult.SetDisplayText("Set Rejected Result");
-
-        var exposeRejectedOutput = new Sequence
-        {
-            Id = "ExposeRejectedOutput",
-            Name = "Expose Rejected Output",
-            Activities =
-            {
-                WithLabel(new SetOutput { Id = "OutputSessionIdRejected", Name = "Output Session Id (Rejected)", OutputName = new("sessionId"), OutputValue = new(ctx => (object)sessionId.Get(ctx).ToString()) }, "Output Session Id (Rejected)"),
-                WithLabel(new SetOutput { Id = "OutputStatusRejected", Name = "Output Status (Rejected)", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }, "Output Status (Rejected)"),
-                WithLabel(new SetOutput { Id = "OutputProposalRejected", Name = "Output Proposal (Rejected)", OutputName = new("designProposal"), OutputValue = new(ctx => (object)(outputProposalJson.Get(ctx) ?? "{}")) }, "Output Proposal (Rejected)"),
-                WithLabel(new SetOutput { Id = "OutputApprovedRejected", Name = "Output Approved (Rejected)", OutputName = new("approved"), OutputValue = new(ctx => (object)outputApproved.Get(ctx)) }, "Output Approved (Rejected)"),
-            }
-        };
-        exposeRejectedOutput.SetDisplayText("Expose Rejected Output");
-
-        // ── Step 5c: Timeout path ──────────────────────────────────────
-        var setTimeoutResult = new SetVariable
-        {
-            Id = "SetTimeoutResult",
-            Name = "Set Timeout Result",
-            Variable = outputStatus,
-            Value = new(ctx =>
-            {
-                outputProposalJson.Set(ctx, proposalJson.Get(ctx) ?? "{}");
-                outputApproved.Set(ctx, false);
-                return "timed_out";
-            })
-        };
-        setTimeoutResult.SetDisplayText("Set Timeout Result");
-
-        var emitReviewTimedOut = new EmitDesignEventActivity
-        {
-            Id = "EmitReviewTimedOut",
-            Name = "Emit Review Timed Out",
-            EventType = new(DesignEvents.ReviewTimedOut),
-            SessionId = new(ctx => sessionId.Get(ctx).ToString()),
-            IssueId = new(ctx => issueId.Get(ctx)),
-            TenantId = new(ctx => tenantId.Get(ctx)),
-            Detail = new("Design review SLA expired with no reviewer decision"),
-        };
-        emitReviewTimedOut.SetDisplayText("Emit Review Timed Out");
-
-        var exposeTimeoutOutput = new Sequence
-        {
-            Id = "ExposeTimeoutOutput",
-            Name = "Expose Timeout Output",
-            Activities =
-            {
-                WithLabel(new SetOutput { Id = "OutputSessionIdTimeout", Name = "Output Session Id (Timeout)", OutputName = new("sessionId"), OutputValue = new(ctx => (object)sessionId.Get(ctx).ToString()) }, "Output Session Id (Timeout)"),
-                WithLabel(new SetOutput { Id = "OutputStatusTimeout", Name = "Output Status (Timeout)", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }, "Output Status (Timeout)"),
-                WithLabel(new SetOutput { Id = "OutputApprovedTimeout", Name = "Output Approved (Timeout)", OutputName = new("approved"), OutputValue = new(ctx => (object)outputApproved.Get(ctx)) }, "Output Approved (Timeout)"),
-            }
-        };
-        exposeTimeoutOutput.SetDisplayText("Expose Timeout Output");
-
-        // ── Fail-closed error terminal (LOUD event + Finish) ───────────
-        var emitProposalFailed = new EmitDesignEventActivity
-        {
-            Id = "EmitProposalFailed",
-            Name = "Emit Proposal Failed",
+            Id = "EmitProposalFailed", Name = "Emit Proposal Failed",
             EventType = new(DesignEvents.ProposalFailed),
             SessionId = new(ctx => sessionId.Get(ctx).ToString()),
             IssueId = new(ctx => issueId.Get(ctx)),
             TenantId = new(ctx => tenantId.Get(ctx)),
-            Detail = new("llm-call for design-proposal generation failed or returned unparseable output"),
+            Detail = new(ctx => failureDetail.Get(ctx)),
         };
-        emitProposalFailed.SetDisplayText("Emit Proposal Failed");
+        emitFailed.SetDisplayText("Emit Proposal Failed");
 
-        var llmCallError = new Finish
+        // ── Step 6: Expose output — the single terminal region ─────────
+        var exposeOutput = new Sequence
         {
-            Id = "LlmCallError",
-            Name = "LLM Call Error"
+            Id = "ExposeOutput", Name = "Expose Output",
+            Activities =
+            {
+                WithLabel(new SetOutput { Id = "OutputSessionId", Name = "Output Session Id", OutputName = new("sessionId"), OutputValue = new(ctx => (object)sessionId.Get(ctx).ToString()) }, "Output Session Id"),
+                WithLabel(new SetOutput { Id = "OutputStatus", Name = "Output Status", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }, "Output Status"),
+                WithLabel(new SetOutput { Id = "OutputProposal", Name = "Output Proposal", OutputName = new("designProposal"), OutputValue = new(ctx => (object)(proposalJson.Get(ctx) ?? "{}")) }, "Output Proposal"),
+                WithLabel(new SetOutput { Id = "OutputApproved", Name = "Output Approved", OutputName = new("approved"), OutputValue = new(ctx => (object)approved.Get(ctx)) }, "Output Approved"),
+                WithLabel(new SetOutput { Id = "OutputOutcome", Name = "Output Outcome", OutputName = new("outcome"), OutputValue = new(ctx => (object)(exitOutcome.Get(ctx) ?? "")) }, "Output Outcome"),
+                WithLabel(new SetOutput { Id = "OutputDocumentId", Name = "Output Document Id", OutputName = new("documentId"), OutputValue = new(ctx => (object)(exitDocId.Get(ctx) ?? "")) }, "Output Document Id"),
+            }
         };
-        llmCallError.SetDisplayText("LLM Call Error");
+        exposeOutput.SetDisplayText("Expose Output");
 
         // ── Build the flowchart ────────────────────────────────────────
         builder.Root = new Flowchart
         {
             Id = "DesignProposalFlowchart",
             Name = "Design Proposal Flowchart",
+            Start = readInputs,
             Activities =
             {
-                readInputs,
-                generateProposalLlm,
-                parseProposal,
-                proposalSuccessCheck,
-                emitProposalGenerated,
-                deliverProposal,
-                emitProposalDelivered,
-                waitForApproval,
-
-                // Approved path
-                storeApproved,
-                emitProposalApproved,
-                setApprovedResult,
-                exposeApprovedOutput,
-
-                // Rejected path
-                storeRejected,
-                emitProposalRejected,
-                setRejectedResult,
-                exposeRejectedOutput,
-
-                // Timeout path
-                setTimeoutResult,
-                emitReviewTimedOut,
-                exposeTimeoutOutput,
-
-                // Fail-closed error terminal
-                emitProposalFailed,
-                llmCallError
+                readInputs, computeReEntry, readPositionStage,
+                dispatchLifecycle, readLifecycleExit,
+                acceptedGate, rejectedGate, emitApproved, emitRejected, emitFailed,
+                exposeOutput,
             },
             Connections =
             {
-                new(readInputs, generateProposalLlm),
-                new(generateProposalLlm, parseProposal),
-                new(parseProposal, proposalSuccessCheck),
-                new(new FlowEndpoint(proposalSuccessCheck, "True"),  new FlowEndpoint(emitProposalGenerated)),
-                new(new FlowEndpoint(proposalSuccessCheck, "False"), new FlowEndpoint(emitProposalFailed)),
-                new(emitProposalFailed, llmCallError),
+                new(readInputs, computeReEntry),
+                new(computeReEntry, readPositionStage),
+                new(readPositionStage, dispatchLifecycle),
 
-                new(emitProposalGenerated, deliverProposal),
-                new(deliverProposal, emitProposalDelivered),
-                new(emitProposalDelivered, waitForApproval),
+                new(dispatchLifecycle, readLifecycleExit),
+                new(readLifecycleExit, acceptedGate),
 
-                // Approved path
-                new(new FlowEndpoint(waitForApproval, "Approved"), new FlowEndpoint(storeApproved)),
-                new(storeApproved, emitProposalApproved),
-                new(emitProposalApproved, setApprovedResult),
-                new(setApprovedResult, exposeApprovedOutput),
-
-                // Rejected path
-                new(new FlowEndpoint(waitForApproval, "Rejected"), new FlowEndpoint(storeRejected)),
-                new(storeRejected, emitProposalRejected),
-                new(emitProposalRejected, setRejectedResult),
-                new(setRejectedResult, exposeRejectedOutput),
-
-                // Timeout path
-                new(new FlowEndpoint(waitForApproval, "Timeout"), new FlowEndpoint(setTimeoutResult)),
-                new(setTimeoutResult, emitReviewTimedOut),
-                new(emitReviewTimedOut, exposeTimeoutOutput)
+                new(new FlowEndpoint(acceptedGate, "True"),  new FlowEndpoint(emitApproved)),
+                new(emitApproved, exposeOutput),
+                new(new FlowEndpoint(acceptedGate, "False"), new FlowEndpoint(rejectedGate)),
+                new(new FlowEndpoint(rejectedGate, "True"),  new FlowEndpoint(emitRejected)),
+                new(emitRejected, exposeOutput),
+                new(new FlowEndpoint(rejectedGate, "False"), new FlowEndpoint(emitFailed)),
+                new(emitFailed, exposeOutput),
             }
         };
-    }
-
-    /// <summary>
-    /// Read the <c>success</c> flag from a dispatched workflow's Result dictionary. Returns
-    /// <c>false</c> if the dictionary is null, the key is absent, or the value is falsy —
-    /// fail-closed by design. Uses the tolerant <see cref="ResumeInput.AsBool"/> read (boxed
-    /// bool / string / JsonElement).
-    /// </summary>
-    internal static bool ReadSuccessFlag(IDictionary<string, object>? result)
-    {
-        if (result == null) return false;
-        if (!result.TryGetValue("success", out var s)) return false;
-        return ResumeInput.AsBool(s);
     }
 }

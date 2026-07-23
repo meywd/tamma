@@ -1,149 +1,106 @@
+using System;
+using System.Linq;
+using System.Reflection;
+using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Runtime.Activities;
 using FluentAssertions;
 using NUnit.Framework;
 using Tamma.Activities.Research;
+using Tamma.Api.Services.Agents;
+using Tamma.Activities.Documents;
+using Tamma.Core.Documents.Resume;
 using Tamma.ElsaServer.Workflows;
 
 namespace Tamma.Activities.Tests.Workflows;
 
 /// <summary>
-/// Story 3.4 — structural verification for <see cref="ResearchWorkflow"/>.
-///
-/// Asserts the workflow:
-/// 1. Builds and has DefinitionId "research".
-/// 2. Threads <c>TenantId</c> so the prompt registry resolves tenant-scoped prompts
-///    (resolution is tenant→system→error — never empty/plain).
-/// 3. Investigates the codebase / prior art by REUSING the <c>context-gathering</c>
-///    sub-workflow (not reinventing a scan).
-/// 4. Synthesizes the research report via <c>DispatchWorkflow("llm-call")</c> (mediated —
-///    the engine holds no LLM credential, TAMMA001) rather than any in-engine provider call.
-/// 5. Is fail-closed: a <c>ResearchError</c> terminal exists and a <c>FlowDecision</c> gate
-///    checks LLM-call success before proceeding.
-/// 6. Emits the required RESEARCH.* DCB events (started / context gathered / completed /
-///    failed) via <see cref="EmitResearchEventActivity"/> nodes.
-/// 7. Is AUTONOMOUS — no human gate / bookmark (no suspend activity in the graph).
+/// Story 39-13 — structural pins for <see cref="ResearchWorkflow"/>, rebuilt as a THIN binding
+/// over <c>document-lifecycle</c> (produces <c>findings</c>). Covers AC1 (two dispatches, zero
+/// llm-call, canonical producer pair), AC3 (zero Finish, single ExposeOutput leaf), AC5 (legacy
+/// RESEARCH.* emits), AC6 (resume declaration), AC8.
 /// </summary>
 [TestFixture]
 public class ResearchWorkflowStructureTests
 {
     private static Flowchart Flowchart()
-    {
-        var builder = WorkflowTestHelper.BuildWorkflow(new ResearchWorkflow());
-        return WorkflowTestHelper.GetFlowchart(builder);
-    }
+        => WorkflowTestHelper.GetFlowchart(WorkflowTestHelper.BuildWorkflow(new ResearchWorkflow()));
+
+    private static System.Collections.Generic.List<IActivity> AllActivities() => StructureWalk.All(Flowchart());
 
     [Test]
     public void Workflow_BuildsWithoutError()
-    {
-        var act = () => WorkflowTestHelper.BuildWorkflow(new ResearchWorkflow());
-        act.Should().NotThrow("ResearchWorkflow.Build() must complete without exceptions");
-    }
+        => ((Action)(() => WorkflowTestHelper.BuildWorkflow(new ResearchWorkflow()))).Should().NotThrow();
 
     [Test]
-    public void Workflow_HasCorrectDefinitionId()
-    {
-        var builder = WorkflowTestHelper.BuildWorkflow(new ResearchWorkflow());
-        builder.Object.DefinitionId.Should().Be("research");
-    }
+    public void Workflow_HasStableDefinitionId()
+        => WorkflowTestHelper.BuildWorkflow(new ResearchWorkflow()).Object.DefinitionId.Should().Be("research");
 
     [Test]
     public void Workflow_ThreadsTenantId()
+        => WorkflowTestHelper.BuildWorkflow(new ResearchWorkflow()).Object.Variables.Any(v => v.Name == "TenantId")
+            .Should().BeTrue();
+
+    [Test]
+    public void Workflow_HasExactlyTwoDispatches_ContextGatheringAndLifecycle_NoLlmCall()
     {
-        var builder = WorkflowTestHelper.BuildWorkflow(new ResearchWorkflow());
-        builder.Object.Variables
-            .Any(v => v.Name == "TenantId")
-            .Should().BeTrue(
-                "the workflow must thread TenantId so llm-call resolves tenant-scoped prompts " +
-                "(tenant→system→error) for the research synthesis");
+        AllActivities().OfType<DispatchWorkflow>().Select(d => d.Id).OrderBy(x => x)
+            .Should().BeEquivalentTo(new[] { "DispatchLifecycle", "GatherContext" });
+        AllActivities().OfType<DispatchWorkflow>()
+            .Where(d => StructureWalk.LiteralDefId(d) == "llm-call").Should().BeEmpty();
+        StructureWalk.LiteralDefId(AllActivities().OfType<DispatchWorkflow>().Single(d => d.Id == "GatherContext"))
+            .Should().Be("context-gathering");
+        StructureWalk.LiteralDefId(AllActivities().OfType<DispatchWorkflow>().Single(d => d.Id == "DispatchLifecycle"))
+            .Should().Be("document-lifecycle");
     }
 
     [Test]
-    public void Workflow_ReusesContextGatheringForInvestigation()
+    public void DispatchLifecycle_MaterializesCanonicalProducerPair_AndFindingsType()
     {
-        Flowchart().Activities
-            .OfType<DispatchWorkflow>()
-            .Should().Contain(d => d.Id == "GatherContext",
-                "the workflow must investigate the codebase / prior art by REUSING the " +
-                "context-gathering sub-workflow rather than reinventing a scan");
+        TaxonomyDriftBuildTests.ScanLifecycleBindingDispatches().Should().Contain(p =>
+            p.Workflow == "ResearchWorkflow" && p.DispatchId == "DispatchLifecycle" &&
+            p.Role == AgentRole.ProductOwner.ToWire() && p.Action == AgentAction.Research.ToWire());
+
+        var input = TaxonomyDriftBuildTests.MaterializeDispatchInput("ResearchWorkflow", "DispatchLifecycle");
+        input.Should().NotBeNull();
+        (input!["documentType"] as string).Should().Be("findings");
     }
 
     [Test]
-    public void Workflow_SynthesizesViaMediatedLlmCall()
+    public void Workflow_HasNoFinishActivity()
+        => AllActivities().OfType<Finish>().Should().BeEmpty();
+
+    [Test]
+    public void Workflow_EveryGraphLeaf_IsTheSingleExposeOutputRegion()
     {
-        Flowchart().Activities
-            .OfType<DispatchWorkflow>()
-            .Should().Contain(d => d.Id == "SynthesizeResearchLlm",
-                "the research report must be synthesized via the mediated llm-call " +
-                "(engine holds no LLM credential, TAMMA001)");
+        var fc = Flowchart();
+        var sources = fc.Connections.Select(c => c.Source.Activity.Id).ToHashSet();
+        fc.Activities.Where(a => !sources.Contains(a.Id)).Select(a => a.Id)
+            .Should().BeEquivalentTo(new[] { "ExposeOutput" });
     }
 
     [Test]
-    public void Workflow_HasFailClosedErrorTerminal()
+    public void Workflow_HasExactlyTheExpectedFlowDecisions()
+        => AllActivities().OfType<FlowDecision>().Select(d => d.Id).OrderBy(x => x)
+            .Should().BeEquivalentTo(new[] { "FreshRun", "LifecycleAccepted", "WasCompleteReEntry" });
+
+    [Test]
+    public void Workflow_HasAllResearchEmitNodes()
+        => AllActivities().OfType<EmitResearchEventActivity>().Select(a => a.Id).ToHashSet()
+            .Should().Contain(new[] { "EmitResearchStarted", "EmitContextGathered", "EmitResearchCompleted", "EmitResearchFailed" });
+
+    [Test]
+    public void Workflow_DeclaresLatestStateReEntry_AndCarriesTheReEntryNode()
     {
-        Flowchart().Activities
-            .OfType<Finish>()
-            .Should().Contain(f => f.Id == "ResearchError",
-                "a fail-closed ResearchError terminal must exist — synthesis failures route " +
-                "there, never proceeding with a fabricated research report");
+        var decl = typeof(ResearchWorkflow).GetCustomAttribute<ResumeBehaviorAttribute>(inherit: false);
+        decl.Should().NotBeNull();
+        decl!.Mode.Should().Be(ResumeMode.LatestStateReEntry);
+        AllActivities().OfType<ComputeReEntryPositionActivity>().Should().ContainSingle();
     }
 
     [Test]
-    public void Workflow_HasSuccessGateForSynthesis()
-    {
-        Flowchart().Activities
-            .OfType<FlowDecision>()
-            .Select(d => d.Id)
-            .Should().Contain("ResearchLlmOk",
-                "the report output must be gated behind a ResearchLlmOk decision (fail-closed)");
-    }
-
-    [Test]
-    public void Workflow_EmitsRequiredResearchEvents()
-    {
-        var emitIds = Flowchart().Activities
-            .OfType<EmitResearchEventActivity>()
-            .Select(a => a.Id)
-            .ToList();
-
-        emitIds.Should().Contain("EmitResearchStarted",
-            "must emit RESEARCH.STARTED when the investigation begins");
-        emitIds.Should().Contain("EmitContextGathered",
-            "must emit RESEARCH.CONTEXT_GATHERED when the codebase/prior-art context is gathered");
-        emitIds.Should().Contain("EmitResearchCompleted",
-            "must emit RESEARCH.COMPLETED when a ranked report is synthesized");
-        emitIds.Should().Contain("EmitResearchFailed",
-            "must emit a LOUD RESEARCH.FAILED when synthesis fails / is unparseable");
-    }
-
-    [Test]
-    public void Workflow_IsAutonomous_NoHumanBookmark()
-    {
-        // Research is autonomous: unlike ClarifyingQuestionsWorkflow (which suspends on a
-        // WaitForClarifyingAnswersActivity bookmark awaiting human answers) it has no human
-        // gate. Assert no bookmark-style "Wait*" activity is present in the graph.
-        var waitActivities = Flowchart().Activities
-            .Where(a => a.GetType().Name.StartsWith("Wait", StringComparison.Ordinal))
-            .Select(a => a.GetType().Name)
-            .ToList();
-
-        waitActivities.Should().BeEmpty(
-            "the research workflow is autonomous — it must not suspend on a human bookmark " +
-            "(no Wait* activity), unlike the clarifying-questions workflow");
-    }
-
-    [Test]
-    public void Workflow_OnlyDispatchesContextGatheringAndLlmCall()
-    {
-        var dispatchIds = Flowchart().Activities
-            .OfType<DispatchWorkflow>()
-            .Select(d => d.Id)
-            .OrderBy(x => x)
-            .ToList();
-
-        dispatchIds.Should().BeEquivalentTo(new[] { "GatherContext", "SynthesizeResearchLlm" },
-            "research reuses context-gathering for investigation and the mediated llm-call for " +
-            "synthesis — no other dispatch and, crucially, no direct in-engine provider call");
-    }
+    public void Workflow_HasNoBookmarkSuspendActivity()
+        => AllActivities().Where(a => a.GetType().Name.StartsWith("Wait", StringComparison.Ordinal))
+            .Should().BeEmpty();
 }

@@ -109,6 +109,20 @@ public class DocumentLifecycleWorkflow : WorkflowBase
         // ── Gate outputs ───────────────────────────────────────────────
         var decisionJson = builder.WithVariable<string>("DecisionJson", "");
         var decisionChannel = builder.WithVariable<string>("DecisionChannel", "orchestrator");
+        // Story 39-13 (D6d) — the decider's notes/feedback, surfaced on the terminal as the
+        // additive `decisionNotes` output so a lifecycle binding can mirror the legacy
+        // Detail on DESIGN.PROPOSAL.APPROVED/REJECTED. Additive-only, like 39-12's documentJson.
+        var decisionFeedback = builder.WithVariable<string>("DecisionFeedback", "");
+
+        // ── Story 39-13 (D5/D6c) — optional pre-ACCEPT delivery hook ────
+        // When `deliveryWorkflowDefinitionId` is non-empty the lifecycle dispatches that
+        // sub-workflow on every entry to ACCEPT (before publishing the acceptance request),
+        // so a family binding (Design) can post the document to the issue BEFORE the human
+        // decides while keeping the legacy GENERATED/DELIVERED emits on the durable drain.
+        var deliveryDefId = builder.WithVariable<string>("DeliveryWorkflowDefinitionId", "");
+        var deliveryRepository = builder.WithVariable<string>("DeliveryRepository", "");
+        var deliveryIssueNumber = builder.WithVariable<int>("DeliveryIssueNumber", 0);
+        var deliveryResult = builder.WithVariable<IDictionary<string, object>?>();
 
         // ── Story 39-10 re-entry (D6) ──────────────────────────────────
         var reEntryPositionJson = builder.WithVariable<string>("ReEntryPositionJson", "");
@@ -164,6 +178,10 @@ public class DocumentLifecycleWorkflow : WorkflowBase
                 correlationId.Set(ctx, corr);
                 reviewDefId.Set(ctx, reviewDef);
                 tenantId.Set(ctx, tenant);
+                // Story 39-13 (D5) — optional pre-ACCEPT delivery spec (default "" = skip).
+                deliveryDefId.Set(ctx, ctx.GetInput<string>("deliveryWorkflowDefinitionId") ?? "");
+                deliveryRepository.Set(ctx, ctx.GetInput<string>("repository") ?? "");
+                deliveryIssueNumber.Set(ctx, ctx.GetInput<int>("issueNumber"));
                 sessionId.Set(ctx, sid.ToString());
                 currentRound.Set(ctx, 0);
                 rulesReference.Set(ctx, state.RulesReference);
@@ -562,9 +580,37 @@ public class DocumentLifecycleWorkflow : WorkflowBase
             DocumentType = new(ctx => documentType.Get(ctx)),
             CorrelationId = new(ctx => correlationId.Get(ctx)),
             DecisionJson = new(decisionJson),
+            Feedback = new(decisionFeedback),
             Channel = new(decisionChannel),
         };
         waitForDecision.SetDisplayText("Wait For Document Decision");
+
+        // Story 39-13 (D5) — pre-ACCEPT delivery: dispatch the delivery sub-workflow (if any)
+        // BEFORE publishing the acceptance request. Variable-backed definition id (default ""),
+        // so a no-delivery lifecycle skips it entirely via HasDeliveryGate.
+        var hasDeliveryGate = new FlowDecision(ctx => !string.IsNullOrWhiteSpace(deliveryDefId.Get(ctx)))
+        { Id = "HasDeliveryGate", Name = "Deliver Before Accept?" };
+        hasDeliveryGate.SetDisplayText("Deliver Before Accept?");
+
+        var dispatchDelivery = new DispatchWorkflow
+        {
+            Id = "DispatchDelivery", Name = "Dispatch Delivery",
+            WorkflowDefinitionId = new(ctx => deliveryDefId.Get(ctx)),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["documentJson"] = currentDocJson.Get(ctx) ?? "",
+                ["documentType"] = documentType.Get(ctx) ?? "",
+                ["issueId"] = issueId.Get(ctx) ?? "",
+                ["repository"] = deliveryRepository.Get(ctx) ?? "",
+                ["issueNumber"] = deliveryIssueNumber.Get(ctx),
+                ["sessionId"] = sessionId.Get(ctx) ?? "",
+                ["tenantId"] = tenantId.Get(ctx) ?? "",
+                ["correlationId"] = correlationId.Get(ctx) ?? "",
+            }),
+            WaitForCompletion = new(true),
+            Result = new(deliveryResult),
+        };
+        dispatchDelivery.SetDisplayText("Dispatch Delivery");
 
         var applyGuardrails = new SetVariable
         {
@@ -678,6 +724,8 @@ public class DocumentLifecycleWorkflow : WorkflowBase
                 WithLabel(new SetOutput { Id = "OutputLifecycleResult", OutputName = new("lifecycleResult"), OutputValue = new(ctx => (object)(outLifecycleResult.Get(ctx) ?? "{}")) }, "Output lifecycleResult"),
                 // Story 39-12 (D4) — the accepted revision's payload body, for lifecycle bindings.
                 WithLabel(new SetOutput { Id = "OutputDocumentJson", OutputName = new("documentJson"), OutputValue = new(ctx => (object)(outDocJson.Get(ctx) ?? "")) }, "Output documentJson"),
+                // Story 39-13 (D6d) — the decider's notes, for a binding's legacy Detail mirror.
+                WithLabel(new SetOutput { Id = "OutputDecisionNotes", OutputName = new("decisionNotes"), OutputValue = new(ctx => (object)(decisionFeedback.Get(ctx) ?? "")) }, "Output decisionNotes"),
                 WithLabel(new SetOutput { Id = "OutputSessionId", OutputName = new("sessionId"), OutputValue = new(ctx => (object)(sessionId.Get(ctx) ?? "")) }, "Output sessionId"),
             }
         };
@@ -705,7 +753,7 @@ public class DocumentLifecycleWorkflow : WorkflowBase
                 emitReviewRequested, dispatchReview, ingestReview, emitReviewed,
                 routeAccept, routeRevise, routeRounds,
                 emitRevisionStarted, prepareRevision, dispatchRevise, ingestRevise,
-                buildAcceptanceRequest, publishRequest, waitForDecision, applyGuardrails,
+                buildAcceptanceRequest, hasDeliveryGate, dispatchDelivery, publishRequest, waitForDecision, applyGuardrails,
                 acceptGate, rejectGate, reviseGate,
                 seedValidationExhausted, seedAmbiguity, seedRounds, seedUndecidable,
                 emitAccepted, emitRejected, emitEscalated,
@@ -762,8 +810,11 @@ public class DocumentLifecycleWorkflow : WorkflowBase
                 Connect(dispatchRevise, ingestRevise),
                 Connect(ingestRevise, validateDraft),
 
-                // ACCEPT — publish → gate (NO decision between them) → guardrails → route
-                Connect(buildAcceptanceRequest, publishRequest),
+                // ACCEPT — (optional delivery) → publish → gate (NO decision between them) → guardrails → route
+                Connect(buildAcceptanceRequest, hasDeliveryGate),
+                ConnectOutcome(hasDeliveryGate, "True", dispatchDelivery),
+                ConnectOutcome(hasDeliveryGate, "False", publishRequest),
+                Connect(dispatchDelivery, publishRequest),
                 Connect(publishRequest, waitForDecision),
                 ConnectOutcome(waitForDecision, "Accept", applyGuardrails),
                 ConnectOutcome(waitForDecision, "RequestRevision", applyGuardrails),
