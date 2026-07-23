@@ -244,6 +244,89 @@ public class DocumentLifecycleWorkflowStructureTests
                 "the lifecycle exposes the decider's notes as the additive 'decisionNotes' output (39-13 D6d)");
     }
 
+    // ── Story 39-11 (D6) — document_instances persist wiring ───────────
+
+    [Test]
+    public void Workflow_PersistsDocumentInstance_AtSupersedeAndEveryTerminal()
+    {
+        // The insert-only store (PK = envelope id) is written EXACTLY ONCE per
+        // distinct envelope: PersistRevised captures the about-to-be-superseded
+        // draft; Persist{Accepted|Rejected|Escalated} capture the final draft after
+        // its terminal Finalize. Re-persisting a produced/validated/reviewed draft
+        // that later reaches a terminal would double-insert the same id — so those
+        // in-place transitions are NOT persist sites.
+        var persistIds = AllActivities().OfType<PersistDocumentInstanceActivity>().Select(a => a.Id).ToHashSet();
+        persistIds.Should().BeEquivalentTo(new[]
+        {
+            "PersistRevised", "PersistAccepted", "PersistRejected", "PersistEscalated",
+        }, "the lifecycle persists each distinct envelope once — at supersede and at each terminal");
+    }
+
+    [Test]
+    public void Workflow_PairsEmitWithPersist_SharingThePreMintedTransitionId()
+    {
+        // AC7 — every persist is adjacent to its transition emit, and a mint node
+        // feeds the emit so the emitted DOCUMENT.* event and the document_instances
+        // row share the SAME pre-minted id (EmitDocumentEventActivity.EventId ==
+        // PersistDocumentInstanceActivity.CorrelatingEventId, both reading the
+        // TransitionEventId variable).
+        var fc = Flowchart();
+        bool Edge(string source, string target) =>
+            fc.Connections.Any(c => c.Source.Activity.Id == source && c.Target.Activity.Id == target);
+
+        // Mint → emit (the pre-minted id is established before the event is emitted).
+        Edge("MintRevisionEventId", "EmitRevisionStarted").Should().BeTrue();
+        Edge("MintAcceptedEventId", "EmitAccepted").Should().BeTrue();
+        Edge("MintRejectedEventId", "EmitRejected").Should().BeTrue();
+        Edge("MintEscalatedEventId", "EmitEscalated").Should().BeTrue();
+
+        // REVISE persists the current draft right after emitting REVISION_STARTED,
+        // BEFORE the superseding revision is prepared.
+        Edge("EmitRevisionStarted", "PersistRevised").Should().BeTrue("the revise persist captures the superseded ancestor");
+        Edge("PersistRevised", "PrepareRevision").Should().BeTrue();
+
+        // Terminals persist AFTER Finalize (so the row carries the terminal status).
+        Edge("FinalizeAccepted", "PersistAccepted").Should().BeTrue("the accepted row is written after the state is stamped Accepted");
+        Edge("FinalizeRejected", "PersistRejected").Should().BeTrue();
+
+        // The escalate persist is gated on a present envelope (a producer that never
+        // yielded a draft escalates with nothing to persist).
+        Edge("FinalizeEscalated", "EscalateHasDocumentGate").Should().BeTrue();
+        fc.Connections.Any(c => c.Source.Activity.Id == "EscalateHasDocumentGate" &&
+            c.Source.Port == "True" && c.Target.Activity.Id == "PersistEscalated")
+            .Should().BeTrue("a present escalated envelope is persisted");
+        fc.Connections.Any(c => c.Source.Activity.Id == "EscalateHasDocumentGate" &&
+            c.Source.Port == "False" && c.Target.Activity.Id == "SetOutputs")
+            .Should().BeTrue("an escalation with no draft skips the persist");
+    }
+
+    [Test]
+    public void Workflow_PersistingEmits_ThreadThePreMintedEventId()
+    {
+        // The four persisting transition emits carry a delegate-backed EventId (the
+        // pre-minted TransitionEventId), not the default null literal — proving the
+        // store↔stream id is threaded onto the emit half of the pair. DocumentId is
+        // ALWAYS delegate-backed on every emit, so its expression type is the
+        // reference shape for "variable-backed"; a literal default is a different type.
+        var emits = AllActivities().OfType<EmitDocumentEventActivity>()
+            .ToDictionary(e => e.Id, e => e);
+
+        foreach (var id in new[] { "EmitRevisionStarted", "EmitAccepted", "EmitRejected", "EmitEscalated" })
+        {
+            emits.Should().ContainKey(id);
+            emits[id].EventId.Expression?.Type.Should().Be("Delegate",
+                $"{id}.EventId is a variable-backed delegate (the pre-minted TransitionEventId)");
+        }
+
+        // Inversely, the non-persisting emits keep the auto-minted id: EventId stays
+        // its default literal (no pre-minted linkage).
+        foreach (var id in new[] { "EmitProduced", "EmitValidated", "EmitReviewRequested", "EmitReviewed" })
+        {
+            emits[id].EventId.Expression?.Type.Should().Be("Literal",
+                $"{id} leaves EventId at its default literal (auto-minted event id, no pre-minted linkage)");
+        }
+    }
+
     // ── AC5 — constant pins ────────────────────────────────────────────
 
     [Test]

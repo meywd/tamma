@@ -50,14 +50,17 @@ namespace Tamma.Activities.Tests.Workflows;
 /// <see cref="DecompositionBindingHelperTests"/> + <see cref="DocumentLifecycleHelperTests"/>
 /// — this proves the WIRING.</para>
 ///
-/// <para><b>Known gap (filed against 39-11/39-6, not patched here per the plan).</b> The
-/// 39-11 <see cref="PersistDocumentInstanceActivity"/> ships the engine→store seam but is NOT
-/// yet wired into the lifecycle graph (its own scope note defers the per-transition
-/// persist+emit wiring). So a LIVE run persists no <c>document_instances</c> rows and AC5's
-/// "read the accepted instance back through <see cref="IDocumentInstanceRepository"/>" cannot
-/// be asserted from a fresh run. The crash re-entry scenarios (e)/(f) instead SEED the store
-/// with the state a crashed run left behind (the 39-10 harness pattern), which exercises the
-/// store-read path AC5 depends on.</para>
+/// <para><b>Store seeding (why it stays).</b> The lifecycle now WIRES
+/// <see cref="PersistDocumentInstanceActivity"/> at supersede + every terminal (39-11 D6), so
+/// a live run DOES project <c>document_instances</c> rows. But in THIS harness the persist
+/// hop goes through <c>TammaApiClient</c> → the <see cref="CapturingHandler"/> stub (which just
+/// records the POST body and 201s); it does NOT flow into the <see cref="IDocumentInstanceRepository"/>
+/// fake that the read path (<see cref="LifecycleReEntryService"/>) queries. Those two seams are
+/// intentionally decoupled in-process, so the crash re-entry scenarios (e)/(f) still SEED the
+/// read fake with the state a crashed run left behind (the 39-10 harness pattern) to exercise
+/// the store-read path AC5 depends on. Wiring the stub handler to feed the read fake is a
+/// harness-only follow-up; the persist WIRING itself is proved structurally by
+/// <c>DocumentLifecycleWorkflowStructureTests</c>.</para>
 /// </summary>
 [TestFixture]
 [Explicit("Full Elsa workflow-runtime integration — runs in the CI Postgres jobs, skipped in the fast local gate")]
@@ -316,7 +319,9 @@ public class IssueDecompositionLifecycleExecutionTests
 
     private static IEnumerable<JsonElement> CapturedEvents(CapturingHandler capture) =>
         capture.Bodies
-            .SelectMany(b => JsonDocument.Parse(b).RootElement.GetProperty("events").EnumerateArray())
+            .SelectMany(b => JsonDocument.Parse(b).RootElement.TryGetProperty("events", out var evs)
+                ? evs.EnumerateArray()
+                : System.Linq.Enumerable.Empty<JsonElement>())
             .ToList();
 
     private static int? SubtaskCountOnCompleted(CapturingHandler capture)

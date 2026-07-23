@@ -73,5 +73,26 @@ lineage" promise of Epic 39 is not met end-to-end at runtime.
 
 ---
 
-**Status**: 🔍 Needs Review
+## ✅ Resolution (2026-07-23)
+
+Wired `PersistDocumentInstanceActivity` into `DocumentLifecycleWorkflow`. Because the store is
+insert-only (PK = `envelope.Id`), each distinct envelope is persisted **exactly once**: at
+revise-start (before it is superseded) and at the terminal transition (accepted/rejected/escalated,
+the escalate persist gated for the no-draft case). A pre-minted `UuidV7` workflow variable
+(`TransitionEventId`) links each transition's `DOCUMENT.*` emit and its adjacent persist via
+`CorrelatingEventId` (the AC7 seam), resume-deterministic across suspend/resume, and inherits the
+39-10 re-entry gating (no double-persist on crash/re-entry). Fail-loud preserved. No schema change.
+Structure test pins the persist node set + mint→emit→persist adjacency.
+
+**Residual (deliberately not gold-plated):** the store projects terminal state + the superseded
+revision chain, NOT a row per intermediate produced→validated→reviewed state — consistent with the
+store's "read-optimized product layer, stream wins" doctrine. Per-transition status rows, if ever
+wanted, are a clean follow-up via a `SetDocumentInstanceStatus` activity over the existing
+`/api/engine/documents/{id}/status` endpoint. The `[Explicit]` execution-test harness still seeds the
+store (its `CapturingHandler` stub records the persist POST but doesn't feed the read fake) — a
+harness-only follow-up; the wiring itself is proven by the structure-test pins.
+
+---
+
+**Status**: ✅ Resolved
 **Last Updated**: 2026-07-23
