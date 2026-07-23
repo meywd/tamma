@@ -1,0 +1,57 @@
+# Story 41-20: Scheduled Security Audit Workflow
+
+Status: drafted
+
+## User Story
+
+As a **security** engineer (or eligible role-holder), I want a scheduled workflow that audits dependencies,
+scans for exposed secrets, and checks compliance posture, producing a typed `Findings` report, so that
+security drift is caught on a cadence and routed — not discovered during an incident.
+
+## Priority
+
+P1 / Wave 2 — recurring, high-consequence; complements the reactive 41-21.
+
+## Scope
+
+Scheduled sweep → thin binding over `document-lifecycle`. `consumes: [dependency manifest + advisories,
+secret-scan surface, compliance checklist]` / `produces: Findings`. Produce cells
+`(security, audit-dependencies)`, `(security, audit-secrets)`, `(security, review-compliance)` — run as
+parallel lenses whose findings aggregate into one ranked `Findings` document.
+
+## Produced document
+
+`Findings`: each finding cites the vulnerable package/secret/control as evidence, with
+severity + remediation; ranked; high-severity unmitigated ⇒ escalation.
+
+## Events
+
+`SECURITY_AUDIT.STARTED`/`.LENS`/`.REPORT` alongside `DOCUMENT.*`, tagged `repository`/`tenantId`.
+
+## Orchestrator / user interaction
+
+Accepted report routes per autonomy; each actionable finding is assigned to the owning role (dev for a
+dep bump — can seed 41-12; security for a control gap); an exposed live secret is an always-escalate class
+that also triggers `rotate-secret`.
+
+## Autonomy behavior
+
+- **70–84:** agent audits; security reviews before findings are actioned.
+- **85–100:** agent audits and self-accepts; low-risk dep bumps auto-assigned; exposed-secret / high-CVSS
+  always escalates regardless of dial.
+
+## Acceptance Criteria
+
+1. Scheduled, tenant-scoped, idempotent; each lens fail-closed (a lens failure is recorded, not dropped).
+2. Findings cite concrete evidence with severity + remediation; empty ⇒ valid empty report.
+3. Exposed-secret path always escalates and integrates with `rotate-secret`.
+4. `[ResumeBehavior(LatestStateReEntry)]`; 39-10 structural test green without allowlist.
+
+## Dependencies
+
+- **Blocking:** Epic 39 (`Findings`, lifecycle, store, task routing), scheduler pattern; `rotate-secret`.
+- **Related:** feeds 41-12 dependency-upgrade planning.
+
+## Estimated Effort
+
+5–6 days

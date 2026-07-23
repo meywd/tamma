@@ -249,8 +249,28 @@ jobs:
           if [ $rc -ne 0 ]; then
             echo "FAILED PROJECTS:$failed"
             for n in $failed; do
-              echo "---- OUTPUT OF FAILED PROJECT $n (tail 400) ----"
-              tail -400 "/tmp/test-logs/$n.log"
+              # Failed test names live in the .trx, not the console: each test
+              # spins a WebApplicationFactory whose startup logs flood stdout,
+              # pushing the "Failed <test>" line far above any tail window, and
+              # the .trx is only reachable as a token-gated artifact. Split the
+              # newest .trx on '<' so every start-tag lands on its own line,
+              # then pull the failed UnitTestResult names (attribute-order
+              # independent, no extra tooling) so intermittent failures are
+              # diagnosable straight from the CI log.
+              echo "---- FAILED TESTS IN $n (from .trx) ----"
+              trx=$(ls -t "tests/$n/TestResults"/*.trx 2>/dev/null | head -1)
+              if [ -n "$trx" ]; then
+                tr '<' '\n' < "$trx" \
+                  | grep 'UnitTestResult ' \
+                  | grep 'outcome="Failed"' \
+                  | grep -oE 'testName="[^"]*"' \
+                  | sed 's/^/  FAILED: /' \
+                  || echo "  (no Failed results in .trx — likely a host/hang exit)"
+              else
+                echo "  (no .trx found)"
+              fi
+              echo "---- OUTPUT OF FAILED PROJECT $n (tail 200) ----"
+              tail -200 "/tmp/test-logs/$n.log"
             done
           else
             echo "ALL PROJECTS PASSED"
