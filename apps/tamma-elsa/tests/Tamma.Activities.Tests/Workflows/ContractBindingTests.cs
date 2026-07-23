@@ -103,12 +103,14 @@ public class ContractBindingTests
                 One("\"severity\""), One("\"recommendation\""),
             ]),
 
-            // IssueDecompositionWorkflow → DecompositionParsing.ParseDecomposition
-            // (Tamma.Activities/Decomposition/DecompositionParsing.cs): fail-closed on
-            // missing "summary" / no usable "subtasks"; per-subtask fail-closed on "id"
-            // and title|description; slices "acceptanceCriteria", "estimateHours",
-            // "complexity", "dependsOn".
-            [("senior_developer", "decompose-issue")] = new("DecompositionParsing.ParseDecomposition",
+            // IssueDecompositionWorkflow (39-12) binds the (senior_developer, decompose-issue)
+            // cell as the produce step of its document-lifecycle binding; the shape authority
+            // is now the typed validator Tamma.Core/Documents/Types/Decomposition.cs
+            // (DecompositionDocumentType.Validate) — strict on "summary" / "subtasks",
+            // per-subtask "id" + title|description, and slices "acceptanceCriteria",
+            // "estimateHours", "complexity", "dependsOn". The token groups are unchanged
+            // (39-3 D2 pinned the wire shape verbatim); only the parser authority migrated.
+            [("senior_developer", "decompose-issue")] = new("DecompositionDocumentType.Validate",
             [
                 One("\"summary\""), One("\"subtasks\""), One("\"id\""), One("\"title\""),
                 One("\"description\""), One("\"acceptanceCriteria\""),

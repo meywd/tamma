@@ -3,13 +3,13 @@ using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Management.Activities.SetOutput;
-using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using System.Text.Json;
-using Tamma.Activities;
 using Tamma.Activities.Decomposition;
-using Tamma.Activities.Decomposition.Models;
+using Tamma.Activities.Documents;
 using Tamma.Api.Services.Agents;
+using Tamma.Core.Documents.Resume;
+using Tamma.ElsaServer.Workflows.Helpers;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
@@ -17,64 +17,69 @@ using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// Story 2.14 — Issue Decomposition sub-workflow. Given a complex issue / requirement it
-/// investigates the codebase / prior art and uses the LLM (via the MEDIATED <c>llm-call</c> path —
-/// the engine holds no LLM credential, TAMMA001) to break the issue into an ORDERED set of smaller,
-/// implementable sub-tasks — each with a rationale, a definition of done, a rough sizing, a
-/// complexity, and its declared prerequisite dependencies — then emits the results as
-/// <c>DECOMPOSITION.*</c> DCB events.
+/// Story 39-12 — Issue Decomposition, re-implemented as a THIN BINDING over
+/// <see cref="DocumentLifecycleWorkflow"/> (<c>DefinitionId = "document-lifecycle"</c>).
+/// The public surface is byte-stable (D1): same <c>DefinitionId = "issue-decomposition"</c>,
+/// same inputs (<c>sessionId</c>/<c>issueId</c>/<c>issueTitle</c>/<c>repository</c>/
+/// <c>issueNumber</c>/<c>workItemJson</c>/<c>tenantId</c>, plus an optional passthrough
+/// <c>acceptanceRulesJson</c>), same outputs (<c>sessionId</c>/<c>status</c>/
+/// <c>decomposition</c>/<c>subtaskCount</c>/<c>contextIds</c>) plus additive
+/// <c>outcome</c>/<c>documentId</c>. Dispatch call sites (orchestrator / triage routing,
+/// by definition id) are untouched.
 ///
-/// Flow:
-///   1. Read inputs (issue/requirement + repository + issueNumber + workItemJson + tenantId;
-///      mint a session id if none)
-///   2. Emit DECOMPOSITION.STARTED
-///   3. Gather codebase / prior-art context by REUSING DispatchWorkflow("context-gathering")
-///      (Story 7-1F multi-role scan) — same reuse as <see cref="ResearchWorkflow"/> /
-///      <see cref="AssessmentWorkflow"/>; the scope/dependency signal it surfaces informs the
-///      complexity assessment (Story 2.14 AC1)
-///   4. Emit DECOMPOSITION.CONTEXT_GATHERED
-///   5. Decompose the issue via DispatchWorkflow("llm-call")
-///      role=senior_developer / action=decompose-issue
-///   6. Parse the decomposition fail-closed (empty/unparseable/no-subtasks → error terminal)
-///   7a. On success: emit DECOMPOSITION.COMPLETED (with the sub-task count), set outputs
-///       (decomposition JSON, sub-task count)
-///   7b. On failure: emit DECOMPOSITION.FAILED (LOUD) and route to the DecompositionError terminal
+/// <para><b>What changed (the epic's charter).</b> The old bespoke pipeline —
+/// <c>llm-call</c> → hand parser (<c>DecompositionParsing</c>) → success-flag gate →
+/// <c>DecompositionError</c> Finish terminal — is DELETED. The binding contributes NO
+/// parse, NO success-flag gate, and ZERO <see cref="Finish"/> activities (D2). It
+/// assembles the issue context (the <c>consumes</c> side), dispatches
+/// <c>document-lifecycle</c> with <c>documentType = "decomposition"</c> and the
+/// <c>(senior_developer, decompose-issue)</c> producer cell, and lets the generic
+/// produce → validate → review → revise → accept rings own ALL quality routing.
+/// Validation failure now flows through those rings and, at worst, exits as a typed
+/// escalation (<c>validation-exhausted</c> / <c>rounds-exhausted</c> /
+/// <c>review-undecidable</c>) with full lineage — never a dead terminal.</para>
 ///
-/// Reuses the <see cref="ResearchWorkflow"/> / <see cref="AmbiguityScoringWorkflow"/> skeleton
-/// (gather-context → llm-call → parse → fail-closed gate + error terminal). Decomposition is
-/// AUTONOMOUS — there is no in-workflow human gate / bookmark. The Story 2.14 AC7 "human approval
-/// before executing decomposed tasks" is a downstream orchestration concern (a parent flow presents
-/// the emitted sub-task set for approval before dispatching implementation); this workflow's job is
-/// to PRODUCE the auditable, structured breakdown, not to execute it.
+/// <para><b>The only routing here (D2).</b> Exactly three <see cref="FlowDecision"/>s,
+/// each on a TYPED value (never raw LLM output):
+/// <list type="bullet">
+///   <item><c>FreshRun</c> — the 39-10 re-entry position is <c>Produce</c>: run the
+///     pre-produce region (STARTED + context scan + CONTEXT_GATHERED). A re-entry is not
+///     a new decomposition, so those emissions are skipped (D7).</item>
+///   <item><c>LifecycleAccepted</c> — the lifecycle exit status is <c>accepted</c>.</item>
+///   <item><c>WasCompleteReEntry</c> — the re-entry short-circuited an already-accepted
+///     document (<c>Complete</c>): suppress a duplicate <c>DECOMPOSITION.COMPLETED</c>
+///     (D3).</item>
+/// </list></para>
 ///
-/// Fail-closed: if the decomposition <c>llm-call</c> returns success=false, or the response cannot
-/// be parsed into a non-empty, valid sub-task set with a rationale, the workflow emits a LOUD
-/// <c>DECOMPOSITION.FAILED</c> event and routes to the DecompositionError terminal — it NEVER
-/// proceeds with a fabricated breakdown. Prompt resolution is tenant→system→error (the
-/// <c>llm-call</c> registry never falls back to an empty/plain prompt).
+/// <para><b>Event compatibility (D3, AC4).</b> The legacy <c>DECOMPOSITION.*</c> events
+/// are mirrored at the equivalent transitions ALONGSIDE the lifecycle's generic
+/// <c>DOCUMENT.*</c> events: <c>DECOMPOSITION.STARTED</c> + <c>DECOMPOSITION.CONTEXT_GATHERED</c>
+/// before dispatch (fresh runs only); <c>DECOMPOSITION.COMPLETED</c> (with the sub-task
+/// count sourced from the accepted <c>Decomposition</c> payload) on an <c>accepted</c>
+/// exit; <c>DECOMPOSITION.FAILED</c> on a <c>rejected</c>/<c>escalated</c> exit, its
+/// detail naming the typed outcome. <see cref="EmitDecompositionEventActivity"/> and its
+/// event catalogue are UNCHANGED.</para>
 ///
-/// NOTE (taxonomy): the decomposition dispatches the dedicated <c>(senior_developer,
-/// decompose-issue)</c> pair (Story 2.14). The <c>decompose-issue</c> action is a first-class
-/// member of the <see cref="AgentAction"/> taxonomy and is eligible for <c>senior_developer</c> in
-/// <c>RolePhaseMap</c> — decomposition is the tech-lead's charter (the senior_developer identity
-/// prompt is literally "decompose complex tasks", alongside <c>create-tasks</c> and
-/// <c>plan-implementation</c>). Its system-default prompt template
-/// (<c>SystemPrompts.DecomposeIssueBody</c>) emits the structured sub-task JSON
-/// <see cref="DecompositionParsing"/> parses, so the happy path produces a real
-/// <c>DECOMPOSITION.COMPLETED</c> breakdown rather than failing closed. The sub-task output shape
-/// (<see cref="IssueDecomposition"/> — ordered sub-tasks with ids + <c>dependsOn</c> edges) is the
-/// input contract for Story 2.15 (#138 dependency mapping) and Story 2.16 (#139 sequencing).
+/// <para><b>Resumable per the standard (D7, AC6).</b> Declared
+/// <c>[ResumeBehavior(LatestStateReEntry)]</c> — the binding itself never suspends on a
+/// bookmark (the accept-gate suspend happens inside the dispatched child lifecycle, which
+/// the parent awaits via <c>WaitForCompletion</c>), and it carries the generic
+/// <see cref="ComputeReEntryPositionActivity"/> node the 39-10 structural gate requires
+/// for this mode. It is NOT on the legacy resume allowlist (the first burn-down).</para>
 /// </summary>
+[ResumeBehavior(ResumeMode.LatestStateReEntry)]
 public class IssueDecompositionWorkflow : WorkflowBase
 {
+    private const string DecompositionDocumentType = "decomposition";
+
     protected override void Build(IWorkflowBuilder builder)
     {
         builder.Name = "IssueDecomposition";
         builder.DefinitionId = "issue-decomposition";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description = "Decompose a complex issue into an ordered set of implementable sub-tasks (with rationale, sizing and dependencies) via the mediated LLM";
+        builder.Description = "Decompose a complex issue into an ordered set of implementable sub-tasks via the generic document lifecycle (produce → validate → review → revise → accept)";
 
-        // ── Workflow variables ──────────────────────────────────────────
+        // ── Workflow variables (inputs) ────────────────────────────────
         var sessionId       = builder.WithVariable<Guid>();
         var issueId         = builder.WithVariable<string>();
         var issueTitle      = builder.WithVariable<string>();
@@ -82,26 +87,34 @@ public class IssueDecompositionWorkflow : WorkflowBase
         var issueNumber     = builder.WithVariable<int>();
         var workItemJson    = builder.WithVariable<string>();
         var tenantId        = builder.WithVariable<string>("TenantId", "");
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
 
+        // ── Context (consumes side) ────────────────────────────────────
         var decompositionContext = builder.WithVariable<string>();
         var contextIds      = builder.WithVariable<string>("[]");
-        var decompositionJson = builder.WithVariable<string>();
-        var subtaskCount    = builder.WithVariable<int>();
 
-        // Dispatched-workflow result containers
+        // ── 39-10 re-entry position (D7) ───────────────────────────────
+        var reEntryPositionJson = builder.WithVariable<string>();
+        var reEntryDocJson  = builder.WithVariable<string>();
+        var positionStage   = builder.WithVariable<string>("PositionStage", "produce");
+
+        // ── Dispatched-workflow result containers ──────────────────────
         var contextGatherResult = builder.WithVariable<IDictionary<string, object>?>();
-        var decomposeLlm        = builder.WithVariable<IDictionary<string, object>?>();
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
 
-        // Success flag (fail-closed guard)
-        var decompositionLlmOk = builder.WithVariable<bool>();
+        // ── Typed lifecycle exit (D2 — routed values, never raw output) ─
+        var lifecycleAccepted = builder.WithVariable<bool>();
+        var exitStatus      = builder.WithVariable<string>("ExitStatus", "");
+        var exitOutcome     = builder.WithVariable<string>("ExitOutcome", "");
+        var exitDocId       = builder.WithVariable<string>("ExitDocId", "");
+        var decompositionJson = builder.WithVariable<string>("DecompositionJson", "{}");
+        var subtaskCount    = builder.WithVariable<int>();
+        var failureDetail   = builder.WithVariable<string>("FailureDetail", "");
 
-        // Captured parse output
-        var decomposition   = builder.WithVariable<IssueDecomposition>();
-
-        // Output variables (readable by a parent workflow)
+        // ── Output ─────────────────────────────────────────────────────
         var outputStatus    = builder.WithVariable<string>();
 
-        // ── Step 1: Read inputs ────────────────────────────────────────
+        // ── Step 1: Read inputs (BuildWorkItem kept as the internal composer) ──
         var readInputs = new SetVariable
         {
             Id = "ReadInputs",
@@ -118,12 +131,50 @@ public class IssueDecompositionWorkflow : WorkflowBase
                 issueNumber.Set(context, context.GetInput<int>("issueNumber"));
                 workItemJson.Set(context, context.GetInput<string>("workItemJson") ?? string.Empty);
                 tenantId.Set(context, context.GetInput<string>("tenantId") ?? string.Empty);
+                acceptanceRulesJson.Set(context, context.GetInput<string>("acceptanceRulesJson") ?? string.Empty);
                 return sid;
             })
         };
         readInputs.SetDisplayText("Read Inputs");
 
-        // ── Step 2: Emit DECOMPOSITION.STARTED ─────────────────────────
+        // ── Step 2: Compute 39-10 re-entry position (D7) ───────────────
+        var computeReEntry = new ComputeReEntryPositionActivity
+        {
+            Id = "ComputeReEntryPosition",
+            Name = "Compute Re-Entry Position",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentType = new(DecompositionDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            CorrelationId = new(ctx => issueId.Get(ctx)),
+            PositionJson = new(reEntryPositionJson),
+            ExistingDocumentJson = new(reEntryDocJson),
+        };
+        computeReEntry.SetDisplayText("Compute Re-Entry Position");
+
+        var readPositionStage = new SetVariable
+        {
+            Id = "ReadPositionStage",
+            Name = "Read Position Stage",
+            Variable = positionStage,
+            Value = new(ctx =>
+            {
+                var position = DocumentLifecycleHelper.DeserializeReEntryPosition(reEntryPositionJson.Get(ctx));
+                return position?.ResumeAt switch
+                {
+                    LifecycleResumeStage.Complete => "complete",
+                    LifecycleResumeStage.Accept => "accept",
+                    LifecycleResumeStage.Review => "review",
+                    _ => "produce",
+                };
+            })
+        };
+        readPositionStage.SetDisplayText("Read Position Stage");
+
+        // ── Step 3: FreshRun gate — pre-produce region only on a fresh run (D7) ──
+        var freshRun = new FlowDecision(ctx => positionStage.Get(ctx) == "produce")
+        { Id = "FreshRun", Name = "Fresh Run?" };
+        freshRun.SetDisplayText("Fresh Run?");
+
         var emitStarted = new EmitDecompositionEventActivity
         {
             Id = "EmitDecompositionStarted",
@@ -136,7 +187,6 @@ public class IssueDecompositionWorkflow : WorkflowBase
         };
         emitStarted.SetDisplayText("Emit Decomposition Started");
 
-        // ── Step 3: Gather context via ContextGathering workflow (7-1F) ─
         var gatherContext = new DispatchWorkflow
         {
             Id = "GatherContext",
@@ -171,7 +221,6 @@ public class IssueDecompositionWorkflow : WorkflowBase
         };
         storeContextResult.SetDisplayText("Store Context Result");
 
-        // ── Step 4: Emit DECOMPOSITION.CONTEXT_GATHERED ────────────────
         var emitContextGathered = new EmitDecompositionEventActivity
         {
             Id = "EmitContextGathered",
@@ -184,71 +233,71 @@ public class IssueDecompositionWorkflow : WorkflowBase
         };
         emitContextGathered.SetDisplayText("Emit Context Gathered");
 
-        // ── Step 5: Decompose the issue via llm-call ───────────────────
-        var decomposeIssueLlm = new DispatchWorkflow
+        // ── Step 4: Dispatch the generic document lifecycle ────────────
+        var dispatchLifecycle = new DispatchWorkflow
         {
-            Id = "DecomposeIssueLlm",
-            Name = "Decompose Issue (LLM)",
-            WorkflowDefinitionId = new("llm-call"),
+            Id = "DispatchLifecycle",
+            Name = "Dispatch Document Lifecycle",
+            WorkflowDefinitionId = new("document-lifecycle"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                // Dedicated decomposition action (Story 2.14): (senior_developer, decompose-issue)
-                // resolves the structured-subtask prompt template that yields the JSON
-                // DecompositionParsing recovers. Prompt resolution is tenant→system→error.
-                ["role"]     = AgentRole.SeniorDeveloper.ToWire(),
-                ["action"]   = AgentAction.DecomposeIssue.ToWire(),
-                ["tenantId"] = tenantId.Get(ctx),
-                ["variables"] = new Dictionary<string, object>
+                // The (senior_developer, decompose-issue) producer cell is bound as the
+                // produce step; the drift enumeration reads producerRole/producerAction here.
+                ["documentType"]          = DecompositionDocumentType,
+                ["producerRole"]          = AgentRole.SeniorDeveloper.ToWire(),
+                ["producerAction"]        = AgentAction.DecomposeIssue.ToWire(),
+                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
                 {
                     ["workItemJson"] = BuildWorkItem(issueTitle.Get(ctx), workItemJson.Get(ctx), issueId.Get(ctx)),
                     ["findings"]     = decompositionContext.Get(ctx) ?? "",
                     ["conventions"]  = "",
-                },
-                ["enableTools"] = false,
+                }),
+                ["issueId"]             = issueId.Get(ctx) ?? "",
+                ["correlationId"]       = issueId.Get(ctx) ?? "",
+                ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
             }),
             WaitForCompletion = new(true),
-            Result = new(decomposeLlm),
+            Result = new(lifecycleResult),
         };
-        decomposeIssueLlm.SetDisplayText("Decompose Issue (LLM)");
+        dispatchLifecycle.SetDisplayText("Dispatch Document Lifecycle");
 
-        // ── Step 6: Parse the decomposition (fail-closed) ──────────────
-        var parseDecomposition = new SetVariable
+        // ── Step 5: Read the typed lifecycle exit (fail-closed) ────────
+        var readLifecycleExit = new SetVariable
         {
-            Id = "ParseDecomposition",
-            Name = "Parse Decomposition",
+            Id = "ReadLifecycleExit",
+            Name = "Read Lifecycle Exit",
             Variable = decompositionJson,
             Value = new(ctx =>
             {
-                var result = decomposeLlm.Get(ctx);
-                if (!ReadSuccessFlag(result))
-                {
-                    decompositionLlmOk.Set(ctx, false);
-                    return "{}";
-                }
+                var exit = DecompositionBindingHelper.ReadLifecycleResult(lifecycleResult.Get(ctx));
+                var accepted = DecompositionBindingHelper.IsAccepted(exit);
 
-                var text = result!.TryGetValue("llmResponse", out var r) ? r?.ToString() ?? "" : "";
-                var parsed = DecompositionParsing.ParseDecomposition(text);
-                if (parsed is null)
-                {
-                    // Fail-closed — no fabricated breakdown.
-                    decompositionLlmOk.Set(ctx, false);
-                    return "{}";
-                }
-
-                decompositionLlmOk.Set(ctx, true);
-                decomposition.Set(ctx, parsed);
-                subtaskCount.Set(ctx, parsed.Subtasks.Count);
-                return JsonSerializer.Serialize(parsed);
+                lifecycleAccepted.Set(ctx, accepted);
+                exitStatus.Set(ctx, exit.Status);
+                exitOutcome.Set(ctx, exit.Outcome ?? "");
+                exitDocId.Set(ctx, exit.DocumentId ?? "");
+                subtaskCount.Set(ctx, DecompositionBindingHelper.CountSubtasks(exit.DocumentJson));
+                failureDetail.Set(ctx, DecompositionBindingHelper.BuildFailureDetail(exit));
+                // status output: "completed" on acceptance (compat, D1); else the typed exit
+                // status ("rejected"/"escalated") — strictly additive over the old failure path.
+                outputStatus.Set(ctx, accepted ? "completed" : exit.Status);
+                return exit.DocumentJson;
             })
         };
-        parseDecomposition.SetDisplayText("Parse Decomposition");
+        readLifecycleExit.SetDisplayText("Read Lifecycle Exit");
 
-        // Fail-closed gate: route to error terminal if decomposition failed / unparseable.
-        var decompositionSuccessCheck = new FlowDecision(ctx => decompositionLlmOk.Get(ctx))
-        { Id = "DecompositionLlmOk", Name = "Decomposition LLM OK?" };
-        decompositionSuccessCheck.SetDisplayText("Decomposition LLM OK?");
+        // ── Step 6: Accepted? (typed) ──────────────────────────────────
+        var lifecycleAcceptedGate = new FlowDecision(ctx => lifecycleAccepted.Get(ctx))
+        { Id = "LifecycleAccepted", Name = "Lifecycle Accepted?" };
+        lifecycleAcceptedGate.SetDisplayText("Lifecycle Accepted?");
 
-        // ── Step 7a: Success path ──────────────────────────────────────
+        // Suppress a duplicate DECOMPOSITION.COMPLETED when a re-entry short-circuited an
+        // already-accepted document (position == Complete, D3).
+        var wasCompleteReEntry = new FlowDecision(ctx => positionStage.Get(ctx) == "complete")
+        { Id = "WasCompleteReEntry", Name = "Was Complete Re-Entry?" };
+        wasCompleteReEntry.SetDisplayText("Was Complete Re-Entry?");
+
         var emitDecompositionCompleted = new EmitDecompositionEventActivity
         {
             Id = "EmitDecompositionCompleted",
@@ -262,15 +311,19 @@ public class IssueDecompositionWorkflow : WorkflowBase
         };
         emitDecompositionCompleted.SetDisplayText("Emit Decomposition Completed");
 
-        var setOutputResult = new SetVariable
+        var emitDecompositionFailed = new EmitDecompositionEventActivity
         {
-            Id = "SetOutputResult",
-            Name = "Set Output Result",
-            Variable = outputStatus,
-            Value = new(_ => "completed")
+            Id = "EmitDecompositionFailed",
+            Name = "Emit Decomposition Failed",
+            EventType = new(DecompositionEvents.Failed),
+            SessionId = new(ctx => sessionId.Get(ctx).ToString()),
+            IssueId = new(ctx => issueId.Get(ctx)),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Detail = new(ctx => failureDetail.Get(ctx)),
         };
-        setOutputResult.SetDisplayText("Set Output Result");
+        emitDecompositionFailed.SetDisplayText("Emit Decomposition Failed");
 
+        // ── Step 7: Expose output — the single terminal region (D2, AC3) ──
         var exposeOutput = new Sequence
         {
             Id = "ExposeOutput",
@@ -282,29 +335,11 @@ public class IssueDecompositionWorkflow : WorkflowBase
                 WithLabel(new SetOutput { Id = "OutputDecomposition", Name = "Output Decomposition", OutputName = new("decomposition"), OutputValue = new(ctx => (object)(decompositionJson.Get(ctx) ?? "{}")) }, "Output Decomposition"),
                 WithLabel(new SetOutput { Id = "OutputSubtaskCount", Name = "Output Subtask Count", OutputName = new("subtaskCount"), OutputValue = new(ctx => (object)subtaskCount.Get(ctx)) }, "Output Subtask Count"),
                 WithLabel(new SetOutput { Id = "OutputContextIds", Name = "Output Context Ids", OutputName = new("contextIds"), OutputValue = new(ctx => (object)(contextIds.Get(ctx) ?? "[]")) }, "Output Context Ids"),
+                WithLabel(new SetOutput { Id = "OutputOutcome", Name = "Output Outcome", OutputName = new("outcome"), OutputValue = new(ctx => (object)(exitOutcome.Get(ctx) ?? "")) }, "Output Outcome"),
+                WithLabel(new SetOutput { Id = "OutputDocumentId", Name = "Output Document Id", OutputName = new("documentId"), OutputValue = new(ctx => (object)(exitDocId.Get(ctx) ?? "")) }, "Output Document Id"),
             }
         };
         exposeOutput.SetDisplayText("Expose Output");
-
-        // ── Step 7b: Fail-closed error terminal (LOUD event + Finish) ──
-        var emitDecompositionFailed = new EmitDecompositionEventActivity
-        {
-            Id = "EmitDecompositionFailed",
-            Name = "Emit Decomposition Failed",
-            EventType = new(DecompositionEvents.Failed),
-            SessionId = new(ctx => sessionId.Get(ctx).ToString()),
-            IssueId = new(ctx => issueId.Get(ctx)),
-            TenantId = new(ctx => tenantId.Get(ctx)),
-            Detail = new("llm-call for issue decomposition failed or returned unparseable/empty output"),
-        };
-        emitDecompositionFailed.SetDisplayText("Emit Decomposition Failed");
-
-        var decompositionError = new Finish
-        {
-            Id = "DecompositionError",
-            Name = "Decomposition Error"
-        };
-        decompositionError.SetDisplayText("Decomposition Error");
 
         // ── Build the flowchart ────────────────────────────────────────
         builder.Root = new Flowchart
@@ -315,63 +350,57 @@ public class IssueDecompositionWorkflow : WorkflowBase
             Activities =
             {
                 readInputs,
+                computeReEntry,
+                readPositionStage,
+                freshRun,
                 emitStarted,
                 gatherContext,
                 storeContextResult,
                 emitContextGathered,
-                decomposeIssueLlm,
-                parseDecomposition,
-                decompositionSuccessCheck,
-
-                // Success path
+                dispatchLifecycle,
+                readLifecycleExit,
+                lifecycleAcceptedGate,
+                wasCompleteReEntry,
                 emitDecompositionCompleted,
-                setOutputResult,
-                exposeOutput,
-
-                // Fail-closed error terminal
                 emitDecompositionFailed,
-                decompositionError,
+                exposeOutput,
             },
             Connections =
             {
-                new(readInputs, emitStarted),
+                new(readInputs, computeReEntry),
+                new(computeReEntry, readPositionStage),
+                new(readPositionStage, freshRun),
+
+                // Fresh run → pre-produce region (STARTED + context scan + CONTEXT_GATHERED).
+                new(new FlowEndpoint(freshRun, "True"),  new FlowEndpoint(emitStarted)),
                 new(emitStarted, gatherContext),
                 new(gatherContext, storeContextResult),
                 new(storeContextResult, emitContextGathered),
-                new(emitContextGathered, decomposeIssueLlm),
-                new(decomposeIssueLlm, parseDecomposition),
-                new(parseDecomposition, decompositionSuccessCheck),
+                new(emitContextGathered, dispatchLifecycle),
+                // Re-entry → straight to dispatch (a re-entry is not a new decomposition, D7).
+                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(dispatchLifecycle)),
 
-                // Success path
-                new(new FlowEndpoint(decompositionSuccessCheck, "True"),  new FlowEndpoint(emitDecompositionCompleted)),
-                new(emitDecompositionCompleted, setOutputResult),
-                new(setOutputResult, exposeOutput),
+                new(dispatchLifecycle, readLifecycleExit),
+                new(readLifecycleExit, lifecycleAcceptedGate),
 
-                // Fail-closed error path
-                new(new FlowEndpoint(decompositionSuccessCheck, "False"), new FlowEndpoint(emitDecompositionFailed)),
-                new(emitDecompositionFailed, decompositionError),
+                // Accepted → suppress duplicate COMPLETED on a complete re-entry (D3).
+                new(new FlowEndpoint(lifecycleAcceptedGate, "True"),  new FlowEndpoint(wasCompleteReEntry)),
+                new(new FlowEndpoint(wasCompleteReEntry, "False"), new FlowEndpoint(emitDecompositionCompleted)),
+                new(emitDecompositionCompleted, exposeOutput),
+                new(new FlowEndpoint(wasCompleteReEntry, "True"),  new FlowEndpoint(exposeOutput)),
+
+                // Not accepted → LOUD DECOMPOSITION.FAILED naming the typed outcome (D3, AC4).
+                new(new FlowEndpoint(lifecycleAcceptedGate, "False"), new FlowEndpoint(emitDecompositionFailed)),
+                new(emitDecompositionFailed, exposeOutput),
             }
         };
     }
 
     /// <summary>
-    /// Read the <c>success</c> flag from a dispatched workflow's Result dictionary. Returns
-    /// <c>false</c> if the dictionary is null, the key is absent, or the value is falsy —
-    /// fail-closed by design. Uses the tolerant <see cref="ResumeInput.AsBool"/> read (boxed
-    /// bool / string / JsonElement).
-    /// </summary>
-    internal static bool ReadSuccessFlag(IDictionary<string, object>? result)
-    {
-        if (result == null) return false;
-        if (!result.TryGetValue("success", out var s)) return false;
-        return ResumeInput.AsBool(s);
-    }
-
-    /// <summary>
     /// Compose the work-item JSON handed to the context-gathering scan and the decomposition
-    /// prompt. Prefers an explicit <paramref name="workItemJson"/>; otherwise wraps the free-text
-    /// <paramref name="issueTitle"/> (plus the issue id) into a minimal JSON object so the
-    /// downstream template has a stable shape. Pure; exposed for unit testing.
+    /// producer. Prefers an explicit <paramref name="workItemJson"/>; otherwise wraps the
+    /// free-text <paramref name="issueTitle"/> (plus the issue id) into a minimal JSON object
+    /// so the downstream template has a stable shape. Pure; exposed for unit testing.
     /// </summary>
     internal static string BuildWorkItem(string? issueTitle, string? workItemJson, string? issueId)
     {

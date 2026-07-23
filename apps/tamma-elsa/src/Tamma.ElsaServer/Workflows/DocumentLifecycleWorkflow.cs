@@ -120,6 +120,11 @@ public class DocumentLifecycleWorkflow : WorkflowBase
         var outOutcome = builder.WithVariable<string>("OutOutcome", "");
         var outDocId = builder.WithVariable<string>("OutDocId", "");
         var outLifecycleResult = builder.WithVariable<string>("OutLifecycleResult", "{}");
+        // Story 39-12 (D4) — the accepted revision's PAYLOAD body (not the envelope, not the
+        // lineage). A lifecycle binding (e.g. IssueDecompositionWorkflow) needs the typed body to
+        // project its own domain output (subtask count, decomposition JSON); the lineage on
+        // lifecycleResult only carries id+state. Empty when no draft was ever produced.
+        var outDocJson = builder.WithVariable<string>("OutDocJson", "");
 
         // ================================================================
         // Init — read + validate inputs (D2/D4), mint session, seed state
@@ -631,13 +636,13 @@ public class DocumentLifecycleWorkflow : WorkflowBase
             currentDocId, documentType, currentRound, issueId, correlationId, sessionId, tenantId, escalateOutcome, "Document escalated");
 
         var finalizeAccepted = Finalize("FinalizeAccepted", "Finalize Accepted",
-            stateJson, DocumentState.Accepted, outStatus, outOutcome, outDocId, outLifecycleResult,
+            stateJson, DocumentState.Accepted, outStatus, outOutcome, outDocId, outLifecycleResult, outDocJson,
             currentDocId, currentDocJson, currentRound, TerminalKind.Accepted, escalateOutcome);
         var finalizeRejected = Finalize("FinalizeRejected", "Finalize Rejected",
-            stateJson, DocumentState.Rejected, outStatus, outOutcome, outDocId, outLifecycleResult,
+            stateJson, DocumentState.Rejected, outStatus, outOutcome, outDocId, outLifecycleResult, outDocJson,
             currentDocId, currentDocJson, currentRound, TerminalKind.Rejected, escalateOutcome);
         var finalizeEscalated = Finalize("FinalizeEscalated", "Finalize Escalated",
-            stateJson, DocumentState.Escalated, outStatus, outOutcome, outDocId, outLifecycleResult,
+            stateJson, DocumentState.Escalated, outStatus, outOutcome, outDocId, outLifecycleResult, outDocJson,
             currentDocId, currentDocJson, currentRound, TerminalKind.Escalated, escalateOutcome);
 
         // 39-10 (D6) — Complete short-circuit terminal: the document of this type is ALREADY
@@ -655,6 +660,8 @@ public class DocumentLifecycleWorkflow : WorkflowBase
                 outOutcome.Set(ctx, result.Outcome?.ToWire() ?? "");
                 outDocId.Set(ctx, result.DocumentId?.ToString() ?? "");
                 outLifecycleResult.Set(ctx, JsonSerializer.Serialize(result, DocumentJson.Options));
+                // D4 — surface the already-accepted revision's payload on the short-circuit path too.
+                outDocJson.Set(ctx, state.Current is null ? "" : state.Current.Payload.GetRawText());
                 return result.Status;
             })
         };
@@ -669,6 +676,8 @@ public class DocumentLifecycleWorkflow : WorkflowBase
                 WithLabel(new SetOutput { Id = "OutputOutcome", OutputName = new("outcome"), OutputValue = new(ctx => (object)(outOutcome.Get(ctx) ?? "")) }, "Output outcome"),
                 WithLabel(new SetOutput { Id = "OutputDocumentId", OutputName = new("documentId"), OutputValue = new(ctx => (object)(outDocId.Get(ctx) ?? "")) }, "Output documentId"),
                 WithLabel(new SetOutput { Id = "OutputLifecycleResult", OutputName = new("lifecycleResult"), OutputValue = new(ctx => (object)(outLifecycleResult.Get(ctx) ?? "{}")) }, "Output lifecycleResult"),
+                // Story 39-12 (D4) — the accepted revision's payload body, for lifecycle bindings.
+                WithLabel(new SetOutput { Id = "OutputDocumentJson", OutputName = new("documentJson"), OutputValue = new(ctx => (object)(outDocJson.Get(ctx) ?? "")) }, "Output documentJson"),
                 WithLabel(new SetOutput { Id = "OutputSessionId", OutputName = new("sessionId"), OutputValue = new(ctx => (object)(sessionId.Get(ctx) ?? "")) }, "Output sessionId"),
             }
         };
@@ -886,6 +895,7 @@ public class DocumentLifecycleWorkflow : WorkflowBase
         string id, string name,
         Variable<string> stateJson, DocumentState finalState,
         Variable<string> outStatus, Variable<string> outOutcome, Variable<string> outDocId, Variable<string> outResult,
+        Variable<string> outDocJson,
         Variable<string> currentDocId, Variable<string> currentDocJson, Variable<int> currentRound,
         TerminalKind kind, Variable<string> escalateOutcome)
     {
@@ -914,6 +924,8 @@ public class DocumentLifecycleWorkflow : WorkflowBase
                 outOutcome.Set(ctx, result.Outcome?.ToWire() ?? "");
                 outDocId.Set(ctx, result.DocumentId?.ToString() ?? "");
                 outResult.Set(ctx, JsonSerializer.Serialize(result, DocumentJson.Options));
+                // D4 — the terminal revision's payload body (empty when nothing was produced).
+                outDocJson.Set(ctx, state.Current is null ? "" : state.Current.Payload.GetRawText());
                 UpdateCurrent(ctx, state, currentDocId, currentDocJson, currentRound);
                 stateJson.Set(ctx, DocumentLifecycleHelper.Serialize(state));
                 return result.Status;

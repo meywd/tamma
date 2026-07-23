@@ -91,9 +91,20 @@ public class WorkflowInterfaceGraphTests
     }
 
     [Test]
-    public void All_seeded_declarations_are_provisional_until_the_39_1_audit_lands()
+    public void Seeded_declarations_are_provisional_except_reconciled_bindings()
     {
-        DocumentTypeRegistry.WorkflowInterfaces.Should().OnlyContain(i => i.Provisional);
+        // Story 39-12 (D9): the issue-decomposition → decomposition edge is flipped
+        // non-provisional — it is now backed by a real document-lifecycle binding
+        // (IssueDecompositionWorkflow), not the D6 README-derived seed guess. Every other
+        // edge stays provisional until its own migration (39-13/14/15) reconciles it.
+        DocumentTypeRegistry.WorkflowInterfaces
+            .Where(i => i.WorkflowDefinitionId != "issue-decomposition")
+            .Should().OnlyContain(i => i.Provisional);
+
+        DocumentTypeRegistry.WorkflowInterfaces
+            .Single(i => i.WorkflowDefinitionId == "issue-decomposition")
+            .Provisional.Should().BeFalse(
+                "the issue-decomposition edge is backed by the 39-12 lifecycle binding (D9)");
     }
 
     private static bool IsRegistered(DocumentTypeKey key)

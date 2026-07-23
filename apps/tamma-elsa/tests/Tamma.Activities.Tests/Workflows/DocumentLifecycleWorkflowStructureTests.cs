@@ -191,6 +191,27 @@ public class DocumentLifecycleWorkflowStructureTests
         });
     }
 
+    // ── Story 39-12 (D4) — terminal exposes the accepted payload body ──
+
+    [Test]
+    public void Workflow_TerminalExposes_DocumentJsonOutput()
+    {
+        // 39-12 D4 filed-back hook: the terminal SetOutputs must expose the accepted
+        // revision's payload body under 'documentJson' so a lifecycle binding
+        // (IssueDecompositionWorkflow) can project its own domain output from it — the
+        // lineage on 'lifecycleResult' only carries id+state, not the body.
+        var outputNames = AllActivities()
+            .OfType<Elsa.Workflows.Management.Activities.SetOutput.SetOutput>()
+            .Select(o => o.OutputName.Expression?.Value as string)
+            .Where(n => n is not null)
+            .ToList();
+
+        outputNames.Should().Contain("documentJson",
+            "the lifecycle must expose the accepted revision payload as the 'documentJson' output (39-12 D4)");
+        outputNames.Should().Contain(new[] { "status", "outcome", "documentId", "lifecycleResult", "sessionId" },
+            "the pre-39-12 output contract is preserved (additive-only)");
+    }
+
     // ── AC5 — constant pins ────────────────────────────────────────────
 
     [Test]
