@@ -159,6 +159,9 @@ public static class DocumentTypeRegistry
             new WorkflowDocumentInterface("triage-po-decision", empty, DocumentTypeKey.TriageDecision,      true),
             new WorkflowDocumentInterface("blocker-diagnosis",  empty, DocumentTypeKey.Diagnosis,           true),
             new WorkflowDocumentInterface("debugging",          empty, DocumentTypeKey.Diagnosis,           true),
+            // Story 39-15 (D4) — the new debug-diagnosis binding PRODUCES a typed Diagnosis via its
+            // document-lifecycle binding (DebuggingWorkflow's loop consumes it); flipped non-provisional.
+            new WorkflowDocumentInterface("debug-diagnosis",    empty, DocumentTypeKey.Diagnosis,           false),
             // Story 39-15 (D3) — test-case-creation CONSUMES the task-breakdown plan and PRODUCES a
             // TestSpec (with the cross-document task-ID validation ring) via its lifecycle binding.
             new WorkflowDocumentInterface("test-case-creation", new[] { DocumentTypeKey.Plan }, DocumentTypeKey.TestSpec, false),

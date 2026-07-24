@@ -123,7 +123,8 @@ public class TaxonomyDriftBuildTests
         "BlockerDiagnosisWorkflow",
         "ClarifyingQuestionsWorkflow",  // Story 3.5: dispatches clarify-requirements (generate questions) + incorporate-answers
         "ContextGatheringWorkflow",
-        "DebuggingWorkflow",
+        "DebugDiagnosisWorkflow",        // Story 39-15: the (senior_developer, debug-rootcause) pair is dispatched via its document-lifecycle binding, discovered by the lifecycle-binding walk (D4)
+        "DebuggingWorkflow",             // still dispatches (developer, debug) via applyFix; AIDiagnosis migrated to the debug-diagnosis binding
         "DeploymentPipelineWorkflow",
         "IssueDecompositionWorkflow",   // Story 39-12: the pair is now dispatched via its document-lifecycle binding (producerRole/producerAction inputs), discovered by the lifecycle-binding walk (D5)
         "MentorshipWorkflow",

@@ -40,7 +40,7 @@ public class WorkflowInterfaceGraphTests
         // (plan-generation + task-creation both produce 'plan'; plan-review /
         // task-review / code-review all produce 'review'; blocker-diagnosis +
         // debugging both produce 'diagnosis').
-        DocumentTypeRegistry.WorkflowInterfaces.Should().HaveCount(14);
+        DocumentTypeRegistry.WorkflowInterfaces.Should().HaveCount(15);
     }
 
     [Test]
@@ -112,6 +112,8 @@ public class WorkflowInterfaceGraphTests
             // and test-case-creation (consumes plan, produces test-spec) are now real bindings.
             "task-creation",
             "test-case-creation",
+            // Story 39-15 — the debug-diagnosis binding produces a typed Diagnosis (real binding).
+            "debug-diagnosis",
         };
 
         DocumentTypeRegistry.WorkflowInterfaces

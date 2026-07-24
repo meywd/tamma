@@ -10,9 +10,12 @@ using Elsa.Workflows.Runtime.Activities;
 using System.Text.Json;
 using Tamma.Activities.CodeIndex;
 using Tamma.Activities.Debug;
+using Tamma.Activities.Documents;
 using Tamma.Activities.Security;
 using Tamma.Activities.Debug.Models;
 using Tamma.Api.Services.Agents;
+using Tamma.Core.Documents.Resume;
+using Tamma.ElsaServer.Workflows.Helpers;
 using Endpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
@@ -48,6 +51,7 @@ namespace Tamma.ElsaServer.Workflows;
 /// Callers (TddWithDebugRetry / CiWithDebugRetry) pass sessionId/storyId/debugContextMode/
 /// errorOutput/repositoryUrl/branchName/skillLevel and (optionally) tenantId.
 /// </summary>
+[ResumeBehavior(ResumeMode.LatestStateReEntry)]
 public class DebuggingWorkflow : WorkflowBase
 {
     protected override void Build(IWorkflowBuilder builder)
@@ -85,9 +89,18 @@ public class DebuggingWorkflow : WorkflowBase
         var reproductionSteps = builder.WithVariable<string>();
 
         // Typed result variables for diagnosis/hypothesis activities
-        var diagnosisResultVar = builder.WithVariable<DiagnosisResult>();
         var selectedHypothesisVar = builder.WithVariable<Hypothesis?>();
         var refinedDiagnosisVar = builder.WithVariable<DiagnosisResult>();
+
+        // Story 39-15 (D4) — the debug-diagnosis lifecycle binding replaces AIDiagnosisActivity.
+        var priorDiagnosisId = builder.WithVariable<string>("PriorDiagnosisId", "");
+        var diagnosisLifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
+        var diagnosisDocumentId = builder.WithVariable<string>("DiagnosisDocumentId", "");
+        var diagnosisFailureReason = builder.WithVariable<string>("DiagnosisFailureReason", "");
+        var diagnosisProducedFlag = builder.WithVariable<bool>();
+        // 39-10 re-entry position (the child lifecycle owns the accept-gate bookmark).
+        var reEntryPositionJson = builder.WithVariable<string>();
+        var reEntryDocJson = builder.WithVariable<string>();
 
         // Diagnosis & loop variables
         var hypothesesJson = builder.WithVariable<string>();
@@ -135,11 +148,29 @@ public class DebuggingWorkflow : WorkflowBase
                 if (skill > 0) skillLevel.Set(ctx, skill);
                 var tenant = ctx.GetInput<string>("tenantId");
                 if (!string.IsNullOrEmpty(tenant)) tenantId.Set(ctx, tenant);
+                // 39-15 (D4) — the retry orchestrator threads the prior attempt's diagnosis id
+                // so attempt N's Diagnosis supersedes N-1's (the technical note's time-travel).
+                var prior = ctx.GetInput<string>("priorDiagnosisDocumentId");
+                if (!string.IsNullOrEmpty(prior)) priorDiagnosisId.Set(ctx, prior);
 
                 return DateTime.UtcNow.ToString("o");
             })
         { Id = "readInputs", Name = "Read Inputs & Init Start Time" };
         readInputs.SetDisplayText("Read Inputs & Init Start Time");
+
+        // 39-10/39-15 (D8) — the generic re-entry gate (the accept-gate suspend lives inside
+        // the dispatched debug-diagnosis child lifecycle, which this workflow awaits).
+        var computeReEntry = new ComputeReEntryPositionActivity
+        {
+            Id = "ComputeReEntryPosition", Name = "Compute Re-Entry Position",
+            IssueId = new(ctx => DebugDiagnosisWorkflow.DeriveIssueId(sessionId.Get(ctx).ToString(), storyId.Get(ctx))),
+            DocumentType = new("diagnosis"),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            CorrelationId = new(ctx => DebugDiagnosisWorkflow.DeriveIssueId(sessionId.Get(ctx).ToString(), storyId.Get(ctx))),
+            PositionJson = new(reEntryPositionJson),
+            ExistingDocumentJson = new(reEntryDocJson),
+        };
+        computeReEntry.SetDisplayText("Compute Re-Entry Position");
 
         var initIteration = new SetVariable<int>(currentIteration, _ => 1)
         { Id = "initIteration", Name = "Initialize Iteration" };
@@ -380,41 +411,59 @@ public class DebuggingWorkflow : WorkflowBase
         { Id = "serializeRepro", Name = "Serialize Reproduction Steps" };
         serializeRepro.SetDisplayText("Serialize Reproduction Steps");
 
-        // 7. AI Diagnosis -- mediated call-LLM; reads serialized context, outputs typed result
-        var aiDiagnosis = new AIDiagnosisActivity
+        // 7. Diagnosis via the debug-diagnosis lifecycle binding (Story 39-15 D4) — replaces the
+        // retired AIDiagnosisActivity's hand-built prompt + direct mediated call. Production now
+        // rides the (senior_developer, debug-rootcause) registry cell through the generic lifecycle.
+        var dispatchDiagnosis = new DispatchWorkflow
         {
-            Id = "aiDiagnosis",
-            Name = "AI Diagnosis",
-            SessionId = new Input<Guid>(ctx => sessionId.Get(ctx)),
-            DebugContextMode = new Input<string>(ctx => debugContextMode.Get(ctx) ?? "RuntimeError"),
-            ErrorContext = new Input<string>(ctx => errorMessages.Get(ctx) ?? ""),
-            CodeContext = new Input<string>(ctx => relevantCode.Get(ctx) ?? ""),
-            GitContext = new Input<string>(ctx => gitHistory.Get(ctx) ?? ""),
-            TestContext = new Input<string>(ctx => testResults.Get(ctx) ?? ""),
-            ReproductionContext = new Input<string>(ctx => reproductionSteps.Get(ctx) ?? ""),
-            PreviousContext = new Input<string?>(ctx => iterationContextJson.Get(ctx)),
-            SkillLevel = new Input<int>(ctx => skillLevel.Get(ctx)),
-            Result = new Output<DiagnosisResult>(diagnosisResultVar)
+            Id = "dispatchDiagnosis",
+            Name = "Dispatch Debug Diagnosis",
+            WorkflowDefinitionId = new(DebugDiagnosisWorkflow.DebugDiagnosisDefinitionId),
+            Input = new(ctx => new Dictionary<string, object>
+            {
+                ["sessionId"] = sessionId.Get(ctx).ToString(),
+                ["storyId"] = storyId.Get(ctx) ?? "",
+                ["mode"] = debugContextMode.Get(ctx) ?? "RuntimeError",
+                ["errorContext"] = errorMessages.Get(ctx) ?? "",
+                ["codeContext"] = relevantCode.Get(ctx) ?? "",
+                ["gitContext"] = gitHistory.Get(ctx) ?? "",
+                ["testContext"] = testResults.Get(ctx) ?? "",
+                ["reproductionContext"] = reproductionSteps.Get(ctx) ?? "",
+                ["previousContext"] = iterationContextJson.Get(ctx) ?? "",
+                ["supersedesDocumentId"] = priorDiagnosisId.Get(ctx) ?? "",
+                ["tenantId"] = tenantId.Get(ctx) ?? "",
+            }),
+            WaitForCompletion = new(true),
+            Result = new(diagnosisLifecycleResult)
         };
-        aiDiagnosis.SetDisplayText("AI Diagnosis");
+        dispatchDiagnosis.SetDisplayText("Dispatch Debug Diagnosis");
 
-        // 7a. Serialize diagnosis result to hypothesesJson string variable
-        var serializeDiagnosis = new SetVariable<string>(hypothesesJson,
+        // 7a. Read the typed diagnosis exit -> hypothesesJson (the legacy Hypothesis[] the loop
+        // slices), diagnosisDocumentId, produced flag, failure reason. Fail-closed via the shared
+        // binding helper: an unreadable/non-accepted exit yields "[]" and a FAILED routing.
+        var readDiagnosisExit = new SetVariable<string>(hypothesesJson,
             ctx =>
             {
-                var result = diagnosisResultVar.Get(ctx);
-                return result?.Hypotheses != null
-                    ? JsonSerializer.Serialize(result.Hypotheses)
-                    : "[]";
-            })
-        { Id = "serializeDiagnosis", Name = "Serialize Diagnosis Hypotheses" };
-        serializeDiagnosis.SetDisplayText("Serialize Diagnosis Hypotheses");
+                var result = diagnosisLifecycleResult.Get(ctx);
+                var legacy = LifecycleBindingHelper.ReadString(result ?? new Dictionary<string, object>(), "hypothesesJson") ?? "[]";
+                var accepted = string.Equals(
+                    LifecycleBindingHelper.ReadString(result ?? new Dictionary<string, object>(), "accepted"),
+                    "True", StringComparison.OrdinalIgnoreCase);
+                var docId = LifecycleBindingHelper.ReadString(result ?? new Dictionary<string, object>(), "diagnosisDocumentId") ?? "";
+                var reason = LifecycleBindingHelper.ReadString(result ?? new Dictionary<string, object>(), "failureReason") ?? "";
 
-        // #8: DEBUG.DIAGNOSIS.SUCCESS / .FAILED (failed == diagnosis failed — e.g.
-        // unparseable LLM output / failed call — OR zero usable hypotheses). Shared
-        // predicate: DebugEvents.IsDiagnosisProduced.
-        var diagnosisProduced = new FlowDecision(ctx =>
-            DebugEvents.IsDiagnosisProduced(diagnosisResultVar.Get(ctx)))
+                var produced = accepted && DiagnosisBindingHelper.HasUsableHypotheses(legacy);
+                diagnosisProducedFlag.Set(ctx, produced);
+                diagnosisDocumentId.Set(ctx, docId);
+                diagnosisFailureReason.Set(ctx, string.IsNullOrEmpty(reason) ? DebugEvents.ReasonNoHypothesis : reason);
+                return produced ? legacy : "[]";
+            })
+        { Id = "readDiagnosisExit", Name = "Read Diagnosis Exit" };
+        readDiagnosisExit.SetDisplayText("Read Diagnosis Exit");
+
+        // #8: DEBUG.DIAGNOSIS.SUCCESS / .FAILED (failed == diagnosis lifecycle did not accept a
+        // usable Diagnosis). The typed produced flag replaces the old DiagnosisResult gate.
+        var diagnosisProduced = new FlowDecision(ctx => diagnosisProducedFlag.Get(ctx))
         { Id = "diagnosisProduced", Name = "Diagnosis Produced?" };
         diagnosisProduced.SetDisplayText("Diagnosis Produced?");
 
@@ -443,7 +492,7 @@ public class DebuggingWorkflow : WorkflowBase
             MaxIterations = new Input<int>(ctx => maxIterations.Get(ctx)),
             // Carry the diagnosis's own failure reason (e.g. diagnosis-parse-failure)
             // into the event data; genuinely-empty hypotheses keep the legacy reason.
-            Reason = new Input<string?>(ctx => DebugEvents.DiagnosisFailureReason(diagnosisResultVar.Get(ctx))),
+            Reason = new Input<string?>(ctx => diagnosisFailureReason.Get(ctx)),
         };
         emitDiagnosisFailed.SetDisplayText("Emit DEBUG.DIAGNOSIS.FAILED");
 
@@ -762,7 +811,8 @@ public class DebuggingWorkflow : WorkflowBase
                 WithLabel(new SetOutput { Id = "outputResolvedSuccess", Name = "Output Resolved Success", OutputName = new("success"), OutputValue = new(ctx => (object)true) }, "Output Resolved Success"),
                 WithLabel(new SetOutput { Id = "outputResolvedStatus", Name = "Output Resolved Status", OutputName = new("status"), OutputValue = new(ctx => (object)(debugStatus.Get(ctx) ?? DebugStatus.Resolved.ToString())) }, "Output Resolved Status"),
                 WithLabel(new SetOutput { Id = "outputResolution", Name = "Output Resolution", OutputName = new("resolution"), OutputValue = new(ctx => (object)(debugResultJson.Get(ctx) ?? "{}")) }, "Output Resolution"),
-                WithLabel(new SetOutput { Id = "outputResolvedIterations", Name = "Output Resolved Iterations", OutputName = new("iterations"), OutputValue = new(ctx => (object)currentIteration.Get(ctx)) }, "Output Resolved Iterations")
+                WithLabel(new SetOutput { Id = "outputResolvedIterations", Name = "Output Resolved Iterations", OutputName = new("iterations"), OutputValue = new(ctx => (object)currentIteration.Get(ctx)) }, "Output Resolved Iterations"),
+                WithLabel(new SetOutput { Id = "outputResolvedDiagnosisDocId", Name = "Output Diagnosis Document Id", OutputName = new("diagnosisDocumentId"), OutputValue = new(ctx => (object)(diagnosisDocumentId.Get(ctx) ?? "")) }, "Output Diagnosis Document Id")
             }
         };
         setResolvedOutputs.SetDisplayText("Set Resolved Outputs");
@@ -915,7 +965,8 @@ public class DebuggingWorkflow : WorkflowBase
                 WithLabel(new SetOutput { Id = "outputEscalatedStatus", Name = "Output Escalated Status", OutputName = new("status"), OutputValue = new(ctx => (object)(debugStatus.Get(ctx) ?? DebugStatus.Escalated.ToString())) }, "Output Escalated Status"),
                 WithLabel(new SetOutput { Id = "outputDebugReport", Name = "Output Debug Report", OutputName = new("debugReport"), OutputValue = new(ctx => (object)(debugResultJson.Get(ctx) ?? "{}")) }, "Output Debug Report"),
                 WithLabel(new SetOutput { Id = "outputEscalatedReason", Name = "Output Escalated Reason", OutputName = new("escalationReason"), OutputValue = new(ctx => (object)(escalationReason.Get(ctx) ?? DebugEvents.ReasonMaxIterations)) }, "Output Escalated Reason"),
-                WithLabel(new SetOutput { Id = "outputEscalatedIterations", Name = "Output Escalated Iterations", OutputName = new("iterations"), OutputValue = new(ctx => (object)currentIteration.Get(ctx)) }, "Output Escalated Iterations")
+                WithLabel(new SetOutput { Id = "outputEscalatedIterations", Name = "Output Escalated Iterations", OutputName = new("iterations"), OutputValue = new(ctx => (object)currentIteration.Get(ctx)) }, "Output Escalated Iterations"),
+                WithLabel(new SetOutput { Id = "outputEscalatedDiagnosisDocId", Name = "Output Diagnosis Document Id", OutputName = new("diagnosisDocumentId"), OutputValue = new(ctx => (object)(diagnosisDocumentId.Get(ctx) ?? "")) }, "Output Diagnosis Document Id")
             }
         };
         setEscalatedOutputs.SetDisplayText("Set Escalated Outputs");
@@ -931,7 +982,7 @@ public class DebuggingWorkflow : WorkflowBase
             Name = "Debugging Flowchart",
             Activities =
             {
-                readInputs, initIteration, initMaxIterations,
+                readInputs, computeReEntry, initIteration, initMaxIterations,
                 initFilesModified, initAttempts, initRegressionTest, initContextDone, initIterationContext,
                 classify,
                 tddEmphasis, runtimeEmphasis, bugEmphasis,
@@ -940,7 +991,7 @@ public class DebuggingWorkflow : WorkflowBase
                 collectErrors, collectCode, collectGit, collectTests, collectRepro, contextTimeout,
                 join, contextGatherGate, contextGateSink, joinLog,
                 serializeErrors, serializeCode, serializeGit, serializeTests, serializeRepro,
-                aiDiagnosis, serializeDiagnosis, diagnosisProduced, emitDiagnosisSuccess, emitDiagnosisFailed,
+                dispatchDiagnosis, readDiagnosisExit, diagnosisProduced, emitDiagnosisSuccess, emitDiagnosisFailed,
                 selectHypothesis, serializeSelectedHypothesis, hasHypothesis, emitHypothesisSelected,
                 isBugMode, writeRegressionTest, captureRegressionFile, runRegressionTest,
                 regressionFailsAsExpected, markRegressionTestWritten,
@@ -958,7 +1009,8 @@ public class DebuggingWorkflow : WorkflowBase
             Connections =
             {
                 // Initialization chain
-                new(readInputs, initIteration),
+                new(readInputs, computeReEntry),
+                new(computeReEntry, initIteration),
                 new(initIteration, initMaxIterations),
                 new(initMaxIterations, initFilesModified),
                 new(initFilesModified, initAttempts),
@@ -1009,10 +1061,10 @@ public class DebuggingWorkflow : WorkflowBase
                 new(serializeGit, serializeTests),
                 new(serializeTests, serializeRepro),
 
-                // Serialization -> AI Diagnosis -> serialize diagnosis
-                new(serializeRepro, aiDiagnosis),
-                new(aiDiagnosis, serializeDiagnosis),
-                new(serializeDiagnosis, diagnosisProduced),
+                // Serialization -> debug-diagnosis lifecycle binding -> read typed exit
+                new(serializeRepro, dispatchDiagnosis),
+                new(dispatchDiagnosis, readDiagnosisExit),
+                new(readDiagnosisExit, diagnosisProduced),
 
                 // Diagnosis success/failed event, then select hypothesis
                 new(new Endpoint(diagnosisProduced, "True"), new Endpoint(emitDiagnosisSuccess)),

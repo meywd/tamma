@@ -1,7 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
 using NUnit.Framework;
-using Tamma.Activities.Debug;
 using Tamma.Core.Documents;
 using Tamma.Core.Documents.Types;
 using TypedDiagnosis = Tamma.Core.Documents.Types.Diagnosis;
@@ -10,17 +9,19 @@ namespace Tamma.Activities.Tests.Documents.Types;
 
 /// <summary>
 /// Story 39-4 AC7/AC8 — the legacy-bridge round-trip for <see cref="Diagnosis"/>
-/// (Design Decision D8). Invokes the INTERNAL <c>AIDiagnosisActivity.ParseDiagnosisResponse</c>
-/// (in-assembly via InternalsVisibleTo): a typed diagnosis serialized through the
-/// snake_case bridge (<see cref="Diagnosis.ToLegacyJson"/>) is recovered by the old
-/// parser with matching hypotheses — a plain camelCase re-serialization would have
-/// "parsed" into an empty, gate-failing result (why the bridge exists, D4).
+/// (Design Decision D8). Story 39-15 retired <c>AIDiagnosisActivity.ParseDiagnosisResponse</c>
+/// (diagnosis production moved onto the debug-diagnosis lifecycle binding); the snake_case
+/// reader it embodied is now the typed <see cref="Diagnosis.FromLegacyJson"/>. This test is
+/// ported to that reader: a typed diagnosis serialized through the snake_case bridge
+/// (<see cref="Diagnosis.ToLegacyJson"/>) is recovered with matching hypotheses — a plain
+/// camelCase re-serialization would have blanked the snake_case-only fields (why the bridge
+/// exists, D4).
 /// </summary>
 [TestFixture]
 public class DiagnosisCrossParserTests
 {
     [Test]
-    public void Typed_diagnosis_round_trips_through_the_legacy_bridge_into_the_old_parser()
+    public void Typed_diagnosis_round_trips_through_the_legacy_bridge_into_the_snakecase_reader()
     {
         var typed = new TypedDiagnosis
         {
@@ -34,9 +35,8 @@ public class DiagnosisCrossParserTests
 
         var legacy = typed.ToLegacyJson();
 
-        var result = new AIDiagnosisActivity().ParseDiagnosisResponse(legacy);
+        var result = TypedDiagnosis.FromLegacyJson(legacy);
 
-        result.FailureReason.Should().BeNullOrEmpty("a valid bridged payload is not a parse failure");
         result.AnalysisSummary.Should().Be("Null ref in resolver");
         result.Hypotheses.Should().HaveCount(2);
         result.Hypotheses[0].SuggestedFix.Should().Be("Guard the miss");
@@ -45,7 +45,7 @@ public class DiagnosisCrossParserTests
     }
 
     [Test]
-    public void Camelcase_serialization_would_NOT_survive_the_old_parser_which_is_why_the_bridge_exists()
+    public void Camelcase_serialization_would_NOT_survive_the_snakecase_reader_which_is_why_the_bridge_exists()
     {
         var typed = new TypedDiagnosis
         {
@@ -55,14 +55,14 @@ public class DiagnosisCrossParserTests
 
         var camel = JsonSerializer.Serialize(typed, DocumentJson.Options);
 
-        // The old snake_case reader cannot see camelCase suggested_fix / affected_files:
-        // it recovers a hypothesis but with the fields blanked — exactly the empty,
+        // The snake_case reader cannot see camelCase suggestedFix / affectedFiles:
+        // it recovers a hypothesis but with those fields blanked — exactly the empty,
         // gate-failing read D4 warns about. The paired ToLegacyJson writer is the fix.
-        var camelResult = new AIDiagnosisActivity().ParseDiagnosisResponse(camel);
+        var camelResult = TypedDiagnosis.FromLegacyJson(camel);
         camelResult.Hypotheses.Should().ContainSingle();
         camelResult.Hypotheses[0].SuggestedFix.Should().BeEmpty("camelCase suggestedFix is invisible to the snake_case reader");
 
-        var bridged = new AIDiagnosisActivity().ParseDiagnosisResponse(typed.ToLegacyJson());
+        var bridged = TypedDiagnosis.FromLegacyJson(typed.ToLegacyJson());
         bridged.Hypotheses[0].SuggestedFix.Should().Be("fix");
     }
 }
