@@ -11,9 +11,9 @@ sidebar:
 
 > **Overview**: [Identity Providers](Identity-Providers) — root-level topic page with the deferral rationale, trigger conditions, and approximate scope tiers.
 
-## Purpose
+## 1. Overview
 
-Allow each tenant to configure their **own** identity provider (SAML 2.0, OIDC, LDAP/Active Directory) so their users sign into Tamma via that IdP rather than through Tamma's built-in email/password or shared GitHub OAuth.
+Allow each tenant to configure their **own** identity provider (SAML 2.0, OIDC, LDAP / Active Directory) so their users sign into Tamma via that IdP rather than through Tamma's built-in email/password or shared GitHub OAuth.
 
 Typical asks that drive this epic:
 
@@ -22,7 +22,7 @@ Typical asks that drive this epic:
 - Tenant admin requires automatic user provisioning via SCIM 2.0 / "Directory Sync" — no per-user invite flow
 - Tenant wants to bind group membership in their directory to tenant roles inside Tamma
 
-## Why this is not being scoped in detail now
+### Why this is not being scoped in detail now
 
 The near-term path is covered by:
 
@@ -32,123 +32,359 @@ The near-term path is covered by:
 
 That combination covers every current user until a paying enterprise customer demands SSO.
 
-Scoping IdP integration is a **big** effort (100–400h depending on tier — see "Approximate scope" below) and is the wrong place to invest until the trigger conditions fire. Doing it now would ship a feature nobody is asking for against real-world IdP quirks we haven't encountered.
+Scoping IdP integration is a **big** effort (100–400h depending on tier) and is the wrong place to invest until the trigger conditions fire. Doing it now would ship a feature nobody is asking for against real-world IdP quirks we haven't encountered.
 
-## Trigger conditions that activate this epic
+## 2. Architecture
 
-Activate scoping when **any** of the following is true:
+### 2.1 Two-plane model (orthogonal to API-access)
 
-1. **First enterprise customer commits** to Tamma with SSO as a required contract term
-2. **Compliance auditor flags** lack of SSO as a finding on a customer's audit (SOC 2, ISO 27001, HIPAA, PCI DSS, FedRAMP)
-3. **≥5 tenants independently ask for SSO / SAML / OIDC** in support tickets within a rolling 60-day window
-4. **SCIM directory sync** becomes a routine sales objection
-5. **A product decision** to target the enterprise tier (e.g. a "Tamma Enterprise" plan launch) where SSO is table stakes
+```mermaid
+graph LR
+    subgraph SignIn["Sign-in plane"]
+        A1[Local: email/password<br/>Epic 18 — live]
+        A2[GitHub OAuth<br/>Epic 16 — live]
+        A3[Per-tenant OIDC<br/>Tier A — ~100h]
+        A4[Per-tenant SAML 2.0<br/>Tier B — +150h]
+        A5[LDAP / AD bind + SCIM<br/>Tier C — +150h]
+    end
 
-Until one of those fires, this epic stays a one-page placeholder.
+    subgraph API["API-access plane"]
+        B[Any git platform<br/>Epic 31]
+    end
 
-## Stories
+    Tenant[Tenant] --> SignIn
+    Tenant --> API
 
-| Story | Title | Status |
-|-------|-------|--------|
-| (none scoped yet) | Activate when trigger conditions fire | Deferred |
+    Note["A tenant signed in via SAML<br/>can operate on Gitea/GitLab repos —<br/>the two planes are orthogonal."]
 
-## Approximate scope (3 pre-scoped tiers)
+    style A3 fill:#ffeecc,stroke-dasharray: 5 5
+    style A4 fill:#ffeecc,stroke-dasharray: 5 5
+    style A5 fill:#ffeecc,stroke-dasharray: 5 5
+```
 
-Pick one tier based on which trigger condition fires:
+### 2.2 Three pre-scoped tiers
 
-### A. Lean — OIDC-only, single-IdP-per-tenant (~100h, 4-5 stories)
+```mermaid
+graph TD
+    Trig[Trigger condition fires]
+    Trig --> Choose{Which tier?}
 
-- Tenant admin uploads OIDC discovery URL + client ID / secret in the dashboard
-- Users sign in with "Sign in with {IdP name}" button at `/login?tenant={slug}` — Tamma redirects to the tenant's IdP
-- JIT user provisioning — first login creates a tenant member with role `member` (promotable via 18-8)
-- No SCIM, no SAML, no group → role binding
-- Handles Okta / Azure AD / Google / Auth0 / any modern IdP — all ship OIDC
+    Choose -->|Enterprise cloud-native<br/>modern IdP| TierA[Tier A — Lean<br/>OIDC-only<br/>~100h, 4-5 stories]
+    Choose -->|Non-cloud IdP<br/>ISO 27001 / group-RBAC| TierB[Tier B — Full<br/>SAML 2.0 + OIDC +<br/>group→role binding<br/>~250h, 10-12 stories]
+    Choose -->|Government / regulated /<br/>air-gapped tenants| TierC[Tier C — Full + LDAP/AD<br/>+ SCIM directory sync<br/>~400h, 15-18 stories]
 
-**Best fit when**: first enterprise customer is cloud-native + uses a modern IdP.
+    TierA -.-> Include[All tiers include:<br/>tenant admin uploads config,<br/>JIT user provisioning,<br/>fallback to local accounts]
+    TierB -.-> Include
+    TierC -.-> Include
+```
 
-### B. Full — SAML 2.0 + OIDC + group → role binding (~250h, 10-12 stories)
+## 3. Components (forward-looking)
 
-- Everything in (A)
-- SAML 2.0 support: metadata XML upload, SP-initiated + IdP-initiated flows, sig verification, encryption
-- Attribute mapping UI — tenant admin maps IdP claims to Tamma display name, email, role claim
-- Group → role binding — IdP group membership resolves to Tamma tenant role on each login
-- Session binding — Tamma session tied to IdP session; IdP-triggered logout invalidates Tamma session
-- SLO (Single Logout) — Tamma sends `LogoutRequest` on user-initiated logout if IdP supports it
+### 3.1 Tier A — OIDC-only (~100h, 4-5 stories)
 
-**Best fit when**: enterprise customer with non-cloud IdP, ISO 27001 / SOC 2 requirement with group-based access.
+| Component | Purpose |
+|-----------|---------|
+| `ITenantIdentityProvider` | interface — `ResolveUserAsync(authCode) Task<TenantUserClaims>` |
+| `OidcIdentityProvider` | reads tenant's OIDC discovery URL + client-id/secret |
+| `tenant_idp_configs` table | per-tenant IdP config (discovery URL, client ID, encrypted client secret via Epic 29 cabinet) |
+| `/login?tenant={slug}` endpoint | redirects to tenant's IdP authorize URL |
+| `/auth/idp/callback` endpoint | exchanges auth code for tokens, extracts claims, JIT-provisions user |
+| JIT provisioning | first login creates `tenant_memberships` with role `member` |
 
-### C. Full + LDAP / Active Directory bind (~400h, 15-18 stories)
+### 3.2 Tier B — + SAML 2.0 + group → role (~+150h)
 
-- Everything in (B)
-- LDAP bind support — tenant runs an LDAP connector, Tamma binds + verifies credentials on each login. Group lookup via LDAP
-- SCIM 2.0 directory sync — IdP pushes user/group changes; Tamma reflects them without user login
-- AD-specific quirks (UPN vs sAMAccountName, nested groups, stale tokens)
+| Component | Purpose |
+|-----------|---------|
+| `SamlIdentityProvider` | SAML SP-initiated + IdP-initiated flows |
+| SAML metadata UX | upload XML / paste / URL-fetch |
+| Attribute-mapping UI | map IdP claims to Tamma display name, email, role claim |
+| `IGroupRoleBinder` | resolves IdP group → tenant role on each login |
+| Session binding | Tamma session tied to IdP session; IdP-triggered logout invalidates Tamma session |
+| SLO (Single Logout) | Tamma sends `LogoutRequest` on user-initiated logout |
 
-**Best fit when**: government / regulated / air-gapped tenants. LDAP is typically a deal-breaker or deal-maker; if not needed, skip.
+### 3.3 Tier C — + LDAP/AD + SCIM (~+150h)
 
-## Reference architectures (read these before scoping)
+| Component | Purpose |
+|-----------|---------|
+| `LdapIdentityProvider` | LDAP bind on each login; group lookup via LDAP |
+| LDAP connector runner | tenant-hosted; tunnels bind calls to their AD |
+| `IScimDirectorySync` | incoming `SCIM 2.0` user/group push from tenant's IdP |
+| AD quirks handling | UPN vs sAMAccountName, nested groups, stale tokens |
 
-Three industry analogues that have already solved the multi-tenant-IdP problem at B2B SaaS scale:
+## 4. Class diagram (aspirational, Tier A baseline)
+
+```mermaid
+classDiagram
+    class ITenantIdentityProvider {
+        <<interface>>
+        +IdpKind Kind
+        +ResolveUserAsync(authCode, tenantId) Task~TenantUserClaims~
+        +BuildAuthorizeUrl(tenantId, returnTo) Task~string~
+        +HandleLogoutAsync(sessionId) Task
+    }
+
+    class IdpKind {
+        <<enum>>
+        Oidc
+        Saml
+        Ldap
+    }
+
+    class TenantUserClaims {
+        <<record>>
+        +string ExternalSubject
+        +string Email
+        +string DisplayName
+        +IReadOnlyList~string~ Groups
+        +string? RoleClaim
+    }
+
+    class OidcIdentityProvider {
+        -HttpClient http
+        -OidcConfig config
+        +BuildAuthorizeUrl(...)
+        +ResolveUserAsync(...)
+    }
+
+    class SamlIdentityProvider {
+        -SamlSpConfig config
+        +BuildAuthorizeUrl(...)
+        +ResolveUserAsync(samlResponse, ...)
+    }
+
+    class LdapIdentityProvider {
+        -LdapConfig config
+        +ResolveUserAsync(bindDn, password, ...)
+    }
+
+    class TenantIdpConfigRow {
+        <<entity>>
+        +Guid Id
+        +Guid TenantId
+        +IdpKind Kind
+        +string ConfigJson
+        +SecretRef? ClientSecretRef
+        +bool IsEnabled
+    }
+
+    class ITenantIdpRegistry {
+        <<interface>>
+        +GetProviderAsync(Guid tenantId) Task~ITenantIdentityProvider?~
+    }
+
+    class IJitProvisioner {
+        <<interface>>
+        +EnsureUserAsync(Guid tenantId, TenantUserClaims) Task~User~
+    }
+
+    class IGroupRoleBinder {
+        <<interface>>
+        +ResolveRoleAsync(Guid tenantId, IReadOnlyList~string~ groups) Task~TenantRole~
+    }
+
+    ITenantIdentityProvider <|.. OidcIdentityProvider
+    ITenantIdentityProvider <|.. SamlIdentityProvider
+    ITenantIdentityProvider <|.. LdapIdentityProvider
+    ITenantIdentityProvider --> TenantUserClaims : returns
+    ITenantIdentityProvider --> IdpKind : Kind
+    ITenantIdpRegistry --> ITenantIdentityProvider : resolves
+    ITenantIdpRegistry --> TenantIdpConfigRow : reads
+    IJitProvisioner --> TenantUserClaims : consumes
+    IGroupRoleBinder --> TenantUserClaims : reads groups
+```
+
+## 5. Sequence diagram — Tier A OIDC sign-in
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Browser
+    participant Tamma as Tamma API
+    participant Registry as ITenantIdpRegistry
+    participant Oidc as OidcIdentityProvider
+    participant Idp as Tenant's IdP (Okta/AzureAD/...)
+    participant Jit as IJitProvisioner
+    participant Binder as IGroupRoleBinder
+    participant CP as ControlPlaneDbContext
+
+    User->>Browser: visit /login?tenant=acme
+    Browser->>Tamma: GET /login?tenant=acme
+    Tamma->>Registry: GetProviderAsync(tenantSlug="acme")
+    Registry->>CP: SELECT tenant_idp_configs WHERE tenant_slug='acme'
+    CP-->>Registry: OIDC config
+    Registry-->>Tamma: OidcIdentityProvider
+
+    Tamma->>Oidc: BuildAuthorizeUrl(tenantId, returnTo="/dashboard")
+    Oidc-->>Tamma: https://idp.acme.com/authorize?client_id=...&state=...
+    Tamma-->>Browser: 302 redirect
+
+    Browser->>Idp: GET /authorize
+    Idp-->>User: login form
+    User->>Idp: credentials
+    Idp-->>Browser: 302 → /auth/idp/callback?code=...&state=...
+
+    Browser->>Tamma: GET /auth/idp/callback?code=...
+    Tamma->>Oidc: ResolveUserAsync(authCode, tenantId)
+    Oidc->>Idp: POST /token (exchange code)
+    Idp-->>Oidc: access_token + id_token
+    Oidc->>Oidc: validate JWT, extract claims
+    Oidc-->>Tamma: TenantUserClaims{ sub, email, name, groups, role? }
+
+    Tamma->>Binder: ResolveRoleAsync(tenantId, claims.Groups)
+    Binder-->>Tamma: TenantRole.Member
+
+    Tamma->>Jit: EnsureUserAsync(tenantId, claims)
+
+    alt first login — JIT create
+        Jit->>CP: INSERT users (external_subject, email, tenantId)
+        Jit->>CP: INSERT tenant_memberships (tenantId, userId, role=Member)
+    else returning user
+        Jit->>CP: UPDATE users SET last_login=now()
+    end
+
+    Jit-->>Tamma: User
+
+    Tamma->>Tamma: mint JWT with tid + sub
+    Tamma-->>Browser: Set-Cookie + 302 → /dashboard
+```
+
+## 6. Use cases
+
+### UC-33-01: Okta-backed enterprise onboarding (Tier A)
+
+1. Sales closes a contract with "Acme Corp". Tamma provisions their tenant (Epic 28).
+2. Tenant admin logs in via initial admin email, navigates to tenant settings → identity.
+3. Uploads Okta OIDC discovery URL + client ID. Generates a client secret stored in Epic 29 cabinet as `tenant/acme/oidc-client-secret`.
+4. Flips `is_enabled = true`. Now employees visit `/login?tenant=acme`, Tamma redirects to Okta, Okta authenticates and redirects back, Tamma JIT-provisions the user with role `member`.
+5. Tenant admin can override role in tenant-admin UI (Epic 18 Story 18-8).
+
+### UC-33-02: Compliance-driven SSO requirement (Tier B)
+
+SOC 2 auditor flags local-password auth as a finding. Enterprise tenant must:
+
+1. Upload SAML metadata XML for their on-prem ADFS.
+2. Map SAML attributes: `http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress` → Tamma email.
+3. Configure group → role: `CN=TammaAdmins,OU=Groups,DC=acme,DC=corp` → `TenantRole.Admin`.
+4. Enable SLO so user logout in ADFS tears down Tamma session.
+
+### UC-33-03: Air-gapped government tenant (Tier C)
+
+Agency runs on-prem infrastructure with an AD Connect Server on an isolated network. Tamma deploys an LDAP connector into their DMZ that:
+
+- Binds to their AD for each login
+- Subscribes to SCIM user/group changes for auto-provisioning
+- Reports directory deltas back to Tamma over a narrow, audited channel
+
+## 7. Dependencies
+
+### Upstream
+
+- [Epic 18](Epic-18-User-Auth.md) — user + tenant model; Stories 18-7 / 18-8 ship the local user-management fallback
+- [Epic 28](Epic-28-DB-Per-Tenant.md) — tenant lifecycle hooks
+- [Epic 29](Epic-29-Secret-Management.md) — secret cabinet holds per-tenant IdP client secrets / service account passwords
+- [Epic 31](Epic-31-Multi-Git-Platform.md) — platform abstraction; orthogonal but in the same Layer-5 band
+
+### Downstream
+
+None — terminal epic.
+
+### Trigger-condition graph
+
+```mermaid
+graph TD
+    T1[Enterprise customer commits<br/>with SSO contract term]
+    T2[Compliance auditor flags<br/>lack of SSO as finding]
+    T3[≥5 tenants ask for SSO in<br/>60-day rolling window]
+    T4[SCIM directory sync becomes<br/>routine sales objection]
+    T5[Product targets<br/>'Tamma Enterprise' tier launch]
+
+    Activate[Activate Epic 33 scoping]
+
+    T1 --> Activate
+    T2 --> Activate
+    T3 --> Activate
+    T4 --> Activate
+    T5 --> Activate
+
+    Activate --> Tier{Pick tier based on<br/>which trigger fired}
+    Tier -->|T1 + cloud-native IdP| A[Tier A OIDC<br/>~100h]
+    Tier -->|T2 + group-RBAC| B[Tier B SAML + groups<br/>~250h]
+    Tier -->|T1-5 + air-gapped| C[Tier C LDAP + SCIM<br/>~400h]
+```
+
+## 8. Current state
+
+### Not started — epic is a one-page placeholder until triggers fire
+
+No stories scoped. No code committed. Design intents locked-in (see Architecture §2) but not turned into acceptance criteria yet.
+
+### What exists today (fallback auth)
+
+- **Email/password** (Epic 18 Stories 18-1..18-6) — registration, login, password reset, email verification
+- **GitHub OAuth** (Epic 16) — sign in with GitHub for users with a GitHub account
+- **User management** (Epic 18 Stories 18-7, 18-8) — tenant admin can invite, list, change role, remove users
+
+This combination handles 100% of current users. Epic 33 is for the first paying customer that demands SSO.
+
+### Reference architectures to read before scoping
+
+Three industry analogues at B2B SaaS scale:
 
 | Vendor | What they do | What we'd learn |
 |--------|--------------|-----------------|
-| **[Auth0 Organizations](https://auth0.com/docs/manage-users/organizations)** | Per-organization connection picker; each org binds to its own IdP; user's effective identity is `(org, sub)` | Data model for `(tenant, external_identity)` mapping; connection-picker UX; policy per org |
-| **[Clerk multi-tenant](https://clerk.com/docs/authentication/social-connections/overview)** | Per-organization SSO + SAML IdP with metadata upload; magic-link fallback | SAML metadata ingestion UX; JIT provisioning shape; session/cookie scoping across orgs |
-| **[WorkOS Directory Sync / SSO](https://workos.com/docs/sso/overview)** | SSO-in-a-box: one API over ~40 IdP implementations; SCIM directory sync with realtime change-stream | Abstraction surface for "one API covers 40 IdPs"; SCIM event model; test harness strategy |
+| [Auth0 Organizations](https://auth0.com/docs/manage-users/organizations) | Per-organization connection picker; each org binds to its own IdP; user identity is `(org, sub)` | Data model for `(tenant, external_identity)` mapping; connection-picker UX; policy per org |
+| [Clerk multi-tenant](https://clerk.com/docs/authentication/social-connections/overview) | Per-organization SSO + SAML with metadata upload; magic-link fallback | SAML metadata ingestion UX; JIT provisioning shape; session scoping across orgs |
+| [WorkOS Directory Sync / SSO](https://workos.com/docs/sso/overview) | SSO-in-a-box: one API over ~40 IdP implementations; SCIM directory sync with realtime change stream | Abstraction surface for "one API covers 40 IdPs"; SCIM event model; test harness strategy |
 
-If scoping activates, reading these docs before writing the story set is non-negotiable — the quirks (NameID formats, attribute mapping, metadata refresh semantics, SLO vs session invalidation) are where every greenfield SAML integration burns weeks of budget.
+Reading these before writing the story set is non-negotiable — NameID formats, attribute mapping, metadata refresh, SLO vs session invalidation are where every greenfield SAML integration burns weeks.
 
-## Architecture / key decisions (forward-looking)
+### Architecture decisions to lock before story-writing begins
 
-These are the design intents to lock in before story-writing begins:
+1. **Sign-in plane stays orthogonal to API-access plane** — tenant signed in via SAML can operate on Gitea / GitLab repos
+2. **One IdP per tenant for v1** — multi-IdP is post-MVP
+3. **Local accounts as fallback stay forever** — built-in email/password + GitHub OAuth are the universal login
+4. **JIT user provisioning is the default for Tier A** — SCIM is Tier C only
+5. **No per-tenant custom-domain login pages in MVP** — marketing/brand polish, not an identity concern
 
-1. **Sign-in plane stays orthogonal to API-access plane**. A tenant signed in via corporate SAML IdP (Epic 33) can still operate on repos via Gitea / GitLab (Epic 31 driver). The two concerns do not block each other.
-2. **One IdP per tenant for v1**. Multi-IdP-per-tenant is a post-MVP ask; 99% of cases are single-IdP.
-3. **Local accounts as fallback** stay forever — Tamma's built-in email/password + GitHub OAuth (Epics 16, 18) are the universal login. Per-tenant IdP is opt-in per tenant.
-4. **JIT user provisioning** is the default for tier A; SCIM is tier C only. JIT creates tenant member with role `member`; role promotion via tenant-admin UI.
-5. **No per-tenant custom domain login pages** in MVP (`login.tenant.example.com`). Layer 6 marketing/brand polish, not an identity concern.
+### Drift findings (2026-04-22 audit)
 
-## Dependencies
+- Nothing to drift against — no code, no stories, no schemas. This epic is deliberately a stub.
 
-**Upstream**:
-- [Epic 18](Epic-18-User-Auth.md) — user + tenant model; Stories 18-7/18-8 ship the local user-management path users fall back to when no IdP is configured
+### Not in scope (for eventual scoping, too)
+
+- Multiple IdPs per tenant — one-IdP-per-tenant is good enough for 99% of cases
+- Social provider federation on top of tenant IdPs — tenant IdP is the authority
+- Custom-domain login pages (`login.tenant.example.com`) — Layer 6 marketing/brand polish
+- FIDO2 / Passkey as sole factor — add-on to any tier above
+
+### Open questions (gating decisions for when scoping activates)
+
+1. **Build vs buy**: build SAML/OIDC against `Microsoft.IdentityModel.*` directly, or use WorkOS / Auth0 / Stytch? Saves 50-100h on Tier B/C but adds vendor cost + lock-in
+2. **Tenant onboarding UX for SAML metadata XML**: upload-file vs paste-XML vs URL-fetch
+3. **Session model**: Tamma session on top of IdP session (Tier B SLO), or independent?
+4. **Trigger-condition watchlist**: instrument support-ticket tagging for SSO mentions to detect trigger #3 automatically?
+
+## 9. See also
+
+- [Identity Providers](Identity-Providers) — root-level topic page
+- [Epic 18](Epic-18-User-Auth.md) — built-in user auth and the fallback path
+- [Epic 16](Epic-16-Auth-Admin.md) — platform-level auth / admin plane
 - [Epic 28](Epic-28-DB-Per-Tenant.md) — tenant lifecycle hooks
-- [Epic 31](Epic-31-Multi-Git-Platform.md) — platform abstraction (sign-in stays orthogonal so 31 doesn't block 33 or vice versa)
-
-**Downstream**: none — terminal epic.
-
-## Not in scope (for eventual scoping, too)
-
-- **Multiple IdPs per tenant** — one-IdP-per-tenant is good enough for 99% of cases; multi-IdP is post-MVP
-- **Social provider federation on top of tenant IdPs** — out of scope; tenant IdP is the authority
-- **Custom domain login pages** (`login.tenant.example.com`) — Layer 6 marketing/brand polish
-- **FIDO2 / Passkey** as the sole factor — add-on to any tier above
-
-## Open questions
-
-These are gating decisions for when scoping activates — not answered now:
-
-1. **Build vs buy**: do we build SAML/OIDC against Microsoft.IdentityModel.* directly, or use WorkOS / Auth0 / Stytch as an abstraction layer? Each shaves 50-100h off tier B/C but adds vendor cost + lock-in.
-2. **Tenant onboarding UX for SAML metadata XML**: upload-file vs paste-XML vs URL-fetch. Tier A (OIDC) just needs URL; tier B (SAML) is the painful part.
-3. **Session model**: does Tamma's session live on top of the IdP's session (tier B SLO), or is it independent (logout triggers IdP logout but not vice-versa)? Affects compliance posture.
-4. **Trigger-condition watchlist**: should we instrument support-ticket tagging for SSO mentions to detect trigger #3 automatically? Cheap to add now if we decide to.
-
-## Cross-reference
-
-- Tenant user management (built-in path): `docs/stories/plans/tenant-user-mgmt-audit.md`
-- Layer placement across Epics 29 / 30 / 31 / 33: `docs/stories/plans/epic-31-33-placement.md`
-- Unified RBAC reference: `docs/stories/rbac-unified-model.md`
-
-## Story files
-
-[Epic 33 README on GitHub](/stories/epic-33/)
+- [Epic 29](Epic-29-Secret-Management.md) — holds per-tenant IdP client secrets
+- [Epic 31](Epic-31-Multi-Git-Platform.md) — the orthogonal API-access plane
+- Cross-reference:
+  - Tenant user management (built-in path): `docs/stories/plans/tenant-user-mgmt-audit.md`
+  - Layer placement across Epics 29 / 30 / 31 / 33: `docs/stories/plans/epic-31-33-placement.md`
+  - Unified RBAC reference: `docs/stories/rbac-unified-model.md`
+- Story files: [Epic 33 README on GitHub](/stories/epic-33/)
 
 ## Change log
 
 | Date | Version | Changes | Author |
 |------|---------|---------|--------|
 | 2026-04-21 | 0.1.0 | Initial stub (forward-looking, deferred) | Planning sweep |
+| 2026-04-22 | 0.2.0 | Rewrite with 9-section template + forward-looking class/sequence diagrams | Planning sweep |
 
 ---
 
-_Last updated: 2026-04-21_
+_Last updated: 2026-04-22_

@@ -4,167 +4,198 @@ sidebar:
   order: 1.5
 ---
 
-**Status:** Partially Complete — core infra done, secret-management track (1.5-16..1.5-45) in progress
+**Status:** Core infra complete (1.5-1..1.5-15 shipped); secret-management track (1.5-16..1.5-45) in active design
 **Stories:** 45 (1.5-1 through 1.5-45)
-**Packages:** `@tamma/api`, `@tamma/cli`, `@tamma/orchestrator`, Docker stack, Elsa secret broker, GitHub Actions secret-fetcher
+**Packages:** `@tamma/cli`, `@tamma/api`, `@tamma/orchestrator`, Docker Compose stack, Elsa secret broker, GitHub Actions secret-fetcher
+**Tech Spec:** [tech-spec-epic-1.5.md](/stories/epic-1.5//tech-spec-epic-1.5.md)
 
 ## Overview
 
-Epic 1.5 establishes production-ready infrastructure, deployment automation, and operational capabilities for the Tamma platform. It grew from the original 10-story Docker/CLI scope into a 45-story epic that also owns the **secret-management track** — the LLM-safe cryptographic pipeline that Epic 29 builds its operator-facing cabinet on top of.
+Epic 1.5 is the "how do we ship it" epic: it takes the Epic-1 CLI and turns it into three fully-packaged deployment topologies — **CLI mode** (single binary, `tamma start`), **service mode** (long-running HTTP daemon, `tamma server`), and **SaaS mode** (GitHub-App-authenticated coordinator, `tamma api`). Each mode uses the same `TammaEngine` core, so downstream epics never branch on runtime shape.
 
-## Story groupings
+The epic also grew a second track after initial scoping: the **LLM-safe secret-management pipeline** (Stories 1.5-16..1.5-45). Because autonomous agents are constantly feeding prompts to LLMs, the platform needs a way to let agents reference secrets by name without ever leaking plaintext into an LLM window. The chosen answer is a *commitment-hash protocol* — workflow variables carry only hashes, and CI/runtime consumers fetch the real plaintext from a secret broker via short-lived OIDC tokens. Epic 1.5 owns this pipeline end-to-end (broker, protocol, platform mirrors, rotation cascade, leak detection); Epic 29 builds the operator-facing cabinet on top.
 
-| Group | Stories | Theme |
-|-------|---------|-------|
-| Core Deployment | 1.5-1 .. 1.5-10 | CLI modes, Docker, K8s, CI/CD, Installers |
-| SaaS Coordination | 1.5-11 .. 1.5-15 | GitHub App auth, Worker mode, Multi-tenant task queue |
-| Secret-Management Track | 1.5-16 .. 1.5-22 | Secret broker + commitment-hash protocol + OIDC trust |
-| Platform Secret Mirrors | 1.5-23 .. 1.5-26 | GitHub / GitLab / Gitea / Forgejo / Bitbucket / Azure DevOps secret stores |
-| Rotation & Leak Detection | 1.5-27 .. 1.5-31 | Probe workflows, leak detection, auto-rotation |
-| Advanced Crypto | 1.5-32 .. 1.5-36 | Secret import, drift detection, KMS-backed root key |
-| Ops & Observability | 1.5-37 .. 1.5-45 | Notifications, dashboards, mTLS, health checks, MCP tools |
+Production deployment today lives on a Hetzner CPX42 VPS (16 GB, amd64) with a 10-service Docker Compose stack fronted by nginx and Cloudflare. Kubernetes manifests exist (`apps/tamma-elsa/k8s/`) and Story 1.5-10 is in-progress for the full K8s story. GitHub Actions CI covers build/lint/test (`ci.yml`), layered Hetzner deploy (`deploy.yml`), GHCR image publishing (`docker-publish.yml`), smoke tests (`docker-smoke-test.yml`), releases (`release.yml`), and the worker template (`tamma-worker.yml`).
 
-## Core deliverables (shipped)
+## Architecture
 
-### Docker Compose Stack
+The CLI package carries a thin mode-selector that dispatches to three distinct runtime shapes. `tamma start` instantiates `TammaEngine` in-process and polls GitHub directly — the self-hosted engine. `tamma server` boots a Fastify HTTP server that wraps the same engine plus an API/dashboard surface. `tamma api` is the SaaS coordinator — it authenticates as a GitHub App, discovers installations, and dispatches `workflow_dispatch` events to tenant repos, where a `tamma-worker.yml` runs the engine as a GitHub Action worker.
 
-Production deployment runs on Hetzner CPX42 (16GB RAM, amd64) at 204.168.131.39 with 10 services:
+The secret-management pipeline sits behind an `ISecretStore` seam. The primary store is `TammaVaultStore` (envelope-encrypted rows in Postgres, AES-256-GCM with KEK from env var or later KMS). Platform mirrors (`GitHubSecretStore` via libsodium, GitLab/Gitea/Forgejo/Bitbucket/Azure DevOps) register as additional `ISecretStore` backends. Elsa workflows emit only **commitment hashes**, never plaintext; `FetchSecretsEndpoint` validates OIDC tokens and returns plaintext at execution time. `ProbeSecretWorkflow`, `LeakDetectionWorkflow`, and `RotationCascadeWorkflow` close the loop for validation + rotation.
 
-| Service | Technology | Purpose |
-|---------|-----------|---------|
-| PostgreSQL 17 | Database | Data, events, Elsa workflow state |
-| RabbitMQ | Message broker | Async messaging |
-| ChromaDB | Vector store | Code embeddings |
-| elsa-server | .NET 8 | Elsa workflow engine |
-| tamma-api-dotnet | .NET 8 | .NET REST API |
-| tamma-api | Node.js 22 / Fastify | TypeScript REST API |
-| tamma-engine | Node.js 22 | TypeScript engine |
-| tamma-dashboard | nginx | React SPA |
-| elsa-studio | nginx | Custom Blazor WASM |
-| nginx-proxy | nginx | Reverse proxy |
-| OpenSearch (opt-in) | OpenSearch 2.x | Log aggregation |
+## Components
 
-### CI/CD Pipelines
+| Component | Purpose | Key files | Status |
+|-----------|---------|-----------|--------|
+| CLI mode selector | Dispatch `start` / `server` / `api` to correct runtime | `packages/cli/src/index.tsx`, `commands/start.tsx` | Done |
+| CLI `start` command | Run `TammaEngine` in-process against a local checkout | `packages/cli/src/commands/start.tsx` | Done |
+| CLI `server` command | Boot Fastify HTTP server + engine | `packages/cli/src/commands/server.ts` | Done |
+| CLI `api` command | SaaS coordinator entrypoint | `packages/cli/src/commands/api.ts` | Done |
+| Config loader | Layered config (env → file → flags) with secret redaction | `packages/cli/src/config.ts`, `config-layered.test.ts` | Done |
+| Preflight check | Validate provider/platform creds before loop starts | `packages/cli/src/preflight.ts` | Done |
+| `TammaEngine` | Single-issue pipeline engine | `packages/orchestrator/src/engine.ts` | Done |
+| `SaaSCoordinator` | Discover GitHub App installations, dispatch workflows | `packages/orchestrator/src/saas-coordinator.ts` | Done |
+| `WorkflowEngine` | Elsa client that maps to C# workflows | `packages/orchestrator/src/workflow-engine.ts`, `elsa-client.ts` | Done |
+| Docker stack | `docker-compose.yml` + `.prod.yml` with 10 services | `apps/tamma-elsa/docker-compose*.yml` | Done |
+| Kubernetes manifests | Initial K8s deployment spec | `apps/tamma-elsa/k8s/tamma-deployment.yml` | In progress (1.5-10) |
+| CI workflow (`ci.yml`) | Build, lint, test on PR | `.github/workflows/ci.yml` | Done |
+| CI workflow (`deploy.yml`) | Layered Hetzner deploy (postgres → rabbitmq → elsa → APIs → dashboard) | `.github/workflows/deploy.yml` | Done |
+| CI workflow (`docker-publish.yml`) | Build + push images to GHCR on tag | `.github/workflows/docker-publish.yml` | Done |
+| CI workflow (`release.yml`) | GitHub Releases | `.github/workflows/release.yml` | Done |
+| Worker template | GitHub Actions worker that runs engine in a tenant repo | `.github/workflows/tamma-worker.yml` | Done |
+| GitHub App auth | JWT + installation token refresh via `@octokit/auth-app` | `packages/platforms/src/github/*` | Done |
+| Secret broker HTTP service | `POST /secrets/commit`, `POST /secrets/fetch`, `POST /secrets/rotate` | Planned (1.5-17) | Planned |
+| `TammaVaultStore` | Envelope-encrypted Postgres-backed secret store | Planned (1.5-17) | Planned |
+| Secret Activities | Elsa C# wrappers over broker HTTP API | Planned (1.5-18) | Planned |
+| OIDC Trust Registry | Validate short-lived tokens from CI runners | Planned (1.5-20) | Planned |
+| Platform secret mirrors | `GitHubSecretStore` / GitLab / Gitea / Forgejo / Bitbucket / Azure DevOps | Planned (1.5-23..1.5-26) | Planned |
+| `LeakDetectionWorkflow` | Scan LLM outputs + GitHub secret-scanning webhook | Planned (1.5-28) | Planned |
+| `RotationCascadeWorkflow` | Saga-shaped multi-store rotation with compensation | Planned (1.5-30) | Planned |
 
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `ci.yml` | PRs | Build, lint, test |
-| `deploy.yml` | main push | Deploy to VPS via SSH |
-| `docker-publish.yml` | Tags | Build + push images to GHCR |
-| `docker-smoke-test.yml` | deploy | Smoke test stack |
-| `release.yml` | Tags | GitHub releases |
-| `tamma-worker.yml` | dispatch | GitHub Actions worker template |
+## Class diagram
 
-### GitHub App Authentication
+```
+     CLI entry (packages/cli/src/index.tsx)
+            |
+            |  dispatch by command
+            +--- "start"  ---> EngineMode  ---> TammaEngine
+            +--- "server" ---> ServerMode  ---> Fastify + TammaEngine + API routes
+            +--- "api"    ---> SaaSMode    ---> SaaSCoordinator
 
-- Dual auth modes: PAT (self-hosted) and GitHub App (SaaS)
-- JWT signed with RSA private key using `@octokit/auth-app`
-- Installation token auto-refresh
-- Installation callback endpoint and persistence
-- API key provisioning into repository GitHub Actions secrets
+     SaaSCoordinator
+     - appAuth : GitHubAppAuth
+     - platform : IGitPlatform  (per-installation)
+     + discoverInstallations() : Promise<Installation[]>
+     + dispatchWorker(repo, workItem) : Promise<WorkflowRun>
+     + reconcileLoop()
 
-### SaaS Coordinator
+     TammaEngine  (see Epic 1)
+     + run()
+     + processOneIssue()
 
-- Discovers active GitHub App installations
-- Dispatches `workflow_dispatch` events to user repositories
-- Installation lifecycle management (new, removed, suspended)
-- Reconciliation loop on configurable interval
+     ISecretStore  <<interface>>                        IRotationHandler  <<interface>>
+     + get(ref) : Promise<Plaintext>                    + canHandle(store, kind) : boolean
+     + put(ref, plaintext, meta) : Promise<void>        + rotate(ctx) : Promise<RotationResult>
+     + delete(ref) : Promise<void>                             ^
+     + rotate(ref, newValue) : Promise<void>                   |
+     + commit(ref) : Promise<Hash>                    +--------+---------+---------------+
+            ^                                         |                  |               |
+            |                                 GitHubRotator       PostgresRotator   ApiKeyRotator
+   +--------+--------+-----------+--------+
+   |                 |           |        |
+ TammaVault    GitHubSecret  GitLab     Gitea
+ Store         Store         Store      SecretStore
+ - kek : KEK
+ - pg  : Pool
 
-## Stories
+     LeakDetectionWorkflow  --> AutoRotateWorkflow --> RotationCascadeWorkflow
+            ^                                                ^
+     GitHub secret-scanning webhook                     probe success
+     LLM output scanner                                 probe failure => compensation
+```
 
-### Core Deployment (1.5-1 .. 1.5-10)
+## Data flow — "CI job needs a secret" happy path
 
-| Story | Title | Status |
-|-------|-------|--------|
-| 1.5-1 | Core Engine Separation | Done |
-| 1.5-2 | CLI Mode Enhancement & Configuration Management | Done |
-| 1.5-3 | Service Mode Implementation & Environment Deployments | Done |
-| 1.5-4 | Web Server API & Secret Management Integration | Done |
-| 1.5-5 | Docker Packaging | Done |
-| 1.5-6 | Health Checks, Monitoring & Webhook Integration | Done |
-| 1.5-7 | Backup & Recovery & System Configuration Management | Done |
-| 1.5-8 | Documentation, Templates & NPM Package Publishing | Done |
-| 1.5-9 | Binary Releases & Installers | Done |
-| 1.5-10 | Kubernetes Deployment | In Progress |
+```
+Elsa workflow        Secret Broker          TammaVaultStore       GitHub Actions runner
+    |                      |                      |                       |
+    | Activity: useSecret("stripe_api_key")        |                       |
+    | --> commit()         |                      |                       |
+    | ------------------>  |                      |                       |
+    |                      | lookup ref,          |                       |
+    |                      | return hash          |                       |
+    |<-------------------- | (no plaintext)       |                       |
+    |                      |                      |                       |
+    | writes hash to       |                      |                       |
+    | workflow variable    |                      |                       |
+    |                      |                      |                       |
+    | dispatch             |                      |                       |
+    | workflow_dispatch    |                      |                       |
+    | ------------------------------------ workflow starts ------------->|
+    |                      |                      |                       |
+    |                      |                      |    fetch-secrets@v1   |
+    |                      |   POST /secrets/fetch (OIDC token + hash)   |
+    |                      |<-----------------------------------------|   |
+    |                      | validate OIDC against trust registry       |
+    |                      | get by hash          |                       |
+    |                      | --------------------->| decrypt (KEK)        |
+    |                      |<----------------------| plaintext            |
+    |                      | ---------- ciphertext-in-transit ----------->|
+    |                      |                      |          (TLS)        |
+    |                      |                      |                       | set as masked env var
+    |                      |                      |                       | run job step
+    |                      |                      |                       |
+    |    (if leak detected later)                  |                       |
+    |                      |                      |                       |
+    |  LeakDetectionWorkflow <--- scan output --- |                       |
+    |                      |                      |                       |
+    |  AutoRotateWorkflow ----> RotationCascade --> rotate all mirrors    |
+```
 
-### SaaS Coordination (1.5-11 .. 1.5-15)
+## Use cases
 
-| Story | Title | Status |
-|-------|-------|--------|
-| 1.5-11 | GitHub App Authentication | Done |
-| 1.5-12 | SaaS Coordinator | Done |
-| 1.5-13 | GitHub Actions Worker Mode | Done |
-| 1.5-14 | Multi-Tenant Task Queue & Webhook Routing | Done |
-| 1.5-15 | SaaS API Key Provisioning | Done |
-
-### Secret-Management Track (1.5-16 .. 1.5-45)
-
-The secret-management track ships the **LLM-safe** secret pipeline: Elsa workflows hash-commit secret values before emitting them to LLMs; workers fetch plaintext from a secret broker via OIDC-issued short-lived tokens; leak detection + rotation close the loop.
-
-Epic 29 reuses these primitives for the **operator-facing cabinet** (platform + tenant admin UIs, rotation workflows for non-CI consumers like Postgres roles and Cranl env vars).
-
-| Story | Title | Status |
-|-------|-------|--------|
-| 1.5-16 | Secret Store Interface + Commitment Hash Protocol | Planned |
-| 1.5-17 | TammaVaultStore + Postgres schema + secret-broker HTTP service | Planned |
-| 1.5-18 | Secret Activities — Elsa C# wrappers over the secret broker HTTP API | Planned |
-| 1.5-19 | Secret workflows + `LlmWorkflowLaunchRegistry` + `alert_orchestrator` | Planned |
-| 1.5-20 | OIDC Trust Registry + Validator | Planned |
-| 1.5-21 | CI Fetch HTTP Endpoint | Planned |
-| 1.5-22 | `actions/fetch-secrets/` GitHub Action | Planned |
-| 1.5-23 | GitHub Actions Secrets Mirror (`GitHubSecretStore`) | Planned |
-| 1.5-24 | GitLab CI/CD Variables Mirror + CI Template | Planned |
-| 1.5-25 | Gitea + Forgejo Secret Stores | Planned |
-| 1.5-26 | Bitbucket + Azure DevOps Secret Stores + Pipeline Tasks | Planned |
-| 1.5-27 | ProbeSecretWorkflow & v1 Probe Handler Types | Planned |
-| 1.5-28 | LeakDetectionWorkflow — LLM Output Scanner + GitHub Secret-Scanning Webhook | Planned |
-| 1.5-29 | IRotationHandler + built-in handlers | Planned |
-| 1.5-30 | RotationCascadeWorkflow | Planned |
-| 1.5-31 | AutoRotateWorkflow — wires leak events to rotation cascade | Planned |
-| 1.5-32 | Secret import path — TLS certs, SSH keys, externally-generated credentials | Planned |
-| 1.5-33 | Drift detection via platform audit webhooks | Planned |
-| 1.5-34 | Non-GitHub git leak scanning — trufflehog + bundled rule set | Planned |
-| 1.5-35 | Cloud provider rotation handlers — AWS IAM, GCP, Azure | Planned |
-| 1.5-36 | KMS-backed root key — envelope encryption via AWS KMS, GCP KMS, Azure Key Vault | Planned |
-| 1.5-37 | Operator notification channels (Slack / Email / PagerDuty / Webhook) | Planned |
-| 1.5-38 | Cascade scheduling — cron-based automatic rotation | Planned |
-| 1.5-39 | Operator dashboard UI for secrets, rotations, and alerts | Planned |
-| 1.5-40 | Self-hosted git platform variants (GHES / GitLab SM / Bitbucket Server / Azure DevOps Server) | Planned |
-| 1.5-41 | mTLS transport between Elsa and the secret broker | Planned |
-| 1.5-42 | Post-Rotation Health Checks | Planned |
-| 1.5-43 | Custom Probe Types & Plugin Framework | Planned |
-| 1.5-44 | Secret Metadata CRUD | Planned |
-| 1.5-45 | MCP Tool Surface for Secret Management | Planned |
-
-## Architecture / key decisions
-
-1. **Core infra is complete**: 1.5-1..1.5-15 shipped as of the initial platform launch. Docker stack on Hetzner is the production deployment; SaaS coordinator orchestrates GitHub App installations.
-2. **Secret-management track is LLM-safe by design**: Elsa never sees plaintext secrets. Commitment-hash protocol (1.5-16) ensures workflow variables carry only hashes; CI fetches plaintext via OIDC tokens from the secret broker.
-3. **Epic 29 and Epic 1.5 share seams, not code**: Epic 1.5 owns the LLM-safe secret path (workflows, mirrors, leak detection). Epic 29 adds the operator cabinet on top. The `ISecretsService` seam is the same; rotation handlers (1.5-29, 29-6) are the same framework.
-4. **Platform mirrors are per-platform stores**: GitHub (libsodium), GitLab (plaintext), Gitea/Forgejo (plaintext), Bitbucket / Azure DevOps (platform-specific). Each mirror registers with the broker as an `ISecretStore`.
-5. **Rotation cascade on leak**: `LeakDetectionWorkflow` → `AutoRotateWorkflow` → `RotationCascadeWorkflow`. All handlers implement `IRotationHandler`; the cascade is saga-shaped with compensation.
-6. **KMS-backed root key deferred**: env-var KEK is the v1 design (per Doc 01 §8.2); KMS (1.5-36) ships when a trigger condition fires.
+- **Solo dev running self-hosted** wants **Tamma on their laptop**: `npm install -g @tamma/cli` → `tamma init` → `tamma start --label tamma-auto` → engine polls their repo in-process.
+- **Team running on Hetzner** wants **shared self-hosted deployment**: clone repo → copy env template → `docker compose up -d` → Cloudflare DNS → nginx reverse-proxies to `tamma-api`, `elsa-server`, `tamma-dashboard` → team hits `app.tamma.dev`.
+- **SaaS tenant** wants **zero-install onboarding**: install Tamma GitHub App on their org → `SaaSCoordinator` in `tamma api` discovers the installation → pushes a `workflow_dispatch` to a tenant repo → `tamma-worker.yml` spins up a runner → engine runs inside GitHub Actions using installation token.
+- **Platform operator** wants **to rotate a leaked API key across all mirrors atomically**: `LeakDetectionWorkflow` fires on GitHub secret-scanning webhook → `AutoRotateWorkflow` resolves the `IRotationHandler` for that store kind → `RotationCascadeWorkflow` rotates in vault, then GitHub secret, then GitLab mirror → compensation reverts on partial failure.
+- **Compliance auditor** wants **proof no LLM ever saw a secret plaintext**: inspect workflow variables — only hashes present; inspect broker audit log — every fetch has OIDC-attested consumer identity + short-lived TTL.
+- **K8s tenant** wants **to scale engine pods horizontally** (planned, Story 1.5-10): apply `tamma-deployment.yml` → Elsa scheduler distributes `SingleIssueCycle` instances → workers pull from shared RabbitMQ.
 
 ## Dependencies
 
-**Upstream**: Epic 1 (providers, platforms, CLI)
+**Upstream:**
+- [Epic 1](Epic-1-Foundation.md) — provides `@tamma/cli`, `TammaEngine`, `IGitPlatform`, `IAgentProvider`.
 
-**Downstream**:
-- [Epic 2](Epic-2-Autonomous-Loop.md), [Epic 19](Epic-19-Agent-Dispatch.md), [Epic 23](Epic-23-System-Monitoring.md), [Epic 25](Epic-25-Wiki-Site.md), all deployment-dependent epics
-- [Epic 28](Epic-28-DB-Per-Tenant.md) — consumes 1.5-16 for KEK primitives
-- [Epic 29](Epic-29-Secret-Management.md) — operator-facing cabinet on top of the secret-management track
-- [Epic 31](Epic-31-Multi-Git-Platform.md) — consumes 1.5-23..1.5-26 mirrors
+**Downstream:**
+- [Epic 2](Epic-2-Autonomous-Loop.md) — runs inside the service/CLI/SaaS modes shipped here.
+- [Epic 19](Epic-19-Agent-Dispatch.md) — uses the worker-mode dispatch pattern.
+- [Epic 23](Epic-23-System-Monitoring.md) — monitors the Hetzner Docker stack.
+- [Epic 25](Epic-25-Wiki-Site.md) — wiki site is deployed via the same CI pipeline.
+- [Epic 28](Epic-28-DB-Per-Tenant.md) — consumes the 1.5-16 KEK primitives for per-tenant envelope encryption.
+- [Epic 29](Epic-29-Secret-Management.md) — operator-facing cabinet builds on the 1.5-16..1.5-45 track.
+- [Epic 31](Epic-31-Multi-Git-Platform.md) — the platform secret mirrors in 1.5-23..1.5-26 are per-platform stores.
 
-## Open questions
+## Current state
 
-1. **Secret-management track scheduling**: the track is ~30 stories; does it ship as a Wave-3 block, or interleaved with Epic 29's cabinet work? Current plan: 1.5-16..1.5-22 first (broker + protocol), then Epic 29 Stories 29-1..29-3 (cabinet MVP), then interleave.
-2. **KMS activation trigger**: same trigger set as Story 28-13 (paying tenants with breach clauses, compliance finding, threat-model change, provider LF-graduation). 1.5-36 only lands when triggered.
-3. **Self-hosted git platform variants (1.5-40)**: GHES / GitLab Self-Managed / Bitbucket Server / Azure DevOps Server each have quirks. Defer until a tenant asks.
+**Landed** (all in production on Hetzner):
 
-## Story files
+- `tamma start` / `tamma server` / `tamma api` CLI modes (1.5-1..1.5-4).
+- Docker Compose stack (1.5-5): Postgres 17, RabbitMQ, ChromaDB, elsa-server (.NET 8), `tamma-api-dotnet`, `tamma-api` (Fastify), `tamma-engine`, `tamma-dashboard`, `elsa-studio`, `nginx-proxy`, optional OpenSearch.
+- Health checks + webhook integration (1.5-6), backup/recovery (1.5-7), doc/template/NPM publishing (1.5-8), binary installers (1.5-9).
+- GitHub App auth + SaaS Coordinator (1.5-11, 1.5-12).
+- GitHub Actions worker mode (1.5-13) — `tamma-worker.yml` template.
+- Multi-tenant task queue + webhook routing (1.5-14).
+- SaaS API key provisioning into repo Actions secrets (1.5-15).
 
-[Epic 1.5 stories on GitHub](/stories/epic-1.5/)
+**Planned** (design complete, not yet implemented):
 
----
+- 1.5-10 Kubernetes deployment — initial manifests in `apps/tamma-elsa/k8s/`; full story still open.
+- 1.5-16..1.5-22 Secret broker + commitment-hash protocol + OIDC trust + CI fetch endpoint + `actions/fetch-secrets/` action.
+- 1.5-23..1.5-26 Platform secret mirrors for GitHub / GitLab / Gitea / Forgejo / Bitbucket / Azure DevOps.
+- 1.5-27..1.5-31 Rotation & leak detection — `ProbeSecretWorkflow`, `LeakDetectionWorkflow`, `IRotationHandler`, `RotationCascadeWorkflow`, `AutoRotateWorkflow`.
+- 1.5-32..1.5-36 Advanced crypto — secret import, drift detection, KMS-backed root key (deferred until trigger fires; env-var KEK is v1).
+- 1.5-37..1.5-45 Ops & observability — notification channels, cascade scheduling, operator dashboard, mTLS, self-hosted platform variants, MCP tool surface.
 
-_Last updated: 2026-04-21_
+**Drift from briefs:**
+
+- The original Epic 1.5 scope was 10 stories (Core Deployment). It grew to 45 stories after the secret-management track was pulled in from what was initially planned as Epic 29. Epic 29 now owns only the operator-facing cabinet; Epic 1.5 owns the pipeline.
+- The original Story 1.5-4 brief bundled "Web Server API" and "Secret Management Integration" together. In practice, secret-management moved entirely into the 1.5-16..1.5-45 track and 1.5-4 delivered only the Fastify API scaffolding.
+- KMS-backed root key (1.5-36) is deferred per project decision (`MEMORY.md`: `Epic 28 KEK backend — ship env-var KEK, defer OpenBao/KMS`). The story stays in the epic but does not ship until a trigger fires (paying tenant with breach clause, compliance finding, threat-model change).
+- Production deployment uses `elsa-server` for workflow execution; the TypeScript `@tamma/orchestrator` package dispatches to Elsa rather than re-implementing the state machine in TS. Stories assume TS engine; actual execution is 60/40 split TS/C#.
+
+## See also
+
+- **Docs:** [docs/stories/epic-1.5/](/stories/epic-1.5/) — all 45 story briefs.
+- **Tech spec:** [tech-spec-epic-1.5.md](/stories/epic-1.5//tech-spec-epic-1.5.md).
+- **Related wiki pages:**
+  - [Deployment](Deployment) — Hetzner deployment runbook.
+  - [Secret Management](Secret-Management) — end-user view of the secret pipeline.
+  - [Architecture](/architecture/) — overall deployment topology.
+  - [Epic 29: Secret Management](Epic-29-Secret-Management.md) — operator cabinet on top of this track.
+  - [Epic 1: Foundation](Epic-1-Foundation.md) — the CLI + engine this epic packages.
+- **Code paths:**
+  - `packages/cli/src/commands/` — CLI mode commands.
+  - `packages/orchestrator/src/saas-coordinator.ts` — SaaS coordinator.
+  - `apps/tamma-elsa/docker-compose*.yml` — Docker stack.
+  - `apps/tamma-elsa/k8s/` — K8s manifests.
+  - `.github/workflows/` — CI pipelines.

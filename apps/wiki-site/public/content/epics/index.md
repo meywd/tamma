@@ -4,9 +4,9 @@ sidebar:
   order: 0
 ---
 
-All 33 epics for the Tamma project, organized by implementation status.
+All 37 epics for the Tamma project, organized by implementation status.
 
-_Last audited: 2026-04-21_
+_Last audited: 2026-07-24_
 
 ## Completed Epics (10)
 
@@ -62,7 +62,7 @@ _Last audited: 2026-04-21_
 
 | Epic | Name | Stories | Effort | Layer | Page |
 |------|------|---------|--------|-------|------|
-| 27 | Prompt Store — Multi-Tenant Prompt Management | 7 | 86h | 4 | [Epic-27-Prompt-Store](/epics/27-prompt-store/) |
+| 27 | Prompt Store — Multi-Tenant Prompt Management | 7 + 12 taxonomy stories (27-8..27-19) | 86h+ | 4 | [Epic-27-Prompt-Store](/epics/27-prompt-store/) |
 | 28 | Database-per-Tenant Isolation | 12 + 1 deferred | 265h | 4 | [Epic-28-DB-Per-Tenant](/epics/28-db-per-tenant/) |
 | 29 | Platform Secret Management | 10 | 166h | 4 | [Epic-29-Secret-Management](/epics/29-secret-management/) |
 | 30 | Pluggable Tenant Infrastructure Provisioning | 10 | 216h | 5 | [Epic-30-Pluggable-Provisioning](/epics/30-pluggable-provisioning/) |
@@ -70,6 +70,19 @@ _Last audited: 2026-04-21_
 | 33 | Per-Tenant Identity Providers | (deferred — trigger-gated) | 100–400h depending on tier | 5+ | [Epic-33-Per-Tenant-IdP](/epics/33-per-tenant-idp/) |
 
 > **Note**: Epic 32 is intentionally skipped (no folder under `docs/stories/`).
+
+## Workflow-Platform Wave (39–42)
+
+The document-lifecycle wave makes the platform's domain language explicit and extends the single quality lifecycle across the whole team. **Epic 39 is implemented** (spine + all producer migrations); **40, 41, 42 are scoped/planned (backlog, not built).**
+
+| Epic | Name | Stories | Status | Page |
+|------|------|---------|--------|------|
+| **39** | Typed Work Documents & the Universal Lifecycle | 21 | **Implemented** — spine complete, producer migrations 39-12…39-15 merged; 39-1/16/17/21 remain | [Epic-39-Document-Lifecycle](/epics/39-document-lifecycle/) |
+| 40 | Resumable Coding Execution | 7 | Planned / docs — backlog | [Epic-40-Resumable-Coding](/epics/40-resumable-coding/) |
+| 41 | Full-Team Workflow Coverage | 28 + 41-29 router | Planned / docs — backlog | [Epic-41-Full-Team-Workflows](/epics/41-full-team-workflows/) |
+| 42 | Agent Capability & Tool Layer | 9 | Planned / docs — backlog | [Epic-42-Tool-Layer](/epics/42-tool-layer/) |
+
+> **Epic 27 taxonomy stories (27-8..27-19):** 27-8 Convention Store Schema, 27-9 Convention Store Service, 27-10 Convention Store API, 27-11 Convention Store Admin UI, 27-12 Convention Store Tenant UI, 27-13 Convention Store Integration, 27-14 Convention Store Events, 27-15 AgentRole/AgentAction Taxonomy + RolePhaseMap Rebuild, 27-16 Taxonomy Codegen (Prompt + Convention Seed), 27-17 Taxonomy Drift Build Test, 27-18 Prompt Store Taxonomy Reshape, 27-19 Workflow Dispatch-Site Migration. See [Role/Action Taxonomy](Role-Action-Taxonomy.md) for the (role,action) exact lookup design.
 
 ## Audit
 
@@ -80,6 +93,8 @@ _Last audited: 2026-04-21_
 - [Roadmap](/roadmap/) — full timeline and status
 - [Stories](/stories/) — all user stories across all epics
 - [Architecture](/architecture/) — system architecture overview
+- [Document Lifecycle](Document-Lifecycle) — Epic 39 root topic page
+- [Resumable Workflows](Resumable-Workflows) — the resumable-by-design standard (Epics 39/40/41)
 - [Secret Management](Secret-Management) — Epic 29 root topic page
 - [Multi-Tenant Provisioning](Multi-Tenant-Provisioning) — Epic 30 root topic page
 - [Multi Git Platform](Multi-Git-Platform) — Epic 31 root topic page
