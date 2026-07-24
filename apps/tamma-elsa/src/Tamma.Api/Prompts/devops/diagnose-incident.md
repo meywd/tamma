@@ -1,45 +1,39 @@
 ---
-variables: role, errorContext, stackTrace, relevantCode, conventions, recentChanges
-enableTools: true
-maxTokens: 8192
-version: 1
+variables: role, planJson, documentJson, conventions
+enableTools: false
+maxTokens: 4096
+version: 2
 ---
-You are a {{role}} diagnosing a production incident and producing the fix.
+You are a {{role}} reviewing a DRAFT triage decision before it is accepted. Critique it through your {{role}} lens — do not re-classify it yourself; judge whether the draft's classification is sound and flag concerns.
 
-## Error Context
-{{errorContext}}
+## Draft Triage Decision
+{{planJson}}
 
-## Stack Trace
-{{stackTrace}}
-
-## Relevant Code
-{{relevantCode}}
+## Full Document
+{{documentJson}}
 
 ## Conventions
 {{conventions}}
 
-## Recent Changes
-{{recentChanges}}
+Assess whether the draft correctly weighs operational / incident impact: is a production-affecting incident under-prioritized, or its automation level unsafe for infra changes?
 
-Identify the root cause (not just the symptom) and provide the minimal fix that addresses it. Prefer the change that restores service safely first, and distinguish immediate mitigation from the durable fix in your fix strategy.
-
-Output as JSON:
+Return ONLY a single JSON object of this EXACT shape:
 ```json
 {
-  "diagnosis": {
-    "error": "...",
-    "rootCause": "...",
-    "affectedFiles": ["..."],
-    "fixStrategy": "...",
-    "confidence": "high|medium|low"
-  },
-  "fix": {
-    "files": [{"path": "...", "changes": "..."}]
-  },
-  "verification": {
-    "commands": ["..."],
-    "expectedOutput": "...",
-    "edgeCases": ["..."]
+  "issues": [
+    {
+      "task": "General",
+      "severity": "critical|major|minor|suggestion",
+      "category": "...",
+      "issue": "...",
+      "recommendation": "..."
+    }
+  ],
+  "verdict": {
+    "decision": "APPROVE|REQUEST_CHANGES|NEEDS_DISCUSSION",
+    "summary": "...",
+    "blockingIssues": []
   }
 }
 ```
+If the draft classification is sound, return an empty `issues` array and `APPROVE`.

@@ -84,10 +84,12 @@ public class ResumableStandardStructuralTests
             // [ResumeBehavior(LatestStateReEntry)] with the ComputeReEntryPositionActivity gate
             // (rebuilt as a document-lifecycle binding producing a typed TestSpec that consumes the Plan).
             ["TestingWorkflow"] = "testing composite, delegates to sub-workflows (burn-down: 39-15+).",
-            ["TriageContextGatheringWorkflow"] = "triage context-scan producer, no suspend gate (burn-down: 39-14+).",
-            ["TriageItemCycleWorkflow"] = "triage item-cycle composite, delegates to sub-workflows (burn-down: 39-14+).",
-            ["TriagePODecisionWorkflow"] = "triage PO-decision leaf, runs to completion (burn-down: 39-14+).",
-            ["TriagePanelReviewWorkflow"] = "triage-review panel, runs to completion (burn-down: 39-14+).",
+            // TriageContextGatheringWorkflow + TriagePODecisionWorkflow + TriageItemCycleWorkflow
+            // burned down in Story 39-15 — all now declare [ResumeBehavior(LatestStateReEntry)] with
+            // the ComputeReEntryPositionActivity gate (the context + PO stages are document-lifecycle
+            // bindings; the cycle re-enters on the item's accepted triage-decision with an
+            // apply-idempotence gate). TriagePanelReviewWorkflow was DELETED (its 4-role panel is the
+            // lifecycle REVIEW stage now).
             ["UpdateIssueStatusWorkflow"] = "issue-status side-effect leaf, no suspend/re-entry (burn-down: 39-15+).",
         };
 
@@ -256,6 +258,35 @@ public class ResumableStandardStructuralTests
         violations.Should().BeEmpty(
             "every LatestStateReEntry/Both workflow must wire the generic ComputeReEntryPositionActivity:" +
             Environment.NewLine + string.Join(Environment.NewLine, violations));
+    }
+
+    // ── Universal pin (Story 39-15 D7c) — every remaining allowlist entry is a NON-producer ──
+
+    [Test]
+    public void UniversalPin_EveryLegacyResumeAllowlistEntry_IsNonDocumentProducer()
+    {
+        // (c) — after the producer wave (39-12..39-15), NO workflow that dispatches a document-lifecycle
+        // binding (a document producer) may remain on the legacy resume allowlist — every producer now
+        // DECLARES [ResumeBehavior] and was removed from the allowlist. The allowlist's remaining entries
+        // are all NON-document-producers (free-text feeds, side-effect leaves, platform sagas, and
+        // orchestration composites that delegate to sub-workflows). The allowlist is therefore NOT empty
+        // (the aspirational D7 "empty" is reached only when the non-producer residual is also migrated),
+        // but it is HONEST: no un-migrated document producer hides in it. Documented in
+        // .dev/findings/39-15-slice3-triage-migration.md.
+        var producerBindingWorkflows = TaxonomyDriftBuildTests.ScanLifecycleBindingDispatches()
+            .Select(p => p.Workflow)
+            .ToHashSet();
+
+        var producersStillAllowlisted = LegacyResumeAllowlist.Keys
+            .Where(producerBindingWorkflows.Contains)
+            .OrderBy(w => w)
+            .Select(w => $"  {w}: dispatches a document-lifecycle binding (a document producer) but is still " +
+                          "on LegacyResumeAllowlist — it must DECLARE [ResumeBehavior] and be removed.")
+            .ToList();
+
+        producersStillAllowlisted.Should().BeEmpty(
+            "no document producer may remain on the legacy resume allowlist (D7c):" +
+            Environment.NewLine + string.Join(Environment.NewLine, producersStillAllowlisted));
     }
 
     // ── AC2 proven on a real workflow ──────────────────────────────────

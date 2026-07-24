@@ -106,7 +106,9 @@ public static class RolePhaseMap
                 AgentAction.AddressReviewComments,
                 AgentAction.SelfReview,
                 AgentAction.ReviewFeasibility,
-                AgentAction.TriageDefect),
+                AgentAction.TriageDefect,
+                // Story 39-15 (D5) — the split Findings-producing triage-context cell.
+                AgentAction.TriageContextScan),
 
             // tester — QA, test engineering
             [AgentRole.Tester] = FreezeSet(
@@ -408,6 +410,30 @@ public static class RolePhaseMap
         _ => throw new ArgumentOutOfRangeException(
             nameof(role), role, $"Role '{role.ToWire()}' is not on the triage panel."),
     };
+
+    /// <summary>
+    /// Story 39-15 (39-7 extension) — the DOC-TYPE-AWARE panel action selector. The
+    /// 39-7 review producers run ONE aggregation/roster engine over every document
+    /// type; the per-member review action, however, depends on WHAT is being
+    /// reviewed. A <c>triage-decision</c> draft is critiqued through each panellist's
+    /// TRIAGE lens (<see cref="GetTriageActionForRole"/>: Security→assess-vulnerability,
+    /// Developer/Tester→triage-defect, Devops→diagnose-incident); every other document
+    /// type is critiqued through the plan/task REVIEW lens
+    /// (<see cref="GetReviewActionForRole"/>). This composes the two existing maps — it
+    /// does NOT introduce a third vocabulary — so the panel stays one engine,
+    /// doc-type-parameterized (never a triage-local aggregator).
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Thrown for a role not on the selected panel (triage roster for
+    /// <c>triage-decision</c>, the document-review roster otherwise).
+    /// </exception>
+    public static AgentAction GetPanelActionForRole(AgentRole role, string? docTypeKey)
+        => string.Equals(docTypeKey, TriageDecisionDocTypeKey, StringComparison.Ordinal)
+            ? GetTriageActionForRole(role)
+            : GetReviewActionForRole(role);
+
+    /// <summary>The <c>triage-decision</c> document-type key the panel switches roster/action on.</summary>
+    public const string TriageDecisionDocTypeKey = "triage-decision";
 
     /// <summary>
     /// Throw if <paramref name="role"/> is empty, forbidden, or not in

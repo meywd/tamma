@@ -1,6 +1,8 @@
 using System.Text;
 using System.Text.Json;
 using Tamma.Activities.ADL;
+using Tamma.Core.Documents;
+using Tamma.Core.Documents.Types;
 
 namespace Tamma.ElsaServer.Workflows.Helpers;
 
@@ -166,6 +168,47 @@ public static class TriageItemCycleHelper
 
     private static CycleDecision Empty(string status)
         => new(status, "", "", "", "", Array.Empty<string>(), "");
+
+    /// <summary>
+    /// Story 39-15 (D9) — the typed-decision adapter that replaces the legacy
+    /// <see cref="ParseDecision"/> at the cycle's decision gate. Deserializes the accepted
+    /// <see cref="TriageDecision"/> document body (the terminal lifecycle revision payload)
+    /// and maps it onto the cycle's <see cref="CycleDecision"/> view. A body that
+    /// deserializes to a TriageDecision carrying all four closed-enum classification fields
+    /// is <see cref="TriagePoDecisionHelper.StatusOk"/> (the typed-exit predicate); an
+    /// empty / unreadable / field-incomplete body yields an empty-status decision — which
+    /// <see cref="IsDecisionApplicable"/> treats as NOT applicable (fail-closed, never a
+    /// fabricated clean decision).
+    /// </summary>
+    public static CycleDecision ReadTypedDecision(string? documentJson)
+    {
+        if (string.IsNullOrWhiteSpace(documentJson))
+            return Empty("");
+        try
+        {
+            var d = JsonSerializer.Deserialize<Tamma.Core.Documents.Types.TriageDecision>(documentJson!, DocumentJson.Options);
+            if (d is null)
+                return Empty("");
+
+            var complete = !string.IsNullOrWhiteSpace(d.Priority)
+                && !string.IsNullOrWhiteSpace(d.Type)
+                && !string.IsNullOrWhiteSpace(d.Complexity)
+                && !string.IsNullOrWhiteSpace(d.Automation);
+
+            return new CycleDecision(
+                complete ? TriagePoDecisionHelper.StatusOk : "",
+                d.Priority ?? "",
+                d.Type ?? "",
+                d.Complexity ?? "",
+                d.Automation ?? "",
+                (d.Labels ?? Array.Empty<string>()).ToList(),
+                d.Comment ?? "");
+        }
+        catch (JsonException)
+        {
+            return Empty("");
+        }
+    }
 
     /// <summary>
     /// #1 — the decision-OK gate. A decision is applicable ONLY when the PO step

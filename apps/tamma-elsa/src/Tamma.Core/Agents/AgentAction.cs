@@ -69,6 +69,10 @@ public enum AgentAction
     [Wire("address-review-comments")] AddressReviewComments,
     [Wire("self-review")] SelfReview,
     [Wire("review-feasibility")] ReviewFeasibility,
+    // Story 39-15 (D5) — the SPLIT triage-context producer cell. Distinct from the
+    // free-text (developer, context-scan) so the Findings-producing triage-context
+    // use is a document contract while ContextGatheringWorkflow keeps context-scan free-text.
+    [Wire("triage-context-scan")] TriageContextScan,
 
     // tester
     [Wire("plan-test-strategy")] PlanTestStrategy,

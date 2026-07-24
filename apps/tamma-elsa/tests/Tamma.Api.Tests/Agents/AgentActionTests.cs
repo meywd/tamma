@@ -32,7 +32,10 @@ public class AgentActionTests
         // issue-decomposition token under senior_developer) + 1 incorporate-answers
         // (product_owner) and 1 propose-design (architect) — taxonomy split so each
         // (role, action) cell carries exactly one output contract.
-        Enum.GetValues<AgentAction>().Length.Should().Be(79);
+        // Story 39-15 (D5) — 79 → 80: the split (developer, triage-context-scan) action
+        // was minted so the Findings-producing triage-context use is a document contract
+        // while ContextGatheringWorkflow keeps context-scan free-text.
+        Enum.GetValues<AgentAction>().Length.Should().Be(80);
     }
 
     [TestCase("context-scan", AgentAction.ContextScan)]
