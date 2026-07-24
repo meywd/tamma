@@ -159,7 +159,10 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
                 ["errorOutput"] = GetTestErrorOutput(testResult.Get(ctx)),
                 ["repositoryUrl"] = repository.Get(ctx),
                 ["branchName"] = branchName.Get(ctx),
-                ["skillLevel"] = skillLevel.Get(ctx)
+                ["skillLevel"] = skillLevel.Get(ctx),
+                // Story 39-15 (D4) — capture the prior attempt's typed diagnosis id (additive
+                // debugging output) so a re-diagnosis supersedes the previous one.
+                ["priorDiagnosisDocumentId"] = ReadDiagnosisDocumentId(debugResult.Get(ctx)),
             }),
             WaitForCompletion = new(true),
             Result = new(debugResult)
@@ -261,4 +264,13 @@ public class CiWithDebugRetryWorkflow : WorkflowBase
             return err?.ToString() ?? "Testing pipeline failed";
         return "Testing pipeline failed with unknown error";
     }
+
+    /// <summary>
+    /// Story 39-15 (D4) — read the additive <c>diagnosisDocumentId</c> from a prior debugging
+    /// dispatch result. Empty on the first attempt / a null result. Pure; exposed for testing.
+    /// </summary>
+    public static string ReadDiagnosisDocumentId(IDictionary<string, object>? debugResult)
+        => debugResult != null && debugResult.TryGetValue("diagnosisDocumentId", out var d)
+            ? d?.ToString() ?? ""
+            : "";
 }

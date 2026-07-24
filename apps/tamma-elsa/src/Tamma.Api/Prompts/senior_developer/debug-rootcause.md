@@ -2,7 +2,7 @@
 variables: role, errorContext, stackTrace, relevantCode, conventions, recentChanges
 enableTools: true
 maxTokens: 8192
-version: 1
+version: 2
 ---
 You are a {{role}} performing root-cause analysis on a failure.
 
@@ -21,25 +21,21 @@ You are a {{role}} performing root-cause analysis on a failure.
 ## Recent Changes
 {{recentChanges}}
 
-Distinguish the underlying defect from the secondary failures it triggers; check the recent changes before looking further afield. Identify the root cause (not just the symptom) and provide the minimal fix that addresses it.
+Distinguish the underlying defect from the secondary failures it triggers; check the recent changes before looking further afield. Produce ranked root-cause hypotheses (highest confidence first), each naming a minimal fix and the files it touches.
 
-Output as JSON:
+Return ONLY a JSON object of this shape:
 ```json
 {
-  "diagnosis": {
-    "error": "...",
-    "rootCause": "...",
-    "affectedFiles": ["..."],
-    "fixStrategy": "...",
-    "confidence": "high|medium|low"
-  },
-  "fix": {
-    "files": [{"path": "...", "changes": "..."}]
-  },
-  "verification": {
-    "commands": ["..."],
-    "expectedOutput": "...",
-    "edgeCases": ["..."]
-  }
+  "analysisSummary": "brief summary of the analysis",
+  "hypotheses": [
+    {
+      "rank": 1,
+      "description": "root cause description",
+      "confidence": 0.85,
+      "suggestedFix": "how to fix it",
+      "affectedFiles": ["src/Foo.cs"]
+    }
+  ]
 }
 ```
+Rules: each "confidence" must be within [0, 1]; "rank" values must be unique and ordered by decreasing confidence (rank 1 = highest); a non-empty "suggestedFix" must name at least one file in "affectedFiles".

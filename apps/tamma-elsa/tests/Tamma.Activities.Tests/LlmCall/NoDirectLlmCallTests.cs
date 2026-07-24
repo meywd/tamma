@@ -208,7 +208,9 @@ public class NoDirectLlmCallTests
         typeof(AnalyzeCodeActivity),
         typeof(ApplyRefactoringActivity),
         typeof(Tamma.Activities.ADL.ApplyReviewFixesActivity),
-        typeof(AIDiagnosisActivity),
+        // AIDiagnosisActivity retired in Story 39-15 — diagnosis production migrated onto the
+        // debug-diagnosis lifecycle binding (produces a typed Diagnosis via the mediated
+        // (senior_developer, debug-rootcause) cell), so there is no diagnosis activity to pin here.
         // Debugging.md §Missing #9 — Refine + regression-test gen were the two debug
         // activities still on the direct /api/engine/execute-task callback; now mediated.
         typeof(RefineHypothesisActivity),

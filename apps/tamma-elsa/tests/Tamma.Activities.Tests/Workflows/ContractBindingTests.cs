@@ -184,6 +184,18 @@ public class ContractBindingTests
                 AnyOf("\"testCases\"", "\"tests\"", "JSON array"),
             ]),
 
+            // DebugDiagnosisWorkflow (Story 39-15 D4) binds the (senior_developer, debug-rootcause)
+            // cell as the produce step of its document-lifecycle binding; the shape authority is the
+            // typed validator Tamma.Core/Documents/Types/Diagnosis.cs (DiagnosisDocumentType.Validate).
+            // Replaces the retired AIDiagnosisActivity hand-parser; the prompt was rewritten from the
+            // old diagnosis/fix/verification shape to the canonical camelCase Diagnosis wire.
+            [("senior_developer", "debug-rootcause")] = new("DiagnosisDocumentType.Validate",
+            [
+                One("\"analysisSummary\""), One("\"hypotheses\""), One("\"rank\""),
+                One("\"description\""), One("\"confidence\""), One("\"suggestedFix\""),
+                One("\"affectedFiles\""),
+            ]),
+
             // AssessmentWorkflow inline ParseQuestionsResult (AssessmentWorkflow.cs
             // ~l.194-245): bare JSON array of strings, or {"questions":[...]}.
             [("product_owner", "generate-assessment-questions")] = new("AssessmentWorkflow.ParseQuestionsResult",

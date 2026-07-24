@@ -298,6 +298,10 @@ public class TddWithDebugRetryWorkflow : WorkflowBase
                 ["branchName"] = branchName.Get(ctx),
                 ["skillLevel"] = skillLevel.Get(ctx),
                 ["tenantId"] = tenantId.Get(ctx),
+                // Story 39-15 (D4) — capture the prior attempt's typed diagnosis id (additive
+                // debugging output) so attempt N's Diagnosis supersedes N-1's (the time-travel
+                // lineage). Empty on the first attempt; carried from the previous debugResult after.
+                ["priorDiagnosisDocumentId"] = ReadDiagnosisDocumentId(debugResult.Get(ctx)),
             }),
             WaitForCompletion = new(true),
             Result = new(debugResult)
@@ -514,4 +518,14 @@ public class TddWithDebugRetryWorkflow : WorkflowBase
             ? $"TDD debugging escalated after {attempts}/{maxRetries} attempt(s): {detail}"
             : $"TDD did not converge after {attempts}/{maxRetries} debug attempt(s): {detail}";
     }
+
+    /// <summary>
+    /// Story 39-15 (D4) — read the additive <c>diagnosisDocumentId</c> from a prior debugging
+    /// dispatch result (the typed diagnosis id). Empty on the first attempt / a null result, so
+    /// the next attempt supersedes the prior diagnosis. Pure; exposed for unit testing.
+    /// </summary>
+    public static string ReadDiagnosisDocumentId(IDictionary<string, object>? debugResult)
+        => debugResult != null && debugResult.TryGetValue("diagnosisDocumentId", out var d)
+            ? d?.ToString() ?? ""
+            : "";
 }

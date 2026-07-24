@@ -52,7 +52,10 @@ public class ResumableStandardStructuralTests
             ["CodeReviewWorkflow"] = "code-review leaf, runs to completion (burn-down: 39-14+).",
             ["ContextGatheringWorkflow"] = "context-scan producer, no suspend gate (burn-down: 39-12+).",
             ["CreateTenantWorkflow"] = "platform provisioning saga, no document lifecycle (burn-down: n/a — platform).",
-            ["DebuggingWorkflow"] = "debug leaf, runs to completion (burn-down: 39-15+).",
+            // DebuggingWorkflow burned down in Story 39-15 — it now declares
+            // [ResumeBehavior(LatestStateReEntry)] with the ComputeReEntryPositionActivity gate
+            // (its diagnosis step is a debug-diagnosis document-lifecycle binding; the child lifecycle
+            // owns the accept-gate bookmark this workflow awaits).
             ["DeleteTenantWorkflow"] = "platform deprovisioning saga, no document lifecycle (burn-down: n/a — platform).",
             ["DeploymentPipelineWorkflow"] = "deploy pipeline, no document-decision suspend (burn-down: 39-15+).",
             ["DesignDeliveryWorkflow"] = "39-13 pre-ACCEPT delivery leaf (emit GENERATED/DELIVERED + deliver), runs to completion, no suspend/re-entry (burn-down: n/a — delivery leaf).",
