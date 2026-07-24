@@ -154,6 +154,131 @@ public class DocumentLifecycleHelperTests
         act.Should().Throw<TammaError>().Where(e => e.Code == "DOCUMENT.STATE.ILLEGAL_TRANSITION");
     }
 
+    // ── supersession chain — a repair INHERITS its chain position ──────
+    // (.dev/bugs/repair-after-revise-breaks-supersession-chain.md)
+
+    [Test]
+    public void ResolveSupersedes_ProduceStartsTheChain_ReviseExtendsIt()
+    {
+        var state = NewState(2, 2);
+        DocumentLifecycleHelper.ResolveSupersedes(state, DocumentLifecycleHelper.DraftOrigin.Produce)
+            .Should().BeNull("the first draft supersedes nothing");
+
+        state = Ingest(state, DocumentLifecycleHelper.DraftOrigin.Produce);
+        DocumentLifecycleHelper.ResolveSupersedes(state, DocumentLifecycleHelper.DraftOrigin.Revise)
+            .Should().Be(state.Current!.Id, "a revise supersedes the draft that was reviewed");
+    }
+
+    [Test]
+    public void ResolveSupersedes_RepairOfAFirstDraft_SupersedesNothing()
+    {
+        var state = Ingest(NewState(2, 2), DocumentLifecycleHelper.DraftOrigin.Produce);
+        DocumentLifecycleHelper.ResolveSupersedes(state, DocumentLifecycleHelper.DraftOrigin.Repair)
+            .Should().BeNull("a repair of the first draft inherits its null edge — it opens no chain");
+    }
+
+    [Test]
+    public void ResolveSupersedes_RepairInsideAReviseRound_InheritsTheChainPosition()
+    {
+        // produce → revise → (validate fails) → repair. The repair REPLACES the revision it
+        // repairs, so it keeps pointing at the draft that revision superseded. Deriving the
+        // edge from "is this a revise?" alone mints it with a NULL edge and orphans the round.
+        var state = Ingest(NewState(2, 2), DocumentLifecycleHelper.DraftOrigin.Produce);
+        var first = state.Current!.Id;
+        state = Ingest(state, DocumentLifecycleHelper.DraftOrigin.Revise);
+        state = Ingest(state, DocumentLifecycleHelper.DraftOrigin.Repair);
+
+        state.Current!.SupersedesDocumentId.Should().Be(first,
+            "the repaired revision holds the chain position of the revision it replaces");
+    }
+
+    [Test]
+    public void ConsecutiveRepairsInsideAReviseRound_AllInheritTheSameEdge()
+    {
+        // Repair is bounded but repeatable; every repair turn in the round replaces the
+        // previous one at the SAME chain position, so the edge never drifts and never
+        // multiplies (only the surviving draft ever reaches a persist site).
+        var state = Ingest(NewState(2, maxRepair: 3), DocumentLifecycleHelper.DraftOrigin.Produce);
+        var first = state.Current!.Id;
+        state = Ingest(state, DocumentLifecycleHelper.DraftOrigin.Revise);
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            state = Ingest(state, DocumentLifecycleHelper.DraftOrigin.Repair);
+            state.Current!.SupersedesDocumentId.Should().Be(first,
+                $"repair turn {attempt + 1} replaces its predecessor at the same chain position");
+        }
+    }
+
+    [Test]
+    public void ProduceReviewReviseRepairAccept_PersistedChainIsUnbroken()
+    {
+        // The lifecycle-level pin: drive the exact 39-6 graph order for
+        // produce → review → revise → (validate fails) → repair → accept, collecting the
+        // envelopes at the graph's TWO persist sites (PersistRevised at REVISION_STARTED,
+        // Persist* at the terminal), then assert the resulting document_instances chain.
+        var state = NewState(maxRounds: 2, maxRepair: 2);
+        var persisted = new List<DocumentEnvelope>();
+
+        // PRODUCE → VALIDATE (ok) → REVIEW → route = revise.
+        state = Ingest(state, DocumentLifecycleHelper.DraftOrigin.Produce);
+        var produced = state.Current!;
+        state = AppendReview(state);
+        DocumentLifecycleHelper.ComputeReviewRoute(state, ConcernsReviewJson())
+            .Should().Be(DocumentLifecycleHelper.ReviewRoute.Revise);
+
+        // REVISE — PersistRevised writes the about-to-be-superseded draft first.
+        persisted.Add(state.Current!);
+        state = DocumentLifecycleHelper.IncrementRound(state);
+        state = Ingest(state, DocumentLifecycleHelper.DraftOrigin.Revise);
+        var revised = state.Current!;
+        revised.SupersedesDocumentId.Should().Be(produced.Id, "the revision extends the chain");
+
+        // VALIDATE fails on the revision → REPAIR (inside the revise round).
+        state = DocumentLifecycleHelper.WithViolations(state, new[]
+        {
+            new DocumentViolation("NO_TASKS", "nothing decomposed"),
+        });
+        DocumentLifecycleHelper.ShouldRepair(state).Should().BeTrue();
+        state = DocumentLifecycleHelper.IncrementRepairAttempts(state);
+        state = Ingest(state, DocumentLifecycleHelper.DraftOrigin.Repair);
+        var repaired = state.Current!;
+
+        // VALIDATE (ok) → REVIEW approves → ACCEPT → the terminal persists the final draft.
+        state = AppendReview(state);
+        DocumentLifecycleHelper.ComputeReviewRoute(state, ApproveReviewJson())
+            .Should().Be(DocumentLifecycleHelper.ReviewRoute.Accept);
+        persisted.Add(state.Current!);
+
+        persisted.Select(e => e.Id).Should().Equal(new[] { produced.Id, repaired.Id },
+            "the store sees the superseded first draft and the accepted repaired revision");
+        persisted.Should().NotContain(e => e.Id == revised.Id,
+            "the revision the repair replaced never reaches a persist site — which is precisely why " +
+            "inheriting its edge cannot double-fill the unique filtered index");
+
+        AssertUnbrokenChain(persisted);
+    }
+
+    /// <summary>
+    /// Assert a persisted revision list is ONE unbroken supersession chain: a single
+    /// root, every later row superseding its predecessor, and no prior gaining two
+    /// successors (the store's unique filtered index on <c>supersedes_document_id</c>).
+    /// </summary>
+    private static void AssertUnbrokenChain(IReadOnlyList<DocumentEnvelope> rows)
+    {
+        rows.Should().NotBeEmpty();
+        rows[0].SupersedesDocumentId.Should().BeNull("the chain has exactly one root");
+        for (var i = 1; i < rows.Count; i++)
+            rows[i].SupersedesDocumentId.Should().Be(rows[i - 1].Id,
+                $"row {i} must supersede its predecessor — a null edge silently orphans the chain");
+
+        rows.Where(r => r.SupersedesDocumentId is not null)
+            .Select(r => r.SupersedesDocumentId!.Value)
+            .Should().OnlyHaveUniqueItems(
+                "a prior may gain at most ONE successor row (DocumentInstanceRepository's unique " +
+                "filtered index on supersedes_document_id 23505s on a second)");
+    }
+
     // ── AC4 — termination property tests ───────────────────────────────
 
     [Test]
@@ -352,6 +477,22 @@ public class DocumentLifecycleHelperTests
         var producer = DocumentProducer.Create("senior_developer", "decompose-issue", "llm-call");
         var envelope = DocumentLifecycleHelper.MintDraft(
             state, doc.RootElement.Clone(), producer, state.Current?.Id, DateTimeOffset.UtcNow);
+        return DocumentLifecycleHelper.AppendDraft(state, envelope);
+    }
+
+    /// <summary>
+    /// Mint + append a draft exactly as the workflow's <c>IngestDraft</c> does: the
+    /// supersession edge comes from <c>ResolveSupersedes(state, origin)</c>, so this
+    /// mirrors the produce/repair/revise ingest sites rather than re-deriving them.
+    /// </summary>
+    private static DocumentLifecycleHelper.LifecycleState Ingest(
+        DocumentLifecycleHelper.LifecycleState state, DocumentLifecycleHelper.DraftOrigin origin)
+    {
+        using var doc = JsonDocument.Parse("{\"summary\":\"s\"}");
+        var producer = DocumentProducer.Create("senior_developer", "decompose-issue", "llm-call");
+        var envelope = DocumentLifecycleHelper.MintDraft(
+            state, doc.RootElement.Clone(), producer,
+            DocumentLifecycleHelper.ResolveSupersedes(state, origin), DateTimeOffset.UtcNow);
         return DocumentLifecycleHelper.AppendDraft(state, envelope);
     }
 

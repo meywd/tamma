@@ -287,7 +287,8 @@ public class DocumentLifecycleWorkflow : WorkflowBase
             Value = new(ctx =>
             {
                 var state = DocumentLifecycleHelper.Deserialize(stateJson.Get(ctx));
-                var (newState, ok, _) = IngestDraft(produceResult.Get(ctx), state, isRevise: false);
+                var (newState, ok, _) = IngestDraft(
+                    produceResult.Get(ctx), state, DocumentLifecycleHelper.DraftOrigin.Produce);
                 producedOk.Set(ctx, ok);
                 lastDispatchOk.Set(ctx, ok);
                 UpdateCurrent(ctx, newState, currentDocId, currentDocJson, currentRound);
@@ -405,7 +406,11 @@ public class DocumentLifecycleWorkflow : WorkflowBase
             Value = new(ctx =>
             {
                 var state = DocumentLifecycleHelper.Deserialize(stateJson.Get(ctx));
-                var (newState, ok, _) = IngestDraft(repairResult.Get(ctx), state, isRevise: false);
+                // A repair REPLACES the draft it repairs at the same chain position —
+                // it inherits that draft's supersedes edge (null for a first draft),
+                // never resets it (.dev/bugs/repair-after-revise-breaks-supersession-chain.md).
+                var (newState, ok, _) = IngestDraft(
+                    repairResult.Get(ctx), state, DocumentLifecycleHelper.DraftOrigin.Repair);
                 lastDispatchOk.Set(ctx, ok);
                 UpdateCurrent(ctx, newState, currentDocId, currentDocJson, currentRound);
                 return DocumentLifecycleHelper.Serialize(newState);
@@ -552,7 +557,8 @@ public class DocumentLifecycleWorkflow : WorkflowBase
             Value = new(ctx =>
             {
                 var state = DocumentLifecycleHelper.Deserialize(stateJson.Get(ctx));
-                var (newState, ok, _) = IngestDraft(reviseResult.Get(ctx), state, isRevise: true);
+                var (newState, ok, _) = IngestDraft(
+                    reviseResult.Get(ctx), state, DocumentLifecycleHelper.DraftOrigin.Revise);
                 lastDispatchOk.Set(ctx, ok);
                 UpdateCurrent(ctx, newState, currentDocId, currentDocJson, currentRound);
                 return DocumentLifecycleHelper.Serialize(newState);
@@ -1154,9 +1160,16 @@ public class DocumentLifecycleWorkflow : WorkflowBase
         currentRound.Set(ctx, state.Round);
     }
 
-    /// <summary>Ingest a produce/repair/revise result into a fresh draft envelope.</summary>
+    /// <summary>
+    /// Ingest a produce/repair/revise result into a fresh draft envelope. The
+    /// supersession edge is derived from the producer turn through the pure
+    /// <see cref="DocumentLifecycleHelper.ResolveSupersedes"/> (D1) — a repair
+    /// INHERITS the current chain position rather than resetting it, so a repair
+    /// inside a revise round does not orphan that round's chain.
+    /// </summary>
     private static (DocumentLifecycleHelper.LifecycleState State, bool Ok, string PayloadJson) IngestDraft(
-        IDictionary<string, object>? result, DocumentLifecycleHelper.LifecycleState state, bool isRevise)
+        IDictionary<string, object>? result, DocumentLifecycleHelper.LifecycleState state,
+        DocumentLifecycleHelper.DraftOrigin origin)
     {
         if (!ReadSuccessFlag(result))
             return (state, false, "{}");
@@ -1179,7 +1192,7 @@ public class DocumentLifecycleWorkflow : WorkflowBase
 
         var producer = DocumentProducer.Create(
             state.ProducerRole, state.ProducerAction, DocumentLifecycleHelper.ProducerWorkflowDefinitionId);
-        var supersedes = isRevise ? state.Current?.Id : null;
+        var supersedes = DocumentLifecycleHelper.ResolveSupersedes(state, origin);
         var envelope = DocumentLifecycleHelper.MintDraft(state, payload, producer, supersedes, DateTimeOffset.UtcNow);
         return (DocumentLifecycleHelper.AppendDraft(state, envelope), true, payloadJson);
     }

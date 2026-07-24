@@ -2,7 +2,7 @@
 
 **Date**: 2026-07-24
 **Reporter**: Claude (agent)
-**Status**: 🔍 Open — not introduced by, and not fixed by, the 39-13 follow-up work
+**Status**: ✅ Resolved — 2026-07-24 (confirmed reproducible in the code as written, then fixed)
 **Severity**: 🟡 Medium — silent lineage corruption, no fail-loud signal
 **Area**: Epic 39 document lifecycle / store (39-6 + 39-11)
 
@@ -34,18 +34,52 @@ threaded into the envelope (39-13 follow-up item 4). That investigation conclude
 edge must NOT be added — and surfaced this pre-existing repair-branch defect as a separate issue.
 See `.dev/findings/assessment-family-policy-gaps.md` #4 for the cross-run reasoning.
 
-## Suggested fix
+## Resolution (2026-07-24)
 
-On the repair branch, `IngestDraft` should **inherit** the current chain position rather than
-resetting it — i.e. carry `state.Current?.SupersedesDocumentId` through, so a repair produced
-during a revise round keeps pointing at the draft the revise superseded. Take care that:
+Confirmed as filed: `IngestDraft` derived the edge as `isRevise ? state.Current?.Id : null`, and
+both `IngestProduce` and `IngestRepair` passed `isRevise: false`, so every repair draft — including
+one produced inside a revise round — was minted with a null edge.
 
-- a repair of a *first* draft still supersedes nothing (inheriting `null` is correct there); and
-- the inherited edge does not collide with the unique filtered index — a repair *replaces* the
-  revision it repairs in the chain, it does not add a second successor to the same prior.
+**What shipped** — the supersedes derivation moved out of the graph into the pure decision core
+(D1), as a three-valued turn instead of a boolean:
 
-Add a store-level test covering `produce → review → revise → repair → accept` and asserting the
-chain is unbroken end-to-end.
+- `DocumentLifecycleHelper.DraftOrigin { Produce, Repair, Revise }` +
+  `DocumentLifecycleHelper.ResolveSupersedes(state, origin)`:
+  - `Produce` → `null` (starts the chain) — unchanged,
+  - `Revise` → `state.Current?.Id` (extends the chain) — unchanged,
+  - `Repair` → `state.Current?.SupersedesDocumentId` (**inherits** the position of the draft it
+    replaces) — the fix.
+- `DocumentLifecycleWorkflow.IngestDraft` takes a `DraftOrigin` instead of `bool isRevise`; the
+  three ingest sites pass `Produce` / `Repair` / `Revise`. Every non-repair path is byte-for-byte
+  the previous behaviour.
+
+**Why the inherited edge cannot collide with the unique filtered index.** The lifecycle persists
+an envelope at exactly two kinds of site: `PersistRevised` (the current draft, as a revise is about
+to supersede it) and the terminal `Persist{Accepted|Rejected|Escalated}`. A draft that a repair
+replaces reaches *neither* — the repair happens between VALIDATE and any persist — so it is never
+written to `document_instances`. The inherited prior therefore gains exactly ONE successor row (the
+surviving repaired draft), no matter how many repair turns run in the round. A repair of a first
+draft inherits `null` and still supersedes nothing.
+
+**Coverage** (`tests/Tamma.Activities.Tests/Workflows/DocumentLifecycleHelperTests.cs`, fast gate):
+`ResolveSupersedes_ProduceStartsTheChain_ReviseExtendsIt`,
+`ResolveSupersedes_RepairOfAFirstDraft_SupersedesNothing`,
+`ResolveSupersedes_RepairInsideAReviseRound_InheritsTheChainPosition`,
+`ConsecutiveRepairsInsideAReviseRound_AllInheritTheSameEdge`, and the lifecycle-level
+`ProduceReviewReviseRepairAccept_PersistedChainIsUnbroken` — which drives the graph's stage order
+and collects the envelopes at the two persist sites, asserting one unbroken chain, that the
+replaced revision is absent from the store, and that no prior gains two successors. Verified to
+FAIL on the pre-fix expression (three of the five red when `ResolveSupersedes` is temporarily
+reverted to `origin == Revise ? Current?.Id : null`).
+
+**Left for follow-up.** The end-to-end runtime proof lives in `DocumentLifecycleExecutionTests`
+(`[Explicit]`, CI-Postgres jobs). A scenario there — script `valid → concerns review → invalid
+revision → repair → approve` and assert the published `AcceptanceRequest.Lineage` (and the
+`PersistDocumentInstanceActivity` HTTP bodies the harness already captures) carry the inherited
+edge — would additionally prove the *routing*: that the repair ring really is re-entered after a
+revise and that the real `document_instances` insert accepts the inherited edge without a `23505`.
+The pure pin cannot see either. That fixture does not run outside the CI Postgres jobs (it faults
+with `WorkflowGraphNotFoundException` locally), so it was not extended here.
 
 ## Related
 - `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/DocumentLifecycleWorkflow.cs` (`IngestDraft`)
@@ -55,4 +89,4 @@ chain is unbroken end-to-end.
 
 ---
 
-**Last Updated**: 2026-07-24
+**Last Updated**: 2026-07-24 (resolved)
