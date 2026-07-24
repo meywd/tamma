@@ -6,6 +6,8 @@ title: "Workflow: Task Creation"
 **Class:** `TaskCreationWorkflow`
 **Source:** `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/TaskCreationWorkflow.cs`
 
+> **Epic 39 (Story 39-15) — now a `document-lifecycle` binding (produces a task-breakdown `Plan`, consumes `Plan`).** This workflow is a thin binding over the generic [Document Lifecycle](Document-Lifecycle) (`produce → validate → review → revise → accept`). On a fresh run it fetches the latest accepted system `Plan` for the issue and dispatches `document-lifecycle` with `documentType = plan` (39-4 maps `create-tasks` → `plan`) and the `(senior_developer, create-tasks)` producer cell. The old bespoke `Extract & Validate` → `Can Retry?` retry loop and error terminal are **deleted**; validation, review-with-notes, bounded revision, and typed escalation with full lineage are owned by the lifecycle. The Flow Diagram, "Validation Rules", and "Retry Behavior" sections below describe the retired bespoke flow, kept for historical reference.
+
 ## Purpose
 
 The Task Creation workflow uses a senior developer LLM to break the approved implementation plan into detailed implementation tasks. Each task includes files to modify, code changes, test approach, and dependencies forming a DAG (directed acyclic graph).

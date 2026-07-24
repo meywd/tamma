@@ -6,6 +6,8 @@ title: "Workflow: Test Case Creation"
 **Class:** `TestCaseCreationWorkflow`
 **Source:** `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/TestCaseCreationWorkflow.cs`
 
+> **Epic 39 (Story 39-15) — now a `document-lifecycle` binding (produces `TestSpec`, consumes `Plan`).** This workflow is a thin binding over the generic [Document Lifecycle](Document-Lifecycle) (`produce → validate → review → revise → accept`). It dispatches `document-lifecycle` with `documentType = test-spec` and the `(tester, write-tests)` producer cell, handing the consumed task breakdown as the cross-document validation context. **Cross-doc task-id validation** now lives in the validator: a case bound to a task id absent from the consumed plan is a VALIDATE failure (`CASE_UNKNOWN_TASK_ID` via `TestSpecDocumentType.ValidateWithContext`) flowing through the rings — not a binding-local branch. The old bespoke `Extract & Validate` → `Can Retry?` retry loop and error terminal are **deleted**. The Flow Diagram, "Validation Rules", and "Retry Behavior" sections below describe the retired bespoke flow, kept for historical reference.
+
 ## Purpose
 
 The Test Case Creation workflow generates test cases from task plans for the TDD red phase. It dispatches `llm-call` with `role=tester` and `action=write-tests`, then validates the output contains test case JSON. This ensures the Red phase of TDD has pre-existing failing tests to work against.

@@ -36,7 +36,7 @@ This page is the index for the 35 development-orchestration workflows in the sys
 | 26 | **Debugging** | `debugging` | Systematic AI-driven debugging with 3 entry modes | [Details](Workflow-Debugging) |
 | 27 | **Triage Item Cycle** | `triage-item-cycle` | Singleton: context → panel → PO → labels for one item | [Details](Workflow-Triage-Item-Cycle) |
 | 28 | **Triage Context Gathering** | `triage-context-gathering` | Gather context for triage: code usage, deps, CVE, changelog | [Details](Workflow-Triage-Context-Gathering) |
-| 29 | **Triage Panel Review** | `triage-panel-review` | 4-role panel reviews item for triage (security/dev/devops/qa) | [Details](Workflow-Triage-Panel-Review) |
+| 29 | **Triage Panel Review** *(retired)* | — | Folded into the `TriageDecision` lifecycle **REVIEW** stage (the 39-7 doc-type-aware 4-role panel); no longer a standalone workflow | [Lifecycle](Document-Lifecycle) |
 | 30 | **Triage PO Decision** | `triage-po-decision` | PO makes final triage decision based on panel review | [Details](Workflow-Triage-PO-Decision) |
 | 31 | **Issue Decomposition** | `issue-decomposition` | Decompose a complex issue into ordered sub-tasks with dependencies via mediated LLM | [Details](Workflow-Issue-Decomposition) |
 | 32 | **Research** | `research` | Autonomous investigation: context gathering + ranked, confidence-scored research report | [Details](Workflow-Research) |
@@ -55,9 +55,10 @@ ADL Orchestrator (selects work items, manages concurrency)
   |     +-- Fetch Untriaged Items (issues + Dependabot + CodeQL)
   |     +-- For Each Item:
   |           +-- Triage Item Cycle (fire & forget, singleton — queued)
-  |                 +-- Triage Context Gathering (wait)
-  |                 +-- Triage Panel Review (wait) — security/dev/devops/qa
-  |                 +-- Triage PO Decision (wait) — priority, labels, automation
+  |                 +-- Triage Context Gathering (wait) — produces Findings
+  |                 +-- Triage PO Decision (wait) — produces TriageDecision;
+  |                       the 4-role panel (security/dev/devops/qa) now runs
+  |                       as the lifecycle REVIEW stage inside this dispatch
   |                 +-- Apply Labels & Post Comment
   |
   +-- Single Issue Cycle (fire & forget, receives pre-selected work item)
@@ -144,7 +145,7 @@ Most inter-workflow calls use `DispatchWorkflow` with `WaitForCompletion = true`
 
 **Fire-and-forget dispatches:**
 - ADL Orchestrator dispatches Single Issue Cycle and Issue Triage (`WaitForCompletion = false`)
-- Issue Triage dispatches Triage Context Gathering, Triage Panel Review, and Triage PO Decision (`WaitForCompletion = true`)
+- Issue Triage (via Triage Item Cycle) dispatches Triage Context Gathering and Triage PO Decision (`WaitForCompletion = true`); the 4-role panel now runs inside the `TriageDecision` lifecycle's REVIEW stage rather than as a separate dispatch
 - Single Issue Cycle dispatches Update Issue Status at every step (`WaitForCompletion = false`)
 - Single Issue Cycle dispatches Code Review (`WaitForCompletion = false`), then blocks on PR approval bookmark
 - Single Issue Cycle dispatches Merge Complete (`WaitForCompletion = false`), then blocks on PR merged bookmark

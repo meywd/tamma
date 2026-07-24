@@ -90,12 +90,13 @@ Dispatches `llm-call` with `role=developer`, `action=context-scan`, `scanFocus=t
 
 See [Triage Context Gathering](Workflow-Triage-Context-Gathering) for full details.
 
-### Triage Panel Review
+### Triage Panel Review *(retired — now the lifecycle REVIEW stage)*
 
-**Definition ID:** `triage-panel-review`
-**Class:** `TriagePanelReviewWorkflow`
-
-Four-role LLM panel assesses the item:
+The standalone `triage-panel-review` workflow (`TriagePanelReviewWorkflow`) and its
+aggregator were **deleted** in the Epic 39 triage migration (Story 39-15). The four-role
+panel now runs as the **REVIEW** stage of the `TriageDecision` [document lifecycle](Document-Lifecycle),
+driven by the 39-7 doc-type-aware panel (`RolePhaseMap.GetPanelActionForRole` returns the
+triage review actions for `documentType = "triage-decision"`):
 
 | Role | Focus |
 |------|-------|
@@ -104,12 +105,9 @@ Four-role LLM panel assesses the item:
 | DevOps | Infrastructure impact, deployment considerations, dependency chain |
 | QA | Test impact, compatibility, regression risk |
 
-**Inputs:** `repository`, `itemJson`, `contextJson`
-**Outputs:** `panelResultJson`
-
-Each role dispatches `llm-call` with `role=<role>`, `action=triage`. Results are aggregated into a JSON object with all 4 assessments.
-
-See [Triage Panel Review](Workflow-Triage-Panel-Review) for full details.
+The panel critiques the PO's draft `TriageDecision` (review-of-a-draft) rather than feeding raw
+assessments in; its verdict is resolved by the unified `Review` aggregation. See
+[Triage PO Decision](Workflow-Triage-PO-Decision) and [Document Lifecycle](Document-Lifecycle).
 
 ### Triage PO Decision
 

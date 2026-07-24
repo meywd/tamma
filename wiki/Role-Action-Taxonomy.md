@@ -19,6 +19,12 @@ senior_developer, tech_writer. Each role has its own specific action set
 (~80 jagged cells total). Shared tokens (`context-scan`, `code-review`,
 `plan-review`) repeat across roles; the role half of the key disambiguates.
 
+Epic 39 added the split **`(developer, triage-context-scan)`** cell — a
+triage-focused context scan distinct from the general `(developer, context-scan)`
+— so the [Triage Context Gathering](Workflow-Triage-Context-Gathering.md) binding
+produces a `Findings` document under its own producer cell (rather than sharing
+research's cell).
+
 See the canonical list and rationale in the design spec:
 `docs/superpowers/specs/2026-05-18-role-action-taxonomy-and-resolution-design.md`.
 
@@ -30,6 +36,15 @@ See the canonical list and rationale in the design spec:
   build test rejects any workflow dispatching a pair outside it.
 - **Code-defined:** roles/actions are not in the database; tenant
   customization is per-`(role, action)` convention/prompt overrides only.
+- **Document-type bound (Epic 39):** every document-producing `(role, action)`
+  cell is now bound to a document-type validator — a universal invariant enforced
+  by `ContractBindingTests`, so a producer cell always type-checks against the
+  [document type](Document-Lifecycle) it emits (Decomposition, Findings, Plan,
+  Design, Review, TriageDecision, Diagnosis, TestSpec, …). Only genuine
+  **prose/code** cells remain unbound: tech-writer prose outputs (changelog, ADR,
+  postmortem, release notes — markdown with an audience tag, no forced schema) and
+  code-producing cells (code's validator is the build/test/gate stack, not a
+  document schema).
 
 ## Related
 

@@ -167,6 +167,50 @@ Activity categories (`apps/tamma-elsa/src/Tamma.Activities/`):
 
 Memory budget (from `docker/docker-compose.yml` + production overrides in `docker-compose.prod.yml`): ~7.1 GB without OpenSearch, ~11.8 GB with. Hetzner CPX42 (16 GB) comfortably runs the full stack.
 
+### 2.6 Document lifecycle & typed work documents (Epic 39)
+
+Every document-producing workflow shares one quality lifecycle instead of a private
+parse-and-decide loop. This is the platform's domain language made explicit; the full
+treatment is in [Document Lifecycle](Document-Lifecycle) — the load-bearing facts for the
+running system:
+
+**Three pillars.** (1) **Typed work documents** — ~10 artifacts (Decomposition, Findings,
+AmbiguityAssessment, Clarification, Plan, Design, Review, TriageDecision, Diagnosis,
+TestSpec) as static C# types in `apps/tamma-elsa/src/Tamma.Core/Documents/Types/`,
+registered in the fail-loud `DocumentTypeRegistry` (`.../Documents/DocumentTypeRegistry.cs`);
+each is schema + executable domain rules (`IDocumentType.Validate` /
+`ValidateWithContext`) + a prompt-contract renderer. (2) **One lifecycle** — `produce →
+validate (deterministic, bounded repair) → review (with notes) → revise (bounded rounds) →
+accept`, written once as the generic `DocumentLifecycleWorkflow`
+(`Tamma.ElsaServer/Workflows/DocumentLifecycleWorkflow.cs`, DefinitionId
+`document-lifecycle`). (3) **Resumable by design** (§ [Resumable Workflows](Resumable-Workflows)).
+
+**The accept gate is an actor, not a branch.** ACCEPT always builds an `AcceptanceRequest`,
+publishes it on the workflow↔orchestrator channel (`PublishAcceptanceRequestActivity`), and
+suspends on `WaitForDocumentDecisionActivity`. The orchestrator reads the **acceptance
+rules** (`Tamma.Core/Documents/Policy/AcceptanceRules.cs`) + the **autonomy dial (70–100)**
+and routes the decision to itself or to a tenant role's Task View; `AcceptanceGuardrails.Clamp`
+enforces only the hard invariants (round bounds, blocking-review, always-escalate classes).
+Unhandleable outcomes escalate with full lineage as one of four typed
+`DocumentLifecycleOutcome`s (`ReviewUndecidable`, `AmbiguityAboveThreshold`,
+`RoundsExhausted`, `ValidationExhausted`) — never a bare failure.
+
+**Document store.** Every transition emits a `DOCUMENT.*` DCB event AND projects a row into
+the tenant-resident `document_instances` table (entity
+`Tamma.Data/Entities/DocumentInstance.cs`) — a rebuildable read model over the stream (the
+stream wins on disagreement), sharing a `CorrelatingEventId` with its event. Insert-only:
+a revise inserts `revision + 1` and flips its predecessor to `superseded`. Reads via
+`IDocumentInstanceRepository.GetLatestAcceptedAsync` + the lineage endpoints
+(`Tamma.Api/Endpoints/DocumentEndpoints.cs`: `GET /api/documents/issues/{issueId}/lineage`
+and `.../latest`).
+
+**Thin bindings.** The 39-12…39-15 migration turned every producer (issue-decomposition,
+the assessment family, the planning family, the triage/creation/debug family — e.g.
+[Workflow: Debug Diagnosis](Workflow-Debug-Diagnosis)) into a thin binding over
+`document-lifecycle`; the unified `Review` type absorbed the three previously-forked verdict
+shapes. Static `consumes`/`produces` edges are declared in
+`DocumentTypeRegistry.WorkflowInterfaces` and checked by a build-time graph test.
+
 ---
 
 ## 3. Data storage layout
@@ -850,6 +894,18 @@ public enum ProvisioningTopology { DatabaseOnly, DedicatedCompute, Managed }
 ```
 
 See [Epic 30 — Pluggable Provisioning](Epics/Epic-30-Pluggable-Provisioning.md).
+
+### 13.3 Epic 39 — producer-migration spine complete
+
+The typed-document producer-migration spine **landed**: every document-producing workflow
+is now a thin binding over the generic `document-lifecycle` sub-workflow (39-12…39-15 —
+Decomposition, the assessment family, the planning family, and the triage/creation/debug
+family), the ~10 document types + `AcceptanceRules` + the `document_instances` store are
+wired, and the resumable-by-design standard is enforced by `ResumableStandardStructuralTests`
+with the legacy allowlist burned down to non-producer workflows. See § 2.6 and
+[Document Lifecycle](Document-Lifecycle). Still forward-looking within Epic 39: the
+resident orchestrator agent, the real-time channels, orchestrator chat + the Task View,
+teams/roles/repo-access routing, and RAG-in-C# (39-17…39-21).
 
 ---
 

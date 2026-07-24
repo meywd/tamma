@@ -6,6 +6,8 @@ title: "Workflow: Issue Decomposition"
 **Class:** `IssueDecompositionWorkflow`
 **Source:** `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/IssueDecompositionWorkflow.cs`
 
+> **Epic 39 (Story 39-12) — now a `document-lifecycle` binding (produces `Decomposition`).** This workflow is a thin binding over the generic [Document Lifecycle](Document-Lifecycle) (`produce → validate → review → revise → accept`). It assembles the issue context and dispatches `document-lifecycle` with `documentType = decomposition` and the `(senior_developer, decompose-issue)` producer cell, then exposes typed outcomes. The old bespoke pipeline — `llm-call` → hand parser (`DecompositionParsing`) → success-flag gate → error-`Finish` terminal — is **deleted**; the lifecycle's generic rings own all validation, review-with-notes, bounded revision, and typed escalation (`validation-exhausted` / `rounds-exhausted` / `review-undecidable`) with full lineage instead of a dead terminal. The `DECOMPOSITION.*` events still emit, now **alongside** the generic `DOCUMENT.*` events. The Flow Diagram and "Fail-Closed Parsing" section below describe the retired bespoke flow, kept for historical reference.
+
 ## Purpose
 
 The Issue Decomposition workflow (Story 2.14) breaks a complex issue/requirement into an ORDERED set of smaller, implementable sub-tasks — each with a stable id, title, description, acceptance criteria, an effort estimate (hours), a complexity bucket, and declared `dependsOn` prerequisite edges. It gathers codebase/prior-art context by reusing the `context-gathering` sub-workflow, then decomposes via the MEDIATED `llm-call` path (role=`senior_developer`, action=`decompose-issue`) — the engine holds no LLM credential. Every transition is emitted as a `DECOMPOSITION.*` DCB event.

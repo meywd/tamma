@@ -6,6 +6,8 @@ title: "Workflow: Triage Context Gathering"
 **Class:** `TriageContextGatheringWorkflow`
 **Source:** `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/TriageContextGatheringWorkflow.cs`
 
+> **Epic 39 (Story 39-15) — now a `document-lifecycle` binding (produces `Findings`).** This workflow is a thin binding over the generic [Document Lifecycle](Document-Lifecycle) (`produce → validate → review → revise → accept`). It dispatches `document-lifecycle` with `documentType = findings` and the new SPLIT `(developer, triage-context-scan)` producer cell (distinct from research's `(product_owner, research)` cell that also produces `Findings`; the triage findings slice is issue-scoped so the two never collide). The old bespoke `Extract & Validate` (parse-or-wrap-raw-text) → `Finish` terminal is **deleted**; validation, review, revision, and typed escalation are owned by the lifecycle. The legacy `contextJson` output is the accepted `Findings` body (`{}` on non-accept). The Flow Diagram and "Result Extraction" section below describe the retired bespoke flow, kept for historical reference.
+
 ## Purpose
 
 The Triage Context Gathering workflow gathers context for issue/alert triage. It dispatches `llm-call` with `role=developer` and `action=context-scan` to analyze code usage of the affected package/module, dependency graphs, CVE details (for security alerts), changelogs, and migration guides.
@@ -88,4 +90,4 @@ The LLM response is parsed for JSON. If valid JSON is found, it is returned dire
 
 ---
 
-_See also: [Triage Panel Review](/workflows/triage-panel-review) | [Issue Triage](/workflows/triage) | [Workflows Index](/workflows)_
+_See also: [Triage PO Decision](/workflows/triage-po-decision) | [Issue Triage](/workflows/triage) | [Workflows Index](/workflows)_
