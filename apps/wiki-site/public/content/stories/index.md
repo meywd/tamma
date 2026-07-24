@@ -4,7 +4,7 @@ sidebar:
   order: 0
 ---
 
-This page provides an index of all user stories across all 33 epics (Epic 32 is intentionally skipped). Each story links to its documentation in the repository.
+This page provides an index of all user stories across all 37 epics (Epic 32 is intentionally skipped). Each story links to its documentation in the repository.
 
 ## Story Structure
 
@@ -64,7 +64,7 @@ Each story includes:
 
 ---
 
-## Epic 2: Autonomous Development Loop (Near Complete -- 13/20 Done)
+## Epic 2: Autonomous Development Loop (Near Complete -- 14/20 Done)
 
 | Story | Title | Status |
 |-------|-------|--------|
@@ -81,7 +81,7 @@ Each story includes:
 | 2-11 | Auto-Next Issue Selection | Done |
 | 2-12 | Intelligent Provider Selection | Done |
 | 2-13 | Prompt Engineering Optimization | Done |
-| 2-14 | Issue Decomposition Engine | Ready for Dev |
+| 2-14 | Issue Decomposition Engine | Done |
 | 2-15 | Task Dependency Mapping | Ready for Dev |
 | 2-16 | Incremental Task Sequencing | Ready for Dev |
 | 2-17 | Context Gathering Redesign | Drafted |
@@ -93,28 +93,29 @@ Each story includes:
 
 ---
 
-## Epic 3: Quality Gates & Intelligence (Near Complete -- 8/12 Done)
+## Epic 3: Quality Gates & Intelligence (Near Complete -- 12/13 Done)
 
 | Story | Title | Status |
 |-------|-------|--------|
 | 3-1 | Build Automation Gate Implementation | Done |
 | 3-2 | Test Execution Gate Implementation | Done |
 | 3-3 | Escalation Workflow Implementation | Done |
-| 3-4 | Research Workflow Implementation | Drafted |
-| 3-5 | Clarifying Questions Workflow Implementation | Drafted |
-| 3-6 | Ambiguity Scoring Implementation | Drafted |
-| 3-7 | Design Proposal Workflow Implementation | Drafted |
+| 3-4 | Research Workflow Implementation | Done |
+| 3-5 | Clarifying Questions Workflow Implementation | Done (landed 2026-07-04: `ClarifyingQuestionsWorkflow` + secure resume endpoint, `CLARIFY.*` events) |
+| 3-6 | Ambiguity Scoring Implementation | Done |
+| 3-7 | Design Proposal Workflow Implementation | Done |
 | 3-8 | Static Analysis Gate Implementation | Done |
 | 3-9 | Security Scanning Gate Implementation | Done |
 | 3-10 | Agent Performance Monitoring | Done |
 | 3-11 | Cost-Aware AI Usage | Done |
 | 3-12 | Task Complexity Assessment | Done |
+| 3-13 | Intelligent Test Execution Pipeline | Ready for Dev |
 
 [Detailed Breakdown](/epics/3-quality-gates/) | [Story Files](/stories/epic-3/)
 
 ---
 
-## Epic 4: Event Sourcing & Audit Trail (Near Complete -- 6/8 Done)
+## Epic 4: Event Sourcing & Audit Trail (Near Complete -- 7/8 Done)
 
 | Story | Title | Status |
 |-------|-------|--------|
@@ -125,7 +126,7 @@ Each story includes:
 | 4-5 | Event Capture - Code Changes & Git Operations | Done |
 | 4-6 | Event Capture - Approvals & Escalations | Done |
 | 4-7 | Event Query API for Time-Travel | Done |
-| 4-8 | Black-Box Replay for Debugging | Drafted |
+| 4-8 | Black-Box Replay for Debugging | Done |
 
 [Detailed Breakdown](/epics/4-event-sourcing/) | [Story Files](/stories/epic-4/)
 
@@ -145,9 +146,9 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 | 5-6 | Alert System for Critical Issues | In Progress |
 | 5-7 | Feedback Collection System | In Progress |
 | 5-8 | Integration Testing Suite | Done |
-| 5-9a | Installation & Setup Documentation | Drafted |
-| 5-9b | Usage & Configuration Documentation | Drafted |
-| 5-9c | API Reference Documentation | Backlog |
+| 5-9a | Installation & Setup Documentation | Done — [Installation](Installation) |
+| 5-9b | Usage & Configuration Documentation | Done — [Usage & Configuration](Usage-and-Configuration) |
+| 5-9c | API Reference Documentation | Done — [API Reference](API-Reference) |
 | 5-9d | Full Documentation Website | Backlog |
 | 5-9e | Video Walkthrough | Backlog |
 | 5-10 | Alpha Release Preparation | Done |
@@ -157,6 +158,8 @@ Dashboard exists at `@tamma/dashboard` with admin, settings, and knowledge base 
 ---
 
 ## Epic 6: Context & Knowledge Management (Near Complete -- 10/11 Done)
+
+2026-07 update: the KB/RAG `intelligence-server` sidecar is now wired to a real vector store (`createVectorStoreFromEnv`/`RagPipeline`), with self-hosted embeddings via local Ollama (`nomic-embed-text`) and RAG collection bootstrap so the sidecar boots configured.
 
 | Story | Title | Package | Status |
 |-------|-------|---------|--------|
@@ -361,7 +364,7 @@ Engine exists as an imperative state machine (`packages/orchestrator/src/engine.
 | 18-1 | User Registration & Email Verification | Drafted |
 | 18-2 | User Login & Session Management | In Progress |
 | 18-3 | Organization/Tenant Creation | Drafted |
-| 18-4 | GitHub App Installation Onboarding | Done |
+| 18-4 | GitHub App Installation Onboarding | In Progress (non-migration slices landed 2026-07: repo activate/deactivate + `ONBOARDING.COMPLETED`) |
 | 18-5 | User-Facing Dashboard Shell | In Progress |
 
 [Detailed Breakdown](/epics/18-user-auth/) | [Story Files](/stories/epic-18/)
@@ -398,14 +401,14 @@ Engine exists as an imperative state machine (`packages/orchestrator/src/engine.
 
 ## Epic 21: Marketing Site & User Dashboard (Partially Implemented)
 
-Marketing site exists at `apps/marketing-site/` with Midnight Ocean redesign. Wiki site at `apps/wiki-site/`. User dashboard not yet implemented.
+Marketing site extracted to a standalone repo (Midnight Ocean redesign). Wiki site at `apps/wiki-site/`. User dashboard (`packages/dashboard-user`) now has Repos & Workflow Runs pages (21-4, landed 2026-07).
 
 | Story | Title | Status |
 |-------|-------|--------|
-| 21-1 | Marketing Landing Page | Done |
+| 21-1 | Marketing Landing Page | Done (site extracted to standalone repo) |
 | 21-2 | Pricing Page + Stripe Checkout | Drafted |
 | 21-3 | Documentation Site | In Progress |
-| 21-4 | User Dashboard -- Repos & Workflow Runs | Drafted |
+| 21-4 | User Dashboard -- Repos & Workflow Runs | Done |
 | 21-5 | User Dashboard -- Settings & Billing | Drafted |
 
 [Detailed Breakdown](/epics/21-marketing-dashboard/) | [Story Files](/stories/epic-21/)
@@ -426,24 +429,24 @@ Marketing site exists at `apps/marketing-site/` with Midnight Ocean redesign. Wi
 
 ---
 
-## Epic 23: System Monitoring & Observability Dashboard (Drafted -- 26 Task Plans)
+## Epic 23: System Monitoring & Observability Dashboard (In Progress -- 8/12 Done)
 
-All 12 stories now have detailed implementation-ready task plan breakdowns.
+Eight monitoring pages landed on `main` in 2026-07: the nav/layout foundation (23-12) plus System Health, Agent Monitor, Event Store Explorer, Configuration Audit, Workflow Monitor, Provider Diagnostics, and Infrastructure Monitor.
 
 | Story | Title | Task Plans | Status |
 |-------|-------|------------|--------|
-| 23-1 | System Health Dashboard (Overview) | 2 | Planned |
-| 23-2 | Agent Monitor (Realtime) | 2 | Planned |
-| 23-3 | Event Store Explorer | 2 | Planned |
-| 23-4 | Configuration Audit | 2 | Planned |
-| 23-5 | Workflow Monitor | 2 | Planned |
-| 23-6 | Provider Diagnostics (Deep) | 2 | Planned |
+| 23-1 | System Health Dashboard (Overview) | 2 | Done |
+| 23-2 | Agent Monitor (Realtime) | 2 | Done |
+| 23-3 | Event Store Explorer | 2 | Done |
+| 23-4 | Configuration Audit | 2 | Done |
+| 23-5 | Workflow Monitor | 2 | Done |
+| 23-6 | Provider Diagnostics (Deep) | 2 | Done |
 | 23-7 | Log Explorer (OpenSearch) | 2 | Planned |
-| 23-8 | Infrastructure Monitor | 2 | Planned |
+| 23-8 | Infrastructure Monitor | 2 | Done |
 | 23-9 | Knowledge Base Monitor | 2 | Planned |
 | 23-10 | Security & Access Audit | 2 | Planned |
-| 23-11 | Monitoring API Foundation | 3 | Planned |
-| 23-12 | Dashboard Navigation & Layout | 3 | Planned |
+| 23-11 | Monitoring API Foundation | 3 | Superseded (C# `Tamma.Api` port replaced the TS Fastify foundation) |
+| 23-12 | Dashboard Navigation & Layout | 3 | Done |
 
 [Detailed Breakdown](/epics/23-system-monitoring/) | [Story Files](/stories/epic-23/)
 
@@ -507,6 +510,11 @@ Replaces the file-based, single-tenant `PromptStore` with a PostgreSQL-backed, m
 | 27-5 | Prompt Store Tenant UI | Planned |
 | 27-6 | Elsa Workflow Integration | Planned |
 | 27-7 | Prompt Store Event Sourcing | Planned |
+| 27-15 | AgentRole/AgentAction Taxonomy + RolePhaseMap Rebuild | Planned |
+| 27-16 | Taxonomy Codegen (Prompt + Convention Seed) | Planned |
+| 27-17 | Taxonomy Drift Build Test | Planned |
+| 27-18 | Prompt Store Taxonomy Reshape | Planned |
+| 27-19 | Workflow Dispatch-Site Migration | Planned |
 
 [Detailed Breakdown](/epics/27-prompt-store/) | [Story Files](/stories/epic-27/)
 
@@ -613,6 +621,116 @@ Per-tenant SAML 2.0 / OIDC / LDAP / SCIM directory sync. Deferred until trigger 
 
 ---
 
+## Epic 39: Typed Work Documents & the Universal Lifecycle (Implemented -- 17/21 Done)
+
+The document-lifecycle spine: ~10 typed work documents in `Tamma.Core`, one generic produce→validate→review→revise→accept lifecycle, acceptance rules + a 70–100 autonomy dial, the escalation surface, real-time channels + orchestrator chat + Task View, and the resumable-by-design standard. **The producer-migration spine is complete** — 39-12…39-15 all merged, so every document-producing workflow now rides `DocumentLifecycleWorkflow`.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 39-1 | Workflow I/O & Lifecycle Audit | Drafted |
+| 39-2 | Document Core — Envelope, Type Registry, Lineage, Drift Tests | Done |
+| 39-3 | Document Types Batch 1 — Decomposition, Findings, AmbiguityAssessment, Clarification | Done |
+| 39-4 | Document Types Batch 2 — Plan, Design, Review (unified), TriageDecision, Diagnosis, TestSpec | Done |
+| 39-5 | Acceptance Rules — configurable policy, admin UI, orchestrator read path | Done |
+| 39-6 | DocumentLifecycleWorkflow — generic produce/validate/review/revise/accept | Done |
+| 39-7 | Review Producers — single reviewer + panel onto the unified Review type | Done |
+| 39-8 | Escalation & Approval Surface | Done |
+| 39-9 | Deterministic Repair Ring | Done |
+| 39-10 | Resumable-by-Design Standard | Done |
+| 39-11 | Document Store & Lineage API | Done |
+| 39-12 | Pilot Migration — IssueDecomposition onto the lifecycle | Done |
+| 39-13 | Assessment Family Migration — Research, Ambiguity, Clarify, DesignProposal | Done |
+| 39-14 | Planning Family Migration — PlanGeneration + PlanReview onto unified Review | Done |
+| 39-15 | Remaining Producers Migration — Triage, TestSpec, TaskCreation, Diagnosis | Done |
+| 39-16 | Prompt Contracts Generated From Document Types | Drafted |
+| 39-17 | Orchestrator Agent — long-running LLM process, platform context & tools | Drafted |
+| 39-18 | Real-Time Channels — workflow↔orchestrator + user↔orchestrator (SignalR) | Done |
+| 39-19 | Orchestrator Chat + Task View | Done |
+| 39-20 | Teams, Roles, Repo Access & Task Routing | Done |
+| 39-21 | RAG in C# — per-tenant knowledge isolation and grounding | Drafted |
+
+[Detailed Breakdown](/epics/39-document-lifecycle/) | [Story Files](/stories/epic-39/)
+
+---
+
+## Epic 40: Resumable Coding Execution (Planned / docs -- 0/7)
+
+Ships the missing `tamma-agent.yml` runner contract and makes the coding step resumable on the 39-10 mechanism. Backlog — no code yet.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 40-1 | The `tamma-agent.yml` Runner Contract & Repo Scaffolding (+ single-user CLI parity) | Drafted |
+| 40-2 | `WaitForAgentRunActivity` — durable bookmark suspend + `DelayFor` timeout | Drafted |
+| 40-3 | Durable agent-run signal plane + resume endpoint (cross-pod, restart-safe) | Drafted |
+| 40-4 | Per-task re-entry — reconstruct landed tasks from git + DCB events | Drafted |
+| 40-5 | `[ResumeBehavior]` on `SingleIssueCycleWorkflow` + allowlist burn-down | Drafted |
+| 40-6 | Agent-run lifecycle event family + re-entry feed | Drafted |
+| 40-7 | End-to-end crash/restart + mode-matrix integration proof | Drafted |
+
+[Detailed Breakdown](/epics/40-resumable-coding/) | [Story Files](/stories/epic-40/)
+
+---
+
+## Epic 41: Full-Team Workflow Coverage (Planned / docs -- 0/29)
+
+Turns every remaining recurring SDLC activity into a lifecycle workflow on the Epic 39 spine (thin bindings, no new architecture). Adds three new roles (`scrum_master`, `project_manager`, `ux_designer`) and six new document types via 41-1; **41-29** is the task-level flow router that activates the whole set. Backlog — no code yet. The full 28-story coverage matrix (per-role activity → owning story) is in the epic page; the highlights:
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 41-1 | New Roles (scrum_master / project_manager / ux_designer) + New Document Types | Drafted |
+| 41-2 | Acceptance-Criteria Authoring | Drafted |
+| 41-3 | Backlog Prioritization | Drafted |
+| 41-4 | Roadmap Shaping | Drafted |
+| 41-5 | Stakeholder / Status Update | Drafted |
+| 41-6 | Sprint Planning | Drafted |
+| 41-7 | Standup Synthesis | Drafted |
+| 41-8 | Retrospective Facilitation | Drafted |
+| 41-9 | ADR Authoring | Drafted |
+| 41-10 | System Design Doc | Drafted |
+| 41-11 | Tech-Debt & Technical-Risk Triage | Drafted |
+| 41-12 | Dependency & Upgrade Planning | Drafted |
+| 41-13 | Test-Plan / Strategy Authoring | Drafted |
+| 41-14 | Exploratory Test Charter | Drafted |
+| 41-15 | Acceptance Verification | Drafted |
+| 41-16 | Regression & Flaky-Test Management | Drafted |
+| 41-17 | Standalone Code Review & PR Triage | Drafted |
+| 41-18 | Refactor Planning | Drafted |
+| 41-19 | Threat Modeling | Drafted |
+| 41-20 | Scheduled Dependency / Secret / Compliance Audit | Drafted |
+| 41-21 | Security Incident Analysis | Drafted |
+| 41-22 | Incident Response & Postmortem (incl. rollback) | Drafted |
+| 41-23 | Capacity & Health Review | Drafted |
+| 41-24 | Release Notes & Changelog | Drafted |
+| 41-25 | User & API Documentation | Drafted |
+| 41-26 | Runbook & Ops-Docs | Drafted |
+| 41-27 | User-Flow & Wireframe Drafting | Drafted |
+| 41-28 | Design Review & Accessibility Audit | Drafted |
+| 41-29 | Task-Level Flow Router (+ issue-level pre-route) | Drafted |
+
+[Detailed Breakdown](/epics/41-full-team-workflows/) | [Story Files](/stories/epic-41/)
+
+---
+
+## Epic 42: Agent Capability & Tool Layer (Planned / docs -- 0/9)
+
+Makes the coding-only tool framework first-class: extensible (native + dynamic + MCP), secured (secret-bound, redacted), autonomy-gated (per-role, per-autonomy, per-mode). Backlog — no code yet.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 42-1 | Tool Contract & Registry Evolution (`ToolDescriptor` + dynamic registry) | Drafted |
+| 42-2 | Tool Binding & Config Store (two-scoping) | Drafted |
+| 42-3 | Per-Tool Permission & Autonomy Gating | Drafted |
+| 42-4 | Tool Credential / Secret Binding | Drafted |
+| 42-5 | Tool-Use DCB Audit (`TOOL.*` events) | Drafted |
+| 42-6 | MCP Integration | Drafted |
+| 42-7 | Cloud / VPS Resource Operations Tool | Drafted |
+| 42-8 | Feature-Flag & Deploy-Control Tools | Drafted |
+| 42-9 | Authenticated HTTP / External-API Tool | Drafted |
+
+[Detailed Breakdown](/epics/42-tool-layer/) | [Story Files](/stories/epic-42/)
+
+---
+
 ## Story Workflow
 
 Stories progress through the following stages:
@@ -628,13 +746,15 @@ Stories progress through the following stages:
 
 | Category | Count |
 |----------|-------|
-| Total stories across all epics | ~310+ (Wave-2 added ~70 new stories) |
-| Total epics | 33 (Epic 32 skipped) |
+| Total stories across all epics | ~375+ (Wave-2 added ~70; the workflow-platform wave 39–42 added ~65) |
+| Total epics | 37 (Epic 32 skipped) |
 | Epics completed | 10 (8, 9, 11, 13, 14, 15, 16, 19, 21 — landing page only, 25) |
 | Epics near complete | 8 (1, 1.5, 2, 3, 4, 6, 7, 12) |
-| Epics partially implemented | 5 (5, 17, 18, 21, 22) |
-| Epics drafted | 5 (10, 20, 23, 24, 26) |
+| Epics implemented (workflow-platform wave) | 1 (39 — spine complete, 17/21 stories) |
+| Epics partially implemented | 6 (5, 17, 18, 21, 22, 23) |
+| Epics drafted | 4 (10, 20, 24, 26) |
 | Epics newly scoped (Wave-2) | 5 (27, 28, 29, 30, 31) + 1 deferred (33) |
+| Epics planned / docs (workflow-platform wave) | 3 (40, 41, 42) |
 | Detailed task plans (Epic 23) | 26 |
 | Detailed task plans (Epic 24) | 24 |
 | Wave-2 impl plans (Epics 9, 12, 18, 19-6, 28, 29, 30) | 39 |

@@ -16,7 +16,14 @@ Stories are organized into epic-specific subdirectories:
 - **`epic-6/`** - Context & Knowledge Management (10 stories)
 - **`epic-7/`** - Autonomous Mentorship Workflow (10 stories)
 - **`epic-8/`** - Distribution & Installation (8 stories)
-- **`epic-20/`** - Billing & Payments (5 stories)
+- **`epic-20/`** - Billing & Payments (5 stories) — **superseded by Epics 34 & 35** (re-targeted to the C# `apps/tamma-elsa` stack)
+- **`epic-32/`** - Agents — First-Class Agent Entities, Managed Execution, Benchmarking & Learning (14 stories)
+- **`epic-34/`** - Pricing, Plans & Entitlements (10 stories)
+- **`epic-35/`** - Billing & Payments (C#) — Stripe, BYOK-Aware Metering, Subscriptions, Invoicing & Dunning (12 stories)
+- **`epic-36/`** - Analytics & Reporting Platform (11 stories)
+- **`epic-37/`** - Audit, Compliance & Data Governance (12 stories)
+
+> Note: this list is illustrative, not exhaustive — see each `epic-N/README.md` for the canonical per-epic detail and `docs/sprint-status.yaml` for live status across all epics.
 
 ## File Types
 

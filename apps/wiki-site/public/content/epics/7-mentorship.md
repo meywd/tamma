@@ -4,181 +4,229 @@ sidebar:
   order: 7
 ---
 
-**Status:** Near Complete (18/19 done, TDD sub-workflow in progress)
-**Stories:** 19 (7-1 through 7-10, 7-1A through 7-1I)
-**Location:** `apps/tamma-elsa/` (C# / .NET 8), `packages/orchestrator/` (TypeScript bridge)
+**Status:** Near complete. 18 of 19 stories landed (7-1 core + 7-1A..7-1G, 7-1I sub-workflows done; 7-1H TDD sub-workflow in progress; 7-11/7-12 follow-up refinements landed).
+**Stories:** 19 (7-1..7-10 + 7-1A..7-1I sub-workflows + 7-11/7-12 prompt refinement).
+**Primary code:** `apps/tamma-elsa/` (C# / .NET 8 ELSA workflows + activities), `packages/orchestrator/` (TypeScript bridge).
 
 ## Overview
 
-Epic 7 implements an autonomous mentorship workflow system that guides developers through story implementation. The workflow is driven by a 28-state state machine implemented as ELSA activities in the .NET engine, with a TypeScript bridge layer for integration with the main Tamma engine.
+Epic 7 is the end-to-end autonomous mentorship pipeline. When a developer (human or agent) is assigned a story, the system walks the work from "I don't fully understand this ticket" through implementation, quality gates, review, and merge — adapting tone, guidance depth, and escalation thresholds to the developer's measured skill level. It is the workflow that makes Tamma more than a code generator; the platform observes progress, diagnoses when work stalls, and intervenes with targeted guidance rather than raw code.
 
-The mentorship workflow handles the full lifecycle: assessing a developer's understanding, gathering project context, using Claude for AI-powered analysis, decomposing stories into plans, monitoring progress, diagnosing blockers, running quality gates, managing code reviews, and completing the merge. The system adapts dynamically to each developer's skill level and detects circular behavior patterns.
+Under the hood, mentorship is a 28-state machine expressed as a code-first ELSA 3 flowchart (`MentorshipWorkflow.cs`) composed from eight sub-workflows: LLM call, context gathering, assessment, code review, testing, blocker diagnosis, TDD, and debugging. Every decision, LLM call, and external side-effect is an ELSA activity, so the whole session is pausable, resumable, visible in Studio, and audit-logged. The TypeScript `@tamma/orchestrator` package exposes the session lifecycle to CLI / API callers through a thin HTTP client (`elsa-client.ts`) so it can be driven from the engine without duplicating workflow logic in TypeScript.
 
-## 28-State Machine
+Mentorship is a consumer of nearly every other pillar: provider chains (Epic 9), content sanitization (Epic 11), the agentic tool loop (Epic 12), and the event store (Epic 10). It's also the source of most of the workflow decomposition pressure that drove Epic 13.
 
-| Group | States | Purpose |
-|-------|--------|---------|
-| Initialization | INIT_STORY_PROCESSING, VALIDATE_STORY | Load and validate story context |
-| Assessment | ASSESS_JUNIOR_CAPABILITY, CLARIFY_REQUIREMENTS, RE_EXPLAIN_STORY | Evaluate developer understanding |
-| Planning | PLAN_DECOMPOSITION, REVIEW_PLAN, ADJUST_PLAN | Create and refine implementation plan |
-| Implementation | START_IMPLEMENTATION, MONITOR_PROGRESS, PROVIDE_GUIDANCE, DETECT_PATTERN | Guide and monitor coding work |
-| Blockers | DIAGNOSE_BLOCKER, PROVIDE_HINT, PROVIDE_ASSISTANCE, ESCALATE_TO_SENIOR | Resolve impediments |
-| Quality | QUALITY_GATE_CHECK, AUTO_FIX_ISSUES, MANUAL_FIX_REQUIRED | Validate code quality |
-| Review | PREPARE_CODE_REVIEW, MONITOR_REVIEW, GUIDE_FIXES, RE_REQUEST_REVIEW | Manage code review cycle |
-| Completion | MERGE_AND_COMPLETE, GENERATE_REPORT, UPDATE_SKILL_PROFILE, COMPLETED | Finalize and learn |
-| Exception | PAUSED, CANCELLED, FAILED, TIMEOUT | Handle abnormal conditions |
+## Architecture
 
-## ELSA Activities (Implemented)
+```
++---------------------------------------------------------------+
+|           Mentorship Session (correlationId)                   |
++---------------------------------------------------------------+
+|                                                                |
+|   TS Engine / CLI / API                                        |
+|        |   POST /sessions   GET /sessions/:id   SSE /events    |
+|        v                                                       |
+|   @tamma/orchestrator  ->  elsa-client.ts  (HTTP + webhooks)   |
+|                                                                |
++-----------------------+----------------------------------------+
+                        |
+                        v
++---------------------------------------------------------------+
+|   ELSA Server (apps/tamma-elsa)  MentorshipWorkflow (28-state) |
+|                                                                |
+|   INIT --> ASSESS --> PLAN --> IMPLEMENT --> QUALITY --> REVIEW|
+|     |        |         |          |            |        |     |
+|     |        |         |          |            |        v     |
+|     |        |         |          |            |     MERGE    |
+|     |        |         |          |            |        |     |
+|     +--------+---------+----------+-- DIAGNOSE BLOCKER --+     |
+|                                     |                          |
+|                          DETECT PATTERN --> ESCALATE           |
+|                                                                |
++---------------------------------------------------------------+
+|   Sub-workflows (all DispatchWorkflow from parent):            |
+|   - LlmCallWorkflow            (7-1B — universal LLM gate)     |
+|   - ContextGatheringWorkflow   (7-1F — parallel fetchers)      |
+|   - AssessmentWorkflow         (7-1E — question pipeline)      |
+|   - TestingWorkflow            (7-1C — run + parse tests)      |
+|   - CodeReviewWorkflow         (7-1D — PR review lifecycle)    |
+|   - BlockerDiagnosisWorkflow   (7-1G — signal collection)      |
+|   - TddWorkflow / TddWithDebugRetry (7-1H — red/green/refactor)|
+|   - DebuggingWorkflow          (7-1I — 3-mode systematic)      |
+|                                                                |
+|   All backed by ELSA activities under                          |
+|   Tamma.Activities/{Mentorship,AI,Assessment,Blocker,Context,  |
+|                     Debug,Integration,LlmCall,TDD,Testing}     |
++---------------------------------------------------------------+
+          |                         |                   |
+          v                         v                   v
+   Provider Chain (Epic 9)   Tool Loop (Epic 12)   Event Store (Epic 10)
+```
 
-Located in `apps/tamma-elsa/src/Tamma.Activities/`:
+## Components
 
-### Mentorship Activities
-| Activity | File | Purpose |
-|----------|------|---------|
-| AssessJuniorCapabilityActivity | `Mentorship/` | Evaluate developer skill level |
-| MonitorImplementationActivity | `Mentorship/` | Track implementation progress |
-| DiagnoseBlockerActivity | `Mentorship/` | Identify and categorize blockers |
-| ProvideGuidanceActivity | `Mentorship/` | Generate contextual guidance |
-| QualityGateCheckActivity | `Mentorship/` | Run quality checks |
-| CodeReviewActivity | `Mentorship/` | Manage code review process |
-| MergeCompleteActivity | `Mentorship/` | Handle merge and completion |
+| Component | Purpose | Key Files | Status |
+|-----------|---------|-----------|--------|
+| MentorshipWorkflow | Main 28-state flowchart wiring every sub-workflow together | `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/MentorshipWorkflow.cs` | Done (7-1A) |
+| LlmCallWorkflow | Universal LLM gate — resolve config, check budget + circuit breaker, call provider, record diagnostics | `.../LlmCallWorkflow.cs`, `Tamma.Activities/LlmCall/*` | Done (7-1B) |
+| TestingWorkflow | Compile + run tests, parse results, emit structured outcome | `.../TestingWorkflow.cs` | Done (7-1C) |
+| CodeReviewWorkflow | Prepare review, monitor PR comments, guide fixes, re-request review | `.../CodeReviewWorkflow.cs` | Done (7-1D) |
+| AssessmentWorkflow | Generate → deliver → wait → analyze → classify skill level | `.../AssessmentWorkflow.cs`, `Tamma.Activities/Assessment/*` | Done (7-1E) |
+| ContextGatheringWorkflow | Parallel-fetch story metadata, files, commits, tests, similar patterns; budget-trim | `.../ContextGatheringWorkflow.cs`, `Tamma.Activities/Context/*` | Done (7-1F) |
+| BlockerDiagnosisWorkflow | Collect CI status, git activity, inactivity, communication signals; classify blocker type | `.../BlockerDiagnosisWorkflow.cs`, `Tamma.Activities/Blocker/*` | Done (7-1G) |
+| DebuggingWorkflow | Three debug modes (TDD-driven, CI-driven, user-reported); hypothesis → regression test → fix | `.../DebuggingWorkflow.cs`, `Tamma.Activities/Debug/*` | Done (7-1I) |
+| TddWorkflow / TddWithDebugRetryWorkflow | Red-green-refactor with automatic debug retry on failure | `.../TddWorkflow.cs`, `.../TddWithDebugRetryWorkflow.cs` | In progress (7-1H) |
+| Mentorship activities | Assess, monitor, diagnose, guide, quality-gate, review, merge | `Tamma.Activities/Mentorship/*.cs` | Done (7-1..7-9) |
+| AI activities | Claude analysis, context gathering, suggestion generation | `Tamma.Activities/AI/*.cs` | Done (7-4) |
+| Integration activities | GitHub + Slack helpers | `Tamma.Activities/Integration/*.cs` | Done |
+| TS bridge | Start / signal / poll ELSA workflows from TypeScript engine | `packages/orchestrator/src/elsa-client.ts`, `engine.ts` | Done (7-10) |
 
-### AI Activities
-| Activity | File | Purpose |
-|----------|------|---------|
-| ClaudeAnalysisActivity | `AI/` | AI-powered assessment and analysis |
-| ContextGatheringActivity | `AI/` | Gather project and code context |
-| SuggestionGeneratorActivity | `AI/` | Generate improvement suggestions |
+## Class / type structure (primary types)
 
-### Assessment Activities
-| Activity | File | Purpose |
-|----------|------|---------|
-| GenerateQuestionsActivity | `Assessment/` | Generate skill assessment questions |
-| DeliverQuestionsActivity | `Assessment/` | Deliver questions to developer |
-| WaitForResponseActivity | `Assessment/` | Await developer answers |
-| AnalyzeResponseActivity | `Assessment/` | Analyze quality of responses |
-| ClassifyResultActivity | `Assessment/` | Classify assessment outcome |
-| UpdateSkillProfileActivity | `Assessment/` | Update developer skill profile |
+```
+Tamma.Core.Enums
+  MentorshipState (28 values: INIT_STORY_PROCESSING .. COMPLETED + PAUSED/CANCELLED/FAILED/TIMEOUT)
+  BlockerType, SkillLevel, ReviewOutcome, QualityGateResult
 
-### Blocker Activities
-| Activity | File | Purpose |
-|----------|------|---------|
-| ClassifyBlockerActivity | `Blocker/` | Categorize blocker type |
-| CollectCIStatusActivity | `Blocker/` | Gather CI pipeline status |
-| CollectGitActivityActivity | `Blocker/` | Analyze git commit patterns |
-| CollectInactivityActivity | `Blocker/` | Detect developer inactivity |
-| CollectCommunicationActivity | `Blocker/` | Gather communication context |
-| DetectProgressActivity | `Blocker/` | Assess overall progress |
-| EscalateToSeniorActivity | `Blocker/` | Escalate unresolvable blockers |
+Tamma.ElsaServer.Workflows
+  WorkflowBase (abstract)       — shared helpers: DispatchWorkflow, SetOutput, ObserveEvent
+    MentorshipWorkflow          — 28-state Flowchart
+    LlmCallWorkflow             — provider chain + budget + circuit breaker
+    ContextGatheringWorkflow    — parallel fetch + budget
+    AssessmentWorkflow          — question → analyze
+    TestingWorkflow             — compile + run + parse
+    CodeReviewWorkflow          — PR lifecycle
+    BlockerDiagnosisWorkflow    — signal collection + classify
+    TddWorkflow                 — red/green/refactor
+    TddWithDebugRetryWorkflow   — wraps TddWorkflow + DebuggingWorkflow
+    DebuggingWorkflow           — 3-mode systematic debugging
 
-### Context Activities
-| Activity | File | Purpose |
-|----------|------|---------|
-| FetchFileContentsActivity | `Context/` | Load relevant source files |
-| FetchRecentCommitsActivity | `Context/` | Get recent commit history |
-| FetchSessionHistoryActivity | `Context/` | Load mentorship session history |
-| FetchSimilarPatternsActivity | `Context/` | Find similar code patterns |
-| FetchStoryMetadataActivity | `Context/` | Load story details |
-| FetchTestResultsActivity | `Context/` | Get test execution results |
-| AssembleContextActivity | `Context/` | Combine context sources |
-| ApplyBudgetActivity | `Context/` | Apply token budget limits |
+Tamma.Activities.Core
+  TammaActivity (CodeActivity)  — base class emitting STARTED/COMPLETED/FAILED events
+  TammaAsyncActivity            — async variant
+  TammaOutcomeActivity          — activities with multiple named outcomes
+  ITammaActivity                — common interface
 
-### Debug Activities
-| Activity | File | Purpose |
-|----------|------|---------|
-| CollectErrorMessagesActivity | `Debug/` | Gather error messages |
-| CollectGitHistoryActivity | `Debug/` | Relevant git history |
-| CollectRelevantCodeActivity | `Debug/` | Related source code |
-| CollectReproductionStepsActivity | `Debug/` | Reproduction steps |
-| CollectTestResultsActivity | `Debug/` | Test failure details |
-| ClassifyDebugContextActivity | `Debug/` | Classify debugging context |
-| SelectHypothesisActivity | `Debug/` | Generate hypotheses |
-| RefineHypothesisActivity | `Debug/` | Refine based on evidence |
-| AIDiagnosisActivity | `Debug/` | AI-powered diagnosis |
-| WriteRegressionTestActivity | `Debug/` | Generate regression tests |
-| CompileDebugReportActivity | `Debug/` | Compile debug findings |
-| RecordResolutionActivity | `Debug/` | Record resolution for learning |
+Tamma.Activities.Mentorship
+  AssessJuniorCapabilityActivity : TammaActivity
+  MonitorImplementationActivity  : TammaActivity
+  DiagnoseBlockerActivity        : TammaActivity
+  ProvideGuidanceActivity        : TammaActivity
+  QualityGateCheckActivity       : TammaActivity
+  CodeReviewActivity             : TammaActivity
+  MergeCompleteActivity          : TammaActivity
 
-### Tool Execution Activities (Epic 12)
-| Activity | File | Purpose |
-|----------|------|---------|
-| IToolExecutor / ToolExecutorRegistry | `LlmCall/Tools/` | Tool execution framework |
-| FileReadTool | `LlmCall/Tools/` | Read files |
-| FileWriteTool | `LlmCall/Tools/` | Write files |
-| SearchCodeTool | `LlmCall/Tools/` | Search codebase |
-| ShellExecuteTool | `LlmCall/Tools/` | Execute shell commands |
-| RunTestsTool | `LlmCall/Tools/` | Run test suites |
-| GitOperationsTool | `LlmCall/Tools/` | Git operations |
-| CommandValidator | `LlmCall/Tools/` | Validate shell commands |
-| PathValidator | `LlmCall/Tools/` | Validate file paths |
-| TokenEstimator | `LlmCall/Tools/` | Estimate token counts |
-| ContextCompactor | `LlmCall/Tools/` | Compact context when near limits |
+Tamma.Activities.AI
+  ClaudeAnalysisActivity         : TammaAsyncActivity
+  ContextGatheringActivity       : TammaAsyncActivity
+  SuggestionGeneratorActivity    : TammaAsyncActivity
 
-## Code-First ELSA Workflows
+@tamma/orchestrator
+  class ElsaClient
+    startWorkflow(defId, input): Promise<InstanceId>
+    signalWorkflow(instanceId, signal, payload): Promise<void>
+    getStatus(instanceId): Promise<WorkflowStatus>
+    streamEvents(instanceId): AsyncIterable<WorkflowEvent>
+  class TammaEngine (uses ElsaClient for mentorship sessions)
+```
 
-Located in `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/`:
+## Sequence — happy path mentorship session
 
-| Workflow | File | Purpose |
-|----------|------|---------|
-| AdlOrchestratorWorkflow | `AdlOrchestratorWorkflow.cs` | Main ADL (Autonomous Development Loop) orchestrator |
-| SingleIssueCycleWorkflow | `SingleIssueCycleWorkflow.cs` | Full issue lifecycle (largest workflow) |
-| MentorshipWorkflow | `MentorshipWorkflow.cs` | 28-state mentorship flow |
-| LlmCallWorkflow | `LlmCallWorkflow.cs` | LLM call with provider chain, budget, circuit breaker |
-| TddWorkflow | `TddWorkflow.cs` | Test-driven development cycle |
-| TddWithDebugRetryWorkflow | `TddWithDebugRetryWorkflow.cs` | TDD with debug retry (Epic 13) |
-| TestingWorkflow | `TestingWorkflow.cs` | Test execution pipeline |
-| CiWithDebugRetryWorkflow | `CiWithDebugRetryWorkflow.cs` | CI with debug retry (Epic 13) |
-| ContextGatheringWorkflow | `ContextGatheringWorkflow.cs` | Context gathering pipeline |
-| PlanGenerationWorkflow | `PlanGenerationWorkflow.cs` | Development plan generation |
-| CodeReviewWorkflow | `CodeReviewWorkflow.cs` | Code review lifecycle |
-| ReviewFixWorkflow | `ReviewFixWorkflow.cs` | Review fix iteration |
-| BranchCreationWorkflow | `BranchCreationWorkflow.cs` | Git branch creation |
-| PullRequestWorkflow | `PullRequestWorkflow.cs` | PR creation and management |
-| MergeWorkflow | `MergeWorkflow.cs` | PR merge process |
-| MergeApprovalWorkflow | `MergeApprovalWorkflow.cs` | Merge approval gate |
-| AssessmentWorkflow | `AssessmentWorkflow.cs` | Developer assessment flow |
-| BlockerDiagnosisWorkflow | `BlockerDiagnosisWorkflow.cs` | Blocker diagnosis sub-workflow |
-| DebuggingWorkflow | `DebuggingWorkflow.cs` | Systematic debugging pipeline |
+```
+Developer (or engine)     @tamma/orchestrator      ELSA Server             MentorshipWorkflow          Sub-workflows
+         |                        |                     |                          |                         |
+         | start story #42 -----> |                     |                          |                         |
+         |                        | POST /workflows/run |                          |                         |
+         |                        | ------------------> |                          |                         |
+         |                        |                     | create instance -------> | INIT_STORY_PROCESSING   |
+         |                        |                     |                          | VALIDATE_STORY          |
+         |                        |                     |                          |                         |
+         |                        |                     |                          | ASSESS_JUNIOR_CAPABILITY|
+         |                        |                     |                          | --- dispatch ----------> AssessmentWorkflow
+         |                        |                     |                          |                         |  Generate → deliver
+         |                        |                     |                          |                         |  (bookmark: wait for response)
+         |                        |                     |                          | <--- result (skillLvl) -- Analyze → classify
+         |                        |                     |                          |                         |
+         |                        |                     |                          | PLAN_DECOMPOSITION      |
+         |                        |                     |                          | --- dispatch ----------> LlmCallWorkflow (architect role)
+         |                        |                     |                          | <--- plan --------------
+         |                        |                     |                          |                         |
+         |                        |                     |                          | START_IMPLEMENTATION    |
+         |                        |                     |                          | --- dispatch ----------> ContextGatheringWorkflow
+         |                        |                     |                          | <--- context -----------
+         |                        |                     |                          |                         |
+         |                        |                     |                          | MONITOR_PROGRESS (loop) |
+         |                        |                     |                          |   PROVIDE_GUIDANCE      |
+         |                        |                     |                          |   DETECT_PATTERN? --->  |  pattern → blocker flow
+         |                        |                     |                          |                         |
+         |                        |                     |                          | QUALITY_GATE_CHECK      |
+         |                        |                     |                          | --- dispatch ----------> TestingWorkflow
+         |                        |                     |                          | <--- pass/fail ---------
+         |                        |                     |                          |   fail → AUTO_FIX_ISSUES|
+         |                        |                     |                          |                         |
+         |                        |                     |                          | PREPARE_CODE_REVIEW     |
+         |                        |                     |                          | --- dispatch ----------> CodeReviewWorkflow
+         |                        |                     |                          | <--- approved ----------
+         |                        |                     |                          |                         |
+         |                        |                     |                          | MERGE_AND_COMPLETE      |
+         |                        |                     |                          | GENERATE_REPORT         |
+         |                        |                     |                          | UPDATE_SKILL_PROFILE    |
+         |                        |                     |                          | COMPLETED               |
+         | <------ SSE event ---- |  webhook / SSE <--- | instance complete        |                         |
+```
 
-## TypeScript Bridge
+## Use cases
 
-`packages/orchestrator/src/elsa-client.ts` provides the TypeScript-to-ELSA bridge:
-- HTTP client for ELSA REST API
-- Workflow dispatch and signal operations
-- Status querying
-- Session lifecycle management
+- **New junior picks up a story** — developer is assessed, given a decomposed plan sized to their skill level, and monitored through implementation. Pattern detection catches circular work (same files edited in a loop with no net progress) and escalates early rather than burning cycles.
+- **Blocker on an otherwise-healthy PR** — implementation stalls. `BlockerDiagnosisWorkflow` collects CI status + git activity + inactivity signals, classifies the blocker (dependency vs. ambiguity vs. missing context), and routes to either targeted guidance, context re-gathering, or senior escalation.
+- **TDD cycle for a brittle feature** — `TddWithDebugRetryWorkflow` runs red-green-refactor; on red (test failure after implementation) it dispatches the debugging workflow, which walks systematic hypothesis generation and produces a regression test before re-attempting. Epic 13 extracted this loop so it is reusable outside mentorship.
+- **Autonomous agent operating in mentorship mode** — the same state machine drives a pure-agent session (skill level = senior by default), giving the agent the same monitoring, quality-gate, and review plumbing the human path gets. The mentorship session becomes the audit trail for agent work.
+- **Re-entering a paused session** — operator pauses the instance; ELSA persists bookmark state. On resume, the workflow continues from the exact activity it was waiting on (e.g. `WAIT_FOR_RESPONSE` in assessment).
 
-## Stories
+## Dependencies
 
-### Core Stories
+**Upstream (needed before / by this epic)**
+- Epic 1 — provider interfaces (`IAgentProvider`, `IAIProvider`) the LLM activities call through.
+- Epic 6 — context & knowledge base used by `ContextGatheringWorkflow` for similar-pattern lookup.
+- Epic 9 — role-based agent resolver, provider chain, content sanitizer, diagnostics queue, circuit breaker.
+- Epic 11 — `ContentSanitizer` C# port gates every LLM input and output in `LlmCallWorkflow`.
+- Epic 12 — agentic tool loop in `CallLlmInlineActivity` gives mentorship activities real tool use.
 
-| Story | Title | Status |
-|-------|-------|--------|
-| 7-1 | Mentorship State Machine Core | Done |
-| 7-2 | Skill Assessment Activity | Done |
-| 7-3 | Context Gathering Activity | Done |
-| 7-4 | Claude Analysis Activity | Done |
-| 7-5 | Plan Decomposition Activity | Done |
-| 7-6 | Progress Monitoring & Pattern Detection | Done |
-| 7-7 | Blocker Diagnosis & Resolution | Done |
-| 7-8 | Quality Gate & Auto-Fix Pipeline | Done |
-| 7-9 | Code Review & Merge Workflow | Done |
-| 7-10 | TypeScript Engine Bridge & Session API | Done |
+**Downstream (consumers / extenders)**
+- Epic 13 — extracts mentorship's internal TDD + CI retry loops into reusable sub-workflows.
+- Epic 14 — ELSA Studio visualizes and debugs running mentorship sessions (custom UI hints).
+- Epic 2 — main autonomous loop invokes mentorship sessions as the primary execution surface.
+- Epic 19 / Agent Dispatch — dispatcher starts mentorship workflows per assigned issue.
 
-### ELSA Sub-Workflow Stories
+## Current state
 
-| Story | Title | Status |
-|-------|-------|--------|
-| 7-1A | Main Mentorship Workflow (Code-First Flowchart) | Done |
-| 7-1B | LLM Call Sub-Workflow | Done |
-| 7-1C | Testing Sub-Workflow | Done |
-| 7-1D | Code Review Sub-Workflow | Done |
-| 7-1E | Assessment Sub-Workflow | Done |
-| 7-1F | Context Gathering Sub-Workflow | Done |
-| 7-1G | Blocker Diagnosis Sub-Workflow | Done |
-| 7-1H | TDD Sub-Workflow | In Progress |
-| 7-1I | Debugging Sub-Workflow | Done |
+Landed:
+- `ac05aa0f docs: Epic 7 stories 7-1..7-10 + 7-1A..7-1I sub-workflows`
+- `b10e90f docs: add implementation plans for all 15 stories (epics 11-14)` (sibling landings)
+- 9ac2fcb / 44d7ef7 — TDD / CI retry extractions (Epic 13) that simplified the parent workflow.
+- Sub-workflows 7-1A, 7-1B, 7-1C, 7-1D, 7-1E, 7-1F, 7-1G, 7-1I merged via `bb61173`, `e07a263`, and predecessors.
+- Story 7-11 (blocker diagnosis improvements) and 7-12 (debugging workflow prompt improvements) landed as follow-ups.
+
+Still outstanding:
+- Story 7-1H (TDD sub-workflow) — TDD prompt overhaul impl plan written, implementation in flight.
+- A subset of activities still use simulated logic (flagged in `docs/stories/epic-7/README.md` §"Existing Implementation"); real-API conversion is ongoing.
+
+Stubs / deferrals:
+- `AssessJuniorCapabilityActivity` still mixes simulated and real signals; full Claude-backed version pending.
+- Skill-level profile persistence presently in-memory; backed by the event store once Epic 10 state reconstruction lands.
+
+## See also
+
+- [Workflow: Mentorship](../Workflow-Mentorship.md) — walk-through of the 28-state machine.
+- [Workflow: ADL Orchestrator](../Workflow-ADL-Orchestrator.md) — parent loop that starts mentorship sessions.
+- [Workflow: Single Issue Cycle](../Workflow-Single-Issue-Cycle.md) — issue lifecycle workflow.
+- [Epic 9: Agent Management](Epic-9-Agent-Management.md) — provider chain + prompt resolution consumed here.
+- [Epic 11: Security](Epic-11-Security.md) — sanitization gates in `LlmCallWorkflow`.
+- [Epic 12: Tool Loop](Epic-12-Tool-Loop.md) — agentic loop inside LLM activities.
+- [Epic 13: Workflow Decomposition](Epic-13-Workflow-Decomposition.md) — extraction of TDD / CI retry loops.
+- Impl plans: [`docs/stories/epic-7/`](/stories/epic-7/).
+- Source: `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/`, `apps/tamma-elsa/src/Tamma.Activities/`, `packages/orchestrator/src/elsa-client.ts`.
 
 ---
 
-_For story details, see [docs/stories/epic-7/](/stories/epic-7/) in the repository._
+_Last refreshed 2026-04-22._

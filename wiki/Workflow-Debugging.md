@@ -4,6 +4,8 @@
 **Class:** `DebuggingWorkflow`
 **Source:** `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/DebuggingWorkflow.cs`
 
+> **Epic 39 (Story 39-15) — diagnosis now runs through the `debug-diagnosis` lifecycle binding.** The Debugging workflow remains a non-binding orchestrator, but its AI-diagnosis step no longer calls the bespoke `AIDiagnosisActivity`. It now dispatches the new `debug-diagnosis` workflow — itself a thin binding over the generic [Document Lifecycle](Document-Lifecycle) that produces a typed `Diagnosis` from the `(senior_developer, debug-rootcause)` producer cell — and consumes the accepted `Diagnosis` document as its ranked hypotheses. Attempt N's diagnosis supersedes N-1's via `supersedesDocumentId` (lineage-preserved). **The fix/verify iteration loop (apply fix → run tests → refine, max 5 iterations) is unchanged.** The "AI Diagnosis" section below describes the retired `AIDiagnosisActivity`, kept for historical reference.
+
 ## Purpose
 
 The Debugging workflow provides **systematic AI-driven debugging** with 3 entry modes. It collects context from 5 sources in parallel, uses AI to generate ranked hypotheses, then iteratively applies fixes and verifies them with tests (up to 5 iterations).

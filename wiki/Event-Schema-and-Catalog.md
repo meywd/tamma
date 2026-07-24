@@ -1,6 +1,6 @@
 # Event Schema & Catalog (Epic 4 — Story 4-1)
 
-_Last updated: 2026-07-15._
+_Last updated: 2026-07-24._
 
 This page is the maintainable reference for Tamma's **DCB (Dynamic Consistency Boundary)** event schema and the catalog of event **types** the running system emits. It is the shipped answer to [Story 4-1: Event Schema Design](https://github.com/meywd/tamma/blob/main/docs/stories/epic-4/story-4-1/4-1-event-schema-design.md) — re-based on the **current C# stack**. The original brief sketched a TypeScript `BaseEvent`/`Emmett` design; production landed on a custom EF Core implementation. Where the two differ, this page describes what the code actually does and maps it back to the story's acceptance criteria in [§9](#9-acceptance-criteria--shipped-schema).
 
@@ -222,6 +222,8 @@ Grouped by domain. Each group cites its catalog class; the listed strings are th
 
 The Epic-2/3 assessment sub-workflows (2026-07): each mirrors the same skeleton (gather context → mediated `llm-call` → fail-closed parse → emit) and emits through a dedicated `Emit*EventActivity`. Common tags: `sessionId`, `issueId`, `tenantId` (empty/single-user → platform-scope, `TenantId` null); each catalog exposes a `StatusForEvent` helper so the `.FAILED` terminal is always a loud error-status row, never a false success.
 
+> **Epic 39 — these families now emit ALONGSIDE `DOCUMENT.*`.** As of Epic 39 (stories 39-12…39-15) the producer workflows are thin bindings over the generic document lifecycle (see [§10.2a](#102a-document-lifecycle--acceptance-surface-epic-39) and [Document Lifecycle](Document-Lifecycle)). The per-family catalogs below — `DECOMPOSITION.*`, `RESEARCH.*`, `AMBIGUITY.*`, `CLARIFY.*`, `DESIGN.*`, `TRIAGE.*`, and `DEBUG.DIAGNOSIS.*` — are **retained and still emitted at the equivalent transitions**, but they now emit *alongside* the generic `DOCUMENT.*` lifecycle events (state history) plus the `APPROVAL.*` / `ESCALATION.*` acceptance surface. A migrated run therefore carries both its legacy family rows and the generic lifecycle rows; dashboards treat `DOCUMENT.*` as state history and `ESCALATION.*` as the exception surface so the two never double-count.
+
 | Catalog | Event types |
 |---|---|
 | `ResearchEvents` (Story 3.4, `research` workflow) | `RESEARCH.STARTED`, `RESEARCH.CONTEXT_GATHERED`, `RESEARCH.COMPLETED` (data: `findingCount`, `confidence`), `RESEARCH.FAILED` |
@@ -229,6 +231,19 @@ The Epic-2/3 assessment sub-workflows (2026-07): each mirrors the same skeleton 
 | `AmbiguityEvents` (Story 3.6, `ambiguity-scoring` workflow) | `AMBIGUITY.STARTED`, `AMBIGUITY.SCORED`, `AMBIGUITY.CLARIFICATION_TRIGGERED`, `AMBIGUITY.BELOW_THRESHOLD`, `AMBIGUITY.FAILED` (data: `score` 0..1, `ambiguityCount`, `confidence`, `threshold`, `detail`) |
 | `DesignEvents` (Story 3.7, `design-proposal` workflow) | `DESIGN.PROPOSAL.GENERATED/DELIVERED/APPROVED/REJECTED`, `DESIGN.PROPOSAL.FAILED`, `DESIGN.REVIEW.TIMED_OUT` (both loud error-status; tags add `channel`; data: `alternativeCount`, `reviewer`, `detail`) |
 | `DecompositionEvents` (Story 2.14, `issue-decomposition` workflow) | `DECOMPOSITION.STARTED`, `DECOMPOSITION.CONTEXT_GATHERED`, `DECOMPOSITION.COMPLETED` (data: `subtaskCount`), `DECOMPOSITION.FAILED` |
+
+### 10.2a Document lifecycle & acceptance surface (Epic 39) (`Tamma.Activities/Documents/{DocumentEvents,ApprovalEvents}.cs`)
+
+The generic document lifecycle (`produce → validate → review → revise → accept`, Story 39-6) emits one uniform `DOCUMENT.*` family on every transition, regardless of document type. Every migrated producer (decomposition, research, ambiguity, clarify, design, plan, task, test-spec, triage, debug-diagnosis) rides these events; the legacy per-family events in [§10.2](#102-assessment-research--design-workflows-tammaactivitiesresearchambiguityclarifydesigndecomposition) still fire alongside them. Common tags: `issueId`, `documentId`, `documentType`, `correlationId`, `tenantId` (when set). Each catalog exposes a `StatusForEvent` helper so `.FAILED` / `REJECTED` / `ESCALATED` / `UNDECIDABLE` are always LOUD error-status rows.
+
+| Catalog | Event types |
+|---|---|
+| `DocumentEvents` (Story 39-6/39-7/39-10) | `DOCUMENT.PRODUCED.SUCCESS/FAILED`, `DOCUMENT.VALIDATED.SUCCESS/FAILED`, `DOCUMENT.REVIEW_REQUESTED`, `DOCUMENT.REVIEWED`, `DOCUMENT.REVISION_STARTED`, `DOCUMENT.ACCEPTED`, `DOCUMENT.REJECTED` (loud), `DOCUMENT.ESCALATED` (loud), `DOCUMENT.REVIEW_PANEL_STARTED/COMPLETED`, `DOCUMENT.REVIEW_PANEL_UNDECIDABLE` (loud), `DOCUMENT.REENTERED` (crash re-entry at a non-Produce stage) |
+| `ApprovalEvents` (Story 39-8 — acceptance gate + exception surface) | `APPROVAL.REQUESTED` (started; the accept gate published an `AcceptanceRequest` and suspended to the orchestrator), `APPROVAL.PROVIDED` (the injected decision arrived on resume; carries decider + `channel` + `durationMs`), `ESCALATION.TRIGGERED` (loud; carries full document lineage), `ESCALATION.RESOLVED` (dispositioned: resolved/overridden/abandoned) |
+
+> `DOCUMENT.ESCALATED` (state transition) and `ESCALATION.TRIGGERED` (exception surface with lineage / `channel` / timing) are emitted at the SAME escalated exit **by design** — not accidental double-emission. 39-11's dashboards read `DOCUMENT.*` as state history and `ESCALATION.*` as the exception surface, so the pair never double-counts. `ApprovalEvents` also owns the `APPROVAL.GATE*` bookmark prefix (the suspend/resume gate), absorbing the old Story 4-6 approval/escalation-capture goal.
+
+**Planned / not yet emitted.** Two event families are specified but not landed as of this writing: **`TOOL.*`** (orchestrator/agent tool-call audit — **Epic 42**) and **`ROUTE.*`** (acceptance routing decisions — **Story 41-29**). They are noted here as future additions so the catalog's forward shape is visible; do not treat them as currently emitted.
 
 ### 10.3 Quality gates, testing, debugging & TDD code/commit audit (`Tamma.Activities/{Testing,Review,Blocker,Debug,TDD}`)
 

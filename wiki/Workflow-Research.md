@@ -6,6 +6,8 @@ title: "Workflow: Research"
 **Class:** `ResearchWorkflow`
 **Source:** `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/ResearchWorkflow.cs`
 
+> **Epic 39 (Story 39-13) — now a `document-lifecycle` binding (produces `Findings`).** This workflow is a thin binding over the generic [Document Lifecycle](Document-Lifecycle) (`produce → validate → review → revise → accept`). It assembles the codebase/prior-art context and dispatches `document-lifecycle` with `documentType = findings` and the `(product_owner, research)` producer cell, then exposes typed outcomes. The old bespoke pipeline — `llm-call` → hand parser (`ResearchParsing`) → success-flag gate → error-`Finish` terminal — is **deleted**; the lifecycle's generic rings own all validation, review-with-notes, bounded revision, and typed escalation with full lineage instead of a dead terminal. The `RESEARCH.*` events still emit, now **alongside** the generic `DOCUMENT.*` events. The Flow Diagram and "Fail-Closed Parsing" section below describe the retired bespoke flow, kept for historical reference.
+
 ## Purpose
 
 The Research workflow (Story 3.4) autonomously investigates an issue/topic — typically when ambiguity is detected in a requirement. It gathers codebase/prior-art context by reusing the `context-gathering` sub-workflow, then synthesizes the gathered context into a ranked, confidence-scored research report via the MEDIATED `llm-call` path (role=`product_owner`, action=`research`) — the engine holds no LLM credential. Results are emitted as `RESEARCH.*` DCB events so the research is stored and linked to the originating issue for traceability.

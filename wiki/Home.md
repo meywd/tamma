@@ -4,7 +4,7 @@
 
 ## Quick Links
 
-- [Project Roadmap](Roadmap) - All 31 epics with timeline, status, and layer placement
+- [Project Roadmap](Roadmap) - All 37 epics with timeline, status, and layer placement
 - [Architecture](Architecture) - System architecture overview (three deployment modes, `IAgentExecutor`, pluggable backends)
 - [Event Schema & Catalog](Event-Schema-and-Catalog) - Epic 4 DCB event schema: `DomainEvent` shape, tags taxonomy, and the full `AGGREGATE.ACTION.STATUS` catalog
 - [Deployment](Deployment) - Docker stack, least-privilege app-role runbook, env vars, Redis/Cranl activation
@@ -20,7 +20,9 @@
 - [Multi-Tenant Provisioning](Multi-Tenant-Provisioning) - Epic 30: `ITenantInfrastructureProvider` v2, Cranl/Hetzner/Cloudflare/BYO backends
 - [Multi Git Platform](Multi-Git-Platform) - Epic 31: `IGitPlatformClient`, Gitea/Forgejo/GitLab drivers
 - [Identity Providers](Identity-Providers) - Epic 33 (deferred): per-tenant SAML/OIDC/LDAP
-- [Epics](Epics) - All 31 epics organized by phase
+- [Document Lifecycle](Document-Lifecycle) - Epic 39: typed work documents + the universal produce→validate→review→revise→accept lifecycle
+- [Resumable Workflows](Resumable-Workflows) - The resumable-by-design standard (Epic 39-10) generalized by Epics 40 and 41
+- [Epics](Epics) - All 37 epics organized by phase
 - [Epic 1: Foundation](Epics/Epic-1-Foundation) - Core infrastructure (AI providers, Git platforms, CLI)
 - [Epic 1.5: Infrastructure & Deployment](Epics/Epic-1.5-Infrastructure) - Docker, CI/CD, SaaS coordinator
 - [Epic 2: Autonomous Loop](Epics/Epic-2-Autonomous-Loop) - 14-step autonomous development loop
@@ -34,7 +36,11 @@
 - [Epic 24: Voice Conversation](Epics/Epic-24-Voice-Conversation) - Realtime voice conversation
 - [Epic 25: Wiki Site](Epics/Epic-25-Wiki-Site) - Custom documentation site on Cloudflare Workers
 - [Epic 26: Project Management & Triage](Epics/Epic-26-Project-Management) - Issue triage, scrum, release management
-- [Workflows](Workflows) - All 21 ELSA workflows with flow diagrams and dependency map
+- [Epic 39: Document Lifecycle](Epics/Epic-39-Document-Lifecycle) - Typed work documents + universal lifecycle (**implemented** — spine complete)
+- [Epic 40: Resumable Coding](Epics/Epic-40-Resumable-Coding) - Durable agent-run waits + the tamma-agent runner contract (planned)
+- [Epic 41: Full-Team Workflows](Epics/Epic-41-Full-Team-Workflows) - Every remaining SDLC activity as a lifecycle workflow + the 41-29 flow router (planned)
+- [Epic 42: Tool Layer](Epics/Epic-42-Tool-Layer) - Governed, extensible, secret-bound agent tool catalog (planned)
+- [Workflows](Workflows) - All 30+ ELSA workflows with flow diagrams and dependency map
 - [Stories](Stories) - Detailed story documentation across all epics
 - [Contributing](Contributing) - How to contribute to Tamma
 - [GitHub Issues](https://github.com/meywd/tamma/issues) - Track progress
@@ -67,14 +73,15 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 
 ## Current Status
 
-**Phase:** Active development on `main` — Epic 23 monitoring-dashboard buildout, Epic 3 assessment workflows, Epic 4 event capture + black-box replay
+**Phase:** Active development on `main` — the Epic 39 document-lifecycle spine has landed (typed work documents + the universal produce→validate→review→revise→accept lifecycle; every document-producing workflow migrated onto it), alongside the Epic 23 monitoring-dashboard buildout, Epic 3 assessment workflows, and Epic 4 event capture + black-box replay
 **Stack:** C#/.NET 8 backend (30+ Elsa workflows + `Tamma.Api` Minimal API) on PostgreSQL 17; TypeScript `intelligence-server` sidecar (KB/RAG) + React dashboards
 **KB/RAG:** sidecar wired to a real vector store with self-hosted embeddings via local Ollama (`nomic-embed-text`) — no external embedding API required
 **Deployment:** Hetzner VPS via Docker Compose (qa-tag–gated deploys); wiki site live at wiki.tamma.dev
-**Epic Count:** epics 1–31 plus 32/34–38 (agents, pricing, billing, analytics, audit) tracked in `docs/sprint-status.yaml`; Epic 33 deferred
+**Epic Count:** epics 1–31 plus 32/34–38 (agents, pricing, billing, analytics, audit) tracked in `docs/sprint-status.yaml`, plus the workflow-platform wave (39 implemented; 40/41/42 scoped); Epic 33 deferred
 
-### Recent Progress (main-branch development, 2026-07-04 → 2026-07-15)
+### Recent Progress (main-branch development, 2026-07-04 → 2026-07-24)
 
+- **Epic 39 document-lifecycle spine — implemented** -- typed work documents (Decomposition, Plan, Review, Findings, …) as static `Tamma.Core` types, one generic `DocumentLifecycleWorkflow` (produce→validate→review→revise→accept), acceptance rules + the 70–100 autonomy dial, the escalation/approval surface, real-time channels + orchestrator chat + Task View, teams/roles/repo-access routing, and the resumable-by-design standard. **The producer-migration spine is complete** — 39-12…39-15 all merged, so every document-producing workflow now rides the lifecycle. Remaining: 39-1 (I/O audit), 39-16 (generated prompt contracts), 39-17 (resident orchestrator agent), 39-21 (C# RAG). Epics 40 (resumable coding), 41 (full-team workflows), and 42 (tool layer) are scoped/planned on top of it.
 - **Epic 23 monitoring dashboard — 8 of 12 stories landed** -- 23-12 nav/layout/shared primitives (foundation), 23-1 System Health overview, 23-2 Agent Monitor (realtime tool-loop tail), 23-3 Event Store Explorer (over the 4-7 query API), 23-4 Configuration Audit, 23-5 Workflow Monitor, 23-6 Provider Diagnostics (latency/error/cost aggregations + fail-closed tenant fix), 23-8 Infrastructure Monitor (runtime/disk/dependency health).
 - **Epic 3 assessment workflows** -- 3-4 ResearchWorkflow + research action/prompt template (`RESEARCH.*` events, structured findings), 3-6 ambiguity scoring (mediated LLM, fail-closed parse, `AMBIGUITY.*` events), 3-7 DesignProposalWorkflow (approval gate + secure resume, `DESIGN.*` events).
 - **Epic 4 audit trail** -- 4-5 DCB event coverage for code changes & git operations; 4-8 black-box replay (point-in-time state reconstruction via a pure fold over the DCB event slice); read-endpoint hardening fix (UTC date bounds, bounded fetches, empty-tenant guard).
@@ -122,6 +129,17 @@ Tamma is an **autonomous development platform** designed to achieve **70%+ auton
 | Epic 31 | Multi Git Platform Support | 10 core + 2 optional | 4 + 5 | Briefs only |
 | Epic 33 | Per-Tenant IdP (deferred) | — | post-launch | Forward-looking stub |
 
+### Workflow-Platform Wave (Epics 39–42)
+
+The document-lifecycle wave. **Epic 39 is implemented** (spine complete); **40, 41, 42 are scoped/planned — backlog, not built.**
+
+| Epic | Name | Stories | Status |
+|------|------|---------|--------|
+| Epic 39 | Typed Work Documents & the Universal Lifecycle | 21 | **Implemented** — spine + producer migrations 39-12…39-15 merged; 39-1/16/17/21 remain |
+| Epic 40 | Resumable Coding Execution | 7 | Planned / docs — backlog |
+| Epic 41 | Full-Team Workflow Coverage | 28 + 41-29 router | Planned / docs — backlog |
+| Epic 42 | Agent Capability & Tool Layer | 9 | Planned / docs — backlog |
+
 ### Partially Implemented (5)
 
 | Epic | Name | Done | In Progress | Drafted |
@@ -148,10 +166,10 @@ All technical documentation is maintained in the [/docs](https://github.com/meyw
 - [Architecture](https://github.com/meywd/tamma/blob/main/docs/architecture.md) - Technical architecture
 - [Epics](https://github.com/meywd/tamma/blob/main/docs/epics.md) - Epic breakdown
 - [Tech Specs](https://github.com/meywd/tamma/tree/main/docs) - Technical specifications per epic
-- [Stories](https://github.com/meywd/tamma/tree/main/docs/stories) - User story documentation (31 epics, 260+ stories, 80+ impl plans)
+- [Stories](https://github.com/meywd/tamma/tree/main/docs/stories) - User story documentation (37 epics, 375+ stories, 80+ impl plans)
 - [Code review 2026-04-20](https://github.com/meywd/tamma/blob/main/docs/review/session-2026-04-20.md) - Senior code review report
 - [Layer placement plans](https://github.com/meywd/tamma/tree/main/docs/stories/plans) - Layer 4/5 layer placement for Epics 29/30/31/33
 
 ---
 
-_Last updated: 2026-07-15 (main-branch sync: Epic 23 monitoring pages, Epic 3 assessment workflows, Epic 4 capture + replay, Epic 6 KB/RAG + Ollama) | Maintained by: meywd_
+_Last updated: 2026-07-24 (workflow-platform wave: Epic 39 document-lifecycle spine implemented; Epics 40/41/42 scoped) | Maintained by: meywd_

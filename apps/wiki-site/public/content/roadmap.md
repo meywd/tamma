@@ -4,9 +4,9 @@ sidebar:
   order: 1
 ---
 
-Comprehensive roadmap covering **33 epics** from foundation through SaaS platform, including five newly scoped epics from the 2026-04-20/21 planning sweep (Epics 28, 29, 30, 31, 33). _(Epics 27 and 32 are now defined; previous roadmap text marking them "reserved" was stale.)_
+Comprehensive roadmap covering **37 epics** from foundation through SaaS platform, including the newly scoped Wave-2 epics (28, 29, 30, 31, 33) and the workflow-platform wave (39, 40, 41, 42). _(Epics 27 and 32 are now defined; previous roadmap text marking them "reserved" was stale.)_
 
-_Last audited: 2026-04-21 (auth-foundation sprint + Wave-2 planning + prioritization)._
+_Last audited: 2026-07-24 (workflow-platform wave added: Epic 39 implemented — document-lifecycle spine + producer migrations 39-12…39-15; Epics 40/41/42 scoped/planned)._
 
 ## Prioritization (Wave A → D)
 
@@ -42,11 +42,11 @@ Review-finding cross-reference: see [Port Audit → Code review (2026-04-20)](Po
 |------|------|---------|------|--------|
 | **Epic 1** | Foundation & Core Infrastructure | 15 | 10 | Near Complete |
 | **Epic 1.5** | Infrastructure & Deployment | 10 | 9 | Near Complete (K8s in progress) |
-| **Epic 2** | Autonomous Development Loop | 20 | 13 | Near Complete |
-| **Epic 3** | Quality Gates & Intelligence | 12 | 8 | Near Complete |
-| **Epic 4** | Event Sourcing & Audit Trail | 8 | 6 | Near Complete |
+| **Epic 2** | Autonomous Development Loop | 20 | 14 | Near Complete (2-14 decomposition landed 2026-07) |
+| **Epic 3** | Quality Gates & Intelligence | 13 | 12 | Near Complete (3-4/3-5/3-6/3-7 landed 2026-07; 3-13 remains) |
+| **Epic 4** | Event Sourcing & Audit Trail | 8 | 7 | Near Complete (4-5 capture + 4-8 replay landed 2026-07) |
 | **Epic 5** | Observability Dashboard & Docs | 14 | 4 | Partially Implemented |
-| **Epic 6** | Context & Knowledge Management | 10 | 9 | Near Complete |
+| **Epic 6** | Context & Knowledge Management | 10 | 9 | Near Complete (KB/RAG sidecar live w/ local Ollama embeddings, 2026-07) |
 | **Epic 7** | Autonomous Mentorship Workflow | 9 | 8 | Near Complete |
 | **Epic 8** | Distribution & Installation | 8 | 8 | Completed |
 | **Epic 9** | Config-Driven Multi-Agent Management | 11 | 11 | Completed |
@@ -58,12 +58,12 @@ Review-finding cross-reference: see [Port Audit → Code review (2026-04-20)](Po
 | **Epic 15** | Observability & Log Aggregation | 1 | 1 | Completed |
 | **Epic 16** | Unified Auth, User Management & Admin | 6 | 6 | Completed |
 | **Epic 17** | Multi-Tenancy Foundation | 5 | 0 | Drafted |
-| **Epic 18** | End-User Auth & Registration | 5 (+ 18-7, 18-8) | 1 | Partially Implemented |
+| **Epic 18** | End-User Auth & Registration | 5 (+ 18-6/18-7/18-8) | 4 | Partially Implemented (18-4 onboarding slices landed 2026-07; 18-4 still in progress) |
 | **Epic 19** | GitHub App Agent Dispatch | 6 | 5 | **Completed** (19-6 follow-up drafted) |
 | **Epic 20** | Billing & Payments | 5 | 0 | Drafted |
-| **Epic 21** | Marketing Site & User Dashboard | 5 | 1 | Partially (Midnight Ocean live) |
+| **Epic 21** | Marketing Site & User Dashboard | 5 | 2 | Partially (21-4 Repos & Runs pages landed 2026-07; marketing site extracted to standalone repo) |
 | **Epic 22** | CLI Mode Preservation | 5 | 0 | Drafted |
-| **Epic 23** | System Monitoring & Observability Dashboard | 12 | 0 | Drafted (26 task plans) |
+| **Epic 23** | System Monitoring & Observability Dashboard | 12 | 8 | In Progress — 23-1..23-6, 23-8, 23-12 landed 2026-07; 23-7/23-9/23-10 remain (23-11 superseded) |
 | **Epic 24** | Realtime Voice Conversation | 7 | 1 | Drafted (24 task plans) |
 | **Epic 25** | Documentation & Wiki Site | 1 | 1 | Completed |
 | **Epic 26** | Project Management & Triage | 4 | 0 | Drafted |
@@ -72,8 +72,12 @@ Review-finding cross-reference: see [Port Audit → Code review (2026-04-20)](Po
 | **Epic 30** | Pluggable Tenant Infrastructure Provisioning | 10 | 0 | **New — briefs + 10 impl plans** |
 | **Epic 31** | Multi Git Platform Support | 10 core + 2 optional | 0 | **New — briefs only** |
 | **Epic 33** | Per-Tenant Identity Providers | — | 0 | **New — deferred stub** |
+| **Epic 39** | Typed Work Documents & the Universal Lifecycle | 21 | 17 | **Implemented** — spine complete, 39-12…39-15 merged; 39-1/16/17/21 remain |
+| **Epic 40** | Resumable Coding Execution | 7 | 0 | Planned / docs — backlog |
+| **Epic 41** | Full-Team Workflow Coverage | 28 + 41-29 router | 0 | Planned / docs — backlog |
+| **Epic 42** | Agent Capability & Tool Layer | 9 | 0 | Planned / docs — backlog |
 
-_(Epics 27 and 32 reserved for future use.)_
+_(Epic 32 reserved for future use.)_
 
 ---
 
@@ -119,6 +123,28 @@ Forward-looking stub. Three pre-scoped tiers (Lean OIDC ~100h / Full SAML+OIDC ~
 
 ---
 
+## Workflow-platform wave (Epics 39–42)
+
+This wave makes the platform's implicit domain language explicit and extends the single quality lifecycle across the whole team. **Epic 39 is implemented; 40, 41, and 42 are scoped/planned (backlog, not built).**
+
+### Epic 39 — Typed Work Documents & the Universal Lifecycle (Implemented)
+
+**Layer 4** — 21 stories, 17 landed. Defines ~10 typed work documents (Decomposition, Plan, Review, Findings, …) as static C# types in `Tamma.Core`, one generic `produce → validate → review → revise → accept` lifecycle, an orchestrator that routes acceptance by a 70–100 autonomy dial, and a resumable-by-design authoring standard with a structural test. **The producer-migration spine is complete** — 39-12 (pilot) → 39-13 (assessment family) → 39-14 (planning family) → 39-15 (remaining producers) are all merged, so every document-producing workflow now rides `DocumentLifecycleWorkflow`. Remaining: 39-1 (I/O audit), 39-16 (generated prompt contracts), 39-17 (resident orchestrator agent), 39-21 (C# RAG). See [Document Lifecycle](Document-Lifecycle).
+
+### Epic 40 — Resumable Coding Execution (Planned / docs)
+
+**Layer 4** — 7 stories, backlog. Ships the missing `tamma-agent.yml` runner contract (SaaS + single-user) that Story 19-1 specified but never built, and makes the coding step resumable on the 39-10 mechanism — replacing the inline ~35-min monitor with a durable bookmark suspend, the in-memory webhook signal registry with a persisted cross-pod signal, and adding git+events-based per-task re-entry. Code is deliberately NOT a document type; re-entry reads git + DCB events, not the document store. See [Resumable Workflows](Resumable-Workflows).
+
+### Epic 41 — Full-Team Workflow Coverage (Planned / docs)
+
+**Layer 4** — 28 stories + 41-29 the task-level flow router, backlog. Turns every remaining recurring SDLC activity (ADR authoring, sprint planning, standup synthesis, threat modeling, release notes, UX specs, …) into a first-class lifecycle workflow on the Epic 39 spine — thin bindings, no new architecture. Adds three new `AgentRole`s (`scrum_master`, `project_manager`, `ux_designer`) and six new document types via 41-1. **41-29** is the activation story: it adds a task `kind` to the `Plan` and dispatches each task to the workflow matching its kind (code→TDD, docs→docs, infra→deploy, design→UX). Every story can run human-assigned before its agent path lands.
+
+### Epic 42 — Agent Capability & Tool Layer (Planned / docs)
+
+**Layer 4** — 9 stories, backlog. Makes the coding-only tool framework first-class: a `ToolDescriptor` (category / permission class / autonomy floor / required secret / suspends) on `IToolExecutor` with deny-by-default governance, a dynamic + MCP registry seam, a two-scoping `tool_bindings` store, per-tool autonomy gating in `ResolveToolsActivity` that routes destructive/above-floor calls through the Epic 39 `AcceptanceRequest` channel, secret binding via Epic 29's `ISecretStore`, and durable `TOOL.*` DCB audit. Tool families: cloud/VPS ops, feature-flag & deploy control, authenticated HTTP, and MCP-exposed tools — the missing foundation under Epic 41's non-code task kinds.
+
+---
+
 ## Review findings cross-reference
 
 The 2026-04-20 senior code review (`docs/review/session-2026-04-20.md`) surfaced 18 findings. Merge-blockers closed this sprint; follow-ups mapped into new epics.
@@ -151,7 +177,10 @@ Beyond the numbered findings, Epic 31 closes the "GitHub-hard-coding" design-int
 Completed / Near Complete:
   Epic 1   (Foundation)              [NEAR COMPLETE - 10/15]
   Epic 1.5 (Infrastructure)          [NEAR COMPLETE - 9/10]
-  Epic 6   (Context & Knowledge)     [NEAR COMPLETE - 9/10]
+  Epic 2   (Autonomous Loop)         [NEAR COMPLETE - 14/20 — 2-14 decomposition landed 2026-07]
+  Epic 3   (Quality Gates)           [NEAR COMPLETE - 12/13 — 3-4/3-5/3-6/3-7 landed 2026-07]
+  Epic 4   (Event Sourcing)          [NEAR COMPLETE - 7/8 — 4-5 capture + 4-8 replay landed 2026-07]
+  Epic 6   (Context & Knowledge)     [NEAR COMPLETE - 9/10 — KB/RAG sidecar live w/ Ollama embeddings]
   Epic 7   (Mentorship Workflow)     [NEAR COMPLETE - 8/9]
   Epic 8   (Distribution)            [COMPLETED]
   Epic 9   (Multi-Agent Management)  [COMPLETED]
@@ -162,18 +191,27 @@ Completed / Near Complete:
   Epic 15  (Log Aggregation)         [COMPLETED]
   Epic 16  (Unified Auth & Admin)    [COMPLETED]
   Epic 19  (Agent Dispatch)          [COMPLETED - 19-6 follow-up drafted]
-  Epic 21  (Marketing Site)          [PARTIAL - landing live]
+  Epic 21  (Marketing/User Dashboard) [PARTIAL - 21-4 Repos & Runs pages live]
   Epic 25  (Wiki Site)               [COMPLETED]
 
+In progress:
+  Epic 18  (End-User Auth)           [4 done — 18-4 onboarding slices landed 2026-07, still in progress]
+  Epic 23  (Monitoring Dashboard)    [IN PROGRESS - 8/12 pages landed 2026-07]
+  Epic 39  (Document Lifecycle)      [IMPLEMENTED - spine complete, 39-12..39-15 merged; 39-1/16/17/21 remain]
+
 Active planning (Wave-2):
-  Epic 18  (End-User Auth)           [1 done + 18-7/18-8 new]
   Epic 28  (Database-per-Tenant)     [NEW - briefs + 12 plans]
   Epic 29  (Secret Management)       [NEW - briefs + 10 plans]
   Epic 30  (Multi-Tenant Provisioning) [NEW - briefs + 10 plans]
   Epic 31  (Multi Git Platform)      [NEW - briefs only]
 
+Workflow-platform wave (planned / docs):
+  Epic 40  (Resumable Coding)        [BACKLOG - briefs only]
+  Epic 41  (Full-Team Workflows)     [BACKLOG - briefs only]
+  Epic 42  (Tool Layer)              [BACKLOG - briefs only]
+
 Drafted / Future:
-  Epic 2-5, 10, 17, 20, 22-24, 26
+  Epic 5, 10, 17, 20, 22, 24, 26
   Epic 33  (Per-Tenant IdP)          [DEFERRED STUB - trigger-gated]
 ```
 
@@ -200,6 +238,8 @@ Drafted / Future:
 - [Multi-Tenant Provisioning](Multi-Tenant-Provisioning) — Epic 30
 - [Multi Git Platform](Multi-Git-Platform) — Epic 31
 - [Identity Providers](Identity-Providers) — Epic 33 (deferred)
+- [Document Lifecycle](Document-Lifecycle) — Epic 39
+- [Resumable Workflows](Resumable-Workflows) — Epics 39/40/41 resumable-by-design standard
 - [Wave-2 impl plan inventory](https://github.com/meywd/tamma/blob/main/docs/stories/plans/wave-2-impl-plan-inventory.md)
 - [Layer 4/5 placement for Epics 29/30](https://github.com/meywd/tamma/blob/main/docs/stories/plans/epic-29-30-placement.md)
 - [Layer 4/5 placement for Epics 31/33](https://github.com/meywd/tamma/blob/main/docs/stories/plans/epic-31-33-placement.md)

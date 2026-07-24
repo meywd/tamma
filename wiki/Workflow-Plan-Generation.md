@@ -6,6 +6,8 @@ title: "Workflow: Plan Generation"
 **Class:** `PlanGenerationWorkflow`
 **Source:** `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/PlanGenerationWorkflow.cs`
 
+> **Epic 39 (Story 39-14) — now a `document-lifecycle` binding (produces `Plan`, consumes `Decomposition`).** This workflow is a thin binding over the generic [Document Lifecycle](Document-Lifecycle) (`produce → validate → review → revise → accept`). On a fresh run it fetches the latest accepted `Decomposition` for the issue and folds it into the producer's `contextFindings`, then dispatches `document-lifecycle` with `documentType = plan` and the `(architect, plan-system-design)` producer cell. Plan **review now runs inside the lifecycle's REVIEW stage** as the unified `Review` (39-7 panel) — the old inline `Extract & Validate` → `Can Retry?` retry loop is **deleted**; validation, review-with-notes, bounded revision, and typed escalation (`validation-exhausted` / `rounds-exhausted` / `review-undecidable`) with full lineage are owned by the lifecycle. The Flow Diagram and "Validation Rules" section below describe the retired bespoke flow, kept for historical reference.
+
 ## Purpose
 
 The Plan Generation workflow uses an architect-role LLM to produce an implementation blueprint for an issue. Prompts come from the prompt registry (role=architect, action=plan) with no inline prompts. The generated plan is validated for required fields (tasks/steps and file map), with up to 2 retries on invalid output, feeding validation errors back into the next attempt.

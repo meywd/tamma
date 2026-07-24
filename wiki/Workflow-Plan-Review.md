@@ -6,6 +6,8 @@ title: "Workflow: Plan Review"
 **Class:** `PlanReviewWorkflow`
 **Source:** `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/PlanReviewWorkflow.cs`
 
+> **Epic 39 (Story 39-14) — now a deterministic read-through shim (no LLM).** Plan review no longer exists as an independent produce-verdict pipeline: it runs **inside the Plan lifecycle's REVIEW stage** (the 39-7 unified `Review`, produced by the doc-type-aware panel) — see [Document Lifecycle](Document-Lifecycle) and [Plan Generation](Plan-Generation). This workflow now only keeps the `plan-review` call site alive: it is a pure store read-through that fetches the latest accepted `Plan` plus its review lineage and maps them onto the legacy review outputs. It has **no `llm-call`, no panel, no `DispatchWorkflow`, and no `Finish` terminal** — the 7-role panel, PO-led discussion rounds, and iterative-round escalation described below are **all removed**. The entire body below (panel, discussion, rounds) describes the retired pre-Epic-39 workflow, kept for historical reference.
+
 ## Purpose
 
 The Plan Review workflow runs a 7-role LLM panel review of the implementation plan. Each role (Architect, Developer, QA/Tester, Security, DevOps, Product Owner, Senior Developer) reviews sequentially via the LLM Call workflow. If not all roles approve, a PO-led discussion round attempts to resolve concerns. The review supports up to 3 iterative rounds before escalating to a human.

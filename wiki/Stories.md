@@ -1,6 +1,6 @@
 # User Stories Index
 
-This page provides an index of all user stories across all 33 epics (Epic 32 is intentionally skipped). Each story links to its documentation in the repository.
+This page provides an index of all user stories across all 37 epics (Epic 32 is intentionally skipped). Each story links to its documentation in the repository.
 
 ## Story Structure
 
@@ -617,6 +617,116 @@ Per-tenant SAML 2.0 / OIDC / LDAP / SCIM directory sync. Deferred until trigger 
 
 ---
 
+## Epic 39: Typed Work Documents & the Universal Lifecycle (Implemented -- 17/21 Done)
+
+The document-lifecycle spine: ~10 typed work documents in `Tamma.Core`, one generic produce→validate→review→revise→accept lifecycle, acceptance rules + a 70–100 autonomy dial, the escalation surface, real-time channels + orchestrator chat + Task View, and the resumable-by-design standard. **The producer-migration spine is complete** — 39-12…39-15 all merged, so every document-producing workflow now rides `DocumentLifecycleWorkflow`.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 39-1 | Workflow I/O & Lifecycle Audit | Drafted |
+| 39-2 | Document Core — Envelope, Type Registry, Lineage, Drift Tests | Done |
+| 39-3 | Document Types Batch 1 — Decomposition, Findings, AmbiguityAssessment, Clarification | Done |
+| 39-4 | Document Types Batch 2 — Plan, Design, Review (unified), TriageDecision, Diagnosis, TestSpec | Done |
+| 39-5 | Acceptance Rules — configurable policy, admin UI, orchestrator read path | Done |
+| 39-6 | DocumentLifecycleWorkflow — generic produce/validate/review/revise/accept | Done |
+| 39-7 | Review Producers — single reviewer + panel onto the unified Review type | Done |
+| 39-8 | Escalation & Approval Surface | Done |
+| 39-9 | Deterministic Repair Ring | Done |
+| 39-10 | Resumable-by-Design Standard | Done |
+| 39-11 | Document Store & Lineage API | Done |
+| 39-12 | Pilot Migration — IssueDecomposition onto the lifecycle | Done |
+| 39-13 | Assessment Family Migration — Research, Ambiguity, Clarify, DesignProposal | Done |
+| 39-14 | Planning Family Migration — PlanGeneration + PlanReview onto unified Review | Done |
+| 39-15 | Remaining Producers Migration — Triage, TestSpec, TaskCreation, Diagnosis | Done |
+| 39-16 | Prompt Contracts Generated From Document Types | Drafted |
+| 39-17 | Orchestrator Agent — long-running LLM process, platform context & tools | Drafted |
+| 39-18 | Real-Time Channels — workflow↔orchestrator + user↔orchestrator (SignalR) | Done |
+| 39-19 | Orchestrator Chat + Task View | Done |
+| 39-20 | Teams, Roles, Repo Access & Task Routing | Done |
+| 39-21 | RAG in C# — per-tenant knowledge isolation and grounding | Drafted |
+
+[Detailed Breakdown](Epics/Epic-39-Document-Lifecycle) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-39)
+
+---
+
+## Epic 40: Resumable Coding Execution (Planned / docs -- 0/7)
+
+Ships the missing `tamma-agent.yml` runner contract and makes the coding step resumable on the 39-10 mechanism. Backlog — no code yet.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 40-1 | The `tamma-agent.yml` Runner Contract & Repo Scaffolding (+ single-user CLI parity) | Drafted |
+| 40-2 | `WaitForAgentRunActivity` — durable bookmark suspend + `DelayFor` timeout | Drafted |
+| 40-3 | Durable agent-run signal plane + resume endpoint (cross-pod, restart-safe) | Drafted |
+| 40-4 | Per-task re-entry — reconstruct landed tasks from git + DCB events | Drafted |
+| 40-5 | `[ResumeBehavior]` on `SingleIssueCycleWorkflow` + allowlist burn-down | Drafted |
+| 40-6 | Agent-run lifecycle event family + re-entry feed | Drafted |
+| 40-7 | End-to-end crash/restart + mode-matrix integration proof | Drafted |
+
+[Detailed Breakdown](Epics/Epic-40-Resumable-Coding) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-40)
+
+---
+
+## Epic 41: Full-Team Workflow Coverage (Planned / docs -- 0/29)
+
+Turns every remaining recurring SDLC activity into a lifecycle workflow on the Epic 39 spine (thin bindings, no new architecture). Adds three new roles (`scrum_master`, `project_manager`, `ux_designer`) and six new document types via 41-1; **41-29** is the task-level flow router that activates the whole set. Backlog — no code yet. The full 28-story coverage matrix (per-role activity → owning story) is in the epic page; the highlights:
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 41-1 | New Roles (scrum_master / project_manager / ux_designer) + New Document Types | Drafted |
+| 41-2 | Acceptance-Criteria Authoring | Drafted |
+| 41-3 | Backlog Prioritization | Drafted |
+| 41-4 | Roadmap Shaping | Drafted |
+| 41-5 | Stakeholder / Status Update | Drafted |
+| 41-6 | Sprint Planning | Drafted |
+| 41-7 | Standup Synthesis | Drafted |
+| 41-8 | Retrospective Facilitation | Drafted |
+| 41-9 | ADR Authoring | Drafted |
+| 41-10 | System Design Doc | Drafted |
+| 41-11 | Tech-Debt & Technical-Risk Triage | Drafted |
+| 41-12 | Dependency & Upgrade Planning | Drafted |
+| 41-13 | Test-Plan / Strategy Authoring | Drafted |
+| 41-14 | Exploratory Test Charter | Drafted |
+| 41-15 | Acceptance Verification | Drafted |
+| 41-16 | Regression & Flaky-Test Management | Drafted |
+| 41-17 | Standalone Code Review & PR Triage | Drafted |
+| 41-18 | Refactor Planning | Drafted |
+| 41-19 | Threat Modeling | Drafted |
+| 41-20 | Scheduled Dependency / Secret / Compliance Audit | Drafted |
+| 41-21 | Security Incident Analysis | Drafted |
+| 41-22 | Incident Response & Postmortem (incl. rollback) | Drafted |
+| 41-23 | Capacity & Health Review | Drafted |
+| 41-24 | Release Notes & Changelog | Drafted |
+| 41-25 | User & API Documentation | Drafted |
+| 41-26 | Runbook & Ops-Docs | Drafted |
+| 41-27 | User-Flow & Wireframe Drafting | Drafted |
+| 41-28 | Design Review & Accessibility Audit | Drafted |
+| 41-29 | Task-Level Flow Router (+ issue-level pre-route) | Drafted |
+
+[Detailed Breakdown](Epics/Epic-41-Full-Team-Workflows) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-41)
+
+---
+
+## Epic 42: Agent Capability & Tool Layer (Planned / docs -- 0/9)
+
+Makes the coding-only tool framework first-class: extensible (native + dynamic + MCP), secured (secret-bound, redacted), autonomy-gated (per-role, per-autonomy, per-mode). Backlog — no code yet.
+
+| Story | Title | Status |
+|-------|-------|--------|
+| 42-1 | Tool Contract & Registry Evolution (`ToolDescriptor` + dynamic registry) | Drafted |
+| 42-2 | Tool Binding & Config Store (two-scoping) | Drafted |
+| 42-3 | Per-Tool Permission & Autonomy Gating | Drafted |
+| 42-4 | Tool Credential / Secret Binding | Drafted |
+| 42-5 | Tool-Use DCB Audit (`TOOL.*` events) | Drafted |
+| 42-6 | MCP Integration | Drafted |
+| 42-7 | Cloud / VPS Resource Operations Tool | Drafted |
+| 42-8 | Feature-Flag & Deploy-Control Tools | Drafted |
+| 42-9 | Authenticated HTTP / External-API Tool | Drafted |
+
+[Detailed Breakdown](Epics/Epic-42-Tool-Layer) | [Story Files](https://github.com/meywd/tamma/tree/main/docs/stories/epic-42)
+
+---
+
 ## Story Workflow
 
 Stories progress through the following stages:
@@ -632,13 +742,15 @@ Stories progress through the following stages:
 
 | Category | Count |
 |----------|-------|
-| Total stories across all epics | ~310+ (Wave-2 added ~70 new stories) |
-| Total epics | 33 (Epic 32 skipped) |
+| Total stories across all epics | ~375+ (Wave-2 added ~70; the workflow-platform wave 39–42 added ~65) |
+| Total epics | 37 (Epic 32 skipped) |
 | Epics completed | 10 (8, 9, 11, 13, 14, 15, 16, 19, 21 — landing page only, 25) |
 | Epics near complete | 8 (1, 1.5, 2, 3, 4, 6, 7, 12) |
+| Epics implemented (workflow-platform wave) | 1 (39 — spine complete, 17/21 stories) |
 | Epics partially implemented | 6 (5, 17, 18, 21, 22, 23) |
 | Epics drafted | 4 (10, 20, 24, 26) |
 | Epics newly scoped (Wave-2) | 5 (27, 28, 29, 30, 31) + 1 deferred (33) |
+| Epics planned / docs (workflow-platform wave) | 3 (40, 41, 42) |
 | Detailed task plans (Epic 23) | 26 |
 | Detailed task plans (Epic 24) | 24 |
 | Wave-2 impl plans (Epics 9, 12, 18, 19-6, 28, 29, 30) | 39 |

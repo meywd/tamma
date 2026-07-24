@@ -6,6 +6,8 @@ title: "Workflow: Ambiguity Scoring"
 **Class:** `AmbiguityScoringWorkflow`
 **Source:** `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/AmbiguityScoringWorkflow.cs`
 
+> **Epic 39 (Story 39-13) — now a `document-lifecycle` binding (produces `AmbiguityAssessment`).** This workflow is a thin binding over the generic [Document Lifecycle](Document-Lifecycle) (`produce → validate → review → revise → accept`). It dispatches `document-lifecycle` with `documentType = ambiguity-assessment` and the `(product_owner, score-ambiguity)` producer cell, then exposes typed outcomes. The old bespoke pipeline — `llm-call` → hand parser (`AmbiguityParsing`) → success-flag gate → error-`Finish` terminal — is **deleted**. **The in-workflow threshold branch is retired:** "ambiguity above threshold" is now the typed `ambiguity-above-threshold` lifecycle outcome, and the threshold is **acceptance-rules configuration** (`AcceptanceDefaults.DefaultAmbiguityEscalationThreshold`, default **0.7**), not a workflow constant. The orchestrator routes an above-threshold exit to [Clarifying Questions](Clarifying-Questions). The legacy `threshold`/`decision` outputs are compat-only projections of the typed exit. The `AMBIGUITY.*` events still emit, now **alongside** the generic `DOCUMENT.*` events. The Flow Diagram, "Threshold Policy", and "Fail-Closed Parsing" sections below describe the retired bespoke flow, kept for historical reference.
+
 ## Purpose
 
 The Ambiguity Scoring workflow (Story 3.6) quantifies how ambiguous/underspecified a requirement is: a 0..1 score plus a typed, itemised breakdown with specific recommendations, produced via the MEDIATED `llm-call` path (role=`product_owner`, action=`score-ambiguity`; the engine holds no LLM credential). It then applies a caller-supplied threshold policy to DECIDE whether clarification should be triggered before implementation proceeds, and emits every transition as an `AMBIGUITY.*` DCB event.
@@ -95,6 +97,8 @@ Scoring is AUTONOMOUS — there is no human gate/bookmark. The workflow itself d
 ```
 
 ## Threshold Policy
+
+> _Superseded by Epic 39._ The threshold is now read from the acceptance rules (`AcceptanceDefaults.DefaultAmbiguityEscalationThreshold`, default **0.7**) and evaluated as the lifecycle's `ambiguity-above-threshold` outcome — not the in-workflow `AmbiguityThresholds` constant described here. The description below is retained for historical reference.
 
 `AmbiguityThresholds` is a pure, unit-testable policy:
 
