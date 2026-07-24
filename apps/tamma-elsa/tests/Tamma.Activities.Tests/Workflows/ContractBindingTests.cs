@@ -163,18 +163,23 @@ public class ContractBindingTests
                 AnyOf("\"fileMap\"", "\"files\"", "\"filesToModify\""),
             ]),
 
-            // TaskCreationWorkflow inline ExtractValidate (TaskCreationWorkflow.cs
-            // ~l.140-200): accepts a bare JSON array OR an object with a non-empty
-            // "tasks" array; anything else → validation error → retry → error output.
-            [("senior_developer", "create-tasks")] = new("TaskCreationWorkflow.ExtractValidate",
+            // TaskCreationWorkflow (Story 39-15) binds the (senior_developer, create-tasks) cell as
+            // the produce step of its document-lifecycle binding; the shape authority is now the
+            // typed validator Tamma.Core/Documents/Types/Plan.cs (PlanDocumentType.Validate) —
+            // subsumes what the retired inline ExtractValidate checked (a bare array OR a non-empty
+            // "tasks" array). Token group unchanged (39-4 D5 pinned round-trip compatibility; the
+            // shipped template uses "tasks"); only the parser authority migrated.
+            [("senior_developer", "create-tasks")] = new("PlanDocumentType.Validate",
             [
                 AnyOf("\"tasks\"", "JSON array"),
             ]),
 
-            // TestCaseCreationWorkflow inline ExtractValidate (TestCaseCreationWorkflow.cs
-            // ~l.123-193): accepts a bare JSON array OR an object with "testCases"|"tests";
-            // anything else → validation error → retry → error output.
-            [("tester", "write-tests")] = new("TestCaseCreationWorkflow.ExtractValidate",
+            // TestCaseCreationWorkflow (Story 39-15) binds the (tester, write-tests) cell as the
+            // produce step of its document-lifecycle binding; the shape authority is now the typed
+            // validator Tamma.Core/Documents/Types/TestSpec.cs (TestSpecDocumentType.Validate /
+            // ValidateWithContext for the cross-doc task-ID ring) — subsumes the retired inline
+            // ExtractValidate. Token group unchanged; only the parser authority migrated.
+            [("tester", "write-tests")] = new("TestSpecDocumentType.Validate",
             [
                 AnyOf("\"testCases\"", "\"tests\"", "JSON array"),
             ]),

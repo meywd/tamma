@@ -79,6 +79,11 @@ public class DocumentLifecycleWorkflow : WorkflowBase
         var correlationId = builder.WithVariable<string>("CorrelationId", "");
         var reviewDefId = builder.WithVariable<string>("ReviewDefinitionId", DefaultReviewDefinitionId);
         var tenantId = builder.WithVariable<string>("TenantId", "");
+        // Story 39-15 (D3) — optional cross-document validation context (default "" = skip).
+        // When non-empty it is forwarded to the type's IDocumentType.ValidateWithContext at
+        // VALIDATE, so a type (currently TestSpec) can check a binding that cannot be seen
+        // payload-only (a test case referencing a task not in the consumed plan).
+        var validationContextJson = builder.WithVariable<string>("ValidationContextJson", "");
 
         // ── Denormalised scalars for emit tags / gate inputs ───────────
         var sessionId = builder.WithVariable<string>("SessionId", "");
@@ -188,6 +193,7 @@ public class DocumentLifecycleWorkflow : WorkflowBase
                 correlationId.Set(ctx, corr);
                 reviewDefId.Set(ctx, reviewDef);
                 tenantId.Set(ctx, tenant);
+                validationContextJson.Set(ctx, ctx.GetInput<string>("validationContextJson") ?? "");
                 // Story 39-13 (D5) — optional pre-ACCEPT delivery spec (default "" = skip).
                 deliveryDefId.Set(ctx, ctx.GetInput<string>("deliveryWorkflowDefinitionId") ?? "");
                 deliveryRepository.Set(ctx, ctx.GetInput<string>("repository") ?? "");
@@ -325,7 +331,13 @@ public class DocumentLifecycleWorkflow : WorkflowBase
                 }
                 else
                 {
-                    var result = DocumentTypeRegistry.Resolve(state.TypeKey).Validate(state.Current.Payload);
+                    // Story 39-15 (D3) — forward the optional cross-document context to the
+                    // type's ValidateWithContext (DIM default = context-free Validate).
+                    var contextJson = validationContextJson.Get(ctx) ?? "";
+                    var validator = DocumentTypeRegistry.Resolve(state.TypeKey);
+                    var result = string.IsNullOrWhiteSpace(contextJson)
+                        ? validator.Validate(state.Current.Payload)
+                        : validator.ValidateWithContext(state.Current.Payload, contextJson);
                     state = DocumentLifecycleHelper.WithViolations(state, result.Violations);
                     ok = result.IsValid;
                     if (ok)

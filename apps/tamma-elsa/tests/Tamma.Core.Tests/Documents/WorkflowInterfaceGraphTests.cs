@@ -108,6 +108,10 @@ public class WorkflowInterfaceGraphTests
             // produces plan) and plan-review (reader) are now backed by real bindings.
             "plan-generation",
             "plan-review",
+            // Story 39-15 — the creation family: task-creation (consumes plan, produces plan)
+            // and test-case-creation (consumes plan, produces test-spec) are now real bindings.
+            "task-creation",
+            "test-case-creation",
         };
 
         DocumentTypeRegistry.WorkflowInterfaces

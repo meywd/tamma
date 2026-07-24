@@ -101,4 +101,57 @@ public class TestSpecTypeTests
         contract.Should().Contain("\"testCases\"").And.Contain("\"taskId\"").And.Contain("\"behavior\"");
         Type.RenderContract().Should().Be(contract);
     }
+
+    // ── Story 39-15 (D3) — the cross-document task-ID ring via ValidateWithContext ──
+
+    private static DocumentValidationResult ValidateWithContext(string json, string contextJson)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return Type.ValidateWithContext(doc.RootElement, contextJson);
+    }
+
+    private const string PlanContext =
+        """{ "tasks": [ { "id": "T-1", "files": ["a.cs"], "testing": "unit" } ] }""";
+
+    [Test]
+    public void ValidateWithContext_UnknownTaskId_IsRejected()
+    {
+        var r = ValidateWithContext(
+            """{ "testCases": [ { "id": "TC-1", "taskId": "T-9", "behavior": "does a thing" } ] }""",
+            PlanContext);
+        r.IsValid.Should().BeFalse();
+        Codes(r).Should().Contain(TestSpecDocumentType.CaseUnknownTaskId);
+        r.Violations.Should().Contain(v => v.Message.Contains("T-9"),
+            "the domain-phrased violation names the offending task id for the repair ring");
+    }
+
+    [Test]
+    public void ValidateWithContext_KnownTaskId_Passes()
+    {
+        var r = ValidateWithContext(
+            """{ "testCases": [ { "id": "TC-1", "taskId": "T-1", "behavior": "does a thing" } ] }""",
+            PlanContext);
+        r.IsValid.Should().BeTrue(string.Join(", ", Codes(r)));
+    }
+
+    [Test]
+    public void ValidateWithContext_EmptyContext_DegradesToPayloadOnly()
+    {
+        // No plan context — the cross-document rule cannot fire; only payload-only rules apply.
+        var r = ValidateWithContext(
+            """{ "testCases": [ { "id": "TC-1", "taskId": "T-9", "behavior": "does a thing" } ] }""",
+            "");
+        Codes(r).Should().NotContain(TestSpecDocumentType.CaseUnknownTaskId);
+        r.IsValid.Should().BeTrue();
+    }
+
+    [Test]
+    public void ValidateWithContext_DefaultDim_FallsBackToValidate()
+    {
+        // The IDocumentType DIM default returns Validate(payload) — a type without a cross-doc
+        // rule is source-compatible (asserted here via a payload-only invalid case).
+        IDocumentType type = Type;
+        using var doc = JsonDocument.Parse("""{ "testCases": [] }""");
+        type.ValidateWithContext(doc.RootElement, "").IsValid.Should().BeFalse();
+    }
 }
