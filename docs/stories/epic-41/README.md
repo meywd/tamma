@@ -196,6 +196,12 @@ release notes, changelog, runbook, user/API docs, stakeholder update).
 41-1 gates only the agent path.
 
 **Wave 1 — highest leverage (closes the biggest holes on the critical path).**
+- **41-29 Task-Level Flow Router (+ issue-level pre-route)** — *the activation story.* Adds a task `kind`
+  to the `Plan` and switches `single-issue-cycle` to dispatch each task to the workflow matching its kind
+  (code→TDD, docs→docs, infra→deploy, design→UX, …) plus a lightweight issue-level pre-route for
+  `question`/`docs`-only issues. Without it, every issue is forced through the code-writing pipeline and
+  the per-role workflows below are unreachable from the issue pipeline. Ships against today's workflows and
+  lights up each new kind as its Epic 41 target lands. Depends on 39-15 + the `Plan` schema change.
 - **41-2 Acceptance-Criteria Authoring** — feeds `verify-acceptance` (41-15) *and* the merge gate; today
   "done" is undefined outside a plan. Highest single-story leverage.
 - **41-15 Acceptance Verification** — closes the loop 41-2 opens; turns "tests pass" into "requirement
