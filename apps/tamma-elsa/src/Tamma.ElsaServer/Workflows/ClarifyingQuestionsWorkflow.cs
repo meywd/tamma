@@ -71,7 +71,6 @@ public class ClarifyingQuestionsWorkflow : WorkflowBase
         var runAAccepted    = builder.WithVariable<bool>();
         var runBAccepted    = builder.WithVariable<bool>();
         var questionsJson   = builder.WithVariable<string>("QuestionsJson", "{}");
-        var runADocId       = builder.WithVariable<string>("RunADocId", "");
         var questionCount   = builder.WithVariable<int>();
         var clarifiedJson   = builder.WithVariable<string>("ClarifiedJson", "{}");
         var resolved        = builder.WithVariable<bool>();
@@ -201,7 +200,6 @@ public class ClarifyingQuestionsWorkflow : WorkflowBase
                 var accepted = LifecycleBindingHelper.IsAccepted(exit);
                 var (qCount, _) = AssessmentBindingHelper.ReadClarification(exit.DocumentJson);
                 runAAccepted.Set(ctx, accepted);
-                runADocId.Set(ctx, exit.DocumentId ?? "");
                 questionCount.Set(ctx, qCount);
                 failureDetail.Set(ctx, AssessmentBindingHelper.BuildFailureDetail(exit));
                 return exit.DocumentJson;
@@ -292,9 +290,13 @@ public class ClarifyingQuestionsWorkflow : WorkflowBase
                 }),
                 ["issueId"]             = issueId.Get(ctx) ?? "",
                 ["correlationId"]       = issueId.Get(ctx) ?? "",
-                // Cross-run lineage anchor (Run A's document); shared issueId/correlationId
-                // chain the two runs in the 39-11 lineage query.
-                ["supersedesDocumentId"] = runADocId.Get(ctx) ?? "",
+                // NO cross-run supersedes edge, deliberately. `document-lifecycle` owns the
+                // supersedes field end-to-end (a REVISE mints the superseding draft) and
+                // 39-11's store enforces a strictly linear, write-once chain — a per-run
+                // input edge cannot be reconciled with either. Cross-run lineage for the two
+                // Clarification runs rides the shared issueId/correlationId, which is what
+                // the 39-11 lineage query groups on. See
+                // `.dev/findings/assessment-family-policy-gaps.md` #4.
                 ["tenantId"]            = tenantId.Get(ctx) ?? "",
                 ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
             }),

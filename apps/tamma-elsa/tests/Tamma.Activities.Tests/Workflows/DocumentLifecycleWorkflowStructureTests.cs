@@ -233,6 +233,43 @@ public class DocumentLifecycleWorkflowStructureTests
     }
 
     [Test]
+    public void Workflow_DeliveryDispatch_SitsBehindTheReEntryGate()
+    {
+        // Filed-back fix (.dev/findings/assessment-family-policy-gaps.md #3) — delivery must
+        // happen EXACTLY ONCE. The ACCEPT region has two inbound edges: RouteAccept (review
+        // approved) and ReEntryAcceptGate (39-10 crash re-entry, where the document was
+        // already delivered before the gate suspended). Re-dispatching on the re-entry edge
+        // would re-emit the delivery child's legacy DESIGN.PROPOSAL.GENERATED/DELIVERED pair,
+        // so the dispatch sits behind BOTH HasDeliveryGate (configured?) and
+        // DeliveryReEntryGate (first entry into ACCEPT?) — the same re-entry-position gating
+        // the family bindings apply to their own legacy emits.
+        var fc = Flowchart();
+
+        AllActivities().OfType<FlowDecision>().Select(d => d.Id).Should().Contain("DeliveryReEntryGate",
+            "the delivery dispatch is gated on the 39-10 re-entry position");
+
+        fc.Connections.Where(c => c.Target.Activity.Id == "DispatchDelivery")
+            .Should().OnlyContain(c => c.Source.Activity.Id == "DeliveryReEntryGate" && c.Source.Port == "True")
+            .And.HaveCount(1,
+                "the ONLY edge into the delivery dispatch is the re-entry gate's first-entry branch");
+
+        fc.Connections.Where(c => c.Target.Activity.Id == "DeliveryReEntryGate")
+            .Should().OnlyContain(c => c.Source.Activity.Id == "HasDeliveryGate" && c.Source.Port == "True")
+            .And.HaveCount(1,
+                "the re-entry gate is reached only when a delivery workflow is configured");
+
+        fc.Connections.Any(c =>
+            c.Source.Activity.Id == "DeliveryReEntryGate" && c.Source.Port == "False" &&
+            c.Target.Activity.Id == "PublishAcceptanceRequest")
+            .Should().BeTrue("a re-entered ACCEPT skips delivery and publishes straight away (exactly-once)");
+
+        // The ACCEPT region is still entered only through BuildAcceptanceRequest → HasDeliveryGate,
+        // so no path can reach DispatchDelivery around the re-entry gate.
+        fc.Connections.Where(c => c.Source.Activity.Id == "BuildAcceptanceRequest")
+            .Should().OnlyContain(c => c.Target.Activity.Id == "HasDeliveryGate");
+    }
+
+    [Test]
     public void Workflow_TerminalExposes_DecisionNotesOutput()
     {
         // D6d — the decider's notes are surfaced so a binding can mirror the legacy

@@ -14,6 +14,12 @@ namespace Tamma.Core.Documents.Policy;
 /// default to a 7-role PANEL with a MAJORITY decision rule, while every other
 /// type defaults to a single <c>architect</c> reviewer with a UNANIMOUS rule.</para>
 ///
+/// <para>The ACCEPTOR REQUIREMENT is per-type too (Story 39-13 Design Decision D4):
+/// <c>design</c> defaults to <see cref="AcceptorRequirement.Human"/> — a design proposal
+/// is pinned to a human acceptor no matter how high the autonomy dial is set — while
+/// every other type keeps <see cref="AcceptorRequirement.Any"/>, the pre-39-13 behavior
+/// where the autonomy dial alone decides who accepts.</para>
+///
 /// <para>The static constructor calls <see cref="AcceptanceRules.Validate"/> on
 /// every per-type default — an invalid default REFUSES to load (the fail-loud
 /// posture of <c>PromptFileLoader</c>). Every value here is pinned by
@@ -70,6 +76,7 @@ public static class AcceptanceDefaults
     public static AcceptanceRules Rules { get; }
 
     private static readonly AcceptanceRules s_panelRules;
+    private static readonly AcceptanceRules s_humanAcceptorRules;
 
     static AcceptanceDefaults()
     {
@@ -100,6 +107,14 @@ public static class AcceptanceDefaults
                 DecisionRule: ReviewDecisionRule.Majority),
         }).Validate();
 
+        // Story 39-13 D4 — the base row with the acceptance decision pinned to a human.
+        // Reviewer selection is untouched (single architect, unanimous); only WHO answers
+        // the accept decision changes.
+        s_humanAcceptorRules = (Rules with
+        {
+            AcceptorRequirement = AcceptorRequirement.Human,
+        }).Validate();
+
         // Fail loud if any per-type default is invalid.
         foreach (var type in Enum.GetValues<DocumentTypeKey>())
             _ = For(type);
@@ -107,9 +122,13 @@ public static class AcceptanceDefaults
 
     /// <summary>
     /// The per-type default: <c>plan</c> and <c>review</c> get the 7-role
-    /// majority panel; every other type gets the single-<c>architect</c>
-    /// unanimous base row.
+    /// majority panel; <c>design</c> gets the human-acceptor row (39-13 D4);
+    /// every other type gets the single-<c>architect</c> unanimous base row.
     /// </summary>
-    public static AcceptanceRules For(DocumentTypeKey type) =>
-        type is DocumentTypeKey.Plan or DocumentTypeKey.Review ? s_panelRules : Rules;
+    public static AcceptanceRules For(DocumentTypeKey type) => type switch
+    {
+        DocumentTypeKey.Plan or DocumentTypeKey.Review => s_panelRules,
+        DocumentTypeKey.Design => s_humanAcceptorRules,
+        _ => Rules,
+    };
 }

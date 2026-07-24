@@ -8,8 +8,9 @@ namespace Tamma.Core.Documents.Policy;
 /// The configurable acceptance policy for a document type (Story 39-5 AC1). It
 /// expresses the autonomy dial (70–100), the revision/repair bounds, the
 /// escalation criteria (ambiguity threshold + always-escalate classes), the
-/// reviewer selection (single reviewer vs panel), and the two operator-authored
-/// guidance strings the orchestrator reads when it decides and routes.
+/// reviewer selection (single reviewer vs panel), the per-type autonomy floor
+/// (<see cref="AcceptorRequirement"/>), and the two operator-authored guidance
+/// strings the orchestrator reads when it decides and routes.
 ///
 /// <para>
 /// Every property carries an explicit <c>[JsonPropertyName]</c> (39-2 D8);
@@ -50,6 +51,20 @@ public sealed record AcceptanceRules
     [JsonPropertyName("reviewerSelection")]
     public required ReviewerSelection ReviewerSelection { get; init; }
 
+    /// <summary>
+    /// The autonomy FLOOR for this document type: whether the acceptance decision may be
+    /// answered by the orchestrator itself, or is pinned to a HUMAN acceptor regardless of
+    /// <see cref="AutonomyLevel"/> (Story 39-13 Design Decision D4 — "Design pinned to human
+    /// by default"; filed back in <c>.dev/findings/assessment-family-policy-gaps.md</c> #2).
+    ///
+    /// <para>OPTIONAL and additive: an absent wire property — and every construction that
+    /// omits it — defaults to <see cref="AcceptorRequirement.Any"/>, which is exactly the
+    /// pre-39-13 behavior (the autonomy dial alone decides who accepts). Only
+    /// <c>design</c> ships a non-default per-type value (see <see cref="AcceptanceDefaults.For"/>).</para>
+    /// </summary>
+    [JsonPropertyName("acceptorRequirement")]
+    public AcceptorRequirement AcceptorRequirement { get; init; } = AcceptorRequirement.Any;
+
     /// <summary>Operator prose: what warrants acceptance, revision, escalation.</summary>
     [JsonPropertyName("decisionGuidance")]
     public required string DecisionGuidance { get; init; }
@@ -88,6 +103,10 @@ public sealed record AcceptanceRules
         if (ReviewerSelection is null)
             throw Invalid(nameof(ReviewerSelection), "ReviewerSelection must not be null.");
         ValidateReviewerSelection(ReviewerSelection);
+
+        if (!Enum.IsDefined(AcceptorRequirement))
+            throw Invalid(nameof(AcceptorRequirement),
+                $"AcceptorRequirement '{(int)AcceptorRequirement}' is not a known acceptor requirement.");
 
         if (DecisionGuidance is null)
             throw Invalid(nameof(DecisionGuidance), "DecisionGuidance must not be null.");
@@ -220,6 +239,24 @@ public enum ReviewDecisionRule
     [Wire("majority")]  Majority,
 }
 
+/// <summary>
+/// Who may answer the acceptance decision for a document type — the per-type autonomy
+/// floor (Story 39-13 Design Decision D4). <c>any</c> is the backward-compatible default:
+/// the orchestrator's autonomy dial alone decides whether it accepts or assigns.
+/// <c>human</c> pins the decision to a person no matter how high the autonomy dial is
+/// set, which is what a Design proposal ships with.
+///
+/// <para>The first member is <see cref="Any"/> on purpose: it is the CLR default, so a
+/// rules row written before this field existed (and any construction that omits it)
+/// deserializes to today's behavior rather than silently tightening a policy.</para>
+/// </summary>
+[JsonConverter(typeof(WireEnumJsonConverter<AcceptorRequirement>))]
+public enum AcceptorRequirement
+{
+    [Wire("any")]   Any,
+    [Wire("human")] Human,
+}
+
 /// <summary><see cref="EscalationClassKind"/> wire helper.</summary>
 public static class EscalationClassKindExtensions
 {
@@ -236,4 +273,11 @@ public static class ReviewerModeExtensions
 public static class ReviewDecisionRuleExtensions
 {
     public static string ToWire(this ReviewDecisionRule rule) => EnumWire<ReviewDecisionRule>.ToWire(rule);
+}
+
+/// <summary><see cref="AcceptorRequirement"/> wire helper.</summary>
+public static class AcceptorRequirementExtensions
+{
+    public static string ToWire(this AcceptorRequirement requirement) =>
+        EnumWire<AcceptorRequirement>.ToWire(requirement);
 }
