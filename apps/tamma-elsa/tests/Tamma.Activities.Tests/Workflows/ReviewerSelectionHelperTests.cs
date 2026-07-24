@@ -89,11 +89,54 @@ public class ReviewerSelectionHelperTests
     }
 
     [Test]
-    public void AllDispatchablePairs_AreTwelveAndAllEligible()
+    public void AllDispatchablePairs_AreSixteenAndAllEligible()
     {
-        ReviewerSelectionHelper.AllDispatchablePairs.Should().HaveCount(12);
+        // Story 39-15 — 12 → 16: the 4 triage-panel pairs (doc-type-aware) join the
+        // 7 document + 5 diff pairs when TriagePanelReviewWorkflow's semantics moved to
+        // the 39-7 panel over a triage-decision draft.
+        ReviewerSelectionHelper.AllDispatchablePairs.Should().HaveCount(16);
         ReviewerSelectionHelper.AllDispatchablePairs.Should().OnlyContain(
             p => RolePhaseMap.IsRoleEligibleForPhase(p.Action, p.Role));
+    }
+
+    // ── Story 39-15 (39-7 extension) — the doc-type-aware panel action selection ──
+
+    [Test]
+    public void Resolve_TriageDecisionSubject_YieldsTriagePerRoleActions()
+    {
+        // The four triage roles reviewing a triage-decision draft resolve to their TRIAGE
+        // lens (GetTriageActionForRole), NOT the plan/task review lens.
+        ReviewerSelectionHelper.Resolve("security", null, "document", "triage-decision").Action
+            .Should().Be(AgentAction.AssessVulnerability);
+        ReviewerSelectionHelper.Resolve("developer", null, "document", "triage-decision").Action
+            .Should().Be(AgentAction.TriageDefect);
+        ReviewerSelectionHelper.Resolve("tester", null, "document", "triage-decision").Action
+            .Should().Be(AgentAction.TriageDefect);
+        ReviewerSelectionHelper.Resolve("devops", null, "document", "triage-decision").Action
+            .Should().Be(AgentAction.DiagnoseIncident);
+    }
+
+    [Test]
+    public void Resolve_NonTriageDocument_StillYieldsReviewActions_DocPathUnchanged()
+    {
+        // The document path stays byte-identical for every non-triage doc type: the
+        // review lens (GetReviewActionForRole) still applies (a null and a non-triage key both).
+        ReviewerSelectionHelper.Resolve("architect", null, "document", "plan").Action
+            .Should().Be(AgentAction.PlanReview);
+        ReviewerSelectionHelper.Resolve("security", null, "document", "plan").Action
+            .Should().Be(AgentAction.PlanReviewSecurity);
+        ReviewerSelectionHelper.Resolve("developer", null, "document", null).Action
+            .Should().Be(AgentAction.ReviewFeasibility);
+    }
+
+    [Test]
+    public void AllDispatchablePairs_ContainsTheFourTriagePanelPairs()
+    {
+        var pairs = ReviewerSelectionHelper.AllDispatchablePairs;
+        pairs.Should().Contain(("security", "assess-vulnerability"));
+        pairs.Should().Contain(("developer", "triage-defect"));
+        pairs.Should().Contain(("tester", "triage-defect"));
+        pairs.Should().Contain(("devops", "diagnose-incident"));
     }
 
     [Test]

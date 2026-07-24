@@ -184,6 +184,28 @@ public class ContractBindingTests
                 AnyOf("\"testCases\"", "\"tests\"", "JSON array"),
             ]),
 
+            // TriagePODecisionWorkflow (Story 39-15 D5) binds the (product_owner, triage-intake) cell
+            // as the produce step of its document-lifecycle binding; the shape authority is now the
+            // typed validator Tamma.Core/Documents/Types/TriageDecision.cs
+            // (TriageDecisionDocumentType.Validate) — closed enums + required reasoning. The prompt
+            // was rewritten from the P0-P3 / ownerRole vocabulary to the 26-1 TriageDecision wire (D7).
+            [("product_owner", "triage-intake")] = new("TriageDecisionDocumentType.Validate",
+            [
+                One("\"priority\""), One("\"type\""), One("\"complexity\""),
+                One("\"automation\""), One("\"reasoning\""),
+            ]),
+
+            // TriageContextGatheringWorkflow (Story 39-15 D5) binds the SPLIT
+            // (developer, triage-context-scan) cell as the produce step of its document-lifecycle
+            // binding; the shape authority is FindingsDocumentType.Validate (the 39-13 Research
+            // recipe). Distinct from the free-text (developer, context-scan) that ContextGathering keeps.
+            [("developer", "triage-context-scan")] = new("FindingsDocumentType.Validate",
+            [
+                One("\"summary\""), One("\"findings\""), One("\"title\""),
+                One("\"relevance\""), One("\"confidence\""), One("\"citations\""),
+                One("\"overallConfidence\""),
+            ]),
+
             // DebugDiagnosisWorkflow (Story 39-15 D4) binds the (senior_developer, debug-rootcause)
             // cell as the produce step of its document-lifecycle binding; the shape authority is the
             // typed validator Tamma.Core/Documents/Types/Diagnosis.cs (DiagnosisDocumentType.Validate).
@@ -290,9 +312,12 @@ public class ContractBindingTests
                 "ApplyReviewFixesActivity consumes the response as patch text",
 
             // ---- context scans: free-text findings stored verbatim -------------------
+            // Story 39-15 (D5) — the SPLIT: (developer, context-scan) now serves ONLY
+            // ContextGatheringWorkflow's free-text feed. TriageContextGatheringWorkflow migrated to
+            // the distinct (developer, triage-context-scan) Findings binding (in Bindings above), so
+            // this cell no longer shares a cell with a document producer — it is contract-clean.
             [("developer", "context-scan")] =
-                "ContextGatheringWorkflow/TriageContextGatheringWorkflow store scan findings as free text " +
-                "(TriageContextHelper wraps prose into a JSON envelope itself — no required reply fields)",
+                "ContextGatheringWorkflow stores scan findings as free text (no required reply fields)",
             [("tester", "context-scan")] = "free-text scan findings stored verbatim (ContextGatheringWorkflow.Extract)",
             [("security", "context-scan")] = "free-text scan findings stored verbatim (ContextGatheringWorkflow.Extract)",
             [("devops", "context-scan")] = "free-text scan findings stored verbatim (ContextGatheringWorkflow.Extract)",
@@ -303,9 +328,9 @@ public class ContractBindingTests
                 "ClassifyBlockerActivity.ParseAIDiagnosis treats every field (blocker_type, confidence, " +
                 "root_cause…) as optional with defaults and falls back to heuristic signal-based " +
                 "classification — never fails closed",
-            [("product_owner", "triage-intake")] =
-                "TriagePoDecisionHelper.ParseDecision is fail-safe: unparseable output becomes an explicit " +
-                "needs-human-review decision and out-of-vocab fields are clamped to defaults with notes",
+            // Story 39-15 (D5) — (product_owner, triage-intake) MOVED to Bindings: it is now the
+            // produce cell of the TriageDecision lifecycle binding (TriageDecisionDocumentType.Validate),
+            // no longer a lenient fail-safe parse.
 
             // ---- review panels: missing fields degrade to a conservative verdict -----
             // These 4 plan-review-family pairs are STILL emitted by a compiled site —
@@ -321,15 +346,11 @@ public class ContractBindingTests
             [("developer", "review-feasibility")] = "panel review (TaskReviewWorkflow): lenient verdict parse, missing fields default to 'concerns'",
             [("tester", "review-testability")] = "panel review (TaskReviewWorkflow): lenient verdict parse, missing fields default to 'concerns'",
 
-            // ---- triage panel: quorum-gated, per-role failure tolerated --------------
-            // TriagePanelReviewWorkflow leaves an unparseable role review as the "{}"
-            // sentinel (that role counts as FAILED) and TriagePanelAggregationHelper
-            // aggregates whatever fields the surviving reviews carry — quorum decides,
-            // no single reply field is load-bearing.
-            [("security", "assess-vulnerability")] = "triage panel: quorum aggregation, unparseable review = failed role, no required fields",
-            [("developer", "triage-defect")] = "triage panel: quorum aggregation, unparseable review = failed role, no required fields",
-            [("tester", "triage-defect")] = "triage panel: quorum aggregation, unparseable review = failed role, no required fields",
-            [("devops", "diagnose-incident")] = "triage panel: quorum aggregation, unparseable review = failed role, no required fields",
+            // Story 39-15 (D5) — the 4 triage-panel pairs MOVED to ReviewProducerDispatchablePairs:
+            // TriagePanelReviewWorkflow was DELETED (the panel is now the lifecycle REVIEW stage over
+            // a triage-decision draft, 39-7 config), so they have NO compiled emitter and are reachable
+            // only via the panel producer's policy-selected dispatch (ReviewerSelectionHelper
+            // .AllDispatchablePairs, doc-type-aware).
         };
 
     // ====================================================================
@@ -507,6 +528,19 @@ public class ContractBindingTests
             [("tester", "code-review-coverage")] =
                 "diff-review producer pair (D3 diff map): tester reviews a diff via code-review-coverage; " +
                 "policy-only, no compiled emitter.",
+
+            // Story 39-15 (D5) — the 4 TRIAGE-panel producer pairs, reachable ONLY when a
+            // triage-decision draft is reviewed (RolePhaseMap.GetPanelActionForRole → triage lens).
+            // TriagePanelReviewWorkflow was deleted; they have no compiled emitter and are dispatched
+            // via the doc-type-aware panel producer's policy selection.
+            [("security", "assess-vulnerability")] =
+                "triage-panel producer pair: security reviews a triage-decision draft via assess-vulnerability; policy-only, no compiled emitter.",
+            [("developer", "triage-defect")] =
+                "triage-panel producer pair: developer reviews a triage-decision draft via triage-defect; policy-only, no compiled emitter.",
+            [("tester", "triage-defect")] =
+                "triage-panel producer pair: tester reviews a triage-decision draft via triage-defect; policy-only, no compiled emitter.",
+            [("devops", "diagnose-incident")] =
+                "triage-panel producer pair: devops reviews a triage-decision draft via diagnose-incident; policy-only, no compiled emitter.",
         };
 
     [Test]
@@ -555,13 +589,88 @@ public class ContractBindingTests
     }
 
     [Test]
-    public void ReviewerSelectionHelper_AllDispatchablePairs_HasTwelveEligiblePairs()
+    public void ReviewerSelectionHelper_AllDispatchablePairs_HasSixteenEligiblePairs()
     {
-        // Pin the D9 surface: 7 document + 5 diff = 12, each taxonomy-eligible.
+        // Pin the D9 surface: 7 document + 5 diff + 4 triage-panel = 16, each taxonomy-eligible.
+        // Story 39-15 added the 4 triage-panel pairs (doc-type-aware GetPanelActionForRole) when
+        // TriagePanelReviewWorkflow's semantics moved to the 39-7 panel over a triage-decision draft.
         var pairs = ReviewerSelectionHelper.AllDispatchablePairs;
-        pairs.Should().HaveCount(12, "7 document-review pairs + 5 diff-review pairs");
+        pairs.Should().HaveCount(16, "7 document-review pairs + 5 diff-review pairs + 4 triage-panel pairs");
         pairs.Should().OnlyContain(p => Tamma.Api.Services.Agents.RolePhaseMap.IsRoleEligibleForPhase(p.Action, p.Role),
             "every dispatchable review pair must be taxonomy-eligible");
+    }
+
+    // ====================================================================
+    // Universal pin (Story 39-15 D7c) — the platform invariant, now that every
+    // DOCUMENT-PRODUCING llm-call pair rides a lifecycle binding.
+    // ====================================================================
+
+    /// <summary>
+    /// The DOCUMENTED non-DocumentType residual (D7c): Bindings entries whose parser authority
+    /// is an INLINE parser rather than a typed DocumentType.Validate, because the cell is NOT a
+    /// document producer — assessment intake (questions / analysis feed the assessment loop, not a
+    /// stored document) and deploy/rollback stage-status (a side-effect gate, not a document). These
+    /// are the honest residual after the producer wave; recorded in
+    /// .dev/findings/39-15-slice3-triage-migration.md.
+    /// </summary>
+    private static readonly IReadOnlySet<(string Role, string Action)> NonDocumentTypeResidual =
+        new HashSet<(string, string)>
+        {
+            ("product_owner", "generate-assessment-questions"),
+            ("product_owner", "analyze-assessment-response"),
+            ("devops", "deploy"),
+            ("devops", "rollback"),
+        };
+
+    [Test]
+    public void UniversalPin_EveryBindingAuthority_IsDocumentTypeValidate_OrDocumentedResidual()
+    {
+        // (a) — every Bindings entry's parser authority ends in "DocumentType.Validate" (no
+        // workflow-inline parser can re-enter the map), EXCEPT the documented non-document-producer
+        // residual. This is what makes the graph type-check: a document producer's shape authority
+        // is its typed validator, never an ad-hoc parser.
+        var offenders = Bindings
+            .Where(kv => !kv.Value.Parser.EndsWith("DocumentType.Validate", StringComparison.Ordinal))
+            .Where(kv => !NonDocumentTypeResidual.Contains(kv.Key))
+            .Select(kv => $"  ({kv.Key.Role}, {kv.Key.Action}) → {kv.Value.Parser}")
+            .ToList();
+
+        offenders.Should().BeEmpty(
+            "every document-producing binding authority must be a typed DocumentType.Validate (D7c). " +
+            "Non-DocumentType authorities must be in the documented NonDocumentTypeResidual (non-producer " +
+            "inline parsers):" + Environment.NewLine + string.Join(Environment.NewLine, offenders));
+
+        // The residual must not rot: every listed pair must actually still be a Bindings entry with a
+        // non-DocumentType authority (else delete it — it migrated or vanished).
+        var staleResidual = NonDocumentTypeResidual
+            .Where(k => !Bindings.ContainsKey(k) || Bindings[k].Parser.EndsWith("DocumentType.Validate", StringComparison.Ordinal))
+            .Select(k => $"  ({k.Role}, {k.Action})")
+            .ToList();
+        staleResidual.Should().BeEmpty(
+            "NonDocumentTypeResidual entries must still be non-DocumentType Bindings authorities:" +
+            Environment.NewLine + string.Join(Environment.NewLine, staleResidual));
+    }
+
+    [Test]
+    public void UniversalPin_EveryIntentionallyUnbound_IsProseOrCode()
+    {
+        // (b) — every remaining allowlist justification classifies as prose (free-text consumer) or
+        // code (success-flag / file-format / lenient-degrade consumer). No document-producing cell may
+        // hide here (those are all in Bindings now).
+        string[] prose = { "free-text", "free text", "free-form", "prose", "verbatim", "raw text", "raw response", "stored as free text", "raw" };
+        string[] code = { "success flag", "file-format", "code output", "patch", "lenient", "fallback", "default", "optional", "heuristic", "never fails closed", "clamp", "degrade" };
+
+        var unclassified = IntentionallyUnbound
+            .Where(kv =>
+                !prose.Any(p => kv.Value.Contains(p, StringComparison.OrdinalIgnoreCase)) &&
+                !code.Any(c => kv.Value.Contains(c, StringComparison.OrdinalIgnoreCase)))
+            .Select(kv => $"  ({kv.Key.Role}, {kv.Key.Action}): {kv.Value}")
+            .ToList();
+
+        unclassified.Should().BeEmpty(
+            "every IntentionallyUnbound justification must read as prose (free-text) or code " +
+            "(success-flag/file-format/lenient) — a document producer must be BOUND, never allowlisted (D7c):" +
+            Environment.NewLine + string.Join(Environment.NewLine, unclassified));
     }
 
     // ====================================================================

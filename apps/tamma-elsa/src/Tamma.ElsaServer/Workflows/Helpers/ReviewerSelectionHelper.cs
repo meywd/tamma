@@ -80,6 +80,20 @@ public static class ReviewerSelectionHelper
     ];
 
     /// <summary>
+    /// Story 39-15 — the 4-role TRIAGE panel roster (the domain of
+    /// <see cref="RolePhaseMap.GetTriageActionForRole"/>). Used when the review subject
+    /// is a <c>triage-decision</c> draft; the panel's runtime roster still comes from the
+    /// acceptance rules' <c>PanelRoles</c>, but this list backs the classification pins.
+    /// </summary>
+    public static readonly AgentRole[] TriagePanelRoster =
+    [
+        AgentRole.Security,
+        AgentRole.Developer,
+        AgentRole.Tester,
+        AgentRole.Devops,
+    ];
+
+    /// <summary>
     /// Resolve the reviewer <c>(role, action)</c> for a review dispatch (AC4 runtime
     /// half). <paramref name="actionOverride"/> (when non-empty) wins over
     /// derivation; otherwise the action comes from the document-review map (kind
@@ -119,7 +133,7 @@ public static class ReviewerSelectionHelper
         {
             action = subjectKind switch
             {
-                DocumentSubjectKind => ResolveDocumentAction(parsedRole),
+                DocumentSubjectKind => ResolveDocumentAction(parsedRole, documentTypeKey),
                 DiffSubjectKind => DiffReviewAction(parsedRole),
                 _ => throw Invalid(
                     $"Unknown review subject kind '{subjectKind}' — expected 'document' or 'diff'.",
@@ -136,25 +150,30 @@ public static class ReviewerSelectionHelper
         return new ReviewerSpec(parsedRole, action);
     }
 
-    private static AgentAction ResolveDocumentAction(AgentRole role)
+    private static AgentAction ResolveDocumentAction(AgentRole role, string? documentTypeKey)
     {
         try
         {
-            return RolePhaseMap.GetReviewActionForRole(role);
+            // Story 39-15 (39-7 extension) — the per-member review action is
+            // doc-type-aware: a triage-decision draft is critiqued through each role's
+            // TRIAGE lens, every other document through the plan/task review lens.
+            return RolePhaseMap.GetPanelActionForRole(role, documentTypeKey);
         }
         catch (ArgumentOutOfRangeException)
         {
             throw Invalid(
-                $"Role '{role.ToWire()}' is not on a document review panel.",
+                $"Role '{role.ToWire()}' is not on the review panel for document type '{documentTypeKey}'.",
                 role.ToWire(), null);
         }
     }
 
     /// <summary>
     /// Every <c>(role, action)</c> pair the producers can dispatch (Design Decision
-    /// D9 pin surface): the 7 document-review pairs + the 5 diff-review pairs = 12.
-    /// The <c>ContractBindingTests</c> classification guard iterates this so a
-    /// reviewer cell reachable by policy but bound nowhere fails the build.
+    /// D9 pin surface): the 7 document-review pairs + the 5 diff-review pairs + the 4
+    /// TRIAGE-panel pairs (Story 39-15, when the reviewed document is a
+    /// <c>triage-decision</c> draft) = 16. The <c>ContractBindingTests</c> classification
+    /// guard iterates this so a reviewer cell reachable by policy but bound nowhere fails
+    /// the build.
     /// </summary>
     public static IReadOnlyList<(string Role, string Action)> AllDispatchablePairs { get; } = BuildAllPairs();
 
@@ -165,6 +184,11 @@ public static class ReviewerSelectionHelper
             pairs.Add((role.ToWire(), RolePhaseMap.GetReviewActionForRole(role).ToWire()));
         foreach (var role in s_diffRoster)
             pairs.Add((role.ToWire(), DiffReviewAction(role).ToWire()));
+        // Story 39-15 — the triage-decision panel's per-role actions (doc-type-aware),
+        // reachable only when a triage-decision draft is reviewed. Classified via
+        // ContractBindingTests.ReviewProducerDispatchablePairs (policy-only, no compiled emitter).
+        foreach (var role in TriagePanelRoster)
+            pairs.Add((role.ToWire(), RolePhaseMap.GetTriageActionForRole(role).ToWire()));
         return pairs;
     }
 

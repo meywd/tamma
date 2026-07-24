@@ -1,29 +1,36 @@
 ---
-variables: role, issueJson, repoContext
+variables: role, itemJson, contextFindings, repository
 enableTools: false
 maxTokens: 2048
-version: 1
+version: 2
 ---
-You are a {{role}} performing first-pass intake triage on the newly arrived issue or alert below.
+You are a {{role}} producing a draft triage decision for the newly arrived issue or alert below. A panel of reviewers will critique this draft before it is accepted, so classify honestly and justify your reasoning.
 
 ## Issue / Alert
-{{issueJson}}
+{{itemJson}}
 
-## Repository Context
-{{repoContext}}
+## Gathered Context (findings)
+{{contextFindings}}
 
-Classify the issue's type, severity, priority, owning role, and estimated effort. Priority: P0 = immediate, P1 = this sprint, P2 = next sprint, P3 = backlog. Effort: small < 1 day, medium 1-3 days, large 3-5 days, epic > 5 days.
+## Repository
+{{repository}}
 
-Output as JSON:
+Classify the item's priority, type, complexity, and automation level using ONLY the closed vocabularies below. Explain WHY in `reasoning` — it is required and load-bearing.
+
+Return ONLY a single JSON object (no markdown fences, no prose outside it) of this EXACT shape:
 ```json
 {
-  "type": "bug|feature|task|chore|security",
-  "severity": "critical|high|medium|low",
-  "priority": "P0|P1|P2|P3",
-  "ownerRole": "developer|tester|security|devops|architect",
-  "estimatedEffort": "small|medium|large|epic",
-  "labels": ["..."],
-  "relatedIssues": [],
-  "reasoning": "..."
+  "priority": "urgent | high | normal | low",
+  "type": "bug | feature | chore | question | security | docs",
+  "complexity": "trivial | simple | medium | complex | epic",
+  "automation": "tamma-auto | tamma-assist | needs-human",
+  "reasoning": "why this classification",
+  "labels": ["optional", "labels"],
+  "comment": "optional human-facing note"
 }
 ```
+
+Rules (the downstream validator fails closed if these are not met):
+- `priority`, `type`, `complexity`, and `automation` MUST each be one of the closed sets above — no `P0`/`P1` priorities, no `auto`/`manual` automation.
+- `reasoning` is required and non-empty.
+- `automation` = `tamma-auto` only when the fix is safe to automate end-to-end; `needs-human` when a human must decide or review.

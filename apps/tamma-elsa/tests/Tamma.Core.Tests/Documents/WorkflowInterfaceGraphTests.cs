@@ -40,7 +40,9 @@ public class WorkflowInterfaceGraphTests
         // (plan-generation + task-creation both produce 'plan'; plan-review /
         // task-review / code-review all produce 'review'; blocker-diagnosis +
         // debugging both produce 'diagnosis').
-        DocumentTypeRegistry.WorkflowInterfaces.Should().HaveCount(15);
+        // Story 39-15 — 15 → 16: added the triage-context-gathering → findings edge (the split
+        // Findings binding); triage-po-decision now consumes [findings]/produces triage-decision.
+        DocumentTypeRegistry.WorkflowInterfaces.Should().HaveCount(16);
     }
 
     [Test]
@@ -114,6 +116,10 @@ public class WorkflowInterfaceGraphTests
             "test-case-creation",
             // Story 39-15 — the debug-diagnosis binding produces a typed Diagnosis (real binding).
             "debug-diagnosis",
+            // Story 39-15 — the triage family: triage-context-gathering (produces findings) and
+            // triage-po-decision (consumes [findings], produces triage-decision) are now real bindings.
+            "triage-context-gathering",
+            "triage-po-decision",
         };
 
         DocumentTypeRegistry.WorkflowInterfaces

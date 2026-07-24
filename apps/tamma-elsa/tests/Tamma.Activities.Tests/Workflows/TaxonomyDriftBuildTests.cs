@@ -100,8 +100,14 @@ public class TaxonomyDriftBuildTests
     /// became a document-lifecycle binding pair (still counted, via the lifecycle-binding
     /// walk) — so the observed pair count dropped by ~15 (from the 44 authoring-time figure
     /// to ~29). Lowered 40 → 25, keeping the same "a few below observed" slack discipline.</para>
+    ///
+    /// <para>Story 39-15 recount: TriagePanelReviewWorkflow's 4 compiled llm-call dispatch sites (the
+    /// 4-role triage panel) vanished when it was DELETED (the panel is now the lifecycle REVIEW stage);
+    /// TriageContextGathering's context-scan and TriagePODecision's triage-intake llm-call sites became
+    /// document-lifecycle binding pairs (still counted, via the lifecycle-binding walk). Net: observed
+    /// drops by ~4 (to ~25). Lowered 25 → 21, keeping the "a few below observed" slack discipline.</para>
     /// </summary>
-    private const int MinExpectedDispatchPairs = 25;
+    private const int MinExpectedDispatchPairs = 21;
 
     /// <summary>
     /// The set of workflow type-names that each contribute ≥1 <c>(role, action)</c>
@@ -136,9 +142,9 @@ public class TaxonomyDriftBuildTests
         "TaskCreationWorkflow",
         "TaskReviewWorkflow",
         "TestCaseCreationWorkflow",
-        "TriageContextGatheringWorkflow",
-        "TriagePanelReviewWorkflow",
-        "TriagePODecisionWorkflow",
+        "TriageContextGatheringWorkflow", // Story 39-15: the (developer, triage-context-scan) pair is now dispatched via its document-lifecycle Findings binding, discovered by the lifecycle-binding walk (D5)
+        // TriagePanelReviewWorkflow removed (Story 39-15): DELETED — the 4-role panel is now the lifecycle REVIEW stage over a triage-decision draft (39-7 config), so it emits NO (role, action) dispatch pair.
+        "TriagePODecisionWorkflow",       // Story 39-15: the (product_owner, triage-intake) pair is now dispatched via its document-lifecycle TriageDecision binding, discovered by the lifecycle-binding walk (D5)
     };
 
     /// <summary>

@@ -156,7 +156,12 @@ public static class DocumentTypeRegistry
             new WorkflowDocumentInterface("plan-review",        new[] { DocumentTypeKey.Plan },          null,                 false),
             new WorkflowDocumentInterface("task-review",        empty, DocumentTypeKey.Review,              true),
             new WorkflowDocumentInterface("code-review",        empty, DocumentTypeKey.Review,              true),
-            new WorkflowDocumentInterface("triage-po-decision", empty, DocumentTypeKey.TriageDecision,      true),
+            // Story 39-15 (D5) — triage-context-gathering PRODUCES a Findings document (the 39-13
+            // Research recipe on the split (developer, triage-context-scan) cell); triage-po-decision
+            // CONSUMES that Findings context and PRODUCES a reviewed TriageDecision (the 4-role panel
+            // is now its lifecycle REVIEW stage). Both flipped non-provisional (real lifecycle bindings).
+            new WorkflowDocumentInterface("triage-context-gathering", empty, DocumentTypeKey.Findings,   false),
+            new WorkflowDocumentInterface("triage-po-decision", new[] { DocumentTypeKey.Findings }, DocumentTypeKey.TriageDecision, false),
             new WorkflowDocumentInterface("blocker-diagnosis",  empty, DocumentTypeKey.Diagnosis,           true),
             new WorkflowDocumentInterface("debugging",          empty, DocumentTypeKey.Diagnosis,           true),
             // Story 39-15 (D4) — the new debug-diagnosis binding PRODUCES a typed Diagnosis via its

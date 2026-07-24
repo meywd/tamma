@@ -8,6 +8,8 @@ using Elsa.Workflows.Memory;
 using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
 using Tamma.Activities.ADL;
+using Tamma.Activities.Documents;
+using Tamma.Core.Documents.Resume;
 using Tamma.ElsaServer.Workflows.Helpers;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
@@ -17,101 +19,41 @@ using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// Triage Item Cycle — processes a single untriaged item through
-/// context gathering, 4-role panel review, PO decision, and label application.
+/// Story 39-15 (D5/D8) — Triage Item Cycle, still a NON-binding ORCHESTRATOR over the
+/// migrated triage bindings. It dispatches the <c>triage-context-gathering</c> Findings
+/// binding and the <c>triage-po-decision</c> TriageDecision binding (whose REVIEW is now
+/// the 39-7 panel INSIDE the lifecycle — the 4-role panel is no longer a separate input
+/// stage), routes on the TYPED decision, and applies validated labels + a rendered comment.
 ///
-/// <para>Build-out (completeness audit 2026-06-22, <c>TriageItemCycle.md</c>): the
-/// orchestrator layer is now <b>fail-closed and audited</b> — it is no longer a
-/// happy-path spine over robust sub-workflows. Specifically:</para>
-///
-/// <list type="bullet">
-///   <item><description>#3 — cycle-scoped DCB events. <c>TRIAGE.ISSUE.STARTED</c> at
-///     Init and exactly one terminal (<c>COMPLETED</c> / <c>SKIPPED</c> /
-///     <c>FAILED</c>) at each exit, tagged itemKey/issueId/repository/itemSource/type/
-///     priority/automation (via <see cref="EmitTriageCycleEventActivity"/>). The unit
-///     of audit ("we triaged item X → outcome Y") is now a single loud row.</description></item>
-///   <item><description>#1/#2 — a decision-OK gate before apply. The PO sub-workflow now
-///     outputs <c>callSucceeded</c> + a <c>status</c> (#391). A faulted PO dispatch (no
-///     <c>callSucceeded</c> output → fail-closed false), an <c>llm-failed</c> /
-///     <c>unparsed</c> / <c>skipped</c> decision, or a missing/empty decision SKIPS
-///     apply and FAILS the item — never labels off a fabricated/empty decision.</description></item>
-///   <item><description>#2 — failure edges on the three <c>DispatchWorkflow</c> nodes.
-///     <c>DispatchWorkflow</c> has NO <c>Faulted</c> outcome port; a faulted child
-///     reaches <c>Finished</c> (so the parent bookmark resumes — never a hang) but its
-///     output dict lacks the success-signal keys. The cycle therefore fail-closes on the
-///     ABSENCE of those keys: context → <c>contextStatus</c> gate, panel →
-///     <c>panelStatus</c> gate, PO → <c>callSucceeded</c>/<c>status</c> gate. A faulted
-///     stage routes to a loud non-applying terminal, never proceeds with empty JSON.</description></item>
-///   <item><description>#5 — a per-item <c>itemResult</c> output
-///     (<c>{ itemKey, outcome, decisionStatus, error? }</c>) so the fire-and-forget
-///     parent can report <c>{ triaged, failed, skipped }</c> rather than a blanket
-///     success.</description></item>
-///   <item><description>#7 — labels are validated against the canonical vocabulary and
-///     the comment is rendered deterministically from the parsed decision (an AC5
-///     markdown table) before apply — never arbitrary LLM prose/labels.</description></item>
-///   <item><description>#8 — <see cref="ApplyTriageResultActivity"/> is fail-loud on a
-///     non-success engine-callback POST. It emits a loud <c>TRIAGE.APPLY.RESULT.FAILED</c>
-///     leaf event instead of a swallowed false <c>.COMPLETED</c>, and exposes a
-///     <c>Success</c> / <c>Failure</c> outcome so the cycle routes an apply failure to a
-///     LOUD <c>TRIAGE.ISSUE.FAILED</c> terminal (review fix below) rather than halting
-///     with no terminal.</description></item>
-/// </list>
-///
-/// <para>Review fix (CRITICAL — "stuck, no terminal" hang). Previously the apply node
-/// <i>threw</i> on a 4xx/5xx and had only a success-only edge
-/// (<c>applyLabels → emitCompleted</c>) with the DEFAULT incident strategy. A Flowchart
-/// never schedules a <i>faulted</i> node's outbound edges (Elsa 3.5
-/// <c>Flowchart.ProcessChildCompletedAsync</c> only routes a <c>Completed</c> child), and
-/// the default <c>FaultStrategy</c> transitions the whole instance to <c>Faulted</c> — so
-/// an apply HTTP failure halted the instance with NO <c>TRIAGE.ISSUE.*</c> terminal and
-/// no <c>itemResult</c>. Mirroring the merge-approval / deployment-pipeline precedent:
-/// (a) <c>WorkflowOptions.IncidentStrategyType = ContinueWithIncidentsStrategy</c> so an
-/// unexpected fault does not hard-halt; (b) the <c>itemResult</c> output + fail-reason are
-/// SEEDED to a fail-closed <c>failed</c> default BEFORE apply, so even a halt yields a
-/// parseable failed outcome; and (c) the apply node's <c>Failure</c> outcome routes to a
-/// loud <c>TRIAGE.ISSUE.FAILED</c> terminal that overwrites the <c>itemResult</c>. The
-/// <c>Success</c> outcome routes to <c>COMPLETED</c>. Exactly ONE cycle terminal event
-/// fires per run — including the apply-fault path.</para>
-///
-/// <para>#9 — singleton: the previous header claimed "singleton — Elsa queues
-/// subsequent dispatches until the current one finishes". That is FALSE for Elsa's
-/// <c>SingletonStrategy</c>, which <i>rejects</i> (does not queue) a new dispatch while
-/// one is running — enforcing it would silently DROP items from the parent's per-item
-/// fan-out. The claim is therefore dropped; correctness does not rely on serialization.
-/// A real dedupe/triage-state gate (#4) is deferred to a follow-on 26-1 sub-story.</para>
-///
-/// Flow:
-///   Init → Emit STARTED → Gather Context (llm-call) → Extract Context + Status → Context Gathered?
-///       ├─ True (ok/empty)    → Panel Review (llm-call x4) → Extract Panel + Status → Panel Usable?
-///       │     ├─ True (ok/partial)  → PO Decision → Capture (callSucceeded/status/fields)
-///       │     │       → Decision OK?
-///       │     │           ├─ True (callSucceeded && status=ok) → Seed failed itemResult →
-///       │     │           │     Build Apply Inputs (validated labels + rendered comment;
-///       │     │           │     emit LABELS.INVALID for any dropped) → Apply
-///       │     │           │         ├─ Success → Emit COMPLETED → Finish
-///       │     │           │         └─ Failure → Fail Item (reason=applyFailed) → Emit FAILED → Finish
-///       │     │           └─ False → Fail Item (reason=decisionUnusable) → Emit FAILED → Finish
-///       │     └─ False (failed)     → Mark Skipped (panel-failed)  → Emit SKIPPED → Finish
-///       └─ False (failed)     → Mark Skipped (context-failed)      → Emit SKIPPED → Finish
-///
-/// Inputs: repository, itemJson, tenantId
-/// Outputs: itemResult ({ itemKey, outcome, decisionStatus, error? }); triageSkipped/skipReason (back-compat)
+/// <para>What changed (Story 39-15): the <c>triage-panel-review</c> dispatch +
+/// <c>extractPanelResult</c> + <c>panelUsable</c> nodes are DELETED (the panel is the
+/// lifecycle REVIEW stage now). The decision gate deserializes the TYPED
+/// <see cref="Tamma.Core.Documents.Types.TriageDecision"/>
+/// (<see cref="TriageItemCycleHelper.ReadTypedDecision"/>) instead of parsing a bare JSON
+/// blob; <c>findingsDocumentId</c> threads from the context binding into the po-decision
+/// dispatch as the lineage anchor. The cycle declares
+/// <c>[ResumeBehavior(LatestStateReEntry)]</c> with a
+/// <see cref="ComputeReEntryPositionActivity"/> gate on the item's <c>triage-decision</c>
+/// document: a crash re-entry AFTER the decision was already accepted short-circuits to a
+/// single idempotent <c>TRIAGE.ISSUE.COMPLETED</c> terminal (no re-produce, no duplicate
+/// apply — D8). <c>ContinueWithIncidentsStrategy</c>, the seeded fail-closed
+/// <c>itemResult</c>, <c>ValidateLabels</c>/<c>RenderComment</c>, and the
+/// <see cref="ApplyTriageResultActivity"/> Success/Failure routing are all preserved.</para>
 /// </summary>
+[ResumeBehavior(ResumeMode.LatestStateReEntry)]
 public class TriageItemCycleWorkflow : WorkflowBase
 {
+    private const string TriageDecisionDocumentType = "triage-decision";
+
     protected override void Build(IWorkflowBuilder builder)
     {
         builder.Name = "Triage Item Cycle";
         builder.DefinitionId = "triage-item-cycle";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description = "Process one untriaged item: context → panel → PO → labels (fail-closed, audited)";
+        builder.Description = "Process one untriaged item: context → PO decision (panel inside) → labels (fail-closed, audited, resumable)";
 
-        // Review fix (CRITICAL — "stuck, no terminal" hang). Continue-with-incidents so
-        // an unexpected fault (e.g. in an Extract/Build node) does NOT halt the instance
-        // with no output. The apply step routes its failure as an explicit Failure
-        // OUTCOME (not a throw), so the loud TRIAGE.ISSUE.FAILED terminal is always
-        // reachable; the seeded fail-closed itemResult (below, before apply) covers any
-        // other halt. Mirrors MergeApprovalWorkflow I1 / DeploymentPipelineWorkflow.
+        // Continue-with-incidents so an unexpected fault does not halt the instance with no
+        // output; the apply step routes its failure as an explicit Failure OUTCOME.
         builder.WorkflowOptions.IncidentStrategyType = typeof(ContinueWithIncidentsStrategy);
 
         // ================================================================
@@ -120,39 +62,30 @@ public class TriageItemCycleWorkflow : WorkflowBase
         var repository = builder.WithVariable<string>("Repository", "");
         var itemJson = builder.WithVariable<string>("ItemJson", "");
         var tenantId = builder.WithVariable<string>("TenantId", "");
-        // Deterministic key + tags for events / outcome (#3/#5).
         var itemKey = builder.WithVariable<string>("ItemKey", "");
         var itemNumber = builder.WithVariable<int>("ItemNumber", 0);
         var itemSource = builder.WithVariable<string>("ItemSource", "");
 
+        // 39-10 re-entry position (on the item's triage-decision document).
+        var reEntryPositionJson = builder.WithVariable<string>();
+        var reEntryDocJson = builder.WithVariable<string>();
+        var positionStage = builder.WithVariable<string>("PositionStage", "produce");
+
         var contextJson = builder.WithVariable<string>("ContextJson", "");
-        // Context health signal from the (fail-closed) context sub-workflow:
-        // "ok" / "empty" => usable; "failed" => no context gathered, skip the panel.
-        var contextStatus = builder.WithVariable<string>(
-            "ContextStatus", TriageContextEvents.StatusFailed);
-        var panelResultJson = builder.WithVariable<string>("PanelResultJson", "");
-        // Panel health signal from the (fail-closed) panel sub-workflow:
-        // "ok" / "partial" => usable; "failed" => below quorum, do NOT apply labels.
-        var panelStatus = builder.WithVariable<string>(
-            "PanelStatus", TriagePanelAggregationHelper.StatusFailed);
+        var contextStatus = builder.WithVariable<string>("ContextStatus", TriageContextEvents.StatusFailed);
+        var findingsDocumentId = builder.WithVariable<string>("FindingsDocumentId", "");
+
         var poDecisionJson = builder.WithVariable<string>("PODecisionJson", "");
-        // PO call health (#1/#2): the PO sub-workflow's `callSucceeded` output. Default
-        // false — a faulted PO dispatch never sets it, so the cycle fail-closes.
+        var poDocumentJson = builder.WithVariable<string>("PODocumentJson", "");
         var poCallSucceeded = builder.WithVariable<bool>("PoCallSucceeded", false);
-        // Decision fields surfaced for the COMPLETED event + apply (#3/#7).
         var decisionStatus = builder.WithVariable<string>("DecisionStatus", "");
         var decisionType = builder.WithVariable<string>("DecisionType", "");
         var decisionPriority = builder.WithVariable<string>("DecisionPriority", "");
         var decisionAutomation = builder.WithVariable<string>("DecisionAutomation", "");
-        // Validated labels + rendered comment for apply (#7).
         var appliedLabels = builder.WithVariable<string[]>("AppliedLabels", System.Array.Empty<string>());
         var appliedComment = builder.WithVariable<string>("AppliedComment", "");
-        // Out-of-vocab labels the PO returned that were dropped by ValidateLabels (#7) —
-        // captured (no longer discarded) so the cycle emits a TRIAGE.LABELS.INVALID
-        // warning recording what was dropped, rather than silently swallowing it.
         var droppedLabels = builder.WithVariable<string[]>("DroppedLabels", System.Array.Empty<string>());
 
-        // Why the cycle skipped/failed apply — surfaced on the outputs + events.
         var skipReason = builder.WithVariable<string>("SkipReason", "");
         var subResult = builder.WithVariable<IDictionary<string, object>?>();
 
@@ -170,7 +103,7 @@ public class TriageItemCycleWorkflow : WorkflowBase
                 itemJson.Set(ctx, item);
                 tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
                 itemKey.Set(ctx, TriageItemCycleHelper.DeriveItemKey(repo, item));
-                itemNumber.Set(ctx, TriagePanelAggregationHelper.ParseItemNumber(item));
+                itemNumber.Set(ctx, TriageBindingHelper.ParseItemNumber(item));
                 itemSource.Set(ctx, TriageItemCycleHelper.ReadItemSource(item));
                 return (object)repo;
             })
@@ -178,7 +111,47 @@ public class TriageItemCycleWorkflow : WorkflowBase
         init.SetDisplayText("Initialize");
 
         // ================================================================
-        // 1a. Emit TRIAGE.ISSUE.STARTED (#3).
+        // 1a. 39-10 re-entry position on the item's triage-decision document (D8).
+        // ================================================================
+        var computeReEntry = new ComputeReEntryPositionActivity
+        {
+            Id = "ComputeReEntryPosition", Name = "Compute Re-Entry Position",
+            IssueId = new(ctx => itemKey.Get(ctx)),
+            DocumentType = new(TriageDecisionDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            CorrelationId = new(ctx => itemKey.Get(ctx)),
+            PositionJson = new(reEntryPositionJson),
+            ExistingDocumentJson = new(reEntryDocJson),
+        };
+        computeReEntry.SetDisplayText("Compute Re-Entry Position");
+
+        var readPositionStage = new SetVariable
+        {
+            Id = "ReadPositionStage", Name = "Read Position Stage",
+            Variable = positionStage,
+            Value = new(ctx =>
+            {
+                var position = DocumentLifecycleHelper.DeserializeReEntryPosition(reEntryPositionJson.Get(ctx));
+                return position?.ResumeAt switch
+                {
+                    LifecycleResumeStage.Complete => "complete",
+                    LifecycleResumeStage.Accept => "accept",
+                    LifecycleResumeStage.Review => "review",
+                    _ => "produce",
+                };
+            })
+        };
+        readPositionStage.SetDisplayText("Read Position Stage");
+
+        // Apply-idempotence gate (D8): a crash re-entry AFTER the decision was already
+        // accepted (position "complete") short-circuits to a single idempotent COMPLETED
+        // terminal — no re-dispatch of context/po, no duplicate ApplyTriageResultActivity.
+        var alreadyComplete = new FlowDecision(ctx => positionStage.Get(ctx) == "complete")
+        { Id = "AlreadyComplete", Name = "Already Complete?" };
+        alreadyComplete.SetDisplayText("Already Complete?");
+
+        // ================================================================
+        // 1b. Emit TRIAGE.ISSUE.STARTED.
         // ================================================================
         var emitStarted = CycleEvent(
             "EmitCycleStarted", "Emit TRIAGE.ISSUE.STARTED",
@@ -187,18 +160,18 @@ public class TriageItemCycleWorkflow : WorkflowBase
             _ => "", _ => "", _ => "", _ => "", _ => "");
 
         // ================================================================
-        // 2. Gather Context (code usage, deps, CVE details)
+        // 2. Gather Context (Findings binding).
         // ================================================================
         var gatherContext = new DispatchWorkflow
         {
-            Id = "GatherTriageContext",
-            Name = "Gather Triage Context",
+            Id = "GatherTriageContext", Name = "Gather Triage Context",
             WorkflowDefinitionId = new("triage-context-gathering"),
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["repository"] = repository.Get(ctx),
                 ["itemJson"] = itemJson.Get(ctx),
                 ["tenantId"] = tenantId.Get(ctx),
+                ["issueId"] = itemKey.Get(ctx),
             }),
             WaitForCompletion = new(true),
             Result = new(subResult),
@@ -207,17 +180,12 @@ public class TriageItemCycleWorkflow : WorkflowBase
 
         var extractContext = new SetVariable
         {
-            Id = "ExtractContext",
-            Name = "Extract Context",
+            Id = "ExtractContext", Name = "Extract Context",
             Variable = contextJson,
             Value = new Input<object?>(ctx =>
             {
                 var result = subResult.Get(ctx);
 
-                // Read the context-health signal first. Absence is treated as a
-                // FAILED scan (fail-closed): a faulted context dispatch (#2) reaches
-                // Finished with no output, so the status key is absent — we must NOT
-                // assume context was gathered and run the panel.
                 var status = TriageContextEvents.StatusFailed;
                 if (result != null && result.TryGetValue("contextStatus", out var st))
                 {
@@ -226,6 +194,9 @@ public class TriageItemCycleWorkflow : WorkflowBase
                 }
                 contextStatus.Set(ctx, status);
 
+                if (result != null && result.TryGetValue("findingsDocumentId", out var fd))
+                    findingsDocumentId.Set(ctx, fd?.ToString() ?? "");
+
                 if (result != null && result.TryGetValue("contextJson", out var c))
                     return (object)(c?.ToString() ?? "");
                 return (object)"";
@@ -233,82 +204,25 @@ public class TriageItemCycleWorkflow : WorkflowBase
         };
         extractContext.SetDisplayText("Extract Context");
 
-        // ================================================================
-        // 2a. Context Gathered? — honour the context stage's fail-closed signal.
-        // ================================================================
         var contextGathered = new FlowDecision(ctx =>
             contextStatus.Get(ctx) != TriageContextEvents.StatusFailed)
         { Id = "ContextGathered", Name = "Context Gathered?" };
         contextGathered.SetDisplayText("Context Gathered?");
 
         // ================================================================
-        // 3. Panel Review (security analyst, dev, devops, qa)
-        // ================================================================
-        var panelReview = new DispatchWorkflow
-        {
-            Id = "PanelReview",
-            Name = "Panel Review",
-            WorkflowDefinitionId = new("triage-panel-review"),
-            Input = new(ctx => new Dictionary<string, object>
-            {
-                ["repository"] = repository.Get(ctx),
-                ["itemJson"] = itemJson.Get(ctx),
-                ["contextJson"] = contextJson.Get(ctx),
-                ["tenantId"] = tenantId.Get(ctx),
-            }),
-            WaitForCompletion = new(true),
-            Result = new(subResult),
-        };
-        panelReview.SetDisplayText("Panel Review");
-
-        var extractPanelResult = new SetVariable
-        {
-            Id = "ExtractPanelResult",
-            Name = "Extract Panel Result",
-            Variable = panelResultJson,
-            Value = new Input<object?>(ctx =>
-            {
-                var result = subResult.Get(ctx);
-
-                // Read the panel-health signal first. Absence is treated as a FAILED
-                // panel (fail-closed): a faulted panel dispatch (#2) yields no status
-                // key — we must NOT assume success and apply labels.
-                var status = TriagePanelAggregationHelper.StatusFailed;
-                if (result != null && result.TryGetValue("panelStatus", out var st))
-                {
-                    var s = st?.ToString();
-                    if (!string.IsNullOrWhiteSpace(s)) status = s!;
-                }
-                panelStatus.Set(ctx, status);
-
-                if (result != null && result.TryGetValue("panelResultJson", out var p))
-                    return (object)(p?.ToString() ?? "");
-                return (object)"";
-            })
-        };
-        extractPanelResult.SetDisplayText("Extract Panel Result");
-
-        // ================================================================
-        // 3a. Panel Usable? — honour the panel's fail-closed signal.
-        // ================================================================
-        var panelUsable = new FlowDecision(ctx =>
-            panelStatus.Get(ctx) != TriagePanelAggregationHelper.StatusFailed)
-        { Id = "PanelUsable", Name = "Panel Usable?" };
-        panelUsable.SetDisplayText("Panel Usable?");
-
-        // ================================================================
-        // 4. PO Decision (priority, labels, automation level)
+        // 3. PO Decision (TriageDecision binding — panel is now INSIDE the lifecycle).
         // ================================================================
         var poDecision = new DispatchWorkflow
         {
-            Id = "PODecision",
-            Name = "PO Decision",
+            Id = "PODecision", Name = "PO Decision",
             WorkflowDefinitionId = new("triage-po-decision"),
             Input = new(ctx => new Dictionary<string, object>
             {
                 ["repository"] = repository.Get(ctx),
                 ["itemJson"] = itemJson.Get(ctx),
-                ["panelResultJson"] = panelResultJson.Get(ctx),
+                ["contextJson"] = contextJson.Get(ctx),
+                ["findingsDocumentId"] = findingsDocumentId.Get(ctx),
+                ["issueId"] = itemKey.Get(ctx),
                 ["tenantId"] = tenantId.Get(ctx),
             }),
             WaitForCompletion = new(true),
@@ -316,13 +230,9 @@ public class TriageItemCycleWorkflow : WorkflowBase
         };
         poDecision.SetDisplayText("PO Decision");
 
-        // 4a. Capture decision — #1/#2. Read callSucceeded + decisionJson, parse the
-        //     status + classification fields. Fail-closed: a faulted PO dispatch
-        //     leaves callSucceeded absent (=> false) and decisionJson empty.
         var extractDecision = new SetVariable
         {
-            Id = "ExtractDecision",
-            Name = "Extract Decision",
+            Id = "ExtractDecision", Name = "Extract Decision",
             Variable = poDecisionJson,
             Value = new Input<object?>(ctx =>
             {
@@ -335,8 +245,12 @@ public class TriageItemCycleWorkflow : WorkflowBase
                 var json = "";
                 if (result != null && result.TryGetValue("decisionJson", out var d))
                     json = d?.ToString() ?? "";
+                var docJson = "";
+                if (result != null && result.TryGetValue("documentJson", out var dj))
+                    docJson = dj?.ToString() ?? "";
+                poDocumentJson.Set(ctx, docJson);
 
-                var parsed = TriageItemCycleHelper.ParseDecision(json);
+                var parsed = TriageItemCycleHelper.ReadTypedDecision(docJson);
                 decisionStatus.Set(ctx, parsed.Status);
                 decisionType.Set(ctx, parsed.Type);
                 decisionPriority.Set(ctx, parsed.Priority);
@@ -347,28 +261,23 @@ public class TriageItemCycleWorkflow : WorkflowBase
         };
         extractDecision.SetDisplayText("Extract Decision");
 
-        // 4b. Decision OK? — #1 the apply gate. Applicable ONLY when the PO call
-        //     succeeded AND the decision status is "ok". A faulted PO, an llm-failed /
-        //     unparsed / skipped decision, or empty JSON → False → fail the item.
+        // Typed-exit gate — applicable ONLY when the po binding accepted AND the typed
+        // TriageDecision is complete. A non-accept exit (callSucceeded=false / empty
+        // documentJson) → NOT applicable → fail the item, never label off a fabricated decision.
         var decisionOk = new FlowDecision(ctx =>
             TriageItemCycleHelper.IsDecisionApplicable(
                 poCallSucceeded.Get(ctx),
-                TriageItemCycleHelper.ParseDecision(poDecisionJson.Get(ctx))))
+                TriageItemCycleHelper.ReadTypedDecision(poDocumentJson.Get(ctx))))
         { Id = "DecisionOK", Name = "Decision OK?" };
         decisionOk.SetDisplayText("Decision OK?");
 
-        // 4c. Build apply inputs — #7 validate labels against the canonical vocab and
-        //     render the AC5 markdown-table comment deterministically from the decision.
-        //     Capture the dropped (out-of-vocab) labels so the cycle can emit a
-        //     TRIAGE.LABELS.INVALID warning rather than silently discarding them.
         var buildApplyInputs = new SetVariable
         {
-            Id = "BuildApplyInputs",
-            Name = "Build Apply Inputs",
+            Id = "BuildApplyInputs", Name = "Build Apply Inputs",
             Variable = appliedLabels,
             Value = new Input<object?>(ctx =>
             {
-                var decision = TriageItemCycleHelper.ParseDecision(poDecisionJson.Get(ctx));
+                var decision = TriageItemCycleHelper.ReadTypedDecision(poDocumentJson.Get(ctx));
                 var validated = TriageItemCycleHelper.ValidateLabels(decision.Labels, out var dropped);
                 droppedLabels.Set(ctx, dropped.ToArray());
                 appliedComment.Set(ctx, TriageItemCycleHelper.RenderComment(decision));
@@ -377,12 +286,6 @@ public class TriageItemCycleWorkflow : WorkflowBase
         };
         buildApplyInputs.SetDisplayText("Build Apply Inputs");
 
-        // 4d. MINOR (#7) — record dropped out-of-vocab labels as a loud (warning) audit
-        //     row. Non-terminal: the cycle still applies the validated subset and
-        //     proceeds to COMPLETED. Reason carries the dropped set (comma-joined,
-        //     secret-free — they are label strings). Emitted unconditionally; the
-        //     downstream durable drain persists it, and an empty dropped set carries an
-        //     empty reason (the cheap path — no extra branch in the flowchart).
         var emitLabelsInvalid = CycleEvent(
             "EmitLabelsInvalid", "Emit TRIAGE.LABELS.INVALID",
             _ => TriageCycleEvents.LabelsInvalid,
@@ -390,11 +293,6 @@ public class TriageItemCycleWorkflow : WorkflowBase
             _ => "", _ => "", _ => "", ctx => decisionStatus.Get(ctx),
             ctx => string.Join(",", droppedLabels.Get(ctx) ?? System.Array.Empty<string>()));
 
-        // 4e. Seed a fail-closed itemResult + reason BEFORE apply (review fix). If apply
-        //     (or anything after this) faults and continue-with-incidents stops the flow
-        //     before a terminal, the workflow output still carries a parseable
-        //     itemResult{outcome:"failed"} — never a stuck instance with no output. The
-        //     Success / Failure terminals below overwrite this with the real outcome.
         var seedFailedReason = new SetVariable
         {
             Id = "SeedFailedReason", Name = "Seed Fail-Closed Reason",
@@ -408,21 +306,17 @@ public class TriageItemCycleWorkflow : WorkflowBase
             Id = "SeedFailedResult", Name = "Seed Item Result (failed)",
             OutputName = new("itemResult"),
             OutputValue = new(ctx => (object)TriageItemCycleHelper.BuildItemResult(
-                itemKey.Get(ctx), TriageCycleEvents.OutcomeFailed, decisionStatus.Get(ctx),
+                itemKey.Get(ctx) ?? "", TriageCycleEvents.OutcomeFailed, decisionStatus.Get(ctx),
                 "applyIncomplete")),
         };
         seedFailedResult.SetDisplayText("Seed Item Result (failed)");
 
         // ================================================================
-        // 5. Apply Labels + Post Comment (#7/#8 — validated labels, rendered
-        //    comment, fail-loud on a non-success engine POST). The activity exposes a
-        //    Success / Failure outcome so an apply HTTP failure routes to a loud
-        //    TRIAGE.ISSUE.FAILED terminal (review fix) instead of faulting the cycle.
+        // 4. Apply Labels + Post Comment.
         // ================================================================
         var applyLabels = new ApplyTriageResultActivity
         {
-            Id = "ApplyLabels",
-            Name = "Apply Labels & Comment",
+            Id = "ApplyLabels", Name = "Apply Labels & Comment",
             Repository = new Input<string>(ctx => repository.Get(ctx)),
             ItemJson = new Input<string>(ctx => itemJson.Get(ctx)),
             DecisionJson = new Input<string>(ctx => poDecisionJson.Get(ctx)),
@@ -431,9 +325,6 @@ public class TriageItemCycleWorkflow : WorkflowBase
         };
         applyLabels.SetDisplayText("Apply Labels & Comment");
 
-        // 5a. Emit TRIAGE.ISSUE.COMPLETED (#3) — reached ONLY via the apply Success
-        //     outcome, so COMPLETED is never a false success (a failed apply takes the
-        //     Failure edge to the FAILED terminal below).
         var emitCompleted = CycleEvent(
             "EmitCycleCompleted", "Emit TRIAGE.ISSUE.COMPLETED",
             _ => TriageCycleEvents.Completed,
@@ -443,17 +334,30 @@ public class TriageItemCycleWorkflow : WorkflowBase
 
         var outCompletedResult = new SetOutput
         {
-            Id = "OutCompletedResult",
-            Name = "Output Item Result (triaged)",
+            Id = "OutCompletedResult", Name = "Output Item Result (triaged)",
             OutputName = new("itemResult"),
             OutputValue = new(ctx => (object)TriageItemCycleHelper.BuildItemResult(
-                itemKey.Get(ctx), TriageCycleEvents.OutcomeTriaged, decisionStatus.Get(ctx), null)),
+                itemKey.Get(ctx) ?? "", TriageCycleEvents.OutcomeTriaged, decisionStatus.Get(ctx), null)),
         };
         outCompletedResult.SetDisplayText("Output Item Result (triaged)");
 
-        // 5b. Apply Failure terminal (review fix) — the engine-callback POST failed
-        //     (4xx/5xx or a network throw). Loud TRIAGE.ISSUE.FAILED, fail-closed
-        //     itemResult{outcome:"failed"}. Exactly one cycle terminal on this path.
+        // Idempotent re-entry COMPLETED terminal (D8) — reached only from the
+        // already-complete gate; emits exactly one TRIAGE.ISSUE.COMPLETED with no re-apply.
+        var emitCompletedReentry = CycleEvent(
+            "EmitCycleCompletedReentry", "Emit TRIAGE.ISSUE.COMPLETED (re-entry)",
+            _ => TriageCycleEvents.Completed,
+            repository, itemKey, itemNumber, tenantId, itemSource,
+            _ => "", _ => "", _ => "", _ => TriagePoDecisionHelper.StatusOk, _ => "");
+
+        var outReentryResult = new SetOutput
+        {
+            Id = "OutReentryResult", Name = "Output Item Result (re-entry)",
+            OutputName = new("itemResult"),
+            OutputValue = new(ctx => (object)TriageItemCycleHelper.BuildItemResult(
+                itemKey.Get(ctx) ?? "", TriageCycleEvents.OutcomeTriaged, TriagePoDecisionHelper.StatusOk, null)),
+        };
+        outReentryResult.SetDisplayText("Output Item Result (re-entry)");
+
         var setApplyFailedReason = new SetVariable
         {
             Id = "SetApplyFailedReason", Name = "Set Apply-Failed Reason",
@@ -474,15 +378,14 @@ public class TriageItemCycleWorkflow : WorkflowBase
             Id = "OutApplyFailedResult", Name = "Output Item Result (apply failed)",
             OutputName = new("itemResult"),
             OutputValue = new(ctx => (object)TriageItemCycleHelper.BuildItemResult(
-                itemKey.Get(ctx), TriageCycleEvents.OutcomeFailed, decisionStatus.Get(ctx),
+                itemKey.Get(ctx) ?? "", TriageCycleEvents.OutcomeFailed, decisionStatus.Get(ctx),
                 skipReason.Get(ctx))),
         };
         outApplyFailedResult.SetDisplayText("Output Item Result (apply failed)");
 
         // ================================================================
-        // Skip / fail terminals
+        // Skip / fail terminals.
         // ================================================================
-        // Skip reason setters (per branch) — explicit + testable.
         var setContextFailedReason = new SetVariable
         {
             Id = "SetContextFailedReason", Name = "Set Context-Failed Reason",
@@ -491,16 +394,6 @@ public class TriageItemCycleWorkflow : WorkflowBase
         };
         setContextFailedReason.SetDisplayText("Set Context-Failed Reason");
 
-        var setPanelFailedReason = new SetVariable
-        {
-            Id = "SetPanelFailedReason", Name = "Set Panel-Failed Reason",
-            Variable = skipReason,
-            Value = new Input<object?>(_ => (object)"panel-failed"),
-        };
-        setPanelFailedReason.SetDisplayText("Set Panel-Failed Reason");
-
-        // Shared SKIPPED terminal — a stage reported a non-applying-but-not-faulted
-        // signal (context unavailable / panel below quorum). Loud (warning) audit row.
         var markSkipped = new SetOutput
         {
             Id = "MarkSkipped", Name = "Mark Triage Skipped",
@@ -529,12 +422,11 @@ public class TriageItemCycleWorkflow : WorkflowBase
             Id = "OutSkippedResult", Name = "Output Item Result (skipped)",
             OutputName = new("itemResult"),
             OutputValue = new(ctx => (object)TriageItemCycleHelper.BuildItemResult(
-                itemKey.Get(ctx), TriageCycleEvents.OutcomeSkipped, decisionStatus.Get(ctx),
+                itemKey.Get(ctx) ?? "", TriageCycleEvents.OutcomeSkipped, decisionStatus.Get(ctx),
                 skipReason.Get(ctx))),
         };
         outSkippedResult.SetDisplayText("Output Item Result (skipped)");
 
-        // FAILED terminal — the PO produced no usable decision (#1/#2). Loud (error).
         var setDecisionFailedReason = new SetVariable
         {
             Id = "SetDecisionFailedReason", Name = "Set Decision-Failed Reason",
@@ -561,14 +453,11 @@ public class TriageItemCycleWorkflow : WorkflowBase
             Id = "OutFailedResult", Name = "Output Item Result (failed)",
             OutputName = new("itemResult"),
             OutputValue = new(ctx => (object)TriageItemCycleHelper.BuildItemResult(
-                itemKey.Get(ctx), TriageCycleEvents.OutcomeFailed, decisionStatus.Get(ctx),
+                itemKey.Get(ctx) ?? "", TriageCycleEvents.OutcomeFailed, decisionStatus.Get(ctx),
                 skipReason.Get(ctx))),
         };
         outFailedResult.SetDisplayText("Output Item Result (failed)");
 
-        // ================================================================
-        // 6. Finish
-        // ================================================================
         var finish = new Finish { Id = "Finish", Name = "Complete" };
         finish.SetDisplayText("Complete");
 
@@ -581,66 +470,62 @@ public class TriageItemCycleWorkflow : WorkflowBase
             Start = init,
             Activities =
             {
-                init, emitStarted,
+                init, computeReEntry, readPositionStage, alreadyComplete,
+                emitCompletedReentry, outReentryResult,
+                emitStarted,
                 gatherContext, extractContext, contextGathered,
-                panelReview, extractPanelResult, panelUsable,
                 poDecision, extractDecision, decisionOk, buildApplyInputs,
                 emitLabelsInvalid, seedFailedReason, seedFailedResult,
                 applyLabels, emitCompleted, outCompletedResult,
                 setApplyFailedReason, emitApplyFailed, outApplyFailedResult,
-                setContextFailedReason, setPanelFailedReason,
+                setContextFailedReason,
                 markSkipped, outSkipReason, emitSkipped, outSkippedResult,
                 setDecisionFailedReason, emitFailed, outFailedResult,
                 finish,
             },
             Connections =
             {
-                Connect(init, emitStarted),
+                Connect(init, computeReEntry),
+                Connect(computeReEntry, readPositionStage),
+                Connect(readPositionStage, alreadyComplete),
+
+                // Re-entry after accept → single idempotent COMPLETED, no re-apply (D8).
+                ConnectOutcome(alreadyComplete, "True", emitCompletedReentry),
+                Connect(emitCompletedReentry, outReentryResult),
+                Connect(outReentryResult, finish),
+
+                // Fresh / mid-flow re-entry → the normal cycle.
+                ConnectOutcome(alreadyComplete, "False", emitStarted),
                 Connect(emitStarted, gatherContext),
                 Connect(gatherContext, extractContext),
                 Connect(extractContext, contextGathered),
 
-                // Context gathered (ok/empty) → run the panel.
-                ConnectOutcome(contextGathered, "True", panelReview),
-                Connect(panelReview, extractPanelResult),
-                Connect(extractPanelResult, panelUsable),
-
-                // Context failed → SKIPPED (no panel over phantom context).
-                ConnectOutcome(contextGathered, "False", setContextFailedReason),
-                Connect(setContextFailedReason, markSkipped),
-
-                // Panel usable (ok/partial) → PO decision → capture → decision gate.
-                ConnectOutcome(panelUsable, "True", poDecision),
+                // Context gathered (ok) → PO decision (panel inside).
+                ConnectOutcome(contextGathered, "True", poDecision),
                 Connect(poDecision, extractDecision),
                 Connect(extractDecision, decisionOk),
 
-                // Panel failed → SKIPPED (no labels off a wholly-failed panel).
-                ConnectOutcome(panelUsable, "False", setPanelFailedReason),
-                Connect(setPanelFailedReason, markSkipped),
+                // Context failed → SKIPPED.
+                ConnectOutcome(contextGathered, "False", setContextFailedReason),
+                Connect(setContextFailedReason, markSkipped),
 
-                // Decision OK → validate labels + render comment → record any dropped
-                // labels (LABELS.INVALID warning) → seed a fail-closed itemResult →
-                // apply. The apply Success outcome → COMPLETED; Failure → loud FAILED.
+                // Decision OK → validate labels + render comment → seed → apply.
                 ConnectOutcome(decisionOk, "True", buildApplyInputs),
                 Connect(buildApplyInputs, emitLabelsInvalid),
                 Connect(emitLabelsInvalid, seedFailedReason),
                 Connect(seedFailedReason, seedFailedResult),
                 Connect(seedFailedResult, applyLabels),
 
-                // Apply succeeded → COMPLETED (overwrites the seeded itemResult).
                 ConnectOutcome(applyLabels, "Success", emitCompleted),
                 Connect(emitCompleted, outCompletedResult),
                 Connect(outCompletedResult, finish),
 
-                // Apply failed (4xx/5xx / network) → loud TRIAGE.ISSUE.FAILED terminal —
-                // exactly one cycle terminal on the apply-fault path (the review fix).
                 ConnectOutcome(applyLabels, "Failure", setApplyFailedReason),
                 Connect(setApplyFailedReason, emitApplyFailed),
                 Connect(emitApplyFailed, outApplyFailedResult),
                 Connect(outApplyFailedResult, finish),
 
-                // Decision NOT OK (faulted PO / llm-failed / unparsed / empty) → FAILED.
-                // The False edge NEVER reaches buildApplyInputs / applyLabels.
+                // Decision NOT OK → FAILED.
                 ConnectOutcome(decisionOk, "False", setDecisionFailedReason),
                 Connect(setDecisionFailedReason, emitFailed),
                 Connect(emitFailed, outFailedResult),
@@ -655,9 +540,6 @@ public class TriageItemCycleWorkflow : WorkflowBase
         };
     }
 
-    // ================================================================
-    // Helper: Emit a cycle-scoped TRIAGE.ISSUE.* DCB event via the durable drain.
-    // ================================================================
     private static EmitTriageCycleEventActivity CycleEvent(
         string id, string label,
         System.Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> eventType,

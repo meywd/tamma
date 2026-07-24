@@ -3,82 +3,76 @@ using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Management.Activities.SetOutput;
-using Elsa.Workflows.Memory;
-using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
+using System.Text.Json;
 using Tamma.Activities.ADL;
+using Tamma.Activities.Documents;
+using Tamma.Api.Services.Agents;
+using Tamma.Core.Documents.Resume;
+using Tamma.Core.Documents.Types;
 using Tamma.ElsaServer.Workflows.Helpers;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
-using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
-using Tamma.Api.Services.Agents;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// Triage PO Decision — Product Owner makes the final triage decision based on the
-/// panel review.
+/// Story 39-15 (D5/D6) — Triage PO Decision, re-implemented as a THIN BINDING over
+/// <see cref="DocumentLifecycleWorkflow"/>, producing a typed
+/// <see cref="Tamma.Core.Documents.Types.TriageDecision"/> through the shared
+/// produce → validate → review(panel) → revise → accept loop. DefinitionId
+/// <c>triage-po-decision</c> is byte-stable. The PRODUCE cell is
+/// <c>(product_owner, triage-intake)</c> (the DRAFT decision); VALIDATE is
+/// <see cref="TriageDecisionDocumentType"/> (closed enums + reasoning — enum invalidity
+/// is a validator failure, not a parse branch); REVIEW is the 39-7 panel over the draft
+/// with the doc-type-aware TRIAGE roster (the retired <c>TriagePanelReviewWorkflow</c>'s
+/// semantics, now lifecycle config); ACCEPT is the orchestrator gate.
 ///
-/// Dispatches <c>llm-call</c> with role=<c>product_owner</c>, action=<c>triage-intake</c>.
-/// Parses the decision: priority, type, complexity, automation level, labels, comment.
-///
-/// <para>Build-out (completeness audit 2026-06-22, <c>TriagePODecision.md</c>): the
-/// step is now <b>fail-closed / no-false-success</b>:
-/// <list type="bullet">
-///   <item><description>#1 — it branches on the <c>llm-call</c> <c>success</c> bool.
-///     A total LLM failure (providers down / budget / allowlist reject) routes to a
-///     loud FAILED terminal that emits an explicit <c>llm-failed</c> marker
-///     (<c>triage-failed</c>/<c>needs-human</c>) — it NEVER fabricates a clean
-///     <c>needs-human</c>/<c>priority-normal</c> applied decision.</description></item>
-///   <item><description>#2 — prose / unparseable LLM output is marked
-///     <c>unparsed</c> (needs-human-review), not presented as a clean classified
-///     decision.</description></item>
-///   <item><description>#3 — every lifecycle transition emits a
-///     <c>TRIAGE.PO_DECISION.*</c> DCB event via the durable drain
-///     (<see cref="EmitTriagePoDecisionEventActivity"/>).</description></item>
-///   <item><description>#4 — classification fields are validated against the Story
-///     26-1 vocabulary; out-of-vocab values are clamped + flagged in the comment.</description></item>
-///   <item><description>#7 — empty input short-circuits with a SKIPPED event (no
-///     LLM spend).</description></item>
-/// </list></para>
-///
-/// Flow:
-///   Init → [Inputs Present?] ──No──► BuildSkipped → (emit SKIPPED) → SetOutputs → Finish
-///        └─Yes─► Emit STARTED → PO Decision (llm-call) → Capture Result
-///                  → [Call Succeeded?] ──False──► BuildFailure → (emit FAILED) → SetOutputs → Finish
-///                       └─True─► Extract Decision (validate vocab, mark unparsed)
-///                                 → (emit COMPLETED) → SetOutputs → Finish
-///
-/// Inputs: repository, itemJson, panelResultJson, tenantId
-/// Outputs: decisionJson (contract preserved, additively carries status/reasoning);
-///          plus callSucceeded, providerUsed, costUsd, rawResponse for audit.
+/// <para>Legacy outputs are preserved: <c>decisionJson</c> (the accepted TriageDecision
+/// projected to the wire <see cref="TriagePoDecisionHelper.ParseDecision"/> round-trips
+/// clean), <c>callSucceeded</c> (accept → true; typed outcome → false),
+/// <c>providerUsed</c>/<c>costUsd</c>/<c>rawResponse</c> (audit-only, empty here). The
+/// empty-input short-circuit (SKIPPED, no dispatch, emitted before any dispatch) is kept.
+/// <c>TRIAGE.PO_DECISION.*</c> + <c>TRIAGE.PANEL.*</c> mirror the lifecycle exits (D6).</para>
 /// </summary>
+[ResumeBehavior(ResumeMode.LatestStateReEntry)]
 public class TriagePODecisionWorkflow : WorkflowBase
 {
+    private const string TriageDecisionDocumentType = "triage-decision";
+    private const int TriageRosterSize = 4;
+
     protected override void Build(IWorkflowBuilder builder)
     {
         builder.Name = "Triage PO Decision";
         builder.DefinitionId = "triage-po-decision";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description = "PO makes final triage decision based on panel review (fail-closed)";
+        builder.Description = "Produce a reviewed, typed TriageDecision via the generic document lifecycle (produce → validate → review(panel) → accept)";
 
-        // ================================================================
-        // Variables
-        // ================================================================
+        // ── Inputs ─────────────────────────────────────────────────────
         var repository = builder.WithVariable<string>("Repository", "");
         var itemJson = builder.WithVariable<string>("ItemJson", "");
-        var panelResultJson = builder.WithVariable<string>("PanelResultJson", "{}");
+        var contextJson = builder.WithVariable<string>("ContextJson", "{}");
         var tenantId = builder.WithVariable<string>("TenantId", "");
+        var issueId = builder.WithVariable<string>("IssueId", "");
+        var findingsDocumentId = builder.WithVariable<string>("FindingsDocumentId", "");
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
         var itemNumber = builder.WithVariable<int>("ItemNumber", 0);
-        var decisionJson = builder.WithVariable<string>("DecisionJson", "{}");
 
-        // Captured from the llm-call result (#1/#3/#6).
+        // ── 39-10 re-entry position ────────────────────────────────────
+        var reEntryPositionJson = builder.WithVariable<string>();
+        var reEntryDocJson = builder.WithVariable<string>();
+        var positionStage = builder.WithVariable<string>("PositionStage", "produce");
+
+        // ── Dispatched lifecycle result + typed exit ───────────────────
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
+        var lifecycleAccepted = builder.WithVariable<bool>();
+        var exitOutcome = builder.WithVariable<string>("ExitOutcome", "");
+        var exitDocId = builder.WithVariable<string>("ExitDocId", "");
+        var documentJson = builder.WithVariable<string>("DocumentJson", "");
+        var decisionJson = builder.WithVariable<string>("DecisionJson", "{}");
         var callSucceeded = builder.WithVariable<bool>("CallSucceeded", false);
-        var providerUsed = builder.WithVariable<string>("ProviderUsed", "");
-        var costUsd = builder.WithVariable<decimal>("CostUsd", 0m);
-        var rawResponse = builder.WithVariable<string>("RawResponse", "");
-        var failureSummary = builder.WithVariable<string>("FailureSummary", "");
+        var failureDetail = builder.WithVariable<string>("FailureDetail", "");
 
         // Decision fields surfaced for the COMPLETED event payload.
         var decisionStatus = builder.WithVariable<string>("DecisionStatus", "");
@@ -87,298 +81,342 @@ public class TriagePODecisionWorkflow : WorkflowBase
         var complexity = builder.WithVariable<string>("Complexity", "");
         var automation = builder.WithVariable<string>("Automation", "");
 
-        var llmResult = builder.WithVariable<IDictionary<string, object>?>();
+        // Panel mirror counts.
+        var panelMemberCount = builder.WithVariable<int>("PanelMemberCount", TriageRosterSize);
+        var panelSucceededCount = builder.WithVariable<int>("PanelSucceededCount", 0);
+        var panelFailedRolesJson = builder.WithVariable<string>("PanelFailedRolesJson", "[]");
 
-        // ================================================================
-        // 1. Init — copy inputs; parse the item number for event tags.
-        // ================================================================
-        var init = new SetVariable
+        // ── Step 1: Read inputs ────────────────────────────────────────
+        var readInputs = new SetVariable
         {
-            Id = "Init", Name = "Initialize",
+            Id = "ReadInputs", Name = "Read Inputs",
             Variable = repository,
-            Value = new Input<object?>(ctx =>
+            Value = new(ctx =>
             {
                 var repo = ctx.GetInput<string>("repository") ?? "";
                 var item = ctx.GetInput<string>("itemJson") ?? "";
                 itemJson.Set(ctx, item);
-                panelResultJson.Set(ctx, ctx.GetInput<string>("panelResultJson") ?? "{}");
+                contextJson.Set(ctx, ctx.GetInput<string>("contextJson") ?? "{}");
                 tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
-                itemNumber.Set(ctx, TriagePoDecisionHelper.ParseItemNumber(item));
+                findingsDocumentId.Set(ctx, ctx.GetInput<string>("findingsDocumentId") ?? "");
+                acceptanceRulesJson.Set(ctx, ctx.GetInput<string>("acceptanceRulesJson") ?? "");
+                itemNumber.Set(ctx, TriageBindingHelper.ParseItemNumber(item));
+
+                var explicitIssueId = ctx.GetInput<string>("issueId") ?? "";
+                issueId.Set(ctx, string.IsNullOrWhiteSpace(explicitIssueId)
+                    ? CreationBindingHelper.DeriveIssueId(repo, TriageBindingHelper.ParseItemNumber(item))
+                    : explicitIssueId);
                 return (object)repo;
             })
         };
-        init.SetDisplayText("Initialize");
+        readInputs.SetDisplayText("Read Inputs");
 
-        // ================================================================
-        // 1a. Inputs Present? — #7 empty-input guard. Blank / {} item → skip the
-        //     LLM call entirely (no spend on garbage).
-        // ================================================================
-        var inputsPresent = new FlowDecision(ctx =>
-            TriagePoDecisionHelper.IsUsableInput(itemJson.Get(ctx)))
+        // ── Step 2: Compute 39-10 re-entry position ────────────────────
+        var computeReEntry = new ComputeReEntryPositionActivity
+        {
+            Id = "ComputeReEntryPosition", Name = "Compute Re-Entry Position",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentType = new(TriageDecisionDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            CorrelationId = new(ctx => issueId.Get(ctx)),
+            PositionJson = new(reEntryPositionJson),
+            ExistingDocumentJson = new(reEntryDocJson),
+        };
+        computeReEntry.SetDisplayText("Compute Re-Entry Position");
+
+        var readPositionStage = new SetVariable
+        {
+            Id = "ReadPositionStage", Name = "Read Position Stage",
+            Variable = positionStage,
+            Value = new(ctx =>
+            {
+                var position = DocumentLifecycleHelper.DeserializeReEntryPosition(reEntryPositionJson.Get(ctx));
+                return position?.ResumeAt switch
+                {
+                    LifecycleResumeStage.Complete => "complete",
+                    LifecycleResumeStage.Accept => "accept",
+                    LifecycleResumeStage.Review => "review",
+                    _ => "produce",
+                };
+            })
+        };
+        readPositionStage.SetDisplayText("Read Position Stage");
+
+        var freshRun = new FlowDecision(ctx => positionStage.Get(ctx) == "produce")
+        { Id = "FreshRun", Name = "Fresh Run?" };
+        freshRun.SetDisplayText("Fresh Run?");
+
+        // ── Empty-input short-circuit (kept — the one pre-lifecycle guard that saves LLM spend) ──
+        var inputsPresent = new FlowDecision(ctx => TriagePoDecisionHelper.IsUsableInput(itemJson.Get(ctx)))
         { Id = "InputsPresent", Name = "Inputs Present?" };
         inputsPresent.SetDisplayText("Inputs Present?");
 
-        // ----- Skip path (#7) -----
         var buildSkipped = new SetVariable
         {
             Id = "BuildSkipped", Name = "Build Skipped Decision",
             Variable = decisionJson,
-            Value = new Input<object?>(ctx =>
+            Value = new(ctx =>
             {
                 var d = TriagePoDecisionHelper.BuildSkippedDecision();
                 decisionStatus.Set(ctx, d.Status);
+                callSucceeded.Set(ctx, false);
                 return (object)TriagePoDecisionHelper.Serialize(d);
             })
         };
         buildSkipped.SetDisplayText("Build Skipped Decision");
 
-        var emitSkipped = EmitEvent("EmitSkipped", "Emit TRIAGE.PO_DECISION.SKIPPED",
-            _ => TriagePoDecisionEvents.Skipped,
-            repository, itemNumber, tenantId,
-            ctx => decisionStatus.Get(ctx), _ => "", _ => "", _ => "", _ => "",
-            _ => "", _ => 0m, _ => "");
+        var emitSkipped = PoEvent("EmitSkipped", "Emit TRIAGE.PO_DECISION.SKIPPED",
+            _ => TriagePoDecisionEvents.Skipped, repository, itemNumber, tenantId,
+            ctx => decisionStatus.Get(ctx), _ => "", _ => "", _ => "", _ => "", _ => "");
 
-        // ================================================================
-        // 2. Emit TRIAGE.PO_DECISION.STARTED
-        // ================================================================
-        var emitStarted = EmitEvent("EmitStarted", "Emit TRIAGE.PO_DECISION.STARTED",
-            _ => TriagePoDecisionEvents.Started,
-            repository, itemNumber, tenantId,
-            _ => "", _ => "", _ => "", _ => "", _ => "",
-            _ => "", _ => 0m, _ => "");
+        var emitStarted = PoEvent("EmitStarted", "Emit TRIAGE.PO_DECISION.STARTED",
+            _ => TriagePoDecisionEvents.Started, repository, itemNumber, tenantId,
+            _ => "", _ => "", _ => "", _ => "", _ => "", _ => "");
 
-        // ================================================================
-        // 3. PO Decision (via LlmCallWorkflow) — unchanged dispatch.
-        // ================================================================
-        var poDecisionCall = new DispatchWorkflow
+        var emitPanelStarted = PanelEvent("EmitPanelStarted", "Emit TRIAGE.PANEL.STARTED",
+            _ => TriageEvents.PanelStarted, repository, itemNumber, tenantId,
+            _ => TriageRosterSize, _ => 0, _ => "[]");
+
+        // ── Step 3: Dispatch the generic document lifecycle ────────────
+        var dispatchLifecycle = new DispatchWorkflow
         {
-            Id = "PODecisionCall", Name = "PO Decision",
-            WorkflowDefinitionId = new("llm-call"),
+            Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
+            WorkflowDefinitionId = new("document-lifecycle"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["role"] = AgentRole.ProductOwner.ToWire(),
-                ["action"] = AgentAction.TriageIntake.ToWire(),
-                ["variables"] = new Dictionary<string, object>
+                ["documentType"] = TriageDecisionDocumentType,
+                ["producerRole"] = AgentRole.ProductOwner.ToWire(),
+                ["producerAction"] = AgentAction.TriageIntake.ToWire(),
+                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
                 {
-                    ["itemJson"] = itemJson.Get(ctx),
-                    ["panelResultJson"] = panelResultJson.Get(ctx),
-                    ["repository"] = repository.Get(ctx),
-                },
-                ["enableTools"] = false,
-                ["tenantId"] = tenantId.Get(ctx),
+                    ["itemJson"] = itemJson.Get(ctx) ?? "",
+                    // The gathered Findings context is folded into the DECLARED contextFindings
+                    // carrier (render-drop lesson); repair/revise notes land in the same carrier.
+                    ["contextFindings"] = contextJson.Get(ctx) ?? "{}",
+                    ["repository"] = repository.Get(ctx) ?? "",
+                }),
+                ["feedbackVariableName"] = "contextFindings",
+                ["issueId"] = issueId.Get(ctx) ?? "",
+                ["correlationId"] = issueId.Get(ctx) ?? "",
+                ["tenantId"] = tenantId.Get(ctx) ?? "",
+                // Behavior-preserving triage default rules (panel roster + quorum 2 + needs-human
+                // always-escalate) unless the caller/store passes an explicit override.
+                ["acceptanceRulesJson"] = string.IsNullOrWhiteSpace(acceptanceRulesJson.Get(ctx))
+                    ? TriageBindingHelper.DefaultTriageRulesJson()
+                    : acceptanceRulesJson.Get(ctx)!,
             }),
             WaitForCompletion = new(true),
-            Result = new(llmResult),
+            Result = new(lifecycleResult),
         };
-        poDecisionCall.SetDisplayText("PO Decision");
+        dispatchLifecycle.SetDisplayText("Dispatch Document Lifecycle");
 
-        // ================================================================
-        // 3a. Capture Result — #1/#6. Read success/providerUsed/costUsd/rawResponse
-        //     + the failure diagnostics summary, NOT just llmResponse. Fail-closed:
-        //     a missing `success` key reads as FAILED (we never assume success).
-        // ================================================================
-        var captureResult = new SetVariable
+        // ── Step 4: Read the typed lifecycle exit (fail-closed) ────────
+        var readLifecycleExit = new SetVariable
         {
-            Id = "CaptureResult", Name = "Capture Result",
-            Variable = callSucceeded,
-            Value = new Input<object?>(ctx =>
-            {
-                var result = llmResult.Get(ctx);
-                if (result == null)
-                {
-                    failureSummary.Set(ctx, "no result from llm-call");
-                    return (object)false;
-                }
-
-                // Fail-closed: only an explicit success==true counts as success.
-                var succeeded = result.TryGetValue("success", out var s) && s is true;
-
-                providerUsed.Set(ctx, result.TryGetValue("providerUsed", out var pv)
-                    ? pv?.ToString() ?? "" : "");
-                costUsd.Set(ctx, result.TryGetValue("costUsd", out var c)
-                    ? EmitTriagePoDecisionEventActivity.ParseCost(c) : 0m);
-                rawResponse.Set(ctx, result.TryGetValue("llmResponse", out var r)
-                    ? r?.ToString() ?? "" : "");
-
-                if (!succeeded)
-                {
-                    var wfOut = result.TryGetValue("workflowOutput", out var wo)
-                        ? wo?.ToString() : null;
-                    failureSummary.Set(ctx, TriagePoDecisionHelper.SummarizeFailure(wfOut));
-                }
-
-                return (object)succeeded;
-            })
-        };
-        captureResult.SetDisplayText("Capture Result");
-
-        // ================================================================
-        // 3b. Call Succeeded? — #1 FlowDecision. False → FAILED terminal (no
-        //     fabricated decision); True → ExtractDecision.
-        // ================================================================
-        var callSucceededGate = new FlowDecision(ctx => callSucceeded.Get(ctx))
-        { Id = "CallSucceeded", Name = "PO Call Succeeded?" };
-        callSucceededGate.SetDisplayText("PO Call Succeeded?");
-
-        // ----- Failure path (#1) -----
-        var buildFailure = new SetVariable
-        {
-            Id = "BuildFailure", Name = "Build Failure Decision",
+            Id = "ReadLifecycleExit", Name = "Read Lifecycle Exit",
             Variable = decisionJson,
-            Value = new Input<object?>(ctx =>
+            Value = new(ctx =>
             {
-                var d = TriagePoDecisionHelper.BuildFailureDecision(failureSummary.Get(ctx));
-                decisionStatus.Set(ctx, d.Status);
-                return (object)TriagePoDecisionHelper.Serialize(d);
+                var exit = LifecycleBindingHelper.ReadLifecycleResult(lifecycleResult.Get(ctx));
+                var accepted = LifecycleBindingHelper.IsAccepted(exit);
+
+                lifecycleAccepted.Set(ctx, accepted);
+                callSucceeded.Set(ctx, accepted);
+                exitOutcome.Set(ctx, exit.Outcome ?? "");
+                exitDocId.Set(ctx, exit.DocumentId ?? "");
+                failureDetail.Set(ctx, TriageBindingHelper.BuildFailureDetail(exit));
+
+                var mirror = TriageBindingHelper.ReadPanelMirror(exit.DocumentJson, accepted, TriageRosterSize);
+                panelMemberCount.Set(ctx, mirror.MemberCount);
+                panelSucceededCount.Set(ctx, mirror.SucceededCount);
+                panelFailedRolesJson.Set(ctx, mirror.FailedRolesJson);
+
+                if (accepted)
+                {
+                    documentJson.Set(ctx, exit.DocumentJson);
+                    var d = TryReadDecision(exit.DocumentJson);
+                    decisionStatus.Set(ctx, TriagePoDecisionHelper.StatusOk);
+                    priority.Set(ctx, d?.Priority ?? "");
+                    type.Set(ctx, d?.Type ?? "");
+                    complexity.Set(ctx, d?.Complexity ?? "");
+                    automation.Set(ctx, d?.Automation ?? "");
+                    return (object)TriageBindingHelper.ProjectLegacyDecisionJson(exit.DocumentJson);
+                }
+
+                // Non-accept — honest fallback labels (needs-human), NEVER a fabricated clean decision.
+                documentJson.Set(ctx, "");
+                var failure = TriagePoDecisionHelper.BuildFailureDecision(TriageBindingHelper.BuildFailureDetail(exit));
+                decisionStatus.Set(ctx, failure.Status);
+                priority.Set(ctx, failure.Priority);
+                type.Set(ctx, failure.Type);
+                complexity.Set(ctx, failure.Complexity);
+                automation.Set(ctx, failure.Automation);
+                return (object)TriagePoDecisionHelper.Serialize(failure);
             })
         };
-        buildFailure.SetDisplayText("Build Failure Decision");
+        readLifecycleExit.SetDisplayText("Read Lifecycle Exit");
 
-        var emitFailed = EmitEvent("EmitFailed", "Emit TRIAGE.PO_DECISION.FAILED",
-            _ => TriagePoDecisionEvents.Failed,
-            repository, itemNumber, tenantId,
+        var lifecycleAcceptedGate = new FlowDecision(ctx => lifecycleAccepted.Get(ctx))
+        { Id = "LifecycleAccepted", Name = "Lifecycle Accepted?" };
+        lifecycleAcceptedGate.SetDisplayText("Lifecycle Accepted?");
+
+        var wasCompleteReEntry = new FlowDecision(ctx => positionStage.Get(ctx) == "complete")
+        { Id = "WasCompleteReEntry", Name = "Was Complete Re-Entry?" };
+        wasCompleteReEntry.SetDisplayText("Was Complete Re-Entry?");
+
+        var emitPanelCompleted = PanelEvent("EmitPanelCompleted", "Emit TRIAGE.PANEL.COMPLETED",
+            _ => TriageEvents.PanelCompleted, repository, itemNumber, tenantId,
+            ctx => panelMemberCount.Get(ctx), ctx => panelSucceededCount.Get(ctx), ctx => panelFailedRolesJson.Get(ctx));
+
+        var emitCompleted = PoEvent("EmitCompleted", "Emit TRIAGE.PO_DECISION.COMPLETED",
+            _ => TriagePoDecisionEvents.Completed, repository, itemNumber, tenantId,
+            ctx => decisionStatus.Get(ctx), ctx => priority.Get(ctx), ctx => type.Get(ctx),
+            ctx => complexity.Get(ctx), ctx => automation.Get(ctx), _ => "");
+
+        var emitPanelFailed = PanelEvent("EmitPanelFailed", "Emit TRIAGE.PANEL.FAILED",
+            _ => TriageEvents.PanelFailed, repository, itemNumber, tenantId,
+            _ => TriageRosterSize, _ => 0, _ => "[]");
+
+        var emitFailed = PoEvent("EmitFailed", "Emit TRIAGE.PO_DECISION.FAILED",
+            _ => TriagePoDecisionEvents.Failed, repository, itemNumber, tenantId,
             ctx => decisionStatus.Get(ctx), _ => "", _ => "", _ => "", _ => "",
-            ctx => providerUsed.Get(ctx), ctx => costUsd.Get(ctx),
-            ctx => failureSummary.Get(ctx));
+            ctx => failureDetail.Get(ctx));
 
-        // ================================================================
-        // 4. Extract Decision (success branch) — #2/#4/#5 via the pure helper.
-        // ================================================================
-        var extractDecision = new SetVariable
-        {
-            Id = "ExtractDecision", Name = "Extract Decision",
-            Variable = decisionJson,
-            Value = new Input<object?>(ctx =>
-            {
-                var d = TriagePoDecisionHelper.ParseDecision(rawResponse.Get(ctx));
-                decisionStatus.Set(ctx, d.Status);
-                priority.Set(ctx, d.Priority);
-                type.Set(ctx, d.Type);
-                complexity.Set(ctx, d.Complexity);
-                automation.Set(ctx, d.Automation);
-                return (object)TriagePoDecisionHelper.Serialize(d);
-            })
-        };
-        extractDecision.SetDisplayText("Extract Decision");
-
-        var emitCompleted = EmitEvent("EmitCompleted", "Emit TRIAGE.PO_DECISION.COMPLETED",
-            _ => TriagePoDecisionEvents.Completed,
-            repository, itemNumber, tenantId,
-            ctx => decisionStatus.Get(ctx),
-            ctx => priority.Get(ctx), ctx => type.Get(ctx),
-            ctx => complexity.Get(ctx), ctx => automation.Get(ctx),
-            ctx => providerUsed.Get(ctx), ctx => costUsd.Get(ctx), _ => "");
-
-        // ================================================================
-        // 5. Set Outputs — decisionJson (contract preserved) + audit outputs (#6).
-        // ================================================================
+        // ── Step 5: Set Outputs — the single terminal region ───────────
         var setOutputs = new Sequence
         {
             Id = "SetOutputs", Name = "Set Outputs",
             Activities =
             {
-                WithLabel(new SetOutput
-                    { Id = "OutDecision", OutputName = new("decisionJson"), OutputValue = new(ctx => (object)decisionJson.Get(ctx)) }, "Output decisionJson"),
-                WithLabel(new SetOutput
-                    { Id = "OutCallSucceeded", OutputName = new("callSucceeded"), OutputValue = new(ctx => (object)callSucceeded.Get(ctx)) }, "Output callSucceeded"),
-                WithLabel(new SetOutput
-                    { Id = "OutProviderUsed", OutputName = new("providerUsed"), OutputValue = new(ctx => (object)providerUsed.Get(ctx)) }, "Output providerUsed"),
-                WithLabel(new SetOutput
-                    { Id = "OutCostUsd", OutputName = new("costUsd"), OutputValue = new(ctx => (object)costUsd.Get(ctx)) }, "Output costUsd"),
-                WithLabel(new SetOutput
-                    { Id = "OutRawResponse", OutputName = new("rawResponse"), OutputValue = new(ctx => (object)rawResponse.Get(ctx)) }, "Output rawResponse"),
+                WithLabel(new SetOutput { Id = "OutDecision", OutputName = new("decisionJson"), OutputValue = new(ctx => (object)(decisionJson.Get(ctx) ?? "{}")) }, "Output decisionJson"),
+                WithLabel(new SetOutput { Id = "OutCallSucceeded", OutputName = new("callSucceeded"), OutputValue = new(ctx => (object)callSucceeded.Get(ctx)) }, "Output callSucceeded"),
+                WithLabel(new SetOutput { Id = "OutProviderUsed", OutputName = new("providerUsed"), OutputValue = new(_ => (object)"") }, "Output providerUsed"),
+                WithLabel(new SetOutput { Id = "OutCostUsd", OutputName = new("costUsd"), OutputValue = new(_ => (object)0m) }, "Output costUsd"),
+                WithLabel(new SetOutput { Id = "OutRawResponse", OutputName = new("rawResponse"), OutputValue = new(_ => (object)"") }, "Output rawResponse"),
+                WithLabel(new SetOutput { Id = "OutDocumentJson", OutputName = new("documentJson"), OutputValue = new(ctx => (object)(documentJson.Get(ctx) ?? "")) }, "Output documentJson"),
+                WithLabel(new SetOutput { Id = "OutDocumentId", OutputName = new("documentId"), OutputValue = new(ctx => (object)(exitDocId.Get(ctx) ?? "")) }, "Output documentId"),
+                WithLabel(new SetOutput { Id = "OutOutcome", OutputName = new("outcome"), OutputValue = new(ctx => (object)(exitOutcome.Get(ctx) ?? "")) }, "Output outcome"),
+                WithLabel(new SetOutput { Id = "OutStatus", OutputName = new("status"), OutputValue = new(ctx => (object)decisionStatus.Get(ctx)) }, "Output status"),
             }
         };
         setOutputs.SetDisplayText("Set Outputs");
 
-        var finish = new Finish { Id = "Finish", Name = "Complete" };
-        finish.SetDisplayText("Complete");
-
-        // ================================================================
-        // Flowchart
-        // ================================================================
         builder.Root = new Flowchart
         {
             Id = "TriagePODecisionFlowchart",
-            Start = init,
+            Start = readInputs,
             Activities =
             {
-                init, inputsPresent,
-                buildSkipped, emitSkipped,
-                emitStarted, poDecisionCall, captureResult, callSucceededGate,
-                buildFailure, emitFailed,
-                extractDecision, emitCompleted,
-                setOutputs, finish,
+                readInputs, computeReEntry, readPositionStage, freshRun,
+                inputsPresent, buildSkipped, emitSkipped,
+                emitStarted, emitPanelStarted, dispatchLifecycle, readLifecycleExit,
+                lifecycleAcceptedGate, wasCompleteReEntry,
+                emitPanelCompleted, emitCompleted, emitPanelFailed, emitFailed,
+                setOutputs,
             },
             Connections =
             {
-                Connect(init, inputsPresent),
+                new(readInputs, computeReEntry),
+                new(computeReEntry, readPositionStage),
+                new(readPositionStage, freshRun),
 
-                // #7 — empty input → skip (no LLM spend).
-                ConnectOutcome(inputsPresent, "False", buildSkipped),
-                Connect(buildSkipped, emitSkipped),
-                Connect(emitSkipped, setOutputs),
+                // Fresh run → empty-input guard.
+                new(new FlowEndpoint(freshRun, "True"), new FlowEndpoint(inputsPresent)),
+                new(new FlowEndpoint(inputsPresent, "False"), new FlowEndpoint(buildSkipped)),
+                new(buildSkipped, emitSkipped),
+                new(emitSkipped, setOutputs),
 
-                // Inputs present → STARTED → dispatch → capture → success gate.
-                ConnectOutcome(inputsPresent, "True", emitStarted),
-                Connect(emitStarted, poDecisionCall),
-                Connect(poDecisionCall, captureResult),
-                Connect(captureResult, callSucceededGate),
+                new(new FlowEndpoint(inputsPresent, "True"), new FlowEndpoint(emitStarted)),
+                new(emitStarted, emitPanelStarted),
+                new(emitPanelStarted, dispatchLifecycle),
 
-                // #1 — LLM failed → FAILED terminal (no fabricated decision).
-                ConnectOutcome(callSucceededGate, "False", buildFailure),
-                Connect(buildFailure, emitFailed),
-                Connect(emitFailed, setOutputs),
+                // Re-entry → straight to dispatch (no double STARTED/PANEL.STARTED emit).
+                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(dispatchLifecycle)),
 
-                // Success → extract (validate/clamp/unparsed) → COMPLETED.
-                ConnectOutcome(callSucceededGate, "True", extractDecision),
-                Connect(extractDecision, emitCompleted),
-                Connect(emitCompleted, setOutputs),
+                new(dispatchLifecycle, readLifecycleExit),
+                new(readLifecycleExit, lifecycleAcceptedGate),
 
-                Connect(setOutputs, finish),
+                new(new FlowEndpoint(lifecycleAcceptedGate, "True"), new FlowEndpoint(wasCompleteReEntry)),
+                new(new FlowEndpoint(wasCompleteReEntry, "False"), new FlowEndpoint(emitPanelCompleted)),
+                new(emitPanelCompleted, emitCompleted),
+                new(emitCompleted, setOutputs),
+                new(new FlowEndpoint(wasCompleteReEntry, "True"), new FlowEndpoint(setOutputs)),
+
+                new(new FlowEndpoint(lifecycleAcceptedGate, "False"), new FlowEndpoint(emitPanelFailed)),
+                new(emitPanelFailed, emitFailed),
+                new(emitFailed, setOutputs),
             }
         };
     }
 
-    // ================================================================
-    // Helper: Emit a TRIAGE.PO_DECISION.* DCB event through the durable drain.
-    // ================================================================
-    private static EmitTriagePoDecisionEventActivity EmitEvent(
+    private static Tamma.Core.Documents.Types.TriageDecision? TryReadDecision(string? documentJson)
+    {
+        if (string.IsNullOrWhiteSpace(documentJson)) return null;
+        try
+        {
+            return JsonSerializer.Deserialize<Tamma.Core.Documents.Types.TriageDecision>(documentJson!, Tamma.Core.Documents.DocumentJson.Options);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static EmitTriagePoDecisionEventActivity PoEvent(
         string id, string label,
         Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> eventType,
-        Variable<string> repository, Variable<int> itemNumber, Variable<string> tenantId,
+        Elsa.Workflows.Memory.Variable<string> repository,
+        Elsa.Workflows.Memory.Variable<int> itemNumber,
+        Elsa.Workflows.Memory.Variable<string> tenantId,
         Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> decisionStatus,
         Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> priority,
         Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> type,
         Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> complexity,
         Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> automation,
-        Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> providerUsed,
-        Func<Elsa.Expressions.Models.ExpressionExecutionContext, decimal> costUsd,
         Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> error)
     {
         var emit = new EmitTriagePoDecisionEventActivity
         {
             Id = id, Name = label,
-            EventType = new Input<string>(eventType),
-            Repository = new Input<string>(ctx => repository.Get(ctx)),
-            ItemNumber = new Input<int>(ctx => itemNumber.Get(ctx)),
-            TenantId = new Input<string?>(ctx => tenantId.Get(ctx)),
-            DecisionStatus = new Input<string?>(ctx => decisionStatus(ctx)),
-            Priority = new Input<string?>(ctx => priority(ctx)),
-            Type = new Input<string?>(ctx => type(ctx)),
-            Complexity = new Input<string?>(ctx => complexity(ctx)),
-            Automation = new Input<string?>(ctx => automation(ctx)),
-            ProviderUsed = new Input<string?>(ctx => providerUsed(ctx)),
-            CostUsd = new Input<decimal>(costUsd),
-            Error = new Input<string?>(ctx => error(ctx)),
+            EventType = new(eventType),
+            Repository = new(ctx => repository.Get(ctx)),
+            ItemNumber = new(ctx => itemNumber.Get(ctx)),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            DecisionStatus = new(ctx => decisionStatus(ctx)),
+            Priority = new(ctx => priority(ctx)),
+            Type = new(ctx => type(ctx)),
+            Complexity = new(ctx => complexity(ctx)),
+            Automation = new(ctx => automation(ctx)),
+            ProviderUsed = new(_ => ""),
+            CostUsd = new(0m),
+            Error = new(ctx => error(ctx)),
         };
         emit.SetDisplayText(label);
         return emit;
     }
 
-    private static FlowConnection Connect(IActivity source, IActivity target)
-        => new(new FlowEndpoint(source), new FlowEndpoint(target));
-
-    private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
-        => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
+    private static EmitTriageEventActivity PanelEvent(
+        string id, string label,
+        Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> eventType,
+        Elsa.Workflows.Memory.Variable<string> repository,
+        Elsa.Workflows.Memory.Variable<int> itemNumber,
+        Elsa.Workflows.Memory.Variable<string> tenantId,
+        Func<Elsa.Expressions.Models.ExpressionExecutionContext, int> roleCount,
+        Func<Elsa.Expressions.Models.ExpressionExecutionContext, int> succeededCount,
+        Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> failedRolesJson)
+    {
+        var emit = new EmitTriageEventActivity
+        {
+            Id = id, Name = label,
+            EventType = new(eventType),
+            Repository = new(ctx => repository.Get(ctx)),
+            ItemNumber = new(ctx => itemNumber.Get(ctx)),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            RoleCount = new(roleCount),
+            SucceededCount = new(succeededCount),
+            FailedRolesJson = new(ctx => failedRolesJson(ctx)),
+        };
+        emit.SetDisplayText(label);
+        return emit;
+    }
 }

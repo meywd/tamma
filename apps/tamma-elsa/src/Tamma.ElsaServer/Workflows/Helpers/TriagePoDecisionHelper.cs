@@ -28,10 +28,13 @@ namespace Tamma.ElsaServer.Workflows.Helpers;
 ///     empty input (<c>itemJson</c> blank/<c>{}</c>) without spending an LLM call.</description></item>
 /// </list>
 ///
-/// <para>Mirrors <see cref="TriagePanelAggregationHelper"/> (the panel sibling that
-/// sets the bar): deterministic parse independent of LLM prose, structured fields
-/// surfaced for the consumer, fail-closed defaults that are loud rather than
-/// benign-looking.</para>
+/// <para>Story 39-15 (D9): with the <c>triage-po-decision</c> workflow rebuilt as a
+/// TriageDecision lifecycle binding, <see cref="BuildFailureDecision"/> /
+/// <see cref="BuildSkippedDecision"/> / <see cref="SummarizeFailure"/> /
+/// <see cref="IsUsableInput"/> survive as the binding/cycle's honest-fallback renderers;
+/// <see cref="ParseDecision"/> stays as the fail-safe legacy-wire baseline the
+/// cross-parser + round-trip pins reference. Deterministic parse independent of LLM
+/// prose, fail-closed defaults that are loud rather than benign-looking.</para>
 /// </summary>
 public static class TriagePoDecisionHelper
 {
@@ -320,11 +323,12 @@ public static class TriagePoDecisionHelper
 
     /// <summary>
     /// Best-effort parse of the triage item number out of <c>itemJson</c> for event
-    /// tags. Delegates to <see cref="TriagePanelAggregationHelper.ParseItemNumber"/>
-    /// so the two stages parse the item number identically.
+    /// tags. Delegates to <see cref="TriageBindingHelper.ParseItemNumber"/> (Story 39-15
+    /// relocated the shared parse there when <c>TriagePanelAggregationHelper</c> was deleted)
+    /// so every triage stage parses the item number identically.
     /// </summary>
     public static int ParseItemNumber(string? itemJson)
-        => TriagePanelAggregationHelper.ParseItemNumber(itemJson);
+        => TriageBindingHelper.ParseItemNumber(itemJson);
 
     /// <summary>
     /// Summarize the <c>llm-call</c> failure diagnostics (the <c>workflowOutput</c>

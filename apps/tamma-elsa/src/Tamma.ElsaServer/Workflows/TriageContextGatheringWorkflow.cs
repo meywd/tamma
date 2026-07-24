@@ -3,302 +3,278 @@ using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
 using Elsa.Workflows.Management.Activities.SetOutput;
-using Elsa.Workflows.Memory;
-using Elsa.Workflows.Models;
 using Elsa.Workflows.Runtime.Activities;
+using System.Text.Json;
 using Tamma.Activities.ADL;
+using Tamma.Activities.Documents;
+using Tamma.Api.Services.Agents;
+using Tamma.Core.Documents.Resume;
 using Tamma.ElsaServer.Workflows.Helpers;
 using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
-using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
-
-using Tamma.Api.Services.Agents;
 
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
 namespace Tamma.ElsaServer.Workflows;
 
 /// <summary>
-/// Triage Context Gathering — gathers triage-time context for a single untriaged
-/// item (code usage of the affected package/module, dependency graph, CVE details
-/// for security alerts, changelog / migration guides) by dispatching one
-/// tool-enabled <c>llm-call</c> (<c>role=developer</c>, <c>action=context-scan</c>)
-/// and returning a <c>contextJson</c> bundle that the panel-review and PO-decision
-/// sub-workflows reason over.
+/// Story 39-15 (D5) — Triage Context Gathering, re-implemented as a THIN BINDING over
+/// <see cref="DocumentLifecycleWorkflow"/> (the 39-13 Research recipe), producing a typed
+/// <see cref="Tamma.Core.Documents.Types.Findings"/> document through the shared
+/// produce → validate → review → revise → accept loop. DefinitionId
+/// <c>triage-context-gathering</c> is byte-stable; the legacy outputs
+/// <c>contextJson</c> (= the accepted Findings document body) and <c>contextStatus</c>
+/// (<c>"ok"</c> on accept / <c>"failed"</c> on any typed outcome — the fail-closed
+/// contract the cycle already reads) are preserved, plus additive
+/// <c>findingsDocumentId</c> / <c>outcome</c> / <c>documentId</c>.
 ///
-/// <para>Build-out (completeness audit 2026-06-22, <c>TriageContextGathering.md</c>):
-/// the stage is now contract-correct and fail-closed:
-/// <list type="bullet">
-///   <item><description><b>Variable contract fixed (P0 #1).</b> The dispatch passes
-///     the <c>context-scan</c> template's <i>declared</i> variables
-///     (<c>workItemJson</c> / <c>workItemType</c> / <c>previousFindings</c>) — the
-///     prior <c>itemJson</c> / <c>itemType</c> / <c>scanFocus</c> rendered empty, so
-///     the model scanned with no work item. The detected item type now feeds a real
-///     <c>{{workItemType}}</c> so the scan is item-type-aware.</description></item>
-///   <item><description><b>Fail-closed on the <c>llm-call</c> <c>success</c> flag
-///     (P0 #2).</b> An all-providers-failed scan no longer coalesces to <c>"{}"</c>
-///     presented as success — a <c>Context Gathered?</c> gate routes a failed scan
-///     to a LOUD <c>TRIAGE.CONTEXT.FAILED</c> terminal and reports
-///     <c>contextStatus="failed"</c> so the parent cycle can skip the panel.</description></item>
-///   <item><description><b>Robust item-type detection (P1 #5)</b> — parses the item
-///     JSON via <see cref="TriageContextHelper.DetectItemType"/> instead of
-///     substring-sniffing the raw text.</description></item>
-///   <item><description><b>DCB events (P1 #4)</b> — <c>TRIAGE.CONTEXT.STARTED</c>
-///     after init and exactly one terminal (<c>COMPLETED</c> / <c>EMPTY</c> /
-///     <c>FAILED</c>) via <see cref="EmitTriageContextEventActivity"/> on the durable
-///     drain, so audit can see whether context was gathered, degraded, or failed.</description></item>
-///   <item><description><b><c>tenantId</c> threading (P1 #6)</b> — a <c>TenantId</c>
-///     variable is stamped (the drain scopes events to it) and forwarded into the
-///     <c>llm-call</c> dispatch for SaaS prompt + BYOK resolution.</description></item>
-/// </list>
-/// (Deferred per the audit: a dedicated CVE/changelog action + structured advisory
-/// engine-callback (#7), idempotency cache (#8), balanced-brace scanner (#9), and
-/// the shared init→scan→extract helper shared with <c>ContextGatheringWorkflow</c>
-/// (#10).)</para>
-///
-/// Flow:
-///   Init → Emit STARTED → Gather Context (llm-call) → Extract + Status
-///     → Context Gathered?
-///         ├─ True  → Output(ok/empty) → Emit COMPLETED/EMPTY → Finish
-///         └─ False → Output(failed)   → Emit FAILED          → Finish
-///
-/// Inputs: repository, itemJson, tenantId
-/// Outputs: contextJson, contextStatus
+/// <para>The produce cell is the SPLIT <c>(developer, triage-context-scan)</c> action —
+/// distinct from the free-text <c>(developer, context-scan)</c> that
+/// <c>ContextGatheringWorkflow</c> keeps unmigrated (D5). The old bespoke scan →
+/// <c>ExtractContext</c> → fail-closed gate is DELETED (no parse, no success-flag gate,
+/// ZERO <see cref="Finish"/>); <see cref="TriageContextHelper.DetectItemType"/> survives
+/// to feed <c>{{workItemType}}</c>. <c>TRIAGE.CONTEXT.STARTED/COMPLETED/FAILED</c> mirror
+/// the lifecycle exits (D6; <c>EMPTY</c> is unreachable — the type expresses "no context"
+/// as an empty findings list — but the constant is retained).</para>
 /// </summary>
+[ResumeBehavior(ResumeMode.LatestStateReEntry)]
 public class TriageContextGatheringWorkflow : WorkflowBase
 {
+    private const string FindingsDocumentType = "findings";
+
     protected override void Build(IWorkflowBuilder builder)
     {
         builder.Name = "Triage Context Gathering";
         builder.DefinitionId = "triage-context-gathering";
         builder.Version = WorkflowVersions.ComputedVersion;
-        builder.Description = "Gather context for triage: code usage, deps, CVE, changelog (fail-closed)";
+        builder.Description = "Gather triage context and synthesize a typed Findings document via the generic document lifecycle";
 
-        // ================================================================
-        // Variables
-        // ================================================================
+        // ── Inputs ─────────────────────────────────────────────────────
         var repository = builder.WithVariable<string>("Repository", "");
         var itemJson = builder.WithVariable<string>("ItemJson", "");
         var tenantId = builder.WithVariable<string>("TenantId", "");
-        var contextJson = builder.WithVariable<string>("ContextJson", "{}");
-        // Detected item type — drives {{workItemType}} so the scan is item-aware.
+        var issueId = builder.WithVariable<string>("IssueId", "");
+        var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
         var itemType = builder.WithVariable<string>("ItemType", TriageContextHelper.ItemTypeIssue);
-        // Item number for event tags / audit correlation (0 when unknown).
         var itemNumber = builder.WithVariable<int>("ItemNumber", 0);
-        // Context-health signal from the (fail-closed) extraction:
-        // "ok" / "empty" => usable; "failed" => no context gathered, do NOT run panel.
-        var contextStatus = builder.WithVariable<string>(
-            "ContextStatus", TriageContextEvents.StatusFailed);
 
-        var llmResult = builder.WithVariable<IDictionary<string, object>?>();
+        // ── 39-10 re-entry position ────────────────────────────────────
+        var reEntryPositionJson = builder.WithVariable<string>();
+        var reEntryDocJson = builder.WithVariable<string>();
+        var positionStage = builder.WithVariable<string>("PositionStage", "produce");
 
-        // ================================================================
-        // 1. Init — read inputs; parse item type + number.
-        // ================================================================
-        var init = new SetVariable
+        // ── Dispatched lifecycle result + typed exit ───────────────────
+        var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
+        var lifecycleAccepted = builder.WithVariable<bool>();
+        var exitOutcome = builder.WithVariable<string>("ExitOutcome", "");
+        var findingsDocumentId = builder.WithVariable<string>("FindingsDocumentId", "");
+        var contextJson = builder.WithVariable<string>("ContextJson", "{}");
+        var contextStatus = builder.WithVariable<string>("ContextStatus", TriageBindingHelper.ContextStatusFailed);
+        var failureDetail = builder.WithVariable<string>("FailureDetail", "");
+
+        // ── Step 1: Read inputs ────────────────────────────────────────
+        var readInputs = new SetVariable
         {
-            Id = "Init", Name = "Initialize",
+            Id = "ReadInputs", Name = "Read Inputs",
             Variable = repository,
-            Value = new Input<object?>(ctx =>
+            Value = new(ctx =>
             {
                 var repo = ctx.GetInput<string>("repository") ?? "";
                 var item = ctx.GetInput<string>("itemJson") ?? "";
                 itemJson.Set(ctx, item);
                 tenantId.Set(ctx, ctx.GetInput<string>("tenantId") ?? "");
+                acceptanceRulesJson.Set(ctx, ctx.GetInput<string>("acceptanceRulesJson") ?? "");
                 itemType.Set(ctx, TriageContextHelper.DetectItemType(item));
-                itemNumber.Set(ctx, TriagePanelAggregationHelper.ParseItemNumber(item));
+                itemNumber.Set(ctx, TriageBindingHelper.ParseItemNumber(item));
+
+                // findings is a shared type (ResearchWorkflow also produces it) — scope the
+                // triage-context findings so its accepted-doc + re-entry slice never collides
+                // with a research findings for the same issue (CreationBindingHelper D2 pattern).
+                var explicitIssueId = ctx.GetInput<string>("issueId") ?? "";
+                var baseId = string.IsNullOrWhiteSpace(explicitIssueId)
+                    ? CreationBindingHelper.DeriveIssueId(repo, TriageBindingHelper.ParseItemNumber(item))
+                    : explicitIssueId;
+                issueId.Set(ctx, CreationBindingHelper.ScopeIssueId(baseId, "triage-context"));
                 return (object)repo;
             })
         };
-        init.SetDisplayText("Initialize");
+        readInputs.SetDisplayText("Read Inputs");
 
-        // ================================================================
-        // 2. Emit TRIAGE.CONTEXT.STARTED
-        // ================================================================
-        var emitStarted = EmitContextEvent("EmitStarted", "Emit TRIAGE.CONTEXT.STARTED",
-            _ => TriageContextEvents.Started,
-            repository, itemNumber, tenantId,
-            ctx => itemType.Get(ctx), _ => "", _ => 0);
-
-        // ================================================================
-        // 3. Gather Context (via LlmCallWorkflow) — correct template variables.
-        // ================================================================
-        var gatherContext = new DispatchWorkflow
+        // ── Step 2: Compute 39-10 re-entry position ────────────────────
+        var computeReEntry = new ComputeReEntryPositionActivity
         {
-            Id = "GatherContext", Name = "Gather Context",
-            WorkflowDefinitionId = new("llm-call"),
+            Id = "ComputeReEntryPosition", Name = "Compute Re-Entry Position",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentType = new(FindingsDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            CorrelationId = new(ctx => issueId.Get(ctx)),
+            PositionJson = new(reEntryPositionJson),
+            ExistingDocumentJson = new(reEntryDocJson),
+        };
+        computeReEntry.SetDisplayText("Compute Re-Entry Position");
+
+        var readPositionStage = new SetVariable
+        {
+            Id = "ReadPositionStage", Name = "Read Position Stage",
+            Variable = positionStage,
+            Value = new(ctx =>
+            {
+                var position = DocumentLifecycleHelper.DeserializeReEntryPosition(reEntryPositionJson.Get(ctx));
+                return position?.ResumeAt switch
+                {
+                    LifecycleResumeStage.Complete => "complete",
+                    LifecycleResumeStage.Accept => "accept",
+                    LifecycleResumeStage.Review => "review",
+                    _ => "produce",
+                };
+            })
+        };
+        readPositionStage.SetDisplayText("Read Position Stage");
+
+        var freshRun = new FlowDecision(ctx => positionStage.Get(ctx) == "produce")
+        { Id = "FreshRun", Name = "Fresh Run?" };
+        freshRun.SetDisplayText("Fresh Run?");
+
+        var emitStarted = ContextEvent("EmitContextStarted", "Emit TRIAGE.CONTEXT.STARTED",
+            _ => TriageContextEvents.Started, repository, itemNumber, tenantId, itemType,
+            _ => "", _ => 0);
+
+        // ── Step 3: Dispatch the generic document lifecycle ────────────
+        var dispatchLifecycle = new DispatchWorkflow
+        {
+            Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
+            WorkflowDefinitionId = new("document-lifecycle"),
             Input = new(ctx => new Dictionary<string, object>
             {
-                ["role"] = AgentRole.Developer.ToWire(),
-                ["action"] = AgentAction.ContextScan.ToWire(),
-                ["tenantId"] = tenantId.Get(ctx),
-                ["variables"] = new Dictionary<string, object>
+                ["documentType"] = FindingsDocumentType,
+                ["producerRole"] = AgentRole.Developer.ToWire(),
+                ["producerAction"] = AgentAction.TriageContextScan.ToWire(),
+                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
                 {
-                    // The context-scan template (SystemPrompts.cs) declares
-                    // workItemJson / workItemType / previousFindings — pass those
-                    // names so the model actually sees the triage item.
-                    ["workItemJson"] = itemJson.Get(ctx),
-                    ["workItemType"] = itemType.Get(ctx),
+                    ["workItemJson"] = itemJson.Get(ctx) ?? "",
+                    ["workItemType"] = itemType.Get(ctx) ?? "",
                     ["previousFindings"] = "{}",
-                    ["repository"] = repository.Get(ctx),
-                },
-                ["enableTools"] = true,
+                    ["repository"] = repository.Get(ctx) ?? "",
+                }),
+                ["feedbackVariableName"] = "previousFindings",
+                ["issueId"] = issueId.Get(ctx) ?? "",
+                ["correlationId"] = issueId.Get(ctx) ?? "",
+                ["tenantId"] = tenantId.Get(ctx) ?? "",
+                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
             }),
             WaitForCompletion = new(true),
-            Result = new(llmResult),
+            Result = new(lifecycleResult),
         };
-        gatherContext.SetDisplayText("Gather Context");
+        dispatchLifecycle.SetDisplayText("Dispatch Document Lifecycle");
 
-        // ================================================================
-        // 4. Extract Result + Status — fail-closed (no false success).
-        // ================================================================
-        var extractResult = new SetVariable
+        // ── Step 4: Read the typed lifecycle exit (fail-closed) ────────
+        var readLifecycleExit = new SetVariable
         {
-            Id = "ExtractResult", Name = "Extract Result",
+            Id = "ReadLifecycleExit", Name = "Read Lifecycle Exit",
             Variable = contextJson,
-            Value = new Input<object?>(ctx =>
+            Value = new(ctx =>
             {
-                var (json, status) = TriageContextHelper.ExtractContext(llmResult.Get(ctx));
-                contextStatus.Set(ctx, status);
-                return (object)json;
+                var exit = LifecycleBindingHelper.ReadLifecycleResult(lifecycleResult.Get(ctx));
+                var accepted = LifecycleBindingHelper.IsAccepted(exit);
+
+                lifecycleAccepted.Set(ctx, accepted);
+                exitOutcome.Set(ctx, exit.Outcome ?? "");
+                findingsDocumentId.Set(ctx, exit.DocumentId ?? "");
+                contextStatus.Set(ctx, accepted ? TriageBindingHelper.ContextStatusOk : TriageBindingHelper.ContextStatusFailed);
+                failureDetail.Set(ctx, TriageBindingHelper.BuildFailureDetail(exit));
+                // Legacy contextJson = the accepted Findings body; "{}" on non-accept so a
+                // downstream consumer that ignores contextStatus still gets no phantom context.
+                return accepted ? exit.DocumentJson : "{}";
             })
         };
-        extractResult.SetDisplayText("Extract Result");
+        readLifecycleExit.SetDisplayText("Read Lifecycle Exit");
 
-        // ================================================================
-        // 4a. Context Gathered? — fail-closed gate. "failed" routes to the LOUD
-        //     FAILED terminal; "ok"/"empty" proceed to the usable terminal. NO
-        //     false success: a failed scan never reaches COMPLETED.
-        // ================================================================
-        var contextGathered = new FlowDecision(ctx =>
-            contextStatus.Get(ctx) != TriageContextEvents.StatusFailed)
-        { Id = "ContextGathered", Name = "Context Gathered?" };
-        contextGathered.SetDisplayText("Context Gathered?");
+        var lifecycleAcceptedGate = new FlowDecision(ctx => lifecycleAccepted.Get(ctx))
+        { Id = "LifecycleAccepted", Name = "Lifecycle Accepted?" };
+        lifecycleAcceptedGate.SetDisplayText("Lifecycle Accepted?");
 
-        // ----- Usable path (ok / empty) -----
-        var usableOutputs = BuildOutputs("UsableOutputs", "Usable Outputs",
-            contextJson, contextStatus);
+        var wasCompleteReEntry = new FlowDecision(ctx => positionStage.Get(ctx) == "complete")
+        { Id = "WasCompleteReEntry", Name = "Was Complete Re-Entry?" };
+        wasCompleteReEntry.SetDisplayText("Was Complete Re-Entry?");
 
-        // Emit COMPLETED (ok) or EMPTY (degraded) — driven by contextStatus.
-        var emitUsable = EmitContextEvent("EmitUsable", "Emit TRIAGE.CONTEXT.COMPLETED/EMPTY",
-            ctx => TriageContextEvents.EventTypeForStatus(contextStatus.Get(ctx)),
-            repository, itemNumber, tenantId,
-            ctx => itemType.Get(ctx), ctx => contextStatus.Get(ctx),
-            ctx => contextJson.Get(ctx).Length);
+        var emitCompleted = ContextEvent("EmitContextCompleted", "Emit TRIAGE.CONTEXT.COMPLETED",
+            _ => TriageContextEvents.Completed, repository, itemNumber, tenantId, itemType,
+            _ => TriageContextEvents.StatusOk, ctx => contextJson.Get(ctx).Length);
 
-        // ----- Failed path (no context gathered) -----
-        // Force the output to the "{}" sentinel + failed status so a downstream
-        // consumer that ignores contextStatus still gets no phantom context.
-        var failedSetStatus = new SetVariable
+        var emitFailed = ContextEvent("EmitContextFailed", "Emit TRIAGE.CONTEXT.FAILED",
+            _ => TriageContextEvents.Failed, repository, itemNumber, tenantId, itemType,
+            _ => TriageContextEvents.StatusFailed, _ => 0);
+
+        // ── Step 5: Expose output — the single terminal region ─────────
+        var exposeOutput = new Sequence
         {
-            Id = "FailedSetStatus", Name = "Mark Context Failed",
-            Variable = contextJson,
-            Value = new Input<object?>(ctx =>
+            Id = "ExposeOutput", Name = "Expose Output",
+            Activities =
             {
-                contextStatus.Set(ctx, TriageContextEvents.StatusFailed);
-                return (object)"{}";
-            })
+                WithLabel(new SetOutput { Id = "OutputContext", OutputName = new("contextJson"), OutputValue = new(ctx => (object)(contextJson.Get(ctx) ?? "{}")) }, "Output contextJson"),
+                WithLabel(new SetOutput { Id = "OutputContextStatus", OutputName = new("contextStatus"), OutputValue = new(ctx => (object)(contextStatus.Get(ctx) ?? TriageBindingHelper.ContextStatusFailed)) }, "Output contextStatus"),
+                WithLabel(new SetOutput { Id = "OutputFindingsDocId", OutputName = new("findingsDocumentId"), OutputValue = new(ctx => (object)(findingsDocumentId.Get(ctx) ?? "")) }, "Output findingsDocumentId"),
+                WithLabel(new SetOutput { Id = "OutputOutcome", OutputName = new("outcome"), OutputValue = new(ctx => (object)(exitOutcome.Get(ctx) ?? "")) }, "Output outcome"),
+            }
         };
-        failedSetStatus.SetDisplayText("Mark Context Failed");
+        exposeOutput.SetDisplayText("Expose Output");
 
-        var failedOutputs = BuildOutputs("FailedOutputs", "Failed Outputs",
-            contextJson, contextStatus);
-
-        var emitFailed = EmitContextEvent("EmitFailed", "Emit TRIAGE.CONTEXT.FAILED",
-            _ => TriageContextEvents.Failed,
-            repository, itemNumber, tenantId,
-            ctx => itemType.Get(ctx), _ => TriageContextEvents.StatusFailed, _ => 0);
-
-        var finish = new Finish { Id = "Finish", Name = "Complete" };
-        finish.SetDisplayText("Complete");
-
-        // ================================================================
-        // Flowchart
-        // ================================================================
         builder.Root = new Flowchart
         {
             Id = "TriageContextGatheringFlowchart",
-            Start = init,
+            Start = readInputs,
             Activities =
             {
-                init, emitStarted, gatherContext, extractResult,
-                contextGathered,
-                usableOutputs, emitUsable,
-                failedSetStatus, failedOutputs, emitFailed,
-                finish,
+                readInputs, computeReEntry, readPositionStage, freshRun,
+                emitStarted, dispatchLifecycle, readLifecycleExit,
+                lifecycleAcceptedGate, wasCompleteReEntry, emitCompleted, emitFailed,
+                exposeOutput,
             },
             Connections =
             {
-                Connect(init, emitStarted),
-                Connect(emitStarted, gatherContext),
-                Connect(gatherContext, extractResult),
-                Connect(extractResult, contextGathered),
+                new(readInputs, computeReEntry),
+                new(computeReEntry, readPositionStage),
+                new(readPositionStage, freshRun),
 
-                // Usable (ok/empty) → outputs → emit COMPLETED/EMPTY → finish.
-                ConnectOutcome(contextGathered, "True", usableOutputs),
-                Connect(usableOutputs, emitUsable),
-                Connect(emitUsable, finish),
+                new(new FlowEndpoint(freshRun, "True"), new FlowEndpoint(emitStarted)),
+                new(emitStarted, dispatchLifecycle),
+                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(dispatchLifecycle)),
 
-                // Failed → mark "{}"/failed → outputs → emit FAILED → finish.
-                // The False edge NEVER falls through to the usable/COMPLETED path.
-                ConnectOutcome(contextGathered, "False", failedSetStatus),
-                Connect(failedSetStatus, failedOutputs),
-                Connect(failedOutputs, emitFailed),
-                Connect(emitFailed, finish),
+                new(dispatchLifecycle, readLifecycleExit),
+                new(readLifecycleExit, lifecycleAcceptedGate),
+
+                new(new FlowEndpoint(lifecycleAcceptedGate, "True"), new FlowEndpoint(wasCompleteReEntry)),
+                new(new FlowEndpoint(wasCompleteReEntry, "False"), new FlowEndpoint(emitCompleted)),
+                new(emitCompleted, exposeOutput),
+                new(new FlowEndpoint(wasCompleteReEntry, "True"), new FlowEndpoint(exposeOutput)),
+
+                new(new FlowEndpoint(lifecycleAcceptedGate, "False"), new FlowEndpoint(emitFailed)),
+                new(emitFailed, exposeOutput),
             }
         };
     }
 
-    // ================================================================
-    // Helper: Set the two workflow outputs (contextJson + contextStatus).
-    // ================================================================
-    private static Sequence BuildOutputs(
-        string id, string name,
-        Variable<string> contextJson, Variable<string> contextStatus)
-    {
-        var seq = new Sequence
-        {
-            Id = id, Name = name,
-            Activities =
-            {
-                WithLabel(new SetOutput
-                    { Id = $"{id}_Context", OutputName = new("contextJson"), OutputValue = new(ctx => (object)contextJson.Get(ctx)) }, "Output contextJson"),
-                WithLabel(new SetOutput
-                    { Id = $"{id}_Status", OutputName = new("contextStatus"), OutputValue = new(ctx => (object)contextStatus.Get(ctx)) }, "Output contextStatus"),
-            }
-        };
-        seq.SetDisplayText(name);
-        return seq;
-    }
-
-    // ================================================================
-    // Helper: Emit a TRIAGE.CONTEXT.* DCB event through the durable drain.
-    // ================================================================
-    private static EmitTriageContextEventActivity EmitContextEvent(
+    private static EmitTriageContextEventActivity ContextEvent(
         string id, string label,
         Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> eventType,
-        Variable<string> repository, Variable<int> itemNumber, Variable<string> tenantId,
-        Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> itemType,
+        Elsa.Workflows.Memory.Variable<string> repository,
+        Elsa.Workflows.Memory.Variable<int> itemNumber,
+        Elsa.Workflows.Memory.Variable<string> tenantId,
+        Elsa.Workflows.Memory.Variable<string> itemType,
         Func<Elsa.Expressions.Models.ExpressionExecutionContext, string> contextStatus,
         Func<Elsa.Expressions.Models.ExpressionExecutionContext, int> contextJsonLength)
     {
         var emit = new EmitTriageContextEventActivity
         {
             Id = id, Name = label,
-            EventType = new Input<string>(eventType),
-            Repository = new Input<string>(ctx => repository.Get(ctx)),
-            ItemNumber = new Input<int>(ctx => itemNumber.Get(ctx)),
-            TenantId = new Input<string?>(ctx => tenantId.Get(ctx)),
-            ItemType = new Input<string?>(ctx => itemType(ctx)),
-            ContextStatus = new Input<string?>(ctx => contextStatus(ctx)),
-            ContextJsonLength = new Input<int>(contextJsonLength),
+            EventType = new(eventType),
+            Repository = new(ctx => repository.Get(ctx)),
+            ItemNumber = new(ctx => itemNumber.Get(ctx)),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            ItemType = new(ctx => itemType.Get(ctx)),
+            ContextStatus = new(ctx => contextStatus(ctx)),
+            ContextJsonLength = new(contextJsonLength),
         };
         emit.SetDisplayText(label);
         return emit;
     }
-
-    private static FlowConnection Connect(IActivity source, IActivity target)
-        => new(new FlowEndpoint(source), new FlowEndpoint(target));
-
-    private static FlowConnection ConnectOutcome(IActivity source, string outcome, IActivity target)
-        => new(new FlowEndpoint(source, outcome), new FlowEndpoint(target));
 }

@@ -59,7 +59,9 @@ public class RolePhaseMapTests
         // out of clarify-requirements) + 1 propose-design action (architect — design
         // proposal split out of plan-system-design), so each (role, action) cell
         // carries exactly one output contract.
-        RolePhaseMap.ValidActions.Should().HaveCount(79);
+        // + 1 triage-context-scan action (Story 39-15 D5 — developer; the Findings-producing
+        // triage-context cell split out of the free-text context-scan). 79 → 80.
+        RolePhaseMap.ValidActions.Should().HaveCount(80);
     }
 
     [Test]
