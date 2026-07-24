@@ -40,6 +40,11 @@ customer-facing release can be a configured always-escalate class (human sign-of
 - **85–100:** agent drafts and self-accepts internal changelog; customer-facing notes publish per policy
   (always-escalate optional).
 
+> **Epic 42 caveat — "publish" has no tool.** Pushing notes to a wiki/docs host/release page needs a
+> publish capability (**42-9**); none of the six registered `IToolExecutor`s
+> (`Tamma.Api/Program.cs:753-764`) provides one. Drafting is agent-reachable; publication is
+> **human-assigned** (rule 4) until Epic 42 lands.
+
 ## Acceptance Criteria
 
 1. Thin lifecycle binding; both outputs ride the lifecycle as audience-tagged prose reviewed by a `Review`.
@@ -48,7 +53,11 @@ customer-facing release can be a configured always-escalate class (human sign-of
 
 ## Dependencies
 
-- **Blocking:** Epic 39 (prose handling, lifecycle, review, store), 4-7 query API for the window.
+- **Blocking:** **41-1c** (the `prose` type + `Audience` field; *corrected: was "Epic 39 (prose
+  handling)" — out of Epic 39's scope per 39-1:58*), **41-1a** (the `(tech_writer, review-docs)`
+  review-selector arm — `RolePhaseMap.GetReviewActionForRole` throws for `TechWriter` today and
+  `DocumentLifecycleWorkflow.cs:1199` calls it unguarded), Epic 39 (lifecycle, review, store), 4-7 query
+  API for the window.
 
 ## Estimated Effort
 

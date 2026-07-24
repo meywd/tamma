@@ -87,8 +87,11 @@ agent, and **that agent has no tool to do non-code work**:
 
 - A `docs` task routed to `41-24`/`41-25`/`41-26` needs a **publish** capability (push to the wiki /
   docs host / issue tracker) — there is none.
-- An `infra` task routed to `deployment-pipeline` needs **deploy-control** and **cloud/VPS** tools —
-  there are none; today it can only shell out.
+- An `infra` task needs **deploy-control** and **cloud/VPS** tools — there are none; today it can only
+  shell out. *(Corrected: 41-29 routes `infra` to the **coding path**, not to `deployment-pipeline` —
+  that pipeline requires a merged commit sha and runs post-merge, so it cannot be dispatched from the
+  pre-merge per-task loop. The tool need is unchanged: the agent making the infra change still has no
+  governed way to touch a cloud resource or a deploy control.)*
 - `41-22` (incident response & postmortem, incl. `rollback`) and `41-23` (capacity & health review)
   need **cloud/VPS** ops and a **feature-flag kill-switch** — there are none.
 - `41-5` (stakeholder update) and `41-7` (standup digest) need an **authenticated HTTP** tool to post
@@ -254,8 +257,8 @@ actual class + target must be reported per call to 42-3's stage-2 gate.
 
 | Family (story) | What it does | Permission class (max = descriptor) | Secret purpose † | Epic 41 consumers |
 |---|---|---|---|---|
-| **Cloud / VPS resource ops** (42-7) — provider-abstracted (Hetzner / generic), like the Git & AI provider abstractions | list / create / resize / delete VPS & cloud resources | `ReadOnly` (list) · `Mutating` (create/resize) · **`Destructive`** (delete) | `ApiKey` (cloud-provider token) | `deployment-pipeline` (infra tasks via 41-29) · **41-22** incident/rollback · **41-23** capacity & health |
-| **Feature-flag / config toggle** (42-8A) | read & flip feature flags / runtime config | `Mutating` (non-prod) · **`Destructive`** (prod flag / kill-switch) | `ApiKey` (flag provider) | `deployment-pipeline` promotion · **41-22** kill-switch · 41-29 `infra` kind |
+| **Cloud / VPS resource ops** (42-7) — provider-abstracted (Hetzner / generic), like the Git & AI provider abstractions | list / create / resize / delete VPS & cloud resources | `ReadOnly` (list) · `Mutating` (create/resize) · **`Destructive`** (delete) | `ApiKey` (cloud-provider token) | **41-29 `infra` tasks** (coding path) · `deployment-pipeline` · **41-22** incident/rollback · **41-23** capacity & health |
+| **Feature-flag / config toggle** (42-8A) | read & flip feature flags / runtime config | `Mutating` (non-prod) · **`Destructive`** (prod flag / kill-switch) | `ApiKey` (flag provider) | `deployment-pipeline` promotion · **41-22** kill-switch · 41-29 `infra` kind (coding path) |
 | **Deploy control** (42-8B) | trigger / promote / rollback / gate a release | `Mutating` (staging) · **`Destructive`** (prod) | `ApiKey` or `SigningKey` (deploy platform) | `deployment-pipeline` · **41-22** rollback · **41-24** release notes trigger |
 | **Authenticated HTTP / external API** (42-9) — generic, host+method allowlisted, per-endpoint bound | one authenticated REST call to a bound endpoint | `ReadOnly` (GET-only bindings) · **`Mutating`** (default) | `ApiKey` (per-endpoint) | **41-5** stakeholder update · **41-7** standup publish · **41-24/25/26** docs publish · any integration |
 | **MCP-exposed tools** (42-6) | whatever an external MCP server exposes; **also** reconciles the 8 ungoverned `/api/kb/mcp/*` routes — **retire 2, re-scope 6** (Part A) | inherited/declared per tool — **`Destructive`** until classified | per bound server | open-ended — any future kind |

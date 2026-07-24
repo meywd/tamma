@@ -40,6 +40,11 @@ that also triggers `rotate-secret`.
 - **85–100:** agent audits and self-accepts; low-risk dep bumps auto-assigned; exposed-secret / high-CVSS
   always escalates regardless of dial.
 
+> **Epic 42 caveat — the agent path works, but *ungoverned*.** Dependency/secret/compliance scanning
+> is reachable only by shelling out through `ShellExecuteTool`; there is no audit-tool descriptor, no
+> permission class, and no `TOOL.*` audit trail. That is the one path in this family that is possible
+> today rather than impossible — but it is unclassified and unaudited until **Epic 42** lands.
+
 ## Acceptance Criteria
 
 1. Scheduled, tenant-scoped, idempotent; each lens fail-closed (a lens failure is recorded, not dropped).
@@ -49,7 +54,7 @@ that also triggers `rotate-secret`.
 
 ## Dependencies
 
-- **Blocking:** Epic 39 (`Findings`, lifecycle, store, task routing), scheduler pattern; `rotate-secret`.
+- **Blocking:** Epic 39 (`Findings`, lifecycle, store, task routing), `rotate-secret`, and **the tenant-aware scheduled-trigger seam — unowned; no story writes it** (*corrected: "scheduler pattern" named no artifact;* `HourlyAnalyticsRollupScheduler` *is hardcoded to one workflow (`:198-199`), offers one `FireAtMinute` int rather than a window/cron shape (`:34`), threads no `tenantId` into the dispatch (`:202-203`), keeps its last-fired window in a per-process field (`:83`), and its advisory-lock key has no tenant component (`:241`) — one tenant's leader would suppress every other tenant's fire*).
 - **Related:** feeds 41-12 dependency-upgrade planning.
 
 ## Estimated Effort

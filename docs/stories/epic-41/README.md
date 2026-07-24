@@ -37,22 +37,34 @@ role families) — and turns each into a **first-class lifecycle workflow** on t
    (no bespoke terminal — every non-accept exit is a typed lifecycle outcome); (d) no validate/retry
    plumbing variables (`ValidationErrors` / `RetryCount` / `MaxRetries` / `*Valid`); (e) the dispatch
    materialises the canonical `(role, action)` pair + `documentType` + a **declared**
-   `feedbackVariableName` carrier, asserted via `TaxonomyDriftBuildTests.ScanLifecycleBindingDispatches`.
-   Any story that cannot meet (a)–(e) must name the deviation and justify it in its own ACs — the rule
+   `feedbackVariableName` carrier, asserted via `TaxonomyDriftBuildTests.ScanLifecycleBindingDispatches`;
+   and (f) the binding declares its `WorkflowDocumentInterface` row in `DocumentTypeRegistry.BuildSeed`
+   and **bumps `WorkflowInterfaceGraphTests.Declared_edge_count_is_pinned`** (`:45`, `HaveCount(16)`
+   today) in the same change — the pin is deliberately a conscious edit, one per new producing workflow.
+   Any story that cannot meet (a)–(f) must name the deviation and justify it in its own ACs — the rule
    is enforced per story or it is not claimed.
 
-   > **Corrected — prose has no mechanism, and no story owns building one.** Earlier drafts said prose
-   > output (ADR, postmortem, release notes, changelog, runbook, docs, stakeholder update) "rides the
-   > lifecycle as a **prose document with an audience tag** (Epic 39: *prose stays prose*)". Epic 39
-   > states that only as a *principle*, and 39-1 records prose/tech-writer output as explicitly **out of
-   > scope** of the 10-type table. In code there is no prose type and no audience tag:
-   > `Tamma.Core/Documents/DocumentTypeKey.cs:24-33` has exactly ten members (findings,
+   > **Clause (f) is an epic-level rule because only some stories state it.** 41-10, 41-12, 41-15,
+   > 41-16, 41-17 and 41-18 carry it as an explicit AC; the rest inherit it from here. Note the
+   > direction: the edge pin moves with a **producing workflow**, not with a document type — 41-1b
+   > registers six types and deliberately moves **no** edges (its D2), while it *does* move the two
+   > vocabulary pins (`DocumentTypeKeyTests.cs:20` `Be(10)`, `DocumentTypeRegistryTests.cs:37`
+   > `HaveCount(10)`). Do not conflate the three.
+
+   > **Corrected — prose has no mechanism in code; Story 41-1c now owns building one.** Earlier drafts
+   > said prose output (ADR, postmortem, release notes, changelog, runbook, docs, stakeholder update)
+   > "rides the lifecycle as a **prose document with an audience tag** (Epic 39: *prose stays prose*)".
+   > Epic 39 states that only as a *principle*, and 39-1 records prose/tech-writer output as explicitly
+   > **out of scope** of the 10-type table. In code there is no prose type and no audience tag:
+   > `Tamma.Core/Documents/DocumentTypeKey.cs:22-33` has exactly ten members (findings,
    > ambiguity-assessment, clarification, decomposition, plan, design, review, triage-decision,
    > diagnosis, test-spec) and neither `Tamma.Data/Entities/DocumentInstance.cs` nor
-   > `Tamma.Core/Documents/DocumentEnvelope.cs` carries an `Audience` member. **41-4, 41-5, 41-9, 41-22,
-   > 41-24, 41-25 and 41-26 are therefore blocked on an enabler that does not yet exist** (a `prose`
-   > `DocumentTypeKey` member or a documented decision to model prose as an untyped body, an `Audience`
-   > column + envelope field, and an audience vocabulary). See **Sequencing → Wave 0**.
+   > `Tamma.Core/Documents/DocumentEnvelope.cs` carries an `Audience` member. **41-4, 41-5, 41-8, 41-9,
+   > 41-22, 41-24, 41-25 and 41-26 — eight stories — are written against that mechanism**, and until the
+   > 41-1 split none owned it. **[41-1c](./story-41-1/41-1c-prose-documents-and-audience-tags.md)** now
+   > does: a `prose` `DocumentTypeKey` member + `ProseDocumentType` (body unvalidated markdown), an
+   > `Audience` field on `DocumentEnvelope` **and** `DocumentInstance` (+ EF config + migration), and the
+   > audience/kind vocabularies. See **Sequencing → Wave 0**.
 
 2. **DCB events.** Every transition emits the generic `DOCUMENT.*` family plus a domain-specific family
    (`ADR.*`, `SPRINT.*`, `THREATMODEL.*`, …) so existing dashboards and new ones both see a loud,
@@ -75,39 +87,43 @@ role families) — and turns each into a **first-class lifecycle workflow** on t
 
 **Vocabulary is reused, not reinvented.** Where an activity's output fits an existing Epic 39 type
 (`Findings`, `Review`, `Design`, `Plan`, `Diagnosis`, `TriageDecision`, `TestSpec`) this epic uses it.
-Only a handful of genuinely new types are proposed (Story 41-1) and each is justified against an
-existing type it could NOT reuse — plus prose, which is *not* an existing type and needs the Wave-0
-enabler described in the Corrected note above.
+Only a handful of genuinely new types are proposed (Story **41-1b**) and each is justified against an
+existing type it could NOT reuse — plus prose, which is *not* an existing type and is built by
+**41-1c**, per the Corrected note above.
 
 ## New roles & the two role families that don't exist yet
 
 The taxonomy (`Tamma.Core/Agents`) models **8 roles**: developer, senior_developer, tester, security,
 devops, architect, product_owner, tech_writer. The user's target set names **four the platform has no
 role for** — they currently fall back to `product_owner` via `LegacyRoleAliases` (`scrum_master`,
-`analyst`) or aren't modelled at all (UX, designer, project_manager). Story **41-1** adds
+`analyst`) or aren't modelled at all (UX, designer, project_manager). Story **41-1a** adds
 `scrum_master`, `project_manager`, and `ux_designer` (covering both UX and visual-design work) as first
--class `AgentRole`s with their action cells, plus the new document types the epic needs.
+-class `AgentRole`s with their action cells; **41-1b** adds the new document types the epic needs and
+**41-1c** the prose mechanism.
 
-> **Corrected — 41-1 is a hard blocker, on BOTH paths, for eleven stories.** Earlier drafts claimed
-> "every other story in the epic can still ship and run human-assigned before 41-1 lands … 41-1 gates
-> only the *agent* path". That is false and it contradicted the stories' own Dependencies. A document
-> type that is not in the vocabulary cannot be validated or persisted **no matter who executes the
-> step**: `DocumentTypeKeyExtensions.Parse` throws `DOCUMENT.TYPE.UNKNOWN` for any non-vocabulary wire
-> string (`DocumentTypeKey.cs:54`), `DocumentTypeRegistry.Resolve` throws
-> `DOCUMENT.TYPE.NOT_REGISTERED` (`DocumentTypeRegistry.cs:86`), and `DocumentInstance.DocumentType`
-> is a `DocumentTypeKey` wire string. The same holds for a missing `(role, action)` cell — a human
-> assignee still needs a cell to bind. **Eleven stories name 41-1 in their own `Blocking:` line:**
+> **Corrected — the enabler set is a hard blocker on BOTH paths, for fourteen stories.** Earlier
+> drafts claimed "every other story in the epic can still ship and run human-assigned before 41-1
+> lands … 41-1 gates only the *agent* path". That is false and it contradicted the stories' own
+> Dependencies. A document type that is not in the vocabulary cannot be validated or persisted **no
+> matter who executes the step**: `DocumentTypeKeyExtensions.Parse` throws `DOCUMENT.TYPE.UNKNOWN`
+> for any non-vocabulary wire string (`DocumentTypeKey.cs:49-59`), `DocumentTypeRegistry.Resolve`
+> throws `DOCUMENT.TYPE.NOT_REGISTERED` (`DocumentTypeRegistry.cs:85-91`), and
+> `DocumentInstance.DocumentType` is a `DocumentTypeKey` wire string. The same holds for a missing
+> `(role, action)` cell — a human assignee still needs a cell to bind.
 >
-> | Blocked on 41-1 for | Stories |
-> |---|---|
-> | a new **document type** (unpersistable until registered) | 41-2 `AcceptanceCriteria` · 41-3 `BacklogOrdering` · 41-6 `SprintPlan` · 41-13 `TestPlan` · 41-19 `ThreatModel` · 41-27 `UxSpec` |
-> | a new **role** | 41-6, 41-7, 41-8 (`scrum_master`) · 41-27, 41-28 (`ux_designer`) |
-> | a new **action cell** | 41-11 `triage-tech-debt` · 41-16 `manage-regression` |
+> | Blocked on | For | Stories |
+> |---|---|---|
+> | **41-1b** | a new **document type** (unpersistable until registered) | 41-2 `AcceptanceCriteria` · 41-3 `BacklogOrdering` · 41-6 `SprintPlan` · 41-13 `TestPlan` · 41-19 `ThreatModel` · 41-27 `UxSpec` |
+> | **41-1a** | a new **role** | 41-6, 41-7, 41-8 (`scrum_master`) · 41-27, 41-28 (`ux_designer`) |
+> | **41-1a** | a new **action cell** | 41-10 `design-system` · 41-11 `triage-tech-debt` · 41-16 `manage-regression` · 41-17 `triage-pr` (PR-triage half) · 41-22 `incident-rootcause` |
+> | **41-1a** | the **review-action selector** arm the review stage needs | 41-24, 41-25, 41-26 (`(tech_writer, review-docs)`) |
+> | **41-1c** | the **prose type + audience tag** | 41-4, 41-5, 41-8, 41-9, 41-22, 41-24, 41-25, 41-26 |
 >
-> **41-17 belongs on this list too** — its PR-triage half produces on `(senior_developer, triage-pr)`,
-> a cell 41-1 owns and that does not exist today (absent from `AgentAction.cs`; not in
-> `SeniorDeveloper`'s eligible set at `RolePhaseMap.cs:80-92`) — but 41-17's `Blocking:` line omits it.
-> Its stand-alone code-review half needs no new cell and is genuinely 41-1-independent.
+> Union across the taxonomy/document-type halves (41-1a + 41-1b): **seventeen** stories — the fourteen
+> above plus 41-24/41-25/41-26, whose *review* stage (not their produce step) needs the selector arm.
+> Adding 41-1c's prose set of eight, and netting the five stories in both: **twenty of twenty-nine**. *(Corrected twice over: the count was "eleven" while 41-10,
+> 41-17 and 41-22 were separately shown to need new 41-1a cells; and this note used to say 41-17's
+> `Blocking:` line omitted 41-1 — 41-17 has since been revised and names 41-1a explicitly.)*
 >
 > What *is* true: for a story whose type/role/cell already exist, rule 4 lets the produce step run
 > human-assigned at low autonomy without an agent. That is a narrower claim than the one deleted.
@@ -152,8 +168,8 @@ cell at all). "New story" names the Epic 41 story that closes a ◑/✗.
 | Design proposal | ✅ | `design-proposal` |
 | Plan review (architecture lens) | ✅ | `plan-review`, `review-panel` |
 | **ADR authoring** | ✗ | **41-9** (cell `write-adr`) |
-| **System design doc (API contract / data model / integration)** | ✗ | **41-10** (cells exist, no workflow) |
-| **Tech-debt & technical-risk triage** | ✗ | **41-11** (cell `assess-technical-risk`; no tech-debt cell) |
+| **System design doc (API contract / data model / integration)** | ✗ | **41-10** (`system-design`, on a **new** `(architect, design-system)` cell from 41-1a; the three `design-*` facet cells stay unbound and become *sections* of the one `Design`) |
+| **Tech-debt & technical-risk triage** | ✗ | **41-11** (cell `assess-technical-risk` exists; the `triage-tech-debt` cell is minted by 41-1a) |
 | **Dependency & upgrade planning** | ✗ | **41-12** (cell `plan-migration-strategy` + security `audit-dependencies`) |
 
 ### Product Owner
@@ -170,7 +186,7 @@ cell at all). "New story" names the Epic 41 story that closes a ◑/✗.
 | **Roadmap shaping** | ✗ | **41-4** (cell `plan-roadmap`) |
 | **Stakeholder / status update** | ✗ | **41-5** (cell `summarize-stakeholder`) |
 
-### Project Manager & Scrum Master (no role today → 41-1)
+### Project Manager & Scrum Master (no role today → 41-1a)
 
 | Activity | Status | Workflow / story |
 |---|---|---|
@@ -191,7 +207,7 @@ cell at all). "New story" names the Epic 41 story that closes a ◑/✗.
 | **Test-plan / strategy authoring** | ✗ | **41-13** (cell `plan-test-strategy`) |
 | **Exploratory test charter** | ✗ | **41-14** (cell `exploratory-test`) |
 | **Acceptance verification** | ✗ | **41-15** (cell `verify-acceptance`) |
-| **Regression & flaky-test management** | ✗ | **41-16** (cell `write-regression-test`) |
+| **Regression & flaky-test management** | ✗ | **41-16** (`(tester, manage-regression)` from 41-1a + the existing `write-regression-test`) |
 
 ### Security
 
@@ -210,7 +226,7 @@ cell at all). "New story" names the Epic 41 story that closes a ◑/✗.
 | Deploy / promotion pipeline | ✅ | `deployment-pipeline` |
 | CI configuration | ◑ | `ci-with-debug-retry` (runs CI; doesn't author config) |
 | Incident diagnosis (panel lens) | ◑ | `review-panel` as the lifecycle REVIEW stage (devops lens `diagnose-incident`) |
-| **Incident response & postmortem** | ✗ | **41-22** (cells `plan-incident-response`/`write-postmortem`) |
+| **Incident response & postmortem** | ✗ | **41-22** (new `(devops, incident-rootcause)` cell from 41-1a + existing `plan-incident-response`/`write-postmortem`; **not** `(devops, diagnose-incident)`, which is the triage-panel lens) |
 | **Capacity & health review** | ✗ | **41-23** (cells `assess-capacity`/`monitor-health`) |
 | Rollback | ✅ | `deployment-pipeline` — auto rollback-on-prod-failure branch |
 
@@ -235,7 +251,7 @@ cell at all). "New story" names the Epic 41 story that closes a ◑/✗.
 | **Runbook & ops-docs** | ✗ | **41-26** (cell `write-runbook`) |
 | Doc review | ◑ | folded into 41-24/41-25/41-26 review stage (cell `review-docs`) — **but the review-action selector cannot reach it today**; see Dependencies |
 
-### UX / Designer (no role today → 41-1)
+### UX / Designer (no role today → 41-1a)
 
 | Activity | Status | Workflow / story |
 |---|---|---|
@@ -243,7 +259,7 @@ cell at all). "New story" names the Epic 41 story that closes a ◑/✗.
 | **Wireframe / UI spec authoring** | ✗ | **41-27** |
 | **Design review & accessibility audit** | ✗ | **41-28** |
 
-## New document types (Story 41-1)
+## New document types (Story 41-1b)
 
 Reuse first; a new type is proposed only when no existing Epic 39 type carries the domain rules.
 
@@ -261,18 +277,33 @@ charter, security audit, technical-risk), **`Review`** (standalone code review, 
 design/a11y review, doc review), **`Diagnosis`** (incident/security-incident analysis), **`Plan`**
 (refactor plan, dependency-upgrade plan, roadmap, incident-response plan), **`TriageDecision`** (PR
 triage, tech-debt triage, regression/flaky triage), and **prose** (ADR, postmortem, release notes,
-changelog, runbook, user/API docs, stakeholder update) — which, per the Corrected note under rule 1, has
-**no type and no audience tag in code yet** and needs the Wave-0 prose enabler below.
+changelog, runbook, user/API docs, stakeholder update, retro narrative) — which, per the Corrected note
+under rule 1, has **no type and no audience tag in code yet** and is built by the Wave-0 enabler
+**41-1c** below.
 
 ## Sequencing (highest-leverage first)
 
-**Wave 0 — enablers. All three are hard gates; two of the three are unowned.**
+**Wave 0 — enablers. All are hard gates; one of the four is still unowned.**
 
-| Enabler | Owner | State |
-|---|---|---|
-| Roles + action cells + the six new document types | **41-1** | drafted; hard-blocks eleven stories on **both** paths (see the Corrected note above) |
-| **Prose document support** — a `prose` type (or a documented decision to model prose as an untyped body), an `Audience` column on `DocumentInstance` + envelope field, an audience vocabulary | **none — must be written** | blocks 41-4, 41-5, 41-9, 41-22, 41-24, 41-25, 41-26 |
-| **Tenant-aware scheduled-trigger seam** (see Dependencies) | **none — must be written** | blocks 41-5, 41-7, 41-11, 41-16, 41-17 (PR sweep), 41-20, 41-23 |
+*Corrected: this table used to list three enablers and give the prose row the owner "none — must be
+written". Story 41-1 has since been **split into three independently-shippable sub-stories**, and the
+third of them (41-1c) is the prose enabler. Only the scheduler seam remains unowned.*
+
+| Enabler | Owner | Effort | State |
+|---|---|---|---|
+| Three roles + fifteen action cells + the derived panel-selector maps + the `scrum_master` alias removal | **[41-1a](./story-41-1/41-1a-agent-taxonomy-extension.md)** | 4–5 d | drafted |
+| The six new document types (`AcceptanceCriteria`, `BacklogOrdering`, `SprintPlan`, `TestPlan`, `ThreatModel`, `UxSpec`) | **[41-1b](./story-41-1/41-1b-new-document-types.md)** | 5–6 d | drafted |
+| **Prose document support** — a `prose` type, an `Audience` field on envelope **and** `DocumentInstance` (+ migration), the audience/kind vocabularies | **[41-1c](./story-41-1/41-1c-prose-documents-and-audience-tags.md)** | 3–4 d | drafted |
+| **Tenant-aware scheduled-trigger seam** (see Dependencies) | **none — must be written** | — | blocks 41-5, 41-7, 41-11, 41-16, 41-17 (PR sweep), 41-20, 41-23 |
+
+41-1a + 41-1b hard-block **seventeen** stories on both execution paths — fourteen at their *produce*
+step (a missing type/role/cell), plus 41-24/41-25/41-26 at their *review* stage (the
+`(tech_writer, review-docs)` selector arm). 41-1c blocks **eight**. Five stories (41-8, 41-22,
+41-24, 41-25, 41-26) are in both sets, so **twenty of the epic's twenty-nine** wait on some part of
+the enabler set (17 + 8 − 5 = 20). The per-story breakdown is the "What each sub-story gates" table in
+[the 41-1 umbrella](./story-41-1/41-1-team-role-and-document-type-extensions.md). 41-1a and 41-1b are
+independent of each other; 41-1c is independent of both — so the enabler set is ~6 days of
+wall-clock, not 12–15.
 
 **Wave 1 — highest leverage (closes the biggest holes on the critical path).** *Only 41-29 and 41-17's
 code-review half are Wave-0-independent; the rest are listed here for leverage, not for start order —
@@ -282,30 +313,36 @@ code-review half are Wave-0-independent; the rest are listed here for leverage, 
   (code→TDD, docs→docs, design→UX, …) plus a lightweight issue-level pre-route for `question`/`docs`-only
   issues. Without it, every issue is forced through the code-writing pipeline and the per-role workflows
   below are unreachable from the issue pipeline. Ships against today's workflows and lights up each new
-  kind as its Epic 41 target lands. **Not blocked by 41-1.** 39-15 has landed (`TaskCreationWorkflow.cs:19`
-  is already the thin binding), so its remaining blockers are its own `Plan` schema change and the 39-16
-  contract regeneration. **Rebases onto Epic 40:** 40-2/40-4/40-5 rewire the same per-task loop region of
-  `SingleIssueCycleWorkflow.cs`, so 41-29 lands after them (40-2 → 40-4 → 40-5 → 41-29).
+  kind as its Epic 41 target lands. **Not blocked by any part of 41-1.** 39-15 has landed
+  (`TaskCreationWorkflow.cs:19` is already the thin binding), so its remaining blocker is its own `Plan`
+  schema + shared contract change (39-16's generated-region markers do not exist in any prompt file, so
+  the two plan templates are hand-edited — see the story). **Rebases onto Epic 40:** 40-2/40-4/40-5
+  rewire the same per-task loop region of `SingleIssueCycleWorkflow.cs`, so 41-29 lands after them
+  (40-2 → 40-4 → 40-5 → 41-29).
 - **41-2 Acceptance-Criteria Authoring** — feeds `verify-acceptance` (41-15) *and* the merge gate; today
-  "done" is undefined outside a plan. Highest single-story leverage. **Gated on 41-1** (`AcceptanceCriteria`
-  type) — it cannot precede Wave 0.
+  "done" is undefined outside a plan. Highest single-story leverage. **Gated on 41-1b**
+  (`AcceptanceCriteria` type) — it cannot precede Wave 0.
 - **41-15 Acceptance Verification** — closes the loop 41-2 opens; turns "tests pass" into "requirement
-  met" at the accept gate. Gated on 41-2, hence transitively on 41-1.
+  met" at the accept gate. Gated on 41-2, hence transitively on 41-1b.
 - **41-17 Standalone Code Review & PR Triage** — code review only exists mentorship-bound; every repo
   needs review-of-a-diff and a routed PR queue as a stand-alone. **Split it:** the code-review half needs
-  no new cell and is Wave-1-startable; the PR-triage half needs 41-1's `triage-pr` cell **and** the
-  scheduler enabler, so it lands after Wave 0.
+  no new cell and is Wave-1-startable; the PR-triage half needs 41-1a's `triage-pr` cell **and** the
+  scheduler enabler, so it lands after Wave 0. (The story now records both, and the disposition of the
+  incumbent `code-review` DefinitionId: the new bindings take new ids — `diff-review` /
+  `pr-triage-sweep` — and rewire neither live caller.)
 - **41-9 ADR Authoring** — cheap, high-value; intended to prove the prose path for the whole
-  tech-writer/devops family behind it. **Gated on the Wave-0 prose enabler** — it cannot be the reference
-  implementation of a path that does not exist. Either the enabler lands first or 41-9 leaves Wave 1.
+  tech-writer/devops family behind it. **Gated on 41-1c** — it cannot be the reference implementation of
+  a path that does not exist. 41-1c is 3–4 days and independent of 41-1a/41-1b, so the cheapest fix is
+  to land it first rather than to demote 41-9.
 
 **Wave 2 — recurring, event-sourced, scheduled (compounding value).**
 - **41-7 Standup Synthesis**, **41-16 Regression & Flaky-Test Management**, **41-11 Tech-Debt & Risk
   Triage**, **41-20 Scheduled Security Audit**, **41-23 Capacity & Health Review** — all read the DCB
   stream / CI history on a cron and produce a `Findings`/`TriageDecision`; each replaces a standing human
   chore. 41-24 Release Notes & 41-25 User/API Docs are release/merge-triggered siblings.
-  **All five cron stories are gated on the Wave-0 scheduler enabler**; 41-11 and 41-16 additionally on
-  41-1's cells, and 41-24/41-25 on the prose enabler. Wave 2 cannot start before Wave 0 finishes.
+  **All five cron stories are gated on the Wave-0 scheduler enabler — the one that is still unowned**;
+  41-11 and 41-16 additionally on 41-1a's cells, and 41-24/41-25 on 41-1c. Wave 2 cannot start before
+  Wave 0 finishes.
 
 **Wave 3 — planning & design depth.**
 - 41-3 Backlog Prioritization, 41-6 Sprint Planning, 41-4 Roadmap, 41-8 Retro, 41-5 Stakeholder Update,
@@ -313,19 +350,21 @@ code-review half are Wave-0-independent; the rest are listed here for leverage, 
   41-22 Incident & Postmortem, 41-12 Dependency & Upgrade, 41-13 Test-Plan, 41-14 Exploratory Charter,
   41-26 Runbook.
 
-**Wave 4 — new surface (UX/design; depends on 41-1's `ux_designer` role + `UxSpec` type).**
+**Wave 4 — new surface (UX/design; depends on 41-1a's `ux_designer` role + 41-1b's `UxSpec` type).**
 - 41-27 User-Flow & Wireframe Drafting, 41-28 Design Review & Accessibility Audit.
 
 ### Planning artifacts this epic does not have
 
 Epic 39 and Epic 40 each ship an `EXECUTION-PLAN.md`; Epic 40 also ships a `sprint-status.yaml`. **Epic 41
 has neither, and exactly one of its 29 stories (41-29) has an `implementation-plan.md`.** The waves above
-are therefore a leverage ordering, not a schedule: there is no per-story effort estimate, no critical path,
-no cross-story shared-edit register, and no wave roll-up that a scheduler could execute against. Two
-consequences worth naming before anyone reads a start date into this section:
+are therefore a leverage ordering, not a schedule: apart from 41-1a/b/c (4–5 / 5–6 / 3–4 days) and 41-29
+(6.5–7.5) there is no per-story effort estimate, no critical path, no cross-story shared-edit register,
+and no wave roll-up that a scheduler could execute against. Two consequences worth naming before anyone
+reads a start date into this section:
 
-- The Wave-0 gates above (41-1, prose, scheduler) are the only hard edges recorded anywhere; **all other
-  ordering lives in individual stories' `Blocking:` lines** and has never been reconciled across them.
+- The Wave-0 gates above (41-1a, 41-1b, 41-1c, scheduler) are the only hard edges recorded anywhere;
+  **all other ordering lives in individual stories' `Blocking:` lines** and has never been reconciled
+  across them.
 - The one cross-epic shared edit that *is* known — `SingleIssueCycleWorkflow.cs`'s per-task loop, written
   by 40-2, 40-4, 40-5 and 41-29 — is registered in Epic 40's execution plan, not here.
 
@@ -373,12 +412,14 @@ schedulable. Until then, treat every wave boundary as a dependency statement onl
   rewire the same per-task loop of `SingleIssueCycleWorkflow.cs` that 41-29's `FlowSwitch` wraps
   (order: 40-2 → 40-4 → 40-5 → 41-29).
 - **Epic 42 (Agent Capability & Tool Layer) — the reciprocal edge Epic 42 already declares.**
-  `docs/stories/epic-42/README.md:77-96` names Epic 41 as its consumer ("the missing foundation under
-  Epic 41"), and `:357` lists "Epic 41 / 41-29: the consumers" — yet this section previously did not
-  name Epic 42 at all, so the edge existed in one direction only. Only **six** `IToolExecutor`s are
-  registered (`Tamma.Api/Program.cs:753-764`: `FileRead`, `FileWrite`, `SearchCode`, `ShellExecute`,
-  `GitOperations`, `RunTests`) and the registry is DI-seeded from exactly that set — all six are
-  coding-oriented. So the **agent** path of the non-code stories has no governed tool:
+  `docs/stories/epic-42/README.md:81-101` ("The gap this epic fills — and how it underpins Epic 41" …
+  "So Epic 42 is the **missing foundation under Epic 41**") names Epic 41 as its consumer, `:255-260`
+  gives a per-tool-family "Epic 41 consumers" column, and `:375` lists "Epic 41 / 41-29: the
+  consumers" — yet this section previously did not name Epic 42 at all, so the edge existed in one
+  direction only. Only **six** `IToolExecutor`s are registered (`Tamma.Api/Program.cs:753-764`:
+  `FileRead`, `FileWrite`, `SearchCode`, `ShellExecute`, `GitOperations`, `RunTests`) and the registry
+  is DI-seeded from exactly that set — all six are coding-oriented. So the **agent** path of the
+  non-code stories has no governed tool:
 
   | Story | Needs (Epic 42) | Reachable today? |
   |---|---|---|
@@ -390,8 +431,26 @@ schedulable. Until then, treat every wave boundary as a dependency statement onl
   | **41-20** dependency/secret/compliance audit | governed audit tooling | degrades to raw `ShellExecute` — possible but **ungoverned and unclassified** |
   | **41-14** tool-enabled exploratory charter | governed exploration tooling | degrades to the six coding tools |
 
-  Until Epic 42 lands these stories are **human-assigned only** (rule 4). Each story's Autonomy section
-  should carry that caveat explicitly rather than implying a day-one agent path.
+  Until Epic 42 lands these stories are **human-assigned only** (rule 4) for the tool-using half.
+  ✅ Each of 41-5, 41-7, 41-14, 41-20, 41-23, 41-24, 41-25, 41-26 and 41-28 now carries that caveat in
+  its own **Autonomy behavior** section, so the promise is not read as day-one. (41-22 states it in
+  Scope.) Note the honest gradation: 41-23 and 41-28 have **no registered executor at all** for what
+  they need; 41-5/41-7/41-24/25/26 have none for *publication* but can draft; 41-20's audit path is
+  *possible* today via raw `ShellExecute` — it is **ungoverned and unclassified**, not impossible;
+  41-14 degrades to the six coding tools.
+
+  > **One claim in Epic 42's consumer list no longer matches 41-29 — flagged, not silently absorbed
+  > (Epic 42's docs are owned elsewhere; do not edit them from here).** `epic-42/README.md:90-91`
+  > ("An `infra` task routed to `deployment-pipeline` needs deploy-control and cloud/VPS tools"),
+  > `:257-258` (`deployment-pipeline` "infra tasks via 41-29", "41-29 `infra` kind") and `:97` all
+  > assume 41-29 routes `infra` → `deployment-pipeline`. **41-29 no longer does, and cannot**:
+  > `deployment-pipeline` is the post-merge step-15 promotion and requires a `MergeSha` that does not
+  > exist inside the per-task loop (`WaitForPRMergedActivity` is its first writer,
+  > `SingleIssueCycleWorkflow.cs:701-708`), so `infra` takes the coding path and 41-29 AC2 adds a
+  > standing negative assertion that `deployment-pipeline` is unreachable from the loop. This does
+  > **not** weaken Epic 42's case — `deployment-pipeline` still needs 42-7/42-8B for its own
+  > post-merge stages, and an `infra` *task* still runs the coding agent, which needs governed
+  > IaC/cloud tooling. Only the routing sentence is stale. Reconcile when epic-42 is next revised.
 - **Scheduled workflows have no reusable pattern.** `HourlyAnalyticsRollupScheduler` was cited here as a
   "cron pattern"; it is not reusable as one (all line cites below are
   `Tamma.ElsaServer/Workflows/HourlyAnalyticsRollupScheduler.cs`). It hardcodes its target workflow
@@ -402,14 +461,23 @@ schedulable. Until then, treat every wave boundary as a dependency statement onl
   rests on `_lastFired` in-process memory (`:83`) plus the target workflow's own per-row UPSERT — a
   property a document-producing lifecycle workflow does not have. The consumers need the opposite of all
   four: **41-5, 41-7, 41-11, 41-16, 41-17 (PR sweep), 41-20, 41-23** each ask for tenant-scoped,
-  per-window, durable idempotency. **No story owns building that seam** — it is the third Wave-0 enabler.
-  (41-17 does not even list the scheduler in its `Blocking:` line despite naming it in Scope.)
-- `Tamma.Core/Agents` taxonomy extension (**41-1**) — see the Corrected note above: it gates **eleven**
-  stories on both the agent and the human path, not just the agent path of 41-6/41-7/41-8/41-27/41-28.
-- **Review-panel selector gap.** `RolePhaseMap.GetReviewActionForRole` (`RolePhaseMap.cs:376-387`) covers 7 of the 8
-  roles and **throws** for `tech_writer`, and `DocumentLifecycleWorkflow.cs:1199` calls it unguarded — so
-  configuring `tech_writer` as a document reviewer fails at runtime. 41-24/41-25/41-26 all specify review
-  via `(tech_writer, review-docs)`; the cell itself is legal (`AgentAction.cs:117`, `RolePhaseMap.cs:162`)
-  but the selector cannot reach it. 41-1 must add the `TechWriter` arm and extend
-  `ReviewerSelectionHelper.s_documentRoster` from 7 to 8, and state whether `scrum_master` /
-  `project_manager` / `ux_designer` are on the review/triage panels or deliberately off them.
+  per-window, durable idempotency. **No story owns building that seam** — it is the one Wave-0 enabler
+  still without an owner, and the only genuinely unowned dependency left in the epic. *(Corrected: this
+  bullet also said "41-17 does not even list the scheduler in its `Blocking:` line". It does now, and so
+  do all seven consumers — 41-5, 41-7, 41-11, 41-16, 41-17, 41-20 and 41-23 each name the **seam**, not
+  the non-reusable "scheduler pattern", and state which of their ACs is unreachable without it.)*
+  **This is the one thing in Epic 41 that no story builds.** Writing it is a prerequisite for Wave 2 in
+  its entirety and for 41-17's PR-triage half; it needs a tenant component in the advisory-lock key, a
+  `tenantId` threaded into the dispatch, a **persisted** last-fired window (not `_lastFired` in process
+  memory), and a window/cron shape rather than a single `FireAtMinute`.
+- `Tamma.Core/Agents` taxonomy extension (**41-1a**) + the document-type extension (**41-1b**) — see the
+  Corrected note above: together they gate **seventeen** stories on both the agent and the human path,
+  not just the agent path of 41-6/41-7/41-8/41-27/41-28.
+- **Review-panel selector gap — owned by 41-1a (Scope 3 / D1-D2).** `RolePhaseMap.GetReviewActionForRole`
+  (`RolePhaseMap.cs:376-387`) covers 7 of the 8 roles and **throws** for `tech_writer`, and
+  `DocumentLifecycleWorkflow.cs:1199` calls it unguarded — so configuring `tech_writer` as a document
+  reviewer fails at runtime. 41-24/41-25/41-26 all specify review via `(tech_writer, review-docs)`; the
+  cell itself is legal (`AgentAction.cs:117`, `RolePhaseMap.cs:162`) but the selector cannot reach it.
+  41-1a adds the `TechWriter` arm, extends `ReviewerSelectionHelper.s_documentRoster` from 7 to 8, and
+  decides per new role whether `scrum_master` / `project_manager` / `ux_designer` are on the
+  review/triage panels or deliberately off them (pinning the throw either way).

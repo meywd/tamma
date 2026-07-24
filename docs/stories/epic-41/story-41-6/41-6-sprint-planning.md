@@ -47,7 +47,8 @@ owner-role. Over-commit beyond capacity is a validator rejection, not an accept-
 
 ## Dependencies
 
-- **Blocking:** 41-1 (`scrum_master` role, `SprintPlan` type), 41-3, Epic 39 (lifecycle, store, routing).
+- **Blocking:** **41-1a** (`scrum_master` role + `plan-sprint` cell) **and 41-1b** (`SprintPlan`
+  type), 41-3, Epic 39 (lifecycle, store, routing).
 - **Related:** 41-7, 41-8.
 
 ## Estimated Effort

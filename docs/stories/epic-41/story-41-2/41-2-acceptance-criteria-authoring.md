@@ -53,7 +53,8 @@ role (or the initiator) can accept in the Task View or by asking the orchestrato
 
 ## Dependencies
 
-- **Blocking:** 41-1 (`AcceptanceCriteria` type), Epic 39 lifecycle/store/accept.
+- **Blocking:** **41-1b** (`AcceptanceCriteria` type — an unregistered type is unpersistable on the
+  human path too), Epic 39 lifecycle/store/accept.
 - **Unblocks:** 41-15, merge-gate consumption.
 
 ## Estimated Effort

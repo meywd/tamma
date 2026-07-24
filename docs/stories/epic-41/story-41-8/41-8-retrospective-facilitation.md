@@ -48,7 +48,9 @@ out-of-scope note).
 
 ## Dependencies
 
-- **Blocking:** 41-1 (`scrum_master` role), Epic 39 (`Findings`, lifecycle, store, routing, 4-7 query API).
+- **Blocking:** **41-1a** (`scrum_master` role + `facilitate-retro` cell), **41-1c** (the `Audience`
+  tag its retro *narrative* carries — the `Findings` half needs only 41-1a; *added: 41-8 was absent from
+  the epic's prose-blocked list*), Epic 39 (`Findings`, lifecycle, store, routing, 4-7 query API).
 - **Related:** 41-6, 41-7.
 
 ## Estimated Effort

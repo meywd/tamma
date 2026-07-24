@@ -157,11 +157,17 @@ registry, because 40-3's cross-pod resume and the 39-10 gate both address it by 
 |-------|-------|----------|--------|-------------|
 | 40-1 | The `tamma-agent.yml` Runner Contract & Repo Scaffolding (+ single-user CLI parity) | P0 | drafted | 6-8 days |
 | 40-2 | `WaitForAgentRunActivity` — durable bookmark suspend + `DelayFor` timeout | P0 | drafted | 5-7 days |
-| 40-3 | Durable agent-run signal plane + resume endpoint (cross-pod, restart-safe) | P0 | drafted | 5-7 days |
+| 40-3 | Durable agent-run signal plane + resume endpoint (cross-pod, restart-safe) | P0 | drafted | **7-9 days** |
 | 40-4 | Per-task re-entry — reconstruct landed tasks from git + DCB events | P0 | drafted | 5-7 days |
 | 40-5 | `[ResumeBehavior]` on `SingleIssueCycleWorkflow` + allowlist burn-down | P0 | drafted | 2-3 days |
 | 40-6 | Agent-run lifecycle event family + re-entry feed | P1 | drafted | 3-4 days |
 | 40-7 | End-to-end crash/restart + mode-matrix integration proof | P0 | drafted | 4-5 days |
+
+*40-3's estimate was raised from 5-7 by its own review pass (dual-scoped storage ⇒ two migrations,
+an API-side row-write path, and a real hosted reconciler with leader election). That makes it the
+epic's longest story and moves the critical path onto it — see EXECUTION-PLAN.md, which carries the
+reconciled 39.5 / 22.5 / 24.5 roll-up. The plan totals for 40-4 (7.0) and 40-7 (5.0) also sit at the
+top of their stated ranges.*
 
 ## Supersedes / absorbs
 
@@ -212,9 +218,13 @@ registry, because 40-3's cross-pod resume and the 39-10 gate both address it by 
   per-task loop.** 41-29 wraps `extractCurrentTask`'s successor in a `FlowSwitch` by task
   `kind`, editing the identical region of `SingleIssueCycleWorkflow.cs` that 40-2 (node-type
   swap), 40-4 (re-entry node) and 40-5 (attribute) edit. The two are **orthogonal, not
-  conflicting** — but 41-29's plan currently describes the `code` case as "existing
-  `tddForTask` path (`ExecuteAgentActivity` + `dispatchTddRetry`) — unchanged", which is the
-  *pre-40* shape. **Merge order (stated once, here and in EXECUTION-PLAN.md):
-  40-2 → 40-4 → 40-5 → 41-29**, with 41-29 rebasing onto the post-40 loop so its `code` case
-  routes to `WaitForAgentRunActivity`. 41-29 already lists Epic 40 as blocking; Epic 40 owes
-  it this reciprocal note.
+  conflicting**: 41-29's switch is by task `kind`, 40-2's change is the node type behind the
+  `code` case. **Merge order: 40-2 → 40-4 → 40-5 → 41-29**, with 41-29 rebasing onto the post-40
+  loop so its `code` case routes to `WaitForAgentRunActivity` (`Received`/`Timeout`/`Failed`)
+  rather than `ExecuteAgentActivity` (`Completed`/`Failed`). **Both sides now state this order
+  and state it identically** — here, in EXECUTION-PLAN.md's shared-edit row, in
+  `epic-41/README.md`, and in 41-29's story + implementation plan, which was rewritten off the
+  pre-40 shape it originally described. If one moves, move all of them.
+  *Note the one thing 41-29 does NOT inherit:* its `infra` kind routes to the **coding path**,
+  not to `deployment-pipeline` — that workflow is the post-merge step-15 dispatch
+  (`SingleIssueCycleWorkflow.cs:721`) and needs a `MergeSha` the loop has not produced.

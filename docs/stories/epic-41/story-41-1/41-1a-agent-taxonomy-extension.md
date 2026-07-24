@@ -1,4 +1,4 @@
-# Story 41-1a: Agent-Taxonomy Extension — three roles, thirteen cells, the panel-selector maps
+# Story 41-1a: Agent-Taxonomy Extension — three roles, fifteen cells, the panel-selector maps
 
 Status: drafted
 
@@ -13,21 +13,35 @@ document review assigned to a role the epic introduces does not throw at runtime
 
 ## Priority
 
-P0 — hard gate for 41-6, 41-7, 41-8, 41-11, 41-16, 41-17 (PR-triage half), 41-27, 41-28 on both the
-human-assigned and the agent path, plus the `(tech_writer, review-docs)` review stage of 41-24, 41-25
-and 41-26.
+P0 — hard gate for 41-6, 41-7, 41-8, 41-10, 41-11, 41-16, 41-17 (PR-triage half), 41-22, 41-27, 41-28 on
+both the human-assigned and the agent path, plus the `(tech_writer, review-docs)` review stage of 41-24,
+41-25 and 41-26.
 
 ## Scope
 
 1. **Three new `AgentRole`s** in `Tamma.Core/Agents/AgentRole.cs`: `scrum_master`, `project_manager`,
    `ux_designer` (covering UX and visual-design work). Each gets its `_system.md` identity preamble and
    its action-cell files under `Prompts/{role}/`.
-2. **Thirteen new `AgentAction` tokens** + `RolePhaseMap.EligibleActions` entries: `plan-sprint`,
+2. **Fifteen new `AgentAction` tokens** + `RolePhaseMap.EligibleActions` entries: `plan-sprint`,
    `synthesize-standup`, `facilitate-retro`, `track-impediments` (scrum_master); `report-status`,
    `coordinate-release` (project_manager); `draft-user-flow`, `author-ui-spec`, `review-design`,
-   `audit-accessibility` (ux_designer); `triage-tech-debt` (architect), `triage-pr` (senior_developer),
-   `manage-regression` (tester). Existing cells (`write-adr`, `prioritize-backlog`, `verify-acceptance`,
-   `threat-model`, `review-docs`, …) are reused unchanged.
+   `audit-accessibility` (ux_designer); `triage-tech-debt` **and `design-system`** (architect),
+   `triage-pr` (senior_developer), `manage-regression` (tester), **`incident-rootcause`** (devops).
+   Existing cells (`write-adr`, `prioritize-backlog`, `verify-acceptance`, `threat-model`,
+   `review-docs`, `plan-incident-response`, `write-postmortem`, `write-regression-test`, …) are reused
+   unchanged.
+
+   > **Corrected — the list was thirteen and omitted two cells that other stories name this story as
+   > minting.** **41-10** requires `(architect, design-system)` (`41-10…:20`) because
+   > `plan-system-design` is reserved as `plan-generation`'s `Plan` producer
+   > (`ContractBindingTests.cs:160-164`) and the three `design-*` cells are facet-scoped in their
+   > shipped templates. **41-22** requires `(devops, incident-rootcause)` (`41-22…:20-22`) because
+   > `(devops, diagnose-incident)` is the **triage-panel review lens**
+   > (`RolePhaseMap.GetTriageActionForRole`, `:404-412`) and is listed in
+   > `ContractBindingTests.ReviewProducerDispatchablePairs` (`:542-543`), whose stale-entry guard
+   > (`:579`) fails the build on any pair that is also in `Bindings`. Neither cell exists in
+   > `AgentAction.cs` today. Each needs a `Prompts/{role}/{action}.md` template like the other thirteen
+   > — `PromptFileLoader` refuses to start on a taxonomy cell with no file (AC2).
 3. **The DERIVED panel-selector maps.** `RolePhaseMap.GetReviewActionForRole` (`RolePhaseMap.cs:376-387`)
    and `GetTriageActionForRole` (`:404-412`) are `switch` expressions that **throw
    `ArgumentOutOfRangeException` for any role not listed**; `GetPanelActionForRole` (`:430-433`) fans out
@@ -64,8 +78,10 @@ and 41-26.
 1. `AgentRoleExtensions.Parse("scrum_master")` returns the new `AgentRole.ScrumMaster` — today it returns
    `ProductOwner` via the alias. `Parse("project_manager")` and `Parse("ux_designer")` return their roles
    — today both throw `ArgumentException`. Round-trip holds for all 11 roles.
-2. Each of the thirteen new `(role, action)` pairs passes `RolePhaseMap.IsRoleEligibleForPhase`, and
-   `GetPrimaryPhaseForRole` returns a non-throwing action for each new role.
+2. Each of the fifteen new `(role, action)` pairs passes `RolePhaseMap.IsRoleEligibleForPhase`, and
+   `GetPrimaryPhaseForRole` returns a non-throwing action for each new role. The two cells added by the
+   Scope-2 correction are covered explicitly: `(architect, design-system)` for 41-10 and
+   `(devops, incident-rootcause)` for 41-22.
 3. **A `document-lifecycle` run whose acceptance rules name `tech_writer` as the reviewer completes its
    review stage and produces a `Review`.** Today that run fails:
    `DocumentLifecycleWorkflow.BuildReviewEnvelope` calls `RolePhaseMap.GetReviewActionForRole` unguarded
@@ -91,8 +107,8 @@ and 41-26.
    > chain and different prompt cells. The carve-out is explicit here rather than hidden behind a
    > parenthetical.
 7. **Count pins bumped consciously, each with a one-line reason in the test comment:**
-   `AgentRoleTests.cs:12` `Be(8)` → `Be(11)`; `AgentActionTests.cs:38` `Be(80)` → `Be(93)`;
-   `RolePhaseMapTests.cs` `ValidActions.Should().HaveCount(80)` → `HaveCount(93)`;
+   `AgentRoleTests.cs:12` `Be(8)` → `Be(11)`; `AgentActionTests.cs:38` `Be(80)` → `Be(95)`;
+   `RolePhaseMapTests.cs:64` `ValidActions.Should().HaveCount(80)` → `HaveCount(95)`;
    `SystemPromptsTests.cs:61` `RoleSystemPrompts.Should().HaveCount(8)` → `HaveCount(11)`;
    `ConventionStoreEndpointsTests.cs:720` and `:744` `HaveCount(8)` → `HaveCount(11)`. If D1/D2 grow the
    document roster, `ReviewerSelectionHelperTests.cs:97` and `ContractBindingTests.cs:598`
@@ -108,8 +124,8 @@ and 41-26.
 ## Dependencies
 
 - **Blocking:** 27-15/27-18 taxonomy machinery, Epic 39 (39-7 review producers — the selector's caller).
-- **Unblocks:** 41-6, 41-7, 41-8, 41-11, 41-16, 41-17 (PR-triage half), 41-27, 41-28; the review stage of
-  41-24, 41-25, 41-26.
+- **Unblocks:** 41-6, 41-7, 41-8, **41-10** (`design-system`), 41-11, 41-16, 41-17 (PR-triage half),
+  **41-22** (`incident-rootcause`), 41-27, 41-28; the review stage of 41-24, 41-25, 41-26.
 
 ## Estimated Effort
 

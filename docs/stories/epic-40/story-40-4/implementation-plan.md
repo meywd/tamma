@@ -262,7 +262,10 @@ All NUnit + FluentAssertions (+ Moq; git/event reads faked).
 | 7 | unit tests (calculator, service, activity, registration, structure) | 1.5 |
 | **Total** | | **7.0** (story estimate: 5-7 days) |
 
-> **Knock-on for EXECUTION-PLAN.md:** this total was **6.5** before the clause-(c) seam was
-> budgeted. Wave 2's pole becomes `max(40-3 6.75, 40-4 7.0) = 7.0`. 40-7 carries a further +0.25
-> (the seam flip, see its plan), so the reconciled figures are wall-clock
-> `8 + 7.0 + 3.25 + 5.0 = 23.25` and epic total **38.0**. Flagged rather than silently absorbed.
+> **Knock-on for EXECUTION-PLAN.md — ABSORBED, see that file for the authoritative roll-up.** This
+> total was **6.5** before the clause-(c) seam was budgeted. *(Superseded arithmetic: this note
+> originally computed wave 2's pole as `max(40-3 6.75, 40-4 7.0) = 7.0`, wall-clock 23.25 and epic
+> total 38.0. It was written before 40-3's own review pass raised **6.75 → 8.25**, which makes 40-3
+> the wave-2 pole and puts the critical path on `40-2 → 40-3 → 40-6 → 40-7`.)* The reconciled
+> figures now live in EXECUTION-PLAN.md: total **39.5**, critical path **22.5**, wall-clock
+> **24.5**. Do not re-derive them from this note.

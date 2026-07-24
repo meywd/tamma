@@ -205,7 +205,9 @@ same-process fast path — correctness no longer depends on it.
 - **Emits (40-6 constants, placeholder-pinned here):** `AGENT_RUN.RESUME_UNRESOLVED` (loud, on a
   row with no resolvable bookmark past timeout) and reuses 40-6's `AGENT_RUN.RECEIVED`/`TIMED_OUT`
   where the resumer marks the row. If 40-6 has not merged, define a local constant and migrate it
-  to 40-6's `AgentRunEventTypes` at merge (documented conscious pin).
+  to 40-6's **`AgentRunWaitEventTypes`** at merge (documented conscious pin). *(Corrected: this line
+  said `AgentRunEventTypes`; 32-5 owns that name — `Tamma.Api/Services/Agents/AgentRunEventTypes.cs:17`,
+  `AGENT.RUN.*` — so 40-6 D1 renames the new catalogue. The wire strings are unchanged.)*
 - **Consumes:** the `workflow_run.completed` webhook payload; the mediated `GET runs/{id}` status.
 
 ## Test Plan

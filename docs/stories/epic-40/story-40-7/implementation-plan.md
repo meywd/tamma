@@ -179,6 +179,8 @@ moved to the real service.
 | 9 | seam flip (two `Program.cs` defaults) + registration-test pin | 0.25 |
 | **Total** | | **5.0** (story estimate: 4-5 days) |
 
-> **Knock-on for EXECUTION-PLAN.md:** this total was **4.75**. Wave 4's pole becomes 5.0; combined
-> with 40-4's +0.5 (its plan flags the same), wall-clock `8 + 7.0 + 3.25 + 5.0 = 23.25`, epic total
-> **38.0**. Flagged rather than silently absorbed.
+> **Knock-on for EXECUTION-PLAN.md — ABSORBED, see that file for the authoritative roll-up.** This
+> total was **4.75**; wave 4's pole becomes 5.0. *(Superseded arithmetic: combined with 40-4's +0.5
+> this note computed wall-clock 23.25 / epic total 38.0. It predates 40-3's own raise
+> **6.75 → 8.25**, which makes 40-3 the wave-2 pole.)* Reconciled figures: total **39.5**, critical
+> path **22.5** (`40-2 → 40-3 → 40-6 → 40-7`), wall-clock **24.5**.

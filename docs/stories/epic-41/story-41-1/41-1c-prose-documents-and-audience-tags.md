@@ -101,10 +101,14 @@ this mechanism as if it had shipped. It has not, and before this split no story 
   on its retro narrative — its `Findings` half needs only 41-1a).
 
 > **Sequencing consequence.** 41-9 is designated the Wave-1 reference implementation of the
-> prose-on-lifecycle path (`41-9:14-15`), and its own `Blocking:` line names only "Epic 39 (prose-document
-> handling …)". It cannot be the reference implementation of a path that does not exist: either 41-1c
-> lands before Wave 1, or 41-9 leaves Wave 1. The seven other dependents' `Blocking:` lines name Epic 39
-> for the same non-existent deliverable and should point here instead.
+> prose-on-lifecycle path (`41-9:14-15`). It cannot be the reference implementation of a path that does
+> not exist: either 41-1c lands before Wave 1, or 41-9 leaves Wave 1. Because this story is 3–4 days and
+> independent of 41-1a/41-1b, the epic README takes the first option.
+>
+> *(Reconciled 2026-07-24: all eight dependents' `Blocking:` lines previously named "Epic 39
+> (prose-document handling …)" for a deliverable 39-1:58 records as **out of Epic 39's scope**. They now
+> name 41-1c. 41-8 — which needs the audience tag for its retro *narrative* even though its `Findings`
+> half needs only 41-1a — was missing from every enumeration of that set and has been added.)*
 
 ## Estimated Effort
 

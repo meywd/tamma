@@ -46,7 +46,7 @@ affecting committed work can be an always-escalate class.
 
 ## Dependencies
 
-- **Blocking:** 41-1 (`BacklogOrdering` type), Epic 39 (lifecycle, store, accept).
+- **Blocking:** **41-1b** (`BacklogOrdering` type), Epic 39 (lifecycle, store, accept).
 - **Unblocks:** 41-6.
 
 ## Estimated Effort

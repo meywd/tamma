@@ -45,7 +45,7 @@ seed security tasks. Accepted model informs `plan-generation` and 41-15 verifica
 
 ## Dependencies
 
-- **Blocking:** 41-1 (`ThreatModel` type), Epic 39 (lifecycle, review, store).
+- **Blocking:** **41-1b** (`ThreatModel` type), Epic 39 (lifecycle, review, store).
 - **Related:** consumes 41-10.
 
 ## Estimated Effort

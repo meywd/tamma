@@ -37,6 +37,11 @@ can be an always-escalate class (human sign-off before send).
 - **70–84:** agent drafts; PO/PM accepts before send.
 - **85–100:** agent drafts and self-accepts internal reports; external stakeholder reports per policy.
 
+> **Epic 42 caveat — the agent path cannot *publish* yet.** Posting the report to Slack/Jira/email
+> needs an authenticated HTTP / external-API tool (**42-9**). Only six `IToolExecutor`s are registered
+> today (`Tamma.Api/Program.cs:753-764`), all coding-oriented. Until 42-9 lands, drafting is
+> agent-reachable but delivery is **human-assigned** (rule 4) — not a day-one agent path.
+
 ## Acceptance Criteria
 
 1. Scheduled, tenant-scoped, idempotent per period; every claim cites DCB evidence.
@@ -45,7 +50,12 @@ can be an always-escalate class (human sign-off before send).
 
 ## Dependencies
 
-- **Blocking:** Epic 39 (prose handling, lifecycle, review, store, 4-7 query API), scheduler pattern.
+- **Blocking:** **41-1c** (the `prose` type + `Audience` field; *corrected: was "Epic 39 (prose
+  handling)" — out of Epic 39's scope per 39-1:58*), Epic 39 (lifecycle, review, store, 4-7 query API),
+  and **the tenant-aware scheduled-trigger seam — unowned; no story writes it**
+  (*corrected: "scheduler pattern" named no artifact;* `HourlyAnalyticsRollupScheduler` *is hardcoded to
+  one workflow, has one `FireAtMinute` int, threads no `tenantId`, and its advisory-lock key has no
+  tenant component — see the epic README's scheduler bullet*).
 - **Related:** consumes 41-6 SprintPlan.
 
 ## Estimated Effort

@@ -44,7 +44,9 @@ Accept gate routes per autonomy; a roadmap is typically a human-accepted artifac
 
 ## Dependencies
 
-- **Blocking:** Epic 39 (prose handling, lifecycle, review, store); 41-3.
+- **Blocking:** **41-1c** (the `prose` type + `Audience` field — this workflow's output is prose and
+  the mechanism does not exist in code; *corrected: this line named "Epic 39 (prose handling)", which
+  39-1:58 records as out of Epic 39's scope*), Epic 39 (lifecycle, review, store); 41-3.
 
 ## Estimated Effort
 

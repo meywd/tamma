@@ -38,6 +38,11 @@ Verdict routes through the accept gate; a blocking a11y failure escalates with l
 - **70–84:** agent drafts the review; a human designer signs off.
 - **85–100:** agent review self-accepted for non-blocking verdicts; blocking a11y issues always escalate.
 
+> **Epic 42 caveat — auditing a *shipped* UI is unreachable by any registered tool.** There is no
+> browser/render executor among the six registered `IToolExecutor`s
+> (`Tamma.Api/Program.cs:753-764`), so an agent can review a `UxSpec` or a diff but cannot inspect a
+> running interface. The shipped-UI half is **human-assigned** (rule 4) until Epic 42 supplies one.
+
 ## Acceptance Criteria
 
 1. Thin lifecycle binding; validated unified `Review`; blocking a11y issues cannot be laundered into approval.
@@ -47,7 +52,8 @@ Verdict routes through the accept gate; a blocking a11y failure escalates with l
 
 ## Dependencies
 
-- **Blocking:** 41-1 (`ux_designer` role), Epic 39 (`Review`, lifecycle, review producers, store).
+- **Blocking:** **41-1a** (`ux_designer` role + `review-design`/`audit-accessibility` cells), Epic 39
+  (`Review`, lifecycle, review producers, store).
 - **Related:** reviews 41-27 output.
 
 ## Estimated Effort

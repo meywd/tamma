@@ -37,6 +37,11 @@ human-or-agent (a human tester runs the session at low autonomy, an agent explor
 - **85–100:** agent charters, explores (tool-enabled), and self-accepts; confirmed defects always route to
   triage.
 
+> **Epic 42 caveat — "tool-enabled" means the six coding tools, nothing more.** Exploration today
+> degrades to `FileRead`/`SearchCode`/`ShellExecute`/`RunTests`
+> (`Tamma.Api/Program.cs:753-764`); there is no governed exploration tooling. The charter half is
+> agent-reachable now; genuinely tool-enabled exploration waits on **Epic 42**.
+
 ## Acceptance Criteria
 
 1. Thin lifecycle binding; `Findings` cite concrete evidence; empty session ⇒ valid empty findings.
