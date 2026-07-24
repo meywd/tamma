@@ -33,8 +33,8 @@ has no canonical suspend activity).
 
 ## Architectural Context (READ FIRST)
 
-**Today the coding step is inline and non-durable.** In `SingleIssueCycleWorkflow.cs` the TDD
-loop node `tddForTask` is an `ExecuteAgentActivity`
+**Today the coding step is inline and non-durable.** In `SingleIssueCycleWorkflow.cs:571` the
+TDD loop node `tddForTask` is an `ExecuteAgentActivity`
 (`apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/ExecuteAgentActivity.cs`). Its
 `ExecuteAsync` calls `executor.ExecuteAsync(request, ct)` and **awaits inline**
 (`ExecuteAgentActivity.cs:199`). For the `GitHubActionsExecutor`
@@ -44,9 +44,10 @@ loop node `tddForTask` is an `ExecuteAgentActivity`
 A restart mid-wait loses the monitor task, and — with no task re-entry (40-4) — the
 orchestrator re-dispatches the cycle from the start.
 
-**The durable primitive already exists in the same activity family.**
-`WaitForCIResultsActivity` (`apps/tamma-elsa/src/Tamma.Activities/Testing/WaitForCIResultsActivity.cs`)
-is the pattern to copy exactly:
+**The durable primitive already exists in the same activity family — copy its SHAPE, not its
+naming.** `WaitForCIResultsActivity`
+(`apps/tamma-elsa/src/Tamma.Activities/Testing/WaitForCIResultsActivity.cs`) is the suspend
+mechanics to mirror:
 
 - `context.CreateBookmark(payload, OnResumeAsync)` — a result bookmark resumed by an external
   webhook → **`Received`** outcome (`WaitForCIResultsActivity.cs:87`).
@@ -54,15 +55,38 @@ is the pattern to copy exactly:
   delay bookmark the scheduler auto-resumes at the deadline → **`Timeout`** outcome
   (`WaitForCIResultsActivity.cs:94`). No thread is held for the wait; Elsa burns the loser
   bookmark on completion.
-- Resume read-back is **serialization-tolerant** (`ResumeInput.AsBool`, the #15/#437 lesson).
-- `[FlowNode("Received", "Timeout")]`, fail-closed sentinel on unparseable/timeout.
+- Resume read-back is **serialization-tolerant** (`ResumeInput.AsBool`
+  (`Tamma.Activities/ResumeInput.cs:38`), the #15/#437 lesson).
+- `[FlowNode("Received", "Timeout")]` (`:42`), fail-closed sentinel on unparseable/timeout.
 
-**Epic 39-10 provides the bookmark builder.** `LifecycleBookmarks`
-(`apps/tamma-elsa/src/Tamma.Activities/Documents/LifecycleBookmarks.cs`, story 39-10) is the
-one canonical **tenant-folded, deterministic** bookmark-name builder (same inputs → same name
-on suspend and resume; tenant A ≠ tenant B). This story adds a `ForAgentRun` shape to it (or
-consumes it if 39-10 shipped one) and registers `WaitForAgentRunActivity` in
-`LifecycleBookmarks.CanonicalSuspendActivities` so 40-5's structural test recognizes it.
+*Corrected — this story previously said "the pattern to copy **exactly**", which is a
+wording hazard:* `WaitForCIResultsActivity` addresses its bookmark with its **own ad-hoc
+payload object**, `new CIResultBookmarkPayload(sessionId, runId)`
+(`WaitForCIResultsActivity.cs:80`, created at `:87`) — not a `LifecycleBookmarks`-composed
+name — and it is deliberately **not** a member of
+`LifecycleBookmarks.CanonicalSuspendActivities`, which today holds exactly two entries:
+`WaitForDocumentDecisionActivity → "document-decision"` (`LifecycleBookmarks.cs:101`) and
+`WaitForDocumentInputActivity → "document-input"` (`:104`). Copying it literally would ship
+a third un-folded bookmark scheme that AC2/AC6 and 40-3's resume cannot address.
+
+**DECISION — the new wait joins the canonical registry; Epic 40 does not add a second
+ad-hoc scheme.** `WaitForAgentRunActivity` builds its bookmark name through
+`LifecycleBookmarks.ForAgentRun(...)` → `LifecycleBookmarks.Compose`
+(`LifecycleBookmarks.cs:38`, segments via `WaitForMergeApprovalActivity.NormalizeSegment`
+as used at `:43`/`:46`) and registers itself in `CanonicalSuspendActivities` (AC2, AC6).
+Rationale: 40-3 must recompute the name from durable inputs on a *different pod*, which the
+`CIResultBookmarkPayload` object shape cannot support tenant-folded; and leaving the epic
+with two unfolded schemes in one cycle is exactly what 39-10's registry exists to prevent.
+`WaitForCIResultsActivity`'s own migration onto the registry is **out of scope here** and
+remains unowned — see Dependencies.
+
+**Epic 39-10 has LANDED — this story consumes it, it does not wait for it.**
+*Corrected: earlier drafts of this story and its plan treated 39-10 as an unmerged hard gate
+and budgeted a "shim".* `LifecycleBookmarks`
+(`apps/tamma-elsa/src/Tamma.Activities/Documents/LifecycleBookmarks.cs`) exists and is in
+use: `Compose` at `:38`, `ForStageGate` `:55`, `ForDecisionSession` `:66`, `ForDocumentInput`
+`:82`, `CanonicalSuspendActivities` `:98`. This story **edits that real file** to add a
+`ForAgentRun` shape and the registry entry — there is no shim and no rebase.
 
 **Dispatch and collect are retained, the inline monitor is replaced.** The dispatch half
 (`IAgentDispatchService.DispatchAsync`) runs in the activity's synchronous `Execute` *before*
@@ -104,24 +128,50 @@ suspending; the collect half (`IAgentResultCollectorService.CollectAsync`) runs 
    `JsonElement` truthy+falsy matrix.
 
 6. **Registered as a canonical suspend activity.** `WaitForAgentRunActivity`'s type is added to
-   `LifecycleBookmarks.CanonicalSuspendActivities` (39-10's registry) with its gate prefix, so
-   40-5's `ResumableStandardStructuralTests` recognizes it as a sanctioned suspend point.
+   `LifecycleBookmarks.CanonicalSuspendActivities` (`LifecycleBookmarks.cs:98`) with gate
+   prefix `"agent-run"`, taking the registry from two entries to three, so 40-5's
+   `ResumableStandardStructuralTests` recognizes it as a sanctioned suspend point.
+   *Falsifiable:* an implementation that addresses its bookmark with a bespoke payload
+   object (the `CIResultBookmarkPayload` shape) instead of a `Compose`-built name fails this
+   AC and AC2 together — the registry entry alone is not sufficient.
 
-7. **The TDD loop uses it (SaaS/GHA path).** `SingleIssueCycleWorkflow`'s `tddForTask` node is
-   switched from `ExecuteAgentActivity` to `WaitForAgentRunActivity` (inputs mapped identically:
+7. **The TDD loop uses it (SaaS/GHA path).** `SingleIssueCycleWorkflow`'s `tddForTask` node
+   (`SingleIssueCycleWorkflow.cs:571`) is switched from `ExecuteAgentActivity`
+   (`[FlowNode("Completed", "Failed")]`, `ExecuteAgentActivity.cs:37`) to
+   `WaitForAgentRunActivity` (inputs mapped identically:
    repository, branchName, issueNumber, `task="implement"`, `plan_json=currentTaskJson`, the
    deterministic `adl-{issue}-task-{index}` session id, provider, timeout, tenantId). The
-   loop's existing `Completed`/`Failed` outcomes are wired to the activity's `Received`(→gate on
-   result)/`Timeout`/`Failed` edges preserving current routing (retry on failure, advance on
-   success). *(The `SetVariable`/re-entry wiring interplay lands with 40-4/40-5; this story
-   delivers the activity + the GHA-mode suspend.)*
+   loop's existing outcome wiring at `SingleIssueCycleWorkflow.cs:1181-1183` —
+   `Completed → incrementTask`, `Failed → notifyTddRetry`, `Failed → dispatchTddRetry` — is
+   preserved through the new edges: `Received` → the result gate (advance on success, the
+   `dispatchTddRetry` path on agent-reported failure), `Timeout`/`Failed` → the escalation
+   sink. *Falsifiable:* a graph test asserts the post-swap node type **and** that every one of
+   those three destinations is still reachable from the loop node; dropping the
+   `dispatchTddRetry` edge reddens it. *(The `SetVariable`/re-entry wiring interplay lands
+   with 40-4/40-5; this story delivers the activity + the GHA-mode suspend.)*
 
-8. **Single-user (Local) parity retained.** For `LocalExecutor` (single-user), where there is
-   no external webhook, the activity still functions: it may run the local runner to completion
-   inside `Execute` and short-circuit to `Received` (no external suspend needed), OR suspend on
-   a locally-signaled bookmark — the plan chooses and justifies. Either way the same outputs and
-   edges are produced, so the workflow definition is mode-agnostic (the `ExecuteAgentActivity`
-   guarantee is preserved).
+8. **Single-user (Local) mode is not regressed, and is not claimed to work end-to-end.**
+   *Corrected — this AC previously read "Local parity **retained**", which asserted a working
+   baseline that does not exist.* `AgentExecutorFactory` auto-resolves `local` whenever no
+   GitHub App is configured (`AgentExecutorFactory.cs:69-77`), but the local path is
+   **broken today**: `LocalExecutor` shells out to `node <CliEntryPoint> execute-agent`, and
+   `CliEntryPoint` defaults to the *relative* `packages/cli/dist/index.js`
+   (`LocalExecutor.cs:246`) while the child runs in a per-session temp dir
+   (`LocalExecutor.cs:94`, `:184-193`), with no `packages/cli/dist/` built in the tree. Fixing
+   that is **40-1 AC8**, not this story.
+
+   What this story owns is therefore bounded: where the resolved mode is `local`, the
+   activity runs the executor to completion inside `Execute` and short-circuits to
+   **`Received`** (no external result bookmark — there is no webhook to fire it), still
+   arming `DelayFor` as a hard timeout. The same outputs and edges are produced in both
+   modes, so the workflow definition stays mode-agnostic (the `ExecuteAgentActivity`
+   guarantee is preserved) and **no local behaviour gets worse** than it is today.
+
+   *Falsifiable:* the local branch is verified against a stubbed `IAgentExecutor` — assert
+   `Received`, outputs set, and **no external bookmark created**. The single-user
+   *end-to-end* proof (a real local run producing a real `AgentResultArtifact`) is explicitly
+   **not** an AC of this story and belongs to 40-1 AC8 / 40-7's mode matrix. Do not write an
+   AC here that cannot fail until 40-1 lands.
 
 9. **Fail-loud on missing dependencies.** No `IAgentDispatchService`/collector registered ⇒
    `TammaError`-style loud failure to the `Failed` edge with a diagnostic, never a silent hang
@@ -142,18 +192,36 @@ suspending; the collect half (`IAgentResultCollectorService.CollectAsync`) runs 
 - **Timeout semantics ≠ agent failure.** `Timeout` (deadline, no completion) is a distinct edge
   from `Received`-with-`success:false` (agent ran, failed). The cycle routes them differently
   (timeout → escalate/needs-human; agent-failure → tdd-with-debug-retry) — keep them separate.
+- **`SingleIssueCycleWorkflow.cs`'s per-task loop is a shared edit surface.** Within Epic 40
+  the sequence is 40-2 (node swap) → 40-4 (re-entry node) → 40-5 (`[ResumeBehavior]`). Epic
+  41's story 41-29 rewires the *same* region (a kind-switch ahead of the task step) and must
+  rebase onto the post-40 shape — its `code` case routes to `WaitForAgentRunActivity`, not to
+  the `ExecuteAgentActivity` it currently describes. Line cites in this story (`:571`,
+  `:1181-1183`) are against today's file and will shift after the swap.
 
 ## Dependencies
 
-- **Story 39-10 (Resumable Standard) — HARD.** `LifecycleBookmarks` (+ the `ForAgentRun` shape
-  this story adds), `CanonicalSuspendActivities`, `NormalizeSegment`, `ResumeInput`. Blocking:
-  AC2/AC5/AC6 consume it directly.
+- **Story 39-10 (Resumable Standard) — LANDED, consumed.** *Corrected: previously listed as a
+  HARD unmerged gate.* `LifecycleBookmarks` (`Compose` `:38`, `NormalizeSegment` via
+  `WaitForMergeApprovalActivity`, `CanonicalSuspendActivities` `:98`) and `ResumeInput.AsBool`
+  (`ResumeInput.cs:38`) all exist; AC2/AC5/AC6 edit and extend them directly. No gate, no shim.
+- **Story 40-1 (AC8) — BLOCKING for AC8's single-user end-to-end only.** The local executor
+  *class* is wired and `AgentExecutorFactory` makes `local` the default with no GitHub App,
+  but the local **path** cannot resolve its entry point today (AC8). 40-2's local branch is
+  code-complete and unit-testable against a stubbed executor without 40-1; a *running*
+  single-user coding step is not. This edge does not gate the GitHub Actions path, AC1-AC7, or
+  AC9, so it does not move 40-2's start date.
 - **Story 40-3** — the durable signal + resume endpoint that actually resumes this bookmark
   from the webhook. Developed in lockstep against AC2's name contract; 40-2 is testable against
   a direct bookmark resume before 40-3 lands.
-- **Existing (verified):** `WaitForCIResultsActivity` (the pattern), `IAgentDispatchService`/
-  `IAgentResultCollectorService`/`GitHubActionsExecutor`/`LocalExecutor`, Elsa 3 bookmarks +
-  `DelayFor` + EF persistence.
+- **Existing (verified):** `WaitForCIResultsActivity` (the suspend *shape*, not its naming —
+  see Architectural Context), `IAgentDispatchService`/`IAgentResultCollectorService`/
+  `GitHubActionsExecutor`, `LocalExecutor`/`AgentExecutorFactory` **as wired classes** (their
+  runtime path is the 40-1 caveat above), Elsa 3 bookmarks + `DelayFor` + EF persistence.
+- **Explicitly NOT owned here (genuinely unowned):** migrating `WaitForCIResultsActivity`
+  off `CIResultBookmarkPayload` onto `LifecycleBookmarks` + the canonical registry. After
+  this story the codebase still has one ad-hoc scheme (CI results); Epic 40 simply does not
+  add a second. No story currently owns that burn-down.
 
 ## Estimated Effort
 
@@ -164,3 +232,4 @@ suspending; the collect half (`IAgentResultCollectorService.CollectAsync`) runs 
 | Date       | Version | Changes                | Author |
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-23 | 1.0.0   | Initial story creation | Claude |
+| 2026-07-24 | 1.1.0   | Code-verified revision: 39-10 recorded as LANDED (gate + shim struck); DECISION recorded that the new wait joins `LifecycleBookmarks.CanonicalSuspendActivities` rather than repeating `WaitForCIResultsActivity`'s ad-hoc `CIResultBookmarkPayload` scheme; AC8 rewritten from "Local parity retained" to an honest, falsifiable statement of what the local branch does, with 40-1 AC8 named as the blocking edge for the single-user end-to-end proof; AC6/AC7 made falsifiable | Claude |

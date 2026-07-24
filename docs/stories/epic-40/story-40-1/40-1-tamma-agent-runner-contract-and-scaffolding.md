@@ -48,11 +48,32 @@ The C# side is fully built and pins the runner's output contract:
   (`apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/AgentDispatchService.cs:91`) sends
   exactly seven `workflow_dispatch` string inputs: `issue_number, task, plan_json,
   branch_name, tamma_session_id, agent_provider, agent_config_json`.
-- **Workflow file name** — defaulted to `tamma-agent.yml` in three places
-  (`AgentDispatchService.cs:49`, `ExecuteAgentActivity.cs:187`,
-  `AgentDispatchMediationService.cs:41`); the mediation `CheckWorkflowFileAsync`
-  (`AgentDispatchMediationService.cs:101`) fails loud with `WorkflowNotFound` /
-  *"Add the Tamma agent workflow template to .github/workflows/"* when it is absent.
+- **Workflow file name** — *Corrected (this story previously said "three places"):* the
+  literal `tamma-agent.yml` is a hardcoded default in **six** behavioural places:
+  1. `Tamma.Activities/AgentDispatch/AgentDispatchService.cs:49`
+  2. `Tamma.Activities/AgentDispatch/ExecuteAgentActivity.cs:187`
+  3. `Tamma.Activities/AgentDispatch/DispatchAgentWorkflowActivity.cs:100`
+  4. `Tamma.Activities/LlmCall/Models/TammaApiModels.cs:494`
+     (`AgentDispatchRunApiRequest`) — the **engine→API wire default**, so an engine
+     caller that omits the field silently gets `tamma-agent.yml` on the API side too
+  5. `Tamma.Api/Services/AgentDispatch/AgentDispatchRequests.cs:25`
+     (`DispatchAgentRunRequest`)
+  6. `Tamma.Api/Services/AgentDispatch/AgentDispatchMediationService.cs:41`
+     (`DefaultWorkflowFile`)
+
+  Two further mentions are **prose only, not behaviour** and must not be counted:
+  `Tamma.Platforms.Abstractions/Models/WorkflowDispatchRequest.cs:11` and
+  `AgentDispatchRequests.cs:24`.
+- **Presence check vs. fail-loud policy — two different owners.** *Corrected (this story
+  previously wrote "the mediation `CheckWorkflowFileAsync`", implying the mediation
+  service declares it):* the check is declared on `IGitHubActionsClient.cs:33` and
+  implemented by `Tamma.Api/Services/GitHub/OctokitGitHubActionsClient.cs:63` (null seam:
+  `Tamma.Activities/AgentDispatch/NullGitHubActionsClient.cs:16`).
+  `AgentDispatchMediationService` only **calls** it (`AgentDispatchMediationService.cs:101`).
+  What the mediation service *does* own is the fail-loud policy and the user-facing
+  string: `WorkflowNotFound` + *"Add the Tamma agent workflow template to
+  .github/workflows/"* at `AgentDispatchMediationService.cs:107-112`. AC7 edits that
+  string, not a method on the client.
 - **Result artifact** — `ActionsResultAggregator`
   (`apps/tamma-elsa/src/Tamma.Api/Services/AgentDispatch/ActionsResultAggregator.cs:39`)
   downloads the artifact named **`tamma-result`**, opens the entry ending **`result.json`**,
@@ -64,12 +85,31 @@ The C# side is fully built and pins the runner's output contract:
   agent_log_summary, tokens_used, duration_seconds, agent_provider, agent_version`.
   Caps: `MaxResultJsonBytes=4MB`, `MaxFilesChangedCount=2000`, `MaxAgentLogSummaryChars=32K`.
 
-**Single-user parity is symmetrically unshipped.** `LocalExecutor`
-(`Tamma.Activities/AgentDispatch/LocalExecutor.cs`) spawns
+**Single-user parity is unshipped — but not for the reason the code claims.**
+`LocalExecutor` (`Tamma.Activities/AgentDispatch/LocalExecutor.cs`) spawns
 `node packages/cli/dist/index.js execute-agent --request … --output …` and reads back an
-`AgentResultArtifact`-shaped file — but the `execute-agent` CLI command is **not
-implemented** (the executor's own XML doc and its "did not produce a result file
-(packages/cli execute-agent command may not be implemented yet)" error path say so).
+`AgentResultArtifact`-shaped file. *Corrected (this story previously said the
+`execute-agent` command is "not implemented"):* it **is** implemented —
+`packages/cli/src/commands/execute-agent.ts` (473 lines) implements the request/result
+JSON protocol verbatim, is registered at `packages/cli/src/index.tsx:158`, and has unit
+tests in `execute-agent.test.ts`. Three real defects break the path instead:
+
+- **No build output.** There is no `packages/cli/dist/` in the tree — the shell-out
+  target only exists after `pnpm --filter @tamma/cli build`.
+- **The default entry point cannot resolve.** `LocalExecutorOptions.CliEntryPoint`
+  defaults to the **relative** path `packages/cli/dist/index.js` (`LocalExecutor.cs:246`)
+  while the child process is launched with `WorkingDirectory` = a per-session temp dir
+  (`LocalExecutor.cs:94`; `ResolveWorkingDirectory` `:184-193`). `node` therefore resolves
+  it against the temp dir and fails, unless `Agent:Local:CliEntryPoint` is configured to
+  an absolute path.
+- **Stale in-code documentation.** `LocalExecutor.cs:16-18`, `:40-43`, and the error
+  string at `:139` still assert the command "may not be implemented yet". They are wrong
+  and misled this story's first draft.
+
+This is not a self-hosting-only concern: `AgentExecutorFactory` auto-resolves **`local`**
+whenever no GitHub App is configured (`AgentExecutorFactory.cs:69-77`), so `local` is the
+*default* executor on a self-hosted install — and today it fails on entry-point
+resolution rather than on a missing feature.
 
 **In the SingleIssueCycle context the runner does NOT open the PR.** The `pull-request`
 sub-workflow creates the draft PR *before* the TDD loop
@@ -89,6 +129,13 @@ issue" call.
    `AgentDispatchService.BuildDispatchInputs` sends (names/types byte-matched). It carries a
    `tamma-runner-version` marker (comment + an env/echo the run logs) so drift/upgrade can be
    detected.
+
+   **The filename default is pinned everywhere it exists.** The shipped file's basename is
+   byte-matched against **all six** hardcoded defaults enumerated in Architectural Context —
+   either by collapsing them to one shared constant that the test pins, or by a test that
+   asserts all six literals equal the shipped basename. *Falsifiable:* changing any one of
+   the six sites (or renaming the shipped file) without changing the rest fails the build.
+   A test that pins only three of the six does not satisfy this AC.
 
 2. **Runner steps implement the contract.** checkout `branch_name` → set up the agent
    environment → write the plan slice (`plan_json`) and a `.tamma/INSTRUCTIONS.md` (plan +
@@ -125,15 +172,25 @@ issue" call.
    target repo** and **detect version drift** against the shipped canonical copy. Endpoint(s)
    under the tenant-scoped admin surface: check status, install/upgrade. Tenant↔repo
    authorization reuses the existing `IGitRepoAuthorizer` guard; the install commit uses the
-   installation token minted inside `Tamma.Api` (never in the engine). The `CheckWorkflowFileAsync`
-   "not found" path's error message points at this install action.
+   installation token minted inside `Tamma.Api` (never in the engine). The fail-loud
+   `WorkflowNotFound` message at **`AgentDispatchMediationService.cs:107-112`** — *not* a
+   method on `IGitHubActionsClient`, see Architectural Context — points at this install
+   action instead of the bare "add the template" string.
 
-8. **Single-user CLI parity — implement `execute-agent`.** The local coding path is made real:
-   either (a) implement the `packages/cli execute-agent` command to the `LocalExecutor`
-   request/result JSON protocol, OR (b) replace the shell-out with an in-process local runner —
-   whichever the implementation plan justifies — so a self-hosted single-user Tamma can run the
-   coding step and produce the same `AgentResultArtifact`. The single-user runner uses the sole
-   user's own agent keys from local config, never a tenant secret.
+8. **The single-user local path runs on a default install.** *Corrected: the
+   `execute-agent` command already exists (Architectural Context), so the deliverable is
+   making the local path **resolvable**, not writing the command.* On a self-hosted install
+   with no GitHub App configured — where `AgentExecutorFactory` resolves `local`
+   (`AgentExecutorFactory.cs:69-77`) — the coding step completes and produces a parsed
+   `AgentResultArtifact` **without hand-editing configuration**. The plan picks and
+   justifies exactly one of: (a) package the existing Node CLI (build `dist/` as part of
+   the app build/image and default `Agent:Local:CliEntryPoint` to an absolute, resolvable
+   path), or (b) replace the shell-out with an in-process C# runner. Either way the sole
+   user's own agent keys from local config are used, never a tenant secret, and the stale
+   claims at `LocalExecutor.cs:16-18`, `:40-43`, `:139` are corrected to match reality.
+   *Falsifiable:* a test exercising the local path with **only default configuration**
+   yields a parsed `AgentResultArtifact`; run against today's tree the same test fails on
+   entry-point resolution.
 
 9. **Documentation.** A user-facing setup doc (secrets to add, how the App installs the
    workflow, self-hosted runner labels) and inline YAML comments per step. The
@@ -161,10 +218,19 @@ issue" call.
 - **Existing (verified):** `AgentDispatchService`/`AgentResultArtifactParser`/
   `ActionsResultAggregator`/`AgentDispatchMediationService`, `IGitHubActionsClient` +
   `OctokitGitHubActionsClient` (installation-token commit path), `IGitRepoAuthorizer`, the
-  GitHub App installation flow, `LocalExecutor` + `IProcessRunner`.
+  GitHub App installation flow, `LocalExecutor` + `IProcessRunner` +
+  `AgentExecutorFactory`. *Scope note:* those classes and their DI wiring are in place; the
+  local **path** is what does not work today (entry-point resolution, AC8) — do not read
+  "verified" as "the local coding step runs".
 - **Story 19-1** — the contract this story delivers (was never implemented).
-- **Independent of** 40-2..40-7 — ships the runner regardless of the durable-wait work; those
-  stories change *how Tamma waits*, not *what the runner does*.
+- **Independent of** 40-2..40-7 **for the GitHub Actions path** — ships the runner
+  regardless of the durable-wait work; those stories change *how Tamma waits*, not *what
+  the runner does*.
+- **Feeds 40-2 AC8 (single-user).** 40-2's local branch short-circuits to `Received` by
+  running whatever `AgentExecutorFactory` resolves; that is unit-testable against a stubbed
+  executor today, but the **single-user end-to-end** proof (a real local run producing a
+  real `AgentResultArtifact`) is only reachable once **this story's AC8** lands. 40-2
+  states the same edge from its side.
 
 ## Estimated Effort
 
@@ -175,3 +241,4 @@ issue" call.
 | Date       | Version | Changes                | Author |
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-23 | 1.0.0   | Initial story creation | Claude |
+| 2026-07-24 | 1.1.0   | Code-verified revision: `tamma-agent.yml` default count 3 → 6 (+2 prose-only) and AC1 byte-match widened to all six; `CheckWorkflowFileAsync` re-attributed to `IGitHubActionsClient`/`OctokitGitHubActionsClient` with the fail-loud message located at `AgentDispatchMediationService.cs:107-112`; AC8 rewritten — `execute-agent` exists, the defect is entry-point resolution/packaging; 40-1 AC8 recorded as feeding 40-2 AC8 | Claude |

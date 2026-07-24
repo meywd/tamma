@@ -11,10 +11,13 @@
 #   Epic:  backlog | contexted
 #   Story: backlog | drafted | ready-for-dev | in-progress | review | done | superseded
 #
-# NOTE: Epic 40's spine (40-2..40-7) is HARD-GATED on Epic 39-10
-#       (LifecycleBookmarks, ResumeBehavior, CanonicalSuspendActivities,
-#       LegacyResumeAllowlist, ResumableStandardStructuralTests). 40-1 has NO
-#       Epic-39 dependency and can start immediately.
+# NOTE (corrected — was: "Epic 40's spine (40-2..40-7) is HARD-GATED on Epic 39-10"):
+#       Epic 39-10 has LANDED. LifecycleBookmarks (+ Compose, CanonicalSuspendActivities),
+#       ResumeBehaviorAttribute/ResumeMode, ComputeReEntryPositionActivity and the
+#       ResumableStandardStructuralTests build gate are all shipped, with 22 production
+#       workflows already declaring against them. Epic 40 has NO external gate: 40-1 and
+#       40-2 both start day 0. The only hard scheduling constraint is 40-3's
+#       agent_run_waits TenantDbContext migration (single-author token, shared with Epic 39).
 
 generated: 2026-07-23
 project: Tamma
@@ -25,28 +28,27 @@ story_location: "{project-root}/docs/stories"
 development_status:
   epic-40: contexted   # README + EXECUTION-PLAN + 7 stories drafted (docs-only authoring pass).
 
-  # ── Wave 0 (background — no Epic-39 dependency, start day 0) ──
-  40-1-tamma-agent-runner-contract-and-scaffolding: drafted   # NET-NEW: tamma-agent.yml + scripts + result schema pin + GitHub-App scaffold + single-user in-process runner. 19-1 was contract-only, never built. Effort 6-8d. Prereq: none.
-
-  # ── Wave 1 (spine root — gated on 39-10) ──
-  40-2-wait-for-agent-run-activity-durable-bookmark: drafted  # Durable bookmark suspend + DelayFor timeout replacing the inline monitor. Effort 5-7d. Prereq: 39-10 (HARD).
+  # ── Wave 1 (both start day 0 — no external gate; they share no files) ──
+  40-1-tamma-agent-runner-contract-and-scaffolding: drafted   # NET-NEW: tamma-agent.yml + scripts + result schema pin + GitHub-App scaffold. 19-1 was contract-only, never built. NOTE: the single-user `execute-agent` CLI command DOES exist and is unit-tested — the gap there is packaging/config (relative CliEntryPoint vs temp workdir, no dist/ built), not a missing command. Effort 6-8d. Prereq: none.
+  40-2-wait-for-agent-run-activity-durable-bookmark: drafted  # Durable bookmark suspend + DelayFor timeout replacing the inline monitor; joins the shipped CanonicalSuspendActivities registry. Effort 5-7d. Prereq: none (39-10 landed).
 
   # ── Wave 2 (need 40-2) ──
   40-3-durable-agent-run-signal-and-resume-endpoint: drafted  # Persisted agent_run_waits row + webhook resume (cross-pod, restart-safe) + resume endpoint; demotes in-memory WebhookSignalRegistry. Effort 5-7d. Prereq: 40-2 (HARD), 39-8 (SOFT). MIGRATION: TenantDbContext (agent_run_waits) — single-author token.
-  40-4-per-task-re-entry-from-git-and-events: drafted         # Reconstruct landed tasks from git + DCB events keyed by adl-{issue}-task-{index}; resume loop at the right CurrentTaskIndex. Effort 5-7d. Prereq: 40-2 (HARD), 39-10 pattern (SOFT).
+  40-4-per-task-re-entry-from-git-and-events: drafted         # Reconstruct landed tasks from git + DCB events keyed by adl-{issue}-task-{index}; resume loop at the right CurrentTaskIndex. ALSO OWNS the ResumableStandardStructuralTests clause-(c) extension seam (:252 hardcodes ComputeReEntryPositionActivity) + registers ComputeTaskResumeIndexActivity. Ships behind a Null-default seam — the go-live flip must be named. Effort 5-7d. Prereq: 40-2 (HARD).
 
   # ── Wave 3 (need 40-2/40-4) ──
-  40-5-resume-behavior-declaration-and-allowlist-burndown: drafted  # [ResumeBehavior(Both)] on SingleIssueCycleWorkflow + remove its LegacyResumeAllowlist entry; pass ResumableStandardStructuralTests with no allowlist. Effort 2-3d. Prereq: 39-10 + 40-2 + 40-4 (ALL HARD).
+  40-5-resume-behavior-declaration-and-allowlist-burndown: drafted  # [ResumeBehavior(Both)] on SingleIssueCycleWorkflow + remove its LegacyResumeAllowlist entry (a private static field in the TEST fixture ResumableStandardStructuralTests.cs:75 — a tests-project edit); pass the gate with no allowlist. Declaring Both arms clause (c), so 40-4's seam must merge FIRST. Effort 2-3d. Prereq: 40-2 + 40-4 (HARD).
   40-6-agent-run-lifecycle-event-family: drafted             # AgentRunEventTypes (WAIT_SUSPENDED/RECEIVED/TIMED_OUT/RESUME_UNRESOLVED/TASK_REENTERED) consolidating 40-2/3/4 placeholder pins; feeds re-entry. Effort 3-4d. Prereq: 40-2/40-3/40-4 (HARD).
 
   # ── Wave 4 (composition proof — needs the whole epic) ──
-  40-7-crash-restart-mode-matrix-integration-proof: drafted  # Testcontainers: durable suspend/resume, cross-pod, crash re-entry (exactly-once/task), timeout, inconsistency-fails-loud, SaaS+local mode matrix, 40-1 runner self-check. Effort 4-5d. Prereq: 40-1..40-6 (HARD).
+  40-7-crash-restart-mode-matrix-integration-proof: drafted  # Testcontainers: durable suspend/resume, cross-pod, crash re-entry (exactly-once/task), timeout, inconsistency-fails-loud, SaaS+local mode matrix, 40-1 runner self-check. Its re-entry assertions need the REAL TaskLoopReEntryService registered (or 40-4's flag set) — the DI default is the Null seam that always returns index 0. Effort 4-5d. Prereq: 40-1..40-6 (HARD).
 
   epic-40-retrospective: optional
 
 # ── Effort / schedule summary (see EXECUTION-PLAN.md) ──
 # total_effort_person_days: 37.25
-# critical_path_days: 20.5            # 40-2 -> 40-4 -> 40-6 -> 40-7 (39-10 assumed landed)
-# wave_parallel_wall_clock_days: 22.75
-# external_gate: "Epic 39-10 must land before the 40-2 spine can start"
-# tenant_migration: "40-3 agent_run_waits — joins Epic 39 tenant-context migration chain (single-author token)"
+# critical_path_days: 20.5            # 40-2 -> 40-4 -> 40-6 -> 40-7
+# wave_parallel_wall_clock_days: 22.75  # sum of wave poles: 8 + 6.75 + 3.25 + 4.75
+# external_gate: none                 # corrected: 39-10 has landed
+# tenant_migration: "40-3 agent_run_waits — joins Epic 39 tenant-context migration chain (single-author token); the ONLY hard scheduling constraint"
+# cross_epic_merge_order: "SingleIssueCycleWorkflow.cs — 40-2 -> 40-4 -> 40-5 -> 41-29 (Epic 41 rewires the same per-task loop)"
