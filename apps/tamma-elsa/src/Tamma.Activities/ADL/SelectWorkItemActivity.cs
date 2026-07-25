@@ -183,8 +183,8 @@ public class SelectWorkItemActivity : TammaOutcomeActivity
             if (response.IsSuccessStatusCode)
             {
                 var json = await response.Content.ReadAsStringAsync();
-                var issues = JsonSerializer.Deserialize<List<WorkItem>>(json,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                var issues = JsonSerializer.Deserialize<EngineIssuesResponse>(json,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })?.Issues;
 
                 if (issues != null)
                 {
@@ -217,8 +217,8 @@ public class SelectWorkItemActivity : TammaOutcomeActivity
             if (untriagedResponse.IsSuccessStatusCode)
             {
                 var json = await untriagedResponse.Content.ReadAsStringAsync();
-                var allIssues = JsonSerializer.Deserialize<List<WorkItem>>(json,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                var allIssues = JsonSerializer.Deserialize<EngineIssuesResponse>(json,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true })?.Issues;
 
                 if (allIssues != null)
                 {
@@ -271,6 +271,29 @@ public class SelectWorkItemActivity : TammaOutcomeActivity
         ["priority"] = this.GetOutput<string>(context, nameof(Priority)),
         ["untriagedCount"] = this.GetOutput<int>(context, nameof(UntriagedCount)),
     };
+}
+
+/// <summary>
+/// The response envelope of <c>GET /api/engine/issues</c>.
+///
+/// <para><b>Why this type exists.</b> The endpoint returns
+/// <c>{ issues, total }</c> (<c>EngineEndpoints.GetIssues</c>,
+/// <c>Results.Ok(new { issues = r.Issues, total = r.Total })</c>) — an OBJECT.
+/// Both engine-side callers used to deserialize the body straight into
+/// <c>List&lt;WorkItem&gt;</c>, which throws <see cref="JsonException"/> against an
+/// object. In <see cref="SelectWorkItemActivity"/> that throw was caught by a
+/// broad <c>catch (Exception)</c> that only logged, so the real (non-mock) intake
+/// path silently returned zero candidates and every run reported
+/// <c>NothingFound</c>. Deserializing the envelope is the fix; keeping it as a
+/// named type is what stops the next caller repeating it.</para>
+/// </summary>
+internal sealed class EngineIssuesResponse
+{
+    [JsonPropertyName("issues")]
+    public List<WorkItem> Issues { get; set; } = new();
+
+    [JsonPropertyName("total")]
+    public int Total { get; set; }
 }
 
 /// <summary>

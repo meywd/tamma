@@ -39,3 +39,23 @@ Both stay **Wave 3**, both on the Wave-1 rails (42-1 → 42-2 → 42-3/42-4/42-5
 engine-side. 42-8B and 42-7 share `WaitForToolOperationActivity`, its bookmark prefix, its
 `LifecycleBookmarks.CanonicalSuspendActivities` registration and its authenticated callback endpoint —
 whichever lands first ships them; the second reuses them and adds only its operation `kind`.
+
+> *Post-reconciliation note (2026-07-25): the Wave-1 rails are now 42-1 → 42-4/42-5 (42-2 and 42-3 are
+> deleted; Epic 43 governs). The order above is also less certain — 42-9 lost its entire configuration
+> source with 42-2, so if it slips, **42-8A should ship first**: it is independent, small, and delivers the
+> kill-switch 41-22 needs. See [`implementation-plan.md`](./implementation-plan.md) C2.*
+
+## Estimated Effort
+
+This index is a coordination artifact and carries **no implementation effort of its own**. The roll-up for
+the two halves, and the shared-asset accounting that makes the naive sum wrong:
+
+| Story | Standalone | If its sibling landed first |
+|---|---|---|
+| **42-8A** — Feature-Flag / Config-Toggle | **~4–5 days** | — (shares nothing; no engine-side work) |
+| **42-8B** — Deploy-Control | **~5–6 days** | **~4 days** (42-7 already shipped `WaitForToolOperationActivity` + its bookmark builder + the `CanonicalSuspendActivities` registration + the authenticated callback endpoint) |
+
+**Pair total: ~9–11 days.** Note that 42-8B shares its wait machinery with **42-7**, not with 42-8A, so the
+three suspend-and-flag stories (42-8A + 42-8B + 42-7) total **~14–15 days**, not the ~16–17 that summing
+standalone figures would give — the machinery is paid for **once**. See
+[`implementation-plan.md`](./implementation-plan.md) C1 for the ledger.

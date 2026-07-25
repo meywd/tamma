@@ -333,7 +333,38 @@ ungovernable one.
 | Story | Title | Purpose (one line) |
 |---|---|---|
 | **42-1** | Tool Contract & Registry Evolution | Add `ToolDescriptor` (category / permission class / autonomy floor / secret requirement / suspends) to the `IToolExecutor` surface and a dynamic `Register`/`Unregister` seam to `IToolExecutorRegistry`; annotate the six built-ins. |
-| ~~**42-2**~~ | ~~Tool Binding & Config Store~~ | **SUPERSEDED by Epic 43 — story file deleted 2026-07-25.** It persisted per-principal tool enablement + autonomy floor in a new `tool_bindings` table. Epic 43's `action_assignments` stores the same policy for *all* actions, of which tools are one namespace; two tables holding the same setting can disagree. Two-scoping prose transplanted to Epic 43 Story 5. |
+| ~~**42-2**~~ | ~~Tool Binding & Config Store~~ | **SUPERSEDED by Epic 43 — story file deleted 2026-07-25.** It persisted per-principal tool enablement + autonomy floor in a new `tool_bindings` table. Epic 43's `action_assignments` stores the same policy for *all* actions, of which tools are one namespace; two tables holding the same setting can disagree. Two-scoping prose transplanted to Epic 43 Story 5. **⚠️ But see the gap below — the deletion took `ConfigJson` with it.** |
+
+> ### ⚠️ Gap opened by the 42-2 deletion — `ConfigJson` has no replacement
+>
+> Found during the implementation-planning pass, after the reconciliation was written. **This is a
+> defect in the reconciliation, not in the stories.**
+>
+> 42-2's `tool_bindings` row carried **two different things**: per-principal *policy* (enablement,
+> autonomy floor, allowed roles) and per-principal *configuration* (`ConfigJson`). Epic 43's
+> `action_assignments` absorbs the policy half only — it stores a threshold and flags, deliberately,
+> because it is a governance table and not a settings store.
+>
+> So deleting 42-2 wholesale left **four stories with nowhere to put their configuration**:
+>
+> | Story | What it lost |
+> |---|---|
+> | **42-9** authenticated HTTP tool | the destination / host allowlist |
+> | **42-8A** feature-flag tool | the environment map |
+> | **42-8B** deploy-control tool | the target map |
+> | **42-4** tool credential binding | the secret-name override |
+>
+> **Interim resolution, applied in those four plans:** each moves its configuration to `IOptions`
+> (deployment configuration), which is sufficient for single-user mode and for a single-tenant
+> deployment.
+>
+> **Open product question — per-tenant tool configuration in SaaS is genuinely lost.** `IOptions` is
+> process-wide, so two tenants cannot have different deploy targets or different flag environments.
+> 42-2 would have supported that. Restoring it means either a narrow `tool_configuration` table
+> (config only, no policy — explicitly *not* a second governance store) or accepting that tool
+> configuration is deployment-scoped in v1. Not derivable from code; needs a decision before 42-7,
+> 42-8A, 42-8B or 42-9 are implemented.
+
 | ~~**42-3**~~ | ~~Per-Tool Permission & Autonomy Gating~~ | **SUPERSEDED by Epic 43 — story file deleted 2026-07-25.** A second gate on the same code path as Epic 43's Seam B, with no stated ordering between them, its own denial-audit schema and its own escalation machinery. Its siting analysis and effective-ceiling insight (filtering on the raw descriptor class would have made every Wave-3 write tool unreachable) are transplanted to Epic 43 Story 9, with credit. |
 | **42-4** | Tool Credential / Secret Binding | Generalize the shipped runtime-reveal pattern into `IToolSecretProvider` (impl in `Tamma.Api`), bind external-touching tools to `ISecretStore` (`SecretScope.Tenant` SaaS / `SecretScope.Platform` single-user); guarantee no-secret-in-logs/events. |
 | **42-5** | Tool-Use DCB Audit | Emit the durable **invocation trio** `TOOL.INVOKED` / `TOOL.SUCCEEDED` / `TOOL.FAILED` (secret-redacted args, `issueId`/`tenantId` tags) via a **direct `IEventRepository` append in `Tamma.Api`** at the shared `InlineToolLoopRunner` call site covering both execution branches, alongside the ephemeral `TOOL_LOOP.*` SSE stream; owns the shared emit path + redaction rule the other `TOOL.*` events reuse. *(The governance events `TOOL.RESOLVED`/`DENIED`/`ESCALATED`/`AUTHORIZED` are **42-3**'s; `TOOL.SECRET_ACCESSED` is **42-4**'s; `TOOL.BINDING_*` is **42-2**'s.)* |
