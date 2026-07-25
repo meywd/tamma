@@ -53,10 +53,15 @@ orchestrator re-dispatches a fresh `SingleIssueCycleWorkflow` for the issue and 
 at index 0** — re-running every prior stage and re-implementing landed tasks. There is no read of
 "what already happened for this issue."
 
-**39-10 established the pattern; code needs its own read model.** 39-10's `LifecycleReEntryService`
-reconstructs a document workflow's position from the **39-11 document store + DCB events**. Epic
-39's README is explicit that **code is NOT a document type** — code's store is git. So the coding
-loop cannot reuse the document-store read; it reconstructs from:
+**39-10 has landed; code needs its own read model.** 39-10's `LifecycleReEntryService`
+reconstructs a document workflow's position from the **39-11 document store + DCB events**, via the
+one shipped re-entry node `ComputeReEntryPositionActivity`
+(`Tamma.Activities/Documents/ComputeReEntryPositionActivity.cs:36`). That node is **document-coupled
+by construction** — a `DocumentType` input (`:43-44`), a hard `ILifecycleReEntryService` resolve
+(`:70-76`), and a `DOCUMENT.REENTERED` emission (`:141`) — and Epic 39's README is explicit that
+**code is NOT a document type**; code's store is git. So the coding loop can reuse neither the
+document-store read nor that node: it needs its own node (AC3) and its own read model, which
+reconstructs from:
 
 1. **Git** — the branch's commits (via the mediated compare/PR reads already in
    `ActionsResultAggregator`): which tasks' expected changes are already committed.
@@ -83,10 +88,13 @@ possible — each task's events are addressable.
    state yields zero new agent dispatches for landed tasks and zero duplicate `CODE.*`/agent
    events (mirrors 39-10 AC6).
 
-3. **Wired into the loop.** `SingleIssueCycleWorkflow`'s `initTaskLoop` (or a new node before
-   `hasMoreTasks`) consults the re-entry service to set the initial `CurrentTaskIndex` to the
-   reconstructed resume index instead of hard-`0`, when re-entering for an issue that already has
-   landed tasks. A fresh issue with no history resolves to `0` (today's behavior, zero risk).
+3. **Wired into the loop as a named node.** A new activity **`ComputeTaskResumeIndexActivity`**
+   (`apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/`) sits between `initTaskLoop`
+   (`SingleIssueCycleWorkflow.cs:517`) and `hasMoreTasks` (`:530`), consults the re-entry service,
+   and sets the initial `CurrentTaskIndex` to the reconstructed resume index instead of hard-`0`
+   when re-entering an issue that already has landed tasks. A fresh issue with no history resolves
+   to `0` (today's behavior, zero risk). **The type name is load-bearing** — 40-5 (gate clause c),
+   40-6 (emission site) and 40-7 (integration assertion) all reference this exact type.
 
 4. **Disagreement fails loud, never guesses.** If git and events disagree (a task's events say
    landed but its commits are absent, or vice-versa), the service throws a typed
@@ -99,9 +107,23 @@ possible — each task's events are addressable.
    side reuses `IEventRepository` (Story 4-7 query surface) — the same reads 39-10 uses. No new
    GitHub client, no second event query path.
 
-6. **Null-seam default.** Until fully wired/validated, the service ships behind a
-   `NullTaskLoopReEntryService` that always returns index `0` (today's behavior), so re-entry
-   goes live by a DI swap without a workflow-code change (the 39-10 D7 pattern).
+6. **Null seam with a NAMED flip.** The service ships behind a `NullTaskLoopReEntryService` that
+   always returns index `0` (today's behavior), so re-entry goes live by a DI swap without a
+   workflow-code change (the 39-10 D7 pattern). Unlike a bare seam, the flip is specified:
+   - **Key:** `Coding:TaskReEntryDisabled`, read in both hosts exactly as 39-10's shipped
+     `Documents:ReEntryDisabled` is (`Tamma.ElsaServer/Program.cs:178-187`,
+     `Tamma.Api/Program.cs:250-260`) — `true` ⇒ `NullTaskLoopReEntryService`, otherwise the real
+     `TaskLoopReEntryService`.
+   - **Shipped default at 40-4's merge:** the key's *default value* is `true` — a stock deployment
+     gets the Null seam and today's behavior while the read model is unvalidated.
+   - **Who flips it, and when:** **40-7**, once its crash-re-entry scenarios (40-7 AC3/AC4) are
+     green, changes that one default literal to `false`. **Shipped default at the END of the epic
+     is therefore the REAL service**, with `Coding:TaskReEntryDisabled=true` left as the operator
+     kill-switch — the same posture 39-10 reached after 39-11 landed.
+
+   Falsifiable: a DI test per host asserts the flag `true` resolves `NullTaskLoopReEntryService`
+   and the flag absent/`false` resolves `TaskLoopReEntryService`, plus a pin on the shipped default
+   (Null at 40-4; 40-7 flips the pin with the literal).
 
 7. **Emits a re-entry event.** When re-entry skips ≥1 task, the cycle emits
    `AGENT_RUN.TASK_REENTERED` (40-6 family) with `{ issueNumber, resumeIndex, landedIndices,
@@ -112,13 +134,44 @@ possible — each task's events are addressable.
    events are tenant-folded. Single-user: local git + central-schema events. The reconstruction
    logic is mode-agnostic; only the read sources differ (as they already do for dispatch/collect).
 
+9. **The task list is rehydrated and verified before any reconstructed index is used.** A resume
+   index is a position in the **original** task list, so it is meaningless against a regenerated
+   one — and on a fresh dispatch both `task-creation` (`SingleIssueCycleWorkflow.cs:317`) and
+   `task-review` (`:370`, which *rewrites* `tasksJson` from the review result) are LLM producers
+   that may reorder or rewrite. Therefore:
+   - **(a) Rehydrate, don't regenerate.** For an issue with prior landed tasks the loop indexes
+     into the list read from the durable accepted **task-breakdown `plan` document** (39-15's
+     non-provisional `task-creation → Plan` binding, `DocumentTypeRegistry.cs:154`), not a freshly
+     generated one.
+   - **(b) Verify before trusting.** `tasks[i].id` (`PlanTask.Id`, `Plan.cs:14`) must equal the
+     `taskId` recorded for index `i` on the prior run's per-task events (40-6 AC3).
+   - **(c) Mismatch ⇒ index 0.** Verification failure, un-rehydratable list, or a task without an
+     id ⇒ resume index `0` (re-implement, safe) with the reason on the position's basis. Never a
+     best-effort skip.
+
+   Falsifiable: given landed evidence for tasks 0..k and a *reordered* rehydrated list, the service
+   returns `0` with a `TASK_LIST_MISMATCH` basis — not `k+1`.
+
+10. **The 39-10 build gate can see the new node (clause-(c) extension seam).** 39-10's clause (c)
+    (`ResumableStandardStructuralTests.cs:240-261`) asserts **exact type-identity** membership of
+    `ComputeReEntryPositionActivity` in the built graph (`:252`) — one hardcoded type, and one this
+    story cannot reuse (document-coupled, see Architectural Context). 40-4 therefore lands the
+    extension seam and registers into it: a canonical **re-entry registry**
+    (`CanonicalReEntryActivities`) mirroring the shipped
+    `LifecycleBookmarks.CanonicalSuspendActivities` (`LifecycleBookmarks.cs:98-105`); clause (c)
+    widens to "the graph contains ≥1 node whose type is in the registry"; the registry ships
+    seeded with `ComputeReEntryPositionActivity` **and** `ComputeTaskResumeIndexActivity`.
+    Falsifiable both ways: every workflow that declares `LatestStateReEntry`/`Both` today keeps
+    the same verdict, and a declaring workflow whose graph holds neither registered type still
+    fails, naming the workflow and listing the registered types.
+
 ## Technical Notes
 
 - **Git is the authority for "landed"; events are the corroborating trail.** A task is landed
   when its expected changes are committed on the branch AND its `adl-{issue}-task-{index}` run
   event says success. Requiring both avoids skipping a task whose events fired but whose push
-  failed (D4's inconsistency case), and avoids re-implementing a task whose events were lost but
-  whose commits are present (corroborate, then trust git).
+  failed (the plan's D3 inconsistency case), and avoids re-implementing a task whose events were
+  lost but whose commits are present (corroborate, then trust git).
 - **The session-id scheme is the join key — keep it deterministic.** `adl-{issue}-task-{index}`
   must remain stable; any change to it breaks re-entry addressing. If a future story changes it,
   re-entry must migrate in lockstep.
@@ -127,29 +180,50 @@ possible — each task's events are addressable.
   (they are cheap/idempotent relative to coding, and `tasksJson` must be regenerated to index
   into). A future story may extend re-entry to skip those too; out of scope here. *(State this
   boundary explicitly so the scope is honest.)*
-- **`tasksJson` determinism matters.** Re-entry indexes into `tasksJson[CurrentTaskIndex]`; if
-  task regeneration produces a different ordering, the index is meaningless. The plan must address
-  how `tasksJson` is stabilized/rehydrated for a re-entering issue (e.g. read the tasks from the
-  PR's committed plan `.md` files or a prior `TASK.CREATED` event rather than regenerating).
+- **`tasksJson` determinism matters — now AC9, not a hope.** Re-entry indexes into
+  `tasksJson[CurrentTaskIndex]`; if regeneration reorders the list, the index is silently wrong
+  (skipping an unimplemented task). AC9 pins rehydrate-then-verify-then-fall-back-to-0.
+- **AC9 is the ONE place the coding path reads the 39-11 document store — deliberately, and only
+  for the task LIST.** The epic's rule "code is not a document type; re-entry reads git + events"
+  governs the resume *position* (AC1), and it still holds. The task list, by contrast, genuinely
+  *is* a document after 39-15 (`task-creation` produces a non-provisional `plan`,
+  `DocumentTypeRegistry.cs:154`), and it is the only order-stable durable copy that exists today.
+  Recorded here so the read is a decision, not an accident. Alternatives considered and rejected:
+  the prior task-creation DCB event (carries ids/metadata, not a guaranteed body) and committing a
+  `.tamma/tasks.json` to the branch (new write behavior, a separate story).
+- **Two of this story's edits land in the tests project.** `ResumableStandardStructuralTests.cs` is
+  a test fixture; AC10's clause-(c) widening edits it (`:240-261`). 40-5 edits the same file
+  (deleting the `SingleIssueCycleWorkflow` allowlist entry at `:75`), and 40-5's `Both` declaration
+  *arms* clause (c) — so **40-4's seam must merge before 40-5** or 40-5 reddens CI.
 
 ## Dependencies
 
 - **Story 40-2 — HARD.** The loop node is `WaitForAgentRunActivity`; re-entry sets the index it
   resumes at. 40-4's guard skips landed tasks before that suspend.
-- **Story 39-10 — SOFT (pattern), and the event-read path.** `LifecycleReEntryService`/
-  `LifecycleResumeCalculator` are the pure-calculator + I/O-service split to mirror; the 4-7/4-8
-  read path is shared. Not consumed directly (different store), but the shape is copied.
+- **Story 39-10 — LANDED; the pattern, the read path, and the gate this story widens.**
+  `LifecycleReEntryService`/`LifecycleResumeCalculator` are the pure-calculator + I/O-service split
+  to mirror (not consumed — different store); `ResumableStandardStructuralTests.cs` is the gate
+  AC10 extends. *(Corrected: earlier drafts treated 39-10 as an unlanded prerequisite. It is in the
+  tree — `ResumeBehavior.cs:11/:39`, `LifecycleBookmarks.cs:30/:98`,
+  `ComputeReEntryPositionActivity.cs:36`, `ResumableStandardStructuralTests.cs:34`.)*
 - **Story 4-7 (event query API) + 4-8 (`ReplayReconstructor`)** — the DCB read + forensic
   fallback. Existing.
+- **Story 40-6 — SOFT, but AC9(b) needs it.** The `taskId`-per-index recorded on the per-task
+  events is what makes rehydration verifiable. Until 40-6 lands, AC9(b) verifies against whatever
+  the placeholder-pinned emission carries; if no `taskId` is available the rule degrades to AC9(c)
+  (index 0), which is safe.
 - **Existing (verified):** `ActionsResultAggregator` (git compare/PR reads), `IEventRepository`,
-  the `adl-{issue}-task-{index}` session scheme, `SingleIssueCycleWorkflow` loop.
+  the `adl-{issue}-task-{index}` session scheme (`SingleIssueCycleWorkflow.cs:581`), the loop
+  (`:513-592`), the accepted task-breakdown `plan` document (39-15).
 
 ## Estimated Effort
 
-5-7 days
+5-7 days (plan totals 7.0 — see the plan's Effort Breakdown; +0.5 vs. the pre-review 6.5 for the
+previously unbudgeted clause-(c) seam)
 
 ## Change Log
 
 | Date       | Version | Changes                | Author |
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-23 | 1.0.0   | Initial story creation | Claude |
+| 2026-07-24 | 1.1.0   | Review pass: AC3 names `ComputeTaskResumeIndexActivity`; AC6 names the flip (key, default, owner); new AC9 (task-list rehydrate + verify) and AC10 (clause-(c) re-entry registry seam); 39-10 recorded as landed | Claude |

@@ -16,7 +16,8 @@ P3 / Wave 3 — turns tech-debt findings into safe, planned work.
 ## Scope
 
 Thin binding over `document-lifecycle`. `consumes: [tech-debt TriageDecision (41-11), context-scan, Review
-concerns]` / `produces: Plan`. Produce cell `(senior_developer, plan-refactor)`.
+concerns]` / `produces: Plan`. Produce cell `(senior_developer, plan-refactor)` — an existing, unbound
+cell (`AgentAction.cs`; in `SeniorDeveloper`'s eligible set, `RolePhaseMap.cs:80-92`).
 
 ## Produced document
 
@@ -40,14 +41,37 @@ refactor touching a public API can be an always-escalate class.
 
 ## Acceptance Criteria
 
-1. Thin lifecycle binding; `Plan` validated (ordering, per-step testing/behavior preservation).
-2. Consumes 41-11 tech-debt output when present.
-3. Accepted plan consumable by the coding step via 39-11.
-4. `[ResumeBehavior(Both)]`; 39-10 structural test green without allowlist.
+1. Thin lifecycle binding on `(senior_developer, plan-refactor)`, adding one `ContractBindingTests`
+   `Bindings` entry with authority `PlanDocumentType.Validate`.
+2. `Plan` validation is exercised by one fixture per rule: no steps ⇒ `EMPTY_PLAN`; a step with no file map
+   ⇒ `TASK_MISSING_FILE_MAP`; a step whose `testing` field is empty ⇒ `TASK_MISSING_TESTING`; a
+   self-dependent step ⇒ `SELF_DEPENDS_ON`; a cyclic pair ⇒ `CYCLIC_DEPENDS_ON` (`Plan.cs:50-71`).
+3. **Behavior preservation is enforced as structure, not as judgement.** Every step's `testing` field must
+   name a characterization or regression test that exists before the step runs; a step whose `testing` is
+   empty or names no test is rejected by rule (`TASK_MISSING_TESTING` plus a story-local
+   `STEP_MISSING_CHARACTERIZATION_TEST`). *Corrected: AC1 previously asserted the `Plan` was "validated
+   (… behavior preservation)". `PlanDocumentType` has no behavior-preservation rule (`Plan.cs:47-71`
+   lists all nine), so as written the criterion could not fail.*
+4. The run records the `documentId` of the 41-11 tech-debt `TriageDecision` it consumed (or `null` when
+   triggered from a `Review` concern instead), and fails loud if a referenced id is unreadable.
+5. An accepted `Plan` is retrievable by `issueId`/`repository` through 39-11 and is read by a coding-step
+   dispatch in an integration test.
+6. `[ResumeBehavior(Both)]`; 39-10 structural test green without an allowlist entry. A new
+   `WorkflowDocumentInterface` row is declared and `WorkflowInterfaceGraphTests.Declared_edge_count_is_pinned`
+   is bumped in the same change.
+
+> Whether the refactor is *actually* behavior-preserving is not decidable from the plan document — that is
+> what the characterization tests in AC3 and the review panel are for. No AC asserts it.
 
 ## Dependencies
 
-- **Blocking:** Epic 39 (`Plan`, lifecycle, review-panel, store); Epic 40 for execution.
+- **Blocking:** Epic 39 (`Plan`, lifecycle, review-panel, store).
+- **Blocking for the execution hand-off only (AC5's downstream, not this workflow):** **Epic 40**.
+  *Corrected: this previously read "Epic 40 for execution", which reads as a durability nicety. Epic 40
+  ships the missing **execution substrate** — `.github/workflows/tamma-agent.yml` does not exist in this
+  repo, so the coding step's dispatch fails loud with `WorkflowNotFound`
+  (`AgentDispatchMediationService.cs:109`) today. Producing and accepting the `Plan` has no Epic 40
+  dependency; only working the accepted plan does.*
 - **Related:** consumes 41-11.
 
 ## Estimated Effort

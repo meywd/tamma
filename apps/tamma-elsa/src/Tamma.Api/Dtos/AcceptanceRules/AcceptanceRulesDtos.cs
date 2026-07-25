@@ -17,7 +17,11 @@ public sealed record AcceptanceRulesUpsertRequest(
     [property: JsonPropertyName("alwaysEscalate")] IReadOnlyList<EscalationClass>? AlwaysEscalate,
     [property: JsonPropertyName("reviewerSelection")] ReviewerSelection ReviewerSelection,
     [property: JsonPropertyName("decisionGuidance")] string DecisionGuidance,
-    [property: JsonPropertyName("routingGuidance")] string RoutingGuidance)
+    [property: JsonPropertyName("routingGuidance")] string RoutingGuidance,
+    // Story 39-13 D4 — the per-type autonomy floor. Trailing + defaulted so a body
+    // written before the field existed still binds, to `any` (today's behavior).
+    [property: JsonPropertyName("acceptorRequirement")] AcceptorRequirement AcceptorRequirement
+        = AcceptorRequirement.Any)
 {
     /// <summary>Map to the domain record (unvalidated — the service calls <c>Validate()</c>).</summary>
     public Tamma.Core.Documents.Policy.AcceptanceRules ToRules() => new()
@@ -30,5 +34,6 @@ public sealed record AcceptanceRulesUpsertRequest(
         ReviewerSelection = ReviewerSelection,
         DecisionGuidance = DecisionGuidance ?? string.Empty,
         RoutingGuidance = RoutingGuidance ?? string.Empty,
+        AcceptorRequirement = AcceptorRequirement,
     };
 }

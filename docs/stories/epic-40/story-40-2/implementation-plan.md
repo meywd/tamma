@@ -14,17 +14,18 @@ the old inline path are reused; only the inline monitor `await` is removed.
 ## Pre-Reading
 
 - `docs/stories/epic-40/story-40-2/40-2-wait-for-agent-run-activity-durable-bookmark.md` — this story (ACs are source of truth)
-- `apps/tamma-elsa/src/Tamma.Activities/Testing/WaitForCIResultsActivity.cs` — THE pattern: `CreateBookmark` + `DelayFor`, `[FlowNode("Received","Timeout")]`, fail-closed sentinel, `ResumeInput.AsBool` read-back
+- `apps/tamma-elsa/src/Tamma.Activities/Testing/WaitForCIResultsActivity.cs` — the SUSPEND SHAPE to mirror: `CreateBookmark` (`:87`) + `DelayFor` (`:94`), `[FlowNode("Received","Timeout")]` (`:42`), fail-closed sentinel, `ResumeInput.AsBool` read-back. **Do NOT copy its naming:** it addresses the bookmark with a bespoke `CIResultBookmarkPayload` object (`:80`) and is deliberately absent from `LifecycleBookmarks.CanonicalSuspendActivities`. D7 records the decision to use the canonical registry instead.
 - `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/ExecuteAgentActivity.cs` — the current inline activity (inputs/outputs to mirror, DI-guard shape, event emission via `TammaEventEmitter`)
 - `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/GitHubActionsExecutor.cs` — the dispatch→monitor→collect composition to split (dispatch pre-suspend, collect post-resume); `TimeoutMinutes` computation (`request.TimeoutMinutes + 5`)
 - `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/AgentDispatchService.cs` + `IAgentDispatchServices.cs` — `DispatchAsync` (returns `AgentDispatchResult { Success, DispatchedAt, … }`) run in `Execute`
 - `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/AgentResultCollectorService.cs` + `CollectAgentResultsActivity.cs` — `CollectAsync(request, monitorResult, ct)` run in `OnResumeAsync`; `AgentMonitorResult` shape it needs
-- `apps/tamma-elsa/src/Tamma.Activities/Documents/LifecycleBookmarks.cs` — 39-10's builder (add `ForAgentRun`); `CanonicalSuspendActivities` registry; `WaitForMergeApprovalActivity.NormalizeSegment`
+- `apps/tamma-elsa/src/Tamma.Activities/Documents/LifecycleBookmarks.cs` — 39-10's builder, **shipped**: `Compose` `:38`, `ForStageGate` `:55`, `ForDecisionSession` `:66`, `ForDocumentInput` `:82`, `CanonicalSuspendActivities` `:98` (two entries: `:101`, `:104`). This story adds `ForAgentRun` + a third registry entry; `NormalizeSegment` comes from `WaitForMergeApprovalActivity` (used at `:43`/`:46`)
+- `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/AgentExecutorFactory.cs:69-77` — mode auto-detection (`local` when no GitHub App); the D5 local branch keys off this
 - `apps/tamma-elsa/src/Tamma.Activities/ResumeInput.cs` — `ResumeInput.AsBool` coercion (#15/#437)
 - `apps/tamma-elsa/tests/Tamma.Activities.Tests/Clarify/ClarifyResumeReadBackTests.cs` — the read-back tolerance matrix shape
 - `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/SingleIssueCycleWorkflow.cs:571` — the `tddForTask` node + loop wiring (`Completed`/`Failed` → incrementTask / dispatchTddRetry)
 - `docs/stories/epic-39/story-39-10/implementation-plan.md` — `LifecycleBookmarks`/`CanonicalSuspendActivities`/`ResumeBehavior` contracts consumed here
-- **NOT FOUND (prerequisite):** `LifecycleBookmarks.cs`, `CanonicalSuspendActivities` (land with 39-10). See Dependencies & Sequencing.
+- *Corrected:* an earlier draft listed `LifecycleBookmarks.cs` / `CanonicalSuspendActivities` as **NOT FOUND (prerequisite)**. **They exist** (39-10 landed) — the paths above are real and this story edits them in place. There is no shim step.
 
 ## Design Decisions
 
@@ -55,19 +56,38 @@ the old inline path are reused; only the inline monitor `await` is removed.
   from an unreadable run), matching `GitHubActionsExecutor` step-3 semantics.
 - **D5 — Local mode runs to completion in `Execute`, short-circuits `Received` (no external
   suspend).** For `LocalExecutor` there is no `workflow_run` webhook; suspending on an external
-  signal would hang. The factory-selected mode is known in `Execute`; when it is `local`, the
-  activity runs the local runner synchronously (as today) and completes `Received` without
-  creating the external result bookmark — it still arms `DelayFor` for a hard timeout. So the
-  workflow definition stays mode-agnostic (AC8) while only the GHA path uses the external
-  suspend. Decision recorded rather than forcing a fake local webhook.
+  signal would hang. The factory-selected mode is known in `Execute`
+  (`AgentExecutorFactory.cs:69-77` — `local` is the auto-resolved default when no GitHub App
+  is configured); when it is `local`, the activity runs the executor synchronously (as today)
+  and completes `Received` without creating the external result bookmark — it still arms
+  `DelayFor` for a hard timeout. So the workflow definition stays mode-agnostic (AC8) while
+  only the GHA path uses the external suspend. Decision recorded rather than forcing a fake
+  local webhook.
+
+  **Scope honesty (AC8).** This branch preserves today's local behaviour; it does not make
+  local *work*. The local path is currently broken on entry-point resolution
+  (`LocalExecutor.cs:246` relative `CliEntryPoint` vs. the temp-dir `WorkingDirectory` at
+  `:94`/`:184-193`; no built `packages/cli/dist/`), which **40-1 AC8** fixes. Until then this
+  story's local coverage is unit-level against a stubbed `IAgentExecutor` (assert `Received`,
+  outputs set, **no external bookmark**), and 40-7's mode matrix is where a real single-user
+  run is proven. Do not write a local integration test here that cannot fail until 40-1 lands.
 - **D6 — Reuse `ExecuteAgentActivity`'s input/output surface verbatim.** Same `Input<>`/`Output<>`
   properties, same `AgentExecutionRequest` construction, same `BuildStartData`/`BuildEndData`
   event data — so the `SingleIssueCycleWorkflow` node swap (AC7) is a near-mechanical
   type change with identical mappings, and downstream consumers (`LastAgentExecutionResult`) are
   unaffected. `ExecuteAgentActivity` is left intact for non-resumable callers.
-- **D7 — Register in `CanonicalSuspendActivities` with gate `"agent-run"`.** One entry
-  `{ typeof(WaitForAgentRunActivity), "agent-run" }` so 40-5's structural test sees a sanctioned
-  suspend node; the legacy `ExecuteAgentActivity` stays OUT (it is not a suspend point).
+- **D7 — DECISION: the new wait joins the canonical registry; Epic 40 ships no second ad-hoc
+  bookmark scheme.** One entry `{ typeof(WaitForAgentRunActivity), "agent-run" }` added to
+  `LifecycleBookmarks.CanonicalSuspendActivities` (`LifecycleBookmarks.cs:98` — two entries
+  today at `:101`/`:104`, three after this story), and the bookmark itself addressed by a
+  `Compose`-built name (D2), **not** by a payload object. *The previously open question — copy
+  `WaitForCIResultsActivity`'s `CIResultBookmarkPayload` scheme or fold into 39-10's builder —
+  is settled by 40-3:* the resume runs on a **different pod** and must recompute the name from
+  durable inputs, which a payload-object bookmark cannot do tenant-folded. `ExecuteAgentActivity`
+  stays OUT of the registry (it is not a suspend point). Migrating `WaitForCIResultsActivity`
+  itself onto the registry is **out of scope and unowned** — after Epic 40 the codebase still
+  carries that one legacy scheme; the point of this decision is that the cycle does not add a
+  second.
 - **D8 — Fail-loud DI guards + event emission parity.** Missing dispatch service/collector ⇒
   loud `Failed` with a diagnostic (mirrors `ExecuteAgentActivity.cs:167`). Emit
   `TammaEventEmitter.EmitStart` at dispatch; the wait-lifecycle events (`AGENT_RUN.WAIT_*`) are
@@ -77,10 +97,10 @@ the old inline path are reused; only the inline monitor `await` is removed.
 ## Implementation Steps
 
 1. **MODIFY `apps/tamma-elsa/src/Tamma.Activities/Documents/LifecycleBookmarks.cs`** (39-10's
-   file) — add `ForAgentRun(...)` (D2) and the `{ typeof(WaitForAgentRunActivity), "agent-run" }`
-   entry to `CanonicalSuspendActivities` (D7). If 39-10 has not merged, land this in a small
-   shared shim the story owns and rebase onto `LifecycleBookmarks` when it does (coordinate the
-   registry pin).
+   shipped file) — add `ForAgentRun(...)` next to `ForDocumentInput` (`:82`) delegating to
+   `Compose` (`:38`) (D2), and add the `{ typeof(WaitForAgentRunActivity), "agent-run" }` entry
+   to `CanonicalSuspendActivities` (`:98`) (D7). *Corrected: an earlier draft budgeted a "shim
+   if 39-10 has not merged". 39-10 has merged — edit the real file.*
 
 2. **CREATE `apps/tamma-elsa/src/Tamma.Activities/AgentDispatch/WaitForAgentRunActivity.cs`**
    (AC1) — `[Activity("Tamma.AgentDispatch","Wait For Agent Run",…)]`,
@@ -136,14 +156,17 @@ All NUnit + FluentAssertions (+ Moq).
 - **`LifecycleBookmarksAgentRunTests`** (unit) — `ForAgentRun` determinism (same inputs →
   byte-identical), tenant folding (A ≠ B), null tenant → `none` segment, hostile-char
   normalization; `CanonicalSuspendActivities` contains `WaitForAgentRunActivity` with gate
-  `"agent-run"`. **Covers AC2, AC6.**
+  `"agent-run"`. Plus the D7 pin: the registry has exactly **three** entries after this story
+  (`WaitForDocumentDecisionActivity`, `WaitForDocumentInputActivity`, `WaitForAgentRunActivity`)
+  — a conscious count, so a fourth suspend point added without registration is a visible edit.
+  **Covers AC2, AC6.**
 - **`WaitForAgentRunActivityTests`** (unit, in-process `IWorkflowRunner` or activity harness,
   Moq'd dispatch/collect) — dispatch fail → `Failed`, no bookmark; dispatch ok → suspends with a
   bookmark named `ForAgentRun(...)` + a `DelayFor` bookmark present; resume with a success
   payload → collects → `Received` with outputs set; resume with agent-failure payload → `Received`
-  with `Success:false`; timeout resume → `Timeout` with fail-closed sentinel; local mode →
-  runs-to-completion + `Received` without an external bookmark (D5); DI missing → loud `Failed`.
-  **Covers AC1, AC3, AC4, AC8, AC9.**
+  with `Success:false`; timeout resume → `Timeout` with fail-closed sentinel; local mode
+  (stubbed `IAgentExecutor`) → runs-to-completion + `Received` **and no external bookmark
+  created** (D5); DI missing → loud `Failed`. **Covers AC1, AC3, AC4, AC8 (unit scope), AC9.**
 - **`WaitForAgentRunReadBackTests`** (unit, `ClarifyResumeReadBackTests` shape) — completion
   payload read-back across boxed-bool/`"true"`/`"True"`/`JsonElement`, truthy+falsy;
   missing/unparseable → fail-closed failure result, never a green pass. **Covers AC5.**
@@ -161,19 +184,24 @@ All NUnit + FluentAssertions (+ Moq).
 | 5 — serialization-tolerant read-back | 3 | `WaitForAgentRunReadBackTests` |
 | 6 — registered canonical suspend activity | 1 | `LifecycleBookmarksAgentRunTests` |
 | 7 — TDD loop uses it (GHA) | 4 | `WaitForAgentRunActivityTests` + `SingleIssueCycle` structure test (40-5) |
-| 8 — local parity, mode-agnostic definition | 2, 3 | `WaitForAgentRunActivityTests` local case |
+| 8 — local not regressed, mode-agnostic definition | 2, 3 | `WaitForAgentRunActivityTests` local case (stubbed executor). *Single-user end-to-end is 40-1 AC8 + 40-7, not this row.* |
 | 9 — fail-loud DI guards | 2 | `WaitForAgentRunActivityTests` DI-missing case |
 
 ## Dependencies & Sequencing
 
-- **Hard prerequisite:** 39-10 (`LifecycleBookmarks`, `CanonicalSuspendActivities`,
-  `NormalizeSegment`, `ResumeInput`). Do not start step 1 before it compiles; a shared shim
-  bridges if 40-2 runs slightly ahead, rebased onto `LifecycleBookmarks` at merge.
+- **39-10 — LANDED, no gate.** `LifecycleBookmarks`, `CanonicalSuspendActivities`,
+  `NormalizeSegment`, `ResumeInput` all exist and are consumed directly. *Corrected: an earlier
+  draft called this a hard unmerged prerequisite and budgeted a shim; both are struck.*
+- **40-1 (AC8) — blocking for the single-user END-TO-END proof only.** The local coding path
+  cannot resolve its runner entry point today; 40-1 AC8 fixes it. 40-2's local branch (D5) is
+  unit-testable against a stubbed executor without 40-1, and the GHA path is entirely
+  independent — so this edge does **not** gate 40-2's start, only the scope of what AC8 can
+  claim.
 - **Lockstep:** 40-3 — the resume side that fires this bookmark from the webhook; agree the
   `ForAgentRun` name contract (AC2) + the completion payload shape in both plans up front. 40-2
   is unit-testable via direct bookmark resume before 40-3 lands.
-- **In place, verified:** `WaitForCIResultsActivity`, the dispatch/collect services,
-  `AgentExecutorFactory`, Elsa bookmarks + `DelayFor` + EF store.
+- **In place, verified:** `WaitForCIResultsActivity` (shape only — see D7), the dispatch/collect
+  services, `AgentExecutorFactory`, Elsa bookmarks + `DelayFor` + EF store.
 - **Feeds:** 40-4 (re-entry routes into this suspend point), 40-5 (declares the workflow
   resumable citing this canonical activity), 40-6 (adds the wait event family), 40-7 (integration
   proof).
@@ -189,6 +217,14 @@ All NUnit + FluentAssertions (+ Moq).
   the name is recomputable from durable inputs only.
 - **Local mode hangs waiting for a webhook that never comes.** Mitigation: D5 runs local
   to-completion in `Execute`; local never creates the external result bookmark.
+- **AC8 is read as "single-user works".** It does not: the local runner path is broken
+  independently of this story (40-1 AC8). Mitigation: AC8's wording and D5's scope note state
+  the boundary, and the local test uses a stubbed executor so it measures *this* story's
+  behaviour rather than 40-1's.
+- **A reviewer takes "copy `WaitForCIResultsActivity`" literally** and ships a
+  `CIResultBookmarkPayload`-style bookmark that 40-3 cannot address. Mitigation: D7's decision
+  + the AC2/AC6 falsifiability clauses; the Pre-Reading entry flags the naming divergence at
+  the point of reading.
 - **Loop-routing regression when swapping the node (AC7).** Mitigation: preserve the exact
   `Completed`/`Failed` gate on `LastAgentExecutionResult.Success`; keep `Timeout` a *distinct*
   escalation edge from agent-failure-retry (Technical Note); covered by the structure test in 40-5.

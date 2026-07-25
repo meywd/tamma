@@ -38,6 +38,11 @@ action. Missing/contradicting existing docs surface as review concerns, not sile
 - **70–84:** agent drafts; tech writer accepts.
 - **85–100:** agent drafts and self-accepts; contract-affecting API-doc changes can be always-escalate.
 
+> **Epic 42 caveat — "publish" has no tool.** Pushing docs to the docs host needs a publish
+> capability (**42-9**); none of the six registered `IToolExecutor`s
+> (`Tamma.Api/Program.cs:753-764`) provides one. Drafting is agent-reachable; publication is
+> **human-assigned** (rule 4) until Epic 42 lands.
+
 ## Acceptance Criteria
 
 1. Thin lifecycle binding; prose reviewed by a `Review` that checks accuracy against the merged diff.
@@ -46,7 +51,9 @@ action. Missing/contradicting existing docs surface as review concerns, not sile
 
 ## Dependencies
 
-- **Blocking:** Epic 39 (prose handling, lifecycle, review, store).
+- **Blocking:** **41-1c** (the `prose` type + `Audience` field; *corrected: was "Epic 39 (prose
+  handling)" — out of Epic 39's scope per 39-1:58*), **41-1a** (the `(tech_writer, review-docs)`
+  review-selector arm — the selector throws for `TechWriter` today), Epic 39 (lifecycle, review, store).
 - **Related:** consumes 41-2 AcceptanceCriteria when present.
 
 ## Estimated Effort

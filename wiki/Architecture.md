@@ -641,8 +641,10 @@ LlmCallWorkflow (apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/LlmCallWorkflow.
    ├─► ResolveAgentConfigActivity         — maps phase → role → provider chain
    │   └─ reads AgentConfigRepository     — per-tenant override > default
    │
-   ├─► ResolveLlmPromptActivity           — PromptStore 3-layer resolution
-   │   └─ ResolvePromptFromRegistryActivity  — user override → system default
+   ├─► ResolvePromptFromRegistryActivity  — renders the (role, action) cell via
+   │                                        POST /api/prompts/{role}/{action}/render
+   │   └─ principal override → system default; NO provider dimension (the retry
+   │      loop swaps providers under a fixed prompt + output contract)
    │
    ├─► ResolveToolsActivity               — selects tools from the registry
    │   └─ ToolExecutorRegistry            — file-read, file-write, search-code,

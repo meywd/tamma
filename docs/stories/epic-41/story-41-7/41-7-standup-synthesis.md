@@ -41,6 +41,11 @@ flagged blocker, routed to the owning role). Low-value/empty windows produce an 
 - **85–100:** agent synthesizes and self-accepts; each flagged blocker still routes to its owning role's
   Task View as an assigned follow-up.
 
+> **Epic 42 caveat — the agent path cannot *broadcast* yet.** Publishing the digest to a chat/tracker
+> needs an authenticated HTTP / external-API tool (**42-9**); the six registered `IToolExecutor`s
+> (`Tamma.Api/Program.cs:753-764`) are all coding-oriented. Synthesis is agent-reachable; delivery is
+> **human-assigned** (rule 4) until 42-9 lands.
+
 ## Acceptance Criteria
 
 1. Scheduled, tenant-scoped, idempotent per window (re-running the same window is a no-op re-read).
@@ -50,8 +55,8 @@ flagged blocker, routed to the owning role). Low-value/empty windows produce an 
 
 ## Dependencies
 
-- **Blocking:** 41-1 (`scrum_master` role), Epic 39 (`Findings`, lifecycle, store, task routing, 4-7 query
-  API), scheduler pattern.
+- **Blocking:** **41-1a** (`scrum_master` role + `synthesize-standup` cell), Epic 39 (`Findings`,
+  lifecycle, store, task routing, 4-7 query API), and **the tenant-aware scheduled-trigger seam — unowned; no story writes it** (*corrected: "scheduler pattern" named no artifact;* `HourlyAnalyticsRollupScheduler` *is hardcoded to one workflow (`:198-199`), offers one `FireAtMinute` int rather than a window/cron shape (`:34`), threads no `tenantId` into the dispatch (`:202-203`), keeps its last-fired window in a per-process field (`:83`), and its advisory-lock key has no tenant component (`:241`) — one tenant's leader would suppress every other tenant's fire*).
 - **Related:** feeds 41-8 retro input.
 
 ## Estimated Effort

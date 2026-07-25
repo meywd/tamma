@@ -46,7 +46,7 @@ Accept gate routes per autonomy; accepted `TestPlan` drives `test-case-creation`
 
 ## Dependencies
 
-- **Blocking:** 41-1 (`TestPlan` type), Epic 39 (lifecycle, review, store); 41-2.
+- **Blocking:** **41-1b** (`TestPlan` type), Epic 39 (lifecycle, review, store); 41-2.
 
 ## Estimated Effort
 

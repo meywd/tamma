@@ -49,7 +49,10 @@ class. Accepted ADRs are queryable per issue and per repo.
 
 ## Dependencies
 
-- **Blocking:** Epic 39 (prose-document handling, lifecycle, review, store).
+- **Blocking:** **41-1c** (the `prose` type + `Audience` field — 41-9 is the designated *reference
+  implementation* of the prose path, so it cannot precede the story that builds it; *corrected: was
+  "Epic 39 (prose-document handling)", which 39-1:58 records as out of Epic 39's scope*), Epic 39
+  (lifecycle, review, store).
 - **Related:** consumes 41-10 System Design output when present.
 
 ## Estimated Effort

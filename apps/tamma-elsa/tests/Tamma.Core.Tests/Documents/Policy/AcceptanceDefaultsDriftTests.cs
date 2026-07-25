@@ -27,6 +27,8 @@ public class AcceptanceDefaultsDriftTests
         r.AlwaysEscalate.Should().BeEmpty();
         r.DecisionGuidance.Should().NotBeNullOrWhiteSpace();
         r.RoutingGuidance.Should().NotBeNullOrWhiteSpace();
+        r.AcceptorRequirement.Should().Be(AcceptorRequirement.Any,
+            "the shared base row imposes no autonomy floor — the pre-39-13 behavior");
     }
 
     [Test]
@@ -80,6 +82,39 @@ public class AcceptanceDefaultsDriftTests
         sel.ReviewerRole.Should().Be(AgentRole.Architect.ToWire());
         sel.DecisionRule.Should().Be(ReviewDecisionRule.Unanimous);
     }
+
+    // ── Story 39-13 D4 — the per-type acceptor requirement (autonomy floor) ──
+
+    [Test]
+    public void Design_defaults_to_a_human_acceptor()
+    {
+        // 39-13 D4: "Design pinned to human by default". Reviewer selection is UNCHANGED
+        // (single architect, unanimous) — only who answers the accept decision is pinned.
+        var rules = AcceptanceDefaults.For(DocumentTypeKey.Design);
+        rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human);
+        rules.ReviewerSelection.Should().Be(AcceptanceDefaults.Rules.ReviewerSelection);
+        rules.AutonomyLevel.Should().Be(AcceptanceDefaults.DefaultAutonomyLevel,
+            "the human pin is independent of the autonomy dial, not a lower dial");
+    }
+
+    [TestCase(DocumentTypeKey.Findings)]
+    [TestCase(DocumentTypeKey.AmbiguityAssessment)]
+    [TestCase(DocumentTypeKey.Clarification)]
+    [TestCase(DocumentTypeKey.Decomposition)]
+    [TestCase(DocumentTypeKey.Plan)]
+    [TestCase(DocumentTypeKey.Review)]
+    [TestCase(DocumentTypeKey.TriageDecision)]
+    [TestCase(DocumentTypeKey.Diagnosis)]
+    [TestCase(DocumentTypeKey.TestSpec)]
+    public void Every_type_but_design_imposes_no_acceptor_floor(DocumentTypeKey type) =>
+        AcceptanceDefaults.For(type).AcceptorRequirement.Should().Be(AcceptorRequirement.Any,
+            "the field is additive — only 'design' ships a non-default value");
+
+    [Test]
+    public void Design_is_the_only_type_with_an_acceptor_floor() =>
+        Enum.GetValues<DocumentTypeKey>()
+            .Where(t => AcceptanceDefaults.For(t).AcceptorRequirement != AcceptorRequirement.Any)
+            .Should().Equal(DocumentTypeKey.Design);
 
     [Test]
     public void Every_per_type_default_is_valid()

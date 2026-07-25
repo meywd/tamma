@@ -130,7 +130,80 @@ public class AcceptanceRulesModelTests
         rules.Invoking(r => r.Validate()).Should().Throw<TammaError>();
     }
 
+    // ── Story 39-13 D4 — acceptor requirement (per-type autonomy floor) ──
+
+    [Test]
+    public void AcceptorRequirement_defaults_to_any_when_unspecified()
+    {
+        // The field is ADDITIVE: a record built without it must behave exactly as it did
+        // before the field existed, so `any` has to be the CLR default (first member).
+        var rules = new AcceptanceRules
+        {
+            AutonomyLevel = 70,
+            MaxRevisionRounds = 2,
+            MaxValidationRepairAttempts = 2,
+            AmbiguityEscalationThreshold = 0.7,
+            AlwaysEscalate = Array.Empty<EscalationClass>(),
+            ReviewerSelection = AcceptanceTestData.SingleArchitect(),
+            DecisionGuidance = "d",
+            RoutingGuidance = "r",
+        };
+
+        rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Any);
+        default(AcceptorRequirement).Should().Be(AcceptorRequirement.Any);
+        rules.Invoking(r => r.Validate()).Should().NotThrow();
+    }
+
+    [TestCase(AcceptorRequirement.Any)]
+    [TestCase(AcceptorRequirement.Human)]
+    public void Known_acceptor_requirements_pass_validation(AcceptorRequirement requirement) =>
+        Assert(AcceptanceTestData.ValidRules() with { AcceptorRequirement = requirement }, shouldPass: true);
+
+    [Test]
+    public void Unknown_acceptor_requirement_rejects() =>
+        Assert(AcceptanceTestData.ValidRules() with { AcceptorRequirement = (AcceptorRequirement)99 }, shouldPass: false);
+
+    [Test]
+    public void AcceptorRequirement_roundtrips_through_the_canonical_serializer()
+    {
+        var rules = AcceptanceTestData.ValidRules() with { AcceptorRequirement = AcceptorRequirement.Human };
+
+        var json = AcceptanceRulesJson.Serialize(rules);
+        json.Should().Contain("\"acceptorRequirement\":\"human\"", "the wire spelling is the [Wire] token");
+
+        AcceptanceRulesJson.Deserialize(json).AcceptorRequirement.Should().Be(AcceptorRequirement.Human);
+        AcceptanceRulesJson.Deserialize(AcceptanceRulesJson.Serialize(AcceptanceTestData.ValidRules()))
+            .AcceptorRequirement.Should().Be(AcceptorRequirement.Any);
+    }
+
+    [Test]
+    public void A_rules_row_written_before_the_field_existed_deserializes_to_any()
+    {
+        // Backward compatibility: a persisted `acceptance_rules_overrides.rules_json` blob
+        // from before 39-13 carries no `acceptorRequirement` key. It must load — and load
+        // as `any`, i.e. exactly the behavior it had when it was written.
+        const string legacyJson =
+            "{\"autonomyLevel\":70,\"maxRevisionRounds\":2,\"maxValidationRepairAttempts\":2," +
+            "\"ambiguityEscalationThreshold\":0.7,\"alwaysEscalate\":[]," +
+            "\"reviewerSelection\":{\"mode\":\"single-reviewer\",\"reviewerRole\":\"architect\"," +
+            "\"panelRoles\":[],\"quorum\":null,\"decisionRule\":\"unanimous\"}," +
+            "\"decisionGuidance\":\"d\",\"routingGuidance\":\"r\"}";
+
+        var rules = AcceptanceRulesJson.Deserialize(legacyJson);
+        rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Any);
+        rules.AutonomyLevel.Should().Be(70);
+    }
+
     // ── Enum wire round-trips + count pins ──
+
+    [Test]
+    public void AcceptorRequirement_has_two_members_with_wire_roundtrip()
+    {
+        Enum.GetValues<AcceptorRequirement>().Length.Should().Be(2);
+        AcceptorRequirement.Any.ToWire().Should().Be("any");
+        AcceptorRequirement.Human.ToWire().Should().Be("human");
+    }
+
 
     [Test]
     public void EscalationClassKind_has_two_members_with_wire_roundtrip()

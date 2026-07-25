@@ -1,54 +1,114 @@
-# Story 41-1: Team-Role & Document-Type Extensions
+# Story 41-1: Team-Role & Document-Type Extensions — enabler set (SPLIT)
 
-Status: drafted
+Status: superseded — split into 41-1a / 41-1b / 41-1c. This file is the split index + the
+cross-story gate table; it is not itself implementable. (Matches `docs/sprint-status.yaml`, and the
+shape Epic 42 used for its 42-8 split.)
 
 ## User Story
 
-As the **Epic 41 program**, I want the agent taxonomy and the Epic 39 document registry extended with the
-roles and typed documents the remaining team activities need, so that every Epic 41 workflow can bind a
-real `(role, action)` cell and produce a registered typed document — enabling the *agent* execution path
-(rule 4) at higher autonomy, while the human-assigned path already works.
+As the **Epic 41 program**, I want the agent taxonomy, the Epic 39 document registry, and prose-document
+support extended with the roles, cells and typed documents the remaining team activities need, so that
+every Epic 41 workflow can bind a real `(role, action)` cell and produce a persistable document — on the
+human-assigned path *and* the agent path.
 
 ## Priority
 
-P0 — enabler. Gates the agent path of the role-family stories (41-6/41-7/41-8/41-27/41-28) and the typed
-outputs of 41-2/41-3/41-6/41-13/41-19/41-27. Not a hard blocker for the human path of any story.
+**P0 — the epic's hard gate.** Its taxonomy and document-type halves block **seventeen** stories on BOTH
+execution paths (fourteen at their produce step, plus 41-24/41-25/41-26 at their review stage); its
+prose half blocks **eight**. Five are in both sets — **twenty of twenty-nine** in all.
 
-## Scope
+> **Corrected — the previous Priority paragraph contradicted itself in consecutive sentences.** It read
+> "Gates the agent path of … and the typed outputs of …" and then "Not a hard blocker for the human path
+> of any story." Both cannot be true: a *typed output* is unreachable by a human-assigned run too.
+> `DocumentTypeKeyExtensions.Parse` throws `DOCUMENT.TYPE.UNKNOWN` for any non-vocabulary wire string
+> (`DocumentTypeKey.cs:49-59`), `DocumentTypeRegistry.Resolve` throws `DOCUMENT.TYPE.NOT_REGISTERED`
+> (`DocumentTypeRegistry.cs:85-91`), and `DocumentInstance.DocumentType` (`DocumentInstance.cs:34`) is a
+> `DocumentTypeKey` wire string — none of that consults *who* executed the produce step. The same holds
+> for a missing `(role, action)` cell: a human assignee still needs a cell to bind. The "human path is
+> unblocked" claim is deleted, not softened.
+>
+> What survives: for a story whose type, role and cell already exist, rule 4 lets the produce step run
+> human-assigned at low autonomy without an agent. That is a narrower claim about *those* stories.
 
-1. **New `AgentRole`s** in `Tamma.Core/Agents/AgentRole.cs`: `scrum_master`, `project_manager`,
-   `ux_designer`. Remove the `scrum_master → product_owner` entry from `LegacyRoleAliases` (it becomes a
-   real role); keep `analyst` aliased. Add each role's `_system.md` identity preamble and its action
-   cells under `Prompts/{role}/`.
-2. **New `AgentAction` tokens** + `RolePhaseMap` eligibility entries for the activities that lack a cell:
-   `plan-sprint`, `synthesize-standup`, `facilitate-retro`, `track-impediments` (scrum_master);
-   `report-status`, `coordinate-release` (project_manager); `draft-user-flow`, `author-ui-spec`,
-   `review-design`, `audit-accessibility` (ux_designer); `triage-tech-debt` (architect),
-   `triage-pr` (senior_developer), `manage-regression` (tester). Existing cells (`write-adr`,
-   `prioritize-backlog`, `verify-acceptance`, `threat-model`, …) are reused unchanged.
-3. **New document types** registered in the 39-2 registry with schema + domain rules + prompt-contract
-   renderer + examples + drift test: `AcceptanceCriteria`, `BacklogOrdering`, `SprintPlan`, `TestPlan`,
-   `ThreatModel`, `UxSpec` (rules per the README table). Each declares which producers `produce` it.
-4. **Prose-document audience tags** extended for the new prose outputs (ADR, postmortem, release-notes,
-   changelog, runbook, user/API docs, stakeholder-update, retro, roadmap).
+## Why this is split
 
-## Acceptance Criteria
+The single story bundled four independently-shippable deliverables — three new roles, fifteen new action
+cells, six new document types, and the prose/audience mechanism — behind one 5–7 day estimate. The landed
+Epic 39 precedent sizes just *one* of those slices at more than that: **39-3** shipped four document types
+(4–5 days) and **39-4** shipped six (5–6 days), each as its own story. The prose mechanism is a schema +
+migration + vocabulary change that no story owned at all.
 
-1. The three new roles round-trip through `EnumWire`/`RolePhaseMap`; `ValidRoles` = 11; every new
-   `(role, action)` pair passes `IsRoleEligibleForPhase`; the taxonomy drift test is green.
-2. `PromptFileLoader` starts fail-loud: every new taxonomy cell has a file and no file sits outside the
-   taxonomy (the existing one-cell-one-file invariant holds for the enlarged grid).
-3. The six new document types are registered, carry executable domain rules with unit tests, and each has
-   a generated prompt contract (39-16 mechanism) bound to its producer cell.
-4. `ContractBindingTests` extends to the new cells with no build-gate regression.
-5. No existing role/action/document behaviour changes (byte-stable for the 8 current roles).
+| Sub-story | Deliverable | Effort |
+|---|---|---|
+| **41-1a** — [Agent-Taxonomy Extension](./41-1a-agent-taxonomy-extension.md) | 3 roles, 15 action cells, the DERIVED panel-selector maps, the `scrum_master` alias removal | 4–5 days |
+| **41-1b** — [New Document Types](./41-1b-new-document-types.md) | `AcceptanceCriteria`, `BacklogOrdering`, `SprintPlan`, `TestPlan`, `ThreatModel`, `UxSpec` | 5–6 days |
+| **41-1c** — [Prose Documents & Audience Tags](./41-1c-prose-documents-and-audience-tags.md) | the prose type + `Audience` field + audience/kind vocabularies | 3–4 days |
+
+41-1a and 41-1b are independent and can run in parallel. 41-1c is independent of both.
+
+> **Corrected — 41-1c is new scope, not an extension.** The old Scope item 4 read "Prose-document audience
+> tags **extended** for the new prose outputs", presupposing a mechanism that exists. It does not exist:
+> `DocumentTypeKey.cs:22-33` has exactly ten members and no prose member, and neither
+> `DocumentInstance.cs:23-89` nor `DocumentEnvelope.cs` carries an `Audience` member. Epic 39 states
+> *"prose stays prose"* only as a **principle** (`epic-39/README.md:115-116`), and 39-1:58 records
+> prose/tech-writer output as explicitly **out of scope** of the 10-type table. Eight Epic 41 stories
+> write as though the mechanism shipped. 41-1c builds it.
+
+## What each sub-story gates
+
+| Downstream story | Waits on | For |
+|---|---|---|
+| 41-2 | 41-1b | `AcceptanceCriteria` type |
+| 41-3 | 41-1b | `BacklogOrdering` type |
+| 41-6 | 41-1a + 41-1b | `scrum_master` role, `SprintPlan` type |
+| 41-7, 41-8 | 41-1a | `scrum_master` role + `synthesize-standup` / `facilitate-retro` cells |
+| 41-10 | 41-1a | `design-system` cell — `plan-system-design` is reserved as plan-generation's `Plan` producer |
+| 41-11 | 41-1a | `triage-tech-debt` cell |
+| 41-13 | 41-1b | `TestPlan` type |
+| 41-16 | 41-1a | `manage-regression` cell |
+| 41-17 (PR-triage half) | 41-1a | `triage-pr` cell |
+| 41-19 | 41-1b | `ThreatModel` type |
+| 41-22 | 41-1a | `incident-rootcause` cell — `diagnose-incident` is the triage-panel lens, not bindable |
+| 41-27 | 41-1a + 41-1b | `ux_designer` role, `UxSpec` type |
+| 41-28 | 41-1a | `ux_designer` role + `review-design` / `audit-accessibility` cells |
+| 41-4, 41-5, 41-9, 41-22, 41-24, 41-25, 41-26 | **41-1c** | prose type + audience tag |
+| 41-8 | **41-1c** | audience tag on its retro narrative (its `Findings` half needs only 41-1a) |
+| 41-24, 41-25, 41-26 | 41-1a | the `(tech_writer, review-docs)` **review-selector** arm — see 41-1a AC3 |
+
+**20 of the epic's 29 stories wait on some part of this set** — seventeen on the taxonomy/document-type
+halves (41-1a + 41-1b; fourteen at their produce step plus 41-24/41-25/41-26 at their review stage) and
+eight on the prose half (41-1c). 41-8, 41-22, 41-24, 41-25 and 41-26 are in both: 17 + 8 − 5 = 20.
+
+*Corrected: this table and the counts above previously read twelve / nineteen, omitting 41-10 and 41-22,
+both of which name 41-1a as the minter of a cell that does not exist in `AgentAction.cs`. 41-1a's Scope
+item 2 has been widened from thirteen cells to fifteen to match. The taxonomy-half count also omitted
+41-24/41-25/41-26, which the last row of this table has always listed.*
+
+## Downstream references to reconcile (owned by other files)
+
+The split gives the prose enabler an owner for the first time; the documents that assumed it was somebody
+else's job still pointed elsewhere. Status of that loop after the 2026-07-24 audit pass:
+
+- ✅ **epic-41 README, Wave-0 table** — the "Prose document support / **none — must be written**" row now
+  names **41-1c**, and the 41-1 row is split into the three sub-stories with their efforts. Only the
+  scheduler seam is still owner-less.
+- ✅ **41-17** — its `Blocking:` line now names **41-1a** (`triage-pr`) and the unowned scheduler seam.
+- ✅ **41-4, 41-5, 41-8, 41-9, 41-22, 41-24, 41-25, 41-26** — their `Blocking:` lines named "Epic 39
+  (prose-document handling …)" for a deliverable 39-1:58 records as out of Epic 39's scope; they now
+  name **41-1c**. 41-8 was missing from that list and has been added.
+- ✅ **`docs/sprint-status.yaml`** — tracked 41-1 as a single story; it now carries 41-1a/41-1b/41-1c
+  rows with 41-1 marked `superseded`.
+- ⚠️ **Still open, and owned by nobody:** the **tenant-aware scheduled-trigger seam**. It is the fourth
+  Wave-0 enabler and the only one without a story. Seven stories name it in their `Blocking:` lines
+  (41-5, 41-7, 41-11, 41-16, 41-17, 41-20, 41-23); none builds it. Not in this story's scope — flagged
+  here because this is where the enabler set is enumerated.
 
 ## Dependencies
 
-- **Blocking:** Epic 39 (39-2 registry, 39-3/39-4 type pattern, 39-16 contract generation), 27-15/27-18
-  taxonomy machinery.
-- **Unblocks:** the agent path of every Epic 41 role-family story.
+- **Blocking:** Epic 39 (39-2 registry, 39-3/39-4 type pattern, 39-11 store, 39-16 contract generation),
+  27-15/27-18 taxonomy machinery.
+- **Unblocks:** see the table above.
 
 ## Estimated Effort
 
-5–7 days
+12–15 days across the three sub-stories (was: 5–7 days for all four deliverables at once).

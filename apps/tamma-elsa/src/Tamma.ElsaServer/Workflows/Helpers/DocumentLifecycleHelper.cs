@@ -226,6 +226,39 @@ public static class DocumentLifecycleHelper
             supersedesDocumentId: supersedes,
             now: now);
 
+    /// <summary>Which kind of producer turn minted a draft (produce / repair / revise).</summary>
+    public enum DraftOrigin { Produce, Repair, Revise }
+
+    /// <summary>
+    /// The supersession edge a freshly minted draft carries (the 39-2 D4 chain
+    /// invariant), by producer turn. NOT derivable from "is this a revise?" alone —
+    /// a deterministic validation repair is neither a revise nor necessarily a first
+    /// draft, and repairs occur INSIDE revise rounds too.
+    ///
+    /// <list type="bullet">
+    /// <item><b>Produce</b> — starts the chain: supersedes nothing.</item>
+    /// <item><b>Revise</b> — extends the chain: supersedes the reviewed draft.</item>
+    /// <item><b>Repair</b> — REPLACES the draft it repairs at the SAME chain position,
+    /// so it INHERITS that draft's edge. A repair of a first draft inherits
+    /// <c>null</c> (still supersedes nothing); a repair inside a revise round keeps
+    /// pointing at the draft the revise superseded, instead of orphaning the round
+    /// (<c>.dev/bugs/repair-after-revise-breaks-supersession-chain.md</c>).</item>
+    /// </list>
+    ///
+    /// <para>Inheriting cannot double-fill the store's unique filtered index on
+    /// <c>supersedes_document_id</c>: the repaired draft is never itself written to
+    /// <c>document_instances</c>. The lifecycle persists an envelope at exactly two
+    /// points — <c>PersistRevised</c> (the current draft as a revise supersedes it)
+    /// and the terminal persists — and a draft that a repair replaces reaches
+    /// neither, so the inherited prior gains exactly ONE successor row.</para>
+    /// </summary>
+    public static Guid? ResolveSupersedes(LifecycleState state, DraftOrigin origin) => origin switch
+    {
+        DraftOrigin.Revise => state.Current?.Id,
+        DraftOrigin.Repair => state.Current?.SupersedesDocumentId,
+        _ => null,
+    };
+
     /// <summary>
     /// Apply a legal state transition to an envelope through the 39-2
     /// <see cref="DocumentEnvelope.WithState"/> seam (D9). Exposed so the AC6 negative

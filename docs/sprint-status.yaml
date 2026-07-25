@@ -1,5 +1,8 @@
 # generated: 2025-10-29
 # updated: 2026-07-15 (main-branch sync: 2-14 decomposition, 3-4/3-6/3-7 assessment workflows, 4-5/4-8 event capture+replay, 18-4 slices, 21-4 repos/runs pages, 8 Epic-23 monitoring pages, Epic-6 KB/RAG sidecar+Ollama)
+# updated: 2026-07-24 (Epic-39 reconciled against landed code — 14 of 21 stories are DONE and 1 in-progress, not "drafted"; epics 40/41/42 added, docs-only)
+# last_reconciled_against_code: 2026-07-24 — scope: epic-39, epic-40, epic-41, epic-42 (evidence = deliverables present in
+#   apps/tamma-elsa/src + their tests present in apps/tamma-elsa/tests). All other epic blocks carry their own older markers.
 # project: Tamma
 # project_key: Tamma
 # tracking_system: file-system
@@ -509,27 +512,145 @@ development_status:
   38-4-build-time-guardrail-analyzer: drafted         # Build-Time Guardrail Analyzer (rule-1 enforcement) [P1]
   epic-38-retrospective: optional
 
-  epic-39: contexted   # NEW Typed Work Documents & the Universal Workflow Lifecycle (added 2026-07-19; all stories drafted)
-  39-1-workflow-io-and-lifecycle-audit: drafted       # Workflow I/O & Lifecycle Audit (consumes/produces map, gap analysis) [P0]
-  39-2-document-core-envelope-type-registry-lineage-drift-tests: drafted # Document Core — Envelope, Type Registry, Lineage, Drift Tests [P0]
-  39-3-document-types-batch-1-decomposition-findings-ambiguity-clarification: drafted # Document Types Batch 1 — Decomposition, Findings, AmbiguityAssessment, Clarification [P0]
-  39-4-document-types-batch-2-plan-design-review-triage-diagnosis-testspec: drafted # Document Types Batch 2 — Plan, Design, Review (unified), TriageDecision, Diagnosis, TestSpec [P0]
-  39-5-acceptance-policy-per-mode-accept-escalation-configuration: drafted # Acceptance Rules — configurable policy, admin UI, orchestrator read path [P0]
-  39-6-document-lifecycle-workflow-generic-produce-validate-review-revise-accept: drafted # DocumentLifecycleWorkflow — generic produce/validate/review/revise/accept [P0]
-  39-7-review-producers-single-reviewer-and-panel-onto-unified-review: drafted # Review Producers — single reviewer + panel onto the unified Review type [P0]
-  39-8-escalation-and-approval-surface-events-suspend-resume-lineage: drafted # Escalation & Approval Surface — events, suspend/resume, lineage payload [P0]
-  39-9-deterministic-repair-ring-validator-feedback-repair-in-managed: drafted # Deterministic Repair Ring — validator feedback repair in the managed layer [P1]
-  39-10-resumable-by-design-standard-bookmarks-latest-state-re-entry: drafted # Resumable-by-Design Standard — bookmarks + latest-state re-entry + structural test [P0]
-  39-11-document-store-and-lineage-api: drafted       # Document Store & Lineage API [P1]
-  39-12-pilot-migration-issuedecomposition-onto-the-lifecycle: drafted # Pilot Migration — IssueDecomposition onto the lifecycle [P0]
-  39-13-assessment-family-migration-research-ambiguity-clarify-design: drafted # Assessment Family Migration — Research, Ambiguity, Clarify, DesignProposal [P1]
-  39-14-planning-family-migration-plangeneration-planreview-unified: drafted # Planning Family Migration — PlanGeneration + PlanReview onto unified Review [P1]
-  39-15-remaining-producers-migration-triage-testspec-taskcreation-diag: drafted # Remaining Producers Migration — Triage, TestSpec, TaskCreation, Diagnosis [P2]
-  39-16-prompt-contracts-generated-from-document-types: drafted # Prompt Contracts Generated From Document Types (single source) [P1]
-  39-17-orchestrator-agent-long-running-llm-process-platform-context-tools: drafted # Orchestrator Agent — long-running LLM process, platform context & tools [P0]
-  39-18-real-time-channels-workflow-orchestrator-and-user-orchestrator: drafted # Real-Time Channels — workflow↔orchestrator + user↔orchestrator (SignalR) [P0]
-  39-19-orchestrator-chat-primary-user-interface-and-task-view: drafted # Orchestrator Chat — primary user interface, and the Task View [P0]
-  39-20-teams-roles-repo-access-and-task-routing: drafted # Teams, Roles, Repo Access & Task Routing [P0]
-  39-21-rag-in-csharp-per-tenant-knowledge-isolation-and-grounding: drafted # RAG in C# — per-tenant knowledge isolation and grounding [P1]
+  # ══════════════════════════════════════════════════════════════════════════════════════════════
+  # EPIC 39 — RECONCILED AGAINST LANDED CODE on 2026-07-24.
+  #
+  # CORRECTED: this block previously marked ALL 21 stories "drafted". That was wrong and stale —
+  # the producer-migration spine had already merged. Statuses below are derived ONLY from the code
+  # (deliverables present under apps/tamma-elsa/src + their tests present under apps/tamma-elsa/tests),
+  # never from the story docs. Per-story evidence is cited inline so the next reader can re-check.
+  #
+  # ⚠️ THIS FILE IS THE SHARED INPUT that every downstream epic's planning docs consult. Epics 40, 41
+  #    and 42 were all scoped while this block said "drafted", and each imported wrong facts from it
+  #    (most visibly: Epic 40 was authored with a "HARD external gate on 39-10", a story that had in
+  #    fact already landed). Before scoping a new epic, re-verify this block against the code; when
+  #    you change a status here, treat it as a change to every plan that reads it.
+  # ══════════════════════════════════════════════════════════════════════════════════════════════
+  epic-39: contexted   # Typed Work Documents & the Universal Workflow Lifecycle (added 2026-07-19)
+  39-1-workflow-io-and-lifecycle-audit: ready-for-dev  # NOT landed. Its sole deliverable — .dev/findings/epic-39-workflow-io-lifecycle-audit.md — does not exist. Story + impl plan only. Note: 39-2..39-15 shipped WITHOUT this discovery gate. [P0]
+  39-2-document-core-envelope-type-registry-lineage-drift-tests: done # Tamma.Core/Documents/{DocumentEnvelope,DocumentTypeKey,DocumentTypeRegistry,DocumentStateMachine,DocumentJson,UuidV7}.cs + Lineage/ + Core.Tests/Documents/ (envelope, state-machine, registry, key, workflow-interface-graph). [P0]
+  39-3-document-types-batch-1-decomposition-findings-ambiguity-clarification: done # Tamma.Core/Documents/Types/{Decomposition,Findings,AmbiguityAssessment,Clarification}.cs + Core.Tests/Documents/Types/; completion-notes.md in the story dir. [P0]
+  39-4-document-types-batch-2-plan-design-review-triage-diagnosis-testspec: done # Types/{Plan,Design,Review,ReviewDocumentType,TriageDecision,Diagnosis,TestSpec}.cs — DocumentTypeKey now has exactly 10 members, registry pinned at 10; completion-notes.md present. [P0]
+  39-5-acceptance-policy-per-mode-accept-escalation-configuration: done # Core/Documents/Policy/ (AcceptanceRules/Defaults/Guardrails/Routing/Resolver), AcceptanceRulesEndpoints + Api.Tests/AcceptanceRules/, dashboard admin page, tenant migration 20260722011909_AddAcceptanceRulesOverrides. [P0]
+  39-6-document-lifecycle-workflow-generic-produce-validate-review-revise-accept: done # DocumentLifecycleWorkflow.cs + DocumentEvents/EmitDocumentEventActivity; DocumentLifecycle{Structure,Execution,Helper}Tests green. [P0]
+  39-7-review-producers-single-reviewer-and-panel-onto-unified-review: done # DocumentReviewWorkflow + PanelReviewWorkflow + SingleReviewerWorkflow + Helpers/ReviewerSelectionHelper (7-role roster); ReviewProducer/ReviewPanelAggregation/ReviewParity tests. [P0]
+  39-8-escalation-and-approval-surface-events-suspend-resume-lineage: done # WaitForDocumentDecisionActivity, ApprovalEvents, EmitEscalationEventActivity, DocumentDecisionEndpoints; ApprovalPairingReconstruction + EscalationLineageCompleteness tests. [P0]
+  39-9-deterministic-repair-ring-validator-feedback-repair-in-managed: done # Api/Services/Agents/{RepairRingOptions,RepairMessageComposer,RepairRingEventTypes}.cs + 6 test files (InlineToolLoopRunnerRepair, ManagedAgentContentValidation, RepairRingEventRate, ...). Ships dark (EnabledDocumentTypes empty) by design. [P1]
+  39-10-resumable-by-design-standard-bookmarks-latest-state-re-entry: done # LifecycleBookmarks.cs (Compose/ForStageGate/ForDecisionSession/ForDocumentInput + CanonicalSuspendActivities), Core/Documents/Resume/ResumeBehavior.cs, ComputeReEntryPositionActivity.cs, ResumableStandardStructuralTests.cs (4 live clauses). 22 production workflows already declare [ResumeBehavior]. THIS IS THE STORY EPIC 40 WAS DRAFTED AS BEING GATED ON — the gate is discharged. [P0]
+  39-11-document-store-and-lineage-api: done          # DocumentInstance entity + tenant migration 20260722180002_AddDocumentInstances, DocumentEndpoints + LineageAssembler; Api.Tests/Documents/ (repository, isolation, stream-consistency, lineage, engine-write-seam). Real LifecycleReEntryService is the DI default (Null behind Documents:ReEntryDisabled). [P1]
+  39-12-pilot-migration-issuedecomposition-onto-the-lifecycle: done # IssueDecompositionWorkflow rebound onto document-lifecycle; IssueDecompositionLifecycleExecutionTests + DecompositionBindingHelperTests. [P0]
+  39-13-assessment-family-migration-research-ambiguity-clarify-design: done # Research/AmbiguityScoring/ClarifyingQuestions/DesignProposal all dispatch document-lifecycle; AssessmentFamilyLifecycleExecutionTests + AssessmentBindingHelperTests; added WaitForDocumentInputActivity to CanonicalSuspendActivities. [P1]
+  39-14-planning-family-migration-plangeneration-planreview-unified: done # PlanGenerationWorkflow binds (architect, plan-system-design) → Plan; PlanReviewWorkflow reduced to a shim onto the unified Review. PlanningFamilyLifecycleExecutionTests, PlanReviewShimStructureTests, PlanBindingHelperTests. [P1]
+  39-15-remaining-producers-migration-triage-testspec-taskcreation-diag: done # TaskCreation/TestCaseCreation/DebugDiagnosis/TriageContextGathering/TriagePODecision all bind document-lifecycle; triage-panel-review workflow DELETED (negative-assertion tests pin it gone); registry edges flipped non-provisional (16). [P2]
+  39-16-prompt-contracts-generated-from-document-types: ready-for-dev # NOT landed — CORRECTED: the 2026-07-24 reconciliation brief listed 39-16 among the merged spine; the code refutes it. No apps/tamma-elsa/tools/Tamma.PromptContractGen, no Core/Documents/PromptContractRegion.cs, no ElsaServer/Workflows/Introspection/ scanner, ZERO "BEGIN GENERATED CONTRACT" markers in the 116 prompt files, and ContractBindingTests still carries the hand-maintained token-group `Bindings` map this story was to DELETE. Consequence: any downstream story planning on "regenerate the contract for cell X" (e.g. 41-29) must hand-edit templates or take a real dependency on this. [P1]
+  39-17-orchestrator-agent-long-running-llm-process-platform-context-tools: ready-for-dev # NOT landed. No Tamma.Api/Services/Orchestrator/, no IOrchestratorInbox, no per-tenant agent host or /api/orchestrator/config. [P0]
+  39-18-real-time-channels-workflow-orchestrator-and-user-orchestrator: in-progress # MOSTLY LANDED — CORRECTED: the 2026-07-24 reconciliation brief listed 39-18 as unstarted; the code refutes it. Shipped: Api/Hubs/{OrchestratorChannelHub,UserChannelHub}.cs (mapped at Program.cs /hubs/orchestrator + /hubs/user), Core/Documents/Channels/{ChannelMessages,ChannelAudience}.cs, ChannelOutboxMessage entity + tenant migration 20260722211145_AddChannelOutbox, ChannelOutboxService/Sweeper/Repository, and the fail-closed InitiatorOnlyTaskAudienceResolver stub for 39-20; 5 test files under Api.Tests/Channels/. OUTSTANDING: PersistedOrchestratorInbox / IOrchestratorInbox — blocked on 39-17 owning the interface. [P0]
+  39-19-orchestrator-chat-primary-user-interface-and-task-view: ready-for-dev # NOT landed. No /chat or /tasks route in packages/dashboard-user, no CHAT.* event family, no chat-history or task-inbox endpoints. [P0]
+  39-20-teams-roles-repo-access-and-task-routing: ready-for-dev # NOT landed. No teams/team_members/repositories/repo_access_grants tables, no TaskAssignmentService, no TASK.ASSIGNED events. Api/Services/Access/ITaskAudienceResolver.cs exists but is 39-18's fail-closed STUB (initiator-only), explicitly labelled as awaiting this story's real implementation. [P0]
+  39-21-rag-in-csharp-per-tenant-knowledge-isolation-and-grounding: ready-for-dev # NOT landed. No apps/tamma-elsa/src/Tamma.Intelligence/ project; KB/RAG is still the TS sidecar + ChromaDB/Ollama. [P1]
+  39-22-prompt-quality-pass-remove-over-constraint: drafted # ADDED 2026-07-25. Trims over-constraint from the 80 (role, action) prose bodies, gated on 39-9's per-cell repair-ring rates (LLM.VALIDATION.FAILED / LLM.REPAIR.SUCCEEDED / LLM.REPAIR.EXHAUSTED) rather than taste. Sequence AFTER 39-16 (which makes the output-contract block generated content, i.e. off-limits to this pass). Deliberately cross-provider: prompts have NO provider dimension and this story does not add one — see .dev/findings/no-provider-dimension-in-prompts.md. [P2]
   epic-39-retrospective: optional
+
+  # ══════════════════════════════════════════════════════════════════════════════════════════════
+  # EPICS 40 / 41 / 42 — ADDED 2026-07-24. They existed on disk under docs/stories/ but were ABSENT
+  # from this file entirely, so nothing consulting the tracker could see them.
+  #
+  # All three are DOCS-ONLY: scoped and planned, ZERO implementation code exists for any of them
+  # (verified 2026-07-24 — no .github/workflows/tamma-agent.yml, no WaitForAgentRunActivity, no
+  # ComputeTaskResumeIndexActivity, no agent_run_waits table; DocumentTypeKey still has exactly 10
+  # members and AgentRole exactly 8, so none of Epic 41's new roles/types exist; no ToolDescriptor
+  # and IToolExecutorRegistry still has no Register/Unregister, so none of Epic 42 exists).
+  #
+  # Their plans were authored against the STALE epic-39 block above and imported wrong facts from it
+  # — corrected in a 2026-07-24 doc pass. Re-verify against code before scheduling.
+  # ══════════════════════════════════════════════════════════════════════════════════════════════
+
+  epic-40: contexted   # Resumable Coding Execution — runner contract, durable agent-run waits, per-task re-entry (added 2026-07-23)
+  # Per-story effort/wave detail lives in docs/stories/epic-40/sprint-status.yaml (that file is authoritative for scheduling).
+  # CORRECTED 2026-07-24: Epic 40 was drafted with a "HARD external gate — Epic 39-10 must land first".
+  #   39-10 HAS landed (see above), so the gate is discharged: 40-1 and 40-2 both start day 0 and the
+  #   shim/fallback paths in the story docs are moot. The only hard scheduling constraint left is
+  #   40-3's agent_run_waits TenantDbContext migration (single-author token, shared with Epic 39).
+  40-1-tamma-agent-runner-contract-and-scaffolding: drafted   # tamma-agent.yml + scripts + result-schema pin + GitHub-App scaffold. Prereq: none.
+  40-2-wait-for-agent-run-activity-durable-bookmark: drafted  # Durable bookmark suspend + DelayFor timeout replacing the inline monitor; joins CanonicalSuspendActivities. Prereq: none (39-10 landed).
+  40-3-durable-agent-run-signal-and-resume-endpoint: drafted  # Persisted agent_run_waits row + webhook resume + resume endpoint. Prereq: 40-2. MIGRATIONS: TWO — TenantDbContext (token-bound) + ControlPlaneDbContext (single-user rows). Effort raised 5-7 -> 7-9d; now the epic's longest story and its critical path.
+  40-4-per-task-re-entry-from-git-and-events: drafted         # Re-entry keyed by adl-{issue}-task-{index}; also owns the ResumableStandardStructuralTests clause-(c) extension seam. Prereq: 40-2.
+  40-5-resume-behavior-declaration-and-allowlist-burndown: drafted # [ResumeBehavior(Both)] on SingleIssueCycleWorkflow + remove its LegacyResumeAllowlist entry (a TEST-fixture edit). Prereq: 40-2 + 40-4.
+  40-6-agent-run-lifecycle-event-family: drafted              # AgentRunEventTypes consolidating the 40-2/3/4 placeholder pins. Prereq: 40-2/40-3/40-4.
+  40-7-crash-restart-mode-matrix-integration-proof: drafted   # Testcontainers composition proof (durable suspend/resume, cross-pod, crash re-entry, timeout, SaaS+local matrix). Prereq: 40-1..40-6.
+  epic-40-retrospective: optional
+  # CROSS-EPIC: SingleIssueCycleWorkflow.cs per-task loop has four writers — merge order 40-2 → 40-4 → 40-5 → 41-29.
+  #   Stated identically in docs/stories/epic-40/{README.md,EXECUTION-PLAN.md} and
+  #   docs/stories/epic-41/{README.md,story-41-29/*}. If one moves, move all five.
+  # SCHEDULE (reconciled 2026-07-24 against the seven implementation plans, not the story headers):
+  #   total 39.5 person-days · critical path 22.5 (40-2 → 40-3 → 40-6 → 40-7) · wave wall-clock 24.5.
+  #   Superseded: the 37.25 / 20.5 / 22.75 figures that ran the critical path through 40-4.
+
+  epic-41: contexted   # Team-Activity Coverage — the non-coding roles onto the Epic-39 lifecycle (added 2026-07-23)
+  # 29 numbered stories (41-1 now ships as three sub-stories, so 31 story files); only 41-29 has an
+  # implementation plan and there is no EXECUTION-PLAN.md — the "waves" in the README are a leverage
+  # ordering, not a schedule.
+  # PRIORITIES REALIGNED 2026-07-24: 17 of the 29 [Pn] tags here disagreed with the story files' own
+  #   "## Priority" headings. The story files are authoritative — their Wave labels already agree
+  #   one-for-one with the README's Sequencing section, so the tags here were the drifted copy.
+  # UPDATED 2026-07-24 (audit pass): 41-1 was SPLIT into 41-1a/41-1b/41-1c. The prose-document enabler,
+  # previously listed here and in the README as UNOWNED, is now owned by 41-1c. Exactly ONE Wave-0
+  # enabler remains unowned: the tenant-aware scheduled-trigger seam (blocks 41-5/41-7/41-11/41-16/
+  # 41-17 PR-sweep/41-20/41-23). It must be written before those stories can meet their AC1/AC4.
+  41-1-team-role-and-document-type-extensions: superseded    # SPLIT into 41-1a/41-1b/41-1c — the remaining 41-1-*.md is the split index + the cross-story gate table. Same shape as Epic 42's 42-8 split.
+  41-1a-agent-taxonomy-extension: drafted                    # 3 AgentRoles (scrum_master/project_manager/ux_designer) + 15 action cells + the DERIVED panel-selector maps (GetReviewActionForRole throws for tech_writer today) + the scrum_master LegacyRoleAliases removal. 4-5d. Hard-blocks 41-6/41-7/41-8/41-10/41-11/41-16/41-17(PR half)/41-22/41-27/41-28 + the review stage of 41-24/25/26. [P0]
+  41-1b-new-document-types: drafted                          # AcceptanceCriteria/BacklogOrdering/SprintPlan/TestPlan/ThreatModel/UxSpec — 6 DocumentTypeKey members + 6 IDocumentType impls (39-3/39-4 pattern). Bumps DocumentTypeKeyTests Be(10)->Be(16) and DocumentTypeRegistryTests HaveCount(10)->HaveCount(16). 5-6d. Hard-blocks 41-2/41-3/41-6/41-13/41-19/41-27 on BOTH paths. [P0]
+  41-1c-prose-documents-and-audience-tags: drafted           # `prose` DocumentTypeKey + ProseDocumentType (unvalidated body) + Audience on DocumentEnvelope AND DocumentInstance (+ tenant migration) + audience/kind vocabularies. 3-4d. THE PROSE ENABLER — was unowned; blocks 41-4/41-5/41-8/41-9/41-22/41-24/41-25/41-26. [P0]
+  41-2-acceptance-criteria-authoring: drafted                # cell define-acceptance-criteria (exists) → AcceptanceCriteria. Blocked on 41-1b. [P0]
+  41-3-backlog-prioritization-and-grooming: drafted          # cell prioritize-backlog (exists) → BacklogOrdering. Blocked on 41-1b. [P2]
+  41-4-roadmap-shaping: drafted                              # cell plan-roadmap (exists); prose output — blocked on 41-1c. [P3]
+  41-5-stakeholder-and-status-reporting: drafted             # cell summarize-stakeholder (exists); scheduled + prose — blocked on 41-1c AND the still-unowned scheduler seam. Agent path also needs 42-9 to publish. [P2]
+  41-6-sprint-planning: drafted                              # SprintPlan type + scrum_master role. Blocked on 41-1a + 41-1b. [P2]
+  41-7-standup-synthesis: drafted                            # event-sourced digest; scheduled — blocked on 41-1a (scrum_master) AND the still-unowned scheduler seam. Agent path also needs 42-9 to broadcast. [P1]
+  41-8-retrospective-facilitation: drafted                   # scrum_master; produces Findings + an audience-tagged prose narrative. Blocked on 41-1a AND 41-1c. [P3]
+  41-9-adr-authoring: drafted                                # cell write-adr (exists); designated prose reference implementation — blocked on 41-1c (3-4d, independent of 41-1a/b, so land it first rather than demoting 41-9 out of Wave 1). [P1]
+  41-10-system-design-document: drafted                      # DefinitionId system-design. Produce cell must NOT be (architect, plan-system-design) — that is plan-generation's Plan producer (ContractBindingTests.cs:160). Blocked on 41-1a minting (architect, design-system). [P2]
+  41-11-tech-debt-and-technical-risk-triage: drafted         # cell triage-tech-debt (41-1a); scheduled sweep — also blocked on the still-unowned scheduler seam. [P2]
+  41-12-dependency-and-upgrade-planning: drafted             # cell plan-migration-strategy. Blocked on Epic 40 for the execution hand-off. [P3]
+  41-13-test-plan-authoring: drafted                         # TestPlan type. Blocked on 41-1b. [P3]
+  41-14-exploratory-test-charter: drafted                    # cell exploratory-test (exists); charter half ships now, but 'tool-enabled' exploration degrades to the six coding tools until Epic 42. [P3]
+  41-15-acceptance-verification: drafted                     # cell verify-acceptance. Blocked on 41-2 + Epic 40. [P0]
+  41-16-regression-and-flaky-test-management: drafted        # cell manage-regression (41-1a) + existing write-regression-test; scheduled sweep — also blocked on the still-unowned scheduler seam. [P1]
+  41-17-standalone-code-review-and-pr-triage: drafted        # SPLIT ON THE HALF-LINE: code-review half (new DefinitionId diff-review) is Wave-1-startable; PR-triage half (pr-triage-sweep) needs 41-1a's triage-pr cell + the still-unowned scheduler seam. Incumbent `code-review` keeps its id and neither live caller is rewired; (senior_developer, code-review) moves out of ContractBindingTests.IntentionallyUnbound; DocumentTypeRegistry.cs:158 provisional edge reconciled. [P0]
+  41-18-refactor-planning: drafted                           # cell plan-refactor. Blocked on Epic 40. [P3]
+  41-19-threat-modeling: drafted                             # ThreatModel type (cell threat-model exists). Blocked on 41-1b. [P3]
+  41-20-scheduled-security-audit: drafted                    # scheduled — blocked on the still-unowned scheduler seam; agent path is POSSIBLE today but degrades to ungoverned/unclassified ShellExecute until Epic 42. [P1]
+  41-21-security-incident-analysis: drafted                  # cell analyze-security-incident. [P3]
+  41-22-incident-response-and-postmortem: drafted            # must DISPATCH deployment-pipeline, not re-bind the existing (devops, rollback) execution cell. Blocked on 41-1a (new (devops, incident-rootcause) cell — diagnose-incident is the triage-panel lens) AND 41-1c (prose postmortem). [P3]
+  41-23-capacity-and-health-review: drafted                  # scheduled — blocked on the still-unowned scheduler seam; health/metric signals have NO registered tool executor, so the agent path needs Epic 42 (42-9/42-7). [P2]
+  41-24-release-notes-and-changelog: drafted                 # prose (41-1c); also needs the tech_writer arm on the review-action selector (41-1a). Publication needs 42-9. [P1]
+  41-25-user-and-api-documentation: drafted                  # prose (41-1c); same tech_writer review-selector gap (41-1a). Publication needs 42-9. [P2]
+  41-26-runbook-and-ops-docs-authoring: drafted              # prose (41-1c); same tech_writer review-selector gap (41-1a). Publication needs 42-9. [P3]
+  41-27-user-flow-and-wireframe-drafting: drafted            # ux_designer role (41-1a) + UxSpec type (41-1b). [P3]
+  41-28-design-review-and-accessibility-audit: drafted       # ux_designer role + review-design/audit-accessibility cells (41-1a); auditing a SHIPPED UI has no registered tool executor at all — agent path needs Epic 42. [P3]
+  41-29-task-level-flow-router: drafted                      # FlowSwitch by task kind in the per-task loop. Rebases onto the post-Epic-40 loop (merge order above). 39-15 blocker SATISFIED. Its one real blocker is its own PlanTask.Kind + shared PlanDocumentType contract change — the contract is per-TYPE not per-cell, so both plan producers move, and 39-16's generated-region markers do not exist in any prompt file, so both templates are hand-edited. `infra` routes to the CODING path, NOT deployment-pipeline (post-merge; needs a MergeSha the loop does not have) — AC2 pins that negatively. [P0]
+  epic-41-retrospective: optional
+  # CROSS-EPIC (41 -> 42): epic-42/README.md:90-91,:257-258 still describes 41-29 as routing an `infra`
+  #   task to `deployment-pipeline`. 41-29 no longer does and cannot (post-merge workflow, needs a
+  #   MergeSha the per-task loop has not produced). Epic 42's case is unaffected — only that sentence is
+  #   stale. Flagged in epic-41/README.md's Epic 42 bullet; reconcile when epic-42 is next revised.
+  # UNOWNED WORK still needed before Epic 41 is schedulable: (1) the tenant-aware scheduled-trigger seam;
+  #   (2) an EXECUTION-PLAN.md + per-story efforts — only 41-1a/b/c and 41-29 carry estimates today.
+
+  epic-42: contexted   # Agent Capability & Tool Layer — first-class, secured, autonomy-gated tool catalog (added 2026-07-23)
+  # The missing foundation under Epic 41's non-code kinds: only 6 IToolExecutors are registered today
+  # (Program.cs), all coding-oriented, so publish / deploy-control / cloud-VPS / health-metrics / HTTP
+  # agent paths either shell out ungoverned or fall back to the human-assigned path.
+  42-1-tool-contract-registry-evolution: drafted             # ToolDescriptor on IToolExecutor + Register/Unregister on the registry; relocates SecretPurpose to Tamma.Core. Wave 0 — everything depends on it. [P0]
+  42-2-tool-binding-config-store: drafted                    # tool_bindings (user_id XOR tenant_id), mirroring prompt_overrides. [P0]
+  42-3-permission-autonomy-gating: drafted                   # Two-stage gate (resolve-time eligible set + invocation-time authorization) + live-read autonomy resolver. Largest Wave-1 item. [P0]
+  42-4-tool-credential-secret-binding: drafted               # IToolSecretProvider generalizing the shipped runtime-reveal pattern over ISecretStore. [P0]
+  42-5-tool-use-dcb-audit: drafted                           # Durable TOOL.INVOKED/SUCCEEDED/FAILED via IEventRepository at the shared runner call site. [P0]
+  42-6-mcp-integration: drafted                              # Part A (Wave 0.5, P0): retire the 2 tool-facing /api/kb/mcp/* routes. Part B (Wave 2): MCP servers into the governed registry. [P0/P1]
+  42-7-cloud-vps-resource-tool: drafted                      # cloud_resource_read / _write (Hetzner + generic). Shares WaitForToolOperationActivity with 42-8B. [P1]
+  42-8-feature-flag-deploy-control-tools: superseded         # SPLIT — the remaining 42-8-*.md is the split index only; the two halves share no implementation.
+  42-8a-feature-flag-tool: drafted                           # feature_flag_read / _write; no engine-side work. [P1]
+  42-8b-deploy-control-tool: drafted                         # deploy_status / deploy_control (trigger/promote/rollback); shares the suspend path with 42-7. [P1]
+  42-9-authenticated-http-external-api-tool: drafted         # Host+method-allowlisted authenticated REST tool; unblocks the most Epic-41 workflows. [P1]
+  epic-42-retrospective: optional
 

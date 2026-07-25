@@ -50,7 +50,8 @@ this produces the structured spec, not rendered artwork.
 
 ## Dependencies
 
-- **Blocking:** 41-1 (`ux_designer` role, `UxSpec` type), Epic 39 (lifecycle, review, store).
+- **Blocking:** **41-1a** (`ux_designer` role + `draft-user-flow`/`author-ui-spec` cells) **and
+  41-1b** (`UxSpec` type), Epic 39 (lifecycle, review, store).
 - **Related:** feeds 41-28; consumed by `plan-generation`.
 
 ## Estimated Effort

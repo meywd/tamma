@@ -47,14 +47,27 @@ store node (`Role = "plan-review"`) so that family continues and the KB keeps re
 Round count, previously reconstructable only from `po-decision-round-{N}` role strings, is now
 reconstructable from `DOCUMENT.REVISION_STARTED`/`DOCUMENT.REVIEWED` round tags.
 
+### 4. The per-type acceptance-rules surface gained an autonomy floor (2026-07-24 update)
+`AcceptanceRules` now carries an optional `AcceptorRequirement` (`any` | `human`) — the per-type
+autonomy floor filed back from 39-13 D4 (see the sibling finding). It does NOT touch the plan/review
+panel defaults recorded above: `plan` and `review` keep the 7-role majority panel and
+`AcceptorRequirement.Any`; only `design` ships `human`. Relevant here because it lands in the same
+`AcceptanceDefaults.For` per-type table this finding's panel defaults live in, and because **39-17
+now has two per-type policy inputs to honor, not one** — the autonomy dial AND the acceptor floor —
+alongside whatever it does about defer/split (item 1).
+
 ## ✅ Action Items
 - [ ] If defer/split scope routing is still wanted, implement it as a 39-17 orchestrator accept-decision
       capability (not a reviewer verdict).
 - [ ] Dashboards/consumers that read `deferred`/`split` from `plan-review` output should treat them as
       always-empty and migrate to the orchestrator's routing signal.
+- [ ] When 39-17 lands, have its routing honor `AcceptanceRules.AcceptorRequirement` (`human` ⇒ never
+      `AcceptanceRouting.DecideSelf`). Nothing reads the field today — see
+      `.dev/findings/assessment-family-policy-gaps.md` #2.
 
 ## 🔗 Related
-- `.dev/findings/assessment-family-policy-gaps.md` (39-13 sibling behavior changes)
+- `.dev/findings/assessment-family-policy-gaps.md` (39-13 sibling behavior changes; the four filed-back
+  items there are now resolved, with the `AcceptorRequirement` consumer wiring left to 39-17)
 - `.dev/findings/document-lifecycle-persist-not-wired.md` (AC-store gap affecting execution tests)
 - `docs/stories/epic-39/story-39-14/implementation-plan.md` (D1, D2, D5)
 
@@ -65,4 +78,4 @@ execution-test scenario (h). The defer/split retirement is the most consumer-vis
 ---
 
 **Status**: 🔍 Needs Review
-**Last Updated**: 2026-07-23
+**Last Updated**: 2026-07-24

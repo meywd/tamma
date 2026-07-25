@@ -131,9 +131,11 @@ public class DocumentLifecycleWorkflow : WorkflowBase
 
         // ── Story 39-13 (D5/D6c) — optional pre-ACCEPT delivery hook ────
         // When `deliveryWorkflowDefinitionId` is non-empty the lifecycle dispatches that
-        // sub-workflow on every entry to ACCEPT (before publishing the acceptance request),
-        // so a family binding (Design) can post the document to the issue BEFORE the human
-        // decides while keeping the legacy GENERATED/DELIVERED emits on the durable drain.
+        // sub-workflow on each FRESH entry to ACCEPT (before publishing the acceptance
+        // request), so a family binding (Design) can post the document to the issue BEFORE
+        // the human decides while keeping the legacy GENERATED/DELIVERED emits on the durable
+        // drain. A crash re-entry that resumes AT ACCEPT skips it (DeliveryReEntryGate) so
+        // delivery — and its legacy emits — happen exactly once per delivered revision.
         var deliveryDefId = builder.WithVariable<string>("DeliveryWorkflowDefinitionId", "");
         var deliveryRepository = builder.WithVariable<string>("DeliveryRepository", "");
         var deliveryIssueNumber = builder.WithVariable<int>("DeliveryIssueNumber", 0);
@@ -285,7 +287,8 @@ public class DocumentLifecycleWorkflow : WorkflowBase
             Value = new(ctx =>
             {
                 var state = DocumentLifecycleHelper.Deserialize(stateJson.Get(ctx));
-                var (newState, ok, _) = IngestDraft(produceResult.Get(ctx), state, isRevise: false);
+                var (newState, ok, _) = IngestDraft(
+                    produceResult.Get(ctx), state, DocumentLifecycleHelper.DraftOrigin.Produce);
                 producedOk.Set(ctx, ok);
                 lastDispatchOk.Set(ctx, ok);
                 UpdateCurrent(ctx, newState, currentDocId, currentDocJson, currentRound);
@@ -403,7 +406,11 @@ public class DocumentLifecycleWorkflow : WorkflowBase
             Value = new(ctx =>
             {
                 var state = DocumentLifecycleHelper.Deserialize(stateJson.Get(ctx));
-                var (newState, ok, _) = IngestDraft(repairResult.Get(ctx), state, isRevise: false);
+                // A repair REPLACES the draft it repairs at the same chain position —
+                // it inherits that draft's supersedes edge (null for a first draft),
+                // never resets it (.dev/bugs/repair-after-revise-breaks-supersession-chain.md).
+                var (newState, ok, _) = IngestDraft(
+                    repairResult.Get(ctx), state, DocumentLifecycleHelper.DraftOrigin.Repair);
                 lastDispatchOk.Set(ctx, ok);
                 UpdateCurrent(ctx, newState, currentDocId, currentDocJson, currentRound);
                 return DocumentLifecycleHelper.Serialize(newState);
@@ -550,7 +557,8 @@ public class DocumentLifecycleWorkflow : WorkflowBase
             Value = new(ctx =>
             {
                 var state = DocumentLifecycleHelper.Deserialize(stateJson.Get(ctx));
-                var (newState, ok, _) = IngestDraft(reviseResult.Get(ctx), state, isRevise: true);
+                var (newState, ok, _) = IngestDraft(
+                    reviseResult.Get(ctx), state, DocumentLifecycleHelper.DraftOrigin.Revise);
                 lastDispatchOk.Set(ctx, ok);
                 UpdateCurrent(ctx, newState, currentDocId, currentDocJson, currentRound);
                 return DocumentLifecycleHelper.Serialize(newState);
@@ -616,6 +624,20 @@ public class DocumentLifecycleWorkflow : WorkflowBase
         var hasDeliveryGate = new FlowDecision(ctx => !string.IsNullOrWhiteSpace(deliveryDefId.Get(ctx)))
         { Id = "HasDeliveryGate", Name = "Deliver Before Accept?" };
         hasDeliveryGate.SetDisplayText("Deliver Before Accept?");
+
+        // Delivery must happen EXACTLY ONCE per document (filed back from
+        // `.dev/findings/assessment-family-policy-gaps.md` #3). The ACCEPT region has TWO
+        // inbound edges: the review-approved edge (RouteAccept) and the 39-10 crash re-entry
+        // edge (ReEntryAcceptGate). On the re-entry edge the document was already delivered
+        // before the gate suspended, so re-dispatching would re-emit the delivery child's
+        // legacy events (DESIGN.PROPOSAL.GENERATED / DELIVERED). Gate the dispatch on the
+        // re-entry position exactly as the family bindings gate their own pre-lifecycle emits
+        // (39-10 pattern): only a run that did NOT resume at ACCEPT delivers. A revise round
+        // that loops back through REVIEW into ACCEPT DOES re-deliver — that is a NEW revision
+        // the decider has not seen, not a duplicate of an already-delivered one.
+        var deliveryReEntryGate = new FlowDecision(ctx => reEntryStage.Get(ctx) != "accept")
+        { Id = "DeliveryReEntryGate", Name = "First Entry To Accept?" };
+        deliveryReEntryGate.SetDisplayText("First Entry To Accept?");
 
         var dispatchDelivery = new DispatchWorkflow
         {
@@ -824,7 +846,8 @@ public class DocumentLifecycleWorkflow : WorkflowBase
                 emitReviewRequested, dispatchReview, ingestReview, emitReviewed,
                 routeAccept, routeRevise, routeRounds,
                 emitRevisionStarted, prepareRevision, dispatchRevise, ingestRevise,
-                buildAcceptanceRequest, hasDeliveryGate, dispatchDelivery, publishRequest, waitForDecision, applyGuardrails,
+                buildAcceptanceRequest, hasDeliveryGate, deliveryReEntryGate, dispatchDelivery,
+                publishRequest, waitForDecision, applyGuardrails,
                 acceptGate, rejectGate, reviseGate,
                 seedValidationExhausted, seedAmbiguity, seedRounds, seedUndecidable,
                 mintRevisionEventId, mintAcceptedEventId, mintRejectedEventId, mintEscalatedEventId,
@@ -889,10 +912,14 @@ public class DocumentLifecycleWorkflow : WorkflowBase
                 Connect(dispatchRevise, ingestRevise),
                 Connect(ingestRevise, validateDraft),
 
-                // ACCEPT — (optional delivery) → publish → gate (NO decision between them) → guardrails → route
+                // ACCEPT — (optional delivery) → publish → gate (NO decision between them) → guardrails → route.
+                // Delivery is behind TWO gates: "is a delivery workflow configured?" and
+                // "is this the first entry into ACCEPT?" (the exactly-once re-entry pin).
                 Connect(buildAcceptanceRequest, hasDeliveryGate),
-                ConnectOutcome(hasDeliveryGate, "True", dispatchDelivery),
+                ConnectOutcome(hasDeliveryGate, "True", deliveryReEntryGate),
                 ConnectOutcome(hasDeliveryGate, "False", publishRequest),
+                ConnectOutcome(deliveryReEntryGate, "True", dispatchDelivery),
+                ConnectOutcome(deliveryReEntryGate, "False", publishRequest),
                 Connect(dispatchDelivery, publishRequest),
                 Connect(publishRequest, waitForDecision),
                 ConnectOutcome(waitForDecision, "Accept", applyGuardrails),
@@ -1133,9 +1160,16 @@ public class DocumentLifecycleWorkflow : WorkflowBase
         currentRound.Set(ctx, state.Round);
     }
 
-    /// <summary>Ingest a produce/repair/revise result into a fresh draft envelope.</summary>
+    /// <summary>
+    /// Ingest a produce/repair/revise result into a fresh draft envelope. The
+    /// supersession edge is derived from the producer turn through the pure
+    /// <see cref="DocumentLifecycleHelper.ResolveSupersedes"/> (D1) — a repair
+    /// INHERITS the current chain position rather than resetting it, so a repair
+    /// inside a revise round does not orphan that round's chain.
+    /// </summary>
     private static (DocumentLifecycleHelper.LifecycleState State, bool Ok, string PayloadJson) IngestDraft(
-        IDictionary<string, object>? result, DocumentLifecycleHelper.LifecycleState state, bool isRevise)
+        IDictionary<string, object>? result, DocumentLifecycleHelper.LifecycleState state,
+        DocumentLifecycleHelper.DraftOrigin origin)
     {
         if (!ReadSuccessFlag(result))
             return (state, false, "{}");
@@ -1158,7 +1192,7 @@ public class DocumentLifecycleWorkflow : WorkflowBase
 
         var producer = DocumentProducer.Create(
             state.ProducerRole, state.ProducerAction, DocumentLifecycleHelper.ProducerWorkflowDefinitionId);
-        var supersedes = isRevise ? state.Current?.Id : null;
+        var supersedes = DocumentLifecycleHelper.ResolveSupersedes(state, origin);
         var envelope = DocumentLifecycleHelper.MintDraft(state, payload, producer, supersedes, DateTimeOffset.UtcNow);
         return (DocumentLifecycleHelper.AppendDraft(state, envelope), true, payloadJson);
     }

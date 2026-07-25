@@ -39,6 +39,11 @@ Accepted runbook routes per autonomy and is published to the ops docs surface; a
 - **85–100:** agent drafts and self-accepts; a runbook covering a regulated/critical path can be
   always-escalate.
 
+> **Epic 42 caveat — "publish" has no tool.** Pushing the runbook to the ops-docs host needs a
+> publish capability (**42-9**); none of the six registered `IToolExecutor`s
+> (`Tamma.Api/Program.cs:753-764`) provides one. Drafting is agent-reachable; publication is
+> **human-assigned** (rule 4) until Epic 42 lands.
+
 ## Acceptance Criteria
 
 1. Thin lifecycle binding; prose reviewed by a `Review`.
@@ -47,7 +52,10 @@ Accepted runbook routes per autonomy and is published to the ops docs surface; a
 
 ## Dependencies
 
-- **Blocking:** Epic 39 (prose handling, lifecycle, review, store), `context-gathering`.
+- **Blocking:** **41-1c** (the `prose` type + `Audience` field; *corrected: was "Epic 39 (prose
+  handling)" — out of Epic 39's scope per 39-1:58*), **41-1a** (the `(tech_writer, review-docs)`
+  review-selector arm — the selector throws for `TechWriter` today), Epic 39 (lifecycle, review, store),
+  `context-gathering`.
 - **Related:** dispatched by 41-22.
 
 ## Estimated Effort

@@ -49,8 +49,8 @@ planning); high-risk items assigned to the architect/senior-dev role's Task View
 
 ## Dependencies
 
-- **Blocking:** 41-1 (`triage-tech-debt` cell), Epic 39 (`TriageDecision`, `Findings`, lifecycle, store),
-  scheduler pattern, `context-gathering`.
+- **Blocking:** **41-1a** (`triage-tech-debt` cell — absent from `AgentAction.cs` today), Epic 39
+  (`TriageDecision`, `Findings`, lifecycle, store), `context-gathering`, and **the tenant-aware scheduled-trigger seam — unowned; no story writes it** (*corrected: "scheduler pattern" named no artifact;* `HourlyAnalyticsRollupScheduler` *is hardcoded to one workflow (`:198-199`), offers one `FireAtMinute` int rather than a window/cron shape (`:34`), threads no `tenantId` into the dispatch (`:202-203`), keeps its last-fired window in a per-process field (`:83`), and its advisory-lock key has no tenant component (`:241`) — one tenant's leader would suppress every other tenant's fire*).
 
 ## Estimated Effort
 

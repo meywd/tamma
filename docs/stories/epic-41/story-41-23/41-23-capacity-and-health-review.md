@@ -38,6 +38,11 @@ the devops role's Task View or self-actioned at high autonomy (can seed a scalin
 - **85–100:** agent drafts and self-accepts; routine scaling recommendations auto-assigned; a breach above
   a configured threshold always escalates.
 
+> **Epic 42 caveat — no registered tool can read a health or metric signal.** All six registered
+> `IToolExecutor`s (`Tamma.Api/Program.cs:753-764`) are coding-oriented; reading metrics needs
+> **42-9** (authenticated HTTP) and acting on capacity needs **42-7** (cloud/VPS). Until then this
+> workflow is **human-assigned** (rule 4) for anything beyond the DCB/analytics reads it already has.
+
 ## Acceptance Criteria
 
 1. Scheduled, tenant-scoped, idempotent per window; each lens fail-closed.
@@ -46,8 +51,8 @@ the devops role's Task View or self-actioned at high autonomy (can seed a scalin
 
 ## Dependencies
 
-- **Blocking:** Epic 39 (`Findings`, lifecycle, store), scheduler pattern, analytics/health signals
-  (28-10 rollup, 4-7 query API).
+- **Blocking:** Epic 39 (`Findings`, lifecycle, store), analytics/health signals (28-10 rollup, 4-7
+  query API), and **the tenant-aware scheduled-trigger seam — unowned; no story writes it** (*corrected: "scheduler pattern" named no artifact;* `HourlyAnalyticsRollupScheduler` *is hardcoded to one workflow (`:198-199`), offers one `FireAtMinute` int rather than a window/cron shape (`:34`), threads no `tenantId` into the dispatch (`:202-203`), keeps its last-fired window in a per-process field (`:83`), and its advisory-lock key has no tenant component (`:241`) — one tenant's leader would suppress every other tenant's fire*).
 
 ## Estimated Effort
 

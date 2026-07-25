@@ -187,6 +187,14 @@ lineage, which is also what re-entry reads to resume from the latest state.
 | 39-19 | Orchestrator Chat — primary user interface, and the Task View | P0 | drafted | 6-8 days |
 | 39-20 | Teams, Roles, Repo Access & Task Routing | P0 | drafted | 6-8 days |
 | 39-21 | RAG in C# — per-tenant knowledge isolation and grounding | P1 | drafted | 8-10 days |
+| 39-22 | Prompt Quality Pass — remove over-constraint, measure don't guess | P2 | drafted | 4-6 days |
+
+> **39-22 sequencing** — run it *after* 39-16. 39-16 makes the output-contract block
+> generated content (removing the largest block of hand-written prompt bulk and putting
+> a hard boundary around the region 39-22 must not edit), and 39-9's repair-ring events
+> supply 39-22's per-cell before/after gate. See
+> `.dev/findings/no-provider-dimension-in-prompts.md` for why this is a single
+> cross-provider pass and not per-provider prompt tuning.
 
 ## Supersedes / absorbs
 
