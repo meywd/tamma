@@ -38,17 +38,10 @@ public class UIHintAttributeTests
             "PlanJson should use the json-editor UI hint for JSON editing");
     }
 
-    [Test]
-    public void ResolveLlmPromptActivity_SystemPromptOverride_HasMultiLineUIHint()
-    {
-        var property = typeof(ResolveLlmPromptActivity).GetProperty("SystemPromptOverride");
-        property.Should().NotBeNull("ResolveLlmPromptActivity must have a SystemPromptOverride property");
-
-        var inputAttr = property!.GetCustomAttribute<InputAttribute>();
-        inputAttr.Should().NotBeNull("SystemPromptOverride must have an [Input] attribute");
-        inputAttr!.UIHint.Should().Be("multiline",
-            "SystemPromptOverride should use the multiline UI hint for long text");
-    }
+    // ResolveLlmPromptActivity_SystemPromptOverride_HasMultiLineUIHint was removed
+    // with the activity itself — the abandoned config-driven prompt hierarchy. The
+    // live resolver is ResolvePromptFromRegistryActivity; the surviving multiline
+    // hint assertion below covers ResolveAgentConfigActivity's override property.
 
     [Test]
     public void ResolveAgentConfigActivity_SystemPromptOverrideProp_HasMultiLineUIHint()

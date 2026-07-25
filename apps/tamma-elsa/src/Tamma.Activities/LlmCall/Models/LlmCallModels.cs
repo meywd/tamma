@@ -264,52 +264,18 @@ public enum CircuitBreakerStatus
 // ============================================================
 // Prompt Resolution
 // ============================================================
-
-/// <summary>
-/// Result of the 6-level prompt resolution hierarchy.
-/// </summary>
-public class ResolvedPrompt
-{
-    /// <summary>The final system prompt text.</summary>
-    public string SystemPrompt { get; set; } = string.Empty;
-
-    /// <summary>The user prompt text (passed through or enriched).</summary>
-    public string UserPrompt { get; set; } = string.Empty;
-
-    /// <summary>Which resolution level provided the system prompt.</summary>
-    public PromptResolutionLevel ResolvedLevel { get; set; }
-
-    /// <summary>Config key that was matched (for diagnostics).</summary>
-    public string? MatchedConfigKey { get; set; }
-}
-
-/// <summary>
-/// The 6-level prompt resolution hierarchy (highest priority first).
-/// </summary>
-[JsonConverter(typeof(JsonStringEnumConverter))]
-public enum PromptResolutionLevel
-{
-    /// <summary>Level 1 — per-provider, per-role override (e.g. "LlmPrompts:anthropic:code_reviewer").</summary>
-    PerProviderPerRole,
-
-    /// <summary>Level 2 — per-provider default (e.g. "LlmPrompts:anthropic:default").</summary>
-    PerProviderDefault,
-
-    /// <summary>Level 3 — per-role override (e.g. "LlmPrompts:roles:code_reviewer").</summary>
-    PerRole,
-
-    /// <summary>Level 4 — per-operation override (e.g. "LlmPrompts:operations:blocker_diagnosis").</summary>
-    PerOperation,
-
-    /// <summary>Level 5 — global default from config (e.g. "LlmPrompts:default").</summary>
-    GlobalDefault,
-
-    /// <summary>Level 6 — hardcoded fallback baked into the activity.</summary>
-    HardcodedFallback,
-
-    /// <summary>Caller provided an explicit override — no resolution needed.</summary>
-    CallerOverride
-}
+//
+// The `ResolvedPrompt` class and the `PromptResolutionLevel` enum that used to
+// live here were removed alongside `ResolveLlmPromptActivity` — the abandoned
+// config-driven `LlmPrompts:{provider}:{role}` hierarchy. Prompt resolution is
+// the Prompt Store's job: `ResolvePromptFromRegistryActivity` renders the
+// `(principal, scope, role, action)` cell over `POST /api/prompts/{role}/{action}/render`.
+//
+// There is deliberately NO provider dimension. `LlmCallWorkflow.BuildRetryLoop`
+// retries the SAME call across the provider chain (`ForEach<provider>`), so a
+// provider-keyed prompt would swap the prompt mid-retry while the output
+// contract still has to hold. Provider differences belong at the transport seam
+// (`HttpProviderClient`), not in the prompt.
 
 // ============================================================
 // Tool / Function Calling

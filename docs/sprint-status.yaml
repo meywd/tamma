@@ -548,6 +548,7 @@ development_status:
   39-19-orchestrator-chat-primary-user-interface-and-task-view: ready-for-dev # NOT landed. No /chat or /tasks route in packages/dashboard-user, no CHAT.* event family, no chat-history or task-inbox endpoints. [P0]
   39-20-teams-roles-repo-access-and-task-routing: ready-for-dev # NOT landed. No teams/team_members/repositories/repo_access_grants tables, no TaskAssignmentService, no TASK.ASSIGNED events. Api/Services/Access/ITaskAudienceResolver.cs exists but is 39-18's fail-closed STUB (initiator-only), explicitly labelled as awaiting this story's real implementation. [P0]
   39-21-rag-in-csharp-per-tenant-knowledge-isolation-and-grounding: ready-for-dev # NOT landed. No apps/tamma-elsa/src/Tamma.Intelligence/ project; KB/RAG is still the TS sidecar + ChromaDB/Ollama. [P1]
+  39-22-prompt-quality-pass-remove-over-constraint: drafted # ADDED 2026-07-25. Trims over-constraint from the 80 (role, action) prose bodies, gated on 39-9's per-cell repair-ring rates (LLM.VALIDATION.FAILED / LLM.REPAIR.SUCCEEDED / LLM.REPAIR.EXHAUSTED) rather than taste. Sequence AFTER 39-16 (which makes the output-contract block generated content, i.e. off-limits to this pass). Deliberately cross-provider: prompts have NO provider dimension and this story does not add one — see .dev/findings/no-provider-dimension-in-prompts.md. [P2]
   epic-39-retrospective: optional
 
   # ══════════════════════════════════════════════════════════════════════════════════════════════
