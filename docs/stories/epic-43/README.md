@@ -389,7 +389,14 @@ Built through as one epic. The ordering below is sequencing, not separate releas
 **Story 0** fixes a live bug worth landing on its own: the acceptance-rules edit dialog builds its
 save body without `acceptorRequirement`, and the API defaults the missing field — so **every admin
 save silently resets `design` from human-required back to `any`**. Also deletes a dead tool-resolution
-activity with zero callers (a third dead tool vocabulary) and resolves a tool the registry cannot see.
+activity with zero callers (a third dead tool vocabulary).
+
+> **Correction (2026-07-25).** An earlier draft of this line also asked Story 0 to "resolve
+> `GetAcceptanceRulesTool` — DI-register or delete, it must not stay a tool the registry cannot
+> see." That was wrong. It is deliberately not registered as an `IToolExecutor`
+> (`Program.cs:411-417`, Story 39-5 Design Decision D6) — the factory mints principal-bound
+> instances per tenant-agent session, so a singleton registration would be the bug. Story 4's
+> startup validator gives it a permanent allowlist entry instead of "fixing" it.
 
 **Story 7 is the least reliable estimate in the plan** — three React primitives with no in-repo
 precedent (a row-level toggle, a grouped table, and a dimmed row with a why-disabled tooltip). The
