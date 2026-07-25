@@ -221,10 +221,31 @@ flatly that "the dial is read live, never cached into a running workflow (Epic 3
 `DocumentLifecycleWorkflow` resolves `ResolvedAcceptanceRules` **once at Init** (`ResolveRules`, L184)
 into serialized lifecycle state, and every later stage reads `state.Rules`. Worse, `AcceptanceRules.AutonomyLevel`
 is validated to `[70,100]` and then **never branched on anywhere** — no comparison, no switch (nor is
-the per-type `AcceptorRequirement` floor). So `AutonomyFloor ≤ currentAutonomy` is a **new Epic 39
-design change requiring sign-off**, not a reuse: 42-3 must *ship* the live-read resolver seam
-(an `Input<T>` bound to a delegate that consults the resolver per activity execution — the re-read-on-resume
-pattern `WaitForDocumentDecisionActivity` already proves), not merely call an existing one.
+the per-type `AcceptorRequirement` floor). So `AutonomyFloor ≤ currentAutonomy` is a **new** control-flow
+use: 42-3 must *ship* the live-read resolver seam (an `Input<T>` bound to a delegate that consults the
+resolver per activity execution — the re-read-on-resume pattern `WaitForDocumentDecisionActivity`
+already proves), not merely call an existing one.
+
+> **DECIDED (2026-07-24, product owner).** This is **not** an open question, and the dial being
+> unread today is "not built yet", not a design flaw. The dial is **both**:
+> 1. **Prompt context** — the orchestrator reads it to decide *how much it forwards to users*. This is
+>    its existing role and it stays.
+> 2. **A hard gate** — below a threshold, specific **action classes** must not be auto-decided or
+>    auto-called at all. Named examples: **ambiguity**, **deployment**, **design decisions**.
+>
+> Two consequences for this epic:
+> - 42-3's premise is **confirmed valid** — build the floor. No Epic 39 sign-off is outstanding; the
+>   live-read seam is in scope for 42-3 precisely because (2) makes the dial a safety control, and a
+>   safety control cached at Init would not respond to an operator turning it down mid-run.
+> - **Scope gap in this epic:** 42-3 models the floor for **tools only**. The decision above is
+>   broader — it also covers **`llm-call`s and workflow actions** (an ambiguity assessment or a design
+>   decision is not a tool call). The per-action-class floor therefore belongs in the **Epic 39 policy
+>   layer** alongside `AcceptorRequirement`, with 42-3's tool floor as one consumer of it, not as the
+>   mechanism. Filed as a follow-up: see Dependencies.
+>
+> Relationship to the landed `AcceptorRequirement` (`any`|`human`, per *document type*): that is the
+> **coarse** form of the same idea and stays. The decision above adds a **finer, per-action-class**
+> floor. Both are policy inputs the orchestrator honors; neither replaces the other.
 
 **Credentials (Story 42-4)** bind through Epic 29's `ISecretStore` — `SecretScope.Tenant` in SaaS
 (keyed by the tenant `Guid`), `SecretScope.Platform` in single-user. *Corrected:* there is **no user
@@ -367,8 +388,17 @@ only one of the two carries that cost (the per-story estimates state both figure
   `DocumentEnvelope`; `AcceptanceRequestFactory` is the only constructor). **Autonomy dial — not an
   existing consumable behaviour:** `AutonomyLevel` is stored, validated `[70,100]` and emitted in audit,
   but **no code branches on it**, and `DocumentLifecycleWorkflow` caches the resolved rules at Init
-  contrary to Epic 39's own written rule; 42-3 must ship the live-read path and get that design change
-  signed off. Also: resumable-by-design (42-1 `Suspends`).
+  contrary to Epic 39's own written rule; 42-3 must ship the live-read path. **Sign-off obtained
+  (2026-07-24)** — the dial is deliberately both prompt context *and* a hard gate; see the DECIDED note
+  in "The autonomy dial" above. Also: resumable-by-design (42-1 `Suspends`).
+- **Epic 39 follow-up this epic does NOT own — the per-action-class autonomy floor.** The product
+  decision that fixes 42-3's premise is broader than tools: below a threshold, whole **action classes**
+  (named: **ambiguity**, **deployment**, **design decisions**) must not be auto-decided or auto-called —
+  which covers `llm-call`s and workflow actions, not just `IToolExecutor` invocations. That floor
+  belongs in the **Epic 39 policy layer** next to the landed per-document-type `AcceptorRequirement`
+  (`any`|`human`), with 42-3's `AutonomyFloor` as **one consumer** of it rather than the mechanism.
+  Until it exists, 42-3's floor governs tools only and the non-tool classes stay ungated. Needs an
+  Epic 39 story; 42-3 is not blocked on it.
 - **DCB audit transport (42-5):** *Corrected* — **not** `TammaEventEmitter` → `tamma:events` →
   `EventDrain`. That emitter structurally requires an `ActivityExecutionContext` **and** an `IActivity`,
   and the tool loop no longer runs in the engine; `Tamma.Api` holds `IEventRepository` directly (as
