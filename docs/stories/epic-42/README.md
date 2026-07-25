@@ -301,6 +301,35 @@ ungovernable one.
 
 ## Stories
 
+> ## ⚠️ RECONCILED AGAINST EPIC 43 (2026-07-25) — read before implementing any story below
+>
+> **Epic 43 (The Action Catalog) is the single source of truth for gating.** Epic 42 consumes it.
+> Epic 42 was, structurally, a second action catalog: a duplicate autonomy-floor field, a duplicate
+> per-principal override store, a duplicate admin surface and permission, a second gate on the same
+> code path with no stated ordering, a second denial-audit schema, and a second escalation machinery.
+> Twelve concrete duplications in all. **None of Epic 42 exists in code**, so this is a spec
+> reconciliation, not a migration.
+>
+> The story table below is the PRE-reconciliation text, retained for its analysis. The verdicts:
+>
+> | Story | Verdict |
+> |---|---|
+> | **42-1** | **Rewritten** — drop `AutonomyFloor`, `PermissionClass` and `Category` (absorbed by the catalog, along with their default-interface-member default and its three caveats). Keep `SecretRequirement`, `Suspends`, and the `SecretPurpose` relocation. |
+> | **42-2** | **DELETED** — a third per-principal override store of identical shape. Its two-scoping prose is transplanted into Epic 43 Story 5. |
+> | **42-3** | **DELETED** — a second gate on the same code path. Its siting analysis and its effective-ceiling insight (filtering on the raw descriptor class would have made every Wave-3 write tool unreachable) are transplanted into Epic 43's Seam B, with credit. |
+> | **42-4** | Unchanged. |
+> | **42-5** | **Narrowed** — keeps the invocation trio; loses the governance events (Epic 43 owns one event family) and its dependency on `InlineToolLoopResult.ToolCalls`, which is documented as always empty. |
+> | **42-6** | Part A unchanged. **Part B gains a catalog-binding prerequisite** — an MCP tool entering the registry must resolve to a catalog entry. |
+> | **42-7 / 42-8A / 42-8B / 42-9** | **Gating sections stripped.** They declare capability and secrets; the catalog governs them. |
+> | **42-8B specifically** | **Scope 4 / AC7 DELETED** — it required the Epic 39 always-escalate class to bind *independently* of the dial and of 42-3's grant, so a satisfied tool authorization would not satisfy the class. That is two gates, two audit ids and two human decisions for one production deploy. |
+>
+> Also settled here: the contradiction where this README said 42-3 was *not* blocked on the Epic 39
+> gating work while Story 39-23 said it *was*, and 42-3 itself never mentioned either. 39-23 is
+> superseded; 42-3 is deleted; the question is moot.
+>
+> Applied by **Epic 43 Story 10**. See `docs/stories/epic-43/README.md` and
+> `.dev/decisions/epic-43-action-catalog-design.md`.
+
 | Story | Title | Purpose (one line) |
 |---|---|---|
 | **42-1** | Tool Contract & Registry Evolution | Add `ToolDescriptor` (category / permission class / autonomy floor / secret requirement / suspends) to the `IToolExecutor` surface and a dynamic `Register`/`Unregister` seam to `IToolExecutorRegistry`; annotate the six built-ins. |

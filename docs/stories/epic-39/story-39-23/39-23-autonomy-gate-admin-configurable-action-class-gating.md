@@ -1,6 +1,33 @@
 # Story 39-23: Autonomy Gate — Admin-Configurable, Dial-Sensitive Action-Class Gating
 
-Status: drafted
+Status: **SUPERSEDED by Epic 43** (2026-07-25) — do not implement.
+
+> **Why superseded.** This story hung the gating policy off the per-document-type
+> `acceptance_rules_overrides` row, by adding an optional `minAutonomyLevel` to
+> `EscalationClass`. That shape only carries an action in the model when someone
+> remembers to list it on some document type's rules row — the inverse of what the
+> product requires, which is an exhaustive permissions-list-style catalog where every
+> action is present regardless of the current floor, grouped, and assignable as a group
+> or individually.
+>
+> Two further problems this story could not have solved in place:
+> - It re-hardcoded the dial bound (`minAutonomyLevel` "validated [70,100]"), which
+>   would have made `[70,100]` live in three places and blocked ever lowering the floor
+>   cheaply. Epic 43 D3 makes it one named constant.
+> - Its premise that the always-escalate gate is enforced was wrong.
+>   `AcceptanceGuardrails.TryPreGate` has zero production call sites, so the list it
+>   extended never executes. Epic 43 gives `TryPreGate` its first production caller and
+>   absorbs the legacy list as a floor rather than extending it.
+>
+> **Superseded by:** `docs/stories/epic-43/README.md`.
+> **Decision record:** `.dev/decisions/epic-43-action-catalog-design.md`.
+> Its `AcceptorRequirement` observation remains valid and is carried as an Epic 43 risk:
+> a second "pin this to a human" concept coexists with the catalog and is deliberately
+> not folded in.
+
+---
+
+_Original content follows, retained for the reasoning it records._
 
 ## MANDATORY: Before You Code
 
