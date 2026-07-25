@@ -80,6 +80,10 @@ public sealed class ManagedAgent : IManagedAgent
     // trailing ctor arg (null ⇒ new RepairRingOptions() = default OFF, cap 1) so the
     // existing unit-test ctors are unchanged; DI-registered in the API host.
     private readonly RepairRingOptions _repairOptions;
+    // The tool catalogue, used to resolve each advertised tool's description and
+    // JSON Schema. Optional (null ⇒ name-only tools) to keep older unit-test ctors
+    // compiling; DI-registered in the API host.
+    private readonly Tamma.Activities.LlmCall.Tools.IToolExecutorRegistry? _toolRegistry;
     private readonly ILogger<ManagedAgent> _logger;
 
     // NOTE: the process mode (single-user vs SaaS) is NOT a dependency here — the
@@ -100,7 +104,8 @@ public sealed class ManagedAgent : IManagedAgent
         Tamma.Activities.Security.IContentSanitizer? sanitizer = null,
         IAgentTrailEmitter? trail = null,
         Tamma.Api.Services.Streaming.ILlmRunStreamBus? runStreamBus = null,
-        IOptions<RepairRingOptions>? repairOptions = null)
+        IOptions<RepairRingOptions>? repairOptions = null,
+        Tamma.Activities.LlmCall.Tools.IToolExecutorRegistry? toolRegistry = null)
     {
         _gate = gate ?? throw new ArgumentNullException(nameof(gate));
         _budget = budget ?? throw new ArgumentNullException(nameof(budget));
@@ -127,6 +132,11 @@ public sealed class ManagedAgent : IManagedAgent
         // default is repair OFF for every document type (EnabledDocumentTypes empty)
         // with a hard cap of 2 and a default of 1 — the mechanism ships dark.
         _repairOptions = repairOptions?.Value ?? new RepairRingOptions();
+        // The tool catalogue. Optional trailing arg (null ⇒ name-only tools, the
+        // pre-fix behaviour) so existing unit-test ctors are unchanged; DI-registered
+        // in the API host so production always resolves real schemas. See
+        // ToResolvedTools for why the absence of this was a live defect.
+        _toolRegistry = toolRegistry;
     }
 
     /// <inheritdoc />
@@ -920,20 +930,56 @@ public sealed class ManagedAgent : IManagedAgent
         return string.IsNullOrWhiteSpace(providerDefault) ? resolved.Model : providerDefault;
     }
 
-    private static IReadOnlyList<ResolvedTool>? ToResolvedTools(
+    /// <summary>
+    /// Build the tool set advertised to the model, resolving each name against the
+    /// tool catalogue for its description and JSON Schema.
+    ///
+    /// <para><b>This is the provider-agnostic layer, and that is the point.</b> The
+    /// comment here used to claim "descriptions/schemas come from the existing
+    /// built-in catalog at runtime" while the code returned
+    /// <c>new ResolvedTool { Name = n }</c> — description <c>""</c>, schema
+    /// <c>null</c>. No later code did that lookup. Both wire dialects write the null
+    /// straight through — <c>input_schema</c> for the Anthropic shape and
+    /// <c>parameters</c> for the OpenAI-compatible shape — so every managed-agent
+    /// call advertised tools the model had no signature for, on every provider. It
+    /// would either decline to use them or guess at arguments, and
+    /// <c>ToolCallValidator</c> never checks arguments against the schema either, so
+    /// a wrong guess surfaced as a property-access throw inside the tool.</para>
+    ///
+    /// <para>Fixing it HERE rather than in a body builder is deliberate: a builder
+    /// fix would repair one wire format and leave the other broken, and the next
+    /// providers on the roadmap (Kimi, GLM, DeepSeek) are all OpenAI-compatible.
+    /// One lookup, every dialect.</para>
+    ///
+    /// <para>A name with no registered executor keeps its bare entry rather than
+    /// being dropped: dropping it would silently shrink the agent's advertised
+    /// capability, which is harder to notice than a tool that fails when called.
+    /// The tool-vocabulary mismatch that makes this reachable — advertised
+    /// Claude-Code names vs registry names — is Epic 43 Story 4's subject.</para>
+    /// </summary>
+    private IReadOnlyList<ResolvedTool>? ToResolvedTools(
         ManagedAgentRequest request, ResolvedAgentConfig resolved)
     {
         // The request's tool allow-list (else the agent's resolved default set)
-        // becomes the resolved-tool set passed to the runner. Per the buffered
-        // scope, descriptions/schemas come from the existing built-in catalog at
-        // runtime; here we pass the names so the runner advertises them.
+        // becomes the resolved-tool set passed to the runner.
         var names = request.Tools is { Count: > 0 } ? request.Tools : resolved.Tools;
         if (names is not { Count: > 0 })
         {
             return null;
         }
 
-        return names.Select(n => new ResolvedTool { Name = n }).ToList();
+        return names.Select(n =>
+        {
+            var executor = _toolRegistry?.GetExecutor(n);
+            return executor is null
+                ? new ResolvedTool { Name = n }
+                : new ResolvedTool
+                {
+                    Name = executor.ToolName,
+                    Description = executor.Description,
+                    InputSchema = executor.InputSchema,
+                };
+        }).ToList();
     }
 
     /// <summary>Mutable carrier for the identity stamped as composition advances
