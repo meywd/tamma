@@ -47,6 +47,64 @@ populates `ResolvedTool` from `IToolExecutorRegistry` once, and every dialect �
 OpenAI-compatible for Kimi / GLM / DeepSeek tomorrow — gets a correct schema for free. Patching a
 body builder would fix one wire format and leave the other broken.
 
+## Product direction, part 2 (2026-07-25)
+
+> "adding a provider that is supported should be an admin config"
+
+**Providers become data, not code.** An admin adds DeepSeek / Kimi / GLM through the admin surface —
+no deploy, no PR.
+
+**The boundary that makes this safe:** an admin adds an *instance of a wire dialect the code already
+implements*. They do **not** add a dialect. `WireDialect` stays a closed `[Wire]` enum in code
+(`anthropic` | `openai-compatible` today); base URL, auth scheme, default model and display name
+become row data. "Supported" in the product owner's phrasing means exactly this — the shape is
+already handled, only the endpoint is new.
+
+That boundary is what keeps the change tractable. Without it, "add a provider" means "add a
+response parser", which is code by definition.
+
+### What this forces, beyond the descriptor
+
+1. **Static `AddHttpClient` registration cannot survive.** `Program.cs:100-168` registers eight
+   named clients at startup with baked-in base URLs and auth headers. A DB-driven provider has no
+   startup-time name. Either resolve a plain `IHttpClientFactory.CreateClient()` and set base
+   address + headers per call from the descriptor, or use a typed handler keyed on the descriptor.
+   The current `CreateClient("anthropic")` pattern is incompatible with admin-added providers.
+   (Note the existing `llm-{provider}` lookup at `InlineToolLoopRunner.cs:141` already resolves
+   nothing — that path is *accidentally* dynamic today, and broken.)
+2. **An admin-supplied base URL is an SSRF and credential-exfiltration vector.** This is the sharp
+   edge. An admin who can set a provider's base URL can point `openai` at a host they control and
+   harvest every API key the platform sends there — including, in SaaS, other tenants' BYOK keys if
+   the descriptor is platform-scoped. Mitigations that must be decided, not assumed:
+   - host allowlist / denylist on the URL (the same treatment Epic 42's 42-9 specifies for its
+     authenticated HTTP tool — reuse it, do not write a second one),
+   - block private/loopback/link-local ranges after DNS resolution, rejecting a mixed-resolution
+     host rather than filtering survivors (42-9's `SafeConnectAsync` **filters**; `ValidateAsync`
+     **rejects** — the distinction was already flagged as a divergence),
+   - HTTPS required,
+   - who may write a provider descriptor, per mode (below).
+3. **Two scoping models, answered separately** (CLAUDE.md's universal rule). Single-user: the sole
+   user owns provider descriptors. SaaS: platform-owned catalogue plus tenant-scoped additions? Or
+   platform-only? A tenant-addable provider descriptor is a credential-exfiltration path *between*
+   tenants unless credentials are strictly tenant-scoped and the descriptor is too.
+4. **Credentials stay in the secret store**, never in the descriptor row. `IProviderCredentialResolver`
+   and the BYOK cabinet already exist; a descriptor references a secret, it does not carry one.
+5. **`ProviderAllowlist` inverts.** Today it is the source of truth. It becomes the *seed* for the
+   descriptor table — and the runtime check becomes "is there an enabled descriptor for this key",
+   not "is this string in a hardcoded set".
+6. **Adding a provider is itself a governed action** (Epic 43). `effect:provider.create` /
+   `.update` belongs in the action catalog, almost certainly in the `secrets` or a new
+   `provider-config` group, and it is a strong candidate for a human-only floor given (2).
+7. **The circuit breaker and pricing tables key on provider.** `provider_health` and
+   `ProviderPricingService` are keyed by provider string; an admin-added provider needs a pricing
+   row or cost attribution silently reads zero. Check `DbProviderPricingService` before assuming a
+   new key degrades gracefully.
+
+**Sequencing:** this is a superset of the descriptor work, not a replacement. Build the descriptor
+in code first, seed it from the current hardcoded lists, prove Kimi/GLM/DeepSeek work as code
+entries — *then* move the descriptor to a table with an admin surface. Shipping the admin surface
+and the abstraction in one step means debugging SSRF policy and dialect plumbing simultaneously.
+
 ## The shape this argues for
 
 One **provider descriptor** carrying what a provider actually differs by:
@@ -87,6 +145,21 @@ and is what makes the three candidate providers cheap to add.
 - [ ] Add `deepseek`, `moonshot`/`kimi`, and a real `glm`/`zhipu` key when the descriptor lands.
       Confirm whether `z-ai` is meant to *be* GLM or is a separate product.
 - [ ] Resolve or remove the phantom `llm-*` named-client lookup.
+- [ ] **Phase 2 — provider descriptors become an admin config surface** (table + API + UI, seeded
+      from the code lists). Blocked on the descriptor existing in code first. Requires an SSRF
+      decision on admin-supplied base URLs, a per-mode ownership answer, an Epic 43 catalog entry
+      for the mutation, and a pricing-row story for admin-added keys.
+
+## Open questions for the product owner
+
+1. **Is `z-ai` meant to BE GLM?** Z.ai is Zhipu's international brand. If so, GLM is a rename plus a
+   client registration, not a new provider.
+2. **In SaaS, may a tenant admin add a provider descriptor, or is the catalogue platform-owned?**
+   This is a security decision, not a convenience one — see SSRF above. Platform-owned with
+   tenant-scoped *credentials* is the conservative shape.
+3. **Is an admin-supplied base URL allowed to be an arbitrary host**, or restricted to an
+   allowlist the platform owner maintains? "Any HTTPS host" is the flexible answer and the
+   dangerous one.
 
 ## Related
 
