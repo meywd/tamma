@@ -96,7 +96,7 @@ the admin UI, and there is a live production default (`TriageBindingHelper.cs:15
 
 ### 2. Groups
 
-`ActionGroup` — a `[Wire]` enum, **15 members**, a strict partition: every action in exactly one
+`ActionGroup` — a `[Wire]` enum, **16 members**, a strict partition: every action in exactly one
 group. Membership is a field on the descriptor; the by-group index is *built*, never hand-maintained
 (the `RolePhaseMap.cs:170-171` idiom). No `[Category]` attribute is introduced — none exists in the
 repo and inventing one creates a second grouping idiom beside the shipped one.
@@ -111,6 +111,22 @@ The index build throws if any group has zero members, so a group cannot rot into
 **Assigning all 80 agent-actions to groups is the single largest judgment call in this epic.** A bad
 partition is a bad safety policy, and no test can catch a wrong-but-consistent one. It gets
 disproportionate review relative to its estimate.
+
+> **Corrected 2026-07-25.** This section said "15 members" while listing sixteen names, and did not
+> say which to drop. It is **16** — merging two groups to hit a round number is precisely the
+> wrong-but-consistent partition this story exists to avoid. Settle any change before Story 5, since
+> group wire strings become persisted vocabulary the moment assignments are stored.
+
+> **Corrected 2026-07-25 — the shipped-default set was materially wrong, and enforcing-v1 made it
+> dangerous.** An earlier draft (inherited from the design) said the `AlwaysHuman` defaults include
+> "the 10 `document-type:*` where `AcceptanceDefaults.For` ships `AcceptorRequirement.Human`."
+> **It ships exactly one.** `AcceptanceDefaults.cs:128-133` maps `Plan`/`Review` to panel *selection*
+> — which is not a human acceptor — and only `Design` to `s_humanAcceptorRules`;
+> `AcceptorRequirement.Human` occurs once in production, at `:115`. Because v1 enforces (D1), taking
+> the design at its word would have **gated nine document types the day the catalog shipped**, under
+> a decision whose entire point is to change no runtime behaviour. The derived set is one member.
+> That will look wrong to a reviewer, so the evidence is restated in Story 3, its plan, and the test
+> comment.
 
 ### 3. The policy value: one number per action
 
