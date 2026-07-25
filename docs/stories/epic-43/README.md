@@ -220,6 +220,16 @@ CI blocks the merge either way; what is lost is local-build feedback.
 
 - Bindings attach to a **site**, not an effect. A new capability grown inside an
   already-governed method passes every check.
+- **The gate matches on identity, not on argument values.** An `ActionKey` either is or is not
+  gated; there is no way to express "gate this action *when* the payload looks like X". This is the
+  same limitation `EscalationClassKind` has today — `document-type` | `agent-action` matched by
+  string equality — and it is why three Epic 41 stories (41-19, 41-20, 41-21) could not express
+  their "always escalates on \<payload condition\>" requirement and filed it back to 39-5 instead.
+  Configuring such a class escalates *every* run of it. Where a payload predicate is genuinely
+  needed the answer is one of three things that already work — make the state unrepresentable in
+  the document type's validation, use the landed `BlockingReviewViolation` clamp, or route it as a
+  typed side-effect edge — not a richer gate. A payload-predicate policy layer is a 39-5 change
+  this epic deliberately does not attempt.
 - `file_write` and `shell_execute` are single undifferentiated members and function as bypasses:
   `effect:git.pull-request.create` set to human-only is defeated by `git push` under
   `tool:git_operations.write`, and every governed route is reachable by `curl` under
