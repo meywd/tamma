@@ -968,18 +968,48 @@ public sealed class ManagedAgent : IManagedAgent
             return null;
         }
 
-        return names.Select(n =>
+        // Build the lookup from GetAll() rather than calling GetExecutor per name.
+        // GetExecutor logs a WARNING on every miss, and the advertised names are
+        // currently Claude-Code style (Read/Write/Edit/Bash/Grep/Glob — see
+        // DefaultAgentConfig) while the registry is keyed on file_read/file_write/
+        // shell_execute/…, so a per-name GetExecutor would emit six warnings on
+        // every developer-role call. The mismatch is real and worth surfacing, but
+        // once per request at Debug, not six times per request at Warning.
+        // Registry keys are already unique under OrdinalIgnoreCase (it drops
+        // duplicates at construction), so this ToDictionary cannot throw.
+        var catalogue = _toolRegistry?.GetAll()
+            .ToDictionary(e => e.ToolName, e => e, StringComparer.OrdinalIgnoreCase);
+
+        var unresolved = new List<string>();
+        var tools = names.Select(n =>
         {
-            var executor = _toolRegistry?.GetExecutor(n);
-            return executor is null
-                ? new ResolvedTool { Name = n }
-                : new ResolvedTool
+            if (catalogue is not null && catalogue.TryGetValue(n, out var executor))
+            {
+                return new ResolvedTool
                 {
+                    // The registry's canonical spelling, not the requested casing.
+                    // Every downstream comparison — the registry lookup, IsAllowed,
+                    // and ToolCallValidator's allowlist check — is OrdinalIgnoreCase,
+                    // so canonicalising cannot desync an allowlist match.
                     Name = executor.ToolName,
                     Description = executor.Description,
                     InputSchema = executor.InputSchema,
                 };
+            }
+
+            unresolved.Add(n);
+            return new ResolvedTool { Name = n };
         }).ToList();
+
+        if (unresolved.Count > 0 && catalogue is not null)
+        {
+            _logger.LogDebug(
+                "Advertising {UnresolvedCount} tool(s) with no registered executor, so without a "
+                + "description or schema: {UnresolvedTools}. Registered: {RegisteredTools}.",
+                unresolved.Count, string.Join(", ", unresolved), string.Join(", ", catalogue.Keys));
+        }
+
+        return tools;
     }
 
     /// <summary>Mutable carrier for the identity stamped as composition advances

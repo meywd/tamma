@@ -681,7 +681,8 @@ public class ManagedAgentTests
         executor.SetupGet(e => e.ToolName).Returns("file_read");
         executor.SetupGet(e => e.Description).Returns("Read a file from the workspace.");
         executor.SetupGet(e => e.InputSchema).Returns(schema);
-        registry.Setup(r => r.GetExecutor("file_read")).Returns(executor.Object);
+        registry.Setup(r => r.GetAll())
+            .Returns(new List<Tamma.Activities.LlmCall.Tools.IToolExecutor> { executor.Object });
 
         var sut = new ManagedAgent(
             _gate.Object, _budget.Object, _resolver.Object, _credentials.Object,
@@ -727,8 +728,8 @@ public class ManagedAgentTests
         // Dropping an unresolvable name would silently shrink the agent's advertised
         // capability, which is harder to notice than a tool that fails when called.
         var registry = new Mock<Tamma.Activities.LlmCall.Tools.IToolExecutorRegistry>(MockBehavior.Loose);
-        registry.Setup(r => r.GetExecutor(It.IsAny<string>()))
-            .Returns((Tamma.Activities.LlmCall.Tools.IToolExecutor?)null);
+        registry.Setup(r => r.GetAll())
+            .Returns(new List<Tamma.Activities.LlmCall.Tools.IToolExecutor>());
 
         var sut = new ManagedAgent(
             _gate.Object, _budget.Object, _resolver.Object, _credentials.Object,
