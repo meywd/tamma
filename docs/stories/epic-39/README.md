@@ -188,6 +188,16 @@ lineage, which is also what re-entry reads to resume from the latest state.
 | 39-20 | Teams, Roles, Repo Access & Task Routing | P0 | drafted | 6-8 days |
 | 39-21 | RAG in C# — per-tenant knowledge isolation and grounding | P1 | drafted | 8-10 days |
 | 39-22 | Prompt Quality Pass — remove over-constraint, measure don't guess | P2 | drafted | 4-6 days |
+| 39-23 | Autonomy Gate — admin-configurable, dial-sensitive action-class gating | P0 | drafted | 5-7 days |
+
+> **39-23** implements the decided behavior of the 70–100 autonomy dial (product-owner
+> decision 2026-07-24): it is **both** prompt context **and** a hard gate on action
+> classes. 39-5 already shipped the vocabulary (`AlwaysEscalate` /
+> `EscalationClass{document-type|agent-action}`), its taxonomy validation, the enforcement
+> point (`AcceptanceGuardrails.TryPreGate`), the admin surface
+> (`PUT /api/acceptance-rules/{documentTypeKey}`) and both scoping models — so 39-23 is a
+> reach + dial-sensitivity change, not a new subsystem. **What to gate is admin
+> configuration, never a hardcoded rule.** Blocks Epic 42's Story 42-3.
 
 > **39-22 sequencing** — run it *after* 39-16. 39-16 makes the output-contract block
 > generated content (removing the largest block of hand-written prompt bulk and putting

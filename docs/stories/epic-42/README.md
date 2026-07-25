@@ -397,8 +397,15 @@ only one of the two carries that cost (the per-story estimates state both figure
   which covers `llm-call`s and workflow actions, not just `IToolExecutor` invocations. That floor
   belongs in the **Epic 39 policy layer** next to the landed per-document-type `AcceptorRequirement`
   (`any`|`human`), with 42-3's `AutonomyFloor` as **one consumer** of it rather than the mechanism.
-  Until it exists, 42-3's floor governs tools only and the non-tool classes stay ungated. Needs an
-  Epic 39 story; 42-3 is not blocked on it.
+  Until it exists, 42-3's floor governs tools only and the non-tool classes stay ungated.
+  **Filed 2026-07-25 as Story 39-23** (Autonomy Gate — admin-configurable, dial-sensitive
+  action-class gating). 42-3 reads the floor 39-23 resolves rather than reimplementing it.
+  Note for 42-3's authors: 39-5 already ships the configurable gate vocabulary
+  (`AlwaysEscalate` / `EscalationClass{document-type|agent-action}`, fail-loud taxonomy
+  validation, `PUT /api/acceptance-rules/{documentTypeKey}`, base row, both scoping models),
+  so **what to gate is admin configuration** — 42-3 must not hardcode a tool gate list either.
+  42-3 is not blocked on 39-23 for its tool-only scope, but its `AutonomyFloor` semantics
+  should match 39-23's `minAutonomyLevel` (gated below the level, released at/above it).
 - **DCB audit transport (42-5):** *Corrected* — **not** `TammaEventEmitter` → `tamma:events` →
   `EventDrain`. That emitter structurally requires an `ActivityExecutionContext` **and** an `IActivity`,
   and the tool loop no longer runs in the engine; `Tamma.Api` holds `IEventRepository` directly (as
