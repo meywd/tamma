@@ -687,3 +687,50 @@ development_status:
   epic-43-retrospective: optional
   epic-42-retrospective: optional
 
+  epic-44: contexted   # Native Work Tracking — the mutable system of record (added 2026-07-25)
+  # NEW FEATURE. Framing from the survey, not the brief: Tamma PLANS work in three places and TRACKS it
+  # in none. (1) docs/sprint-status.yaml — this file — declares tracking_system: file-system and has ZERO
+  # programmatic readers (verified by grep across apps/ and packages/). (2) Customer work is a GitHub issue
+  # with no local copy anywhere. (3) DecompositionTask/PlanTask are work items in every respect except
+  # identity — they live inside a JSONB document body with no row, no status and no assignee.
+  # KEY ARCHITECTURAL FIND: DocumentInstance.IssueId is a `string` (DocumentInstance.cs:37), DCB tags.issueId
+  # is JSONB, TaskRef.IssueId is string? — nothing constrains it to a GitHub number. So a native work item
+  # minting its own key (TAM-142) into that namespace INHERITS THE ENTIRE EPIC 39 SPINE unchanged (document
+  # store, lineage, re-entry, escalation, decision inbox, replay) with zero adapter. That is D2 and it costs
+  # nothing.
+  # EXTERNAL PLATFORMS (D3): native-only source of truth, one-way GitHub import, opt-in comment/label
+  # outbound. NO SYNC — the code forces it: IGitPlatformClient has 12 methods and ZERO issue CRUD,
+  # Models/Issue.cs is dead code (never returned, never constructed), PlatformKind declares 6 members with no
+  # plain-Git value, Bitbucket and Azure DevOps have no class, and there are ZERO production IWebhookHandler
+  # implementations (issue webhooks are verified, deduped, categorized and dispatched to nothing).
+  # RESIDENCY (D5): tenant schema — and this epic builds the migrate-all-provisioned-tenants sweep Epic 43
+  # dodged by going control-plane. MigrateTenantAppAsync has exactly two production call sites, both
+  # creation-only. EfTenantDbMigrator is already idempotent, so the fix is ~40 lines of caller.
+  # NAMING: every obvious noun is taken (Task → TaskRef/PlanTask/QueuedTask/TaskKind//api/tasks/reserved
+  # TASK.*; Story → the live stories table; Issue → the dead record; Cycle → CycleEvents). Hence WorkItem /
+  # Iteration / Project in Tamma.Core.Tracking.
+  44-0-tracker-core: drafted                                 # Vocabularies, WorkItemRef, parenting matrix, rank algebra, fail-loud index. [P0] 4d
+  44-1-storage-and-tenant-migration-sweep: drafted           # Repositories + THE MIGRATE-ALL-PROVISIONED-TENANTS SWEEP (no startup sweep exists today; a new tenant migration never reaches existing tenants). [P0] 6d
+  44-2-work-item-and-project-api: drafted                    # API, RBAC, tracker_preferences, Epic 43 catalog descriptors. NOTE: work items are CONTENT not configuration — schema-per-tenant already isolates them, so NO principal XOR on work_items; the XOR is used in its strong form on tracker_preferences. [P0] 5d
+  44-3-hierarchy-ranking-and-backlog-apply-seam: drafted     # Hierarchy, ranking, and the BacklogOrdering apply seam (41-3 produces the immutable document; 44 owns the mutable record). [P0] 4d
+  44-4-iterations-and-board-projection: drafted              # Iterations, board read projection, SprintPlan apply seam. D9 implements the correct behaviour for 41-6 AC3 and asserts NO TASK.* event — see the 41-6 narrowing note below. [P0] 4d
+  44-5-dcb-events-and-name-drift-ratchet: drafted            # Events + THE EVENT-NAME DRIFT RATCHET THE REPO HAS NEVER HAD — no test anywhere enforces AGGREGATE.ACTION.STATUS across ~300 constants. [P0] 4d
+  44-6-tracker-ui: drafted                                   # UI in packages/dashboard + turning on the 449 dashboard tests that DO NOT RUN IN CI (vitest.config.ts:62 excludes them; no workflow has the filter line) and typechecking both dashboards. WEAKEST ESTIMATE IN THE EPIC. Shares GroupedTable + RowToggle with 43-7 — coordination gate in both directions. [P0] 9d
+  44-7-loop-integration-and-intake-fix: drafted              # The story that makes the tracker matter. Owns the issueId join. NOTE: its commit-1 intake bug (SelectWorkItemActivity/FetchUntriagedItemsActivity deserializing List<WorkItem> from a { issues, total } object) WAS ALREADY FIXED ahead of this story — see .dev/bugs/engine-issues-intake-silently-returned-nothing.md. [P0] 5d
+  44-8-external-link: drafted                                # GitHub import, ExternalRef, opt-in outbound. [P1] 4d
+  44-9-dogfood-generated-sprint-status: drafted              # sprint-status.yaml becomes GENERATED from the tracker. Cancelled if the PO answers "customers-first" to open question 2. [P2] 4d
+  epic-44-retrospective: optional
+  # ── Cross-epic notes filed by the Epic 44 survey ───────────────────────────────────────────────
+  # 39-19's "Task View" is NOT a tracker — TaskAssigned carries decisionSessionId/documentTypeKey/documentId/
+  #   autonomyLevel and its four task types are acceptance_decision|review|approval|clarification, each a
+  #   suspended 39-8 bookmark, with NO table. Disjoint nouns sharing a word. Epic 44 uses /work, never /tasks.
+  # 39-20 owns the SET of eligible people; Epic 44 owns the CHOICE and persists it. STANDING WARNING: the
+  #   resolver is a total no-op in production — ChannelOutboxService.cs:143 hardcodes InitiatorUserId: null,
+  #   so EligibleAudienceAsync returns empty for every input. 44-2 degrades honestly rather than rendering an
+  #   empty assignee picker.
+  # 41-6 AC3 SHOULD BE NARROWED: "committed items produce role-scoped Task View entries via 39-20" — a sprint
+  #   commitment has no bookmark and no pending decision, so it would need a fifth action-less task type or it
+  #   sits in the inbox forever. Recommended in the Epic 44 README; NOT performed.
+  # 41-29's "task" is a PlanTask inside a document body. Materializing PlanTasks as work items is RECOMMENDED
+  #   AGAINST for v1 (double-writes every plan, two sources of truth). Deferred with reasons.
+
