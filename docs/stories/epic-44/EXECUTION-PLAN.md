@@ -84,9 +84,11 @@ initiator-only rule is already correct and nothing is lost. In SaaS, 44-2 must d
 
 If the epic must be smaller, these are the honest cuts in order:
 
-1. **44-9 (dogfood)** — 4 days. Cancelled outright if the product owner answers "customers-first" to
-   open question 2. Its value is proving the tracker on Tamma's own work, which is real but not
-   load-bearing.
+1. ~~**44-9 (dogfood)** — 4 days.~~ **NO LONGER A CUT LINE (corrected 2026-07-25).** Open question 2
+   has been answered: the tracker serves both audiences and **Tamma is tenant #1**, because the
+   platform self-maintains. Generating `sprint-status.yaml` from the tracker is therefore not a
+   dogfood nicety — it is the evidence that tenant #1 exists at all. Its 4 days are load-bearing.
+   If scope must come out, take it from 44-8 or 44-5's non-ratchet half instead.
 2. **44-8 (external link)** — 4 days. The native tracker works without GitHub import; import is what
    makes migration painless, not what makes the tracker function.
 3. **44-5 (events + ratchet)** — 4 days, *but* the event-name drift ratchet is the only test the repo

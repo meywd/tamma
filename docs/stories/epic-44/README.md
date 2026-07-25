@@ -480,11 +480,43 @@ These are not derivable from the code.
    re-targeted at `packages/dashboard` and this epic's D9 becomes uncontroversial. **This blocks nothing
    in Epic 44 but it decides whether the platform ends up with two user-facing dashboards.**
 
-2. **Is the tracker for Tamma's own development, for customers, or both?** The epic is written for both
-   (44-9 dogfoods `sprint-status.yaml` into it), but they pull in different directions: an internal
-   tracker wants deep coupling to `docs/stories/*.md` and the wiki publish pipeline; a customer tracker
-   wants none of that and needs import/export instead. If the answer is "customers first", 44-9 drops
-   to the bottom and its 4 days move to 44-6.
+2. ~~**Is the tracker for Tamma's own development, for customers, or both?**~~ — **ANSWERED
+   (2026-07-25, product owner): both, and Tamma is tenant #1.**
+
+   > "tamma will self maintain, so the first tenant is tamma itself"
+
+   This is not a preference between two audiences; it is a statement that **the platform's own
+   development runs on the platform**, as an ordinary tenant. It aligns with CLAUDE.md's standing
+   self-maintenance goal ("Tamma is designed to autonomously develop features for itself") and with
+   the `tenant_databases` pool already auto-bootstrapping the central DB as member #1.
+
+   **Consequences, and they are not small:**
+
+   - **44-9 is no longer a cuttable dogfood story — it is the proof.** The execution plan lists it
+     first on the cut line; that is now wrong. If `sprint-status.yaml` is not generated from the
+     tracker, Tamma is not running on its own tracker and tenant #1 does not exist in any meaningful
+     sense. Its 4 days are load-bearing. *(The `EXECUTION-PLAN.md` cut-line section carries the
+     correction.)*
+   - **Both directions are required, not one.** The internal side needs the `docs/stories/*.md` and
+     wiki-publish coupling; the customer side needs import/export. "Customers first" was offered as
+     a way to drop scope and is off the table.
+   - **Tenant zero has a bootstrap problem.** The tenant that runs the platform cannot be
+     provisioned *by* the platform through the normal path — the provisioner would need a running
+     platform to provision the tenant that runs it. The central-DB-as-pool-member-#1 bootstrap is
+     the existing precedent; 44-1 must state explicitly how the Tamma tenant row comes into
+     existence, and it is not via `POST /api/admin/tenants/{id}/provision`.
+   - **Self-modification changes the risk class of Epic 43's dial.** With Tamma as a tenant, its
+     autonomy dial governs agents changing *Tamma itself*. The failure mode is not "a bad deploy for
+     a customer" but "a bad deploy that removes the ability to deploy". Epic 43's `deploy-control`
+     group defaults deserve a different conversation for tenant #1 than for tenant *n*, and there
+     must be a **break-glass path that does not run through Tamma** — if Tamma breaks its own
+     deployment there is no Tamma to fix it.
+   - **Question 3 below (may an agent create work items unattended?) is now sharper**, because the
+     agent filing them is working on this repository.
+   - **The provider-config direction interacts** (`.dev/findings/provider-abstraction-and-openai-compatible-candidates.md`):
+     tenant #1 needs its own provider descriptors and credentials like any tenant, which is a useful
+     forcing function — if the Tamma tenant cannot be configured through the admin surface, neither
+     can a customer.
 
 3. **Should a work item be creatable by an agent without a human?** The autonomous loop decomposes an
    issue into `DecompositionTask`s today. If those may become work items automatically, tracker creation
