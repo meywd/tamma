@@ -89,8 +89,8 @@ public class FetchUntriagedItemsActivity : TammaAsyncActivity
                 if (response.IsSuccessStatusCode)
                 {
                     var json = await response.Content.ReadAsStringAsync();
-                    var issues = JsonSerializer.Deserialize<List<WorkItem>>(json,
-                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    var issues = JsonSerializer.Deserialize<EngineIssuesResponse>(json,
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true })?.Issues;
                     if (issues != null)
                     {
                         foreach (var issue in issues)

@@ -188,6 +188,19 @@ lineage, which is also what re-entry reads to resume from the latest state.
 | 39-20 | Teams, Roles, Repo Access & Task Routing | P0 | drafted | 6-8 days |
 | 39-21 | RAG in C# — per-tenant knowledge isolation and grounding | P1 | drafted | 8-10 days |
 | 39-22 | Prompt Quality Pass — remove over-constraint, measure don't guess | P2 | drafted | 4-6 days |
+| ~~39-23~~ | ~~Autonomy Gate — admin-configurable, dial-sensitive action-class gating~~ | — | **superseded** | — |
+
+> **39-23 is SUPERSEDED by Epic 43** (2026-07-25). It hung gating policy off the
+> per-document-type acceptance-rules row, so an action was only in the model when someone
+> listed it on some document type — the inverse of the required exhaustive, grouped
+> permissions-list catalog. It also re-hardcoded the `[70,100]` dial bound, and its premise
+> that the always-escalate gate is enforced was wrong (`AcceptanceGuardrails.TryPreGate` has
+> zero production call sites, so that list never executes).
+>
+> See `docs/stories/epic-43/README.md` and
+> `.dev/decisions/epic-43-action-catalog-design.md`. Epic 43 gives `TryPreGate` its first
+> production caller and absorbs the legacy `AlwaysEscalate` list as a floor that the new
+> surface cannot lower.
 
 > **39-22 sequencing** — run it *after* 39-16. 39-16 makes the output-contract block
 > generated content (removing the largest block of hand-written prompt bulk and putting

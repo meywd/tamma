@@ -1,8 +1,14 @@
-# Finding: DocumentLifecycleWorkflow does not persist document_instances during a live run
+# Finding: DocumentLifecycleWorkflow did not persist document_instances during a live run — FIXED
+
+> **✅ RESOLVED 2026-07-24 — do not cite this as a live gap.** Persistence is wired at
+> `DocumentLifecycleWorkflow.cs:770-777`. The title and the analysis below describe the
+> pre-fix state and are kept for the reasoning; see the Status section at the bottom.
+> Flagged during the Epic 41 planning pass, where a reader skimming the old present-tense
+> title took it for an open issue.
 
 **Date**: 2026-07-23
 **Author**: Claude (agent)
-**Type**: 🚨 Known Issue
+**Type**: ✅ Resolved (was: 🚨 Known Issue)
 **Category**: Integration
 
 ## 📋 Summary

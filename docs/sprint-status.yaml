@@ -549,6 +549,7 @@ development_status:
   39-20-teams-roles-repo-access-and-task-routing: ready-for-dev # NOT landed. No teams/team_members/repositories/repo_access_grants tables, no TaskAssignmentService, no TASK.ASSIGNED events. Api/Services/Access/ITaskAudienceResolver.cs exists but is 39-18's fail-closed STUB (initiator-only), explicitly labelled as awaiting this story's real implementation. [P0]
   39-21-rag-in-csharp-per-tenant-knowledge-isolation-and-grounding: ready-for-dev # NOT landed. No apps/tamma-elsa/src/Tamma.Intelligence/ project; KB/RAG is still the TS sidecar + ChromaDB/Ollama. [P1]
   39-22-prompt-quality-pass-remove-over-constraint: drafted # ADDED 2026-07-25. Trims over-constraint from the 80 (role, action) prose bodies, gated on 39-9's per-cell repair-ring rates (LLM.VALIDATION.FAILED / LLM.REPAIR.SUCCEEDED / LLM.REPAIR.EXHAUSTED) rather than taste. Sequence AFTER 39-16 (which makes the output-contract block generated content, i.e. off-limits to this pass). Deliberately cross-provider: prompts have NO provider dimension and this story does not add one — see .dev/findings/no-provider-dimension-in-prompts.md. [P2]
+  39-23-autonomy-gate-admin-configurable-action-class-gating: superseded # SUPERSEDED by Epic 43 (2026-07-25) — do not implement. Hung gating policy off the per-document-type acceptance-rules row, so an action was only in the model if someone listed it on some document type; the product requires an exhaustive grouped permissions-list catalog where every action is present regardless of the current floor. Also re-hardcoded the [70,100] dial bound (Epic 43 D3 makes it one constant), and its premise that the always-escalate gate is enforced was FALSE — AcceptanceGuardrails.TryPreGate has zero production call sites. Original note follows. # ADDED 2026-07-25. Implements the decided autonomy-dial behavior (BOTH prompt context AND a hard gate on action classes). NOT a new subsystem: 39-5 already shipped AlwaysEscalate/EscalationClass{document-type|agent-action}, its fail-loud taxonomy validation, the enforcement point (AcceptanceGuardrails.TryPreGate), the admin surface (PUT /api/acceptance-rules/{documentTypeKey}), the base row and both scoping models. Three gaps remain: the gate is binary while the dial is a range (adds optional minAutonomyLevel, null = today's always-gate), it fires only at the document accept gate (needs to reach llm-call/action dispatch), and action-class gates have no natural home row (base row). What to gate stays ADMIN CONFIGURATION, never hardcoded. Blocks 42-3. [P0]
   epic-39-retrospective: optional
 
   # ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -642,8 +643,8 @@ development_status:
   # (Program.cs), all coding-oriented, so publish / deploy-control / cloud-VPS / health-metrics / HTTP
   # agent paths either shell out ungoverned or fall back to the human-assigned path.
   42-1-tool-contract-registry-evolution: drafted             # ToolDescriptor on IToolExecutor + Register/Unregister on the registry; relocates SecretPurpose to Tamma.Core. Wave 0 — everything depends on it. [P0]
-  42-2-tool-binding-config-store: drafted                    # tool_bindings (user_id XOR tenant_id), mirroring prompt_overrides. [P0]
-  42-3-permission-autonomy-gating: drafted                   # Two-stage gate (resolve-time eligible set + invocation-time authorization) + live-read autonomy resolver. Largest Wave-1 item. [P0]
+  42-2-tool-binding-config-store: superseded                 # SUPERSEDED by Epic 43 (2026-07-25) — story file DELETED. It persisted per-principal tool enablement + autonomy floor in a NEW tool_bindings table; Epic 43's action_assignments stores the same policy for ALL actions, of which tools are one namespace. Two tables holding the same kind of setting can disagree. Its two-scoping prose is transplanted into Epic 43 Story 5.
+  42-3-permission-autonomy-gating: superseded                # SUPERSEDED by Epic 43 (2026-07-25) — story file DELETED. It was a second gate on the same code path as Epic 43's Seam B, with no stated ordering between them and its own denial-audit schema and escalation machinery. Its siting analysis and its effective-ceiling insight (filtering on the raw descriptor class would have made every Wave-3 write tool unreachable) are transplanted into Epic 43 Story 9, with credit.
   42-4-tool-credential-secret-binding: drafted               # IToolSecretProvider generalizing the shipped runtime-reveal pattern over ISecretStore. [P0]
   42-5-tool-use-dcb-audit: drafted                           # Durable TOOL.INVOKED/SUCCEEDED/FAILED via IEventRepository at the shared runner call site. [P0]
   42-6-mcp-integration: drafted                              # Part A (Wave 0.5, P0): retire the 2 tool-facing /api/kb/mcp/* routes. Part B (Wave 2): MCP servers into the governed registry. [P0/P1]
@@ -652,5 +653,84 @@ development_status:
   42-8a-feature-flag-tool: drafted                           # feature_flag_read / _write; no engine-side work. [P1]
   42-8b-deploy-control-tool: drafted                         # deploy_status / deploy_control (trigger/promote/rollback); shares the suspend path with 42-7. [P1]
   42-9-authenticated-http-external-api-tool: drafted         # Host+method-allowlisted authenticated REST tool; unblocks the most Epic-41 workflows. [P1]
+  # ── 2026-07-25: Epic 43 reconciliation. Epic 43 is the single source of truth for gating; Epic 42
+  #    consumes it. None of Epic 42 exists in code, so this is a SPEC reconciliation, not a migration.
+  #    42-1 rewritten (drops AutonomyFloor/PermissionClass/Category — absorbed by the catalog; keeps
+  #    SecretRequirement + Suspends + the SecretPurpose relocation). 42-2 and 42-3 DELETED (a third
+  #    override store of identical shape, and a second gate on the same code path). 42-5 narrowed.
+  #    42-6 Part B gains a catalog-binding prerequisite. 42-7/8A/8B/9 lose their gating sections, and
+  #    42-8B's independently-binding escalation requirement is deleted — it would have meant two gates,
+  #    two audit trails and two human decisions for one production deploy. Applied in Epic 43 Story 10.
+
+  epic-43: contexted   # The Action Catalog — one governed list of everything Tamma can do (added 2026-07-25)
+  # NEW FEATURE, not a gap fix: the autonomy dial (AcceptanceRules.AutonomyLevel, 70-100) is stored,
+  # validated, defaulted and displayed, and nothing reads it to decide anything — the consuming layer
+  # was never built. Consequential capability is spread across 16 unrelated vocabularies (80 AgentActions,
+  # 7 tool classes, 218 Elsa activities, ~205 mutating routes, 53 SensitiveActionCatalog codes, 14 git
+  # subcommands, two non-overlapping shell denylists...), only two of which have drift protection. So the
+  # catalog is a NEW union vocabulary layered over them, not a re-presentation of an existing list.
+  # Decisions: .dev/decisions/epic-43-action-catalog-design.md. D1 v1 ENFORCES with behaviour-preserving
+  # defaults; D2 unclassified is allowed at runtime but unmergeable in CI (Roslyn analyzer rejected —
+  # 79/200 mutating Map* calls have no fluent chain, ~40% structural miss rate); D3 no lower bound in the
+  # model, [70,100] as ONE named constant. Supersedes 39-23.
+  43-0-prerequisite-fixes-and-dead-code: drafted             # Fixes a LIVE bug: RulesEditDialog omits acceptorRequirement from its PUT body and the API defaults it, so every admin save silently resets design from human back to any. Also deletes ResolveToolsActivity (zero callers, a third dead tool vocabulary). CORRECTED 2026-07-25: an earlier note here asked this story to DI-register-or-delete GetAcceptanceRulesTool; that was WRONG — it is deliberately unregistered per Story 39-5 D6 (Program.cs:411-417), the factory mints principal-bound instances per tenant-agent session, so a singleton registration would BE the bug. Story 43-4's validator gives it a permanent allowlist entry instead. Ships standalone. [P1]
+  43-1-autonomy-dial-one-constant: drafted                   # AutonomyDial{Min,Max,Default,AlwaysHuman} in one place, published over the wire so the UI binds instead of hardcoding; fixes the 8 hardcode sites incl. the corrupt-row test vector and two silent coverage loops; 13-file doc pass. Ships standalone and is valuable even if the rest slips. [P0]
+  43-2-catalog-core: drafted                                 # Tamma.Core/Actions/: ActionNamespace, ActionKey (composite, NOT a flat enum — a flat one would copy all 80 AgentAction wire strings into a second vocabulary), ActionRisk, the 4 new [Wire] enums, ActionDescriptor, fail-loud index. [P0]
+  43-3-groups-and-behaviour-preserving-defaults: drafted     # The 15-member ActionGroup partition + assignment of all ~153 members + DefaultMinAutonomy set so day one reproduces today exactly. LARGEST JUDGMENT CALL in the epic — a bad partition is a bad safety policy and no test catches a wrong-but-consistent one. [P0]
+  43-4-tool-vocabulary-reconciliation: drafted               # The startup validator that has never existed. NOTE: reconciling the three disagreeing tool vocabularies (registry file_read/file_write/shell_execute vs advertised Read/Write/Bash vs a dead built-in map) is a PRIVILEGE EXPANSION, not a cleanup — tools advertised under Claude-Code names currently cannot execute at all. [P0]
+  43-5-storage-principal-resolution-resolver-audit: drafted  # action_assignments + action_authorizations, CONTROL-PLANE resident (tenant residency fails 3 ways, decisively: a new tenant migration never reaches already-provisioned tenants) and DELIBERATELY EXCLUDED from the destructive startup DROP list. Principal resolution is mandatory — the engine service principal carries no user id and a nullable header-sourced tenant id. [P0]
+  43-6-admin-api-and-rbac: drafted                           # actions:manage in all THREE places incl. the Development-permissive array; single-field PUTs (not defaulted bodies — that is the 43-0 bug class); server-computed automatedAtLevel/editable/enforcementSites. [P0]
+  43-7-admin-ui: drafted                                     # Three new React primitives with NO in-repo precedent (RowToggle, GroupedTable, DimmedRow+tooltip — the dimmed-row treatment exists only in Blazor). LEAST RELIABLE ESTIMATE IN THE PLAN. [P0]
+  43-8-drift-harnesses: drafted                              # Bidirectional reflection sweeps over routes (incl. attribute-routed controllers and hub endpoints, invisible to syntax analysis), mediation-client mutating methods, background actors (incl. the factory-overload registration where ImplementationType is null), and activities missing [Activity]. Shrink-only ratchet on the ungoverned backlog. [P0]
+  43-9-seams-enforcement-and-authorization-ledger: drafted   # Five seams. Seam A (llm-call) is OBSERVE-ONLY PERMANENTLY — a requires-human there reaches a dispatch whose caller has no human route in 44 of 45 workflows. Seam B sits post-sanitization and pre-fork, NOT nested in the optional validator block. Seam C is an endpoint filter (tenant context is unset during policy evaluation) returning 409 never 202 (202 is already a success code on the mediation client). Seam D can only deny — a sweeper cannot suspend. Seam E reaches the gate over HTTP and is OR'd into the deploy approval, never replacing it. [P0]
+  43-10-epic-42-spec-reconciliation: drafted                 # See the reconciliation note above. [P0]
+  epic-43-retrospective: optional
   epic-42-retrospective: optional
+
+  epic-44: contexted   # Native Work Tracking — the mutable system of record (added 2026-07-25)
+  # NEW FEATURE. Framing from the survey, not the brief: Tamma PLANS work in three places and TRACKS it
+  # in none. (1) docs/sprint-status.yaml — this file — declares tracking_system: file-system and has ZERO
+  # programmatic readers (verified by grep across apps/ and packages/). (2) Customer work is a GitHub issue
+  # with no local copy anywhere. (3) DecompositionTask/PlanTask are work items in every respect except
+  # identity — they live inside a JSONB document body with no row, no status and no assignee.
+  # KEY ARCHITECTURAL FIND: DocumentInstance.IssueId is a `string` (DocumentInstance.cs:37), DCB tags.issueId
+  # is JSONB, TaskRef.IssueId is string? — nothing constrains it to a GitHub number. So a native work item
+  # minting its own key (TAM-142) into that namespace INHERITS THE ENTIRE EPIC 39 SPINE unchanged (document
+  # store, lineage, re-entry, escalation, decision inbox, replay) with zero adapter. That is D2 and it costs
+  # nothing.
+  # EXTERNAL PLATFORMS (D3): native-only source of truth, one-way GitHub import, opt-in comment/label
+  # outbound. NO SYNC — the code forces it: IGitPlatformClient has 12 methods and ZERO issue CRUD,
+  # Models/Issue.cs is dead code (never returned, never constructed), PlatformKind declares 6 members with no
+  # plain-Git value, Bitbucket and Azure DevOps have no class, and there are ZERO production IWebhookHandler
+  # implementations (issue webhooks are verified, deduped, categorized and dispatched to nothing).
+  # RESIDENCY (D5): tenant schema — and this epic builds the migrate-all-provisioned-tenants sweep Epic 43
+  # dodged by going control-plane. MigrateTenantAppAsync has exactly two production call sites, both
+  # creation-only. EfTenantDbMigrator is already idempotent, so the fix is ~40 lines of caller.
+  # NAMING: every obvious noun is taken (Task → TaskRef/PlanTask/QueuedTask/TaskKind//api/tasks/reserved
+  # TASK.*; Story → the live stories table; Issue → the dead record; Cycle → CycleEvents). Hence WorkItem /
+  # Iteration / Project in Tamma.Core.Tracking.
+  44-0-tracker-core: drafted                                 # Vocabularies, WorkItemRef, parenting matrix, rank algebra, fail-loud index. [P0] 4d
+  44-1-storage-and-tenant-migration-sweep: drafted           # Repositories + THE MIGRATE-ALL-PROVISIONED-TENANTS SWEEP (no startup sweep exists today; a new tenant migration never reaches existing tenants). [P0] 6d
+  44-2-work-item-and-project-api: drafted                    # API, RBAC, tracker_preferences, Epic 43 catalog descriptors. NOTE: work items are CONTENT not configuration — schema-per-tenant already isolates them, so NO principal XOR on work_items; the XOR is used in its strong form on tracker_preferences. [P0] 5d
+  44-3-hierarchy-ranking-and-backlog-apply-seam: drafted     # Hierarchy, ranking, and the BacklogOrdering apply seam (41-3 produces the immutable document; 44 owns the mutable record). [P0] 4d
+  44-4-iterations-and-board-projection: drafted              # Iterations, board read projection, SprintPlan apply seam. D9 implements the correct behaviour for 41-6 AC3 and asserts NO TASK.* event — see the 41-6 narrowing note below. [P0] 4d
+  44-5-dcb-events-and-name-drift-ratchet: drafted            # Events + THE EVENT-NAME DRIFT RATCHET THE REPO HAS NEVER HAD — no test anywhere enforces AGGREGATE.ACTION.STATUS across ~300 constants. [P0] 4d
+  44-6-tracker-ui: drafted                                   # UI in packages/dashboard + turning on the 449 dashboard tests that DO NOT RUN IN CI (vitest.config.ts:62 excludes them; no workflow has the filter line) and typechecking both dashboards. WEAKEST ESTIMATE IN THE EPIC. Shares GroupedTable + RowToggle with 43-7 — coordination gate in both directions. [P0] 9d
+  44-7-loop-integration-and-intake-fix: drafted              # The story that makes the tracker matter. Owns the issueId join. NOTE: its commit-1 intake bug (SelectWorkItemActivity/FetchUntriagedItemsActivity deserializing List<WorkItem> from a { issues, total } object) WAS ALREADY FIXED ahead of this story — see .dev/bugs/engine-issues-intake-silently-returned-nothing.md. [P0] 5d
+  44-8-external-link: drafted                                # GitHub import, ExternalRef, opt-in outbound. [P1] 4d
+  44-9-dogfood-generated-sprint-status: drafted              # sprint-status.yaml becomes GENERATED from the tracker. Cancelled if the PO answers "customers-first" to open question 2. [P2] 4d
+  epic-44-retrospective: optional
+  # ── Cross-epic notes filed by the Epic 44 survey ───────────────────────────────────────────────
+  # 39-19's "Task View" is NOT a tracker — TaskAssigned carries decisionSessionId/documentTypeKey/documentId/
+  #   autonomyLevel and its four task types are acceptance_decision|review|approval|clarification, each a
+  #   suspended 39-8 bookmark, with NO table. Disjoint nouns sharing a word. Epic 44 uses /work, never /tasks.
+  # 39-20 owns the SET of eligible people; Epic 44 owns the CHOICE and persists it. STANDING WARNING: the
+  #   resolver is a total no-op in production — ChannelOutboxService.cs:143 hardcodes InitiatorUserId: null,
+  #   so EligibleAudienceAsync returns empty for every input. 44-2 degrades honestly rather than rendering an
+  #   empty assignee picker.
+  # 41-6 AC3 SHOULD BE NARROWED: "committed items produce role-scoped Task View entries via 39-20" — a sprint
+  #   commitment has no bookmark and no pending decision, so it would need a fifth action-less task type or it
+  #   sits in the inbox forever. Recommended in the Epic 44 README; NOT performed.
+  # 41-29's "task" is a PlanTask inside a document body. Materializing PlanTasks as work items is RECOMMENDED
+  #   AGAINST for v1 (double-writes every plan, two sources of truth). Deferred with reasons.
 

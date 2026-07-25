@@ -1209,7 +1209,14 @@ public class DocumentLifecycleWorkflow : WorkflowBase
             state.Rules.Rules.ReviewerSelection.PanelRoles is { Count: > 0 } panel ? panel[0] : null,
             AgentRole.Architect.ToWire());
         var reviewerRole = AgentRoleExtensions.Parse(reviewerRoleWire);
-        var reviewAction = RolePhaseMap.GetReviewActionForRole(reviewerRole).ToWire();
+        // MUST match how the reviewer was actually SELECTED. ReviewerSelectionHelper
+        // .ResolveDocumentAction picks the lens with the doc-type-AWARE
+        // GetPanelActionForRole (39-15), so recording the envelope with the
+        // doc-type-agnostic GetReviewActionForRole made the two disagree for
+        // `triage-decision`: the reviewer critiqued through the TRIAGE lens while the
+        // produced Review claimed the plan/task review lens. The provenance on the
+        // Review document was simply wrong. Same call, same arguments, one source.
+        var reviewAction = RolePhaseMap.GetPanelActionForRole(reviewerRole, state.TypeKey).ToWire();
         var producer = DocumentProducer.Create(reviewerRoleWire, reviewAction, reviewDefId);
 
         return DocumentEnvelope.CreateDraft(
