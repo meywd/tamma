@@ -23,18 +23,32 @@ You are a {{role}} writing test cases for the implementation tasks below, before
 
 Derive concrete test cases from the tasks above, covering happy paths, error paths, and edge cases for each task's observable behavior. Follow the project conventions provided above.
 
-Return ONLY a JSON array of test-case objects with no wrapper object:
+Return ONLY a single JSON object (no markdown fences, no prose outside it) whose `testCases` is a JSON array of test-case objects, of this EXACT shape:
 ```json
-[
-  {
-    "id": "TC1",
-    "taskId": "T1",
-    "description": "the behavior this test verifies and its expected outcome",
-    "type": "happy-path|error-path|edge-case",
-    "file": "path/to/test/file",
-    "testCode": "the complete test implementation"
-  }
-]
+{
+  "testCases": [
+    {
+      "id": "TC1",
+      "taskId": "T1",
+      "behavior": "the single behavior this test verifies and its expected outcome",
+      "type": "happy-path|error-path|edge-case",
+      "file": "path/to/test/file",
+      "testCode": "the complete test implementation"
+    },
+    {
+      "id": "TC2",
+      "taskId": "T1",
+      "behavior": "a different behavior of the same task (e.g. its error path)",
+      "type": "happy-path|error-path|edge-case",
+      "file": "path/to/test/file",
+      "testCode": "the complete test implementation"
+    }
+  ]
+}
 ```
 
-Do not include numbering, explanations, file fences, or any text outside the JSON array. The array MUST contain at least one test case — the downstream validator rejects an empty array (or a non-JSON reply) and burns a retry.
+Requirements (the downstream validator fails closed if these are not met):
+- `testCases` MUST contain at least one test case — an empty array (or a non-JSON reply) is rejected and burns a retry.
+- Each case MUST carry a non-empty `taskId` naming the task it covers, and a non-empty `behavior` stating ONE expected behavior (one behavior per case).
+- No two cases may assert the same `behavior` for the same `taskId` — collapse duplicates.
+- Do not include numbering, explanations, file fences, or any text outside the JSON object.

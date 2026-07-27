@@ -25,10 +25,17 @@ Return ONLY a single JSON object (no markdown fences, no prose outside it) of th
 {
   "summary": "concise description of the proposed design and how it satisfies the requirement",
   "recommendation": "which alternative is recommended and why",
+  "recommendedAlternativeId": "A1",
   "constraintEvaluation": "how the design meets or trades off each stated constraint",
   "alternatives": [
     {
-      "name": "short name of the alternative",
+      "id": "A1",
+      "name": "short name of the recommended alternative",
+      "tradeoffs": "its costs and benefits relative to the others"
+    },
+    {
+      "id": "A2",
+      "name": "short name of the second alternative",
       "tradeoffs": "its costs and benefits relative to the others"
     }
   ]
@@ -37,5 +44,6 @@ Return ONLY a single JSON object (no markdown fences, no prose outside it) of th
 
 Requirements (the downstream parser fails closed if these are not met):
 - `summary` MUST be a non-empty description of the design — it is load-bearing; an empty value fails the workflow.
-- `alternatives` MUST contain at least two entries, each with a non-empty `name` and `tradeoffs`.
+- `alternatives` MUST contain at least two entries, each with a unique `id` and a non-empty `name` and `tradeoffs`.
+- `recommendedAlternativeId` MUST be the `id` of one of the listed alternatives — the recommendation must reference an alternative that actually appears in the list.
 - `recommendation` and `constraintEvaluation` MUST be non-empty strings.

@@ -29,7 +29,16 @@ Return ONLY a single JSON object (no markdown fences, no prose outside it) of th
       "acceptanceCriteria": "the definition of done for this sub-task",
       "estimateHours": 4,
       "complexity": "low|medium|high",
-      "dependsOn": ["ST-0"]
+      "dependsOn": []
+    },
+    {
+      "id": "ST-2",
+      "title": "the next sub-task, built on ST-1",
+      "description": "what to implement in this sub-task",
+      "acceptanceCriteria": "the definition of done for this sub-task",
+      "estimateHours": 4,
+      "complexity": "low|medium|high",
+      "dependsOn": ["ST-1"]
     }
   ]
 }
