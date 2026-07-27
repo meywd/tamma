@@ -17,6 +17,8 @@
  *   /                                     AuthGuard → AppLayout → DashboardHome
  *   /alerts                               AuthGuard → AppLayout → TenantAlertFeed
  *   /settings/billing                     AuthGuard → AppLayout → PlanPricingPage
+ *   /settings/models                      AuthGuard → AppLayout → ModelSettingsPage (Story 46-3;
+ *                                         members VIEW read-only — the page gates mutations)
  *   /settings/alerts                      AuthGuard → TenantAdminGuard → AppLayout → TenantAlertChannels
  *   /onboarding                           AuthGuard → redirect → /onboarding/platforms (45-2 AC4)
  *   /onboarding/platforms                 AuthGuard → TenantAdminGuard → AppLayout → PlatformPicker          (Story 31-9)
@@ -57,6 +59,8 @@ import { InstallError } from './pages/onboarding/InstallError';
 import { ConnectedPlatforms } from './pages/settings/ConnectedPlatforms';
 // Story 34-9 — tenant Plan & Pricing page.
 import { PlanPricingPage } from './pages/settings/PlanPricingPage';
+// Story 46-3 — tenant model settings page.
+import { ModelSettingsPage } from './pages/models/ModelSettingsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
 import type { JSX } from 'react';
@@ -80,6 +84,7 @@ export const ROUTE_PATHS: string[] = [
   '/',
   '/alerts',
   '/settings/billing',
+  '/settings/models',
   '/settings/alerts',
   '/onboarding',
   '/onboarding/platforms',
@@ -141,6 +146,11 @@ export function App(): JSX.Element {
             {/* Story 34-9 — Plan & Pricing. Rendered for all members; the page
                 itself gates mutations (member = read-only) so members can VIEW. */}
             <Route path="/settings/billing" element={<PlanPricingPage />} />
+            {/* Story 46-3 — model settings. Rendered for all members (NO
+                TenantAdminGuard): members view the roster/list read-only; the
+                page gates mutations and the server's AgentManage policy is the
+                real enforcement (member PUT/DELETE → 403). */}
+            <Route path="/settings/models" element={<ModelSettingsPage />} />
             <Route
               path="/settings/alerts"
               element={

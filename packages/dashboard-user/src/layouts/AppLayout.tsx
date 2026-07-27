@@ -37,6 +37,10 @@ export function AppLayout({ children }: { children?: ReactNode }): JSX.Element {
           <Link to="/settings/platforms" className="px-2 py-1.5 rounded hover:bg-gray-100">
             Platforms
           </Link>
+          {/* Story 46-3 — tenant model settings (route pinned in ROUTE_PATHS). */}
+          <Link to="/settings/models" className="px-2 py-1.5 rounded hover:bg-gray-100">
+            Models
+          </Link>
           <Link to="/settings/billing" className="px-2 py-1.5 rounded hover:bg-gray-100">
             Billing
           </Link>

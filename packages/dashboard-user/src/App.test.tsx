@@ -51,6 +51,7 @@ function stubFetch(): void {
     plans: [],
     limits: [],
     installations: [],
+    providers: [],
     runs: [],
     stats: null,
     tenantId: 'tnt-1',
