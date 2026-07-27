@@ -46,7 +46,8 @@ this produces the structured spec, not rendered artwork.
 1. Thin lifecycle binding; `UxSpec` validated (flow states, a11y per screen, criteria mapping).
 2. Consumes `AcceptanceCriteria` when present; spec traces to criteria.
 3. Consumable by `plan-generation`/41-28 via 39-11.
-4. `[ResumeBehavior(Both)]`; 39-10 structural test green without allowlist.
+4. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate suspends
+   inside the dispatched `document-lifecycle` child); 39-10 structural test green without allowlist.
 
 ## Dependencies
 

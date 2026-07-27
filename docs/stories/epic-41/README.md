@@ -79,10 +79,14 @@ role families) — and turns each into a **first-class lifecycle workflow** on t
    scoped by 39-20 access); at higher autonomy the appropriate `AgentRole` performs the `llm-call`. The
    workflow binds a `(role, action)` cell either way — the assignment target (agent process vs. human
    role) is the orchestrator's routing decision, not the workflow's shape.
-5. **Resumable by design.** Interactive workflows declare `[ResumeBehavior(Both)]` (accept gate suspends
-   on a canonical tenant-folded bookmark via `LifecycleBookmarks`; Init reconstructs from the document
-   store + DCB events); run-to-completion producers declare `[ResumeBehavior(LatestStateReEntry)]`. All
-   pass the 39-10 structural test without an allowlist entry. **Scheduled workflows have no reusable
+5. **Resumable by design.** Every **thin producer binding** in this epic declares
+   `[ResumeBehavior(LatestStateReEntry)]` — the binding's own graph owns no suspend node; the accept
+   gate suspends on its canonical tenant-folded bookmark **inside the dispatched `document-lifecycle`
+   child** (`LifecycleBookmarks`), which the parent awaits with `WaitForCompletion = true`. Only a
+   workflow that suspends on a bookmark in its OWN graph (e.g. 41-31's approval gate) declares
+   `[ResumeBehavior(Both)]` — `ResumableStandardStructuralTests` clause (b) fails a `Both` declaration
+   with no canonical suspend node in the declaring graph. All pass the 39-10 structural test without an
+   allowlist entry. **Scheduled workflows have no reusable
    pattern yet** — see the scheduler note under **Dependencies**.
 
 **Vocabulary is reused, not reinvented.** Where an activity's output fits an existing Epic 39 type
@@ -314,7 +318,7 @@ third of them (41-1c) is the prose enabler. Only the scheduler seam remains unow
 
 | Enabler | Owner | Effort | State |
 |---|---|---|---|
-| Three roles + fifteen action cells + the derived panel-selector maps + the `scrum_master` alias removal | **[41-1a](./story-41-1/41-1a-agent-taxonomy-extension.md)** | 4–5 d | drafted |
+| Three roles + fifteen action tokens (eighteen cells incl. per-role `context-scan`, plus the 41-8 lockstep `write-retro-narrative` amendment) + the derived panel-selector maps + the `scrum_master` alias removal | **[41-1a](./story-41-1/41-1a-agent-taxonomy-extension.md)** | 4–5 d | drafted |
 | The six new document types (`AcceptanceCriteria`, `BacklogOrdering`, `SprintPlan`, `TestPlan`, `ThreatModel`, `UxSpec`) | **[41-1b](./story-41-1/41-1b-new-document-types.md)** | 5–6 d | drafted |
 | **Prose document support** — a `prose` type, an `Audience` field on envelope **and** `DocumentInstance` (+ migration), the audience/kind vocabularies | **[41-1c](./story-41-1/41-1c-prose-documents-and-audience-tags.md)** | 3–4 d | drafted |
 | **Tenant-aware scheduled-trigger seam** (see Dependencies) | **[41-30](./story-41-30/41-30-tenant-aware-scheduled-trigger-seam.md)** | 6–7 d | drafted — blocks **41-11, 41-16, 41-17 (PR sweep), 41-20, 41-23**; see the scoping decision below |
@@ -383,11 +387,15 @@ third of them (41-1c) is the prose enabler. Only the scheduler seam remains unow
 > which also makes it a cleaner thing to specify, since every remaining consumer wants the same
 > shape: run this on a cadence, per tenant, and do not double-fire.
 
-41-1a + 41-1b hard-block **seventeen** stories on both execution paths — fourteen at their *produce*
-step (a missing type/role/cell), plus 41-24/41-25/41-26 at their *review* stage (the
-`(tech_writer, review-docs)` selector arm). 41-1c blocks **eight**. Five stories (41-8, 41-22,
-41-24, 41-25, 41-26) are in both sets, so **twenty of the epic's twenty-nine** wait on some part of
-the enabler set (17 + 8 − 5 = 20). The per-story breakdown is the "What each sub-story gates" table in
+41-1a + 41-1b hard-block **seventeen** stories on both execution paths — **fifteen** at their
+*produce* step (a missing type/role/cell — 41-5 joined this set when its produce cell moved to
+`(project_manager, report-status)`), plus 41-24/41-25 at their *review* stage (the
+`(tech_writer, review-docs)` selector arm; 41-26 left this set — its default reviewer is now the
+already-reachable `(devops, review-operability)`, making 41-1a an upgrade there, not a gate).
+41-1c blocks **eight**. Five stories (41-5, 41-8, 41-22, 41-24, 41-25) are in both sets, so
+**twenty of the epic's twenty-nine** original workflow stories wait on some part of the enabler set
+(17 + 8 − 5 = 20; the 2026-07-27 additions 41-30/41-31/41-32 are enabler/seam stories and are not
+gated). The per-story breakdown is the "What each sub-story gates" table in
 [the 41-1 umbrella](./story-41-1/41-1-team-role-and-document-type-extensions.md). 41-1a and 41-1b are
 independent of each other; 41-1c is independent of both — so the enabler set is ~6 days of
 wall-clock, not 12–15.
@@ -450,27 +458,23 @@ code-review half are Wave-0-independent; the rest are listed here for leverage, 
 **Wave 4 — new surface (UX/design; depends on 41-1a's `ux_designer` role + 41-1b's `UxSpec` type).**
 - 41-27 User-Flow & Wireframe Drafting, 41-28 Design Review & Accessibility Audit.
 
-### Planning artifacts this epic does not have
+### Planning artifacts
 
-Epic 39 and Epic 40 each ship an `EXECUTION-PLAN.md`; Epic 40 also ships a `sprint-status.yaml`. **Epic 41
-has neither.** *(Corrected 2026-07-27: this sentence continued "and exactly one of its 29 stories
-(41-29) has an `implementation-plan.md`", which is now doubly wrong — several stories carry plans,
-including 41-5, 41-11, 41-20 and 41-22, and the epic is **32** stories after 41-30/41-31/41-32 were
-added. The plan-coverage claim was stale when written and should be re-counted, not patched again.)*
-The waves above
-are therefore a leverage ordering, not a schedule: apart from 41-1a/b/c (4–5 / 5–6 / 3–4 days) and 41-29
-(6.5–7.5) there is no per-story effort estimate, no critical path, no cross-story shared-edit register,
-and no wave roll-up that a scheduler could execute against. Two consequences worth naming before anyone
-reads a start date into this section:
+**This epic now ships an [`EXECUTION-PLAN.md`](./EXECUTION-PLAN.md)** (added 2026-07-27), reconciled
+from all 34 implementation plans: total ≈ 169 person-days, internal critical path 16.4 days
+(`41-1b → 41-2 → 41-15`), wave wall-clock ≈ 20 days, and the serialized
+`WorkflowInterfaceGraphTests` edge-count-pin bump as the epic's merge-rate limiter. Its per-story
+efforts (the plans' bottom-line totals) supersede the story files' older ranges. The epic's stories
+are tracked in the shared `docs/sprint-status.yaml`. *(An earlier revision of this section said Epic
+41 had no execution plan and almost no per-story estimates — both were true when written and are now
+resolved.)* Two standing notes:
 
-- The Wave-0 gates above (41-1a, 41-1b, 41-1c, scheduler) are the only hard edges recorded anywhere;
-  **all other ordering lives in individual stories' `Blocking:` lines** and has never been reconciled
-  across them.
-- The one cross-epic shared edit that *is* known — `SingleIssueCycleWorkflow.cs`'s per-task loop, written
-  by 40-2, 40-4, 40-5 and 41-29 — is registered in Epic 40's execution plan, not here.
-
-Producing an `EXECUTION-PLAN.md` (+ `sprint-status.yaml`) is a prerequisite for treating Epic 41 as
-schedulable. Until then, treat every wave boundary as a dependency statement only.
+- The Wave-0 gates above (41-1a, 41-1b, 41-1c, 41-30) plus the per-story `Blocking:` lines are
+  reconciled in the execution plan's per-story table; treat that table as authoritative when they
+  disagree with a wave label here.
+- The one cross-epic shared edit — `SingleIssueCycleWorkflow.cs`'s per-task loop, written by 40-2,
+  40-4, 40-5 and 41-29 (and 41-15's merge region) — is registered in Epic 40's execution plan and
+  cross-referenced in this epic's.
 
 ## Deliberately out of scope (not automated as a workflow)
 

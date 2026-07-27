@@ -16,9 +16,11 @@ P1 / Wave 2 — recurring, event-sourced, compounding. Replaces a standing daily
 
 ## Scope
 
-Scheduled trigger (the `HourlyAnalyticsRollupScheduler` cron pattern, daily per configured team-window) →
-thin binding over `document-lifecycle`. `consumes: [DCB events window, open Decompositions/Plans/PRs,
-blocker events]` / `produces: Findings`. Produce cell `(scrum_master, synthesize-standup)` (41-1).
+User-initiated run over a configured team-window (per the 2026-07-25 scheduling decision, ceremonies are
+user-initiated — a cron cadence is a later opt-in through 41-30; `HourlyAnalyticsRollupScheduler` is not a
+reusable pattern) → thin binding over `document-lifecycle`. `consumes: [DCB events window, open
+Decompositions/Plans/PRs, blocker events]` / `produces: Findings`. Produce cell
+`(scrum_master, synthesize-standup)` (41-1).
 
 ## Produced document
 
@@ -27,13 +29,16 @@ with the owning role. `issueId`/`repository` lineage on every finding.
 
 ## Events
 
-`STANDUP.SYNTHESIS.STARTED` → `.DIGEST` alongside `DOCUMENT.*`, tagged `repository`/`tenantId`/window.
+`STANDUP.SYNTHESIS.STARTED` → `.DIGEST` (or `.SKIPPED` for an empty window) alongside `DOCUMENT.*`,
+tagged `repository`/`tenantId`/window.
 
 ## Orchestrator / user interaction
 
 The accepted digest is delivered to the team via the orchestrator (chat post + Task View items for each
-flagged blocker, routed to the owning role). Low-value/empty windows produce an empty-but-valid `Findings`
-(no false noise).
+flagged blocker, routed to the owning role). An empty window **short-circuits before dispatch**: it emits
+`STANDUP.SYNTHESIS.SKIPPED` and produces no document (no false noise — `FindingsDocumentType`
+deliberately rejects an empty findings list with `EMPTY_FINDINGS`, so "an empty-but-valid `Findings`" is
+not a thing the type permits).
 
 ## Autonomy behavior
 
@@ -48,16 +53,27 @@ flagged blocker, routed to the owning role). Low-value/empty windows produce an 
 
 ## Acceptance Criteria
 
-1. Scheduled, tenant-scoped, idempotent per window (re-running the same window is a no-op re-read).
-2. Every finding cites concrete DCB evidence; confidence/relevance ∈ [0,1]; empty window ⇒ valid empty digest.
+1. Tenant-scoped, idempotent per window (re-running the same window is a no-op re-read); user-initiated
+   per the 2026-07-25 scheduling decision.
+2. Every finding cites concrete DCB evidence; confidence/relevance ∈ [0,1]. An empty window produces **no
+   document and a `STANDUP.SYNTHESIS.SKIPPED` audit row** — the run short-circuits before dispatch with
+   `status = "skipped"`; never an empty `Findings` (the type rejects one with `EMPTY_FINDINGS`) and never
+   a false digest.
 3. `[ResumeBehavior(LatestStateReEntry)]`; 39-10 structural test green without allowlist.
-4. Blocker follow-ups land in the correct role's Task View via the 39-20 audience resolver.
+4. Each flagged blocker is emitted as a `STANDUP.BLOCKER_FLAGGED` row carrying the owning role, and the
+   accepted digest publishes an `AcceptanceRequest` on the orchestrator channel; **role-scoped Task View
+   delivery is unreachable until 39-19/39-20 land** (the audience resolver is the fail-closed
+   `InitiatorOnlyTaskAudienceResolver` stub).
 
 ## Dependencies
 
 - **Blocking:** **41-1a** (`scrum_master` role + `synthesize-standup` cell), Epic 39 (`Findings`,
-  lifecycle, store, task routing, 4-7 query API), and **the tenant-aware scheduled-trigger seam — unowned; no story writes it** (*corrected: "scheduler pattern" named no artifact;* `HourlyAnalyticsRollupScheduler` *is hardcoded to one workflow (`:198-199`), offers one `FireAtMinute` int rather than a window/cron shape (`:34`), threads no `tenantId` into the dispatch (`:202-203`), keeps its last-fired window in a per-process field (`:83`), and its advisory-lock key has no tenant component (`:241`) — one tenant's leader would suppress every other tenant's fire*).
-- **Related:** feeds 41-8 retro input.
+  lifecycle, store, task routing, 4-7 query API).
+- **Related:** feeds 41-8 retro input. Per the 2026-07-25 scheduling decision, standup synthesis is
+  **user-initiated** — this story is NOT blocked on the tenant-aware scheduled-trigger seam (now owned by
+  **41-30**); a cron cadence is a later opt-in through 41-30. (*The old blocking line's finding stands:*
+  `HourlyAnalyticsRollupScheduler` *is hardcoded to one workflow, threads no `tenantId`, and its
+  advisory-lock key has no tenant component — which is exactly why 41-30 exists.*)
 
 ## Estimated Effort
 

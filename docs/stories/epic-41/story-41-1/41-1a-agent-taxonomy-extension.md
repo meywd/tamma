@@ -1,4 +1,4 @@
-# Story 41-1a: Agent-Taxonomy Extension — three roles, fifteen cells, the panel-selector maps
+# Story 41-1a: Agent-Taxonomy Extension — three roles, fifteen actions (eighteen cells), the panel-selector maps
 
 Status: drafted
 
@@ -13,9 +13,10 @@ document review assigned to a role the epic introduces does not throw at runtime
 
 ## Priority
 
-P0 — hard gate for 41-6, 41-7, 41-8, 41-10, 41-11, 41-16, 41-17 (PR-triage half), 41-22, 41-27, 41-28 on
-both the human-assigned and the agent path, plus the `(tech_writer, review-docs)` review stage of 41-24,
-41-25 and 41-26.
+P0 — hard gate for 41-5 (`(project_manager, report-status)` — its `(product_owner,
+summarize-stakeholder)` cell is unusable, see 41-5), 41-6, 41-7, 41-8, 41-10, 41-11, 41-16, 41-17
+(PR-triage half), 41-22, 41-27, 41-28 on both the human-assigned and the agent path, plus the
+`(tech_writer, review-docs)` review stage of 41-24, 41-25 and 41-26.
 
 ## Scope
 
@@ -42,6 +43,20 @@ both the human-assigned and the agent path, plus the `(tech_writer, review-docs)
    > (`:579`) fails the build on any pair that is also in `Bindings`. Neither cell exists in
    > `AgentAction.cs` today. Each needs a `Prompts/{role}/{action}.md` template like the other thirteen
    > — `PromptFileLoader` refuses to start on a taxonomy cell with no file (AC2).
+
+   **Cell/file arithmetic:** fifteen new *action tokens*, but **eighteen new cells** — the three new
+   roles each also carry the existing `context-scan` token, as all 8 incumbent roles do — and therefore
+   **twenty-one new prompt files** (18 cell files + 3 `_system.md`). "Fifteen cells" undercounts; the
+   counts in AC7 are token/role counts and are unaffected.
+
+   > **Lockstep amendment (41-8 Phase B):** this story also mints **`(scrum_master,
+   > write-retro-narrative)`** — the prose retro-narrative producer cell. 41-8's plan established that
+   > "Findings plus a prose narrative" cannot be one binding (one dispatch = one document; one cell = one
+   > contract) and the original fifteen-token list carried no narrative cell, so 41-8 Phase B had no cell
+   > to bind. The cell cannot be minted from 41-8 (`PromptFileLoader` is fail-loud in both directions —
+   > a cell without a file or a file without a cell refuses to boot), so it lands here. It moves every
+   > count by one: sixteen tokens, nineteen new cells, twenty-two new prompt files, and each AC7 pin one
+   > higher than the base numbers stated there.
 3. **The DERIVED panel-selector maps.** `RolePhaseMap.GetReviewActionForRole` (`RolePhaseMap.cs:376-387`)
    and `GetTriageActionForRole` (`:404-412`) are `switch` expressions that **throw
    `ArgumentOutOfRangeException` for any role not listed**; `GetPanelActionForRole` (`:430-433`) fans out
@@ -78,10 +93,11 @@ both the human-assigned and the agent path, plus the `(tech_writer, review-docs)
 1. `AgentRoleExtensions.Parse("scrum_master")` returns the new `AgentRole.ScrumMaster` — today it returns
    `ProductOwner` via the alias. `Parse("project_manager")` and `Parse("ux_designer")` return their roles
    — today both throw `ArgumentException`. Round-trip holds for all 11 roles.
-2. Each of the fifteen new `(role, action)` pairs passes `RolePhaseMap.IsRoleEligibleForPhase`, and
-   `GetPrimaryPhaseForRole` returns a non-throwing action for each new role. The two cells added by the
-   Scope-2 correction are covered explicitly: `(architect, design-system)` for 41-10 and
-   `(devops, incident-rootcause)` for 41-22.
+2. Each of the new `(role, action)` cells — eighteen base cells (fifteen new tokens + `context-scan` for
+   each new role) plus the 41-8 lockstep `(scrum_master, write-retro-narrative)` — passes
+   `RolePhaseMap.IsRoleEligibleForPhase`, and `GetPrimaryPhaseForRole` returns a non-throwing action for
+   each new role. The two cells added by the Scope-2 correction are covered explicitly:
+   `(architect, design-system)` for 41-10 and `(devops, incident-rootcause)` for 41-22.
 3. **A `document-lifecycle` run whose acceptance rules name `tech_writer` as the reviewer completes its
    review stage and produces a `Review`.** Today that run fails:
    `DocumentLifecycleWorkflow.BuildReviewEnvelope` calls `RolePhaseMap.GetReviewActionForRole` unguarded
@@ -124,7 +140,8 @@ both the human-assigned and the agent path, plus the `(tech_writer, review-docs)
 ## Dependencies
 
 - **Blocking:** 27-15/27-18 taxonomy machinery, Epic 39 (39-7 review producers — the selector's caller).
-- **Unblocks:** 41-6, 41-7, 41-8, **41-10** (`design-system`), 41-11, 41-16, 41-17 (PR-triage half),
+- **Unblocks:** **41-5** (`report-status`), 41-6, 41-7, 41-8 (Phase A `facilitate-retro`; Phase B
+  `write-retro-narrative`), **41-10** (`design-system`), 41-11, 41-16, 41-17 (PR-triage half),
   **41-22** (`incident-rootcause`), 41-27, 41-28; the review stage of 41-24, 41-25, 41-26.
 
 ## Estimated Effort

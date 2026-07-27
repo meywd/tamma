@@ -42,7 +42,8 @@ security role and can trigger `rotate-secret` / a remediation plan; follow-ups r
 
 1. Thin lifecycle binding; `Diagnosis` validated (ranked hypotheses, remediation references).
 2. Active-incident path always escalates and can dispatch `rotate-secret`/remediation.
-3. `[ResumeBehavior(Both)]`; 39-10 structural test green without allowlist.
+3. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate suspends
+   inside the dispatched `document-lifecycle` child); 39-10 structural test green without allowlist.
 
 ## Dependencies
 

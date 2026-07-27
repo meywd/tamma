@@ -58,7 +58,9 @@ Accept gate routes the verdict per autonomy. A "changes-requested" verdict escal
    `SUBJECT_INCOMPLETE` (`ReviewDocumentType.cs:23-32`).
 4. The verdict is a gate input to `single-issue-cycle`/`merge-approval`: an integration test shows a
    `request-changes` verdict blocking the merge-approval path and an `approve` verdict releasing it.
-5. `[ResumeBehavior(Both)]`; 39-10 structural test green without an allowlist entry. A new
+5. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate
+   suspends inside the dispatched `document-lifecycle` child); 39-10 structural test green without an
+   allowlist entry. A new
    `WorkflowDocumentInterface` row is declared and `WorkflowInterfaceGraphTests.Declared_edge_count_is_pinned`
    is bumped in the same change.
 

@@ -15,7 +15,14 @@ P3 / Wave 3 — complements scripted testing; consumes 41-13.
 ## Scope
 
 Thin binding over `document-lifecycle`. `consumes: [TestPlan (41-13)?, feature under test, AcceptanceCriteria?]`
-/ `produces: Findings` (charter mission + session observations). Produce cell `(tester, exploratory-test)`.
+/ `produces: Findings` (ONE document: the charter mission is the `topic`/`summary`, the session
+observations are its `findings[]` — a charter-then-session two-document split is not expressible in one
+binding and re-entry would short-circuit the second run). Produce cell `(tester, exploratory-test)`.
+
+The cell exists; what IS in scope is a **template rewrite**: the shipped
+`Prompts/tester/exploratory-test.md` instructs the model to write an exploratory test FILE (code), which
+`FindingsDocumentType.Validate` would reject as `MALFORMED_PAYLOAD` on every produce. It is rewritten to
+the `Findings` contract.
 
 ## Produced document
 
@@ -24,7 +31,9 @@ is found; ranked. `issueId` lineage.
 
 ## Events
 
-`EXPLORATORY.CHARTER.STARTED` → `.SESSION` → `.FINDINGS` alongside `DOCUMENT.*`.
+`EXPLORATORY.CHARTER.STARTED` → `.FINDINGS` / `.FAILED` alongside `DOCUMENT.*`. (No `.SESSION` member —
+nothing in the binding observes "a session happened" separately from the produce step; and every landed
+family carries a failure member for the `rejected`/`escalated` exits.)
 
 ## Orchestrator / user interaction
 
@@ -33,7 +42,9 @@ human-or-agent (a human tester runs the session at low autonomy, an agent explor
 
 ## Autonomy behavior
 
-- **70–84:** agent drafts the charter; a human runs the session and records findings.
+- **70–84:** the produce step is assigned to a human tester, who fills the one `Findings` document
+  (charter mission as `topic`/`summary`, session observations as `findings[]`) in the course of running
+  the session.
 - **85–100:** agent charters, explores (tool-enabled), and self-accepts; confirmed defects always route to
   triage.
 
@@ -44,9 +55,17 @@ human-or-agent (a human tester runs the session at low autonomy, an agent explor
 
 ## Acceptance Criteria
 
-1. Thin lifecycle binding; `Findings` cite concrete evidence; empty session ⇒ valid empty findings.
-2. Defect findings integrate with triage/PR-triage.
-3. `[ResumeBehavior(Both)]`; 39-10 structural test green without allowlist.
+1. Thin lifecycle binding; `Findings` cite concrete evidence. A session that found nothing emits **one
+   finding** whose `title` is the charter mission and whose `summary` records "no anomalies observed",
+   citing what was exercised — evidence still required. (An empty `findings[]` is deliberately invalid:
+   `FindingsDocumentType` fires `EMPTY_FINDINGS`, so "valid empty findings" is not a thing the type
+   permits.)
+2. Defect findings are **readable** by triage/PR-triage: the accepted `Findings` is retrievable for the
+   issue through the same `FetchLatestAcceptedDocumentActivity` seam `triage-po-decision` uses, and the
+   seed row declares the produced edge. Actually routing them into triage is a `TriageItemCycleWorkflow` /
+   41-17 edit, filed forward — not claimed here.
+3. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate suspends
+   inside the dispatched child); 39-10 structural test green without allowlist.
 
 ## Dependencies
 

@@ -1,26 +1,24 @@
 # Implementation Plan — Story 41-5: Stakeholder & Status Reporting Workflow
 
-> ## ⛔ THIS PLAN IS BLOCKED — the scheduled-trigger half has no owner
+> ## Scheduler note — NOT scheduler-blocked (2026-07-25 decision); still gated on 41-1a + 41-1c
 >
-> AC1 ("**Scheduled**, tenant-scoped, idempotent per period") requires a tenant-aware scheduled-trigger
-> seam that **does not exist and no story builds** (epic README, Wave-0 table: owner *"none — must be
-> written"*). Verified in tree: `HourlyAnalyticsRollupScheduler` is the only cron-shaped artifact in the
-> Elsa host and is **not reusable** — it hardcodes its target (`HourlyAnalyticsRollupWorkflow.DefinitionId`,
-> `:197-198`) and its options section (`:17`), offers a single `FireAtMinute` int (`:34`) rather than a
-> window or cron shape, threads **no `tenantId`** into the dispatch (`:198-204`), keys its advisory lock on
-> `(year, dayOfYear, hour)` with **no tenant component** (`ComputeAdvisoryLockKey`, `:241-255`, so one
-> tenant's leader suppresses every other tenant's fire), and rests idempotency on `_lastFired` **in-process
-> memory** (`:83`) plus the target workflow's own per-row UPSERT — a property a document-producing lifecycle
-> workflow does not have. The only other durable-window precedent, `SecretAutoRotationScheduler`, drives off
-> a per-row `NextRotationDueAt` column and is likewise not a generic seam.
+> **Per the product owner's 2026-07-25 decision ("scheduling is needed for audits, NOT for ceremonies"),
+> status reporting is user-initiated** — Part A ships complete on a manual/API trigger and this plan is
+> no longer blocked on a scheduled-trigger seam. The seam itself is now **owned by 41-30**; a cron
+> cadence for this workflow is a later opt-in through 41-30, and Part B below remains
+> requirements-only until then.
 >
-> **This plan does not invent the seam.** It is split into a **Part A (unblocked)** — the document-producing
-> lifecycle binding, which is complete and shippable on a manual/API trigger — and a **Part B (blocked)** —
-> the scheduled trigger, which cannot start until the seam is owned and written. Part B's ACs are listed but
-> not planned to step level, because planning against a component with no contract would be fiction.
+> The original finding stands and is why 41-30 exists: `HourlyAnalyticsRollupScheduler` is the only
+> cron-shaped artifact in the Elsa host and is **not reusable** — it hardcodes its target
+> (`HourlyAnalyticsRollupWorkflow.DefinitionId`, `:197-198`) and its options section (`:17`), offers a
+> single `FireAtMinute` int (`:34`) rather than a window or cron shape, threads **no `tenantId`** into
+> the dispatch (`:198-204`), keys its advisory lock on `(year, dayOfYear, hour)` with **no tenant
+> component** (`ComputeAdvisoryLockKey`, `:241-255`), and rests idempotency on `_lastFired`
+> **in-process memory** (`:83`).
 >
-> Part A is *additionally* hard-blocked on **41-1c** (prose) and **41-1a** (see Correction 2 — the story's
-> named cell is already taken by a live consumer). Neither is this story's to build.
+> Part A **remains hard-blocked on 41-1c** (prose) **and 41-1a** (see Correction 2 — the story's named
+> cell is already taken by a live consumer; the real cell `(project_manager, report-status)` does not
+> exist until 41-1a mints it). Neither is this story's to build.
 
 ## Scope & Deliverable
 

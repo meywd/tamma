@@ -42,7 +42,8 @@ Accept gate routes per autonomy; accepted `TestPlan` drives `test-case-creation`
 1. Thin lifecycle binding; `TestPlan` validated (risk ranking, coverage mapping, entry/exit).
 2. Consumes `AcceptanceCriteria` when present; strategy lines trace to criteria.
 3. Consumable by `test-case-creation` / 41-14 via 39-11.
-4. `[ResumeBehavior(Both)]`; 39-10 structural test green without allowlist.
+4. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate suspends
+   inside the dispatched `document-lifecycle` child); 39-10 structural test green without allowlist.
 
 ## Dependencies
 
