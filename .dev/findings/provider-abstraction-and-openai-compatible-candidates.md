@@ -150,16 +150,29 @@ and is what makes the three candidate providers cheap to add.
       decision on admin-supplied base URLs, a per-mode ownership answer, an Epic 43 catalog entry
       for the mutation, and a pricing-row story for admin-added keys.
 
+## Decided (2026-07-25, product owner)
+
+**Only the platform owner may add a provider. The catalogue is platform-owned; customers pick from
+it and supply their own key.**
+
+This settles the SSRF question by removing the attack surface rather than mitigating it: a customer
+never supplies a base URL, so no customer can redirect credentials anywhere. Consequences:
+
+- The descriptor write path is gated by the existing platform-owner policy, not a new tenant-level
+  permission. No `providers:manage` for tenants.
+- A host allowlist is **not** required for safety, because the only writer is already the platform
+  owner. Keep HTTPS-required and post-DNS private-range rejection as defence in depth — they are
+  cheap and they catch a typo pointing at an internal service — but they are no longer load-bearing.
+- The tenant-scoped half is **credentials only**: a tenant supplies its own key for a
+  platform-listed provider, through the existing BYOK cabinet.
+- Phase 2's admin surface is therefore a *platform-owner* screen, which is materially simpler than
+  a tenant-facing one — no per-tenant descriptor rows, no cross-tenant isolation story for the
+  descriptor table itself.
+
 ## Open questions for the product owner
 
 1. **Is `z-ai` meant to BE GLM?** Z.ai is Zhipu's international brand. If so, GLM is a rename plus a
    client registration, not a new provider.
-2. **In SaaS, may a tenant admin add a provider descriptor, or is the catalogue platform-owned?**
-   This is a security decision, not a convenience one — see SSRF above. Platform-owned with
-   tenant-scoped *credentials* is the conservative shape.
-3. **Is an admin-supplied base URL allowed to be an arbitrary host**, or restricted to an
-   allowlist the platform owner maintains? "Any HTTPS host" is the flexible answer and the
-   dangerous one.
 
 ## Related
 

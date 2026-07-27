@@ -440,15 +440,38 @@ dimmed-row treatment exists in the repo, but in Blazor.
 1. **MCP server trust and tenancy** — may a tenant admin register a tenant-scoped MCP server, or is
    the allowlist platform-owned? Determines whether MCP invocation can ever be finer-grained than one
    member. Not derivable from code.
-2. **Is secret-reveal gateable at all,** or is it a break-glass path that must never be blocked? If
-   it is an emergency operator path, gating it is the wrong default and it needs a documented bypass.
+2. ~~**Is secret-reveal gateable at all?**~~ — **ANSWERED (2026-07-25): NO. Reading a secret never
+   requires a human.**
+
+   `effect:secret.reveal` is **removed from the gateable set**. It is not an approval checkpoint —
+   it is the mechanism by which a tool or provider call gets the credential it was already
+   authorized to use, and it can fire many times inside a single agent run. Gating it would mean a
+   human approval per credential fetch, which is nonsense at best and an outage amplifier at worst.
+
+   What governs a secret is therefore the **action that needs it**, not the read: if deploying is
+   gated, the deploy is what waits for a person — the credential fetch inside it is not a second
+   gate. The `secrets` group keeps its other members (rotation, the automation actors); the reveal
+   effect is catalogued as **informational only, never enforceable**, and 43-2 must model that as a
+   descriptor property rather than leaving it as a threshold an admin could accidentally raise.
+
+   *(Audit is a separate matter and unaffected: `ISecretAccessAuditor` should still record reveals.
+   Its only implementation is a null one today — tracked in the Epic 42 notes, not here.)*
+
 3. **Compliance framing.** This epic keeps `SensitiveActionCatalog` as the compliance artifact and
    the action catalog as the authorization artifact, joined by one optional field. If legal needs one
    artifact with SOC2 mappings across all ~153 members, that is materially larger scope and must be
    settled before the descriptor shape freezes.
-4. **Should changing an assignment require two people?** A platform admin, or an API key carrying a
-   wildcard permission, can rewrite every threshold unchallenged — and API key permissions are
-   accepted free-form with no validation, so the manage permission is self-grantable. No two-person
-   mechanism exists anywhere in the repo; this is a new capability, not a design choice.
+4. ~~**Should changing an assignment require two people?**~~ — **ANSWERED (2026-07-25): no. The
+   action list is tenant-level configuration**, edited by a tenant admin like any other tenant
+   setting. One admin, one write, recorded in the audit event. No two-person mechanism is built.
+
+   Two consequences worth stating, since the assignment surface is now confirmed tenant-scoped:
+   - The **platform ceiling still applies** — a tenant admin configures within it and cannot lower
+     a platform-set floor. That is what the `max()` composition in §4 is for, and it is now the
+     load-bearing protection rather than a nicety.
+   - The self-grantable-permission observation stands but is **out of scope here**: API key
+     permissions are accepted free-form with no validation against `Permissions.Matrix`
+     (`AdminApiKeysEndpoints.cs:63`). That is a pre-existing auth-plane gap affecting every
+     permission, not something this epic introduces or should fix.
 5. **Is the ungoverned-route backlog funded?** The ratchet guarantees it only shrinks when someone
    does the work.
