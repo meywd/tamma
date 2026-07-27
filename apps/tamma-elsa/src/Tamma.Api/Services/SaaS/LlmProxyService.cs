@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Tamma.Api.Services.Billing;
 using Tamma.Api.Services.Diagnostics;
+using Tamma.Api.Services.Providers;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -13,14 +14,31 @@ namespace Tamma.Api.Services.SaaS;
 /// Anthropic's <c>/v1/messages</c> endpoint and records token-usage +
 /// estimated cost via <see cref="IDiagnosticsService"/>.
 ///
-/// Uses <see cref="IHttpClientFactory"/> with the <c>anthropic</c> named
-/// client (configured in <c>Program.cs</c>) so tests can swap a handler.
+/// The named client, endpoint path, and wire dialect come from the
+/// <see cref="ProviderCatalog"/> descriptor for <see cref="ProviderKey"/>
+/// (Phase 1 of the provider abstraction) — previously this class was the
+/// third independent copy of the Anthropic wiring and rode the named client
+/// whose version header had drifted to an unpublished value. The payload
+/// builder itself stays local: this is a pass-through proxy of
+/// caller-supplied turns, deliberately NOT the tool-loop conversation format
+/// <c>ProviderRequestShaper</c> produces, and its wire bytes are pinned by
+/// <c>ProviderGoldenRequestTests</c>.
 /// </summary>
 public sealed class LlmProxyService : ILlmProxyService
 {
     private const string ProviderKey = "anthropic-claude";
     private const string DefaultModel = "claude-sonnet-4.5";
-    private const string HttpClientName = "anthropic";
+
+    /// <summary>Descriptor for <see cref="ProviderKey"/> (an alias of the
+    /// <c>anthropic</c> descriptor). Fail-loud at type-load if the catalogue
+    /// ever drops the key or flips its dialect away from Anthropic — this
+    /// proxy only implements the Anthropic pass-through shape.</summary>
+    private static readonly ProviderDescriptor Descriptor =
+        ProviderCatalog.Resolve(ProviderKey) is { Dialect: ProviderWireDialect.Anthropic } d
+            ? d
+            : throw new InvalidOperationException(
+                $"LlmProxyService requires provider '{ProviderKey}' to resolve to an " +
+                "Anthropic-dialect descriptor in ProviderCatalog.");
 
     // Minimal price sheet (USD per 1K tokens). Keep it narrow — real pricing
     // integration is Epic-9/diagnostics territory. Falls back to the sonnet
@@ -95,14 +113,14 @@ public sealed class LlmProxyService : ILlmProxyService
             }
         }
 
-        var client = _httpFactory.CreateClient(HttpClientName);
+        var client = _httpFactory.CreateClient(Descriptor.HttpClientName);
         var payload = BuildAnthropicPayload(model, request);
 
         var sw = Stopwatch.StartNew();
         HttpResponseMessage? response = null;
         try
         {
-            response = await client.PostAsJsonAsync("/v1/messages", payload, ct);
+            response = await client.PostAsJsonAsync(ProviderCatalog.ChatPath(Descriptor), payload, ct);
             sw.Stop();
 
             if (!response.IsSuccessStatusCode)

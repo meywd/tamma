@@ -15,6 +15,13 @@ public class ProviderAllowlist
 
     /// <summary>
     /// Built-in known providers. Matches the providers supported by the platform.
+    /// This set is kept in EXACT keyset agreement with the provider catalogue in
+    /// <c>Tamma.Api.Services.Providers.ProviderCatalog</c> (HTTP descriptors +
+    /// allow-listed non-HTTP classifications) — enforced by
+    /// <c>ProviderCatalogTests</c> in Tamma.Activities.Tests, so the two
+    /// surfaces can never drift apart again (they disagreed by seven entries
+    /// before Phase 1 of the provider abstraction; see
+    /// .dev/findings/provider-abstraction-and-openai-compatible-candidates.md).
     /// </summary>
     private static readonly HashSet<string> DefaultProviders = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -25,14 +32,16 @@ public class ProviderAllowlist
         "github-copilot",
         "local-llm",
         "opencode",
-        "z-ai",
+        "z-ai",           // Zhipu GLM — Z.ai is Zhipu's international brand
         "zen-mcp",
         "azure-openai",
         "gemini",
         "ollama",
         "lmstudio",
         "together",
-        "groq"
+        "groq",
+        "deepseek",       // OpenAI-compatible candidate (finding, 2026-07-25)
+        "moonshot"        // Moonshot AI / Kimi — OpenAI-compatible candidate
     };
 
     private static readonly ProviderAllowlist DefaultInstance = new();

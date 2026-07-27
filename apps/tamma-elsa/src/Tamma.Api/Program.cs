@@ -171,6 +171,62 @@ builder.Services.AddHttpClient("local", client =>
     var baseUrl = builder.Configuration["LocalLLM:BaseUrl"] ?? "http://localhost:11434";
     client.BaseAddress = new Uri(baseUrl);
 });
+// ── Descriptor-driven provider clients (Phase 1 of the provider abstraction,
+// .dev/findings/provider-abstraction-and-openai-compatible-candidates.md).
+// The seven provider clients above predate the ProviderCatalog and keep their
+// hand-written registrations byte-for-byte; every catalogue descriptor whose
+// client name is NOT hand-registered gets its named client here, configured
+// from the descriptor (default base URL + auth scheme + version header) with
+// the same "{Section}:BaseUrl" / "{Section}:ApiKey" override convention.
+// This is what closed the allowlist ↔ named-client gap: azure-openai,
+// together, groq, and the new deepseek + moonshot (Kimi) become dispatchable.
+// A descriptor with an empty base URL and no config (e.g. Azure OpenAI's
+// per-resource URL) is registered without a BaseAddress; HttpProviderClient
+// fails fast on that with its existing "no BaseAddress" error.
+var handRegisteredProviderClients = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+{
+    "anthropic", "openai", "github-copilot", "gemini", "openrouter", "z.ai", "local",
+};
+foreach (var providerDescriptor in Tamma.Api.Services.Providers.ProviderCatalog.HttpProviders)
+{
+    if (!handRegisteredProviderClients.Add(providerDescriptor.HttpClientName))
+        continue; // hand-registered above, or shared with an earlier descriptor
+
+    var d = providerDescriptor;
+    builder.Services.AddHttpClient(d.HttpClientName, client =>
+    {
+        var baseUrl = builder.Configuration[$"{d.ConfigSection}:BaseUrl"] ?? d.DefaultBaseUrl;
+        if (!string.IsNullOrWhiteSpace(baseUrl))
+            client.BaseAddress = new Uri(baseUrl);
+
+        var apiKey = builder.Configuration[$"{d.ConfigSection}:ApiKey"];
+        if (!string.IsNullOrEmpty(apiKey))
+        {
+            switch (d.AuthScheme)
+            {
+                case Tamma.Api.Services.Providers.ProviderAuthScheme.AnthropicApiKey:
+                    client.DefaultRequestHeaders.Add("x-api-key", apiKey);
+                    break;
+                case Tamma.Api.Services.Providers.ProviderAuthScheme.GoogleApiKey:
+                    client.DefaultRequestHeaders.Add("X-Goog-Api-Key", apiKey);
+                    break;
+                default:
+                    client.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+                    break;
+            }
+        }
+
+        if (d.VersionHeaderName is not null)
+            client.DefaultRequestHeaders.Add(d.VersionHeaderName, d.VersionHeaderValue);
+    });
+}
+// The inline tool-loop runner's client is deliberately UNCONFIGURED: the
+// runner clears default headers and targets absolute URLs, applying base URL /
+// auth / version headers per call from the descriptor + resolved (BYOK-aware)
+// credentials. Registered here so the name is intentional rather than the old
+// phantom "llm-{provider}" lookup that resolved unregistered names.
+builder.Services.AddHttpClient(
+    Tamma.Api.Services.Agents.InlineToolLoopRunner.RunnerHttpClientName);
 builder.Services.AddHttpClient("github", client =>
 {
     var baseUrl = builder.Configuration["GitHub:ApiBaseUrl"] ?? "https://api.github.com";
