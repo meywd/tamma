@@ -16,7 +16,15 @@ import { AuditLogTab } from './AuditLogTab.js';
 // Story 34-9 — platform-owner pricing & plan-management dashboards.
 import { PricingTab } from './pricing/PricingTab.js';
 
-type AdminTab = 'users' | 'api-keys' | 'health' | 'links' | 'audit-log' | 'tenants' | 'pricing';
+type AdminTab =
+  | 'users'
+  | 'api-keys'
+  | 'health'
+  | 'links'
+  | 'audit-log'
+  | 'tenants'
+  | 'pricing'
+  | 'providers';
 
 interface TabDef {
   id: AdminTab;
@@ -27,6 +35,7 @@ const TABS: TabDef[] = [
   { id: 'users', label: 'Users' },
   { id: 'tenants', label: 'Tenants' },
   { id: 'pricing', label: 'Pricing' },
+  { id: 'providers', label: 'Providers' },
   { id: 'api-keys', label: 'API Keys' },
   { id: 'health', label: 'System Health' },
   { id: 'links', label: 'Quick Links' },
@@ -47,6 +56,27 @@ function TenantsLinkPanel(): JSX.Element {
         className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md"
       >
         Open tenants roster
+      </Link>
+    </div>
+  );
+}
+
+// Story 46-2 — link panel to the standalone provider-settings page,
+// following the TenantsLinkPanel precedent above.
+function ProvidersLinkPanel(): JSX.Element {
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6 dark:bg-gray-800 dark:border-gray-700">
+      <h2 className="text-lg font-semibold text-gray-900 mb-2 dark:text-gray-100">Providers</h2>
+      <p className="text-sm text-gray-600 mb-4 dark:text-gray-400">
+        Enable or disable each AI provider and pick its platform default model
+        from the provider&apos;s own live model list — no code update or
+        redeploy needed.
+      </p>
+      <Link
+        to="/admin/providers"
+        className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md"
+      >
+        Open provider settings
       </Link>
     </div>
   );
@@ -80,6 +110,7 @@ export function AdminLayout(): JSX.Element {
         {activeTab === 'users' && <UsersTab />}
         {activeTab === 'tenants' && <TenantsLinkPanel />}
         {activeTab === 'pricing' && <PricingTab />}
+        {activeTab === 'providers' && <ProvidersLinkPanel />}
         {activeTab === 'api-keys' && <ApiKeysTab />}
         {activeTab === 'health' && <HealthTab />}
         {activeTab === 'links' && <QuickLinksTab />}
