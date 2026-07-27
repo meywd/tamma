@@ -3,7 +3,8 @@
 **Date**: 2026-07-25
 **Type**: 📚 Lesson Learned / design correction
 **Category**: Architecture
-**Status**: 🔍 Open — changes to apply to Story 44-0 before it is implemented
+**Status**: ✅ Applied (2026-07-25) — all ten changes are in Story 44-0, its plan, the epic README
+and the execution plan. Two items below were deliberately **not** taken as written; see "Deviations".
 
 Research source: Linear's **published GraphQL schema** (`packages/sdk/src/schema.graphql`,
 github.com/linear/linear — 49,840 lines, generated from their live API, docstrings written by
@@ -162,6 +163,33 @@ sequence can collide. Linear needed `previousIdentifiers` for the *rare* team mo
    way to record *what* blocks it is a half-feature — and with a restrictive matrix, dependency gets
    encoded as parenting, corrupting the hierarchy.
 10. **Clarify `Rank.Last()`** — if it returns a fixed sentinel, two consecutive appends collide.
+
+## Deviations taken when applying
+
+1. **`cancelled`, not Linear's `canceled`.** The category spelling matches the repo and
+   `WorkItemStatus.Cancelled`. Two spellings of one word inside one namespace is the papercut the
+   story's own D3 warns about for hyphen-vs-underscore. The divergence is noted in the story so a
+   future reader diffing against Linear's schema does not read it as a mapping error.
+2. **The relation vocabulary shipped rather than being merely "noted".** But bounded: 44-0 ships only
+   the enum and the direction convention; the table is 44-1's and validation is 44-3's, and the
+   enum's own doc says **delete it** rather than leave it unreferenced if the relation feature is
+   declined — a dead vocabulary is precisely the failure the epic README spends a table criticising
+   (`Issue`, `TriageComplexity`).
+
+## Found while applying, not in the analysis above
+
+- **`Category()` is a contract, not a compression.** `unstarted` and `backlog` each have exactly one
+  member. That is fine and deliberate, but someone will eventually try to "simplify" it away.
+- **`(EstimateScale = not_used, Estimate = 5)` is representable and meaningless** — the same defect
+  class as `(Kind=Bug, Type=Feature)` that this analysis flags. No validator was added (it belongs to
+  44-2); it should be one.
+- **Estimates were NOT re-cut for 44-1 and 44-3** despite 44-0 handing them additive work
+  (`SiblingRank`, `PreviousKeys`, `Estimate`+`EstimateScale`, a relations table; plus relation
+  validation and a status-set-literal sweep). Re-estimating two stories from a third story's review
+  is how estimates stop meaning anything. Flagged in the execution plan with the arithmetic if it
+  lands as +0.5 d each.
+- **The story filename still says `parenting-matrix`.** Renaming it would break the
+  `docs/sprint-status.yaml` reference; the heading and all prose say "hierarchy invariants".
 
 ## Related
 

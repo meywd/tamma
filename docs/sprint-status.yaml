@@ -709,7 +709,21 @@ development_status:
   # NAMING: every obvious noun is taken (Task → TaskRef/PlanTask/QueuedTask/TaskKind//api/tasks/reserved
   # TASK.*; Story → the live stories table; Issue → the dead record; Cycle → CycleEvents). Hence WorkItem /
   # Iteration / Project in Tamma.Core.Tracking.
-  44-0-tracker-core: drafted                                 # Vocabularies, WorkItemRef, parenting matrix, rank algebra, fail-loud index. [P0] 4d
+  44-0-tracker-core: drafted                                 # Vocabularies, WorkItemRef, HIERARCHY INVARIANTS (not a parenting matrix — see below), rank algebra, fail-loud index. [P0] 4.5d
+  # REWORKED 2026-07-25 after comparing against Linear's published GraphQL schema
+  # (.dev/findings/linear-comparison-against-story-44-0.md). The (parentKind, childKind) matrix is
+  # DELETED: it had only THREE distinct rows — Story/Bug/Spike interchangeable, Task/Chore
+  # interchangeable — so WorkItemKind was a 3-member LEVEL enum wearing a 6-member KIND enum's
+  # clothes. Worse, it forbade shapes the repo already produces: Epic → Story → DecompositionTask →
+  # PlanTask is depth 4 against the old MaxDepth 3, pre-foreclosing the epic's own named v2. Replaced
+  # by structural invariants (no cycles, MaxDepth 6, Epic-not-under-non-Epic). WorkItemKind drops to
+  # 4 members (bug/chore deleted — TriageIssueType already carries both, a two-member collision that
+  # was flagged nowhere). WorkItemStatus gains `triage` (8 members) plus a Category() switch with no
+  # default arm, so a new status without a category is a COMPILE error rather than a set-literal
+  # drift across five stories. Key frozen at creation + PreviousKeys (the key is the DCB join key and
+  # event tags are append-only, so re-minting on a project move silently orphans lineage). Priority
+  # nullable ("the agent didn't prioritise this" ≠ "normal"). Rank.Last() deleted — a fixed sentinel
+  # made two consecutive appends collide.
   44-1-storage-and-tenant-migration-sweep: drafted           # Repositories + THE MIGRATE-ALL-PROVISIONED-TENANTS SWEEP (no startup sweep exists today; a new tenant migration never reaches existing tenants). [P0] 6d
   44-2-work-item-and-project-api: drafted                    # API, RBAC, tracker_preferences, Epic 43 catalog descriptors. NOTE: work items are CONTENT not configuration — schema-per-tenant already isolates them, so NO principal XOR on work_items; the XOR is used in its strong form on tracker_preferences. [P0] 5d
   44-3-hierarchy-ranking-and-backlog-apply-seam: drafted     # Hierarchy, ranking, and the BacklogOrdering apply seam (41-3 produces the immutable document; 44 owns the mutable record). [P0] 4d
