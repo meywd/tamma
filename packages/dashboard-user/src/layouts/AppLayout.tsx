@@ -3,14 +3,24 @@
  *
  * Minimal for story 18-5 shell; the full nav / org switcher / notification
  * bell land in later story-18-5 sub-tasks (see impl plan steps 5–9).
+ *
+ * Story 45-2 AC6 — the sidebar links ONLY to routes that exist. The former
+ * /repos, /runs and /settings entries were copies of the ADMIN app's routes
+ * (packages/dashboard/src/router.tsx); no such pages have ever existed here,
+ * so the links are REMOVED, not routed to the 404. AppLayout.test.tsx pins
+ * every sidebar target against App.tsx's ROUTE_PATHS so a copied link fails
+ * CI instead of shipping.
+ *
+ * Renders `children` when given (the auth-aware 404 uses this to draw inside
+ * the shell), otherwise the routed <Outlet />.
  */
 
 import { Link, Outlet } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 
-import type { JSX } from "react";
+import type { JSX, ReactNode } from 'react';
 
-export function AppLayout(): JSX.Element {
+export function AppLayout({ children }: { children?: ReactNode }): JSX.Element {
   const { user, logout } = useAuth();
 
   return (
@@ -21,17 +31,14 @@ export function AppLayout(): JSX.Element {
           <Link to="/" className="px-2 py-1.5 rounded hover:bg-gray-100">
             Dashboard
           </Link>
-          <Link to="/repos" className="px-2 py-1.5 rounded hover:bg-gray-100">
-            Repositories
+          <Link to="/alerts" className="px-2 py-1.5 rounded hover:bg-gray-100">
+            Alerts
           </Link>
-          <Link to="/runs" className="px-2 py-1.5 rounded hover:bg-gray-100">
-            Runs
+          <Link to="/settings/platforms" className="px-2 py-1.5 rounded hover:bg-gray-100">
+            Platforms
           </Link>
           <Link to="/settings/billing" className="px-2 py-1.5 rounded hover:bg-gray-100">
             Billing
-          </Link>
-          <Link to="/settings" className="px-2 py-1.5 rounded hover:bg-gray-100">
-            Settings
           </Link>
         </nav>
       </aside>
@@ -49,9 +56,7 @@ export function AppLayout(): JSX.Element {
             Sign out
           </button>
         </header>
-        <div className="flex-1 p-6">
-          <Outlet />
-        </div>
+        <div className="flex-1 p-6">{children ?? <Outlet />}</div>
       </main>
     </div>
   );

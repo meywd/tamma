@@ -86,11 +86,17 @@ export interface UpdateChannelBody {
   config?: string | null;
 }
 
+// Optional filters. `| undefined` is deliberate: under
+// `exactOptionalPropertyTypes` a bare `status?: AlertStatus` means "the key
+// may be ABSENT" and not "the key may be present holding undefined" — but a
+// caller building a filter object from component state naturally produces
+// `{ status: undefined, ... }`. Both shapes are accepted here and both are
+// omitted from the query string (see the guards in listTenantAlerts).
 export interface ListAlertsParams {
-  status?: AlertStatus;
-  severity?: AlertSeverity;
-  sinceDays?: number;
-  limit?: number;
+  status?: AlertStatus | undefined;
+  severity?: AlertSeverity | undefined;
+  sinceDays?: number | undefined;
+  limit?: number | undefined;
 }
 
 export async function listTenantAlerts(
@@ -177,21 +183,13 @@ export async function updateTenantChannel(
         'Use `credentialsSecretId` + the secret store instead.',
     );
   }
-  // Re-use ApiClient's PATCH pattern via fetch directly (no apiClient.patch).
-  const resp = await fetch(
-    `${apiClientBaseUrl()}/api/v1/orgs/${tenantId}/alert-channels/${channelId}`,
-    {
-      method: 'PATCH',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(body),
-    },
+  // Story 45-1: goes through ApiClient.patch so this call inherits the
+  // single-shot refresh-on-401 retry every other call in this module gets.
+  // (The previous bare `fetch` here was the one call in the app that missed it.)
+  return apiClient.patch<ChannelDto>(
+    `/api/v1/orgs/${tenantId}/alert-channels/${channelId}`,
+    body,
   );
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`PATCH failed ${resp.status}: ${text}`);
-  }
-  return (await resp.json()) as ChannelDto;
 }
 
 export async function deleteTenantChannel(
@@ -242,12 +240,4 @@ export function hasPlaintextCredential(configJson?: string | null): boolean {
     if (banned.has(key.toLowerCase())) return true;
   }
   return false;
-}
-
-function apiClientBaseUrl(): string {
-  return (
-    (typeof import.meta !== 'undefined' &&
-      (import.meta as { env?: Record<string, string> }).env?.VITE_API_URL) ||
-    ''
-  );
 }

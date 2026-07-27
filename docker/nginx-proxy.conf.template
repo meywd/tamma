@@ -17,6 +17,9 @@
 #   app.tamma.dev/        -> dashboard (oauth2-proxy protected)
 #   app.tamma.dev/api/    -> tamma-api (JWT auth, no oauth2-proxy)
 #   api.tamma.dev/        -> tamma-api (webhooks/machine clients, no oauth2-proxy)
+#   dash.tamma.dev/       -> dashboard-user (customer SPA — NO oauth2-proxy;
+#                            the app ships its own /login + /register)
+#   dash.tamma.dev/api/   -> tamma-api (JWT auth, no oauth2-proxy)
 #   elsa.tamma.dev/       -> elsa-studio (oauth2-proxy protected)
 #   logs.tamma.dev/       -> opensearch-dashboards (oauth2-proxy protected)
 #   Bare IP               -> dashboard + /api/
@@ -44,7 +47,7 @@ resolver 127.0.0.11 valid=30s ipv6=off;
 # Redirect HTTP -> HTTPS for named hosts
 server {
     listen 80;
-    server_name app.tamma.dev api.tamma.dev elsa.tamma.dev logs.tamma.dev;
+    server_name app.tamma.dev api.tamma.dev dash.tamma.dev elsa.tamma.dev logs.tamma.dev;
     return 301 https://$host$request_uri;
 }
 
@@ -197,6 +200,46 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+    }
+}
+
+# =============================================================================
+# dash.tamma.dev — CUSTOMER dashboard (dashboard-user SPA) + /api/
+#
+# DELIBERATELY NO auth_request / oauth2-proxy on this host: the customer app
+# ships its own /login, /register and cookie-session auth, and its
+# registration/verify/reset/invite pages MUST be reachable anonymously —
+# gating them behind the GitHub OAuth wall the admin hosts use would put a
+# login for an account that does not exist yet in front of the signup form
+# (Epic 45 D1). Do NOT "fix" this host to match its siblings.
+# =============================================================================
+server {
+    listen 443 ssl;
+    server_name dash.tamma.dev;
+
+    # ----- API routes: JWT-based auth (no oauth2-proxy) -----
+    # Trailing /api/ on the upstream (NOT the bare / the in-container
+    # nginx-dashboard-user.conf uses): this layer must preserve the /api
+    # prefix, the in-container proxy strips it.
+    location /api/ {
+        proxy_pass http://tamma-api:3100/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    # ----- Customer SPA: anonymous-reachable (see header) -----
+    location / {
+        proxy_pass http://tamma-dashboard-user:3002;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
     }
 }
 

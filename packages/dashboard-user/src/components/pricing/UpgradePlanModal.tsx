@@ -10,14 +10,24 @@
  *
  * This is a PURE set-diff over server-resolved numbers — no pricing/headroom math
  * is duplicated here (AC13).
+ *
+ * Story 45-1: the subscribe response is the C# PlanAssignmentResponse
+ * (Dtos/Admin/AdminTenantDtos.cs:135-148). After a successful subscribe the
+ * modal stays open in a confirmation state — direction, per-metric over-limit
+ * warnings and the scheduled effective date all render there. `onSubscribed`
+ * fires when the user dismisses the confirmation (the page closes the modal
+ * and reloads); firing it immediately would unmount the modal before the
+ * warnings could ever be seen, which is exactly how the old code lost them.
  */
 
 import { useMemo, useState, type JSX } from 'react';
 import {
   tenantPricingApi,
   metricKeyLabel,
+  type PlanAssignmentWarning,
   type PlanSnapshotDto,
   type ResolvedEntitlementLine,
+  type SubscribeResponse,
 } from '../../api/pricing';
 import { ApiError } from '../../api/client';
 
@@ -42,6 +52,38 @@ function prettyMetric(key: string): string {
 
 function limitText(limit: number | null): string {
   return limit === null ? 'Unlimited' : String(limit);
+}
+
+/**
+ * One line per PlanAssignmentWarningItem, e.g.
+ * "Seats: you are using 12, the new plan allows 5". A null half is omitted
+ * rather than rendered as "null" (the usage reader may not know, and a null
+ * limit means unlimited-or-unknown).
+ */
+export function formatWarning(w: PlanAssignmentWarning): string {
+  const metric = prettyMetric(metricKeyLabel(w.metricKey));
+  const parts: string[] = [];
+  if (w.currentUsage !== null) parts.push(`you are using ${w.currentUsage}`);
+  if (w.newLimit !== null) parts.push(`the new plan allows ${w.newLimit}`);
+  if (parts.length === 0) return `${metric}: over the new plan's limit`;
+  return `${metric}: ${parts.join(', ')}`;
+}
+
+/** The server computes direction ("upgrade" | "downgrade" | "lateral" —
+ * PlanChangeDirection lowercased). Never re-derive it client-side: a plan
+ * change can raise one limit and lower another (45-1 D5). Unmapped values
+ * render raw — an honest string beats a wrong label. */
+function directionMessage(direction: string): string {
+  switch (direction) {
+    case 'upgrade':
+      return 'Your plan has been upgraded.';
+    case 'downgrade':
+      return 'Your plan has been downgraded.';
+    case 'lateral':
+      return 'Your plan has been changed.';
+    default:
+      return `Plan change applied (${direction}).`;
+  }
 }
 
 /**
@@ -149,7 +191,9 @@ export function UpgradePlanModal({
   const [selectedSlug, setSelectedSlug] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
+  // Set on a successful subscribe; switches the modal to its confirmation
+  // state. `onSubscribed` fires only when the user dismisses it (see below).
+  const [result, setResult] = useState<SubscribeResponse | null>(null);
 
   const selectedPlan = useMemo(
     () => plans.find((p) => p.slug === selectedSlug) ?? null,
@@ -165,13 +209,9 @@ export function UpgradePlanModal({
     if (!selectedPlan) return;
     setSubmitting(true);
     setError(null);
-    setWarning(null);
     try {
       const resp = await tenantPricingApi.subscribe({ planSlug: selectedPlan.slug });
-      if (resp.violations && resp.violations.length > 0) {
-        setWarning(`Subscribed with warnings: ${resp.violations.join('; ')}`);
-      }
-      onSubscribed();
+      setResult(resp);
     } catch (err) {
       if (err instanceof ApiError) {
         const body = err.body as { error?: string; message?: string } | null;
@@ -181,6 +221,16 @@ export function UpgradePlanModal({
       }
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // After a successful subscribe every exit path must notify the page so it
+  // reloads entitlements — including the corner X.
+  const dismiss = (): void => {
+    if (result !== null) {
+      onSubscribed();
+    } else {
+      onClose();
     }
   };
 
@@ -199,13 +249,45 @@ export function UpgradePlanModal({
           <button
             type="button"
             aria-label="Close"
-            onClick={onClose}
+            onClick={dismiss}
             className="text-gray-400 hover:text-gray-600"
           >
             ×
           </button>
         </div>
 
+        {result !== null ? (
+          <div className="space-y-3 mb-4">
+            <p role="status" className="text-sm font-medium text-gray-900">
+              {directionMessage(result.direction)}
+            </p>
+            {result.scheduledEffectiveAt !== null && (
+              <p className="text-sm text-gray-600">
+                Takes effect {new Date(result.scheduledEffectiveAt).toLocaleString()}.
+              </p>
+            )}
+            {result.warnings.length > 0 && (
+              <div role="alert" className="p-2 text-sm text-amber-800 bg-amber-50 rounded space-y-1">
+                <p className="font-medium">Over-limit warnings (not blocking):</p>
+                <ul className="list-disc pl-5">
+                  {result.warnings.map((w, i) => (
+                    <li key={`${String(w.metricKey)}-${i}`}>{formatWarning(w)}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={dismiss}
+                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
         <label className="block text-xs text-gray-600 mb-1" htmlFor="plan-select">
           Choose a plan
         </label>
@@ -276,11 +358,6 @@ export function UpgradePlanModal({
             {error}
           </div>
         )}
-        {warning !== null && (
-          <div role="status" className="p-2 text-sm text-amber-800 bg-amber-50 rounded mb-3">
-            {warning}
-          </div>
-        )}
 
         <div className="flex justify-end gap-2">
           <button
@@ -301,6 +378,8 @@ export function UpgradePlanModal({
             </button>
           )}
         </div>
+          </>
+        )}
       </div>
     </div>
   );

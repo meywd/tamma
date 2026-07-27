@@ -126,4 +126,15 @@ describe('metricKeyLabel', () => {
     expect(metricKeyLabel(METRIC_KEYS.length - 1)).toBe('benchmark_retention_days');
     expect(metricKeyLabel('seats')).toBe('seats');
   });
+
+  // 45-1: PlanAssignmentWarningItem.MetricKey is serialized via the C# enum's
+  // ToString() — the PascalCase member name — verified against
+  // AdminTenantsEndpoints.ToPlanAssignmentResponse (:893-894).
+  it('normalizes PascalCase C# enum member names to snake_case', () => {
+    expect(metricKeyLabel('Seats')).toBe('seats');
+    expect(metricKeyLabel('WorkflowRuns')).toBe('workflow_runs');
+    expect(metricKeyLabel('LlmTokens')).toBe('llm_tokens');
+    expect(metricKeyLabel('RagStorageMb')).toBe('rag_storage_mb');
+    expect(metricKeyLabel('BenchmarkRetentionDays')).toBe('benchmark_retention_days');
+  });
 });

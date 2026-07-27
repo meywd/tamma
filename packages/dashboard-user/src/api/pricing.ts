@@ -36,7 +36,19 @@ export const METRIC_KEYS = [
 ] as const;
 
 export function metricKeyLabel(metricKey: number | string): string {
-  if (typeof metricKey === 'string') return metricKey;
+  if (typeof metricKey === 'string') {
+    // PlanAssignmentWarningItem.MetricKey arrives as the PascalCase C# enum
+    // member name (`EntitlementMetricKey.ToString()` — e.g. "WorkflowRuns");
+    // the entitlements endpoint sends snake_case. Normalize PascalCase to the
+    // canonical snake_case label; snake_case strings pass through unchanged.
+    // This is THE one metric-key normalizer (45-1 AC2) — do not add a second.
+    if (/^[A-Z]/.test(metricKey)) {
+      return metricKey
+        .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+        .toLowerCase();
+    }
+    return metricKey;
+  }
   return METRIC_KEYS[metricKey] ?? `metric_${metricKey}`;
 }
 
@@ -112,17 +124,30 @@ export interface EstimateParams {
 }
 
 // ── Subscribe (AdminTenantsEndpoints plan-assignment response) ──
+//
+// Mirrors PlanAssignmentResponse — Dtos/Admin/AdminTenantDtos.cs:135-148.
+// Every member is REQUIRED on purpose (45-1 D1): the previous all-optional
+// interface let four field mismatches typecheck silently. If the server DTO
+// changes, this must fail to compile in its consumer, not render nothing.
+
+/** Mirrors PlanAssignmentWarningItem — Dtos/Admin/AdminTenantDtos.cs:145-148.
+ * `metricKey` is serialized via `EntitlementMetricKey.ToString()` → the
+ * PascalCase enum member name (e.g. "Seats"); normalize via metricKeyLabel(). */
+export interface PlanAssignmentWarning {
+  metricKey: number | string;
+  currentUsage: number | null;
+  newLimit: number | null;
+}
 
 export interface SubscribeResponse {
   tenantId: string;
-  planId?: string;
-  planSlug?: string;
-  planName?: string;
-  version?: number;
-  status?: string;
-  message?: string;
-  /** Optional flagged-violation list surfaced as a non-blocking warning (34-4). */
-  violations?: string[];
+  planId: string;
+  planVersion: number;
+  status: string;
+  /** "upgrade" | "downgrade" | "lateral" — PlanChangeDirection lowercased server-side. */
+  direction: string;
+  warnings: PlanAssignmentWarning[];
+  scheduledEffectiveAt: string | null;
 }
 
 export const tenantPricingApi = {

@@ -1,0 +1,8 @@
+# dash.tamma.dev is a signed-in-only customer SPA — there is nothing useful
+# to index and everything to leak from an indexed error page. Unlike
+# app.tamma.dev (behind oauth2-proxy, never crawlable) this host is publicly
+# reachable, so the default is Disallow everything.
+# Epic 45 README open question 3: if a marketing surface ever lands on this
+# host, carve it out here deliberately.
+User-agent: *
+Disallow: /

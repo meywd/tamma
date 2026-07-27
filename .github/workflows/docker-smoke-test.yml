@@ -54,7 +54,7 @@ jobs:
         timeout-minutes: 5
         run: |
           echo "Waiting for services to become healthy..."
-          for service in postgres rabbitmq tamma-api tamma-dashboard; do
+          for service in postgres rabbitmq tamma-api tamma-dashboard tamma-dashboard-user; do
             echo "Waiting for $service..."
             timeout 120 bash -c "until docker compose -f docker/docker-compose.yml ps $service | grep -q healthy; do sleep 5; done" || true
           done
@@ -66,6 +66,8 @@ jobs:
           curl -sf http://localhost:3100/health || echo "tamma-api health check pending"
           # Test dashboard
           curl -sf http://localhost:3001/ || echo "dashboard health check pending"
+          # Test customer dashboard (dashboard-user)
+          curl -sf http://localhost:3002/ || echo "dashboard-user health check pending"
 
       - name: Collect logs on failure
         if: failure()

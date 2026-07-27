@@ -255,6 +255,11 @@ services:
       # at this URL.
       OAuth2Proxy__Url: http://oauth2-proxy:4180
       Dashboard__Url: ${DASHBOARD_URL:-https://app.tamma.dev}
+      # Story 45-7 — customer-facing links (verify / reset / invites / GitHub
+      # install redirects) target the CUSTOMER app, not the oauth2-proxied
+      # admin console. Falls back to Dashboard:Url when unset (single-user
+      # installs have one dashboard and must not need two settings).
+      Dashboard__CustomerUrl: ${CUSTOMER_DASHBOARD_URL:-https://dash.tamma.dev}
       ChromaDb__Url: http://chromadb:8000
       IntelligenceServer__Url: http://intelligence-server:4100
       IntelligenceServer__TimeoutSeconds: "10"
@@ -311,6 +316,22 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.dashboard
+    restart: unless-stopped
+    depends_on:
+      tamma-api:
+        condition: service_started
+    networks:
+      - tamma-net
+
+  # ---------------------------------------------------------------------------
+  # Tamma Customer Dashboard (React SPA via nginx) — the customer-facing app
+  # at dash.tamma.dev. Ships its own /login + /register; served WITHOUT
+  # oauth2-proxy (see the dash.tamma.dev block in nginx-proxy.conf.template).
+  # ---------------------------------------------------------------------------
+  tamma-dashboard-user:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dashboard-user
     restart: unless-stopped
     depends_on:
       tamma-api:
@@ -423,11 +444,13 @@ services:
       - tamma-net
 
   # ---------------------------------------------------------------------------
-  # Reverse Proxy (nginx — routes api.tamma.dev / app.tamma.dev)
+  # Reverse Proxy (nginx — routes api.tamma.dev / app.tamma.dev / dash.tamma.dev)
   #
-  # Hard-depends on tamma-api and tamma-dashboard (critical path).
-  # oauth2-proxy and opensearch-dashboards are soft dependencies — nginx
-  # resolves them at request time and returns 502 if unavailable.
+  # Hard-depends on tamma-api, tamma-dashboard and tamma-dashboard-user
+  # (critical path — the customer app is the product and is at least as
+  # critical as the admin console). oauth2-proxy and opensearch-dashboards
+  # are soft dependencies — nginx resolves them at request time and returns
+  # 502 if unavailable.
   # ---------------------------------------------------------------------------
   nginx-proxy:
     image: nginx:1.27-alpine
@@ -448,6 +471,8 @@ services:
       tamma-api:
         condition: service_started
       tamma-dashboard:
+        condition: service_started
+      tamma-dashboard-user:
         condition: service_started
     networks:
       - tamma-net

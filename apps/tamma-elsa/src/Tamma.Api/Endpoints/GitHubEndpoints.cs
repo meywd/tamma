@@ -22,7 +22,6 @@ public static class GitHubEndpoints
 {
     private const string SuccessRedirectPath = "/onboarding/success";
     private const string ErrorRedirectPath = "/onboarding/error";
-    private const string DefaultDashboardUrl = "https://dash.tamma.dev";
 
     /// <summary>
     /// GitHub App install callback. GitHub redirects the user here after they
@@ -37,7 +36,17 @@ public static class GitHubEndpoints
     {
         var logger = loggerFactory.CreateLogger("GitHubEndpoints.Callback");
 
-        var dashboardBase = config["Dashboard:Url"] ?? DefaultDashboardUrl;
+        // Story 45-7 DECISION (epic-45 README open question 1): the install
+        // redirect targets the CUSTOMER app, not the admin console. The
+        // person completing a GitHub App install is a customer mid-onboarding,
+        // and 45-2 built /onboarding/success + /onboarding/error in the
+        // customer app for exactly this hop. This file's old hardcoded
+        // fallback was already https://dash.tamma.dev — that default now
+        // lives in DashboardUrls (CustomerUrl → Url → dash.tamma.dev), which
+        // also normalizes the trailing slash the old inline read did not.
+        // If you are debugging a failed install: the host change is
+        // intentional — do not repoint this at Dashboard:Url.
+        var dashboardBase = DashboardUrls.CustomerBase(config);
 
         // Parse query string
         var query = context.Request.Query;
