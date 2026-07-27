@@ -144,6 +144,25 @@ test_endpoint "app.tamma.dev / unauthenticated → 302 redirect" "app.tamma.dev"
 # API health bypasses oauth2-proxy — must always be 200
 test_endpoint "api.tamma.dev /api/health bypasses auth" "api.tamma.dev" "/api/health" "200"
 
+# ---------------------------------------------------------------------------
+header "Epic 45: Customer app (dash.tamma.dev)"
+
+# dash.tamma.dev: the CUSTOMER app must be reachable anonymously — 200, NOT
+# 302. This is the deliberate INVERSE of the app.tamma.dev assertion above:
+# app.tamma.dev proves oauth2-proxy IS in front of the admin console;
+# dash.tamma.dev proves it is NOT in front of the customer app (its signup /
+# verify / reset pages must load without a GitHub OAuth wall). A 302 here
+# means someone copied the admin vhost's auth_request block — a regression.
+test_endpoint "dash.tamma.dev / anonymous → 200 (NOT 302)" "dash.tamma.dev" "/" "200"
+
+# Deep link through the full proxy chain — proves the SPA fallback
+# (try_files → index.html) survives nginx-proxy → dashboard-user nginx.
+test_endpoint "dash.tamma.dev deep link (SPA fallback)" "dash.tamma.dev" "/settings/billing" "200"
+
+# /api/ through the customer host — proves the vhost's /api/ proxy and its
+# trailing-/api/ upstream (a bare / here would strip the prefix and 404).
+test_endpoint "dash.tamma.dev /api/health via vhost" "dash.tamma.dev" "/api/health" "200"
+
 # Webhooks must not require auth (GitHub sends unsigned POSTs for pings)
 test_endpoint "api.tamma.dev /api/github/webhooks reachable" "api.tamma.dev" "/api/github/webhooks" "401" "POST" '{"action":"ping"}'
 
