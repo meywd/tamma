@@ -28,6 +28,12 @@ using Tamma.Platforms.GitLab;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Story 43-2 AC13 — touch the Action Catalog's lazy static index at boot so a
+// catalog violation (missing descriptor, broken group partition, bad key)
+// fails startup with its ACTION.CATALOG.* code instead of surfacing on the
+// first governed request.
+_ = Tamma.Core.Actions.ActionCatalog.All;
+
 // ────────────────────────────────────────────────────────────────────────────
 // Serilog
 // ────────────────────────────────────────────────────────────────────────────
@@ -1118,8 +1124,22 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowDashboard", policy =>
     {
-        policy.WithOrigins(
-                builder.Configuration["Dashboard:Url"] ?? "http://localhost:3001")
+        // Story 45-7 AC4 — two apps, two origins: the admin console
+        // (Dashboard:Url) and the customer app (Dashboard:CustomerUrl, falling
+        // back through DashboardUrls' chain). Deduped because a single-user
+        // install sets one value for both. Deliberately NO AllowCredentials():
+        // both SPAs are same-origin behind their own nginx in production, and
+        // the token flows in the Authorization header, not cookies.
+        var dashboardOrigins = new[]
+            {
+                builder.Configuration["Dashboard:Url"] ?? "http://localhost:3001",
+                Tamma.Api.Endpoints.DashboardUrls.CustomerBase(builder.Configuration),
+            }
+            .Where(o => !string.IsNullOrWhiteSpace(o))
+            .Select(o => o.TrimEnd('/'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        policy.WithOrigins(dashboardOrigins)
             .WithHeaders("Content-Type", "Authorization")
             .WithMethods("GET", "POST", "PUT", "DELETE", "PATCH");
     });

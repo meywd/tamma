@@ -14,6 +14,11 @@ using Tamma.ElsaServer.Workflows;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Story 43-2 AC13 — touch the Action Catalog's lazy static index at boot so a
+// catalog violation fails startup with its ACTION.CATALOG.* code instead of
+// surfacing mid-workflow (same guard as Tamma.Api's Program.cs).
+_ = Tamma.Core.Actions.ActionCatalog.All;
+
 // Configure Serilog with Console + File + OpenSearch sinks
 var opensearchUrl = builder.Configuration["OpenSearch:Url"] ?? "http://opensearch:9200";
 var opensearchEnabled = builder.Configuration.GetValue<bool>("OpenSearch:Enabled", true);

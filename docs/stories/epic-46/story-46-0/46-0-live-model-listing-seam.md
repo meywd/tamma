@@ -27,7 +27,7 @@ selection instead of breaking.
 ## Priority
 
 P0 — this is the seam both UIs (46-2, 46-3) bind to, and the tool 46-1's defaults-refresh task
-uses. It ships standalone: even before 46-1 lands, `GET /api/admin/providers` is a useful
+uses. It ships standalone: even before 46-1 lands, `GET /api/admin/providers/status` is a useful
 "which providers are actually configured and reachable" status surface.
 
 ## Architectural Context (READ FIRST)
@@ -116,7 +116,7 @@ fail-soft empty envelope for everything else. Keep this as a small allowlist ins
    cached copy it returns an empty list + `ErrorCode`. The cache key includes the tenant id because
    a BYOK-fetched list may differ (entitlements) and must never leak across tenants.
 
-4. **Platform route — `GET /api/admin/providers`** (new `ProviderAdminEndpoints.cs` under
+4. **Platform route — `GET /api/admin/providers/status`** (the story originally said `GET /api/admin/providers`, but that route is already Story 34-11's pricing roster — mapping both is an ambiguous match; new `ProviderAdminEndpoints.cs` under
    `Endpoints/`, mapped as its own group with `RequireAuthorization("PlatformOwnerAccess")`,
    modelled on the `adminConventions` group at `Program.cs:2654`). Returns one row per HTTP
    descriptor: `key`, `displayName`, `dialect`, `effectiveBaseUrl`, `keyConfigured` (credential

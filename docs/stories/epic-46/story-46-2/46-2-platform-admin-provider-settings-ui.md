@@ -55,7 +55,7 @@ P0 — the admin half of the product requirement's UI. Without it, 46-0/46-1 are
 
 | Call | Use |
 |---|---|
-| `GET /api/admin/providers` | the roster: `key`, `displayName`, `dialect`, `effectiveBaseUrl`, `keyStatus` (`configured`/`missing`/`not_required`), `modelsSupported`, `enabled`, `currentModel`, `source` (`platform-db`/`config`/`descriptor`), `aliases`, `transport?` |
+| `GET /api/admin/providers/status` | the roster (NOT `/api/admin/providers` — that is 34-11's pricing roster): `key`, `displayName`, `dialect`, `effectiveBaseUrl`, `keyStatus` (`configured`/`missing`/`not_required`), `modelsSupported`, `enabled`, `currentModel`, `source` (`platform-db`/`config`/`descriptor`), `aliases`, `transport?` |
 | `GET /api/admin/providers/{key}/models` | the picker payload: `{models: [{id, displayName?, deprecated, current}], fetchedAt, stale, errorCode?}` — always 200 for a known key, current model always present |
 | `PUT /api/admin/providers/{key}/settings` | save `{defaultModel?, enabled?}`; response carries `pricingKnown` + `warning?` |
 | `DELETE /api/admin/providers/{key}/settings` | reset to config/descriptor |
@@ -68,7 +68,7 @@ precedence order. The `source` badge text is the one permitted mapping (`platfor
 ## Acceptance Criteria
 
 1. **Roster table.** `/admin/providers` renders one row per provider from
-   `GET /api/admin/providers`: display name (+ key and aliases in a muted sub-line), dialect,
+   `GET /api/admin/providers/status`: display name (+ key and aliases in a muted sub-line), dialect,
    key status (three-state, with `not_required` rendered as such — not as a green "configured"
    lie), enabled toggle (platform rows only), current model + source badge. Non-HTTP providers
    render with their transport and no model controls. Loading and error states per the page
