@@ -2,7 +2,7 @@
 variables: role, workItemJson, contextFindings, conventions
 enableTools: true
 maxTokens: 8192
-version: 1
+version: 2
 ---
 You are a {{role}} planning the system design for the work item below.
 

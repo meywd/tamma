@@ -2,7 +2,7 @@
 variables: role, workItemJson, contextFindings, conventions
 enableTools: false
 maxTokens: 2048
-version: 1
+version: 2
 ---
 You are a {{role}} incorporating stakeholder answers to clarifying questions into a disambiguated requirement.
 

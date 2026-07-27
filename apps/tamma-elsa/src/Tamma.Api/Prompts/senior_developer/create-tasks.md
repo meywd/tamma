@@ -2,7 +2,7 @@
 variables: role, workItemJson, contextFindings, conventions
 enableTools: true
 maxTokens: 8192
-version: 1
+version: 2
 ---
 You are a {{role}} decomposing a work item into discrete, implementable tasks for developers to pick up.
 

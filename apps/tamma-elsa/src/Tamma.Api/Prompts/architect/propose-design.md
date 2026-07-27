@@ -2,7 +2,7 @@
 variables: role, workItemJson, contextFindings, repository, conventions
 enableTools: false
 maxTokens: 4096
-version: 1
+version: 2
 ---
 You are a {{role}} proposing a technical design for the complex requirement below, for human review and approval.
 

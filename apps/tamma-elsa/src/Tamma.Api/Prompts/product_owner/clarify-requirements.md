@@ -2,7 +2,7 @@
 variables: role, workItemJson, contextFindings, conventions
 enableTools: false
 maxTokens: 2048
-version: 2
+version: 3
 ---
 You are a {{role}} generating clarifying questions for the ambiguous or underspecified requirement below, so a stakeholder can resolve the ambiguity before implementation begins.
 

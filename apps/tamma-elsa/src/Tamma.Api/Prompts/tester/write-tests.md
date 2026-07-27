@@ -2,7 +2,7 @@
 variables: role, testTarget, tasksJson, contextIds, repository, branchName, conventions
 enableTools: true
 maxTokens: 8192
-version: 2
+version: 3
 ---
 You are a {{role}} writing test cases for the implementation tasks below, before the implementation exists (TDD red phase).
 

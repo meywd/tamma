@@ -41,6 +41,12 @@ Entries may only ever be REMOVED. Each is an **unbound** cell (a bound cell may 
 baselined — the gate's test 3 enforces it); the owning Epic 41 story rewrites the template
 when it binds the cell and deletes the entry in the same change.
 
+**Scope limit (review finding, 2026-07-27):** the gate sweeps bound cells plus these 11
+enumerated entries — nothing else. A NEW unbound template with a broken JSON example fails
+nothing until the day its cell is bound. So the debt is un-growable only within the swept
+set; the real close comes from Epic 41 stories binding their cells (each binding pulls the
+template into the gate automatically).
+
 | Cell | Intended type | Owner | Why non-conforming today |
 |---|---|---|---|
 | `(architect, plan-migration-strategy)` | `plan` | 41-12 | legacy plan wire (`{path, action}` files + `dependencies`) |
@@ -68,7 +74,9 @@ its entries automatically start being staleness-checked against the real validat
   (`ContractBindingTests.NonDocumentTypeResidual`).
 - `TestSpec`'s cross-document rule (`CASE_UNKNOWN_TASK_ID`) needs a consumed plan and is not
   checkable against a static example; the gate uses the context-free `Validate`.
-- `ClarificationDocumentType.RenderContract` still says the questions phase is a bare JSON
-  array — that contradicts both its own `Validate` (requires `phase`) and the lifecycle ingest
-  (object-only carve). The *template* is fixed; the renderer text is src-side and left as-is
-  (out of scope for this change; worth a follow-up when 39-16 regeneration lands).
+- ~~`ClarificationDocumentType.RenderContract` still says the questions phase is a bare JSON
+  array~~ **Fixed (2026-07-27, review follow-up):** the contract now instructs the object form
+  (`{"phase": "questions", "questions": [...]}`), matching its own `Validate`, the lifecycle
+  ingest carve, and the type's own `valid-questions-phase` example — so 39-16 regeneration can
+  no longer reintroduce the bare-array defect. The pinned "JSON array" token survives (it now
+  describes the `questions` field).
