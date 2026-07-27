@@ -122,7 +122,34 @@ backends, multiple topologies, selectable per tenant at onboarding.
 | [30-8](./30-8-per-tenant-routing.md) | Per-tenant routing — resolve tenantId → provider+endpoints | 20 | 30-1, 30-3, 30-4, 30-5, 30-6, 19-6 | — |
 | [30-9](./30-9-deprovisioning-workflow.md) | Deprovisioning saga — reverse each backend | 16 | 30-1, 30-2, 30-3, 30-4, 30-5, 30-6 | 30-10 |
 | [30-10](./30-10-cost-quota-dashboard.md) | Cost + quota dashboard per tenant | 22 | 30-8 | — |
-| **Total** | | **216** | | |
+| [30-11](./story-30-11/30-11-tenant-offboarding-and-data-portability.md) | **Tenant offboarding & data portability — the customer-initiated exit** | 56 | 30-9 (soft), 37-7 (soft), 41-30 (soft) | — |
+| **Total** | | **272** | | |
+
+> **30-11 added 2026-07-27, closing a gap this epic's own 30-9 named and deferred.** 30-9 **AC6** reads
+> *"Tenant-admin cannot self-deprovision; must contact platform admin (feature flagged for future
+> self-service)"* — and no follow-up story was ever written for that flag. Verified today: **every**
+> tenant-destruction path is platform-admin-only (`AdminTenantsEndpoints`'s `/actions/delete`,
+> `/cancel-delete`, `/cleanup`); `grep -ri offboard` over the C# tree returns **zero hits**; there is
+> **no tenant-scoped data export** anywhere (37-7 is a *data subject* DSAR, 37-4 is audit rows, 36-8 is
+> analytics rollups — none exports a tenant's working data); and `Status = "suspended"` has a complete
+> 402 response branch (`TenantStatusEvaluator.cs:38-39,76,186-195`) that **nothing in the codebase ever
+> writes**. 30-11 is a **new workflow** (`tenant-offboarding`) because the trigger, the artifact and the
+> lifecycle all differ from 30-9's: a tenant owner rather than a token-holding operator; a portability
+> bundle produced *before* teardown; and a **day-scale, customer-cancellable** grace period rather than
+> 30-9/`TenantDeleteRequestedTrigger`'s five-minute operator undo. It **composes** 30-9 rather than
+> duplicating it — the terminal step dispatches `DeprovisionTenantWorkflow` and 30-11 writes no
+> teardown logic at all (pinned by a structure test).
+>
+> Two things it deliberately does **not** take on, both still unowned and both recorded here so they
+> stay visible: the **scheduled retention purge of `platform_events`** (30-9 AC9 disclaims it as an
+> "Epic 17 follow-up" that no story picks up; 37-5 covers `audit_records` only) — a recurring job, and
+> therefore a consumer of Epic 41's 41-30 seam; and **over-quota resource reclamation on plan
+> downgrade** (34-4 flags-never-blocks and its `ITenantUsageReader` is null-wired in production, so the
+> warning never fires; 35-6 owns quota enforcement but its text never mentions downgrade) — which
+> belongs in 35-6's scope, not here.
+>
+> *File-layout note:* 30-11 uses the `story-30-11/` + `implementation-plan.md` layout that epics 39–44
+> standardised on, rather than this epic's older flat `30-N-*-impl-plan.md` pairs.
 
 ## Review findings this epic closes
 
