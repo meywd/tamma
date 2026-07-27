@@ -461,17 +461,34 @@ dimmed-row treatment exists in the repo, but in Blazor.
    the action catalog as the authorization artifact, joined by one optional field. If legal needs one
    artifact with SOC2 mappings across all ~153 members, that is materially larger scope and must be
    settled before the descriptor shape freezes.
-4. ~~**Should changing an assignment require two people?**~~ — **ANSWERED (2026-07-25): no. The
-   action list is tenant-level configuration**, edited by a tenant admin like any other tenant
-   setting. One admin, one write, recorded in the audit event. No two-person mechanism is built.
+4. ~~**Should changing an assignment require two people?**~~ — **ANSWERED (2026-07-25): no.**
 
-   Two consequences worth stating, since the assignment surface is now confirmed tenant-scoped:
-   - The **platform ceiling still applies** — a tenant admin configures within it and cannot lower
-     a platform-set floor. That is what the `max()` composition in §4 is for, and it is now the
-     load-bearing protection rather than a nicety.
-   - The self-grantable-permission observation stands but is **out of scope here**: API key
-     permissions are accepted free-form with no validation against `Permissions.Matrix`
-     (`AdminApiKeysEndpoints.cs:63`). That is a pre-existing auth-plane gap affecting every
-     permission, not something this epic introduces or should fix.
+   And the answer came with a scoping correction that matters more than the question. **The action
+   list and the automation toggle are different layers, at different scopes:**
+
+   | Layer | What it is | Scope | Who changes it |
+   |---|---|---|---|
+   | **The catalog** — actions, groups, risk, descriptors | the *vocabulary*: what actions exist | **PLATFORM** | ships in code; changed by a release, never by an admin |
+   | **The platform ceiling** — platform-scope assignment rows | floors a tenant cannot go below | **PLATFORM** | platform owner |
+   | **The automation toggle** — per-action / per-group thresholds | automated vs human, per level | **TENANT** | tenant admin, like any other tenant setting |
+
+   So a tenant admin never adds, removes or renames an action — they only decide, within your
+   ceiling, which of the platform's actions their agents may do unattended. One admin, one write,
+   recorded in the audit event. No two-person mechanism is built.
+
+   This is what the model in §1–§4 already does — the catalog is a code-resident `[Wire]` vocabulary
+   and only `action_assignments` is per-principal — but an earlier draft of this answer said "the
+   action list is tenant-level configuration", which was wrong and would have licensed a
+   tenant-editable catalog. Corrected.
+
+   Consequence: **the platform ceiling is now the load-bearing protection**, not a nicety. It is the
+   only thing standing between a tenant admin and full automation of a destructive action, so the
+   `max()` composition in §4 is a safety mechanism rather than a convenience, and its tests should be
+   read that way.
+
+   The self-grantable-permission observation stands but is **out of scope here**: API key
+   permissions are accepted free-form with no validation against `Permissions.Matrix`
+   (`AdminApiKeysEndpoints.cs:63`). That is a pre-existing auth-plane gap affecting every
+   permission, not something this epic introduces or should fix.
 5. **Is the ungoverned-route backlog funded?** The ratchet guarantees it only shrinks when someone
    does the work.
