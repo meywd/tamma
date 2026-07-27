@@ -470,11 +470,10 @@ scheduled as Epic 45 (`docs/stories/epic-45/`).
 Closest existing shapes to model on: `pages/runs/RunsPage.tsx` (DataTable + status filter + StatusBadge
 + row→detail) and `pages/runs/RunDetailPage.tsx`.
 
-**And a gap this story must not widen: `packages/dashboard`'s 449 tests do not run in CI.** The root
-`vitest.config.ts:62` excludes `packages/dashboard/**` with a comment deferring to
-`pnpm --filter @tamma/dashboard test`, and no workflow contains that line — `ci.yml:50` runs only the
-`-user` filter. Neither dashboard is typechecked either (`package.json:25` builds five other packages).
-44-6 adds ~9 days of React; it adds the CI line in the same change.
+**And a gap this story must not widen — since closed (2026-07-27): `packages/dashboard`'s 449 tests
+used to never run in CI.** The root `vitest.config.ts:62` excludes `packages/dashboard/**` deferring to
+`pnpm --filter @tamma/dashboard test`, and no workflow contained that line. CI now runs both dashboards'
+tests and typechecks (`ci.yml`); 44-6 must keep its new React code inside those existing steps.
 
 ---
 
@@ -602,7 +601,8 @@ These are not derivable from the code.
    modal, entitlement bar and cost-estimate widget. 47 files, with tests.
 
    It has no Dockerfile, no compose service, no image, no deploy step, no vhost and no domain. Its
-   only appearance outside its own directory is a CI test line whose tests do not actually run.
+   only appearance outside its own directory is its CI test line (those tests run and pass — what is
+   missing is any way to deploy it).
 
    **So the question is not whether to keep it, but when it ships — now scheduled as Epic 45** — because
    three things are silently waiting on it: 39-19's chat, this epic's 44-6 tracker UI, and Epic
