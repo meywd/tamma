@@ -777,3 +777,79 @@ development_status:
   # 41-29's "task" is a PlanTask inside a document body. Materializing PlanTasks as work items is RECOMMENDED
   #   AGAINST for v1 (double-writes every plan, two sources of truth). Deferred with reasons.
 
+
+  epic-45: contexted   # Ship the customer application — packages/dashboard-user from built to reachable (added 2026-07-27)
+  # NOT A NEW FEATURE. The SaaS customer app already EXISTS — 3,661 lines across 25 files, 20 test files,
+  # 103 passing tests, built 2–4 July 2026 under Epic 34-9. It has NEVER been deployed. Its complete wiring
+  # outside its own directory is THREE LINES: ci.yml:49-50 (its tests), vitest.config.ts:64 (a deliberate
+  # exclusion), eslint.config.js:75-76 (the no-raw-fetch rule). No Dockerfile, no compose service in any of
+  # the four compose files, no nginx server block, no entry in docker-publish.yml / deploy.yml /
+  # docker-smoke-test.yml, no e2e spec, no hostname. `dash.tamma.dev` appears ZERO times under docker/,
+  # .github/ or docs/architecture/ — despite being the app's own package.json:4 description AND the hardcoded
+  # default at GitHubEndpoints.cs:25.
+  #
+  # AUDIT VERDICT (2026-07-27, against the working tree): MOSTLY FINISHED, and NOT deployment-only.
+  # What is finished: all 25 HTTP routes the app calls EXIST in Program.cs and are reachable (auth :1838-1859,
+  # tenant alerts/channels :2428-2445, dashboard :2396-2400, onboarding :2523-2528, pricing :2265-2283).
+  # No stubs, no TODOs, no placeholder pages. vite build clean. GET /api/pricing/estimate really does strip
+  # cost-basis and margin (PricingEndpoints.cs:90-102) — the 34-5 leak rule holds.
+  #
+  # CORRECTION TO THE RECORD: .dev/findings/dashboard-user-is-the-unshipped-saas-customer-app.md:32-34 claims
+  # this app's tests do not run. THAT IS BACKWARDS. ci.yml:49-50 IS the filter line and the tests pass (20
+  # files / 103 tests). The package with excluded-and-never-run tests is packages/dashboard — the DEPLOYED
+  # ADMIN app, ~449 tests, excluded at vitest.config.ts:60 with NO filter line anywhere. That is 44-6's
+  # finding and the customer app inherited the blame. Story 45-0 makes the correction permanent.
+  #
+  # WHAT IS ACTUALLY UNFINISHED — the reason this is not a deployment-only epic:
+  # (1) THE API EMAILS SIX URLS INTO THIS APP AND IT IMPLEMENTS NONE OF THEM. /verify?token=
+  #     (AuthEndpoints.cs:31-33 — the app has /verify-email, one word off), /reset-password?token=
+  #     (:36-39, NO PAGE), /invites/accept?token= (OrgEndpoints.cs:361-362, NO PAGE),
+  #     /invites/pending?inviteId= (:501-502, NO PAGE), /onboarding/success and /onboarding/error
+  #     (GitHubEndpoints.cs:23-24, exist in the ADMIN app only). App.tsx has NO catch-all, so all six render
+  #     a blank pane — no 404, no error. A customer cannot verify their email even after deployment.
+  # (2) Dashboard:Url is ONE value driving all six links AND the single-origin CORS list
+  #     (Program.cs:1169-1177), and it is set to https://app.tamma.dev (docker-compose.yml:257) — the
+  #     oauth2-proxy-gated admin console. Verification emails today land on a GitHub OAuth wall.
+  # (3) Four dead nav links (AppLayout.tsx:24,27,33 → /repos /runs /settings; DashboardHome.tsx:64 →
+  #     /onboarding). All four are copies of packages/dashboard/src/router.tsx routes. Aspirational, not typos.
+  # (4) A CONTRACT THE TESTS CERTIFY AS CORRECT WHILE IT IS WRONG. UpgradePlanModal.tsx:171-172 reads
+  #     resp.violations (string[]); the server sends `warnings` as {metricKey,currentUsage,newLimit}[]
+  #     (AdminTenantDtos.cs:135-148). UpgradePlanModal.test.tsx:160 MOCKS THE FIELD THAT DOES NOT EXIST, so
+  #     the test passes and the downgrade warning silently renders nothing. Every field on the TS interface
+  #     was optional, which is exactly how four mismatches typechecked.
+  # (5) ONE BLOCKING TYPE ERROR (TenantAlertFeed.tsx:63, exactOptionalPropertyTypes) that nothing would
+  #     catch: root package.json:24 typechecks five packages and NEITHER dashboard; no workflow typechecks
+  #     either; vite build does not typecheck. Also tsconfig.json:51 excludes packages/dashboard but NOT
+  #     dashboard-user, so ESLint's type-aware parser points at a project with no DOM lib and no jsx setting.
+  # (6) No error boundary (main.tsx:11-12 renders <App /> bare). (7) No public/ — no favicon, no robots.txt.
+  #
+  # NOT GAPS (checked): zero version skew with the admin app; the VITE_API_URL vs VITE_API_BASE_URL name
+  # divergence is cosmetic (NEITHER is set anywhere in the repo — both apps work via same-origin /api/ through
+  # their own nginx); the richer ApiClient (typed errors + refresh-on-401, which the admin app lacks entirely)
+  # is a SANCTIONED per-package divergence.
+  #
+  # UNBLOCKS THREE THINGS THAT DO NOT SAY SO IN THEIR OWN PLANS: Story 39-19 (orchestrator chat targets this
+  # app), Story 44-6 (tracker UI is planned into packages/dashboard *because* this is undeployed — a
+  # customer-facing board in the console customers cannot reach; Epic 44 README open question 1, answered
+  # here), and Epic 34-9's own deliverable (plan management no customer can open).
+  45-0-typecheck-guard-rail: drafted                         # Typecheck dashboard-user in CI + fix the one error hiding behind its absence + correct the test-coverage record. Ships standalone. Coordination gate with 44-6, which claims "typechecking both dashboards" — 44-6 keeps the ADMIN app and its 68 errors either way. [P0] 1d
+  45-1-subscribe-contract-and-patch-refresh: drafted         # violations→warnings (the field the server never sent and the test asserted), + planVersion/direction/scheduledEffectiveAt, + ApiClient.patch so updateTenantChannel stops bypassing refresh-on-401. Fixture copied FROM the C# DTO, not invented — that is the whole lesson. [P0] 1.5d
+  45-2-entry-points: drafted                                 # The six API-emailed URLs, a catch-all 404 declared TWICE (inside and outside the auth tree), an error boundary at the root, four honest nav links. Ships 3 named placeholders that 45-3 deletes. THE story that makes this not a deployment epic. [P0] 2d
+  45-3-missing-account-pages: drafted                        # Password reset (forgot + confirm; LoginPage has NO link to recovery today), invite accept, invite pending. LOAD-BEARING RISK: POST /api/v1/orgs/invites/accept is MemberAccess-gated (Program.cs:2299-2301) but an invitee may have no account — the token must cross registration AND email verification. One component is a third of the story. [P0] 4d
+  45-4-container-image: drafted                              # docker/Dockerfile.dashboard-user + nginx-dashboard-user.conf, mirroring Dockerfile.dashboard MINUS the @tamma/shared stage (the customer app declares 3 deps and no workspace dependency). Port 3002 (its own vite dev port). Copy the IPv4-healthcheck comment verbatim — it records a real outage. + public/ favicons + robots.txt. [P0] 1.5d
+  45-5-compose-vhost-hostname-tls: drafted                   # Compose service in all 3 files + prod limits + the memory-budget table + dash.tamma.dev vhost. THE DECISION: NO auth_request. Model on api.tamma.dev (:177-201), NOT app.tamma.dev (:81-173, 90 lines of oauth2-proxy) — copying the near example puts a GitHub OAuth wall in front of the registration form. post-deploy probe asserts 200-not-302, the deliberate inverse of :142. EXTERNAL LEAD TIME: DNS record + origin-cert SAN check, both day-one. [P0] 2d
+  45-6-build-push-deploy-verify: drafted                     # build-dashboard-user in docker-publish.yml (BOTH retry pairs preserved — they are a recorded response to transient buildx/GHCR failures), BOTH image-override generators (they have ALREADY drifted: deploy.yml:147 has tamma-api-dotnet, docker-publish.yml does not), layer-4 start AND the layer-4 VERIFY loop (:701-709 records the incident it exists for), both health lists, docker-smoke-test.yml. Steps 1-11 parallel; step 12 (production deploy) waits for 45-1/45-2/45-3/45-7. [P0] 2d
+  45-7-dashboard-url-split: drafted                          # Dashboard:CustomerUrl → falls back to Dashboard:Url (the fallback IS the compatibility contract — single-user self-hosted has one dashboard). Consolidates FIVE inline config reads with TWO different defaults (four → localhost:3001, the ADMIN dev port; one → dash.tamma.dev). CORS gains a second origin and explicitly NOT AllowCredentials — a test pins the absence. LAST: repointing before 45-3's pages exist moves the breakage. [P0] 2d
+  epic-45-retrospective: optional
+  # ── Cross-epic notes filed by the Epic 45 audit ────────────────────────────────────────────────
+  # 44-6 SHOULD BE RE-TARGETED at packages/dashboard-user if 45-6 lands first. Its current placement in
+  #   packages/dashboard is a consequence of this app being undeployed, not a design choice — Epic 44 README
+  #   open question 1. Re-targeting changes its estimate, so decide at 44-6's PLAN REVIEW, not after.
+  # 44-6's ci.yml claim ("typechecking both dashboards") OVERLAPS 45-0. Whichever lands first takes the
+  #   customer app; 44-6 keeps the admin app and its 68 typecheck errors — including 4 in the deployed app's
+  #   hooks/useAuth.ts:25,39,45,49 (AuthState declares logout, every setState omits it) and 2 in
+  #   AccountPage.tsx:46,49 (reads .email off a CurrentUser that has no such member). Those are LIVE bugs.
+  # THE TWO IMAGE-OVERRIDE GENERATORS HAVE DRIFTED (docker-publish.yml:447 vs deploy.yml:133). Noted by 45-6,
+  #   deliberately NOT fixed there — reconciling six services' deploy behaviour is its own change.
+  # post-deploy-tests.sh's invocation is UNVERIFIED. 45-6 AC9 must confirm the script actually runs in a
+  #   workflow; if it does not, the EXISTING probes for app./api./elsa.tamma.dev are also not running.
