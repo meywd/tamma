@@ -182,9 +182,54 @@ never supplies a base URL, so no customer can redirect credentials anywhere. Con
 This makes the first descriptor milestone cheaper than it looked: one of the three is already
 reachable, and the other two share its wire dialect exactly.
 
+## Phase 2 is now scoped (added 2026-07-27) — Epic 46
+
+The deferred "admin surface" phase now has stories: **`docs/stories/epic-46/`** ("Provider admin
+surface — runtime provider & model management"). Scope decided by the product owner on 2026-07-27:
+
+> "the UI should allow the admins to choose the models from latest models available without code
+> updates" — at BOTH levels: platform owner (platform default model + provider enable/disable, in
+> `packages/dashboard`) and tenant admins (per-tenant model override, in `packages/dashboard-user`).
+
+**What Epic 46 takes from this finding's Phase-2 list — and what it deliberately does not:**
+
+- ✅ **Model choice becomes data** (`provider_settings`, precedence tenant → platform-DB → config
+  → descriptor), with live model lists fetched from each provider's own models endpoint
+  (`ModelsEndpointPath` on the descriptor). The wire-facts survey is in the epic README.
+- ✅ **The enable/disable flag lands as data** (platform rows) — but egress-path enforcement (the
+  allowlist inversion, item 5 above) is NOT wired in Epic 46 and remains open.
+- ❌ **Descriptors stay code.** No base URLs, auth schemes or provider keys as rows; the SSRF
+  analysis above therefore stays settled by the 2026-07-25 decision (platform-owned catalogue).
+  If a later phase moves descriptors to a table, items 2 (SSRF), 5 (allowlist inversion),
+  6 (Epic 43 catalog entry) and 7 (pricing rows) of "What this forces" come back into play —
+  Epic 46 does not discharge them.
+- Item 6 (governed action): Epic 46 emits `PROVIDER.SETTINGS_CHANGED.SUCCESS` via the sensitive-
+  action catalog for every settings mutation; the `effect:provider.create` action-catalog question
+  remains for the descriptor-to-table phase only.
+- Item 7 (pricing): partially handled — settings writes warn when `(provider, model)` has no
+  pricing row (`pricingKnown: false`); creating rows stays manual.
+
+**Corrections to this finding's body (facts moved under it since 2026-07-25):**
+
+- The named-client registrations cited at `Program.cs:100-168` (rows 2 above, and consequence 1)
+  now live in `Tamma.Api/Extensions/ProviderHttpClientServiceCollectionExtensions.cs` — seven
+  hand-registered clients at `:24-95` plus a descriptor-driven loop at `:113-142` that closed the
+  "seven allowlisted providers have no client" gap. The keyset agreement is pinned by
+  `ProviderCatalogTests.Allowlist_And_Catalog_Are_In_Exact_Keyset_Agreement`.
+- The phantom `llm-{provider}` lookup is resolved: the runner's client is now an intentionally
+  unconfigured named client (`InlineToolLoopRunner.RunnerHttpClientName`, registered at `:149` of
+  the same file).
+- Of the Action items: descriptor ✅, dialect collapse ✅, `anthropic-version` drift ✅, allowlist
+  reconciliation ✅, deepseek/moonshot keys ✅ (z-ai confirmed AS GLM, key kept), `llm-*` phantom ✅,
+  `ToResolvedTools` ✅ (fixed at the provider-agnostic layer as prescribed —
+  `ManagedAgent.cs:960-997` now populates `Description` + `InputSchema` from the registry
+  catalogue). Remaining from this finding: egress-path enforcement
+  of enable/disable (allowlist inversion) and any future descriptor-to-table move.
+
 ## Related
 
 - `apps/tamma-elsa/src/Tamma.Api/Services/Providers/HttpProviderClient.cs`
 - `apps/tamma-elsa/src/Tamma.Api/Services/Agents/InlineToolLoopRunner.cs`
 - `apps/tamma-elsa/src/Tamma.Api/Services/SaaS/LlmProxyService.cs`
 - `apps/tamma-elsa/src/Tamma.Activities/Security/ProviderAllowlist.cs`
+- `docs/stories/epic-46/` — Phase 2 stories (model management; added 2026-07-27)

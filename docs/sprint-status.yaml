@@ -852,3 +852,55 @@ development_status:
   #   deliberately NOT fixed there — reconciling six services' deploy behaviour is its own change.
   # post-deploy-tests.sh's invocation is UNVERIFIED. 45-6 AC9 must confirm the script actually runs in a
   #   workflow; if it does not, the EXISTING probes for app./api./elsa.tamma.dev are also not running.
+
+
+  epic-46: contexted   # Provider admin surface — runtime provider & model management (added 2026-07-27)
+  # PRODUCT REQUIREMENT (PO, 2026-07-27, verbatim intent): "the UI should allow the admins to choose the
+  # models from latest models available without code updates." Clarified same day: BOTH levels — platform
+  # owner manages platform default model + provider enable/disable in packages/dashboard; tenant admins pick
+  # per-tenant model overrides in packages/dashboard-user. Two UIs, one listing seam, one settings store.
+  # This is Phase 2 of the provider abstraction (.dev/findings/provider-abstraction-and-openai-compatible-
+  # candidates.md), scoped DOWN: model choice becomes data; provider descriptors STAY CODE (catalogue remains
+  # platform-owned per the PO's 2026-07-25 SSRF decision — no admin- or tenant-supplied base URLs, ever).
+  #
+  # THE OWNERSHIP LADDER (binding): catalogue = code (per release) → provider enable/default-model =
+  # platform owner (provider_settings platform rows, /api/admin/providers/*) → per-tenant model override =
+  # tenant_owner/tenant_admin in SaaS, sole user in single-user (provider_settings tenant/user rows,
+  # /api/v1/agents/providers/*) → per-call model named by chain entries/agent configs (unchanged, still wins).
+  # RESOLUTION PRECEDENCE: tenant override → platform DB → LlmProviders:{key}:DefaultModel config →
+  # descriptor DefaultModel. DB slots ABOVE config on purpose — a UI choice must win without a deploy.
+  #
+  # WIRE FACTS (surveyed 2026-07-27, table in the epic README): models endpoints verified LIVE for anthropic
+  # (GET /v1/models, x-api-key — 401 proves route+auth) and gemini/google (GET /v1beta/openai/models, Bearer);
+  # from provider docs for openai, openrouter (public, no key), groq (/openai base preserved by CombineUrl),
+  # deepseek (GET /models — no /v1), moonshot, together (returns a BARE ARRAY, not {data:[...]}), and the
+  # local family (ollama/lmstudio serve OpenAI-compat /v1/models). NO models endpoint found for z-ai (docs
+  # unreachable from sandbox — 46-0 carries an implementation-time re-check), azure-openai (api-version +
+  # deployments semantics) and github-copilot (token exchange) — those degrade to free-text model entry.
+  #
+  # CREDENTIALS: model lists are fetched SERVER-SIDE via IProviderCredentialResolver — tenant BYOK key when
+  # present, platform key else (the resolver already implements exactly this order). The browser never sees
+  # or supplies a key. Fail-soft contract: models endpoints always 200 with fresh|stale|empty envelope and
+  # the currently-effective model always present flagged current — a provider being down never breaks the UI.
+  #
+  # ROT EVIDENCE (why live lists matter): openrouter descriptor default is a dated snapshot slug
+  # (ProviderCatalog.cs:66); LlmProxyService.cs:30,60-62 defaults/prices dot-formed ids (claude-sonnet-4.5)
+  # that look like display names, not API ids. 46-1 AC7 verifies + refreshes every shipped default ONCE with
+  # evidence; after that the DB override is the permanent cure.
+  # BILLING GUARD: pricing is keyed (provider,model) — UsagePricingEngine.cs:51-59 THROWS on unknown pairs
+  # (SaaS billing path) and DbProviderPricingService reads cost 0 (runner path). Settings PUTs warn
+  # (pricingKnown:false), never block — hard-block-in-SaaS is epic open question 1 for the PO.
+  46-0-live-model-listing-seam: drafted                      # ModelsEndpointPath on ProviderDescriptor + IProviderModelCatalog (fetch/normalize/5-min-cache/fail-soft) + GET /api/admin/providers (status roster: keyStatus configured|missing|not_required via the resolver, NOT config reads) + /api/admin/providers/{key}/models + tenant GET /api/v1/agents/providers/{provider}/models. Egress pins extend ProviderEgressRegressionTests. [P0] 3.5d
+  46-1-persisted-model-selection: drafted                    # provider_settings CP table (platform + tenant/user XOR rows, mirrors prompt_overrides pattern; CP-resident because the resolver runs on egress hot paths with tenantId but no tenant DbContext) + snapshot store (sync reads for the sync GetDefaultModel callers; 60s multi-instance bound, same posture as the BYOK cache) + LoadProviderConfig restructure (InlineToolLoopRunner.cs:1099-1151 — the early return at :1119 must not bypass the DB) + LlmProxyService pickup + chain-null-model audit + settings routes + PROVIDER.SETTINGS_CHANGED.SUCCESS audit events + the AC7 defaults refresh. RISKIEST EDIT: write the golden no-row comparison test (test 16) BEFORE restructuring. [P0] 4d
+  46-2-platform-admin-provider-settings-ui: drafted          # /admin/providers in packages/dashboard: roster + searchable live picker (fetch-on-open; current pinned even when delisted; deprecated marked; stale banner; free-text for unlistable providers) + save/reset + enable toggle. Follows conventions-api-client/AcceptanceRulesAdminPage conventions; fixtures FROM the C# DTOs (the 45-1 lesson). Admin-app tests still excluded from CI — 44-6 owns that; this story leaves its own files typecheck-clean. [P0] 3d
+  46-3-tenant-model-settings-ui: drafted                     # /settings/models in packages/dashboard-user: tenant roster (enabled providers only) + same picker + override save/reset ("use platform default") + member read-only (server AgentManage is the enforcement; client canEdit is cosmetic, 403-downgrade pinned by test). MERGE GATES: 45-0 (CI typecheck) + 45-2 (shared App.tsx/AppLayout.tsx nav rework — land after). REACHABILITY gated on epic 45's 45-4/45-5/45-6 deploying the app — merge does not wait for those. [P1] 3d
+  epic-46-retrospective: optional
+  # ── Cross-epic notes filed by the Epic 46 survey ───────────────────────────────────────────────
+  # The finding's Program.cs:100-168 named-client citation is STALE — Phase 1 moved registrations to
+  #   Extensions/ProviderHttpClientServiceCollectionExtensions.cs (:24-95 hand-registered, :113-142
+  #   descriptor loop). Corrected in the finding's Phase-2 appendix, not its historical body.
+  # 46-3 is the SECOND story queued into packages/dashboard-user before it is deployed (44-6 may re-target
+  #   there too). Epic 45's schedule is now load-bearing for two other epics — worth saying at its standup.
+  # Enabled flag lands as DATA in 46-1 but is NOT enforced on the egress path (allowlist inversion is the
+  #   finding's remaining Phase-2 work). UIs grey/hide; settings routes reject; egress does not check. Do not
+  #   read "provider disabled" as a security control until that lands.
