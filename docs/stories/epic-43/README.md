@@ -490,5 +490,5 @@ dimmed-row treatment exists in the repo, but in Blazor.
    permissions are accepted free-form with no validation against `Permissions.Matrix`
    (`AdminApiKeysEndpoints.cs:63`). That is a pre-existing auth-plane gap affecting every
    permission, not something this epic introduces or should fix.
-5. **Is the ungoverned-route backlog funded?** The ratchet guarantees it only shrinks when someone
-   does the work.
+5. **Is draining the ungoverned-route backlog scheduled anywhere?** The ratchet guarantees it only
+   shrinks when the work is actually done — and no story yet schedules that work.

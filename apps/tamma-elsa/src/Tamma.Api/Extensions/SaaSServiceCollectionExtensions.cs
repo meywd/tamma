@@ -20,6 +20,12 @@ public static class SaaSServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddSaaSServices(this IServiceCollection services)
     {
+        // F7 — touch LlmProxyService's descriptor resolution at wiring time so
+        // a provider-catalogue regression (dropped key / flipped dialect) fails
+        // AT BOOT with the intended message rather than surfacing as a
+        // TypeInitializationException on the first proxied chat request.
+        LlmProxyService.ValidateProviderWiring();
+
         services.AddScoped<IApiKeyRotationService, ApiKeyRotationService>();
         services.AddScoped<ILlmProxyService, LlmProxyService>();
         services.AddScoped<IWorkflowLifecycleService, WorkflowLifecycleService>();

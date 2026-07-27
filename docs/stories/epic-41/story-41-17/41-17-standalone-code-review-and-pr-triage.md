@@ -129,7 +129,8 @@ reviewer/author-follow-up to the appropriate tenant role's Task View, or self-de
   - **41-1a** — the `(senior_developer, triage-pr)` cell. *Corrected: this was named in Scope but absent
     from Dependencies. It does not exist today — no `triage-pr` wire in `AgentAction.cs`, and it is not in
     `SeniorDeveloper`'s eligible set (`RolePhaseMap.cs:80-92`).*
-  - **The tenant-aware scheduled-trigger seam — unowned; no story writes it.** *Corrected: Scope cited
+  - **The tenant-aware scheduled-trigger seam — now owned by 41-30** (cadence AC only; the producing
+    half is buildable before it). *Corrected: Scope cited
     "`HourlyAnalyticsRollupScheduler` pattern" as if reusable, and Dependencies omitted it entirely. That
     scheduler is hardcoded to one workflow (`HourlyAnalyticsRollupScheduler.cs:198-199`), has one
     `FireAtMinute` int rather than a window/cron shape (`:34`), threads no `tenantId` into the dispatch

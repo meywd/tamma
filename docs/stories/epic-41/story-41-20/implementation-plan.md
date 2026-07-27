@@ -24,7 +24,7 @@ subsystem.
 ## Pre-Reading
 
 - `docs/stories/epic-41/story-41-20/41-20-scheduled-security-audit.md` — the story (ACs are source of truth)
-- `docs/stories/epic-41/README.md` — rule 1's six thinness clauses; the Wave-0 table row for the unowned scheduler; the Dependencies bullet "Scheduled workflows have no reusable pattern"; the Epic 42 table row marking 41-20's audit path *"possible but ungoverned and unclassified"*
+- `docs/stories/epic-41/README.md` — rule 1's six thinness clauses; the Wave-0 table row for the scheduler seam (now story 41-30); the Dependencies bullet "Scheduled workflows have no reusable pattern"; the Epic 42 table row marking 41-20's audit path *"possible but ungoverned and unclassified"*
 - `apps/tamma-elsa/src/Tamma.Core/Documents/Types/Findings.cs` — **read this before writing AC2**: the `Finding` record (`:12-22` — `title`, `summary`, `relevance`, `confidence`, `citations`, `rank`; **no `severity`, no `remediation`**), `FindingsDocumentType` violation constants (`:49-76`), and the `EMPTY_FINDINGS` rule (`:58`, enforced at `:110-116`)
 - `apps/tamma-elsa/src/Tamma.Core/Documents/IDocumentType.cs:32-44` — the `ValidateWithContext` default-interface-member seam
 - `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/TestCaseCreationWorkflow.cs:148` — the only landed consumer of `validationContextJson`; the recipe this story reuses
@@ -422,7 +422,7 @@ NUnit + FluentAssertions (+ Moq; Testcontainers for the execution suite).
 |---|---|---|
 | 1a — per-lens fail-closed (a lens failure is recorded, not dropped) | 6 (D3) | structure test reachability pin; execution (b) |
 | 1b — idempotent within a `windowKey` across a restart | 6 (D3) | execution (d) |
-| 1c — **scheduled, tenant-scoped, at-most-once-per-window across the fleet** | — | **UNREACHABLE — needs the unowned scheduler seam (D8). Not claimed.** |
+| 1c — **scheduled, tenant-scoped, at-most-once-per-window across the fleet** | — | **UNREACHABLE — needs the scheduler seam (story 41-30, not yet built) per D8. Not claimed.** |
 | 2 — findings cite evidence with severity + remediation; clean audit is a valid all-clear report | 2, 3 (D2) | `FindingsSeverityRemediationTests`; execution (a) |
 | 3 — exposed-secret path escalates and integrates with `rotate-secret` | 6 (D4) | execution (c) |
 | 4 — `[ResumeBehavior(LatestStateReEntry)]`; 39-10 green without allowlist | 6 (D6) | `ResumableStandardStructuralTests` |
@@ -477,8 +477,7 @@ NUnit + FluentAssertions (+ Moq; Testcontainers for the execution suite).
 
 ## Blocks / Blocked by
 
-- **Blocked by (hard, for AC1c only): the tenant-aware scheduled-trigger seam — UNOWNED.** No Epic 41
-  story writes it (README Wave-0 table, owner *"none — must be written"*). It also blocks **41-5**,
+- **Blocked by (hard, for AC1c only): the tenant-aware scheduled-trigger seam (story 41-30, not yet built).** It also blocks **41-5**,
   **41-7**, **41-11**, **41-16**, **41-17** (PR-triage half) and **41-23** — seven consumers, one
   missing seam. Everything else in this plan ships without it.
 - **Blocked by:** Epic 39 — `Findings` + `FindingsDocumentType` (39-3), `document-lifecycle` +

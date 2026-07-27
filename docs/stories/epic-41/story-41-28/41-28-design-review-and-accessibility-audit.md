@@ -48,7 +48,8 @@ Verdict routes through the accept gate; a blocking a11y failure escalates with l
 1. Thin lifecycle binding; validated unified `Review`; blocking a11y issues cannot be laundered into approval.
 2. a11y lens references a configured standard (WCAG default) per issue.
 3. Verdict integrates as a gate input for UI-affecting merges.
-4. `[ResumeBehavior(Both)]`; 39-10 structural test green without allowlist.
+4. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate suspends
+   inside the dispatched `document-lifecycle` child); 39-10 structural test green without allowlist.
 
 ## Dependencies
 

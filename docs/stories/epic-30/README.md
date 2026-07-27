@@ -140,7 +140,7 @@ backends, multiple topologies, selectable per tenant at onboarding.
 > duplicating it — the terminal step dispatches `DeprovisionTenantWorkflow` and 30-11 writes no
 > teardown logic at all (pinned by a structure test).
 >
-> Two things it deliberately does **not** take on, both still unowned and both recorded here so they
+> Two things it deliberately does **not** take on, both not scheduled in any story and both recorded here so they
 > stay visible: the **scheduled retention purge of `platform_events`** (30-9 AC9 disclaims it as an
 > "Epic 17 follow-up" that no story picks up; 37-5 covers `audit_records` only) — a recurring job, and
 > therefore a consumer of Epic 41's 41-30 seam; and **over-quota resource reclamation on plan

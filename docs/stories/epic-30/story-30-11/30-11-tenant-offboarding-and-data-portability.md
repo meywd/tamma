@@ -15,7 +15,7 @@ leaving is a supported product path rather than an email to a platform administr
 
 ## Priority
 
-**P2.** Not on any critical path, and genuinely unowned. It becomes P1 the moment SaaS has paying
+**P2.** Not on any critical path. It becomes P1 the moment SaaS has paying
 customers who can sign up self-serve (`packages/dashboard-user` already ships the whole
 signup→billing journey; see Dependencies).
 

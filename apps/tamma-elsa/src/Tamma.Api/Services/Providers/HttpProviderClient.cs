@@ -1,14 +1,18 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Tamma.Activities.LlmCall.Models;
 
 namespace Tamma.Api.Services.Providers;
 
 /// <summary>
 /// Default <see cref="IProviderClient"/> implementation backed by
 /// <see cref="IHttpClientFactory"/>. Each provider key (<c>anthropic</c>,
-/// <c>openai</c>, <c>github-copilot</c>, …) is mapped to a named
-/// <see cref="HttpClient"/> registered in <c>Program.cs</c>.
+/// <c>openai</c>, <c>github-copilot</c>, …) resolves through
+/// <see cref="ProviderCatalog"/> to a descriptor carrying its named
+/// <see cref="HttpClient"/>, chat endpoint path, and wire dialect (Phase 1 of
+/// the provider abstraction — this replaced the local provider→client map and
+/// the <c>StartsWith("anthropic")</c> dialect branches).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -29,42 +33,6 @@ namespace Tamma.Api.Services.Providers;
 /// </remarks>
 public sealed class HttpProviderClient : IProviderClient
 {
-    private static readonly IReadOnlyDictionary<string, string> ProviderHttpClientMap =
-        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["anthropic"] = "anthropic",
-            ["anthropic-claude"] = "anthropic",
-            ["openai"] = "openai",
-            ["github-copilot"] = "github-copilot",
-            ["gemini"] = "gemini",
-            ["openrouter"] = "openrouter",
-            ["z.ai"] = "z.ai",
-            ["zai"] = "z.ai",
-            ["local"] = "local",
-            ["ollama"] = "local",
-            ["lmstudio"] = "local",
-        };
-
-    /// <summary>
-    /// Provider keys that require a non-HTTP transport (subprocess for CLI
-    /// agents, MCP for Zen). They cannot be served by this client and surface
-    /// a stable <c>PROVIDER_NOT_SUPPORTED</c> error so callers don't get an
-    /// opaque <c>InvalidOperationException</c> from a missing
-    /// <see cref="HttpClient.BaseAddress"/>. Tracked separately as part of
-    /// finding 003 — Tamma needs a CLI-agent + MCP adapter port before these
-    /// can be answered.
-    /// </summary>
-    private static readonly HashSet<string> NonHttpProviders =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            "claude-code",
-            "claude-code-cli",
-            "opencode",
-            "opencode-cli",
-            "zen-mcp",
-            "zen",
-        };
-
     private readonly IHttpClientFactory _factory;
     private readonly IProviderPricingService _pricing;
     private readonly ILogger<HttpProviderClient> _logger;
@@ -83,7 +51,13 @@ public sealed class HttpProviderClient : IProviderClient
     public async Task<ProviderInvocationResult> InvokeAsync(
         string provider, string model, ExecuteRequest req, CancellationToken ct = default)
     {
-        if (NonHttpProviders.Contains(provider))
+        // Providers that require a non-HTTP transport (subprocess for CLI
+        // agents, MCP for Zen) cannot be served by this client and surface a
+        // stable PROVIDER_NOT_SUPPORTED error so callers don't get an opaque
+        // InvalidOperationException from a missing BaseAddress. Tracked as
+        // part of finding 003 — Tamma needs a CLI-agent + MCP adapter port
+        // before these can be answered.
+        if (ProviderCatalog.ResolveNonHttp(provider) is not null)
         {
             throw new ProviderNotSupportedException(provider,
                 $"Provider '{provider}' requires a non-HTTP transport " +
@@ -91,44 +65,53 @@ public sealed class HttpProviderClient : IProviderClient
                 "See audit finding 003.");
         }
 
-        if (!ProviderHttpClientMap.TryGetValue(provider, out var clientName))
+        var descriptor = ProviderCatalog.Resolve(provider);
+        if (descriptor is null)
         {
             // Unknown provider — surface a typed error rather than blindly
             // dispatching against a default HttpClient with no BaseAddress
             // (which would 404 or NRE deep inside HttpRequestMessage).
             throw new ProviderNotSupportedException(provider,
                 $"Provider '{provider}' is not registered with the HTTP " +
-                "dispatch layer. Add a named HttpClient + entry to " +
-                $"{nameof(HttpProviderClient)}.{nameof(ProviderHttpClientMap)} " +
+                "dispatch layer. Add a descriptor to " +
+                $"{nameof(ProviderCatalog)}.{nameof(ProviderCatalog.HttpProviders)} " +
                 "to enable it.");
         }
 
-        var client = _factory.CreateClient(clientName);
+        var client = _factory.CreateClient(descriptor.HttpClientName);
         if (client.BaseAddress is null)
         {
-            // Defensive: even when an entry exists, a missing BaseAddress
-            // means the named client wasn't configured (e.g. forgot to call
-            // AddHttpClient(name, ...)). Fail fast with a clear message
-            // instead of producing an opaque "invalid request URI" deep in
-            // HttpRequestMessage.
+            // Defensive: even when a descriptor exists, a missing BaseAddress
+            // means the named client wasn't configured (e.g. Azure OpenAI's
+            // per-resource URL was never supplied). Fail fast with a clear
+            // message instead of producing an opaque "invalid request URI"
+            // deep in HttpRequestMessage.
             throw new ProviderNotSupportedException(provider,
-                $"Named HttpClient '{clientName}' has no BaseAddress. " +
+                $"Named HttpClient '{descriptor.HttpClientName}' has no BaseAddress. " +
                 "Verify the provider's section is configured in appsettings.");
         }
         var stopwatch = Stopwatch.StartNew();
 
-        // Anthropic is the only provider with a first-class request shape
-        // right now. Other providers share a generic completion-style payload
-        // until their dedicated adapters are ported.
-        var (path, payload) = BuildRequest(provider, model, req);
+        var payload = BuildPayload(descriptor, model, req);
+
+        // F1 — build the request URI through the single path-preserving join
+        // (ProviderCatalog.CombineUrl) instead of posting a root-relative path
+        // against BaseAddress, which would discard base-path segments (groq's
+        // /openai, openrouter's /api). F3 — a config-overridden base URL
+        // (≠ the descriptor default, e.g. "{Section}:BaseUrl" pointing at a
+        // proxy) gets the dialect-default path, not the descriptor's
+        // provider-specific ChatEndpointPath.
+        var baseUrl = client.BaseAddress.ToString();
+        var path = ProviderCatalog.ChatPathForBase(descriptor, descriptor.Dialect, baseUrl);
+        var requestUri = ProviderCatalog.CombineUrl(baseUrl, path);
 
         try
         {
-            using var response = await client.PostAsJsonAsync(path, payload, ct);
+            using var response = await client.PostAsJsonAsync(requestUri, payload, ct);
             response.EnsureSuccessStatusCode();
             var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
             stopwatch.Stop();
-            return ParseResponse(provider, model, body, stopwatch.ElapsedMilliseconds);
+            return ParseResponse(descriptor, provider, model, body, stopwatch.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
@@ -140,40 +123,31 @@ public sealed class HttpProviderClient : IProviderClient
         }
     }
 
-    private static (string Path, object Payload) BuildRequest(
-        string provider, string model, ExecuteRequest req)
+    private static object BuildPayload(
+        ProviderDescriptor descriptor, string model, ExecuteRequest req)
     {
-        if (provider.StartsWith("anthropic", StringComparison.OrdinalIgnoreCase))
+        // One body builder per dialect (ProviderRequestShaper), selected via
+        // the descriptor's closed dialect enum. The single-user-turn mapping
+        // and the max_tokens defaults reproduce the legacy payloads
+        // byte-for-byte (pinned by ProviderGoldenRequestTests): Anthropic
+        // defaulted max_tokens to 1024, the OpenAI shape passed null through.
+        var messages = new List<ConversationMessage>
         {
-            return ("/v1/messages", new
-            {
-                model,
-                max_tokens = req.MaxTokens ?? 1024,
-                temperature = req.Temperature,
-                messages = new[]
-                {
-                    new { role = "user", content = req.Input },
-                },
-            });
-        }
+            new() { Role = "user", Content = req.Input },
+        };
 
-        // Generic completion-style payload for other providers.
-        return ("/v1/chat/completions", new
-        {
-            model,
-            max_tokens = req.MaxTokens,
-            temperature = req.Temperature,
-            messages = new[]
-            {
-                new { role = "user", content = req.Input },
-            },
-        });
+        var maxTokens = descriptor.Dialect == ProviderWireDialect.Anthropic
+            ? req.MaxTokens ?? 1024
+            : req.MaxTokens;
+
+        return ProviderRequestShaper.BuildBody(
+            descriptor.Dialect, messages, model, maxTokens, req.Temperature, tools: null);
     }
 
     private ProviderInvocationResult ParseResponse(
-        string provider, string model, JsonElement body, long durationMs)
+        ProviderDescriptor descriptor, string provider, string model, JsonElement body, long durationMs)
     {
-        if (provider.StartsWith("anthropic", StringComparison.OrdinalIgnoreCase))
+        if (descriptor.Dialect == ProviderWireDialect.Anthropic)
         {
             // Anthropic: { content: [{ type: "text", text: "..." }], usage: {...} }
             var content = string.Empty;

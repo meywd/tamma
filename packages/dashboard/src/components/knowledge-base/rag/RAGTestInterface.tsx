@@ -4,7 +4,7 @@
  * Interactive component for testing RAG pipeline queries.
  */
 
-import React, { useState, type JSX } from 'react';
+import { useState, type JSX } from 'react';
 import type { RAGTestResult } from '@tamma/shared';
 
 export interface RAGTestInterfaceProps {

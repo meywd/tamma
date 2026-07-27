@@ -14,9 +14,15 @@ P2 / Wave 3 — recurring, cross-role; reuses the 41-7 event-read pattern at a s
 
 ## Scope
 
-Scheduled trigger → thin binding over `document-lifecycle`. `consumes: [SprintPlan (41-6), DCB events for
+Scheduled trigger → thin binding over `document-lifecycle`. `consumes: [SprintPlan (41-6, optional and
+fail-closed — the report degrades to DCB evidence only when no accepted SprintPlan exists), DCB events for
 the period, blocker/escalation events]` / `produces: prose (status-update, audience=stakeholder)`. Produce
-cell `(product_owner, summarize-stakeholder)` (PM variant `(project_manager, report-status)` via 41-1).
+cell: **`(project_manager, report-status)` via 41-1a — the primary and only produce cell.**
+`(product_owner, summarize-stakeholder)` is NOT usable: it is already dispatched live by
+`ContextGatheringWorkflow` as a lenient free-text summarizer and classified `IntentionallyUnbound`
+(`Bindings` and `IntentionallyUnbound` are mutually exclusive — binding it fails the build), so it stays
+untouched. The status report is not issue-scoped; it keys on the deterministic lineage anchor
+`status:{repository}:{periodKey}`.
 
 ## Produced document
 
@@ -44,19 +50,23 @@ can be an always-escalate class (human sign-off before send).
 
 ## Acceptance Criteria
 
-1. Scheduled, tenant-scoped, idempotent per period; every claim cites DCB evidence.
+1. Scheduled, tenant-scoped, idempotent per period; every claim cites DCB evidence (requires a new
+   tenant-scoped, time-windowed DCB read activity over `IEventRepository.QueryEventsAsync` — no such
+   activity exists today; it is in scope here and shared with 41-7).
 2. Thin lifecycle binding; prose reviewed by a `Review`.
-3. `[ResumeBehavior(Both)]` (scheduled + accept-gate); 39-10 structural test green without allowlist.
+3. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate suspends
+   inside the dispatched child; and "scheduled" is a dispatcher concern, not a resume mode); 39-10
+   structural test green without allowlist.
 
 ## Dependencies
 
-- **Blocking:** **41-1c** (the `prose` type + `Audience` field; *corrected: was "Epic 39 (prose
-  handling)" — out of Epic 39's scope per 39-1:58*), Epic 39 (lifecycle, review, store, 4-7 query API),
-  and **the tenant-aware scheduled-trigger seam — unowned; no story writes it**
-  (*corrected: "scheduler pattern" named no artifact;* `HourlyAnalyticsRollupScheduler` *is hardcoded to
-  one workflow, has one `FireAtMinute` int, threads no `tenantId`, and its advisory-lock key has no
-  tenant component — see the epic README's scheduler bullet*).
-- **Related:** consumes 41-6 SprintPlan.
+- **Blocking:** **41-1a** (the `project_manager` role + `(project_manager, report-status)` cell — the
+  produce cell does not exist today; see Scope), **41-1c** (the `prose` type + `Audience` field;
+  *corrected: was "Epic 39 (prose handling)" — out of Epic 39's scope per 39-1:58*), Epic 39 (lifecycle,
+  review, store, 4-7 query API).
+- **Related:** consumes 41-6 SprintPlan (optional, fail-closed — not a hard dependency). Per the
+  2026-07-25 scheduling decision, reporting is user-initiated: this story is NOT blocked on the 41-30
+  scheduled-trigger seam (a cron cadence is a later opt-in through 41-30).
 
 ## Estimated Effort
 

@@ -68,7 +68,8 @@ hand off to the coding step (Epic 40) to land the test.
 - **Blocking:**
   - **41-1a** — the `(tester, manage-regression)` cell (absent from `AgentAction.cs` today).
   - Epic 39 (`TriageDecision`, `TestSpec`, lifecycle, store).
-  - **The tenant-aware scheduled-trigger seam — unowned; no story writes it.** *Corrected: "scheduler
+  - **The tenant-aware scheduled-trigger seam — now owned by 41-30** (cadence AC only; the producing
+    half is buildable before it). *Corrected: "scheduler
     pattern" named no artifact. `HourlyAnalyticsRollupScheduler` is not a reusable pattern: it is
     hardcoded to one workflow (`:198-199`), has one `FireAtMinute` int rather than a window/cron shape
     (`:34`), threads no `tenantId` into the dispatch (`:202-203`), keeps its last-fired window in a

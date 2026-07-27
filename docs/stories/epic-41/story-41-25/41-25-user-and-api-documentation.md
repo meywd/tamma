@@ -47,7 +47,8 @@ action. Missing/contradicting existing docs surface as review concerns, not sile
 
 1. Thin lifecycle binding; prose reviewed by a `Review` that checks accuracy against the merged diff.
 2. Idempotent per feature; updates existing docs rather than duplicating.
-3. `[ResumeBehavior(Both)]`; 39-10 structural test green without allowlist.
+3. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate suspends
+   inside the dispatched `document-lifecycle` child); 39-10 structural test green without allowlist.
 
 ## Dependencies
 

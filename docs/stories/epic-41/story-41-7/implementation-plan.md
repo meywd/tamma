@@ -1,12 +1,17 @@
 # Implementation Plan — Story 41-7: Standup Synthesis Workflow
 
-> ## ⛔ BLOCKED — this story cannot start, and the blocker has no owner
+> ## Scheduler note — NOT scheduler-blocked (2026-07-25 decision); still gated on 41-1a
 >
-> 41-7 is a **scheduled, tenant-scoped, per-window idempotent** workflow (its AC1). The seam that makes
-> that possible **does not exist in the codebase and no story in Epic 41 builds it.** The epic README
-> names it as the fourth Wave-0 enabler with owner *"none — must be written"*
-> (`epic-41/README.md:297`). Verified against `Tamma.ElsaServer/Workflows/HourlyAnalyticsRollupScheduler.cs`,
-> which the story's Scope line 19 cites as "the cron pattern" — it is not reusable as one:
+> **Per the product owner's 2026-07-25 decision ("scheduling is needed for audits, NOT for ceremonies"),
+> standup synthesis is user-initiated** — this story needs only the manual trigger that already exists,
+> and is no longer blocked on a scheduled-trigger seam. The seam is now **owned by 41-30**; a cron
+> cadence for this workflow is a later opt-in through 41-30. The story **remains hard-blocked on 41-1a**
+> (the `scrum_master` role + `(scrum_master, synthesize-standup)` cell do not exist until 41-1a mints
+> them).
+>
+> The original finding stands and is why 41-30 exists. Verified against
+> `Tamma.ElsaServer/Workflows/HourlyAnalyticsRollupScheduler.cs`, which the story's Scope once cited as
+> "the cron pattern" — it is not reusable as one:
 >
 > | 41-7 AC1 needs | `HourlyAnalyticsRollupScheduler` has | Line |
 > |---|---|---|
@@ -17,9 +22,10 @@
 > | a tenant component in the advisory-lock key | `ComputeAdvisoryLockKey(year, dayOfYear, hour)` — **one tenant's leader suppresses every other tenant's fire** | `:241` |
 >
 > **This plan therefore plans everything EXCEPT the seam, and does not invent it.** Steps 1–9 are the
-> workflow; the trigger is step 10 and is `TODO(scheduler-seam)`. Writing the seam is a prerequisite for
-> Wave 2 in its entirety (41-5, 41-7, 41-11, 41-16, 41-17's PR sweep, 41-20, 41-23) and should be a
-> separate, owned story before any of them is scheduled.
+> workflow, shippable on the manual trigger; the scheduled trigger is step 10 and is
+> `TODO(41-30 seam)` — an opt-in once 41-30 lands. The seam (41-30) gates the *audit* stories
+> (41-11, 41-16, 41-17's PR sweep, 41-20, 41-23); per the 2026-07-25 decision it does NOT gate 41-5 or
+> 41-7.
 
 ## Scope & Deliverable
 
@@ -265,8 +271,8 @@ persisted last-fired table — that is the seam story's migration, not this one'
 
 ## Risks & Mitigations
 
-- **The scheduler seam is unowned — this is the top risk and it is a programme risk, not a technical
-  one.** Mitigation: steps 1–9 are seam-independent and dispatchable by API, so the story delivers value
+- **The scheduler seam is a separate story (41-30) — the top risk here is sequencing, not anything
+  technical.** Mitigation: steps 1–9 are seam-independent and dispatchable by API, so the story delivers value
   as a manually/orchestrator-triggered digest; step 10's four required inputs are written down as the
   seam's consumer contract. Do not build a 41-7-local scheduler: six other stories need the same seam and
   a local copy would be the second non-reusable one.

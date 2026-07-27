@@ -45,7 +45,8 @@ class. Accepted ADRs are queryable per issue and per repo.
    over the ADR text.
 2. No bespoke parse/terminal; non-success exits are typed escalations with lineage.
 3. Accepted ADR persisted with lineage and retrievable via the 39-11 store.
-4. `[ResumeBehavior(Both)]`; 39-10 structural test green without allowlist.
+4. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate suspends
+   inside the dispatched `document-lifecycle` child); 39-10 structural test green without allowlist.
 
 ## Dependencies
 

@@ -46,13 +46,20 @@ the devops role's Task View or self-actioned at high autonomy (can seed a scalin
 ## Acceptance Criteria
 
 1. Scheduled, tenant-scoped, idempotent per window; each lens fail-closed.
-2. Findings cite concrete metric evidence; empty ⇒ valid empty report.
+2. Findings cite concrete metric evidence; a healthy window produces a **single all-clear finding**
+   citing the signals checked — never an empty document (`FindingsDocumentType` rejects an empty
+   findings list with `EMPTY_FINDINGS`).
 3. `[ResumeBehavior(LatestStateReEntry)]`; 39-10 structural test green without allowlist.
 
 ## Dependencies
 
 - **Blocking:** Epic 39 (`Findings`, lifecycle, store), analytics/health signals (28-10 rollup, 4-7
-  query API), and **the tenant-aware scheduled-trigger seam — unowned; no story writes it** (*corrected: "scheduler pattern" named no artifact;* `HourlyAnalyticsRollupScheduler` *is hardcoded to one workflow (`:198-199`), offers one `FireAtMinute` int rather than a window/cron shape (`:34`), threads no `tenantId` into the dispatch (`:202-203`), keeps its last-fired window in a per-process field (`:83`), and its advisory-lock key has no tenant component (`:241`) — one tenant's leader would suppress every other tenant's fire*).
+  query API), and **the tenant-aware scheduled-trigger seam — now owned by 41-30** for the cadence AC;
+  the producing half is buildable before it (*the original finding stands and is why 41-30 exists:*
+  `HourlyAnalyticsRollupScheduler` *is hardcoded to one workflow (`:198-199`), offers one `FireAtMinute`
+  int rather than a window/cron shape (`:34`), threads no `tenantId` into the dispatch (`:202-203`),
+  keeps its last-fired window in a per-process field (`:83`), and its advisory-lock key has no tenant
+  component (`:241`)*).
 
 ## Estimated Effort
 

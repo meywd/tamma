@@ -43,8 +43,17 @@ jobs:
       - name: Typecheck wiki-site
         run: pnpm --filter @tamma/wiki-site run typecheck
 
+      - name: Typecheck dashboard
+        run: pnpm --filter @tamma/dashboard run typecheck
+
+      - name: Typecheck dashboard-user
+        run: pnpm --filter @tamma/dashboard-user run typecheck
+
       - name: Run tests
         run: pnpm vitest run
+
+      - name: Run dashboard tests (jsdom + jest-dom; own vitest config)
+        run: pnpm --filter @tamma/dashboard test
 
       - name: Run dashboard-user tests (jsdom + jest-dom; own vitest config)
         run: pnpm --filter @tamma/dashboard-user test

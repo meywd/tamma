@@ -250,6 +250,31 @@ public class ContractBindingTests
         };
 
     // ====================================================================
+    // Exposed surfaces for TemplateExampleConformanceTests
+    // ====================================================================
+
+    /// <summary>
+    /// Every bound cell key, whatever its parser authority. Exposed so
+    /// <see cref="TemplateExampleConformanceTests"/> can assert its
+    /// non-conformance baseline lists ONLY unbound cells — derived from the SAME
+    /// <see cref="Bindings"/> map, so there is no second hand-maintained list to drift.
+    /// </summary>
+    internal static IReadOnlyCollection<(string Role, string Action)> AllBoundCells =>
+        Bindings.Keys.ToList();
+
+    /// <summary>
+    /// The DocumentType-backed subset of <see cref="Bindings"/>:
+    /// (role, action) → the <c>"XxxDocumentType.Validate"</c> authority string.
+    /// <see cref="TemplateExampleConformanceTests"/> sweeps exactly this set — a new
+    /// lifecycle binding joins the example-conformance gate the day its Bindings
+    /// entry is written, with no second map to update.
+    /// </summary>
+    internal static IReadOnlyDictionary<(string Role, string Action), string> DocumentTypeValidatedCells =>
+        Bindings
+            .Where(kv => kv.Value.Parser.EndsWith("DocumentType.Validate", StringComparison.Ordinal))
+            .ToDictionary(kv => kv.Key, kv => kv.Value.Parser);
+
+    // ====================================================================
     // Known pre-existing contract violations — a RATCHET, not an escape hatch
     // ====================================================================
 

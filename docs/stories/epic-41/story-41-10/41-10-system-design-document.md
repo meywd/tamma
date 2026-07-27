@@ -78,7 +78,9 @@ always-escalate class. Accepted `Design` is consumed by `plan-generation` and ca
    `design-api-contract` / `design-data-model` / `design-integration`.
 4. An accepted `Design` is retrievable by `issueId` through 39-11 and is read by a `plan-generation` run
    in an integration test (and by 41-9 for ADR seeding).
-5. `[ResumeBehavior(Both)]`; 39-10 structural test green without an allowlist entry. A new
+5. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate
+   suspends inside the dispatched `document-lifecycle` child); 39-10 structural test green without an
+   allowlist entry. A new
    `WorkflowDocumentInterface` row (`system-design` → `Design`, non-provisional) is declared and
    `WorkflowInterfaceGraphTests.Declared_edge_count_is_pinned` is bumped in the same change.
 

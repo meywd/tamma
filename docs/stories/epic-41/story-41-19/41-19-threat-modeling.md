@@ -41,7 +41,8 @@ seed security tasks. Accepted model informs `plan-generation` and 41-15 verifica
 1. Thin lifecycle binding; `ThreatModel` validated (categorisation, mitigation+residual per threat).
 2. Unmitigated high-risk cannot be accepted silently — it is a typed escalation.
 3. Consumable by `plan-generation`/41-15 via 39-11.
-4. `[ResumeBehavior(Both)]`; 39-10 structural test green without allowlist.
+4. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate suspends
+   inside the dispatched `document-lifecycle` child); 39-10 structural test green without allowlist.
 
 ## Dependencies
 

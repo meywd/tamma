@@ -60,7 +60,10 @@ export function useVectorDB(): UseVectorDBReturn {
 
   const createCollection = useCallback(async (name: string, dimensions?: number) => {
     try {
-      await vectorDBApi.createCollection({ name, dimensions });
+      await vectorDBApi.createCollection({
+        name,
+        ...(dimensions !== undefined ? { dimensions } : {}),
+      });
       await loadCollections();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create collection');

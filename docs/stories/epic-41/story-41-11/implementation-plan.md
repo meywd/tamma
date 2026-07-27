@@ -287,7 +287,7 @@ story's migration.*
 
 ## Risks & Mitigations
 
-- **The scheduler seam is unowned.** Mitigation: steps 1–11 are seam-independent and the three workflows
+- **The scheduler seam is a separate story (41-30), not this one.** Mitigation: steps 1–11 are seam-independent and the three workflows
   are dispatchable by API, so the story delivers an on-demand debt sweep; step 12's contract is written
   down for the seam's author. Do NOT build a 41-11-local scheduler — six other stories need the same seam.
 - **41-1a is a hard gate on both paths.** `triage-tech-debt` does not exist in `AgentAction.cs`; a human

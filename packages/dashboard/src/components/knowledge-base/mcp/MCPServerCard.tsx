@@ -4,7 +4,7 @@
  * Card showing an MCP server's status with lifecycle controls.
  */
 
-import React, { type JSX } from 'react';
+import { type JSX } from 'react';
 import type { MCPServerInfo } from '@tamma/shared';
 
 export interface MCPServerCardProps {

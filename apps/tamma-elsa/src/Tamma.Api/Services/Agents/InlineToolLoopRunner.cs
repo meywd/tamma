@@ -9,6 +9,7 @@ using Tamma.Activities.LlmCall.Models;
 using Tamma.Activities.LlmCall.Tools;
 using Tamma.Activities.Security;
 using Tamma.Activities.ToolExecution;
+using Tamma.Api.Services.Providers;
 using Tamma.Core;
 
 namespace Tamma.Api.Services.Agents;
@@ -31,6 +32,19 @@ namespace Tamma.Api.Services.Agents;
 /// </summary>
 public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
 {
+    /// <summary>
+    /// The runner's <see cref="HttpClient"/> is deliberately a PLAIN client:
+    /// every call clears <c>DefaultRequestHeaders</c> and targets an absolute
+    /// URL, with base URL / auth header / version header applied per call from
+    /// the <see cref="ProviderCatalog"/> descriptor + resolved (BYOK-aware)
+    /// provider config. This replaces the phantom
+    /// <c>CreateClient($"llm-{provider}")</c> lookup — no <c>llm-*</c> named
+    /// client was ever registered, so those names always resolved to
+    /// unconfigured default clients; one shared name keeps the exact same
+    /// wire behaviour while pooling handlers sanely.
+    /// </summary>
+    public const string RunnerHttpClientName = "llm-provider";
+
     private readonly IHttpClientFactory? _httpClientFactory;
     private readonly IConfiguration? _configuration;
     private readonly ILogger? _logger;
@@ -138,9 +152,15 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
             new() { Role = "user", Content = userPrompt }
         };
 
-        var httpClient = _httpClientFactory?.CreateClient($"llm-{providerName}")
+        var httpClient = _httpClientFactory?.CreateClient(RunnerHttpClientName)
                        ?? new HttpClient();
         httpClient.Timeout = TimeSpan.FromSeconds(providerConfig.TimeoutSeconds);
+
+        // ONE dialect decision per loop, from the descriptor catalogue —
+        // replaces the three duplicated Equals("anthropic") branches
+        // (compaction summarizer, main loop, repair ring). Unknown providers
+        // keep the legacy OpenAI-compatible fallback.
+        var dialect = ProviderCatalog.ResolveDialect(providerName);
 
         var totalPromptTokens = 0;
         var totalCompletionTokens = 0;
@@ -178,7 +198,7 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
                         async (prompt, ct) =>
                         {
                             // Make a single-turn summarization LLM call using the same provider
-                            var summaryResponse = providerName.Equals("anthropic", StringComparison.OrdinalIgnoreCase)
+                            var summaryResponse = dialect == ProviderWireDialect.Anthropic
                                 ? await CallAnthropicMessages(httpClient, providerConfig, model,
                                     "You are a precise conversation summarizer.", prompt, 2048, 0.3, null)
                                 : await CallOpenAiCompatible(httpClient, providerConfig, model,
@@ -200,7 +220,7 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
             // Call LLM with full conversation history
             var llmSw = System.Diagnostics.Stopwatch.StartNew();
             NormalizedLlmResponse response;
-            if (providerName.Equals("anthropic", StringComparison.OrdinalIgnoreCase))
+            if (dialect == ProviderWireDialect.Anthropic)
             {
                 response = await CallAnthropicMultiTurn(
                     httpClient, providerConfig, model, messages, maxTokens, temperature, tools);
@@ -588,7 +608,7 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
                 // execution). Same client/config/tools declarations (Anthropic
                 // requires the tools when history carries tool blocks). Repair turns
                 // NEVER touch loopConfig.MaxSteps / completedTurns.
-                var repairResponse = providerName.Equals("anthropic", StringComparison.OrdinalIgnoreCase)
+                var repairResponse = dialect == ProviderWireDialect.Anthropic
                     ? await CallAnthropicMultiTurn(
                         httpClient, providerConfig, model, messages, maxTokens, temperature, tools)
                     : await CallOpenAiMultiTurn(
@@ -655,15 +675,23 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
             ? config.BaseUrl.TrimEnd('/')
             : "https://api.anthropic.com";
 
+        var descriptor = ProviderCatalog.Resolve(config.Name);
         httpClient.DefaultRequestHeaders.Clear();
         httpClient.DefaultRequestHeaders.Add("x-api-key", config.ApiKey);
-        httpClient.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01");
+        // Version header is per-descriptor DATA (Bedrock would differ); the
+        // fallback preserves the legacy constant for descriptor-less configs.
+        httpClient.DefaultRequestHeaders.Add(
+            descriptor?.VersionHeaderName ?? "anthropic-version",
+            descriptor?.VersionHeaderValue ?? "2023-06-01");
 
         var requestBody = BuildAnthropicMultiTurnBody(messages, model, maxTokens, temperature, tools);
         var json = JsonSerializer.Serialize(requestBody);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-        var response = await httpClient.PostAsync($"{baseUrl}/v1/messages", content);
+        var path = ProviderCatalog.ChatPath(descriptor, ProviderWireDialect.Anthropic);
+        // F1 — the single path-preserving join (identical bytes here since the
+        // Anthropic base URLs carry no path, pinned by the golden tests).
+        var response = await httpClient.PostAsync(ProviderCatalog.CombineUrl(baseUrl, path), content);
         var statusCode = (int)response.StatusCode;
 
         if (!response.IsSuccessStatusCode)
@@ -689,19 +717,18 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         List<ConversationMessage> messages, int maxTokens, double temperature,
         IReadOnlyList<ResolvedTool>? tools)
     {
-        var baseUrl = !string.IsNullOrWhiteSpace(config.BaseUrl)
-            ? config.BaseUrl.TrimEnd('/')
-            : "https://api.openai.com";
+        var descriptor = ProviderCatalog.Resolve(config.Name);
+        var (baseUrl, effectiveDescriptor) = ResolveOpenAiCompatibleBase(config, descriptor);
 
         httpClient.DefaultRequestHeaders.Clear();
-        if (!string.IsNullOrWhiteSpace(config.ApiKey))
-            httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {config.ApiKey}");
+        ApplyAuthHeader(httpClient, effectiveDescriptor, config.ApiKey);
 
         var requestBody = BuildOpenAiMultiTurnBody(messages, model, maxTokens, temperature, tools);
         var json = JsonSerializer.Serialize(requestBody);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-        var response = await httpClient.PostAsync($"{baseUrl}/v1/chat/completions", content);
+        var path = ProviderCatalog.ChatPath(effectiveDescriptor, ProviderWireDialect.OpenAiCompatible);
+        var response = await httpClient.PostAsync(ProviderCatalog.CombineUrl(baseUrl, path), content);
         var statusCode = (int)response.StatusCode;
 
         if (!response.IsSuccessStatusCode)
@@ -720,212 +747,115 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     }
 
     // =======================================================================
-    // Multi-Turn Body Builders  (moved VERBATIM)
+    // Multi-Turn Body Builders — now thin wrappers over the ONE builder per
+    // dialect in ProviderRequestShaper (Phase 1 of the provider abstraction).
+    // Byte-identity with the pre-refactor inline builders is pinned by
+    // ProviderGoldenRequestTests.
     // =======================================================================
 
     /// <summary>
     /// Build the Anthropic Messages API request body for a multi-turn conversation.
     /// </summary>
-    internal Dictionary<string, object> BuildAnthropicMultiTurnBody(
+    internal Dictionary<string, object?> BuildAnthropicMultiTurnBody(
         List<ConversationMessage> messages,
         string model, int maxTokens, double temperature, IReadOnlyList<ResolvedTool>? tools)
-    {
-        var body = new Dictionary<string, object>
-        {
-            ["model"] = model,
-            ["max_tokens"] = maxTokens,
-            ["temperature"] = temperature,
-        };
-
-        // System prompt goes to top-level "system" field (NOT a message)
-        var systemMsg = messages.FirstOrDefault(m => m.Role == "system");
-        if (systemMsg != null)
-            body["system"] = systemMsg.Content ?? "";
-
-        // Build messages array (skip system message)
-        var apiMessages = new List<object>();
-
-        foreach (var msg in messages.Where(m => m.Role != "system"))
-        {
-            if (msg.Role == "user" && msg.ToolCallId == null)
-            {
-                apiMessages.Add(new Dictionary<string, object>
-                {
-                    ["role"] = "user",
-                    ["content"] = msg.Content ?? ""
-                });
-            }
-            else if (msg.Role == "assistant")
-            {
-                var contentBlocks = new List<object>();
-
-                if (!string.IsNullOrEmpty(msg.Content))
-                {
-                    contentBlocks.Add(new Dictionary<string, object>
-                    {
-                        ["type"] = "text",
-                        ["text"] = msg.Content
-                    });
-                }
-
-                if (msg.ToolCalls != null)
-                {
-                    foreach (var tc in msg.ToolCalls)
-                    {
-                        object inputObj;
-                        try
-                        {
-                            inputObj = JsonSerializer.Deserialize<object>(tc.ArgumentsJson) ?? new object();
-                        }
-                        catch
-                        {
-                            inputObj = new object();
-                        }
-
-                        contentBlocks.Add(new Dictionary<string, object>
-                        {
-                            ["type"] = "tool_use",
-                            ["id"] = tc.Id,
-                            ["name"] = tc.Name,
-                            ["input"] = inputObj
-                        });
-                    }
-                }
-
-                apiMessages.Add(new Dictionary<string, object>
-                {
-                    ["role"] = "assistant",
-                    ["content"] = contentBlocks
-                });
-            }
-            else if (msg.Role == "tool")
-            {
-                // Anthropic: tool_result blocks go in a user-role message
-                var toolResultBlock = new Dictionary<string, object>
-                {
-                    ["type"] = "tool_result",
-                    ["tool_use_id"] = msg.ToolCallId ?? "",
-                    ["content"] = msg.Content ?? ""
-                };
-
-                // Batch multiple tool_result blocks into a single user message
-                if (apiMessages.Count > 0 &&
-                    apiMessages[^1] is Dictionary<string, object> lastMsg &&
-                    lastMsg.TryGetValue("role", out var lastRole) &&
-                    lastRole is string roleStr && roleStr == "user" &&
-                    lastMsg.TryGetValue("content", out var lastContent) &&
-                    lastContent is List<object> existingBlocks &&
-                    existingBlocks.Count > 0 &&
-                    existingBlocks[0] is Dictionary<string, object> firstBlock &&
-                    firstBlock.TryGetValue("type", out var blockType) &&
-                    blockType is string blockTypeStr && blockTypeStr == "tool_result")
-                {
-                    existingBlocks.Add(toolResultBlock);
-                }
-                else
-                {
-                    apiMessages.Add(new Dictionary<string, object>
-                    {
-                        ["role"] = "user",
-                        ["content"] = new List<object> { toolResultBlock }
-                    });
-                }
-            }
-        }
-
-        body["messages"] = apiMessages;
-
-        if (tools != null && tools.Count > 0)
-        {
-            body["tools"] = tools.Select(t => new Dictionary<string, object?>
-            {
-                ["name"] = t.Name,
-                ["description"] = t.Description,
-                ["input_schema"] = t.InputSchema
-            }).ToList();
-        }
-
-        return body;
-    }
+        => ProviderRequestShaper.BuildAnthropicBody(messages, model, maxTokens, temperature, tools);
 
     /// <summary>
     /// Build the OpenAI Chat Completions API request body for a multi-turn conversation.
     /// </summary>
-    internal Dictionary<string, object> BuildOpenAiMultiTurnBody(
+    internal Dictionary<string, object?> BuildOpenAiMultiTurnBody(
         List<ConversationMessage> messages,
         string model, int maxTokens, double temperature, IReadOnlyList<ResolvedTool>? tools)
+        => ProviderRequestShaper.BuildOpenAiCompatibleBody(messages, model, maxTokens, temperature, tools);
+
+    /// <summary>
+    /// Apply the descriptor's auth scheme for an OpenAI-compatible call.
+    /// Descriptor-less providers keep the legacy Bearer behaviour; the header
+    /// is only sent when a key is present (unchanged). Callers pass a null
+    /// descriptor when the base URL is a configuration override (see
+    /// <see cref="ResolveOpenAiCompatibleBase"/>) so an override always gets
+    /// the pre-refactor <c>Authorization: Bearer</c> semantics.
+    /// </summary>
+    private static void ApplyAuthHeader(
+        HttpClient httpClient, ProviderDescriptor? descriptor, string apiKey)
     {
-        var apiMessages = new List<object>();
+        if (string.IsNullOrWhiteSpace(apiKey))
+            return;
 
-        foreach (var msg in messages)
+        switch (descriptor?.AuthScheme ?? ProviderAuthScheme.BearerToken)
         {
-            if (msg.Role == "system" || (msg.Role == "user" && msg.ToolCallId == null))
-            {
-                apiMessages.Add(new Dictionary<string, object>
-                {
-                    ["role"] = msg.Role,
-                    ["content"] = msg.Content ?? ""
-                });
-            }
-            else if (msg.Role == "assistant")
-            {
-                var assistantMsg = new Dictionary<string, object?>
-                {
-                    ["role"] = "assistant",
-                    ["content"] = msg.Content
-                };
+            case ProviderAuthScheme.AnthropicApiKey:
+                httpClient.DefaultRequestHeaders.Add("x-api-key", apiKey);
+                if (descriptor?.VersionHeaderName is not null)
+                    httpClient.DefaultRequestHeaders.Add(
+                        descriptor.VersionHeaderName, descriptor.VersionHeaderValue);
+                break;
+            default:
+                httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+                break;
+        }
+    }
 
-                if (msg.ToolCalls != null && msg.ToolCalls.Length > 0)
-                {
-                    assistantMsg["tool_calls"] = msg.ToolCalls.Select(tc =>
-                        new Dictionary<string, object>
-                        {
-                            ["id"] = tc.Id,
-                            ["type"] = "function",
-                            ["function"] = new Dictionary<string, object>
-                            {
-                                ["name"] = tc.Name,
-                                ["arguments"] = tc.ArgumentsJson
-                            }
-                        }).ToList();
-                }
-
-                apiMessages.Add(assistantMsg);
-            }
-            else if (msg.Role == "tool")
-            {
-                apiMessages.Add(new Dictionary<string, object>
-                {
-                    ["role"] = "tool",
-                    ["tool_call_id"] = msg.ToolCallId ?? "",
-                    ["content"] = msg.Content ?? ""
-                });
-            }
+    /// <summary>
+    /// F3/F4 — resolve the effective base URL for an OpenAI-compatible call,
+    /// plus the descriptor whose <c>ChatEndpointPath</c>/auth-scheme should
+    /// shape the request (null ⇒ dialect defaults).
+    ///
+    /// <para><b>Config-override rule (F3):</b> a descriptor's
+    /// <c>ChatEndpointPath</c> and auth scheme describe the provider's OWN
+    /// endpoint at its OWN <c>DefaultBaseUrl</c>. When the config supplies an
+    /// explicit BaseUrl override (e.g. <c>LlmProviders:gemini:BaseUrl</c>
+    /// pointing at an OpenAI-compatible proxy), the pre-refactor semantics are
+    /// restored exactly: <c>{base}/v1/chat/completions</c> with
+    /// <c>Authorization: Bearer</c> — the descriptor's provider-specific path
+    /// and auth scheme apply only when its own default base URL is in use.
+    /// (The Anthropic dialect is untouched by this rule: its config-override
+    /// behaviour is byte-identical to before.)</para>
+    ///
+    /// <para><b>Fail-loud rule (F4):</b> a known provider whose descriptor has
+    /// no default base URL (azure-openai's per-resource endpoint) and no
+    /// configured BaseUrl throws a <see cref="TammaError"/> naming the missing
+    /// config key — the legacy silent fallback sent the provider's key to
+    /// api.openai.com as a Bearer token. Descriptor-less (config-only)
+    /// providers keep the legacy fallback.</para>
+    /// </summary>
+    private static (string BaseUrl, ProviderDescriptor? EffectiveDescriptor)
+        ResolveOpenAiCompatibleBase(LlmProviderConfig config, ProviderDescriptor? descriptor)
+    {
+        if (!string.IsNullOrWhiteSpace(config.BaseUrl))
+        {
+            var configured = config.BaseUrl.TrimEnd('/');
+            var isOverride = descriptor is null
+                || !ProviderCatalog.IsDefaultBaseUrl(descriptor, configured);
+            return (configured, isOverride ? null : descriptor);
         }
 
-        var body = new Dictionary<string, object>
+        if (descriptor is not null)
         {
-            ["model"] = model,
-            ["max_tokens"] = maxTokens,
-            ["temperature"] = temperature,
-            ["messages"] = apiMessages
-        };
-
-        if (tools != null && tools.Count > 0)
-        {
-            body["tools"] = tools.Select(t => new Dictionary<string, object?>
+            if (string.IsNullOrWhiteSpace(descriptor.DefaultBaseUrl))
             {
-                ["type"] = "function",
-                ["function"] = new Dictionary<string, object?>
-                {
-                    ["name"] = t.Name,
-                    ["description"] = t.Description,
-                    ["parameters"] = t.InputSchema
-                }
-            }).ToList();
+                throw new TammaError(
+                    "PROVIDER.BASE_URL.MISSING",
+                    $"Provider '{descriptor.Key}' has no default base URL (its endpoint " +
+                    $"is deployment-specific) and none was configured. Set " +
+                    $"'LlmProviders:{descriptor.Key}:BaseUrl' (or " +
+                    $"'{descriptor.ConfigSection}:BaseUrl' for the dispatch client) " +
+                    "before calling this provider.",
+                    new Dictionary<string, object?>
+                    {
+                        ["provider"] = descriptor.Key,
+                        ["configKey"] = $"LlmProviders:{descriptor.Key}:BaseUrl",
+                    },
+                    retryable: false,
+                    severity: TammaErrorSeverity.High);
+            }
+
+            return (descriptor.DefaultBaseUrl.TrimEnd('/'), descriptor);
         }
 
-        return body;
+        // Descriptor-less (config-only) provider — legacy fallback preserved.
+        return ("https://api.openai.com", null);
     }
 
     // =======================================================================
@@ -1075,41 +1005,28 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
             ? config.BaseUrl.TrimEnd('/')
             : "https://api.anthropic.com";
 
+        var descriptor = ProviderCatalog.Resolve(config.Name);
         httpClient.DefaultRequestHeaders.Clear();
         httpClient.DefaultRequestHeaders.Add("x-api-key", config.ApiKey);
-        httpClient.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01");
+        httpClient.DefaultRequestHeaders.Add(
+            descriptor?.VersionHeaderName ?? "anthropic-version",
+            descriptor?.VersionHeaderValue ?? "2023-06-01");
 
-        var requestBody = new Dictionary<string, object>
-        {
-            ["model"] = model,
-            ["max_tokens"] = maxTokens,
-            ["temperature"] = temperature,
-            ["system"] = systemPrompt,
-            ["messages"] = new[] { new Dictionary<string, string> { ["role"] = "user", ["content"] = userPrompt } }
-        };
-
-        if (!string.IsNullOrWhiteSpace(toolsJson))
-        {
-            try
+        var requestBody = ProviderRequestShaper.BuildAnthropicBody(
+            new List<ConversationMessage>
             {
-                var tools = JsonSerializer.Deserialize<List<ResolvedTool>>(toolsJson);
-                if (tools != null && tools.Count > 0)
-                {
-                    requestBody["tools"] = tools.Select(t => new Dictionary<string, object?>
-                    {
-                        ["name"] = t.Name,
-                        ["description"] = t.Description,
-                        ["input_schema"] = t.InputSchema
-                    }).ToList();
-                }
-            }
-            catch { /* ignore malformed tools */ }
-        }
+                new() { Role = "system", Content = systemPrompt },
+                new() { Role = "user", Content = userPrompt },
+            },
+            model, maxTokens, temperature, ParseToolsJson(toolsJson));
 
         var json = JsonSerializer.Serialize(requestBody);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-        var response = await httpClient.PostAsync($"{baseUrl}/v1/messages", content);
+        var path = ProviderCatalog.ChatPath(descriptor, ProviderWireDialect.Anthropic);
+        // F1 — the single path-preserving join (identical bytes here since the
+        // Anthropic base URLs carry no path, pinned by the golden tests).
+        var response = await httpClient.PostAsync(ProviderCatalog.CombineUrl(baseUrl, path), content);
         var statusCode = (int)response.StatusCode;
 
         if (!response.IsSuccessStatusCode)
@@ -1132,54 +1049,25 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         string systemPrompt, string userPrompt, int maxTokens, double temperature,
         string? toolsJson)
     {
-        var baseUrl = !string.IsNullOrWhiteSpace(config.BaseUrl)
-            ? config.BaseUrl.TrimEnd('/')
-            : "https://api.openai.com";
+        var descriptor = ProviderCatalog.Resolve(config.Name);
+        var (baseUrl, effectiveDescriptor) = ResolveOpenAiCompatibleBase(config, descriptor);
 
         httpClient.DefaultRequestHeaders.Clear();
-        if (!string.IsNullOrWhiteSpace(config.ApiKey))
-            httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {config.ApiKey}");
+        ApplyAuthHeader(httpClient, effectiveDescriptor, config.ApiKey);
 
-        var messages = new List<Dictionary<string, string>>
-        {
-            new() { ["role"] = "system", ["content"] = systemPrompt },
-            new() { ["role"] = "user", ["content"] = userPrompt }
-        };
-
-        var requestBody = new Dictionary<string, object>
-        {
-            ["model"] = model,
-            ["max_tokens"] = maxTokens,
-            ["temperature"] = temperature,
-            ["messages"] = messages
-        };
-
-        if (!string.IsNullOrWhiteSpace(toolsJson))
-        {
-            try
+        var requestBody = ProviderRequestShaper.BuildOpenAiCompatibleBody(
+            new List<ConversationMessage>
             {
-                var tools = JsonSerializer.Deserialize<List<ResolvedTool>>(toolsJson);
-                if (tools != null && tools.Count > 0)
-                {
-                    requestBody["tools"] = tools.Select(t => new Dictionary<string, object?>
-                    {
-                        ["type"] = "function",
-                        ["function"] = new Dictionary<string, object?>
-                        {
-                            ["name"] = t.Name,
-                            ["description"] = t.Description,
-                            ["parameters"] = t.InputSchema
-                        }
-                    }).ToList();
-                }
-            }
-            catch { /* ignore */ }
-        }
+                new() { Role = "system", Content = systemPrompt },
+                new() { Role = "user", Content = userPrompt },
+            },
+            model, maxTokens, temperature, ParseToolsJson(toolsJson));
 
         var json = JsonSerializer.Serialize(requestBody);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-        var response = await httpClient.PostAsync($"{baseUrl}/v1/chat/completions", content);
+        var path = ProviderCatalog.ChatPath(effectiveDescriptor, ProviderWireDialect.OpenAiCompatible);
+        var response = await httpClient.PostAsync(ProviderCatalog.CombineUrl(baseUrl, path), content);
         var statusCode = (int)response.StatusCode;
 
         if (!response.IsSuccessStatusCode)
@@ -1210,17 +1098,27 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     /// </summary>
     internal LlmProviderConfig LoadProviderConfig(string providerName)
     {
-        // Validate provider name against allowlist
-        if (!ProviderAllowlist.IsAllowedDefault(providerName))
+        // F5 — the allowlist carries CANONICAL keys only; catalogue aliases
+        // ("kimi" → moonshot, "z.ai"/"zai" → z-ai, "anthropic-claude" →
+        // anthropic) are lookup spellings, deliberately NOT allowlist entries.
+        // Normalize alias → canonical key via the catalogue BEFORE the
+        // allowlist check, and use the canonical key for everything downstream
+        // (config section, catalogue fallback, credential resolution).
+        var canonicalName = ProviderCatalog.Resolve(providerName)?.Key
+            ?? ProviderCatalog.ResolveNonHttp(providerName)?.Key
+            ?? providerName;
+
+        // Validate the canonical provider name against the allowlist
+        if (!ProviderAllowlist.IsAllowedDefault(canonicalName))
         {
             _logger?.LogWarning("Provider '{Provider}' is not in the allowlist, rejecting", providerName);
             return new LlmProviderConfig { Name = providerName, Enabled = false };
         }
 
-        var section = _configuration?.GetSection($"LlmProviders:{providerName}");
+        var section = _configuration?.GetSection($"LlmProviders:{canonicalName}");
         if (section != null && section.Exists())
         {
-            var config = new LlmProviderConfig { Name = providerName };
+            var config = new LlmProviderConfig { Name = canonicalName };
             config.BaseUrl = section["BaseUrl"] ?? "";
             // ApiKey deliberately NOT read here — resolved via IProviderCredentialResolver.
             config.DefaultModel = section["DefaultModel"] ?? "";
@@ -1228,27 +1126,27 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
             return config;
         }
 
-        return providerName.ToLowerInvariant() switch
+        // No config section — fall back to the provider catalogue (Phase 1 of
+        // the provider abstraction). This replaces a hardcoded three-arm
+        // switch (anthropic / openai / openrouter, preserved byte-identical in
+        // their descriptors) and is what makes the previously-unreachable
+        // allow-listed providers (z-ai/GLM, deepseek, moonshot, together,
+        // groq, …) callable through the runner without a config section.
+        var descriptor = ProviderCatalog.Resolve(canonicalName);
+        if (descriptor is null)
         {
-            "anthropic" => new LlmProviderConfig
-            {
-                Name = providerName,
-                BaseUrl = "https://api.anthropic.com",
-                DefaultModel = _configuration?["Anthropic:Model"] ?? "claude-sonnet-4-20250514"
-            },
-            "openai" => new LlmProviderConfig
-            {
-                Name = providerName,
-                BaseUrl = "https://api.openai.com",
-                DefaultModel = "gpt-4o"
-            },
-            "openrouter" => new LlmProviderConfig
-            {
-                Name = providerName,
-                BaseUrl = "https://openrouter.ai/api",
-                DefaultModel = "anthropic/claude-sonnet-4-20250514"
-            },
-            _ => new LlmProviderConfig { Name = providerName }
+            return new LlmProviderConfig { Name = canonicalName };
+        }
+
+        var defaultModel = string.Equals(descriptor.Key, "anthropic", StringComparison.OrdinalIgnoreCase)
+            ? _configuration?["Anthropic:Model"] ?? descriptor.DefaultModel
+            : descriptor.DefaultModel;
+
+        return new LlmProviderConfig
+        {
+            Name = canonicalName,
+            BaseUrl = descriptor.DefaultBaseUrl,
+            DefaultModel = defaultModel,
         };
     }
 
@@ -1279,7 +1177,11 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
             return (config, null);
         }
 
-        var cred = await _credentialResolver.ResolveAsync(tenantId, providerName, ct)
+        // F5 — resolve the credential under the CANONICAL key (config.Name is
+        // already alias-normalized by LoadProviderConfig), so "kimi"/"z.ai"
+        // spellings hit the same cabinet rows and allowlist entry as
+        // moonshot/z-ai instead of failing the resolver's own allowlist check.
+        var cred = await _credentialResolver.ResolveAsync(tenantId, config.Name, ct)
             .ConfigureAwait(false);
 
         // Plaintext used immediately for the outbound header; never stored/logged.
@@ -1301,6 +1203,26 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     // =======================================================================
     // Helpers  (moved VERBATIM)
     // =======================================================================
+
+    /// <summary>
+    /// Parse the single-turn callers' serialized tools payload. Preserves the
+    /// legacy semantics exactly: null/blank or malformed JSON yields no tools
+    /// (the request simply omits the <c>tools</c> field).
+    /// </summary>
+    private static List<ResolvedTool>? ParseToolsJson(string? toolsJson)
+    {
+        if (string.IsNullOrWhiteSpace(toolsJson))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<ResolvedTool>>(toolsJson);
+        }
+        catch
+        {
+            return null; // ignore malformed tools
+        }
+    }
 
     private static string Truncate(string? s, int max = 500)
     {

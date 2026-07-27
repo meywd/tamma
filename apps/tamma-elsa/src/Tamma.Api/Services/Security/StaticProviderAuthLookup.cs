@@ -38,7 +38,13 @@ public sealed class StaticProviderAuthLookup : IProviderAuthLookup
         if (string.IsNullOrWhiteSpace(providerName))
             return Task.FromResult<ProviderAuthModel?>(null);
 
-        var name = providerName.Trim();
+        // F5 — normalize catalogue aliases ("kimi" → moonshot, "z.ai" → z-ai,
+        // "opencode-cli" → opencode) to the canonical key BEFORE the allowlist
+        // check; aliases are lookup spellings, not allowlist entries.
+        var spelled = providerName.Trim();
+        var name = Tamma.Api.Services.Providers.ProviderCatalog.Resolve(spelled)?.Key
+            ?? Tamma.Api.Services.Providers.ProviderCatalog.ResolveNonHttp(spelled)?.Key
+            ?? spelled;
 
         // A known CLI harness provider classifies as cli-token. We check this
         // set FIRST because ProviderAllowlist.DefaultProviders omits the

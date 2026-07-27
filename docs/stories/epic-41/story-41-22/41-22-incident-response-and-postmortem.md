@@ -108,7 +108,9 @@ to owning roles and can dispatch 41-26.
    (`Program.cs:445-447`), so only the issue initiator is admitted — this AC is testable only once
    role-addressed delivery exists, and until then the story asserts the fail-closed behaviour instead of
    silently dropping the entries.
-5. `[ResumeBehavior(Both)]` across the sequence; 39-10 structural test green without an allowlist entry.
+5. `[ResumeBehavior(LatestStateReEntry)]` across the sequence (a thin binding owns no suspend node — the
+   accept gate suspends inside the dispatched `document-lifecycle` child); 39-10 structural test green
+   without an allowlist entry.
 
 > Postmortem *blamelessness*, root-cause *correctness* and diagnosis *ranking quality* are not acceptance
 > criteria — no deterministic check exists. They are the review stage's and the accept gate's job.

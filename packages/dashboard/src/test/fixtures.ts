@@ -5,6 +5,7 @@ export const OWNER_USER: CurrentUser = {
   username: 'owner-user',
   githubId: 1001,
   role: 'owner',
+  email: 'owner@example.com',
 };
 
 export const ADMIN_USER: CurrentUser = {
@@ -12,6 +13,7 @@ export const ADMIN_USER: CurrentUser = {
   username: 'admin-user',
   githubId: 1002,
   role: 'admin',
+  email: 'admin@example.com',
 };
 
 export const MEMBER_USER: CurrentUser = {
@@ -19,6 +21,7 @@ export const MEMBER_USER: CurrentUser = {
   username: 'member-user',
   githubId: 1003,
   role: 'member',
+  email: '',
 };
 
 export const ADMIN_USERS: AdminUser[] = [

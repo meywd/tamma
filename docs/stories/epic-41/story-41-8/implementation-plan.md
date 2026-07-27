@@ -121,7 +121,7 @@ the typed exit. Zero `Finish`, zero `llm-call`, zero parsing. A `RETRO.*` family
   documents never share a slice.
 - **D3 — trigger: sprint-close event OR direct dispatch, NOT a cron.** The story says "triggered at sprint
   close (or scheduled)". Sprint close is a domain event, not a clock tick, so this story takes the
-  event/dispatch path and **is therefore NOT blocked by the unowned scheduler seam** — unlike 41-7 and
+  event/dispatch path and **is therefore NOT blocked by the scheduler seam (story 41-30)** — unlike 41-7 and
   41-11. Until 41-6 emits a sprint-close event, the workflow is dispatched by definition id with an
   explicit `sprintId` + window. Record this explicitly: it is the reason 41-8 is Wave-3-startable while
   its siblings are not.
@@ -330,7 +330,7 @@ path. `has-pending-model-changes` stays clean in both phases.
 - **NOT blocked by:**
   - **the tenant-aware scheduled-trigger seam** — unlike 41-7, 41-11, 41-5, 41-16, 41-17 and 41-20, this
     story is triggered by sprint close or direct dispatch, not a cron (D3). 41-8 is one of the few Wave-3
-    stories with no unowned blocker on its Phase A.
+    stories whose Phase A has no unbuilt blocker.
   - **41-1b** — Correction 6 drops the `SprintPlan` consumed edge from Phase A deliberately, keeping 41-8
     off 41-6/41-1b's critical path.
 - **Soft / preferred ordering:**

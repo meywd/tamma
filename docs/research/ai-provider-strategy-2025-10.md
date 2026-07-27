@@ -427,7 +427,7 @@ Monthly costs for 24/7 operation:
 
 ### Maintenance Overhead
 
-#### Staffing Costs
+#### Labor Costs
 
 **Small Deployment (1-2 servers):**
 - Part-time DevOps/MLOps: $5,000-$10,000/month

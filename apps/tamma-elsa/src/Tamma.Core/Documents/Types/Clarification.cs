@@ -215,8 +215,9 @@ public sealed class ClarificationDocumentType : IDocumentType
         """
         A clarification document has a "phase" of either "questions" or "resolution".
 
-        QUESTIONS phase — return ONLY a JSON array of open-ended (not yes/no) question strings:
-        ["What is the target platform?", "Which auth model is expected?"]
+        QUESTIONS phase — return ONLY a JSON object with "phase": "questions" and a "questions"
+        JSON array of open-ended (not yes/no) question strings:
+        { "phase": "questions", "questions": ["What is the target platform?", "Which auth model is expected?"] }
 
         RESOLUTION phase — return ONLY a JSON object of this shape:
         {

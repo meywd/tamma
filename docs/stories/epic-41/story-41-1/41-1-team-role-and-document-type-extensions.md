@@ -14,8 +14,10 @@ human-assigned path *and* the agent path.
 ## Priority
 
 **P0 — the epic's hard gate.** Its taxonomy and document-type halves block **seventeen** stories on BOTH
-execution paths (fourteen at their produce step, plus 41-24/41-25/41-26 at their review stage); its
-prose half blocks **eight**. Five are in both sets — **twenty of twenty-nine** in all.
+execution paths (fifteen at their produce step — 41-5 joined when its cell moved to
+`(project_manager, report-status)` — plus 41-24/41-25 at their review stage; 41-26 left the review set,
+its default reviewer being the already-reachable `(devops, review-operability)`); its prose half blocks
+**eight**. Five are in both sets — **twenty of twenty-nine** in all.
 
 > **Corrected — the previous Priority paragraph contradicted itself in consecutive sentences.** It read
 > "Gates the agent path of … and the typed outputs of …" and then "Not a hard blocker for the human path
@@ -40,7 +42,7 @@ migration + vocabulary change that no story owned at all.
 
 | Sub-story | Deliverable | Effort |
 |---|---|---|
-| **41-1a** — [Agent-Taxonomy Extension](./41-1a-agent-taxonomy-extension.md) | 3 roles, 15 action cells, the DERIVED panel-selector maps, the `scrum_master` alias removal | 4–5 days |
+| **41-1a** — [Agent-Taxonomy Extension](./41-1a-agent-taxonomy-extension.md) | 3 roles, 15 action tokens (18 cells incl. per-role `context-scan`, plus the 41-8 lockstep `write-retro-narrative` amendment), the DERIVED panel-selector maps, the `scrum_master` alias removal | 4–5 days |
 | **41-1b** — [New Document Types](./41-1b-new-document-types.md) | `AcceptanceCriteria`, `BacklogOrdering`, `SprintPlan`, `TestPlan`, `ThreatModel`, `UxSpec` | 5–6 days |
 | **41-1c** — [Prose Documents & Audience Tags](./41-1c-prose-documents-and-audience-tags.md) | the prose type + `Audience` field + audience/kind vocabularies | 3–4 days |
 
@@ -61,7 +63,8 @@ migration + vocabulary change that no story owned at all.
 | 41-2 | 41-1b | `AcceptanceCriteria` type |
 | 41-3 | 41-1b | `BacklogOrdering` type |
 | 41-6 | 41-1a + 41-1b | `scrum_master` role, `SprintPlan` type |
-| 41-7, 41-8 | 41-1a | `scrum_master` role + `synthesize-standup` / `facilitate-retro` cells |
+| 41-5 | 41-1a | `project_manager` role + `report-status` cell — `(product_owner, summarize-stakeholder)` is live-bound to `ContextGatheringWorkflow` and cannot be a producer |
+| 41-7, 41-8 (Phase A) | 41-1a | `scrum_master` role + `synthesize-standup` / `facilitate-retro` cells; 41-8 Phase B additionally waits on the 41-1a amendment minting `(scrum_master, write-retro-narrative)` |
 | 41-10 | 41-1a | `design-system` cell — `plan-system-design` is reserved as plan-generation's `Plan` producer |
 | 41-11 | 41-1a | `triage-tech-debt` cell |
 | 41-13 | 41-1b | `TestPlan` type |
@@ -72,12 +75,13 @@ migration + vocabulary change that no story owned at all.
 | 41-27 | 41-1a + 41-1b | `ux_designer` role, `UxSpec` type |
 | 41-28 | 41-1a | `ux_designer` role + `review-design` / `audit-accessibility` cells |
 | 41-4, 41-5, 41-9, 41-22, 41-24, 41-25, 41-26 | **41-1c** | prose type + audience tag |
-| 41-8 | **41-1c** | audience tag on its retro narrative (its `Findings` half needs only 41-1a) |
-| 41-24, 41-25, 41-26 | 41-1a | the `(tech_writer, review-docs)` **review-selector** arm — see 41-1a AC3 |
+| 41-8 (Phase B) | **41-1c** | audience tag on its retro narrative (its `Findings` half needs only 41-1a) |
+| 41-24, 41-25 | 41-1a | the `(tech_writer, review-docs)` **review-selector** arm — see 41-1a AC3. *41-26 no longer waits here: its default reviewer is `(devops, review-operability)`, reachable today; the tech-writer review is its upgrade path.* |
 
-**20 of the epic's 29 stories wait on some part of this set** — seventeen on the taxonomy/document-type
-halves (41-1a + 41-1b; fourteen at their produce step plus 41-24/41-25/41-26 at their review stage) and
-eight on the prose half (41-1c). 41-8, 41-22, 41-24, 41-25 and 41-26 are in both: 17 + 8 − 5 = 20.
+**20 of the epic's 29 original workflow stories wait on some part of this set** — seventeen on the
+taxonomy/document-type halves (41-1a + 41-1b; fifteen at their produce step plus 41-24/41-25 at their
+review stage) and eight on the prose half (41-1c). 41-5, 41-8, 41-22, 41-24 and 41-25 are in both:
+17 + 8 − 5 = 20.
 
 *Corrected: this table and the counts above previously read twelve / nineteen, omitting 41-10 and 41-22,
 both of which name 41-1a as the minter of a cell that does not exist in `AgentAction.cs`. 41-1a's Scope
@@ -90,18 +94,18 @@ The split gives the prose enabler an owner for the first time; the documents tha
 else's job still pointed elsewhere. Status of that loop after the 2026-07-24 audit pass:
 
 - ✅ **epic-41 README, Wave-0 table** — the "Prose document support / **none — must be written**" row now
-  names **41-1c**, and the 41-1 row is split into the three sub-stories with their efforts. Only the
-  scheduler seam is still owner-less.
-- ✅ **41-17** — its `Blocking:` line now names **41-1a** (`triage-pr`) and the unowned scheduler seam.
+  names **41-1c**, and the 41-1 row is split into the three sub-stories with their efforts. The
+  scheduler seam has since gained an owner too (41-30, 2026-07-27).
+- ✅ **41-17** — its `Blocking:` line now names **41-1a** (`triage-pr`) and the scheduler seam (41-30).
 - ✅ **41-4, 41-5, 41-8, 41-9, 41-22, 41-24, 41-25, 41-26** — their `Blocking:` lines named "Epic 39
   (prose-document handling …)" for a deliverable 39-1:58 records as out of Epic 39's scope; they now
   name **41-1c**. 41-8 was missing from that list and has been added.
 - ✅ **`docs/sprint-status.yaml`** — tracked 41-1 as a single story; it now carries 41-1a/41-1b/41-1c
   rows with 41-1 marked `superseded`.
-- ⚠️ **Still open, and owned by nobody:** the **tenant-aware scheduled-trigger seam**. It is the fourth
-  Wave-0 enabler and the only one without a story. Seven stories name it in their `Blocking:` lines
-  (41-5, 41-7, 41-11, 41-16, 41-17, 41-20, 41-23); none builds it. Not in this story's scope — flagged
-  here because this is where the enabler set is enumerated.
+- ✅ **Resolved (2026-07-27): the tenant-aware scheduled-trigger seam is owned by 41-30.** It gates the
+  five audit stories (41-11, 41-16, 41-17 PR-sweep, 41-20, 41-23) at their cadence AC only. Per the
+  product owner's 2026-07-25 decision, 41-5 and 41-7 are user-initiated ceremonies and do **not** wait
+  on it.
 
 ## Dependencies
 

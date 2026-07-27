@@ -49,7 +49,8 @@ customer-facing release can be a configured always-escalate class (human sign-of
 
 1. Thin lifecycle binding; both outputs ride the lifecycle as audience-tagged prose reviewed by a `Review`.
 2. Window derivation is deterministic (the release just cut); re-run is idempotent.
-3. `[ResumeBehavior(Both)]`; 39-10 structural test green without allowlist.
+3. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate suspends
+   inside the dispatched `document-lifecycle` child); 39-10 structural test green without allowlist.
 
 ## Dependencies
 

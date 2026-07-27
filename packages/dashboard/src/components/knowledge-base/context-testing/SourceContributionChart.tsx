@@ -4,7 +4,7 @@
  * Visual bar chart showing token contributions from each source.
  */
 
-import React, { type JSX } from 'react';
+import { type JSX } from 'react';
 import type { UISourceContribution } from '@tamma/shared';
 
 export interface SourceContributionChartProps {

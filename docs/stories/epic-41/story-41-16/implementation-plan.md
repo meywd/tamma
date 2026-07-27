@@ -22,7 +22,8 @@ their prompt-cell rewrites, driven by an **explicit suspect list handed in as in
 from CI history, dispatched **manually or by an existing caller** rather than on a cron. That slice is
 real value (it turns "someone noticed a flaky test" into a typed, reviewed, accepted decision with an
 audit trail) and it is testable end-to-end. Phase B — the sweep, the CI history read, and AC1/AC3 — waits
-on the two unowned pieces.
+on the two missing pieces (the scheduler seam — now story 41-30 — and the per-test CI result store,
+which no story schedules).
 
 ## Pre-Reading
 
@@ -79,7 +80,7 @@ on the two unowned pieces.
   directions) and `src/Tamma.Api/Auth/PromptFileLoader.cs:106`/`:118` (`PROMPT.SEED.UNKNOWN_CELL`) /
   `:161-167` (`PROMPT.SEED.NO_BODY_FAMILY`) — the fail-loud-both-ways loader the new cell must satisfy
 - **NOT FOUND (no code in tree):** `(tester, manage-regression)` (**41-1a**); any tenant-aware scheduler
-  (**unowned**); any per-test CI result store (**unowned**). See Blocks / Blocked by.
+  (**now story 41-30**); any per-test CI result store (**no story schedules it**). See Blocks / Blocked by.
 
 ## Corrections to the story
 
@@ -128,7 +129,7 @@ on the two unowned pieces.
   per-test-result ingest + store (a `test_results` table keyed `(tenantId, repository, commitSha,
   testName, outcome, runId, observedAt)`, fed either by parsing the `.trx`/JUnit artifact or by extending
   the CI-mediation wire + `CIResultsPayload.FailedTestDetails` end to end). Estimated separately below.
-  This is a **second unowned dependency** and the epic README does not list it.
+  This is a **second dependency that no story schedules** and the epic README does not list it.
 - **C3 — `Prompts/tester/write-regression-test.md` produces a TEST FILE, not a `TestSpec`; rewriting it
   is in scope and the story does not say so.** The shipped cell declares
   `variables: role, testTarget, sourceCode, conventions`, `enableTools: true`, and closes with
@@ -180,7 +181,7 @@ on the two unowned pieces.
   binding, driven by an input suspect list; the prompt-cell rewrites; the drift/pin bookkeeping; ACs 2, 4,
   5 and the falsifiable half of 3.
   **Phase B (blocked):** the scheduled sweep + the CI-history read; ACs 1 and the "inside the sweep
-  window" half of 3. Phase B does not start until both unowned pieces have owners.
+  window" half of 3. Phase B does not start until both missing pieces are scheduled as stories.
 - **D2 — Phase A entry point is `regression-triage`, a thin binding with an explicit suspect input.**
   `DefinitionId = "regression-triage"`. Inputs: `repository`, `testName`, `suspectEvidenceJson` (the
   observed run outcomes: `[{runId, commitSha, outcome, observedAt}]`), `issueId?`, `tenantId`,
@@ -315,7 +316,7 @@ on the two unowned pieces.
 
 ## Implementation Steps — Phase B (BLOCKED, do not start)
 
-B1. **The tenant-aware scheduled-trigger seam — unowned.** Minimum shape the epic README already
+B1. **The tenant-aware scheduled-trigger seam — now story 41-30.** Minimum shape the epic README already
     specifies: a tenant component in the advisory-lock key; a `tenantId` threaded into the dispatch; a
     **persisted** last-fired window (a `scheduled_trigger_runs` row, not `_lastFired`); and a window/cron
     shape rather than a single `FireAtMinute`. Seven Epic 41 stories consume it (41-5, 41-7, 41-11,
@@ -323,7 +324,7 @@ B1. **The tenant-aware scheduled-trigger seam — unowned.** Minimum shape the e
     Rough size: 4–6 days including the EF migration, the leader-lock generalisation and a
     multi-tenant/restart integration suite. **Not this story's to write.**
 
-B2. **A per-test CI result store — unowned (C2).** Minimum shape: a `test_results` table keyed
+B2. **A per-test CI result store — no story schedules it (C2).** Minimum shape: a `test_results` table keyed
     `(tenantId, repository, commitSha, testName, outcome, runId, observedAt)`, plus an ingest. Two
     candidate ingests: parse the `.trx`/JUnit artifact CI already produces (`ci.yml:260-269` proves the
     parse is a five-line pipeline — but the artifact is uploaded **only on failure**, so passing runs
@@ -485,7 +486,7 @@ across a restart, process-kill mid-sweep) and the "inside the sweep window" clau
 
 **Story estimate was 5–6 days for the whole thing.** Phase A alone is ~6.75 because the story did not
 scope the new document type (C1), the two prompt rewrites (C3), or the acceptance-policy arm — and Phase
-B is 8.5–12.5 days of unowned work on top. **Recommend re-estimating the story as Phase A only and
+B is 8.5–12.5 days of unscheduled work on top. **Recommend re-estimating the story as Phase A only and
 splitting Phase B out**, exactly as the epic README's Wave-0 table already implies for the seam.
 
 ## Blocks / Blocked by
@@ -500,11 +501,11 @@ splitting Phase B out**, exactly as the epic README's Wave-0 table already impli
   together or the app refuses to start.
 - **Blocked by — HARD, and NOT in the story: the `RegressionTriage` document type (C1).** Either 41-1b
   adopts it as a seventh type or this story registers it with its own count-pin bumps. Decide in step 1.
-- **Blocked by — HARD, UNOWNED: the tenant-aware scheduled-trigger seam.** No story in Epic 41 writes it;
+- **Blocked by — HARD: the tenant-aware scheduled-trigger seam (story 41-30, not yet built).** At the time of writing no story built it;
   the README calls it "the one thing in Epic 41 that no story builds" and lists this story among its seven
   consumers. `HourlyAnalyticsRollupScheduler` is **not** a usable substitute — all four of the story's
   criticisms verified above. **AC1 is unreachable without it and this plan does not pretend otherwise.**
-- **Blocked by — HARD, UNOWNED, and NOT NAMED ANYWHERE: a per-test CI result store (C2).** No component
+- **Blocked by — HARD, SCHEDULED BY NO STORY, and NOT NAMED ANYWHERE ELSE: a per-test CI result store (C2).** No component
   in the tree records which test failed, let alone at which commit sha.
   `GitMediationMapping.cs:46-61` drops per-test detail by design; `TEST.RESULTS_RECEIVED.SUCCESS` carries
   aggregate counts in a free-text string (`TestingWorkflow.cs:180-185`); CI's `.trx` is parsed to stdout

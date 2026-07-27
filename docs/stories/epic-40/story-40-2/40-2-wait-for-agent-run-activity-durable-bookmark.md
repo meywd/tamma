@@ -78,7 +78,7 @@ Rationale: 40-3 must recompute the name from durable inputs on a *different pod*
 `CIResultBookmarkPayload` object shape cannot support tenant-folded; and leaving the epic
 with two unfolded schemes in one cycle is exactly what 39-10's registry exists to prevent.
 `WaitForCIResultsActivity`'s own migration onto the registry is **out of scope here** and
-remains unowned — see Dependencies.
+is not scheduled in any story — see Dependencies.
 
 **Epic 39-10 has LANDED — this story consumes it, it does not wait for it.**
 *Corrected: earlier drafts of this story and its plan treated 39-10 as an unmerged hard gate
@@ -218,7 +218,7 @@ suspending; the collect half (`IAgentResultCollectorService.CollectAsync`) runs 
   see Architectural Context), `IAgentDispatchService`/`IAgentResultCollectorService`/
   `GitHubActionsExecutor`, `LocalExecutor`/`AgentExecutorFactory` **as wired classes** (their
   runtime path is the 40-1 caveat above), Elsa 3 bookmarks + `DelayFor` + EF persistence.
-- **Explicitly NOT owned here (genuinely unowned):** migrating `WaitForCIResultsActivity`
+- **Explicitly not this story's work (and no other story covers it):** migrating `WaitForCIResultsActivity`
   off `CIResultBookmarkPayload` onto `LifecycleBookmarks` + the canonical registry. After
   this story the codebase still has one ad-hoc scheme (CI results); Epic 40 simply does not
   add a second. No story currently owns that burn-down.

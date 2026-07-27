@@ -4,13 +4,15 @@
  * Displays a single retrieved context chunk with metadata and feedback controls.
  */
 
-import React, { type JSX } from 'react';
+import { type JSX } from 'react';
 import type { UIContextChunk } from '@tamma/shared';
 
 export interface ChunkCardProps {
   chunk: UIContextChunk;
   index: number;
-  onFeedback?: (chunkId: string, rating: 'relevant' | 'irrelevant' | 'partially_relevant') => void;
+  onFeedback?:
+    | ((chunkId: string, rating: 'relevant' | 'irrelevant' | 'partially_relevant') => void)
+    | undefined;
 }
 
 const SOURCE_COLORS: Record<string, string> = {

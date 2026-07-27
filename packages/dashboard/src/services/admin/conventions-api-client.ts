@@ -21,7 +21,7 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api';
 
 export interface ApiError extends Error {
   status?: number;
-  code?: string;
+  code?: string | undefined;
 }
 
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {

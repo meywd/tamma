@@ -5,7 +5,7 @@
  * chunking settings, and trigger configuration.
  */
 
-import React, { useState, useEffect, type JSX } from 'react';
+import { useState, useEffect, type JSX } from 'react';
 import type { IndexConfig } from '@tamma/shared';
 
 export interface IndexConfigEditorProps {

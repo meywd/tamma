@@ -48,13 +48,16 @@ that also triggers `rotate-secret`.
 ## Acceptance Criteria
 
 1. Scheduled, tenant-scoped, idempotent; each lens fail-closed (a lens failure is recorded, not dropped).
-2. Findings cite concrete evidence with severity + remediation; empty ⇒ valid empty report.
+2. Findings cite concrete evidence with severity + remediation (context-gated `ValidateWithContext`
+   rules — `Finding` gains optional `severity`/`remediation` members, required only for this story's
+   producers). A clean lens emits **one all-clear finding** (`severity: "none"`, citing the scan
+   output) — never an empty findings list, which `FindingsDocumentType` rejects with `EMPTY_FINDINGS`.
 3. Exposed-secret path always escalates and integrates with `rotate-secret`.
 4. `[ResumeBehavior(LatestStateReEntry)]`; 39-10 structural test green without allowlist.
 
 ## Dependencies
 
-- **Blocking:** Epic 39 (`Findings`, lifecycle, store, task routing), `rotate-secret`, and **the tenant-aware scheduled-trigger seam — unowned; no story writes it** (*corrected: "scheduler pattern" named no artifact;* `HourlyAnalyticsRollupScheduler` *is hardcoded to one workflow (`:198-199`), offers one `FireAtMinute` int rather than a window/cron shape (`:34`), threads no `tenantId` into the dispatch (`:202-203`), keeps its last-fired window in a per-process field (`:83`), and its advisory-lock key has no tenant component (`:241`) — one tenant's leader would suppress every other tenant's fire*).
+- **Blocking:** Epic 39 (`Findings`, lifecycle, store, task routing), `rotate-secret`, and **the tenant-aware scheduled-trigger seam — now owned by 41-30 (cadence AC only; the producing half is buildable before it)** (*corrected: "scheduler pattern" named no artifact;* `HourlyAnalyticsRollupScheduler` *is hardcoded to one workflow (`:198-199`), offers one `FireAtMinute` int rather than a window/cron shape (`:34`), threads no `tenantId` into the dispatch (`:202-203`), keeps its last-fired window in a per-process field (`:83`), and its advisory-lock key has no tenant component (`:241`) — one tenant's leader would suppress every other tenant's fire*).
 - **Related:** feeds 41-12 dependency-upgrade planning.
 
 ## Estimated Effort

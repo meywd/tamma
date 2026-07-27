@@ -416,8 +416,8 @@ NUnit + FluentAssertions (+ Moq; Testcontainers for the execution suite).
   short-circuits as "already accepted" and produces nothing. Mitigation: D2's mandatory producer scoping
   plus Execution (b), which is written specifically to fail without it. Flagged for 41-1c's guidance —
   every prose consumer needs this rule.
-- **The review path has two independent breakages and only one is owned.** Mitigation: D6 takes the
-  unowned half explicitly and Execution (d) asserts the current throw so CI shows the block rather than a
+- **The review path has two independent breakages and only one had a story.** Mitigation: D6 takes the
+  other half explicitly and Execution (d) asserts the current throw so CI shows the block rather than a
   document quietly reviewed by an empty prompt.
 - **No incumbent release convention (C3), so the template *is* the spec.** A later real changelog file or
   a `v*` tagging scheme could contradict it. Mitigation: D4 picks Keep-a-Changelog (the most common,
@@ -442,7 +442,7 @@ NUnit + FluentAssertions (+ Moq; Testcontainers for the execution suite).
 | 2–3 | `ReleaseWindowResolver` + `FetchReleaseWindowActivity` | 0.75 |
 | 4 | `ReleaseDocsEvents` + emit activity | 0.25 |
 | 5–6 | Two produce templates → prose envelope + Keep-a-Changelog shape | 0.5 |
-| 7 | **`review-docs.md` rewrite + classification entry (the shared, previously unowned fix)** | 0.5 |
+| 7 | **`review-docs.md` rewrite + classification entry (the shared fix no other story had picked up)** | 0.5 |
 | 8 | Two producing bindings | 0.75 |
 | 9–10 | Registry seed + edge pin + drift contributor entries | 0.25 |
 | 11 | Structure tests ×2, resolver/activity/prose/review-cell unit tests | 0.75 |

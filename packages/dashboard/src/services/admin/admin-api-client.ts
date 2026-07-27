@@ -32,6 +32,12 @@ export interface CurrentUser {
   username: string;
   githubId: number;
   role: string;
+  /**
+   * Present in the /api/auth/me payload (MeUserPayload.Email in
+   * Tamma.Api/Dtos/Auth/AuthDtos.cs). May be an empty string for
+   * OAuth-only accounts, so render behind a truthiness check.
+   */
+  email: string;
 }
 
 export interface AdminUser {

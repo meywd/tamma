@@ -4,7 +4,7 @@
  * Displays quality analytics including relevance rates and trends.
  */
 
-import React, { type JSX } from 'react';
+import { type JSX } from 'react';
 import type { QualityAnalytics } from '@tamma/shared';
 
 export interface QualityMetricsProps {

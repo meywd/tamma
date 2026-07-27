@@ -4,7 +4,7 @@
  * Grid of MCP server cards.
  */
 
-import React, { type JSX } from 'react';
+import { type JSX } from 'react';
 import type { MCPServerInfo } from '@tamma/shared';
 import { MCPServerCard } from './MCPServerCard.js';
 

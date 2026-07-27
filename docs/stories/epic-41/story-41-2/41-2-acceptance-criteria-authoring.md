@@ -19,6 +19,13 @@ gates an explicit definition-of-done to check against.
 Thin binding over `document-lifecycle`. `consumes: [issue, Clarification?, Findings?]` /
 `produces: AcceptanceCriteria`. Produce cell `(product_owner, define-acceptance-criteria)`.
 
+The cell exists in the taxonomy today but **nothing dispatches it** — this is a greenfield binding, not a
+migration, and there is no 41-1a work in it. What IS in scope is a **template rewrite**: the shipped
+`Prompts/product_owner/define-acceptance-criteria.md` instructs a task breakdown (the `Plan` wire, with
+criteria smuggled into each task's `testing` string), not acceptance criteria. Bound unchanged to the
+`AcceptanceCriteria` validator it would fail every produce, so the body is rewritten to the
+`AcceptanceCriteria` contract (39-15 D7 precedent; front matter unchanged).
+
 ## Produced document
 
 `AcceptanceCriteria` (41-1): independently verifiable criteria in Given/When/Then or checklist form,
@@ -44,12 +51,19 @@ role (or the initiator) can accept in the Task View or by asking the orchestrato
 
 ## Acceptance Criteria
 
-1. Rebuilt as a thin lifecycle binding; no bespoke parse/terminal.
+1. Built as a greenfield thin lifecycle binding (nothing dispatches the cell today); no bespoke
+   parse/terminal. Includes the `define-acceptance-criteria` template rewrite to the `AcceptanceCriteria`
+   contract (see Scope).
 2. Output validated by the `AcceptanceCriteria` type; validation failure flows the repair/review/escalation
    rings, never a dead end.
 3. Accepted document persisted with lineage: Issue → Clarification? → AcceptanceCriteria → Reviews.
+   `DocumentInstance` carries a single `ParentDocumentId`, so the parent is the accepted Clarification when
+   one exists (else the Findings, else null); the other consumed document ids ride the
+   `ACCEPTANCE_CRITERIA.DRAFTED` event payload.
 4. 41-15 can read the latest accepted `AcceptanceCriteria` for an issue via the 39-11 store.
-5. `[ResumeBehavior(Both)]`; passes the 39-10 structural test with no allowlist entry.
+5. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate suspends
+   inside the dispatched `document-lifecycle` child); passes the 39-10 structural test with no allowlist
+   entry.
 
 ## Dependencies
 

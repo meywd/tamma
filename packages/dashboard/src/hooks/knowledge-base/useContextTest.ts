@@ -49,8 +49,8 @@ export function useContextTest(): UseContextTestReturn {
         query,
         taskType,
         maxTokens,
-        sources,
-        options,
+        ...(sources !== undefined ? { sources } : {}),
+        ...(options !== undefined ? { options } : {}),
       });
       setResult(data);
     } catch (err) {

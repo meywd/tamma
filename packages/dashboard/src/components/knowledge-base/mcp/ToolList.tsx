@@ -4,7 +4,7 @@
  * Displays MCP tools with search/filter and invocation triggers.
  */
 
-import React, { useState, useMemo, type JSX } from 'react';
+import { useState, useMemo, type JSX } from 'react';
 import type { MCPTool } from '@tamma/shared';
 
 export interface ToolListProps {

@@ -3,7 +3,7 @@
 **Date**: 2026-07-25
 **Type**: 🚨 Known Issue
 **Category**: Product / Infrastructure
-**Status**: 🔍 Open — needs a product decision, and it is bigger than a docs question
+**Status**: ✅ Resolved — scheduled as **Epic 45** (`docs/stories/epic-45/`), 8 stories with implementation plans and an execution timeline
 
 ## What it actually is
 
@@ -75,13 +75,12 @@ Mirroring what `packages/dashboard` already has: a `docker/Dockerfile.dashboard-
 service, an image build + push in the deploy workflow, an nginx vhost/route in
 `docker/nginx-proxy.conf.template`, and a hostname. Plus turning on the excluded tests.
 
-None of it is hard. All of it is unowned.
+None of it is hard — it just was never written into any story, so no epic covered it.
 
-## The decision needed
+## Resolution
 
-Not "should we keep this app" — it is the product. The decision is **who funds shipping it, and
-when**, because at least three planned things (39-19, 44-6, and 34-9's own value) are silently
-waiting on it.
+This is now planned work, not an open question. Three planned things (39-19, 44-6, and 34-9's own
+value) were silently waiting on it; Epic 45 unblocks all three.
 
 > **ANSWERED — 2026-07-27.** Scoped as **Epic 45: Ship the customer application**
 > (`docs/stories/epic-45/`) — 8 stories, 16 person-days, an 8-day critical path.
@@ -95,8 +94,8 @@ waiting on it.
 > a blank pane. A deployment-only epic would put a working billing page behind a registration flow
 > whose verification email 404s.
 
-If the answer is "not yet", then 39-19 and 44-6 must be re-targeted at the admin console *with that
-stated*, rather than inheriting a dependency nobody has scheduled.
+39-19 and 44-6 now depend on Epic 45 explicitly (customer-facing UI goes in the customer app once
+it is deployed) instead of inheriting an unstated dependency.
 
 ## Related
 

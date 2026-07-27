@@ -398,7 +398,7 @@ development_status:
   30-10-cost-quota-dashboard: drafted               # No per-tenant infra cost/quota dashboard; existing cost UI is LLM-budget/KB only
   30-11-tenant-offboarding-and-data-portability: drafted  # ADDED 2026-07-27. NEW WORKFLOW tenant-offboarding. Closes the gap 30-9 AC6 named and deferred ("tenant-admin cannot self-deprovision; feature flagged for future self-service" - no follow-up story was ever written). Verified: every tenant-destruction path is platform-admin-only, `grep -ri offboard` over C# = ZERO hits, no tenant-scoped data export exists (37-7 is a data SUBJECT DSAR, 37-4 audit rows, 36-8 analytics - none exports working data), and Status="suspended" has a complete 402 branch (TenantStatusEvaluator.cs:38-39,76,186-195) that NOTHING ever writes. New workflow not amendment: owner-not-operator trigger, bundle-before-teardown artifact, day-scale customer-cancellable grace vs 30-9's 5-minute operator undo. COMPOSES 30-9 (dispatches DeprovisionTenantWorkflow; writes zero teardown logic, pinned by a structure test). Soft-blocked by 30-9/37-7/41-30, each with a named substitute. MUST AGREE WITH 35-8 on the `suspended` state machine - two writers, no suspension_reason today. 7d. [P2]
   epic-30-retrospective: optional
-  # UNOWNED, adjacent to 30-11, deliberately NOT folded into it (2026-07-27 survey):
+  # Not scheduled in any story; adjacent to 30-11, deliberately NOT folded into it (2026-07-27 survey):
   #   (a) scheduled retention purge of platform_events / tenant CP rows - 30-9 AC9 disclaims it as an
   #       "Epic 17 follow-up" that no story picks up; 37-5 covers audit_records ONLY. Recurring job =>
   #       a consumer of 41-30's seam. Right home: Epic 37's retention family.
@@ -599,49 +599,49 @@ development_status:
   #   Superseded: the 37.25 / 20.5 / 22.75 figures that ran the critical path through 40-4.
 
   epic-41: contexted   # Team-Activity Coverage — the non-coding roles onto the Epic-39 lifecycle (added 2026-07-23)
-  # 29 numbered stories (41-1 now ships as three sub-stories, so 31 story files); only 41-29 has an
-  # implementation plan and there is no EXECUTION-PLAN.md — the "waves" in the README are a leverage
-  # ordering, not a schedule.
+  # 32 numbered stories (41-1 ships as three sub-stories, so 34 workable stories); every story now has
+  # an implementation plan AND the epic has an EXECUTION-PLAN.md (added 2026-07-27: total ≈169 pd,
+  # internal critical path 16.4 d = 41-1b → 41-2 → 41-15, wave wall-clock ≈20 d, serialized
+  # edge-count-pin bump as the merge-rate limiter).
   # PRIORITIES REALIGNED 2026-07-24: 17 of the 29 [Pn] tags here disagreed with the story files' own
   #   "## Priority" headings. The story files are authoritative — their Wave labels already agree
   #   one-for-one with the README's Sequencing section, so the tags here were the drifted copy.
   # UPDATED 2026-07-24 (audit pass): 41-1 was SPLIT into 41-1a/41-1b/41-1c. The prose-document enabler,
-  # previously listed here and in the README as UNOWNED, is now owned by 41-1c. Exactly ONE Wave-0
-  # enabler remains unowned: the tenant-aware scheduled-trigger seam (blocks 41-5/41-7/41-11/41-16/
-  # 41-17 PR-sweep/41-20/41-23). It must be written before those stories can meet their AC1/AC4.
+  # previously listed here and in the README as having no story, is now 41-1c's work. (The scheduler seam,
+  # which had no story at the time of that pass, is now 41-30's — see the 2026-07-27 notes below.)
   41-1-team-role-and-document-type-extensions: superseded    # SPLIT into 41-1a/41-1b/41-1c — the remaining 41-1-*.md is the split index + the cross-story gate table. Same shape as Epic 42's 42-8 split.
-  41-1a-agent-taxonomy-extension: drafted                    # 3 AgentRoles (scrum_master/project_manager/ux_designer) + 15 action cells + the DERIVED panel-selector maps (GetReviewActionForRole throws for tech_writer today) + the scrum_master LegacyRoleAliases removal. 4-5d. Hard-blocks 41-6/41-7/41-8/41-10/41-11/41-16/41-17(PR half)/41-22/41-27/41-28 + the review stage of 41-24/25/26. [P0]
+  41-1a-agent-taxonomy-extension: drafted                    # 3 AgentRoles (scrum_master/project_manager/ux_designer) + 15 action tokens = 18 cells (each new role also carries context-scan) + the 41-8 lockstep amendment (scrum_master, write-retro-narrative) + the DERIVED panel-selector maps (GetReviewActionForRole throws for tech_writer today) + the scrum_master LegacyRoleAliases removal. 4-5d. Hard-blocks 41-5/41-6/41-7/41-8/41-10/41-11/41-16/41-17(PR half)/41-22/41-27/41-28 + the review stage of 41-24/25 (41-26 now defaults to the reachable devops ops-peer reviewer). [P0]
   41-1b-new-document-types: drafted                          # AcceptanceCriteria/BacklogOrdering/SprintPlan/TestPlan/ThreatModel/UxSpec — 6 DocumentTypeKey members + 6 IDocumentType impls (39-3/39-4 pattern). Bumps DocumentTypeKeyTests Be(10)->Be(16) and DocumentTypeRegistryTests HaveCount(10)->HaveCount(16). 5-6d. Hard-blocks 41-2/41-3/41-6/41-13/41-19/41-27 on BOTH paths. [P0]
-  41-1c-prose-documents-and-audience-tags: drafted           # `prose` DocumentTypeKey + ProseDocumentType (unvalidated body) + Audience on DocumentEnvelope AND DocumentInstance (+ tenant migration) + audience/kind vocabularies. 3-4d. THE PROSE ENABLER — was unowned; blocks 41-4/41-5/41-8/41-9/41-22/41-24/41-25/41-26. [P0]
-  41-2-acceptance-criteria-authoring: drafted                # cell define-acceptance-criteria (exists) → AcceptanceCriteria. Blocked on 41-1b. [P0]
-  41-3-backlog-prioritization-and-grooming: drafted          # cell prioritize-backlog (exists) → BacklogOrdering. Blocked on 41-1b. [P2]
-  41-4-roadmap-shaping: drafted                              # cell plan-roadmap (exists); prose output — blocked on 41-1c. [P3]
-  41-5-stakeholder-and-status-reporting: drafted             # cell summarize-stakeholder (exists); scheduled + prose — blocked on 41-1c AND the still-unowned scheduler seam. Agent path also needs 42-9 to publish. [P2]
+  41-1c-prose-documents-and-audience-tags: drafted           # `prose` DocumentTypeKey + ProseDocumentType (unvalidated body) + Audience on DocumentEnvelope AND DocumentInstance (+ tenant migration) + audience/kind vocabularies. 3-4d. THE PROSE ENABLER — previously had no story; blocks 41-4/41-5/41-8/41-9/41-22/41-24/41-25/41-26. [P0]
+  41-2-acceptance-criteria-authoring: drafted                # cell define-acceptance-criteria (exists, undispatched — greenfield binding) → AcceptanceCriteria. In-scope TEMPLATE REWRITE (shipped template emits a task breakdown, not criteria). Blocked on 41-1b; NOT on 41-1a. [P0]
+  41-3-backlog-prioritization-and-grooming: drafted          # cell prioritize-backlog (exists, undispatched) → BacklogOrdering. In-scope TEMPLATE REWRITE (shipped template ranks ONE item, TriageDecision-shaped). Blocked on 41-1b; NOT on 41-1a. [P2]
+  41-4-roadmap-shaping: drafted                              # cell plan-roadmap (exists, undispatched); prose output — blocked on 41-1c + 41-3. In-scope TEMPLATE REWRITE (shipped template emits a file-level Plan JSON, not a prose roadmap); NOT blocked on 41-1a (reviewer pinned to product_owner for kind=roadmap). [P3]
+  41-5-stakeholder-and-status-reporting: drafted             # CORRECTED 2026-07-27: produce cell is (project_manager, report-status) via 41-1a — (product_owner, summarize-stakeholder) is live-bound to ContextGatheringWorkflow and IntentionallyUnbound, so it cannot be a producer. Blocked on 41-1a AND 41-1c. NOT scheduler-blocked (user-initiated per PO 2026-07-25; cron is a later opt-in through 41-30). Agent path also needs 42-9 to publish. [P2]
   41-6-sprint-planning: drafted                              # SprintPlan type + scrum_master role. Blocked on 41-1a + 41-1b. [P2]
-  41-7-standup-synthesis: drafted                            # event-sourced digest; scheduled — blocked on 41-1a (scrum_master) AND the still-unowned scheduler seam. Agent path also needs 42-9 to broadcast. [P1]
-  41-8-retrospective-facilitation: drafted                   # scrum_master; produces Findings + an audience-tagged prose narrative. Blocked on 41-1a AND 41-1c. [P3]
+  41-7-standup-synthesis: drafted                            # event-sourced digest; blocked on 41-1a (scrum_master) ONLY. NOT scheduler-blocked (user-initiated per PO 2026-07-25; cron is a later opt-in through 41-30). Empty window short-circuits to STANDUP.SYNTHESIS.SKIPPED (EMPTY_FINDINGS forbids an empty digest). Agent path also needs 42-9 to broadcast. [P1]
+  41-8-retrospective-facilitation: drafted                   # SPLIT INTO PHASES 2026-07-27 (one dispatch = one document): Phase A (Findings via facilitate-retro) blocked on 41-1a only; Phase B (prose narrative) blocked on 41-1c AND a 41-1a amendment minting (scrum_master, write-retro-narrative) — the original fifteen-cell list had no narrative cell. [P3]
   41-9-adr-authoring: drafted                                # cell write-adr (exists); designated prose reference implementation — blocked on 41-1c (3-4d, independent of 41-1a/b, so land it first rather than demoting 41-9 out of Wave 1). [P1]
   41-10-system-design-document: drafted                      # DefinitionId system-design. Produce cell must NOT be (architect, plan-system-design) — that is plan-generation's Plan producer (ContractBindingTests.cs:160). Blocked on 41-1a minting (architect, design-system). [P2]
-  41-11-tech-debt-and-technical-risk-triage: drafted         # cell triage-tech-debt (41-1a); scheduled sweep — also blocked on the still-unowned scheduler seam. [P2]
+  41-11-tech-debt-and-technical-risk-triage: drafted         # cell triage-tech-debt (41-1a); scheduled sweep — cadence blocked on the 41-30 seam (owned since 2026-07-27). [P2]
   41-12-dependency-and-upgrade-planning: drafted             # cell plan-migration-strategy. Blocked on Epic 40 for the execution hand-off. [P3]
   41-13-test-plan-authoring: drafted                         # TestPlan type. Blocked on 41-1b. [P3]
   41-14-exploratory-test-charter: drafted                    # cell exploratory-test (exists); charter half ships now, but 'tool-enabled' exploration degrades to the six coding tools until Epic 42. [P3]
   41-15-acceptance-verification: drafted                     # cell verify-acceptance. Blocked on 41-2 + Epic 40. [P0]
-  41-16-regression-and-flaky-test-management: drafted        # cell manage-regression (41-1a) + existing write-regression-test; scheduled sweep — also blocked on the still-unowned scheduler seam. [P1]
-  41-17-standalone-code-review-and-pr-triage: drafted        # SPLIT ON THE HALF-LINE: code-review half (new DefinitionId diff-review) is Wave-1-startable; PR-triage half (pr-triage-sweep) needs 41-1a's triage-pr cell + the still-unowned scheduler seam. Incumbent `code-review` keeps its id and neither live caller is rewired; (senior_developer, code-review) moves out of ContractBindingTests.IntentionallyUnbound; DocumentTypeRegistry.cs:158 provisional edge reconciled. [P0]
+  41-16-regression-and-flaky-test-management: drafted        # cell manage-regression (41-1a) + existing write-regression-test; scheduled sweep — cadence blocked on the 41-30 seam (owned since 2026-07-27); Phase B additionally needs a per-test CI result store that NO STORY schedules. [P1]
+  41-17-standalone-code-review-and-pr-triage: drafted        # SPLIT ON THE HALF-LINE: code-review half (new DefinitionId diff-review) is Wave-1-startable; PR-triage half (pr-triage-sweep) needs 41-1a's triage-pr cell + the 41-30 seam (owned since 2026-07-27). Incumbent `code-review` keeps its id and neither live caller is rewired; (senior_developer, code-review) moves out of ContractBindingTests.IntentionallyUnbound; DocumentTypeRegistry.cs:158 provisional edge reconciled. [P0]
   41-18-refactor-planning: drafted                           # cell plan-refactor. Blocked on Epic 40. [P3]
   41-19-threat-modeling: drafted                             # ThreatModel type (cell threat-model exists). Blocked on 41-1b. [P3]
-  41-20-scheduled-security-audit: drafted                    # scheduled — blocked on the still-unowned scheduler seam; agent path is POSSIBLE today but degrades to ungoverned/unclassified ShellExecute until Epic 42. [P1]
+  41-20-scheduled-security-audit: drafted                    # scheduled — cadence blocked on the 41-30 seam (owned since 2026-07-27); the producing half needs nothing unlanded; agent path is POSSIBLE today but degrades to ungoverned/unclassified ShellExecute until Epic 42. [P1]
   41-21-security-incident-analysis: drafted                  # cell analyze-security-incident. [P3]
   41-22-incident-response-and-postmortem: drafted            # must DISPATCH deployment-pipeline, not re-bind the existing (devops, rollback) execution cell. Blocked on 41-1a (new (devops, incident-rootcause) cell — diagnose-incident is the triage-panel lens) AND 41-1c (prose postmortem). [P3]
-  41-23-capacity-and-health-review: drafted                  # scheduled — blocked on the still-unowned scheduler seam; health/metric signals have NO registered tool executor, so the agent path needs Epic 42 (42-9/42-7). [P2]
+  41-23-capacity-and-health-review: drafted                  # scheduled — cadence blocked on the 41-30 seam (owned since 2026-07-27); the producing half needs nothing unlanded; health/metric signals have NO registered tool executor, so the agent path needs Epic 42 (42-9/42-7). [P2]
   41-24-release-notes-and-changelog: drafted                 # prose (41-1c); also needs the tech_writer arm on the review-action selector (41-1a). Publication needs 42-9. [P1]
   41-25-user-and-api-documentation: drafted                  # prose (41-1c); same tech_writer review-selector gap (41-1a). Publication needs 42-9. [P2]
-  41-26-runbook-and-ops-docs-authoring: drafted              # prose (41-1c); same tech_writer review-selector gap (41-1a). Publication needs 42-9. [P3]
+  41-26-runbook-and-ops-docs-authoring: drafted              # prose (41-1c). CORRECTED 2026-07-27: produce cell is (tech_writer, write-runbook) — WriteRunbook is in tech_writer's eligible set ONLY, so (devops, write-runbook) is an illegal cell; default reviewer is (devops, review-operability), reachable today, so 41-1a is an UPGRADE here, not a blocker. Publication needs 42-9. [P3]
   41-27-user-flow-and-wireframe-drafting: drafted            # ux_designer role (41-1a) + UxSpec type (41-1b). [P3]
   41-28-design-review-and-accessibility-audit: drafted       # ux_designer role + review-design/audit-accessibility cells (41-1a); auditing a SHIPPED UI has no registered tool executor at all — agent path needs Epic 42. [P3]
   41-29-task-level-flow-router: drafted                      # FlowSwitch by task kind in the per-task loop. Rebases onto the post-Epic-40 loop (merge order above). 39-15 blocker SATISFIED. Its one real blocker is its own PlanTask.Kind + shared PlanDocumentType contract change — the contract is per-TYPE not per-cell, so both plan producers move, and 39-16's generated-region markers do not exist in any prompt file, so both templates are hand-edited. `infra` routes to the CODING path, NOT deployment-pipeline (post-merge; needs a MergeSha the loop does not have) — AC2 pins that negatively. [P0]
-  41-30-tenant-aware-scheduled-trigger-seam: drafted         # ADDED 2026-07-27. THE LAST UNOWNED WAVE-0 ENABLER, now owned. A HOSTED SERVICE + 2 control-plane tables + admin API - NOT a workflow (a workflow cannot start itself on a cadence; Elsa's own Cron trigger arms one trigger per DEFINITION with no tenant dimension and LocalScheduler is in-process, so an N-pod deploy arms N copies). CORRECTION TO THIS EPIC'S PREMISE: cron parsing needs ZERO new packages - Elsa.Scheduling 3.5.3 is already referenced (Tamma.ElsaServer.csproj:29), UseScheduling() is already called (Program.cs:100), and Cronos 0.11.0 is already a direct dependency of it. Use Elsa's PARSER, not its SCHEDULER. Two things every prior requirements list missed: an advisory lock is SESSION-scoped so it stops concurrent but NOT sequential double-fire after a pod crash (only a committed ledger row does), and exactly-once across a process boundary is impossible so the contract is AT-MOST-once. Tables EXCLUDED from the destructive startup DROP list (Program.cs:3243-3282) - same call as 43-5; a deploy must not silently disable every tenant's audits. Blocks 41-11/41-16/41-17(PR sweep)/41-20/41-23. NOT 41-5/41-7 (ceremonies are user-initiated, PO 2026-07-25). Not blocked by anything. 6-7d. [P0]
+  41-30-tenant-aware-scheduled-trigger-seam: drafted         # ADDED 2026-07-27. THE LAST WAVE-0 ENABLER TO GET A STORY (this one). A HOSTED SERVICE + 2 control-plane tables + admin API - NOT a workflow (a workflow cannot start itself on a cadence; Elsa's own Cron trigger arms one trigger per DEFINITION with no tenant dimension and LocalScheduler is in-process, so an N-pod deploy arms N copies). CORRECTION TO THIS EPIC'S PREMISE: cron parsing needs ZERO new packages - Elsa.Scheduling 3.5.3 is already referenced (Tamma.ElsaServer.csproj:29), UseScheduling() is already called (Program.cs:100), and Cronos 0.11.0 is already a direct dependency of it. Use Elsa's PARSER, not its SCHEDULER. Two things every prior requirements list missed: an advisory lock is SESSION-scoped so it stops concurrent but NOT sequential double-fire after a pod crash (only a committed ledger row does), and exactly-once across a process boundary is impossible so the contract is AT-MOST-once. Tables EXCLUDED from the destructive startup DROP list (Program.cs:3243-3282) - same call as 43-5; a deploy must not silently disable every tenant's audits. Blocks 41-11/41-16/41-17(PR sweep)/41-20/41-23. NOT 41-5/41-7 (ceremonies are user-initiated, PO 2026-07-25). Not blocked by anything. 6-7d. [P0]
   41-31-standalone-emergency-rollback: drafted               # ADDED 2026-07-27. NEW WORKFLOW emergency-rollback. The epic README's "Rollback OK - deployment-pipeline" row is right about the BRANCH and wrong about the CAPABILITY: the only inbound edge is :546, reachable only after prod has failed MaxStageRetries=3 times (:543/:102); four failure paths bypass it; the pipeline has NO standalone entry (sole dispatch SingleIssueCycleWorkflow.cs:721-742, post-merge, needs a mergeSha); and the rollback dispatch passes the FAILING mergeSha and NO previous-release ref (:604-613) while the prompt asks the agent to find "the previous known-good release". 41-22's OWN plan found this (C5) and filed it - to a .dev/findings/ file that DOES NOT EXIST. New workflow + a ONE-VARIABLE amendment to the pipeline (a structure test, written FIRST, pins that it still has exactly one rollback entry edge). Target resolved from the DCB stream (DEPLOY.STAGE.SUCCESS/production), NOT git releases - IGitPlatformClient has 12 methods and no release read, and the deploy event is the better source anyway. NO document, NO new cell, NO count-pin movement. Unblocks 41-22 AC3. 5d. [P1]
   41-32-alert-triggered-workflow-response-seam: drafted      # ADDED 2026-07-27. AMENDMENT to the alert stack, NOT a new workflow (41-21/41-22 are the workflows). Both declare "Reactive trigger" in their own Scope line and NOTHING can deliver it: AlertRuleEvaluator -> IAlertSink -> NotificationDispatcher -> 4 NOTIFICATION channels, and IElsaWorkflowService (the only way Tamma.Api starts a workflow) has 5 consumers, none in Services/Alerts/. Tamma detects, pages a human, stops. Adds alert_responses + an at-most-once dispatch ledger UNIQUE(alert_id,response_id). NOT a 5th IAlertChannel: AlertDeliveryAttempt is at-least-once with backoff - correct for email, wrong for starting an incident workflow. Idempotency key is the ALERT ID, not a window - no clock needed. Shares 41-30's ledger idiom and closed definition allowlist, shares NO table. AC7 pins that starting a workflow via an alert never bypasses that workflow's own governance. Not blocked by anything. 5-6d. [P1]
   epic-41-retrospective: optional
@@ -649,17 +649,16 @@ development_status:
   #   task to `deployment-pipeline`. 41-29 no longer does and cannot (post-merge workflow, needs a
   #   MergeSha the per-task loop has not produced). Epic 42's case is unaffected — only that sentence is
   #   stale. Flagged in epic-41/README.md's Epic 42 bullet; reconcile when epic-42 is next revised.
-  # UPDATED 2026-07-27: (1) the tenant-aware scheduled-trigger seam is NO LONGER UNOWNED — 41-30 owns it,
+  # UPDATED 2026-07-27: (1) the tenant-aware scheduled-trigger seam NOW HAS A STORY — 41-30 builds it,
   #   and a second, previously-unnamed trigger gap (the REACTIVE one that 41-21/41-22 both specify) is
   #   owned by 41-32. Epic 41 assumed two trigger classes and owned neither; it now owns both.
-  # UNOWNED WORK still needed before Epic 41 is schedulable: an EXECUTION-PLAN.md + per-story efforts —
-  #   only 41-1a/b/c, 41-29, 41-30, 41-31 and 41-32 carry estimates today.
-  # ALSO CORRECTED 2026-07-27: the 41-5 and 41-7 lines above still describe the scheduler seam as a
-  #   blocker. Per the product owner's 2026-07-25 decision (ceremonies are user-initiated, audits are
-  #   not) they are NOT blocked by it — both need only the manual trigger that already exists. The
-  #   epic README's Wave-0 scoping box has said so since e672436; these two lines are the drifted copy.
-  #   Left in place rather than silently rewritten, because their OTHER blockers (41-1c for 41-5,
-  #   41-1a for 41-7) are real and a careless edit would drop those too.
+  # RESOLVED 2026-07-27: EXECUTION-PLAN.md now exists (docs/stories/epic-41/EXECUTION-PLAN.md) and every
+  #   story carries a plan-level effort figure; the plans' totals supersede the story files' ranges.
+  # RESOLVED 2026-07-27: the 41-5 and 41-7 lines above have been rewritten per the PO's 2026-07-25
+  #   decision (ceremonies user-initiated, audits scheduled): the scheduler seam is dropped as their
+  #   blocker while their REAL blockers are kept (41-1a + 41-1c for 41-5 — its cell moved to
+  #   (project_manager, report-status); 41-1a for 41-7). The stale "⛔ BLOCKED (scheduler seam)"
+  #   banners in both stories' implementation plans were corrected in the same pass.
   # NOT A WORKFLOW GAP, recorded so it is not re-discovered (2026-07-27 survey):
   #   MentorshipController.cs:79 dispatches "tamma-autonomous-mentorship" — a definition id that exists
   #   NOWHERE (the real one is `mentorship`) — and SingleIssueCycleWorkflow.cs:283,300 dispatch
@@ -853,3 +852,55 @@ development_status:
   #   deliberately NOT fixed there — reconciling six services' deploy behaviour is its own change.
   # post-deploy-tests.sh's invocation is UNVERIFIED. 45-6 AC9 must confirm the script actually runs in a
   #   workflow; if it does not, the EXISTING probes for app./api./elsa.tamma.dev are also not running.
+
+
+  epic-46: contexted   # Provider admin surface — runtime provider & model management (added 2026-07-27)
+  # PRODUCT REQUIREMENT (PO, 2026-07-27, verbatim intent): "the UI should allow the admins to choose the
+  # models from latest models available without code updates." Clarified same day: BOTH levels — platform
+  # owner manages platform default model + provider enable/disable in packages/dashboard; tenant admins pick
+  # per-tenant model overrides in packages/dashboard-user. Two UIs, one listing seam, one settings store.
+  # This is Phase 2 of the provider abstraction (.dev/findings/provider-abstraction-and-openai-compatible-
+  # candidates.md), scoped DOWN: model choice becomes data; provider descriptors STAY CODE (catalogue remains
+  # platform-owned per the PO's 2026-07-25 SSRF decision — no admin- or tenant-supplied base URLs, ever).
+  #
+  # THE OWNERSHIP LADDER (binding): catalogue = code (per release) → provider enable/default-model =
+  # platform owner (provider_settings platform rows, /api/admin/providers/*) → per-tenant model override =
+  # tenant_owner/tenant_admin in SaaS, sole user in single-user (provider_settings tenant/user rows,
+  # /api/v1/agents/providers/*) → per-call model named by chain entries/agent configs (unchanged, still wins).
+  # RESOLUTION PRECEDENCE: tenant override → platform DB → LlmProviders:{key}:DefaultModel config →
+  # descriptor DefaultModel. DB slots ABOVE config on purpose — a UI choice must win without a deploy.
+  #
+  # WIRE FACTS (surveyed 2026-07-27, table in the epic README): models endpoints verified LIVE for anthropic
+  # (GET /v1/models, x-api-key — 401 proves route+auth) and gemini/google (GET /v1beta/openai/models, Bearer);
+  # from provider docs for openai, openrouter (public, no key), groq (/openai base preserved by CombineUrl),
+  # deepseek (GET /models — no /v1), moonshot, together (returns a BARE ARRAY, not {data:[...]}), and the
+  # local family (ollama/lmstudio serve OpenAI-compat /v1/models). NO models endpoint found for z-ai (docs
+  # unreachable from sandbox — 46-0 carries an implementation-time re-check), azure-openai (api-version +
+  # deployments semantics) and github-copilot (token exchange) — those degrade to free-text model entry.
+  #
+  # CREDENTIALS: model lists are fetched SERVER-SIDE via IProviderCredentialResolver — tenant BYOK key when
+  # present, platform key else (the resolver already implements exactly this order). The browser never sees
+  # or supplies a key. Fail-soft contract: models endpoints always 200 with fresh|stale|empty envelope and
+  # the currently-effective model always present flagged current — a provider being down never breaks the UI.
+  #
+  # ROT EVIDENCE (why live lists matter): openrouter descriptor default is a dated snapshot slug
+  # (ProviderCatalog.cs:66); LlmProxyService.cs:30,60-62 defaults/prices dot-formed ids (claude-sonnet-4.5)
+  # that look like display names, not API ids. 46-1 AC7 verifies + refreshes every shipped default ONCE with
+  # evidence; after that the DB override is the permanent cure.
+  # BILLING GUARD: pricing is keyed (provider,model) — UsagePricingEngine.cs:51-59 THROWS on unknown pairs
+  # (SaaS billing path) and DbProviderPricingService reads cost 0 (runner path). Settings PUTs warn
+  # (pricingKnown:false), never block — hard-block-in-SaaS is epic open question 1 for the PO.
+  46-0-live-model-listing-seam: drafted                      # ModelsEndpointPath on ProviderDescriptor + IProviderModelCatalog (fetch/normalize/5-min-cache/fail-soft) + GET /api/admin/providers (status roster: keyStatus configured|missing|not_required via the resolver, NOT config reads) + /api/admin/providers/{key}/models + tenant GET /api/v1/agents/providers/{provider}/models. Egress pins extend ProviderEgressRegressionTests. [P0] 3.5d
+  46-1-persisted-model-selection: drafted                    # provider_settings CP table (platform + tenant/user XOR rows, mirrors prompt_overrides pattern; CP-resident because the resolver runs on egress hot paths with tenantId but no tenant DbContext) + snapshot store (sync reads for the sync GetDefaultModel callers; 60s multi-instance bound, same posture as the BYOK cache) + LoadProviderConfig restructure (InlineToolLoopRunner.cs:1099-1151 — the early return at :1119 must not bypass the DB) + LlmProxyService pickup + chain-null-model audit + settings routes + PROVIDER.SETTINGS_CHANGED.SUCCESS audit events + the AC7 defaults refresh. RISKIEST EDIT: write the golden no-row comparison test (test 16) BEFORE restructuring. [P0] 4d
+  46-2-platform-admin-provider-settings-ui: drafted          # /admin/providers in packages/dashboard: roster + searchable live picker (fetch-on-open; current pinned even when delisted; deprecated marked; stale banner; free-text for unlistable providers) + save/reset + enable toggle. Follows conventions-api-client/AcceptanceRulesAdminPage conventions; fixtures FROM the C# DTOs (the 45-1 lesson). Admin-app tests still excluded from CI — 44-6 owns that; this story leaves its own files typecheck-clean. [P0] 3d
+  46-3-tenant-model-settings-ui: drafted                     # /settings/models in packages/dashboard-user: tenant roster (enabled providers only) + same picker + override save/reset ("use platform default") + member read-only (server AgentManage is the enforcement; client canEdit is cosmetic, 403-downgrade pinned by test). MERGE GATES: 45-0 (CI typecheck) + 45-2 (shared App.tsx/AppLayout.tsx nav rework — land after). REACHABILITY gated on epic 45's 45-4/45-5/45-6 deploying the app — merge does not wait for those. [P1] 3d
+  epic-46-retrospective: optional
+  # ── Cross-epic notes filed by the Epic 46 survey ───────────────────────────────────────────────
+  # The finding's Program.cs:100-168 named-client citation is STALE — Phase 1 moved registrations to
+  #   Extensions/ProviderHttpClientServiceCollectionExtensions.cs (:24-95 hand-registered, :113-142
+  #   descriptor loop). Corrected in the finding's Phase-2 appendix, not its historical body.
+  # 46-3 is the SECOND story queued into packages/dashboard-user before it is deployed (44-6 may re-target
+  #   there too). Epic 45's schedule is now load-bearing for two other epics — worth saying at its standup.
+  # Enabled flag lands as DATA in 46-1 but is NOT enforced on the egress path (allowlist inversion is the
+  #   finding's remaining Phase-2 work). UIs grey/hide; settings routes reject; egress does not check. Do not
+  #   read "provider disabled" as a security control until that lands.

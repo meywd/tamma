@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Tamma.Api.Services.Billing;
 using Tamma.Api.Services.Diagnostics;
+using Tamma.Api.Services.Providers;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
@@ -13,14 +14,42 @@ namespace Tamma.Api.Services.SaaS;
 /// Anthropic's <c>/v1/messages</c> endpoint and records token-usage +
 /// estimated cost via <see cref="IDiagnosticsService"/>.
 ///
-/// Uses <see cref="IHttpClientFactory"/> with the <c>anthropic</c> named
-/// client (configured in <c>Program.cs</c>) so tests can swap a handler.
+/// The named client, endpoint path, and wire dialect come from the
+/// <see cref="ProviderCatalog"/> descriptor for <see cref="ProviderKey"/>
+/// (Phase 1 of the provider abstraction) — previously this class was the
+/// third independent copy of the Anthropic wiring and rode the named client
+/// whose version header had drifted to an unpublished value. The payload
+/// builder itself stays local: this is a pass-through proxy of
+/// caller-supplied turns, deliberately NOT the tool-loop conversation format
+/// <c>ProviderRequestShaper</c> produces, and its wire bytes are pinned by
+/// <c>ProviderGoldenRequestTests</c>.
 /// </summary>
 public sealed class LlmProxyService : ILlmProxyService
 {
     private const string ProviderKey = "anthropic-claude";
     private const string DefaultModel = "claude-sonnet-4.5";
-    private const string HttpClientName = "anthropic";
+
+    /// <summary>Descriptor for <see cref="ProviderKey"/> (an alias of the
+    /// <c>anthropic</c> descriptor). Fail-loud if the catalogue ever drops the
+    /// key or flips its dialect away from Anthropic — this proxy only
+    /// implements the Anthropic pass-through shape. F7: the resolution is also
+    /// exercised at boot via <see cref="ValidateProviderWiring"/> (called from
+    /// service wiring) so a bad key fails at startup with the intended message
+    /// instead of a <c>TypeInitializationException</c> at first use.</summary>
+    private static readonly ProviderDescriptor Descriptor = ResolveRequiredDescriptor();
+
+    private static ProviderDescriptor ResolveRequiredDescriptor() =>
+        ProviderCatalog.Resolve(ProviderKey) is { Dialect: ProviderWireDialect.Anthropic } d
+            ? d
+            : throw new InvalidOperationException(
+                $"LlmProxyService requires provider '{ProviderKey}' to resolve to an " +
+                "Anthropic-dialect descriptor in ProviderCatalog.");
+
+    /// <summary>F7 — cheap startup validation: runs the descriptor resolution
+    /// directly (NOT through the static field, so the intended
+    /// <see cref="InvalidOperationException"/> surfaces unwrapped) and is
+    /// invoked during service wiring so a catalogue regression fails at boot.</summary>
+    public static void ValidateProviderWiring() => _ = ResolveRequiredDescriptor();
 
     // Minimal price sheet (USD per 1K tokens). Keep it narrow — real pricing
     // integration is Epic-9/diagnostics territory. Falls back to the sonnet
@@ -95,14 +124,28 @@ public sealed class LlmProxyService : ILlmProxyService
             }
         }
 
-        var client = _httpFactory.CreateClient(HttpClientName);
+        var client = _httpFactory.CreateClient(Descriptor.HttpClientName);
+        if (client.BaseAddress is null)
+        {
+            _logger.LogError(
+                "Named HttpClient '{ClientName}' has no BaseAddress; check the provider registration.",
+                Descriptor.HttpClientName);
+            return Error("upstream_error", "provider client is not configured");
+        }
+
         var payload = BuildAnthropicPayload(model, request);
+
+        // F1 — compose the absolute request URI via the single path-preserving
+        // join (a root-relative path against BaseAddress would discard any
+        // base-path segments). Byte-identical for the default Anthropic base.
+        var requestUri = ProviderCatalog.CombineUrl(
+            client.BaseAddress.ToString(), ProviderCatalog.ChatPath(Descriptor));
 
         var sw = Stopwatch.StartNew();
         HttpResponseMessage? response = null;
         try
         {
-            response = await client.PostAsJsonAsync("/v1/messages", payload, ct);
+            response = await client.PostAsJsonAsync(requestUri, payload, ct);
             sw.Stop();
 
             if (!response.IsSuccessStatusCode)

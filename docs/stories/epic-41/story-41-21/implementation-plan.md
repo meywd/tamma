@@ -119,7 +119,7 @@ blast-radius field gap.
 
 9. **NEW — "reactive trigger (security alert / event)" has no seam and the story does not need one.**
    Unlike 41-20, this workflow is **event-driven, not scheduled**, so it does **not** depend on the
-   unowned scheduled-trigger seam. It is dispatched by whatever detects the incident — including
+   scheduled-trigger seam (story 41-30). It is dispatched by whatever detects the incident — including
    41-20's `SECURITY_AUDIT.SECRET_EXPOSED` edge, an operator, or the API. The binding takes the alert
    as an input; no trigger infrastructure is built or required.
 
@@ -485,7 +485,7 @@ NUnit + FluentAssertions (+ Moq; Testcontainers for the execution suite).
 - **NOT blocked by 41-1a** — `(security, analyze-security-incident)` exists at `AgentAction.cs:95`
   and `RolePhaseMap.cs:136`, with its prompt file (Correction 1).
 - **NOT blocked by 41-1b or 41-1c** — `Diagnosis` is an existing registered type; nothing prose here.
-- **NOT blocked by the unowned scheduled-trigger seam** — this workflow is *reactive*, not scheduled
+- **NOT blocked by the scheduled-trigger seam (story 41-30)** — this workflow is *reactive*, not scheduled
   (Correction 9). It is one of the few security/ops stories in Epic 41 with no scheduler dependency.
 - **NOT blocked by Epic 42 for its first cut** — D6's context is assembled from the DCB stream and the
   alert payload, so the produce cell runs with tools off. A tool-enabled forensic variant would need

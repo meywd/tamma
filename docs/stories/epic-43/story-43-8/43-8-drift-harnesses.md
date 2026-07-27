@@ -120,7 +120,7 @@ An analyzer (`TAMMA00x`, `Tamma.Activities.Guardrails` shape) was designed and *
 
 - **A Roslyn analyzer.** Rejected on measurement (Architectural Context). Not deferred — decided.
 - **Closing the holes in AC10.** They are recorded, not fixed. `file_write` path granularity, the two unmerged shell denylists, MCP's absent drift signal and the Elsa workflow API are named as real holes; each needs its own change.
-- **Draining `KnownUngovernedEndpoints` to zero.** The ratchet guarantees it only shrinks; the work of governing ~188 routes is not funded by this story and is an open question in the epic README.
+- **Draining `KnownUngovernedEndpoints` to zero.** The ratchet guarantees it only shrinks; the work of governing ~188 routes is not part of this story and is an open question in the epic README.
 - **Any enforcement.** This story adds metadata and tests. The filter, the gate and the 409 are Story 43-9.
 
 ## Estimated Effort

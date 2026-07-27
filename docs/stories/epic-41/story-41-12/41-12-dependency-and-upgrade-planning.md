@@ -52,7 +52,9 @@ major-version upgrade of a load-bearing dependency can be an always-escalate cla
    against no input.
 4. An accepted `Plan` is retrievable by `repository` through 39-11 and is read by a coding-step dispatch in
    an integration test.
-5. `[ResumeBehavior(Both)]`; 39-10 structural test green without an allowlist entry. A new
+5. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate
+   suspends inside the dispatched `document-lifecycle` child); 39-10 structural test green without an
+   allowlist entry. A new
    `WorkflowDocumentInterface` row is declared and `WorkflowInterfaceGraphTests.Declared_edge_count_is_pinned`
    is bumped in the same change.
 

@@ -56,7 +56,9 @@ refactor touching a public API can be an always-escalate class.
    triggered from a `Review` concern instead), and fails loud if a referenced id is unreadable.
 5. An accepted `Plan` is retrievable by `issueId`/`repository` through 39-11 and is read by a coding-step
    dispatch in an integration test.
-6. `[ResumeBehavior(Both)]`; 39-10 structural test green without an allowlist entry. A new
+6. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate
+   suspends inside the dispatched `document-lifecycle` child); 39-10 structural test green without an
+   allowlist entry. A new
    `WorkflowDocumentInterface` row is declared and `WorkflowInterfaceGraphTests.Declared_edge_count_is_pinned`
    is bumped in the same change.
 

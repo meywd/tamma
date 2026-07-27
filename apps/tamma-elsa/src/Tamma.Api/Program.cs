@@ -105,72 +105,11 @@ builder.Services.AddHttpClient("elsa", client =>
     if (!string.IsNullOrEmpty(elsaApiKey))
         client.DefaultRequestHeaders.Add("Authorization", $"ApiKey {elsaApiKey}");
 });
-builder.Services.AddHttpClient("anthropic", client =>
-{
-    client.BaseAddress = new Uri("https://api.anthropic.com");
-    // 2023-06-01 is the published Anthropic API version. This client previously sent
-    // "2024-01-01", which is not a released version at all — a drift artifact of the
-    // Anthropic request shape being built in THREE places (here, InlineToolLoopRunner
-    // and LlmProxyService), two of which already sent 2023-06-01. Collapsing those
-    // three paths behind one provider descriptor is tracked in
-    // .dev/findings/provider-abstraction-and-openai-compatible-candidates.md.
-    client.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01");
-    var apiKey = builder.Configuration["Anthropic:ApiKey"];
-    if (!string.IsNullOrEmpty(apiKey))
-        client.DefaultRequestHeaders.Add("x-api-key", apiKey);
-});
-// HTTP-based providers used by HttpProviderClient (finding 003). Each named
-// client carries its own base URL + auth header so the dispatch layer doesn't
-// have to know the provider details. CLI-agent providers (claude-code,
-// opencode) and the Zen MCP provider are NOT registered here — they require
-// subprocess / MCP transports that are tracked separately.
-builder.Services.AddHttpClient("openai", client =>
-{
-    client.BaseAddress = new Uri(
-        builder.Configuration["OpenAI:BaseUrl"] ?? "https://api.openai.com");
-    var apiKey = builder.Configuration["OpenAI:ApiKey"];
-    if (!string.IsNullOrEmpty(apiKey))
-        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
-});
-builder.Services.AddHttpClient("github-copilot", client =>
-{
-    client.BaseAddress = new Uri(
-        builder.Configuration["Copilot:BaseUrl"] ?? "https://api.githubcopilot.com");
-    var apiKey = builder.Configuration["Copilot:ApiKey"];
-    if (!string.IsNullOrEmpty(apiKey))
-        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
-});
-builder.Services.AddHttpClient("gemini", client =>
-{
-    client.BaseAddress = new Uri(
-        builder.Configuration["Gemini:BaseUrl"] ?? "https://generativelanguage.googleapis.com");
-    // Gemini accepts the API key via X-Goog-Api-Key header on v1beta.
-    var apiKey = builder.Configuration["Gemini:ApiKey"];
-    if (!string.IsNullOrEmpty(apiKey))
-        client.DefaultRequestHeaders.Add("X-Goog-Api-Key", apiKey);
-});
-builder.Services.AddHttpClient("openrouter", client =>
-{
-    client.BaseAddress = new Uri(
-        builder.Configuration["OpenRouter:BaseUrl"] ?? "https://openrouter.ai");
-    var apiKey = builder.Configuration["OpenRouter:ApiKey"];
-    if (!string.IsNullOrEmpty(apiKey))
-        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
-});
-builder.Services.AddHttpClient("z.ai", client =>
-{
-    client.BaseAddress = new Uri(
-        builder.Configuration["ZAi:BaseUrl"] ?? "https://api.z.ai");
-    var apiKey = builder.Configuration["ZAi:ApiKey"];
-    if (!string.IsNullOrEmpty(apiKey))
-        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
-});
-builder.Services.AddHttpClient("local", client =>
-{
-    // Local model server (Ollama / LM Studio default). Configurable per-deploy.
-    var baseUrl = builder.Configuration["LocalLLM:BaseUrl"] ?? "http://localhost:11434";
-    client.BaseAddress = new Uri(baseUrl);
-});
+// LLM provider named clients (anthropic, openai, gemini, openrouter, …, the
+// descriptor-driven loop, and the tool-loop runner's plain client). Extracted
+// to an extension so the golden-request tests can exercise the REAL
+// registrations end-to-end through HttpProviderClient.
+builder.Services.AddTammaProviderHttpClients(builder.Configuration);
 builder.Services.AddHttpClient("github", client =>
 {
     var baseUrl = builder.Configuration["GitHub:ApiBaseUrl"] ?? "https://api.github.com";
