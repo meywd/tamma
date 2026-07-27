@@ -585,6 +585,15 @@ if (!string.IsNullOrWhiteSpace(
 // of provider-key resolution into the LLM call path (CallLlmInlineActivity).
 builder.Services.AddProviderCredentialResolution();
 
+// Epic 46 — the live model-listing seam (46-0: IProviderModelCatalog — one
+// fetch/normalize/cache service behind the admin + tenant models routes) and
+// the persisted provider-settings store (46-1: IProviderSettingsStore — the
+// tenant-override → platform-DB layers of the default-model precedence,
+// consumed synchronously by InlineToolLoopRunner and LlmProxyService).
+// Registered AFTER AddTammaData (CP DbContext factory) and
+// AddProviderCredentialResolution (both are collaborators).
+builder.Services.AddProviderModelCatalogAndSettings();
+
 // Story 32-5 (T3): the managed execution layer behind POST /api/v1/llm/call.
 // ManagedAgent composes the rule-2 sequence (resolve+enablement+prompt → gate →
 // budget → credential → STARTED → runner → meter → terminal) and the mapper
@@ -2510,6 +2519,22 @@ agents.MapPost("/providers/{provider}/credential/rotate", ProviderCredentialEndp
 agents.MapDelete("/providers/{provider}/credential", ProviderCredentialEndpoints.DeleteCredential)
     .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
 
+// ── Epic 46 — tenant-facing model listing + model settings ──
+// Reads inherit the group's SettingsView gate (any tenant member; single-user:
+// the sole user) — same read reach as the BYOK ListProviders above. The model
+// list is fetched SERVER-side with the tenant's BYOK key when present, else
+// the platform key (epic D5); responses carry model metadata only, never keys.
+// PUT/DELETE of the tenant model override are AgentManage
+// (tenant_owner/tenant_admin → member 403) — model choice sits at the same
+// trust level as BYOK key custody (epic D3).
+agents.MapGet("/providers/models", ProviderCredentialEndpoints.GetTenantProviderRoster);
+agents.MapGet("/providers/{provider}/models", ProviderCredentialEndpoints.GetTenantProviderModels);
+agents.MapGet("/providers/{provider}/model", ProviderCredentialEndpoints.GetTenantProviderModel);
+agents.MapPut("/providers/{provider}/model", ProviderCredentialEndpoints.PutTenantProviderModel)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agents.MapDelete("/providers/{provider}/model", ProviderCredentialEndpoints.DeleteTenantProviderModel)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+
 // ── Integration BYOK — tenant-admin JIRA + email credential management ──
 // Sibling of the Story 32-3 provider BYOK endpoints. Set/remove the tenant's own
 // JIRA/email credential in the secret cabinet so the mediation resolves it
@@ -2655,6 +2680,21 @@ var adminConventions = app.MapGroup("/api/admin/conventions").RequireAuthorizati
 adminConventions.MapPut("/{role}/{action}", ConventionStoreEndpoints.UpsertSystemDefault);
 adminConventions.MapDelete("/{role}/{action}", ConventionStoreEndpoints.DeleteSystemDefault);
 adminConventions.MapPost("/{role}/{action}/reset", ConventionStoreEndpoints.ResetSystemDefault);
+
+// ── Epic 46 — provider admin surface (46-0 status roster + live models;
+// 46-1 platform settings mutations). Own PlatformOwnerAccess group modelled
+// on adminConventions above (epic D3: platform layer is the platform owner's
+// in SaaS; the sole user in single-user — the policy resolves to them).
+// NOTE (46-0 AC4 deviation): the status roster lives at /status because the
+// bare GET /api/admin/providers is already the Story 34-11 provider COST
+// price-book roster (AdminProviderPricingEndpoints.ListProviders, mapped on
+// the admin group above) — double-mapping it would be an ambiguous match.
+var adminProviders = app.MapGroup("/api/admin/providers")
+    .RequireAuthorization("PlatformOwnerAccess");
+adminProviders.MapGet("/status", ProviderAdminEndpoints.ListProviderStatus);
+adminProviders.MapGet("/{key}/models", ProviderAdminEndpoints.GetProviderModels);
+adminProviders.MapPut("/{key}/settings", ProviderAdminEndpoints.PutProviderSettings);
+adminProviders.MapDelete("/{key}/settings", ProviderAdminEndpoints.DeleteProviderSettings);
 
 // ── Acceptance Rules (Story 39-5) ──
 // Configurable per-document-type acceptance policy (autonomy dial + bounds +

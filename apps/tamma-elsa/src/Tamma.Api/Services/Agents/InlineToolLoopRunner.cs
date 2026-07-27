@@ -55,6 +55,7 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     private readonly ToolLoopEventEmitter? _eventEmitter;
     private readonly ParallelToolExecutor? _parallelExecutor;
     private readonly IProviderCredentialResolver? _credentialResolver;
+    private readonly IProviderSettingsStore? _settingsStore;
 
     public InlineToolLoopRunner(
         ILogger<InlineToolLoopRunner>? logger,
@@ -66,7 +67,8 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         ContextCompactor? contextCompactor = null,
         ToolLoopEventEmitter? eventEmitter = null,
         ParallelToolExecutor? parallelExecutor = null,
-        IProviderCredentialResolver? credentialResolver = null)
+        IProviderCredentialResolver? credentialResolver = null,
+        IProviderSettingsStore? settingsStore = null)
     {
         _logger = logger;
         _httpClientFactory = httpClientFactory;
@@ -78,6 +80,10 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         _eventEmitter = eventEmitter;
         _parallelExecutor = parallelExecutor;
         _credentialResolver = credentialResolver;
+        // Story 46-1 — the persisted-model-selection layer. OPTIONAL (null in
+        // the standalone engine and in pre-46 unit-test compositions): with no
+        // store, default-model resolution is byte-identical to pre-46-1.
+        _settingsStore = settingsStore;
     }
 
     /// <inheritdoc />
@@ -1095,8 +1101,20 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     /// the key is resolved separately via <see cref="IProviderCredentialResolver"/>
     /// in <see cref="LoadProviderConfigWithKeyAsync"/>. <see cref="LlmProviderConfig.ApiKey"/>
     /// is always left empty here so the resolver is the single key source.
+    /// Platform-scope overload — see <see cref="LoadProviderConfig(string, Guid?)"/>.
     /// </summary>
     internal LlmProviderConfig LoadProviderConfig(string providerName)
+        => LoadProviderConfig(providerName, tenantId: null);
+
+    /// <summary>
+    /// Story 46-1 (AC3) — tenant-aware provider config load. BaseUrl /
+    /// TimeoutSeconds resolution is UNCHANGED from the pre-46-1 shape;
+    /// DefaultModel resolves through the four-step precedence in
+    /// <see cref="ResolveDefaultModel"/> (tenant/user override → platform DB →
+    /// config → descriptor). With no settings store wired — or no rows saved —
+    /// the output is byte-identical to the pre-46-1 resolution.
+    /// </summary>
+    internal LlmProviderConfig LoadProviderConfig(string providerName, Guid? tenantId)
     {
         // F5 — the allowlist carries CANONICAL keys only; catalogue aliases
         // ("kimi" → moonshot, "z.ai"/"zai" → z-ai, "anthropic-claude" →
@@ -1115,13 +1133,15 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
             return new LlmProviderConfig { Name = providerName, Enabled = false };
         }
 
+        var resolvedModel = ResolveDefaultModel(canonicalName, tenantId).Model;
+
         var section = _configuration?.GetSection($"LlmProviders:{canonicalName}");
         if (section != null && section.Exists())
         {
             var config = new LlmProviderConfig { Name = canonicalName };
             config.BaseUrl = section["BaseUrl"] ?? "";
             // ApiKey deliberately NOT read here — resolved via IProviderCredentialResolver.
-            config.DefaultModel = section["DefaultModel"] ?? "";
+            config.DefaultModel = resolvedModel;
             if (int.TryParse(section["TimeoutSeconds"], out var t)) config.TimeoutSeconds = t;
             return config;
         }
@@ -1135,19 +1155,83 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         var descriptor = ProviderCatalog.Resolve(canonicalName);
         if (descriptor is null)
         {
-            return new LlmProviderConfig { Name = canonicalName };
+            return new LlmProviderConfig { Name = canonicalName, DefaultModel = resolvedModel };
         }
-
-        var defaultModel = string.Equals(descriptor.Key, "anthropic", StringComparison.OrdinalIgnoreCase)
-            ? _configuration?["Anthropic:Model"] ?? descriptor.DefaultModel
-            : descriptor.DefaultModel;
 
         return new LlmProviderConfig
         {
             Name = canonicalName,
             BaseUrl = descriptor.DefaultBaseUrl,
-            DefaultModel = defaultModel,
+            DefaultModel = resolvedModel,
         };
+    }
+
+    /// <summary>
+    /// Story 46-1 (AC3, plan D4) — THE single implementation of the
+    /// default-model precedence (epic 46 D2, binding):
+    /// <b>tenant/user override → platform DB row → configuration → descriptor</b>.
+    /// Called from <see cref="LoadProviderConfig(string, Guid?)"/> for every
+    /// egress path AND surfaced (with provenance) to the settings endpoints —
+    /// one implementation, two consumers, no restatement (the 43-1 lesson).
+    ///
+    /// <para><b>The config step preserves the pre-46-1 shape VERBATIM</b>
+    /// (pinned by the no-row golden-comparison test): when the
+    /// <c>LlmProviders:{key}</c> section EXISTS, the config answer is
+    /// <c>section["DefaultModel"] ?? ""</c> — including the empty string (the
+    /// legacy early return never fell through to the descriptor, and "" keeps
+    /// meaning "caller must specify"). When the section does NOT exist,
+    /// anthropic honours the legacy <c>Anthropic:Model</c> key, then the
+    /// descriptor default. DB rows sit ABOVE all of that (epic D2: a UI choice
+    /// takes effect without a deploy; config silently outranking the UI would
+    /// make the UI a lie) and are never empty (validated on write).</para>
+    /// </summary>
+    /// <param name="canonicalName">Canonical provider key (alias-normalized).</param>
+    /// <param name="tenantId">Tenant context when the caller has one; the
+    /// store maps single-user installs to the sole user's row internally.</param>
+    internal ProviderDefaultModelResolution ResolveDefaultModel(
+        string canonicalName, Guid? tenantId)
+    {
+        // 1) Principal override (tenant row in SaaS / sole user's row in
+        //    single-user mode). Store rows are validated non-empty on write.
+        var overrideModel = _settingsStore?.TryGetModel(canonicalName, tenantId);
+        if (!string.IsNullOrWhiteSpace(overrideModel))
+        {
+            return new ProviderDefaultModelResolution(overrideModel!, "tenant-override");
+        }
+
+        // 2) Platform DB row.
+        var platformModel = _settingsStore?.TryGetPlatformModel(canonicalName);
+        if (!string.IsNullOrWhiteSpace(platformModel))
+        {
+            return new ProviderDefaultModelResolution(platformModel!, "platform-db");
+        }
+
+        // 3) Configuration — the pre-46-1 resolution, shape-preserved.
+        var section = _configuration?.GetSection($"LlmProviders:{canonicalName}");
+        if (section != null && section.Exists())
+        {
+            return new ProviderDefaultModelResolution(section["DefaultModel"] ?? "", "config");
+        }
+
+        var descriptor = ProviderCatalog.Resolve(canonicalName);
+        if (descriptor is null)
+        {
+            return new ProviderDefaultModelResolution("", "descriptor");
+        }
+
+        if (string.Equals(descriptor.Key, "anthropic", StringComparison.OrdinalIgnoreCase))
+        {
+            // Legacy Anthropic:Model (anthropic-only, no-section branch only —
+            // exactly where the pre-46-1 code consulted it).
+            var legacy = _configuration?["Anthropic:Model"];
+            if (legacy is not null)
+            {
+                return new ProviderDefaultModelResolution(legacy, "config");
+            }
+        }
+
+        // 4) Descriptor default (may be "" — "caller must always specify").
+        return new ProviderDefaultModelResolution(descriptor.DefaultModel, "descriptor");
     }
 
     /// <summary>
@@ -1167,7 +1251,9 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         LoadProviderConfigWithKeyAsync(
             string providerName, Guid? tenantId, CancellationToken ct)
     {
-        var config = LoadProviderConfig(providerName); // BaseUrl / DefaultModel / Timeout only
+        // Story 46-1 — the tenant context flows into the default-model
+        // resolution (tenant override → platform DB → config → descriptor).
+        var config = LoadProviderConfig(providerName, tenantId); // BaseUrl / DefaultModel / Timeout only
 
         if (_credentialResolver is null)
         {
@@ -1191,13 +1277,47 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
 
     /// <summary>
     /// Resolve the default model for a provider (BaseUrl / DefaultModel / Timeout
-    /// only). Public per <see cref="IInlineToolLoopRunner.GetDefaultModel"/>
+    /// only). Public per <see cref="IInlineToolLoopRunner.GetDefaultModel(string)"/>
     /// (Finding I-1) so <c>ManagedAgent</c> can pick the override provider's own
     /// default model instead of a role-resolved model for a different provider.
+    /// Platform-scope: resolves the platform-DB → config → descriptor legs only
+    /// (Story 46-1 — callers without tenant context keep today's behaviour plus
+    /// the platform DB layer).
     /// </summary>
     public string GetDefaultModel(string providerName)
     {
-        return LoadProviderConfig(providerName).DefaultModel;
+        return GetDefaultModel(providerName, tenantId: null);
+    }
+
+    /// <summary>
+    /// Story 46-1 (AC3) — tenant-aware default model: full four-step precedence
+    /// (tenant/user override → platform DB → config → descriptor). Same
+    /// empty-string contract as the platform overload.
+    /// </summary>
+    public string GetDefaultModel(string providerName, Guid? tenantId)
+    {
+        return LoadProviderConfig(providerName, tenantId).DefaultModel;
+    }
+
+    /// <summary>
+    /// Story 46-1 — the default-model resolution WITH provenance, for the
+    /// settings endpoints' <c>source</c> field (one implementation — this is
+    /// the same <see cref="ResolveDefaultModel"/> the egress paths use).
+    /// Alias-normalizes and allowlist-guards like <see cref="LoadProviderConfig(string, Guid?)"/>;
+    /// a non-allowlisted key resolves to an empty model with source
+    /// <c>"descriptor"</c>.
+    /// </summary>
+    public ProviderDefaultModelResolution ResolveDefaultModelWithSource(
+        string providerName, Guid? tenantId)
+    {
+        var canonicalName = ProviderCatalog.Resolve(providerName)?.Key
+            ?? ProviderCatalog.ResolveNonHttp(providerName)?.Key
+            ?? providerName;
+        if (!ProviderAllowlist.IsAllowedDefault(canonicalName))
+        {
+            return new ProviderDefaultModelResolution("", "descriptor");
+        }
+        return ResolveDefaultModel(canonicalName, tenantId);
     }
 
     // =======================================================================

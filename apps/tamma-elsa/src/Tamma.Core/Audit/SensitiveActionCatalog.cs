@@ -60,6 +60,17 @@ public static class SensitiveActionCatalog
     public const string ConventionReset = "CONVENTION.RESET.SUCCESS";
     public const string AgentConfigUpdated = "AGENT_CONFIG.UPDATED.SUCCESS";
 
+    /// <summary>Story 46-1 (AC8) — a provider_settings mutation: platform
+    /// default model set/removed, provider enabled/disabled, or a tenant/user
+    /// model override set/removed. Wired by <c>ProviderAdminEndpoints</c> +
+    /// the tenant model routes in <c>ProviderCredentialEndpoints</c>'s surface.
+    /// The concrete operation travels in the event's <c>operation</c> tag
+    /// (set|removed|enabled|disabled) with <c>scope</c> platform|tenant|user;
+    /// data carries previous→new model. Never any key material — this is a
+    /// configuration change, not a credential one (hence Config/CC8.1, not
+    /// Byok — the BYOK category is for key custody).</summary>
+    public const string ProviderSettingsChanged = "PROVIDER.SETTINGS_CHANGED.SUCCESS";
+
     /// <summary>Forward-looking: an edit to the tenant content-sanitization ruleset.</summary>
     public const string SanitizationRuleChanged = "SANITIZATION_RULE.CHANGED.SUCCESS";
 
@@ -193,6 +204,10 @@ public static class SensitiveActionCatalog
         Add(ConventionDeleted, AuditCategory.Config, AuditSeverity.Warning, "CC8.1", "convention", true);
         Add(ConventionReset, AuditCategory.Config, AuditSeverity.Notice, "CC8.1", "convention", true);
         Add(AgentConfigUpdated, AuditCategory.Config, AuditSeverity.Notice, "CC8.1", "agent_config", true);
+        // Story 46-1 (AC8) — provider settings (model selection / enable flag)
+        // are configuration change-management, not key custody: Config/CC8.1,
+        // deliberately NOT AuditCategory.Byok.
+        Add(ProviderSettingsChanged, AuditCategory.Config, AuditSeverity.Notice, "CC8.1", "provider", true);
         Add(SanitizationRuleChanged, AuditCategory.Config, AuditSeverity.Warning, "CC8.1", "sanitization_rule", false);
 
         // ── PERSONA — CC8.1 (prompt/persona are the agent's behavioural config) ──

@@ -6,7 +6,7 @@ namespace Tamma.Api.Services.SaaS;
 public sealed record ChatMessage(string Role, string Content);
 
 /// <summary>Inbound chat request for the SaaS LLM proxy.</summary>
-/// <param name="Model">Upstream model identifier (e.g. <c>claude-sonnet-4.5</c>). Optional — a default is chosen when null.</param>
+/// <param name="Model">Upstream model identifier (e.g. <c>claude-sonnet-4-5</c>). Optional — a default is chosen when null.</param>
 /// <param name="Messages">Ordered list of conversation turns.</param>
 /// <param name="MaxTokens">Optional cap on completion tokens.</param>
 /// <param name="Temperature">Optional sampling temperature.</param>

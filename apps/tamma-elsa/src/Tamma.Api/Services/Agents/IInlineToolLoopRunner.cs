@@ -93,10 +93,42 @@ public interface IInlineToolLoopRunner
     /// provider, so the role's model is not applicable to the override provider —
     /// it must run that provider with ITS default model, never a foreign one.
     /// Returns an empty string for an unknown / non-allowlisted provider (the
-    /// runner's own behaviour).
+    /// runner's own behaviour). Platform-scope: Story 46-1 slots the platform
+    /// provider_settings row above config; callers with tenant context should
+    /// use <see cref="GetDefaultModel(string, System.Guid?)"/>.
     /// </summary>
     string GetDefaultModel(string provider);
+
+    /// <summary>
+    /// Story 46-1 (AC3) — tenant-aware default model under the full four-step
+    /// precedence <b>tenant/user override → platform DB row →
+    /// <c>LlmProviders:{key}:DefaultModel</c> config → descriptor default</b>.
+    /// <paramref name="tenantId"/> null keeps the platform-scope behaviour of
+    /// <see cref="GetDefaultModel(string)"/>. Same empty-string contract.
+    /// </summary>
+    string GetDefaultModel(string provider, Guid? tenantId);
+
+    /// <summary>
+    /// Story 46-1 — the same resolution as
+    /// <see cref="GetDefaultModel(string, Guid?)"/> WITH provenance, for the
+    /// settings endpoints' <c>source</c> field. One precedence implementation,
+    /// two consumers — the endpoints never restate the chain (plan D4).
+    /// </summary>
+    ProviderDefaultModelResolution ResolveDefaultModelWithSource(string provider, Guid? tenantId);
 }
+
+/// <summary>
+/// Story 46-1 — a resolved default model plus its provenance, produced by the
+/// ONE precedence implementation in <c>InlineToolLoopRunner.ResolveDefaultModel</c>
+/// and surfaced by the provider settings endpoints as the <c>source</c> field.
+/// </summary>
+/// <param name="Model">The resolved model id ("" = no default anywhere — the
+/// caller must always specify, the legacy contract).</param>
+/// <param name="Source"><c>"tenant-override"</c> (a principal row — tenant in
+/// SaaS, the sole user in single-user mode) | <c>"platform-db"</c> |
+/// <c>"config"</c> (the <c>LlmProviders</c> section or the legacy
+/// <c>Anthropic:Model</c> key) | <c>"descriptor"</c>.</param>
+public sealed record ProviderDefaultModelResolution(string Model, string Source);
 
 /// <summary>
 /// Structured outcome of an <see cref="IInlineToolLoopRunner.RunAsync"/> run.

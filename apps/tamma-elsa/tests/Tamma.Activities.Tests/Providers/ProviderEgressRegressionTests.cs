@@ -341,4 +341,91 @@ public class ProviderEgressRegressionTests
         // TypeInitializationException at first proxied request.
         FluentActions.Invoking(LlmProxyService.ValidateProviderWiring).Should().NotThrow();
     }
+
+    // ── Story 46-0 (AC8) — models-URL egress pins ───────────────────────────
+    //
+    // The drift guard for the epic 46 wire-facts table: for every descriptor
+    // with a non-null ModelsEndpointPath, the path-preserving join of its
+    // DefaultBaseUrl + ModelsEndpointPath must equal the DOCUMENTED absolute
+    // models URL (groq's /openai and openrouter's /api base segments
+    // preserved; deepseek's un-prefixed /models; gemini's /v1beta/openai).
+
+    [TestCase("anthropic", "https://api.anthropic.com/v1/models",
+        Description = "verified live 2026-07-27: unauthenticated GET → 401 'x-api-key header is required'")]
+    [TestCase("openai", "https://api.openai.com/v1/models")]
+    [TestCase("openrouter", "https://openrouter.ai/api/v1/models",
+        Description = "the /api base segment is preserved — OpenRouter's documented public models URL")]
+    [TestCase("gemini", "https://generativelanguage.googleapis.com/v1beta/openai/models",
+        Description = "verified live 2026-07-27: bad Bearer → 400 'Please pass a valid API key'")]
+    [TestCase("google", "https://generativelanguage.googleapis.com/v1beta/openai/models")]
+    [TestCase("groq", "https://api.groq.com/openai/v1/models",
+        Description = "the /openai base segment is preserved")]
+    [TestCase("deepseek", "https://api.deepseek.com/models",
+        Description = "NO /v1 — api-docs.deepseek.com/api/list-models")]
+    [TestCase("moonshot", "https://api.moonshot.ai/v1/models")]
+    [TestCase("together", "https://api.together.xyz/v1/models",
+        Description = "answers a BARE JSON array, not {data:[…]} — parser-owned")]
+    [TestCase("local-llm", "http://localhost:11434/v1/models")]
+    [TestCase("ollama", "http://localhost:11434/v1/models")]
+    [TestCase("lmstudio", "http://localhost:1234/v1/models")]
+    public void ModelsUrl_ComposesToTheDocumentedAbsoluteUrl(string key, string expected)
+    {
+        var descriptor = ProviderCatalog.Resolve(key);
+        descriptor.Should().NotBeNull();
+        descriptor!.ModelsEndpointPath.Should().NotBeNull(
+            $"'{key}' is a listable provider per the epic 46 survey");
+
+        ProviderCatalog.CombineUrl(descriptor.DefaultBaseUrl, descriptor.ModelsEndpointPath!)
+            .Should().Be(expected);
+    }
+
+    [Test]
+    public void ModelsUrl_ExactListableKeyset()
+    {
+        // Keyset drift guard: the set of listable providers IS the survey
+        // table. z-ai (no documented route — re-checked 2026-07-27, docs.z.ai
+        // unreachable), azure-openai (deployment listing / api-version
+        // semantics) and github-copilot (token-exchange auth) ship null and
+        // degrade to free-text model entry (epic D4).
+        ProviderCatalog.HttpProviders
+            .Where(d => d.ModelsEndpointPath is not null)
+            .Select(d => d.Key)
+            .Should().BeEquivalentTo(new[]
+            {
+                "anthropic", "openai", "openrouter", "gemini", "google", "groq",
+                "deepseek", "moonshot", "together", "local-llm", "ollama", "lmstudio",
+            });
+
+        ProviderCatalog.HttpProviders
+            .Where(d => d.ModelsEndpointPath is null)
+            .Select(d => d.Key)
+            .Should().BeEquivalentTo(new[] { "z-ai", "azure-openai", "github-copilot" });
+    }
+
+    [Test]
+    public void ModelsPathForBase_AppliesTheF3OverrideRule()
+    {
+        var gemini = ProviderCatalog.Resolve("gemini")!;
+        var deepseek = ProviderCatalog.Resolve("deepseek")!;
+        var zai = ProviderCatalog.Resolve("z-ai")!;
+
+        // At the descriptor's own default base → the provider-specific path.
+        ProviderCatalog.ModelsPathForBase(gemini, gemini.DefaultBaseUrl)
+            .Should().Be("/v1beta/openai/models");
+        ProviderCatalog.ModelsPathForBase(deepseek, "https://api.deepseek.com/")
+            .Should().Be("/models", "slash-insensitive default-base match");
+
+        // A config-overridden base (an OpenAI-compatible proxy) → the
+        // dialect-generic /v1/models, never the provider-specific path.
+        ProviderCatalog.ModelsPathForBase(gemini, "https://llm-proxy.internal/gemini")
+            .Should().Be("/v1/models");
+        ProviderCatalog.ModelsPathForBase(deepseek, "https://llm-proxy.internal/ds")
+            .Should().Be("/v1/models");
+
+        // Unlistable stays unlistable regardless of base — listing support is
+        // a property of the PROVIDER, not the URL.
+        ProviderCatalog.ModelsPathForBase(zai, zai.DefaultBaseUrl).Should().BeNull();
+        ProviderCatalog.ModelsPathForBase(zai, "https://llm-proxy.internal/zai").Should().BeNull();
+        ProviderCatalog.ModelsPathForBase(null, "https://anything").Should().BeNull();
+    }
 }

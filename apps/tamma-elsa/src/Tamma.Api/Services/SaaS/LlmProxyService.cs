@@ -27,7 +27,18 @@ namespace Tamma.Api.Services.SaaS;
 public sealed class LlmProxyService : ILlmProxyService
 {
     private const string ProviderKey = "anthropic-claude";
-    private const string DefaultModel = "claude-sonnet-4.5";
+
+    /// <summary>
+    /// Story 46-1 (AC4/AC7) — the LAST-RESORT safety net when the request
+    /// names no model AND the provider_settings store has no row. Corrected
+    /// 2026-07-27: was <c>claude-sonnet-4.5</c> — a DISPLAY name, not an API
+    /// id (Anthropic model ids are dash-formed; the docs' current catalog
+    /// lists <c>claude-sonnet-4-5</c> as the Active alias, full id
+    /// <c>claude-sonnet-4-5-20250929</c>). The dot-formed string was never a
+    /// valid id, so the previous default 404'd whenever it actually reached
+    /// the API.
+    /// </summary>
+    private const string DefaultModel = "claude-sonnet-4-5";
 
     /// <summary>Descriptor for <see cref="ProviderKey"/> (an alias of the
     /// <c>anthropic</c> descriptor). Fail-loud if the catalogue ever drops the
@@ -54,12 +65,19 @@ public sealed class LlmProxyService : ILlmProxyService
     // Minimal price sheet (USD per 1K tokens). Keep it narrow — real pricing
     // integration is Epic-9/diagnostics territory. Falls back to the sonnet
     // rate for unknown models so we still record *some* cost signal.
+    // 46-1 AC7 defaults refresh (2026-07-27): keys were the dot-formed display
+    // names (claude-sonnet-4.5 / claude-opus-4.7 / claude-haiku-3.5) — not API
+    // ids; haiku 3.5 is RETIRED outright (2026-02-19). Re-keyed to the current
+    // dash-formed ids with the published per-MTok rates ÷ 1000:
+    //   sonnet-4-5  $3/$15  → 0.003/0.015 (unchanged rate),
+    //   opus-4-7    $5/$25  → 0.005/0.025 (old row carried Opus-3-era 15/75),
+    //   haiku-4-5   $1/$5   → 0.001/0.005.
     private static readonly Dictionary<string, (decimal InputPer1K, decimal OutputPer1K)> PriceTable
         = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["claude-sonnet-4.5"]   = (0.003m, 0.015m),
-            ["claude-opus-4.7"]     = (0.015m, 0.075m),
-            ["claude-haiku-3.5"]    = (0.00025m, 0.00125m),
+            ["claude-sonnet-4-5"]   = (0.003m, 0.015m),
+            ["claude-opus-4-7"]     = (0.005m, 0.025m),
+            ["claude-haiku-4-5"]    = (0.001m, 0.005m),
         };
 
     private readonly IHttpClientFactory _httpFactory;
@@ -67,19 +85,25 @@ public sealed class LlmProxyService : ILlmProxyService
     private readonly IBillingModeTagger _billingModeTagger;
     private readonly IEventRepository _events;
     private readonly ILogger<LlmProxyService> _logger;
+    private readonly Providers.IProviderSettingsStore? _settings;
 
     public LlmProxyService(
         IHttpClientFactory httpFactory,
         IDiagnosticsService diagnostics,
         IBillingModeTagger billingModeTagger,
         IEventRepository events,
-        ILogger<LlmProxyService> logger)
+        ILogger<LlmProxyService> logger,
+        Providers.IProviderSettingsStore? settings = null)
     {
         _httpFactory = httpFactory;
         _diagnostics = diagnostics;
         _billingModeTagger = billingModeTagger;
         _events = events;
         _logger = logger;
+        // Story 46-1 (AC4) — the persisted-model-selection store. OPTIONAL
+        // (null in pre-46 unit-test compositions): with no store, resolution
+        // is request-model → DefaultModel const, byte-identical to before.
+        _settings = settings;
     }
 
     public async Task<ChatResponse> ChatAsync(ChatRequest request, Guid? tenantId, CancellationToken ct = default)
@@ -95,7 +119,16 @@ public sealed class LlmProxyService : ILlmProxyService
         // (owner-declared mode via the tagger). This proxy does not consume 32-3's
         // credential resolver, so the tag is derived from 34-3's mode alone
         // (AC5) — no competing key path introduced here.
-        var model = string.IsNullOrWhiteSpace(request.Model) ? DefaultModel : request.Model!;
+        //
+        // Story 46-1 (AC4) — model resolution: request model → provider_settings
+        // store (tenant/user override, then platform row, for the CANONICAL
+        // `anthropic` key this proxy fronts) → the DefaultModel const as the
+        // last-resort safety net. A request that names a model always wins.
+        var model = string.IsNullOrWhiteSpace(request.Model)
+            ? _settings?.TryGetModel(Descriptor.Key, tenantId)
+                ?? _settings?.TryGetPlatformModel(Descriptor.Key)
+                ?? DefaultModel
+            : request.Model!;
 
         // Fix 1 — ONE per-call correlation id shared by BOTH sinks this call writes:
         // the ProviderDiagnostic row AND the LLM.CALL.SUCCESS usage event. The
@@ -286,7 +319,7 @@ public sealed class LlmProxyService : ILlmProxyService
     {
         var price = PriceTable.TryGetValue(model, out var p)
             ? p
-            : PriceTable["claude-sonnet-4.5"]; // safe fallback
+            : PriceTable["claude-sonnet-4-5"]; // safe fallback
         var promptCost = promptTokens / 1000m * price.InputPer1K;
         var completionCost = completionTokens / 1000m * price.OutputPer1K;
         return Math.Round(promptCost + completionCost, 6);

@@ -79,7 +79,9 @@ public static class SaaSEndpoints
         // OpenAI-style snake_case-via-camelCase, and keep the Tamma-specific
         // `costUsd` + `text` extension fields so the new behaviour stays
         // observable.
-        var modelOut = response.Model ?? body.Model ?? "claude-sonnet-4.5";
+        // 46-1 AC7: the display-name-shaped "claude-sonnet-4.5" fallback label
+        // is corrected to the dash-formed API id (see LlmProxyService.DefaultModel).
+        var modelOut = response.Model ?? body.Model ?? "claude-sonnet-4-5";
         return Results.Ok(new
         {
             id = $"chat_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}",

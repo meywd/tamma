@@ -156,8 +156,11 @@ public class ManagedAgentTests
             .Setup(c => c.ResolveAsync(It.IsAny<Guid?>(), "openai", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ProviderCredential(TestApiKey, CredentialSource.Platform, "platform:openai/api-key", null));
 
-        // The runner gives "openai" its own default model (the legacy GetDefaultModel).
-        _runner.Setup(r => r.GetDefaultModel("openai")).Returns("gpt-4o");
+        // The runner gives "openai" its own default model. Story 46-1 (AC3):
+        // ManagedAgent now calls the TENANT-AWARE overload so a per-tenant
+        // provider_settings override can win — the exact tenant id is verified
+        // after the run below.
+        _runner.Setup(r => r.GetDefaultModel("openai", It.IsAny<Guid?>())).Returns("gpt-4o");
 
         string? runnerProvider = null;
         string? runnerModel = null;
@@ -203,6 +206,10 @@ public class ManagedAgentTests
         // an "anthropic" resolution would have thrown.
         _credentials.Verify(c => c.ResolveAsync(It.IsAny<Guid?>(), "openai", It.IsAny<CancellationToken>()), Times.Once);
         _credentials.Verify(c => c.ResolveAsync(It.IsAny<Guid?>(), "anthropic", It.IsAny<CancellationToken>()), Times.Never);
+
+        // Story 46-1 (AC9 test 9) — the default-model lookup carried the
+        // REQUEST's tenant context, so a per-tenant model override resolves.
+        _runner.Verify(r => r.GetDefaultModel("openai", req.TenantId), Times.AtLeastOnce);
 
         // Cost/usage keyed off the override provider+model.
         _pricing.Verify(p => p.Compute("openai", "gpt-4o", 10, 5), Times.Once);

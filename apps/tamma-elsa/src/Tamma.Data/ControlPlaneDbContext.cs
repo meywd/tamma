@@ -733,6 +733,16 @@ public class ControlPlaneDbContext : DbContext
     /// </summary>
     public DbSet<TenantProviderBilling> TenantProviderBillings => Set<TenantProviderBilling>();
 
+    /// <summary>
+    /// Story 46-1 — persisted provider model selection (platform default +
+    /// tenant/user overrides) and the platform enable flag. CP-resident in
+    /// BOTH modes (epic 46 D3a — the resolver runs on hot egress paths with
+    /// no tenant DbContext). Deliberately EXCLUDED from the Epic 19 startup
+    /// wipe so UI selections survive redeploys; created idempotently by its
+    /// migration. See <see cref="Entities.ProviderSetting"/>.
+    /// </summary>
+    public DbSet<ProviderSetting> ProviderSettings => Set<ProviderSetting>();
+
     // Story 28-1 PR D: the 11 + 4 mentorship tenant-resident entities
     // (AgentConfig, PromptOverride, ProviderHealth, ProviderDiagnostic,
     // SanitizationRule, WorkflowDefinition, WorkflowInstance, DomainEvent,
@@ -859,6 +869,13 @@ public class ControlPlaneDbContext : DbContext
         // One active row per (tenant, provider) via a partial unique index;
         // CHECKs pin mode/status + the byok↔secret XOR. FK to tenants (Cascade).
         TammaModelConfiguration.ConfigureTenantProviderBilling(modelBuilder);
+
+        // Story 46-1 — provider_settings (persisted model selection + platform
+        // enable flag). CP-resident in BOTH modes; no FK to tenants/users so
+        // the table can be excluded from the Epic 19 startup wipe and survive
+        // redeploys (epic 46 requirement: a UI model choice needs no deploy
+        // and outlives one).
+        TammaModelConfiguration.ConfigureProviderSettings(modelBuilder);
     }
 
     /// <summary>
