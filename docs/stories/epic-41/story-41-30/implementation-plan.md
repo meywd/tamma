@@ -1,6 +1,6 @@
 # Implementation Plan — Story 41-30: The Tenant-Aware Scheduled-Trigger Seam
 
-> **Read this first.** Every prior Epic 41 document treats this component as *unowned and
+> **Read this first.** Every prior Epic 41 document treats this component as *belonging to no story, and
 > unspecified*, and two of them (41-5's plan, "Design Notes — Part B"; 41-20's plan, D8) left behind a
 > requirements list for whoever eventually built it. **This plan is the answer to those lists**, and it
 > satisfies each bullet explicitly in D10. It also corrects a load-bearing factual claim those documents

@@ -289,7 +289,7 @@ existing `IEventRepository` → `domain_events` path.
   step 7's explicit check. Note honestly that `TAMMA001` would **not** mechanically catch it — the denylist
   is a closed 13-entry list that does not name `IToolSecretProvider`, and its HTTP check fires only on a
   statically-literal external host. The analyzer is a backstop, not the enforcement.
-- **G1 leaves SaaS name-binding unowned.** Mitigation: the one-line resolver seam gives a future owner a
+- **G1 leaves SaaS name-binding with no story to build it.** Mitigation: the one-line resolver seam gives a future story a
   single plug point; the gap is recorded in Blocks / Blocked by rather than papered over with a new table.
 
 ## Est. Effort

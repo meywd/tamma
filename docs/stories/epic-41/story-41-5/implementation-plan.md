@@ -38,7 +38,7 @@ its three pin edits; the `ContractBindingTests` `Bindings` entry; and the struct
 ## Pre-Reading
 
 - `docs/stories/epic-41/story-41-5/41-5-stakeholder-and-status-reporting.md` — the story (ACs are source of truth, less the Corrections below)
-- `docs/stories/epic-41/README.md` — the **scheduler bullet** under Dependencies (the definitive statement that this seam is unowned) and the Epic 42 table row for 41-5
+- `docs/stories/epic-41/README.md` — the **scheduler bullet** under Dependencies (the definitive statement that no story then built this seam) and the Epic 42 table row for 41-5
 - `docs/stories/epic-41/story-41-1/41-1a-agent-taxonomy-extension.md` — Scope 2 mints `(project_manager, report-status)`, the cell Correction 2 forces this story onto
 - `docs/stories/epic-41/story-41-1/41-1c-prose-documents-and-audience-tags.md` — the `prose` type, `Audience` on envelope **and** `DocumentInstance` + migration, the `status-update` kind and `stakeholder` audience (its Scope 3 seeds both **from this story**)
 - `docs/stories/epic-41/story-41-4/implementation-plan.md` — the sibling prose binding; its D5 (reviewer choice that avoids a 41-1a review-arm dependency), D6 (template rewrite posture), D9 (kind/audience from vocabularies) apply here verbatim
@@ -334,8 +334,8 @@ manually/API-triggered status-report producer, not a scheduled one.
 
 ## Dependencies & Sequencing
 
-- **Blocked by (hard, Part B):** **the tenant-aware scheduled-trigger seam — UNOWNED.** This is the one thing
-  in Epic 41 that no story builds. Writing it is a prerequisite for this story's AC1 and for all of Wave 2.
+- **Blocked by (hard, Part B):** **the tenant-aware scheduled-trigger seam (story 41-30, not yet built).** This is the one thing
+  in Epic 41 that only that story builds. Writing it is a prerequisite for this story's AC1 and for all of Wave 2.
 - **Blocked by (hard, Part A):**
   - **41-1a** — for `AgentRole.ProjectManager`, `AgentAction.ReportStatus` and
     `Prompts/project_manager/report-status.md`. **This is new relative to the story file**, which names only
@@ -411,7 +411,7 @@ lineage anchor (Correction 4), and the scheduled half has no component to build 
 
 ## Blocks / Blocked by
 
-- **Blocked by (hard):** the **tenant-aware scheduled-trigger seam** — unowned, blocks AC1 and all of Part
+- **Blocked by (hard):** the **tenant-aware scheduled-trigger seam** — story 41-30, blocks AC1 and all of Part
   B; **41-1a** (`project_manager` role + `report-status` cell + its prompt file — a dependency the story
   file does not name, forced by Correction 2); **41-1c** (the `prose` type, the `Audience`
   envelope/store field + migration, the `status-update`/`stakeholder` vocabulary); Epic 39 stories 39-6,

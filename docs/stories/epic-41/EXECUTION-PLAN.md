@@ -148,7 +148,7 @@ fast producer PRs can serialize through the pin, so batch small producers (41-14
 **1. The critical path ends in a file-level queue this epic does not control.** 41-15 edits
 `SingleIssueCycleWorkflow.cs`'s merge region, and that file's per-task loop is rewritten by Epic 40's
 `40-2 → 40-4 → 40-5` followed by 41-29 Phase 2. If Epic 40 slips, 41-15 (and 41-29 P2) slip with it
-regardless of this epic's staffing. Everything up to 41-15's final merge is Epic-41-internal; do the
+no matter how much of this epic runs in parallel. Everything up to 41-15's final merge is Epic-41-internal; do the
 work early and hold the merge.
 
 **2. 41-22 is the largest story and sits behind the widest gate.** 7.5 days, needing both 41-1a
@@ -162,10 +162,10 @@ shared with 41-7 and extended by 41-31. The cheap-path total assumes 41-7 lands 
 and the 41-5/41-7/41-31 owners coordinate; ignoring the ordering costs ~2.5–3.5 duplicated days and,
 worse, two divergent DCB read activities to reconcile later.
 
-**4. 41-16 has a second unowned enabler nobody scheduled.** Its Phase B ("mine CI history",
+**4. 41-16 has a second enabler nobody scheduled.** Its Phase B ("mine CI history",
 same-commit flaky split) needs a **per-test CI result store** that does not exist and is in no
-Wave-0 table — the plan calls it out as unowned. Phase A (6.75 d) ships without it; do not book
-Phase B until that store has an owner. 41-16 also needs a type-ownership decision
+Wave-0 table — the plan calls it out as unscheduled. Phase A (6.75 d) ships without it; do not book
+Phase B until that store is scheduled as a story. 41-16 also needs a type-ownership decision
 (`RegressionTriage` — 41-1b's seventh type or its own) settled in its first step.
 
 **5. Reachability is epic-wide, not per-story.** 39-17/39-19/39-20 are unlanded: every accept gate
@@ -182,7 +182,7 @@ docs-family order once, at wave-1 start.
 In descending order of what can be dropped without destabilizing the rest:
 
 1. **Phase Bs**: 41-8 Phase B (retro prose narrative — also needs the 41-1a amendment cell),
-   41-16 Phase B (needs the unowned CI result store), 41-5 Part B / 41-23 Phase 4 (cron wiring —
+   41-16 Phase B (needs the still-unscheduled CI result store), 41-5 Part B / 41-23 Phase 4 (cron wiring —
    opt-ins through 41-30). All are additive follow-ups by construction.
 2. **The Wave-2 depth stories nothing hard consumes**: 41-4 (roadmap), 41-14's TestPlan edge,
    41-28's integration scenarios against a real UxSpec (its diff-subject half stands alone).
@@ -202,8 +202,8 @@ In descending order of what can be dropped without destabilizing the rest:
   (41-7 first; else 6.25), 41-25 **4.5** / 41-26 **3.75** (inheriting 41-24 D6 / ops-peer reviewer;
   else +0.5 each), 41-23 **4.75** producing half (+0.5 trigger wiring after 41-30), 41-5 **5.75**
   Part A only, 41-16 **6.75** Phase A only, 41-29 **7.0** (mid of 6.5–7.5).
-- One engineer per story; the parallelism above is people-parallel. The day-0 width (~14 streams) is
-  an upper bound on useful staffing, not a request.
+- One work stream per story. The day-0 width (~14 streams) is an upper bound on how much can
+  usefully run in parallel, not a requirement.
 - The **2026-07-25 scheduling decision** is settled input: audits scheduled (behind 41-30),
   ceremonies user-initiated (41-5/41-7 unblocked from the seam). The stale "⛔ BLOCKED (scheduler
   seam)" banners in 41-5/41-7's plans were corrected alongside this plan; their remaining blockers
@@ -221,5 +221,5 @@ Generated from the 34 implementation plans' `Est. Effort` tables and `Blocks / B
 the epic README's Wave-0/Sequencing sections, and the 2026-07-25 scheduling decision — not
 hand-guessed from the story headers. Re-run the reconciliation if the plans change materially. The
 single most important scheduling fact in this epic is not a dependency at all: it is the
-**serialized edge-count bump** — the one constraint that neither staffing nor reordering can
+**serialized edge-count bump** — the one constraint that neither parallelism nor reordering can
 parallelize away.

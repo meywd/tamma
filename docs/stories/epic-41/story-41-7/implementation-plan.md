@@ -271,8 +271,8 @@ persisted last-fired table — that is the seam story's migration, not this one'
 
 ## Risks & Mitigations
 
-- **The scheduler seam is unowned — this is the top risk and it is a programme risk, not a technical
-  one.** Mitigation: steps 1–9 are seam-independent and dispatchable by API, so the story delivers value
+- **The scheduler seam is a separate story (41-30) — the top risk here is sequencing, not anything
+  technical.** Mitigation: steps 1–9 are seam-independent and dispatchable by API, so the story delivers value
   as a manually/orchestrator-triggered digest; step 10's four required inputs are written down as the
   seam's consumer contract. Do not build a 41-7-local scheduler: six other stories need the same seam and
   a local copy would be the second non-reusable one.

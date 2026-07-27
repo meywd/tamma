@@ -24,12 +24,12 @@ When this story is done, a **scheduled, tenant-scoped, per-window-idempotent** s
 | `capacity-health-review` | a thin binding over `document-lifecycle`, `produces: findings`, cell `(devops, assess-capacity)` |
 | `FetchHealthSignalsActivity` | the in-process read of analytics rollups + DCB deploy/health events for a window (**not** a tool — see D3) |
 | `HealthReviewEvents` + `EmitHealthReviewEventActivity` | `HEALTH_REVIEW.*` alongside `DOCUMENT.*` |
-| the scheduled-trigger seam | **Phase 0, unowned** — see the block notice |
+| the scheduled-trigger seam | **Phase 0 — story 41-30, not yet built** — see the block notice |
 
 ## Pre-Reading
 
 - `docs/stories/epic-41/story-41-23/41-23-capacity-and-health-review.md` — the story (ACs are source of truth, modulo **Corrections** below)
-- `docs/stories/epic-41/README.md:454-472` — the scheduler dependency, in full; `:297` — the unowned Wave-0 row
+- `docs/stories/epic-41/README.md:454-472` — the scheduler dependency, in full; `:297` — the seam's Wave-0 row
 - `docs/stories/epic-39/story-39-12/implementation-plan.md` — the thin-binding recipe
 - `docs/stories/epic-39/story-39-10/implementation-plan.md` — the resume standard
 - `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/HourlyAnalyticsRollupScheduler.cs` — the non-reusable precedent, in full (366 lines; three types: options `:15-42`, `BackgroundService` `:70-256`, `IRollupSchedulerLeaderLock` + `PostgresAdvisoryLeaderLock` `:265-366`)
@@ -178,7 +178,7 @@ When this story is done, a **scheduled, tenant-scoped, per-window-idempotent** s
 
 ## Implementation Steps
 
-### Phase 0 — the scheduled-trigger seam (UNOWNED; not this story's estimate)
+### Phase 0 — the scheduled-trigger seam (story 41-30; not this story's estimate)
 
 0. **Blocked.** See the notice at the top and **D0**. Nothing here can be built by 41-23 without
    expanding its scope by the seam's full cost. If this story is scheduled before the seam exists, the
@@ -311,14 +311,14 @@ NUnit + FluentAssertions (+ Moq; Testcontainers for the execution suite).
 
 | AC | Satisfied by step(s) | Verified by |
 |---|---|---|
-| 1 — scheduled, tenant-scoped, idempotent per window; each lens fail-closed | **partially** — 2, 7 (D6/D8); scheduling half is **Phase 0, unowned** | Execution (b)(c) prove *window* + *tenant* idempotency at the document layer; `FetchHealthSignalsActivityTests` proves fail-closed. **"Scheduled" is NOT satisfied and no test claims it** |
+| 1 — scheduled, tenant-scoped, idempotent per window; each lens fail-closed | **partially** — 2, 7 (D6/D8); scheduling half is **Phase 0 — story 41-30** | Execution (b)(c) prove *window* + *tenant* idempotency at the document layer; `FetchHealthSignalsActivityTests` proves fail-closed. **"Scheduled" is NOT satisfied and no test claims it** |
 | 2 — findings cite concrete metric evidence; empty ⇒ valid empty report | 4 (D4/D5), with **C1's restatement** | `FindingsDocumentType` fixtures incl. the all-clear case and the standing `EMPTY_FINDINGS` negative. **As written the AC is unsatisfiable (C1)** |
 | 3 — `[ResumeBehavior(LatestStateReEntry)]`; 39-10 gate green without allowlist | 7 (D7) | `CapacityHealthReviewWorkflowStructureTests`; `ResumableStandardStructuralTests` |
 
 ## Blocks / Blocked by
 
-- **Blocked by — hard, and UNOWNED:**
-  - **The tenant-aware scheduled-trigger seam.** No story owns it (`epic-41/README.md:297`, `:454-472`).
+- **Blocked by — hard:**
+  - **The tenant-aware scheduled-trigger seam.** Only story 41-30 builds it (`epic-41/README.md:297`, `:454-472`).
     AC1's scheduling half cannot be met. **This is the reason the plan is marked blocked.** Its minimum
     contract is in D0; its migration is flagged under Data & Migrations; its extraction target (the
     `HourlyAnalyticsRollupScheduler` / `AuditChainCheckpointScheduler` duplicate) is C6.
@@ -342,7 +342,7 @@ NUnit + FluentAssertions (+ Moq; Testcontainers for the execution suite).
   delivery blocker.
 - **Blocks:** **41-22** — a projected-capacity breach or degraded-health finding is one of the incident
   workflow's reactive triggers ("consumes 41-23 escalations"). That edge lands in 41-22, not here.
-- **Sibling consumers of the same unowned seam:** **41-5**, **41-7**, **41-11**, **41-16**, **41-17**
+- **Sibling consumers of the same seam:** **41-5**, **41-7**, **41-11**, **41-16**, **41-17**
   (PR-triage half), **41-20**. Whoever writes the seam should size it against all seven, not against
   this story alone.
 - **Files, does not fix:** typed `severity`/`recommendedAction`/`projectedBreach` on `Finding` → the
@@ -389,7 +389,7 @@ NUnit + FluentAssertions (+ Moq; Testcontainers for the execution suite).
 | 11 | Testcontainers scenarios (a)–(e) | 0.75 |
 | — | Full-suite green, review polish | 0.25 |
 | **Total (Phases 1–3 + 5)** | | **4.75** (story estimate: 4–5 days) |
-| **Phase 0 — the seam** | **UNOWNED. Not estimated here.** Extraction of a twice-duplicated pattern (C6) plus a persisted-window table, a tenant-keyed lock, a cron/window shape and a trigger registry. Size it against all seven consumers. | **—** |
+| **Phase 0 — the seam** | **Story 41-30's work. Not estimated here.** Extraction of a twice-duplicated pattern (C6) plus a persisted-window table, a tenant-keyed lock, a cron/window shape and a trigger registry. Size it against all seven consumers. | **—** |
 | **Phase 4 — trigger wiring** | Blocked on Phase 0; ~0.5 d once the seam's registration API exists | **0.5\*** |
 
 \* Not included in the total; unreachable today.

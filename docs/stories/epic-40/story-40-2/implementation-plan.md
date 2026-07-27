@@ -85,7 +85,7 @@ the old inline path are reused; only the inline monitor `await` is removed.
   is settled by 40-3:* the resume runs on a **different pod** and must recompute the name from
   durable inputs, which a payload-object bookmark cannot do tenant-folded. `ExecuteAgentActivity`
   stays OUT of the registry (it is not a suspend point). Migrating `WaitForCIResultsActivity`
-  itself onto the registry is **out of scope and unowned** — after Epic 40 the codebase still
+  itself onto the registry is **out of scope — no story covers it** — after Epic 40 the codebase still
   carries that one legacy scheme; the point of this decision is that the cycle does not add a
   second.
 - **D8 — Fail-loud DI guards + event emission parity.** Missing dispatch service/collector ⇒

@@ -13,9 +13,8 @@ tenant's fire.
 
 ## Priority
 
-**P0 / Wave 0.** This is the **fourth Wave-0 enabler** and the only one that has never had an owner
-(epic README, *Sequencing → Wave 0*, owner *"none — must be written"*; `docs/sprint-status.yaml`,
-epic-41 block, *"Exactly ONE Wave-0 enabler remains unowned"*). It hard-blocks the AC1 of **five**
+**P0 / Wave 0.** This is the **fourth Wave-0 enabler** and the only one that had no story until this one was filed
+(epic README, *Sequencing → Wave 0*; `docs/sprint-status.yaml`, epic-41 block). It hard-blocks the AC1 of **five**
 audit stories and Wave 2 in its entirety.
 
 ## Shape: a hosted service + control-plane storage + an admin surface — **not a workflow**

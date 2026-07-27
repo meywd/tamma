@@ -147,5 +147,5 @@ rules they instantiate.
   - via **41-1c**: 41-4, 41-5, 41-8, 41-9, 41-22, 41-24, 41-25, 41-26.
   - Union = 20 (41-8, 41-22, 41-24, 41-25, 41-26 appear in two sets).
 - **Does NOT block:** 41-29 (Task-Level Flow Router) and the code-review half of 41-17.
-- **Not owned here:** the tenant-aware scheduled-trigger seam — the fourth Wave-0 enabler, still
-  ownerless, blocking 41-5, 41-7, 41-11, 41-16, 41-17 (PR sweep), 41-20, 41-23.
+- **Not this story's work:** the tenant-aware scheduled-trigger seam — the fourth Wave-0 enabler, now
+  story 41-30, blocking 41-5, 41-7, 41-11, 41-16, 41-17 (PR sweep), 41-20, 41-23.

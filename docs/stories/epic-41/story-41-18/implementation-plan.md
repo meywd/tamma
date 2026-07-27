@@ -414,7 +414,7 @@ NUnit + FluentAssertions (+ Moq; Testcontainers for the execution suite).
   AC5 is scoped to the read + dispatch-input shape (Correction 6), which is testable today.
 - **Blocked by (soft, for the intended trigger):** **41-11** (Tech-Debt & Technical-Risk Triage)
   produces the `TriageDecision` this workflow is designed to consume. 41-11 is itself blocked on
-  41-1a's `triage-tech-debt` cell **and** the unowned scheduled-trigger seam. This story does **not**
+  41-1a's `triage-tech-debt` cell **and** the scheduled-trigger seam (story 41-30). This story does **not**
   inherit either blocker — scenario (b) proves the `Review`-triggered and direct-dispatch paths work
   with no 41-11 document present, and scenario (a) seeds the triage document directly into the store.
 - **Blocks:** nothing hard. Its accepted `Plan` is a consumer of **41-11** and a producer for the

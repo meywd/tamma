@@ -310,11 +310,11 @@ under rule 1, has **no type and no audience tag in code yet** and is built by th
 
 ## Sequencing (highest-leverage first)
 
-**Wave 0 — enablers. All are hard gates; one of the four is still unowned.**
+**Wave 0 — enablers. All four are hard gates, and all four now have stories.**
 
 *Corrected: this table used to list three enablers and give the prose row the owner "none — must be
 written". Story 41-1 has since been **split into three independently-shippable sub-stories**, and the
-third of them (41-1c) is the prose enabler. Only the scheduler seam remains unowned.*
+third of them (41-1c) is the prose enabler. The scheduler seam was the last to get a story — 41-30.*
 
 | Enabler | Owner | Effort | State |
 |---|---|---|---|
@@ -381,9 +381,9 @@ third of them (41-1c) is the prose enabler. Only the scheduler seam remains unow
 > anyone remembered.
 >
 > **Consequences:** 41-5 and 41-7 come off the blocked list and become schedulable immediately —
-> both need only a manual trigger, which already exists. Their plans currently say "⛔ BLOCKED
-> (scheduler seam, unowned)" and must be corrected. The seam itself is still unowned and still needs
-> a decision on who builds it, but it now gates five audit stories rather than seven mixed ones —
+> both need only a manual trigger, which already exists. (Their plans previously carried "⛔ BLOCKED
+> (scheduler seam)" banners — since corrected.) The seam itself is now story 41-30, and it gates five
+> audit stories rather than seven mixed ones —
 > which also makes it a cleaner thing to specify, since every remaining consumer wants the same
 > shape: run this on a cadence, per tenant, and do not double-fire.
 
@@ -566,8 +566,8 @@ resolved.)* Two standing notes:
   rests on `_lastFired` in-process memory (`:83`) plus the target workflow's own per-row UPSERT — a
   property a document-producing lifecycle workflow does not have. The consumers need the opposite of all
   four: **41-5, 41-7, 41-11, 41-16, 41-17 (PR sweep), 41-20, 41-23** each ask for tenant-scoped,
-  per-window, durable idempotency. **No story owns building that seam** — it is the one Wave-0 enabler
-  still without an owner, and the only genuinely unowned dependency left in the epic. *(Corrected: this
+  per-window, durable idempotency. **That seam is now story 41-30's work** — it was the last Wave-0 enabler
+  to get a story of its own. *(Corrected: this
   bullet also said "41-17 does not even list the scheduler in its `Blocking:` line". It does now, and so
   do all seven consumers — 41-5, 41-7, 41-11, 41-16, 41-17, 41-20 and 41-23 each name the **seam**, not
   the non-reusable "scheduler pattern", and state which of their ACs is unreachable without it.)*

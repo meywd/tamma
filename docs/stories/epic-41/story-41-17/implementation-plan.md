@@ -31,7 +31,7 @@ independent of the mentorship engine, and the open-PR queue is a routed, audited
 ## Pre-Reading
 
 - `docs/stories/epic-41/story-41-17/41-17-standalone-code-review-and-pr-triage.md` — the story (ACs are source of truth)
-- `docs/stories/epic-41/README.md` — rule 1's six thinness clauses (a)–(f); the Wave-0 table row for the unowned scheduler seam; the Dependencies bullet "Scheduled workflows have no reusable pattern"
+- `docs/stories/epic-41/README.md` — rule 1's six thinness clauses (a)–(f); the Wave-0 table row for the scheduler seam (now story 41-30); the Dependencies bullet "Scheduled workflows have no reusable pattern"
 - `docs/stories/epic-39/story-39-12/implementation-plan.md` and `docs/stories/epic-39/story-39-15` — the binding recipe (D1 byte-stable surface, D2 typed-routing-only, D3 legacy event mirroring, D5 drift-guard migration, D7 resume declaration)
 - `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/TaskCreationWorkflow.cs` — **the reference shape**; copy its skeleton verbatim (ReadInputs → ComputeReEntryPosition → ReadPositionStage → FreshRun → Fetch* → DispatchLifecycle → ReadLifecycleExit → ExposeOutput; zero `Finish`)
 - `apps/tamma-elsa/tests/Tamma.Activities.Tests/Workflows/TaskCreationWorkflowStructureTests.cs` — **the reference structure-test set**; the six clauses in executable form
@@ -45,7 +45,7 @@ independent of the mentorship engine, and the open-PR queue is a routed, audited
 - `apps/tamma-elsa/src/Tamma.Core/Documents/DocumentTypeRegistry.cs:134-174` (`BuildSeed`, the provisional `code-review` row at `:158`) + `apps/tamma-elsa/tests/Tamma.Core.Tests/Documents/WorkflowInterfaceGraphTests.cs:45` (`HaveCount(16)`)
 - `apps/tamma-elsa/src/Tamma.Activities/Review/CodeReviewEvents.cs` — the **existing** `CODE_REVIEW.*` family (read D6 before naming an event)
 - `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/HourlyAnalyticsRollupScheduler.cs` (`FireAtMinute` `:34`, `_lastFired` `:83`, `ComputeAdvisoryLockKey(year, dayOfYear, hour)` `:241`, hardcoded target `:198-200`) and `apps/tamma-elsa/src/Tamma.Api/Services/Secrets/Rotation/SecretAutoRotationScheduler.cs` — the two existing schedulers, **neither reusable**; see D8
-- **NOT FOUND (must be built elsewhere before Half B compiles):** the `(senior_developer, triage-pr)` cell (41-1a) and any tenant-aware scheduled-trigger seam (unowned)
+- **NOT FOUND (must be built elsewhere before Half B compiles):** the `(senior_developer, triage-pr)` cell (41-1a) and any tenant-aware scheduled-trigger seam (story 41-30, not yet built)
 
 ## Corrections to the story
 
@@ -353,7 +353,7 @@ The story was drafted against a snapshot. Verified against the tree today:
 12. **GATE (no code until both are true):** (a) 41-1a has landed `(senior_developer, triage-pr)` —
     `AgentAction.cs` member + `RolePhaseMap` `SeniorDeveloper` set + `Prompts/senior_developer/triage-pr.md`
     + the two count pins (`AgentActionTests.cs:38`, `RolePhaseMapTests.cs:64`) bumped in the same
-    change; (b) a tenant-aware scheduled-trigger seam exists per D8. **If (b) is still unowned when
+    change; (b) a tenant-aware scheduled-trigger seam exists per D8. **If (b) is still unbuilt when
     Half A ships, file it as an epic-level blocker and stop.**
 
 13. **CREATE `apps/tamma-elsa/src/Tamma.Activities/Review/PrTriageEvents.cs`** — `PR_TRIAGE.SWEEP.STARTED`
