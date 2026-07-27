@@ -169,10 +169,18 @@ never supplies a base URL, so no customer can redirect credentials anywhere. Con
   a tenant-facing one — no per-tenant descriptor rows, no cross-tenant isolation story for the
   descriptor table itself.
 
-## Open questions for the product owner
+## Also decided (2026-07-25)
 
-1. **Is `z-ai` meant to BE GLM?** Z.ai is Zhipu's international brand. If so, GLM is a rename plus a
-   client registration, not a new provider.
+**`z-ai` IS GLM (Zhipu).** Confirmed by the product owner. So the candidate list is really:
+
+| Candidate | Status |
+|---|---|
+| **GLM / Zhipu** | **Already half-present as `z-ai`** — it is in the 15-member allowlist and has a named HTTP client. Finishing it is a wiring + naming job, not a new provider. Decide whether the key stays `z-ai` or is renamed; if renamed, it is a wire-string change on persisted config, so prefer keeping `z-ai` and documenting the equivalence. |
+| **DeepSeek** | Genuinely new. OpenAI-compatible. |
+| **Kimi / Moonshot** | Genuinely new. OpenAI-compatible. |
+
+This makes the first descriptor milestone cheaper than it looked: one of the three is already
+reachable, and the other two share its wire dialect exactly.
 
 ## Related
 

@@ -294,7 +294,39 @@ third of them (41-1c) is the prose enabler. Only the scheduler seam remains unow
 | Three roles + fifteen action cells + the derived panel-selector maps + the `scrum_master` alias removal | **[41-1a](./story-41-1/41-1a-agent-taxonomy-extension.md)** | 4–5 d | drafted |
 | The six new document types (`AcceptanceCriteria`, `BacklogOrdering`, `SprintPlan`, `TestPlan`, `ThreatModel`, `UxSpec`) | **[41-1b](./story-41-1/41-1b-new-document-types.md)** | 5–6 d | drafted |
 | **Prose document support** — a `prose` type, an `Audience` field on envelope **and** `DocumentInstance` (+ migration), the audience/kind vocabularies | **[41-1c](./story-41-1/41-1c-prose-documents-and-audience-tags.md)** | 3–4 d | drafted |
-| **Tenant-aware scheduled-trigger seam** (see Dependencies) | **none — must be written** | — | blocks 41-5, 41-7, 41-11, 41-16, 41-17 (PR sweep), 41-20, 41-23 |
+| **Tenant-aware scheduled-trigger seam** (see Dependencies) | **none — must be written** | — | blocks **41-11, 41-16, 41-17 (PR sweep), 41-20, 41-23** — see the scoping decision below |
+
+> ### Scheduling is needed for audits, NOT for ceremonies (product owner, 2026-07-25)
+>
+> > "scrum and stuff are not automated, they are for users if they exist, but audits sure need to
+> > exist, so it depends"
+>
+> The seam was listed as blocking seven stories. It blocks **five**. The ceremony stories are
+> **user-initiated**, not scheduled:
+>
+> | Story | Trigger | Needs the seam? |
+> |---|---|---|
+> | 41-5 Stakeholder / status reporting | a person asks for it | **No** |
+> | 41-7 Standup synthesis | a person asks for it | **No** |
+> | 41-8 Retrospective facilitation | already event-triggered (sprint close), not cron | No (already) |
+> | 41-6 Sprint planning | a person runs it | No (already) |
+> | **41-11** Tech-debt sweep | recurring audit | **Yes** |
+> | **41-16** Regression / flaky-test management | recurring audit | **Yes** |
+> | **41-17** PR-triage sweep half | recurring audit | **Yes** |
+> | **41-20** Scheduled security audit | recurring audit | **Yes** |
+> | **41-23** Capacity / health review | recurring audit | **Yes** |
+>
+> **The distinction is who decides it should happen now.** A standup summary is something a team
+> asks for when they want it — automating it on a cron produces a document nobody asked for, on a
+> day nobody was working. An audit is exactly the opposite: its value is that it runs whether or not
+> anyone remembered.
+>
+> **Consequences:** 41-5 and 41-7 come off the blocked list and become schedulable immediately —
+> both need only a manual trigger, which already exists. Their plans currently say "⛔ BLOCKED
+> (scheduler seam, unowned)" and must be corrected. The seam itself is still unowned and still needs
+> a decision on who builds it, but it now gates five audit stories rather than seven mixed ones —
+> which also makes it a cleaner thing to specify, since every remaining consumer wants the same
+> shape: run this on a cadence, per tenant, and do not double-fire.
 
 41-1a + 41-1b hard-block **seventeen** stories on both execution paths — fourteen at their *produce*
 step (a missing type/role/cell), plus 41-24/41-25/41-26 at their *review* stage (the
