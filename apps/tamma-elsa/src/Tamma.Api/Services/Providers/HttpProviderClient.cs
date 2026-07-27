@@ -92,11 +92,22 @@ public sealed class HttpProviderClient : IProviderClient
         }
         var stopwatch = Stopwatch.StartNew();
 
-        var (path, payload) = BuildRequest(descriptor, model, req);
+        var payload = BuildPayload(descriptor, model, req);
+
+        // F1 — build the request URI through the single path-preserving join
+        // (ProviderCatalog.CombineUrl) instead of posting a root-relative path
+        // against BaseAddress, which would discard base-path segments (groq's
+        // /openai, openrouter's /api). F3 — a config-overridden base URL
+        // (≠ the descriptor default, e.g. "{Section}:BaseUrl" pointing at a
+        // proxy) gets the dialect-default path, not the descriptor's
+        // provider-specific ChatEndpointPath.
+        var baseUrl = client.BaseAddress.ToString();
+        var path = ProviderCatalog.ChatPathForBase(descriptor, descriptor.Dialect, baseUrl);
+        var requestUri = ProviderCatalog.CombineUrl(baseUrl, path);
 
         try
         {
-            using var response = await client.PostAsJsonAsync(path, payload, ct);
+            using var response = await client.PostAsJsonAsync(requestUri, payload, ct);
             response.EnsureSuccessStatusCode();
             var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
             stopwatch.Stop();
@@ -112,7 +123,7 @@ public sealed class HttpProviderClient : IProviderClient
         }
     }
 
-    private static (string Path, object Payload) BuildRequest(
+    private static object BuildPayload(
         ProviderDescriptor descriptor, string model, ExecuteRequest req)
     {
         // One body builder per dialect (ProviderRequestShaper), selected via
@@ -129,10 +140,8 @@ public sealed class HttpProviderClient : IProviderClient
             ? req.MaxTokens ?? 1024
             : req.MaxTokens;
 
-        var payload = ProviderRequestShaper.BuildBody(
+        return ProviderRequestShaper.BuildBody(
             descriptor.Dialect, messages, model, maxTokens, req.Temperature, tools: null);
-
-        return (ProviderCatalog.ChatPath(descriptor), payload);
     }
 
     private ProviderInvocationResult ParseResponse(

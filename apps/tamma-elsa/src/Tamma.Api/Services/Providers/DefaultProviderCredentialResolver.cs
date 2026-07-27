@@ -218,7 +218,14 @@ public sealed class DefaultProviderCredentialResolver : IProviderCredentialResol
                 severity: TammaErrorSeverity.High);
         }
 
-        var provider = providerName.Trim().ToLowerInvariant();
+        // F5 — catalogue aliases ("kimi", "z.ai", "zai", …) are lookup
+        // spellings, not allowlist entries: normalize to the canonical key
+        // BEFORE the allowlist check so aliases resolve credentials under the
+        // same cabinet rows as their canonical provider.
+        var spelled = providerName.Trim().ToLowerInvariant();
+        var provider = ProviderCatalog.Resolve(spelled)?.Key
+            ?? ProviderCatalog.ResolveNonHttp(spelled)?.Key
+            ?? spelled;
         if (!_allowlist.IsAllowed(provider))
         {
             throw new TammaError(

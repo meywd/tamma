@@ -84,10 +84,16 @@ public static class ProviderCatalog
             DisplayName = "Google Gemini",
             Dialect = ProviderWireDialect.OpenAiCompatible,
             DefaultBaseUrl = "https://generativelanguage.googleapis.com",
-            AuthScheme = ProviderAuthScheme.GoogleApiKey,
+            AuthScheme = ProviderAuthScheme.BearerToken,
             DefaultModel = "",
             HttpClientName = "gemini",
             ConfigSection = "Gemini",
+            // Google's OpenAI-compatible surface lives under /v1beta/openai
+            // with standard Bearer auth (ai.google.dev/gemini-api/docs/openai;
+            // verified empirically 2026-07-27: POST /v1beta/openai/chat/completions
+            // with a Bearer header answers "Please pass a valid API key" while
+            // /v1/chat/completions is a plain 404).
+            ChatEndpointPath = "/v1beta/openai/chat/completions",
         },
         new ProviderDescriptor
         {
@@ -97,10 +103,12 @@ public static class ProviderCatalog
             DisplayName = "Google Gemini",
             Dialect = ProviderWireDialect.OpenAiCompatible,
             DefaultBaseUrl = "https://generativelanguage.googleapis.com",
-            AuthScheme = ProviderAuthScheme.GoogleApiKey,
+            AuthScheme = ProviderAuthScheme.BearerToken,
             DefaultModel = "",
             HttpClientName = "gemini",
             ConfigSection = "Gemini",
+            // Same wire identity as the "gemini" descriptor above.
+            ChatEndpointPath = "/v1beta/openai/chat/completions",
         },
         new ProviderDescriptor
         {
@@ -310,4 +318,54 @@ public static class ProviderCatalog
     /// <summary>Chat endpoint path for a known descriptor.</summary>
     public static string ChatPath(ProviderDescriptor descriptor) =>
         ChatPath(descriptor, descriptor.Dialect);
+
+    /// <summary>
+    /// Chat endpoint path honouring the config-override rule: a descriptor's
+    /// <see cref="ProviderDescriptor.ChatEndpointPath"/> describes the
+    /// provider's OWN endpoint at its OWN <see cref="ProviderDescriptor.DefaultBaseUrl"/>.
+    /// When <paramref name="effectiveBaseUrl"/> is an explicit configuration
+    /// override (≠ the descriptor default), the pre-refactor proxy semantics
+    /// apply instead: the dialect-default path (<c>/v1/messages</c> or
+    /// <c>/v1/chat/completions</c>) — a gemini/z-ai deployment routed through
+    /// an OpenAI-compatible proxy gets <c>{base}/v1/chat/completions</c>, not
+    /// the descriptor's provider-specific path grafted onto the proxy URL.
+    /// </summary>
+    public static string ChatPathForBase(
+        ProviderDescriptor? descriptor, ProviderWireDialect dialect, string? effectiveBaseUrl) =>
+        descriptor is not null && IsDefaultBaseUrl(descriptor, effectiveBaseUrl)
+            ? ChatPath(descriptor)
+            : ChatPath(null, dialect);
+
+    /// <summary>Whether <paramref name="baseUrl"/> is the descriptor's own
+    /// default base URL (slash- and case-insensitive), i.e. NOT a
+    /// configuration override.</summary>
+    public static bool IsDefaultBaseUrl(ProviderDescriptor descriptor, string? baseUrl) =>
+        !string.IsNullOrWhiteSpace(descriptor.DefaultBaseUrl)
+        && !string.IsNullOrWhiteSpace(baseUrl)
+        && string.Equals(
+            baseUrl.TrimEnd('/'),
+            descriptor.DefaultBaseUrl.TrimEnd('/'),
+            StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Join a base URL and an endpoint path PRESERVING the base URL's own path
+    /// segments. This is the single URL-composition helper for every LLM
+    /// egress path: .NET's <c>Uri(baseAddress, relative)</c> composition
+    /// DISCARDS base path segments for root-relative paths (groq's
+    /// <c>https://api.groq.com/openai</c> + <c>/v1/chat/completions</c> would
+    /// become <c>https://api.groq.com/v1/chat/completions</c> — a 404), so
+    /// callers must build absolute request URIs through this method instead of
+    /// posting relative paths against <c>HttpClient.BaseAddress</c>.
+    /// Hosts without a base path stay byte-identical
+    /// (<c>https://api.openai.com</c> + <c>/v1/chat/completions</c> →
+    /// <c>https://api.openai.com/v1/chat/completions</c>).
+    /// </summary>
+    public static string CombineUrl(string baseUrl, string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+        var trimmedBase = baseUrl.TrimEnd('/');
+        return string.IsNullOrEmpty(path)
+            ? trimmedBase
+            : trimmedBase + "/" + path.TrimStart('/');
+    }
 }

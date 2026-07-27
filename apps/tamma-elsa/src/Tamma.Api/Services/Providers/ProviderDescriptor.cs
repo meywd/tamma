@@ -32,11 +32,13 @@ public enum ProviderAuthScheme
     /// descriptor's version header, e.g. <c>anthropic-version</c>).</summary>
     AnthropicApiKey,
 
-    /// <summary>Standard <c>Authorization: Bearer &lt;key&gt;</c> header.</summary>
+    /// <summary>Standard <c>Authorization: Bearer &lt;key&gt;</c> header.
+    /// Also used by Google's OpenAI-compatible surface
+    /// (<c>/v1beta/openai/chat/completions</c> takes <c>Authorization:
+    /// Bearer</c>, per ai.google.dev/gemini-api/docs/openai — the former
+    /// <c>GoogleApiKey</c>/<c>X-Goog-Api-Key</c> scheme was a wire-fact error
+    /// and has been removed).</summary>
     BearerToken,
-
-    /// <summary>Google-style <c>X-Goog-Api-Key</c> header.</summary>
-    GoogleApiKey,
 }
 
 /// <summary>Transport of a provider that is NOT served over plain HTTP.</summary>

@@ -336,7 +336,13 @@ public static class ProviderCredentialEndpoints
         {
             return (null, Results.BadRequest(new { error = "invalid_provider" }));
         }
-        var norm = provider.Trim().ToLowerInvariant();
+        // F5 — normalize catalogue aliases ("kimi" → moonshot, "z.ai"/"zai" →
+        // z-ai) to the canonical key BEFORE the allowlist check; aliases are
+        // lookup spellings, deliberately not allowlist entries.
+        var spelled = provider.Trim().ToLowerInvariant();
+        var norm = ProviderCatalog.Resolve(spelled)?.Key
+            ?? ProviderCatalog.ResolveNonHttp(spelled)?.Key
+            ?? spelled;
         if (!ProviderAllowlist.IsAllowedDefault(norm))
         {
             // Unknown provider — 404 (do not enumerate the allowlist).

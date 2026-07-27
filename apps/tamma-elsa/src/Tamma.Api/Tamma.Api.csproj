@@ -52,6 +52,10 @@
     <!-- Expose internal helpers (e.g. sealed-box encryption) to the test
          project without widening the public API surface. -->
     <InternalsVisibleTo Include="Tamma.Api.Tests" />
+    <!-- The provider golden/regression suite lives in Tamma.Activities.Tests
+         (it needs ProviderAllowlist AND ProviderCatalog in one view) and
+         drives the runner's internal LoadProviderConfig directly. -->
+    <InternalsVisibleTo Include="Tamma.Activities.Tests" />
   </ItemGroup>
 
   <ItemGroup>

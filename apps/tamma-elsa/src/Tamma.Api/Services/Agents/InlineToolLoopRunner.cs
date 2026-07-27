@@ -689,7 +689,9 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
         var path = ProviderCatalog.ChatPath(descriptor, ProviderWireDialect.Anthropic);
-        var response = await httpClient.PostAsync($"{baseUrl}{path}", content);
+        // F1 — the single path-preserving join (identical bytes here since the
+        // Anthropic base URLs carry no path, pinned by the golden tests).
+        var response = await httpClient.PostAsync(ProviderCatalog.CombineUrl(baseUrl, path), content);
         var statusCode = (int)response.StatusCode;
 
         if (!response.IsSuccessStatusCode)
@@ -715,20 +717,18 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         List<ConversationMessage> messages, int maxTokens, double temperature,
         IReadOnlyList<ResolvedTool>? tools)
     {
-        var baseUrl = !string.IsNullOrWhiteSpace(config.BaseUrl)
-            ? config.BaseUrl.TrimEnd('/')
-            : "https://api.openai.com";
-
         var descriptor = ProviderCatalog.Resolve(config.Name);
+        var (baseUrl, effectiveDescriptor) = ResolveOpenAiCompatibleBase(config, descriptor);
+
         httpClient.DefaultRequestHeaders.Clear();
-        ApplyAuthHeader(httpClient, descriptor, config.ApiKey);
+        ApplyAuthHeader(httpClient, effectiveDescriptor, config.ApiKey);
 
         var requestBody = BuildOpenAiMultiTurnBody(messages, model, maxTokens, temperature, tools);
         var json = JsonSerializer.Serialize(requestBody);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-        var path = ProviderCatalog.ChatPath(descriptor, ProviderWireDialect.OpenAiCompatible);
-        var response = await httpClient.PostAsync($"{baseUrl}{path}", content);
+        var path = ProviderCatalog.ChatPath(effectiveDescriptor, ProviderWireDialect.OpenAiCompatible);
+        var response = await httpClient.PostAsync(ProviderCatalog.CombineUrl(baseUrl, path), content);
         var statusCode = (int)response.StatusCode;
 
         if (!response.IsSuccessStatusCode)
@@ -772,7 +772,10 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     /// <summary>
     /// Apply the descriptor's auth scheme for an OpenAI-compatible call.
     /// Descriptor-less providers keep the legacy Bearer behaviour; the header
-    /// is only sent when a key is present (unchanged).
+    /// is only sent when a key is present (unchanged). Callers pass a null
+    /// descriptor when the base URL is a configuration override (see
+    /// <see cref="ResolveOpenAiCompatibleBase"/>) so an override always gets
+    /// the pre-refactor <c>Authorization: Bearer</c> semantics.
     /// </summary>
     private static void ApplyAuthHeader(
         HttpClient httpClient, ProviderDescriptor? descriptor, string apiKey)
@@ -782,9 +785,6 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
 
         switch (descriptor?.AuthScheme ?? ProviderAuthScheme.BearerToken)
         {
-            case ProviderAuthScheme.GoogleApiKey:
-                httpClient.DefaultRequestHeaders.Add("X-Goog-Api-Key", apiKey);
-                break;
             case ProviderAuthScheme.AnthropicApiKey:
                 httpClient.DefaultRequestHeaders.Add("x-api-key", apiKey);
                 if (descriptor?.VersionHeaderName is not null)
@@ -795,6 +795,67 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
                 httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
                 break;
         }
+    }
+
+    /// <summary>
+    /// F3/F4 — resolve the effective base URL for an OpenAI-compatible call,
+    /// plus the descriptor whose <c>ChatEndpointPath</c>/auth-scheme should
+    /// shape the request (null ⇒ dialect defaults).
+    ///
+    /// <para><b>Config-override rule (F3):</b> a descriptor's
+    /// <c>ChatEndpointPath</c> and auth scheme describe the provider's OWN
+    /// endpoint at its OWN <c>DefaultBaseUrl</c>. When the config supplies an
+    /// explicit BaseUrl override (e.g. <c>LlmProviders:gemini:BaseUrl</c>
+    /// pointing at an OpenAI-compatible proxy), the pre-refactor semantics are
+    /// restored exactly: <c>{base}/v1/chat/completions</c> with
+    /// <c>Authorization: Bearer</c> — the descriptor's provider-specific path
+    /// and auth scheme apply only when its own default base URL is in use.
+    /// (The Anthropic dialect is untouched by this rule: its config-override
+    /// behaviour is byte-identical to before.)</para>
+    ///
+    /// <para><b>Fail-loud rule (F4):</b> a known provider whose descriptor has
+    /// no default base URL (azure-openai's per-resource endpoint) and no
+    /// configured BaseUrl throws a <see cref="TammaError"/> naming the missing
+    /// config key — the legacy silent fallback sent the provider's key to
+    /// api.openai.com as a Bearer token. Descriptor-less (config-only)
+    /// providers keep the legacy fallback.</para>
+    /// </summary>
+    private static (string BaseUrl, ProviderDescriptor? EffectiveDescriptor)
+        ResolveOpenAiCompatibleBase(LlmProviderConfig config, ProviderDescriptor? descriptor)
+    {
+        if (!string.IsNullOrWhiteSpace(config.BaseUrl))
+        {
+            var configured = config.BaseUrl.TrimEnd('/');
+            var isOverride = descriptor is null
+                || !ProviderCatalog.IsDefaultBaseUrl(descriptor, configured);
+            return (configured, isOverride ? null : descriptor);
+        }
+
+        if (descriptor is not null)
+        {
+            if (string.IsNullOrWhiteSpace(descriptor.DefaultBaseUrl))
+            {
+                throw new TammaError(
+                    "PROVIDER.BASE_URL.MISSING",
+                    $"Provider '{descriptor.Key}' has no default base URL (its endpoint " +
+                    $"is deployment-specific) and none was configured. Set " +
+                    $"'LlmProviders:{descriptor.Key}:BaseUrl' (or " +
+                    $"'{descriptor.ConfigSection}:BaseUrl' for the dispatch client) " +
+                    "before calling this provider.",
+                    new Dictionary<string, object?>
+                    {
+                        ["provider"] = descriptor.Key,
+                        ["configKey"] = $"LlmProviders:{descriptor.Key}:BaseUrl",
+                    },
+                    retryable: false,
+                    severity: TammaErrorSeverity.High);
+            }
+
+            return (descriptor.DefaultBaseUrl.TrimEnd('/'), descriptor);
+        }
+
+        // Descriptor-less (config-only) provider — legacy fallback preserved.
+        return ("https://api.openai.com", null);
     }
 
     // =======================================================================
@@ -963,7 +1024,9 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
         var path = ProviderCatalog.ChatPath(descriptor, ProviderWireDialect.Anthropic);
-        var response = await httpClient.PostAsync($"{baseUrl}{path}", content);
+        // F1 — the single path-preserving join (identical bytes here since the
+        // Anthropic base URLs carry no path, pinned by the golden tests).
+        var response = await httpClient.PostAsync(ProviderCatalog.CombineUrl(baseUrl, path), content);
         var statusCode = (int)response.StatusCode;
 
         if (!response.IsSuccessStatusCode)
@@ -986,13 +1049,11 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         string systemPrompt, string userPrompt, int maxTokens, double temperature,
         string? toolsJson)
     {
-        var baseUrl = !string.IsNullOrWhiteSpace(config.BaseUrl)
-            ? config.BaseUrl.TrimEnd('/')
-            : "https://api.openai.com";
-
         var descriptor = ProviderCatalog.Resolve(config.Name);
+        var (baseUrl, effectiveDescriptor) = ResolveOpenAiCompatibleBase(config, descriptor);
+
         httpClient.DefaultRequestHeaders.Clear();
-        ApplyAuthHeader(httpClient, descriptor, config.ApiKey);
+        ApplyAuthHeader(httpClient, effectiveDescriptor, config.ApiKey);
 
         var requestBody = ProviderRequestShaper.BuildOpenAiCompatibleBody(
             new List<ConversationMessage>
@@ -1005,8 +1066,8 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         var json = JsonSerializer.Serialize(requestBody);
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-        var path = ProviderCatalog.ChatPath(descriptor, ProviderWireDialect.OpenAiCompatible);
-        var response = await httpClient.PostAsync($"{baseUrl}{path}", content);
+        var path = ProviderCatalog.ChatPath(effectiveDescriptor, ProviderWireDialect.OpenAiCompatible);
+        var response = await httpClient.PostAsync(ProviderCatalog.CombineUrl(baseUrl, path), content);
         var statusCode = (int)response.StatusCode;
 
         if (!response.IsSuccessStatusCode)
@@ -1037,17 +1098,27 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     /// </summary>
     internal LlmProviderConfig LoadProviderConfig(string providerName)
     {
-        // Validate provider name against allowlist
-        if (!ProviderAllowlist.IsAllowedDefault(providerName))
+        // F5 — the allowlist carries CANONICAL keys only; catalogue aliases
+        // ("kimi" → moonshot, "z.ai"/"zai" → z-ai, "anthropic-claude" →
+        // anthropic) are lookup spellings, deliberately NOT allowlist entries.
+        // Normalize alias → canonical key via the catalogue BEFORE the
+        // allowlist check, and use the canonical key for everything downstream
+        // (config section, catalogue fallback, credential resolution).
+        var canonicalName = ProviderCatalog.Resolve(providerName)?.Key
+            ?? ProviderCatalog.ResolveNonHttp(providerName)?.Key
+            ?? providerName;
+
+        // Validate the canonical provider name against the allowlist
+        if (!ProviderAllowlist.IsAllowedDefault(canonicalName))
         {
             _logger?.LogWarning("Provider '{Provider}' is not in the allowlist, rejecting", providerName);
             return new LlmProviderConfig { Name = providerName, Enabled = false };
         }
 
-        var section = _configuration?.GetSection($"LlmProviders:{providerName}");
+        var section = _configuration?.GetSection($"LlmProviders:{canonicalName}");
         if (section != null && section.Exists())
         {
-            var config = new LlmProviderConfig { Name = providerName };
+            var config = new LlmProviderConfig { Name = canonicalName };
             config.BaseUrl = section["BaseUrl"] ?? "";
             // ApiKey deliberately NOT read here — resolved via IProviderCredentialResolver.
             config.DefaultModel = section["DefaultModel"] ?? "";
@@ -1061,10 +1132,10 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         // their descriptors) and is what makes the previously-unreachable
         // allow-listed providers (z-ai/GLM, deepseek, moonshot, together,
         // groq, …) callable through the runner without a config section.
-        var descriptor = ProviderCatalog.Resolve(providerName);
+        var descriptor = ProviderCatalog.Resolve(canonicalName);
         if (descriptor is null)
         {
-            return new LlmProviderConfig { Name = providerName };
+            return new LlmProviderConfig { Name = canonicalName };
         }
 
         var defaultModel = string.Equals(descriptor.Key, "anthropic", StringComparison.OrdinalIgnoreCase)
@@ -1073,7 +1144,7 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
 
         return new LlmProviderConfig
         {
-            Name = providerName,
+            Name = canonicalName,
             BaseUrl = descriptor.DefaultBaseUrl,
             DefaultModel = defaultModel,
         };
@@ -1106,7 +1177,11 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
             return (config, null);
         }
 
-        var cred = await _credentialResolver.ResolveAsync(tenantId, providerName, ct)
+        // F5 — resolve the credential under the CANONICAL key (config.Name is
+        // already alias-normalized by LoadProviderConfig), so "kimi"/"z.ai"
+        // spellings hit the same cabinet rows and allowlist entry as
+        // moonshot/z-ai instead of failing the resolver's own allowlist check.
+        var cred = await _credentialResolver.ResolveAsync(tenantId, config.Name, ct)
             .ConfigureAwait(false);
 
         // Plaintext used immediately for the outbound header; never stored/logged.
