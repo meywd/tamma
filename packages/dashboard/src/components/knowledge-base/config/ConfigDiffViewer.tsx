@@ -4,7 +4,7 @@
  * Displays differences between two configuration versions.
  */
 
-import React, { type JSX } from 'react';
+import { type JSX } from 'react';
 
 export interface ConfigDiffViewerProps {
   oldConfig: Record<string, unknown>;

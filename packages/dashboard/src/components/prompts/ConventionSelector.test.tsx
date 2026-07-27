@@ -32,14 +32,14 @@ function mockFetch(ok = true) {
 
 describe('ConventionSelector', () => {
   const user = userEvent.setup();
-  const originalFetch = global.fetch;
+  const originalFetch = globalThis.fetch;
 
   afterEach(() => {
-    global.fetch = originalFetch;
+    globalThis.fetch = originalFetch;
   });
 
   it('lists convention templates in dropdown', async () => {
-    global.fetch = mockFetch() as typeof fetch;
+    globalThis.fetch = mockFetch() as typeof fetch;
     render(<ConventionSelector onInsert={vi.fn()} />);
     const select = screen.getByLabelText('Convention Template') as HTMLSelectElement;
     await waitFor(() => {
@@ -50,7 +50,7 @@ describe('ConventionSelector', () => {
   });
 
   it('calls onInsert with template text after selection and insert click', async () => {
-    global.fetch = mockFetch() as typeof fetch;
+    globalThis.fetch = mockFetch() as typeof fetch;
     const onInsert = vi.fn();
     render(<ConventionSelector onInsert={onInsert} />);
     const select = screen.getByLabelText('Convention Template') as HTMLSelectElement;

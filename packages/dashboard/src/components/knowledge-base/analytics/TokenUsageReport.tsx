@@ -4,7 +4,7 @@
  * Tabular report of token usage across sources with period breakdown.
  */
 
-import React, { type JSX } from 'react';
+import { type JSX } from 'react';
 import type { UsageAnalytics } from '@tamma/shared';
 
 export interface TokenUsageReportProps {

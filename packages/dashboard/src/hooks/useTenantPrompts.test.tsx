@@ -18,10 +18,10 @@ function mockResponse({ ok = true, status = 200, body = {} }: MockResponseInit =
 }
 
 describe('useTenantPrompts', () => {
-  const originalFetch = global.fetch;
+  const originalFetch = globalThis.fetch;
 
   afterEach(() => {
-    global.fetch = originalFetch;
+    globalThis.fetch = originalFetch;
     vi.clearAllMocks();
   });
 
@@ -64,7 +64,7 @@ describe('useTenantPrompts', () => {
       },
     ];
 
-    global.fetch = vi.fn().mockImplementation((url: string) => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
       if (url.endsWith('/api/prompts/system')) {
         return Promise.resolve(mockResponse({ body: systemDefaults }));
       }
@@ -87,7 +87,7 @@ describe('useTenantPrompts', () => {
   });
 
   it('reports errors when the system endpoint fails', async () => {
-    global.fetch = vi
+    globalThis.fetch = vi
       .fn()
       .mockResolvedValueOnce(mockResponse({ ok: false, status: 500 })) // system
       .mockResolvedValue(mockResponse({ body: [] })) as typeof fetch;
@@ -97,7 +97,7 @@ describe('useTenantPrompts', () => {
   });
 
   it('upsertOverride PUTs to /api/prompts/:role/:action', async () => {
-    global.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
       if (init?.method === 'PUT') {
         return Promise.resolve(
           mockResponse({
@@ -131,7 +131,7 @@ describe('useTenantPrompts', () => {
       });
     });
     expect(saved).toBeDefined();
-    const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     const putCall = fetchMock.mock.calls.find(
       (c) => (c[1] as RequestInit | undefined)?.method === 'PUT',
     );
@@ -140,7 +140,7 @@ describe('useTenantPrompts', () => {
   });
 
   it('deleteOverride DELETEs /api/prompts/:role/:action and returns true', async () => {
-    global.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+    globalThis.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
       if (init?.method === 'DELETE') {
         return Promise.resolve(mockResponse({ body: { message: 'deleted' } }));
       }
@@ -158,7 +158,7 @@ describe('useTenantPrompts', () => {
   });
 
   it('renderPreview POSTs to /api/prompts/:role/:action/render', async () => {
-    global.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
       if (init?.method === 'POST') {
         return Promise.resolve(
           mockResponse({

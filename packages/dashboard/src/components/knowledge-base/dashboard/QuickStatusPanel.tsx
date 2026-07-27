@@ -4,7 +4,7 @@
  * Displays an overview of all subsystem statuses at a glance.
  */
 
-import React, { type JSX } from 'react';
+import { type JSX } from 'react';
 import { StatusCard } from './StatusCard.js';
 import type { IndexStatus, MCPServerInfo, RAGMetricsInfo } from '@tamma/shared';
 

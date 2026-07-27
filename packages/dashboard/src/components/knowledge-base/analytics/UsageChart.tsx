@@ -4,7 +4,7 @@
  * Displays usage analytics with source breakdown.
  */
 
-import React, { type JSX } from 'react';
+import { type JSX } from 'react';
 import type { UsageAnalytics } from '@tamma/shared';
 
 export interface UsageChartProps {

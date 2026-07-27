@@ -43,15 +43,15 @@ const SAMPLE_CONVENTIONS = [
 ];
 
 describe('useTenantConventions', () => {
-  const originalFetch = global.fetch;
+  const originalFetch = globalThis.fetch;
 
   afterEach(() => {
-    global.fetch = originalFetch;
+    globalThis.fetch = originalFetch;
     vi.clearAllMocks();
   });
 
   it('loads conventions from GET /api/conventions', async () => {
-    global.fetch = vi.fn().mockResolvedValue(
+    globalThis.fetch = vi.fn().mockResolvedValue(
       mockResponse({ body: SAMPLE_CONVENTIONS }),
     ) as typeof fetch;
 
@@ -63,7 +63,7 @@ describe('useTenantConventions', () => {
   });
 
   it('reports errors when the endpoint fails', async () => {
-    global.fetch = vi.fn().mockResolvedValue(
+    globalThis.fetch = vi.fn().mockResolvedValue(
       mockResponse({ ok: false, status: 500, body: { error: 'Server error' } }),
     ) as typeof fetch;
 
@@ -73,7 +73,7 @@ describe('useTenantConventions', () => {
   });
 
   it('upsertOverride PUTs to /api/conventions/:role/:action', async () => {
-    global.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+    globalThis.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
       if (init?.method === 'PUT') {
         return Promise.resolve(
           mockResponse({
@@ -106,7 +106,7 @@ describe('useTenantConventions', () => {
     });
     expect(saved).toBeDefined();
 
-    const fetchMock = global.fetch as unknown as ReturnType<typeof vi.fn>;
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     const putCall = fetchMock.mock.calls.find(
       (c) => (c[1] as RequestInit | undefined)?.method === 'PUT',
     );
@@ -115,7 +115,7 @@ describe('useTenantConventions', () => {
   });
 
   it('deleteOverride DELETEs /api/conventions/:role/:action and returns true', async () => {
-    global.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+    globalThis.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
       if (init?.method === 'DELETE') {
         return Promise.resolve(mockResponse({ body: { message: 'deleted' } }));
       }
@@ -133,7 +133,7 @@ describe('useTenantConventions', () => {
   });
 
   it('overrideCount counts only isOverride=true conventions', async () => {
-    global.fetch = vi.fn().mockResolvedValue(
+    globalThis.fetch = vi.fn().mockResolvedValue(
       mockResponse({ body: SAMPLE_CONVENTIONS }),
     ) as typeof fetch;
 

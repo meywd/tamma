@@ -59,7 +59,7 @@ export function useIndexStatus(pollIntervalMs = 5000): UseIndexStatusReturn {
 
   const triggerIndex = useCallback(async (fullReindex?: boolean) => {
     try {
-      await indexApi.triggerIndex({ fullReindex });
+      await indexApi.triggerIndex(fullReindex !== undefined ? { fullReindex } : {});
       await refreshStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to trigger index');

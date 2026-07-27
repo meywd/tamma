@@ -4,7 +4,7 @@
  * Configuration editor for the RAG pipeline.
  */
 
-import React, { useState, useEffect, type JSX } from 'react';
+import { useState, useEffect, type JSX } from 'react';
 import type { RAGConfigInfo } from '@tamma/shared';
 
 export interface RAGConfigPanelProps {
@@ -111,7 +111,7 @@ export function RAGConfigPanel({ config, onSave }: RAGConfigPanelProps): JSX.Ele
             <label style={labelStyle}>Output Format</label>
             <select
               value={format}
-              onChange={(e) => setFormat(e.target.value)}
+              onChange={(e) => setFormat(e.target.value as typeof format)}
               style={inputStyle}
             >
               <option value="xml">XML</option>

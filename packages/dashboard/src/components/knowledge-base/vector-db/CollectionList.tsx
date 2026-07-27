@@ -4,7 +4,7 @@
  * Displays all vector database collections with actions.
  */
 
-import React, { useState, type JSX } from 'react';
+import { useState, type JSX } from 'react';
 import type { CollectionInfo } from '@tamma/shared';
 
 export interface CollectionListProps {

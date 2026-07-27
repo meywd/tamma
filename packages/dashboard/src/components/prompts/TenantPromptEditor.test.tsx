@@ -1,8 +1,25 @@
 // @vitest-environment jsdom
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { Mock } from 'vitest';
 import { TenantPromptEditor } from './TenantPromptEditor.js';
-import type { PromptDetail } from '../../hooks/useTenantPrompts.js';
+import type {
+  PromptDetail,
+  RenderedResult,
+  UpsertPromptInput,
+} from '../../hooks/useTenantPrompts.js';
+
+type UpsertOverrideFn = (
+  role: string,
+  action: string,
+  input: UpsertPromptInput,
+) => Promise<PromptDetail>;
+type DeleteOverrideFn = (role: string, action: string) => Promise<boolean>;
+type RenderPreviewFn = (
+  role: string,
+  action: string,
+  variables: Record<string, string>,
+) => Promise<RenderedResult | null>;
 
 const SYSTEM_DEFAULT: PromptDetail = {
   role: 'developer',
@@ -24,19 +41,23 @@ const USER_OVERRIDE: PromptDetail = {
 function setup(opts?: {
   detail?: PromptDetail;
   readOnly?: boolean;
-  upsertOverride?: ReturnType<typeof vi.fn>;
-  deleteOverride?: ReturnType<typeof vi.fn>;
-  onSaved?: ReturnType<typeof vi.fn>;
-  onClose?: ReturnType<typeof vi.fn>;
-  renderPreview?: ReturnType<typeof vi.fn>;
+  upsertOverride?: Mock<UpsertOverrideFn>;
+  deleteOverride?: Mock<DeleteOverrideFn>;
+  onSaved?: Mock<() => void>;
+  onClose?: Mock<() => void>;
+  renderPreview?: Mock<RenderPreviewFn>;
 }) {
   const detail = opts?.detail ?? SYSTEM_DEFAULT;
-  const getPrompt = vi.fn().mockResolvedValue(detail);
-  const upsertOverride = opts?.upsertOverride ?? vi.fn().mockResolvedValue(detail);
-  const deleteOverride = opts?.deleteOverride ?? vi.fn().mockResolvedValue(true);
-  const renderPreview = opts?.renderPreview ?? vi.fn().mockResolvedValue(null);
-  const onSaved = opts?.onSaved ?? vi.fn();
-  const onClose = opts?.onClose ?? vi.fn();
+  const getPrompt = vi.fn<(role: string, action: string) => Promise<PromptDetail | null>>()
+    .mockResolvedValue(detail);
+  const upsertOverride =
+    opts?.upsertOverride ?? vi.fn<UpsertOverrideFn>().mockResolvedValue(detail);
+  const deleteOverride =
+    opts?.deleteOverride ?? vi.fn<DeleteOverrideFn>().mockResolvedValue(true);
+  const renderPreview =
+    opts?.renderPreview ?? vi.fn<RenderPreviewFn>().mockResolvedValue(null);
+  const onSaved = opts?.onSaved ?? vi.fn<() => void>();
+  const onClose = opts?.onClose ?? vi.fn<() => void>();
 
   render(
     <TenantPromptEditor
@@ -80,8 +101,8 @@ describe('TenantPromptEditor', () => {
   });
 
   it('calls upsertOverride on Save click with edited template', async () => {
-    const upsertOverride = vi.fn().mockResolvedValue(SYSTEM_DEFAULT);
-    const onSaved = vi.fn();
+    const upsertOverride = vi.fn<UpsertOverrideFn>().mockResolvedValue(SYSTEM_DEFAULT);
+    const onSaved = vi.fn<() => void>();
     setup({ upsertOverride, onSaved });
     const textarea = await screen.findByLabelText(/^Template$/i);
     await user.clear(textarea);
@@ -98,8 +119,8 @@ describe('TenantPromptEditor', () => {
   });
 
   it('calls deleteOverride after confirm on Reset click', async () => {
-    const deleteOverride = vi.fn().mockResolvedValue(true);
-    const onSaved = vi.fn();
+    const deleteOverride = vi.fn<DeleteOverrideFn>().mockResolvedValue(true);
+    const onSaved = vi.fn<() => void>();
     setup({ detail: USER_OVERRIDE, deleteOverride, onSaved });
     await screen.findByText(/This is a tenant override/i);
     await user.click(screen.getByRole('button', { name: /Reset to Default/i }));

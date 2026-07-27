@@ -4,14 +4,16 @@
  * Displays assembled context with chunk cards and source contributions.
  */
 
-import React, { type JSX } from 'react';
+import { type JSX } from 'react';
 import type { ContextTestResult } from '@tamma/shared';
 import { ChunkCard } from './ChunkCard.js';
 import { SourceContributionChart } from './SourceContributionChart.js';
 
 export interface ContextViewerProps {
   result: ContextTestResult;
-  onFeedback?: (chunkId: string, rating: 'relevant' | 'irrelevant' | 'partially_relevant') => void;
+  onFeedback?:
+    | ((chunkId: string, rating: 'relevant' | 'irrelevant' | 'partially_relevant') => void)
+    | undefined;
 }
 
 export function ContextViewer({ result, onFeedback }: ContextViewerProps): JSX.Element {

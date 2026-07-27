@@ -5,7 +5,7 @@
  * set by the GitHub OAuth flow (see routes/auth/github-oauth.ts).
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 export interface AuthUser {
   id: string;
@@ -14,14 +14,19 @@ export interface AuthUser {
   role: string;
 }
 
+/** Fetch state only — what `useState` actually holds. */
 interface AuthState {
   user: AuthUser | null;
   loading: boolean;
   error: string | null;
+}
+
+/** Public hook contract: fetch state plus the `logout` action. */
+export interface UseAuthResult extends AuthState {
   logout: () => void;
 }
 
-export function useAuth(): AuthState {
+export function useAuth(): UseAuthResult {
   const [state, setState] = useState<AuthState>({
     user: null,
     loading: true,
@@ -58,12 +63,11 @@ export function useAuth(): AuthState {
     };
   }, []);
 
-  function logout(): void {
-    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
-      .finally(() => {
-        window.location.href = '/login';
-      });
-  }
+  const logout = useCallback((): void => {
+    void fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).finally(() => {
+      window.location.href = '/login';
+    });
+  }, []);
 
   return { ...state, logout };
 }

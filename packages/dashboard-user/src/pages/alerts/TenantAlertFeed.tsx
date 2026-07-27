@@ -61,9 +61,9 @@ export function TenantAlertFeed(): JSX.Element {
     setError(null);
     try {
       const resp = await listTenantAlerts(tenantId, {
-        severity: severity || undefined,
-        status: status || undefined,
-        sinceDays: windowSelection.days,
+        ...(severity ? { severity } : {}),
+        ...(status ? { status } : {}),
+        ...(windowSelection.days !== undefined ? { sinceDays: windowSelection.days } : {}),
         limit: 200,
       });
       setAlerts(resp.items);

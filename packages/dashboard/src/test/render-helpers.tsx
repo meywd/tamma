@@ -1,4 +1,4 @@
-import { render, type RenderOptions } from '@testing-library/react';
+import { render, type RenderOptions, type RenderResult } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactElement } from 'react';
 
@@ -8,7 +8,7 @@ import type { ReactElement } from 'react';
 export function renderWithRouter(
   ui: ReactElement,
   options?: RenderOptions & { initialEntries?: string[] },
-) {
+): RenderResult {
   const { initialEntries = ['/admin'], ...renderOptions } = options ?? {};
   return render(ui, {
     wrapper: ({ children }) => (
