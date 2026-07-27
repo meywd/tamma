@@ -84,11 +84,26 @@ there.
 Routes `/api/projects`, `/api/work-items`, `/api/iterations` — all verified absent from `Program.cs`.
 Permission `tracker:manage` — verified absent from `Auth/Permissions.cs` (18 keys, `:12-95`).
 
-**One collision is accepted and must be flagged, not silently absorbed:** `TriageComplexity` already
-has a `[Wire("epic")]` member (`TriageDecision.cs:39`). `WorkItemKind.Epic` is a *different axis* — a
-hierarchy level, not a size estimate. They must never be unified. Likewise `ITERATION.*` as a
-top-level event family is free, but `CODE_REVIEW.ITERATION.STARTED` (`CodeReviewEvents.cs:63`) and
-`AGENT.ITERATION.*` (`Program.cs:825`) exist as *sub*-segments; a grep for `ITERATION.` returns both.
+**Two vocabulary collisions, flagged rather than silently absorbed — one accepted, one resolved.**
+
+1. **Accepted:** `TriageComplexity` already has a `[Wire("epic")]` member (`TriageDecision.cs:39`).
+   `WorkItemKind.Epic` is a *different axis* — a hierarchy affordance, not a size estimate. They must
+   never be unified. `TriageComplexity` is not adopted by this epic; its fate is Open question 5.
+
+2. **Resolved by deletion, and it is the larger of the two.** `TriageIssueType`
+   (`TriageDecision.cs:23-31`) is `{bug, feature, chore, question, security, docs}`. The first draft of
+   `WorkItemKind` was `{epic, story, task, bug, chore, spike}` — **two** overlapping members, with each
+   vocabulary carrying members the other lacks (`spike` is a kind not a type; `feature`/`question`/
+   `security`/`docs` are types not kinds). Partial overlap with partial coverage on both sides, and
+   both vocabularies actually adopted by 44-0 (unlike the `TriageComplexity` case, where only one
+   side is live). `(Kind=Bug, Type=Feature)` and `(Kind=Story, Type=Bug)` were both representable and
+   neither meant anything. **`WorkItemKind` therefore ships as `{epic, story, task, spike}`** and `bug`
+   / `chore` live only on the `TriageIssueType` axis (44-0 AC1). Kind answers *what may contain what*;
+   type answers *what sort of thing is it*.
+
+Likewise `ITERATION.*` as a top-level event family is free, but `CODE_REVIEW.ITERATION.STARTED`
+(`CodeReviewEvents.cs:63`) and `AGENT.ITERATION.*` (`Program.cs:825`) exist as *sub*-segments; a grep
+for `ITERATION.` returns both.
 
 ### 2. `issueId` is the join key — and it costs nothing
 
@@ -113,43 +128,103 @@ populate it. Native work items leave it `NULL` and are queried through `Tags->>'
 what `EventRepository.QueryAsync` already does for everything else. Stated so nobody "fixes" it by
 widening the column.
 
-### 3. One table, a closed kind vocabulary, and a parenting matrix
+### 3. One table, a closed kind vocabulary, and structural hierarchy invariants
 
 ```csharp
-public enum WorkItemKind {                    public enum WorkItemStatus {
-    [Wire("epic")]   Epic,                        [Wire("backlog")]     Backlog,
-    [Wire("story")]  Story,                       [Wire("ready")]       Ready,
-    [Wire("task")]   Task,                        [Wire("in_progress")] InProgress,
-    [Wire("bug")]    Bug,                         [Wire("in_review")]   InReview,
-    [Wire("chore")]  Chore,                       [Wire("blocked")]     Blocked,
-    [Wire("spike")]  Spike,                       [Wire("done")]        Done,
-}                                                 [Wire("cancelled")]   Cancelled,
-                                              }
+public enum WorkItemKind {          public enum WorkItemStatus {          public enum WorkItemStatusCategory {
+    [Wire("epic")]  Epic,              [Wire("triage")]      Triage,          [Wire("triage")]    Triage,
+    [Wire("story")] Story,             [Wire("backlog")]     Backlog,         [Wire("backlog")]   Backlog,
+    [Wire("task")]  Task,              [Wire("ready")]       Ready,           [Wire("unstarted")] Unstarted,
+    [Wire("spike")] Spike,             [Wire("in_progress")] InProgress,      [Wire("started")]   Started,
+}                                      [Wire("in_review")]   InReview,        [Wire("completed")] Completed,
+                                       [Wire("blocked")]     Blocked,         [Wire("cancelled")] Cancelled,
+                                       [Wire("done")]        Done,        }
+                                       [Wire("cancelled")]   Cancelled,
+                                   }
 ```
 
 **Not one table per level.** Separate `epics`/`stories`/`tasks` tables would mean 3× the CRUD, 3× the
-board code and 3× the event families, for levels that differ only in *what may parent what*. The
-allowed-parent set is a matrix, and the repo already has that idiom: `RolePhaseMap.cs:43-163` is a
-93-cell `(role, action)` eligibility set with a *built*, never hand-maintained, index
-(`:170-171`). `TrackerHierarchy` is that shape for `(parentKind, childKind)`.
+board code and 3× the event families, for levels that differ only in nesting.
 
-**Depth is bounded at 3** (`Epic > Story|Bug|Spike > Task|Chore`). Not because deeper is
-conceptually wrong but because an unbounded tree makes every list query recursive and every board
-render ambiguous. Enforced in the service and pinned by a test.
+**And not a `(parentKind, childKind)` whitelist either — that was the first draft and it was wrong.**
+The draft matrix (`Epic → {Story, Bug, Spike}`; `Story|Bug|Spike → {Task, Chore}`; `Task|Chore → {}`)
+had only **three distinct rows**: `Story`/`Bug`/`Spike` interchangeable, `Task`/`Chore`
+interchangeable. It encoded *root / branch / leaf* — **level** — while presenting as a rule over
+**kind**. What it forbade was ordinary work: a task directly under a small epic (forcing an agent to
+fabricate a filler story that then carries a status, a rank and an event stream into the backlog);
+a sub-spike; and decomposing a task at all — which is not hypothetical, because `DecompositionTask`
+(`Decomposition.cs:29`) and `PlanTask` (`Plan.cs:12`) are shipped types, making
+`Epic → Story → DecompositionTask → PlanTask` depth **4** against the draft's `MaxDepth = 3`, and
+pre-foreclosing the v2 candidate this README's Deferred section names.
 
-`Project` is a **separate table** — it owns the key prefix, the key sequence, and the repository
-binding. It is not a work item and never appears on a board.
+The failure modes are asymmetric and they settle it: under a closed *vocabulary* an agent's worst case
+is "picked the wrong member" — one field, visible, recoverable; under a closed *parenting matrix* it is
+"produced a correct decomposition the matrix rejects", recoverable only by fabricating structure.
+**Rejecting a valid plan costs more than mislabelling one.** (Full evidence:
+`.dev/findings/linear-comparison-against-story-44-0.md`.)
+
+**So `TrackerHierarchy` is structural invariants only:** no cycles; `MaxDepth = 6`; and exactly one
+kind rule — *an Epic may not be a child of a non-Epic*. Any kind, including `task`, may be top-level;
+`IsDefaultRoot` is a UI placement hint, never a validator, because otherwise an imported or triaged
+item cannot exist until someone invents a parent epic for it. **The built-index idiom is kept**
+(`RolePhaseMap.cs:43-163` declares 93 cells and *builds* its index at `:170-171`) — `TrackerHierarchy`
+declares one invariant row per `WorkItemKind` and throws at first touch if a kind has no row, so adding
+a kind without deciding its rule stays a boot failure. The mechanism was never the problem; the 4×4
+whitelist it was pointed at was.
+
+**Depth is bounded at 6.** Not because deeper is conceptually wrong but because an unbounded tree
+makes every list query recursive and every board render ambiguous — and six clears the depth-4
+structures the codebase already contains, which three did not. Enforced in the service (44-3) and
+pinned by a test.
+
+`Project` is a **separate table** — it owns the key prefix, the key sequence, the repository binding
+and the estimate scale. It is not a work item and never appears on a board.
 
 `Iteration` is **orthogonal to the hierarchy**, an FK on the work item, not a level.
 
-`WorkItemStatus` is count-pinned and mirrored by a CHECK constraint —
-`DocumentInstanceStatus.cs:12-14` is the exact precedent (7 members, count-pinned, DB CHECK
-`ck_document_instances_status` mirroring the wire strings).
+`WorkItemStatus` is count-pinned at 8 and mirrored by a CHECK constraint —
+`DocumentInstanceStatus.cs:12-14` is the exact precedent (count-pinned, DB CHECK
+`ck_document_instances_status` mirroring the wire strings). **`triage` is a member from day one**:
+44-8 imports GitHub issues and `FetchUntriagedItemsActivity` already exists, so items arrive with
+nobody having looked at them, and without `triage` those merge into `backlog` — conflating "we decided
+not now" with "nobody has decided", which is the whole value of the queue under Open question 3.
+Adding an enum member *later* is a migration over `ck_work_items_status` on the highest-row-count
+tenant table, across every tenant schema, through the sweep §5 describes.
 
-**Priority and type reuse the shipped triage vocabularies.** `TriagePriority` and `TriageIssueType`
-(`TriageDecision.cs:14-31`) are already `[Wire]`, already alias-parsed, already count-pinned, and
-currently used by nothing but their own tests. A tracker giving them a consumer is the cheapest
-possible win and removes a dead vocabulary. `TriageComplexity` is **not** adopted — see §1.
+**`WorkItemStatusCategory` is where grouping logic is defined, once.** Three statuses
+(`in_progress`, `in_review`, `blocked`) are the same fact under three names; without a category,
+"is it in flight?", "which board column group?" and "should the loop pick it up?" each become a
+hardcoded set literal in 44-3, 44-4, 44-6, 44-7 and 44-9, and those drift. `Status.Category()` is a
+total `switch` expression with no `default:` arm, so a new status without a category is a compile
+error; `IsTerminal` is derived from it rather than hand-maintained. The **fuller** Linear shape —
+named status *rows* per project carrying a closed category, which would make D11's deferral a genuine
+feature flag instead of a migration — is deliberately not taken in v1 (it needs a table, seeding, an
+ordering column and a management UI). Shipping the category vocabulary now means the eventual rows
+change storage without changing the grouping contract.
+
+**Priority and type reuse the shipped triage vocabularies, and priority is nullable.**
+`TriagePriority` and `TriageIssueType` (`TriageDecision.cs:14-31`) are already `[Wire]`, already
+alias-parsed, already count-pinned, and currently used by nothing but their own tests. A tracker giving
+them a consumer is the cheapest possible win and removes a dead vocabulary. **`Priority` is
+`TriagePriority?`** — `null` ("nobody has prioritised this") and `normal` ("somebody looked and said
+normal") are different facts, and in an overnight agent-filed queue the difference is the signal.
+`TriageComplexity` is **not** adopted — see §1.
+
+**One relation vocabulary, because `blocked` alone is a half-feature.** `WorkItemRelationKind`
+`{blocks, duplicate, related}` ships in 44-0; the `work_item_relations` edge table is 44-1's and its
+validation 44-3's. Without it, "A must land before B" has exactly one place to go — parenting — and
+dependency-as-hierarchy corrupts the tree that the recursive CTE, the board roll-ups and 44-9's
+`sprint-status.yaml` generation all read. Dependency is not new here: `DecompositionTask.DependsOn`
+and `PlanTask.DependsOn` already ship it inside document bodies.
+
+**The work-item key is frozen at creation.** It is minted once from the creating project's sequence
+and never re-minted, *including on a move to another project* — so after a move the key prefix no
+longer matches the project, and that is intended. Re-minting is not available: the key is already in
+`DocumentInstance.IssueId` and DCB `tags.issueId`, and event tags are **append-only**, so a re-mint
+orphans the item's document lineage and event history silently and unrecoverably. A `PreviousKeys`
+array covers the one case a freeze cannot — a deliberate operator re-key such as renaming a project
+prefix — and lookup resolves current-or-previous. (Linear needed `previousIdentifiers` for a *team*
+move, which is rare; a project move here is the common case, which is exactly why we freeze instead.)
 
 ### 4. Ranking — a fractional index, not an integer
 
@@ -158,11 +233,24 @@ possible win and removes a dead vocabulary. `TriageComplexity` is **not** adopte
 
 Rejected: an integer rank (a move rewrites O(n) rows and every board drag becomes a transaction over
 the whole column); a float (precision exhausts after ~50 insertions between a fixed pair, which is
-one afternoon of grooming).
+one afternoon of grooming — and it is what Linear uses for all three of its sort columns, the one
+place this design is ahead of theirs). Also rejected: a `Rank.Last()` returning a fixed sentinel,
+which reproduces the float failure exactly — two consecutive appends both get the sentinel and compare
+equal. Appending is `Between(currentMax, null)`, exposed as `Append(currentMax)` so the caller cannot
+omit the neighbour.
 
-**One rank per work item, project-scoped** — not one per (project, status). The board column's order
-*is* the project rank filtered by status. Two rank columns are two things that can disagree, and
-nothing reads the difference.
+**No rank per (project, status).** The board column's order *is* the project rank filtered by status;
+a per-status rank would give one item N positions of which N−1 are stale. Linear has no per-status
+order either.
+
+**But two rank columns on a different axis: `Rank` and `SiblingRank`.** `Rank` is the flat
+project-backlog position; `SiblingRank` is the position among siblings under the same parent (null
+parent included). With only a project rank, tidying an epic's three children rewrites their positions
+in the global backlog, and a backlog re-prioritisation reshuffles subtree display order — genuinely
+different questions. Unlike a per-status rank, `SiblingRank` cannot disagree with itself: an item has
+exactly one parent, so it is single-valued. Linear ships `sortOrder` and `subIssueSortOrder` for
+exactly this reason while having no per-status order at all. One algebra (44-0), two columns (44-1),
+both `COLLATE "C"`.
 
 ### 5. Storage: tenant schema — and this epic fixes the migration-reach gap
 
@@ -224,7 +312,9 @@ weak `audit_records` form which permits both NULL) and a unique index carrying
 
 **Deferred with reasons:** per-principal *status-set customization*. A customizable status vocabulary
 turns a count-pinned closed enum into open data, which breaks both the CHECK constraint and the board
-projection's drift guarantee. v1 ships the fixed 7-member set.
+projection's drift guarantee. v1 ships the fixed 8-member set plus the closed
+`WorkItemStatusCategory` (§3), which is the seam the eventual named-status-rows design grows through
+without changing any grouping contract.
 
 ### 7. The board is a query, not a table
 
@@ -309,17 +399,24 @@ None of the overlapping stories is absorbed. Two need a correction, recorded bel
 
 ## Drift prevention
 
-Three mechanisms, all existing house patterns:
+Four mechanisms, all existing house patterns:
 
-- **`[Wire]` closed vocabularies with count pins.** `WorkItemKind`, `WorkItemStatus` and the parenting
-  matrix follow `DocumentTypeKey`/`DocumentInstanceStatus`: `EnumWire<T>`'s static constructor
+- **`[Wire]` closed vocabularies with count pins.** `WorkItemKind` (4), `WorkItemStatus` (8),
+  `WorkItemStatusCategory` (6), `WorkItemRelationKind` (3) and `EstimateScale` (5) follow
+  `DocumentTypeKey`/`DocumentInstanceStatus`: `EnumWire<T>`'s static constructor
   (`Tamma.Core/Agents/EnumWire.cs:39-59`) already throws on a missing `[Wire]`, a duplicate wire
   string, or a `[Flags]` enum, and parsing is ordinal/case-sensitive (`:65`) so non-canonical casing in
   persisted data is rejected rather than coerced. Count pins per `TriageDecisionTypeTests.cs:34-37`.
+  **One thing `[Wire]` does not give:** declaration order. `TriagePriority`'s ordinals are what every
+  priority-sorted board and `ORDER BY` rests on, so they get their own pin (D10).
 - **CHECK constraints mirroring the wire strings**, per `ck_document_instances_status`
   (`DocumentInstanceStatus.cs:14`), plus a test asserting enum and constraint agree.
-- **A built, never hand-maintained parenting index** that throws at startup if a kind has no
-  parenting rule — the `RolePhaseMap.cs:170-171` / `PromptFileLoader` fail-loud posture.
+- **A built, never hand-maintained hierarchy index** that throws at startup if a `WorkItemKind` has no
+  structural-invariant row — the `RolePhaseMap.cs:170-171` / `PromptFileLoader` fail-loud posture. The
+  cells changed (an invariant per kind, not a child set per parent); the mechanism did not.
+- **A total `switch` expression for `Status.Category()`** with no `default:` arm, so adding a status
+  without assigning it a category is a **compile** error rather than a runtime surprise — and grouping
+  logic exists in exactly one place instead of as set literals across five stories.
 
 **And one mechanism the repo does not have, which this epic must add because it introduces three new
 event families.** The survey found **no test asserting `AGGREGATE.ACTION.STATUS` naming or family
@@ -387,7 +484,7 @@ Sequencing, not separate releases.
 
 | # | Title | Days |
 |---|---|---|
-| **44-0** | Tracker core: vocabularies, `WorkItemRef`, parenting matrix, rank algebra, fail-loud index | 4 |
+| **44-0** | Tracker core: vocabularies, `WorkItemRef`, hierarchy invariants, rank algebra, fail-loud index | 4.5 |
 | **44-1** | Storage, repositories, tenant migration — and the migrate-all-provisioned-tenants sweep | 6 |
 | **44-2** | Work-item & project API, RBAC, `tracker_preferences`, action-catalog descriptors | 5 |
 | **44-3** | Hierarchy, ranking, and the `BacklogOrdering` apply seam | 4 |
@@ -398,7 +495,10 @@ Sequencing, not separate releases.
 | **44-8** | External link: GitHub import, `ExternalRef`, opt-in outbound comment/label | 4 |
 | **44-9** | Dogfood: `docs/sprint-status.yaml` becomes generated from the tracker | 4 |
 
-**Total ~49 days.**
+**Total ~49.5 days.** (44-0 moved 4 → 4.5 when the parenting matrix was replaced with structural
+invariants and five small vocabularies were added — see its Estimated Effort section. It also hands
+44-1 four additional columns and one small table, and 44-3 one validator; both are additive and
+flagged in those stories rather than absorbed silently.)
 
 **44-0, 44-1 and 44-2 are the spine**; nothing else starts before 44-1. **44-7 is the story that makes
 the tracker matter** — without it the tracker is a second place to write things down, which is exactly
@@ -416,13 +516,28 @@ one of them is multi-container drag-and-drop.
   A separate epic.
 - **Materializing `PlanTask`s as work items** (41-29 reconciliation). Would double-write every plan and
   give the same rows two sources of truth. Needs a decision on which store is authoritative first.
+  **It is at least now structurally possible:** `Epic → Story → DecompositionTask → PlanTask` is depth
+  4, which the draft `MaxDepth = 3` silently forbade; `MaxDepth = 6` and the deletion of the parenting
+  matrix (§3) leave the decision to the product owner rather than to a constant nobody revisited.
 - **Comments on work items.** The DCB stream *is* the activity feed — `WORKITEM.*` plus the existing
   `DOCUMENT.*`/`APPROVAL.*` for the same `issueId` already renders a full timeline. A comments table
   earns its keep only once humans discuss items outside a workflow.
 - **Custom fields, saved views, swimlane definitions, per-principal status sets.** Each converts a
   count-pinned closed vocabulary into open data and breaks the CHECK constraint + projection guarantee.
-- **Estimation, velocity, burndown.** `EstimateHours` is stored from 44-0; nothing reads it in v1.
-  Charts belong with Epic 36 (analytics), not here.
+- **Estimation, velocity, burndown.** A scale-free `Estimate` (`decimal?`) is stored on the work item
+  from 44-1, with the scale as project configuration (`EstimateScale` — `not_used | linear |
+  fibonacci | exponential | t_shirt`, 44-0 AC13). **Not `EstimateHours`**: naming the scale in the
+  column makes changing scale a migration and mixing scales across projects impossible, and every
+  scale Linear ships pointedly excludes hours because an hours-shaped estimate invites the reading
+  that the number is a commitment. Nothing reads `Estimate` in v1; charts belong with Epic 36
+  (analytics), not here.
+- **Named status rows per project.** The fuller Linear shape — open, per-project named statuses each
+  carrying a closed `WorkItemStatusCategory` — is the better long-term design and is what would make
+  D11's deferral a feature flag rather than a migration. Deferred because it needs a
+  `work_item_statuses` table, per-project seeding, a default-set migration, an ordering column and a
+  management UI, all on the critical path before the first board renders. The category vocabulary
+  ships in v1 (§3) so the grouping contract does not change when the rows arrive, and the fixed
+  8-member `WorkItemStatus` enum becomes the seed set.
 - **Notifications on tracker changes.** 39-18's channels ship (`Api/Hubs/*`, `channel_outbox`), but
   their audience resolver is a no-op stub. Wiring the tracker to a dead resolver would ship silence.
 - **Porting the tracker UI into `packages/dashboard-user`.** Blocked on that package having any
@@ -459,14 +574,16 @@ one of them is multi-container drag-and-drop.
 | **D1** | **`WorkItem` / `Iteration` / `Project`** in `Tamma.Core.Tracking`; events `WORKITEM.*` / `ITERATION.*` / `PROJECT.*`; routes `/api/work-items`, `/api/iterations`, `/api/projects`. | `Task`/`Story`/`Issue`/`Cycle`/`Sprint` — every one collides with shipped or reserved names (§1). |
 | **D2** | **The work-item key is minted into the existing `issueId` string namespace**, so the entire Epic 39 spine works unchanged. | A separate `workItemId` tag — would fork document lineage, re-entry, the decision inbox and replay into two coordinate systems. |
 | **D3** | **Native-only system of record. One-way import, GitHub-only opt-in outbound comment/label. No sync.** | Two-way sync (needs 6 methods × 4 drivers + 2 missing drivers + a webhook-handler layer that has never existed + a conflict model — larger than this epic); one-way *mirror* from the platform (makes the tracker read-only, which is not the ask). |
-| **D4** | **One `work_items` table, closed `WorkItemKind`, a built `(parentKind, childKind)` matrix, depth bounded at 3.** | A table per level (3× CRUD/board/events for levels that differ only in allowed children); an unbounded tree (every query recursive, every board render ambiguous). |
+| **D4** | **One `work_items` table; a closed 4-member `WorkItemKind` (`epic\|story\|task\|spike`); hierarchy expressed as *structural invariants* — no cycles, depth ≤ 6, and one kind rule (an Epic may not be a child of a non-Epic) — with the fail-loud built index kept and repointed at those invariants.** | A table per level (3× CRUD/board/events for levels that differ only in nesting); an unbounded tree (every query recursive, every board render ambiguous); **a `(parentKind, childKind)` whitelist** — it had three distinct rows, so it encoded *level* while claiming to encode *kind*, and it rejected valid decompositions (a task under a small epic; decomposing a task at all, against the shipped depth-4 `Epic → Story → DecompositionTask → PlanTask` chain). Rejecting a valid plan costs more than mislabelling one; **`bug`/`chore` as kinds** — `TriageIssueType` already carries both (§1). |
 | **D5** | **Tenant-schema residency, and this epic builds the migrate-all-provisioned-tenants sweep.** | Control-plane residency (would put every tenant's backlog in one shared table and forfeit the isolation `SchemaPerTenantMigrationTests` proves); shipping the migration without the sweep (every existing tenant gets `42P01`). |
 | **D6** | **No principal XOR on work items** — content, not configuration; schema-per-tenant already isolates. The XOR *is* used, in its strong form, for `tracker_preferences`. | Copying the XOR onto `work_items` — a nullable `UserId` encoding a second ownership plane with no reader. |
-| **D7** | **Fractional-index string `Rank`, one per work item, project-scoped.** | Integer rank (a drag rewrites O(n) rows); float (precision exhausts in ~50 insertions); a second rank per status column (two things that can disagree). |
+| **D7** | **Fractional-index string `Rank`, project-scoped, on two axes: `Rank` (flat backlog) and `SiblingRank` (order under a parent).** Both `COLLATE "C"`. `Append`/`Prepend`, no `Last()`. | Integer rank (a drag rewrites O(n) rows); float (precision exhausts in ~50 insertions — Linear's choice, and the one place we are ahead of them); **a rank per status column** (one item gets N positions of which N−1 are stale; Linear has no per-status order either) — note `SiblingRank` is a *different* axis and cannot disagree with itself, since an item has exactly one parent; a `Last()` sentinel (two consecutive appends collide, the float failure again). |
 | **D8** | **The board is a query, not a table.** | A `boards` table — nothing would read a column definition that `groupBy=status` already answers. |
 | **D9** | **UI in `packages/dashboard`** (deployed), not `packages/dashboard-user` (no Dockerfile, no compose service, no deploy step). | Shipping into `dashboard-user` and absorbing its deployment build-out unbudgeted. |
-| **D10** | **Priority and item type reuse the shipped `TriagePriority` / `TriageIssueType` `[Wire]` enums**, giving two dead vocabularies their first consumer. | New parallel enums (a fifth priority vocabulary in a repo that already has drift between the triage enums and the `triage-intake` prompt, `TriageDecision.cs:212-217`). |
-| **D11** | **`WorkItemStatus` is a fixed 7-member closed enum in v1**, CHECK-mirrored and count-pinned. | Customizable status sets — converts a closed vocabulary into open data and breaks both the constraint and the projection guarantee. |
+| **D10** | **Priority and item type reuse the shipped `TriagePriority` / `TriageIssueType` `[Wire]` enums**, giving two dead vocabularies their first consumer. **Priority is nullable** (`null` = unprioritised ≠ `normal`), and `TriagePriority`'s *ordinal* order is pinned by its own test because `[Wire]` guarantees strings and says nothing about declaration order. | New parallel enums (a fifth priority vocabulary in a repo that already has drift between the triage enums and the `triage-intake` prompt, `TriageDecision.cs:212-217`); a non-nullable priority defaulting to `normal` (erases "nobody looked", which is the signal that matters in an agent-filed queue — Linear makes it first-class as `0 = No priority`). |
+| **D11** | **`WorkItemStatus` is a fixed 8-member closed enum in v1** (`triage` included from day one), CHECK-mirrored and count-pinned, with a closed 6-member `WorkItemStatusCategory` as the single definition of grouping. | Customizable status sets **in v1** — converts a closed vocabulary into open data and breaks both the constraint and the projection guarantee. Note this is a *deferral, not a rejection*: named per-project status rows carrying a closed category is the better long-term shape (Deferred section), and shipping `Category()` now is what keeps that migration from changing the grouping contract. Also rejected: **omitting `triage`** — adding an enum member later is a fleet-wide migration on the highest-row-count tenant table, not a feature flag. |
+| **D12** | **A `WorkItemRelationKind {blocks, duplicate, related}` edge**, vocabulary in 44-0, table in 44-1, validation in 44-3 (no cycle detection — a blocking cycle is a real thing to show, not to prevent). | `blocked`-as-a-status alone, with no record of *what* blocks it — a half-feature whose real cost is that dependency then gets encoded as parenting, corrupting the tree the CTE, the roll-ups and 44-9 all read. `DecompositionTask`/`PlanTask` already ship `dependsOn`. |
+| **D13** | **The work-item key is frozen at creation and never re-minted, including on a project move**; a `PreviousKeys` array plus current-or-previous lookup covers a deliberate operator re-key. | Re-minting on a move — the key is already in `DocumentInstance.IssueId` and DCB `tags.issueId`, and event tags are append-only, so a re-mint orphans document lineage and event history silently and unrecoverably. Keeping the key mutable at all — the per-project sequence could then collide. |
 
 ---
 
@@ -474,31 +591,90 @@ one of them is multi-container drag-and-drop.
 
 These are not derivable from the code.
 
-1. **Is `packages/dashboard-user` intended to be the customer-facing application?** If yes, someone must
-   fund its deployment path — Dockerfile, compose service, GHCR image, deploy step, nginx vhost, none of
-   which exist — and 39-19's `/chat` and `/tasks` are blocked on the same work. If no, 39-19 should be
-   re-targeted at `packages/dashboard` and this epic's D9 becomes uncontroversial. **This blocks nothing
-   in Epic 44 but it decides whether the platform ends up with two user-facing dashboards.**
+1. **`packages/dashboard-user` IS the SaaS customer app — and it has never been deployed.**
+   *Reframed 2026-07-25 after investigating rather than asking; full detail in
+   `.dev/findings/dashboard-user-is-the-unshipped-saas-customer-app.md`.*
 
-2. **Is the tracker for Tamma's own development, for customers, or both?** The epic is written for both
-   (44-9 dogfoods `sprint-status.yaml` into it), but they pull in different directions: an internal
-   tracker wants deep coupling to `docs/stories/*.md` and the wiki publish pipeline; a customer tracker
-   wants none of that and needs import/export instead. If the answer is "customers first", 44-9 drops
-   to the bottom and its 4 days move to 44-6.
+   This was previously written as "is it intended to be the customer app?", which implied it might be
+   disposable. It is not. It was built in three commits on 2–4 July 2026 under **Epic 34-9** and its
+   routes are a complete signup-to-billing journey: `/login`, `/register`, `/verify-email`,
+   `/onboarding/platforms`, `/`, `/alerts`, `/settings/alerts`, `/settings/billing` — with an upgrade
+   modal, entitlement bar and cost-estimate widget. 47 files, with tests.
 
-3. **Should a work item be creatable by an agent without a human?** The autonomous loop decomposes an
-   issue into `DecompositionTask`s today. If those may become work items automatically, tracker creation
-   is a consequential action needing an Epic 43 `MinAutonomy` threshold and a policy for what happens
-   when an agent files 40 items overnight. If they may not, 44-7's intake seam is read-only and the
-   epic is materially simpler. **This changes 44-2 and 44-7 and should be settled before 44-0 freezes
-   the descriptor shape.**
+   It has no Dockerfile, no compose service, no image, no deploy step, no vhost and no domain. Its
+   only appearance outside its own directory is a CI test line whose tests do not actually run.
 
-4. **What is the intended relationship between a work item's status and the workflow that is executing
-   it?** Two coherent answers: (a) status is human-owned and workflows only *report* (`in_progress` is
-   set by a person), or (b) the loop drives status transitions (`SingleIssueCycleWorkflow` moves an item
-   to `in_review` when it opens a PR). (b) is more useful and much more coupled — it makes every
-   workflow a tracker writer and needs an idempotency rule for re-entry. v1 as drafted assumes (a) with
-   an explicit opt-in for (b) per project; confirm.
+   **So the question is not whether to keep it. It is who funds shipping it, and when** — because
+   three things are silently waiting on it: 39-19's chat, this epic's 44-6 tracker UI, and Epic
+   34-9's own deliverable (plan management that no customer can currently open).
+
+   If the answer is "not yet", then 39-19 and 44-6 must be **explicitly re-targeted** at the admin
+   console rather than left inheriting a dependency nobody has scheduled.
+
+2. ~~**Is the tracker for Tamma's own development, for customers, or both?**~~ — **ANSWERED
+   (2026-07-25, product owner): both, and Tamma is tenant #1.**
+
+   > "tamma will self maintain, so the first tenant is tamma itself"
+
+   This is not a preference between two audiences; it is a statement that **the platform's own
+   development runs on the platform**, as an ordinary tenant. It aligns with CLAUDE.md's standing
+   self-maintenance goal ("Tamma is designed to autonomously develop features for itself") and with
+   the `tenant_databases` pool already auto-bootstrapping the central DB as member #1.
+
+   **Consequences, and they are not small:**
+
+   - **44-9 is no longer a cuttable dogfood story — it is the proof.** The execution plan lists it
+     first on the cut line; that is now wrong. If `sprint-status.yaml` is not generated from the
+     tracker, Tamma is not running on its own tracker and tenant #1 does not exist in any meaningful
+     sense. Its 4 days are load-bearing. *(The `EXECUTION-PLAN.md` cut-line section carries the
+     correction.)*
+   - **Both directions are required, not one.** The internal side needs the `docs/stories/*.md` and
+     wiki-publish coupling; the customer side needs import/export. "Customers first" was offered as
+     a way to drop scope and is off the table.
+   - **Tenant zero has a bootstrap problem.** The tenant that runs the platform cannot be
+     provisioned *by* the platform through the normal path — the provisioner would need a running
+     platform to provision the tenant that runs it. The central-DB-as-pool-member-#1 bootstrap is
+     the existing precedent; 44-1 must state explicitly how the Tamma tenant row comes into
+     existence, and it is not via `POST /api/admin/tenants/{id}/provision`.
+   - **Self-modification changes the risk class of Epic 43's dial.** With Tamma as a tenant, its
+     autonomy dial governs agents changing *Tamma itself*. The failure mode is not "a bad deploy for
+     a customer" but "a bad deploy that removes the ability to deploy". Epic 43's `deploy-control`
+     group defaults deserve a different conversation for tenant #1 than for tenant *n*, and there
+     must be a **break-glass path that does not run through Tamma** — if Tamma breaks its own
+     deployment there is no Tamma to fix it.
+   - **Question 3 below (may an agent create work items unattended?) is now sharper**, because the
+     agent filing them is working on this repository.
+   - **The provider-config direction interacts** (`.dev/findings/provider-abstraction-and-openai-compatible-candidates.md`):
+     tenant #1 needs its own provider descriptors and credentials like any tenant, which is a useful
+     forcing function — if the Tamma tenant cannot be configured through the admin surface, neither
+     can a customer.
+
+3. & 4. ~~**Should a work item be creatable by an agent without a human?**~~ ~~**Does the loop drive
+   status or only report it?**~~ — **BOTH ANSWERED (2026-07-25), and they were the same question.**
+
+   > "its always through the workflows, so whatever the workflow dictates should happen"
+   > "again it's always a flow, action with a setting for automation level"
+
+   **Epic 44 does not own an automation policy. Epic 43 does.** Creating a work item and
+   transitioning its status are **actions in the action catalog**, each with an automation level like
+   any other action. A workflow does what its level permits. There is no separate "may agents file
+   work items?" permission, no per-project status-writing opt-in, and no tracker-specific throttle.
+
+   This deletes rather than adds:
+
+   - **44-2** drops its bespoke creation-authority policy. It registers catalog descriptors for the
+     tracker's mutating actions (`workitem.create`, `workitem.status.transition`,
+     `workitem.assign`, …) and enforces nothing itself — the gate already exists.
+   - **44-7** drops the read-only-vs-writer fork entirely. The intake seam writes; whether a given
+     workflow *may* write is the catalog's answer, not the seam's.
+   - **44-4** keeps its idempotency rule, which is still required — re-entry must not double-apply a
+     transition. That is a correctness property, not a policy one, and survives.
+   - The "agent files 40 items overnight" worry is answered by the same dial as everything else: if
+     that is undesirable, the create action's level is raised. No special-casing.
+
+   **The general principle, worth stating once because it generalises past this epic:** anything an
+   agent can do is a workflow action, and every workflow action is governed by the catalog. A feature
+   that invents its own automation policy is duplicating the gate — and will drift from it.
 
 5. **Is `TriageComplexity` meant to survive?** It has an `epic` member (`TriageDecision.cs:39`) that
    reads as a hierarchy level next to `WorkItemKind.Epic`, it is used by nothing but its own tests, and

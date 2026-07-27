@@ -226,11 +226,13 @@ cell at all). "New story" names the Epic 41 story that closes a ◑/✗.
 | Deploy / promotion pipeline | ✅ | `deployment-pipeline` |
 | CI configuration | ◑ | `ci-with-debug-retry` (runs CI; doesn't author config) |
 | Incident diagnosis (panel lens) | ◑ | `review-panel` as the lifecycle REVIEW stage (devops lens `diagnose-incident`) |
-| **Incident response & postmortem** | ✗ | **41-22** (new `(devops, incident-rootcause)` cell from 41-1a + existing `plan-incident-response`/`write-postmortem`; **not** `(devops, diagnose-incident)`, which is the triage-panel lens) |
+| **Incident response & postmortem** | ✗ | **41-22** (new `(devops, incident-rootcause)` cell from 41-1a + existing `plan-incident-response`/`write-postmortem`; **not** `(devops, diagnose-incident)`, which is the triage-panel lens). **Its trigger is 41-32** |
 | **Capacity & health review** | ✗ | **41-23** (cells `assess-capacity`/`monitor-health`) |
-| Rollback | ✅ | `deployment-pipeline` — auto rollback-on-prod-failure branch |
+| Rollback of a deploy **in flight** | ✅ | `deployment-pipeline` — auto rollback-on-prod-failure branch |
+| **Rollback of a deploy that already succeeded** | ✗ | **41-31** (`emergency-rollback`) |
 
-> **Corrected — rollback is not missing.** It was listed `✗ / folded into 41-22 (cell rollback)`. It is
+> **Corrected twice — rollback is not missing, but the shipped capability is narrower than the ✅
+> implied, so the row is now split.** It was first listed `✗ / folded into 41-22 (cell rollback)`. It is
 > a **landed, executed step**: `DeploymentPipelineWorkflow.cs:299-329` builds the rollback branch
 > (`emitRollbackStarted` → `rollbackCall` → `extractRollbackResult` → `rollbackOk` →
 > `emitRollbackSuccess` / `emitRollbackFailed`), wired at `:545-552` off production failure, dispatching
@@ -239,7 +241,28 @@ cell at all). "New story" names the Epic 41 story that closes a ◑/✗.
 > removes the inconsistency with the `deployment-pipeline` ✅ row above it. Consequence for **41-22**:
 > `(devops, rollback)` is an existing **execution** cell (bound to
 > `DeploymentPipelineWorkflow.ParseStageStatus` and listed in `ContractBindingTests.NonDocumentTypeResidual`),
-> so 41-22 must **dispatch `deployment-pipeline`** rather than re-bind that cell as a document producer.
+> so 41-22 must **dispatch** an execution workflow rather than re-bind that cell as a document producer.
+>
+> **Corrected again (2026-07-27) — that dispatch target cannot be `deployment-pipeline`, and 41-31 now
+> supplies the one it can be.** The correction above is right about the *branch* and wrong about the
+> *capability*, because of where the branch is wired. The only inbound edge is
+> `Connect(emitProdFailed, emitRollbackStarted)` (`:546`), and `emitProdFailed` is reachable only from
+> `ConnectOutcome(prodRetryCheck, "False", …)` (`:543`) — i.e. **after a production deploy in the same
+> run has failed `MaxStageRetries = 3` times** (`:102`). Four failure paths bypass it entirely
+> (`:506-507`, `:519-520`, `:531`, `:562`). `deployment-pipeline` also has **no standalone entry
+> point** (sole dispatch site `SingleIssueCycleWorkflow.cs:721-742`, post-merge, `mergeSha` from
+> `WaitForPRMergedActivity`) and its rollback dispatch passes **the failing `mergeSha` and no
+> previous-release ref at all** (`:604-613`), while `Prompts/devops/rollback.md` asks the agent to find
+> "the previous known-good release" with nothing to find it from.
+>
+> So the shipped capability is *"undo the deploy I was in the middle of"*, not *"revert a release that
+> is already live"*. **41-22's own implementation plan found this** (finding C5: *"AC3's 'a rollback is
+> performed by dispatching `deployment-pipeline`' [is] not implementable"*) and recorded it as *"filed,
+> not fixed here"* — **and the `.dev/findings/` file it says it filed does not exist.**
+> **[41-31](./story-41-31/41-31-standalone-emergency-rollback.md)** is that fix: a new
+> `emergency-rollback` execution workflow (no document, no new cell, no count-pin movement) plus a
+> one-variable amendment giving *both* rollback paths a resolved target. **41-22 must be revised to
+> dispatch `emergency-rollback`.**
 
 ### Tech Writer
 
@@ -294,7 +317,71 @@ third of them (41-1c) is the prose enabler. Only the scheduler seam remains unow
 | Three roles + fifteen action cells + the derived panel-selector maps + the `scrum_master` alias removal | **[41-1a](./story-41-1/41-1a-agent-taxonomy-extension.md)** | 4–5 d | drafted |
 | The six new document types (`AcceptanceCriteria`, `BacklogOrdering`, `SprintPlan`, `TestPlan`, `ThreatModel`, `UxSpec`) | **[41-1b](./story-41-1/41-1b-new-document-types.md)** | 5–6 d | drafted |
 | **Prose document support** — a `prose` type, an `Audience` field on envelope **and** `DocumentInstance` (+ migration), the audience/kind vocabularies | **[41-1c](./story-41-1/41-1c-prose-documents-and-audience-tags.md)** | 3–4 d | drafted |
-| **Tenant-aware scheduled-trigger seam** (see Dependencies) | **none — must be written** | — | blocks 41-5, 41-7, 41-11, 41-16, 41-17 (PR sweep), 41-20, 41-23 |
+| **Tenant-aware scheduled-trigger seam** (see Dependencies) | **[41-30](./story-41-30/41-30-tenant-aware-scheduled-trigger-seam.md)** | 6–7 d | drafted — blocks **41-11, 41-16, 41-17 (PR sweep), 41-20, 41-23**; see the scoping decision below |
+
+> **Corrected 2026-07-27 — the seam now has an owner, and the premise behind "it needs new Elsa
+> packages" was false.** The Wave-0 row above read *"none — must be written"* from this epic's first
+> draft until **41-30** was written. Two factual corrections came out of writing it, both of which make
+> the seam cheaper than every prior document assumed:
+>
+> - **Cron parsing is already an in-tree dependency.** `HourlyAnalyticsRollupScheduler.cs:45-49` calls
+>   itself a *"lightweight alternative to wiring a full Elsa cron-trigger activity (which would require
+>   additional Elsa packages)"*, and this epic inherited that framing. It is not true today:
+>   `Tamma.ElsaServer.csproj:29` references **`Elsa.Scheduling` 3.5.3**, `Program.cs:100` already calls
+>   `elsa.UseScheduling()`, `Elsa.Scheduling` declares **`Cronos` 0.11.0** as a direct dependency and
+>   ships `ICronParser`/`CronosCronParser`, and `AdlOrchestratorWorkflow.cs:2` already imports
+>   `Elsa.Scheduling.Activities`. **The seam needs zero new NuGet packages.**
+> - **That does not mean Elsa's `Cron` trigger can replace the seam.** It arms one trigger per workflow
+>   *definition* with no tenant dimension, and the shipped `IScheduler` is `LocalScheduler` —
+>   in-process, so an N-pod deploy arms N copies. Use Elsa's **parser**, not its **scheduler**. 41-30
+>   D3 records the choice; 41-30 Correction 2 records the rejection.
+>
+> **The seam is a hosted service + two control-plane tables + an admin API — not a workflow**, and
+> 41-30's "Shape" section argues that explicitly, because this epic's default answer is "make it a
+> workflow".
+
+> ### Epic 41 assumes two trigger classes and, until 41-30/41-32, owned neither
+>
+> The scheduled one is above. The **reactive** one is the same size of hole and was never named:
+> **41-21** and **41-22** each declare *"Reactive trigger (alert / security alert / health-review
+> escalation)"* in their own Scope line, and nothing in the platform can deliver it.
+> `AlertRuleEvaluator` → `IAlertSink` → `NotificationDispatcher` → four **notification** channels
+> (email, PagerDuty, Slack, webhook); `IElsaWorkflowService` — the only way anything in `Tamma.Api`
+> starts a workflow — has five consumers and **none is in `Services/Alerts/`**. Tamma detects, pages a
+> human, and stops. **[41-32](./story-41-32/41-32-alert-triggered-workflow-response-seam.md)** closes
+> it as an *amendment to the alert stack*, not a new workflow — 41-21 and 41-22 are the workflows.
+
+> ### Scheduling is needed for audits, NOT for ceremonies (product owner, 2026-07-25)
+>
+> > "scrum and stuff are not automated, they are for users if they exist, but audits sure need to
+> > exist, so it depends"
+>
+> The seam was listed as blocking seven stories. It blocks **five**. The ceremony stories are
+> **user-initiated**, not scheduled:
+>
+> | Story | Trigger | Needs the seam? |
+> |---|---|---|
+> | 41-5 Stakeholder / status reporting | a person asks for it | **No** |
+> | 41-7 Standup synthesis | a person asks for it | **No** |
+> | 41-8 Retrospective facilitation | already event-triggered (sprint close), not cron | No (already) |
+> | 41-6 Sprint planning | a person runs it | No (already) |
+> | **41-11** Tech-debt sweep | recurring audit | **Yes** |
+> | **41-16** Regression / flaky-test management | recurring audit | **Yes** |
+> | **41-17** PR-triage sweep half | recurring audit | **Yes** |
+> | **41-20** Scheduled security audit | recurring audit | **Yes** |
+> | **41-23** Capacity / health review | recurring audit | **Yes** |
+>
+> **The distinction is who decides it should happen now.** A standup summary is something a team
+> asks for when they want it — automating it on a cron produces a document nobody asked for, on a
+> day nobody was working. An audit is exactly the opposite: its value is that it runs whether or not
+> anyone remembered.
+>
+> **Consequences:** 41-5 and 41-7 come off the blocked list and become schedulable immediately —
+> both need only a manual trigger, which already exists. Their plans currently say "⛔ BLOCKED
+> (scheduler seam, unowned)" and must be corrected. The seam itself is still unowned and still needs
+> a decision on who builds it, but it now gates five audit stories rather than seven mixed ones —
+> which also makes it a cleaner thing to specify, since every remaining consumer wants the same
+> shape: run this on a cadence, per tenant, and do not double-fire.
 
 41-1a + 41-1b hard-block **seventeen** stories on both execution paths — fourteen at their *produce*
 step (a missing type/role/cell), plus 41-24/41-25/41-26 at their *review* stage (the
@@ -340,9 +427,19 @@ code-review half are Wave-0-independent; the rest are listed here for leverage, 
   Triage**, **41-20 Scheduled Security Audit**, **41-23 Capacity & Health Review** — all read the DCB
   stream / CI history on a cron and produce a `Findings`/`TriageDecision`; each replaces a standing human
   chore. 41-24 Release Notes & 41-25 User/API Docs are release/merge-triggered siblings.
-  **All five cron stories are gated on the Wave-0 scheduler enabler — the one that is still unowned**;
+  **All five cron stories are gated on the Wave-0 scheduler enabler — now owned by 41-30**;
   41-11 and 41-16 additionally on 41-1a's cells, and 41-24/41-25 on 41-1c. Wave 2 cannot start before
-  Wave 0 finishes.
+  Wave 0 finishes. *(41-7 is listed here for its event-sourced digest shape; per the 2026-07-25 scoping
+  decision it is **user-initiated** and does **not** need the seam.)*
+
+**Wave 3 additions — the two reachability stories (2026-07-27).**
+- **41-31 Standalone Emergency Rollback** — the execution workflow 41-22 AC3 needs and cannot have
+  today. Not blocked by any part of Wave 0 (no new cell, no new document type, no prose); startable
+  immediately.
+- **41-32 Alert-Triggered Workflow-Response Seam** — the reactive trigger 41-21 and 41-22 both
+  specify. Not blocked by Wave 0 either. Its highest-value binding is *alert → 41-31*, which is also
+  why its AC7 (starting a workflow via an alert never bypasses that workflow's own governance) is a
+  hard pin rather than a note.
 
 **Wave 3 — planning & design depth.**
 - 41-3 Backlog Prioritization, 41-6 Sprint Planning, 41-4 Roadmap, 41-8 Retro, 41-5 Stakeholder Update,
@@ -356,7 +453,11 @@ code-review half are Wave-0-independent; the rest are listed here for leverage, 
 ### Planning artifacts this epic does not have
 
 Epic 39 and Epic 40 each ship an `EXECUTION-PLAN.md`; Epic 40 also ships a `sprint-status.yaml`. **Epic 41
-has neither, and exactly one of its 29 stories (41-29) has an `implementation-plan.md`.** The waves above
+has neither.** *(Corrected 2026-07-27: this sentence continued "and exactly one of its 29 stories
+(41-29) has an `implementation-plan.md`", which is now doubly wrong — several stories carry plans,
+including 41-5, 41-11, 41-20 and 41-22, and the epic is **32** stories after 41-30/41-31/41-32 were
+added. The plan-coverage claim was stale when written and should be re-counted, not patched again.)*
+The waves above
 are therefore a leverage ordering, not a schedule: apart from 41-1a/b/c (4–5 / 5–6 / 3–4 days) and 41-29
 (6.5–7.5) there is no per-story effort estimate, no critical path, no cross-story shared-edit register,
 and no wave roll-up that a scheduler could execute against. Two consequences worth naming before anyone
@@ -466,10 +567,29 @@ schedulable. Until then, treat every wave boundary as a dependency statement onl
   bullet also said "41-17 does not even list the scheduler in its `Blocking:` line". It does now, and so
   do all seven consumers — 41-5, 41-7, 41-11, 41-16, 41-17, 41-20 and 41-23 each name the **seam**, not
   the non-reusable "scheduler pattern", and state which of their ACs is unreachable without it.)*
-  **This is the one thing in Epic 41 that no story builds.** Writing it is a prerequisite for Wave 2 in
-  its entirety and for 41-17's PR-triage half; it needs a tenant component in the advisory-lock key, a
+  It needs a tenant component in the advisory-lock key, a
   `tenantId` threaded into the dispatch, a **persisted** last-fired window (not `_lastFired` in process
   memory), and a window/cron shape rather than a single `FireAtMinute`.
+  **Corrected 2026-07-27 — "the one thing in Epic 41 that no story builds" is now built by
+  [41-30](./story-41-30/41-30-tenant-aware-scheduled-trigger-seam.md)**, whose D10 answers each of the
+  requirement lists 41-5's plan (`:160-176`, *"Design Notes — Part B (BLOCKED; requirements only)"*)
+  and 41-20's plan (D8) left behind, item by item. Two things those lists did not say, and 41-30 does:
+  an advisory lock is *session*-scoped, so it prevents **concurrent** double-fire but not **sequential**
+  double-fire after a pod crash — only a committed ledger row does that (41-30 Correction 3, D2); and
+  exactly-once across a process boundary is impossible, so the honest contract is **at-most-once**
+  (Correction 4).
+- **Reactive triggers have no seam either — [41-32](./story-41-32/41-32-alert-triggered-workflow-response-seam.md).**
+  See the boxed note in *Sequencing → Wave 0*. 41-21 and 41-22 both specify a reactive trigger; the
+  alert stack can only notify. 41-32 amends the alert stack with an `alert_responses` binding + an
+  at-most-once dispatch ledger, and adds no workflow. Note the two seams deliberately share an idiom
+  (`INSERT … ON CONFLICT DO NOTHING` as the dedupe answer) and a closed dispatchable-definition
+  allowlist, but **no table** — the scheduled key is `(trigger, window)`, the reactive key is
+  `(alert, response)`, and the latter needs no clock at all.
+- **`MentorshipController.cs:79` dispatches `"tamma-autonomous-mentorship"`, a definition id that
+  exists nowhere** (the real one is `mentorship`), and `SingleIssueCycleWorkflow.cs:283,300` dispatch
+  `"create-issues"`, which no workflow defines. There is **no definition-id constants file** — ~105
+  magic-string sites — which is how both went undetected. Not an Epic 41 deliverable, but it is the
+  standing argument for 41-30/41-32's write-time definition-id allowlists, and worth its own fix.
 - `Tamma.Core/Agents` taxonomy extension (**41-1a**) + the document-type extension (**41-1b**) — see the
   Corrected note above: together they gate **seventeen** stories on both the agent and the human path,
   not just the agent path of 41-6/41-7/41-8/41-27/41-28.

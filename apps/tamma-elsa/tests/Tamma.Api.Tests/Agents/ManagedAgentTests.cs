@@ -649,6 +649,122 @@ public class ManagedAgentTests
     }
 
     // -------------------------------------------------------------------
+    // Advertised tools carry a real description and JSON Schema
+    //
+    // Regression guard. `ToResolvedTools` used to return
+    // `new ResolvedTool { Name = n }` — description "", schema null — while its
+    // own comment claimed schemas "come from the existing built-in catalog at
+    // runtime". No code did that lookup. Both wire dialects write the null
+    // through (`input_schema` for the Anthropic shape, `parameters` for the
+    // OpenAI-compatible shape), so every managed-agent call advertised tools the
+    // model had no signature for, on EVERY provider.
+    //
+    // These assert at the provider-agnostic layer deliberately: the next
+    // providers on the roadmap (Kimi, GLM, DeepSeek) are OpenAI-compatible, and a
+    // fix made in one body builder would leave the other dialect broken.
+    // -------------------------------------------------------------------
+
+    [Test]
+    public async Task RunAsync_AdvertisedTools_CarryDescriptionAndSchemaFromTheRegistry()
+    {
+        var registry = new Mock<Tamma.Activities.LlmCall.Tools.IToolExecutorRegistry>(MockBehavior.Loose);
+        var schema = new Dictionary<string, object>
+        {
+            ["type"] = "object",
+            ["properties"] = new Dictionary<string, object>
+            {
+                ["path"] = new Dictionary<string, object> { ["type"] = "string" },
+            },
+            ["required"] = new[] { "path" },
+        };
+        var executor = new Mock<Tamma.Activities.LlmCall.Tools.IToolExecutor>(MockBehavior.Loose);
+        executor.SetupGet(e => e.ToolName).Returns("file_read");
+        executor.SetupGet(e => e.Description).Returns("Read a file from the workspace.");
+        executor.SetupGet(e => e.InputSchema).Returns(schema);
+        registry.Setup(r => r.GetAll())
+            .Returns(new List<Tamma.Activities.LlmCall.Tools.IToolExecutor> { executor.Object });
+
+        var sut = new ManagedAgent(
+            _gate.Object, _budget.Object, _resolver.Object, _credentials.Object,
+            _runner.Object, _pricing.Object, _markup, _usage, _events,
+            NullLogger<ManagedAgent>.Instance, toolRegistry: registry.Object);
+
+        SetupResolve(Guid.NewGuid(), "anthropic", "claude-sonnet-4");
+        SetupGateAllow();
+        SetupBudgetWithin();
+        SetupCredential(CredentialSource.Platform);
+
+        IReadOnlyList<ResolvedTool>? advertised = null;
+        _runner.Setup(r => r.RunAsync(It.IsAny<string>(), It.IsAny<LlmProviderConfig>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<double>(), It.IsAny<IReadOnlyList<ResolvedTool>?>(), It.IsAny<bool>(),
+                It.IsAny<ToolLoopConfig>(), It.IsAny<string>(), It.IsAny<RepairRingPlan?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<string, LlmProviderConfig, string, string, string, int, double,
+                IReadOnlyList<ResolvedTool>?, bool, ToolLoopConfig, string, RepairRingPlan?, CancellationToken>(
+                (_, _, _, _, _, _, _, tools, _, _, _, _, _) =>
+                {
+                    advertised = tools;
+                    return Task.FromResult(SuccessLoop(1, 1, "ok"));
+                });
+
+        var req = Req(Guid.NewGuid(), "developer") with { Tools = new List<string> { "file_read" } };
+
+        await sut.RunAsync(req);
+
+        advertised.Should().NotBeNull().And.HaveCount(1);
+        var tool = advertised![0];
+        tool.Name.Should().Be("file_read");
+        tool.Description.Should().NotBeNullOrWhiteSpace(
+            "a tool advertised without a description gives the model nothing to decide on");
+        tool.InputSchema.Should().NotBeNull(
+            "a null schema serializes as input_schema/parameters = null, so the model has no signature to call against");
+        tool.InputSchema.Should().ContainKey("properties");
+    }
+
+    [Test]
+    public async Task RunAsync_ToolWithNoRegisteredExecutor_KeepsABareEntryRatherThanVanishing()
+    {
+        // Dropping an unresolvable name would silently shrink the agent's advertised
+        // capability, which is harder to notice than a tool that fails when called.
+        var registry = new Mock<Tamma.Activities.LlmCall.Tools.IToolExecutorRegistry>(MockBehavior.Loose);
+        registry.Setup(r => r.GetAll())
+            .Returns(new List<Tamma.Activities.LlmCall.Tools.IToolExecutor>());
+
+        var sut = new ManagedAgent(
+            _gate.Object, _budget.Object, _resolver.Object, _credentials.Object,
+            _runner.Object, _pricing.Object, _markup, _usage, _events,
+            NullLogger<ManagedAgent>.Instance, toolRegistry: registry.Object);
+
+        SetupResolve(Guid.NewGuid(), "anthropic", "claude-sonnet-4");
+        SetupGateAllow();
+        SetupBudgetWithin();
+        SetupCredential(CredentialSource.Platform);
+
+        IReadOnlyList<ResolvedTool>? advertised = null;
+        _runner.Setup(r => r.RunAsync(It.IsAny<string>(), It.IsAny<LlmProviderConfig>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<double>(), It.IsAny<IReadOnlyList<ResolvedTool>?>(), It.IsAny<bool>(),
+                It.IsAny<ToolLoopConfig>(), It.IsAny<string>(), It.IsAny<RepairRingPlan?>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<string, LlmProviderConfig, string, string, string, int, double,
+                IReadOnlyList<ResolvedTool>?, bool, ToolLoopConfig, string, RepairRingPlan?, CancellationToken>(
+                (_, _, _, _, _, _, _, tools, _, _, _, _, _) =>
+                {
+                    advertised = tools;
+                    return Task.FromResult(SuccessLoop(1, 1, "ok"));
+                });
+
+        // "Bash" is a Claude-Code name; no executor is keyed on it.
+        var req = Req(Guid.NewGuid(), "developer") with { Tools = new List<string> { "Bash" } };
+
+        await sut.RunAsync(req);
+
+        advertised.Should().NotBeNull().And.HaveCount(1);
+        advertised![0].Name.Should().Be("Bash");
+    }
+
+    // -------------------------------------------------------------------
     // setup helpers
     // -------------------------------------------------------------------
 

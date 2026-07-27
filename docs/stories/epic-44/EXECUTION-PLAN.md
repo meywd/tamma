@@ -7,9 +7,9 @@ forced serial**, and **where the schedule floor is**.
 
 | Metric | Value |
 |---|---|
-| Total effort (sum of all stories) | **49 person-days** |
-| Critical path | **28 days** — `44-0 → 44-1 → 44-2 → 44-6` |
-| Speedup vs. fully serial (49 ÷ 28) | **≈ 1.75×** |
+| Total effort (sum of all stories) | **49.5 person-days** |
+| Critical path | **28.5 days** — `44-0 → 44-1 → 44-2 → 44-3 → 44-6` |
+| Speedup vs. fully serial (49.5 ÷ 28.5) | **≈ 1.74×** |
 | Hard external gate | **none for the core** — 39-20 is a soft dependency (see below) |
 | Longest single story | **44-6** at 9 days, and it sits on the critical path |
 
@@ -19,21 +19,21 @@ loop integration, external link, dogfooding — hangs off the API as parallel br
 ## Dependency graph
 
 ```
-44-0 (4d) ──► 44-1 (6d) ──► 44-2 (5d) ──┬─► 44-3 (4d) ──┐
-                                         │               ├─► 44-4 (4d)
-                                         ├─► 44-5 (4d)   │
-                                         ├─► 44-6 (9d) ◄─┘   critical path ends here
-                                         ├─► 44-7 (5d)
-                                         ├─► 44-8 (4d)
-                                         └─► 44-9 (4d)  ◄── needs 44-3 + 44-4
+44-0 (4.5d) ──► 44-1 (6d) ──► 44-2 (5d) ──┬─► 44-3 (4d) ──┐
+                                           │               ├─► 44-4 (4d)
+                                           ├─► 44-5 (4d)   │
+                                           ├─► 44-6 (9d) ◄─┘   critical path ends here
+                                           ├─► 44-7 (5d)
+                                           ├─► 44-8 (4d)
+                                           └─► 44-9 (4d)  ◄── needs 44-3 + 44-4
 ```
 
 | Story | Effort | Depends on | On critical path |
 |---|---|---|---|
-| 44-0 Tracker core | 4 d | — | **yes** |
+| 44-0 Tracker core | 4.5 d | — | **yes** |
 | 44-1 Storage + the tenant-migration sweep | 6 d | 44-0 | **yes** |
 | 44-2 Work-item & project API, RBAC | 5 d | 44-1 | **yes** |
-| 44-3 Hierarchy, ranking, `BacklogOrdering` apply seam | 4 d | 44-2 | no |
+| 44-3 Hierarchy, ranking, `BacklogOrdering` apply seam | 4 d | 44-2 | **yes** (44-6's board needs it) |
 | 44-4 Iterations, board projection, `SprintPlan` apply seam | 4 d | 44-2, 44-3 | no |
 | 44-5 DCB events + the event-name drift ratchet | 4 d | 44-2 | no |
 | 44-6 Tracker UI + the missing CI test line | 9 d | 44-2 (44-3/44-4 for board) | **yes** |
@@ -45,14 +45,14 @@ loop integration, external link, dogfooding — hangs off the API as parallel br
 
 | Wave | Stories | Pole |
 |---|---|---|
-| **0** | 44-0 | 4 d |
+| **0** | 44-0 | 4.5 d |
 | **1** | 44-1 | 6 d |
 | **2** | 44-2 | 5 d |
 | **3** | 44-3, 44-5, 44-7, 44-8 | 5 d |
 | **4** | 44-4, 44-6, 44-9 | 9 d |
 
-Wave-parallel wall clock is **29 days** against a 28-day critical path — the two are nearly identical
-here because the epic is genuinely a spine with a fan-out at the end, not a wide graph.
+Wave-parallel wall clock is **29.5 days** against a 28.5-day critical path — the two are nearly
+identical here because the epic is genuinely a spine with a fan-out at the end, not a wide graph.
 
 ## Where the schedule actually breaks
 
@@ -72,7 +72,17 @@ has had to reach existing tenants. Budget review time, not just build time.
 tracker nobody's workflow reads is a database. If the epic has to be cut short, cut 44-8 and 44-9
 before touching 44-7.
 
-**4. 39-20 is a soft dependency that is currently a no-op.** Epic 44 consumes
+**4. 44-0's rework (2026-07-27) hands additive work to 44-1 and 44-3 that is *not yet* in their
+numbers.** The Linear comparison (`.dev/findings/linear-comparison-against-story-44-0.md`) moved 44-0
+from 4 d to 4.5 d, and along the way it added, downstream: a `SiblingRank` column, a `PreviousKeys`
+column, `Estimate` + `EstimateScale` (replacing `EstimateHours`) and a small `work_item_relations`
+table — **all 44-1** — plus relation-edge validation and a sweep replacing status set literals with
+`Status.Category()` — **44-3**. Each is small and additive; together they are plausibly ~0.5 d on each
+story. **They are flagged here rather than folded in**, because re-estimating two stories from a third
+story's review is how estimates stop meaning anything. Confirm at 44-1's plan review, before Wave 1
+starts. If they land as +0.5 d each, the critical path becomes 29.5 d and the total 50.5 d.
+
+**5. 39-20 is a soft dependency that is currently a no-op.** Epic 44 consumes
 `EligibleAudienceAsync` for assignee pickers and `CanSeeAsync` for list filtering. The shipped
 resolver is `InitiatorOnlyTaskAudienceResolver`, and `ChannelOutboxService.cs:143` hardcodes
 `InitiatorUserId: null` — so it returns **empty for every input**. In single-user mode the
@@ -84,9 +94,11 @@ initiator-only rule is already correct and nothing is lost. In SaaS, 44-2 must d
 
 If the epic must be smaller, these are the honest cuts in order:
 
-1. **44-9 (dogfood)** — 4 days. Cancelled outright if the product owner answers "customers-first" to
-   open question 2. Its value is proving the tracker on Tamma's own work, which is real but not
-   load-bearing.
+1. ~~**44-9 (dogfood)** — 4 days.~~ **NO LONGER A CUT LINE (corrected 2026-07-25).** Open question 2
+   has been answered: the tracker serves both audiences and **Tamma is tenant #1**, because the
+   platform self-maintains. Generating `sprint-status.yaml` from the tracker is therefore not a
+   dogfood nicety — it is the evidence that tenant #1 exists at all. Its 4 days are load-bearing.
+   If scope must come out, take it from 44-8 or 44-5's non-ratchet half instead.
 2. **44-8 (external link)** — 4 days. The native tracker works without GitHub import; import is what
    makes migration painless, not what makes the tracker function.
 3. **44-5 (events + ratchet)** — 4 days, *but* the event-name drift ratchet is the only test the repo

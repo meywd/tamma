@@ -51,7 +51,7 @@ P1 — Wave 1. The board projection is what 44-6 renders; the apply seam is the 
 
 7. **Column skeleton is complete and stable.** `groupBy=status` returns **all seven** `WorkItemStatus` columns in enum order, including empty ones. A board whose columns appear and disappear as work moves is unusable, and the client must not have to synthesise the missing ones.
 
-8. **Iteration summary.** `GET /api/iterations/{id:guid}/summary` returning committed count, count and `EstimateHours` sum by status, and `CapacityPoints`. Computed in SQL. **No velocity, burndown or forecast** — those are Epic 36's and are listed in the epic's Deferred section.
+8. **Iteration summary.** `GET /api/iterations/{id:guid}/summary` returning committed count, count and `Estimate` sum by **`WorkItemStatus.Category()`** (44-0 AC3 — never a hand-written status set; `Estimate` is scale-free, its scale being `Project.EstimateScale`), and `CapacityPoints`. Computed in SQL. **No velocity, burndown or forecast** — those are Epic 36's and are listed in the epic's Deferred section.
 
 9. **Apply seam** `POST /api/iterations/{id:guid}/apply-plan` accepting `{ documentId }`, following 44-3's seam contract exactly: requires `DocumentType == "sprint-plan"` and `Status == "accepted"` (else `409` naming which failed); resolves committed entries by `issueId`; sets `IterationId` in one transaction; returns per-item outcomes (`applied | not-found | wrong-project | already-committed-elsewhere`); is idempotent.
 

@@ -108,7 +108,13 @@ builder.Services.AddHttpClient("elsa", client =>
 builder.Services.AddHttpClient("anthropic", client =>
 {
     client.BaseAddress = new Uri("https://api.anthropic.com");
-    client.DefaultRequestHeaders.Add("anthropic-version", "2024-01-01");
+    // 2023-06-01 is the published Anthropic API version. This client previously sent
+    // "2024-01-01", which is not a released version at all — a drift artifact of the
+    // Anthropic request shape being built in THREE places (here, InlineToolLoopRunner
+    // and LlmProxyService), two of which already sent 2023-06-01. Collapsing those
+    // three paths behind one provider descriptor is tracked in
+    // .dev/findings/provider-abstraction-and-openai-compatible-candidates.md.
+    client.DefaultRequestHeaders.Add("anthropic-version", "2023-06-01");
     var apiKey = builder.Configuration["Anthropic:ApiKey"];
     if (!string.IsNullOrEmpty(apiKey))
         client.DefaultRequestHeaders.Add("x-api-key", apiKey);

@@ -6,7 +6,7 @@ When this story is done a work item can be reparented under rules the database a
 
 ## Pre-Reading
 
-- `docs/stories/epic-44/README.md` — §3 (the parenting matrix and why one table), §4 (rank), the 41-3 boundary row
+- `docs/stories/epic-44/README.md` — §3 (hierarchy invariants — the parenting matrix was deleted — and why one table), §4 (rank), the 41-3 boundary row
 - `docs/stories/epic-44/story-44-0/implementation-plan.md` — D4 (`TrackerHierarchy`, `MaxDepth` enforced elsewhere), D7 (rank algebra + the collation trap)
 - `docs/stories/epic-44/story-44-1/implementation-plan.md` — D3 (`COLLATE "C"`), Data & Migrations (`ParentId` `RESTRICT`, indexes), `BulkSetRankAsync`
 - `docs/stories/epic-44/story-44-2/implementation-plan.md` — D2 (tri-state PATCH), D7 (keyset paging), D10 (catalog descriptors)
@@ -19,13 +19,13 @@ When this story is done a work item can be reparented under rules the database a
 
 ## Design Decisions
 
-- **D1 — Hierarchy invariants are enforced in the service, inside the write transaction, computed from persisted state.** The database cannot express "no cycles at depth ≤ 3 across a self-referencing FK" without a trigger, and a trigger here would be a second rule engine disagreeing with `TrackerHierarchy`. So: `SELECT … FOR UPDATE` the ancestor chain, evaluate `CanParent` + depth + cycle, write, commit. AC2's concurrency test drives two reparents that jointly form a cycle and asserts exactly one commits — the case a naive read-then-write silently allows.
+- **D1 — Hierarchy invariants are enforced in the service, inside the write transaction, computed from persisted state.** The database cannot express "no cycles at depth ≤ `MaxDepth` across a self-referencing FK" without a trigger, and a trigger here would be a second rule engine disagreeing with `TrackerHierarchy`. So: `SELECT … FOR UPDATE` the ancestor chain, evaluate `CanParent` + depth + cycle, write, commit. AC2's concurrency test drives two reparents that jointly form a cycle and asserts exactly one commits — the case a naive read-then-write silently allows.
 
 - **D2 — Three distinct rejection reasons, each named on the wire.** `KIND_NOT_PERMITTED` (`Epic` under `Task`), `MAX_DEPTH_EXCEEDED`, `WOULD_CREATE_CYCLE`, `CROSS_PROJECT_PARENT`. A single `400 "invalid parent"` is unactionable in a drag-and-drop UI, where the user needs to know *which* rule stopped them — and 44-6 renders the reason inline.
 
 - **D3 — `move` is neighbour-addressed `(afterId?, beforeId?)`, never index-addressed.** An index is a position in a list the client last saw; under concurrent drags it is stale by construction and the resulting write is *wrong*. Neighbours are a statement about the intended relation, and the worst outcome under concurrency is a rank between two items that have since moved — visible and harmless. Both null means "to the end". The write is exactly one `UPDATE`, which is the whole point of the fractional index (44-0 D7); a test asserts the statement count.
 
-- **D4 — Kind change re-validates against parent *and* children, in one check.** A `PATCH` that changes `kind` is a hierarchy mutation wearing a field update's clothes. Validating only against the parent lets a `Story` with `Task` children become a `Task`, which `TrackerHierarchy` forbids in the other direction. The check enumerates both edges and returns every violation, not the first.
+- **D4 — Kind change re-validates against parent *and* children, in one check.** A `PATCH` that changes `kind` is a hierarchy mutation wearing a field update's clothes. Under 44-0's invariants the only kind rule is "an Epic may not be a child of a non-Epic", so the case that actually bites is changing an item **to** `Epic` while it has a non-Epic parent — validating only against the parent, or only against the children, misses one direction of it. The check enumerates both edges and returns every violation, not the first.
 
 - **D5 — Subtree is one recursive CTE with an explicit depth guard, and roll-ups are SQL aggregates.** `WITH RECURSIVE` bounded by `WHERE depth < TrackerHierarchy.MaxDepth`, so a cycle introduced by a bug elsewhere is a truncated result rather than an infinite scan. `childCount` / `childCountByStatus` are `LEFT JOIN LATERAL` aggregates in the same statement — AC6's test asserts a **constant** query count in the number of rows, because the natural implementation of a roll-up is N+1 and it will not be visible until a customer has 2 000 items.
 
@@ -86,7 +86,8 @@ None emitted here — 44-5 owns emission and adds it inside these services. 44-5
 
 | # | Test | Asserts |
 |---|---|---|
-| 1 | `HierarchyTests.Permitted_parenting_matrix_is_honoured` | all 36 `(parent, child)` pairs against `TrackerHierarchy` |
+| 1 | `HierarchyTests.Epic_may_not_be_a_child_of_a_non_epic` | all 16 `(parent, child)` pairs against `TrackerHierarchy.CanParent` — only `(Story\|Task\|Spike, Epic)` rejected. There is no `(parentKind, childKind)` matrix; 44-0 D4 deleted it |
+| 1b | `HierarchyTests.Task_under_epic_is_permitted` | the case the deleted matrix forbade — named so a reinstatement fails loudly |
 | 2 | `HierarchyTests.Exceeding_max_depth_is_rejected` | `MAX_DEPTH_EXCEEDED` |
 | 3 | `HierarchyTests.Self_and_descendant_parents_are_rejected` | `WOULD_CREATE_CYCLE` |
 | 4 | `HierarchyTests.Cross_project_parent_is_rejected` | `CROSS_PROJECT_PARENT` |
