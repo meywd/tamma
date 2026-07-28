@@ -143,6 +143,19 @@ residency for reasons that do not apply here, as D3a records).
      `DELETE /api/v1/agents/providers/{provider}/model`. Alias normalization + unknown → 404 via
      the `NormalizeProvider` shape (`ProviderCredentialEndpoints.cs:333-352`). Member PUT/DELETE →
      403. Validation: model non-empty, ≤ 256 chars, no whitespace-only, no control characters.
+     *(Amended 2026-07-28, conformance review: the tenant roster row AND the per-provider model
+     GET gained an additive `fallbackModel` field post-story — the model the tenant would resolve
+     to WITHOUT its override (skip-principal resolution: platform DB → config → descriptor),
+     computed server-side so 46-3's reset confirm can name it without the client restating
+     precedence. See
+     `.dev/bugs/2026-07-27-tenant-surface-cannot-name-platform-default-under-override.md`.)*
+     *(Amended 2026-07-28, conformance review — shipped disabled-provider semantics on the
+     tenant surface, deliberately asymmetric: the per-provider GETs (`…/models`, `…/model`)
+     answer for a platform-disabled provider with the SAME 404 shape as an unknown provider
+     (review F11, never-enumerate — matching the roster, where it is simply absent); PUT returns
+     409 `provider_disabled` (the off switch wins); DELETE of an existing override is
+     deliberately ALLOWED, so a tenant can clean up an orphaned override row while the provider
+     is disabled. The asymmetry is intentional.)*
 
 6. **Pricing warning (epic D3b).** Both PUT responses carry
    `pricingKnown: bool` — false when `IProviderPricingService` has no rate for

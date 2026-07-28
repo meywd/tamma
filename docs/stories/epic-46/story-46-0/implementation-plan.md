@@ -9,6 +9,13 @@ configuration status, `GET /api/admin/providers/{key}/models` and
 and every fetch authenticates server-side through the existing BYOK→platform credential resolver.
 No UI ships here; no database row exists yet.
 
+*(Amended 2026-07-28, conformance review: the status roster shipped at
+`GET /api/admin/providers/status`, not `GET /api/admin/providers` — that bare path is already
+Story 34-11's pricing roster and mapping both would be an ambiguous match. The story's AC4
+already carries the collision note; this plan never got it. The correction applies wherever this
+plan says `GET /api/admin/providers`: this Scope paragraph, step 6's route-group mapping, the
+Definition of Done, and the Risks table row.)*
+
 ## Pre-Reading
 
 - `docs/stories/epic-46/README.md` — the wire-facts table and decisions D4–D6
@@ -147,7 +154,8 @@ not built here.
 - All ACs demonstrably met; tests 1–17 green; `dotnet test` green overall.
 - The Z.ai re-check performed and its outcome recorded in the descriptor comment.
 - `GET /api/admin/providers` returns a row for all 15 HTTP descriptors + the 2 allow-listed
-  non-HTTP keys.
+  non-HTTP keys. *(Amended 2026-07-28, conformance review: shipped as
+  `GET /api/admin/providers/status` — see the Scope note above for the 34-11 path collision.)*
 - No change to `HttpProviderClient`, `ProviderRequestShaper`, or any chat-path behaviour
   (golden-request tests untouched and green).
 

@@ -87,6 +87,15 @@ precedence order. The `source` badge text is the one permitted mapping (`platfor
      (`{errorCode}`)"; an empty list renders the banner plus a free-text input so the admin is
      never dead-ended.
 
+   *(Amended 2026-07-28, conformance review — two letter deviations as shipped: (1) the
+   "(current)" pin and delisted marker derive from the LIVE roster row (`row.currentModel`,
+   re-fetched after save/reset), never from the mount-time list snapshot's `current` flag, which
+   goes stale once a save moves the effective model (review U3); the "no longer listed" marker
+   reads the envelope's additive `delisted` flag rather than inferring it. (2) The banner +
+   free-text degradation applies only to an actual FAILED fetch (transport error or `errorCode`
+   set) — a successful fetch that lists nothing beyond the current model renders the listbox
+   normally; a short list is not an error (review U5).)*
+
 3. **Free-text fallback.** Providers with `modelsSupported: false` (z-ai, azure-openai,
    github-copilot, non-HTTP) get a plain text input pre-filled with the current model, with helper
    text saying the provider does not expose a model list.
@@ -95,6 +104,12 @@ precedence order. The `source` badge text is the one permitted mapping (`platfor
    response surfaces the server's `warning` inline (non-blocking). Reset issues the DELETE behind
    a confirm step whose copy states what the fallback will be (from the row's would-be `source`).
    Both surface `ApiError` failures as inline errors, not toasts-only.
+   *(Amended 2026-07-28, conformance review — letter deviation as shipped: Reset is disabled
+   unless the row's `source === 'platform-db'` — with no platform row there is nothing to delete
+   and the DELETE would 404 (review U5) — and the confirm copy names BOTH fallback tiers
+   generically ("from deployment config" or "built-in default", as reported after the reset)
+   rather than pre-computing a single would-be `source`, which the client cannot know without
+   restating the precedence chain server-side owns.)*
 
 5. **Enable/disable.** The toggle PUTs `{enabled}` and reflects the response. Disabled providers
    render greyed with their controls inert except re-enable.
@@ -114,6 +129,9 @@ precedence order. The `source` badge text is the one permitted mapping (`platfor
 8. **Typecheck honesty.** `pnpm --filter @tamma/dashboard typecheck` is not in CI (Story 44-6
    owns that repair) — this story must still leave its own files clean under the package's
    tsconfig, verified locally and stated in the PR.
+   *(Amended 2026-07-28, conformance review: the premise is stale — the dashboard typecheck AND
+   the admin test suite run in CI since PR #505 (`ci.yml:46-47,55-56`), so this story's files are
+   CI-enforced, not merely locally verified.)*
 
 ## Dependencies
 

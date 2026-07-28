@@ -1294,9 +1294,11 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     /// only). Public per <see cref="IInlineToolLoopRunner.GetDefaultModel(string)"/>
     /// (Finding I-1) so <c>ManagedAgent</c> can pick the override provider's own
     /// default model instead of a role-resolved model for a different provider.
-    /// Platform-scope: resolves the platform-DB → config → descriptor legs only
-    /// (Story 46-1 — callers without tenant context keep today's behaviour plus
-    /// the platform DB layer).
+    /// No-tenant overload (Story 46-1): in SaaS mode this resolves the
+    /// platform-DB → config → descriptor legs; in SINGLE-USER mode the store
+    /// maps the null tenant id to the sole user's override row first (plan D3,
+    /// deliberate) — so "platform-scope only" would be wrong there. See the
+    /// interface doc on <see cref="IInlineToolLoopRunner.GetDefaultModel(string)"/>.
     /// </summary>
     public string GetDefaultModel(string providerName)
     {

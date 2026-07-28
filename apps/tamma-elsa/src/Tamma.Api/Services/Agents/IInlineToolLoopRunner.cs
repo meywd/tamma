@@ -93,9 +93,12 @@ public interface IInlineToolLoopRunner
     /// provider, so the role's model is not applicable to the override provider —
     /// it must run that provider with ITS default model, never a foreign one.
     /// Returns an empty string for an unknown / non-allowlisted provider (the
-    /// runner's own behaviour). Platform-scope: Story 46-1 slots the platform
-    /// provider_settings row above config; callers with tenant context should
-    /// use <see cref="GetDefaultModel(string, System.Guid?)"/>.
+    /// runner's own behaviour). No-tenant-context overload — NOT platform-scope
+    /// only: Story 46-1 slots the provider_settings layers above config, and in
+    /// single-user mode the store maps the null tenant id to the sole user's
+    /// override row (plan D3, deliberate), so that row IS consulted; in SaaS a
+    /// null tenant id resolves platform DB → config → descriptor. Callers with
+    /// tenant context should use <see cref="GetDefaultModel(string, System.Guid?)"/>.
     /// </summary>
     string GetDefaultModel(string provider);
 
