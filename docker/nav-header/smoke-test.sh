@@ -3,11 +3,11 @@
 # Run against a deployed environment to verify nav assets + injection.
 #
 # Usage:
-#   ./smoke-test.sh                          # default: https://app.tamma.dev
-#   TAMMA_BASE=https://app.tamma.dev ./smoke-test.sh
+#   ./smoke-test.sh                          # default: https://admin.tamma.dev
+#   TAMMA_BASE=https://admin.tamma.dev ./smoke-test.sh
 set -euo pipefail
 
-BASE="${TAMMA_BASE:-https://app.tamma.dev}"
+BASE="${TAMMA_BASE:-https://admin.tamma.dev}"
 PASS=0
 FAIL=0
 

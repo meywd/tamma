@@ -50,7 +50,7 @@ const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
   mockUser = MEMBER_USER;
-  setHostname('app.tamma.dev');
+  setHostname('admin.tamma.dev');
   globalThis.fetch = vi.fn().mockResolvedValue({ ok: true });
   mockLogout = vi.fn();
 });
@@ -65,8 +65,8 @@ afterEach(() => {
 // Unit tests for exported helpers
 // ===========================================================================
 describe('isActiveService', () => {
-  it('returns true for "app" when on app.tamma.dev', () => {
-    setHostname('app.tamma.dev');
+  it('returns true for "app" when on admin.tamma.dev', () => {
+    setHostname('admin.tamma.dev');
     expect(isActiveService('app')).toBe(true);
   });
 
@@ -80,8 +80,8 @@ describe('isActiveService', () => {
     expect(isActiveService('elsa')).toBe(true);
   });
 
-  it('returns false for "logs" when on app.tamma.dev', () => {
-    setHostname('app.tamma.dev');
+  it('returns false for "logs" when on admin.tamma.dev', () => {
+    setHostname('admin.tamma.dev');
     expect(isActiveService('logs')).toBe(false);
   });
 });
@@ -136,7 +136,7 @@ describe('NavHeader', () => {
   // Test 2: Active link has aria-current="page"
   // -----------------------------------------------------------------------
   it('marks active link with aria-current="page"', () => {
-    setHostname('app.tamma.dev');
+    setHostname('admin.tamma.dev');
     mockUser = MEMBER_USER;
     render(<NavHeader />);
 
@@ -277,7 +277,7 @@ describe('NavHeader', () => {
     fireEvent.click(screen.getByText('Sign Out'));
 
     // NavHeader called logout once but did not redirect synchronously —
-    // window.location is whatever the test setup left it at (app.tamma.dev).
+    // window.location is whatever the test setup left it at (admin.tamma.dev).
     expect(mockLogout).toHaveBeenCalledOnce();
     expect(window.location.href).not.toBe('/login');
   });

@@ -107,8 +107,9 @@ jobs:
             "TAMMA_SERVICE_API_KEY=${{ secrets.TAMMA_SERVICE_API_KEY }}" \
             "CRANL_ENCRYPTION_KEY=${{ secrets.TAMMA_CRANL_ENCRYPTION_KEY }}" \
             "API_BASE_URL=https://api.tamma.dev" \
-            "DASHBOARD_URL=https://app.tamma.dev" \
+            "DASHBOARD_URL=https://admin.tamma.dev" \
             "CUSTOMER_DASHBOARD_URL=https://dash.tamma.dev" \
+            "DASHBOARD_ADDITIONAL_ORIGINS=https://app.tamma.dev" \
           | ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \

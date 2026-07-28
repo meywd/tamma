@@ -493,8 +493,9 @@ jobs:
             "ELSA_ADMIN_API_KEY=${{ secrets.TAMMA_ELSA_ADMIN_API_KEY }}" \
             "TAMMA_SERVICE_API_KEY=${{ secrets.TAMMA_SERVICE_API_KEY }}" \
             "API_BASE_URL=https://api.tamma.dev" \
-            "DASHBOARD_URL=https://app.tamma.dev" \
+            "DASHBOARD_URL=https://admin.tamma.dev" \
             "CUSTOMER_DASHBOARD_URL=https://dash.tamma.dev" \
+            "DASHBOARD_ADDITIONAL_ORIGINS=https://app.tamma.dev" \
           | ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
@@ -815,7 +816,7 @@ jobs:
               exit \$FAIL
             "
 
-      - name: "Health check: public surfaces (api + app + elsa via proxy)"
+      - name: "Health check: public surfaces (api + admin + app + dash + elsa via proxy)"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
@@ -842,6 +843,7 @@ jobs:
               }
               FAIL=0
               probe api.tamma.dev /api/health 'api.tamma.dev'  || FAIL=1
+              probe admin.tamma.dev /        'admin.tamma.dev' || FAIL=1
               probe app.tamma.dev /          'app.tamma.dev'   || FAIL=1
               probe dash.tamma.dev /         'dash.tamma.dev'  || FAIL=1
               probe elsa.tamma.dev /health   'elsa.tamma.dev'  || FAIL=1
@@ -853,16 +855,17 @@ jobs:
       # OAUTH2_PROXY_CLIENT_ID/SECRET are bound; if env mapping breaks
       # (PR #343 shipped that failure mode for the old endpoint), users
       # see a broken Sign-in button instead of a clear deploy failure.
-      # Probing app.tamma.dev because that's the host that fronts
-      # oauth2-proxy via nginx.
+      # Probing admin.tamma.dev because that's the host that fronts
+      # oauth2-proxy via nginx (the admin console — hostname re-layout
+      # 2026-07-28; app.tamma.dev now serves the un-walled customer app).
       - name: "Health check: GitHub OAuth start endpoint"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
               for i in \$(seq 1 10); do
-                CODE=\$(curl -sk -H 'Host: app.tamma.dev' -o /tmp/oauth-probe.body -w '%{http_code}' 'https://localhost/oauth2/start?rd=%2F' 2>/dev/null || echo '000')
-                LOC=\$(curl -sk -H 'Host: app.tamma.dev' -D - -o /dev/null 'https://localhost/oauth2/start?rd=%2F' 2>/dev/null | tr -d '\r' | awk -F': ' 'tolower(\$1)==\"location\"{print \$2; exit}')
+                CODE=\$(curl -sk -H 'Host: admin.tamma.dev' -o /tmp/oauth-probe.body -w '%{http_code}' 'https://localhost/oauth2/start?rd=%2F' 2>/dev/null || echo '000')
+                LOC=\$(curl -sk -H 'Host: admin.tamma.dev' -D - -o /dev/null 'https://localhost/oauth2/start?rd=%2F' 2>/dev/null | tr -d '\r' | awk -F': ' 'tolower(\$1)==\"location\"{print \$2; exit}')
                 if [ \"\$CODE\" = '302' ] && echo \"\$LOC\" | grep -q 'github.com/login/oauth/authorize'; then
                   echo ' /oauth2/start OK (302 → github.com/login/oauth/authorize)'
                   exit 0
@@ -871,7 +874,7 @@ jobs:
                 echo \"OAuth probe attempt \$i/10: code=\$CODE loc=\$LOC body=\$BODY\"
                 sleep 5
               done
-              echo '::error::/oauth2/start did not redirect to GitHub (final code: '\$CODE'). Check OAUTH2_PROXY_CLIENT_ID/SECRET binding in docker-compose.yml and that the OAuth App callback URL matches https://app.tamma.dev/oauth2/callback.'
+              echo '::error::/oauth2/start did not redirect to GitHub (final code: '\$CODE'). Check OAUTH2_PROXY_CLIENT_ID/SECRET binding in docker-compose.yml and that the OAuth App callback URL matches https://admin.tamma.dev/oauth2/callback.'
               exit 1
             "
 

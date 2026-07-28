@@ -97,6 +97,66 @@ public sealed class DashboardUrlsTests
         DashboardUrls.DefaultCustomerUrl.Should().NotEndWith("/");
     }
 
+    // ── hostname re-layout — AdditionalOrigins (Dashboard:AdditionalOrigins CSV) ──
+
+    [Test]
+    public void AdditionalOrigins_unset_yields_nothing()
+    {
+        DashboardUrls.AdditionalOrigins(Config()).Should().BeEmpty(
+            "a deployment with one hostname per app configures nothing extra");
+    }
+
+    [Test]
+    public void AdditionalOrigins_empty_string_yields_nothing()
+    {
+        var config = Config(("Dashboard:AdditionalOrigins", ""));
+
+        DashboardUrls.AdditionalOrigins(config).Should().BeEmpty();
+    }
+
+    [Test]
+    public void AdditionalOrigins_whitespace_yields_nothing()
+    {
+        var config = Config(("Dashboard:AdditionalOrigins", "   "));
+
+        DashboardUrls.AdditionalOrigins(config).Should().BeEmpty();
+    }
+
+    [Test]
+    public void AdditionalOrigins_single_value_parses()
+    {
+        var config = Config(("Dashboard:AdditionalOrigins", "https://app.tamma.dev"));
+
+        DashboardUrls.AdditionalOrigins(config).Should().Equal("https://app.tamma.dev");
+    }
+
+    [Test]
+    public void AdditionalOrigins_csv_is_split_trimmed_and_blank_entries_dropped()
+    {
+        var config = Config(
+            ("Dashboard:AdditionalOrigins",
+             " https://app.example.com , https://alt.example.com ,, "));
+
+        DashboardUrls.AdditionalOrigins(config).Should().Equal(
+            "https://app.example.com", "https://alt.example.com");
+    }
+
+    [Test]
+    public void AdditionalOrigins_feed_NormalizeOrigins_and_dedupe_with_primaries()
+    {
+        // The wiring contract: Program.cs concatenates the primaries with the
+        // CSV entries and pushes everything through NormalizeOrigins, so a CSV
+        // duplicate of a primary collapses to one policy entry.
+        var config = Config(
+            ("Dashboard:AdditionalOrigins", "https://app.tamma.dev, https://DASH.example.com/"));
+
+        var origins = DashboardUrls.NormalizeOrigins(
+            new[] { "https://dash.example.com" }
+                .Concat(DashboardUrls.AdditionalOrigins(config)));
+
+        origins.Should().Equal("https://dash.example.com", "https://app.tamma.dev");
+    }
+
     // ── review F-CORS-2 — NormalizeOrigins (the CORS origin-list helper) ────
 
     [Test]

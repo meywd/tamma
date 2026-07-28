@@ -1135,6 +1135,11 @@ builder.Services.AddRateLimiter(options =>
 // DashboardUrls' chain). Deduped because a single-user install sets one value
 // for both.
 //
+// Hostname re-layout (2026-07-28) — the customer app can serve from MORE
+// than one origin (Tamma production: app.tamma.dev alongside dash.tamma.dev),
+// so Dashboard:AdditionalOrigins (CSV) contributes extra entries through the
+// same NormalizeOrigins pipeline. Empty/unset adds nothing.
+//
 // Review F-CORS-2 — browsers send the Origin header as scheme://host[:port]
 // (never a path) and WithOrigins matches it by EXACT string comparison, so a
 // configured value carrying a path (https://portal.example.com/dash) could
@@ -1148,7 +1153,7 @@ var dashboardOrigins = Tamma.Api.Endpoints.DashboardUrls.NormalizeOrigins(
     {
         builder.Configuration["Dashboard:Url"] ?? "http://localhost:3001",
         Tamma.Api.Endpoints.DashboardUrls.CustomerBase(builder.Configuration),
-    },
+    }.Concat(Tamma.Api.Endpoints.DashboardUrls.AdditionalOrigins(builder.Configuration)),
     corsOriginWarnings.Add);
 builder.Services.AddCors(options =>
 {

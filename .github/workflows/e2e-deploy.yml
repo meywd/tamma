@@ -18,8 +18,8 @@ on:
   workflow_dispatch:
     inputs:
       app_url:
-        description: 'Dashboard URL (app.tamma.dev)'
-        default: 'https://app.tamma.dev'
+        description: 'Admin dashboard URL (admin.tamma.dev)'
+        default: 'https://admin.tamma.dev'
         type: string
       api_url:
         description: 'API URL (api.tamma.dev)'
@@ -73,7 +73,7 @@ jobs:
       - name: Wait for services to stabilize
         if: github.event_name == 'workflow_run'
         env:
-          APP_URL: ${{ inputs.app_url || 'https://app.tamma.dev' }}
+          APP_URL: ${{ inputs.app_url || 'https://admin.tamma.dev' }}
           API_URL: ${{ inputs.api_url || 'https://api.tamma.dev' }}
           ELSA_URL: ${{ inputs.elsa_url || 'https://elsa.tamma.dev' }}
         run: |
@@ -103,7 +103,7 @@ jobs:
 
       - name: Run E2E smoke tests
         env:
-          E2E_BASE_URL: ${{ inputs.app_url || 'https://app.tamma.dev' }}
+          E2E_BASE_URL: ${{ inputs.app_url || 'https://admin.tamma.dev' }}
           E2E_API_URL: ${{ inputs.api_url || 'https://api.tamma.dev' }}
           E2E_ELSA_URL: ${{ inputs.elsa_url || 'https://elsa.tamma.dev' }}
           CI: true
@@ -134,7 +134,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Service | URL |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|-----|" >> $GITHUB_STEP_SUMMARY
-          echo "| Dashboard | ${{ inputs.app_url || 'https://app.tamma.dev' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dashboard | ${{ inputs.app_url || 'https://admin.tamma.dev' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| API | ${{ inputs.api_url || 'https://api.tamma.dev' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| ELSA Studio | ${{ inputs.elsa_url || 'https://elsa.tamma.dev' }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

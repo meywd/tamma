@@ -47,6 +47,22 @@ public static class DashboardUrls
     }
 
     /// <summary>
+    /// Hostname re-layout (2026-07-28) — the customer app legitimately serves
+    /// from more than one origin (app.tamma.dev AND dash.tamma.dev in Tamma's
+    /// own deploy), so the CORS list needs origins beyond the two Dashboard
+    /// URLs. Parsed from the CSV <c>Dashboard:AdditionalOrigins</c>
+    /// (env: <c>Dashboard__AdditionalOrigins</c>). Unset / empty / whitespace
+    /// yields an empty array — a deployment with one hostname per app
+    /// configures nothing. Entries are trimmed and blank entries dropped;
+    /// callers feed the result through <see cref="NormalizeOrigins"/> together
+    /// with the primary URLs so the same authority-reduction, warning and
+    /// dedupe rules apply.
+    /// </summary>
+    public static string[] AdditionalOrigins(IConfiguration config) =>
+        (config["Dashboard:AdditionalOrigins"] ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>
     /// Review F-CORS-2 — normalize configured dashboard URLs into CORS
     /// ORIGINS. Browsers send the <c>Origin</c> request header as
     /// <c>scheme://host[:port]</c> — never a path — and

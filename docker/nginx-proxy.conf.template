@@ -14,11 +14,15 @@
 # Listens on 443 (TLS with Cloudflare origin cert) and 80 (redirect to HTTPS).
 #
 # Routing:
-#   app.tamma.dev/        -> dashboard (oauth2-proxy protected)
-#   app.tamma.dev/api/    -> tamma-api (JWT auth, no oauth2-proxy)
+#   admin.tamma.dev/      -> dashboard (ADMIN console — oauth2-proxy protected)
+#   admin.tamma.dev/api/  -> tamma-api (JWT auth, no oauth2-proxy)
 #   api.tamma.dev/        -> tamma-api (webhooks/machine clients, no oauth2-proxy)
-#   dash.tamma.dev/       -> dashboard-user (customer SPA — NO oauth2-proxy;
-#                            the app ships its own /login + /register)
+#   app.tamma.dev/        \
+#   dash.tamma.dev/        > dashboard-user (customer SPA — NO oauth2-proxy;
+#                            the app ships its own /login + /register; one
+#                            server block, two names. dash.tamma.dev stays
+#                            the canonical host for emailed customer links.)
+#   app.tamma.dev/api/    -> tamma-api (JWT auth, no oauth2-proxy)
 #   dash.tamma.dev/api/   -> tamma-api (JWT auth, no oauth2-proxy)
 #   elsa.tamma.dev/       -> elsa-studio (oauth2-proxy protected)
 #   logs.tamma.dev/       -> opensearch-dashboards (oauth2-proxy protected)
@@ -47,7 +51,7 @@ resolver 127.0.0.11 valid=30s ipv6=off;
 # Redirect HTTP -> HTTPS for named hosts
 server {
     listen 80;
-    server_name app.tamma.dev api.tamma.dev dash.tamma.dev elsa.tamma.dev logs.tamma.dev;
+    server_name admin.tamma.dev app.tamma.dev api.tamma.dev dash.tamma.dev elsa.tamma.dev logs.tamma.dev;
     return 301 https://$host$request_uri;
 }
 
@@ -81,11 +85,16 @@ ssl_certificate_key /etc/nginx/certs/origin-key.pem;
 ssl_protocols TLSv1.2 TLSv1.3;
 
 # =============================================================================
-# app.tamma.dev — dashboard + /api/
+# admin.tamma.dev — ADMIN console (dashboard) + /api/ — oauth2-proxy protected
+#
+# Hostname re-layout (2026-07-28): the admin console moved here from
+# app.tamma.dev; app.tamma.dev now serves the CUSTOMER app (see the
+# dash.tamma.dev block below). The GitHub OAuth wall (auth_request →
+# oauth2-proxy) lives on THIS host only.
 # =============================================================================
 server {
     listen 443 ssl;
-    server_name app.tamma.dev;
+    server_name admin.tamma.dev;
 
     # ----- Shared nav bar assets (Story 16.4) -----
     location = /tamma-nav.html {
@@ -204,10 +213,14 @@ server {
 }
 
 # =============================================================================
-# dash.tamma.dev — CUSTOMER dashboard (dashboard-user SPA) + /api/
+# dash.tamma.dev + app.tamma.dev — CUSTOMER dashboard (dashboard-user SPA)
+# + /api/ — one server block, two names (hostname re-layout, 2026-07-28:
+# the admin console moved to admin.tamma.dev and app.tamma.dev now serves
+# the customer app alongside dash.tamma.dev; dash.tamma.dev remains the
+# canonical host for emailed customer links).
 #
-# DELIBERATELY NO auth_request / oauth2-proxy on this host: the customer app
-# ships its own /login, /register and cookie-session auth, and its
+# DELIBERATELY NO auth_request / oauth2-proxy on EITHER host: the customer
+# app ships its own /login, /register and cookie-session auth, and its
 # registration/verify/reset/invite pages MUST be reachable anonymously —
 # gating them behind the GitHub OAuth wall the admin hosts use would put a
 # login for an account that does not exist yet in front of the signup form
@@ -215,7 +228,7 @@ server {
 # =============================================================================
 server {
     listen 443 ssl;
-    server_name dash.tamma.dev;
+    server_name dash.tamma.dev app.tamma.dev;
 
     # ----- API routes: JWT-based auth (no oauth2-proxy) -----
     # Trailing /api/ on the upstream (NOT the bare / the in-container
@@ -251,7 +264,7 @@ server {
 # Users without a valid session are redirected to GitHub OAuth login.
 # Users with insufficient role see a 403 page.
 #
-# Nav bar: Injected via nginx sub_filter from app.tamma.dev (Story 16.4).
+# Nav bar: Injected via nginx sub_filter from admin.tamma.dev (Story 16.4).
 # Blazor WASM serves index.html once; the nav is position:fixed outside
 # Blazor's render root, so it survives client-side routing.
 # =============================================================================
@@ -319,7 +332,7 @@ server {
     }
 
     # ----- Named redirect location for unauthenticated users -----
-    # See app.tamma.dev section above for the rationale. Uses
+    # See admin.tamma.dev section above for the rationale. Uses
     # /oauth2/start so oauth2-proxy kicks off the GitHub OAuth flow.
     location @oauth2_redirect {
         return 302 /oauth2/start?rd=$scheme://$http_host$request_uri;
@@ -375,7 +388,7 @@ server {
         # Disable upstream compression so sub_filter can operate on the body.
         proxy_set_header Accept-Encoding "";
         # Inject the self-injecting nav script before </head>.
-        sub_filter '</head>' '<script src="https://app.tamma.dev/tamma-nav.js" defer></script></head>';
+        sub_filter '</head>' '<script src="https://admin.tamma.dev/tamma-nav.js" defer></script></head>';
         sub_filter_once on;
         sub_filter_types text/html;
     }
@@ -392,7 +405,7 @@ server {
 # OpenSearch Dashboards is behind the "observability" profile and may not be
 # running. All proxy_pass directives use variables for deferred DNS resolution.
 #
-# Nav bar: Injected via nginx sub_filter from app.tamma.dev (Story 16.4).
+# Nav bar: Injected via nginx sub_filter from admin.tamma.dev (Story 16.4).
 # =============================================================================
 server {
     listen 443 ssl;
@@ -436,7 +449,7 @@ server {
     }
 
     # ----- Named redirect location for unauthenticated users -----
-    # See app.tamma.dev section above for the rationale.
+    # See admin.tamma.dev section above for the rationale.
     location @oauth2_redirect {
         return 302 /oauth2/start?rd=$scheme://$http_host$request_uri;
     }
@@ -470,7 +483,7 @@ server {
 
         # --- Tamma Nav Bar Injection (Story 16.4) ---
         proxy_set_header Accept-Encoding "";
-        sub_filter '</head>' '<script src="https://app.tamma.dev/tamma-nav.js" defer></script></head>';
+        sub_filter '</head>' '<script src="https://admin.tamma.dev/tamma-nav.js" defer></script></head>';
         sub_filter_once on;
     }
 }

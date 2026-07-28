@@ -1,7 +1,7 @@
 /**
  * Tamma Unified Navigation Bar — Self-injecting script.
  *
- * When loaded via <script src="https://app.tamma.dev/tamma-nav.js">,
+ * When loaded via <script src="https://admin.tamma.dev/tamma-nav.js">,
  * this script fetches the nav HTML snippet and injects it into the page.
  * Used by nginx sub_filter to add the nav bar to third-party dashboards
  * (OpenSearch Dashboards, etc.) without modifying their source.
@@ -12,7 +12,7 @@
   // Prevent double-injection
   if (document.getElementById('tamma-nav')) return;
 
-  var NAV_BASE = 'https://app.tamma.dev';
+  var NAV_BASE = 'https://admin.tamma.dev';
 
   // Fetch the nav HTML snippet and inject it
   var xhr = new XMLHttpRequest();
