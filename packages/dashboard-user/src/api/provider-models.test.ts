@@ -6,7 +6,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { providerModelsApi } from './provider-models';
+import {
+  MAX_MODEL_LENGTH,
+  apiErrorMessage,
+  providerModelsApi,
+  validateModelInput,
+} from './provider-models';
+import { ApiError } from './client';
 
 function jsonResponse<T>(body: T, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -99,5 +105,72 @@ describe('providerModelsApi — URL/method/body matrix', () => {
     const { url, init } = lastCall(spy);
     expect(url).toBe('/api/v1/agents/providers/anthropic/model');
     expect(init.method).toBe('DELETE');
+  });
+});
+
+// U4 — client-side mirror of ProviderAdminEndpoints.ValidateModel (46-1 AC5:
+// non-empty, ≤256 chars, no control characters). The server stays
+// authoritative; this only keeps the common invalid inputs from round-tripping.
+describe('validateModelInput', () => {
+  it('accepts a normal model id', () => {
+    expect(validateModelInput('claude-sonnet-4-5')).toBeNull();
+  });
+
+  it('accepts exactly MAX_MODEL_LENGTH characters', () => {
+    expect(validateModelInput('m'.repeat(MAX_MODEL_LENGTH))).toBeNull();
+  });
+
+  it('validates the TRIMMED value — surrounding whitespace is not an error', () => {
+    expect(validateModelInput('  ok-model  ')).toBeNull();
+  });
+
+  it('rejects empty and whitespace-only (mirrors IsNullOrWhiteSpace)', () => {
+    expect(validateModelInput('')).toMatch(/model id/i);
+    expect(validateModelInput('   ')).toMatch(/model id/i);
+  });
+
+  it('rejects more than 256 characters', () => {
+    expect(validateModelInput('m'.repeat(MAX_MODEL_LENGTH + 1))).toMatch(/at most 256/);
+  });
+
+  it('rejects C0, DEL, and C1 control characters (mirrors .NET char.IsControl)', () => {
+    expect(validateModelInput('bad\u0000id')).toMatch(/control characters/);
+    expect(validateModelInput('bad\u001bid')).toMatch(/control characters/);
+    expect(validateModelInput('bad\u007fid')).toMatch(/control characters/);
+    expect(validateModelInput('bad\u0085id')).toMatch(/control characters/);
+  });
+});
+
+// U4 — mutation errors surface the server's `detail` (the tenant endpoints
+// return `{ error, detail }` bodies), matching the admin client's treatment,
+// instead of the opaque "API error: <status>".
+describe('apiErrorMessage', () => {
+  it('prefers the server detail', () => {
+    const err = new ApiError(400, 'API error: 400', {
+      error: 'invalid_model',
+      detail: 'model must be at most 256 characters.',
+    });
+    expect(apiErrorMessage(err, 'Failed to save the model')).toBe(
+      'model must be at most 256 characters.',
+    );
+  });
+
+  it('falls back to a readable message carrying the error code when detail is absent', () => {
+    const err = new ApiError(400, 'API error: 400', { error: 'invalid_model' });
+    expect(apiErrorMessage(err, 'Failed to save the model')).toBe(
+      'Failed to save the model (invalid_model).',
+    );
+  });
+
+  it('falls back to the caller fallback for a body without detail/error', () => {
+    expect(apiErrorMessage(new ApiError(500, 'API error: 500', null), 'Failed')).toBe('Failed');
+    expect(apiErrorMessage(new ApiError(502, 'API error: 502', 'gateway'), 'Failed')).toBe(
+      'Failed',
+    );
+  });
+
+  it('uses the message of a non-ApiError Error, else the fallback', () => {
+    expect(apiErrorMessage(new TypeError('fetch failed'), 'Failed')).toBe('fetch failed');
+    expect(apiErrorMessage('weird', 'Failed')).toBe('Failed');
   });
 });

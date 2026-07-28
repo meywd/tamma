@@ -5,12 +5,15 @@
  *
  * - Providers with `modelsSupported: true` get a searchable listbox fed by
  *   `GET /api/admin/providers/:key/models`, fetched when the panel opens
- *   (plan D1 — never for all rows on page load). The entry flagged
- *   `current: true` is pre-selected and pinned at the top (even when the
- *   search filter would exclude it); deprecated entries are marked and sorted
- *   after non-deprecated ones; a stale response renders a cache banner; an
- *   empty list degrades to the banner plus a free-text input (epic D6 — the
- *   admin is never dead-ended).
+ *   (plan D1 — never for all rows on page load). The current model — derived
+ *   from the LIVE roster row (`row.currentModel`, re-fetched after
+ *   save/reset), never the list snapshot's `current` flag — is pre-selected
+ *   and pinned at the top (even when the search filter would exclude it);
+ *   deprecated entries are marked and sorted after non-deprecated ones; a
+ *   stale response renders a cache banner; a FAILED list fetch degrades to
+ *   the banner plus a free-text input (epic D6 — the admin is never
+ *   dead-ended), while a successful fetch with a short list renders the
+ *   listbox normally.
  * - Providers with `modelsSupported: false` get a plain text input pre-filled
  *   with the current model (epic D4).
  *
@@ -81,18 +84,49 @@ export function ModelPicker({ row, onSave, onReset }: ModelPickerProps): JSX.Ele
     };
   }, [row.key, row.modelsSupported]);
 
-  const currentEntry = useMemo(
-    () => models?.models.find((m) => m.current) ?? null,
-    [models],
+  // "Current" derives from the LIVE roster row (`row.currentModel`, which the
+  // page re-fetches after save/reset) — never from the mount-time list
+  // snapshot's `current` flags. The list is fetched once on open; after a
+  // save the panel stays mounted, so trusting the snapshot's flag would keep
+  // labelling the OLD model "(current)".
+  const currentId = row.currentModel;
+
+  // The snapshot entry matching the live current model (for displayName /
+  // delisted metadata) — null when the effective model is not in the snapshot.
+  const currentListEntry = useMemo(
+    () =>
+      currentId != null
+        ? models?.models.find((m) => m.id === currentId) ?? null
+        : null,
+    [models, currentId],
   );
+
+  // The pinned entry: the matching snapshot entry, or a minimal client-side
+  // pin when the (re-fetched) effective model is absent from the stale
+  // snapshot (e.g. a free-text save) — the current model is always visible.
+  const currentEntry = useMemo<ProviderModelEntry | null>(() => {
+    if (currentId == null) return null;
+    return (
+      currentListEntry ?? {
+        id: currentId,
+        displayName: null,
+        deprecated: false,
+        current: true,
+      }
+    );
+  }, [currentId, currentListEntry]);
 
   // "No longer listed by the provider": the envelope states the fact —
   // BuildModelsResponse flags the entry it synthesized (`delisted: true`;
-  // absent/false on genuinely-listed entries), so this is a plain flag read.
-  const currentDelisted = currentEntry?.delisted === true;
+  // absent/false on genuinely-listed entries). The badge applies only while
+  // the CURRENT effective model IS that delisted entry — once a save/reset
+  // moves the effective model elsewhere, the stale badge clears.
+  const currentDelisted = currentListEntry?.delisted === true;
 
   // Pinned-current + filter + deprecated-last ordering. The current entry is
-  // always visible (pinned) regardless of the search filter.
+  // always visible (pinned) regardless of the search filter. Server-
+  // synthesized (delisted) entries are never offered as selectable options —
+  // they exist only to name the current model.
   const orderedEntries = useMemo(() => {
     if (models == null) return [];
     const query = search.trim().toLowerCase();
@@ -100,23 +134,30 @@ export function ModelPicker({ row, onSave, onReset }: ModelPickerProps): JSX.Ele
       query === '' ||
       entry.id.toLowerCase().includes(query) ||
       (entry.displayName ?? '').toLowerCase().includes(query);
-    const others = models.models.filter((m) => !m.current);
+    const others = models.models.filter(
+      (m) => m.id !== currentId && m.delisted !== true,
+    );
     const fresh = others.filter((m) => !m.deprecated && matches(m));
     const deprecated = others.filter((m) => m.deprecated && matches(m));
     return [...(currentEntry ? [currentEntry] : []), ...fresh, ...deprecated];
-  }, [models, search, currentEntry]);
+  }, [models, search, currentId, currentEntry]);
 
   const listedOthers = useMemo(
-    () => (models?.models ?? []).filter((m) => !m.current).length,
-    [models],
+    () =>
+      (models?.models ?? []).filter(
+        (m) => m.id !== currentId && m.delisted !== true,
+      ).length,
+    [models, currentId],
   );
 
   // Free-text applies to providers without a models endpoint, to a transport
-  // failure, and to an empty live list — never a dead end (epic D6/D4).
-  const useFreeText =
-    !row.modelsSupported ||
-    fetchError != null ||
-    (models != null && listedOthers === 0);
+  // failure, and to a FAILED list fetch (errorCode set) — never a dead end
+  // (epic D6/D4). A successful fetch that happens to list nothing beyond the
+  // current model (e.g. a local provider with exactly one model) is NOT a
+  // failure: the listbox renders normally.
+  const fetchFailedEmpty =
+    models != null && models.errorCode != null && listedOthers === 0;
+  const useFreeText = !row.modelsSupported || fetchError != null || fetchFailedEmpty;
 
   const modelToSave = useFreeText ? freeText.trim() : selected;
 
@@ -153,7 +194,9 @@ export function ModelPicker({ row, onSave, onReset }: ModelPickerProps): JSX.Ele
 
   const entryLabel = (entry: ProviderModelEntry): string => {
     let label = entry.displayName != null ? `${entry.displayName} — ${entry.id}` : entry.id;
-    if (entry.current) {
+    // Compare against the LIVE current id — the snapshot's `current` flag
+    // goes stale after a save/reset (U3).
+    if (entry.id === currentId) {
       label += ' (current)';
       if (currentDelisted) label += ' — no longer listed by the provider';
     }
@@ -173,7 +216,9 @@ export function ModelPicker({ row, onSave, onReset }: ModelPickerProps): JSX.Ele
         </div>
       );
     }
-    if (models != null && listedOthers === 0) {
+    // Only a FAILED fetch (errorCode) earns the "could not be fetched"
+    // banner — a successful fetch with a short list is not an error (U5).
+    if (fetchFailedEmpty) {
       return (
         <div
           data-testid="models-empty-banner"
@@ -306,12 +351,20 @@ export function ModelPicker({ row, onSave, onReset }: ModelPickerProps): JSX.Ele
             <button
               type="button"
               data-testid="model-reset"
-              disabled={saving || resetting}
+              // Reset DELETEs the platform settings row — when the current
+              // model does not come from one (`source !== 'platform-db'`)
+              // there is nothing to delete and the DELETE would 404 (U5).
+              disabled={saving || resetting || row.source !== 'platform-db'}
+              title={
+                row.source !== 'platform-db'
+                  ? 'No platform override to remove — already on the default.'
+                  : undefined
+              }
               onClick={() => {
                 setResetError(null);
                 setConfirmingReset(true);
               }}
-              className="px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 bg-white rounded-md hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600"
+              className="px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 bg-white rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600"
             >
               Reset to default
             </button>

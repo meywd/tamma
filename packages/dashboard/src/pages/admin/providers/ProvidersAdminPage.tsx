@@ -29,6 +29,10 @@ export function ProvidersAdminPage(): JSX.Element {
   const [rows, setRows] = useState<ProviderStatusRowData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** A post-mutation roster refresh failed — the MUTATION succeeded, so this
+   * must never take the full-page error branch (which would unmount the open
+   * picker and misread the save as failed). Non-fatal inline notice only. */
+  const [refreshFailed, setRefreshFailed] = useState(false);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
@@ -37,6 +41,7 @@ export function ProvidersAdminPage(): JSX.Element {
     try {
       const response = await providersAdminApi.listProviders();
       setRows(response.providers);
+      setRefreshFailed(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load providers');
     } finally {
@@ -48,17 +53,32 @@ export function ProvidersAdminPage(): JSX.Element {
     void reload();
   }, [reload]);
 
+  /** Post-mutation roster refresh: on failure the table (and any open picker,
+   * including its save-succeeded state and pricing warning) stays rendered —
+   * only the inline stale-data notice appears. Never throws. */
+  const refreshRoster = useCallback(async () => {
+    try {
+      const response = await providersAdminApi.listProviders();
+      setRows(response.providers);
+      setRefreshFailed(false);
+      setError(null);
+    } catch {
+      setRefreshFailed(true);
+    }
+  }, []);
+
   /** Save the platform default model (AC4): PUT, then re-fetch the roster so
-   * the row's model + source badge reflect the server's resolution. */
+   * the row's model + source badge reflect the server's resolution. A failed
+   * re-fetch is non-fatal — the save already succeeded server-side. */
   const handleSaveModel = useCallback(
     async (key: string, model: string): Promise<PutProviderSettingsResponse> => {
       const response = await providersAdminApi.putProviderSettings(key, {
         defaultModel: model,
       });
-      await reload();
+      await refreshRoster();
       return response;
     },
-    [reload],
+    [refreshRoster],
   );
 
   /** Enable/disable (AC5): optimistic flip, PUT `{enabled}`, reflect the
@@ -81,13 +101,14 @@ export function ProvidersAdminPage(): JSX.Element {
   }, []);
 
   /** Reset to default (AC4): DELETE the platform row, then re-fetch so the
-   * row shows the server-resolved fallback source. */
+   * row shows the server-resolved fallback source. A failed re-fetch is
+   * non-fatal — the DELETE already succeeded server-side. */
   const handleReset = useCallback(
     async (key: string) => {
       await providersAdminApi.deleteProviderSettings(key);
-      await reload();
+      await refreshRoster();
     },
-    [reload],
+    [refreshRoster],
   );
 
   const toggleExpand = (key: string): void => {
@@ -122,6 +143,26 @@ export function ProvidersAdminPage(): JSX.Element {
           </button>
         </div>
       ) : (
+        <>
+          {refreshFailed && (
+            <div
+              data-testid="roster-refresh-failed"
+              className="mb-4 border border-amber-300 bg-amber-50 rounded-md p-3 text-sm text-amber-900 dark:bg-amber-950 dark:border-amber-800 dark:text-amber-200"
+            >
+              <span>
+                Saved — but refreshing the provider list failed, so the data shown may be
+                stale.
+              </span>
+              <button
+                type="button"
+                data-testid="roster-refresh-retry"
+                onClick={() => void refreshRoster()}
+                className="ml-3 px-2 py-1 text-xs font-medium text-amber-900 border border-amber-400 bg-white rounded-md hover:bg-amber-100 dark:bg-gray-800 dark:text-amber-200 dark:border-amber-700"
+              >
+                Refresh
+              </button>
+            </div>
+          )}
         <div className="overflow-x-auto border border-gray-200 rounded-md dark:border-gray-700">
           <table className="min-w-full text-sm">
             <thead className="bg-gray-50 dark:bg-gray-800">
@@ -168,6 +209,7 @@ export function ProvidersAdminPage(): JSX.Element {
             </tbody>
           </table>
         </div>
+        </>
       )}
     </div>
   );

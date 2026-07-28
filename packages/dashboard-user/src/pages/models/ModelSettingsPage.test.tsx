@@ -216,6 +216,47 @@ describe('ModelSettingsPage — override lifecycle on the roster', () => {
     expect(screen.getByText(/No cost pricing row exists/)).toBeInTheDocument();
   });
 
+  // U3 — the picker's "current" pin must follow the effective value after a
+  // save: the row refetch/patch flows back down as the effectiveModel prop;
+  // the mount-time list snapshot (which still flags the OLD model `current`)
+  // must not win.
+  it('the picker current pin moves to the saved model (stale list snapshot never wins)', async () => {
+    mockApi.putProviderModel.mockResolvedValue({
+      provider: 'anthropic',
+      model: 'claude-opus-4-6',
+      source: 'tenant-override',
+      pricingKnown: true,
+      warning: null,
+    });
+    renderPage();
+    await waitFor(() => expect(screen.getByText('Anthropic')).toBeInTheDocument());
+
+    const anthButton = screen.getAllByRole('button', { name: 'Change model' })[0];
+    await userEvent.click(anthButton as HTMLElement);
+    await waitFor(() => expect(screen.getByText(/Claude Opus 4.6/)).toBeInTheDocument());
+
+    // Before the save the pin names the roster's effective model.
+    let pin = screen.getByText('current').parentElement as HTMLElement;
+    expect(pin.textContent).toContain('claude-sonnet-4-5');
+
+    await userEvent.click(screen.getByRole('button', { name: /Claude Opus 4.6/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save override' }));
+    await waitFor(() =>
+      expect(mockApi.putProviderModel).toHaveBeenCalledWith('anthropic', 'claude-opus-4-6'),
+    );
+
+    // The pin follows the updated row — the list was NOT re-fetched.
+    await waitFor(() => {
+      pin = screen.getByText('current').parentElement as HTMLElement;
+      expect(pin.textContent).toContain('claude-opus-4-6');
+    });
+    expect(mockApi.listProviderModels).toHaveBeenCalledTimes(1);
+    // The old current model returns to the selectable list; the new current
+    // model is not duplicated as an option.
+    expect(screen.getByRole('button', { name: /Claude Sonnet 4.5/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Claude Opus 4.6/ })).toBeNull();
+  });
+
   it('reset confirms naming the server-reported fallback (override active since load), DELETEs, and flips the row back to platform default', async () => {
     // OpenAI row carries the override; its model list is irrelevant here.
     mockApi.listProviderModels.mockResolvedValue({
@@ -262,6 +303,11 @@ describe('ModelSettingsPage — override lifecycle on the roster', () => {
     );
     expect(screen.queryByText('Your override')).toBeNull();
     expect(screen.getAllByText('Platform default')).toHaveLength(4);
+    // U3 — the picker's "current" pin followed the reset to the fallback:
+    // the removed override's model is gone everywhere.
+    const pin = screen.getByText('current').parentElement as HTMLElement;
+    expect(pin.textContent).toContain('gpt-5-default');
+    expect(screen.queryByText('gpt-5.2')).toBeNull();
   });
 
   it('a PUT 403 downgrades the WHOLE page to read-only with the role message (no retry loop)', async () => {
@@ -290,12 +336,22 @@ describe('ModelSettingsPage — override lifecycle on the roster', () => {
 });
 
 describe('ModelSettingsPage — roles (client-side canEdit is cosmetic, D2)', () => {
-  it('member renders read-only: note shown, "View models" disclosure, no editor', async () => {
+  // Server contract for member-role callers (Tamma.Api): READS succeed —
+  // the roster GET (/api/v1/agents/providers/models) and the per-provider
+  // model-list GET are member-readable — while MUTATIONS (PUT/DELETE
+  // …/{provider}/model) sit behind the AgentManage route policy and 403.
+  // The success-mocked roster below reflects that contract; the 403-downgrade
+  // test above deliberately targets a PUT (a mutation), never a read.
+  it('member renders read-only: roster reads succeed, "View models" disclosure, no editor', async () => {
     mockAuth.mockReturnValue({
       user: { id: 'u2', email: 'm@b.dev', displayName: 'M', tenantId: 't1', role: 'member' },
     });
     renderPage();
     await waitFor(() => expect(screen.getByText('Anthropic')).toBeInTheDocument());
+
+    // The read path worked — no error alert for a member-role caller.
+    expect(mockApi.listProviderModelSettings).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alert')).toBeNull();
 
     expect(screen.getByText(/read-only access/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Change model' })).toBeNull();

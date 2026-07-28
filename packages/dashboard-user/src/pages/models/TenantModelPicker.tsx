@@ -8,8 +8,11 @@
  *   - fetch-on-open: this component fetches when mounted, and the page only
  *     mounts it when a row is expanded (46-2 D1 restated);
  *   - client-side search over id + displayName;
- *   - current model pinned first, with a "no longer listed" marker when the
- *     envelope synthesized it (the server's `delisted` flag — a plain read);
+ *   - current model pinned first — derived from the LIVE `effectiveModel`
+ *     prop (which the page re-resolves after save/reset), never the fetched
+ *     list snapshot — with a "no longer listed" marker only while the
+ *     current model IS the entry the server synthesized (the `delisted`
+ *     flag — a plain read);
  *   - deprecated entries marked and sorted last;
  *   - stale-cache and list-unavailable banners straight from the fail-soft
  *     envelope (epic D6 — the page is NEVER unusable);
@@ -25,7 +28,9 @@
 
 import { useEffect, useMemo, useState, type JSX } from 'react';
 import {
+  apiErrorMessage,
   providerModelsApi,
+  validateModelInput,
   type ProviderModelEntry,
   type ProviderModelsResponse,
   type PutTenantProviderModelResponse,
@@ -104,20 +109,35 @@ export function TenantModelPicker(props: TenantModelPickerProps): JSX.Element {
     };
   }, [provider, modelsSupported]);
 
-  const currentEntry = useMemo(
-    () => envelope?.models.find((m) => m.current) ?? null,
-    [envelope],
+  // "Current" derives from the LIVE `effectiveModel` prop — the page
+  // re-resolves the row after save/reset and the updated prop flows down
+  // here. The envelope is a mount-time snapshot; trusting its `current` flag
+  // would keep labelling the OLD model current after a save (U3).
+  const currentId = effectiveModel;
+
+  // The snapshot entry matching the live current model — only used for its
+  // `delisted` metadata; null when the current model is not in the snapshot.
+  const currentListEntry = useMemo(
+    () =>
+      currentId !== null
+        ? envelope?.models.find((m) => m.id === currentId) ?? null
+        : null,
+    [envelope, currentId],
   );
   // The envelope states synthesis directly (`delisted: true` only on the
   // server-injected entry; absent/false = genuinely listed) — a plain read.
-  const delisted = currentEntry?.delisted === true;
+  // The badge applies only while the CURRENT effective model IS the delisted
+  // entry; once a save/reset moves the model elsewhere, the stale badge clears.
+  const delisted = currentListEntry?.delisted === true;
 
   // Non-current entries, search-filtered, deprecated sorted last (each half
-  // keeps the server's order).
+  // keeps the server's order). "Non-current" compares against the LIVE id,
+  // not the snapshot's flag; server-synthesized (delisted) entries are never
+  // offered as options — they exist only to name the current model.
   const listed = useMemo(() => {
     if (envelope === null) return [];
     const q = search.trim().toLowerCase();
-    const rest = envelope.models.filter((m) => !m.current);
+    const rest = envelope.models.filter((m) => m.id !== currentId && m.delisted !== true);
     const filtered =
       q === ''
         ? rest
@@ -127,7 +147,7 @@ export function TenantModelPicker(props: TenantModelPickerProps): JSX.Element {
               (m.displayName !== null && m.displayName.toLowerCase().includes(q)),
           );
     return [...filtered.filter((m) => !m.deprecated), ...filtered.filter((m) => m.deprecated)];
-  }, [envelope, search]);
+  }, [envelope, search, currentId]);
 
   const listUnavailable =
     envelope !== null && !envelope.stale && envelope.errorCode !== null;
@@ -136,6 +156,14 @@ export function TenantModelPicker(props: TenantModelPickerProps): JSX.Element {
   const handleSave = async (): Promise<void> => {
     const model = selection.trim();
     if (model === '' || saving) return;
+    // Client-side mirror of the server rule (non-empty, ≤256 chars, no
+    // control chars) — the common invalid inputs never round-trip; the
+    // server stays authoritative for everything else (U4).
+    const invalid = validateModelInput(model);
+    if (invalid !== null) {
+      setMutationError(invalid);
+      return;
+    }
     setSaving(true);
     setMutationError(null);
     setSaveWarning(null);
@@ -153,7 +181,9 @@ export function TenantModelPicker(props: TenantModelPickerProps): JSX.Element {
       } else if (err instanceof ApiError && err.status === 409) {
         setMutationError('This provider is disabled by the platform.');
       } else {
-        setMutationError(err instanceof Error ? err.message : 'Failed to save the model');
+        // Surface the server's `detail` (e.g. invalid_model's reason) rather
+        // than the opaque "API error: 400" (U4).
+        setMutationError(apiErrorMessage(err, 'Failed to save the model'));
       }
     } finally {
       setSaving(false);
@@ -180,7 +210,7 @@ export function TenantModelPicker(props: TenantModelPickerProps): JSX.Element {
         setConfirmingReset(false);
         onResetDone();
       } else {
-        setMutationError(err instanceof Error ? err.message : 'Failed to remove the override');
+        setMutationError(apiErrorMessage(err, 'Failed to remove the override'));
       }
     } finally {
       setResetting(false);
@@ -237,13 +267,13 @@ export function TenantModelPicker(props: TenantModelPickerProps): JSX.Element {
         </p>
       )}
 
-      {/* ── Current model, pinned first ── */}
-      {(currentEntry !== null || effectiveModel !== null) && (
+      {/* ── Current model, pinned first — always the LIVE effective value ── */}
+      {currentId !== null && (
         <div className="flex items-center gap-2 text-sm">
           <span className="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-100 text-blue-800">
             current
           </span>
-          <code className="text-gray-900">{currentEntry?.id ?? effectiveModel}</code>
+          <code className="text-gray-900">{currentId}</code>
           {delisted && (
             <span className="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-100 text-amber-800">
               no longer listed by the provider

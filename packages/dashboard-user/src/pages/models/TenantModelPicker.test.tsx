@@ -216,6 +216,30 @@ describe('TenantModelPicker — list rendering', () => {
     expect(screen.getByText('claude-retired-1')).toBeInTheDocument();
   });
 
+  // U3 — the pin derives from the LIVE effectiveModel prop (the page
+  // re-resolves the row after save/reset and passes it back down); the
+  // mount-time envelope snapshot must never win over it.
+  it('the current pin follows the effectiveModel prop after a save/reset — including clearing a stale delisted badge', async () => {
+    mockApi.listProviderModels.mockResolvedValue(DELISTED);
+    const props = makeProps({ effectiveModel: 'claude-retired-1' });
+    const view = render(<TenantModelPicker {...props} />);
+    await waitFor(() =>
+      expect(screen.getByText('no longer listed by the provider')).toBeInTheDocument(),
+    );
+
+    // The page saved/reset and re-resolved the row; the picker stays mounted
+    // (no list re-fetch) and only the prop changes.
+    view.rerender(<TenantModelPicker {...props} effectiveModel="claude-opus-4-6" />);
+
+    const pin = screen.getByText('current').parentElement as HTMLElement;
+    expect(pin.textContent).toContain('claude-opus-4-6');
+    // The old model is gone from the pin AND the stale delisted badge with it
+    // (the badge belonged to the old model, not the new one).
+    expect(screen.queryByText('claude-retired-1')).toBeNull();
+    expect(screen.queryByText('no longer listed by the provider')).toBeNull();
+    expect(mockApi.listProviderModels).toHaveBeenCalledTimes(1);
+  });
+
   it('renders the stale banner with the error code (cached list still usable)', async () => {
     mockApi.listProviderModels.mockResolvedValue(STALE);
     renderPicker();
@@ -271,7 +295,7 @@ describe('TenantModelPicker — list rendering', () => {
 describe('TenantModelPicker — override lifecycle', () => {
   it('clicking an entry fills the model id; save PUTs it and surfaces the pricing warning non-blockingly', async () => {
     mockApi.putProviderModel.mockResolvedValue({
-      // PutTenantProviderModelResponse — ProviderCredentialEndpoints.cs:667-668
+      // PutTenantProviderModelResponse — ProviderCredentialEndpoints.cs:689-690
       provider: 'anthropic',
       model: 'claude-opus-4-6',
       source: 'tenant-override',
@@ -304,7 +328,12 @@ describe('TenantModelPicker — override lifecycle', () => {
       effectiveModel: 'claude-opus-4-6',
       platformDefaultModel: 'claude-sonnet-4-5',
     });
-    await waitFor(() => expect(screen.getByText(/Claude Opus 4.6/)).toBeInTheDocument());
+    // The effective model (claude-opus-4-6) is the pinned current — it is
+    // NOT offered again as a list option (U3: pin follows the live prop), so
+    // wait on the pin and a listed sibling instead.
+    await waitFor(() => expect(screen.getByText('claude-opus-4-6')).toBeInTheDocument());
+    expect(screen.getByText(/Claude Haiku 4.5/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Claude Opus 4.6/ })).toBeNull();
 
     await userEvent.click(screen.getByRole('button', { name: 'Use platform default' }));
     const confirm = screen.getByText(/Remove your override/);
@@ -358,6 +387,46 @@ describe('TenantModelPicker — override lifecycle', () => {
       expect(screen.getByText('This provider is disabled by the platform.')).toBeInTheDocument(),
     );
     expect(props.onForbidden).not.toHaveBeenCalled();
+  });
+
+  // U4 — a 400 must not surface as the opaque "API error: 400": the server's
+  // `detail` (ProviderAdminEndpoints.ValidateModel) is shown instead.
+  it('a 400 invalid_model surfaces the server detail, not the opaque status message', async () => {
+    mockApi.putProviderModel.mockRejectedValue(
+      new ApiError(400, 'API error: 400', {
+        error: 'invalid_model',
+        detail: 'model must not contain control characters.',
+      }),
+    );
+    renderPicker();
+    await waitFor(() => expect(screen.getByText(/Claude Opus 4.6/)).toBeInTheDocument());
+
+    await userEvent.type(screen.getByLabelText('Anthropic model id'), 'bad-model');
+    await userEvent.click(screen.getByRole('button', { name: 'Save override' }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('model must not contain control characters.'),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.queryByText('API error: 400')).toBeNull();
+  });
+
+  // U4 — the cheap client-side mirror of the server rule (non-empty, ≤256
+  // chars, no control chars): the common invalid input never round-trips.
+  it('an over-long model id is rejected client-side without a PUT', async () => {
+    renderPicker();
+    await waitFor(() => expect(screen.getByText(/Claude Opus 4.6/)).toBeInTheDocument());
+
+    const input = screen.getByLabelText('Anthropic model id');
+    await userEvent.click(input);
+    await userEvent.paste('m'.repeat(257));
+    await userEvent.click(screen.getByRole('button', { name: 'Save override' }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/at most 256 characters/)).toBeInTheDocument(),
+    );
+    expect(mockApi.putProviderModel).not.toHaveBeenCalled();
   });
 
   it('member read-only disclosure: list viewable, no save/reset affordances, no input', async () => {

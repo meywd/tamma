@@ -409,6 +409,187 @@ describe('ProvidersAdminPage', () => {
     await waitFor(() => expect(api.listProviders).toHaveBeenCalledTimes(2));
   });
 
+  // U3 — the "(current)" marker must follow the LIVE roster value (which is
+  // re-fetched after save/reset), never the mount-time list snapshot.
+  it('moves the "(current)" marker to the newly saved model after a save', async () => {
+    const updated = makeRoster().map((r) =>
+      r.key === 'alpha' ? { ...r, currentModel: 'alpha-small-1' } : r,
+    );
+    api.listProviders
+      .mockResolvedValueOnce({ providers: makeRoster() })
+      .mockResolvedValueOnce({ providers: updated });
+
+    renderPage();
+    await openPicker('alpha');
+    const listbox = await screen.findByTestId('model-listbox');
+    expect(within(listbox).getAllByRole('option')[0]!.textContent).toContain('(current)');
+
+    await userEvent.selectOptions(listbox, 'alpha-small-1');
+    await userEvent.click(screen.getByTestId('model-save'));
+    await waitFor(() => expect(api.listProviders).toHaveBeenCalledTimes(2));
+
+    // The list was NOT re-fetched (the panel stayed mounted)…
+    expect(api.listProviderModels).toHaveBeenCalledTimes(1);
+    // …yet the marker moved with the refreshed roster row.
+    await waitFor(() => {
+      const options = within(screen.getByTestId('model-listbox')).getAllByRole('option');
+      expect((options[0] as HTMLOptionElement).value).toBe('alpha-small-1');
+      expect(options[0]!.textContent).toContain('(current)');
+      const old = options.find((o) => (o as HTMLOptionElement).value === 'alpha-large-2');
+      expect(old!.textContent).not.toContain('(current)');
+    });
+  });
+
+  it('returns the "(current)" marker to the fallback model after a reset', async () => {
+    const updated = makeRoster().map((r) =>
+      r.key === 'alpha'
+        ? { ...r, currentModel: 'alpha-mini', source: 'config' as const }
+        : r,
+    );
+    api.listProviders
+      .mockResolvedValueOnce({ providers: makeRoster() })
+      .mockResolvedValueOnce({ providers: updated });
+
+    renderPage();
+    await openPicker('alpha');
+    await screen.findByTestId('model-listbox');
+
+    await userEvent.click(screen.getByTestId('model-reset'));
+    await userEvent.click(await screen.findByTestId('reset-confirm-button'));
+    await waitFor(() => expect(api.deleteProviderSettings).toHaveBeenCalledWith('alpha'));
+    await waitFor(() => expect(api.listProviders).toHaveBeenCalledTimes(2));
+
+    await waitFor(() => {
+      const options = within(screen.getByTestId('model-listbox')).getAllByRole('option');
+      expect((options[0] as HTMLOptionElement).value).toBe('alpha-mini');
+      expect(options[0]!.textContent).toContain('(current)');
+      const old = options.find((o) => (o as HTMLOptionElement).value === 'alpha-large-2');
+      expect(old!.textContent).not.toContain('(current)');
+    });
+    // The refreshed row no longer comes from a platform row → Reset disables.
+    expect((screen.getByTestId('model-reset') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('clears a stale delisted badge once the saved model takes effect', async () => {
+    api.listProviderModels.mockResolvedValue({
+      provider: 'alpha',
+      models: [
+        { id: 'alpha-large-2', displayName: null, deprecated: false, current: true, delisted: true },
+        { id: 'alpha-small-1', displayName: 'Alpha Small 1', deprecated: false, current: false },
+      ],
+      fetchedAt: '2026-07-27T00:00:00.000Z',
+      stale: false,
+      errorCode: null,
+    });
+    const updated = makeRoster().map((r) =>
+      r.key === 'alpha' ? { ...r, currentModel: 'alpha-small-1' } : r,
+    );
+    api.listProviders
+      .mockResolvedValueOnce({ providers: makeRoster() })
+      .mockResolvedValueOnce({ providers: updated });
+
+    renderPage();
+    await openPicker('alpha');
+    const listbox = await screen.findByTestId('model-listbox');
+    expect(within(listbox).getAllByRole('option')[0]!.textContent).toContain(
+      'no longer listed by the provider',
+    );
+
+    await userEvent.selectOptions(listbox, 'alpha-small-1');
+    await userEvent.click(screen.getByTestId('model-save'));
+    await waitFor(() => expect(api.listProviders).toHaveBeenCalledTimes(2));
+
+    await waitFor(() => {
+      const options = within(screen.getByTestId('model-listbox')).getAllByRole('option');
+      expect((options[0] as HTMLOptionElement).value).toBe('alpha-small-1');
+      expect(options[0]!.textContent).toContain('(current)');
+    });
+    // The delisted badge belonged to the OLD model — gone with it (the
+    // synthesized entry is not offered as a selectable option either).
+    expect(screen.getByTestId('model-listbox').textContent).not.toContain('no longer listed');
+  });
+
+  // U5 — a SUCCESSFUL fetch with a short list is not a failure: no
+  // "could not be fetched" banner, no free-text degrade.
+  it('renders the listbox normally for a successful single-model fetch (no failure banner)', async () => {
+    api.listProviderModels.mockResolvedValue({
+      provider: 'gamma',
+      models: [{ id: 'gamma-free', displayName: null, deprecated: false, current: true }],
+      fetchedAt: '2026-07-27T00:00:00.000Z',
+      stale: false,
+      errorCode: null,
+    });
+
+    renderPage();
+    await openPicker('gamma');
+
+    const listbox = await screen.findByTestId('model-listbox');
+    const options = within(listbox).getAllByRole('option');
+    expect(options).toHaveLength(1);
+    expect(options[0]!.textContent).toContain('(current)');
+    expect(screen.queryByTestId('models-empty-banner')).toBeNull();
+    expect(screen.queryByTestId('model-free-text')).toBeNull();
+  });
+
+  // U5 — no platform settings row (source !== 'platform-db') → the DELETE
+  // would 404; the Reset affordance is disabled instead of error-prone.
+  it('disables Reset when the model does not come from a platform row', async () => {
+    renderPage();
+    // gamma resolves from the descriptor — nothing to DELETE.
+    await openPicker('gamma');
+    await screen.findByTestId('model-listbox');
+    expect((screen.getByTestId('model-reset') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByTestId('reset-confirm')).toBeNull();
+
+    // alpha resolves from platform-db — Reset stays available.
+    await openPicker('alpha');
+    await waitFor(() =>
+      expect((screen.getByTestId('model-reset') as HTMLButtonElement).disabled).toBe(false),
+    );
+  });
+
+  // U6 — a failed post-save roster refetch must NOT take the full-page error
+  // branch: the mutation succeeded; the table and the open picker (with its
+  // save-succeeded state and pricing warning) stay, plus an inline notice.
+  it('keeps the table and the open picker when the post-save roster refetch fails', async () => {
+    api.putProviderSettings.mockResolvedValue(
+      makePutResponse({
+        pricingKnown: false,
+        warning: 'No cost pricing row exists for alpha/alpha-small-1 — calls will record cost 0.',
+      }),
+    );
+    api.listProviders
+      .mockResolvedValueOnce({ providers: makeRoster() })
+      .mockRejectedValueOnce(new Error('offline'));
+
+    renderPage();
+    await openPicker('alpha');
+    await screen.findByTestId('model-listbox');
+
+    await userEvent.selectOptions(screen.getByTestId('model-listbox'), 'alpha-small-1');
+    await userEvent.click(screen.getByTestId('model-save'));
+    await waitFor(() => expect(api.listProviders).toHaveBeenCalledTimes(2));
+
+    // No full-page error branch — the table survives.
+    expect(screen.queryByText('Failed to load providers')).toBeNull();
+    expect(screen.getByTestId('provider-row-alpha')).toBeTruthy();
+    // The picker survives WITH its save outcome (not misreported as failed).
+    expect(await screen.findByTestId('save-success')).toBeTruthy();
+    expect(screen.getByTestId('pricing-warning').textContent).toContain(
+      'No cost pricing row exists',
+    );
+    expect(screen.queryByTestId('save-error')).toBeNull();
+    // The non-fatal inline notice reports the stale data.
+    const notice = screen.getByTestId('roster-refresh-failed');
+    expect(notice.textContent).toContain('Saved');
+    expect(notice.textContent).toContain('stale');
+
+    // Retrying the refresh (base mock resolves again) clears the notice.
+    await userEvent.click(screen.getByTestId('roster-refresh-retry'));
+    await waitFor(() => expect(screen.queryByTestId('roster-refresh-failed')).toBeNull());
+    expect(screen.getByTestId('provider-row-alpha')).toBeTruthy();
+  });
+
   it('renders a disabled provider inert except for re-enable', async () => {
     api.putProviderSettings.mockResolvedValue(
       makePutResponse({ provider: 'zeta', defaultModel: null, enabled: true }),

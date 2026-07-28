@@ -38,7 +38,7 @@
  * never sends a tenant id.
  */
 
-import { apiClient } from './client';
+import { ApiError, apiClient } from './client';
 
 /**
  * Provenance of the resolved model (46-1 resolver:
@@ -93,7 +93,7 @@ export interface ProviderModelEntry {
 }
 
 /**
- * Mirrors ProviderModelsResponse — ProviderAdminEndpoints.cs:431-436 (the
+ * Mirrors ProviderModelsResponse — ProviderAdminEndpoints.cs:447-452 (the
  * fail-soft envelope both apps consume, epic D6). `fetchedAt` is an ISO
  * timestamp or null (never fetched).
  */
@@ -115,13 +115,64 @@ export interface TenantProviderModelResponse {
   fallbackModel: string | null;
 }
 
-/** Mirrors PutTenantProviderModelResponse — ProviderCredentialEndpoints.cs:667-668. */
+/** Mirrors PutTenantProviderModelResponse — ProviderCredentialEndpoints.cs:689-690. */
 export interface PutTenantProviderModelResponse {
   provider: string;
   model: string;
   source: string;
   pricingKnown: boolean;
   warning: string | null;
+}
+
+/** Server-side cap — ProviderAdminEndpoints.cs `MaxModelLength`. */
+export const MAX_MODEL_LENGTH = 256;
+
+/**
+ * Cheap client-side mirror of the server's model validation
+ * (ProviderAdminEndpoints.ValidateModel, 46-1 AC5: non-empty, ≤256 chars, no
+ * control characters) so the common invalid inputs never round-trip. Returns
+ * a human-readable problem, or null when the value passes. The SERVER stays
+ * authoritative — anything this lets through is still validated there.
+ *
+ * `.NET char.IsControl` covers C0 (U+0000–U+001F), DEL (U+007F), and C1
+ * (U+0080–U+009F) — mirrored exactly.
+ */
+export function validateModelInput(model: string): string | null {
+  const trimmed = model.trim();
+  if (trimmed === '') {
+    return 'Enter a model id.';
+  }
+  if (trimmed.length > MAX_MODEL_LENGTH) {
+    return `Model ids are at most ${MAX_MODEL_LENGTH} characters.`;
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(trimmed)) {
+    return 'Model ids must not contain control characters.';
+  }
+  return null;
+}
+
+/**
+ * Human-readable message for a failed mutation: prefer the server's
+ * `detail` (the tenant endpoints return `{ error, detail }` bodies — e.g.
+ * invalid_model's "model must be at most 256 characters."), then the error
+ * code, then the caller's fallback — never the opaque "API error: 400".
+ * Mirrors the admin client's `body.detail ?? body.error` treatment.
+ */
+export function apiErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    const body =
+      typeof err.body === 'object' && err.body !== null
+        ? (err.body as Record<string, unknown>)
+        : {};
+    const detail = body['detail'];
+    if (typeof detail === 'string' && detail !== '') return detail;
+    const code = body['error'];
+    if (typeof code === 'string' && code !== '') return `${fallback} (${code}).`;
+    return fallback;
+  }
+  if (err instanceof Error && err.message !== '') return err.message;
+  return fallback;
 }
 
 export const providerModelsApi = {
