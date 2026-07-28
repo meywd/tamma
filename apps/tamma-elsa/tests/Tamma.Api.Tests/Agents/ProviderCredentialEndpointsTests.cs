@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using NUnit.Framework;
 using Tamma.Activities.LlmCall.Credentials;
 using Tamma.Api.Endpoints;
+using Tamma.Api.Services.Providers;
 using Tamma.Api.Services.Secrets;
 using Tamma.Api.Services.Secrets.Query;
 using Tamma.Api.Services.Secrets.Reveal;
@@ -15,9 +16,10 @@ namespace Tamma.Api.Tests.Agents;
 /// Story 32-3 (AC7) — BYOK management API: register / rotate / delete / list,
 /// driven directly against the static endpoint handlers with cabinet fakes.
 /// Pins reveal-once (no raw key in the response), cache invalidation on every
-/// mutation, whitespace-key rejection, unknown-provider 404, and
-/// no-tenant-context handling. (Member-role 403 is enforced by the
-/// <c>AgentManage</c> route policy and pinned by <c>AgentManagePermissionTests</c>.)
+/// mutation — resolver AND model-catalog (review F12) — whitespace-key
+/// rejection, unknown-provider 404, and no-tenant-context handling.
+/// (Member-role 403 is enforced by the <c>AgentManage</c> route policy and
+/// pinned by <c>AgentManagePermissionTests</c>.)
 /// </summary>
 [TestFixture]
 public class ProviderCredentialEndpointsTests
@@ -28,6 +30,7 @@ public class ProviderCredentialEndpointsTests
     private FakeReveal _reveal = null!;
     private FakeQuery _query = null!;
     private RecordingResolver _resolver = null!;
+    private RecordingCatalog _catalog = null!;
 
     [SetUp]
     public void SetUp()
@@ -35,6 +38,7 @@ public class ProviderCredentialEndpointsTests
         _reveal = new FakeReveal();
         _query = new FakeQuery();
         _resolver = new RecordingResolver();
+        _catalog = new RecordingCatalog();
     }
 
     private static ClaimsPrincipal Principal() =>
@@ -54,7 +58,7 @@ public class ProviderCredentialEndpointsTests
     {
         var result = await ProviderCredentialEndpoints.RegisterCredential(
             "anthropic", new SetProviderCredentialRequest(Key),
-            Principal(), TenantCtx(Tenant), _reveal, _resolver, Http());
+            Principal(), TenantCtx(Tenant), _reveal, _resolver, _catalog, Http());
 
         result.Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults.Created<SetProviderCredentialResponse>>();
         var body = ((Microsoft.AspNetCore.Http.HttpResults.Created<SetProviderCredentialResponse>)result).Value!;
@@ -68,6 +72,8 @@ public class ProviderCredentialEndpointsTests
         _reveal.CreatedScope.Should().Be(SecretScope.Tenant);
         _reveal.CreatedPurpose.Should().Be(SecretPurpose.ApiKey);
         _resolver.Invalidated.Should().ContainSingle().Which.Should().Be((Tenant, "anthropic"));
+        _catalog.Invalidated.Should().ContainSingle().Which.Should().Be(("anthropic", (Guid?)Tenant),
+            "F12 — a BYOK register must evict the tenant's cached model list too");
     }
 
     [Test]
@@ -75,10 +81,11 @@ public class ProviderCredentialEndpointsTests
     {
         var result = await ProviderCredentialEndpoints.RegisterCredential(
             "anthropic", new SetProviderCredentialRequest("   "),
-            Principal(), TenantCtx(Tenant), _reveal, _resolver, Http());
+            Principal(), TenantCtx(Tenant), _reveal, _resolver, _catalog, Http());
 
         result.GetType().Name.Should().Contain("BadRequest");
         _reveal.CreatedName.Should().BeNull();
+        _catalog.Invalidated.Should().BeEmpty("no mutation, no eviction");
     }
 
     [Test]
@@ -86,7 +93,7 @@ public class ProviderCredentialEndpointsTests
     {
         var result = await ProviderCredentialEndpoints.RegisterCredential(
             "not-a-provider", new SetProviderCredentialRequest(Key),
-            Principal(), TenantCtx(Tenant), _reveal, _resolver, Http());
+            Principal(), TenantCtx(Tenant), _reveal, _resolver, _catalog, Http());
 
         result.GetType().Name.Should().Contain("NotFound");
     }
@@ -96,7 +103,7 @@ public class ProviderCredentialEndpointsTests
     {
         var result = await ProviderCredentialEndpoints.RegisterCredential(
             "anthropic", new SetProviderCredentialRequest(Key),
-            Principal(), TenantCtx(null), _reveal, _resolver, Http());
+            Principal(), TenantCtx(null), _reveal, _resolver, _catalog, Http());
 
         result.GetType().Name.Should().Contain("BadRequest");
     }
@@ -110,11 +117,13 @@ public class ProviderCredentialEndpointsTests
 
         var result = await ProviderCredentialEndpoints.RotateCredential(
             "anthropic", new SetProviderCredentialRequest("sk-rotated-9999"),
-            Principal(), TenantCtx(Tenant), _query, _reveal, _resolver, Http());
+            Principal(), TenantCtx(Tenant), _query, _reveal, _resolver, _catalog, Http());
 
         result.GetType().Name.Should().Contain("Ok");
         _reveal.RotatedSecretId.Should().NotBeNull();
         _resolver.Invalidated.Should().Contain((Tenant, "anthropic"));
+        _catalog.Invalidated.Should().Contain(("anthropic", (Guid?)Tenant),
+            "F12 — a BYOK rotate must evict the tenant's cached model list too");
     }
 
     [Test]
@@ -122,11 +131,12 @@ public class ProviderCredentialEndpointsTests
     {
         var result = await ProviderCredentialEndpoints.RotateCredential(
             "anthropic", new SetProviderCredentialRequest("sk-rotated-9999"),
-            Principal(), TenantCtx(Tenant), _query, _reveal, _resolver, Http());
+            Principal(), TenantCtx(Tenant), _query, _reveal, _resolver, _catalog, Http());
 
         result.GetType().Name.Should().Contain("NotFound");
         _reveal.RotatedSecretId.Should().BeNull();
         _resolver.Invalidated.Should().BeEmpty();
+        _catalog.Invalidated.Should().BeEmpty();
     }
 
     // ── Delete ────────────────────────────────────────────────────────────
@@ -138,22 +148,25 @@ public class ProviderCredentialEndpointsTests
         _query.Seed(Tenant, "provider/anthropic/api-key", id, version: 2);
 
         var result = await ProviderCredentialEndpoints.DeleteCredential(
-            "anthropic", Principal(), TenantCtx(Tenant), _query, _resolver, Http());
+            "anthropic", Principal(), TenantCtx(Tenant), _query, _resolver, _catalog, Http());
 
         result.GetType().Name.Should().Contain("NoContent");
         _query.RetiredSecretId.Should().Be(id);
         _query.RetiredVersion.Should().Be(2);
         _resolver.Invalidated.Should().Contain((Tenant, "anthropic"));
+        _catalog.Invalidated.Should().Contain(("anthropic", (Guid?)Tenant),
+            "F12 — a BYOK delete must evict the tenant's cached model list too");
     }
 
     [Test]
     public async Task Delete_NoKey_404()
     {
         var result = await ProviderCredentialEndpoints.DeleteCredential(
-            "anthropic", Principal(), TenantCtx(Tenant), _query, _resolver, Http());
+            "anthropic", Principal(), TenantCtx(Tenant), _query, _resolver, _catalog, Http());
 
         result.GetType().Name.Should().Contain("NotFound");
         _resolver.Invalidated.Should().BeEmpty();
+        _catalog.Invalidated.Should().BeEmpty();
     }
 
     // ── List ──────────────────────────────────────────────────────────────
@@ -195,6 +208,22 @@ public class ProviderCredentialEndpointsTests
         public Task<ProviderCredential> ResolveAsync(Guid? tenantId, string providerName, CancellationToken ct = default) =>
             Task.FromResult(new ProviderCredential("x", CredentialSource.Platform, null, null));
         public void Invalidate(Guid? tenantId, string providerName) => Invalidated.Add((tenantId, providerName));
+    }
+
+    /// <summary>Review F12 — records model-catalog cache invalidations so the
+    /// tests can pin that every BYOK mutation evicts the (provider, tenant)
+    /// model-list entry alongside the credential-resolver entry.</summary>
+    private sealed class RecordingCatalog : IProviderModelCatalog
+    {
+        public List<(string Provider, Guid? TenantId)> Invalidated { get; } = new();
+
+        public Task<ProviderModelList> ListModelsAsync(
+            string providerKey, Guid? tenantId, CancellationToken ct = default) =>
+            Task.FromResult(new ProviderModelList(
+                Array.Empty<ProviderModelInfo>(), FetchedAt: null, Stale: false, ErrorCode: null));
+
+        public void Invalidate(string providerKey, Guid? tenantId) =>
+            Invalidated.Add((providerKey, tenantId));
     }
 
     private sealed class FakeReveal : ISecretRevealService

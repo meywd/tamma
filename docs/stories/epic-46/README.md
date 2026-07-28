@@ -10,7 +10,8 @@ Product requirement (product owner, 2026-07-27, verbatim intent):
 Clarified the same day: **"admins" means both levels.** The platform owner manages catalogue-wide
 settings (platform default model per provider, provider enable/disable) in the admin console
 (`packages/dashboard`), AND tenant admins pick per-tenant model overrides from the same live model
-lists in the customer app (`packages/dashboard-user`). Two UIs, two apps, one listing seam, one
+lists in the customer app (`packages/dashboard-user` — a tenant-ADMIN page, dash-destined under
+`.dev/decisions/2026-07-28-three-host-layout.md`). Two UIs, two apps, one listing seam, one
 settings store.
 
 Today a provider's default model is frozen at build time in three places — the `ProviderCatalog`

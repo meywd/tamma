@@ -24,6 +24,14 @@ public static class ProviderCatalog
     public const string AnthropicMessagesPath = "/v1/messages";
     public const string OpenAiChatCompletionsPath = "/v1/chat/completions";
 
+    /// <summary>Story 46-0 — the dialect-generic models-list path. Both wire
+    /// dialects serve their list at <c>/v1/models</c> (Anthropic's own models
+    /// endpoint IS <c>/v1/models</c>, so the distinction is theoretical today —
+    /// stated here rather than left to be re-derived). Used for
+    /// config-overridden (proxy) base URLs by <see cref="ModelsPathForBase"/>,
+    /// mirroring the F3 chat-path rule.</summary>
+    public const string DefaultModelsPath = "/v1/models";
+
     /// <summary>All HTTP provider descriptors, one per allow-listed HTTP key.</summary>
     public static IReadOnlyList<ProviderDescriptor> HttpProviders { get; } = new[]
     {
@@ -34,7 +42,14 @@ public static class ProviderCatalog
             Dialect = ProviderWireDialect.Anthropic,
             DefaultBaseUrl = "https://api.anthropic.com",
             AuthScheme = ProviderAuthScheme.AnthropicApiKey,
-            DefaultModel = "claude-sonnet-4-20250514",
+            // 46-1 AC7 defaults refresh (2026-07-27): was the dated snapshot
+            // claude-sonnet-4-20250514 — Anthropic's docs list Claude Sonnet 4
+            // as DEPRECATED (migration guide: retires 2026-06-15, i.e. already
+            // past; replacement guidance points at the current Sonnet line).
+            // claude-sonnet-4-5 is the documented ACTIVE dash-formed alias
+            // (full id claude-sonnet-4-5-20250929). Anthropic API ids are
+            // dash-formed — "claude-sonnet-4.5" is the display name, not an id.
+            DefaultModel = "claude-sonnet-4-5",
             HttpClientName = "anthropic",
             ConfigSection = "Anthropic",
             // Per-descriptor DATA: 2023-06-01 is the published Anthropic API
@@ -43,6 +58,11 @@ public static class ProviderCatalog
             // would carry bedrock-2023-05-31 here instead.
             VersionHeaderName = "anthropic-version",
             VersionHeaderValue = "2023-06-01",
+            // 46-0: verified LIVE from this sandbox 2026-07-27 — unauthenticated
+            // GET https://api.anthropic.com/v1/models → 401 "x-api-key header
+            // is required" (route + auth scheme confirmed). Envelope:
+            // {data:[{id, display_name, …}], has_more}.
+            ModelsEndpointPath = "/v1/models",
             Aliases = new[] { "anthropic-claude" },
         },
         new ProviderDescriptor
@@ -52,9 +72,15 @@ public static class ProviderCatalog
             Dialect = ProviderWireDialect.OpenAiCompatible,
             DefaultBaseUrl = "https://api.openai.com",
             AuthScheme = ProviderAuthScheme.BearerToken,
+            // 46-1 AC7: gpt-4o verified against platform.openai.com docs — a
+            // current, accepted model id. Unchanged.
             DefaultModel = "gpt-4o",
             HttpClientName = "openai",
             ConfigSection = "OpenAI",
+            // 46-0: docs-verified (platform.openai.com/docs/api-reference/models;
+            // host unreachable from this sandbox). OpenAI list envelope
+            // {object:"list", data:[{id, owned_by, created}]}.
+            ModelsEndpointPath = "/v1/models",
         },
         new ProviderDescriptor
         {
@@ -63,9 +89,21 @@ public static class ProviderCatalog
             Dialect = ProviderWireDialect.OpenAiCompatible,
             DefaultBaseUrl = "https://openrouter.ai/api",
             AuthScheme = ProviderAuthScheme.BearerToken,
-            DefaultModel = "anthropic/claude-sonnet-4-20250514",
+            // 46-1 AC7 defaults refresh (2026-07-27): was the dated snapshot
+            // slug anthropic/claude-sonnet-4-20250514 — OpenRouter's marketplace
+            // slugs are UNDATED and DOT-formed (anthropic/claude-sonnet-4.5,
+            // unlike Anthropic's own dash-formed API ids — do not "fix" the dot
+            // here). Docs-verified via openrouter.ai model naming conventions;
+            // the public /api/v1/models list was unreachable from this sandbox
+            // (proxy 403), so this is a docs-level refresh, re-checkable in one
+            // click once 46-2's picker is live against the real list.
+            DefaultModel = "anthropic/claude-sonnet-4.5",
             HttpClientName = "openrouter",
             ConfigSection = "OpenRouter",
+            // 46-0: docs-verified (openrouter.ai/docs — the models API is
+            // PUBLIC, works with or without a key; display name in `name`).
+            // Base /api is preserved by CombineUrl → …/api/v1/models.
+            ModelsEndpointPath = "/v1/models",
         },
         new ProviderDescriptor
         {
@@ -77,6 +115,10 @@ public static class ProviderCatalog
             DefaultModel = "", // legacy behaviour: caller must specify
             HttpClientName = "github-copilot",
             ConfigSection = "Copilot",
+            // 46-0 (epic D4): api.githubcopilot.com requires a Copilot token
+            // exchange, not a plain API key — deliberately unlistable; the UIs
+            // fall back to free-text model entry.
+            ModelsEndpointPath = null,
         },
         new ProviderDescriptor
         {
@@ -94,6 +136,12 @@ public static class ProviderCatalog
             // with a Bearer header answers "Please pass a valid API key" while
             // /v1/chat/completions is a plain 404).
             ChatEndpointPath = "/v1beta/openai/chat/completions",
+            // 46-0: verified LIVE from this sandbox 2026-07-27 — GET
+            // /v1beta/openai/models with a bad Bearer → 400 "Please pass a
+            // valid API key" (route + auth scheme confirmed); no auth → 404.
+            // Ids come back as models/gemini-… — kept VERBATIM (they are what
+            // the chat endpoint accepts on this surface).
+            ModelsEndpointPath = "/v1beta/openai/models",
         },
         new ProviderDescriptor
         {
@@ -109,6 +157,7 @@ public static class ProviderCatalog
             ConfigSection = "Gemini",
             // Same wire identity as the "gemini" descriptor above.
             ChatEndpointPath = "/v1beta/openai/chat/completions",
+            ModelsEndpointPath = "/v1beta/openai/models",
         },
         new ProviderDescriptor
         {
@@ -128,6 +177,13 @@ public static class ProviderCatalog
             // Z.ai's chat endpoint is /api/paas/v4/chat/completions (docs.z.ai)
             // — not the OpenAI-default /v1/chat/completions.
             ChatEndpointPath = "/api/paas/v4/chat/completions",
+            // 46-0 Z.ai re-check (story AC1): re-attempted 2026-07-27 at
+            // implementation time — docs.z.ai is still unreachable from this
+            // sandbox (proxy 403) and no models-list route has surfaced in
+            // search. Stays null per epic D4: the UIs fall back to free-text
+            // model entry for z-ai; if the product owner's console shows a
+            // list route, filling this in is a one-line data change.
+            ModelsEndpointPath = null,
             Aliases = new[] { "z.ai", "zai" },
         },
         new ProviderDescriptor
@@ -140,6 +196,10 @@ public static class ProviderCatalog
             DefaultModel = "",
             HttpClientName = "local",
             ConfigSection = "LocalLLM",
+            // 46-0: Ollama's OpenAI-compat layer and LM Studio both serve
+            // /v1/models with no auth (docs.ollama.com/api/openai-compatibility;
+            // key-optional for listing — see ProviderModelCatalogService).
+            ModelsEndpointPath = "/v1/models",
             Aliases = new[] { "local" },
         },
         new ProviderDescriptor
@@ -152,6 +212,7 @@ public static class ProviderCatalog
             DefaultModel = "",
             HttpClientName = "local",
             ConfigSection = "LocalLLM",
+            ModelsEndpointPath = "/v1/models",
         },
         new ProviderDescriptor
         {
@@ -163,6 +224,7 @@ public static class ProviderCatalog
             DefaultModel = "",
             HttpClientName = "local",
             ConfigSection = "LocalLLM",
+            ModelsEndpointPath = "/v1/models",
         },
         new ProviderDescriptor
         {
@@ -174,6 +236,10 @@ public static class ProviderCatalog
             DefaultModel = "",
             HttpClientName = "azure-openai",
             ConfigSection = "AzureOpenAI",
+            // 46-0 (epic D4): Azure's listing needs an api-version query and
+            // returns DEPLOYMENTS — a different resource model. Deliberately
+            // unlistable; free-text model entry in the UIs.
+            ModelsEndpointPath = null,
         },
         new ProviderDescriptor
         {
@@ -185,6 +251,10 @@ public static class ProviderCatalog
             DefaultModel = "",
             HttpClientName = "together",
             ConfigSection = "Together",
+            // 46-0: docs-verified (docs.together.ai/reference/models). NOTE:
+            // Together answers a BARE JSON ARRAY [{id, display_name, …}], not
+            // the {data:[…]} envelope — the parser owns both shapes.
+            ModelsEndpointPath = "/v1/models",
         },
         new ProviderDescriptor
         {
@@ -198,6 +268,10 @@ public static class ProviderCatalog
             DefaultModel = "",
             HttpClientName = "groq",
             ConfigSection = "Groq",
+            // 46-0: docs-verified (console.groq.com/docs/api-reference). The
+            // /openai base segment is preserved by CombineUrl, landing on the
+            // documented https://api.groq.com/openai/v1/models.
+            ModelsEndpointPath = "/v1/models",
         },
         new ProviderDescriptor
         {
@@ -210,9 +284,16 @@ public static class ProviderCatalog
             Dialect = ProviderWireDialect.OpenAiCompatible,
             DefaultBaseUrl = "https://api.deepseek.com",
             AuthScheme = ProviderAuthScheme.BearerToken,
+            // 46-1 AC7: deepseek-chat verified against api-docs.deepseek.com —
+            // still the documented general-purpose model id. Unchanged.
             DefaultModel = "deepseek-chat",
             HttpClientName = "deepseek",
             ConfigSection = "DeepSeek",
+            // 46-0: docs-verified (api-docs.deepseek.com/api/list-models).
+            // NOTE: NO /v1 prefix — matches DeepSeek's chat-path convention
+            // documented above (both /chat/completions and /v1/chat/completions
+            // are served for chat, but the models list is documented at /models).
+            ModelsEndpointPath = "/models",
         },
         new ProviderDescriptor
         {
@@ -224,9 +305,14 @@ public static class ProviderCatalog
             Dialect = ProviderWireDialect.OpenAiCompatible,
             DefaultBaseUrl = "https://api.moonshot.ai",
             AuthScheme = ProviderAuthScheme.BearerToken,
-            DefaultModel = "kimi-k3", // platform.kimi.ai quickstart model (verified 2026-07)
+            // 46-1 AC7: kimi-k3 re-checked 2026-07 against platform.kimi.ai
+            // quickstart — current. Unchanged.
+            DefaultModel = "kimi-k3",
             HttpClientName = "moonshot",
             ConfigSection = "Moonshot",
+            // 46-0: docs-verified (platform.kimi.ai/docs/api/list-models).
+            // OpenAI list envelope + extra capability fields (ignored).
+            ModelsEndpointPath = "/v1/models",
             Aliases = new[] { "kimi" },
         },
     };
@@ -335,6 +421,36 @@ public static class ProviderCatalog
         descriptor is not null && IsDefaultBaseUrl(descriptor, effectiveBaseUrl)
             ? ChatPath(descriptor)
             : ChatPath(null, dialect);
+
+    /// <summary>
+    /// Story 46-0 — models-list endpoint path honouring the F3 config-override
+    /// rule, mirroring <see cref="ChatPathForBase"/>: a descriptor's
+    /// <see cref="ProviderDescriptor.ModelsEndpointPath"/> describes the
+    /// provider's OWN endpoint at its OWN default base URL. When
+    /// <paramref name="effectiveBaseUrl"/> is an explicit configuration
+    /// override (≠ the descriptor default — i.e. an OpenAI-compatible proxy),
+    /// the dialect-generic <see cref="DefaultModelsPath"/> applies instead —
+    /// the provider-specific path (gemini's <c>/v1beta/openai/models</c>,
+    /// deepseek's un-prefixed <c>/models</c>) must not be grafted onto a proxy.
+    /// Both dialects get <c>/v1/models</c> on an override: Anthropic's own
+    /// models path IS <c>/v1/models</c>, so the per-dialect distinction is
+    /// theoretical today (stated here per the 46-0 plan rather than left to be
+    /// re-derived). Returns null when the descriptor is null or the provider's
+    /// models cannot be listed (<c>ModelsEndpointPath == null</c>) — listing
+    /// support is a property of the PROVIDER, not of the base URL.
+    /// </summary>
+    public static string? ModelsPathForBase(
+        ProviderDescriptor? descriptor, string? effectiveBaseUrl)
+    {
+        if (descriptor?.ModelsEndpointPath is null)
+        {
+            return null;
+        }
+
+        return IsDefaultBaseUrl(descriptor, effectiveBaseUrl)
+            ? descriptor.ModelsEndpointPath
+            : DefaultModelsPath;
+    }
 
     /// <summary>Whether <paramref name="baseUrl"/> is the descriptor's own
     /// default base URL (slash- and case-insensitive), i.e. NOT a

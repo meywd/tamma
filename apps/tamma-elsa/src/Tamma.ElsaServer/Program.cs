@@ -14,6 +14,13 @@ using Tamma.ElsaServer.Workflows;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Story 43-2 AC13 — validate the Action Catalog at boot so a catalog
+// violation fails startup as an unwrapped TammaError with its
+// ACTION.CATALOG.* code in the message, instead of surfacing mid-workflow
+// (or as a TypeInitializationException — the trap Validate() exists to
+// avoid; same guard as Tamma.Api's Program.cs).
+Tamma.Core.Actions.ActionCatalog.Validate();
+
 // Configure Serilog with Console + File + OpenSearch sinks
 var opensearchUrl = builder.Configuration["OpenSearch:Url"] ?? "http://opensearch:9200";
 var opensearchEnabled = builder.Configuration.GetValue<bool>("OpenSearch:Enabled", true);

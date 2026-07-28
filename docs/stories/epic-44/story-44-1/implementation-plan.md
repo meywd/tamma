@@ -1,5 +1,14 @@
 # Implementation Plan — Story 44-1: Storage, Repositories, and the Migrate-All-Provisioned-Tenants Sweep
 
+> **⚠️ PREDATES THE 44-0 REWORK (conformance review, 2026-07-28).** This plan was written before
+> the v2 rework of 44-0 and before 44-0 shipped. The STORY file is current; this plan is not — it
+> never mentions four things the story and the shipped `Tamma.Core.Tracking` now require 44-1 to
+> store: **`SiblingRank`** (second `COLLATE "C"` rank column), **`PreviousKeys`** (key history),
+> **`Estimate` + `EstimateScale`**, and the **`work_item_relations`** table (rows stored in
+> `Canonicalize`d lower-id-first form; validation is 44-3's). Re-cut this plan against the story
+> file and `Tamma.Core/Tracking/` before starting; treat effort figures as stale.
+
+
 ## Scope & Deliverable
 
 When this story is done, four tables (`projects`, `work_items`, `iterations`, `tracker_preferences`) exist in every tenant schema — including tenants that were provisioned before the deploy, because this story also builds the `POST /api/admin/tenants/migrate` sweep the platform has never had. `work_items."Rank"` is `COLLATE "C"` so the database and the API agree on order; `ck_work_items_status` / `ck_work_items_kind` mirror 44-0's wire strings and a test proves it; keys are minted `(ProjectId, Number)`-unique under a row lock and a concurrency test proves that. Repositories exist for all four, with parallel never-joined mode surfaces on `tracker_preferences` only — work items are content, not per-principal configuration, and a test asserts no work-item query filters on a user ownership plane.

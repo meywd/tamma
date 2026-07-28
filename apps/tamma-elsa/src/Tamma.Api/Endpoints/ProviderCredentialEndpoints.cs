@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Tamma.Activities.LlmCall.Credentials;
 using Tamma.Activities.Security;
 using Tamma.Api.Auth;
+using Tamma.Api.Services.Agents;
 using Tamma.Api.Services.Audit;
 using Tamma.Api.Services.PromptStore;
 using Tamma.Api.Services.Providers;
@@ -88,6 +89,7 @@ public static class ProviderCredentialEndpoints
         ITenantContext tenantContext,
         [FromServices] ISecretRevealService reveal,
         [FromServices] IProviderCredentialResolver resolver,
+        [FromServices] IProviderModelCatalog modelCatalog,
         HttpContext http)
     {
         var (norm, err) = NormalizeProvider(provider);
@@ -119,6 +121,11 @@ public static class ProviderCredentialEndpoints
                 .ConfigureAwait(false);
 
             resolver.Invalidate(tid, norm!);
+            // Review F12 — the model catalog caches lists per (provider,
+            // tenant) under the credential that fetched them; a credential
+            // change must evict that entry too, or a list fetched with the
+            // OLD key keeps serving for up to the 5-minute TTL.
+            modelCatalog.Invalidate(norm!, tid);
 
             // Story 37-10 — curated BYOK audit event (the SECRET.WRITE cabinet
             // event stays the secret source of truth; this is derived alongside it,
@@ -159,6 +166,7 @@ public static class ProviderCredentialEndpoints
         [FromServices] ISecretQueryService query,
         [FromServices] ISecretRevealService reveal,
         [FromServices] IProviderCredentialResolver resolver,
+        [FromServices] IProviderModelCatalog modelCatalog,
         HttpContext http)
     {
         var (norm, err) = NormalizeProvider(provider);
@@ -191,6 +199,7 @@ public static class ProviderCredentialEndpoints
                 http.RequestAborted).ConfigureAwait(false);
 
             resolver.Invalidate(tid, norm!);
+            modelCatalog.Invalidate(norm!, tid); // F12 — see RegisterCredential
 
             // Story 37-10 — curated BYOK rotate audit event (see RegisterCredential).
             await EmitByokChangeAsync(
@@ -221,6 +230,7 @@ public static class ProviderCredentialEndpoints
         ITenantContext tenantContext,
         [FromServices] ISecretQueryService query,
         [FromServices] IProviderCredentialResolver resolver,
+        [FromServices] IProviderModelCatalog modelCatalog,
         HttpContext http)
     {
         var (norm, err) = NormalizeProvider(provider);
@@ -262,6 +272,7 @@ public static class ProviderCredentialEndpoints
         }
 
         resolver.Invalidate(tid, norm!);
+        modelCatalog.Invalidate(norm!, tid); // F12 — see RegisterCredential
 
         // Story 37-10 — curated BYOK remove audit event (see RegisterCredential).
         await EmitByokChangeAsync(
@@ -269,6 +280,284 @@ public static class ProviderCredentialEndpoints
             retiredVersion).ConfigureAwait(false);
 
         return Results.NoContent();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Epic 46 — tenant-facing model listing + model settings, registered
+    // beside the BYOK routes on the /api/v1/agents/providers surface.
+    // Reads serve any tenant member (single-user: the sole user) — mapped
+    // OUTSIDE the /api/v1/agents group's SettingsView (admin/owner-only)
+    // policy, on the member-reach AuthenticatedAny policy (review F3, the
+    // acceptance-rules read-gate precedent). Writes stay AgentManage-gated
+    // at the route map (member → 403) — the same trust level as BYOK key
+    // custody (epic D3).
+    //
+    // Review F11 — never-enumerate posture for the tenant surface: a
+    // PLATFORM-DISABLED provider answers the per-provider reads with the
+    // same 404 shape as an unknown provider, matching the roster (where it
+    // is simply absent) and the PUT's 409 rationale (the off switch wins).
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Story 46-0 (AC6) — <c>GET /api/v1/agents/providers/{provider}/models</c>:
+    /// the provider's LIVE model list for THIS tenant. The fetch runs
+    /// server-side with the tenant's BYOK key when one exists, else the
+    /// platform key (epic D5 — the credential resolver's existing order); the
+    /// key never reaches the browser. Fail-soft per epic D6: always HTTP 200
+    /// for a known ENABLED provider, and the currently-effective model is
+    /// always an entry flagged <c>current</c>. A platform-disabled provider
+    /// 404s exactly like an unknown one (F11 — never enumerate). SaaS callers
+    /// without tenant context get the empty-envelope behaviour (consistent
+    /// with <see cref="ListProviders"/>).
+    /// </summary>
+    public static async Task<IResult> GetTenantProviderModels(
+        string provider,
+        ITenantContext tenantContext,
+        [FromServices] ITammaModeProvider mode,
+        [FromServices] IProviderSettingsStore settings,
+        [FromServices] IProviderModelCatalog modelCatalog,
+        [FromServices] IInlineToolLoopRunner runner,
+        HttpContext http)
+    {
+        var (norm, err) = NormalizeProvider(provider);
+        if (err is not null) return err;
+        var disabled = DisabledAsUnknown(settings, norm!);
+        if (disabled is not null) return disabled;
+
+        var tenantId = tenantContext.TenantId;
+        if (mode.Mode == TammaMode.SaaS && tenantId is null)
+        {
+            // Consistent with ListProviders' no-tenant-context behaviour —
+            // no provider data is fetched for an unresolved SaaS caller.
+            return Results.Ok(new ProviderModelsResponse(
+                norm!, Array.Empty<ProviderModelEntry>(),
+                FetchedAt: null, Stale: false, ErrorCode: "no_tenant_context"));
+        }
+
+        var list = await modelCatalog.ListModelsAsync(norm!, tenantId, http.RequestAborted)
+            .ConfigureAwait(false);
+        var currentModel = runner.GetDefaultModel(norm!, tenantId);
+
+        return Results.Ok(ProviderAdminEndpoints.BuildModelsResponse(norm!, list, currentModel));
+    }
+
+    /// <summary>
+    /// Story 46-1 (AC5) — <c>GET /api/v1/agents/providers/models</c>: the
+    /// tenant-facing provider roster 46-3 renders. One row per ENABLED HTTP
+    /// provider (disabled providers are simply absent — tenants never see the
+    /// platform's off switch): key, display name, models-listing support, the
+    /// resolved model + provenance for THIS tenant, whether an override row
+    /// exists, BYOK key PRESENCE (metadata only — reuses the
+    /// <see cref="ListProviders"/> cabinet query; never the key), and the
+    /// <c>fallbackModel</c> a removed override would resolve to
+    /// (skip-principal resolution — the reset confirm names it without the
+    /// client restating precedence).
+    /// </summary>
+    public static async Task<IResult> GetTenantProviderRoster(
+        ITenantContext tenantContext,
+        [FromServices] ITammaModeProvider mode,
+        [FromServices] IProviderSettingsStore settings,
+        [FromServices] IInlineToolLoopRunner runner,
+        [FromServices] ISecretQueryService query,
+        HttpContext http)
+    {
+        var tenantId = tenantContext.TenantId;
+
+        // BYOK presence via the same cabinet listing ListProviders uses.
+        var byokProviders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (tenantId is Guid tid)
+        {
+            var rows = await query.ListAsync(SecretScope.Tenant, tid, http.RequestAborted)
+                .ConfigureAwait(false);
+            foreach (var r in rows)
+            {
+                var name = ProviderCabinetNames.TryParse(r.Name);
+                if (name is not null) byokProviders.Add(name);
+            }
+        }
+
+        var roster = new List<TenantProviderRosterRow>();
+        foreach (var d in ProviderCatalog.HttpProviders)
+        {
+            if (!settings.IsEnabled(d.Key))
+            {
+                continue; // platform-disabled → absent from the tenant view
+            }
+            var resolution = runner.ResolveDefaultModelWithSource(d.Key, tenantId);
+            var fallback = runner.ResolveDefaultModelWithSource(
+                d.Key, tenantId, skipPrincipal: true);
+            roster.Add(new TenantProviderRosterRow(
+                Provider: d.Key,
+                DisplayName: d.DisplayName,
+                ModelsSupported: d.ModelsEndpointPath is not null,
+                Model: string.IsNullOrEmpty(resolution.Model) ? null : resolution.Model,
+                Source: resolution.Source,
+                HasOverride: settings.HasOverride(d.Key, tenantId),
+                ByokKeyPresent: byokProviders.Contains(d.Key),
+                FallbackModel: string.IsNullOrEmpty(fallback.Model) ? null : fallback.Model));
+        }
+
+        return Results.Ok(new { providers = roster });
+    }
+
+    /// <summary>
+    /// Story 46-1 (AC5) — <c>GET /api/v1/agents/providers/{provider}/model</c>:
+    /// the resolved model for this tenant + provenance
+    /// (<c>tenant-override | platform-db | config | descriptor</c>) + the raw
+    /// override value when one exists + the <c>fallbackModel</c> a removed
+    /// override would resolve to (skip-principal resolution — never restated
+    /// client-side). Member-readable. A platform-disabled provider 404s
+    /// exactly like an unknown one (F11 — never enumerate).
+    /// </summary>
+    public static IResult GetTenantProviderModel(
+        string provider,
+        ITenantContext tenantContext,
+        [FromServices] IProviderSettingsStore settings,
+        [FromServices] IInlineToolLoopRunner runner)
+    {
+        var (norm, err) = NormalizeProvider(provider);
+        if (err is not null) return err;
+        var disabled = DisabledAsUnknown(settings, norm!);
+        if (disabled is not null) return disabled;
+
+        var tenantId = tenantContext.TenantId;
+        var resolution = runner.ResolveDefaultModelWithSource(norm!, tenantId);
+        var fallback = runner.ResolveDefaultModelWithSource(norm!, tenantId, skipPrincipal: true);
+        return Results.Ok(new TenantProviderModelResponse(
+            norm!,
+            string.IsNullOrEmpty(resolution.Model) ? null : resolution.Model,
+            resolution.Source,
+            settings.TryGetModel(norm!, tenantId),
+            string.IsNullOrEmpty(fallback.Model) ? null : fallback.Model));
+    }
+
+    /// <summary>
+    /// Story 46-1 (AC5) — <c>PUT /api/v1/agents/providers/{provider}/model</c>:
+    /// upsert this tenant's model override (SaaS: tenant-keyed, written by
+    /// tenant_owner/tenant_admin via the AgentManage route policy; single-user:
+    /// the sole user's user-keyed row). Response carries the epic-D3b
+    /// pricing-known warning. Writes against a platform-disabled provider are
+    /// rejected (409) — the off switch wins.
+    /// </summary>
+    public static async Task<IResult> PutTenantProviderModel(
+        string provider,
+        PutTenantProviderModelRequest body,
+        ClaimsPrincipal principal,
+        ITenantContext tenantContext,
+        [FromServices] ITammaModeProvider mode,
+        [FromServices] IProviderSettingsStore settings,
+        [FromServices] IInlineToolLoopRunner runner,
+        [FromServices] IProviderPricingService pricing,
+        HttpContext http)
+    {
+        var (norm, err) = NormalizeProvider(provider);
+        if (err is not null) return err;
+
+        var modelError = ProviderAdminEndpoints.ValidateModel(body?.Model);
+        if (modelError is not null) return modelError;
+        var model = body!.Model!.Trim();
+
+        var (tenantId, userId, principalError) = ResolveSettingsPrincipal(
+            mode, tenantContext, principal);
+        if (principalError is not null) return principalError;
+
+        if (!settings.IsEnabled(norm!))
+        {
+            return Results.Conflict(new
+            {
+                error = "provider_disabled",
+                detail = "this provider is disabled by the platform.",
+            });
+        }
+
+        var previous = runner.ResolveDefaultModelWithSource(norm!, tenantId);
+        await settings.SetPrincipalModelAsync(
+            norm!, tenantId, userId, model, principal.GetUserId(), http.RequestAborted)
+            .ConfigureAwait(false);
+
+        await ProviderAdminEndpoints.EmitSettingsChangeAsync(
+            http, tenantId, principal.GetUserId(), norm!,
+            scope: tenantId is null ? "user" : "tenant",
+            operation: "set", previousModel: previous.Model, model: model, enabled: null)
+            .ConfigureAwait(false);
+
+        var (pricingKnown, warning) =
+            ProviderAdminEndpoints.PricingWarning(pricing, norm!, model);
+        return Results.Ok(new PutTenantProviderModelResponse(
+            norm!, model, "tenant-override", pricingKnown, warning));
+    }
+
+    /// <summary>
+    /// Story 46-1 (AC5) — <c>DELETE /api/v1/agents/providers/{provider}/model</c>:
+    /// remove this tenant's override → resolution falls back to
+    /// platform-db/config/descriptor. 404 when no override row exists.
+    /// </summary>
+    public static async Task<IResult> DeleteTenantProviderModel(
+        string provider,
+        ClaimsPrincipal principal,
+        ITenantContext tenantContext,
+        [FromServices] ITammaModeProvider mode,
+        [FromServices] IProviderSettingsStore settings,
+        [FromServices] IInlineToolLoopRunner runner,
+        HttpContext http)
+    {
+        var (norm, err) = NormalizeProvider(provider);
+        if (err is not null) return err;
+
+        var (tenantId, userId, principalError) = ResolveSettingsPrincipal(
+            mode, tenantContext, principal);
+        if (principalError is not null) return principalError;
+
+        var previous = runner.ResolveDefaultModelWithSource(norm!, tenantId);
+        var removed = await settings.RemovePrincipalModelAsync(
+            norm!, tenantId, userId, http.RequestAborted).ConfigureAwait(false);
+        if (!removed)
+        {
+            return Results.NotFound(new
+            {
+                error = "override_not_found",
+                detail = "no model override for this provider.",
+            });
+        }
+
+        await ProviderAdminEndpoints.EmitSettingsChangeAsync(
+            http, tenantId, principal.GetUserId(), norm!,
+            scope: tenantId is null ? "user" : "tenant",
+            operation: "removed", previousModel: previous.Model, model: null, enabled: null)
+            .ConfigureAwait(false);
+
+        return Results.NoContent();
+    }
+
+    /// <summary>
+    /// Story 46-1 scoping (CLAUDE.md universal rule, answered per mode): SaaS
+    /// rows are TENANT-keyed (no tenant context → 404, mirroring the BYOK
+    /// mutations); single-user rows are USER-keyed (the sole user — resolved
+    /// from the JWT; no user id → 400). Exactly one of the two ids is non-null
+    /// on success.
+    /// </summary>
+    private static (Guid? TenantId, Guid? UserId, IResult? Error) ResolveSettingsPrincipal(
+        ITammaModeProvider mode, ITenantContext tenantContext, ClaimsPrincipal principal)
+    {
+        if (mode.Mode == TammaMode.SingleUser)
+        {
+            var userId = principal.GetUserId();
+            if (userId is null)
+            {
+                return (null, null, Results.BadRequest(new
+                {
+                    error = "no_user_context",
+                    detail = "a model override requires an authenticated user.",
+                }));
+            }
+            return (null, userId, null);
+        }
+
+        if (tenantContext.TenantId is not Guid tid)
+        {
+            return (null, null, Results.NotFound());
+        }
+        return (tid, null, null);
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -330,6 +619,21 @@ public static class ProviderCredentialEndpoints
         return rows.FirstOrDefault(r => r.Name == name);
     }
 
+    /// <summary>
+    /// Review F11 — tenant reads of a PLATFORM-DISABLED provider return the
+    /// same 404 shape as an unknown provider. The roster already hides
+    /// disabled providers entirely; answering their per-provider GETs would
+    /// let a tenant enumerate the platform's off switch — the same
+    /// never-enumerate posture as <see cref="NormalizeProvider"/>, and
+    /// consistent with the PUT's 409 rationale. Deliberate behaviour change:
+    /// these two GETs previously answered for disabled providers.
+    /// </summary>
+    private static IResult? DisabledAsUnknown(
+        IProviderSettingsStore settings, string canonicalProvider) =>
+        settings.IsEnabled(canonicalProvider)
+            ? null
+            : Results.NotFound(new { error = "unknown_provider" });
+
     private static (string? Provider, IResult? Error) NormalizeProvider(string provider)
     {
         if (string.IsNullOrWhiteSpace(provider))
@@ -389,3 +693,39 @@ public sealed record SetProviderCredentialResponse(
 /// <summary>Metadata-only list item (NO key).</summary>
 public sealed record ProviderCredentialMetadata(
     string Provider, int Version, DateTimeOffset? LastRotatedAt, DateTimeOffset UpdatedAt);
+
+/// <summary>Story 46-1 — one row of the tenant-facing provider roster
+/// (<c>GET /api/v1/agents/providers/models</c>). Metadata only:
+/// <see cref="ByokKeyPresent"/> is presence, NEVER the key.
+/// <para><see cref="FallbackModel"/> (additive — bug
+/// 2026-07-27-tenant-surface-cannot-name-platform-default-under-override) is
+/// what the effective model WOULD be if the tenant override were removed:
+/// the skip-principal resolution (platform DB → config → descriptor),
+/// computed server-side through the 46-1 resolver. Equals
+/// <see cref="Model"/> when no override is active; <c>null</c> only when
+/// nothing below the principal leg names a model (empty-string config /
+/// descriptor).</para></summary>
+public sealed record TenantProviderRosterRow(
+    string Provider,
+    string DisplayName,
+    bool ModelsSupported,
+    string? Model,
+    string Source,
+    bool HasOverride,
+    bool ByokKeyPresent,
+    string? FallbackModel = null);
+
+/// <summary>Story 46-1 — resolved model + provenance + the raw override
+/// (<c>GET /api/v1/agents/providers/{provider}/model</c>).
+/// <see cref="FallbackModel"/> carries the same skip-principal resolution as
+/// <see cref="TenantProviderRosterRow.FallbackModel"/> (additive).</summary>
+public sealed record TenantProviderModelResponse(
+    string Provider, string? Model, string Source, string? Override,
+    string? FallbackModel = null);
+
+/// <summary>Story 46-1 — PUT body for the tenant model override.</summary>
+public sealed record PutTenantProviderModelRequest(string? Model);
+
+/// <summary>Story 46-1 — PUT response, carrying the epic-D3b pricing warning.</summary>
+public sealed record PutTenantProviderModelResponse(
+    string Provider, string Model, string Source, bool PricingKnown, string? Warning);

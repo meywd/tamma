@@ -26,15 +26,20 @@ public static class AuthEndpoints
     private static string HashToken(string token)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
 
+    // Story 45-7: both links are CUSTOMER-facing, so the base comes from the
+    // shared DashboardUrls resolver (Dashboard:CustomerUrl → Dashboard:Url →
+    // dash.tamma.dev). The PATHS are frozen: /verify and /reset-password are
+    // in the inbox of every user who has ever registered; the customer app
+    // routes both (45-2/45-3). Do not change them here.
     private static string BuildVerificationUrl(IConfiguration config, string token)
     {
-        var baseUrl = (config["Dashboard:Url"] ?? "http://localhost:3001").TrimEnd('/');
+        var baseUrl = DashboardUrls.CustomerBase(config);
         return $"{baseUrl}/verify?token={Uri.EscapeDataString(token)}";
     }
 
     private static string BuildResetUrl(IConfiguration config, string token)
     {
-        var baseUrl = (config["Dashboard:Url"] ?? "http://localhost:3001").TrimEnd('/');
+        var baseUrl = DashboardUrls.CustomerBase(config);
         return $"{baseUrl}/reset-password?token={Uri.EscapeDataString(token)}";
     }
 

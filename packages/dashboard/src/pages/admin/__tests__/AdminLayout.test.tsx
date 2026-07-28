@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { AdminLayout } from '../AdminLayout.js';
 
 // Mock all tab components to simple stubs
@@ -93,6 +94,23 @@ describe('AdminLayout', () => {
     expect(pricingBtn).toBeInTheDocument();
     await user.click(pricingBtn);
     expect(screen.getByTestId('pricing-tab')).toBeInTheDocument();
+    expect(screen.queryByTestId('users-tab')).not.toBeInTheDocument();
+  });
+
+  // Story 46-2 — the Providers tab renders its link panel targeting the
+  // standalone /admin/providers page (TenantsLinkPanel precedent). Wrapped in
+  // MemoryRouter because the panel renders a react-router <Link>.
+  it('shows the Providers tab and its link panel targets /admin/providers', async () => {
+    render(
+      <MemoryRouter>
+        <AdminLayout />
+      </MemoryRouter>,
+    );
+    const providersBtn = screen.getByText('Providers');
+    expect(providersBtn).toBeInTheDocument();
+    await user.click(providersBtn);
+    const link = screen.getByRole('link', { name: 'Open provider settings' });
+    expect(link).toHaveAttribute('href', '/admin/providers');
     expect(screen.queryByTestId('users-tab')).not.toBeInTheDocument();
   });
 });

@@ -50,6 +50,13 @@ const AdminLayout = React.lazy(() =>
   import('./pages/admin/AdminLayout.js').then((m) => ({ default: m.AdminLayout })),
 );
 
+// Story 46-2 — platform-admin provider settings UI (lazy-loaded).
+const ProvidersAdminPage = React.lazy(() =>
+  import('./pages/admin/providers/ProvidersAdminPage.js').then((m) => ({
+    default: m.ProvidersAdminPage,
+  })),
+);
+
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   // Story 18-4 — onboarding wizard. Auth-gated but rendered without
@@ -205,6 +212,18 @@ export const router = createBrowserRouter([
         element: (
           <AdminGuard>
             <AcceptanceRulesAdminPage />
+          </AdminGuard>
+        ),
+      },
+      // Story 46-2: platform-admin provider settings UI — enable/disable +
+      // platform default model per catalogue provider, live model picker.
+      {
+        path: '/admin/providers',
+        element: (
+          <AdminGuard>
+            <Suspense fallback={<LoadingSpinner size="lg" />}>
+              <ProvidersAdminPage />
+            </Suspense>
           </AdminGuard>
         ),
       },

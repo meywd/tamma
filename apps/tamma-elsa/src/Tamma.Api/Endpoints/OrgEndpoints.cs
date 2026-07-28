@@ -357,8 +357,10 @@ public static class OrgEndpoints
             ExpiresAt = DateTime.UtcNow.AddHours(72),
         });
 
-        // Build the dashboard accept URL.
-        var dashboardBase = (config["Dashboard:Url"] ?? "http://localhost:3001").TrimEnd('/');
+        // Build the dashboard accept URL. Story 45-7: the invitee is a
+        // CUSTOMER — the link targets the customer app (DashboardUrls:
+        // Dashboard:CustomerUrl → Dashboard:Url → dash.tamma.dev).
+        var dashboardBase = DashboardUrls.CustomerBase(config);
         var acceptUrl = $"{dashboardBase}/invites/accept?token={Uri.EscapeDataString(rawToken)}";
 
         var inviterName = principal.FindFirst("name")?.Value
@@ -499,7 +501,8 @@ public static class OrgEndpoints
         // simplest no-leak fallback is to embed only the invite id —
         // attempting to derive the original raw token from the hash is
         // not cryptographically possible.
-        var dashboardBase = (config["Dashboard:Url"] ?? "http://localhost:3001").TrimEnd('/');
+        // Story 45-7: customer-facing link — same resolver as the accept URL.
+        var dashboardBase = DashboardUrls.CustomerBase(config);
         var pendingUrl = $"{dashboardBase}/invites/pending?inviteId={Uri.EscapeDataString(invite.Id.ToString())}";
 
         var inviterName = principal.FindFirst("name")?.Value

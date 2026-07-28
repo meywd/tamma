@@ -27,7 +27,7 @@ selection instead of breaking.
 ## Priority
 
 P0 — this is the seam both UIs (46-2, 46-3) bind to, and the tool 46-1's defaults-refresh task
-uses. It ships standalone: even before 46-1 lands, `GET /api/admin/providers` is a useful
+uses. It ships standalone: even before 46-1 lands, `GET /api/admin/providers/status` is a useful
 "which providers are actually configured and reachable" status surface.
 
 ## Architectural Context (READ FIRST)
@@ -116,7 +116,7 @@ fail-soft empty envelope for everything else. Keep this as a small allowlist ins
    cached copy it returns an empty list + `ErrorCode`. The cache key includes the tenant id because
    a BYOK-fetched list may differ (entitlements) and must never leak across tenants.
 
-4. **Platform route — `GET /api/admin/providers`** (new `ProviderAdminEndpoints.cs` under
+4. **Platform route — `GET /api/admin/providers/status`** (the story originally said `GET /api/admin/providers`, but that route is already Story 34-11's pricing roster — mapping both is an ambiguous match; new `ProviderAdminEndpoints.cs` under
    `Endpoints/`, mapped as its own group with `RequireAuthorization("PlatformOwnerAccess")`,
    modelled on the `adminConventions` group at `Program.cs:2654`). Returns one row per HTTP
    descriptor: `key`, `displayName`, `dialect`, `effectiveBaseUrl`, `keyConfigured` (credential
@@ -125,6 +125,13 @@ fail-soft empty envelope for everything else. Keep this as a small allowlist ins
    (`config` | `descriptor` until 46-1 adds the DB layers; computed via the same precedence
    `InlineToolLoopRunner.LoadProviderConfig` uses, `InlineToolLoopRunner.cs:1099-1151`), and
    `aliases`. Non-HTTP descriptors appear with `transport` and `modelsSupported: false`.
+   *(Amended 2026-07-28, conformance review: shipped as the three-state
+   `keyStatus: "configured" | "missing" | "not_required"` rather than the boolean
+   `keyConfigured` — plan D6, so key-optional providers do not render as a green "configured"
+   lie. Also, the row's `currentModel`/`source` resolve with `skipPrincipal: true` (review F4):
+   the platform surface always reports the PLATFORM-layer resolution (platform DB → config →
+   descriptor), because in single-user mode a plain `tenantId: null` resolve maps to the sole
+   user's row and would leak that personal override into the roster as the platform value.)*
 
 5. **Platform route — `GET /api/admin/providers/{key}/models`** (same policy): resolves alias →
    canonical key (404 unknown, never enumerate — `NormalizeProvider` shape), calls
@@ -132,6 +139,11 @@ fail-soft empty envelope for everything else. Keep this as a small allowlist ins
    an entry flagged `current: true` (synthesized with `DisplayName = null` if the live list lacks
    it). Response: `{ provider, models: [{id, displayName?, deprecated, current}], fetchedAt,
    stale, errorCode? }`. Always HTTP 200 for a known provider — fail-soft per epic D6.
+   *(Amended 2026-07-28, conformance review: the models envelope gained an additive `delisted`
+   field post-story — set `true` ONLY on the synthesized current entry (the currently-effective
+   model the provider no longer lists; a genuinely-listed current entry is flagged in place with
+   `delisted` absent/false) — so the UIs read the fact instead of inferring synthesis
+   heuristically. See `.dev/bugs/2026-07-27-models-envelope-lacks-delisted-flag.md`.)*
 
 6. **Tenant route — `GET /api/v1/agents/providers/{provider}/models`**, registered beside the
    existing BYOK routes (`ProviderCredentialEndpoints.cs` maps; read-level policy — same as
@@ -139,6 +151,14 @@ fail-soft empty envelope for everything else. Keep this as a small allowlist ins
    but `ListModelsAsync(key, tenantContext.TenantId)` so a tenant BYOK key is used when present
    (epic D5). No tenant context in SaaS mode → empty providers behaviour consistent with
    `ProviderCredentialEndpoints.ListProviders` (`:57-61`).
+   *(Amended 2026-07-28, conformance review: the "read-level policy — same as `ListProviders`,
+   any tenant member" premise was wrong twice — `ListProviders` actually inherits the
+   `/api/v1/agents` group's `SettingsView` gate, which maps to admin/owner only, so it is NOT
+   member-reach and matching it would 403 every SaaS member on reads. As shipped (review blocker
+   F3) the three tenant GETs are deliberately mapped OUTSIDE the group on `AuthenticatedAny`
+   (`Program.cs:2595-2604`) — endpoint-level `RequireAuthorization` can only ADD to a group
+   policy, never relax it — keeping the group's `ConfigRead` rate limit explicitly. That is what
+   delivers the intended any-tenant-member (single-user: sole user) read reach.)*
 
 7. **The credential never reaches the browser and never enters a log.** Response DTOs contain no
    key material; the service logs provider key, status code and duration only. Grep-checkable:

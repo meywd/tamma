@@ -14,6 +14,7 @@ import {
   resolveTenantAlert,
   listTenantChannels,
   createTenantChannel,
+  updateTenantChannel,
   hasPlaintextCredential,
 } from './alerts';
 
@@ -38,6 +39,38 @@ describe('alerts API — URL shape', () => {
     const url = spy.mock.calls[0]?.[0] as string;
     expect(url).toContain('/api/v1/orgs/tnt-A/alerts');
     expect(url).toContain('limit=50');
+  });
+
+  // Story 45-0 regression pins: absent filters must NOT leak into the query
+  // string (no `status=undefined`), whether the keys are genuinely absent or
+  // present-but-undefined (the shape a component builds from optional state).
+  it('omits absent filters from the query string', async () => {
+    const spy = vi.fn().mockResolvedValueOnce(
+      mockJson({ items: [], count: 0, limit: 25 }),
+    );
+    globalThis.fetch = spy as unknown as typeof fetch;
+
+    await listTenantAlerts('tnt-A', { limit: 25 });
+
+    const url = spy.mock.calls[0]?.[0] as string;
+    expect(url).toBe('/api/v1/orgs/tnt-A/alerts?limit=25');
+  });
+
+  it('omits explicitly-undefined filters exactly like absent ones', async () => {
+    const spy = vi.fn().mockResolvedValueOnce(
+      mockJson({ items: [], count: 0, limit: 25 }),
+    );
+    globalThis.fetch = spy as unknown as typeof fetch;
+
+    await listTenantAlerts('tnt-A', {
+      status: undefined,
+      severity: undefined,
+      sinceDays: undefined,
+      limit: 25,
+    });
+
+    const url = spy.mock.calls[0]?.[0] as string;
+    expect(url).toBe('/api/v1/orgs/tnt-A/alerts?limit=25');
   });
 
   it('listTenantAlerts forwards severity + status + since filters', async () => {
@@ -105,6 +138,42 @@ describe('alerts API — URL shape', () => {
     expect(spy.mock.calls[0]?.[0]).toContain(
       '/api/v1/orgs/tnt-A/alert-channels',
     );
+  });
+
+  it('updateTenantChannel PATCHes through ApiClient', async () => {
+    const spy = vi.fn().mockResolvedValueOnce(mockJson({ id: 'ch-1' }));
+    globalThis.fetch = spy as unknown as typeof fetch;
+
+    await updateTenantChannel('tnt-A', 'ch-1', { name: 'renamed' });
+
+    const [url, init] = spy.mock.calls[0] ?? [];
+    expect(url as string).toContain('/api/v1/orgs/tnt-A/alert-channels/ch-1');
+    expect((init as RequestInit).method).toBe('PATCH');
+    expect((init as RequestInit).credentials).toBe('include');
+    const body = JSON.parse((init as RequestInit).body as string);
+    expect(body.name).toBe('renamed');
+  });
+
+  // Story 45-1 AC8: the PATCH previously used a bare fetch and was the ONE
+  // call in the app that missed the single-shot refresh-on-401 retry. This
+  // test is what makes the fix visible — the happy path is unchanged.
+  it('updateTenantChannel refreshes and retries once on 401', async () => {
+    const spy = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('', { status: 401 })) // original PATCH
+      .mockResolvedValueOnce(new Response('', { status: 200 })) // refresh
+      .mockResolvedValueOnce(mockJson({ id: 'ch-1', name: 'renamed' })); // retried PATCH
+    globalThis.fetch = spy as unknown as typeof fetch;
+
+    const channel = await updateTenantChannel('tnt-A', 'ch-1', { name: 'renamed' });
+
+    expect(spy).toHaveBeenCalledTimes(3);
+    expect(spy.mock.calls[0]?.[0]).toContain('/api/v1/orgs/tnt-A/alert-channels/ch-1');
+    expect(spy.mock.calls[1]?.[0]).toContain('/api/v1/auth/refresh');
+    expect((spy.mock.calls[1]?.[1] as RequestInit).method).toBe('POST');
+    expect(spy.mock.calls[2]?.[0]).toContain('/api/v1/orgs/tnt-A/alert-channels/ch-1');
+    expect((spy.mock.calls[2]?.[1] as RequestInit).method).toBe('PATCH');
+    expect(channel).toMatchObject({ id: 'ch-1', name: 'renamed' });
   });
 });
 

@@ -57,6 +57,23 @@ describe('ApiClient', () => {
     expect(headers['Content-Type']).toBe('application/json');
   });
 
+  it('serializes JSON body, sets content type and credentials on PATCH', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response('{}', {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    await client.patch('/api/v1/orgs/t/alert-channels/c', { name: 'x' });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://api.tamma.dev/api/v1/orgs/t/alert-channels/c');
+    expect((init as RequestInit).method).toBe('PATCH');
+    expect((init as RequestInit).credentials).toBe('include');
+    expect((init as RequestInit).body).toBe(JSON.stringify({ name: 'x' }));
+    const headers = (init as RequestInit).headers as Record<string, string>;
+    expect(headers['Content-Type']).toBe('application/json');
+  });
+
   it('parses JSON responses', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ foo: 'bar' }), {

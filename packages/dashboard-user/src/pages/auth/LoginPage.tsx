@@ -88,6 +88,14 @@ export function LoginPage(): JSX.Element {
           </button>
         </form>
 
+        {/* Story 45-3 AC2 — without this link the reset flow is only
+            reachable by someone who already has the email they cannot get. */}
+        <p className="mt-3 text-sm text-center">
+          <Link to="/forgot-password" className="text-gray-500 hover:text-gray-900 hover:underline">
+            Forgot your password?
+          </Link>
+        </p>
+
         <div className="my-4 flex items-center gap-2 text-xs text-gray-400">
           <span className="flex-1 h-px bg-gray-200" />
           <span>or</span>

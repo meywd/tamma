@@ -162,16 +162,16 @@
 
   <a class="tn-skip" href="#main-content">Skip to main content</a>
 
-  <a class="tn-logo" href="https://app.tamma.dev" style="display:flex;align-items:center;gap:8px">
-    <img src="https://app.tamma.dev/logo.png" alt="" style="width:24px;height:24px;border-radius:4px" />
+  <a class="tn-logo" href="https://admin.tamma.dev" style="display:flex;align-items:center;gap:8px">
+    <img src="https://admin.tamma.dev/logo.png" alt="" style="width:24px;height:24px;border-radius:4px" />
     Tamma
   </a>
 
   <div class="tn-links">
-    <a href="https://app.tamma.dev" data-svc="app">Dashboard</a>
+    <a href="https://admin.tamma.dev" data-svc="app">Dashboard</a>
     <a href="https://elsa.tamma.dev" data-svc="elsa">Workflows</a>
     <a href="https://logs.tamma.dev" data-svc="logs">Logs</a>
-    <a href="https://app.tamma.dev/admin" data-svc="admin" class="tn-admin">Admin</a>
+    <a href="https://admin.tamma.dev/admin" data-svc="admin" class="tn-admin">Admin</a>
   </div>
 
   <div class="tn-spacer"></div>
@@ -183,8 +183,8 @@
       <span class="tn-username" id="tamma-nav-username"></span>
     </button>
     <div class="tn-menu" id="tamma-nav-menu" role="menu">
-      <a href="https://app.tamma.dev/account" role="menuitem">Settings</a>
-      <a href="https://app.tamma.dev/api/auth/logout" role="menuitem" id="tamma-nav-signout">Sign Out</a>
+      <a href="https://admin.tamma.dev/account" role="menuitem">Settings</a>
+      <a href="https://admin.tamma.dev/api/auth/logout" role="menuitem" id="tamma-nav-signout">Sign Out</a>
     </div>
   </div>
 </nav>
@@ -197,7 +197,7 @@
   // Detect active service from hostname
   var host = window.location.hostname;
   var svcMap = {
-    'app.tamma.dev': 'app',
+    'admin.tamma.dev': 'app',
     'elsa.tamma.dev': 'elsa',
     'logs.tamma.dev': 'logs',
     'localhost': 'app'
@@ -243,13 +243,13 @@
   if (signout) {
     signout.addEventListener('click', function(e) {
       e.preventDefault();
-      fetch('https://app.tamma.dev/api/auth/logout', { method: 'POST', credentials: 'include' })
-        .finally(function() { window.location.href = 'https://app.tamma.dev/login'; });
+      fetch('https://admin.tamma.dev/api/auth/logout', { method: 'POST', credentials: 'include' })
+        .finally(function() { window.location.href = 'https://admin.tamma.dev/login'; });
     });
   }
 
   // Fetch user identity from shared JWT cookie
-  fetch('https://app.tamma.dev/api/auth/me', { credentials: 'include' })
+  fetch('https://admin.tamma.dev/api/auth/me', { credentials: 'include' })
     .then(function(r) { return r.ok ? r.json() : null; })
     .then(function(data) {
       if (!data || !data.user) return;

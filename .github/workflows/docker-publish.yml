@@ -206,6 +206,77 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ---------------------------------------------------------------------------
+  # Customer dashboard (dashboard-user SPA — dash.tamma.dev). A literal copy
+  # of build-dashboard with images:/file: repointed; both retry pairs are
+  # deliberate (buildx setup and GHCR pushes fail transiently in this repo).
+  # ---------------------------------------------------------------------------
+  build-dashboard-user:
+    name: Build Dashboard-User
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx (attempt 1)
+        id: buildx1
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Wait before retry
+        if: steps.buildx1.outcome == 'failure'
+        run: sleep 60
+
+      - name: Setup Docker Buildx (attempt 2)
+        if: steps.buildx1.outcome == 'failure'
+        uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/tamma-dashboard-user
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr,prefix=pr-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-
+
+      - name: Build and push (attempt 1)
+        id: build1
+        uses: docker/build-push-action@v6
+        continue-on-error: true
+        with:
+          context: .
+          file: docker/Dockerfile.dashboard-user
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Wait before retry
+        if: steps.build1.outcome == 'failure'
+        run: sleep 30
+
+      - name: Build and push (attempt 2)
+        if: steps.build1.outcome == 'failure'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.dashboard-user
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
   # Intelligence sidecar (TS — proxies the C# KB endpoints to packages/intelligence)
   # ---------------------------------------------------------------------------
   build-intelligence-server:
@@ -332,7 +403,7 @@ jobs:
   # ---------------------------------------------------------------------------
   deploy:
     name: Deploy to VPS
-    needs: [build-ts, build-dashboard, build-dotnet, build-intelligence-server]
+    needs: [build-ts, build-dashboard, build-dashboard-user, build-dotnet, build-intelligence-server]
     # Deploy ONLY on a qa-* tag push. PRs, main pushes, and v* release tags
     # build/publish images but never deploy.
     if: startsWith(github.ref, 'refs/tags/qa-')
@@ -422,7 +493,9 @@ jobs:
             "ELSA_ADMIN_API_KEY=${{ secrets.TAMMA_ELSA_ADMIN_API_KEY }}" \
             "TAMMA_SERVICE_API_KEY=${{ secrets.TAMMA_SERVICE_API_KEY }}" \
             "API_BASE_URL=https://api.tamma.dev" \
-            "DASHBOARD_URL=https://app.tamma.dev" \
+            "DASHBOARD_URL=https://admin.tamma.dev" \
+            "CUSTOMER_DASHBOARD_URL=https://dash.tamma.dev" \
+            "DASHBOARD_ADDITIONAL_ORIGINS=https://app.tamma.dev" \
           | ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
@@ -454,6 +527,9 @@ jobs:
               build: !reset null
             tamma-dashboard:
               image: ghcr.io/${OWNER}/tamma-dashboard:${IMAGE_TAG}
+              build: !reset null
+            tamma-dashboard-user:
+              image: ghcr.io/${OWNER}/tamma-dashboard-user:${IMAGE_TAG}
               build: !reset null
             elsa-server:
               image: ghcr.io/${OWNER}/tamma-elsa:${IMAGE_TAG}
@@ -676,7 +752,7 @@ jobs:
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
               COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
-              \$COMPOSE up -d --force-recreate tamma-engine tamma-dashboard elsa-studio && \
+              \$COMPOSE up -d --force-recreate tamma-engine tamma-dashboard tamma-dashboard-user elsa-studio && \
               echo 'Starting oauth2-proxy + nginx-proxy...' && \
               \$COMPOSE up -d --force-recreate oauth2-proxy nginx-proxy && \
               echo 'Running OpenSearch bootstrap (if observability stack is up)...' && \
@@ -715,7 +791,7 @@ jobs:
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
               COMPOSE='docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env' && \
               FAIL=0 && \
-              for svc in tamma-dashboard tamma-engine elsa-studio; do
+              for svc in tamma-dashboard tamma-dashboard-user tamma-engine elsa-studio; do
                 CONTAINER=\$(\$COMPOSE ps -q \$svc | head -1)
                 if [ -z \"\$CONTAINER\" ]; then
                   echo \"::error::\$svc container not found\"
@@ -740,7 +816,7 @@ jobs:
               exit \$FAIL
             "
 
-      - name: "Health check: public surfaces (api + app + elsa via proxy)"
+      - name: "Health check: public surfaces (api + admin + app + dash + elsa via proxy)"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
@@ -767,7 +843,9 @@ jobs:
               }
               FAIL=0
               probe api.tamma.dev /api/health 'api.tamma.dev'  || FAIL=1
+              probe admin.tamma.dev /        'admin.tamma.dev' || FAIL=1
               probe app.tamma.dev /          'app.tamma.dev'   || FAIL=1
+              probe dash.tamma.dev /         'dash.tamma.dev'  || FAIL=1
               probe elsa.tamma.dev /health   'elsa.tamma.dev'  || FAIL=1
               exit \$FAIL
             "
@@ -777,16 +855,17 @@ jobs:
       # OAUTH2_PROXY_CLIENT_ID/SECRET are bound; if env mapping breaks
       # (PR #343 shipped that failure mode for the old endpoint), users
       # see a broken Sign-in button instead of a clear deploy failure.
-      # Probing app.tamma.dev because that's the host that fronts
-      # oauth2-proxy via nginx.
+      # Probing admin.tamma.dev because that's the host that fronts
+      # oauth2-proxy via nginx (the admin console — hostname re-layout
+      # 2026-07-28; app.tamma.dev now serves the un-walled customer app).
       - name: "Health check: GitHub OAuth start endpoint"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
               for i in \$(seq 1 10); do
-                CODE=\$(curl -sk -H 'Host: app.tamma.dev' -o /tmp/oauth-probe.body -w '%{http_code}' 'https://localhost/oauth2/start?rd=%2F' 2>/dev/null || echo '000')
-                LOC=\$(curl -sk -H 'Host: app.tamma.dev' -D - -o /dev/null 'https://localhost/oauth2/start?rd=%2F' 2>/dev/null | tr -d '\r' | awk -F': ' 'tolower(\$1)==\"location\"{print \$2; exit}')
+                CODE=\$(curl -sk -H 'Host: admin.tamma.dev' -o /tmp/oauth-probe.body -w '%{http_code}' 'https://localhost/oauth2/start?rd=%2F' 2>/dev/null || echo '000')
+                LOC=\$(curl -sk -H 'Host: admin.tamma.dev' -D - -o /dev/null 'https://localhost/oauth2/start?rd=%2F' 2>/dev/null | tr -d '\r' | awk -F': ' 'tolower(\$1)==\"location\"{print \$2; exit}')
                 if [ \"\$CODE\" = '302' ] && echo \"\$LOC\" | grep -q 'github.com/login/oauth/authorize'; then
                   echo ' /oauth2/start OK (302 → github.com/login/oauth/authorize)'
                   exit 0
@@ -795,7 +874,7 @@ jobs:
                 echo \"OAuth probe attempt \$i/10: code=\$CODE loc=\$LOC body=\$BODY\"
                 sleep 5
               done
-              echo '::error::/oauth2/start did not redirect to GitHub (final code: '\$CODE'). Check OAUTH2_PROXY_CLIENT_ID/SECRET binding in docker-compose.yml and that the OAuth App callback URL matches https://app.tamma.dev/oauth2/callback.'
+              echo '::error::/oauth2/start did not redirect to GitHub (final code: '\$CODE'). Check OAUTH2_PROXY_CLIENT_ID/SECRET binding in docker-compose.yml and that the OAuth App callback URL matches https://admin.tamma.dev/oauth2/callback.'
               exit 1
             "
 
@@ -821,7 +900,7 @@ jobs:
               echo '=== Container Status ===' && \
               docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env ps -a 2>/dev/null && \
               echo '' && \
-              for svc in postgres rabbitmq chromadb elsa-server elsa-studio tamma-api tamma-engine tamma-dashboard nginx-proxy; do
+              for svc in postgres rabbitmq chromadb elsa-server elsa-studio tamma-api tamma-engine tamma-dashboard tamma-dashboard-user nginx-proxy; do
                 echo \"=== Logs: \$svc (last 50 lines) ===\" && \
                 docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env logs --tail=50 \$svc 2>/dev/null || echo '(no logs)' && \
                 echo ''

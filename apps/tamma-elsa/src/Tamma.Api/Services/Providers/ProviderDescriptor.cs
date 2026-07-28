@@ -100,6 +100,19 @@ public sealed record ProviderDescriptor
     /// Z.ai is the current outlier (<c>/api/paas/v4/chat/completions</c>).</summary>
     public string? ChatEndpointPath { get; init; }
 
+    /// <summary>Story 46-0 — the provider's model-LIST endpoint path, relative
+    /// to the effective base URL (joined via
+    /// <see cref="ProviderCatalog.CombineUrl"/>, so base-path segments like
+    /// groq's <c>/openai</c> and openrouter's <c>/api</c> are preserved).
+    /// <c>null</c> = this provider's models cannot be listed and the UIs fall
+    /// back to free-text model entry (epic 46 D4: z-ai — no documented route;
+    /// azure-openai — deployment listing needs <c>api-version</c> semantics;
+    /// github-copilot — token-exchange auth). The config-override rule (F3)
+    /// applies through <see cref="ProviderCatalog.ModelsPathForBase"/>: an
+    /// explicitly overridden base URL (an OpenAI-compatible proxy) gets the
+    /// dialect-generic <c>/v1/models</c>, not this provider-specific path.</summary>
+    public string? ModelsEndpointPath { get; init; }
+
     /// <summary>API version header name, where the provider requires one
     /// (e.g. <c>anthropic-version</c>). Per-descriptor DATA, not a dialect
     /// constant — an AWS Bedrock descriptor would carry

@@ -23,14 +23,18 @@ export interface ServiceLink {
 }
 
 export const ALL_SERVICES: ServiceLink[] = [
-  { key: 'app', label: 'Dashboard', url: 'https://app.tamma.dev' },
+  // Hostname re-layout (2026-07-28): the admin console moved from
+  // app.tamma.dev to admin.tamma.dev (app.tamma.dev now serves the
+  // customer app). The 'app' key is the nav's internal id for this
+  // dashboard and is kept stable.
+  { key: 'app', label: 'Dashboard', url: 'https://admin.tamma.dev' },
   { key: 'elsa', label: 'Workflows', url: 'https://elsa.tamma.dev' },
   { key: 'logs', label: 'Logs', url: 'https://logs.tamma.dev' },
 ];
 
 export function isActiveService(key: string): boolean {
   const host = window.location.hostname;
-  if (key === 'app') return host === 'app.tamma.dev' || host === 'localhost';
+  if (key === 'app') return host === 'admin.tamma.dev' || host === 'localhost';
   return host === `${key}.tamma.dev`;
 }
 
@@ -76,7 +80,7 @@ export function NavHeader(): JSX.Element {
     <nav className="tamma-nav-bar" aria-label="Tamma services">
       <a href="#main-content" className="tn-skip">Skip to main content</a>
 
-      <a className="tn-logo" href="https://app.tamma.dev" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <a className="tn-logo" href="https://admin.tamma.dev" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <img src="/logo.png" alt="" style={{ width: '24px', height: '24px', borderRadius: '4px' }} />
         Tamma
       </a>
@@ -94,7 +98,7 @@ export function NavHeader(): JSX.Element {
         ))}
         {isAdmin(user) && (
           <a
-            href="https://app.tamma.dev/admin"
+            href="https://admin.tamma.dev/admin"
             className={isAdminPageActive() ? 'tn-active' : ''}
             aria-current={isAdminPageActive() ? 'page' : undefined}
           >

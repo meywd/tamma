@@ -28,6 +28,14 @@ using Tamma.Platforms.GitLab;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Story 43-2 AC13 — validate the Action Catalog at boot so a catalog
+// violation (missing descriptor, broken group partition, bad key) fails
+// startup with its ACTION.CATALOG.* code instead of surfacing on the first
+// governed request. Validate() runs the full validation directly, so a
+// failure surfaces as an unwrapped TammaError carrying the ACTION.CATALOG.*
+// code in its message rather than a TypeInitializationException.
+Tamma.Core.Actions.ActionCatalog.Validate();
+
 // ────────────────────────────────────────────────────────────────────────────
 // Serilog
 // ────────────────────────────────────────────────────────────────────────────
@@ -585,6 +593,23 @@ if (!string.IsNullOrWhiteSpace(
 // of provider-key resolution into the LLM call path (CallLlmInlineActivity).
 builder.Services.AddProviderCredentialResolution();
 
+// Epic 46 — the live model-listing seam (46-0: IProviderModelCatalog — one
+// fetch/normalize/cache service behind the admin + tenant models routes) and
+// the persisted provider-settings store (46-1: IProviderSettingsStore — the
+// tenant-override → platform-DB layers of the default-model precedence,
+// consumed synchronously by InlineToolLoopRunner and LlmProxyService).
+// Registered AFTER AddTammaData (CP DbContext factory) and
+// AddProviderCredentialResolution (both are collaborators).
+builder.Services.AddProviderModelCatalogAndSettings();
+// Review F1 — prime the settings snapshot BEFORE the app serves traffic:
+// the store's sync reads never block, so without priming the first requests
+// after every restart would resolve against the empty snapshot (ignoring
+// persisted selections) until the first lazy TTL refresh landed. Fail-soft —
+// a briefly-unavailable DB logs a warning and startup proceeds; the lazy
+// refresh remains the fallback.
+builder.Services.AddHostedService<
+    Tamma.Api.Services.Providers.ProviderSettingsStorePrimingService>();
+
 // Story 32-5 (T3): the managed execution layer behind POST /api/v1/llm/call.
 // ManagedAgent composes the rule-2 sequence (resolve+enablement+prompt → gate →
 // budget → credential → STARTED → runner → meter → terminal) and the mapper
@@ -1105,14 +1130,51 @@ builder.Services.AddRateLimiter(options =>
 });
 
 // CORS
+// Story 45-7 AC4 — two apps, two origins: the admin console (Dashboard:Url)
+// and the customer app (Dashboard:CustomerUrl, falling back through
+// DashboardUrls' chain). Deduped because a single-user install sets one value
+// for both.
+//
+// Hostname re-layout (2026-07-28) — the customer app can serve from MORE
+// than one origin (Tamma production: app.tamma.dev alongside dash.tamma.dev),
+// so Dashboard:AdditionalOrigins (CSV) contributes extra entries through the
+// same NormalizeOrigins pipeline. Empty/unset adds nothing.
+//
+// Review F-CORS-2 — browsers send the Origin header as scheme://host[:port]
+// (never a path) and WithOrigins matches it by EXACT string comparison, so a
+// configured value carrying a path (https://portal.example.com/dash) could
+// never match — silent CORS failure. DashboardUrls.NormalizeOrigins reduces
+// each entry to its authority (Uri.GetLeftPart(UriPartial.Authority)) and
+// reports every changed/unparseable value; the warnings are logged right
+// after the host is built (below) because no logger exists yet at this point.
+var corsOriginWarnings = new List<string>();
+var dashboardOrigins = Tamma.Api.Endpoints.DashboardUrls.NormalizeOrigins(
+    new[]
+    {
+        builder.Configuration["Dashboard:Url"] ?? "http://localhost:3001",
+        Tamma.Api.Endpoints.DashboardUrls.CustomerBase(builder.Configuration),
+    }.Concat(Tamma.Api.Endpoints.DashboardUrls.AdditionalOrigins(builder.Configuration)),
+    corsOriginWarnings.Add);
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowDashboard", policy =>
     {
-        policy.WithOrigins(
-                builder.Configuration["Dashboard:Url"] ?? "http://localhost:3001")
+        // Review F-CORS-1 — AllowCredentials() is REQUIRED: the customer
+        // app authenticates with the tamma_session COOKIE (not an
+        // Authorization header) and its ApiClient hardcodes
+        // credentials:'include' for the cross-subdomain deployment shape
+        // (dash.tamma.dev → api.tamma.dev; see
+        // packages/dashboard-user/src/api/client.ts). Without it the browser
+        // discards every credentialed cross-origin response the moment a
+        // deployment sets VITE_API_URL cross-origin. Safe here because the
+        // origins are an explicit configured list — never "*" (the
+        // AllowCredentials + wildcard combination is the forbidden one, and
+        // ASP.NET Core throws on it anyway). The admin console's
+        // Authorization-header flow is unaffected by the extra grant.
+        policy.WithOrigins(dashboardOrigins)
             .WithHeaders("Content-Type", "Authorization")
-            .WithMethods("GET", "POST", "PUT", "DELETE", "PATCH");
+            .WithMethods("GET", "POST", "PUT", "DELETE", "PATCH")
+            .AllowCredentials();
     });
 });
 
@@ -1682,6 +1744,14 @@ else
 }
 
 var app = builder.Build();
+
+// Review F-CORS-2 — surface the origin-normalization warnings collected
+// before the logger existed (path-carrying or unparseable Dashboard:Url /
+// Dashboard:CustomerUrl values that would otherwise fail CORS silently).
+foreach (var corsWarning in corsOriginWarnings)
+{
+    app.Logger.LogWarning("CORS origin configuration: {Warning}", corsWarning);
+}
 
 // Story 28-12 AC5 residual — eagerly resolve the KEK-rotation metrics so
 // the `tamma.kek_rotation.remaining` ObservableGauge's Meter is alive
@@ -2510,6 +2580,35 @@ agents.MapPost("/providers/{provider}/credential/rotate", ProviderCredentialEndp
 agents.MapDelete("/providers/{provider}/credential", ProviderCredentialEndpoints.DeleteCredential)
     .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
 
+// ── Epic 46 — tenant-facing model listing + model settings ──
+// READS are member-reach (review F3): the stories promise them to ANY tenant
+// member (46-3's customer app renders the roster/model picker for members),
+// but the /api/v1/agents group's SettingsView policy maps to settings:view =
+// admin/owner only (Auth/Permissions.cs) — inheriting it would 403 every SaaS
+// member on reads. Endpoint-level RequireAuthorization ADDS to a group's
+// policy (it cannot relax it), so the three GETs are mapped OUTSIDE the group
+// on AuthenticatedAny — the same deliberate read-gate deviation as the
+// convention-store and acceptance-rules reads below — keeping the group's
+// ConfigRead rate limit explicitly. The model list is fetched SERVER-side
+// with the tenant's BYOK key when present, else the platform key (epic D5);
+// responses carry model metadata only, never keys.
+app.MapGet("/api/v1/agents/providers/models",
+        ProviderCredentialEndpoints.GetTenantProviderRoster)
+    .RequireAuthorization("AuthenticatedAny").RequireRateLimiting("ConfigRead");
+app.MapGet("/api/v1/agents/providers/{provider}/models",
+        ProviderCredentialEndpoints.GetTenantProviderModels)
+    .RequireAuthorization("AuthenticatedAny").RequireRateLimiting("ConfigRead");
+app.MapGet("/api/v1/agents/providers/{provider}/model",
+        ProviderCredentialEndpoints.GetTenantProviderModel)
+    .RequireAuthorization("AuthenticatedAny").RequireRateLimiting("ConfigRead");
+// PUT/DELETE of the tenant model override stay on the group: its SettingsView
+// gate plus AgentManage (tenant_owner/tenant_admin → member 403) — model
+// choice sits at the same trust level as BYOK key custody (epic D3).
+agents.MapPut("/providers/{provider}/model", ProviderCredentialEndpoints.PutTenantProviderModel)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+agents.MapDelete("/providers/{provider}/model", ProviderCredentialEndpoints.DeleteTenantProviderModel)
+    .RequireAuthorization("AgentManage").RequireRateLimiting("ConfigWrite");
+
 // ── Integration BYOK — tenant-admin JIRA + email credential management ──
 // Sibling of the Story 32-3 provider BYOK endpoints. Set/remove the tenant's own
 // JIRA/email credential in the secret cabinet so the mediation resolves it
@@ -2655,6 +2754,21 @@ var adminConventions = app.MapGroup("/api/admin/conventions").RequireAuthorizati
 adminConventions.MapPut("/{role}/{action}", ConventionStoreEndpoints.UpsertSystemDefault);
 adminConventions.MapDelete("/{role}/{action}", ConventionStoreEndpoints.DeleteSystemDefault);
 adminConventions.MapPost("/{role}/{action}/reset", ConventionStoreEndpoints.ResetSystemDefault);
+
+// ── Epic 46 — provider admin surface (46-0 status roster + live models;
+// 46-1 platform settings mutations). Own PlatformOwnerAccess group modelled
+// on adminConventions above (epic D3: platform layer is the platform owner's
+// in SaaS; the sole user in single-user — the policy resolves to them).
+// NOTE (46-0 AC4 deviation): the status roster lives at /status because the
+// bare GET /api/admin/providers is already the Story 34-11 provider COST
+// price-book roster (AdminProviderPricingEndpoints.ListProviders, mapped on
+// the admin group above) — double-mapping it would be an ambiguous match.
+var adminProviders = app.MapGroup("/api/admin/providers")
+    .RequireAuthorization("PlatformOwnerAccess");
+adminProviders.MapGet("/status", ProviderAdminEndpoints.ListProviderStatus);
+adminProviders.MapGet("/{key}/models", ProviderAdminEndpoints.GetProviderModels);
+adminProviders.MapPut("/{key}/settings", ProviderAdminEndpoints.PutProviderSettings);
+adminProviders.MapDelete("/{key}/settings", ProviderAdminEndpoints.DeleteProviderSettings);
 
 // ── Acceptance Rules (Story 39-5) ──
 // Configurable per-document-type acceptance policy (autonomy dial + bounds +

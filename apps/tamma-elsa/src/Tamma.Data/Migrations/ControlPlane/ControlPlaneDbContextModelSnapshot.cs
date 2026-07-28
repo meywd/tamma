@@ -2189,6 +2189,67 @@ namespace Tamma.Data.Migrations.ControlPlane
                         });
                 });
 
+            modelBuilder.Entity("Tamma.Data.Entities.ProviderSetting", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string>("DefaultModel")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<bool>("Enabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("ProviderKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProviderKey")
+                        .HasDatabaseName("IX_provider_settings_ProviderKey");
+
+                    b.HasIndex("TenantId", "UserId", "ProviderKey")
+                        .IsUnique()
+                        .HasDatabaseName("IX_provider_settings_TenantId_UserId_ProviderKey");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("TenantId", "UserId", "ProviderKey"), false);
+
+                    b.ToTable("provider_settings", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_provider_settings_model", "\"DefaultModel\" IS NULL OR length(\"DefaultModel\") > 0");
+
+                            t.HasCheckConstraint("ck_provider_settings_principal_xor", "NOT (\"TenantId\" IS NOT NULL AND \"UserId\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_provider_settings_scope", "(\"Scope\" = 'platform' AND \"TenantId\" IS NULL AND \"UserId\" IS NULL) OR (\"Scope\" = 'principal' AND ((\"TenantId\" IS NOT NULL AND \"UserId\" IS NULL) OR (\"TenantId\" IS NULL AND \"UserId\" IS NOT NULL)))");
+                        });
+                });
+
             modelBuilder.Entity("Tamma.Data.Entities.RefreshToken", b =>
                 {
                     b.Property<Guid>("Id")

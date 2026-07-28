@@ -115,35 +115,61 @@ describe('nginx-proxy.conf.template', () => {
     expect(nginxConfig).toContain('$ELSA_ADMIN_API_KEY');
   });
 
-  describe('app.tamma.dev server block', () => {
-    let appBlock: string;
+  // Hostname re-layout (2026-07-28): the ADMIN console (oauth2-proxy'd)
+  // moved from app.tamma.dev to admin.tamma.dev; app.tamma.dev now serves
+  // the customer app alongside dash.tamma.dev (one block, two names).
+  describe('admin.tamma.dev server block (admin console)', () => {
+    let adminBlock: string;
 
     beforeAll(() => {
-      appBlock = serverBlocks.get('app.tamma.dev') ?? '';
-      expect(appBlock).not.toBe('');
+      adminBlock = serverBlocks.get('admin.tamma.dev') ?? '';
+      expect(adminBlock).not.toBe('');
     });
 
     it('has auth_request on the root / location (dashboard)', () => {
-      const locations = extractLocationBlocks(appBlock);
+      const locations = extractLocationBlocks(adminBlock);
       const rootLoc = locations.find((l) => l.path === '/');
       expect(rootLoc).toBeDefined();
       expect(rootLoc?.body).toContain('auth_request /oauth2/auth');
     });
 
     it('does NOT have auth_request on /api/ routes', () => {
-      const locations = extractLocationBlocks(appBlock);
+      const locations = extractLocationBlocks(adminBlock);
       const apiLoc = locations.find((l) => l.path === '/api/');
       expect(apiLoc).toBeDefined();
       expect(apiLoc?.body).not.toContain('auth_request');
     });
 
     it('has the /sign-out location that clears tamma_session', () => {
-      const locations = extractLocationBlocks(appBlock);
+      const locations = extractLocationBlocks(adminBlock);
       const signOutLoc = locations.find((l) => l.path === '= /sign-out');
       expect(signOutLoc).toBeDefined();
       expect(signOutLoc?.body).toContain('tamma_session=');
       expect(signOutLoc?.body).toContain('Max-Age=0');
       expect(signOutLoc?.body).toContain('/oauth2/sign_out');
+    });
+  });
+
+  describe('customer server block (dash.tamma.dev + app.tamma.dev)', () => {
+    let customerBlock: string;
+
+    beforeAll(() => {
+      // One server block, two names — keyed by the full server_name value.
+      customerBlock = serverBlocks.get('dash.tamma.dev app.tamma.dev') ?? '';
+      expect(customerBlock).not.toBe('');
+    });
+
+    it('does NOT have auth_request anywhere (customer app ships its own login)', () => {
+      // Epic 45 D1 / hostname re-layout: signup/verify/reset pages must be
+      // reachable anonymously on BOTH hosts — no GitHub OAuth wall.
+      expect(customerBlock).not.toContain('auth_request');
+    });
+
+    it('serves app.tamma.dev from the customer block, not the admin one', () => {
+      // app.tamma.dev must appear ONLY here (plus the port-80 redirect),
+      // never as the admin console's server_name.
+      const adminBlock = serverBlocks.get('admin.tamma.dev') ?? '';
+      expect(adminBlock).not.toContain('app.tamma.dev');
     });
   });
 

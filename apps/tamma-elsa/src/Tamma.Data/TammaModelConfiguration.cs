@@ -1070,6 +1070,77 @@ internal static class TammaModelConfiguration
     }
 
     /// <summary>
+    /// Story 46-1 — configure the <c>provider_settings</c> table (persisted
+    /// provider model selection + platform enable flag). CP-resident in BOTH
+    /// modes (epic 46 D3a) — configured ONLY on <see cref="ControlPlaneDbContext"/>,
+    /// never on the tenant context.
+    ///
+    /// <para>Three row kinds behind two CHECKs: <c>ck_provider_settings_scope</c>
+    /// ties the <c>Scope</c> discriminator to the null pattern (platform = both
+    /// principal columns null; principal = XOR — the
+    /// <c>ck_prompt_overrides_principal_xor</c> pattern), and
+    /// <c>ck_provider_settings_model</c> pins "a stored model is never an empty
+    /// string" (a platform row may carry NULL when it only stores the enabled
+    /// flag). The unique index uses NULLS NOT DISTINCT so the all-null platform
+    /// principal dedupes like any other (same pattern as prompt_overrides /
+    /// agent_role_selections).</para>
+    ///
+    /// <para><b>No FK to tenants/users</b> — this table is deliberately EXCLUDED
+    /// from the Epic 19 destructive startup DROP list so UI model selections
+    /// survive redeploys; an FK would cascade the rows away with the wiped
+    /// principals (see <see cref="Entities.ProviderSetting"/>).</para>
+    /// </summary>
+    public static void ConfigureProviderSettings(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<ProviderSetting>(entity =>
+        {
+            entity.ToTable("provider_settings", t =>
+            {
+                // Scope ⇄ null-pattern invariant: platform rows have neither
+                // principal column; principal rows have exactly one.
+                t.HasCheckConstraint(
+                    "ck_provider_settings_scope",
+                    "(\"Scope\" = 'platform' AND \"TenantId\" IS NULL AND \"UserId\" IS NULL) "
+                    + "OR (\"Scope\" = 'principal' AND ("
+                    + "(\"TenantId\" IS NOT NULL AND \"UserId\" IS NULL) "
+                    + "OR (\"TenantId\" IS NULL AND \"UserId\" IS NOT NULL)))");
+                // Strict XOR for principal rows (mirrors
+                // ck_prompt_overrides_principal_xor; platform rows are exempt
+                // by the all-null arm above — this CHECK forbids BOTH set).
+                t.HasCheckConstraint(
+                    "ck_provider_settings_principal_xor",
+                    "NOT (\"TenantId\" IS NOT NULL AND \"UserId\" IS NOT NULL)");
+                // A stored model is never the empty-string sentinel (config's
+                // "" keeps meaning "no opinion"; DB rows must carry a real id
+                // or NULL for a flag-only platform row).
+                t.HasCheckConstraint(
+                    "ck_provider_settings_model",
+                    "\"DefaultModel\" IS NULL OR length(\"DefaultModel\") > 0");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Scope).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.ProviderKey).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.DefaultModel).HasMaxLength(256);
+            entity.Property(e => e.Enabled).IsRequired().HasDefaultValue(true);
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // One row per (principal, provider). NULLS NOT DISTINCT (PG15+;
+            // production runs PG17) so the all-null platform principal and the
+            // half-null tenant/user principals each dedupe — same pattern as
+            // prompt_overrides / agent_role_selections.
+            entity.HasIndex(e => new { e.TenantId, e.UserId, e.ProviderKey })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("IX_provider_settings_TenantId_UserId_ProviderKey");
+
+            // Platform-row hot path (the snapshot rebuild filters by key).
+            entity.HasIndex(e => e.ProviderKey)
+                .HasDatabaseName("IX_provider_settings_ProviderKey");
+        });
+    }
+
+    /// <summary>
     /// Story 35-1 — billing foundation entities. The tenant→Stripe customer
     /// mapping (<c>billing_customers</c>, unique <c>TenantId</c>) and the
     /// slug→Stripe-ids catalog (<c>billing_plan_prices</c>, unique

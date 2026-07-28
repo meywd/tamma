@@ -61,9 +61,9 @@ console — epic README open question 3.
 
 | Call | Use |
 |---|---|
-| `GET /api/v1/agents/providers/models` | roster: enabled providers with `key`, `displayName`, `modelsSupported`, resolved `model`, `source`, `hasOverride`, `byokKeyPresent` |
-| `GET /api/v1/agents/providers/{provider}/models` | picker payload — same envelope as the admin route; **server-side the fetch uses the tenant's BYOK key when present, else the platform key** (epic D5); the browser never sees a key |
-| `GET /api/v1/agents/providers/{provider}/model` | resolved model + source + override |
+| `GET /api/v1/agents/providers/models` | roster: enabled providers with `key`, `displayName`, `modelsSupported`, resolved `model`, `source`, `hasOverride`, `byokKeyPresent` — plus the additive `fallbackModel` *(Amended 2026-07-28, conformance review: post-story field — the model the tenant would resolve to without its override, skip-principal resolution, so the reset confirm can name it; see `.dev/bugs/2026-07-27-tenant-surface-cannot-name-platform-default-under-override.md`)* |
+| `GET /api/v1/agents/providers/{provider}/models` | picker payload — same envelope as the admin route; **server-side the fetch uses the tenant's BYOK key when present, else the platform key** (epic D5); the browser never sees a key. *(Amended 2026-07-28, conformance review: the envelope carries the additive `delisted` field — `true` only on the synthesized current entry the provider no longer lists; see `.dev/bugs/2026-07-27-models-envelope-lacks-delisted-flag.md`)* |
+| `GET /api/v1/agents/providers/{provider}/model` | resolved model + source + override — plus the additive `fallbackModel` *(Amended 2026-07-28, conformance review: same post-story field and bug record as the roster row above)* |
 | `PUT /api/v1/agents/providers/{provider}/model` | set the tenant override `{model}`; response carries `pricingKnown` + `warning?` |
 | `DELETE /api/v1/agents/providers/{provider}/model` | remove the override → platform default |
 

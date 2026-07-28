@@ -391,7 +391,7 @@ Built through as one epic. The ordering below is sequencing, not separate releas
 | 0 | Prerequisite fixes and dead code | 2 |
 | 1 | `AutonomyDial`: one constant, published, drift-tested | 2 |
 | 2 | Catalog core: union vocabulary + fail-loud index | 5 |
-| 3 | Groups: the 15-member partition + behaviour-preserving defaults | 3 |
+| 3 | Groups: the 16-member partition + behaviour-preserving defaults | 3 |
 | 4 | Tool-vocabulary reconciliation + startup validator | 3 |
 | 5 | Storage, principal resolution, resolver, audit | 5 |
 | 6 | Admin API + RBAC | 3 |

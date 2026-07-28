@@ -46,6 +46,21 @@ describe('LoginPage', () => {
     );
   });
 
+  // Story 45-3 AC2 — without this link, the password-reset flow is a page
+  // nobody can reach (the exact defect class Epic 45 exists to fix).
+  it('links to /forgot-password', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(new Response('', { status: 401 }));
+
+    renderWithRouter();
+
+    expect(await screen.findByRole('link', { name: /forgot your password/i })).toHaveAttribute(
+      'href',
+      '/forgot-password',
+    );
+  });
+
   it('submits credentials and redirects to "/" on success', async () => {
     const fetchMock = vi.fn();
     fetchMock

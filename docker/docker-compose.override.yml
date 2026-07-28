@@ -35,6 +35,10 @@ services:
     ports:
       - "3001:3001"
 
+  tamma-dashboard-user:
+    ports:
+      - "3002:3002"
+
   elsa-studio:
     ports:
       - "14000:80"

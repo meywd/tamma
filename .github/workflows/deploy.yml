@@ -107,7 +107,9 @@ jobs:
             "TAMMA_SERVICE_API_KEY=${{ secrets.TAMMA_SERVICE_API_KEY }}" \
             "CRANL_ENCRYPTION_KEY=${{ secrets.TAMMA_CRANL_ENCRYPTION_KEY }}" \
             "API_BASE_URL=https://api.tamma.dev" \
-            "DASHBOARD_URL=https://app.tamma.dev" \
+            "DASHBOARD_URL=https://admin.tamma.dev" \
+            "CUSTOMER_DASHBOARD_URL=https://dash.tamma.dev" \
+            "DASHBOARD_ADDITIONAL_ORIGINS=https://app.tamma.dev" \
           | ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
@@ -139,6 +141,9 @@ jobs:
               build: !reset null
             tamma-dashboard:
               image: ghcr.io/${OWNER}/tamma-dashboard:${IMAGE_TAG}
+              build: !reset null
+            tamma-dashboard-user:
+              image: ghcr.io/${OWNER}/tamma-dashboard-user:${IMAGE_TAG}
               build: !reset null
             elsa-server:
               image: ghcr.io/${OWNER}/tamma-elsa:${IMAGE_TAG}
@@ -240,14 +245,14 @@ jobs:
               echo 'FAILED: APIs not healthy' && \$COMPOSE logs --tail=30 tamma-api tamma-api-dotnet && exit 1
             "
 
-      - name: "Start: engine + dashboard + oauth2-proxy + nginx-proxy"
+      - name: "Start: engine + dashboards + oauth2-proxy + nginx-proxy"
         run: |
           ssh -i ~/.ssh/deploy_key \
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
               docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env \
-                up -d tamma-engine tamma-dashboard elsa-studio oauth2-proxy nginx-proxy && \
+                up -d tamma-engine tamma-dashboard tamma-dashboard-user elsa-studio oauth2-proxy nginx-proxy && \
               sleep 5 && \
               docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env ps && \
               echo 'Running OpenSearch bootstrap (if observability stack is up)...' && \
@@ -307,7 +312,7 @@ jobs:
             -p ${{ secrets.VPS_SSH_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "
               cd ${{ secrets.VPS_DEPLOY_PATH }}/docker && \
-              for svc in postgres rabbitmq elsa-server tamma-api-dotnet tamma-api tamma-engine tamma-dashboard; do
+              for svc in postgres rabbitmq elsa-server tamma-api-dotnet tamma-api tamma-engine tamma-dashboard tamma-dashboard-user; do
                 echo \"=== \$svc (last 50) ===\" && \
                 docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.images.yml --env-file ../.env logs --tail=50 \$svc 2>/dev/null || echo '(no logs)'
               done

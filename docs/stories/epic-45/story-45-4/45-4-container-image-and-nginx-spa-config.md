@@ -1,6 +1,6 @@
 # Story 45-4: Container Image — `docker/Dockerfile.dashboard-user` and `docker/nginx-dashboard-user.conf`
 
-Status: drafted
+Status: done (code) — conformance-reviewed 2026-07-28; in-container /api proxy preserves the prefix (review fix — the AC's bare-/ form was the defect); container run probes are deploy-time
 
 ## MANDATORY: Before You Code
 

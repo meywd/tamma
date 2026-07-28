@@ -16,17 +16,18 @@
 #   tamma-api:        768M  (consolidated C# API)
 #   tamma-engine:     1G
 #   tamma-dashboard:  256M
+#   tamma-dashboard-user: 256M  (customer SPA — dash.tamma.dev)
 #   elsa-studio:      128M
 #   nginx-proxy:      128M
 #   ─────────────────────
-#   Total:          ~8.8G  (leaves ~7.2G for OS, Docker, and headroom)
+#   Total:          ~9.0G  (leaves ~7G for OS, Docker, and headroom)
 #
 # With observability profile (+opensearch +dashboards):
 #   opensearch:       3G
 #   opensearch-dashboards: 1.5G
 #   opensearch-setup: 128M
 #   ─────────────────────
-#   Total:         ~13.4G  (sum of LIMITS/caps, not reservations — actual RSS
+#   Total:         ~13.7G  (sum of LIMITS/caps, not reservations — actual RSS
 #                           is far lower; but do not run the observability
 #                           profile + ollama on a 16GB box without headroom care)
 # =============================================================================
@@ -90,6 +91,15 @@ services:
           memory: 1G
 
   tamma-dashboard:
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 256M
+    # No exposed ports — reachable via nginx-proxy only
+
+  tamma-dashboard-user:
     restart: unless-stopped
     deploy:
       resources:

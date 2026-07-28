@@ -254,7 +254,25 @@ services:
       # ProxyHeaderAuthMiddleware, which calls oauth2-proxy /oauth2/userinfo
       # at this URL.
       OAuth2Proxy__Url: http://oauth2-proxy:4180
-      Dashboard__Url: ${DASHBOARD_URL:-https://app.tamma.dev}
+      # Hostname re-layout (2026-07-28): the ADMIN console (oauth2-proxy'd)
+      # lives at admin.tamma.dev; app.tamma.dev now serves the CUSTOMER app
+      # alongside dash.tamma.dev.
+      Dashboard__Url: ${DASHBOARD_URL:-https://admin.tamma.dev}
+      # Story 45-7 — customer-facing links (verify / reset / invites / GitHub
+      # install redirects) target the CUSTOMER app, not the oauth2-proxied
+      # admin console. The EMPTY default is load-bearing (review finding,
+      # 2026-07-28): DashboardUrls treats empty as unset and falls back to
+      # Dashboard:Url, so a self-hosted install that sets only DASHBOARD_URL
+      # keeps the pre-split contract. A hardcoded default here would send
+      # every install's one-time verify/reset/invite tokens to Tamma's
+      # production host. Tamma's own deploy sets CUSTOMER_DASHBOARD_URL.
+      Dashboard__CustomerUrl: ${CUSTOMER_DASHBOARD_URL:-}
+      # Hostname re-layout (2026-07-28) — the customer app legitimately
+      # serves from TWO origins (app.tamma.dev AND dash.tamma.dev), and CORS
+      # matches origins exactly, so the extra one(s) ride in via this CSV.
+      # EMPTY default on purpose: self-hosters with one host per app need
+      # nothing here; Tamma's own deploy sets it to https://app.tamma.dev.
+      Dashboard__AdditionalOrigins: ${DASHBOARD_ADDITIONAL_ORIGINS:-}
       ChromaDb__Url: http://chromadb:8000
       IntelligenceServer__Url: http://intelligence-server:4100
       IntelligenceServer__TimeoutSeconds: "10"
@@ -311,6 +329,23 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.dashboard
+    restart: unless-stopped
+    depends_on:
+      tamma-api:
+        condition: service_started
+    networks:
+      - tamma-net
+
+  # ---------------------------------------------------------------------------
+  # Tamma Customer Dashboard (React SPA via nginx) — the customer-facing app
+  # at dash.tamma.dev AND app.tamma.dev. Ships its own /login + /register;
+  # served WITHOUT oauth2-proxy (see the dash.tamma.dev + app.tamma.dev
+  # block in nginx-proxy.conf.template).
+  # ---------------------------------------------------------------------------
+  tamma-dashboard-user:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dashboard-user
     restart: unless-stopped
     depends_on:
       tamma-api:
@@ -423,11 +458,14 @@ services:
       - tamma-net
 
   # ---------------------------------------------------------------------------
-  # Reverse Proxy (nginx — routes api.tamma.dev / app.tamma.dev)
+  # Reverse Proxy (nginx — routes api.tamma.dev / admin.tamma.dev /
+  # app.tamma.dev / dash.tamma.dev)
   #
-  # Hard-depends on tamma-api and tamma-dashboard (critical path).
-  # oauth2-proxy and opensearch-dashboards are soft dependencies — nginx
-  # resolves them at request time and returns 502 if unavailable.
+  # Hard-depends on tamma-api, tamma-dashboard and tamma-dashboard-user
+  # (critical path — the customer app is the product and is at least as
+  # critical as the admin console). oauth2-proxy and opensearch-dashboards
+  # are soft dependencies — nginx resolves them at request time and returns
+  # 502 if unavailable.
   # ---------------------------------------------------------------------------
   nginx-proxy:
     image: nginx:1.27-alpine
@@ -448,6 +486,8 @@ services:
       tamma-api:
         condition: service_started
       tamma-dashboard:
+        condition: service_started
+      tamma-dashboard-user:
         condition: service_started
     networks:
       - tamma-net

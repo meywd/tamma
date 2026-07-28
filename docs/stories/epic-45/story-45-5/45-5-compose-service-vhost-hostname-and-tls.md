@@ -1,6 +1,6 @@
 # Story 45-5: Compose Service, `dash.tamma.dev` vhost, TLS and DNS
 
-Status: drafted
+Status: code-complete — conformance-reviewed 2026-07-28; cert-SAN + DNS operator items tracked in .dev/findings/2026-07-28-epic45-cutover-evidence.md (DNS + edge TLS already evidenced there); /api probe pins prefix survival via /api/v1/auth/me→401 (health has an unprefixed twin)
 
 ## MANDATORY: Before You Code
 

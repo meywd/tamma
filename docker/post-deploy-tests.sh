@@ -14,10 +14,10 @@
 # Notes on HTTPS + SNI:
 #   We use `curl --resolve` instead of `-H "Host: ..."` because nginx selects
 #   the server block from the TLS SNI, NOT the HTTP Host header. Sending
-#   `-H Host: app.tamma.dev` while curl uses SNI=localhost lands the request
-#   on the first 443 server block (not app.tamma.dev), which masks real config
-#   bugs. `--resolve host:443:ip` makes curl send SNI=host while connecting
-#   to `ip`, which is what we actually want.
+#   `-H Host: admin.tamma.dev` while curl uses SNI=localhost lands the request
+#   on the first 443 server block (not admin.tamma.dev), which masks real
+#   config bugs. `--resolve host:443:ip` makes curl send SNI=host while
+#   connecting to `ip`, which is what we actually want.
 # =============================================================================
 
 set -uo pipefail
@@ -80,6 +80,34 @@ test_endpoint() {
 
 header() { printf "\n${BOLD}--- %s ---${RESET}\n" "$1"; }
 
+# test_endpoint_strict LABEL HOST PATH EXPECTED [METHOD] [DATA]
+#   Like test_endpoint, but 404 is a hard FAIL instead of a "not deployed
+#   yet" WARN. Use for probes whose regression symptom IS a 404 (SPA
+#   fallback, /api prefix survival) — the lenient helper can never catch
+#   those (review finding, 2026-07-28).
+test_endpoint_strict() {
+  local label="$1" host="$2" path="$3" expected="$4"
+  local method="${5:-GET}" data="${6:-}"
+
+  local curl_args=(-sk -o /dev/null -w '%{http_code}' --max-time 5
+    --resolve "${host}:443:${TARGET_IP}"
+    -X "${method}")
+  [ -n "${data}" ] && curl_args+=(-H 'Content-Type: application/json' -d "${data}")
+  curl_args+=("https://${host}${path}")
+
+  local status
+  status=$(curl "${curl_args[@]}" 2>/dev/null) || status="000"
+
+  if [ "${status}" = "${expected}" ]; then
+    PASS=$((PASS + 1))
+    printf "  ${GREEN}PASS${RESET}  %-55s  HTTP %s\n" "${label}" "${status}"
+  else
+    FAIL=$((FAIL + 1))
+    RESULTS+=("${label} — got ${status}, expected ${expected} (strict: 404 fails)")
+    printf "  ${RED}FAIL${RESET}  %-55s  HTTP %s (expected %s, strict)\n" "${label}" "${status}" "${expected}"
+  fi
+}
+
 # =============================================================================
 # Diagnostics — only when running on the VPS directly
 # =============================================================================
@@ -126,8 +154,8 @@ header "Story 16-1: OAuth2 Proxy"
 # Success = any HTTP response that is not 000 (connection refused) or 502
 # (upstream unavailable).
 OA_PROBE=$(curl -sk -o /dev/null -w '%{http_code}' --max-time 5 \
-  --resolve "app.tamma.dev:443:${TARGET_IP}" \
-  "https://app.tamma.dev/oauth2/sign_in" 2>/dev/null) || OA_PROBE="000"
+  --resolve "admin.tamma.dev:443:${TARGET_IP}" \
+  "https://admin.tamma.dev/oauth2/sign_in" 2>/dev/null) || OA_PROBE="000"
 if [ "${OA_PROBE}" != "000" ] && [ "${OA_PROBE}" != "502" ] && [ "${OA_PROBE}" != "504" ]; then
   PASS=$((PASS + 1))
   printf "  ${GREEN}PASS${RESET}  %-55s  HTTP %s\n" "oauth2-proxy reachable via nginx" "${OA_PROBE}"
@@ -137,12 +165,44 @@ else
   printf "  ${RED}FAIL${RESET}  %-55s  HTTP %s\n" "oauth2-proxy reachable via nginx" "${OA_PROBE}"
 fi
 
-# app.tamma.dev: unauthenticated should get 302 redirect to oauth2-proxy
-# If oauth2-proxy is not wired (old nginx config), it returns 200
-test_endpoint "app.tamma.dev / unauthenticated → 302 redirect" "app.tamma.dev" "/" "302"
+# admin.tamma.dev: unauthenticated should get 302 redirect to oauth2-proxy
+# (hostname re-layout 2026-07-28: the admin console moved here from
+# app.tamma.dev, which now serves the customer app — see the strict probes
+# below). If oauth2-proxy is not wired (old nginx config), it returns 200.
+test_endpoint "admin.tamma.dev / unauthenticated → 302 redirect" "admin.tamma.dev" "/" "302"
 
 # API health bypasses oauth2-proxy — must always be 200
 test_endpoint "api.tamma.dev /api/health bypasses auth" "api.tamma.dev" "/api/health" "200"
+
+# ---------------------------------------------------------------------------
+header "Epic 45: Customer app (dash.tamma.dev + app.tamma.dev)"
+
+# dash.tamma.dev AND app.tamma.dev: the CUSTOMER app must be reachable
+# anonymously on BOTH hosts — 200, NOT 302. This is the deliberate INVERSE
+# of the admin.tamma.dev assertion above: admin.tamma.dev proves
+# oauth2-proxy IS in front of the admin console; these prove it is NOT in
+# front of the customer app (its signup / verify / reset pages must load
+# without a GitHub OAuth wall). A 302 here means someone copied the admin
+# vhost's auth_request block — a regression. app.tamma.dev joined this set
+# in the 2026-07-28 hostname re-layout (it used to BE the admin console) —
+# a 302 on it means the old oauth2-proxy'd vhost came back.
+test_endpoint_strict "dash.tamma.dev / anonymous → 200 (NOT 302)" "dash.tamma.dev" "/" "200"
+test_endpoint_strict "app.tamma.dev / anonymous → 200 (NOT 302)" "app.tamma.dev" "/" "200"
+
+# Deep link through the full proxy chain — proves the SPA fallback
+# (try_files → index.html) survives nginx-proxy → dashboard-user nginx.
+# STRICT: the regression symptom is exactly a 404, which the lenient
+# helper reports as "not deployed yet" and passes. Probed on both customer
+# hosts — they share one server block, but the probe is what proves it.
+test_endpoint_strict "dash.tamma.dev deep link (SPA fallback)" "dash.tamma.dev" "/settings/billing" "200"
+test_endpoint_strict "app.tamma.dev deep link (SPA fallback)" "app.tamma.dev" "/settings/billing" "200"
+
+# /api prefix survival through the customer vhost. /api/v1/auth/me is
+# /api-ONLY (no unprefixed twin — /api/health has one at /health, so it
+# cannot detect a stripped prefix): correct proxying → 401 anonymous;
+# a prefix-stripping proxy_pass → 404 → strict FAIL.
+test_endpoint_strict "dash.tamma.dev /api prefix survives (auth/me → 401)" "dash.tamma.dev" "/api/v1/auth/me" "401"
+test_endpoint_strict "app.tamma.dev /api prefix survives (auth/me → 401)" "app.tamma.dev" "/api/v1/auth/me" "401"
 
 # Webhooks must not require auth (GitHub sends unsigned POSTs for pings)
 test_endpoint "api.tamma.dev /api/github/webhooks reachable" "api.tamma.dev" "/api/github/webhooks" "401" "POST" '{"action":"ping"}'

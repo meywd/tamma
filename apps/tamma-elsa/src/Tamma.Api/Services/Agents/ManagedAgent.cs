@@ -926,7 +926,10 @@ public sealed class ManagedAgent : IManagedAgent
         // Override provider differs from the role-resolved one — the resolved model
         // is a model for a DIFFERENT provider, so use the override provider's own
         // default (legacy GetDefaultModel). Guard against an empty default.
-        var providerDefault = _runner.GetDefaultModel(chosenProvider);
+        // Story 46-1 (AC3) — pass the request's tenant context so a per-tenant
+        // model override (provider_settings) wins over the platform/config/
+        // descriptor defaults for this tenant's runs.
+        var providerDefault = _runner.GetDefaultModel(chosenProvider, request.TenantId);
         return string.IsNullOrWhiteSpace(providerDefault) ? resolved.Model : providerDefault;
     }
 

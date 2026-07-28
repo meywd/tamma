@@ -68,6 +68,19 @@ export class ApiClient {
     return this.request<T>(path, requestInit);
   }
 
+  async patch<T>(path: string, body?: unknown, init?: RequestInit): Promise<T> {
+    const requestInit: RequestInit = {
+      ...init,
+      method: 'PATCH',
+      headers: {
+        ...((init?.headers as Record<string, string>) ?? {}),
+        'Content-Type': 'application/json',
+      },
+    };
+    if (body !== undefined) requestInit.body = JSON.stringify(body);
+    return this.request<T>(path, requestInit);
+  }
+
   async delete<T>(path: string, init?: RequestInit): Promise<T> {
     return this.request<T>(path, { ...init, method: 'DELETE' });
   }
