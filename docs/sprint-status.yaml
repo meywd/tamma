@@ -737,7 +737,7 @@ development_status:
   # NAMING: every obvious noun is taken (Task → TaskRef/PlanTask/QueuedTask/TaskKind//api/tasks/reserved
   # TASK.*; Story → the live stories table; Issue → the dead record; Cycle → CycleEvents). Hence WorkItem /
   # Iteration / Project in Tamma.Core.Tracking.
-  44-0-tracker-core: done                                    # IMPLEMENTED 2026-07-28 (PR #506): Tamma.Core/Tracking/ — 4 kinds, 8 statuses + no-default Category() switch, hierarchy invariants (depth 6, task-under-epic regression), WorkItemRef + key history, base-62 Rank (10k-insertion property tests), priority/estimate/relations. 77 tests.
+  44-0-tracker-core: done                                    # IMPLEMENTED 2026-07-28 (PR #506): Tamma.Core/Tracking/ — 4 kinds, 8 statuses + no-default Category() switch, hierarchy invariants (depth 6, task-under-epic regression), WorkItemRef + key history, base-62 Rank (10k-insertion property tests), priority/estimate/relations. 81 tests (77 + 4 review-round rank tests). Conformance-reviewed 2026-07-28: all 16 ACs verified done.
   # REWORKED 2026-07-25 after comparing against Linear's published GraphQL schema
   # (.dev/findings/linear-comparison-against-story-44-0.md). The (parentKind, childKind) matrix is
   # DELETED: it had only THREE distinct rows — Story/Bug/Spike interchangeable, Task/Chore

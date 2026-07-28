@@ -84,7 +84,9 @@ P1 — Wave 1. Hierarchy and ranking are what make a list a tracker. The apply s
 - Any change to 41-3's workflow, prompt cell or acceptance path.
 - Iterations and the `SprintPlan` apply seam — 44-4 (same shape, different document).
 - Cross-project hierarchy. Rejected in AC1 and not planned; a parent in another project makes the project key meaningless as an identifier prefix.
-- Dependency edges (`dependsOn`) between work items. `DecompositionTask` and `PlanTask` both carry `dependsOn` inside their document bodies; promoting that to a tracker-level graph needs a cycle model, a critical-path renderer and a scheduling story. Deferred.
+- Dependency edges (`dependsOn`) between work items. `DecompositionTask` and `PlanTask` both carry `dependsOn` inside their document bodies; promoting that to a tracker-level graph needs a cycle model, a critical-path renderer and a scheduling story. Deferred. **This deferral does NOT cover `work_item_relations` validation** — see the added AC below.
+
+**Added AC (2026-07-28, conformance review):** this story owns the write-path validation of `work_item_relations` rows that 44-0/44-1/epic D12 assign here: reject self-edges (`TRACKER.SELF_RELATION` — `WorkItemRelationKind.Canonicalize` already throws; call it), reject cross-project edges, and store symmetric kinds in canonical lower-id-first form via `Canonicalize` before insert (44-1's unique index assumes it). Without this AC the relation vocabulary ships with no enforcement — the exact dead-vocabulary failure 44-0 AC14 warns about.
 
 ## Estimated Effort
 

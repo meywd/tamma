@@ -1,6 +1,6 @@
 # Story 44-0: Tracker Core — Vocabularies, `WorkItemRef`, Hierarchy Invariants, Rank Algebra, Fail-Loud Index
 
-Status: drafted
+Status: done — implemented 2026-07-28 (PR #506); AC9's append/prepend text amended post-review (see change note at AC9)
 
 ## MANDATORY: Before You Code
 
@@ -108,7 +108,7 @@ P0 — Wave 0. Every other story in Epic 44 depends on these types. `Tamma.Core`
      Tests assert: `Record` is idempotent (re-recording the same outgoing key does not duplicate it), preserves order oldest-first, and `Matches` resolves both the current key and every previous one — and that a project move alone produces **no** `PreviousKeys` entry, because the key did not change.
 
 9. **`Rank`** — a fractional-index algebra: `Rank.Between(string? left, string? right)` returning a base-62 string that sorts strictly between its neighbours under **ordinal** comparison, plus `Rank.First()`, `Rank.Append(string? currentMax)` and `Rank.Prepend(string? currentMin)`.
-   **There is no `Rank.Last()`.** A `Last()` that returns a fixed sentinel is a collision waiting to happen — two consecutive appends both get the sentinel and the two items compare equal, which is the exact failure the epic README's D7 rejects `double` for. Appending is `Between(currentMax, null)` and it needs the caller's current maximum; `Append(currentMax)` makes that parameter unavoidable at the call site. `Prepend` is its mirror.
+   **There is no `Rank.Last()`.** A `Last()` that returns a fixed sentinel is a collision waiting to happen — two consecutive appends both get the sentinel and the two items compare equal, which is the exact failure the epic README's D7 rejects `double` for. Appending needs the caller's current maximum; `Append(currentMax)` makes that parameter unavoidable at the call site. `Prepend` is its mirror. *(Amended 2026-07-28, review round: as shipped, `Append`/`Prepend` are digit-increment/decrement with carry — NOT `Between` with an open side, which grows rank length linearly under pure append chains (10k appends: 2,001 chars vs 165). The AC's testable requirements — strictly increasing, distinct, defined null cases — are unchanged; `Rank.cs` documents the convention and its pre-44-1 timing.)*
    Property tests assert: (a) 10 000 sequential midpoint insertions between a fixed pair never collide and never exceed a stated length bound; (b) ordinal sort order of a shuffled generated sequence matches insertion intent; (c) `Between(null, null)`, `Between(x, null)` and `Between(null, x)` are all defined; (d) **two consecutive `Append` calls produce distinct, strictly increasing ranks** — the regression test for the deleted `Last()`.
 
 10. **Two rank axes, not one — and not one per status column.** `Rank` (the type) serves two *columns* on the work item, both project-scoped strings over the same algebra:

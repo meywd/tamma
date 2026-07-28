@@ -87,6 +87,13 @@ P0 — Wave 0. 44-3, 44-4, 44-6, 44-7 and 44-8 are all consumers of this surface
 - **Story 39-20** — `ITaskAudienceResolver`'s real implementation. **Not blocking**: AC6/AC7 are written to degrade honestly against the stub and to light up when 39-20 lands, with no code change beyond the DI registration 39-20 itself performs.
 - **Epic 43** — blocking only if 43-8's ratchet arms before this lands; AC10 covers both orders.
 
+
+**Added obligation (2026-07-28, conformance review):** the API write path enforces
+estimate/scale coherence via `EstimateScale.AllowsEstimate` (shipped in 44-0 —
+`Tamma.Core/Tracking/EstimateScale.cs`): a work-item write carrying an `Estimate` under a
+project whose scale is `not_used` is a 400, not a silent store. The pure rule already
+exists; this story owns calling it at the boundary.
+
 ## Out of Scope
 
 - Hierarchy validation and reparenting rules — 44-3.
