@@ -455,7 +455,8 @@ deployment path.
 This creates a stated tension with 39-19, which puts `/chat` and `/tasks` in `dashboard-user`.
 **Epic 44 does not resolve it and does not silently absorb it**: the tracker ships in the deployed
 dashboard, and 39-19 cannot land until the `dashboard-user` deployment path exists — that path is now
-scheduled as Epic 45 (`docs/stories/epic-45/`).
+scheduled as Epic 45 (`docs/stories/epic-45/`). Host targeting for the tracker UI: `app.tamma.dev`
+(normal users) per `.dev/decisions/2026-07-28-three-host-layout.md`.
 
 **What does not exist, that a board needs:**
 
