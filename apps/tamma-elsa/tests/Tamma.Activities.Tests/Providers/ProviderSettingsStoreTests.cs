@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 using Tamma.Activities.Tests.LlmCall; // FakeTimeProvider (local test helper)
@@ -12,8 +13,10 @@ namespace Tamma.Activities.Tests.Providers;
 /// <summary>
 /// Story 46-1 (AC2) — the provider-settings snapshot store: sync reads,
 /// invalidate-on-write, the pinned 60 s lazy-refresh TTL, per-mode principal
-/// resolution (SaaS tenant-keyed vs single-user user-keyed), and the
-/// no-repository degradation (reads answer "no row"; writes fail loud).
+/// resolution (SaaS tenant-keyed vs single-user user-keyed), the
+/// no-repository degradation (reads answer "no row"; writes fail loud),
+/// startup priming (review F1), stale-load discard (review F2), and the
+/// single-user multi-user-row collapse warning (review F7).
 /// </summary>
 [TestFixture]
 public class ProviderSettingsStoreTests
@@ -65,14 +68,78 @@ public class ProviderSettingsStoreTests
         }
     }
 
+    /// <summary>Review F2 harness — delegates to <see cref="FakeRepository"/>
+    /// but holds the FIRST LoadAllAsync open (after it has captured the rows
+    /// as they were when the read began) until the test releases the gate —
+    /// simulating a slow background TTL load racing a write refresh.</summary>
+    private sealed class GatedRepository : IProviderSettingsRepository
+    {
+        private readonly FakeRepository _inner = new();
+        private int _loadCalls;
+
+        public List<ProviderSetting> Rows => _inner.Rows;
+        public TaskCompletionSource FirstLoadStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource FirstLoadGate { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<IReadOnlyList<ProviderSetting>> LoadAllAsync(
+            CancellationToken ct = default)
+        {
+            var call = Interlocked.Increment(ref _loadCalls);
+            // Capture the rows AS OF the moment the read began — the stale
+            // load must return the pre-write state, like a DB read would.
+            var rows = await _inner.LoadAllAsync(ct);
+            if (call == 1)
+            {
+                FirstLoadStarted.TrySetResult();
+                await FirstLoadGate.Task;
+            }
+            return rows;
+        }
+
+        public Task<ProviderSetting> UpsertAsync(
+            Guid? tenantId, Guid? userId, string providerKey, string? model, bool? enabled,
+            Guid? updatedBy, CancellationToken ct = default) =>
+            _inner.UpsertAsync(tenantId, userId, providerKey, model, enabled, updatedBy, ct);
+
+        public Task<bool> DeleteAsync(
+            Guid? tenantId, Guid? userId, string providerKey, CancellationToken ct = default) =>
+            _inner.DeleteAsync(tenantId, userId, providerKey, ct);
+    }
+
+    private sealed class ThrowingRepository : IProviderSettingsRepository
+    {
+        public Task<IReadOnlyList<ProviderSetting>> LoadAllAsync(CancellationToken ct = default)
+            => throw new InvalidOperationException("db unavailable");
+        public Task<ProviderSetting> UpsertAsync(
+            Guid? t, Guid? u, string p, string? m, bool? e, Guid? by, CancellationToken ct = default)
+            => throw new NotSupportedException();
+        public Task<bool> DeleteAsync(
+            Guid? t, Guid? u, string p, CancellationToken ct = default)
+            => throw new NotSupportedException();
+    }
+
     private sealed class FixedMode : ITammaModeProvider
     {
         public FixedMode(TammaMode mode) => Mode = mode;
         public TammaMode Mode { get; }
     }
 
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = new();
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Entries.Add((logLevel, formatter(state, exception)));
+    }
+
     private static ProviderSettingsStore Store(
-        FakeRepository? repo, TammaMode mode = TammaMode.SaaS, TimeProvider? time = null) =>
+        IProviderSettingsRepository? repo, TammaMode mode = TammaMode.SaaS,
+        TimeProvider? time = null) =>
         new(repo, new FixedMode(mode), NullLogger<ProviderSettingsStore>.Instance, time);
 
     // ── AC9 test 5: write → same-instance read is immediate ────────────────
@@ -185,16 +252,21 @@ public class ProviderSettingsStoreTests
     }
 
     [Test]
-    public void PrincipalWrites_RequireExactlyOnePrincipalId()
+    public async Task PrincipalWrites_RequireExactlyOnePrincipalId()
     {
+        // Review F5 — these assertions were previously un-awaited
+        // (Should().ThrowAsync returns a Task that was dropped), so the test
+        // passed even with the guard removed. Awaited, it fails without the
+        // guard: the fake repository accepts any id combination, so no
+        // ArgumentException would surface.
         var store = Store(new FakeRepository());
         var id = Guid.NewGuid();
 
         var both = () => store.SetPrincipalModelAsync("openai", id, id, "m", null);
         var neither = () => store.SetPrincipalModelAsync("openai", null, null, "m", null);
 
-        both.Should().ThrowAsync<ArgumentException>();
-        neither.Should().ThrowAsync<ArgumentException>();
+        await both.Should().ThrowAsync<ArgumentException>();
+        await neither.Should().ThrowAsync<ArgumentException>();
     }
 
     // ── enabled flag ────────────────────────────────────────────────────────
@@ -235,7 +307,7 @@ public class ProviderSettingsStoreTests
     // ── no-repository degradation ───────────────────────────────────────────
 
     [Test]
-    public void NoRepository_ReadsAnswerNoRow_WritesFailLoud()
+    public async Task NoRepository_ReadsAnswerNoRow_WritesFailLoud()
     {
         var store = Store(repo: null);
 
@@ -243,7 +315,144 @@ public class ProviderSettingsStoreTests
         store.TryGetPlatformModel("openai").Should().BeNull();
         store.IsEnabled("openai").Should().BeTrue();
 
+        // Review F5 — awaited (was a dropped Task, i.e. vacuously green).
+        // Without RequireRepository the null repository would surface as a
+        // NullReferenceException, failing the typed assertion below.
         var write = () => store.SetPlatformModelAsync("openai", "m", null);
-        write.Should().ThrowAsync<InvalidOperationException>();
+        await write.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    // ── review F1: startup priming ──────────────────────────────────────────
+
+    [Test]
+    public async Task Priming_HostedServiceStart_MakesTheFirstReadSeeThePersistedRow()
+    {
+        var repo = new FakeRepository();
+        repo.Rows.Add(new ProviderSetting
+        {
+            Id = Guid.NewGuid(),
+            Scope = "platform",
+            ProviderKey = "openai",
+            DefaultModel = "persisted-before-restart",
+            Enabled = true,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        var store = Store(repo);
+        var priming = new ProviderSettingsStorePrimingService(
+            store, NullLogger<ProviderSettingsStorePrimingService>.Instance);
+
+        await priming.StartAsync(CancellationToken.None);
+
+        // The FIRST snapshot read after startup sees the row — synchronously,
+        // with no TTL wait and no background refresh needed.
+        store.TryGetPlatformModel("openai").Should().Be("persisted-before-restart",
+            "the cold-start snapshot must be primed before the app serves traffic (F1)");
+        repo.LoadCount.Should().Be(1, "priming itself performed the load; the read was served "
+            + "from the primed snapshot without scheduling another refresh");
+    }
+
+    [Test]
+    public async Task Priming_DbUnavailable_FailsSoft_HostStartupProceeds()
+    {
+        var store = Store(new ThrowingRepository());
+        var priming = new ProviderSettingsStorePrimingService(
+            store, NullLogger<ProviderSettingsStorePrimingService>.Instance);
+
+        var start = () => priming.StartAsync(CancellationToken.None);
+
+        await start.Should().NotThrowAsync(
+            "a briefly-unavailable DB must not crash the host (F1 fail-soft); "
+            + "the lazy TTL refresh remains the fallback");
+        store.TryGetPlatformModel("openai").Should().BeNull("the empty snapshot is served until "
+            + "a later refresh succeeds");
+    }
+
+    // ── review F2: stale background load vs write refresh ───────────────────
+
+    [Test]
+    public async Task StaleLoad_FinishingAfterAWriteRefresh_IsDiscardedNotInstalled()
+    {
+        var repo = new GatedRepository();
+        var store = Store(repo);
+
+        // A slow load whose DB read began BEFORE the write — it captured the
+        // pre-write (empty) row set and is now stuck mid-flight.
+        var staleLoad = store.RefreshAsync();
+        await repo.FirstLoadStarted.Task;
+
+        // The write lands; its own refresh installs the post-write snapshot.
+        await store.SetPlatformModelAsync("openai", "post-write-model", null);
+        store.TryGetPlatformModel("openai").Should().Be("post-write-model");
+
+        // The stale load completes AFTER the write's refresh.
+        repo.FirstLoadGate.SetResult();
+        await staleLoad;
+
+        store.TryGetPlatformModel("openai").Should().Be("post-write-model",
+            "a load versioned before the write's refresh must be discarded on completion — "
+            + "installing it would revive the pre-write snapshot for up to the 60 s TTL (F2)");
+    }
+
+    // ── review F7: single-user multi-user-row collapse warning ──────────────
+
+    [Test]
+    public async Task SingleUser_RowsForMultipleUserIds_CollapseLastWriteWins_AndWarn()
+    {
+        var repo = new FakeRepository();
+        repo.Rows.Add(new ProviderSetting
+        {
+            Id = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            Scope = "principal",
+            ProviderKey = "openai",
+            DefaultModel = "older-users-model",
+            Enabled = true,
+            UpdatedAt = DateTime.UtcNow.AddMinutes(-10),
+        });
+        repo.Rows.Add(new ProviderSetting
+        {
+            Id = Guid.NewGuid(),
+            UserId = Guid.NewGuid(),
+            Scope = "principal",
+            ProviderKey = "openai",
+            DefaultModel = "newest-users-model",
+            Enabled = true,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        var logger = new RecordingLogger<ProviderSettingsStore>();
+        var store = new ProviderSettingsStore(
+            repo, new FixedMode(TammaMode.SingleUser), logger);
+
+        await store.RefreshAsync();
+
+        store.TryGetModel("openai", null).Should().Be("newest-users-model",
+            "the documented collapse is deterministic: most recently updated wins");
+        logger.Entries.Should().Contain(
+            e => e.Level == LogLevel.Warning && e.Message.Contains("2 distinct user ids"),
+            "F7: shadowing another user's override must be surfaced, not silent");
+    }
+
+    [Test]
+    public async Task SaaS_RowsForMultipleUserIds_NoCollapseWarning()
+    {
+        // The collapse (and its warning) is a single-user-mode concern; user
+        // rows are simply not part of the SaaS lookup.
+        var repo = new FakeRepository();
+        repo.Rows.Add(new ProviderSetting
+        {
+            Id = Guid.NewGuid(), UserId = Guid.NewGuid(), Scope = "principal",
+            ProviderKey = "openai", DefaultModel = "a", Enabled = true, UpdatedAt = DateTime.UtcNow,
+        });
+        repo.Rows.Add(new ProviderSetting
+        {
+            Id = Guid.NewGuid(), UserId = Guid.NewGuid(), Scope = "principal",
+            ProviderKey = "openai", DefaultModel = "b", Enabled = true, UpdatedAt = DateTime.UtcNow,
+        });
+        var logger = new RecordingLogger<ProviderSettingsStore>();
+        var store = new ProviderSettingsStore(repo, new FixedMode(TammaMode.SaaS), logger);
+
+        await store.RefreshAsync();
+
+        logger.Entries.Should().NotContain(e => e.Level == LogLevel.Warning);
     }
 }

@@ -84,7 +84,7 @@ public interface IProviderSettingsStore
 
 /// <inheritdoc />
 /// <remarks>
-/// 46-1 plan D2 — the snapshot is a single immutable object swapped whole
+/// <para>46-1 plan D2 — the snapshot is a single immutable object swapped whole
 /// (<c>volatile</c> field): no per-entry locking, readers never block. Writes
 /// go DB-first, then rebuild synchronously before returning, so the writing
 /// instance is consistent immediately; other instances converge within
@@ -92,7 +92,29 @@ public interface IProviderSettingsStore
 /// whole-snapshot swap is simpler to reason about and to test than eviction
 /// semantics. When no repository is wired (hosts without a control-plane DB,
 /// e.g. the standalone engine or bare unit-test composition), every read
-/// answers "no row" and behaviour is byte-identical to pre-46-1.
+/// answers "no row" and behaviour is byte-identical to pre-46-1.</para>
+///
+/// <para><b>Cold start (review F1):</b> the snapshot is PRIMED at startup by
+/// <see cref="ProviderSettingsStorePrimingService"/> (an
+/// <c>IHostedService</c> that awaits <see cref="RefreshAsync"/> before the
+/// host starts serving traffic, fail-soft) so the first requests after a
+/// restart honour persisted selections instead of reading the empty snapshot
+/// until the first TTL refresh lands.</para>
+///
+/// <para><b>Load/install ordering (review F2):</b> every load takes a
+/// monotonic version ticket BEFORE its DB read begins and a snapshot is only
+/// installed when its ticket is ≥ the installed one — so a slow background
+/// TTL load that started before a write can never complete AFTER the write's
+/// refresh and swap the pre-write snapshot back in.</para>
+///
+/// <para><b>Known limitation (review F7):</b> in single-user mode the
+/// snapshot collapses ALL user-keyed rows into one provider→model map,
+/// most-recently-updated wins. More than one distinct <c>user_id</c> among
+/// those rows should be impossible in a genuine single-user install (one
+/// user owns everything); if it happens anyway (e.g. a DB restored from a
+/// SaaS instance), the extra users' overrides are silently shadowed —
+/// <see cref="RefreshAsync"/> logs a warning naming the row count so the
+/// operator can clean up.</para>
 /// </remarks>
 public sealed class ProviderSettingsStore : IProviderSettingsStore
 {
@@ -108,8 +130,18 @@ public sealed class ProviderSettingsStore : IProviderSettingsStore
     private readonly TimeProvider _timeProvider;
 
     private volatile Snapshot _snapshot = Snapshot.Empty;
-    private DateTimeOffset _loadedAt = DateTimeOffset.MinValue;
+    private long _loadedAtTicks = DateTimeOffset.MinValue.UtcTicks;
     private int _refreshing; // 0|1 — single-flight guard for the lazy refresh
+
+    // Review F2 — monotonic load versioning. Every load takes a ticket
+    // (Interlocked.Increment) BEFORE its DB read begins; the install is
+    // CAS-style under _installLock and only proceeds when the ticket is >=
+    // the installed one. A stale TTL load that started before a write's
+    // refresh therefore can never clobber the post-write snapshot, no matter
+    // how late it completes.
+    private long _loadVersion;      // ticket source
+    private long _installedVersion; // ticket of the installed snapshot
+    private readonly object _installLock = new();
 
     public ProviderSettingsStore(
         IProviderSettingsRepository? repository,
@@ -240,11 +272,27 @@ public sealed class ProviderSettingsStore : IProviderSettingsStore
             return; // no CP DB — the empty snapshot IS the truth
         }
 
+        // F2 — the version ticket is taken BEFORE the DB read begins, so a
+        // load that started earlier always carries a smaller ticket than one
+        // that started later (in particular: than a write-path refresh that
+        // began after the write committed).
+        var version = Interlocked.Increment(ref _loadVersion);
         try
         {
             var rows = await _repository.LoadAllAsync(ct).ConfigureAwait(false);
-            _snapshot = Snapshot.Build(rows);
-            _loadedAt = _timeProvider.GetUtcNow();
+            WarnOnCollapsedSingleUserRows(rows); // F7
+            var snapshot = Snapshot.Build(rows);
+            lock (_installLock)
+            {
+                if (version >= _installedVersion)
+                {
+                    _installedVersion = version;
+                    _snapshot = snapshot;
+                    Volatile.Write(ref _loadedAtTicks, _timeProvider.GetUtcNow().UtcTicks);
+                }
+                // else: a newer load already installed — this one is stale
+                // (its read began before the installed one's); discard it.
+            }
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
@@ -258,10 +306,38 @@ public sealed class ProviderSettingsStore : IProviderSettingsStore
 
     // ─────────────────────────────────────────────────────────────────────
 
+    /// <summary>Review F7 — single-user mode collapses user-keyed rows to one
+    /// provider→model map (last write wins). More than one distinct user id
+    /// among those rows means someone's overrides are being shadowed; warn so
+    /// the operator can clean the stray rows up.</summary>
+    private void WarnOnCollapsedSingleUserRows(IReadOnlyList<ProviderSetting> rows)
+    {
+        if (_mode.Mode != TammaMode.SingleUser)
+        {
+            return;
+        }
+
+        var distinctUsers = rows
+            .Where(r => r.UserId is not null)
+            .Select(r => r.UserId!.Value)
+            .Distinct()
+            .Count();
+        if (distinctUsers > 1)
+        {
+            _logger.LogWarning(
+                "provider_settings holds rows for {DistinctUserCount} distinct user ids in "
+                + "single-user mode; the snapshot collapses them last-write-wins per provider, "
+                + "so all but the most recently updated user's overrides are shadowed. "
+                + "A single-user install should carry rows for exactly one user id.",
+                distinctUsers);
+        }
+    }
+
     private Snapshot CurrentSnapshot()
     {
         if (_repository is not null
-            && _timeProvider.GetUtcNow() - _loadedAt > RefreshTtl
+            && _timeProvider.GetUtcNow().UtcTicks - Volatile.Read(ref _loadedAtTicks)
+                > RefreshTtl.Ticks
             && Interlocked.CompareExchange(ref _refreshing, 1, 0) == 0)
         {
             // Lazy TTL refresh in the background — readers NEVER block
@@ -312,7 +388,9 @@ public sealed class ProviderSettingsStore : IProviderSettingsStore
         /// <summary>Single-user lookup: provider → the sole user's model. If
         /// multiple user rows somehow exist per provider (should not happen in
         /// single-user mode), the most recently updated wins —
-        /// deterministically.</summary>
+        /// deterministically. <see cref="RefreshAsync"/> logs a warning when
+        /// more than one distinct user id contributes rows (review F7): the
+        /// shadowed users' overrides are silently dropped by this collapse.</summary>
         public IReadOnlyDictionary<string, string> UserModelByProvider { get; }
 
         public static Snapshot Build(IReadOnlyList<ProviderSetting> rows)
@@ -354,4 +432,53 @@ public sealed class ProviderSettingsStore : IProviderSettingsStore
                     kv => kv.Key, kv => kv.Value.Model, StringComparer.OrdinalIgnoreCase));
         }
     }
+}
+
+/// <summary>
+/// Review F1 — primes the <see cref="ProviderSettingsStore"/> snapshot at
+/// startup. Without this, <c>_snapshot</c> starts Empty and the sync reads
+/// never block, so the first requests after every restart would ignore
+/// persisted selections until the first lazy TTL refresh completed.
+///
+/// <para><b>Fail-soft:</b> a briefly-unavailable DB must not crash the host —
+/// <see cref="ProviderSettingsStore.RefreshAsync"/> already swallows
+/// non-cancellation failures (logging a warning and keeping the previous —
+/// here: empty — snapshot), and this service additionally catches anything
+/// else so startup always proceeds; the lazy TTL refresh remains the
+/// fallback path.</para>
+/// </summary>
+public sealed class ProviderSettingsStorePrimingService : IHostedService
+{
+    private readonly IProviderSettingsStore _store;
+    private readonly ILogger<ProviderSettingsStorePrimingService> _logger;
+
+    public ProviderSettingsStorePrimingService(
+        IProviderSettingsStore store,
+        ILogger<ProviderSettingsStorePrimingService> logger)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(logger);
+        _store = store;
+        _logger = logger;
+    }
+
+    /// <inheritdoc />
+    public async Task StartAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _store.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Includes OperationCanceledException from a host shutting down
+            // mid-start: priming is best-effort, never a startup blocker.
+            _logger.LogWarning(ex,
+                "provider_settings startup priming failed; the store starts empty and "
+                + "the lazy TTL refresh remains the fallback.");
+        }
+    }
+
+    /// <inheritdoc />
+    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }

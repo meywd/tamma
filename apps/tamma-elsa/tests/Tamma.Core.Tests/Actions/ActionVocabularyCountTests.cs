@@ -58,16 +58,17 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void BackgroundActor_has_25_members()
+    public void BackgroundActor_has_26_members()
     {
-        // Derivation: grep -rn 'AddHostedService' src --include=*.cs → 24
-        // registrations (5 ElsaServer + 7 Api/Program.cs incl. one factory
-        // overload + 12 Api/Extensions) + PlatformTaskWorker (TryAddEnumerable
+        // Derivation: grep -rn 'AddHostedService' src --include=*.cs → 25
+        // registrations (5 ElsaServer + 8 Api/Program.cs incl. one factory
+        // overload and the Epic 46 review-F1 ProviderSettingsStorePrimingService
+        // + 12 Api/Extensions) + PlatformTaskWorker (TryAddEnumerable
         // descriptor inside AddPlatformTaskWorker, no AddHostedService line)
-        // → 25. Cross-checked: 25 non-abstract IHostedService classes exist
+        // → 26. Cross-checked: 26 non-abstract IHostedService classes exist
         // across both host assemblies (BackgroundActorCatalogSweepTests binds
         // them by type name).
-        Enum.GetValues<BackgroundActor>().Should().HaveCount(25);
+        Enum.GetValues<BackgroundActor>().Should().HaveCount(26);
     }
 
     [Test]
@@ -98,11 +99,11 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void TotalCatalogMembers_is_153()
+    public void TotalCatalogMembers_is_154()
     {
-        // 80 + 10 + 8 + 22 + 25 + 8 = 153 — the design's working figure held
-        // after re-derivation.
-        ActionCatalog.All.Should().HaveCount(153);
-        ActionCatalog.ByKey.Should().HaveCount(153);
+        // 80 + 10 + 8 + 22 + 26 + 8 = 154 — the design's working figure (153)
+        // plus the Epic 46 review-F1 ProviderSettingsStorePrimingService.
+        ActionCatalog.All.Should().HaveCount(154);
+        ActionCatalog.ByKey.Should().HaveCount(154);
     }
 }

@@ -186,7 +186,7 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void PlatformAutomation_has_the_36_expected_members()
+    public void PlatformAutomation_has_the_37_expected_members()
     {
         var expected = new List<string>
         {
@@ -194,19 +194,19 @@ public class ActionGroupMembershipTests
             "effect:engine.document.persist", "effect:engine.document.set-status",
             "effect:engine.channel-outbox.enqueue",
         };
-        // The 23 automation members outside the secrets group.
+        // The 24 automation members outside the secrets group.
         expected.AddRange(Enum.GetValues<BackgroundActor>()
             .Where(b => b is not (BackgroundActor.SecretAutoRotationScheduler or BackgroundActor.RetireSweep))
             .Select(b => $"automation:{b.ToWire()}"));
         // All 8 platform tasks.
         expected.AddRange(Enum.GetValues<PlatformTaskKind>().Select(p => $"platform-task:{p.ToWire()}"));
 
-        expected.Should().HaveCount(36, "5 engine effects + 23 automation + 8 platform tasks");
+        expected.Should().HaveCount(37, "5 engine effects + 24 automation + 8 platform tasks");
         WiresIn(ActionGroup.PlatformAutomation).Should().BeEquivalentTo(expected);
     }
 
     [Test]
-    public void The_per_group_counts_sum_to_153()
+    public void The_per_group_counts_sum_to_154()
     {
         var counts = new Dictionary<ActionGroup, int>
         {
@@ -225,10 +225,10 @@ public class ActionGroupMembershipTests
             [ActionGroup.ExternalComms] = 2,
             [ActionGroup.ModelInvocation] = 3,
             [ActionGroup.Secrets] = 4,
-            [ActionGroup.PlatformAutomation] = 36,
+            [ActionGroup.PlatformAutomation] = 37,
         };
 
-        counts.Values.Sum().Should().Be(153);
+        counts.Values.Sum().Should().Be(154);
         foreach (var (group, count) in counts)
             ActionCatalog.ByGroup[group].Should().HaveCount(count, $"group '{group.ToWire()}'");
     }

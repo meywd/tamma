@@ -57,6 +57,15 @@ public sealed class EfProviderSettingsRepository : IProviderSettingsRepository
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Review F8 — read-then-insert races: two concurrent PUTs for the same
+    /// <c>(tenantId, userId, providerKey)</c> can both miss the read and both
+    /// insert, and the <c>UNIQUE NULLS NOT DISTINCT</c> index turns the loser
+    /// into a Postgres 23505 (previously an unhandled 500). The unique
+    /// violation is caught and retried ONCE as an update of the row the
+    /// winning writer inserted — converging on last-write-wins, the same
+    /// outcome as if the requests had arrived a moment apart.
+    /// </remarks>
     public async Task<ProviderSetting> UpsertAsync(
         Guid? tenantId,
         Guid? userId,
@@ -81,6 +90,7 @@ public sealed class EfProviderSettingsRepository : IProviderSettingsRepository
                 ct)
             .ConfigureAwait(false);
 
+        var inserting = row is null;
         if (row is null)
         {
             row = new ProviderSetting
@@ -93,14 +103,50 @@ public sealed class EfProviderSettingsRepository : IProviderSettingsRepository
             db.ProviderSettings.Add(row);
         }
 
+        Apply(row, model, enabled, updatedBy);
+
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return row;
+        }
+        catch (DbUpdateException ex) when (inserting && IsUniqueViolation(ex))
+        {
+            // F8 — a concurrent writer inserted the same key between our read
+            // and our insert. Retry once as an update of THAT row.
+            db.Entry(row).State = EntityState.Detached;
+            var existing = await db.ProviderSettings
+                .FirstOrDefaultAsync(
+                    s => s.TenantId == tenantId
+                        && s.UserId == userId
+                        && s.ProviderKey == providerKey,
+                    ct)
+                .ConfigureAwait(false);
+            if (existing is null)
+            {
+                // The competing row vanished again (insert+delete race) —
+                // genuinely unresolvable in one retry; surface the original.
+                throw;
+            }
+
+            Apply(existing, model, enabled, updatedBy);
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return existing;
+        }
+    }
+
+    private static void Apply(ProviderSetting row, string? model, bool? enabled, Guid? updatedBy)
+    {
         if (model is not null) row.DefaultModel = model;
         if (enabled is not null) row.Enabled = enabled.Value;
         row.UpdatedAt = DateTime.UtcNow;
         row.UpdatedBy = updatedBy;
-
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return row;
     }
+
+    /// <summary>Postgres unique-index violation (SQLSTATE 23505) — the same
+    /// detection shape as <c>ProviderCredentialEndpoints.IsDuplicate</c>.</summary>
+    private static bool IsUniqueViolation(DbUpdateException ex) =>
+        ex.InnerException is Npgsql.PostgresException pg && pg.SqlState == "23505";
 
     /// <inheritdoc />
     public async Task<bool> DeleteAsync(

@@ -89,6 +89,7 @@ public static class ProviderCredentialEndpoints
         ITenantContext tenantContext,
         [FromServices] ISecretRevealService reveal,
         [FromServices] IProviderCredentialResolver resolver,
+        [FromServices] IProviderModelCatalog modelCatalog,
         HttpContext http)
     {
         var (norm, err) = NormalizeProvider(provider);
@@ -120,6 +121,11 @@ public static class ProviderCredentialEndpoints
                 .ConfigureAwait(false);
 
             resolver.Invalidate(tid, norm!);
+            // Review F12 — the model catalog caches lists per (provider,
+            // tenant) under the credential that fetched them; a credential
+            // change must evict that entry too, or a list fetched with the
+            // OLD key keeps serving for up to the 5-minute TTL.
+            modelCatalog.Invalidate(norm!, tid);
 
             // Story 37-10 — curated BYOK audit event (the SECRET.WRITE cabinet
             // event stays the secret source of truth; this is derived alongside it,
@@ -160,6 +166,7 @@ public static class ProviderCredentialEndpoints
         [FromServices] ISecretQueryService query,
         [FromServices] ISecretRevealService reveal,
         [FromServices] IProviderCredentialResolver resolver,
+        [FromServices] IProviderModelCatalog modelCatalog,
         HttpContext http)
     {
         var (norm, err) = NormalizeProvider(provider);
@@ -192,6 +199,7 @@ public static class ProviderCredentialEndpoints
                 http.RequestAborted).ConfigureAwait(false);
 
             resolver.Invalidate(tid, norm!);
+            modelCatalog.Invalidate(norm!, tid); // F12 — see RegisterCredential
 
             // Story 37-10 — curated BYOK rotate audit event (see RegisterCredential).
             await EmitByokChangeAsync(
@@ -222,6 +230,7 @@ public static class ProviderCredentialEndpoints
         ITenantContext tenantContext,
         [FromServices] ISecretQueryService query,
         [FromServices] IProviderCredentialResolver resolver,
+        [FromServices] IProviderModelCatalog modelCatalog,
         HttpContext http)
     {
         var (norm, err) = NormalizeProvider(provider);
@@ -263,6 +272,7 @@ public static class ProviderCredentialEndpoints
         }
 
         resolver.Invalidate(tid, norm!);
+        modelCatalog.Invalidate(norm!, tid); // F12 — see RegisterCredential
 
         // Story 37-10 — curated BYOK remove audit event (see RegisterCredential).
         await EmitByokChangeAsync(
@@ -275,9 +285,17 @@ public static class ProviderCredentialEndpoints
     // ─────────────────────────────────────────────────────────────────────
     // Epic 46 — tenant-facing model listing + model settings, registered
     // beside the BYOK routes on the /api/v1/agents/providers surface.
-    // Reads serve any tenant member (single-user: the sole user); writes are
-    // AgentManage-gated at the route map (member → 403) — the same trust
-    // level as BYOK key custody (epic D3).
+    // Reads serve any tenant member (single-user: the sole user) — mapped
+    // OUTSIDE the /api/v1/agents group's SettingsView (admin/owner-only)
+    // policy, on the member-reach AuthenticatedAny policy (review F3, the
+    // acceptance-rules read-gate precedent). Writes stay AgentManage-gated
+    // at the route map (member → 403) — the same trust level as BYOK key
+    // custody (epic D3).
+    //
+    // Review F11 — never-enumerate posture for the tenant surface: a
+    // PLATFORM-DISABLED provider answers the per-provider reads with the
+    // same 404 shape as an unknown provider, matching the roster (where it
+    // is simply absent) and the PUT's 409 rationale (the off switch wins).
     // ─────────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -286,20 +304,25 @@ public static class ProviderCredentialEndpoints
     /// server-side with the tenant's BYOK key when one exists, else the
     /// platform key (epic D5 — the credential resolver's existing order); the
     /// key never reaches the browser. Fail-soft per epic D6: always HTTP 200
-    /// for a known provider, and the currently-effective model is always an
-    /// entry flagged <c>current</c>. SaaS callers without tenant context get
-    /// the empty-envelope behaviour (consistent with <see cref="ListProviders"/>).
+    /// for a known ENABLED provider, and the currently-effective model is
+    /// always an entry flagged <c>current</c>. A platform-disabled provider
+    /// 404s exactly like an unknown one (F11 — never enumerate). SaaS callers
+    /// without tenant context get the empty-envelope behaviour (consistent
+    /// with <see cref="ListProviders"/>).
     /// </summary>
     public static async Task<IResult> GetTenantProviderModels(
         string provider,
         ITenantContext tenantContext,
         [FromServices] ITammaModeProvider mode,
+        [FromServices] IProviderSettingsStore settings,
         [FromServices] IProviderModelCatalog modelCatalog,
         [FromServices] IInlineToolLoopRunner runner,
         HttpContext http)
     {
         var (norm, err) = NormalizeProvider(provider);
         if (err is not null) return err;
+        var disabled = DisabledAsUnknown(settings, norm!);
+        if (disabled is not null) return disabled;
 
         var tenantId = tenantContext.TenantId;
         if (mode.Mode == TammaMode.SaaS && tenantId is null)
@@ -383,7 +406,8 @@ public static class ProviderCredentialEndpoints
     /// (<c>tenant-override | platform-db | config | descriptor</c>) + the raw
     /// override value when one exists + the <c>fallbackModel</c> a removed
     /// override would resolve to (skip-principal resolution — never restated
-    /// client-side). Member-readable.
+    /// client-side). Member-readable. A platform-disabled provider 404s
+    /// exactly like an unknown one (F11 — never enumerate).
     /// </summary>
     public static IResult GetTenantProviderModel(
         string provider,
@@ -393,6 +417,8 @@ public static class ProviderCredentialEndpoints
     {
         var (norm, err) = NormalizeProvider(provider);
         if (err is not null) return err;
+        var disabled = DisabledAsUnknown(settings, norm!);
+        if (disabled is not null) return disabled;
 
         var tenantId = tenantContext.TenantId;
         var resolution = runner.ResolveDefaultModelWithSource(norm!, tenantId);
@@ -592,6 +618,21 @@ public static class ProviderCredentialEndpoints
         var rows = await query.ListAsync(SecretScope.Tenant, tenantId, ct).ConfigureAwait(false);
         return rows.FirstOrDefault(r => r.Name == name);
     }
+
+    /// <summary>
+    /// Review F11 — tenant reads of a PLATFORM-DISABLED provider return the
+    /// same 404 shape as an unknown provider. The roster already hides
+    /// disabled providers entirely; answering their per-provider GETs would
+    /// let a tenant enumerate the platform's off switch — the same
+    /// never-enumerate posture as <see cref="NormalizeProvider"/>, and
+    /// consistent with the PUT's 409 rationale. Deliberate behaviour change:
+    /// these two GETs previously answered for disabled providers.
+    /// </summary>
+    private static IResult? DisabledAsUnknown(
+        IProviderSettingsStore settings, string canonicalProvider) =>
+        settings.IsEnabled(canonicalProvider)
+            ? null
+            : Results.NotFound(new { error = "unknown_provider" });
 
     private static (string? Provider, IResult? Error) NormalizeProvider(string provider)
     {

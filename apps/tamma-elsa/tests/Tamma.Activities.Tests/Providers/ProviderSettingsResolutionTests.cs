@@ -254,6 +254,59 @@ public class ProviderSettingsResolutionTests
                 actual.Enabled.Should().Be(expected.Enabled, $"key {key}");
             }
         }
+
+        // ── review F13 — LITERAL pins for three representative keys ─────────
+        // The pairwise comparison above proves store-vs-no-store equality but
+        // would stay green if BOTH paths drifted together. Pin the absolute
+        // expected values so a joint drift cannot pass. Both runners must
+        // agree on the literals.
+        foreach (var runner in new[] { withoutStore, withEmptyStore })
+        {
+            // anthropic: the LlmProviders:anthropic section EXISTS in this
+            // config, so the section's DefaultModel answers and the legacy
+            // Anthropic:Model key (set above to a sentinel) must be IGNORED —
+            // the quirk only applies on the no-section branch.
+            var anthropic = runner.LoadProviderConfig("anthropic", null);
+            anthropic.DefaultModel.Should().Be("claude-sonnet-4-5");
+            anthropic.BaseUrl.Should().Be("https://api.anthropic.com");
+
+            var openai = runner.LoadProviderConfig("openai", null);
+            openai.DefaultModel.Should().Be("gpt-4o");
+            openai.BaseUrl.Should().Be("https://api.openai.com");
+
+            // groq has NO config section here → descriptor branch: BaseUrl is
+            // the descriptor's /openai-suffixed base and DefaultModel is the
+            // descriptor's "" ("caller must specify").
+            var groq = runner.LoadProviderConfig("groq", null);
+            groq.DefaultModel.Should().Be("");
+            groq.BaseUrl.Should().Be("https://api.groq.com/openai");
+        }
+    }
+
+    [Test]
+    public void NoRowInstall_AnthropicLegacyModelKey_LiteralPin_NoSectionBranch()
+    {
+        // F13 companion — the Anthropic:Model legacy quirk on the branch where
+        // it DOES apply (no LlmProviders:anthropic section): both the no-store
+        // and the empty-store runner must resolve the literal legacy value,
+        // with the descriptor supplying the base URL.
+        var config = Config(new Dictionary<string, string?>
+        {
+            ["Anthropic:Model"] = "legacy-pinned-model",
+        });
+
+        foreach (var runner in new[]
+        {
+            Runner(config, store: null),
+            Runner(config, new FakeSettingsStore()),
+        })
+        {
+            var cfg = runner.LoadProviderConfig("anthropic", null);
+            cfg.DefaultModel.Should().Be("legacy-pinned-model",
+                "the legacy Anthropic:Model key is honoured on the no-section branch");
+            cfg.BaseUrl.Should().Be("https://api.anthropic.com");
+            runner.ResolveDefaultModelWithSource("anthropic", null).Source.Should().Be("config");
+        }
     }
 
     [Test]

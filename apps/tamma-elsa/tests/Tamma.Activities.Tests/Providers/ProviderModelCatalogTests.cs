@@ -355,6 +355,59 @@ public class ProviderModelCatalogTests
         aAgain.Models.Select(m => m.Id).Should().Contain("gpt-4o");
     }
 
+    // ── review F12: BYOK-change invalidation hook ──────────────────────────
+
+    [Test]
+    public async Task Invalidate_EvictsTheTenantsCachedList_OtherTenantsUnaffected()
+    {
+        var handler = new CapturingHandler();
+        handler.EnqueueJson(OpenAiFixture);   // tenant A, first fetch
+        handler.EnqueueJson(AnthropicFixture); // tenant B, first fetch
+        handler.EnqueueJson(GeminiFixture);    // tenant A, refetch after invalidation
+        var service = Service(handler, new FakeResolver("k"));
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+
+        await service.ListModelsAsync("openai", tenantA);
+        await service.ListModelsAsync("openai", tenantB);
+        handler.Requests.Should().HaveCount(2);
+
+        // A BYOK change for tenant A evicts ONLY tenant A's entry…
+        service.Invalidate("openai", tenantA);
+
+        var refetched = await service.ListModelsAsync("openai", tenantA);
+        handler.Requests.Should().HaveCount(3,
+            "the invalidated (provider, tenant) entry must refetch under the NEW credential");
+        refetched.Models.Select(m => m.Id).Should().Contain("models/gemini-2.0-flash",
+            "the refetch result replaced the pre-invalidation cache entry");
+
+        // …tenant B (and its cache hit) is untouched.
+        var b = await service.ListModelsAsync("openai", tenantB);
+        handler.Requests.Should().HaveCount(3, "tenant B still serves from its cache");
+        b.Models.Select(m => m.Id).Should().Contain("claude-sonnet-4-5");
+    }
+
+    [Test]
+    public async Task Invalidate_AcceptsAliases_AndUnknownKeysAreANoOp()
+    {
+        var handler = new CapturingHandler();
+        handler.EnqueueJson(OpenAiFixture);
+        handler.EnqueueJson(OpenAiFixture);
+        var service = Service(handler, new FakeResolver("k"));
+        var tenant = Guid.NewGuid();
+
+        await service.ListModelsAsync("moonshot", tenant);
+        handler.Requests.Should().HaveCount(1);
+
+        service.Invalidate("kimi", tenant); // alias → canonical moonshot entry
+
+        await service.ListModelsAsync("moonshot", tenant);
+        handler.Requests.Should().HaveCount(2, "the alias evicted the canonical cache entry");
+
+        var act = () => service.Invalidate("definitely-not-a-provider", tenant);
+        act.Should().NotThrow("unknown keys are a harmless no-op");
+    }
+
     // ── AC9 tests 9–10: fail-soft stale / empty ─────────────────────────────
 
     [Test]
@@ -534,6 +587,30 @@ public class ProviderModelCatalogTests
         response.Models.Single(m => m.Current).Id.Should().Be("gpt-4o-mini");
         response.Models.Should().OnlyContain(
             m => !m.Delisted, "no entry is flagged when the list carries the current model");
+    }
+
+    [Test]
+    public void CurrentModelInjection_CaseVariantSavedModel_FlaggedInPlace_NoDelistedDuplicate()
+    {
+        // Review F10 — the membership check is OrdinalIgnoreCase (consistent
+        // with the catalogue's case-insensitive key handling): a case-variant
+        // saved model previously produced a FALSE Delisted entry prepended on
+        // top of the genuinely-listed row (duplicate + wrong flag).
+        var list = new ProviderModelList(
+            new[]
+            {
+                new ProviderModelInfo("GPT-4o", null, false),
+                new ProviderModelInfo("gpt-4o-mini", null, false),
+            },
+            DateTimeOffset.UtcNow, Stale: false, ErrorCode: null);
+
+        var response = ProviderAdminEndpoints.BuildModelsResponse("openai", list, "gpt-4o");
+
+        response.Models.Should().HaveCount(2,
+            "no synthesized duplicate for a case-variant of a listed model");
+        var current = response.Models.Single(m => m.Current);
+        current.Id.Should().Be("GPT-4o", "the listed entry is flagged in place, id verbatim");
+        current.Delisted.Should().BeFalse("the model IS listed — only spelled differently");
     }
 
     [Test]

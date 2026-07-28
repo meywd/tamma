@@ -7,13 +7,14 @@ namespace Tamma.Core.Actions;
 /// <summary>
 /// The <c>automation:*</c> plane of the Action Catalog (Story 43-2 AC6): every
 /// hosted background actor across both hosts. Re-derived from the tree on
-/// 2026-07-27: 24 <c>AddHostedService</c> registrations (5 in
-/// <c>Tamma.ElsaServer/Program.cs</c>, 7 in <c>Tamma.Api/Program.cs</c> including
+/// 2026-07-28: 25 <c>AddHostedService</c> registrations (5 in
+/// <c>Tamma.ElsaServer/Program.cs</c>, 8 in <c>Tamma.Api/Program.cs</c> including
 /// one factory overload, 12 in <c>Tamma.Api/Extensions/*</c>) plus
 /// <c>PlatformTaskWorker</c> (registered via a <c>TryAddEnumerable</c>
 /// hosted-service descriptor in <c>AddPlatformTaskWorker</c>, so no literal
-/// <c>AddHostedService&lt;&gt;</c> line exists for it) = <b>25</b>, matching the
-/// design's figure. Wire rule: kebab-case of the class name with a trailing
+/// <c>AddHostedService&lt;&gt;</c> line exists for it) = <b>26</b> (the design's
+/// figure of 25 plus the Epic 46 review-F1 settings-store primer). Wire rule:
+/// kebab-case of the class name with a trailing
 /// <c>HostedService</c>/<c>BackgroundService</c> suffix dropped.
 ///
 /// <para>Bound to the real classes by the reflection sweep in
@@ -69,6 +70,11 @@ public enum BackgroundActor
     /// <c>ImplementationType</c>): Story 43-8's registration-level sweep must
     /// special-case it; the type-level sweep here sees it normally.</summary>
     [Wire("tenant-status-invalidation-listener")] TenantStatusInvalidationListener,
+
+    /// <summary><c>Tamma.Api.Services.Providers.ProviderSettingsStorePrimingService</c>
+    /// — Epic 46 review F1: primes the provider-settings snapshot before the
+    /// host serves traffic (fail-soft; the lazy TTL refresh is the fallback).</summary>
+    [Wire("provider-settings-store-priming-service")] ProviderSettingsStorePrimingService,
 
     // ── Tamma.Api host — Extensions/* registrations ──
 

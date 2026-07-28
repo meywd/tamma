@@ -65,7 +65,14 @@ public static class ProviderAdminEndpoints
         {
             var baseUrl = httpClientFactory.CreateClient(d.HttpClientName).BaseAddress?.ToString()
                 ?? (string.IsNullOrWhiteSpace(d.DefaultBaseUrl) ? null : d.DefaultBaseUrl);
-            var resolution = runner.ResolveDefaultModelWithSource(d.Key, tenantId: null);
+            // Review F4 — skipPrincipal: this is the PLATFORM surface, so the
+            // roster reports the platform-layer resolution (platform DB →
+            // config → descriptor). A mere tenantId:null is NOT enough: in
+            // single-user mode the store maps any tenant argument to the sole
+            // user's override row, which would leak a personal override into
+            // the platform roster as its "current model".
+            var resolution = runner.ResolveDefaultModelWithSource(
+                d.Key, tenantId: null, skipPrincipal: true);
 
             rows.Add(new ProviderStatusRow(
                 Key: d.Key,
@@ -84,7 +91,9 @@ public static class ProviderAdminEndpoints
 
         foreach (var n in ProviderCatalog.NonHttpProviders.Where(n => n.Allowlisted))
         {
-            var resolution = runner.ResolveDefaultModelWithSource(n.Key, tenantId: null);
+            // F4 — platform-layer resolution here too (see the HTTP loop).
+            var resolution = runner.ResolveDefaultModelWithSource(
+                n.Key, tenantId: null, skipPrincipal: true);
             rows.Add(new ProviderStatusRow(
                 Key: n.Key,
                 DisplayName: n.DisplayName,
@@ -108,8 +117,9 @@ public static class ProviderAdminEndpoints
     /// a provider, platform-key scope (<c>tenantId: null</c>). Always HTTP 200
     /// for a known provider (fail-soft, epic D6): fresh list, stale-flagged
     /// cached list, or empty list + error code — and the currently-effective
-    /// model is ALWAYS present, flagged <c>current</c> (synthesized if the
-    /// provider delisted it). Unknown key → 404, never enumerating.
+    /// PLATFORM-layer model (skip-principal resolution — review F4) is ALWAYS
+    /// present, flagged <c>current</c> (synthesized if the provider delisted
+    /// it). Unknown key → 404, never enumerating.
     /// </summary>
     public static async Task<IResult> GetProviderModels(
         string key,
@@ -122,7 +132,12 @@ public static class ProviderAdminEndpoints
 
         var list = await modelCatalog.ListModelsAsync(norm!, tenantId: null, http.RequestAborted)
             .ConfigureAwait(false);
-        var currentModel = runner.GetDefaultModel(norm!, tenantId: null);
+        // F4 — the "current" pin on the ADMIN list is the platform-layer
+        // model (skip-principal): in single-user mode a plain tenantId:null
+        // resolve would surface the sole user's personal override instead.
+        var currentModel = runner
+            .ResolveDefaultModelWithSource(norm!, tenantId: null, skipPrincipal: true)
+            .Model;
 
         return Results.Ok(BuildModelsResponse(norm!, list, currentModel));
     }
@@ -159,7 +174,12 @@ public static class ProviderAdminEndpoints
             if (modelError is not null) return modelError;
         }
 
-        var previous = runner.ResolveDefaultModelWithSource(norm!, tenantId: null);
+        // F4 — the audited previousModel is the PLATFORM-layer value
+        // (skip-principal). In single-user mode a plain tenantId:null resolve
+        // would record the sole user's override as "previous", falsifying the
+        // audit trail of a platform mutation.
+        var previous = runner.ResolveDefaultModelWithSource(
+            norm!, tenantId: null, skipPrincipal: true);
         var actor = principal.GetUserId();
 
         if (body.DefaultModel is not null)
@@ -201,7 +221,9 @@ public static class ProviderAdminEndpoints
         var (norm, err) = NormalizeProvider(key);
         if (err is not null) return err;
 
-        var previous = runner.ResolveDefaultModelWithSource(norm!, tenantId: null);
+        // F4 — platform-layer previous value (see PutProviderSettings).
+        var previous = runner.ResolveDefaultModelWithSource(
+            norm!, tenantId: null, skipPrincipal: true);
         var removed = await settings.RemovePlatformAsync(norm!, http.RequestAborted)
             .ConfigureAwait(false);
         if (!removed)
@@ -265,8 +287,12 @@ public static class ProviderAdminEndpoints
         var hasCurrent = false;
         foreach (var m in list.Models)
         {
+            // Review F10 — OrdinalIgnoreCase, consistent with the catalogue's
+            // case-insensitive key handling: a case-variant saved model must
+            // flag the listed entry in place, not synthesize a false-Delisted
+            // duplicate row on top of it.
             var isCurrent = !string.IsNullOrEmpty(currentModel)
-                && string.Equals(m.Id, currentModel, StringComparison.Ordinal);
+                && string.Equals(m.Id, currentModel, StringComparison.OrdinalIgnoreCase);
             hasCurrent |= isCurrent;
             entries.Add(new ProviderModelEntry(m.Id, m.DisplayName, m.Deprecated, isCurrent));
         }
@@ -375,12 +401,29 @@ public static class ProviderAdminEndpoints
         catch { emitter = null; }
         if (emitter is null) return;
 
+        // Review F9 — the documented `mode` tag (single-user|saas) was never
+        // actually emitted. Resolved best-effort like the emitter itself so
+        // the handler signatures stay stable for the direct-call tests.
+        Tamma.Api.Services.PromptStore.ITammaModeProvider? modeProvider;
+        try
+        {
+            modeProvider = http.RequestServices?
+                .GetService<Tamma.Api.Services.PromptStore.ITammaModeProvider>();
+        }
+        catch { modeProvider = null; }
+
         var tags = new Dictionary<string, string?>
         {
             ["provider"] = provider,
             ["scope"] = scope,
             ["operation"] = operation,
         };
+        if (modeProvider is not null)
+        {
+            tags["mode"] = modeProvider.Mode == Tamma.Api.Services.PromptStore.TammaMode.SingleUser
+                ? "single-user"
+                : "saas";
+        }
         var data = new Dictionary<string, object?>
         {
             ["provider"] = provider,

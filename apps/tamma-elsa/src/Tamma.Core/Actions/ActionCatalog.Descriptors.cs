@@ -276,7 +276,7 @@ public static partial class ActionCatalog
         Effect(ExternalEffect.DeployRollback, ActionGroup.DeployControl, ActionRisk.Destructive, "Roll back production", "Production rollback branch (same LLM-tool-loop limitation as promote).",
             "Tamma.ElsaServer.Workflows.DeploymentPipelineWorkflow — RollbackProduction branch", reversible: false),
 
-        // ── automation (25) — EscalatableToHuman=false for the whole plane ────
+        // ── automation (26) — EscalatableToHuman=false for the whole plane ────
 
         Automation(BackgroundActor.HourlyAnalyticsRollupScheduler, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Hourly analytics rollup", "Rolls up analytics hourly.",
             "Tamma.ElsaServer.Workflows.HourlyAnalyticsRollupScheduler"),
@@ -304,6 +304,10 @@ public static partial class ActionCatalog
             "Tamma.Api.Services.Engine.Lifecycle.EngineRegistryHeartbeatService"),
         Automation(BackgroundActor.TenantStatusInvalidationListener, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Tenant status invalidation listener", "Fans out tenant status cache invalidations (FACTORY-registered hosted service — null ImplementationType; flagged for 43-8's registration sweep).",
             "Tamma.Api.Services.TenantStatus.TenantStatusInvalidationListener"),
+        // ReadOnly: primes an in-process snapshot from a DB read at startup —
+        // it writes nothing anywhere (Epic 46 review F1).
+        Automation(BackgroundActor.ProviderSettingsStorePrimingService, ActionGroup.PlatformAutomation, ActionRisk.ReadOnly, "Provider settings store primer", "Primes the provider-settings snapshot before the host serves traffic (fail-soft; the lazy TTL refresh is the fallback).",
+            "Tamma.Api.Services.Providers.ProviderSettingsStorePrimingService"),
         Automation(BackgroundActor.EntitlementCacheInvalidationListener, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Entitlement cache invalidation listener", "Fans out entitlement cache invalidations.",
             "Tamma.Api.Services.Pricing.EntitlementCacheInvalidationListener"),
         Automation(BackgroundActor.ConventionStoreSeeder, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Convention store seeder", "Seeds convention templates at startup.",

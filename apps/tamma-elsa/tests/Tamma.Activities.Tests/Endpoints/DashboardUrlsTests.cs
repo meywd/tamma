@@ -96,4 +96,102 @@ public sealed class DashboardUrlsTests
         DashboardUrls.DefaultCustomerUrl.Should().Be("https://dash.tamma.dev");
         DashboardUrls.DefaultCustomerUrl.Should().NotEndWith("/");
     }
+
+    // ── review F-CORS-2 — NormalizeOrigins (the CORS origin-list helper) ────
+
+    [Test]
+    public void NormalizeOrigins_bare_origins_pass_through_unchanged_no_warning()
+    {
+        var warnings = new List<string>();
+
+        var origins = DashboardUrls.NormalizeOrigins(
+            new[] { "https://dash.example.com", "http://localhost:3001" }, warnings.Add);
+
+        origins.Should().Equal("https://dash.example.com", "http://localhost:3001");
+        warnings.Should().BeEmpty();
+    }
+
+    [Test]
+    public void NormalizeOrigins_path_carrying_url_reduces_to_the_authority_and_warns()
+    {
+        // Browsers send Origin as scheme://host[:port] — a configured value
+        // with a path could never match WithOrigins' exact comparison.
+        var warnings = new List<string>();
+
+        var origins = DashboardUrls.NormalizeOrigins(
+            new[] { "https://portal.example.com/dash" }, warnings.Add);
+
+        origins.Should().Equal("https://portal.example.com");
+        warnings.Should().ContainSingle()
+            .Which.Should().Contain("https://portal.example.com/dash");
+    }
+
+    [Test]
+    public void NormalizeOrigins_trailing_slash_is_authority_equivalent_no_warning()
+    {
+        // A lone trailing slash is trimmed BEFORE parsing (the pre-existing
+        // TrimEnd behaviour) — not a misconfiguration worth warning about.
+        var warnings = new List<string>();
+
+        var origins = DashboardUrls.NormalizeOrigins(
+            new[] { "https://dash.example.com/" }, warnings.Add);
+
+        origins.Should().Equal("https://dash.example.com");
+        warnings.Should().BeEmpty();
+    }
+
+    [Test]
+    public void NormalizeOrigins_default_port_is_dropped_like_browsers_do()
+    {
+        var warnings = new List<string>();
+
+        var origins = DashboardUrls.NormalizeOrigins(
+            new[] { "https://dash.example.com:443/app" }, warnings.Add);
+
+        origins.Should().ContainSingle(
+                "browsers omit the default port from the Origin header")
+            .Which.Should().Be("https://dash.example.com");
+        warnings.Should().ContainSingle("the value changed, so the operator is told");
+    }
+
+    [Test]
+    public void NormalizeOrigins_unparseable_value_kept_verbatim_with_warning()
+    {
+        var warnings = new List<string>();
+
+        var origins = DashboardUrls.NormalizeOrigins(
+            new[] { "not a url at all" }, warnings.Add);
+
+        origins.Should().ContainSingle(
+                "a mis-typed entry stays visible in the policy instead of vanishing")
+            .Which.Should().Be("not a url at all");
+        warnings.Should().ContainSingle().Which.Should().Contain("not a url at all");
+    }
+
+    [Test]
+    public void NormalizeOrigins_dedupes_case_insensitively_and_drops_blanks()
+    {
+        var origins = DashboardUrls.NormalizeOrigins(new[]
+        {
+            "https://dash.example.com",
+            "https://DASH.example.com/",
+            "",
+            "   ",
+            null,
+        });
+
+        origins.Should().ContainSingle("single-user installs set one value for both apps");
+    }
+
+    [Test]
+    public void NormalizeOrigins_query_and_fragment_also_reduce_to_the_authority()
+    {
+        var warnings = new List<string>();
+
+        var origins = DashboardUrls.NormalizeOrigins(
+            new[] { "https://dash.example.com/?utm=x" }, warnings.Add);
+
+        origins.Should().Equal("https://dash.example.com");
+        warnings.Should().ContainSingle();
+    }
 }

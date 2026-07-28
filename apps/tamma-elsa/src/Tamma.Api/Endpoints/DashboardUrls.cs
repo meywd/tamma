@@ -45,4 +45,61 @@ public static class DashboardUrls
 
         return DefaultCustomerUrl;
     }
+
+    /// <summary>
+    /// Review F-CORS-2 — normalize configured dashboard URLs into CORS
+    /// ORIGINS. Browsers send the <c>Origin</c> request header as
+    /// <c>scheme://host[:port]</c> — never a path — and
+    /// <c>CorsPolicyBuilder.WithOrigins</c> matches by exact string
+    /// comparison, so a configured <c>Dashboard:Url</c> /
+    /// <c>Dashboard:CustomerUrl</c> carrying a path
+    /// (<c>https://portal.example.com/dash</c>) would produce an entry that
+    /// can never match — a silent CORS failure.
+    ///
+    /// <para>Each non-blank value that parses as an absolute http(s) URI is
+    /// reduced to its authority via
+    /// <see cref="Uri.GetLeftPart(UriPartial)"/> (default ports are dropped,
+    /// exactly as browsers omit them from <c>Origin</c>). Values that fail to
+    /// parse are kept verbatim so a mis-typed entry stays visible in the
+    /// policy rather than vanishing. Both cases — a changed value and an
+    /// unparseable one — are reported through <paramref name="warn"/> so the
+    /// operator sees the misconfiguration at startup. Results are deduped
+    /// case-insensitively.</para>
+    /// </summary>
+    public static string[] NormalizeOrigins(
+        IEnumerable<string?> configuredUrls, Action<string>? warn = null)
+    {
+        ArgumentNullException.ThrowIfNull(configuredUrls);
+
+        var origins = new List<string>();
+        foreach (var value in configuredUrls)
+        {
+            if (string.IsNullOrWhiteSpace(value)) continue;
+            var trimmed = value.Trim().TrimEnd('/');
+
+            if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
+                && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+            {
+                var origin = uri.GetLeftPart(UriPartial.Authority);
+                if (!string.Equals(origin, trimmed, StringComparison.OrdinalIgnoreCase))
+                {
+                    warn?.Invoke(
+                        $"dashboard URL '{value}' is not a bare origin — normalized to "
+                        + $"'{origin}' for CORS (browsers send Origin as scheme://host[:port], "
+                        + "never a path).");
+                }
+                origins.Add(origin);
+            }
+            else
+            {
+                warn?.Invoke(
+                    $"dashboard URL '{value}' is not an absolute http(s) URL; kept verbatim "
+                    + "in the CORS origin list, but it will never match a browser Origin "
+                    + "header — fix the Dashboard:Url / Dashboard:CustomerUrl value.");
+                origins.Add(trimmed);
+            }
+        }
+
+        return origins.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
 }

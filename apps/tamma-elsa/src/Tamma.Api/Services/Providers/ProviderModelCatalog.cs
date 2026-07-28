@@ -50,6 +50,18 @@ public interface IProviderModelCatalog
     /// </summary>
     Task<ProviderModelList> ListModelsAsync(
         string providerKey, Guid? tenantId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Review F12 — evict the cached model list for
+    /// (<paramref name="providerKey"/>, <paramref name="tenantId"/>). Called by
+    /// the BYOK credential mutations (register / rotate / delete) alongside
+    /// <c>IProviderCredentialResolver.Invalidate</c>: a list fetched under the
+    /// OLD credential (e.g. the platform key, or a revoked BYOK key) must not
+    /// keep serving for up to <see cref="ProviderModelCatalogService.CacheTtl"/>
+    /// after the tenant's credential changed. Accepts aliases; no-op when
+    /// nothing is cached for the pair.
+    /// </summary>
+    void Invalidate(string providerKey, Guid? tenantId);
 }
 
 /// <inheritdoc />
@@ -342,6 +354,17 @@ public sealed class ProviderModelCatalogService : IProviderModelCatalog
         }
 
         return models;
+    }
+
+    /// <inheritdoc />
+    public void Invalidate(string providerKey, Guid? tenantId)
+    {
+        // Alias-normalize the same way ListModelsAsync keys its cache, so
+        // "kimi" evicts the moonshot entry. An unknown key normalizes to its
+        // trimmed spelling — TryRemove is then a harmless no-op.
+        var canonical = ProviderCatalog.Resolve(providerKey)?.Key
+            ?? (providerKey ?? string.Empty).Trim().ToLowerInvariant();
+        _cache.TryRemove((canonical, tenantId), out _);
     }
 
     /// <summary>Fail-soft: serve the last-known-good list flagged stale when
