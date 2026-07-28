@@ -3,7 +3,7 @@
 **Date Discovered**: 2026-07-27
 **Reporter**: Claude (Story 46-3 implementation)
 **Severity**: 🟢 Low
-**Status**: 🐛 Open
+**Status**: ✅ Resolved
 
 ## 📋 Summary
 
@@ -52,3 +52,39 @@ fixture-drift failure.
 - Epic: `docs/stories/epic-46/README.md` — resolution precedence (D2), RBAC table (D3)
 - Backend commit that landed the tenant routes: `1d6f1e3`
 - Sibling envelope gap: `.dev/bugs/2026-07-27-models-envelope-lacks-delisted-flag.md`
+
+## ✅ Resolution
+
+**Resolution Date**: 2026-07-28
+**Resolution**: Fixed as proposed — additive `fallbackModel` on BOTH tenant DTOs,
+computed server-side through the ONE 46-1 resolver; the client-side capture is
+deleted.
+
+- **C#**: `IInlineToolLoopRunner.ResolveDefaultModelWithSource` gained the
+  proposed skip-principal overload (`(provider, tenantId, skipPrincipal)`).
+  `skipPrincipal: true` excludes the principal leg REGARDLESS of mode —
+  including the sole user's row in single-user mode, which `tenantId: null`
+  alone would still consult — by delegating to a `ResolveBelowPrincipal`
+  extraction of steps 2–4 (platform DB → config → descriptor), so precedence is
+  still stated exactly once. `TenantProviderRosterRow` and
+  `TenantProviderModelResponse` gained `string? FallbackModel` ("" mapped to
+  null, like `Model`), populated by `GetTenantProviderRoster` /
+  `GetTenantProviderModel`.
+- **dashboard-user**: `ModelSettingsPage.tsx`'s `platformDefaults` capture
+  (the "when client-knowable" opportunistic branch) is deleted — the picker's
+  `platformDefaultModel` prop is now fed `row.fallbackModel`, so the reset
+  confirm names the platform default even for rows that already had an
+  override at page load. The generic wording survives only for a genuinely
+  null fallback.
+- **Floor, verified**: the descriptor floor is NOT "never empty" — several
+  catalogue descriptors ship `DefaultModel = ""` ("caller must specify"; groq
+  among them), so `fallbackModel` is genuinely `null` there. Pinned by
+  `SkipPrincipal_DescriptorFloorCanBeEmpty_GroqShipsNoDefault` and
+  `GetTenantProviderModel_NothingBelowTheOverride_FallbackNull`.
+- **Tests**: `ProviderSettingsResolutionTests` pins the overload across all
+  layers (platform-db / config / descriptor / empty floor / single-user skip /
+  false ≡ two-arg overload) plus direct-call `GetTenantProviderModel` DTO
+  pins; both UI suites fixture `fallbackModel`, including the load-time-override
+  case that previously stayed generic. The no-row byte-identity suite is
+  untouched; the DTO reflection-scan hygiene test still passes (the new field
+  carries no key material).

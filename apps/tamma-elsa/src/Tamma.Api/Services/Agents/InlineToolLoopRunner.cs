@@ -1199,6 +1199,20 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
             return new ProviderDefaultModelResolution(overrideModel!, "tenant-override");
         }
 
+        return ResolveBelowPrincipal(canonicalName);
+    }
+
+    /// <summary>
+    /// Steps 2–4 of the precedence chain (platform DB → config → descriptor) —
+    /// the resolution AS IF no principal override row existed. Extracted
+    /// verbatim from <see cref="ResolveDefaultModel"/> so the tenant model
+    /// routes can surface the fallback a reset would land on
+    /// (<c>fallbackModel</c> — bug
+    /// 2026-07-27-tenant-surface-cannot-name-platform-default-under-override)
+    /// without restating the chain.
+    /// </summary>
+    private ProviderDefaultModelResolution ResolveBelowPrincipal(string canonicalName)
+    {
         // 2) Platform DB row.
         var platformModel = _settingsStore?.TryGetPlatformModel(canonicalName);
         if (!string.IsNullOrWhiteSpace(platformModel))
@@ -1310,6 +1324,24 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     public ProviderDefaultModelResolution ResolveDefaultModelWithSource(
         string providerName, Guid? tenantId)
     {
+        return ResolveDefaultModelWithSource(providerName, tenantId, skipPrincipal: false);
+    }
+
+    /// <summary>
+    /// Skip-principal overload (bug
+    /// 2026-07-27-tenant-surface-cannot-name-platform-default-under-override):
+    /// with <paramref name="skipPrincipal"/> <c>true</c> the principal
+    /// (tenant/user override) leg is excluded REGARDLESS of mode — including
+    /// the sole user's row in single-user mode, which a mere
+    /// <c>tenantId: null</c> would still consult — so the answer is the
+    /// platform DB → config → descriptor resolution a removed override would
+    /// fall back to. <paramref name="tenantId"/> is then irrelevant (the
+    /// remaining legs are principal-agnostic). <c>false</c> is byte-identical
+    /// to the two-argument overload.
+    /// </summary>
+    public ProviderDefaultModelResolution ResolveDefaultModelWithSource(
+        string providerName, Guid? tenantId, bool skipPrincipal)
+    {
         var canonicalName = ProviderCatalog.Resolve(providerName)?.Key
             ?? ProviderCatalog.ResolveNonHttp(providerName)?.Key
             ?? providerName;
@@ -1317,7 +1349,9 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         {
             return new ProviderDefaultModelResolution("", "descriptor");
         }
-        return ResolveDefaultModel(canonicalName, tenantId);
+        return skipPrincipal
+            ? ResolveBelowPrincipal(canonicalName)
+            : ResolveDefaultModel(canonicalName, tenantId);
     }
 
     // =======================================================================

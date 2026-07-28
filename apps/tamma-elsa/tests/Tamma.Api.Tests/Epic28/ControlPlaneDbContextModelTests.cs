@@ -160,6 +160,12 @@ public class ControlPlaneDbContextModelTests
             // owner (BYOK vs platform-provided). CP-resident (keyed by tenant). One
             // active row per (tenant, provider) via a partial unique index.
             "tenant_provider_billing",
+            // Story 46-1 — persisted provider model selection (platform +
+            // tenant/user XOR rows). CP-resident: the resolver runs on egress
+            // hot paths with a tenantId but no tenant DbContext; deliberately
+            // FK-free and excluded from the destructive startup DROP list so
+            // selections survive redeploys and tenant wipes.
+            "provider_settings",
         }, because: "Story 28-1 PR D (Decision #4) — enumerate every "
             + "CP-resident table; the 11 + 4 mentorship tenant-resident "
             + "entities have moved to TenantDbContext. Story 31-2 adds "

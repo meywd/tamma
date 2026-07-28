@@ -115,6 +115,20 @@ public interface IInlineToolLoopRunner
     /// two consumers — the endpoints never restate the chain (plan D4).
     /// </summary>
     ProviderDefaultModelResolution ResolveDefaultModelWithSource(string provider, Guid? tenantId);
+
+    /// <summary>
+    /// Skip-principal overload (bug
+    /// 2026-07-27-tenant-surface-cannot-name-platform-default-under-override):
+    /// <paramref name="skipPrincipal"/> <c>true</c> excludes the principal
+    /// (tenant/user override) leg regardless of mode — the answer is the
+    /// platform DB → config → descriptor resolution a removed override would
+    /// fall back to, surfaced as <c>fallbackModel</c> on the tenant model
+    /// routes. <c>false</c> behaves exactly like the two-argument overload.
+    /// Same empty-string contract; still the ONE precedence implementation —
+    /// callers never restate the chain.
+    /// </summary>
+    ProviderDefaultModelResolution ResolveDefaultModelWithSource(
+        string provider, Guid? tenantId, bool skipPrincipal);
 }
 
 /// <summary>

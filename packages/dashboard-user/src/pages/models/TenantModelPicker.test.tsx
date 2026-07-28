@@ -1,24 +1,22 @@
 /**
  * Story 46-3 AC2/AC3 — TenantModelPicker behaviours: search, current-pinned +
- * delisted marker, deprecated ordering, stale/unavailable banners, free-text
- * path, save + pricing warning, reset confirm naming the platform default,
- * 403 → forbidden callback (no retry loop), member read-only disclosure.
+ * delisted marker (the server's `delisted` flag — no heuristic), deprecated
+ * ordering, stale/unavailable banners, free-text path, save + pricing
+ * warning, reset confirm naming the platform default from the roster row's
+ * server-computed fallback, 403 → forbidden callback (no retry loop), member
+ * read-only disclosure.
  *
  * Fixtures mirror the C# DTOs — ProviderModelEntry / ProviderModelsResponse
- * (apps/tamma-elsa/src/Tamma.Api/Endpoints/ProviderAdminEndpoints.cs:426-436)
+ * (apps/tamma-elsa/src/Tamma.Api/Endpoints/ProviderAdminEndpoints.cs)
  * and PutTenantProviderModelResponse
- * (apps/tamma-elsa/src/Tamma.Api/Endpoints/ProviderCredentialEndpoints.cs:667-668).
+ * (apps/tamma-elsa/src/Tamma.Api/Endpoints/ProviderCredentialEndpoints.cs).
  * Do not invent fields (the 45-1 lesson).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import {
-  TenantModelPicker,
-  isCurrentDelisted,
-  type TenantModelPickerProps,
-} from './TenantModelPicker';
+import { TenantModelPicker, type TenantModelPickerProps } from './TenantModelPicker';
 import { ApiError } from '../../api/client';
 import type { ProviderModelsResponse } from '../../api/provider-models';
 
@@ -54,11 +52,19 @@ const FRESH: ProviderModelsResponse = {
 };
 
 // Delisted current: BuildModelsResponse synthesized the pin (index 0,
-// displayName null) because the live list no longer carries the model.
+// displayName null, `delisted: true`) because the live list no longer
+// carries the model. The flag is the contract — position/display name are
+// incidental.
 const DELISTED: ProviderModelsResponse = {
   provider: 'anthropic',
   models: [
-    { id: 'claude-retired-1', displayName: null, deprecated: false, current: true },
+    {
+      id: 'claude-retired-1',
+      displayName: null,
+      deprecated: false,
+      current: true,
+      delisted: true,
+    },
     { id: 'claude-opus-4-6', displayName: 'Claude Opus 4.6', deprecated: false, current: false },
   ],
   fetchedAt: '2026-07-27T12:00:00.000Z',
@@ -108,45 +114,51 @@ beforeEach(() => {
   mockApi.listProviderModels.mockResolvedValue(FRESH);
 });
 
-describe('isCurrentDelisted heuristic (envelope carries no explicit flag)', () => {
-  it.each([
-    ['synthesized pin ahead of a named list', DELISTED, true],
-    ['current flagged in place', FRESH, false],
-    [
-      'sole pinned entry after a failed fetch',
-      {
-        ...EMPTY,
-        models: [{ id: 'm-old', displayName: null, deprecated: false, current: true }],
-      },
-      true,
-    ],
-    [
-      'sole entry, fresh fetch (provider really lists one model)',
-      {
-        provider: 'p',
-        models: [{ id: 'm-1', displayName: null, deprecated: false, current: true }],
-        fetchedAt: '2026-07-27T12:00:00.000Z',
-        stale: false,
-        errorCode: null,
-      },
-      false,
-    ],
-    [
-      'no-display-name provider (OpenAI-style) — documented false-negative',
-      {
-        provider: 'openai',
-        models: [
-          { id: 'gpt-old', displayName: null, deprecated: false, current: true },
-          { id: 'gpt-5', displayName: null, deprecated: false, current: false },
-        ],
-        fetchedAt: '2026-07-27T12:00:00.000Z',
-        stale: false,
-        errorCode: null,
-      },
-      false,
-    ],
-  ] as [string, ProviderModelsResponse, boolean][])('%s → %s', (_name, envelope, expected) => {
-    expect(isCurrentDelisted(envelope)).toBe(expected);
+describe('delisted marker — a plain read of the envelope flag (no heuristic)', () => {
+  it('OpenAI-style list (no display names anywhere) WITH the flag shows the marker — the heuristic-era false negative', async () => {
+    mockApi.listProviderModels.mockResolvedValue({
+      provider: 'openai',
+      models: [
+        { id: 'gpt-old', displayName: null, deprecated: false, current: true, delisted: true },
+        { id: 'gpt-5', displayName: null, deprecated: false, current: false },
+      ],
+      fetchedAt: '2026-07-27T12:00:00.000Z',
+      stale: false,
+      errorCode: null,
+    });
+    renderPicker({ provider: 'openai', displayName: 'OpenAI', effectiveModel: 'gpt-old' });
+    await waitFor(() =>
+      expect(screen.getByText('no longer listed by the provider')).toBeInTheDocument(),
+    );
+  });
+
+  it('a genuinely-listed nameless first-position current WITHOUT the flag shows no marker — the heuristic-era false positive', async () => {
+    mockApi.listProviderModels.mockResolvedValue({
+      provider: 'openai',
+      models: [
+        { id: 'gpt-5', displayName: null, deprecated: false, current: true },
+        { id: 'gpt-5-mini', displayName: null, deprecated: false, current: false },
+      ],
+      fetchedAt: '2026-07-27T12:00:00.000Z',
+      stale: false,
+      errorCode: null,
+    });
+    renderPicker({ provider: 'openai', displayName: 'OpenAI', effectiveModel: 'gpt-5' });
+    await waitFor(() => expect(screen.getByText('current')).toBeInTheDocument());
+    expect(screen.queryByText('no longer listed by the provider')).toBeNull();
+  });
+
+  it('a sole synthesized pin after a failed fetch is flagged by the server, not inferred from stale/errorCode', async () => {
+    mockApi.listProviderModels.mockResolvedValue({
+      ...EMPTY,
+      models: [
+        { id: 'm-old', displayName: null, deprecated: false, current: true, delisted: true },
+      ],
+    });
+    renderPicker({ provider: 'deepseek', displayName: 'DeepSeek', effectiveModel: 'm-old' });
+    await waitFor(() =>
+      expect(screen.getByText('no longer listed by the provider')).toBeInTheDocument(),
+    );
   });
 });
 
@@ -285,7 +297,7 @@ describe('TenantModelPicker — override lifecycle', () => {
     expect(screen.getByText(/No cost pricing row exists/)).toBeInTheDocument();
   });
 
-  it('reset confirm names the platform default when known, DELETEs, and reports done', async () => {
+  it('reset confirm names the platform default (the row\'s server-computed fallbackModel), DELETEs, and reports done', async () => {
     mockApi.deleteProviderModel.mockResolvedValue(undefined);
     const { props } = renderPicker({
       hasOverride: true,
@@ -304,7 +316,9 @@ describe('TenantModelPicker — override lifecycle', () => {
     expect(props.onResetDone).toHaveBeenCalledTimes(1);
   });
 
-  it('reset confirm stays generic when the platform default is not client-knowable', async () => {
+  it('reset confirm stays generic when the server reports no fallback (fallbackModel null)', async () => {
+    // fallbackModel is null only when nothing below the override names a
+    // model (empty-string config / descriptor floor) — not "unknown".
     renderPicker({ hasOverride: true, platformDefaultModel: null });
     await waitFor(() => expect(screen.getByText(/Claude Opus 4.6/)).toBeInTheDocument());
 

@@ -9,7 +9,7 @@
  *     mounts it when a row is expanded (46-2 D1 restated);
  *   - client-side search over id + displayName;
  *   - current model pinned first, with a "no longer listed" marker when the
- *     envelope synthesized it (heuristic — see isCurrentDelisted);
+ *     envelope synthesized it (the server's `delisted` flag — a plain read);
  *   - deprecated entries marked and sorted last;
  *   - stale-cache and list-unavailable banners straight from the fail-soft
  *     envelope (epic D6 — the page is NEVER unusable);
@@ -17,7 +17,8 @@
  *     the fallback whenever the list is empty/unavailable;
  *   - save (PUT) surfacing the non-blocking pricingKnown warning (epic D3b);
  *   - "Use platform default" (DELETE) behind an inline confirm that names
- *     the fallback model when the client knows it;
+ *     the fallback model from the roster row's server-computed
+ *     `fallbackModel` (generic only when the server reports none);
  *   - 403 on either mutation downgrades the whole page via onForbidden —
  *     the SERVER is the RBAC enforcement, canEdit is cosmetic (D2).
  */
@@ -31,31 +32,6 @@ import {
 } from '../../api/provider-models';
 import { ApiError } from '../../api/client';
 
-/**
- * Heuristic: is the current-flagged entry a pin the server SYNTHESIZED
- * because the provider no longer lists the model? BuildModelsResponse
- * (ProviderAdminEndpoints.cs:259-280) prepends a synthesized entry at index
- * 0 with a null displayName when the fetched list lacks the current model —
- * but the envelope carries no explicit "synthesized" flag, so this is an
- * approximation: an in-list current keeps its provider position/display
- * name. For providers whose entries all lack display names (OpenAI-style
- * lists), a genuinely-listed current model that happens to sit first is
- * indistinguishable — the marker is informational, so that tie goes to
- * showing it only alongside other signals (sole entry + error/stale).
- */
-export function isCurrentDelisted(res: ProviderModelsResponse): boolean {
-  const first = res.models[0];
-  if (first === undefined || !first.current || first.displayName !== null) {
-    return false;
-  }
-  if (res.models.length === 1) {
-    // The pin is the only entry: synthesized iff the live fetch failed.
-    return res.stale || res.errorCode !== null;
-  }
-  // Prepended, nameless, ahead of a list that names its entries → synthesized.
-  return res.models.some((m) => !m.current && m.displayName !== null);
-}
-
 export interface TenantModelPickerProps {
   provider: string;
   displayName: string;
@@ -64,10 +40,10 @@ export interface TenantModelPickerProps {
   effectiveModel: string | null;
   hasOverride: boolean;
   /**
-   * The platform-default model this provider falls back to, when the client
-   * knows it (captured while the row resolved WITHOUT an override — the
-   * tenant surface has no endpoint exposing the platform default while an
-   * override is active). null → the reset confirm stays generic.
+   * The platform-default model this provider falls back to — the roster
+   * row's server-computed `fallbackModel` (the skip-principal resolution;
+   * available even while an override is active). null → nothing below the
+   * override names a model, so the reset confirm stays generic.
    */
   platformDefaultModel: string | null;
   canEdit: boolean;
@@ -132,7 +108,9 @@ export function TenantModelPicker(props: TenantModelPickerProps): JSX.Element {
     () => envelope?.models.find((m) => m.current) ?? null,
     [envelope],
   );
-  const delisted = envelope !== null && isCurrentDelisted(envelope);
+  // The envelope states synthesis directly (`delisted: true` only on the
+  // server-injected entry; absent/false = genuinely listed) — a plain read.
+  const delisted = currentEntry?.delisted === true;
 
   // Non-current entries, search-filtered, deprecated sorted last (each half
   // keeps the server's order).

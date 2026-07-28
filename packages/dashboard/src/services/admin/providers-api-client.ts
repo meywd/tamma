@@ -105,6 +105,15 @@ export interface ProviderModelEntry {
   deprecated: boolean;
   /** The currently-effective model — always present exactly once (epic D6). */
   current: boolean;
+  /**
+   * `true` ONLY on the entry the server synthesized because the provider's
+   * live list no longer carries the current model
+   * (`BuildModelsResponse` — the C# record omits `false` from the wire, so
+   * absent and `false` both mean "genuinely listed"). Replaces the 46-2
+   * index-0/null-displayName heuristic
+   * (.dev/bugs/2026-07-27-models-envelope-lacks-delisted-flag.md).
+   */
+  delisted?: boolean;
 }
 
 /**

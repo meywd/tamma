@@ -324,8 +324,11 @@ public static class ProviderCredentialEndpoints
     /// provider (disabled providers are simply absent — tenants never see the
     /// platform's off switch): key, display name, models-listing support, the
     /// resolved model + provenance for THIS tenant, whether an override row
-    /// exists, and BYOK key PRESENCE (metadata only — reuses the
-    /// <see cref="ListProviders"/> cabinet query; never the key).
+    /// exists, BYOK key PRESENCE (metadata only — reuses the
+    /// <see cref="ListProviders"/> cabinet query; never the key), and the
+    /// <c>fallbackModel</c> a removed override would resolve to
+    /// (skip-principal resolution — the reset confirm names it without the
+    /// client restating precedence).
     /// </summary>
     public static async Task<IResult> GetTenantProviderRoster(
         ITenantContext tenantContext,
@@ -358,6 +361,8 @@ public static class ProviderCredentialEndpoints
                 continue; // platform-disabled → absent from the tenant view
             }
             var resolution = runner.ResolveDefaultModelWithSource(d.Key, tenantId);
+            var fallback = runner.ResolveDefaultModelWithSource(
+                d.Key, tenantId, skipPrincipal: true);
             roster.Add(new TenantProviderRosterRow(
                 Provider: d.Key,
                 DisplayName: d.DisplayName,
@@ -365,7 +370,8 @@ public static class ProviderCredentialEndpoints
                 Model: string.IsNullOrEmpty(resolution.Model) ? null : resolution.Model,
                 Source: resolution.Source,
                 HasOverride: settings.HasOverride(d.Key, tenantId),
-                ByokKeyPresent: byokProviders.Contains(d.Key)));
+                ByokKeyPresent: byokProviders.Contains(d.Key),
+                FallbackModel: string.IsNullOrEmpty(fallback.Model) ? null : fallback.Model));
         }
 
         return Results.Ok(new { providers = roster });
@@ -375,7 +381,9 @@ public static class ProviderCredentialEndpoints
     /// Story 46-1 (AC5) — <c>GET /api/v1/agents/providers/{provider}/model</c>:
     /// the resolved model for this tenant + provenance
     /// (<c>tenant-override | platform-db | config | descriptor</c>) + the raw
-    /// override value when one exists. Member-readable.
+    /// override value when one exists + the <c>fallbackModel</c> a removed
+    /// override would resolve to (skip-principal resolution — never restated
+    /// client-side). Member-readable.
     /// </summary>
     public static IResult GetTenantProviderModel(
         string provider,
@@ -388,11 +396,13 @@ public static class ProviderCredentialEndpoints
 
         var tenantId = tenantContext.TenantId;
         var resolution = runner.ResolveDefaultModelWithSource(norm!, tenantId);
+        var fallback = runner.ResolveDefaultModelWithSource(norm!, tenantId, skipPrincipal: true);
         return Results.Ok(new TenantProviderModelResponse(
             norm!,
             string.IsNullOrEmpty(resolution.Model) ? null : resolution.Model,
             resolution.Source,
-            settings.TryGetModel(norm!, tenantId)));
+            settings.TryGetModel(norm!, tenantId),
+            string.IsNullOrEmpty(fallback.Model) ? null : fallback.Model));
     }
 
     /// <summary>
@@ -645,7 +655,15 @@ public sealed record ProviderCredentialMetadata(
 
 /// <summary>Story 46-1 — one row of the tenant-facing provider roster
 /// (<c>GET /api/v1/agents/providers/models</c>). Metadata only:
-/// <see cref="ByokKeyPresent"/> is presence, NEVER the key.</summary>
+/// <see cref="ByokKeyPresent"/> is presence, NEVER the key.
+/// <para><see cref="FallbackModel"/> (additive — bug
+/// 2026-07-27-tenant-surface-cannot-name-platform-default-under-override) is
+/// what the effective model WOULD be if the tenant override were removed:
+/// the skip-principal resolution (platform DB → config → descriptor),
+/// computed server-side through the 46-1 resolver. Equals
+/// <see cref="Model"/> when no override is active; <c>null</c> only when
+/// nothing below the principal leg names a model (empty-string config /
+/// descriptor).</para></summary>
 public sealed record TenantProviderRosterRow(
     string Provider,
     string DisplayName,
@@ -653,12 +671,16 @@ public sealed record TenantProviderRosterRow(
     string? Model,
     string Source,
     bool HasOverride,
-    bool ByokKeyPresent);
+    bool ByokKeyPresent,
+    string? FallbackModel = null);
 
 /// <summary>Story 46-1 — resolved model + provenance + the raw override
-/// (<c>GET /api/v1/agents/providers/{provider}/model</c>).</summary>
+/// (<c>GET /api/v1/agents/providers/{provider}/model</c>).
+/// <see cref="FallbackModel"/> carries the same skip-principal resolution as
+/// <see cref="TenantProviderRosterRow.FallbackModel"/> (additive).</summary>
 public sealed record TenantProviderModelResponse(
-    string Provider, string? Model, string Source, string? Override);
+    string Provider, string? Model, string Source, string? Override,
+    string? FallbackModel = null);
 
 /// <summary>Story 46-1 — PUT body for the tenant model override.</summary>
 public sealed record PutTenantProviderModelRequest(string? Model);

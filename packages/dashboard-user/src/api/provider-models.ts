@@ -20,7 +20,8 @@
  *     404 { error: "unknown_provider" } — non-catalogue provider only.
  *   GET    /api/v1/agents/providers/{provider}/model
  *     200 TenantProviderModelResponse — resolved model + provenance +
- *         raw override (null when none).
+ *         raw override (null when none) + fallbackModel (what a removed
+ *         override would resolve to, computed server-side).
  *   PUT    /api/v1/agents/providers/{provider}/model   { model }
  *     200 PutTenantProviderModelResponse (carries pricingKnown + warning —
  *         epic D3b allow-with-warning, never blocks)
@@ -48,7 +49,7 @@ import { apiClient } from './client';
 export type ModelSource = 'tenant-override' | 'platform-db' | 'config' | 'descriptor';
 
 /**
- * Mirrors TenantProviderRosterRow — ProviderCredentialEndpoints.cs:649-656.
+ * Mirrors TenantProviderRosterRow — ProviderCredentialEndpoints.cs.
  * NOTE: the C# field is `Provider` (serialized `provider`), not `key`.
  * `byokKeyPresent` is presence metadata only — NEVER the key.
  */
@@ -60,6 +61,14 @@ export interface TenantProviderRosterRow {
   source: string;
   hasOverride: boolean;
   byokKeyPresent: boolean;
+  /**
+   * What the effective model WOULD be if the tenant override were removed —
+   * the server-side skip-principal resolution (platform DB → config →
+   * descriptor; never restated client-side). Equals `model` when no override
+   * is active; `null` when nothing below the override names a model.
+   * (.dev/bugs/2026-07-27-tenant-surface-cannot-name-platform-default-under-override.md)
+   */
+  fallbackModel: string | null;
 }
 
 /** Mirrors the anonymous `{ providers = roster }` object GetTenantProviderRoster returns. */
@@ -67,12 +76,20 @@ export interface TenantProviderRosterResponse {
   providers: TenantProviderRosterRow[];
 }
 
-/** Mirrors ProviderModelEntry — ProviderAdminEndpoints.cs:426-427. */
+/** Mirrors ProviderModelEntry — ProviderAdminEndpoints.cs. */
 export interface ProviderModelEntry {
   id: string;
   displayName: string | null;
   deprecated: boolean;
   current: boolean;
+  /**
+   * `true` ONLY on the entry BuildModelsResponse synthesized because the
+   * provider's live list no longer carries the current model (the C# record
+   * omits `false` from the wire — absent/false both mean "genuinely listed").
+   * Replaces the exported isCurrentDelisted heuristic
+   * (.dev/bugs/2026-07-27-models-envelope-lacks-delisted-flag.md).
+   */
+  delisted?: boolean;
 }
 
 /**
@@ -88,12 +105,14 @@ export interface ProviderModelsResponse {
   errorCode: string | null;
 }
 
-/** Mirrors TenantProviderModelResponse — ProviderCredentialEndpoints.cs:660-661. */
+/** Mirrors TenantProviderModelResponse — ProviderCredentialEndpoints.cs. */
 export interface TenantProviderModelResponse {
   provider: string;
   model: string | null;
   source: string;
   override: string | null;
+  /** Same skip-principal fallback as `TenantProviderRosterRow.fallbackModel`. */
+  fallbackModel: string | null;
 }
 
 /** Mirrors PutTenantProviderModelResponse — ProviderCredentialEndpoints.cs:667-668. */

@@ -254,8 +254,10 @@ public static class ProviderAdminEndpoints
 
     /// <summary>Current-model injection (46-0 AC5, epic D6): the effective
     /// model is ALWAYS an entry — flagged in place when the live list carries
-    /// it, synthesized (DisplayName null) and prepended when the provider
-    /// delisted it (or the list is empty/stale).</summary>
+    /// it, synthesized (DisplayName null, <c>Delisted: true</c>) and prepended
+    /// when the provider delisted it (or the list is empty/stale). The
+    /// <c>Delisted</c> flag states the fact so neither UI has to infer
+    /// synthesis positionally (bug 2026-07-27-models-envelope-lacks-delisted-flag).</summary>
     internal static ProviderModelsResponse BuildModelsResponse(
         string provider, ProviderModelList list, string? currentModel)
     {
@@ -272,7 +274,8 @@ public static class ProviderAdminEndpoints
         if (!hasCurrent && !string.IsNullOrEmpty(currentModel))
         {
             entries.Insert(0, new ProviderModelEntry(
-                currentModel!, DisplayName: null, Deprecated: false, Current: true));
+                currentModel!, DisplayName: null, Deprecated: false, Current: true,
+                Delisted: true));
         }
 
         return new ProviderModelsResponse(
@@ -422,9 +425,22 @@ public sealed record ProviderStatusRow(
     bool Enabled,
     IReadOnlyList<string> Aliases);
 
-/// <summary>One entry of a live model list (46-0 AC5 response shape).</summary>
+/// <summary>One entry of a live model list (46-0 AC5 response shape).
+/// <para><c>Delisted</c> is <c>true</c> ONLY on the entry
+/// <see cref="ProviderAdminEndpoints.BuildModelsResponse"/> synthesized because
+/// the provider's list no longer carries the currently-effective model —
+/// genuinely-listed entries serialize without the field (default <c>false</c>
+/// is omitted), so consumers read absent/false as "listed". Additive; replaces
+/// the 46-2/46-3 client-side heuristics
+/// (bug 2026-07-27-models-envelope-lacks-delisted-flag).</para></summary>
 public sealed record ProviderModelEntry(
-    string Id, string? DisplayName, bool Deprecated, bool Current);
+    string Id,
+    string? DisplayName,
+    bool Deprecated,
+    bool Current,
+    [property: System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    bool Delisted = false);
 
 /// <summary>The fail-soft models envelope both the admin and tenant models
 /// routes return (always HTTP 200 for a known provider — epic D6).</summary>

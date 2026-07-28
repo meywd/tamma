@@ -6,8 +6,9 @@
  * read-only, error-keeps-frame + retry, empty roster.
  *
  * Roster fixture mirrors TenantProviderRosterRow — apps/tamma-elsa/src/
- * Tamma.Api/Endpoints/ProviderCredentialEndpoints.cs:649-656 (note the field
- * is `provider`, NOT `key`). Do not invent fields (the 45-1 lesson).
+ * Tamma.Api/Endpoints/ProviderCredentialEndpoints.cs (note the field is
+ * `provider`, NOT `key`; `fallbackModel` is the server-computed
+ * skip-principal resolution). Do not invent fields (the 45-1 lesson).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -51,6 +52,8 @@ const ROSTER: TenantProviderRosterResponse = {
       source: 'platform-db',
       hasOverride: false,
       byokKeyPresent: true,
+      // No override → the fallback IS the resolved model.
+      fallbackModel: 'claude-sonnet-4-5',
     },
     {
       provider: 'openai',
@@ -60,6 +63,9 @@ const ROSTER: TenantProviderRosterResponse = {
       source: 'tenant-override',
       hasOverride: true,
       byokKeyPresent: false,
+      // Override active at page load — the server still names what a reset
+      // would land on (the bug the field exists to fix).
+      fallbackModel: 'gpt-5-default',
     },
     {
       provider: 'z-ai',
@@ -69,6 +75,7 @@ const ROSTER: TenantProviderRosterResponse = {
       source: 'config',
       hasOverride: false,
       byokKeyPresent: false,
+      fallbackModel: 'glm-4.7',
     },
     {
       provider: 'deepseek',
@@ -78,6 +85,8 @@ const ROSTER: TenantProviderRosterResponse = {
       source: 'descriptor',
       hasOverride: false,
       byokKeyPresent: false,
+      // Nothing anywhere names a model (descriptor default "" → null).
+      fallbackModel: null,
     },
   ],
 };
@@ -207,7 +216,7 @@ describe('ModelSettingsPage — override lifecycle on the roster', () => {
     expect(screen.getByText(/No cost pricing row exists/)).toBeInTheDocument();
   });
 
-  it('reset confirms naming the fallback, DELETEs, and flips the row back to platform default', async () => {
+  it('reset confirms naming the server-reported fallback (override active since load), DELETEs, and flips the row back to platform default', async () => {
     // OpenAI row carries the override; its model list is irrelevant here.
     mockApi.listProviderModels.mockResolvedValue({
       provider: 'openai',
@@ -218,12 +227,13 @@ describe('ModelSettingsPage — override lifecycle on the roster', () => {
     });
     mockApi.deleteProviderModel.mockResolvedValue(undefined);
     // Re-resolution after DELETE — TenantProviderModelResponse
-    // (ProviderCredentialEndpoints.cs:660-661).
+    // (ProviderCredentialEndpoints.cs).
     mockApi.getProviderModel.mockResolvedValue({
       provider: 'openai',
       model: 'gpt-5-default',
       source: 'platform-db',
       override: null,
+      fallbackModel: 'gpt-5-default',
     });
     renderPage();
     await waitFor(() => expect(screen.getByText('OpenAI')).toBeInTheDocument());
@@ -235,7 +245,12 @@ describe('ModelSettingsPage — override lifecycle on the roster', () => {
     await userEvent.click(
       await screen.findByRole('button', { name: 'Use platform default' }),
     );
-    expect(screen.getByText(/Remove your override/)).toBeInTheDocument();
+    // The confirm NAMES the fallback even though the override was already
+    // active when the page loaded — the roster row's fallbackModel, not a
+    // client-side capture (the pre-fix behaviour stayed generic here).
+    const confirm = screen.getByText(/Remove your override/);
+    expect(confirm.textContent).toContain('fall back to the platform default');
+    expect(confirm.textContent).toContain('gpt-5-default');
 
     await userEvent.click(screen.getByRole('button', { name: 'Confirm' }));
     await waitFor(() => expect(mockApi.deleteProviderModel).toHaveBeenCalledWith('openai'));

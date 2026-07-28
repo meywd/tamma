@@ -59,6 +59,7 @@ describe('providerModelsApi — URL/method/body matrix', () => {
         model: 'claude-sonnet-4-5',
         source: 'platform-db',
         override: null,
+        fallbackModel: 'claude-sonnet-4-5',
       }),
     );
     globalThis.fetch = spy as unknown as typeof fetch;

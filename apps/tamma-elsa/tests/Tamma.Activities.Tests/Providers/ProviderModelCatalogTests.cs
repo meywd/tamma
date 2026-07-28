@@ -465,6 +465,56 @@ public class ProviderModelCatalogTests
         current.Id.Should().Be("gpt-4-turbo-delisted");
         current.DisplayName.Should().BeNull("synthesized entries carry no display name");
         response.Models[0].Should().Be(current, "the synthesized current model is prepended");
+        current.Delisted.Should().BeTrue(
+            "the envelope states the fact — the UIs no longer infer synthesis positionally " +
+            "(bug 2026-07-27-models-envelope-lacks-delisted-flag)");
+        response.Models.Where(m => !m.Current).Should().OnlyContain(
+            m => !m.Delisted, "only the synthesized entry carries the flag");
+    }
+
+    [Test]
+    public void CurrentModelInjection_ListedFirstEntryWithoutDisplayName_NotDelisted()
+    {
+        // The 46-2 heuristic's documented false positive: a display-name-less
+        // provider (OpenAI/Groq/DeepSeek-style list) whose current model
+        // genuinely IS the first entry. Structurally identical to a synthesized
+        // pin — the flag is what tells them apart.
+        var list = new ProviderModelList(
+            new[]
+            {
+                new ProviderModelInfo("gpt-4o", null, false),
+                new ProviderModelInfo("gpt-4o-mini", null, false),
+            },
+            DateTimeOffset.UtcNow, Stale: false, ErrorCode: null);
+
+        var response = ProviderAdminEndpoints.BuildModelsResponse("openai", list, "gpt-4o");
+
+        response.Models.Should().HaveCount(2, "no synthesis happened");
+        var current = response.Models.Single(m => m.Current);
+        current.Should().Be(response.Models[0]);
+        current.DisplayName.Should().BeNull();
+        current.Delisted.Should().BeFalse("a listed-in-place current entry never carries the flag");
+    }
+
+    [Test]
+    public void DelistedFlag_OnTheWire_PresentTrueOnlyOnTheSynthesizedEntry()
+    {
+        // Wire contract the TS clients type as `delisted?: boolean`:
+        // `"delisted":true` on the synthesized entry; OMITTED (WhenWritingDefault)
+        // on genuinely-listed entries — absent/false both read as "listed".
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var list = new ProviderModelList(
+            new[] { new ProviderModelInfo("gpt-4o", null, false) },
+            DateTimeOffset.UtcNow, Stale: false, ErrorCode: null);
+
+        var synthesized = JsonSerializer.Serialize(
+            ProviderAdminEndpoints.BuildModelsResponse("openai", list, "gone-model"), options);
+        synthesized.Should().Contain("\"delisted\":true");
+        synthesized.Should().NotContain("\"delisted\":false");
+
+        var listed = JsonSerializer.Serialize(
+            ProviderAdminEndpoints.BuildModelsResponse("openai", list, "gpt-4o"), options);
+        listed.Should().NotContain("delisted", "false is omitted from the wire");
     }
 
     [Test]
@@ -482,6 +532,8 @@ public class ProviderModelCatalogTests
 
         response.Models.Should().HaveCount(2, "no synthesis when the list carries the model");
         response.Models.Single(m => m.Current).Id.Should().Be("gpt-4o-mini");
+        response.Models.Should().OnlyContain(
+            m => !m.Delisted, "no entry is flagged when the list carries the current model");
     }
 
     [Test]

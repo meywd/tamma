@@ -86,24 +86,10 @@ export function ModelPicker({ row, onSave, onReset }: ModelPickerProps): JSX.Ele
     [models],
   );
 
-  /**
-   * "No longer listed by the provider" detection. The envelope carries no
-   * explicit synthesized/delisted flag — the server prepends a synthesized
-   * entry (displayName null) at index 0 when the live list lacks the current
-   * model (ProviderAdminEndpoints.BuildModelsResponse) — so this is the best
-   * available heuristic: a fresh, non-empty list whose current entry sits at
-   * index 0 with no display name and other entries after it.
-   */
-  const currentDelisted = useMemo(() => {
-    if (models == null || currentEntry == null) return false;
-    return (
-      !models.stale &&
-      models.errorCode == null &&
-      models.models.length > 1 &&
-      currentEntry.displayName == null &&
-      models.models[0]?.id === currentEntry.id
-    );
-  }, [models, currentEntry]);
+  // "No longer listed by the provider": the envelope states the fact —
+  // BuildModelsResponse flags the entry it synthesized (`delisted: true`;
+  // absent/false on genuinely-listed entries), so this is a plain flag read.
+  const currentDelisted = currentEntry?.delisted === true;
 
   // Pinned-current + filter + deprecated-last ordering. The current entry is
   // always visible (pinned) regardless of the search filter.

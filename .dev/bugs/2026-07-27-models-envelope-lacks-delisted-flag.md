@@ -3,7 +3,7 @@
 **Date Discovered**: 2026-07-27
 **Reporter**: Claude (Story 46-2 implementation)
 **Severity**: 🟢 Low
-**Status**: 🐛 Open
+**Status**: ✅ Resolved
 
 ## 📋 Summary
 
@@ -70,3 +70,28 @@ repeat the Epic 45 (45-1) fixture-drift failure in mirror image.
 - Story: `docs/stories/epic-46/story-46-2/46-2-platform-admin-provider-settings-ui.md` (AC2)
 - Epic: `docs/stories/epic-46/README.md` — D6 (fail-soft envelope contract)
 - Backend commit that landed the envelope: `1d6f1e3`
+
+## ✅ Resolution
+
+**Resolution Date**: 2026-07-28
+**Resolution**: Fixed as proposed — additive `Delisted` flag on the envelope; both
+client heuristics deleted.
+
+- **C#**: `ProviderModelEntry` gained `bool Delisted = false`
+  (`[JsonIgnore(WhenWritingDefault)]` — the wire carries `"delisted":true` on the
+  synthesized entry and omits the field on genuinely-listed entries, so
+  absent/false both read as "listed"). `BuildModelsResponse` sets it `true` only
+  on the entry it prepends. One field, both routes (admin + tenant), both UIs.
+- **dashboard (46-2)**: `ModelPicker.tsx`'s index-0/null-displayName heuristic
+  deleted — `currentDelisted` is now `currentEntry?.delisted === true`.
+  `providers-api-client.ts` mirrors the field as `delisted?: boolean`.
+- **dashboard-user (46-3)**: the exported `isCurrentDelisted()` helper deleted
+  (nothing else used it) — the picker reads the flag directly.
+  `provider-models.ts` mirrors the field.
+- **Tests**: `ProviderModelCatalogTests` injection tests pin `delisted` true only
+  on synthesized entries, false on a genuinely-listed nameless first entry (the
+  46-2 false positive, now distinguishable), and the wire omission of `false`.
+  Both UI suites fixture the flag; the 46-2 false-positive and 46-3
+  false-negative shapes are pinned as regression tests (marker only with the
+  flag). The 58 provider golden fixtures and the no-row byte-identity suite are
+  untouched; the DTO reflection-scan hygiene test still passes.

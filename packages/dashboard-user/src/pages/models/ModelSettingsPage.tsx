@@ -19,11 +19,12 @@
  * The picker (TenantModelPicker) mounts only when a row is expanded —
  * fetch-on-open, so 15 provider lists are never fetched up front (46-2 D1).
  *
- * Platform-default capture: the tenant surface has no endpoint that exposes
- * the platform default while an override is active, so the page remembers
- * the resolved model of any row whose source is NOT 'tenant-override' — the
- * only moment the client can see it — and the reset confirm names it when
- * known (AC3), staying generic otherwise.
+ * Platform default (AC3): every roster row carries the server-computed
+ * `fallbackModel` — what resolution would answer if the tenant override were
+ * removed (skip-principal, computed through the 46-1 resolver) — so the
+ * reset confirm always names it, even for rows that already had an override
+ * when the page loaded. Generic wording only when the server reports null
+ * (nothing below the override names a model).
  */
 
 import { useCallback, useEffect, useState, type JSX } from 'react';
@@ -33,7 +34,7 @@ import {
   type PutTenantProviderModelResponse,
   type TenantProviderRosterRow,
 } from '../../api/provider-models';
-import { provenanceLabel, TENANT_OVERRIDE_SOURCE } from './provenance';
+import { provenanceLabel } from './provenance';
 import { TenantModelPicker } from './TenantModelPicker';
 
 export function ModelSettingsPage(): JSX.Element {
@@ -50,34 +51,19 @@ export function ModelSettingsPage(): JSX.Element {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [platformDefaults, setPlatformDefaults] = useState<Record<string, string>>({});
-
-  const capturePlatformDefaults = useCallback((list: TenantProviderRosterRow[]) => {
-    setPlatformDefaults((prev) => {
-      const next = { ...prev };
-      for (const row of list) {
-        if (row.source !== TENANT_OVERRIDE_SOURCE && row.model !== null) {
-          next[row.provider] = row.model;
-        }
-      }
-      return next;
-    });
-  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const resp = await providerModelsApi.listProviderModelSettings();
-      const list = resp?.providers ?? [];
-      setRows(list);
-      capturePlatformDefaults(list);
+      setRows(resp?.providers ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load provider model settings');
     } finally {
       setLoading(false);
     }
-  }, [capturePlatformDefaults]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -107,14 +93,11 @@ export function ModelSettingsPage(): JSX.Element {
                   model: resolved.model,
                   source: resolved.source,
                   hasOverride: resolved.override !== null,
+                  fallbackModel: resolved.fallbackModel,
                 }
               : row,
           ),
         );
-        const fallback = resolved.model;
-        if (resolved.source !== TENANT_OVERRIDE_SOURCE && fallback !== null) {
-          setPlatformDefaults((prev) => ({ ...prev, [provider]: fallback }));
-        }
       } catch {
         // Single-row refresh failed — fall back to a full reload.
         void load();
@@ -216,7 +199,7 @@ export function ModelSettingsPage(): JSX.Element {
                     modelsSupported={row.modelsSupported}
                     effectiveModel={row.model}
                     hasOverride={row.hasOverride}
-                    platformDefaultModel={platformDefaults[row.provider] ?? null}
+                    platformDefaultModel={row.fallbackModel}
                     canEdit={canEdit}
                     onSaved={(resp) => handleSaved(row.provider, resp)}
                     onResetDone={() => {

@@ -243,13 +243,20 @@ describe('ProvidersAdminPage', () => {
   });
 
   it('marks a delisted current model as no longer listed by the provider', async () => {
-    // The server synthesizes the current entry (displayName null) at index 0
-    // when the provider delisted it (BuildModelsResponse in
-    // ProviderAdminEndpoints.cs).
+    // The server synthesizes the current entry (displayName null,
+    // `delisted: true`) at index 0 when the provider delisted it
+    // (BuildModelsResponse in ProviderAdminEndpoints.cs). The marker is a
+    // plain read of that flag — no positional heuristic.
     api.listProviderModels.mockResolvedValue({
       provider: 'alpha',
       models: [
-        { id: 'alpha-large-2', displayName: null, deprecated: false, current: true },
+        {
+          id: 'alpha-large-2',
+          displayName: null,
+          deprecated: false,
+          current: true,
+          delisted: true,
+        },
         { id: 'alpha-small-1', displayName: 'Alpha Small 1', deprecated: false, current: false },
       ],
       fetchedAt: '2026-07-27T00:00:00.000Z',
@@ -264,6 +271,30 @@ describe('ProvidersAdminPage', () => {
     const options = within(listbox).getAllByRole('option');
     expect(options[0]!.textContent).toContain('no longer listed by the provider');
     expect(options[1]!.textContent).not.toContain('no longer listed');
+  });
+
+  it('does NOT mark a genuinely-listed first-position current model without display name', async () => {
+    // The old heuristic's false positive (display-name-less providers whose
+    // current model really is first in the provider's own order): without the
+    // server's `delisted` flag, no marker renders.
+    api.listProviderModels.mockResolvedValue({
+      provider: 'alpha',
+      models: [
+        { id: 'alpha-large-2', displayName: null, deprecated: false, current: true },
+        { id: 'alpha-small-1', displayName: null, deprecated: false, current: false },
+      ],
+      fetchedAt: '2026-07-27T00:00:00.000Z',
+      stale: false,
+      errorCode: null,
+    });
+
+    renderPage();
+    await openPicker('alpha');
+    const listbox = await screen.findByTestId('model-listbox');
+
+    const options = within(listbox).getAllByRole('option');
+    expect(options[0]!.textContent).toContain('(current)');
+    expect(options[0]!.textContent).not.toContain('no longer listed');
   });
 
   it('marks deprecated models and orders them after non-deprecated ones', async () => {
@@ -300,10 +331,14 @@ describe('ProvidersAdminPage', () => {
   });
 
   it('degrades an empty model list to a banner plus a usable free-text input', async () => {
-    // Fail-soft envelope: only the synthesized current entry, with the error code.
+    // Fail-soft envelope: only the synthesized current entry (flagged
+    // `delisted` — it is absent from a list the server could not fetch), with
+    // the error code.
     api.listProviderModels.mockResolvedValue({
       provider: 'beta',
-      models: [{ id: 'beta-chat-1', displayName: null, deprecated: false, current: true }],
+      models: [
+        { id: 'beta-chat-1', displayName: null, deprecated: false, current: true, delisted: true },
+      ],
       fetchedAt: null,
       stale: false,
       errorCode: 'credential_unavailable',

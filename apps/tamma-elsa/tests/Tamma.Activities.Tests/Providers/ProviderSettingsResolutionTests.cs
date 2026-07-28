@@ -287,6 +287,191 @@ public class ProviderSettingsResolutionTests
             .Should().Be("tenant-override");
     }
 
+    // ── the skip-principal overload + the tenant routes' fallbackModel ──────
+    // (bug 2026-07-27-tenant-surface-cannot-name-platform-default-under-override)
+
+    [Test]
+    public void SkipPrincipal_OverrideActive_AnswersThePlatformDbLeg()
+    {
+        var store = new FakeSettingsStore
+        {
+            TenantModels = { [("openai", Tenant)] = "tenant-model" },
+            PlatformModels = { ["openai"] = "platform-model" },
+        };
+        var runner = Runner(Config(), store);
+
+        // The normal resolution answers the override…
+        runner.ResolveDefaultModelWithSource("openai", Tenant).Model.Should().Be("tenant-model");
+
+        // …the skip-principal overload answers what a reset would land on.
+        var fallback = runner.ResolveDefaultModelWithSource("openai", Tenant, skipPrincipal: true);
+        fallback.Model.Should().Be("platform-model");
+        fallback.Source.Should().Be("platform-db");
+    }
+
+    [Test]
+    public void SkipPrincipal_FallsThroughConfigToTheDescriptorFloor()
+    {
+        var tenantOnly = new FakeSettingsStore
+        {
+            TenantModels = { [("openai", Tenant)] = "tenant-model" },
+        };
+
+        // No platform row → the config leg answers…
+        var config = Config(new Dictionary<string, string?>
+        {
+            ["LlmProviders:openai:DefaultModel"] = "cfg-model",
+        });
+        var viaConfig = Runner(config, tenantOnly)
+            .ResolveDefaultModelWithSource("openai", Tenant, skipPrincipal: true);
+        viaConfig.Model.Should().Be("cfg-model");
+        viaConfig.Source.Should().Be("config");
+
+        // …no config either → the descriptor floor (openai ships a default).
+        var viaDescriptor = Runner(Config(), tenantOnly)
+            .ResolveDefaultModelWithSource("openai", Tenant, skipPrincipal: true);
+        viaDescriptor.Model.Should().Be("gpt-4o");
+        viaDescriptor.Source.Should().Be("descriptor");
+    }
+
+    [Test]
+    public void SkipPrincipal_DescriptorFloorCanBeEmpty_GroqShipsNoDefault()
+    {
+        // The floor is NOT "never empty": several catalogue descriptors carry
+        // DefaultModel "" ("caller must specify") — groq among them — so the
+        // tenant routes' fallbackModel maps "" → null there. Pinned so the
+        // customer UI's generic-confirm branch stays honest.
+        var store = new FakeSettingsStore
+        {
+            TenantModels = { [("groq", Tenant)] = "tenant-model" },
+        };
+        var fallback = Runner(Config(), store)
+            .ResolveDefaultModelWithSource("groq", Tenant, skipPrincipal: true);
+        fallback.Model.Should().Be("");
+        fallback.Source.Should().Be("descriptor");
+    }
+
+    [Test]
+    public void SkipPrincipal_SingleUserMode_SkipsTheSoleUsersRowToo()
+    {
+        var store = new FakeSettingsStore
+        {
+            SingleUserMode = true,
+            UserModels = { ["anthropic"] = "sole-user-model" },
+            PlatformModels = { ["anthropic"] = "platform-model" },
+        };
+        var runner = Runner(Config(), store);
+
+        // tenantId null does NOT skip the principal leg in single-user mode
+        // (the store maps mode internally) — only the explicit flag does.
+        runner.ResolveDefaultModelWithSource("anthropic", null).Model
+            .Should().Be("sole-user-model");
+        runner.ResolveDefaultModelWithSource("anthropic", null, skipPrincipal: true).Model
+            .Should().Be("platform-model");
+    }
+
+    [Test]
+    public void SkipPrincipalFalse_ByteIdenticalToTheTwoArgumentOverload()
+    {
+        var store = new FakeSettingsStore
+        {
+            TenantModels = { [("openai", Tenant)] = "tenant-model" },
+            PlatformModels = { ["anthropic"] = "platform-model" },
+        };
+        var runner = Runner(Config(), store);
+
+        foreach (var key in new[] { "openai", "anthropic", "groq", "not-a-provider" })
+        {
+            foreach (var tenantId in new Guid?[] { null, Tenant })
+            {
+                runner.ResolveDefaultModelWithSource(key, tenantId, skipPrincipal: false)
+                    .Should().Be(runner.ResolveDefaultModelWithSource(key, tenantId),
+                        $"key {key}, tenant {tenantId}");
+            }
+        }
+    }
+
+    // ── endpoint surface: GET …/{provider}/model carries fallbackModel ──────
+
+    private sealed class StubTenantContext(Guid? id) : Tamma.Data.ITenantContext
+    {
+        public Guid? TenantId { get; private set; } = id;
+        public void SetTenantId(Guid tenantId) => TenantId = tenantId;
+        public void ClearTenantId() => TenantId = null;
+    }
+
+    private static Tamma.Api.Endpoints.TenantProviderModelResponse GetModelBody(
+        string provider, FakeSettingsStore store, Guid? tenantId,
+        IConfiguration? configuration = null)
+    {
+        var result = Tamma.Api.Endpoints.ProviderCredentialEndpoints.GetTenantProviderModel(
+            provider, new StubTenantContext(tenantId), store,
+            Runner(configuration ?? Config(), store));
+        return result
+            .Should().BeOfType<Microsoft.AspNetCore.Http.HttpResults
+                .Ok<Tamma.Api.Endpoints.TenantProviderModelResponse>>()
+            .Subject.Value!;
+    }
+
+    [Test]
+    public void GetTenantProviderModel_OverrideActive_NamesThePlatformFallback()
+    {
+        // THE bug case: while the override is active every resolved read IS
+        // the override — fallbackModel now states what a reset lands on.
+        var store = new FakeSettingsStore
+        {
+            TenantModels = { [("openai", Tenant)] = "tenant-model" },
+            PlatformModels = { ["openai"] = "platform-model" },
+        };
+
+        var body = GetModelBody("openai", store, Tenant);
+
+        body.Model.Should().Be("tenant-model");
+        body.Source.Should().Be("tenant-override");
+        body.Override.Should().Be("tenant-model");
+        body.FallbackModel.Should().Be("platform-model");
+    }
+
+    [Test]
+    public void GetTenantProviderModel_NoOverride_FallbackEqualsTheResolvedModel()
+    {
+        var store = new FakeSettingsStore { PlatformModels = { ["openai"] = "platform-model" } };
+
+        var body = GetModelBody("openai", store, Tenant);
+
+        body.Model.Should().Be("platform-model");
+        body.Source.Should().Be("platform-db");
+        body.Override.Should().BeNull();
+        body.FallbackModel.Should().Be("platform-model");
+    }
+
+    [Test]
+    public void GetTenantProviderModel_NothingBelowTheOverride_FallbackNull()
+    {
+        // groq: no platform row, no config, descriptor default "" → null.
+        var store = new FakeSettingsStore
+        {
+            TenantModels = { [("groq", Tenant)] = "tenant-model" },
+        };
+
+        var body = GetModelBody("groq", store, Tenant);
+
+        body.Model.Should().Be("tenant-model");
+        body.FallbackModel.Should().BeNull(
+            "nothing below the principal leg names a model for this provider");
+    }
+
+    [Test]
+    public void GetTenantProviderModel_DescriptorFloor_FallbackIsTheDescriptorDefault()
+    {
+        var store = new FakeSettingsStore
+        {
+            TenantModels = { [("openai", Tenant)] = "tenant-model" },
+        };
+
+        GetModelBody("openai", store, Tenant).FallbackModel.Should().Be("gpt-4o");
+    }
+
     // ── an explicitly-named per-call model never consults the resolver ─────
 
     [Test]
