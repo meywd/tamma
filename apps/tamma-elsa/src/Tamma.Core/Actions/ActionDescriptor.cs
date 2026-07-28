@@ -36,8 +36,13 @@ namespace Tamma.Core.Actions;
 /// Optional join into <c>SensitiveActionCatalog.ByCode</c> (43-2 D12): the
 /// compliance catalog stays the compliance artifact, this catalog stays the
 /// authorization artifact, joined where a join exists. Every non-null value must
-/// resolve (checked at BuildIndex via the caller-supplied validity set in tests
-/// and pinned by <c>ActionDescriptorMetadataTests</c>).
+/// resolve: <c>ActionCatalog.BuildIndex</c> checks it against a caller-supplied
+/// validity set (code <c>ACTION.CATALOG.UNKNOWN_SENSITIVE_CODE</c>) —
+/// <c>ActionCatalog.Validate()</c> supplies the real
+/// <c>SensitiveActionCatalog.ByCode</c> key set at boot, the red-rehearsal in
+/// <c>ActionCatalogBuildIndexTests</c> supplies its own, and the join is
+/// additionally pinned by <c>ActionDescriptorMetadataTests</c>. The static-init
+/// path deliberately skips it (no Audit-plane dependency at type init).
 /// </param>
 /// <param name="EscalatableToHuman">
 /// Whether a denial can suspend for a person. <c>false</c> for every

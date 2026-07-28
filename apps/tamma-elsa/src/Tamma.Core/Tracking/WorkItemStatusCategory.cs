@@ -48,16 +48,24 @@ public static class WorkItemStatusCategoryExtensions
     ///
     /// <para>Deliberately a <c>switch</c> expression with <b>no default arm</b>:
     /// adding a status without assigning it a category must be a compile-time
-    /// diagnostic (CS8509), not a runtime surprise. Do not "tidy" this by adding
-    /// a discard arm, and note that <c>unstarted</c> and <c>backlog</c> each
+    /// ERROR, not a runtime surprise. The mechanism is two-part, because the
+    /// C# compiler alone only makes an unhandled named member a WARNING
+    /// (CS8509) and this repo builds with <c>TreatWarningsAsErrors=false</c>:
+    /// <c>Tamma.Core.csproj</c> promotes CS8509 to an error via
+    /// <c>&lt;WarningsAsErrors&gt;</c>, scoped to this project. Do not "tidy"
+    /// this by adding a discard arm (it would suppress CS8509 and void the
+    /// guarantee), and note that <c>unstarted</c> and <c>backlog</c> each
     /// having exactly one member is deliberate — the category is a contract,
     /// not a compression.</para>
     /// </summary>
 #pragma warning disable CS8524 // Unnamed enum values ((WorkItemStatus)99) are unrepresentable here: every
     // construction path goes through EnumWire parsing or the enum literals, and an
     // unnamed value at runtime still fails loud (SwitchExpressionException).
-    // CS8509 (a *named* member without an arm) stays ENABLED — it is the
-    // compile-time guarantee this switch exists to provide (AC3).
+    // CS8509 (a *named* member without an arm) stays ENABLED — and is promoted
+    // to an ERROR by Tamma.Core.csproj's <WarningsAsErrors> (repo-wide
+    // TreatWarningsAsErrors is false, so the bare warning alone would not block
+    // a build) — it is the compile-time guarantee this switch exists to
+    // provide (AC3).
     public static WorkItemStatusCategory Category(this WorkItemStatus status) => status switch
     {
         WorkItemStatus.Triage => WorkItemStatusCategory.Triage,

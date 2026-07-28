@@ -18,21 +18,46 @@ namespace Tamma.Activities.Tests.Actions;
 [TestFixture]
 public class ToolExecutorCatalogSweepTests
 {
-    /// <summary>
-    /// Every non-abstract <see cref="IToolExecutor"/> implementation across the
-    /// assemblies that declare them (Tamma.Activities + Tamma.Api — the
-    /// deliberately-unregistered GetAcceptanceRulesTool lives in Tamma.Api).
-    /// </summary>
-    private static IReadOnlyList<Type> ExecutorTypes() =>
+    // ⚠ META-GUARD — THE ASSEMBLY LIST BELOW IS THE SWEEP'S BLIND SPOT. A
+    // reflection sweep only binds the catalog to code it actually scans: an
+    // IToolExecutor declared in an assembly missing from this list is invisible
+    // here and ships uncatalogued. The list must cover EVERY production
+    // assembly — today the three are Tamma.Activities, Tamma.Api and
+    // Tamma.ElsaServer (kept in lockstep with BackgroundActorCatalogSweepTests,
+    // and pinned by The_swept_assemblies_are_the_three_production_assemblies) —
+    // and MUST GROW the day a fourth production assembly is added to
+    // Tamma.sln, even if it declares no executors yet.
+    private static IReadOnlyList<System.Reflection.Assembly> SweptAssemblies() =>
         new[]
         {
             typeof(GitOperationsTool).Assembly,                                    // Tamma.Activities
-            typeof(Tamma.Api.Services.AcceptanceRules.GetAcceptanceRulesTool).Assembly, // Tamma.Api
+            typeof(Tamma.Api.Services.AcceptanceRules.GetAcceptanceRulesTool).Assembly, // Tamma.Api (declares the deliberately-unregistered GetAcceptanceRulesTool)
+            typeof(Tamma.ElsaServer.WorkflowSeeder).Assembly,                      // Tamma.ElsaServer (declares none today — swept so one added there cannot ship uncatalogued)
         }
         .Distinct()
+        .ToArray();
+
+    /// <summary>
+    /// Every non-abstract <see cref="IToolExecutor"/> implementation across the
+    /// production assemblies (see the meta-guard note on
+    /// <see cref="SweptAssemblies"/>).
+    /// </summary>
+    private static IReadOnlyList<Type> ExecutorTypes() =>
+        SweptAssemblies()
         .SelectMany(a => a.GetTypes())
         .Where(t => t is { IsAbstract: false, IsInterface: false } && typeof(IToolExecutor).IsAssignableFrom(t))
         .ToArray();
+
+    [Test]
+    public void The_swept_assemblies_are_the_three_production_assemblies()
+    {
+        // Meta-assertion for the sweep's own blind spot (see the note above):
+        // if this fails because a production assembly was added or renamed,
+        // grow the list here AND in BackgroundActorCatalogSweepTests — never
+        // shrink a sweep to make it pass.
+        SweptAssemblies().Select(a => a.GetName().Name)
+            .Should().BeEquivalentTo(new[] { "Tamma.Activities", "Tamma.Api", "Tamma.ElsaServer" });
+    }
 
     /// <summary>
     /// Reads <c>ToolName</c> without running a constructor: every executor's

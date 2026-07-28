@@ -148,13 +148,102 @@ public class RankTests
     }
 
     [Test]
-    public void Append_and_prepend_are_between_with_an_open_side()
+    public void Append_and_prepend_border_their_neighbour_and_default_to_first()
     {
+        // Append/Prepend are deliberately NOT Between with an open side any
+        // more: Between bisects (optimal for interior insertion), while the
+        // edge operations digit-increment/decrement so a pure edge chain grows
+        // O(log n) instead of linearly (see Rank.cs's convention note).
         var anchor = Rank.First();
-        Rank.Append(anchor).Should().Be(Rank.Between(anchor, null));
-        Rank.Prepend(anchor).Should().Be(Rank.Between(null, anchor));
+        string.CompareOrdinal(Rank.Append(anchor), anchor).Should().BePositive();
+        string.CompareOrdinal(Rank.Prepend(anchor), anchor).Should().BeNegative();
+        Rank.IsValid(Rank.Append(anchor)).Should().BeTrue();
+        Rank.IsValid(Rank.Prepend(anchor)).Should().BeTrue();
         Rank.Append(null).Should().Be(Rank.First());
         Rank.Prepend(null).Should().Be(Rank.First());
+
+        // Non-canonical edge anchors are rejected loud, exactly like Between's
+        // neighbours.
+        FluentActions.Invoking(() => Rank.Append("a0")).Should().Throw<ArgumentException>();
+        FluentActions.Invoking(() => Rank.Prepend("a0")).Should().Throw<ArgumentException>();
+        FluentActions.Invoking(() => Rank.Append("")).Should().Throw<ArgumentException>();
+        FluentActions.Invoking(() => Rank.Prepend("")).Should().Throw<ArgumentException>();
+    }
+
+    [Test]
+    public void Ten_thousand_pure_appends_grow_logarithmically()
+    {
+        // The Θ(n²) regression this pins (fixed 2026-07-28, BEFORE Story 44-1
+        // freezes storage): the old midpoint-toward-the-bound append grew one
+        // digit every ~5 appends, so this chain produced 2,001-character ranks.
+        // Digit-increment appends add one digit per ~61 appends: ceil(n/61)+2.
+        var appendBound = (Insertions + 60) / 61 + 2;
+
+        var generated = new List<string> { Rank.Append(null) };
+        for (var i = 0; i < Insertions; i++)
+            generated.Add(Rank.Append(generated[^1]));
+
+        generated.Distinct(StringComparer.Ordinal).Should().HaveCount(generated.Count, "ranks must never collide");
+        for (var i = 1; i < generated.Count; i++)
+        {
+            string.CompareOrdinal(generated[i], generated[i - 1])
+                .Should().BePositive(because: $"append {i} must sort strictly after the previous maximum");
+        }
+
+        generated.Max(r => r.Length).Should().BeLessThanOrEqualTo(appendBound);
+        generated.Should().OnlyContain(r => Rank.IsValid(r));
+    }
+
+    [Test]
+    public void Ten_thousand_pure_prepends_grow_logarithmically()
+    {
+        // Prepend is Append's mirror; same O(log n) bound, same 44-1 timing note.
+        var prependBound = (Insertions + 60) / 61 + 2;
+
+        var generated = new List<string> { Rank.Prepend(null) };
+        for (var i = 0; i < Insertions; i++)
+            generated.Add(Rank.Prepend(generated[^1]));
+
+        generated.Distinct(StringComparer.Ordinal).Should().HaveCount(generated.Count, "ranks must never collide");
+        for (var i = 1; i < generated.Count; i++)
+        {
+            string.CompareOrdinal(generated[i], generated[i - 1])
+                .Should().BeNegative(because: $"prepend {i} must sort strictly before the previous minimum");
+        }
+
+        generated.Max(r => r.Length).Should().BeLessThanOrEqualTo(prependBound);
+        generated.Should().OnlyContain(r => Rank.IsValid(r));
+    }
+
+    [Test]
+    public void Old_style_and_new_style_ranks_interoperate()
+    {
+        // A board ranked under the OLD append/prepend convention (Between with
+        // an open side — exactly what pre-2026-07-28 Append/Prepend emitted)
+        // must keep ordering and bisecting correctly once NEW-convention ranks
+        // land next to it: both conventions emit canonical base-62 strings and
+        // ordering is plain ordinal, so histories mix freely.
+        var ordered = new List<string> { Rank.First() };
+
+        for (var i = 0; i < 200; i++)
+        {
+            // Old-convention append and prepend (verbatim old semantics).
+            ordered.Add(Rank.Between(ordered[^1], null));
+            ordered.Insert(0, Rank.Between(null, ordered[0]));
+
+            // New-convention append and prepend on the same history.
+            ordered.Add(Rank.Append(ordered[^1]));
+            ordered.Insert(0, Rank.Prepend(ordered[0]));
+        }
+
+        // Interior bisection between every mixed-convention adjacent pair.
+        for (var i = ordered.Count - 1; i > 0; i--)
+            ordered.Insert(i, Rank.Between(ordered[i - 1], ordered[i]));
+
+        ordered.Should().OnlyContain(r => Rank.IsValid(r));
+        ordered.Distinct(StringComparer.Ordinal).Should().HaveCount(ordered.Count, "mixed histories must never collide");
+        ordered.Should().BeInAscendingOrder(StringComparer.Ordinal,
+            "a mix of old-style and new-style ranks must still order correctly under ordinal comparison");
     }
 
     [Test]

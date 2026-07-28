@@ -26,7 +26,16 @@ namespace Tamma.Activities.Tests.Actions;
 [TestFixture]
 public class BackgroundActorCatalogSweepTests
 {
-    private static IReadOnlyList<Type> HostedServiceTypes() =>
+    // ⚠ META-GUARD — THE ASSEMBLY LIST BELOW IS THE SWEEP'S BLIND SPOT. A
+    // reflection sweep only binds the catalog to code it actually scans: an
+    // IHostedService declared in an assembly missing from this list is
+    // invisible here and ships uncatalogued. The list must cover EVERY
+    // production assembly — today the three are Tamma.Activities, Tamma.Api
+    // and Tamma.ElsaServer (kept in lockstep with ToolExecutorCatalogSweepTests,
+    // and pinned by The_swept_assemblies_are_the_three_production_assemblies) —
+    // and MUST GROW the day a fourth production assembly is added to
+    // Tamma.sln, even if it declares no hosted services yet.
+    private static IReadOnlyList<System.Reflection.Assembly> SweptAssemblies() =>
         new[]
         {
             typeof(Tamma.Activities.LlmCall.Tools.GitOperationsTool).Assembly, // Tamma.Activities
@@ -34,9 +43,24 @@ public class BackgroundActorCatalogSweepTests
             typeof(Tamma.ElsaServer.WorkflowSeeder).Assembly, // Tamma.ElsaServer
         }
         .Distinct()
+        .ToArray();
+
+    private static IReadOnlyList<Type> HostedServiceTypes() =>
+        SweptAssemblies()
         .SelectMany(a => a.GetTypes())
         .Where(t => t is { IsAbstract: false, IsInterface: false } && typeof(IHostedService).IsAssignableFrom(t))
         .ToArray();
+
+    [Test]
+    public void The_swept_assemblies_are_the_three_production_assemblies()
+    {
+        // Meta-assertion for the sweep's own blind spot (see the note above):
+        // if this fails because a production assembly was added or renamed,
+        // grow the list here AND in ToolExecutorCatalogSweepTests — never
+        // shrink a sweep to make it pass.
+        SweptAssemblies().Select(a => a.GetName().Name)
+            .Should().BeEquivalentTo(new[] { "Tamma.Activities", "Tamma.Api", "Tamma.ElsaServer" });
+    }
 
     [Test]
     public void Every_hosted_service_class_and_every_catalogued_actor_match_bidirectionally()

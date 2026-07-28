@@ -41,19 +41,76 @@ public static class Rank
     /// <summary>The rank for the first item of an empty ordering: <c>Between(null, null)</c>.</summary>
     public static string First() => Between(null, null);
 
-    /// <summary>
-    /// A rank strictly after <paramref name="currentMax"/> (the caller's current
-    /// maximum rank, or null for an empty ordering). Equivalent to
-    /// <c>Between(currentMax, null)</c>.
-    /// </summary>
-    public static string Append(string? currentMax) => Between(currentMax, null);
+    // ── Append/Prepend convention (corrected 2026-07-28, BEFORE Story 44-1
+    // freezes storage — no persisted ranks exist yet, so this convention change
+    // needs no migration) ─────────────────────────────────────────────────────
+    //
+    // Append/Prepend used to delegate to Between with an open side, midpointing
+    // toward the fixed bound: each append halved the remaining headroom, so a
+    // rank grew one digit every ~5-6 appends — a 10k append chain produced
+    // ~2,001-character ranks (Θ(n) per rank, Θ(n²) stored characters over the
+    // chain). They now use the standard fractional-indexing edge convention
+    // (digit-increment/decrement with carry, as LexoRank extends): amortized
+    // O(log n) — one digit per ~61 edge insertions, a 10k chain tops out at
+    // 165 characters. Interior Between is unchanged (its bisection is already
+    // optimal), and the two conventions interoperate: every output is a
+    // canonical base-62 string ordered by plain ordinal comparison, so any mix
+    // of old-style and new-style ranks still orders and bisects correctly
+    // (pinned by RankTests' mixed-history test).
 
     /// <summary>
-    /// A rank strictly before <paramref name="currentMin"/> (the caller's
-    /// current minimum rank, or null for an empty ordering). Equivalent to
-    /// <c>Between(null, currentMin)</c>.
+    /// A canonical rank strictly after <paramref name="currentMax"/> (the
+    /// caller's current maximum rank, or null for an empty ordering).
+    /// Digit-increment with carry: increment the last non-<c>'z'</c> digit and
+    /// truncate what follows; an all-<c>'z'</c> rank extends with <c>'1'</c>.
+    /// Amortized O(log n) rank length over an n-append chain (~n/61 digits) —
+    /// NOT equivalent to <c>Between(currentMax, null)</c>, which bisects toward
+    /// the upper bound and grows linearly. See the convention note above.
     /// </summary>
-    public static string Prepend(string? currentMin) => Between(null, currentMin);
+    /// <exception cref="ArgumentException">
+    /// <paramref name="currentMax"/> is non-null and not a canonical rank.
+    /// </exception>
+    public static string Append(string? currentMax)
+    {
+        if (currentMax is null)
+            return First();
+        if (!IsValid(currentMax))
+            throw new ArgumentException($"'{currentMax}' is not a canonical rank.", nameof(currentMax));
+
+        // Last digit that still has headroom; everything after it is 'z'.
+        var i = currentMax.Length - 1;
+        while (i >= 0 && currentMax[i] == 'z')
+            i--;
+
+        return i < 0
+            ? currentMax + '1' // all-'z': extend one digit ('1', never '0' — trailing zeros are non-canonical)
+            : currentMax[..i] + Alphabet[DigitIndex(currentMax[i]) + 1];
+    }
+
+    /// <summary>
+    /// A canonical rank strictly before <paramref name="currentMin"/> (the
+    /// caller's current minimum rank, or null for an empty ordering). The
+    /// mirror of <see cref="Append"/>: decrement the last digit while it stays
+    /// canonical (≥ <c>'1'</c> after the decrement); a rank ending in
+    /// <c>'1'</c> steps down into the next digit position with <c>"0z"</c>.
+    /// Amortized O(log n) rank length over an n-prepend chain — NOT equivalent
+    /// to <c>Between(null, currentMin)</c>. See the convention note above.
+    /// </summary>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="currentMin"/> is non-null and not a canonical rank.
+    /// </exception>
+    public static string Prepend(string? currentMin)
+    {
+        if (currentMin is null)
+            return First();
+        if (!IsValid(currentMin))
+            throw new ArgumentException($"'{currentMin}' is not a canonical rank.", nameof(currentMin));
+
+        var last = DigitIndex(currentMin[^1]);
+        return last >= 2
+            ? currentMin[..^1] + Alphabet[last - 1]
+            : currentMin[..^1] + "0z"; // last digit is '1': "…0z" sorts strictly between "…0" (non-canonical) and "…1"
+    }
 
     /// <summary>
     /// Whether <paramref name="candidate"/> is a canonical rank: non-empty,

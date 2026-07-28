@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using Tamma.Api.Services.Agents;
+using Tamma.Core.Audit;
 using Tamma.Core.Documents;
 using Tamma.Core.Documents.Policy;
 
@@ -17,13 +18,16 @@ namespace Tamma.Core.Actions;
 ///
 /// <para>
 /// FAIL-LOUD AT STATIC INIT (the <c>PromptFileLoader</c> posture, 43-2 D7):
-/// <see cref="BuildIndex"/> throws on any of eight inconsistency classes, each
+/// <see cref="BuildIndex"/> throws on any of nine inconsistency classes, each
 /// with its own <c>ACTION.CATALOG.*</c> code naming the offending member —
 /// adding an <see cref="AgentAction"/> member without a descriptor is a boot
 /// failure, including in test hosts. Do not soften to log-and-continue: a
 /// catalog that silently omits a member is the epic's core failure mode.
-/// Both hosts must touch this type eagerly at composition (43-2 AC13 — the
-/// <c>Program.cs</c> eager reads are wired outside this story's file lane).
+/// Both hosts must call <see cref="Validate()"/> eagerly at composition
+/// (43-2 AC13 — <c>Tamma.Api/Program.cs</c> + <c>Tamma.ElsaServer/Program.cs</c>):
+/// it runs the build DIRECTLY, never through the lazy static fields, so the
+/// intended <see cref="TammaError"/> surfaces unwrapped instead of a
+/// <see cref="TypeInitializationException"/> burying the code.
 /// </para>
 ///
 /// <para>
@@ -62,6 +66,32 @@ public static partial class ActionCatalog
 
     /// <summary>All descriptors in declaration order (namespace, then wire).</summary>
     public static IReadOnlyList<ActionDescriptor> All => s_descriptors;
+
+    /// <summary>
+    /// Story 43-2 AC13 — the boot guard (the
+    /// <c>LlmProxyService.ValidateProviderWiring</c> precedent). Rebuilds and
+    /// revalidates the full descriptor table DIRECTLY — never through
+    /// <see cref="s_descriptors"/>/<see cref="s_index"/> — so a catalog
+    /// violation surfaces as the intended <see cref="TammaError"/>, unwrapped,
+    /// its <c>ACTION.CATALOG.*</c> code leading the message, instead of a
+    /// <see cref="TypeInitializationException"/> whose inner error a host log
+    /// may swallow. This is also where the <c>SensitiveActionCode</c> join is
+    /// checked against the REAL <see cref="SensitiveActionCatalog.ByCode"/>
+    /// (43-2 D12): <see cref="BuildIndex"/> takes the valid-code set as a
+    /// parameter, so the Actions plane never depends on the Audit plane during
+    /// its own static init. Both hosts call this at composition:
+    /// <c>Tamma.Api/Program.cs</c> and <c>Tamma.ElsaServer/Program.cs</c>.
+    /// </summary>
+    /// <exception cref="TammaError">Any <c>ACTION.CATALOG.*</c> violation.</exception>
+    public static void Validate() => Validate(BuildDescriptors());
+
+    /// <summary>
+    /// Red-rehearsal seam (InternalsVisibleTo Tamma.Core.Tests): validates an
+    /// arbitrary table exactly as <see cref="Validate()"/> validates the
+    /// shipped one — including the <see cref="SensitiveActionCatalog"/> join.
+    /// </summary>
+    internal static void Validate(IReadOnlyList<ActionDescriptor> descriptors) =>
+        _ = BuildIndex(descriptors, SensitiveActionCatalog.ByCode.Keys.ToHashSet(StringComparer.Ordinal));
 
     /// <summary>Fail-loud lookup.</summary>
     /// <exception cref="TammaError">Code <c>ACTION.CATALOG.UNKNOWN_MEMBER</c>.</exception>
@@ -103,12 +133,23 @@ public static partial class ActionCatalog
     /// <summary>
     /// Validates a descriptor table and builds the indexes. Internal so
     /// <c>ActionCatalogBuildIndexTests</c> can feed deliberately-bad arrays
-    /// through the real code path (InternalsVisibleTo Tamma.Core.Tests). Eight
+    /// through the real code path (InternalsVisibleTo Tamma.Core.Tests). Nine
     /// distinct codes rather than one generic <c>ACTION.CATALOG.INVALID</c>: the
     /// failure lands at boot on a developer who has just added an enum member,
     /// and the message is the entire remediation UX (43-2 D8).
     /// </summary>
-    internal static CatalogIndex BuildIndex(IReadOnlyList<ActionDescriptor> descriptors)
+    /// <param name="descriptors">The descriptor table to validate and index.</param>
+    /// <param name="validSensitiveActionCodes">
+    /// When non-null, every non-null <see cref="ActionDescriptor.SensitiveActionCode"/>
+    /// must be a member (code <c>ACTION.CATALOG.UNKNOWN_SENSITIVE_CODE</c>).
+    /// <see cref="Validate()"/> supplies the real
+    /// <see cref="SensitiveActionCatalog.ByCode"/> key set; the static-init
+    /// path passes null so the Actions plane carries no Audit-plane dependency
+    /// at type initialization.
+    /// </param>
+    internal static CatalogIndex BuildIndex(
+        IReadOnlyList<ActionDescriptor> descriptors,
+        IReadOnlySet<string>? validSensitiveActionCodes = null)
     {
         var byKey = new Dictionary<ActionKey, ActionDescriptor>();
         var siteKeys = new Dictionary<(ActionNamespace Ns, string SiteKey), ActionKey>();
@@ -123,6 +164,14 @@ public static partial class ActionCatalog
                 throw Invalid("ORPHAN_DESCRIPTOR",
                     $"Descriptor '{d.Key.ToWire()}' has no backing member in the " +
                     $"'{d.Key.Ns.ToWire()}' vocabulary — delete the descriptor or add the member.");
+
+            if (validSensitiveActionCodes is not null
+                && d.SensitiveActionCode is not null
+                && !validSensitiveActionCodes.Contains(d.SensitiveActionCode))
+                throw Invalid("UNKNOWN_SENSITIVE_CODE",
+                    $"Descriptor '{d.Key.ToWire()}' joins SensitiveActionCode '{d.SensitiveActionCode}', " +
+                    "which does not resolve in SensitiveActionCatalog.ByCode — a join that does not " +
+                    "resolve is a typo, not a policy (43-2 D12).");
 
             if (string.IsNullOrWhiteSpace(d.Title) || string.IsNullOrWhiteSpace(d.Summary)
                 || string.IsNullOrWhiteSpace(d.SiteKey))
@@ -189,10 +238,16 @@ public static partial class ActionCatalog
         _ => false,
     };
 
+    // The violation code is FOLDED INTO the message text (message starts with
+    // the full code) so that even when a catalog violation is reached through
+    // the lazy static fields — where the CLR wraps it in a
+    // TypeInitializationException — the ACTION.CATALOG.* code still appears in
+    // the inner-exception text a host log prints. The unwrapped path is
+    // Validate(); this is the belt for the wrapped one.
     private static TammaError Invalid(string code, string message) =>
         new(
             $"ACTION.CATALOG.{code}",
-            message,
+            $"ACTION.CATALOG.{code}: {message}",
             retryable: false,
             severity: TammaErrorSeverity.Critical);
 }

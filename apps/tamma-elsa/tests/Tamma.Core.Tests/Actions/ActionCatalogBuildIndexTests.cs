@@ -8,11 +8,16 @@ namespace Tamma.Core.Tests.Actions;
 
 /// <summary>
 /// The fail-loud <c>BuildIndex</c> contract (Story 43-2 AC11, D7/D8; 43-3 AC1):
-/// eight DISTINCT throw codes, each landing at boot on the developer who just
+/// nine DISTINCT throw codes, each landing at boot on the developer who just
 /// broke the catalog, each message naming the offending member — the message is
 /// the entire remediation UX. Exercised through the internal seam
 /// (<c>InternalsVisibleTo Tamma.Core.Tests</c>) so the real code path validates
 /// deliberately-bad descriptor arrays without touching the shipped table.
+/// Every message STARTS with its full <c>ACTION.CATALOG.*</c> code (asserted
+/// centrally in <see cref="InvokeExpectingThrow"/>) so the code survives even
+/// the wrapped static-init path, where the CLR buries the
+/// <see cref="TammaError"/> inside a <c>TypeInitializationException</c>; the
+/// unwrapped path is <c>ActionCatalog.Validate()</c>, rehearsed below.
 /// </summary>
 [TestFixture]
 public class ActionCatalogBuildIndexTests
@@ -22,7 +27,12 @@ public class ActionCatalogBuildIndexTests
     private static TammaError InvokeExpectingThrow(IReadOnlyList<ActionDescriptor> table)
     {
         var act = () => ActionCatalog.BuildIndex(table);
-        return act.Should().Throw<TammaError>().Which;
+        var error = act.Should().Throw<TammaError>().Which;
+
+        // C1 — the code is folded into the message at every throw site, so a
+        // host log printing only exception messages still shows it.
+        error.Message.Should().StartWith(error.Code + ": ");
+        return error;
     }
 
     [Test]
@@ -32,6 +42,71 @@ public class ActionCatalogBuildIndexTests
 
         index.ByKey.Should().HaveCount(ActionCatalog.All.Count);
         index.ByGroup.Values.Sum(set => set.Count).Should().Be(ActionCatalog.All.Count);
+    }
+
+    [Test]
+    public void The_shipped_catalog_passes_the_boot_guard()
+    {
+        // The exact call both hosts make at composition (43-2 AC13).
+        var act = () => ActionCatalog.Validate();
+
+        act.Should().NotThrow();
+    }
+
+    [Test]
+    public void Validate_surfaces_the_violation_code_unwrapped_and_in_the_message()
+    {
+        // Red-rehearsal of the boot guard (the LlmProxyService.ValidateProviderWiring
+        // precedent): Validate builds DIRECTLY, so a violation surfaces as the
+        // intended TammaError — never a TypeInitializationException — and the
+        // ACTION.CATALOG.* code is readable from ex.Message alone.
+        var table = ValidTable();
+        table.Remove(table.Single(d => d.Key.ToWire() == "agent-action:deploy"));
+
+        var act = () => ActionCatalog.Validate(table);
+
+        var ex = act.Should().Throw<TammaError>().Which;
+        ex.Message.Should().StartWith("ACTION.CATALOG.MISSING_DESCRIPTOR: ");
+        ex.Message.Should().Contain("agent-action:deploy");
+    }
+
+    [Test]
+    public void A_sensitive_code_that_does_not_resolve_fails_the_boot_guard()
+    {
+        // C6 / 43-2 D12 — Validate supplies the REAL SensitiveActionCatalog
+        // key set, so a typo'd join is a boot failure, not a silent no-op row.
+        var table = ValidTable();
+        table[0] = table[0] with { SensitiveActionCode = "NOT.A.REAL.CODE" };
+
+        var act = () => ActionCatalog.Validate(table);
+
+        var ex = act.Should().Throw<TammaError>().Which;
+        ex.Code.Should().Be("ACTION.CATALOG.UNKNOWN_SENSITIVE_CODE");
+        ex.Message.Should().StartWith("ACTION.CATALOG.UNKNOWN_SENSITIVE_CODE: ");
+        ex.Message.Should().Contain(table[0].Key.ToWire());
+        ex.Message.Should().Contain("NOT.A.REAL.CODE");
+    }
+
+    [Test]
+    public void The_sensitive_code_join_is_checked_only_when_a_validity_set_is_supplied()
+    {
+        // The static-init path passes no set (the Actions plane carries no
+        // Audit-plane dependency at type init); a caller-supplied set turns the
+        // check on — the "caller-supplied validity set" ActionDescriptor.cs
+        // documents, exercised here from the test side too.
+        var table = ValidTable();
+        table[0] = table[0] with { SensitiveActionCode = "NOT.A.REAL.CODE" };
+
+        FluentActions.Invoking(() => ActionCatalog.BuildIndex(table)).Should().NotThrow();
+
+        var validCodes = ValidTable()
+            .Where(d => d.SensitiveActionCode is not null)
+            .Select(d => d.SensitiveActionCode!)
+            .ToHashSet(StringComparer.Ordinal);
+        var act = () => ActionCatalog.BuildIndex(table, validCodes);
+
+        act.Should().Throw<TammaError>()
+            .Which.Code.Should().Be("ACTION.CATALOG.UNKNOWN_SENSITIVE_CODE");
     }
 
     [Test]

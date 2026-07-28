@@ -6,6 +6,18 @@
     <Nullable>enable</Nullable>
     <RootNamespace>Tamma.Core</RootNamespace>
     <AssemblyName>Tamma.Core</AssemblyName>
+    <!--
+      CS8509 (switch expression does not handle all NAMED enum members) is
+      elevated to a compile ERROR in this project. Repo-wide,
+      TreatWarningsAsErrors is false (Directory.Build.props), so without this
+      line CS8509 is only a warning — and the no-default-arm switches that
+      Tamma.Core's closed vocabularies rely on (e.g.
+      WorkItemStatusCategoryExtensions.Category, Story 44-0 AC3: "adding a
+      status without a category must not compile") would silently degrade to a
+      runtime SwitchExpressionException. Do not remove; widen the scope only by
+      moving the promotion into Directory.Build.props deliberately.
+    -->
+    <WarningsAsErrors>$(WarningsAsErrors);CS8509</WarningsAsErrors>
     <Version>1.0.0</Version>
     <Authors>Tamma Team</Authors>
     <Description>Core domain models and interfaces for Tamma Mentorship Engine</Description>
