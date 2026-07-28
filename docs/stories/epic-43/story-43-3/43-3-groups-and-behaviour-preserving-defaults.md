@@ -127,9 +127,9 @@ These are **suspend points, not action gates.** A `WaitFor*` in a workflow graph
    - `external-comms` — `effect:notify.slack.queue`, `effect:notify.email.send` (2)
    - `model-invocation` — `effect:llm.call`, `effect:mcp.tool.invoke`, `effect:agent-dispatch.run` (3)
    - `secrets` — `effect:secret.reveal`, `automation:secret-auto-rotation-scheduler`, `automation:retire-sweep` (3)
-   - `platform-automation` — the 5 `effect:engine.*`, the remaining 23 `automation:*`, all 8 `platform-task:*` (36)
+   - `platform-automation` — the 5 `effect:engine.*`, the remaining `automation:*` (24 as shipped), all 8 `platform-task:*` (37 as shipped; 36 at authoring — +1 priming service from the Epic 46 review)
 
-   Grand total across all groups: **153**, pinned.
+   Grand total across all groups: **154 as shipped** (153 at authoring; the pin comment in `ActionVocabularyCountTests` documents the delta), pinned.
 
 6. **Every group carries a UI-facing description**, because the group description is the only place some limitations can honestly appear. **`deploy-control`'s description must state that production deploy is an LLM tool loop, not a typed activity** — `DeploymentPipelineWorkflow` dispatches generic `llm-call` with `enableTools=true`, so gating the deploy effect gates the *stage transition* while the deploy itself happens inside the loop under `tool:shell_execute`. Epic risk 8 requires this in the UI, not only in a doc.
 

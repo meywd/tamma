@@ -1,6 +1,6 @@
 # Story 43-1: `AutonomyDial` — One Constant, Published Over the Wire, Drift-Tested
 
-Status: drafted
+Status: in-progress — the AutonomyDial constant + invariants shipped (PR #506); the 8 hardcode-site rewires, GET /api/actions/dial, dashboard unhardcode, and the doc pass remain
 
 ## MANDATORY: Before You Code
 

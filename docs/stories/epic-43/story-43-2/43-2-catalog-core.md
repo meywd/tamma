@@ -60,10 +60,10 @@ public readonly record struct ActionKey(ActionNamespace Ns, string Key) {
 | `document-type` | `DocumentTypeKey` wire | **10** (verified) | exists, fail-loud registry |
 | `tool` | `ToolAction` wire | 8 | **NEW** |
 | `effect` | `ExternalEffect` wire | 22 | **NEW** |
-| `automation` | `BackgroundActor` wire | 25 | **NEW** |
+| `automation` | `BackgroundActor` wire | 26 | **NEW** — 25 at authoring; +1 (ProviderSettingsStorePrimingService, Epic 46 review) |
 | `platform-task` | `PlatformTaskKind` wire | 8 | **NEW** |
 
-**Working total 153. Story 43-2's first task is to re-derive every count from the tree and freeze the pin** — treat 153 as the design's figure, not a guarantee. Two counts are independently corroborated here: `AgentAction` = 80 (the enum's own header comment says 79 — **the comment is stale**), and `PlatformTaskKind` = 8 (eight `: IPlatformTaskHandler` implementations, each with a `TaskType`, excluding `PlatformTaskHandlerRegistry` itself which implements the *registry* interface).
+**Working total 154 as shipped (153 at authoring; the Epic 46 review round added one hosted service). Story 43-2's first task was to re-derive every count from the tree and freeze the pin** — the design figure, not a guarantee; the sweep proved that rule immediately by catching the addition. Two counts are independently corroborated here: `AgentAction` = 80 (the enum's own header comment says 79 — **the comment is stale**), and `PlatformTaskKind` = 8 (eight `: IPlatformTaskHandler` implementations, each with a `TaskType`, excluding `PlatformTaskHandlerRegistry` itself which implements the *registry* interface).
 
 `ToolAction`'s 8 members are the 7 `IToolExecutor` names with `git_operations` **split by subcommand class** — `git_operations.read` and `git_operations.write` — so `git push` is independently gateable. The split is driven by a new `[Wire] GitSubcommand` enum **replacing the private `HashSet<string> AllowedSubcommands` at `apps/tamma-elsa/src/Tamma.Activities/LlmCall/Tools/GitOperationsTool.cs:21-25`** (14 members: `status, diff, log, add, commit, push, branch, checkout, stash, show, fetch, pull, rev-parse, ls-files` — verified verbatim). This is the **only** argument-bound split in the epic, and it is cheap because the subcommand parse already exists at `GitOperationsTool.cs:78`.
 
@@ -73,7 +73,7 @@ public readonly record struct ActionKey(ActionNamespace Ns, string Key) {
 
 The by-group index is **projected, never hand-maintained** — the `RolePhaseMap` idiom (`apps/tamma-elsa/src/Tamma.Core/Agents/RolePhaseMap.cs:170-171`, `s_rolesForAction = BuildRolesForAction()`).
 
-**Known limitation, recorded not hidden:** `BuildIndex` is **vacuous for 55 of 153 members** — the three enums this story authors (`ExternalEffect`, `BackgroundActor`, `ToolAction`) validate only against themselves. Those planes are bound to reality solely by Story 43-8's reflection harnesses. If 43-8 slips, that half of the catalog has no drift protection.
+**Known limitation, recorded not hidden (since narrowed):** `BuildIndex` is **vacuous for the three enums this story authors** (`ExternalEffect`, `BackgroundActor`, `ToolAction`) — they validate only against themselves at index time. As SHIPPED, four reflection sweeps in Tamma.Activities.Tests (tool executors, hosted services across three assemblies, platform tasks, git parity) bind the BackgroundActor/ToolAction/PlatformTask planes to reality ahead of 43-8; only the effect plane still waits on 43-8's composed-host harness.
 
 ## Acceptance Criteria
 
@@ -87,7 +87,7 @@ The by-group index is **projected, never hand-maintained** — the `RolePhaseMap
 
 5. **`ExternalEffect` — 22 members**, count-pinned, each carrying its `SiteKey`. Derived by re-running the route sweep against `Program.cs`, not copied: the design's list (17 mutating `EngineServiceOnly` routes + `mcp.tool.invoke`, `secret.reveal`, `process.spawn`, `deploy.promote-prod`, `deploy.rollback`) is the starting hypothesis and **any discrepancy is recorded in the plan's corrections section**, not silently reconciled.
 
-6. **`BackgroundActor` — 25 members**, count-pinned, one per `AddHostedService` across both hosts plus `PlatformTaskWorker` (a `BackgroundService` with no `AddHostedService` line, catalogued explicitly so it is not invisible). Re-derived from the tree. The factory-overload registration (no `ImplementationType`) is noted in the descriptor comment so 43-8's reflection sweep knows to special-case it.
+6. **`BackgroundActor` — 26 members as shipped** (25 at authoring), count-pinned, one per `AddHostedService` across both hosts plus `PlatformTaskWorker` (a `BackgroundService` with no `AddHostedService` line, catalogued explicitly so it is not invisible). Re-derived from the tree. The factory-overload registration (no `ImplementationType`) is noted in the descriptor comment so 43-8's reflection sweep knows to special-case it.
 
 7. **`PlatformTaskKind` — 8 members**, pinned against `IPlatformTaskHandlerRegistry.RegisteredTypes`. The registry already throws on duplicate task types at construction (`PlatformTaskHandlerRegistry`'s ctor), so this pin composes with an existing guarantee rather than duplicating one.
 
