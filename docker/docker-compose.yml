@@ -257,9 +257,13 @@ services:
       Dashboard__Url: ${DASHBOARD_URL:-https://app.tamma.dev}
       # Story 45-7 — customer-facing links (verify / reset / invites / GitHub
       # install redirects) target the CUSTOMER app, not the oauth2-proxied
-      # admin console. Falls back to Dashboard:Url when unset (single-user
-      # installs have one dashboard and must not need two settings).
-      Dashboard__CustomerUrl: ${CUSTOMER_DASHBOARD_URL:-https://dash.tamma.dev}
+      # admin console. The EMPTY default is load-bearing (review finding,
+      # 2026-07-28): DashboardUrls treats empty as unset and falls back to
+      # Dashboard:Url, so a self-hosted install that sets only DASHBOARD_URL
+      # keeps the pre-split contract. A hardcoded default here would send
+      # every install's one-time verify/reset/invite tokens to Tamma's
+      # production host. Tamma's own deploy sets CUSTOMER_DASHBOARD_URL.
+      Dashboard__CustomerUrl: ${CUSTOMER_DASHBOARD_URL:-}
       ChromaDb__Url: http://chromadb:8000
       IntelligenceServer__Url: http://intelligence-server:4100
       IntelligenceServer__TimeoutSeconds: "10"

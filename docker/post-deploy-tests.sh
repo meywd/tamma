@@ -80,6 +80,34 @@ test_endpoint() {
 
 header() { printf "\n${BOLD}--- %s ---${RESET}\n" "$1"; }
 
+# test_endpoint_strict LABEL HOST PATH EXPECTED [METHOD] [DATA]
+#   Like test_endpoint, but 404 is a hard FAIL instead of a "not deployed
+#   yet" WARN. Use for probes whose regression symptom IS a 404 (SPA
+#   fallback, /api prefix survival) — the lenient helper can never catch
+#   those (review finding, 2026-07-28).
+test_endpoint_strict() {
+  local label="$1" host="$2" path="$3" expected="$4"
+  local method="${5:-GET}" data="${6:-}"
+
+  local curl_args=(-sk -o /dev/null -w '%{http_code}' --max-time 5
+    --resolve "${host}:443:${TARGET_IP}"
+    -X "${method}")
+  [ -n "${data}" ] && curl_args+=(-H 'Content-Type: application/json' -d "${data}")
+  curl_args+=("https://${host}${path}")
+
+  local status
+  status=$(curl "${curl_args[@]}" 2>/dev/null) || status="000"
+
+  if [ "${status}" = "${expected}" ]; then
+    PASS=$((PASS + 1))
+    printf "  ${GREEN}PASS${RESET}  %-55s  HTTP %s\n" "${label}" "${status}"
+  else
+    FAIL=$((FAIL + 1))
+    RESULTS+=("${label} — got ${status}, expected ${expected} (strict: 404 fails)")
+    printf "  ${RED}FAIL${RESET}  %-55s  HTTP %s (expected %s, strict)\n" "${label}" "${status}" "${expected}"
+  fi
+}
+
 # =============================================================================
 # Diagnostics — only when running on the VPS directly
 # =============================================================================
@@ -153,15 +181,19 @@ header "Epic 45: Customer app (dash.tamma.dev)"
 # dash.tamma.dev proves it is NOT in front of the customer app (its signup /
 # verify / reset pages must load without a GitHub OAuth wall). A 302 here
 # means someone copied the admin vhost's auth_request block — a regression.
-test_endpoint "dash.tamma.dev / anonymous → 200 (NOT 302)" "dash.tamma.dev" "/" "200"
+test_endpoint_strict "dash.tamma.dev / anonymous → 200 (NOT 302)" "dash.tamma.dev" "/" "200"
 
 # Deep link through the full proxy chain — proves the SPA fallback
 # (try_files → index.html) survives nginx-proxy → dashboard-user nginx.
-test_endpoint "dash.tamma.dev deep link (SPA fallback)" "dash.tamma.dev" "/settings/billing" "200"
+# STRICT: the regression symptom is exactly a 404, which the lenient
+# helper reports as "not deployed yet" and passes.
+test_endpoint_strict "dash.tamma.dev deep link (SPA fallback)" "dash.tamma.dev" "/settings/billing" "200"
 
-# /api/ through the customer host — proves the vhost's /api/ proxy and its
-# trailing-/api/ upstream (a bare / here would strip the prefix and 404).
-test_endpoint "dash.tamma.dev /api/health via vhost" "dash.tamma.dev" "/api/health" "200"
+# /api prefix survival through the customer vhost. /api/v1/auth/me is
+# /api-ONLY (no unprefixed twin — /api/health has one at /health, so it
+# cannot detect a stripped prefix): correct proxying → 401 anonymous;
+# a prefix-stripping proxy_pass → 404 → strict FAIL.
+test_endpoint_strict "dash.tamma.dev /api prefix survives (auth/me → 401)" "dash.tamma.dev" "/api/v1/auth/me" "401"
 
 # Webhooks must not require auth (GitHub sends unsigned POSTs for pings)
 test_endpoint "api.tamma.dev /api/github/webhooks reachable" "api.tamma.dev" "/api/github/webhooks" "401" "POST" '{"action":"ping"}'
