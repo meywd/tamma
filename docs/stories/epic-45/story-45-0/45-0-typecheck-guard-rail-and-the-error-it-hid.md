@@ -1,6 +1,6 @@
 # Story 45-0: Guard Rails — Typecheck the Customer App in CI, and the One Error That Hid Behind Its Absence
 
-Status: drafted
+Status: done (code) — conformance-reviewed 2026-07-28; AC4's red-CI proof remains open (needs a scratch-branch push, owner permission — see .dev/findings/2026-07-28-epic45-cutover-evidence.md item 6); root-typecheck double-run accepted and documented in tsconfig.json
 
 ## MANDATORY: Before You Code
 

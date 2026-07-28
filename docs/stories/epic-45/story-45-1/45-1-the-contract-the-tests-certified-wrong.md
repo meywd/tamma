@@ -1,6 +1,6 @@
 # Story 45-1: The Contract the Tests Certified Wrong — `violations` → `warnings`, and the PATCH That Skips Refresh
 
-Status: drafted
+Status: done — conformance-reviewed 2026-07-28, all 9 ACs met (metricKey arrives PascalCase, not ordinal — normalizer documented at pricing.ts)
 
 ## MANDATORY: Before You Code
 

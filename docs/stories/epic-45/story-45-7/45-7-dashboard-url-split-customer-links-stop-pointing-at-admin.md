@@ -1,6 +1,6 @@
 # Story 45-7: The `Dashboard:Url` Split — Customer Links Stop Pointing at the Admin Console
 
-Status: drafted
+Status: done — conformance-reviewed 2026-07-28; AllowCredentials ADDED against the AC's prohibition (the AC's premise was wrong — customer auth is the tamma_session cookie with credentials:'include'); compose customer-URL default deliberately EMPTY (the AC's suggested default would exfiltrate self-hosters' tokens)
 
 ## MANDATORY: Before You Code
 

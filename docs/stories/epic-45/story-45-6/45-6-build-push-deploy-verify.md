@@ -1,6 +1,6 @@
 # Story 45-6: Build, Push, Deploy, Verify — `docker-publish.yml`, `deploy.yml` and the Smoke Tests
 
-Status: drafted
+Status: code-complete — conformance-reviewed 2026-07-28; first production deploy + rollback check are deploy-time, tracked in .dev/findings/2026-07-28-epic45-cutover-evidence.md items 3-4
 
 ## MANDATORY: Before You Code
 

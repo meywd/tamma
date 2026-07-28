@@ -1,6 +1,6 @@
 # Story 45-3: The Missing Account Pages — Password Reset, Invite Accept, Invite Pending
 
-Status: drafted
+Status: done — conformance-reviewed 2026-07-28; three distinguishable invite failures (not four — wrong-account/revoked indistinguishable server-side, OrgEndpoints.cs:651-664); pending page informational-only (no invitee-facing lookup/resend endpoint); real-email walk remains deploy-time
 
 ## MANDATORY: Before You Code
 

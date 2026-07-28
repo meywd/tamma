@@ -48,6 +48,12 @@
     "dist",
     "**/*.test.ts",
     "**/*.spec.ts",
+    // Both dashboards are excluded from the root build for the same reason:
+    // each has its own tsconfig (jsdom, vite types) and its own dedicated
+    // typecheck script + CI step. The root `typecheck` script ALSO chains
+    // both dashboard typechecks (local convenience; accepted double-run in
+    // CI — the dedicated steps give named failures, the root run builds
+    // packages/shared first, which the dedicated steps depend on).
     "packages/dashboard",
     "packages/dashboard-user"
   ]

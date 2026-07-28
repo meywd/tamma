@@ -1,6 +1,6 @@
 # Story 45-2: Entry Points — The Six URLs the API Emails, the Missing Catch-All, and Four Honest Nav Links
 
-Status: drafted
+Status: done — conformance-reviewed 2026-07-28; single auth-aware catch-all supersedes the double path="*" (two sibling splats rank identically — second is dead code); nav-link removal documented in AppLayout.tsx header
 
 ## MANDATORY: Before You Code
 

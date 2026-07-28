@@ -231,9 +231,11 @@ server {
     server_name dash.tamma.dev app.tamma.dev;
 
     # ----- API routes: JWT-based auth (no oauth2-proxy) -----
-    # Trailing /api/ on the upstream (NOT the bare / the in-container
-    # nginx-dashboard-user.conf uses): this layer must preserve the /api
-    # prefix, the in-container proxy strips it.
+    # Trailing /api/ on the upstream: this layer must preserve the /api
+    # prefix. (Historical note: the in-container nginx-dashboard-user.conf
+    # used to strip it via a bare-/ upstream; both container confs were
+    # fixed 2026-07-28 to preserve /api as well — this comment previously
+    # described that defect as current.)
     location /api/ {
         proxy_pass http://tamma-api:3100/api/;
         proxy_http_version 1.1;
