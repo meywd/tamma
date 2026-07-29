@@ -157,11 +157,24 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void IssueTracking_has_the_2_expected_members()
+    public void IssueTracking_has_the_12_expected_members()
     {
+        // 2 → 12 (Story 44-2): the NATIVE tracker's ten mutating routes join the
+        // two EXTERNAL-tracker mutations. The group's partition rule is kind of
+        // consequence AT COMPLETION, and each of these completes by changing
+        // what the tracker says the work is — including the preferences pair,
+        // which was deliberately NOT filed under platform-automation (that
+        // would bury a tenant's default project in the same lever as the outbox
+        // sweeper, invisible to anyone gating the tracker).
         WiresIn(ActionGroup.IssueTracking).Should().BeEquivalentTo(new[]
         {
             "effect:git.issue.patch", "effect:jira.ticket.patch",
+            "effect:tracker.project.create", "effect:tracker.project.update",
+            "effect:tracker.project.delete",
+            "effect:tracker.work-item.create", "effect:tracker.work-item.update",
+            "effect:tracker.work-item.delete", "effect:tracker.work-item.assign",
+            "effect:tracker.work-item.set-status",
+            "effect:tracker.preferences.set", "effect:tracker.preferences.delete",
         });
     }
 
@@ -233,8 +246,10 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void The_per_group_counts_sum_to_183()
+    public void The_per_group_counts_sum_to_193()
     {
+        // 183 → 193: +10 native-tracker effects, ALL in issue-tracking
+        // (Story 44-2 AC10) — the group goes 2 → 12 and nothing else moves.
         // 154 → 176: +16 agent-actions (Story 41-1a) and +6 document types
         // (Story 41-1b); 176 → 180: +3 schedule effects and +1 scheduler
         // automation member (Story 41-30); 180 → 181: +1 automation member
@@ -254,7 +269,7 @@ public class ActionGroupMembershipTests
             [ActionGroup.CiAndTest] = 3,
             [ActionGroup.SourceControlRead] = 1,
             [ActionGroup.SourceControlWrite] = 6,
-            [ActionGroup.IssueTracking] = 2,
+            [ActionGroup.IssueTracking] = 12,
             [ActionGroup.DeployControl] = 6,
             [ActionGroup.ExternalComms] = 2,
             [ActionGroup.ModelInvocation] = 3,
@@ -262,7 +277,7 @@ public class ActionGroupMembershipTests
             [ActionGroup.PlatformAutomation] = 43,
         };
 
-        counts.Values.Sum().Should().Be(183);
+        counts.Values.Sum().Should().Be(193);
         foreach (var (group, count) in counts)
             ActionCatalog.ByGroup[group].Should().HaveCount(count, $"group '{group.ToWire()}'");
     }

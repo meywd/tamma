@@ -18,13 +18,38 @@ public sealed record AcceptanceRulesUpsertRequest(
     [property: JsonPropertyName("reviewerSelection")] ReviewerSelection ReviewerSelection,
     [property: JsonPropertyName("decisionGuidance")] string DecisionGuidance,
     [property: JsonPropertyName("routingGuidance")] string RoutingGuidance,
-    // Story 39-13 D4 — the per-type autonomy floor. Trailing + defaulted so a body
-    // written before the field existed still binds, to `any` (today's behavior).
-    [property: JsonPropertyName("acceptorRequirement")] AcceptorRequirement AcceptorRequirement
-        = AcceptorRequirement.Any)
+    // Story 39-13 D4 — the per-type autonomy floor.
+    //
+    // Story 43-0: NULLABLE and defaulted to null, which means "the caller did not
+    // say", NOT "any". It used to be a non-nullable `= AcceptorRequirement.Any`,
+    // and that default was the live data-loss bug: the admin dialog's PUT body
+    // omitted the property, the binder invented `any`, and every save of `design`
+    // (or `sprint-plan`, or `threat-model`) silently erased its shipped
+    // `human` acceptor floor. A body that does not mention the field must never be
+    // reinterpreted as a value — the caller's silence is preserved by
+    // `AcceptanceRulesEndpoints.Upsert`, which passes the CURRENTLY EFFECTIVE
+    // requirement into `ToRules` (same posture as the single-field writes in
+    // `ActionPolicyEndpoints`, which call this "the 43-0 bug class").
+    //
+    // Legacy stored rows are unaffected by this: persistence round-trips the DOMAIN
+    // record `Tamma.Core.Documents.Policy.AcceptanceRules`, whose own
+    // `AcceptorRequirement { get; init; } = AcceptorRequirement.Any` property default
+    // is the legacy-body safety net. This DTO only binds inbound PUT bodies.
+    [property: JsonPropertyName("acceptorRequirement")] AcceptorRequirement? AcceptorRequirement
+        = null)
 {
-    /// <summary>Map to the domain record (unvalidated — the service calls <c>Validate()</c>).</summary>
-    public Tamma.Core.Documents.Policy.AcceptanceRules ToRules() => new()
+    /// <summary>
+    /// Map to the domain record (unvalidated — the service calls <c>Validate()</c>).
+    /// </summary>
+    /// <param name="currentAcceptorRequirement">
+    /// The requirement that is in force for this document type RIGHT NOW (the
+    /// resolved override row, or the shipped per-type default). Used only when the
+    /// body omitted <c>acceptorRequirement</c> — an omission preserves, it never
+    /// resets. There is deliberately no parameterless overload: a call site that
+    /// cannot say what the current value is has no business writing this field.
+    /// </param>
+    public Tamma.Core.Documents.Policy.AcceptanceRules ToRules(
+        AcceptorRequirement currentAcceptorRequirement) => new()
     {
         AutonomyLevel = AutonomyLevel,
         MaxRevisionRounds = MaxRevisionRounds,
@@ -34,6 +59,6 @@ public sealed record AcceptanceRulesUpsertRequest(
         ReviewerSelection = ReviewerSelection,
         DecisionGuidance = DecisionGuidance ?? string.Empty,
         RoutingGuidance = RoutingGuidance ?? string.Empty,
-        AcceptorRequirement = AcceptorRequirement,
+        AcceptorRequirement = AcceptorRequirement ?? currentAcceptorRequirement,
     };
 }

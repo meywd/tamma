@@ -84,6 +84,12 @@ public class WorkItemRepository(
             items = items.Where(w => w.ParentId == null);
         else if (query.ParentId is { } parent)
             items = items.Where(w => w.ParentId == parent);
+        if (query.ExternalLinked is bool externalLinked)
+        {
+            items = externalLinked
+                ? items.Where(w => w.ExternalRefJson != null)
+                : items.Where(w => w.ExternalRefJson == null);
+        }
         if (!string.IsNullOrWhiteSpace(query.TitleContains))
             items = items.Where(w => EF.Functions.ILike(
                 w.Title, $"%{EscapeLike(query.TitleContains)}%"));

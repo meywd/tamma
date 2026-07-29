@@ -51,7 +51,7 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void ExternalEffect_has_25_members()
+    public void ExternalEffect_has_35_members()
     {
         // Derivation: grep 'RequireAuthorization("EngineServiceOnly")'
         // src/Tamma.Api/Program.cs → 26 routes, 17 MUTATING (5 engine-group
@@ -59,7 +59,15 @@ public class ActionVocabularyCountTests
         // mcp.tool.invoke, secret.reveal, process.spawn, deploy.promote-prod,
         // deploy.rollback → 22. 22 → 25 (Story 41-30): the schedule.create /
         // schedule.update / schedule.delete admin trio.
-        Enum.GetValues<ExternalEffect>().Should().HaveCount(25);
+        // 25 → 35 (Story 44-2): the NATIVE tracker's ten mutating routes —
+        // tracker.project.{create,update,delete},
+        // tracker.work-item.{create,update,delete,assign,set-status} and
+        // tracker.preferences.{set,delete}. Derivation: the four Map{Post,Patch,
+        // Delete,Put} calls in Program.cs's `tracker` group (the eight GETs are
+        // reads and are not catalogued, matching the EngineServiceOnly rule
+        // above). These write Tamma's OWN system of record — distinct from
+        // git.issue.patch / jira.ticket.patch, which mutate external trackers.
+        Enum.GetValues<ExternalEffect>().Should().HaveCount(35);
     }
 
     [Test]
@@ -111,9 +119,12 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void TotalCatalogMembers_is_183()
+    public void TotalCatalogMembers_is_193()
     {
-        // 96 + 17 + 8 + 25 + 29 + 8 = 183 — was 182 (automation 28): Story 43-5
+        // 96 + 17 + 8 + 35 + 29 + 8 = 193 — was 183 (effect 25): Story 44-2
+        // added the native tracker's ten mutating routes to the effect plane
+        // (see ExternalEffect_has_35_members for the derivation). Earlier:
+        // was 182 (automation 28): Story 43-5
         // added automation:governance-policy-snapshot-priming-service. Earlier:
         // was 181 (document-type 16): Story 41-1c added document-type:prose;
         // was 180 (automation 27, Story 43-4 added
@@ -121,7 +132,7 @@ public class ActionVocabularyCountTests
         // (80 + 10 + 22 + 26 + …); the agent-action plane grew by 16 (Story
         // 41-1a), the document-type plane by 6 (Story 41-1b), and
         // effect/automation by 3 + 1 (Story 41-30).
-        ActionCatalog.All.Should().HaveCount(183);
-        ActionCatalog.ByKey.Should().HaveCount(183);
+        ActionCatalog.All.Should().HaveCount(193);
+        ActionCatalog.ByKey.Should().HaveCount(193);
     }
 }

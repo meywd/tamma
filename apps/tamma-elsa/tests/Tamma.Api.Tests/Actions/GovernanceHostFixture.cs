@@ -1,0 +1,209 @@
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Connections;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.SignalR;
+using Microsoft.Extensions.DependencyInjection;
+using NUnit.Framework;
+using Tamma.Api.Infrastructure;
+using Tamma.Api.Tests.Infrastructure;
+using Tamma.Core.Actions;
+
+namespace Tamma.Api.Tests.Actions;
+
+/// <summary>
+/// Story 43-8 — the ONE booted <c>Tamma.Api</c> host every route/registration drift
+/// harness in this folder reflects over, plus the reflection itself.
+///
+/// <para><b>Why a booted host and not source analysis</b> (43-8 D1/D2): three of the
+/// four registration shapes in this repo are invisible to a syntax walker.
+/// <c>app.MapControllers()</c> expands at runtime from
+/// <c>[HttpPost]</c>/<c>[Route]</c> attributes; <c>app.MapHub&lt;T&gt;()</c> expands
+/// into a hub endpoint plus a protocol <c>/negotiate</c> endpoint that appear in no
+/// source file; and <c>PlatformTaskWorker</c> is registered by a
+/// <c>TryAddEnumerable</c> inside an extension method with no
+/// <c>AddHostedService&lt;&gt;</c> line anywhere. Everything here therefore reads
+/// <see cref="EndpointDataSource"/> and the built <see cref="IServiceCollection"/>.</para>
+///
+/// <para><b>What this fixture CANNOT see</b> — recorded here rather than only in a
+/// design doc, because a reader of a PASSING harness must not be misled:</para>
+/// <list type="bullet">
+///   <item><b>The Elsa engine's HTTP surface.</b> <c>Tamma.ElsaServer</c> calls
+///   <c>UseWorkflowsApi()</c> in a DIFFERENT PROCESS. None of its routes are in this
+///   host's <see cref="EndpointDataSource"/>, and no harness in this epic sees
+///   them.</item>
+///   <item><b>The TypeScript intelligence sidecar.</b> Governed only as far as the
+///   C# proxy route; everything past the proxy is ungoverned surface with no drift
+///   signal.</item>
+///   <item><b>Conditional registrations.</b> Endpoints and hosted services behind a
+///   configuration branch that is FALSE in the test host are simply absent — this
+///   host runs single-user, no Cranl key, alert workers gated off. A route that only
+///   exists in SaaS mode is invisible here and ships uncatalogued.</item>
+///   <item><b>Effects inside a handler.</b> A binding names a SITE. A new capability
+///   grown inside an already-bound handler changes nothing any harness observes.</item>
+/// </list>
+/// </summary>
+[SetUpFixture]
+public class GovernanceHostFixture
+{
+    private static WebApplicationFactory<Program>? s_factory;
+    private static IReadOnlyList<ServiceDescriptor>? s_descriptors;
+    private static IReadOnlyList<EndpointFact>? s_endpoints;
+
+    /// <summary>Every discovered endpoint, one fact per (endpoint, HTTP method).</summary>
+    public static IReadOnlyList<EndpointFact> Endpoints =>
+        s_endpoints ?? throw new InvalidOperationException("GovernanceHostFixture did not run.");
+
+    /// <summary>
+    /// The COMPLETE service-descriptor list of the built host — the only view that
+    /// sees both awkward hosted-service registration shapes (43-8 D2).
+    /// </summary>
+    public static IReadOnlyList<ServiceDescriptor> ServiceDescriptors =>
+        s_descriptors ?? throw new InvalidOperationException("GovernanceHostFixture did not run.");
+
+    [OneTimeSetUp]
+    public void BootHost()
+    {
+        // ApiTestFixture (the assembly-root [SetUpFixture]) has already started the
+        // Postgres containers and pointed the connection-string env vars at them;
+        // this factory is a second host over the same containers, the
+        // ActionPolicyEndpointsTests shape.
+        var captured = new List<ServiceDescriptor>();
+        s_factory = new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(b =>
+            {
+                b.UseEnvironment("Development");
+                b.DisableAlertHostedServices();
+                // Runs AFTER Program.cs's own registrations, so the snapshot is the
+                // whole collection. DisableAlertHostedServices only swaps *Options
+                // singletons — it removes no IHostedService descriptor, so the
+                // registration sweep still sees every actor.
+                b.ConfigureServices(services => captured.AddRange(services));
+            });
+
+        // Force the full pipeline (endpoint building happens on first request, not
+        // at service-provider construction).
+        using var client = s_factory.CreateClient();
+
+        s_descriptors = captured;
+        s_endpoints = DiscoverEndpoints(s_factory.Services);
+    }
+
+    [OneTimeTearDown]
+    public void DisposeHost() => s_factory?.Dispose();
+
+    /// <summary>
+    /// One (endpoint, HTTP method) pair as the harnesses see it.
+    /// </summary>
+    /// <param name="Method">Upper-case HTTP method, or <c>"*"</c> when the endpoint declares none.</param>
+    /// <param name="Pattern">The raw route pattern (<c>/api/v1/git/{owner}/{repo}/branches</c>).</param>
+    /// <param name="Kind">Which registration shape produced it (see <see cref="EndpointKind"/>).</param>
+    /// <param name="DisplayName">Endpoint display name, for failure messages only.</param>
+    /// <param name="Action">The bound catalog action, when the endpoint carries gate metadata.</param>
+    public sealed record EndpointFact(
+        string Method,
+        string Pattern,
+        string Kind,
+        string DisplayName,
+        ActionKey? Action)
+    {
+        /// <summary>The ratchet/baseline key: <c>"POST /api/v1/thing"</c>.</summary>
+        public string SiteKey => $"{Method} {Pattern}";
+
+        /// <summary>Whether this endpoint carries an <see cref="IActionGateMetadata"/> binding.</summary>
+        public bool IsGoverned => Action is not null;
+    }
+
+    /// <summary><see cref="EndpointFact.Kind"/> values.</summary>
+    public static class EndpointKind
+    {
+        /// <summary>A minimal-API <c>app.Map*</c> route.</summary>
+        public const string MinimalApi = "minimal-api";
+
+        /// <summary>An attribute-routed controller action (invisible to syntax analysis).</summary>
+        public const string ControllerAction = "controller-action";
+
+        /// <summary>A SignalR <c>/negotiate</c> endpoint (POST by protocol).</summary>
+        public const string SignalRNegotiate = "signalr-negotiate";
+
+        /// <summary>A SignalR hub transport endpoint.</summary>
+        public const string SignalRHub = "signalr-hub";
+    }
+
+    /// <summary>The four mutating HTTP verbs the coverage harness governs.</summary>
+    public static readonly IReadOnlySet<string> MutatingMethods =
+        new HashSet<string>(StringComparer.Ordinal) { "POST", "PUT", "PATCH", "DELETE" };
+
+    private static IReadOnlyList<EndpointFact> DiscoverEndpoints(IServiceProvider services)
+    {
+        // Union of BOTH resolution shapes. WebApplication composes its route
+        // groups into the DI-registered EndpointDataSource, but resolving the
+        // singleton and resolving the enumerable are different code paths in
+        // different ASP.NET Core versions; taking both and de-duplicating means an
+        // upgrade cannot silently halve the sweep.
+        var sources = services.GetServices<EndpointDataSource>().ToList();
+        var single = services.GetService<EndpointDataSource>();
+        if (single is not null && !sources.Contains(single)) sources.Add(single);
+
+        var endpoints = sources.SelectMany(s => s.Endpoints).Distinct().ToList();
+
+        var facts = new List<EndpointFact>();
+        foreach (var endpoint in endpoints)
+        {
+            if (endpoint is not RouteEndpoint route) continue;
+
+            // Attribute-routed controller patterns come back WITHOUT a leading
+            // slash ("api/Mentorship/start") while minimal-API ones carry it.
+            // Normalise, so a site key is comparable with an ActionDescriptor.SiteKey
+            // whichever authoring shape produced the route.
+            var pattern = route.RoutePattern.RawText ?? "(no-pattern)";
+            if (!pattern.StartsWith('/')) pattern = "/" + pattern;
+            var gate = endpoint.Metadata.GetMetadata<IActionGateMetadata>();
+            var kind = ClassifyKind(endpoint, pattern);
+
+            var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+            if (methods is null || methods.Count == 0)
+            {
+                // NO DECLARED METHOD MEANS EVERY METHOD, POST INCLUDED. Recording
+                // these as "*" and letting the coverage rule treat them as in scope
+                // is deliberate: the seven endpoints in this shape today are the
+                // three health checks and the four SignalR endpoints, and a filter
+                // keyed on an explicit POST would have silently dropped all seven —
+                // the exact "sweep that reads as coverage" failure this story is
+                // about.
+                facts.Add(new EndpointFact("*", pattern, kind, endpoint.DisplayName ?? pattern, gate?.Action));
+                continue;
+            }
+
+            facts.AddRange(methods.Select(m =>
+                new EndpointFact(m.ToUpperInvariant(), pattern, kind, endpoint.DisplayName ?? pattern, gate?.Action)));
+        }
+
+        return facts;
+    }
+
+    private static string ClassifyKind(Endpoint endpoint, string pattern)
+    {
+        if (endpoint.Metadata.GetMetadata<ControllerActionDescriptor>() is not null)
+            return EndpointKind.ControllerAction;
+
+        // NegotiateMetadata is the framework's own marker on the endpoint MapHub
+        // synthesises for the negotiate handshake — a far better discriminator than
+        // matching on the "/negotiate" suffix, which an application route could also
+        // carry.
+        if (endpoint.Metadata.GetMetadata<NegotiateMetadata>() is not null)
+            return EndpointKind.SignalRNegotiate;
+
+        // The hub's own transport endpoint carries HubMetadata but NOT
+        // NegotiateMetadata — and it declares no HTTP methods at all, so it accepts
+        // POST. Recognising it by framework metadata (rather than by a "/hubs/"
+        // path prefix) means an application route that happens to live under
+        // /hubs cannot inherit the exemption.
+        if (endpoint.Metadata.GetMetadata<HubMetadata>() is not null)
+            return EndpointKind.SignalRHub;
+
+        return EndpointKind.MinimalApi;
+    }
+}

@@ -47,7 +47,15 @@ public class ActionWirePinTests
             "ci.tests.trigger", "agent-dispatch.run", "notify.slack.queue", "notify.email.send",
             "mcp.tool.invoke", "secret.reveal", "process.spawn", "deploy.promote-prod", "deploy.rollback",
             // 41-30 — the scheduled-trigger admin surface (tree-truth reconcile).
-            "schedule.create", "schedule.update", "schedule.delete");
+            "schedule.create", "schedule.update", "schedule.delete",
+            // 44-2 — the NATIVE tracker's ten mutating routes. `tracker.` prefixed
+            // so they never read as the EXTERNAL-tracker pair above
+            // (git.issue.patch / jira.ticket.patch), which mutate somebody else's
+            // system of record.
+            "tracker.project.create", "tracker.project.update", "tracker.project.delete",
+            "tracker.work-item.create", "tracker.work-item.update", "tracker.work-item.delete",
+            "tracker.work-item.assign", "tracker.work-item.set-status",
+            "tracker.preferences.set", "tracker.preferences.delete");
     }
 
     [Test]

@@ -42,7 +42,14 @@ public class WorkflowInterfaceGraphTests
         // debugging both produce 'diagnosis').
         // Story 39-15 — 15 → 16: added the triage-context-gathering → findings edge (the split
         // Findings binding); triage-po-decision now consumes [findings]/produces triage-decision.
-        DocumentTypeRegistry.WorkflowInterfaces.Should().HaveCount(16);
+        // Story 41-2 — 16 → 17: added the acceptance-criteria-authoring edge (consumes
+        // [clarification, findings], produces acceptance-criteria). Epic-41 rule 1 clause (f):
+        // the pin is a conscious edit, exactly one per NEW PRODUCING WORKFLOW — 41-1b registered
+        // six document TYPES and deliberately moved no edge (its D2); 41-1c registered prose and
+        // moved none either.
+        // Story 41-9 — 17 → 18: added the adr-authoring edge (consumes [design, findings],
+        // produces prose). Same lockstep, same reason: one conscious edit per producing workflow.
+        DocumentTypeRegistry.WorkflowInterfaces.Should().HaveCount(18);
     }
 
     [Test]
@@ -120,6 +127,14 @@ public class WorkflowInterfaceGraphTests
             // triage-po-decision (consumes [findings], produces triage-decision) are now real bindings.
             "triage-context-gathering",
             "triage-po-decision",
+            // Story 41-2 — the acceptance-criteria binding (consumes [clarification, findings],
+            // produces acceptance-criteria) is a real document-lifecycle binding. This array is
+            // BIDIRECTIONAL: everything listed must be !Provisional AND everything unlisted must
+            // be Provisional, so a non-provisional seed row omitted here fails the build.
+            "acceptance-criteria-authoring",
+            // Story 41-9 — the ADR binding (consumes [design, findings], produces prose) is the
+            // reference prose-on-lifecycle binding; real binding ⇒ non-provisional.
+            "adr-authoring",
         };
 
         DocumentTypeRegistry.WorkflowInterfaces

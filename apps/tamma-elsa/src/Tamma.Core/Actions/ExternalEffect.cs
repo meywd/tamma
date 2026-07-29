@@ -15,7 +15,10 @@ namespace Tamma.Core.Actions;
 /// non-route members = 22, matching the design's figure — plus Story 41-30's
 /// <c>effect:schedule.create|update|delete</c> trio (the scheduled-trigger
 /// admin mutations, which ride the ScheduleManage-gated /api/admin routes,
-/// not EngineServiceOnly) = 25.
+/// not EngineServiceOnly) = 25 — plus Story 44-2's ten NATIVE-tracker
+/// mutations (<c>tracker.project.*</c>, <c>tracker.work-item.*</c>,
+/// <c>tracker.preferences.*</c>, on the TrackerView/TrackerManage-gated
+/// <c>/api</c> routes) = 35.
 ///
 /// <para>
 /// LIMITATION (43-2 D9, recorded not hidden): unlike <c>agent-action</c> /
@@ -141,6 +144,66 @@ public enum ExternalEffect
     /// stops a tenant's recurring audit — audited via
     /// <c>SCHEDULE.TRIGGER.CHANGED</c>.</summary>
     [Wire("schedule.delete")] ScheduleDelete,
+
+    // ── Story 44-2 — the NATIVE tracker's ten mutating routes
+    //    (TrackerEndpoints). Distinct from git.issue.patch / jira.ticket.patch,
+    //    which mutate an EXTERNAL tracker: these write Tamma's own
+    //    tenant-schema system of record. All ten sit in the issue-tracking
+    //    group (Story 44-2 AC10) and ship at AutonomyDial.Min — nothing gates
+    //    them today, and the catalog is behaviour-preserving. ──
+
+    /// <summary><c>POST /api/projects</c> — <c>TrackerEndpoints.CreateProject</c>.
+    /// Mints a project and, with it, a FROZEN key prefix every future work-item
+    /// key inherits.</summary>
+    [Wire("tracker.project.create")] TrackerProjectCreate,
+
+    /// <summary><c>PATCH /api/projects/{projectId}</c> —
+    /// <c>TrackerEndpoints.PatchProject</c> (name / description / repository
+    /// binding / estimate scale / archive state).</summary>
+    [Wire("tracker.project.update")] TrackerProjectUpdate,
+
+    /// <summary><c>DELETE /api/projects/{projectId}</c> —
+    /// <c>TrackerEndpoints.DeleteProject</c>. Refused while the project holds
+    /// work items (FK RESTRICT → 409), but an empty project's removal is not
+    /// recoverable.</summary>
+    [Wire("tracker.project.delete")] TrackerProjectDelete,
+
+    /// <summary><c>POST /api/work-items</c> —
+    /// <c>TrackerEndpoints.CreateWorkItem</c>. Consumes the project's number
+    /// sequence, so a create is never a no-op even when later deleted.</summary>
+    [Wire("tracker.work-item.create")] TrackerWorkItemCreate,
+
+    /// <summary><c>PATCH /api/work-items/{id}</c> —
+    /// <c>TrackerEndpoints.PatchWorkItem</c> (single-field tri-state patch).</summary>
+    [Wire("tracker.work-item.update")] TrackerWorkItemUpdate,
+
+    /// <summary><c>DELETE /api/work-items/{id}</c> —
+    /// <c>TrackerEndpoints.DeleteWorkItem</c>. Refused while children exist
+    /// (409 naming them); otherwise the row and its relation edges are
+    /// gone.</summary>
+    [Wire("tracker.work-item.delete")] TrackerWorkItemDelete,
+
+    /// <summary><c>POST /api/work-items/{id}/assign</c> —
+    /// <c>TrackerEndpoints.AssignWorkItem</c>. Catalogued separately from the
+    /// generic patch because assignment is the axis 39-20's access model will
+    /// eventually govern.</summary>
+    [Wire("tracker.work-item.assign")] TrackerWorkItemAssign,
+
+    /// <summary><c>POST /api/work-items/{id}/status</c> —
+    /// <c>TrackerEndpoints.SetWorkItemStatus</c>. Separate member because a
+    /// status move is the transition an admin would most plausibly want to gate
+    /// independently of editing a title.</summary>
+    [Wire("tracker.work-item.set-status")] TrackerWorkItemSetStatus,
+
+    /// <summary><c>PUT /api/tracker/preferences</c> —
+    /// <c>TrackerEndpoints.PutPreferences</c>. In SaaS this row is TENANT-wide
+    /// tracker configuration, not a personal setting.</summary>
+    [Wire("tracker.preferences.set")] TrackerPreferencesSet,
+
+    /// <summary><c>DELETE /api/tracker/preferences</c> —
+    /// <c>TrackerEndpoints.DeletePreferences</c> (falls back to the shipped
+    /// defaults).</summary>
+    [Wire("tracker.preferences.delete")] TrackerPreferencesDelete,
 }
 
 /// <summary><see cref="ExternalEffect"/> wire helper.</summary>

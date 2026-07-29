@@ -1,6 +1,8 @@
 # Story 43-0: Prerequisite Fixes and Dead Code — the `acceptorRequirement` Reset, a Mistyped Client, and Two Orphan Tool Vocabularies
 
-Status: drafted
+Status: done — implemented 2026-07-29. One deliberate deviation from the plan's **D1**, recorded in full
+under "Corrections applied while implementing (2026-07-29)" below: the fix is on BOTH sides, not the client
+only — the API no longer invents `acceptorRequirement` for a body that omits it.
 
 ## MANDATORY: Before You Code
 
@@ -124,8 +126,67 @@ So "DI-register or delete" is a false dichotomy. The resolution is: **keep, do n
 
 2 days
 
+## Corrections applied while implementing (2026-07-29)
+
+*[Amendment 2026-07-29 — the fix is two-sided; D1 is superseded. The original D1 text is kept in
+`implementation-plan.md` as the historical record.]*
+
+**D1 said:** fix the TypeScript only, keep the DTO's non-nullable
+`AcceptorRequirement AcceptorRequirement = AcceptorRequirement.Any`, and pin that default as intentional —
+on the reasoning that the default exists to bind "stored legacy bodies" and removing it would turn a silent
+loss into an outage.
+
+**What shipped instead:** both sides.
+
+1. `AcceptanceRulesUpsertRequest.AcceptorRequirement` is now `AcceptorRequirement?`, defaulting to `null` =
+   *"the caller did not say"*. `ToRules` takes the currently-effective requirement as a required argument
+   (there is no parameterless overload), and `AcceptanceRulesEndpoints.Upsert` resolves it — the override
+   row if one exists, else `AcceptanceDefaults.For(type)` — before mapping. An omitted field is therefore
+   **preserved**, never invented. An explicitly stated `"any"` still lowers the floor: silence and intent
+   are now distinguishable, which is the whole point.
+
+2. The dashboard sends the field (interface + memo + a `<select>` control), as AC1/AC2 required.
+
+**Why D1's reasoning did not survive contact with the code.** The "legacy stored body" safety net is not on
+this DTO at all — persistence round-trips the DOMAIN record
+(`AcceptanceRulesService.UpsertAsync` → `AcceptanceRulesJson.Serialize`; `Materialize` →
+`AcceptanceRulesJson.Deserialize`), and it is
+`Tamma.Core.Documents.Policy.AcceptanceRules.AcceptorRequirement { get; init; } = AcceptorRequirement.Any`
+that binds a pre-39-13 row. That property is untouched. `AcceptanceRulesUpsertRequest` only ever binds
+INBOUND PUT bodies, so making it nullable cannot affect a single stored row — D1's stated cost was not real,
+and the story's own framing ("defaulted bodies ARE the bug class") wins.
+
+Two further facts weighed here, both dated after the story was drafted:
+
+- **The repo now has a precedent that says exactly this.** `ActionPolicyEndpoints` (Story 43-6, shipped)
+  opens with: *"Every write endpoint takes ONE nullable-required field: a body missing the field is a 400,
+  NEVER a defaulted write"* — and names the rule **"the 43-0 bug class"**. A 400 is the right shape for a
+  single-field write; for this whole-object PUT the equivalent is preserve-on-absent, which keeps every
+  legacy 8-field client working while making silent policy reset impossible.
+- **The blast radius was larger than the story said.** The story names `design`. Since 41-1b/41-1c,
+  `sprint-plan` and `threat-model` also ship `AcceptorRequirement.Human`
+  (`AcceptanceDefaults.For`), so the pre-fix dialog silently stripped the human-acceptance requirement from
+  **three** document types, not one.
+
+**Effect on AC3.** Case (a) (stated `human` round-trips) is unchanged. Case (b) is now pinned as
+*`Upsert_omitting_acceptorRequirement_on_an_any_type_stays_any`*: for a type whose effective requirement is
+`any`, an omitting body still writes `any` — the documented pre-39-13 behavior is preserved for every type
+that never had a human floor. What changed is only that omission means "keep what is in force" instead of
+the literal constant `any`. The regression pin the bug actually needed is
+*`Upsert_omitting_acceptorRequirement_preserves_shipped_human_floor`*.
+
+**AC8 partially deferred (already satisfied elsewhere).** The `Program.cs` D6 comment extension and
+`GetAcceptanceRulesToolReachabilityTests` were NOT added: Story 43-4 landed first and already carries the
+exemption as a shrink-only, count-pinned, justification-bearing entry —
+`ToolCatalogAllowlists.NotDiRegisteredTools` (one entry, `tool:get_acceptance_rules`), pinned by
+`ToolCatalogAllowlistTests` and enforced at boot by `ActionCatalogStartupValidator`. That is a strictly
+stronger guard than the proposed test, so the "Handoff to 43-4" section is **consumed, not pending**. What
+43-0 did add is the pointer: `GetAcceptanceRulesTool`'s class doc now explains why a singleton
+`IToolExecutor` registration would be wrong and names the allowlist.
+
 ## Change Log
 
 | Date       | Version | Changes                | Author |
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-25 | 1.0.0   | Initial story creation | Claude |
+| 2026-07-29 | 1.1.0   | Implemented. D1 superseded — the API side no longer defaults an omitted `acceptorRequirement` (preserve-on-absent); `ResolveToolsActivity` deleted; 43-4's story text reconciled; AC8 recorded as satisfied by 43-4's allowlist. | Claude |

@@ -290,7 +290,7 @@ public static partial class ActionCatalog
         Tool(ToolAction.GitOperationsWrite, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Git write operations", "Write-graded git subcommands (add/commit/push/checkout/stash/pull) — includes push.",
             "Tamma.Activities.LlmCall.Tools.GitOperationsTool (write-graded GitSubcommand members)"),
 
-        // ── effect (22) ──────────────────────────────────────────────────────
+        // ── effect (35) ──────────────────────────────────────────────────────
 
         Effect(ExternalEffect.EngineEventsAppend, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Append domain events", "Engine appends DCB events through the mediation seam.",
             "POST /api/engine/events — EngineEndpoints.AppendEvents", reversible: false),
@@ -362,6 +362,41 @@ public static partial class ActionCatalog
             "PUT /api/admin/scheduled-triggers/{id} — ScheduledTriggerEndpoints.Update"),
         Effect(ExternalEffect.ScheduleDelete, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Delete schedule", "Delete a scheduled trigger (stops a tenant's recurring audit; audited via SCHEDULE.TRIGGER.CHANGED).",
             "DELETE /api/admin/scheduled-triggers/{id} — ScheduledTriggerEndpoints.Delete"),
+        // Story 44-2 (AC10) — the native tracker's ten mutating routes. ALL ten
+        // land in issue-tracking: the group's partition rule is KIND OF
+        // CONSEQUENCE AT COMPLETION, and every one of these completes by
+        // changing what the tracker says the work is. That includes the
+        // preferences pair — rejected alternative: platform-automation "because
+        // it is configuration", which would put a tenant's default project in
+        // the same admin lever as the outbox sweeper and hide it from anyone
+        // gating the tracker. The group description already reads "issues and
+        // tickets on the configured tracker platforms"; the native tracker IS
+        // one of those, and 44-2 is the story that makes it the default one.
+        // MinAutonomy = AutonomyDial.Min throughout (behaviour-preserving, epic
+        // decision D1: nothing gates these today). Risk grades the CONSEQUENCE,
+        // not the caller: the two deletes that can destroy user work are
+        // Destructive + irreversible; the preferences delete is Mutating
+        // because re-setting it restores the state exactly.
+        Effect(ExternalEffect.TrackerProjectCreate, ActionGroup.IssueTracking, ActionRisk.Mutating, "Create project", "Create a native tracker project, minting the frozen key prefix every work item in it inherits.",
+            "POST /api/projects — TrackerEndpoints.CreateProject"),
+        Effect(ExternalEffect.TrackerProjectUpdate, ActionGroup.IssueTracking, ActionRisk.Mutating, "Update project", "Update a native tracker project's name, description, repository binding, estimate scale or archive state.",
+            "PATCH /api/projects/{projectId} — TrackerEndpoints.PatchProject"),
+        Effect(ExternalEffect.TrackerProjectDelete, ActionGroup.IssueTracking, ActionRisk.Destructive, "Delete project", "Delete a native tracker project (refused while it holds work items — FK RESTRICT → 409 — but an empty project's removal is not undoable).",
+            "DELETE /api/projects/{projectId} — TrackerEndpoints.DeleteProject", reversible: false),
+        Effect(ExternalEffect.TrackerWorkItemCreate, ActionGroup.IssueTracking, ActionRisk.Mutating, "Create work item", "File a native work item, consuming the project's number sequence (the minted key is frozen from that moment).",
+            "POST /api/work-items — TrackerEndpoints.CreateWorkItem"),
+        Effect(ExternalEffect.TrackerWorkItemUpdate, ActionGroup.IssueTracking, ActionRisk.Mutating, "Update work item", "Patch a native work item's title, description, kind, priority, type, iteration, estimate or external ref (single-field tri-state patch).",
+            "PATCH /api/work-items/{id} — TrackerEndpoints.PatchWorkItem"),
+        Effect(ExternalEffect.TrackerWorkItemDelete, ActionGroup.IssueTracking, ActionRisk.Destructive, "Delete work item", "Delete a native work item (refused while children exist — 409 naming them; otherwise the row and its relation edges are gone).",
+            "DELETE /api/work-items/{id} — TrackerEndpoints.DeleteWorkItem", reversible: false),
+        Effect(ExternalEffect.TrackerWorkItemAssign, ActionGroup.IssueTracking, ActionRisk.Mutating, "Assign work item", "Set or clear a native work item's assignee (its own member, because assignment is the axis Story 39-20's access model will govern).",
+            "POST /api/work-items/{id}/assign — TrackerEndpoints.AssignWorkItem"),
+        Effect(ExternalEffect.TrackerWorkItemSetStatus, ActionGroup.IssueTracking, ActionRisk.Mutating, "Move work item status", "Transition a native work item's status (its own member: an admin may plausibly gate a status move without gating a title edit).",
+            "POST /api/work-items/{id}/status — TrackerEndpoints.SetWorkItemStatus"),
+        Effect(ExternalEffect.TrackerPreferencesSet, ActionGroup.IssueTracking, ActionRisk.Mutating, "Set tracker preferences", "Write the tracker preference row (default project / default kind / board grouping) — TENANT-wide configuration in SaaS, not a personal setting.",
+            "PUT /api/tracker/preferences — TrackerEndpoints.PutPreferences"),
+        Effect(ExternalEffect.TrackerPreferencesDelete, ActionGroup.IssueTracking, ActionRisk.Mutating, "Reset tracker preferences", "Delete the tracker preference row so the shipped defaults apply again.",
+            "DELETE /api/tracker/preferences — TrackerEndpoints.DeletePreferences"),
 
         // ── automation (27) — EscalatableToHuman=false for the whole plane ────
 

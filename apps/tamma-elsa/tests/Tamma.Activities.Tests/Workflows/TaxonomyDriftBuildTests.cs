@@ -124,6 +124,8 @@ public class TaxonomyDriftBuildTests
     /// </summary>
     private static readonly IReadOnlySet<string> ExpectedContributingWorkflows = new HashSet<string>
     {
+        "AcceptanceCriteriaAuthoringWorkflow", // Story 41-2: the (product_owner, define-acceptance-criteria) pair is dispatched via its document-lifecycle binding, discovered by the lifecycle-binding walk (39-12 D5)
+        "AdrAuthoringWorkflow",         // Story 41-9: the (architect, write-adr) pair is dispatched via its document-lifecycle prose binding, discovered by the lifecycle-binding walk (39-12 D5)
         "AmbiguityScoringWorkflow",     // Story 3.6: dispatches the dedicated (product_owner, score-ambiguity) scoring pair
         "AssessmentWorkflow",           // P0 fix 2026-06-30: dispatches generate-assessment-questions + analyze-assessment-response
         "BlockerDiagnosisWorkflow",

@@ -373,6 +373,16 @@ builder.Services.AddScoped<Tamma.Api.Services.AcceptanceRules.AcceptanceRulesSer
 builder.Services.AddScoped<Tamma.Core.Documents.Policy.IAcceptanceRulesResolver>(
     sp => sp.GetRequiredService<Tamma.Api.Services.AcceptanceRules.AcceptanceRulesService>());
 builder.Services.AddScoped<Tamma.Api.Services.AcceptanceRules.GetAcceptanceRulesToolFactory>();
+// Story 44-2 — the native tracker's application service + assignee picker.
+// The repositories (IProjectRepository / IWorkItemRepository /
+// IIterationRepository / ITrackerPreferenceRepository) were registered by
+// Story 44-1 in Tamma.Data/DependencyInjection.cs; these two are the API layer
+// on top. TrackerAssigneeResolver is registered concretely (not behind an
+// interface) for the AcceptanceRules/GetAcceptanceRulesToolFactory reason — it
+// has exactly one implementation and no seam to fake at the DI boundary; its
+// tests construct it directly.
+builder.Services.AddScoped<Tamma.Api.Services.Tracker.ITrackerService, Tamma.Api.Services.Tracker.TrackerService>();
+builder.Services.AddScoped<Tamma.Api.Services.Tracker.TrackerAssigneeResolver>();
 // Story 39-8 — the escalation disposition surface (appends ESCALATION.RESOLVED, FAIL-LOUD).
 builder.Services.AddScoped<Tamma.Api.Services.Documents.EscalationDispositionService>();
 // Story 39-8 / 39-18 (D7) — the shared document-decision submission path. BOTH the
@@ -1650,6 +1660,24 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("actions:manage"));
         });
+        // Story 44-2 (AC4) — the native tracker, TWO policies with different
+        // reach. TrackerView (tracker:view = member+) gates reads AND work-item
+        // CRUD/status/assignment: a member must be able to file and move their
+        // own work or the tracker is not a tracker. TrackerManage
+        // (tracker:manage = admin+owner) gates project/iteration STRUCTURE and
+        // the tenant-wide tracker_preferences row. As with AcceptanceRulesManage,
+        // neither reuses SettingsManage — that policy is owner-only and would
+        // 403 every tenant_admin.
+        options.AddPolicy("TrackerView", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("tracker:view"));
+        });
+        options.AddPolicy("TrackerManage", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("tracker:manage"));
+        });
         options.AddPolicy("WorkflowsView", p =>
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
@@ -1752,7 +1780,13 @@ else if (builder.Environment.IsDevelopment())
             .Build();
         // Register all named policies with permissive default
         foreach (var name in new[] { "AdminAccess", "OwnerAccess", "PlatformOwnerAccess", "MemberAccess", "SettingsView",
-            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "PricingManage", "AcceptanceRulesManage", "ScheduleManage", "ActionsManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
+            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "PricingManage", "AcceptanceRulesManage", "ScheduleManage", "ActionsManage",
+            // Story 44-2 — the tracker pair. THIS array is the third of the
+            // three RBAC places (Permissions.Matrix, the AddAuthorization block,
+            // and here); it is the one that gets forgotten, and a policy missing
+            // from it throws at Development startup rather than 403ing quietly.
+            "TrackerView", "TrackerManage",
+            "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
             "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny", "EngineServiceOnly", "OrchestratorChannel" })
         {
             options.AddPolicy(name, p => p.AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement()));
@@ -2890,6 +2924,66 @@ actionsCeiling.MapPut("/actions/{ns}/{key}/threshold", ActionPolicyEndpoints.Put
 actionsCeiling.MapDelete("/actions/{ns}/{key}", ActionPolicyEndpoints.DeleteCeilingAction);
 actionsCeiling.MapPut("/groups/{group}/threshold", ActionPolicyEndpoints.PutCeilingGroupThreshold);
 actionsCeiling.MapDelete("/groups/{group}", ActionPolicyEndpoints.DeleteCeilingGroup);
+
+// ── Story 44-2 — the native tracker (projects, work items, preferences) ──
+// ONE group, three nouns (plan D1) so the literal-before-parameterized ordering
+// is got right in one place rather than three; 44-4's iterations join here.
+//
+// RBAC (AC4), three-place lockstep with Permissions.Matrix and the
+// AddAuthorization block above:
+//   * TrackerView  (tracker:view  = member/admin/owner) — reads AND work-item
+//     CRUD / status / assignment. A member must be able to file a bug and move
+//     their own card.
+//   * TrackerManage (tracker:manage = admin/owner)      — project STRUCTURE
+//     (create/patch/delete) and the tracker_preferences row, which in SaaS is
+//     tenant-wide configuration.
+// Neither reuses SettingsManage (owner-only; would 403 every tenant_admin).
+//
+// ROUTE ORDERING: /work-items/assignable and /work-items/by-key/{key} are
+// LITERAL and are mapped BEFORE /work-items/{id:guid}. The :guid constraint
+// would in fact reject "assignable", but relying on a constraint for
+// disambiguation is exactly the trap the acceptance-rules /defaults comment
+// warns about — the ordering is explicit and TrackerRouteOrderTests pins it.
+//
+// NOT /api/tasks*: that path belongs to Story 39-19's decision inbox and the two
+// must stay distinguishable in a route table (story technical notes).
+var tracker = app.MapGroup("/api")
+    .RequireAuthorization("AuthenticatedAny")
+    .RequireRateLimiting("ConfigRead");
+
+// Projects — structure is TrackerManage.
+tracker.MapGet("/projects", TrackerEndpoints.ListProjects).RequireAuthorization("TrackerView");
+tracker.MapGet("/projects/{projectId:guid}", TrackerEndpoints.GetProject).RequireAuthorization("TrackerView");
+tracker.MapPost("/projects", TrackerEndpoints.CreateProject)
+    .RequireAuthorization("TrackerManage").RequireRateLimiting("ConfigWrite");
+tracker.MapPatch("/projects/{projectId:guid}", TrackerEndpoints.PatchProject)
+    .RequireAuthorization("TrackerManage").RequireRateLimiting("ConfigWrite");
+tracker.MapDelete("/projects/{projectId:guid}", TrackerEndpoints.DeleteProject)
+    .RequireAuthorization("TrackerManage").RequireRateLimiting("ConfigWrite");
+
+// Work items — literal segments FIRST, then the parameterized ones.
+tracker.MapGet("/work-items/assignable", TrackerEndpoints.ListAssignable).RequireAuthorization("TrackerView");
+tracker.MapGet("/work-items/by-key/{key}", TrackerEndpoints.GetWorkItemByKey).RequireAuthorization("TrackerView");
+tracker.MapGet("/work-items", TrackerEndpoints.ListWorkItems).RequireAuthorization("TrackerView");
+tracker.MapGet("/work-items/{id:guid}", TrackerEndpoints.GetWorkItem).RequireAuthorization("TrackerView");
+tracker.MapPost("/work-items", TrackerEndpoints.CreateWorkItem)
+    .RequireAuthorization("TrackerView").RequireRateLimiting("ConfigWrite");
+tracker.MapPatch("/work-items/{id:guid}", TrackerEndpoints.PatchWorkItem)
+    .RequireAuthorization("TrackerView").RequireRateLimiting("ConfigWrite");
+tracker.MapDelete("/work-items/{id:guid}", TrackerEndpoints.DeleteWorkItem)
+    .RequireAuthorization("TrackerView").RequireRateLimiting("ConfigWrite");
+tracker.MapPost("/work-items/{id:guid}/assign", TrackerEndpoints.AssignWorkItem)
+    .RequireAuthorization("TrackerView").RequireRateLimiting("ConfigWrite");
+tracker.MapPost("/work-items/{id:guid}/status", TrackerEndpoints.SetWorkItemStatus)
+    .RequireAuthorization("TrackerView").RequireRateLimiting("ConfigWrite");
+
+// Preferences — per-principal configuration; the ONE mode-branching handler set
+// and the ONE surviving PUT (the body genuinely IS the whole resource).
+tracker.MapGet("/tracker/preferences", TrackerEndpoints.GetPreferences).RequireAuthorization("TrackerView");
+tracker.MapPut("/tracker/preferences", TrackerEndpoints.PutPreferences)
+    .RequireAuthorization("TrackerManage").RequireRateLimiting("ConfigWrite");
+tracker.MapDelete("/tracker/preferences", TrackerEndpoints.DeletePreferences)
+    .RequireAuthorization("TrackerManage").RequireRateLimiting("ConfigWrite");
 
 // ── Settings / Config ──
 // Rate limit (finding 020): ConfigRead default for the group; ConfigWrite

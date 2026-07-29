@@ -119,9 +119,11 @@ public class TemplateExampleConformanceTests
             [("tester", "verify-acceptance")] = new("review", "41-15",
                 "example instructs an {issues, summary: {decision, ...}} shape; Review requires root-level " +
                 "subject/decision/summary (summary is a string, not an object) — MALFORMED_PAYLOAD"),
-            [("product_owner", "define-acceptance-criteria")] = new("acceptance-criteria", "41-2",
-                "example instructs the legacy plan wire; 41-1b mints the AcceptanceCriteria document type " +
-                "this cell will produce, and 41-2 rewrites the cell when it binds"),
+            // (product_owner, define-acceptance-criteria) REMOVED (Story 41-2, 2026-07-29):
+            // AcceptanceCriteriaAuthoringWorkflow binds the cell, so it moved to
+            // ContractBindingTests.Bindings and test 1 now owns it. Its template was rewritten
+            // from the legacy task-breakdown (plan) wire to the AcceptanceCriteria wire in the
+            // same change — a bound cell may never be baselined here (test 3). Pin 16 → 15.
             [("product_owner", "plan-roadmap")] = new("prose", "41-4",
                 "example instructs the legacy plan wire; 41-4 produces prose (roadmap, audience=stakeholder) " +
                 "once 41-1c lands the prose document type"),
@@ -150,9 +152,12 @@ public class TemplateExampleConformanceTests
             // it became visible only because test 5 started enumerating the taxonomy. The
             // templates are NOT rewritten here (each is owned by its story); they are
             // recorded so the debt is explicit and shrink-only from now on.
-            [("architect", "write-adr")] = new("prose", "41-9",
-                "no JSON example — the template instructs a markdown ADR; 41-9 rewrites the cell as a " +
-                "prose (adr, audience=engineering) producer"),
+            // (architect, write-adr) REMOVED (Story 41-9, 2026-07-29): AdrAuthoringWorkflow binds
+            // the cell, so it moved to ContractBindingTests.Bindings and test 1 now owns it. Its
+            // template was rewritten from the markdown issue-comment report to the prose envelope
+            // (kind=adr, audience=engineering) in the same change — a bound cell may never be
+            // baselined here (test 3). Pin 15 → 14. This is the FIRST of the six prose-family
+            // baseline entries to clear; 41-4/41-22/41-24/41-25/41-26 own the rest.
             [("tech_writer", "write-release-notes")] = new("prose", "41-24",
                 "no JSON example — the template instructs markdown release notes; 41-24 rewrites the cell " +
                 "as a prose (release-notes, audience=user) producer"),
@@ -180,9 +185,15 @@ public class TemplateExampleConformanceTests
     /// ever record is the one in the change that WIDENED the gate: before test 5 the
     /// fixture never looked outside its own tables, so the five prose cells added above
     /// were invisible debt, not new drift. Widening the lens is allowed to reveal what
-    /// was already there; nothing else may raise this number.</para>
+    /// was already there; nothing else may raise this number.
+    /// 16 → 15 (2026-07-29, Story 41-2): the ratchet turning the right way for the first
+    /// time — (product_owner, define-acceptance-criteria) was BOUND, its template
+    /// rewritten to the AcceptanceCriteria wire, and its baseline entry deleted.
+    /// 15 → 14 (2026-07-29, Story 41-9): (architect, write-adr) was BOUND, its template
+    /// rewritten from the markdown issue-comment report to the prose envelope
+    /// (kind=adr, audience=engineering), and its baseline entry deleted.</para>
     /// </summary>
-    private const int KnownNonConformingTemplateCount = 16;
+    private const int KnownNonConformingTemplateCount = 14;
 
     // NOTE (2026-07-29): the PlannedFutureTypeKeys escape hatch is gone — 41-1b
     // registered test-plan / acceptance-criteria / backlog-ordering and 41-1c

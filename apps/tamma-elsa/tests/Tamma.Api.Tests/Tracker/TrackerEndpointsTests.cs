@@ -1,0 +1,914 @@
+using System.Security.Claims;
+using System.Text.Json;
+using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
+using NUnit.Framework;
+using Tamma.Api.Dtos.Tracker;
+using Tamma.Api.Endpoints;
+using Tamma.Api.Services.Access;
+using Tamma.Api.Services.Actions;
+using Tamma.Api.Services.PromptStore;
+using Tamma.Api.Services.Tracker;
+using Tamma.Api.Tests.Documents;
+using Tamma.Core;
+using Tamma.Data;
+using Tamma.Data.Entities;
+using Tamma.Data.Pooling;
+using Tamma.Data.Repositories;
+using Testcontainers.PostgreSql;
+
+namespace Tamma.Api.Tests.Tracker;
+
+/// <summary>
+/// Story 44-2 — the tracker HTTP surface driven through its real handler
+/// delegates against a REAL tenant schema (the <c>WorkItemRepositoryTests</c>
+/// fixture shape: Testcontainers Postgres + <c>EfTenantDbMigrator</c> +
+/// <c>SchemaRoutingFactory</c>/<c>FakeTenantContext</c>).
+///
+/// <para>The PATCH bodies are DESERIALIZED FROM JSON rather than constructed,
+/// because the whole point of AC3's tri-state is what the model binder does
+/// with an absent key versus an explicit null — a hand-built DTO would test the
+/// assertion and skip the mechanism.</para>
+///
+/// <para>REQUIRES DOCKER.</para>
+/// </summary>
+[TestFixture]
+[Category("Docker")]
+public class TrackerEndpointsTests
+{
+    private PostgreSqlContainer _postgres = null!;
+    private string _baseConnectionString = null!;
+    private Guid _tenantId;
+    private string _schema = null!;
+
+    private DocumentTestData.SchemaRoutingFactory _factory = null!;
+    private DocumentTestData.FakeTenantContext _tenantContext = null!;
+    private ProjectRepository _projects = null!;
+    private WorkItemRepository _workItems = null!;
+    private TrackerPreferenceRepository _preferences = null!;
+
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+
+    [OneTimeSetUp]
+    public async Task OneTimeSetUp()
+    {
+        _postgres = new PostgreSqlBuilder()
+            .WithImage("postgres:17-alpine")
+            .WithDatabase("tracker_api_test")
+            .WithUsername("tamma")
+            .WithPassword("tamma")
+            .Build();
+        await _postgres.StartAsync();
+        _baseConnectionString = _postgres.GetConnectionString();
+
+        _tenantId = Guid.NewGuid();
+        _schema = TenantNaming.SchemaName(_tenantId);
+        await new EfTenantDbMigrator().MigrateTenantAppAsync(CsFor(_schema));
+
+        _factory = new DocumentTestData.SchemaRoutingFactory(_baseConnectionString).Map(_tenantId, _schema);
+        _tenantContext = new DocumentTestData.FakeTenantContext(_tenantId);
+        _projects = new ProjectRepository(_factory, _tenantContext);
+        _workItems = new WorkItemRepository(_factory, _tenantContext);
+        _preferences = new TrackerPreferenceRepository(_factory, _tenantContext);
+    }
+
+    [OneTimeTearDown]
+    public async Task OneTimeTearDown() => await _postgres.DisposeAsync();
+
+    [SetUp]
+    public async Task ClearTables()
+    {
+        await using var conn = new NpgsqlConnection(CsFor(_schema));
+        await conn.OpenAsync();
+        await using var cmd = new NpgsqlCommand(
+            $"""
+            TRUNCATE TABLE {_schema}.work_item_relations, {_schema}.work_items,
+                           {_schema}.iterations, {_schema}.projects,
+                           {_schema}.tracker_preferences CASCADE;
+            """, conn);
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    // ── Fixture plumbing ───────────────────────────────────────────────────
+
+    private string CsFor(string schema) =>
+        new NpgsqlConnectionStringBuilder(_baseConnectionString) { SearchPath = schema }.ConnectionString;
+
+    private TrackerService Service(
+        ITaskAudienceResolver? resolver = null, TammaMode mode = TammaMode.SingleUser) =>
+        new(_projects, _workItems, _preferences,
+            resolver ?? new InitiatorOnlyTaskAudienceResolver(),
+            new StubModeProvider(mode), _tenantContext);
+
+    private sealed class StubModeProvider(TammaMode mode) : ITammaModeProvider
+    {
+        public TammaMode Mode { get; } = mode;
+    }
+
+    private static ClaimsPrincipal Principal(Guid userId) =>
+        new(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, userId.ToString())], "Test"));
+
+    private static DefaultHttpContext Context(string? ifMatch = null)
+    {
+        var ctx = new DefaultHttpContext
+        {
+            RequestServices = new ServiceCollection().AddLogging().AddOptions().BuildServiceProvider(),
+            Response = { Body = new MemoryStream() },
+        };
+        if (ifMatch is not null)
+            ctx.Request.Headers["If-Match"] = ifMatch;
+        return ctx;
+    }
+
+    private static async Task<(int Status, JsonElement Body, string? ETag)> Exec(
+        IResult result, DefaultHttpContext ctx)
+    {
+        await result.ExecuteAsync(ctx);
+        ctx.Response.Body.Position = 0;
+        var raw = await new StreamReader(ctx.Response.Body).ReadToEndAsync();
+        var body = string.IsNullOrWhiteSpace(raw)
+            ? default
+            : JsonDocument.Parse(raw).RootElement.Clone();
+        var etag = ctx.Response.Headers.ETag.ToString();
+        return (ctx.Response.StatusCode, body, string.IsNullOrEmpty(etag) ? null : etag);
+    }
+
+    private async Task<ProjectEntity> NewProjectAsync(
+        string key = "TAM", string scale = "fibonacci") =>
+        await _projects.CreateAsync(new ProjectEntity
+        {
+            Key = key,
+            Name = $"{key} project",
+            EstimateScale = scale,
+        });
+
+    private async Task<WorkItemEntity> NewItemAsync(Guid projectId, string title = "item") =>
+        await _workItems.CreateAsync(new WorkItemEntity
+        {
+            ProjectId = projectId,
+            Kind = "task",
+            Status = "backlog",
+            Title = title,
+        });
+
+    // ══════════════════ AC3 — the 43-0 regression guard ════════════════════
+
+    [Test]
+    public async Task Patch_touches_only_the_sent_field()
+    {
+        var project = await NewProjectAsync();
+        var created = await Service().CreateWorkItemAsync(
+            JsonSerializer.Deserialize<CreateWorkItemRequest>($$"""
+            {
+              "projectId": "{{project.Id}}",
+              "title": "original",
+              "kind": "story",
+              "status": "in_progress",
+              "priority": "high",
+              "issueType": "feature",
+              "description": "the original description",
+              "estimate": 5,
+              "externalRef": { "platformKind": "github", "number": 7 }
+            }
+            """, Json)!, Guid.NewGuid());
+
+        var before = await _workItems.GetAsync(created.Id);
+
+        var http = Context();
+        var (status, _, _) = await Exec(
+            await TrackerEndpoints.PatchWorkItem(
+                created.Id,
+                JsonSerializer.Deserialize<PatchWorkItemRequest>("""{"title":"renamed"}""", Json)!,
+                Service(), http),
+            http);
+        status.Should().Be(StatusCodes.Status200OK);
+
+        var after = await _workItems.GetAsync(created.Id);
+        after!.Title.Should().Be("renamed");
+        // EVERY other column byte-unchanged. This is the acceptance-rules
+        // acceptorRequirement bug (epic-43 README:380-383) expressed as a test:
+        // a defaulted full-body PUT resets exactly these.
+        after.Description.Should().Be(before!.Description);
+        after.Kind.Should().Be(before.Kind);
+        after.Status.Should().Be(before.Status);
+        after.Priority.Should().Be(before.Priority);
+        after.IssueType.Should().Be(before.IssueType);
+        after.Estimate.Should().Be(before.Estimate);
+        after.ExternalRefJson.Should().Be(before.ExternalRefJson);
+        after.AssigneeUserId.Should().Be(before.AssigneeUserId);
+        after.IterationId.Should().Be(before.IterationId);
+        after.Rank.Should().Be(before.Rank);
+        after.SiblingRank.Should().Be(before.SiblingRank);
+        after.Key.Should().Be(before.Key);
+        after.Number.Should().Be(before.Number);
+        after.ClosedAt.Should().Be(before.ClosedAt);
+        after.Version.Should().Be(before.Version + 1, "one write, one version bump");
+    }
+
+    [Test]
+    public async Task Patch_null_clears_and_absent_preserves()
+    {
+        var project = await NewProjectAsync();
+        var created = await Service().CreateWorkItemAsync(
+            JsonSerializer.Deserialize<CreateWorkItemRequest>($$"""
+            {
+              "projectId": "{{project.Id}}", "title": "t", "kind": "task",
+              "priority": "high", "issueType": "bug", "description": "d", "estimate": 3
+            }
+            """, Json)!, null);
+
+        // Explicit nulls CLEAR; the untouched fields survive.
+        var http = Context();
+        await Exec(
+            await TrackerEndpoints.PatchWorkItem(
+                created.Id,
+                JsonSerializer.Deserialize<PatchWorkItemRequest>(
+                    """{"priority":null,"description":null}""", Json)!,
+                Service(), http),
+            http);
+
+        var cleared = await _workItems.GetAsync(created.Id);
+        cleared!.Priority.Should().BeNull("an explicit null is 'clear this field'");
+        cleared.Description.Should().BeNull();
+        cleared.IssueType.Should().Be("bug", "an ABSENT field is 'leave it alone'");
+        cleared.Estimate.Should().Be(3m);
+
+        // And the mirror: an empty body changes nothing at all.
+        var noop = Context();
+        await Exec(
+            await TrackerEndpoints.PatchWorkItem(
+                created.Id, JsonSerializer.Deserialize<PatchWorkItemRequest>("{}", Json)!,
+                Service(), noop),
+            noop);
+        var untouched = await _workItems.GetAsync(created.Id);
+        untouched!.IssueType.Should().Be("bug");
+        untouched.Estimate.Should().Be(3m);
+        untouched.Title.Should().Be("t");
+    }
+
+    [Test]
+    public async Task Patch_project_touches_only_the_sent_field()
+    {
+        var project = await _projects.CreateAsync(new ProjectEntity
+        {
+            Key = "TAM",
+            Name = "original",
+            Description = "keep me",
+            EstimateScale = "fibonacci",
+            RepositoryId = Guid.NewGuid(),
+        });
+
+        var http = Context();
+        var (status, _, _) = await Exec(
+            await TrackerEndpoints.PatchProject(
+                project.Id,
+                JsonSerializer.Deserialize<PatchProjectRequest>("""{"name":"renamed"}""", Json)!,
+                Service(), http),
+            http);
+        status.Should().Be(StatusCodes.Status200OK);
+
+        var after = await _projects.GetAsync(project.Id);
+        after!.Name.Should().Be("renamed");
+        after.Description.Should().Be("keep me");
+        after.EstimateScale.Should().Be("fibonacci", "an omitted scale must not fall back to not_used");
+        after.RepositoryId.Should().Be(project.RepositoryId);
+        after.Key.Should().Be("TAM");
+    }
+
+    // ══════════════════ AC9 — optimistic concurrency ════════════════════════
+
+    [Test]
+    public async Task Lost_update_is_409()
+    {
+        var project = await NewProjectAsync();
+        var item = await NewItemAsync(project.Id);
+        item.Version.Should().Be(1);
+
+        var first = Context(ifMatch: "\"1\"");
+        var (firstStatus, _, firstETag) = await Exec(
+            await TrackerEndpoints.PatchWorkItem(
+                item.Id, JsonSerializer.Deserialize<PatchWorkItemRequest>(
+                    """{"title":"writer one"}""", Json)!,
+                Service(), first),
+            first);
+        firstStatus.Should().Be(StatusCodes.Status200OK);
+        firstETag.Should().Be("\"2\"", "every single-resource response carries the new ETag");
+
+        // The second writer read the same version and never saw writer one.
+        var second = Context(ifMatch: "\"1\"");
+        var (secondStatus, secondBody, _) = await Exec(
+            await TrackerEndpoints.PatchWorkItem(
+                item.Id, JsonSerializer.Deserialize<PatchWorkItemRequest>(
+                    """{"title":"writer two"}""", Json)!,
+                Service(), second),
+            second);
+        secondStatus.Should().Be(StatusCodes.Status409Conflict,
+            "a stale If-Match is a refusal, never a silent overwrite");
+        secondBody.GetProperty("code").GetString().Should().Be("TRACKER.CONCURRENCY_CONFLICT");
+        secondBody.GetProperty("retryable").GetBoolean().Should().BeTrue(
+            "44-1 types the conflict retryable and the wire must say so");
+
+        (await _workItems.GetAsync(item.Id))!.Title.Should().Be("writer one",
+            "the loser's write must not have landed");
+    }
+
+    [Test]
+    public async Task If_match_star_and_absent_both_pass_and_junk_is_400()
+    {
+        var project = await NewProjectAsync();
+        var item = await NewItemAsync(project.Id);
+
+        var star = Context(ifMatch: "*");
+        (await Exec(await TrackerEndpoints.PatchWorkItem(
+            item.Id, JsonSerializer.Deserialize<PatchWorkItemRequest>("""{"title":"a"}""", Json)!,
+            Service(), star), star)).Status.Should().Be(StatusCodes.Status200OK);
+
+        var none = Context();
+        (await Exec(await TrackerEndpoints.PatchWorkItem(
+            item.Id, JsonSerializer.Deserialize<PatchWorkItemRequest>("""{"title":"b"}""", Json)!,
+            Service(), none), none)).Status.Should().Be(StatusCodes.Status200OK);
+
+        var junk = Context(ifMatch: "\"not-a-version\"");
+        var (status, body, _) = await Exec(await TrackerEndpoints.PatchWorkItem(
+            item.Id, JsonSerializer.Deserialize<PatchWorkItemRequest>("""{"title":"c"}""", Json)!,
+            Service(), junk), junk);
+        status.Should().Be(StatusCodes.Status400BadRequest,
+            "an unparseable precondition must not be silently ignored — ignoring it IS the lost update");
+        body.GetProperty("code").GetString().Should().Be("TRACKER.INVALID_IF_MATCH");
+    }
+
+    // ══════════════════ AC11 — validation, loud and ordinal ═════════════════
+
+    [Test]
+    public async Task Bad_vocabulary_is_400_naming_the_set()
+    {
+        var project = await NewProjectAsync();
+        var http = Context();
+        var (status, body, _) = await Exec(
+            await TrackerEndpoints.CreateWorkItem(
+                new CreateWorkItemRequest(project.Id, "t", "Epic", null, null, null, null, null, null, null, null, null),
+                Service(), Principal(Guid.NewGuid()), http),
+            http);
+
+        status.Should().Be(StatusCodes.Status400BadRequest);
+        body.GetProperty("code").GetString().Should().Be("TRACKER.UNKNOWN_KIND");
+        body.GetProperty("error").GetString().Should()
+            .Contain("epic").And.Contain("story").And.Contain("task").And.Contain("spike",
+                "the 400 names the accepted set — parsing is ordinal, 'Epic' is not coerced to 'epic'");
+    }
+
+    [Test]
+    public async Task Kind_bug_is_rejected_pointing_at_the_issueType_field()
+    {
+        var project = await NewProjectAsync();
+        var http = Context();
+        var (status, body, _) = await Exec(
+            await TrackerEndpoints.CreateWorkItem(
+                new CreateWorkItemRequest(project.Id, "t", "bug", null, null, null, null, null, null, null, null, null),
+                Service(), Principal(Guid.NewGuid()), http),
+            http);
+
+        status.Should().Be(StatusCodes.Status400BadRequest);
+        body.GetProperty("code").GetString().Should().Be("TRACKER.UNKNOWN_KIND");
+        body.GetProperty("error").GetString().Should().Contain("issueType",
+            "bug/chore are TriageIssueType members, not kinds (44-0 AC1) — the 400 says where to send it");
+    }
+
+    [Test]
+    public async Task Priority_aliases_are_accepted_and_absent_priority_stays_null()
+    {
+        var project = await NewProjectAsync();
+        var service = Service();
+
+        var critical = await service.CreateWorkItemAsync(
+            new CreateWorkItemRequest(project.Id, "a", "task", null, "critical", null, null, null, null, null, null, null), null);
+        critical.Priority.Should().Be("urgent", "critical is a documented alias (TriageVocabulary)");
+
+        var medium = await service.CreateWorkItemAsync(
+            new CreateWorkItemRequest(project.Id, "b", "task", null, "medium", null, null, null, null, null, null, null), null);
+        medium.Priority.Should().Be("normal");
+
+        var unset = await service.CreateWorkItemAsync(
+            new CreateWorkItemRequest(project.Id, "c", "task", null, null, null, null, null, null, null, null, null), null);
+        unset.Priority.Should().BeNull(
+            "absent priority stores null — 'nobody prioritised this' is a different fact from 'normal' (44-0 AC11)");
+    }
+
+    [Test]
+    public async Task Estimate_under_a_not_used_scale_is_400()
+    {
+        var project = await NewProjectAsync("NOE", scale: "not_used");
+        var http = Context();
+        var (status, body, _) = await Exec(
+            await TrackerEndpoints.CreateWorkItem(
+                new CreateWorkItemRequest(project.Id, "t", "task", null, null, null, null, null, null, null, 5m, null),
+                Service(), Principal(Guid.NewGuid()), http),
+            http);
+
+        status.Should().Be(StatusCodes.Status400BadRequest,
+            "EstimateScale.AllowsEstimate is the shipped rule (44-0); this story calls it at the boundary");
+        body.GetProperty("code").GetString().Should().Be("TRACKER.ESTIMATE_NOT_ALLOWED");
+
+        // …and the same rule on the PATCH path.
+        var ok = await Service().CreateWorkItemAsync(
+            new CreateWorkItemRequest(project.Id, "t2", "task", null, null, null, null, null, null, null, null, null), null);
+        var patch = Context();
+        var (patchStatus, _, _) = await Exec(
+            await TrackerEndpoints.PatchWorkItem(
+                ok.Id, JsonSerializer.Deserialize<PatchWorkItemRequest>("""{"estimate":8}""", Json)!,
+                Service(), patch),
+            patch);
+        patchStatus.Should().Be(StatusCodes.Status400BadRequest);
+    }
+
+    [Test]
+    public async Task Invalid_project_key_is_400_and_is_never_normalized()
+    {
+        var http = Context();
+        var (status, body, _) = await Exec(
+            await TrackerEndpoints.CreateProject(
+                new CreateProjectRequest("tam", "lower case", null, null, null),
+                Service(), Principal(Guid.NewGuid()), http),
+            http);
+
+        status.Should().Be(StatusCodes.Status400BadRequest);
+        body.GetProperty("code").GetString().Should().Be("TRACKER.INVALID_WORK_ITEM_KEY");
+        (await _projects.GetByKeyAsync("TAM")).Should().BeNull("a bad key is rejected, never upper-cased into a good one");
+    }
+
+    [Test]
+    public async Task Assign_without_the_field_is_400_and_explicit_null_unassigns()
+    {
+        var project = await NewProjectAsync();
+        var assignee = Guid.NewGuid();
+        var item = await Service().CreateWorkItemAsync(
+            new CreateWorkItemRequest(project.Id, "t", "task", null, null, null, null, null, null, assignee, null, null), null);
+
+        var missing = Context();
+        var (missingStatus, missingBody, _) = await Exec(
+            await TrackerEndpoints.AssignWorkItem(
+                item.Id, JsonSerializer.Deserialize<AssignRequest>("{}", Json)!, Service(), missing),
+            missing);
+        missingStatus.Should().Be(StatusCodes.Status400BadRequest);
+        missingBody.GetProperty("code").GetString().Should().Be("TRACKER.MISSING_FIELD");
+        (await _workItems.GetAsync(item.Id))!.AssigneeUserId.Should().Be(assignee,
+            "a body missing the field must never silently unassign");
+
+        var explicitNull = Context();
+        (await Exec(
+            await TrackerEndpoints.AssignWorkItem(
+                item.Id, JsonSerializer.Deserialize<AssignRequest>("""{"assigneeUserId":null}""", Json)!,
+                Service(), explicitNull),
+            explicitNull)).Status.Should().Be(StatusCodes.Status200OK);
+        (await _workItems.GetAsync(item.Id))!.AssigneeUserId.Should().BeNull();
+    }
+
+    // ══════════════════ Delete guards (plan D11) ════════════════════════════
+
+    [Test]
+    public async Task Delete_with_children_is_409_listing_them()
+    {
+        var project = await NewProjectAsync();
+        var parent = await NewItemAsync(project.Id, "parent");
+        var child = await _workItems.CreateAsync(new WorkItemEntity
+        {
+            ProjectId = project.Id, Kind = "task", Status = "backlog",
+            Title = "child", ParentId = parent.Id,
+        });
+
+        var http = Context();
+        var (status, body, _) = await Exec(
+            await TrackerEndpoints.DeleteWorkItem(parent.Id, Service(), http), http);
+
+        status.Should().Be(StatusCodes.Status409Conflict);
+        body.GetProperty("code").GetString().Should().Be("TRACKER.HAS_CHILDREN");
+        body.GetProperty("children").EnumerateArray()
+            .Select(c => c.GetProperty("key").GetString())
+            .Should().Contain(child.Key, "the 409 NAMES the blockers so the UI can offer a real choice");
+        (await _workItems.GetAsync(parent.Id)).Should().NotBeNull("nothing cascaded");
+    }
+
+    [Test]
+    public async Task Delete_of_a_non_empty_project_is_409_listing_its_work_items()
+    {
+        var project = await NewProjectAsync();
+        var item = await NewItemAsync(project.Id);
+
+        var http = Context();
+        var (status, body, _) = await Exec(
+            await TrackerEndpoints.DeleteProject(project.Id, Service(), http), http);
+
+        status.Should().Be(StatusCodes.Status409Conflict);
+        body.GetProperty("code").GetString().Should().Be("TRACKER.PROJECT_NOT_EMPTY");
+        body.GetProperty("workItems").EnumerateArray()
+            .Select(w => w.GetProperty("key").GetString()).Should().Contain(item.Key);
+        (await _projects.GetAsync(project.Id)).Should().NotBeNull();
+    }
+
+    [Test]
+    public async Task Delete_of_a_leaf_work_item_succeeds()
+    {
+        var project = await NewProjectAsync();
+        var item = await NewItemAsync(project.Id);
+
+        var http = Context();
+        (await Exec(await TrackerEndpoints.DeleteWorkItem(item.Id, Service(), http), http))
+            .Status.Should().Be(StatusCodes.Status204NoContent);
+        (await _workItems.GetAsync(item.Id)).Should().BeNull();
+    }
+
+    // ══════════════════ Listing: keyset paging + filters ════════════════════
+
+    [Test]
+    public async Task Keyset_paging_is_stable_under_concurrent_insertion()
+    {
+        var project = await NewProjectAsync();
+        var originals = new List<WorkItemEntity>();
+        for (var i = 0; i < 5; i++)
+            originals.Add(await NewItemAsync(project.Id, $"item {i}"));
+
+        var service = Service();
+        var seen = new List<string>();
+
+        var first = await service.ListWorkItemsAsync(new WorkItemListQuery { Limit = 2 }, null);
+        seen.AddRange(first.Items.Select(i => i.Key));
+        first.NextCursor.Should().NotBeNull();
+
+        // A new item lands at the FRONT of the ordering between pages — the
+        // exact mutation that makes OFFSET paging duplicate a row (plan D7).
+        var intruder = await _workItems.CreateAsync(new WorkItemEntity
+        {
+            ProjectId = project.Id, Kind = "task", Status = "backlog",
+            Title = "intruder", Rank = Tamma.Core.Tracking.Rank.Prepend(originals[0].Rank),
+        });
+
+        var cursor = first.NextCursor;
+        while (cursor is not null)
+        {
+            var page = await service.ListWorkItemsAsync(
+                new WorkItemListQuery { Limit = 2, Cursor = cursor }, null);
+            seen.AddRange(page.Items.Select(i => i.Key));
+            cursor = page.Items.Count == 0 ? null : page.NextCursor;
+        }
+
+        seen.Should().OnlyHaveUniqueItems("keyset paging never returns a row twice");
+        seen.Should().Contain(originals.Select(o => o.Key),
+            "and never skips a row that did not move");
+        seen.Should().NotContain(intruder.Key,
+            "a row inserted BEFORE the cursor is legitimately not in this iteration — "
+            + "the guarantee is no-dup/no-skip for rows that did not move");
+    }
+
+    [Test]
+    public async Task A_forged_cursor_is_400_rather_than_a_silent_restart()
+    {
+        var http = Context();
+        var (status, body, _) = await Exec(
+            await TrackerEndpoints.ListWorkItems(
+                null, null, null, null, null, null, null, null, null, "!!!not-base64!!!", null,
+                Service(), Principal(Guid.NewGuid())),
+            http);
+
+        status.Should().Be(StatusCodes.Status400BadRequest,
+            "silently restarting at page 1 would re-deliver every row the caller already saw");
+        body.GetProperty("code").GetString().Should().Be("TRACKER.INVALID_CURSOR");
+    }
+
+    [Test]
+    public async Task List_filters_by_status_kind_and_external_link()
+    {
+        var project = await NewProjectAsync();
+        await _workItems.CreateAsync(new WorkItemEntity
+        {
+            ProjectId = project.Id, Kind = "story", Status = "in_progress", Title = "native story",
+        });
+        await _workItems.CreateAsync(new WorkItemEntity
+        {
+            ProjectId = project.Id, Kind = "task", Status = "backlog", Title = "imported task",
+            ExternalRefJson = """{"platformKind":"github","number":9}""",
+        });
+
+        var service = Service();
+        (await service.ListWorkItemsAsync(new WorkItemListQuery { Statuses = ["in_progress"] }, null))
+            .Items.Should().ContainSingle().Which.Title.Should().Be("native story");
+        (await service.ListWorkItemsAsync(new WorkItemListQuery { Kinds = ["task"] }, null))
+            .Items.Should().ContainSingle().Which.Title.Should().Be("imported task");
+        (await service.ListWorkItemsAsync(new WorkItemListQuery { ExternalLinked = true }, null))
+            .Items.Should().ContainSingle().Which.Title.Should().Be("imported task");
+        (await service.ListWorkItemsAsync(new WorkItemListQuery { ExternalLinked = false }, null))
+            .Items.Should().ContainSingle().Which.Title.Should().Be("native story");
+        (await service.ListWorkItemsAsync(new WorkItemListQuery { TitleContains = "IMPORT" }, null))
+            .Items.Should().ContainSingle().Which.Title.Should().Be("imported task");
+    }
+
+    [Test]
+    public async Task A_typo_in_a_status_filter_is_400_not_an_empty_board()
+    {
+        var http = Context();
+        var (status, body, _) = await Exec(
+            await TrackerEndpoints.ListWorkItems(
+                null, "in-progress", null, null, null, null, null, null, null, null, null,
+                Service(), Principal(Guid.NewGuid())),
+            http);
+        status.Should().Be(StatusCodes.Status400BadRequest,
+            "silently returning zero rows for a typo'd filter reads as data loss");
+        body.GetProperty("code").GetString().Should().Be("TRACKER.UNKNOWN_STATUS");
+    }
+
+    [Test]
+    public async Task Get_by_key_resolves_a_previous_key()
+    {
+        var project = await NewProjectAsync();
+        var item = await NewItemAsync(project.Id);
+        var original = item.Key;
+        await _workItems.RekeyAsync(item.Id, "TAMMA-1");
+
+        var http = Context();
+        var (status, body, etag) = await Exec(
+            await TrackerEndpoints.GetWorkItemByKey(original, Service(), http), http);
+
+        status.Should().Be(StatusCodes.Status200OK,
+            "already-written DocumentInstance.IssueId / DCB tags must keep resolving (44-0 AC8)");
+        body.GetProperty("key").GetString().Should().Be("TAMMA-1");
+        body.GetProperty("previousKeys").EnumerateArray().Select(e => e.GetString())
+            .Should().Contain(original);
+        etag.Should().NotBeNull();
+    }
+
+    [Test]
+    public async Task Work_item_response_carries_the_derived_status_category_and_parsed_external_ref()
+    {
+        var project = await NewProjectAsync();
+        var item = await _workItems.CreateAsync(new WorkItemEntity
+        {
+            ProjectId = project.Id, Kind = "task", Status = "in_review", Title = "t",
+            ExternalRefJson = """{"platformKind":"github","number":11}""",
+        });
+
+        var http = Context();
+        var (_, body, _) = await Exec(await TrackerEndpoints.GetWorkItem(item.Id, Service(), http), http);
+
+        body.GetProperty("statusCategory").GetString().Should().Be("started",
+            "grouping is derived by WorkItemStatusCategoryExtensions.Category, never a set literal");
+        body.GetProperty("externalRef").GetProperty("number").GetInt32().Should().Be(11,
+            "the jsonb column rides the wire as JSON, not as an escaped string");
+    }
+
+    // ══════════════════ AC6 — the assignee picker ═══════════════════════════
+
+    [Test]
+    public async Task Empty_resolver_falls_back_to_membership()
+    {
+        var tenant = Guid.NewGuid();
+        var memberA = Guid.NewGuid();
+        var memberB = Guid.NewGuid();
+        var resolver = new TrackerAssigneeResolver(
+            // The REAL shipped stub — not a fake. This test fails the day
+            // someone removes the fallback and trusts EligibleAudienceAsync.
+            new InitiatorOnlyTaskAudienceResolver(),
+            new StubModeProvider(TammaMode.SaaS),
+            new FakeMemberships([(memberA, "owner"), (memberB, "member")]),
+            new FakeSoleUser(Guid.NewGuid()));
+
+        var result = await resolver.ResolveAsync(tenant, Guid.NewGuid());
+
+        result.Source.Should().Be("tenant-membership");
+        result.Members.Should().NotBeEmpty("an empty picker reads as a bug and generates a support ticket");
+        result.Members.Select(m => m.UserId).Should().BeEquivalentTo([memberA, memberB]);
+    }
+
+    [Test]
+    public async Task Real_resolver_wins()
+    {
+        var tenant = Guid.NewGuid();
+        var eligible = Guid.NewGuid();
+        var resolver = new TrackerAssigneeResolver(
+            new FakeAudienceResolver(audience: [new AudienceMember(eligible, "member")]),
+            new StubModeProvider(TammaMode.SaaS),
+            new FakeMemberships([(Guid.NewGuid(), "owner")]),
+            new FakeSoleUser(Guid.NewGuid()));
+
+        var result = await resolver.ResolveAsync(tenant, Guid.NewGuid());
+
+        result.Source.Should().Be("audience-resolver",
+            "when 39-20's real resolver answers, its answer wins with no code change here");
+        result.Members.Should().ContainSingle().Which.UserId.Should().Be(eligible);
+    }
+
+    [Test]
+    public async Task Single_user_mode_returns_the_sole_user()
+    {
+        var sole = Guid.NewGuid();
+        var resolver = new TrackerAssigneeResolver(
+            new InitiatorOnlyTaskAudienceResolver(),
+            new StubModeProvider(TammaMode.SingleUser),
+            new FakeMemberships([]),
+            new FakeSoleUser(sole));
+
+        var result = await resolver.ResolveAsync(tenantId: null, callerUserId: null);
+
+        result.Source.Should().Be("single-user");
+        result.Members.Should().ContainSingle().Which.UserId.Should().Be(sole);
+    }
+
+    // ══════════════════ AC7 — visibility, both branches ═════════════════════
+
+    [Test]
+    public async Task Stub_resolver_yields_tenant_scope()
+    {
+        var project = await NewProjectAsync();
+        await NewItemAsync(project.Id, "someone else's item");
+
+        // SaaS + the REAL shipped stub. Applying CanSeeAsync here would empty
+        // the list, because the stub keys entirely on InitiatorUserId.
+        var page = await Service(new InitiatorOnlyTaskAudienceResolver(), TammaMode.SaaS)
+            .ListWorkItemsAsync(new WorkItemListQuery(), Guid.NewGuid());
+
+        page.VisibilityMode.Should().Be("tenant");
+        page.Items.Should().NotBeEmpty("an empty backlog reads as data loss — honest degradation instead");
+    }
+
+    [Test]
+    public async Task Real_resolver_filters_per_user()
+    {
+        var project = await NewProjectAsync();
+        var viewer = Guid.NewGuid();
+        var mine = await _workItems.CreateAsync(new WorkItemEntity
+        {
+            ProjectId = project.Id, Kind = "task", Status = "backlog",
+            Title = "mine", CreatedByUserId = viewer,
+        });
+        await _workItems.CreateAsync(new WorkItemEntity
+        {
+            ProjectId = project.Id, Kind = "task", Status = "backlog",
+            Title = "theirs", CreatedByUserId = Guid.NewGuid(),
+        });
+
+        // A fake "real" resolver: the initiator-matches rule, but a DIFFERENT
+        // type, so the stub check does not fire. This is the branch that lights
+        // up the day 39-20 swaps the DI registration.
+        var page = await Service(new FakeAudienceResolver(audience: []), TammaMode.SaaS)
+            .ListWorkItemsAsync(new WorkItemListQuery(), viewer);
+
+        page.VisibilityMode.Should().Be("per-user");
+        page.Items.Should().ContainSingle().Which.Id.Should().Be(mine.Id);
+    }
+
+    // ══════════════════ AC8 — preferences, both modes ═══════════════════════
+
+    [Test]
+    public async Task SingleUser_preferences_key_on_user_id()
+    {
+        var userId = Guid.NewGuid();
+        var http = Context();
+        var (status, body, _) = await Exec(
+            await TrackerEndpoints.PutPreferences(
+                new UpsertTrackerPreferencesRequest(null, "story", "priority"),
+                Service(), Principal(userId), _tenantContext,
+                new StubModeProvider(TammaMode.SingleUser), http),
+            http);
+
+        status.Should().Be(StatusCodes.Status200OK);
+        body.GetProperty("source").GetString().Should().Be("principal-override");
+
+        var stored = await _preferences.GetAsync(userId);
+        stored.Should().NotBeNull();
+        stored!.UserId.Should().Be(userId);
+        stored.TenantId.Should().BeNull("the strong XOR permits exactly one principal key");
+        stored.DefaultKind.Should().Be("story");
+    }
+
+    [Test]
+    public async Task SaaS_preferences_key_on_tenant_id()
+    {
+        var http = Context();
+        await Exec(
+            await TrackerEndpoints.PutPreferences(
+                new UpsertTrackerPreferencesRequest(null, "spike", "assignee"),
+                Service(), Principal(Guid.NewGuid()), _tenantContext,
+                new StubModeProvider(TammaMode.SaaS), http),
+            http);
+
+        var stored = await _preferences.GetByTenantAsync(_tenantId);
+        stored.Should().NotBeNull();
+        stored!.TenantId.Should().Be(_tenantId);
+        stored.UserId.Should().BeNull();
+        stored.DefaultKind.Should().Be("spike");
+    }
+
+    [Test]
+    public async Task Preference_planes_never_join()
+    {
+        var userId = Guid.NewGuid();
+        var http = Context();
+        await Exec(
+            await TrackerEndpoints.PutPreferences(
+                new UpsertTrackerPreferencesRequest(null, "story", "priority"),
+                Service(), Principal(userId), _tenantContext,
+                new StubModeProvider(TammaMode.SingleUser), http),
+            http);
+
+        // The SaaS surface must not see the user-plane row, and vice versa.
+        (await _preferences.GetByTenantAsync(_tenantId)).Should().BeNull();
+
+        var saasRead = Context();
+        var (_, saasBody, _) = await Exec(
+            await TrackerEndpoints.GetPreferences(
+                Service(), Principal(userId), _tenantContext,
+                new StubModeProvider(TammaMode.SaaS), saasRead),
+            saasRead);
+        saasBody.GetProperty("source").GetString().Should().Be("system-default",
+            "a user-plane row is invisible to the tenant surface — the planes are parallel, never joined");
+    }
+
+    [Test]
+    public async Task Get_preferences_resolves_defaults_and_delete_falls_back_to_them()
+    {
+        var userId = Guid.NewGuid();
+        var mode = new StubModeProvider(TammaMode.SingleUser);
+
+        var initial = Context();
+        var (_, defaults, _) = await Exec(
+            await TrackerEndpoints.GetPreferences(Service(), Principal(userId), _tenantContext, mode, initial),
+            initial);
+        defaults.GetProperty("source").GetString().Should().Be("system-default");
+        defaults.GetProperty("defaultKind").GetString().Should().Be(TrackerPreferenceDefaults.DefaultKind);
+        defaults.GetProperty("boardGroupBy").GetString().Should().Be(TrackerPreferenceDefaults.BoardGroupBy);
+
+        var put = Context();
+        await Exec(
+            await TrackerEndpoints.PutPreferences(
+                new UpsertTrackerPreferencesRequest(null, "epic", "kind"),
+                Service(), Principal(userId), _tenantContext, mode, put),
+            put);
+
+        var (deleteStatus, _, _) = await Exec(
+            await TrackerEndpoints.DeletePreferences(Service(), Principal(userId), _tenantContext, mode),
+            Context());
+        deleteStatus.Should().Be(StatusCodes.Status200OK);
+
+        var after = Context();
+        var (_, resolvedAgain, _) = await Exec(
+            await TrackerEndpoints.GetPreferences(Service(), Principal(userId), _tenantContext, mode, after),
+            after);
+        resolvedAgain.GetProperty("source").GetString().Should().Be("system-default",
+            "DELETE removes the row so the shipped defaults take over (the AcceptanceRulesService posture)");
+    }
+
+    [Test]
+    public async Task Preferences_reject_an_unknown_default_kind()
+    {
+        var http = Context();
+        var (status, body, _) = await Exec(
+            await TrackerEndpoints.PutPreferences(
+                new UpsertTrackerPreferencesRequest(null, "Epic", null),
+                Service(), Principal(Guid.NewGuid()), _tenantContext,
+                new StubModeProvider(TammaMode.SingleUser), http),
+            http);
+
+        status.Should().Be(StatusCodes.Status400BadRequest);
+        body.GetProperty("code").GetString().Should().Be("TRACKER.UNKNOWN_KIND");
+    }
+
+    // ── Fakes ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A DIFFERENT TYPE from <see cref="InitiatorOnlyTaskAudienceResolver"/>, so
+    /// the stub check does not fire — this is what "39-20 has landed" looks
+    /// like to every branch under test.
+    /// </summary>
+    private sealed class FakeAudienceResolver(IReadOnlyList<AudienceMember> audience) : ITaskAudienceResolver
+    {
+        public Task<bool> CanSeeAsync(Guid userId, TaskRef task) =>
+            Task.FromResult(task.InitiatorUserId == userId);
+
+        public Task<IReadOnlyList<AudienceMember>> EligibleAudienceAsync(TaskRef task, string roleWire) =>
+            Task.FromResult(audience);
+    }
+
+    private sealed class FakeMemberships(IReadOnlyList<(Guid UserId, string Role)> rows)
+        : ITenantMembershipRepository
+    {
+        public Task<List<TenantMembership>> ListAllByTenantAsync(Guid tenantId) =>
+            Task.FromResult(rows
+                .Select(r => new TenantMembership { TenantId = tenantId, UserId = r.UserId, Role = r.Role })
+                .ToList());
+
+        public Task<TenantMembership> AddAsync(Guid tenantId, Guid userId, string role) => throw new NotSupportedException();
+        public Task RemoveAsync(Guid tenantId, Guid userId) => throw new NotSupportedException();
+        public Task<string?> GetRoleAsync(Guid tenantId, Guid userId) => throw new NotSupportedException();
+        public Task<(List<TenantMembership> Members, int Total)> ListByTenantAsync(Guid tenantId, int limit, int offset) => throw new NotSupportedException();
+        public Task<List<TenantMembership>> GetUserTenantsAsync(Guid userId) => throw new NotSupportedException();
+        public Task UpdateRoleAsync(Guid tenantId, Guid userId, string role) => throw new NotSupportedException();
+        public Task<int> CountOwnersAsync(Guid tenantId) => throw new NotSupportedException();
+        public Task<List<SoleOwnedTenant>> ListSoleOwnedTenantsAsync(Guid userId) => throw new NotSupportedException();
+        public Task RemoveAllForUserAsync(Guid userId) => throw new NotSupportedException();
+    }
+
+    private sealed class FakeSoleUser(Guid id) : ISoleUserProvider
+    {
+        public Task<Guid> GetSoleUserIdAsync(CancellationToken ct = default) => Task.FromResult(id);
+    }
+}

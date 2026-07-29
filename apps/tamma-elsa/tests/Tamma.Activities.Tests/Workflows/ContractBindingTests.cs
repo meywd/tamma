@@ -248,6 +248,51 @@ public class ContractBindingTests
                 One("\"strengths\""), One("\"rationale\""),
             ]),
 
+            // AcceptanceCriteriaAuthoringWorkflow (Story 41-2) binds the
+            // (product_owner, define-acceptance-criteria) cell as the produce step of its
+            // document-lifecycle binding. The shape authority is the typed validator
+            // Tamma.Core/Documents/Types/AcceptanceCriteria.cs
+            // (AcceptanceCriteriaDocumentType.Validate) — issueId + ≥1 criterion, unique
+            // criterion ids, the closed given-when-then|checklist form with the fields that
+            // form requires, an explicit verifiable attestation, and the cross-document
+            // scopeRef rule. The token groups below are 41-1b's PendingProducerCells entry
+            // moved VERBATIM (that table's promise: the binding story adopts the pinned
+            // contract without rewriting it). The shipped template — which instructed a task
+            // breakdown, i.e. the Plan wire with criteria smuggled into each task's "testing"
+            // string, and carried 1 of these 10 tokens — was REWRITTEN to this wire in the
+            // same change (version 1 → 2; the 39-15 D7 / 41-1b threat-model precedent), and its
+            // KnownNonConformingTemplates baseline deleted.
+            [("product_owner", "define-acceptance-criteria")] = new("AcceptanceCriteriaDocumentType.Validate",
+            [
+                One("\"issueId\""), One("\"criteria\""), One("\"id\""), One("\"form\""),
+                One("\"given\""), One("\"when\""), One("\"then\""), One("\"statement\""),
+                One("\"verifiable\""), One("\"scopeRef\""),
+            ]),
+
+            // AdrAuthoringWorkflow (Story 41-9) binds the (architect, write-adr) cell as the
+            // produce step of its document-lifecycle binding; the shape authority is 41-1c's
+            // typed validator Tamma.Core/Documents/Types/Prose.cs (ProseDocumentType.Validate).
+            //
+            // The token groups pin the prose ENVELOPE, not prose structure (D4). That is the
+            // whole contract: ProseDocumentType checks kind + audience against their CLOSED
+            // vocabularies, a non-empty title and a non-whitespace body — and NOTHING inside the
+            // markdown. The alternative (an IntentionallyUnbound entry reading "prose has no
+            // shape") would be wrong: prose HAS a wire shape; only its body is unvalidated, and
+            // an unbound entry would let a future template edit drop "audience" with no test
+            // noticing. The ADR SHAPE convention (context / decision / consequences /
+            // alternatives-considered) stays guidance in the template body per 41-1c D3 and is
+            // deliberately NOT a token group.
+            //
+            // The shipped template — which instructed a markdown issue-comment report
+            // (## Summary / ### Key Findings / ### Action Items) with NO JSON fence at all, so a
+            // produce through the cell could not even be INGESTED — was rewritten to the prose
+            // envelope in the same change (version 1 → 2), and its
+            // TemplateExampleConformanceTests.KnownNonConformingTemplates baseline deleted.
+            [("architect", "write-adr")] = new("ProseDocumentType.Validate",
+            [
+                One("\"kind\""), One("\"audience\""), One("\"title\""), One("\"body\""),
+            ]),
+
             // DeploymentPipelineWorkflow.ParseStageStatus (DeploymentPipelineWorkflow.cs
             // ~l.669-702): FAIL-CLOSED — a stage only succeeds on an explicit
             // status:"success"; a reply with no "status" field is a failed deploy.
@@ -695,20 +740,14 @@ public class ContractBindingTests
     private static readonly IReadOnlyDictionary<(string Role, string Action), PendingProducerCell>
         PendingProducerCells = new Dictionary<(string, string), PendingProducerCell>
         {
-            // AcceptanceCriteria.cs "Producing cell (41-1b D4)". Template rewrite is
-            // 41-2's job (it still instructs a task breakdown — baselined in
-            // TemplateExampleConformanceTests.KnownNonConformingTemplates).
-            [("product_owner", "define-acceptance-criteria")] = new(
-                new CellContract("AcceptanceCriteriaDocumentType.Validate",
-                [
-                    One("\"issueId\""), One("\"criteria\""), One("\"id\""), One("\"form\""),
-                    One("\"given\""), One("\"when\""), One("\"then\""), One("\"statement\""),
-                    One("\"verifiable\""), One("\"scopeRef\""),
-                ]),
-                "41-2 (acceptance-criteria authoring)",
-                "no compiled dispatch site exists until 41-2 lands its workflow; the cell's shape " +
-                "authority is already typed (AcceptanceCriteria.cs), so it is a declared contract, " +
-                "not an unbound free-text consumer"),
+            // GRADUATED (Story 41-2, 2026-07-29): (product_owner, define-acceptance-criteria)
+            // was the first entry in this table to reach its binding story.
+            // AcceptanceCriteriaAuthoringWorkflow now dispatches the pair, so
+            // EveryPendingProducerCell_IsUndispatched_AndClassifiedNowhereElse would fail on a
+            // surviving entry here. Its IntendedContract moved VERBATIM into Bindings above —
+            // exactly the graduation this table was built to force — and the template-token gate
+            // (EveryBoundCell_TemplateStillCarriesEveryParserRequiredToken) plus the
+            // example-conformance gate now own the cell. 6 entries → 5.
 
             // BacklogOrdering.cs "Producing cell (41-1b D4)". Template rewrite is 41-3's
             // job (it still instructs the retired P0-P3 triage vocabulary — baselined).

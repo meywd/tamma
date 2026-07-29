@@ -37,6 +37,15 @@ public sealed record WorkItemQuery
     /// <summary>Case-insensitive substring match over the title.</summary>
     public string? TitleContains { get; init; }
 
+    /// <summary>
+    /// Story 44-2 — the external-linked filter: true keeps only items carrying
+    /// an <c>ExternalRefJson</c> (imported, 44-8's plane), false keeps only
+    /// native items, null does not filter. Expressed here rather than as a
+    /// post-query filter in the API so it composes with the keyset cursor —
+    /// filtering a page after the fact makes <c>nextCursor</c> lie.
+    /// </summary>
+    public bool? ExternalLinked { get; init; }
+
     public string? AfterRank { get; init; }
     public string? AfterKey { get; init; }
     public int Limit { get; init; } = 100;

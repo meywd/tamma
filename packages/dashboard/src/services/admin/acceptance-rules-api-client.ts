@@ -58,6 +58,21 @@ export type EscalationClassKind = 'document-type' | 'agent-action';
 export type ReviewerMode = 'single-reviewer' | 'panel';
 export type ReviewDecisionRule = 'unanimous' | 'majority';
 
+/**
+ * WHO may answer the acceptance decision for a document type — the per-type
+ * autonomy floor (Story 39-13 D4). Mirrors the two-member C# enum at
+ * `apps/tamma-elsa/src/Tamma.Core/Documents/Policy/AcceptanceRules.cs`
+ * (`[Wire("any")] Any`, `[Wire("human")] Human`).
+ *
+ *   `any`   — the autonomy dial alone decides who accepts.
+ *   `human` — a person must accept, no matter how high the dial is set.
+ *
+ * `design`, `sprint-plan` and `threat-model` SHIP `human`. Story 43-0: this field
+ * was missing from this interface, so the dialog's PUT body omitted it and every
+ * admin save silently reset those types to `any`.
+ */
+export type AcceptorRequirement = 'any' | 'human';
+
 export interface EscalationClass {
   kind: EscalationClassKind;
   key: string;
@@ -71,6 +86,14 @@ export interface ReviewerSelection {
   decisionRule: ReviewDecisionRule;
 }
 
+/**
+ * The full acceptance-rules body. This interface is the PUT contract — it must
+ * carry every wire field of `AcceptanceRulesUpsertRequest`
+ * (`apps/tamma-elsa/src/Tamma.Api/Dtos/AcceptanceRules/AcceptanceRulesDtos.cs`),
+ * because a field missing here is a field `tsc` cannot ask the dialog to send.
+ * The C# side pins the field set in `AcceptanceRulesUpsertRequestFieldSetTests`
+ * and that pin names this file.
+ */
 export interface AcceptanceRules {
   autonomyLevel: number;
   maxRevisionRounds: number;
@@ -78,6 +101,7 @@ export interface AcceptanceRules {
   ambiguityEscalationThreshold: number;
   alwaysEscalate: EscalationClass[];
   reviewerSelection: ReviewerSelection;
+  acceptorRequirement: AcceptorRequirement;
   decisionGuidance: string;
   routingGuidance: string;
 }

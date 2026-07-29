@@ -13,9 +13,12 @@ namespace Tamma.Api.Services.AcceptanceRules;
 /// 39-17 orchestrator agent calls it at decision time to read the effective rules
 /// for a document type. It implements the existing <see cref="IToolExecutor"/>
 /// seam but is PRINCIPAL-BOUND AT CONSTRUCTION and NOT globally DI-registered —
-/// registering it in the set <c>ResolveToolsActivity</c> discovers would inject it
-/// into every coding-agent tool loop. The 39-17 host constructs one per
-/// tenant-agent session via <see cref="GetAcceptanceRulesToolFactory"/>.
+/// a singleton <c>IToolExecutor</c> registration would carry no principal and would
+/// inject a principal-less instance into every coding-agent tool loop. The 39-17
+/// host constructs one per tenant-agent session via
+/// <see cref="GetAcceptanceRulesToolFactory"/>. Story 43-4's boot validator records
+/// the exemption in <c>ToolCatalogAllowlists.NotDiRegisteredTools</c>
+/// (shrink-only, one entry).
 ///
 /// <para>The principal (<c>userId</c> XOR <c>tenantId</c>) comes from the SERVER
 /// at construction, NEVER from the LLM's <c>argumentsJson</c> — only

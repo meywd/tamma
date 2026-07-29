@@ -106,10 +106,29 @@ public static class AcceptanceRulesEndpoints
         ITammaModeProvider modeProvider)
     {
         var userId = principal.GetUserId();
+
+        // Story 43-0 — a field the caller did not send is PRESERVED, never invented.
+        // `acceptorRequirement` is the only optional member of the body; resolve
+        // what is in force right now (override row, else the shipped per-type
+        // default) and hand it to ToRules as the fallback. Before this, an omitting
+        // body bound `any` and every admin save wiped `design`/`sprint-plan`/
+        // `threat-model`'s human acceptor floor.
+        AcceptorRequirement currentAcceptorRequirement;
+        try
+        {
+            currentAcceptorRequirement = await ResolveCurrentAcceptorRequirementAsync(
+                documentTypeKey, store, principal, tenantContext, modeProvider);
+        }
+        catch (TammaError te)
+        {
+            // Unknown document type key — the same 400 the write path raises.
+            return Results.BadRequest(new { error = te.Message, code = te.Code });
+        }
+
         AcceptanceRules rules;
         try
         {
-            rules = req.ToRules();
+            rules = req.ToRules(currentAcceptorRequirement);
         }
         catch (Exception ex)
         {
@@ -168,6 +187,43 @@ public static class AcceptanceRulesEndpoints
     // =======================================================================
     // Helpers
     // =======================================================================
+
+    /// <summary>
+    /// The <see cref="AcceptorRequirement"/> in force for <paramref name="documentTypeKey"/>
+    /// right now — the resolved override row if one exists, else the shipped per-type
+    /// default (<c>design</c>, <c>sprint-plan</c> and <c>threat-model</c> ship
+    /// <see cref="AcceptorRequirement.Human"/>). Story 43-0: this is the value an
+    /// upsert body that OMITS <c>acceptorRequirement</c> carries forward.
+    /// </summary>
+    /// <exception cref="TammaError">
+    /// <c>DOCUMENT.TYPE.UNKNOWN</c> when the key is neither <c>base</c> nor a known
+    /// document type — surfaced by the caller as the same 400 the write path raises.
+    /// </exception>
+    private static async Task<AcceptorRequirement> ResolveCurrentAcceptorRequirementAsync(
+        string documentTypeKey,
+        AcceptanceRulesService store,
+        ClaimsPrincipal principal,
+        ITenantContext tenantContext,
+        ITammaModeProvider modeProvider)
+    {
+        var saas = modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid;
+
+        if (string.Equals(documentTypeKey, AcceptanceRulesService.BaseRowKeyLiteral, StringComparison.Ordinal))
+        {
+            var baseResolved = saas
+                ? await store.ResolveBaseForTenantAsync((Guid)tenantContext.TenantId!)
+                : await store.ResolveBaseAsync(principal.GetUserId());
+            return baseResolved.Rules.AcceptorRequirement;
+        }
+
+        // Throws TammaError DOCUMENT.TYPE.UNKNOWN on a typo'd key (the fail-loud
+        // parse the service would apply on write anyway).
+        var type = Tamma.Core.Documents.DocumentTypeKeyExtensions.Parse(documentTypeKey);
+        var resolved = saas
+            ? await store.ResolveForTenantAsync((Guid)tenantContext.TenantId!, type)
+            : await store.ResolveAsync(principal.GetUserId(), type);
+        return resolved.Rules.AcceptorRequirement;
+    }
 
     private static IReadOnlyList<ResolvedAcceptanceRules> DefaultsForAllTypes()
     {

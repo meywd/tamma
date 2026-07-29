@@ -101,6 +101,23 @@ public static class Permissions
         // mode is unaffected — every signed-up user is auto-owner of their
         // personal tenant.
         ["actions:manage"] = ["admin", "owner"],
+        // Story 44-2 (AC4) — the native tracker. TWO permissions, deliberately
+        // split, because the tracker is the first surface in this repo where
+        // the two halves have genuinely different blast radii:
+        //  * tracker:view (member+) gates work-item CRUD, status and assignment
+        //    — a tracker in which a `member` cannot file a bug or move their own
+        //    card is not a tracker. This is why <noun>:manage alone is wrong here.
+        //  * tracker:manage (admin+owner) gates PROJECT and (at 44-4) iteration
+        //    STRUCTURE, plus the tracker_preferences row: a project key rename or
+        //    delete changes every identifier everyone else quotes, and in SaaS
+        //    the preference row is TENANT-wide configuration (there is no
+        //    per-user plane in SaaS), so it follows the prompt/convention/
+        //    acceptance-rules store precedent.
+        // Neither reuses settings:manage, which is owner-only and would 403
+        // every tenant_admin. Single-user mode is unaffected — every signed-up
+        // user is auto-owner of their personal tenant.
+        ["tracker:view"] = ["member", "admin", "owner"],
+        ["tracker:manage"] = ["admin", "owner"],
     };
 
     public static bool HasPermission(string? role, string? permission)

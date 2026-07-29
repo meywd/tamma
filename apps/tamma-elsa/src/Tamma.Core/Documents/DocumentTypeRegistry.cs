@@ -184,6 +184,23 @@ public static class DocumentTypeRegistry
             // Story 39-15 (D3) — test-case-creation CONSUMES the task-breakdown plan and PRODUCES a
             // TestSpec (with the cross-document task-ID validation ring) via its lifecycle binding.
             new WorkflowDocumentInterface("test-case-creation", new[] { DocumentTypeKey.Plan }, DocumentTypeKey.TestSpec, false),
+            // Story 41-2 — acceptance-criteria-authoring CONSUMES the accepted Clarification and
+            // Findings (both optional, fail-closed reads) and PRODUCES the typed AcceptanceCriteria
+            // that 41-15's acceptance verification and the merge gate read back. Real lifecycle
+            // binding ⇒ non-provisional (epic-41 rule 1 clause (f): one edge per producing workflow).
+            new WorkflowDocumentInterface("acceptance-criteria-authoring",
+                new[] { DocumentTypeKey.Clarification, DocumentTypeKey.Findings },
+                DocumentTypeKey.AcceptanceCriteria, false),
+            // Story 41-9 — adr-authoring CONSUMES the accepted Design (41-10's output, which
+            // design-proposal already produces today) and Findings, and PRODUCES prose with
+            // kind=adr / audience=engineering. The REFERENCE prose-on-lifecycle edge: 41-4, 41-5,
+            // 41-8, 41-22, 41-24, 41-25 and 41-26 each declare their own row in this shape.
+            // (41-9 D8(i) wrote `empty` consumes; the row states the real consumed edges instead —
+            // epic-41 rule 1 requires the binding to declare `consumes: [...]`, and the graph has
+            // both fetch nodes.)
+            new WorkflowDocumentInterface("adr-authoring",
+                new[] { DocumentTypeKey.Design, DocumentTypeKey.Findings },
+                DocumentTypeKey.Prose, false),
         };
     }
 }

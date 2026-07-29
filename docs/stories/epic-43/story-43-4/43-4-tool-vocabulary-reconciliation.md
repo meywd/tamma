@@ -1,6 +1,6 @@
 # Story 43-4: Tool-Vocabulary Reconciliation + Fail-Loud Startup Validator
 
-Status: done — conformance-reviewed 2026-07-29; `ToolNameAliases`, the fail-loud `ActionCatalogStartupValidator` and the `GitSubcommand` consumption all ship, plus the Seam B tool-loop gate (an undeclared deliverable — see the 2026-07-29 addendum); vocabulary (c) `ResolveToolsActivity` is NOT deleted (43-0 has not landed), so the third vocabulary is still alive and unvalidated
+Status: done — conformance-reviewed 2026-07-29; `ToolNameAliases`, the fail-loud `ActionCatalogStartupValidator` and the `GitSubcommand` consumption all ship, plus the Seam B tool-loop gate (an undeclared deliverable — see the 2026-07-29 addendum). *[Superseded 2026-07-29 — Story 43-0 landed: `ResolveToolsActivity.cs` is deleted, so vocabulary (c) no longer exists and "three vocabularies reconciled" is now two vocabularies, both validated. The earlier clause "vocabulary (c) is NOT deleted (43-0 has not landed), so the third vocabulary is still alive and unvalidated" is kept in the table row + amendment note below as the historical record.]*
 
 ## MANDATORY: Before You Code
 
@@ -33,7 +33,7 @@ P0 — Blocks Story 5 (the resolver must be able to answer "what does the emitte
 |---|---|---|---|
 | (a) | Executor registry — what can actually run | `file_read`, `file_write`, `search_code`, `shell_execute`, `git_operations`, `run_tests`, `get_acceptance_rules` | 7 classes implementing `IToolExecutor`; 6 DI-registered at `apps/tamma-elsa/src/Tamma.Api/Program.cs:723-734`, registry at `:735-736` |
 | (b) | Per-role agent config — what is **advertised to the model** | `Read`, `Write`, `Edit`, `Bash`, `Grep`, `Glob` (Claude-Code names) | `apps/tamma-elsa/src/Tamma.Api/Services/Agents/DefaultAgentConfig.cs:53,70,85,102,118,149,165` |
-| (c) | Dead built-in map | `search_code`, `read_file`, `run_tests` | `apps/tamma-elsa/src/Tamma.Activities/LlmCall/ResolveToolsActivity.cs` — **zero code callers** (one doc-comment mention in `GetAcceptanceRulesTool.cs`); **to be** deleted by Story 43-0 |
+| (c) | Dead built-in map | `search_code`, `read_file`, `run_tests` | ~~`apps/tamma-elsa/src/Tamma.Activities/LlmCall/ResolveToolsActivity.cs`~~ — **DELETED 2026-07-29 by Story 43-0**. Had zero code callers and one doc-comment mention in `GetAcceptanceRulesTool.cs` (rewritten in the same change). `ResolvedTool` (`LlmCall/Models/LlmCallModels.cs`) was deliberately kept — it has three live consumers. |
 
 *[Amended 2026-07-29 — vocabulary (c) is still alive.]* Row (c) previously read "deleted by Story 43-0".
 That is not true of the tree: `ResolveToolsActivity.cs` still exists (zero code callers) and **Story 43-0
@@ -43,6 +43,29 @@ first; ignoring it leaves a third vocabulary alive"), and that is the branch rea
 vocabulary remains present and **unvalidated** by `ActionCatalogStartupValidator`. Nothing here is broken
 by it — it has no callers — but the "three vocabularies reconciled" claim holds for (a) and (b) only until
 43-0 deletes (c).
+
+*[Superseded 2026-07-29 (later the same day) — vocabulary (c) is gone.]* Story 43-0 landed and deleted
+`ResolveToolsActivity.cs`. Zero code callers was re-verified across `src/`, `tests/` and the docs tree
+before the delete (the only remaining `"Resolve Tools"` hits are an unrelated `SetVariable` step name in
+`Tamma.ElsaServer/Workflows/LlmCallWorkflow.cs` and historical wiki/story prose). Consequences for THIS
+story, all verified:
+
+- **Nothing in this story's code referenced it.** `ActionCatalogStartupValidator`, `ToolNameAliases` and
+  `ToolCatalogAllowlists` never named `ResolveToolsActivity` or any of its built-in names (`read_file` was
+  never an alias-map key), so no allowlist shrank or grew and no validator branch changed. `dotnet build`
+  and `Tamma.Activities.Tests` (which own `ActionCatalogStartupValidatorTests`, `ToolNameAliasesTests`,
+  `ToolCatalogAllowlistTests`) are green after the delete.
+- **The reconciliation claim is now literally true for the whole tree:** two vocabularies remain — (a) the
+  executor registry and (b) the per-role agent config — and both are validated at boot.
+- **No activity-count pin needed updating.** The deleted type was an Elsa `[Activity]`, but nothing asserts
+  a registered-activity count (`WorkflowStructureTests.SingleIssueCycleWorkflow_ActivityCountIsReasonable`
+  counts a workflow's own nodes, not the assembly's activity set), and nothing referenced it by
+  `DefinitionId` or type.
+- **The `get_acceptance_rules` allowlist entry is untouched.** `GetAcceptanceRulesTool` remains
+  deliberately un-DI-registered (39-5 D6 — the factory mints principal-bound instances per tenant-agent
+  session, so a singleton registration would BE the bug); `ToolCatalogAllowlists.NotDiRegisteredTools`
+  keeps its single entry. 43-0 only rewrote the tool's doc comment, which had been the file's one dangling
+  reference to the deleted activity.
 
 The advertised list reaches the model verbatim and is never checked against the registry:
 `ManagedAgent.ToResolvedTools` (`apps/tamma-elsa/src/Tamma.Api/Services/Agents/ManagedAgent.cs:923-937`) does
@@ -182,6 +205,8 @@ applies that posture to tools, which has never been done.
 - **Story 43-0 (Prerequisite fixes)** — deletes `Tamma.Activities/LlmCall/ResolveToolsActivity.cs`
   (vocabulary (c), zero callers). Not strictly blocking, but if it has not landed the validator must either
   ignore that file or Story 43-0 must land first; ignoring it leaves a third vocabulary alive.
+  *[Resolved 2026-07-29 — 43-0 landed and deleted the file; the validator needed no change because it never
+  referenced it. See the superseding note under the vocabulary table.]*
 - **Existing, verified:** `IToolExecutorRegistry` / `ToolExecutorRegistry`
   (`Tamma.Activities/LlmCall/Tools/`), the six DI registrations (`Tamma.Api/Program.cs:723-734`),
   `GetAcceptanceRulesToolFactory` (`Program.cs:422`), `ToolCallValidator`

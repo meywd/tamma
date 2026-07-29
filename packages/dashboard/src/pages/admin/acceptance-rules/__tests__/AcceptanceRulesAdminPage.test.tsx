@@ -41,6 +41,7 @@ function makeRules(overrides?: Partial<AcceptanceRules>): AcceptanceRules {
       quorum: null,
       decisionRule: 'unanimous',
     },
+    acceptorRequirement: 'any',
     decisionGuidance: 'decide guidance',
     routingGuidance: 'route guidance',
     ...overrides,
