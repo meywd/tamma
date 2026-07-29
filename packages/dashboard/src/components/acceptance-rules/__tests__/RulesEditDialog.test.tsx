@@ -110,9 +110,24 @@ describe('RulesEditDialog', () => {
   });
 
   /**
-   * The whole-body pin: the PUT body must carry every field of `AcceptanceRules`.
-   * A future tenth field added to the interface and forgotten in the memo fails
-   * here (and in the C# `AcceptanceRulesUpsertRequestFieldSetTests`).
+   * The whole-body pin: the PUT body must carry every field of `AcceptanceRules`
+   * AS THE INTERFACE DECLARES IT TODAY.
+   *
+   * Be precise about what this catches (review MINOR-4, 2026-07-29). The earlier
+   * comment claimed "a future tenth field added to the interface and forgotten in
+   * the memo fails here" — it cannot. The expected key list below is a hardcoded
+   * literal, so adding a tenth field to `AcceptanceRules` and forgetting it in the
+   * memo leaves both the memo AND this literal at nine keys, and the assertion
+   * still passes. What actually catches that omission is (a) `tsc` — the memo is
+   * typed `useMemo<AcceptanceRules>`, so a missing required property is a compile
+   * error — and (b) the C# `AcceptanceRulesUpsertRequestFieldSetTests`, which
+   * derives the field set by reflection over the DTO rather than restating it.
+   *
+   * What THIS test does catch is the 43-0 bug shape directly: the memo silently
+   * DROPPING a field that the interface still declares (the original defect —
+   * `acceptorRequirement` absent from a body typed against an interface that also
+   * omitted it), and any stray extra key. It is a body-shape pin, not a
+   * contract-drift pin.
    */
   it('submits every field of the acceptance-rules contract', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);

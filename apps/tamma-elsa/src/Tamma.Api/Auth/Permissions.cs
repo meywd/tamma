@@ -104,15 +104,30 @@ public static class Permissions
         // Story 44-2 (AC4) — the native tracker. TWO permissions, deliberately
         // split, because the tracker is the first surface in this repo where
         // the two halves have genuinely different blast radii:
-        //  * tracker:view (member+) gates work-item CRUD, status and assignment
-        //    — a tracker in which a `member` cannot file a bug or move their own
-        //    card is not a tracker. This is why <noun>:manage alone is wrong here.
+        //  * tracker:view (member+) gates work-item CREATE, PATCH, status and
+        //    assignment — a tracker in which a `member` cannot file a bug or
+        //    move a card is not a tracker. This is why <noun>:manage alone is
+        //    wrong here.
         //  * tracker:manage (admin+owner) gates PROJECT and (at 44-4) iteration
-        //    STRUCTURE, plus the tracker_preferences row: a project key rename or
-        //    delete changes every identifier everyone else quotes, and in SaaS
-        //    the preference row is TENANT-wide configuration (there is no
-        //    per-user plane in SaaS), so it follows the prompt/convention/
-        //    acceptance-rules store precedent.
+        //    STRUCTURE, the tracker_preferences row, AND the work-item DELETE:
+        //    a project key rename or delete changes every identifier everyone
+        //    else quotes; in SaaS the preference row is TENANT-wide
+        //    configuration (there is no per-user plane in SaaS), so it follows
+        //    the prompt/convention/acceptance-rules store precedent; and the
+        //    work-item delete is a HARD delete.
+        //
+        // NO OWNERSHIP PLANE EXISTS YET (adversarial review, 2026-07-29). Be
+        // precise about what tracker:view actually admits: TrackerService does
+        // NOT check creator or assignee on any route, so a `member` may patch,
+        // re-status and re-assign ANY work item in the tenant, not merely "their
+        // own" — and with AC7 degrading to tenant-wide visibility, they can see
+        // every item too. That is accepted for the RECOVERABLE writes (AC4's
+        // normative clause; a bad patch is repairable). It is NOT accepted for
+        // the hard delete, which 44-2 catalogues as Destructive/reversible:false
+        // and which emits no event at all in this story (44-5 owns emission) —
+        // unrecoverable AND unaudited. Hence DELETE /api/work-items/{id} rides
+        // tracker:manage until an ownership plane (Story 39-20's resolver) or
+        // the 44-5 audit trail lands and the gate can be reconsidered.
         // Neither reuses settings:manage, which is owner-only and would 403
         // every tenant_admin. Single-user mode is unaffected — every signed-up
         // user is auto-owner of their personal tenant.

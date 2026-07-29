@@ -192,8 +192,36 @@ public class TemplateExampleConformanceTests
     /// 15 → 14 (2026-07-29, Story 41-9): (architect, write-adr) was BOUND, its template
     /// rewritten from the markdown issue-comment report to the prose envelope
     /// (kind=adr, audience=engineering), and its baseline entry deleted.</para>
+    ///
+    /// <para><b>The direction rule is now ASSERTED, not only written</b> (43-8
+    /// follow-up F2, 2026-07-29). Until this change the shrink-only property was
+    /// PROSE: nothing mechanically forbade replacing <c>14</c> with a larger literal,
+    /// which is the exact defect 43-8's own plan cites about
+    /// <c>ContractBindingTests.cs:255-271</c> ("the pin is a comment; additions are
+    /// undetectable"). The pin's value is now the last element of
+    /// <see cref="PinHistory"/>, and
+    /// <see cref="TheRatchetPin_IsMechanicallyShrinkOnly"/> asserts that history is
+    /// strictly decreasing after its one documented widening — so RAISING the pin
+    /// requires appending a value that makes the fixture RED.</para>
     /// </summary>
     private const int KnownNonConformingTemplateCount = 14;
+
+    /// <summary>
+    /// The pin's recorded high-water history, oldest first. Index 0 → 1 is the ONE
+    /// permitted increase: the change that widened the gate (test 5 started
+    /// enumerating the whole taxonomy, revealing five prose cells that were already
+    /// non-conforming — invisible debt, not new drift). Every element after index 1
+    /// must be strictly LESS than its predecessor.
+    ///
+    /// <para><b>Honest residual.</b> This makes the ratchet mechanically shrink-only
+    /// against the ordinary laundering path (edit one literal). It does not make it
+    /// tamper-proof: an author could still append an increase AND edit
+    /// <see cref="TheRatchetPin_IsMechanicallyShrinkOnly"/> to permit it. That is a
+    /// two-place, semantically obvious diff that changes an assertion — the property
+    /// this buys is that widening the baseline can no longer be a one-literal change
+    /// that reads like routine maintenance.</para>
+    /// </summary>
+    private static readonly int[] PinHistory = [11, 16, 15, 14];
 
     // NOTE (2026-07-29): the PlannedFutureTypeKeys escape hatch is gone — 41-1b
     // registered test-plan / acceptance-criteria / backlog-ordering and 41-1c
@@ -576,6 +604,32 @@ public class TemplateExampleConformanceTests
     // ====================================================================
     // Test 2 — the ratchet: entries must still be non-conforming, and may only shrink
     // ====================================================================
+
+    [Test]
+    public void TheRatchetPin_IsMechanicallyShrinkOnly()
+    {
+        // 43-8 follow-up F2. The pin used to be a bare const compared with HaveCount:
+        // nothing mechanically forbade raising it, so "shrink-only" was prose. Bind
+        // the pin to its recorded history and assert the history's DIRECTION.
+        PinHistory.Should().NotBeEmpty();
+        KnownNonConformingTemplateCount.Should().Be(PinHistory[^1],
+            "the pin IS the last recorded high-water value; changing one without the other is the "
+            + "shape of an undeclared re-widening");
+
+        PinHistory[1].Should().BeGreaterThan(PinHistory[0],
+            "index 0 → 1 is the ONE documented increase: the change that widened the gate and "
+            + "revealed debt that was already there");
+
+        for (var i = 2; i < PinHistory.Length; i++)
+        {
+            PinHistory[i].Should().BeLessThan(PinHistory[i - 1],
+                $"pin history entry #{i} ({PinHistory[i]}) must be strictly smaller than #{i - 1} "
+                + $"({PinHistory[i - 1]}). A ratchet that can turn both ways is not a ratchet: an "
+                + "entry may only leave this baseline when its owning story rewrites the template. "
+                + "If a widening is genuinely warranted a second time, that is a deliberate design "
+                + "change and must be argued in a review, not appended here.");
+        }
+    }
 
     [Test]
     public void KnownNonConformingTemplates_AreStillNonConforming_AndCountOnlyShrinks()

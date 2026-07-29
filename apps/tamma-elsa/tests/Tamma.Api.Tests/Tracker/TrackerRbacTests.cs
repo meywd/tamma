@@ -142,6 +142,23 @@ public class TrackerRbacTests
         read.StatusCode.Should().NotBe(HttpStatusCode.Forbidden, "reads ride tracker:view too");
     }
 
+    [Test]
+    public async Task Member_may_not_hard_delete_a_work_item()
+    {
+        // Review MAJOR-1 (2026-07-29). The ONE work-item route a member does NOT
+        // get. There is no ownership plane: TrackerService checks neither
+        // CreatedByUserId nor AssigneeUserId, so at TrackerView a member could
+        // irreversibly hard-delete ANY item in the tenant — and 44-2 emits no
+        // events at all (44-5 owns emission), so the loss would also be
+        // unaudited. The recoverable writes stay at TrackerView; this one does
+        // not. Deliberate tightening of AC4, recorded in the story amendment.
+        using var member = Client("member");
+
+        (await member.DeleteAsync($"/api/work-items/{Guid.NewGuid()}"))
+            .StatusCode.Should().Be(HttpStatusCode.Forbidden,
+                "a hard delete with no ownership check and no audit trail is admin-gated");
+    }
+
     // ══════════════════ tracker:manage — structure is admin+ ════════════════
 
     [Test]
@@ -186,6 +203,11 @@ public class TrackerRbacTests
 
         (await client.PutAsJsonAsync("/api/tracker/preferences", new { defaultKind = "task" }))
             .StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
+
+        // …and the work-item delete, which moved to TrackerManage (MAJOR-1).
+        (await client.DeleteAsync($"/api/work-items/{Guid.NewGuid()}"))
+            .StatusCode.Should().NotBe(HttpStatusCode.Forbidden,
+                $"role={role} must clear TrackerManage on the destructive work-item route too");
     }
 
     [Test]
@@ -273,9 +295,19 @@ public class TrackerRbacTests
     [Test]
     public void Every_mutating_route_has_a_descriptor()
     {
+        // STRICT, verbatim comparison — no normalization (review MODERATE-5,
+        // 2026-07-29). This test used to strip `:guid` constraints out of the
+        // route pattern before comparing, which made six SiteKeys that did NOT
+        // match their live patterns pass here while 43-8's
+        // GovernedEndpointBindingSweepTests — which compares
+        // RoutePartOf(SiteKey) against RawText ORDINALLY, constraints and all —
+        // would have rejected every one of them the moment 43-9 bound them. Two
+        // harnesses disagreeing, with the lenient one guarding the descriptors,
+        // is worse than no harness. The SiteKeys now carry the constraints and
+        // this comparison is byte-exact, so the two cannot drift apart again.
         var mutating = TrackerRoutes()
             .Where(r => r.Method is "POST" or "PUT" or "PATCH" or "DELETE")
-            .Select(r => $"{r.Method} {Normalize(r.Pattern)}")
+            .Select(r => $"{r.Method} {r.Pattern}")
             .OrderBy(s => s, StringComparer.Ordinal)
             .ToArray();
 
@@ -343,8 +375,4 @@ public class TrackerRbacTests
     /// <summary>Attribute-routed patterns arrive without a leading slash; minimal-API ones with.</summary>
     private static string Slash(string pattern) =>
         pattern.StartsWith('/') ? pattern : "/" + pattern;
-
-    /// <summary>Route pattern → SiteKey shape: constraints stripped.</summary>
-    private static string Normalize(string pattern) =>
-        System.Text.RegularExpressions.Regex.Replace(pattern, @"\{(\w+):[^}]+\}", "{$1}");
 }

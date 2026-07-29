@@ -66,6 +66,13 @@ public class AcceptanceCriteriaAuthoringWorkflow : WorkflowBase
         builder.Description = "Author the testable definition-of-done for an issue as a typed AcceptanceCriteria document via the generic document lifecycle (produce → validate → review → revise → accept)";
 
         // ── Inputs ─────────────────────────────────────────────────────
+        // 41-2 follow-up F7 (2026-07-29): the decision-session handle. Every other
+        // lifecycle binding threads one (AdrAuthoringWorkflow, DesignProposalWorkflow,
+        // DocumentLifecycleWorkflow); this binding did not, so — although nothing
+        // crashed, because DocumentLifecycleWorkflow mints a UUIDv7 when the input is
+        // Guid.Empty — the caller had NO handle to correlate the accept decision with,
+        // and the workflow exposed none on exit. That bites when 39-17/39-19 land.
+        var sessionId    = builder.WithVariable<Guid>();
         var issueId      = builder.WithVariable<string>("IssueId", "");
         var issueTitle   = builder.WithVariable<string>("IssueTitle", "");
         var repository   = builder.WithVariable<string>("Repository", "");
@@ -109,6 +116,13 @@ public class AcceptanceCriteriaAuthoringWorkflow : WorkflowBase
             Variable = issueId,
             Value = new(ctx =>
             {
+                // F7 — mint a session id when the caller supplies none, exactly as
+                // AdrAuthoringWorkflow:118 does, so the handle this binding hands the
+                // lifecycle is the SAME one it exposes as output.
+                var sid = ctx.GetInput<Guid>("sessionId");
+                if (sid == Guid.Empty) sid = Guid.NewGuid();
+                sessionId.Set(ctx, sid);
+
                 var repo = ctx.GetInput<string>("repository") ?? "";
                 repository.Set(ctx, repo);
                 issueNumber.Set(ctx, ctx.GetInput<int>("issueNumber"));
@@ -223,6 +237,11 @@ public class AcceptanceCriteriaAuthoringWorkflow : WorkflowBase
                 }),
                 // 39-6 D11 — repair/revise notes land in the DECLARED carrier (D3).
                 ["feedbackVariableName"] = "contextFindings",
+                // F7 — thread the binding's sessionId as the lifecycle's decision-session
+                // id (AdrAuthoringWorkflow:245, DesignProposalWorkflow:157) so the accept
+                // decision is correlatable to this run rather than to a UUID the child
+                // minted and nobody upstream ever sees.
+                ["sessionId"]           = sessionId.Get(ctx),
                 ["issueId"]             = issueId.Get(ctx) ?? "",
                 ["correlationId"]       = issueId.Get(ctx) ?? "",
                 ["tenantId"]            = tenantId.Get(ctx) ?? "",
@@ -315,6 +334,8 @@ public class AcceptanceCriteriaAuthoringWorkflow : WorkflowBase
             Id = "ExposeOutput", Name = "Expose Output",
             Activities =
             {
+                // F7 — expose the session handle, matching AdrAuthoringWorkflow:332.
+                WithLabel(new SetOutput { Id = "OutputSessionId", Name = "Output Session Id", OutputName = new("sessionId"), OutputValue = new(ctx => (object)sessionId.Get(ctx).ToString()) }, "Output Session Id"),
                 WithLabel(new SetOutput { Id = "OutputStatus", Name = "Output Status", OutputName = new("status"), OutputValue = new(ctx => (object)(outputStatus.Get(ctx) ?? "")) }, "Output Status"),
                 WithLabel(new SetOutput { Id = "OutputOutcome", Name = "Output Outcome", OutputName = new("outcome"), OutputValue = new(ctx => (object)(exitOutcome.Get(ctx) ?? "")) }, "Output Outcome"),
                 WithLabel(new SetOutput { Id = "OutputDocumentId", Name = "Output Document Id", OutputName = new("documentId"), OutputValue = new(ctx => (object)(exitDocId.Get(ctx) ?? "")) }, "Output Document Id"),

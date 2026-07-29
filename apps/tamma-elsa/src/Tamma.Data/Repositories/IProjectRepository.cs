@@ -36,11 +36,18 @@ public interface IProjectRepository
     /// <see cref="IWorkItemRepository.RekeyAsync"/>'s seam) or
     /// <see cref="ProjectEntity.NextNumber"/> (the mint owns it).
     /// </summary>
-    Task<ProjectEntity?> UpdateAsync(ProjectEntity project);
+    /// <param name="expectedVersion">
+    /// The caller's <c>If-Match</c> precondition, applied ATOMICALLY with the
+    /// write as <c>WHERE "Version" = @expected</c> (44-2 review 2026-07-29). A
+    /// mismatch raises the typed, retryable <c>TRACKER.CONCURRENCY_CONFLICT</c>.
+    /// Null means "no precondition" — last write wins against the row as read.
+    /// </param>
+    Task<ProjectEntity?> UpdateAsync(ProjectEntity project, int? expectedVersion = null);
 
     /// <summary>
     /// Delete a project. Work items RESTRICT the FK, so a non-empty project
-    /// surfaces a constraint violation — 44-2 maps it to a 409.
+    /// surfaces a constraint violation — 44-2 maps SqlState 23503 to a 409.
     /// </summary>
-    Task<bool> DeleteAsync(Guid id);
+    /// <param name="expectedVersion">See <see cref="UpdateAsync"/>.</param>
+    Task<bool> DeleteAsync(Guid id, int? expectedVersion = null);
 }

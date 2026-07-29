@@ -28,10 +28,14 @@ public static class GovernsExtensions
     public static RouteHandlerBuilder Governs(this RouteHandlerBuilder builder, ActionKey action) =>
         builder.WithMetadata(new ActionGateMetadata(action));
 
-    /// <summary>Binds every endpoint in a route group to a catalogued action.</summary>
-    public static RouteGroupBuilder Governs(this RouteGroupBuilder builder, ActionKey action)
-    {
-        builder.WithMetadata(new ActionGateMetadata(action));
-        return builder;
-    }
+    // REMOVED 2026-07-29 (adversarial review F17): a
+    // `Governs(this RouteGroupBuilder, ActionKey)` overload also shipped here. It
+    // attached ONE ActionGateMetadata to EVERY endpoint in the group, but
+    // GovernedEndpointBindingSweepTests requires a binding's descriptor SiteKey to
+    // equal that endpoint's own $"{method} {pattern}" — so at most one route in a
+    // group could ever match and the overload GUARANTEED N-1 binding failures. It
+    // had zero call sites in src/ and tests/. A helper that cannot be used correctly
+    // is worse than no helper, so it is deleted rather than documented; a genuine
+    // single-route group can still call .Governs on the RouteHandlerBuilder that
+    // MapPost/MapPut/… returns. Story 43-9 binds routes individually.
 }

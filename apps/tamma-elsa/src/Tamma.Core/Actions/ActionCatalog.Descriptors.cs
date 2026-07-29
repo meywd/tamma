@@ -331,8 +331,20 @@ public static partial class ActionCatalog
         // §3.1): under enforcing-v1 (epic D1) an AlwaysHuman default would gate every
         // MCP invocation on day one — a behaviour change in a behaviour-preserving
         // story. The admin opts in. Pinned by DeployAndMcp_ShipAtMin_PerEpicDecisionD1.
+        // SiteKey corrected 2026-07-29 (adversarial review F16). It previously read
+        // "POST /api/kb/mcp/servers/{id}/start|stop", which is not a route pattern:
+        // the alternation matches no registered route, so 43-8's binding sweep
+        // (RoutePartOf(SiteKey) == $"{method} {RawText}", ordinal) could NEVER bind
+        // this member to anything — not the start route, not the stop route, and not
+        // the invocation route, which the SiteKey did not name at all. It now names
+        // the ONE registered route that actually invokes a tool
+        // (Program.cs `kb.MapPost("/mcp/tools/invoke", KbEndpoints.InvokeMcpTool)`),
+        // verbatim. The server start/stop pair is MCP-server LIFECYCLE, not tool
+        // invocation; it has no catalog member of its own and gaining one is a
+        // vocabulary decision, not a SiteKey repair. Risk grade and
+        // DefaultMinAutonomy deliberately UNCHANGED.
         Effect(ExternalEffect.McpToolInvoke, ActionGroup.ModelInvocation, ActionRisk.Command, "Invoke MCP tool", "Invoke an MCP tool (ONE COARSE MEMBER — no per-server/per-tool granularity; recorded hole).",
-            "POST /api/kb/mcp/servers/{id}/start|stop — KbEndpoints (invocation in intelligence-server sidecar)", reversible: false),
+            "POST /api/kb/mcp/tools/invoke — KbEndpoints.InvokeMcpTool", reversible: false),
         // INFORMATIONAL ONLY, NEVER ENFORCEABLE (epic README OQ2, answered
         // 2026-07-25): the reveal is how an authorized action gets its credential;
         // gating it would demand a human per credential fetch. Enforceable=false is
@@ -377,22 +389,30 @@ public static partial class ActionCatalog
         // not the caller: the two deletes that can destroy user work are
         // Destructive + irreversible; the preferences delete is Mutating
         // because re-setting it restores the state exactly.
+        //
+        // SiteKeys carry the ROUTE CONSTRAINTS (`{projectId:guid}`, `{id:guid}`),
+        // corrected 2026-07-29 (adversarial review MODERATE-5). 43-8's binding sweep
+        // compares RoutePartOf(SiteKey) against the endpoint's RawText ORDINALLY and
+        // does not strip constraints, so the six constraint-bearing SiteKeys as first
+        // written ("{projectId}", "{id}") would have been rejected the moment 43-9
+        // bound them. The SiteKey must be the live pattern verbatim, not a prettified
+        // rendering of it.
         Effect(ExternalEffect.TrackerProjectCreate, ActionGroup.IssueTracking, ActionRisk.Mutating, "Create project", "Create a native tracker project, minting the frozen key prefix every work item in it inherits.",
             "POST /api/projects — TrackerEndpoints.CreateProject"),
         Effect(ExternalEffect.TrackerProjectUpdate, ActionGroup.IssueTracking, ActionRisk.Mutating, "Update project", "Update a native tracker project's name, description, repository binding, estimate scale or archive state.",
-            "PATCH /api/projects/{projectId} — TrackerEndpoints.PatchProject"),
+            "PATCH /api/projects/{projectId:guid} — TrackerEndpoints.PatchProject"),
         Effect(ExternalEffect.TrackerProjectDelete, ActionGroup.IssueTracking, ActionRisk.Destructive, "Delete project", "Delete a native tracker project (refused while it holds work items — FK RESTRICT → 409 — but an empty project's removal is not undoable).",
-            "DELETE /api/projects/{projectId} — TrackerEndpoints.DeleteProject", reversible: false),
+            "DELETE /api/projects/{projectId:guid} — TrackerEndpoints.DeleteProject", reversible: false),
         Effect(ExternalEffect.TrackerWorkItemCreate, ActionGroup.IssueTracking, ActionRisk.Mutating, "Create work item", "File a native work item, consuming the project's number sequence (the minted key is frozen from that moment).",
             "POST /api/work-items — TrackerEndpoints.CreateWorkItem"),
         Effect(ExternalEffect.TrackerWorkItemUpdate, ActionGroup.IssueTracking, ActionRisk.Mutating, "Update work item", "Patch a native work item's title, description, kind, priority, type, iteration, estimate or external ref (single-field tri-state patch).",
-            "PATCH /api/work-items/{id} — TrackerEndpoints.PatchWorkItem"),
+            "PATCH /api/work-items/{id:guid} — TrackerEndpoints.PatchWorkItem"),
         Effect(ExternalEffect.TrackerWorkItemDelete, ActionGroup.IssueTracking, ActionRisk.Destructive, "Delete work item", "Delete a native work item (refused while children exist — 409 naming them; otherwise the row and its relation edges are gone).",
-            "DELETE /api/work-items/{id} — TrackerEndpoints.DeleteWorkItem", reversible: false),
+            "DELETE /api/work-items/{id:guid} — TrackerEndpoints.DeleteWorkItem", reversible: false),
         Effect(ExternalEffect.TrackerWorkItemAssign, ActionGroup.IssueTracking, ActionRisk.Mutating, "Assign work item", "Set or clear a native work item's assignee (its own member, because assignment is the axis Story 39-20's access model will govern).",
-            "POST /api/work-items/{id}/assign — TrackerEndpoints.AssignWorkItem"),
+            "POST /api/work-items/{id:guid}/assign — TrackerEndpoints.AssignWorkItem"),
         Effect(ExternalEffect.TrackerWorkItemSetStatus, ActionGroup.IssueTracking, ActionRisk.Mutating, "Move work item status", "Transition a native work item's status (its own member: an admin may plausibly gate a status move without gating a title edit).",
-            "POST /api/work-items/{id}/status — TrackerEndpoints.SetWorkItemStatus"),
+            "POST /api/work-items/{id:guid}/status — TrackerEndpoints.SetWorkItemStatus"),
         Effect(ExternalEffect.TrackerPreferencesSet, ActionGroup.IssueTracking, ActionRisk.Mutating, "Set tracker preferences", "Write the tracker preference row (default project / default kind / board grouping) — TENANT-wide configuration in SaaS, not a personal setting.",
             "PUT /api/tracker/preferences — TrackerEndpoints.PutPreferences"),
         Effect(ExternalEffect.TrackerPreferencesDelete, ActionGroup.IssueTracking, ActionRisk.Mutating, "Reset tracker preferences", "Delete the tracker preference row so the shipped defaults apply again.",

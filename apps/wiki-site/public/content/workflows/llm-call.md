@@ -160,6 +160,16 @@ The LLM Call is the **universal building block** for all AI operations in Tamma.
                    [Set Outputs]
 ```
 
+> **`[Resolve Tools]` in the diagram above is NOT a `ResolveToolsActivity`.**
+> Corrected 2026-07-29: `Tamma.Activities/LlmCall/ResolveToolsActivity.cs` was
+> **deleted by Story 43-0** — it was dead code (zero references outside its own
+> file) that shipped a third, wrong tool-name vocabulary (`read_file`). Nothing
+> replaced it as a workflow step. The tool set reaching the model is assembled
+> from `IToolExecutorRegistry` and executed by the API-side tool loop
+> (`InlineToolLoopRunner` / `ParallelToolExecutor`) inside `CallLlmInlineActivity`
+> when `enableToolLoop` is true — see [Tool Loop (Agentic)](#tool-loop-agentic)
+> below. Read the box as "the tool set is determined", not as a named activity.
+
 ## Provider Chain Resolution
 
 The provider chain determines which LLM providers are tried and in what order. Resolution priority:

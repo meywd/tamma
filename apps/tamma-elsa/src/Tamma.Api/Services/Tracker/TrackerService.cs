@@ -123,7 +123,16 @@ public sealed class TrackerService(
         if (request.EstimateScale.TryGet(out var estimateScale))
         {
             RequireField(estimateScale, "estimateScale");
-            _ = ParseEstimateScale(estimateScale!);
+            var scale = ParseEstimateScale(estimateScale!);
+            // Review MINOR-9 (2026-07-29): coherence was enforced on the WORK-ITEM
+            // write only, so an admin could flip a project holding estimated items
+            // to `not_used` and leave behind stored estimates no work-item write
+            // could ever have produced — the same representable-but-meaningless
+            // state RequireEstimateCoherence exists to refuse, entered through the
+            // other door. The rule is the same one (44-0's
+            // EstimateScale.AllowsEstimate); this is the second call site.
+            if (!scale.AllowsEstimate(1m))
+                await RequireNoEstimatedItemsAsync(existing, estimateScale!);
             existing.EstimateScale = estimateScale!;
         }
         if (request.Archived.TryGet(out var archived))
@@ -132,7 +141,10 @@ public sealed class TrackerService(
             existing.ArchivedAt = archived == true ? (existing.ArchivedAt ?? DateTime.UtcNow) : null;
         }
 
-        return await projects.UpdateAsync(existing);
+        // The precondition rides INTO the repository (44-2 review 2026-07-29):
+        // RequireVersion above checks OUR read, but the repository re-reads in a
+        // fresh context, so the check alone is not atomic with the write.
+        return await projects.UpdateAsync(existing, ifMatchVersion);
     }
 
     /// <inheritdoc />
@@ -143,7 +155,7 @@ public sealed class TrackerService(
         if (existing is null)
             return false;
         RequireVersion(existing.Version, ifMatchVersion, "project", projectId);
-        return await projects.DeleteAsync(projectId);
+        return await projects.DeleteAsync(projectId, ifMatchVersion);
     }
 
     /// <inheritdoc />
@@ -223,6 +235,18 @@ public sealed class TrackerService(
         var visible = new List<WorkItemEntity>(page.Count);
         foreach (var item in page)
         {
+            // KNOWN GAP, recorded not fixed (review MINOR-8, 2026-07-29): the
+            // TaskRef is keyed on the CREATOR. TaskRef carries exactly one
+            // principal axis (InitiatorUserId) and Story 39-20 owns that shape,
+            // so there is no assignee axis to add here and passing an assignee
+            // AS the initiator would lie to the resolver. Consequence the day
+            // 39-20's real resolver replaces the stub: an item ASSIGNED TO the
+            // viewer but created by someone else is filtered OUT of that
+            // viewer's own list. Dormant today — the branch is unreachable while
+            // IsStubResolver is true. 39-20 must widen TaskRef (or add an
+            // assignee-aware overload) at the same time it swaps the DI
+            // registration; pinned by
+            // Visibility_is_keyed_on_the_creator_not_the_assignee.
             var task = new TaskRef(tenantId, item.CreatedByUserId, null, item.Key);
             if (await audienceResolver.CanSeeAsync(viewer, task))
                 visible.Add(item);
@@ -320,7 +344,9 @@ public sealed class TrackerService(
         if (request.ExternalRef.TryGet(out var externalRef))
             existing.ExternalRefJson = externalRef?.GetRawText();
 
-        return await workItems.UpdateAsync(existing);
+        // See PatchProjectAsync — the precondition must be atomic with the
+        // write, not merely checked against this method's own read.
+        return await workItems.UpdateAsync(existing, ifMatchVersion);
     }
 
     /// <inheritdoc />
@@ -334,7 +360,7 @@ public sealed class TrackerService(
         if (existing is null)
             return null;
         RequireVersion(existing.Version, ifMatchVersion, "work item", id);
-        return await workItems.SetStatusAsync(id, statusWire);
+        return await workItems.SetStatusAsync(id, statusWire, ifMatchVersion);
     }
 
     /// <inheritdoc />
@@ -349,7 +375,7 @@ public sealed class TrackerService(
         // Assignment rides UpdateAsync — the single write seam that bumps
         // Version and leaves the frozen/owned-elsewhere columns untouched.
         existing.AssigneeUserId = assigneeUserId;
-        return await workItems.UpdateAsync(existing);
+        return await workItems.UpdateAsync(existing, ifMatchVersion);
     }
 
     /// <inheritdoc />
@@ -360,7 +386,7 @@ public sealed class TrackerService(
         if (existing is null)
             return false;
         RequireVersion(existing.Version, ifMatchVersion, "work item", id);
-        return await workItems.DeleteAsync(id);
+        return await workItems.DeleteAsync(id, ifMatchVersion);
     }
 
     /// <inheritdoc />
@@ -390,7 +416,8 @@ public sealed class TrackerService(
 
     /// <inheritdoc />
     public async Task<ResolvedTrackerPreferences> UpsertPreferencesAsync(
-        Guid? userId, UpsertTrackerPreferencesRequest request, Guid? actingUserId)
+        Guid? userId, UpsertTrackerPreferencesRequest request, Guid? actingUserId,
+        int? ifMatchVersion = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         EnsureTenant();
@@ -402,13 +429,14 @@ public sealed class TrackerService(
             DefaultProjectId = request.DefaultProjectId,
             DefaultKind = request.DefaultKind,
             BoardGroupBy = request.BoardGroupBy,
-        }, actingUserId);
+        }, actingUserId, ifMatchVersion);
         return Resolve(entity);
     }
 
     /// <inheritdoc />
     public async Task<ResolvedTrackerPreferences> UpsertPreferencesForTenantAsync(
-        Guid tenantId, UpsertTrackerPreferencesRequest request, Guid? actingUserId)
+        Guid tenantId, UpsertTrackerPreferencesRequest request, Guid? actingUserId,
+        int? ifMatchVersion = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         EnsureTenant();
@@ -420,7 +448,7 @@ public sealed class TrackerService(
             DefaultProjectId = request.DefaultProjectId,
             DefaultKind = request.DefaultKind,
             BoardGroupBy = request.BoardGroupBy,
-        }, actingUserId);
+        }, actingUserId, ifMatchVersion);
         return Resolve(entity);
     }
 
@@ -525,6 +553,46 @@ public sealed class TrackerService(
             retryable: false,
             severity: TammaErrorSeverity.Medium);
     }
+
+    /// <summary>
+    /// The PROJECT-side half of estimate/scale coherence (review MINOR-9,
+    /// 2026-07-29). <see cref="RequireEstimateCoherence"/> refuses an estimate
+    /// under a <c>not_used</c> project; this refuses turning a project
+    /// <c>not_used</c> while estimated items still hang off it. Without both,
+    /// the invariant is enforceable in one direction only and the incoherent
+    /// state is reachable through the project write. The 409 names how many
+    /// items block it — a bare refusal forces the admin to go hunting.
+    /// </summary>
+    private async Task RequireNoEstimatedItemsAsync(ProjectEntity project, string targetScale)
+    {
+        var estimated = await workItems.ListAsync(new WorkItemQuery
+        {
+            ProjectId = project.Id,
+            HasEstimate = true,
+            Limit = EstimatedItemProbeLimit,
+        });
+        if (estimated.Count == 0)
+            return;
+        throw new TammaError(
+            "TRACKER.ESTIMATE_NOT_ALLOWED",
+            $"Project '{project.Key}' still holds {estimated.Count}"
+            + (estimated.Count == EstimatedItemProbeLimit ? "+" : string.Empty)
+            + $" work item(s) carrying an estimate, so its estimateScale cannot be set to "
+            + $"'{targetScale}'. Clear those estimates first — storing an estimate under a "
+            + "not_used scale is representable and meaningless, and the work-item write "
+            + "already refuses it.",
+            new Dictionary<string, object?>
+            {
+                ["projectId"] = project.Id,
+                ["estimateScale"] = targetScale,
+                ["blockingItems"] = estimated.Select(w => w.Key).ToList(),
+            },
+            retryable: false,
+            severity: TammaErrorSeverity.Medium);
+    }
+
+    /// <summary>Cap on the estimated-item probe behind the project-scale guard.</summary>
+    private const int EstimatedItemProbeLimit = 50;
 
     /// <summary>
     /// Ordinal, case-sensitive kind parse with the ONE extra affordance the

@@ -33,6 +33,19 @@ namespace Tamma.Api.Tests.Actions;
 /// four facts; grouping by family states the actual reason once and keeps the review
 /// tractable. The classifier's floor is that every entry names a family and a
 /// reason.</para>
+///
+/// <para><b>…but grouping must not hide a risk class</b> (review F15, 2026-07-29).
+/// Family grouping is a readability device, not a licence to file a high-stakes route
+/// behind a generic label. The <c>no-catalog-member: agent / workflow / document
+/// orchestration write</c> paraphrase originally covered 30+ routes including the
+/// agent-provider CREDENTIAL writes (<c>POST|DELETE
+/// /api/v1/agents/providers/{provider}/credential</c>, <c>…/credential/rotate</c>) and
+/// ESCALATION RESOLUTION (<c>POST /api/documents/escalations/{escalationId}/resolve</c>)
+/// — none of which is the same risk class as a role-selection <c>PUT</c>. Those four
+/// now carry their own justification lines. THE RULE: when a family contains a member
+/// whose consequence differs in KIND from the rest, split it out, even though the
+/// count pin does not change. A reviewer scanning this file must be able to see the
+/// dangerous routes without reading the route patterns themselves.</para>
 /// </summary>
 internal static class KnownUngovernedEndpoints
 {
@@ -66,6 +79,15 @@ internal static class KnownUngovernedEndpoints
         "binding-owned-by",
 
         // The gate-evaluation endpoint itself.
+        //
+        // PRE-PROVISIONED, ZERO USES as of 2026-07-29 (review F18(b)). The route it
+        // classifies — POST /api/v1/governance/evaluate — does not exist yet; Story
+        // 43-9 adds it and AC11 names this exact string as the justification it must
+        // enter the baseline with. It is kept rather than deleted so 43-9's diff is
+        // the route plus one baseline entry, not a vocabulary negotiation, and it is
+        // NOT dead weight a reviewer must guess about: its use count is pinned at 0
+        // by GovernedEndpointCoverageSweepTests.PreProvisionedJustificationKeyword_
+        // isStillUnused, which goes red the day 43-9 uses it.
         "gate-evaluation-endpoint-cannot-gate-itself",
 
         // No catalog member exists for this capability at all; cataloguing it is a
@@ -157,7 +179,7 @@ internal static class KnownUngovernedEndpoints
         new("DELETE", "/api/v1/admin/alert-rules/{id:guid}",
             "human-operated: platform-owner admin console mutation behind PlatformOwnerAccess; reached by a person, never by an agent, so gating it would gate a human on themselves"),
         new("DELETE", "/api/v1/agents/providers/{provider}/credential",
-            "no-catalog-member: agent / workflow / document orchestration write with no catalog member; classifying this family is epic README open question 5"),
+            "no-catalog-member: AGENT-PROVIDER CREDENTIAL WRITE — this route and the two POSTs below store, rotate and delete a provider secret for the tenant's agents. Split onto its own justification line 2026-07-29 (review F15): it was hidden inside the generic 'agent / workflow / document orchestration write' family, and a credential write is not the same risk class as a role-selection PUT. Cataloguing it is epic README open question 5, and this sub-family should be taken FIRST"),
         new("DELETE", "/api/v1/agents/providers/{provider}/model",
             "no-catalog-member: agent / workflow / document orchestration write with no catalog member; classifying this family is epic README open question 5"),
         new("DELETE", "/api/v1/git/{owner}/{repo}/branches",
@@ -301,7 +323,7 @@ internal static class KnownUngovernedEndpoints
         new("POST", "/api/documents/decisions/{sessionId}/resume",
             "no-catalog-member: agent / workflow / document orchestration write with no catalog member; classifying this family is epic README open question 5"),
         new("POST", "/api/documents/escalations/{escalationId}/resolve",
-            "no-catalog-member: agent / workflow / document orchestration write with no catalog member; classifying this family is epic README open question 5"),
+            "no-catalog-member: ESCALATION RESOLUTION — closes an escalated document review and releases the suspended lifecycle. Split onto its own justification line 2026-07-29 (review F15): resolving an escalation is the very act the escalation ring exists to require a decision for, so grouping it with the generic 'agent / workflow / document orchestration write' family hid the highest-stakes route in that family. Cataloguing it is epic README open question 5"),
         new("POST", "/api/engine/channel/outbox",
             "engine-mediation: an EngineServiceOnly route the Elsa engine reaches through TammaApiClient; its catalogued effect:* member exists and Story 43-9 binds it with .Governs plus the enforcement filter"),
         new("POST", "/api/engine/command",
@@ -336,19 +358,21 @@ internal static class KnownUngovernedEndpoints
             "no-catalog-member: knowledge-base / RAG proxy write; the sidecar surface past the proxy is ungoverned and no catalog member covers it"),
         new("POST", "/api/kb/index/trigger",
             "no-catalog-member: knowledge-base / RAG proxy write; the sidecar surface past the proxy is ungoverned and no catalog member covers it"),
+        // WORDING CORRECTED 2026-07-29 (adversarial review F16). These two entries
+        // previously claimed the start/stop pair was "the C# half of the catalogued
+        // effect:mcp.tool.invoke member". That was never true in a bindable sense:
+        // the member's SiteKey read "POST /api/kb/mcp/servers/{id}/start|stop", an
+        // ALTERNATION, and GovernedEndpointBindingSweepTests compares a SiteKey's
+        // route part to a single $"{method} {RawText}" ordinally — so it matched no
+        // real route and neither start nor stop could ever have been bound to it.
+        // Server start/stop is MCP-server LIFECYCLE, not tool invocation; it has no
+        // catalog member of its own, and giving it one is a vocabulary decision.
         new("POST", "/api/kb/mcp/servers/{id}/start",
-            "binding-owned-by Story 43-9: the KB proxy's MCP server start/stop pair is the C# half of the catalogued effect:mcp.tool.invoke member (invocation itself runs in the TypeScript sidecar and has no drift signal here)"),
+            "no-catalog-member: MCP-SERVER LIFECYCLE — starting a configured MCP server changes which tools exist for the model to call. It is NOT effect:mcp.tool.invoke (that member names the invocation route) and no catalog member covers server lifecycle; adding one is a vocabulary decision nobody has taken. Note that this route's real consequence — the tool SET changing — has no drift signal anywhere in this epic"),
         new("POST", "/api/kb/mcp/servers/{id}/stop",
-            "binding-owned-by Story 43-9: the KB proxy's MCP server start/stop pair is the C# half of the catalogued effect:mcp.tool.invoke member (invocation itself runs in the TypeScript sidecar and has no drift signal here)"),
-        // FINDING (Story 43-8 sweep, 2026-07-29): this route is the DIRECT MCP
-        // tool-invocation proxy, but the catalog descriptor for
-        // effect:mcp.tool.invoke names only "POST /api/kb/mcp/servers/{id}/start|stop"
-        // as its SiteKey. The descriptor's SiteKey is therefore incomplete, and
-        // GovernedEndpointBindingSweepTests would REJECT a .Governs binding on this
-        // route until it is corrected. Reconciling it belongs to whoever binds the
-        // member (Story 43-9), not to the harness.
+            "no-catalog-member: MCP-SERVER LIFECYCLE — the stop half of the pair above; same absent catalog member, same absent drift signal"),
         new("POST", "/api/kb/mcp/tools/invoke",
-            "binding-owned-by Story 43-9: the direct MCP tool-invocation proxy; catalogued as effect:mcp.tool.invoke, whose descriptor SiteKey names only the servers start|stop pair and must be reconciled before this route can be bound"),
+            "binding-owned-by Story 43-9: the direct MCP tool-invocation proxy and the ONE route effect:mcp.tool.invoke actually names. 43-9 attaches the .Governs binding plus the enforcement filter"),
         new("POST", "/api/kb/rag/query",
             "no-catalog-member: knowledge-base / RAG proxy write; the sidecar surface past the proxy is ungoverned and no catalog member covers it"),
         new("POST", "/api/kb/vector-db/search",
@@ -404,9 +428,9 @@ internal static class KnownUngovernedEndpoints
         new("POST", "/api/v1/agents/config/validate",
             "no-catalog-member: agent / workflow / document orchestration write with no catalog member; classifying this family is epic README open question 5"),
         new("POST", "/api/v1/agents/providers/{provider}/credential",
-            "no-catalog-member: agent / workflow / document orchestration write with no catalog member; classifying this family is epic README open question 5"),
+            "no-catalog-member: AGENT-PROVIDER CREDENTIAL WRITE — stores a provider secret for the tenant's agents. Split onto its own justification line 2026-07-29 (review F15) so a reviewer scanning this baseline can SEE it instead of reading a generic 'agent / workflow / document orchestration write' paraphrase that also covers role-selection PUTs. Cataloguing it is epic README open question 5, and this sub-family should be taken FIRST"),
         new("POST", "/api/v1/agents/providers/{provider}/credential/rotate",
-            "no-catalog-member: agent / workflow / document orchestration write with no catalog member; classifying this family is epic README open question 5"),
+            "no-catalog-member: AGENT-PROVIDER CREDENTIAL WRITE — rotates a stored provider secret. Split onto its own justification line 2026-07-29 (review F15); see the credential POST above. Cataloguing it is epic README open question 5, and this sub-family should be taken FIRST"),
         new("POST", "/api/v1/agents/resolve-for-phase",
             "no-catalog-member: agent / workflow / document orchestration write with no catalog member; classifying this family is epic README open question 5"),
         new("POST", "/api/v1/agents/{id:guid}/archive",

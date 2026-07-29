@@ -127,8 +127,99 @@ An analyzer (`TAMMA00x`, `Tamma.Activities.Guardrails` shape) was designed and *
 
 5 days
 
+## Amendments — as-landed deviations (2026-07-29)
+
+> Added after adversarial review finding **F10**. Everything below was true of the tree at
+> the moment 43-8's harnesses landed but was recorded **only in test doc-comments**, so a
+> reader of this story could not learn any of it — while **Story 43-9's plan assumes the
+> metadata is already attached**. `Status:` is deliberately NOT flipped here; the
+> conformance round is a separate pass.
+
+### A1. What landed: harnesses, not annotations
+
+43-8 landed as a **metadata-and-harness-only** change. That is a defensible choice — it keeps
+the story **behaviour-neutral** (no route changes behaviour, no gate evaluates, nothing can
+regress in production) and it is **honestly pinned** by
+`GovernedEndpointBindingSweepTests.NoProductionRouteIsBoundYet_isTheDayOneState`, which
+asserts that zero routes carry a binding today. But the following **five AC-level carve-outs
+were deferred and were not written down anywhere a story reader would look**. Each was
+verified absent from the tree on 2026-07-29.
+
+| # | AC | What the AC required | State in the tree | Why deferred |
+|---|----|---------------------|-------------------|--------------|
+| 1 | **AC1, step 2** | `[Governs(ns, key)]` on `MentorshipController`'s 4 `[HttpPost]` actions | `GovernsAttribute` **type exists, 0 usages** | Mentorship session lifecycle has **no catalog member** (it is baselined `no-catalog-member` in `KnownUngovernedEndpoints`). There is nothing to bind it *to*; inventing a member to satisfy the annotation would manufacture a phantom capability, which the story's own architectural context forbids. |
+| 2 | **AC1, step 3** | `.Governs` on the 17 mediation routes | **0 call sites in `src/`** | Attaching a binding is Seam C of **Story 43-9**, which attaches the enforcement filter in the same call so annotating and enforcing stay one action. 43-8 deliberately landed the metadata *shape* first so 43-9's binding is visible to a harness the moment it lands. |
+| 3 | **AC4, step 7** | `[PerformsEffect]` on the 17 `TammaApiClient` methods | attribute **type ships unused (0 usages)**; the mapping is a **test-side table** (`MediationClientEffectSweepTests.EffectPerformingSites`) | See **A2** — the recorded justification does not hold, and this one has a real consequence for 43-9. |
+| 4 | **AC9, step 12** | `ActionEnforcementSites` + `enforcementSites` on the admin action DTO | **0 hits anywhere** | The admin response shape is Story 43-6's file. With zero bound routes the array would be empty for every action, so the field's *value* is trivially known; its **absence**, however, means the UI has no way to render "not enforced anywhere yet", which is precisely the lie AC9 exists to prevent. **This is the carve-out with the largest honesty cost and should be closed by 43-6/43-9, not deferred again.** |
+| 5 | **AC8** | a `RatchetDisciplineTests` meta-test asserting all four ratchets have (a) staleness, (b) classification, (c) a count pin | **absent** | The three properties are asserted **per ratchet** in each owning fixture (`GovernedEndpointCoverageSweepTests.Baseline_countIsPinned` / `…_justificationsAreClassified` / the staleness arms of `EveryMutatingEndpoint_IsGovernedOrJustified`, and the equivalents in `MediationClientEffectSweepTests` and `BackgroundActorRegistrationSweepTests`). What is missing is the **meta**-assertion that a FUTURE ratchet also has all three — so a fifth ratchet can ship with only two of the properties and nothing notices. |
+
+### A2. F11 — the `[PerformsEffect]` justification does not hold, and 43-9 is affected
+
+`MediationClientEffectSweepTests`'s doc-comment justifies carrying the effect→method mapping
+as a **test-side table** rather than as `[PerformsEffect]` attributes on the grounds that
+"applying the 17 attributes to `TammaApiClient` itself is a source edit to a file another
+in-flight story is extending."
+
+**That justification is factually wrong.** `Tamma.Activities/LlmCall/TammaApiClient.cs` is not
+in this commit's diff at all — no in-flight story was editing it.
+
+The table is a **fine drift mechanism** on its own terms: it is bidirectional, its method names
+are resolved by reflection (a rename fails the build), and
+`EveryAttributedMethod_AgreesWithTheTable` guarantees an attribute can never disagree with it,
+so entries can graduate one at a time. What the table **cannot** do is be consumed by
+production code — it lives in a test assembly. Concretely:
+
+- **Story 43-9's filter** cannot ask a `TammaApiClient` method which effect it performs.
+- **AC9's `enforcementSites`** cannot enumerate method-plane enforcement sites.
+
+**Therefore 43-9 must apply the 17 `[PerformsEffect]` attributes first** (a mechanical change —
+the sweep already proves each mapping and will reject a disagreeing attribute), and only then
+consume them.
+
+### A3. What Story 43-9 must do first, in order
+
+1. Apply `[PerformsEffect(ExternalEffect.X)]` to the 17 mutating `TammaApiClient` methods named
+   in AC4. The sweep validates each against the table as it lands; the table then retires
+   member by member.
+2. Attach `.Governs(key)` **+ the enforcement filter** to the 17 mediation routes, deleting each
+   route's `KnownUngovernedEndpoints` entry and decrementing `PinnedCount` in the same commit.
+   `NoProductionRouteIsBoundYet_isTheDayOneState` will go red on the first binding — **delete
+   that test in the same commit**; it is a day-one pin, not a permanent invariant.
+3. Add `POST /api/v1/governance/evaluate` to the baseline with the justification
+   `gate-evaluation-endpoint-cannot-gate-itself` (AC11), and delete
+   `GovernedEndpointCoverageSweepTests.PreProvisionedJustificationKeyword_isStillUnused`, which
+   pins that arm's 0 uses today.
+4. Coordinate `enforcementSites` with 43-6 (carve-out #4) **before** any UI renders an action as
+   governed.
+5. Decide separately whether `MentorshipController` gets a catalog member (carve-out #1); if it
+   does not, the `[Governs]` attribute type stays unused and that should be stated, not left
+   looking like an oversight.
+
+### A4. Other landed deviations recorded by this pass
+
+- **F15** — the ungoverned baseline's family grouping hid the agent-provider **credential**
+  writes and **escalation resolution** behind a generic `no-catalog-member: agent / workflow /
+  document orchestration write` paraphrase. Those four entries now carry their own
+  justification lines; `PinnedCount` is unchanged (237) because no entry was added or removed.
+- **F16** — the two `POST /api/kb/mcp/servers/{id}/start|stop` baseline entries claimed to be
+  "the C# half of the catalogued `effect:mcp.tool.invoke` member". They were never bindable to
+  it: the member's `SiteKey` was an **alternation**, which matches no registered route. Their
+  justifications now read `no-catalog-member: MCP-SERVER LIFECYCLE`, and the invocation route
+  `POST /api/kb/mcp/tools/invoke` is recorded as the one route the member names.
+- **F17** — `GovernsExtensions`'s `RouteGroupBuilder.Governs` overload was **removed**. Under
+  `SiteKey` equality at most one route in a group can ever match its `ActionKey`, so the helper
+  guaranteed N−1 binding failures; it had zero call sites. AC1 names only the
+  `RouteHandlerBuilder` shape, so nothing in the story is lost.
+- **F12** — `MediationClientEffectSweepTests` discovered client methods with
+  `typeof(Task).IsAssignableFrom(m.ReturnType)`, making a `ValueTask`-returning mediation
+  method **completely invisible** (proved by mutation: a real
+  `public ValueTask<bool> ZzNukeProductionAsync()` left all 13 tests green). Discovery no longer
+  filters on return type. AC4's wording — "every public `Task`-returning method" — should be
+  read as **"every public instance method"** from here on.
+
 ## Change Log
 
-| Date       | Version | Changes                | Author |
-| ---------- | ------- | ---------------------- | ------ |
-| 2026-07-25 | 1.0.0   | Initial story creation | Claude |
+| Date       | Version | Changes                                                                                     | Author |
+| ---------- | ------- | ------------------------------------------------------------------------------------------- | ------ |
+| 2026-07-25 | 1.0.0   | Initial story creation                                                                        | Claude |
+| 2026-07-29 | 1.1.0   | Amendments §A1–A4: five deferred AC carve-outs, F11's void justification, F12/F15/F16/F17 fixes | Claude |

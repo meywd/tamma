@@ -132,11 +132,20 @@ public interface ITrackerService
 
     Task<ResolvedTrackerPreferences> GetPreferencesForTenantAsync(Guid tenantId);
 
+    /// <param name="ifMatchVersion">
+    /// The caller's <c>If-Match</c> precondition, carried all the way into the
+    /// repository so it is applied ATOMICALLY with the write (44-2 review
+    /// 2026-07-29 — a handler-level read-then-compare left a real lost-update
+    /// window).
+    /// </param>
     Task<ResolvedTrackerPreferences> UpsertPreferencesAsync(
-        Guid? userId, UpsertTrackerPreferencesRequest request, Guid? actingUserId);
+        Guid? userId, UpsertTrackerPreferencesRequest request, Guid? actingUserId,
+        int? ifMatchVersion = null);
 
+    /// <param name="ifMatchVersion">See <see cref="UpsertPreferencesAsync"/>.</param>
     Task<ResolvedTrackerPreferences> UpsertPreferencesForTenantAsync(
-        Guid tenantId, UpsertTrackerPreferencesRequest request, Guid? actingUserId);
+        Guid tenantId, UpsertTrackerPreferencesRequest request, Guid? actingUserId,
+        int? ifMatchVersion = null);
 
     Task<bool> DeletePreferencesAsync(Guid? userId);
 

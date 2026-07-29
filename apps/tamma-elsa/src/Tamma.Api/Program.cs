@@ -1661,13 +1661,26 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddRequirements(new PermissionRequirement("actions:manage"));
         });
         // Story 44-2 (AC4) — the native tracker, TWO policies with different
-        // reach. TrackerView (tracker:view = member+) gates reads AND work-item
-        // CRUD/status/assignment: a member must be able to file and move their
-        // own work or the tracker is not a tracker. TrackerManage
-        // (tracker:manage = admin+owner) gates project/iteration STRUCTURE and
-        // the tenant-wide tracker_preferences row. As with AcceptanceRulesManage,
-        // neither reuses SettingsManage — that policy is owner-only and would
-        // 403 every tenant_admin.
+        // reach. TrackerView (tracker:view = member+) gates reads AND the
+        // RECOVERABLE work-item writes (create / patch / status / assign): a
+        // member must be able to file and move work or the tracker is not a
+        // tracker. TrackerManage (tracker:manage = admin+owner) gates
+        // project/iteration STRUCTURE, the tenant-wide tracker_preferences row,
+        // AND the work-item DELETE. As with AcceptanceRulesManage, neither
+        // reuses SettingsManage — that policy is owner-only and would 403 every
+        // tenant_admin.
+        //
+        // THERE IS NO OWNERSHIP PLANE (adversarial review, 2026-07-29). Neither
+        // TrackerService nor the repositories carry any creator/assignee check:
+        // every tenant member can READ and EDIT every work item in the tenant
+        // today, and AC7's honest degradation means every member also SEES every
+        // item. The word "their own work" in AC4's justification described an
+        // ownership model that was never implemented. The recoverable writes
+        // stay at TrackerView (AC4's normative clause, and a bad patch is
+        // repairable); the HARD DELETE is admin-gated because 44-2 emits no
+        // events at all (44-5 owns emission), so a member-triggered delete would
+        // be both unrecoverable and unaudited. Revisit when an ownership plane
+        // (39-20's resolver) or the 44-5 audit trail lands.
         options.AddPolicy("TrackerView", p =>
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
@@ -2931,13 +2944,24 @@ actionsCeiling.MapDelete("/groups/{group}", ActionPolicyEndpoints.DeleteCeilingG
 //
 // RBAC (AC4), three-place lockstep with Permissions.Matrix and the
 // AddAuthorization block above:
-//   * TrackerView  (tracker:view  = member/admin/owner) — reads AND work-item
-//     CRUD / status / assignment. A member must be able to file a bug and move
-//     their own card.
+//   * TrackerView  (tracker:view  = member/admin/owner) — reads AND the
+//     RECOVERABLE work-item writes: create, patch, status, assign. A member
+//     must be able to file a bug and move a card.
 //   * TrackerManage (tracker:manage = admin/owner)      — project STRUCTURE
-//     (create/patch/delete) and the tracker_preferences row, which in SaaS is
-//     tenant-wide configuration.
+//     (create/patch/delete), the tracker_preferences row (tenant-wide
+//     configuration in SaaS), AND the work-item DELETE.
 // Neither reuses SettingsManage (owner-only; would 403 every tenant_admin).
+//
+// NO OWNERSHIP PLANE EXISTS (adversarial review, 2026-07-29). TrackerService
+// performs no creator/assignee check on any route, so every tenant member can
+// see and edit EVERY work item in the tenant — there is no "their own card" to
+// scope to. The recoverable writes stay at TrackerView per AC4's normative
+// clause. DELETE /work-items/{id} is a HARD delete this story's own catalog
+// descriptor grades Destructive/reversible:false, and 44-2 emits no events
+// (44-5 owns emission), so a member delete would be unrecoverable AND
+// unaudited: it is admin-gated until an ownership plane or the audit trail
+// lands. This is a deliberate TIGHTENING of AC4 — recorded in the story
+// amendment dated 2026-07-29.
 //
 // ROUTE ORDERING: /work-items/assignable and /work-items/by-key/{key} are
 // LITERAL and are mapped BEFORE /work-items/{id:guid}. The :guid constraint
@@ -2970,8 +2994,10 @@ tracker.MapPost("/work-items", TrackerEndpoints.CreateWorkItem)
     .RequireAuthorization("TrackerView").RequireRateLimiting("ConfigWrite");
 tracker.MapPatch("/work-items/{id:guid}", TrackerEndpoints.PatchWorkItem)
     .RequireAuthorization("TrackerView").RequireRateLimiting("ConfigWrite");
+// The ONE destructive work-item route — TrackerManage, not TrackerView (see the
+// no-ownership-plane note above).
 tracker.MapDelete("/work-items/{id:guid}", TrackerEndpoints.DeleteWorkItem)
-    .RequireAuthorization("TrackerView").RequireRateLimiting("ConfigWrite");
+    .RequireAuthorization("TrackerManage").RequireRateLimiting("ConfigWrite");
 tracker.MapPost("/work-items/{id:guid}/assign", TrackerEndpoints.AssignWorkItem)
     .RequireAuthorization("TrackerView").RequireRateLimiting("ConfigWrite");
 tracker.MapPost("/work-items/{id:guid}/status", TrackerEndpoints.SetWorkItemStatus)

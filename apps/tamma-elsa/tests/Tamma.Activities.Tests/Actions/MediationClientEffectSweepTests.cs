@@ -13,9 +13,9 @@ namespace Tamma.Activities.Tests.Actions;
 /// workflow can cause is either one of its methods or is explicitly declared to be
 /// performed somewhere else.
 ///
-/// <para><b>code → catalog:</b> every public <c>Task</c>-returning method on the
-/// client is either mapped to an <see cref="ExternalEffect"/> by
-/// <see cref="EffectPerformingSites"/> or listed in the shrink-only, count-pinned
+/// <para><b>code → catalog:</b> every public instance method on the client —
+/// <b>whatever it returns</b> — is either mapped to an <see cref="ExternalEffect"/>
+/// by <see cref="EffectPerformingSites"/> or listed in the shrink-only, count-pinned
 /// <see cref="KnownNonEffectClientMethods"/> baseline. A NEW mediation method
 /// therefore fails the build until someone decides whether it is a governed
 /// effect.</para>
@@ -54,6 +54,14 @@ namespace Tamma.Activities.Tests.Actions;
 ///   <item><b><c>effect:mcp.tool.invoke</c> has no drift signal at all.</b> Adding
 ///   an MCP server, or a tool on an existing server, changes nothing observable —
 ///   the member is one coarse row by construction.</item>
+///   <item><b>It sees INSTANCE methods declared on the type, and nothing else.</b>
+///   Discovery no longer filters on return type (review F12 — see
+///   <see cref="ClientMethods"/>), but it still cannot see: a <c>static</c> mediation
+///   helper; a non-public method reached through an internal seam; an extension
+///   method over the client; or a method inherited from a base class the client might
+///   grow (<c>DeclaredOnly</c>). Each of those is a way to add mediation surface this
+///   sweep would not report, and none of them exists on
+///   <see cref="TammaApiClient"/> today.</item>
 /// </list>
 /// </summary>
 [TestFixture]
@@ -135,8 +143,10 @@ public class MediationClientEffectSweepTests
                 "GET /api/v1/secrets/reveal/{token}; informational-only and never enforceable, so no "
                 + "mediation-client method exists to attribute"),
             [ExternalEffect.McpToolInvoke] = new(SiteKind.RouteOnly, null,
-                "the C# surface is the KB proxy start/stop pair; invocation itself happens in the "
-                + "TypeScript intelligence sidecar and has NO drift signal in this repo"),
+                "the C# surface is the KB proxy route POST /api/kb/mcp/tools/invoke (SiteKey corrected "
+                + "2026-07-29, review F16 — it previously named a start|stop alternation that is not a "
+                + "route pattern); the invocation it proxies runs in the TypeScript intelligence sidecar, "
+                + "so the tool SET has NO drift signal in this repo"),
             [ExternalEffect.ScheduleCreate] = new(SiteKind.RouteOnly, null,
                 "admin-only scheduled-trigger route (Story 41-30); reached from the dashboard, not the engine"),
             [ExternalEffect.ScheduleUpdate] = new(SiteKind.RouteOnly, null,
@@ -179,7 +189,8 @@ public class MediationClientEffectSweepTests
     // ====================================================================
 
     /// <summary>
-    /// Every public <c>Task</c>-returning <see cref="TammaApiClient"/> method that
+    /// Every public instance <see cref="TammaApiClient"/> method (any return type — see
+    /// <see cref="ClientMethods"/> and review finding F12) that
     /// performs NO catalogued external effect, with the reason. A RATCHET: an entry
     /// that now maps to an effect fails as stale, justifications are keyword-classified,
     /// and the count is pinned so an ADDITION fails the build.
@@ -240,11 +251,35 @@ public class MediationClientEffectSweepTests
     // Discovery + the classifier, as pure functions over their inputs
     // ====================================================================
 
-    /// <summary>Every public instance <c>Task</c>-returning method declared on a client type.</summary>
+    /// <summary>
+    /// EVERY public instance method declared on a client type — not only the
+    /// <c>Task</c>-returning ones.
+    ///
+    /// <para><b>Review finding F12 (2026-07-29), proved by mutation.</b> This filter
+    /// used to read <c>typeof(Task).IsAssignableFrom(m.ReturnType)</c>. A reviewer
+    /// added a real <c>public ValueTask&lt;bool&gt; ZzNukeProductionAsync()</c> to
+    /// <see cref="TammaApiClient"/> and ALL THIRTEEN TESTS IN THIS FIXTURE STAYED
+    /// GREEN: the method was invisible to discovery, so no governance decision was
+    /// demanded, and neither count pin moved (the anti-no-op tripwire was a
+    /// <c>&gt;25</c> lower bound, and the baseline pin counts baseline entries). A
+    /// harness that reads as coverage while covering nothing is exactly the failure
+    /// this story exists to prevent, so <b>return type is no longer a discovery
+    /// filter</b> — <c>ValueTask</c>, <c>IAsyncEnumerable</c>, <c>void</c> and plain
+    /// synchronous methods all reach the classifier.</para>
+    ///
+    /// <para>Two exclusions remain, both structural rather than discretionary, and
+    /// both pinned by
+    /// <see cref="Discrimination_aNonTaskReturningClientMethodIsReported"/>:
+    /// compiler-generated accessors (<c>IsSpecialName</c> — property getters such as
+    /// <c>BaseUrl</c>, operators, event add/remove), and overrides of
+    /// <see cref="object"/> members (<c>ToString</c>/<c>Equals</c>/<c>GetHashCode</c>),
+    /// which are formatting and identity, not mediation. What that still cannot see is
+    /// listed in the fixture doc-comment's "WHAT THIS SWEEP CANNOT SEE".</para>
+    /// </summary>
     internal static IReadOnlyList<MethodInfo> ClientMethods(Type clientType) =>
         clientType
             .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-            .Where(m => !m.IsSpecialName && typeof(Task).IsAssignableFrom(m.ReturnType))
+            .Where(m => !m.IsSpecialName && m.GetBaseDefinition().DeclaringType != typeof(object))
             .OrderBy(m => m.Name, StringComparer.Ordinal)
             .ToArray();
 
@@ -356,12 +391,31 @@ public class MediationClientEffectSweepTests
     [Test]
     public void The_sweep_actually_sees_the_client_surface()
     {
-        // ANTI-NO-OP TRIPWIRE: if the reflection filter ever stops matching (a base
-        // class extraction, an interface split, ValueTask), every assertion below
-        // would pass vacuously.
-        ClientMethods(typeof(TammaApiClient)).Should().HaveCountGreaterThan(25,
-            "TammaApiClient exposes dozens of public Task-returning methods; a tiny result means the "
+        var discovered = ClientMethods(typeof(TammaApiClient));
+
+        // ANTI-NO-OP TRIPWIRE (a): if the reflection filter ever stops matching (a
+        // base-class extraction, an interface split), every assertion below would
+        // pass vacuously on a tiny list.
+        discovered.Should().HaveCountGreaterThan(25,
+            "TammaApiClient exposes dozens of public mediation methods; a tiny result means the "
             + "discovery filter broke, not that the client shrank");
+
+        // ANTI-NO-OP TRIPWIRE (b) — added for review finding F12. A `>25` lower bound
+        // cannot catch a SINGLE addition, which is precisely what the reviewer's
+        // ValueTask mutation was. The discovered surface is therefore pinned EXACTLY,
+        // so adding one method of ANY return shape moves a number in this file.
+        //
+        // MEASURED 2026-07-29, before and after the F12 widening: 36 both times. The
+        // widening surfaced ZERO new methods on TammaApiClient (its whole public
+        // instance surface is Task-returning today, plus the `BaseUrl` property
+        // getter, which is IsSpecialName), so nothing needed reclassifying into
+        // EffectPerformingSites or KnownNonEffectClientMethods and neither of the
+        // other two pins moved. That is why 36/19/17 are unchanged by a change that
+        // genuinely widened the lens.
+        discovered.Should().HaveCount(36,
+            "the mediation surface is pinned exactly: 17 effect-performing + 19 baselined "
+            + "non-effect methods. A change here is a new (or removed) mediation method — decide "
+            + "whether it is a governed effect, then move this number in the same commit.");
     }
 
     [Test]
@@ -439,9 +493,13 @@ public class MediationClientEffectSweepTests
     public void NonEffectClientMethods_countIsPinned()
     {
         // (c) of the three ratchet properties. Without it an ADDITION is undetectable.
+        // Arithmetic restated after the F12 widening: the numerator is now every public
+        // INSTANCE method (any return type), not just the Task-returning ones. It is
+        // still 36, because TammaApiClient happens to expose no non-Task method today —
+        // see The_sweep_actually_sees_the_client_surface for the measurement.
         KnownNonEffectClientMethods.Should().HaveCount(19,
-            "36 public Task-returning methods − 17 effect-performing = 19. If this fails because a new "
-            + "mediation method was added, that is the ratchet working: decide whether it is a "
+            "36 public instance mediation methods − 17 effect-performing = 19. If this fails because a "
+            + "new mediation method was added, that is the ratchet working: decide whether it is a "
             + "governed effect before bumping the number.");
     }
 
@@ -495,6 +553,37 @@ public class MediationClientEffectSweepTests
         public Task<bool> DeleteTheUniverseAsync() => Task.FromResult(true);
 
         public Task<bool> ReadSomethingAsync() => Task.FromResult(true);
+    }
+
+    /// <summary>
+    /// A second stand-in, also declared in the TEST assembly, whose methods return
+    /// things that are NOT <c>Task</c>. It is the PERMANENT regression proof for
+    /// review finding F12: under the old
+    /// <c>typeof(Task).IsAssignableFrom(ReturnType)</c> discovery filter EVERY method
+    /// on this type was invisible, so a mediation method could be added with no
+    /// governance decision and no pin moving. The proof lives here rather than on
+    /// <see cref="TammaApiClient"/> deliberately — a harness must never require a
+    /// production edit to demonstrate that it works.
+    /// </summary>
+    private sealed class NonTaskFixtureClient
+    {
+        /// <summary>The reviewer's exact mutation shape: a generic <c>ValueTask</c>.</summary>
+        public ValueTask<bool> ZzNukeProductionAsync() => ValueTask.FromResult(true);
+
+        /// <summary>Non-generic <c>ValueTask</c> — a different runtime type, same hole.</summary>
+        public ValueTask BareValueTaskAsync() => ValueTask.CompletedTask;
+
+        /// <summary>A streaming return; assignable to neither <c>Task</c> nor <c>ValueTask</c>.</summary>
+        public IAsyncEnumerable<string> StreamAsync() => throw new NotSupportedException();
+
+        /// <summary>A blocking mediation call — synchronous code performs effects too.</summary>
+        public bool SynchronousEffect() => true;
+
+        /// <summary><c>void</c>: fire-and-forget is the easiest effect of all to hide.</summary>
+        public void FireAndForget() { }
+
+        /// <summary>MUST NOT be reported: an <see cref="object"/> override is formatting.</summary>
+        public override string ToString() => nameof(NonTaskFixtureClient);
     }
 
     private static readonly IReadOnlyDictionary<ExternalEffect, EffectSite> FixtureSites =
@@ -570,6 +659,42 @@ public class MediationClientEffectSweepTests
         problems.Should().ContainSingle()
             .Which.Should().Contain("DELETE its KnownNonEffectClientMethods entry",
                 "a baselined method that is now mapped must fail as stale, so the baseline drains");
+    }
+
+    [Test]
+    public void Discrimination_aNonTaskReturningClientMethodIsReported()
+    {
+        // F12 REGRESSION PIN (2026-07-29). Drives the REAL discovery + the REAL
+        // classifier over a fixture whose entire surface the old filter dropped.
+        var discovered = ClientMethods(typeof(NonTaskFixtureClient)).Select(m => m.Name).ToList();
+
+        discovered.Should().BeEquivalentTo(
+            new[]
+            {
+                "BareValueTaskAsync", "FireAndForget", "StreamAsync",
+                "SynchronousEffect", "ZzNukeProductionAsync",
+            },
+            "return type is NOT a governance property — a ValueTask, IAsyncEnumerable, bool or void "
+            + "mediation method performs effects exactly as a Task-returning one does, and under the "
+            + "pre-F12 filter every one of these was invisible to the sweep");
+
+        discovered.Should().NotContain("ToString",
+            "an object override is formatting, not mediation; the two structural exclusions "
+            + "(IsSpecialName accessors, object overrides) are the ONLY ones");
+
+        var problems = Classify(
+            typeof(NonTaskFixtureClient),
+            [],
+            new Dictionary<ExternalEffect, EffectSite>(),
+            new Dictionary<string, string>(StringComparer.Ordinal));
+
+        problems.Should().HaveCount(5,
+            "each unmapped, unbaselined method must produce exactly one governance-decision demand");
+        problems.Should().Contain(p => p.Contains("ZzNukeProductionAsync", StringComparison.Ordinal),
+            "this is the reviewer's mutation, verbatim: adding it to the real client used to leave "
+            + "all thirteen tests green");
+        problems.Should().Contain(p => p.Contains("FireAndForget", StringComparison.Ordinal));
+        problems.Should().NotContain(p => p.Contains("ToString", StringComparison.Ordinal));
     }
 
     [Test]

@@ -17,6 +17,18 @@ namespace Tamma.Api.Endpoints;
 /// <see cref="ITammaModeProvider.Mode"/> + <see cref="ITenantContext"/> exactly
 /// like <c>PromptEndpoints</c>. The literal <c>base</c> segment addresses the
 /// principal base row (the dial).
+///
+/// <para><b>The repair path for a corrupt stored row</b> (review MODERATE-2,
+/// 2026-07-29): rows are validated defensively on READ (39-5 D3), so a row whose
+/// JSON is malformed, or whose body no longer passes
+/// <c>AcceptanceRules.Validate()</c>, makes <see cref="GetResolved"/> and
+/// <see cref="Upsert"/> answer <c>400</c> naming the problem rather than
+/// <c>500</c>. Because per-type resolution FALLS THROUGH to the base row, ONE
+/// corrupt base row affects every document type. The repair is
+/// <c>DELETE /api/acceptance-rules/{key}</c> — which never reads the body — to
+/// drop to the next tier, then <c>PUT</c> the wanted rules. Upsert cannot be the
+/// repair by itself: since 43-0 it must READ the in-force requirement in order
+/// to preserve it.</para>
 /// </summary>
 public static class AcceptanceRulesEndpoints
 {
@@ -76,21 +88,37 @@ public static class AcceptanceRulesEndpoints
     {
         var saas = modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid;
 
-        if (string.Equals(documentTypeKey, AcceptanceRulesService.BaseRowKeyLiteral, StringComparison.Ordinal))
+        try
         {
-            var baseResolved = saas
-                ? await store.ResolveBaseForTenantAsync((Guid)tenantContext.TenantId!)
-                : await store.ResolveBaseAsync(principal.GetUserId());
-            return Results.Ok(baseResolved);
+            if (string.Equals(documentTypeKey, AcceptanceRulesService.BaseRowKeyLiteral, StringComparison.Ordinal))
+            {
+                var baseResolved = saas
+                    ? await store.ResolveBaseForTenantAsync((Guid)tenantContext.TenantId!)
+                    : await store.ResolveBaseAsync(principal.GetUserId());
+                return Results.Ok(baseResolved);
+            }
+
+            if (!Tamma.Core.Documents.DocumentTypeKeyExtensions.TryParse(documentTypeKey, out var type))
+                return Results.BadRequest(new { error = "Unknown document type", code = "DOCUMENT.TYPE.UNKNOWN", input = documentTypeKey });
+
+            var resolved = saas
+                ? await store.ResolveForTenantAsync((Guid)tenantContext.TenantId!, type)
+                : await store.ResolveAsync(principal.GetUserId(), type);
+            return Results.Ok(resolved);
         }
-
-        if (!Tamma.Core.Documents.DocumentTypeKeyExtensions.TryParse(documentTypeKey, out var type))
-            return Results.BadRequest(new { error = "Unknown document type", code = "DOCUMENT.TYPE.UNKNOWN", input = documentTypeKey });
-
-        var resolved = saas
-            ? await store.ResolveForTenantAsync((Guid)tenantContext.TenantId!, type)
-            : await store.ResolveAsync(principal.GetUserId(), type);
-        return Results.Ok(resolved);
+        catch (TammaError te)
+        {
+            // A stored row that no longer validates (ACCEPTANCE_RULES.INVALID).
+            return Results.BadRequest(new { error = te.Message, code = te.Code });
+        }
+        catch (System.Text.Json.JsonException jx)
+        {
+            // Same class as Upsert's (review MODERATE-2): the read-side
+            // validation is deliberate (39-5 D3 — a corrupt row throws, never
+            // degrades), but the caller must be told what to do about it rather
+            // than handed a 500.
+            return Results.BadRequest(StoredRowUnreadable(documentTypeKey, jx));
+        }
     }
 
     // =======================================================================
@@ -121,8 +149,26 @@ public static class AcceptanceRulesEndpoints
         }
         catch (TammaError te)
         {
-            // Unknown document type key — the same 400 the write path raises.
+            // Unknown document type key, or a stored row whose body fails
+            // AcceptanceRules.Validate() (ACCEPTANCE_RULES.INVALID) — the same
+            // 400 the write path raises.
             return Results.BadRequest(new { error = te.Message, code = te.Code });
+        }
+        catch (System.Text.Json.JsonException jx)
+        {
+            // Review MODERATE-2 (2026-07-29). Before 43-0, Upsert never READ, so
+            // overwriting a corrupt row was the repair. Now it reads first, and
+            // Materialize → AcceptanceRulesJson.Deserialize throws JsonException
+            // on malformed stored JSON — which the TammaError catch above does
+            // NOT cover, so this commit turned one corrupt row into a 500 on a
+            // shipped admin surface. Worse: because per-type resolution FALLS
+            // THROUGH to the base row, a single corrupt BASE row broke PUT for
+            // EVERY document type.
+            //
+            // A stored row we cannot parse is not a server fault the caller can
+            // do nothing about — it is a repairable state, and the response says
+            // exactly how to repair it.
+            return Results.BadRequest(StoredRowUnreadable(documentTypeKey, jx));
         }
 
         AcceptanceRules rules;
@@ -224,6 +270,29 @@ public static class AcceptanceRulesEndpoints
             : await store.ResolveAsync(principal.GetUserId(), type);
         return resolved.Rules.AcceptorRequirement;
     }
+
+    /// <summary>
+    /// The typed 400 for a stored override row whose JSON cannot be parsed
+    /// (review MODERATE-2, 2026-07-29). It names the DELETE-then-PUT repair, and
+    /// it names the fall-through explicitly: because per-type resolution walks
+    /// type row → base row → shipped default, the unreadable row may be the BASE
+    /// row even though the caller addressed a document type — which is why one
+    /// corrupt base row could break the write path for all of them.
+    /// </summary>
+    private static object StoredRowUnreadable(string documentTypeKey, System.Text.Json.JsonException jx) => new
+    {
+        error = $"The acceptance-rules row currently in force for '{documentTypeKey}' is stored as "
+            + "malformed JSON and cannot be read. Per-type resolution falls through to the base row, "
+            + $"so the unreadable row may be '{AcceptanceRulesService.BaseRowKeyLiteral}' rather than "
+            + $"'{documentTypeKey}'. REPAIR: DELETE the offending override "
+            + $"(DELETE /api/acceptance-rules/{documentTypeKey}, or "
+            + $"DELETE /api/acceptance-rules/{AcceptanceRulesService.BaseRowKeyLiteral}) — DELETE never "
+            + "reads the body — to fall back to the next tier, then PUT the rules you want. A PUT alone "
+            + "cannot repair it: since Story 43-0 the write READS the in-force value in order to "
+            + "preserve it.",
+        code = "ACCEPTANCE_RULES.STORED_ROW_UNREADABLE",
+        detail = jx.Message,
+    };
 
     private static IReadOnlyList<ResolvedAcceptanceRules> DefaultsForAllTypes()
     {

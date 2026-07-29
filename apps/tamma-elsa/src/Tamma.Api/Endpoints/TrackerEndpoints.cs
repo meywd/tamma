@@ -23,15 +23,28 @@ namespace Tamma.Api.Endpoints;
 /// <c>AcceptanceRulesEndpoints</c> covers rules, defaults and resets in one class
 /// for the same reason.</para>
 ///
-/// <para><b>RBAC</b> (AC4): reads and work-item writes take <c>TrackerView</c>
-/// (<c>tracker:view</c> = member/admin/owner — a tracker in which a member
-/// cannot file a bug or move their own card is not a tracker); project structure
-/// and the preference row take <c>TrackerManage</c> (<c>tracker:manage</c> =
+/// <para><b>RBAC</b> (AC4): reads and the RECOVERABLE work-item writes (create,
+/// patch, status, assign) take <c>TrackerView</c> (<c>tracker:view</c> =
+/// member/admin/owner — a tracker in which a member cannot file a bug or move a
+/// card is not a tracker); project structure, the preference row and the
+/// work-item DELETE take <c>TrackerManage</c> (<c>tracker:manage</c> =
 /// admin/owner — a key rename or a project delete changes everyone's
 /// identifiers, and in SaaS the preference row is TENANT-wide configuration, so
 /// it follows the prompt/convention/acceptance-rules store precedent). Neither
 /// reuses <c>SettingsManage</c>, which is owner-only and would 403 every
 /// tenant_admin.</para>
+///
+/// <para><b>There is NO ownership plane</b> (adversarial review, 2026-07-29).
+/// Nothing in this class or in <see cref="Services.Tracker.TrackerService"/>
+/// checks <c>CreatedByUserId</c> or <c>AssigneeUserId</c> before serving a
+/// write: EVERY tenant member can see and edit EVERY work item in the tenant
+/// today, and AC7's honest degradation means the list is tenant-wide as well.
+/// The handlers below must not be read as scoping anything to a caller's own
+/// work. That is tolerated for the recoverable writes; the HARD delete
+/// (<see cref="DeleteWorkItem"/>, catalogued Destructive/reversible:false, and
+/// emitting no event because 44-5 owns emission — so unrecoverable AND
+/// unaudited) is therefore gated at <c>TrackerManage</c> until an ownership
+/// plane or the audit trail lands.</para>
 ///
 /// <para><b>Mode branching is INLINE and only in the preference handlers</b>
 /// (plan D4), exactly the <c>AcceptanceRulesEndpoints</c> shape. Work items and
@@ -161,6 +174,18 @@ public static class TrackerEndpoints
         catch (TammaError te)
         {
             return MapError(te);
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException ex) when (IsForeignKeyViolation(ex))
+        {
+            // The pre-check above is a COURTESY, not the guard: a work item
+            // created after it and before the DELETE trips the work_items FK
+            // RESTRICT in the database. Before this catch that surfaced as a
+            // raw 500 (44-2 review 2026-07-29) even though ProjectRepository's
+            // own comment already promised "the caller maps the constraint
+            // violation to a 409". Now it does. The body cannot list the
+            // blockers — the row set is whatever raced in — so it names the
+            // constraint and tells the caller to re-read.
+            return ProjectNotEmptyRace(projectId);
         }
     }
 
@@ -389,6 +414,12 @@ public static class TrackerEndpoints
         {
             return MapError(te);
         }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException ex) when (IsForeignKeyViolation(ex))
+        {
+            // Same race as DeleteProject: a child reparented onto this item
+            // after the pre-check trips the RESTRICT FK. 409, never a 500.
+            return HasChildrenRace(id);
+        }
     }
 
     /// <summary>
@@ -453,6 +484,13 @@ public static class TrackerEndpoints
             var userId = principal.GetUserId();
             var saas = modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid;
 
+            // The eager check gives the caller the ACTUAL current version in the
+            // 409 body (the atomic guard below can only say "you lost"). It is
+            // NOT the guard itself: the read and the write are separate
+            // contexts, so `ifMatch` also rides into the repository, where it
+            // becomes `WHERE "Version" = @expected` on the UPDATE (44-2 review
+            // 2026-07-29 — before that, two concurrent PUTs both carrying
+            // `If-Match: 1` both returned 200).
             if (ifMatch is int expected)
             {
                 var current = saas
@@ -464,8 +502,8 @@ public static class TrackerEndpoints
 
             var resolved = saas
                 ? await tracker.UpsertPreferencesForTenantAsync(
-                    (Guid)tenantContext.TenantId!, request, userId)
-                : await tracker.UpsertPreferencesAsync(userId, request, userId);
+                    (Guid)tenantContext.TenantId!, request, userId, ifMatch)
+                : await tracker.UpsertPreferencesAsync(userId, request, userId, ifMatch);
             SetETag(http, resolved.Version);
             return Results.Ok(Map(resolved));
         }
@@ -624,4 +662,34 @@ public static class TrackerEndpoints
 
     private static bool IsUniqueViolation(Microsoft.EntityFrameworkCore.DbUpdateException ex) =>
         ex.InnerException is Npgsql.PostgresException { SqlState: "23505" };
+
+    /// <summary>
+    /// PostgreSQL <c>foreign_key_violation</c>. The two deletes pre-query their
+    /// blocking children and answer 409 with the list, but that pre-check is
+    /// inherently racy — a row created in the gap trips the RESTRICT FK at
+    /// SaveChanges. Same shape as <see cref="IsUniqueViolation"/>'s 23505 use in
+    /// <see cref="CreateProject"/>.
+    /// </summary>
+    private static bool IsForeignKeyViolation(Microsoft.EntityFrameworkCore.DbUpdateException ex) =>
+        ex.InnerException is Npgsql.PostgresException { SqlState: "23503" };
+
+    /// <summary>The 409 for a project that gained a work item after the pre-check.</summary>
+    internal static IResult ProjectNotEmptyRace(Guid projectId) => Results.Conflict(new
+    {
+        error = $"Project '{projectId}' gained at least one work item after this request's "
+            + "emptiness check and the database refused the delete (work_items FK RESTRICT). "
+            + "Re-read the project's work items, move or delete them, and retry.",
+        code = "TRACKER.PROJECT_NOT_EMPTY",
+        retryable = true,
+    });
+
+    /// <summary>The 409 for a work item that gained a child after the pre-check.</summary>
+    internal static IResult HasChildrenRace(Guid id) => Results.Conflict(new
+    {
+        error = $"Work item '{id}' gained at least one child after this request's child check "
+            + "and the database refused the delete (parent FK RESTRICT). Re-read the children, "
+            + "reparent or delete them, and retry.",
+        code = "TRACKER.HAS_CHILDREN",
+        retryable = true,
+    });
 }

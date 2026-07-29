@@ -122,7 +122,10 @@ class. Accepted ADRs are queryable per issue and per repo.
     (the lifecycle suspends forever on its first `ActivityKind.Task` node with no bookmark to resume) —
     `ProseLifecycleExecutionTests.ProseAdr_FullCycle_ReviewedByTechWriter_ResumesToAccepted` is exactly
     that fixture and exactly that state. Executing coverage is `AdrAuthoringWorkflowStructureTests`
-    (15 tests) + `AdrBindingHelperTests` (23 cases) + the drift gates. **What that leaves unproven by
+    (15 tests) + `AdrBindingHelperTests` (**21** cases) + the drift gates. *(Case count corrected
+    2026-07-29, adversarial review F8: this amendment read "23 cases"; the tree holds 21, recounted
+    with `dotnet test --filter FullyQualifiedName~AdrBindingHelperTests`. The 15-test structure
+    figure was accurate and is unchanged.)* **What that leaves unproven by
     THIS story:** AC3's persisted-lineage/retrievability is carried by 41-1c's
     `ProseStoreAndLineageTests` and 41-1b's `NewDocumentTypeStoreRoundTripTests` (both real Postgres 17
     Testcontainer suites that already round-trip `prose` with its audience through the store and the

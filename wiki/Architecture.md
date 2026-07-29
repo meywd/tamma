@@ -646,9 +646,14 @@ LlmCallWorkflow (apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/LlmCallWorkflow.
    │   └─ principal override → system default; NO provider dimension (the retry
    │      loop swaps providers under a fixed prompt + output contract)
    │
-   ├─► ResolveToolsActivity               — selects tools from the registry
-   │   └─ ToolExecutorRegistry            — file-read, file-write, search-code,
-   │                                        shell-execute, run-tests, git-ops
+   ├─► [DELETED 2026-07-29] ResolveToolsActivity
+   │   Story 43-0 deleted this activity: it was dead code with ZERO references
+   │   outside its own file, and it shipped a THIRD tool-name vocabulary
+   │   ("read_file") matching neither live one. Nothing replaced it in the
+   │   workflow — tool selection is not a workflow step. The tool set now
+   │   reaches the model through IToolExecutorRegistry, consumed directly by
+   │   the API-side tool loop (InlineToolLoopRunner / ParallelToolExecutor)
+   │   when EnableToolLoop=true; see CallLlmInlineActivity below.
    │
    ├─► CheckBudgetActivity                — budget_configs row + spend window
    │   └─ fail-closed on over-budget

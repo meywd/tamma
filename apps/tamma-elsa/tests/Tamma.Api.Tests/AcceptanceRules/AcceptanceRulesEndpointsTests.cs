@@ -356,6 +356,114 @@ public class AcceptanceRulesEndpointsTests
             .AcceptorRequirement.Should().Be(AcceptorRequirement.Human);
     }
 
+    // ══════════ Review MODERATE-2 — a corrupt stored row is a 400 ═══════════
+    // Story 43-0 made Upsert READ before writing (so an omitted
+    // acceptorRequirement is preserved). That introduced a NEW 500 on a shipped
+    // admin surface: Materialize → AcceptanceRulesJson.Deserialize throws
+    // JsonException on malformed stored JSON, and the endpoint caught only
+    // TammaError. Worse, per-type resolution FALLS THROUGH to the base row, so
+    // ONE corrupt base row broke PUT for EVERY document type. Before 43-0,
+    // Upsert never read — overwriting WAS the repair.
+
+    /// <summary>Write a row the store cannot parse, straight past the service.</summary>
+    private async Task PoisonRowAsync(Guid userId, string? documentTypeKey)
+    {
+        await using var db = await _fx.Factory.CreateAsync(Guid.NewGuid());
+        db.AcceptanceRulesOverrides.Add(new Tamma.Data.Entities.AcceptanceRulesOverride
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            TenantId = null,
+            DocumentTypeKey = documentTypeKey,
+            RulesJson = "{ this is not json",
+            Version = 1,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+    }
+
+    [Test]
+    public async Task Upsert_over_a_malformed_stored_row_is_400_naming_the_problem_not_500()
+    {
+        var userId = Guid.NewGuid();
+        var tc = new TenantContext();
+        tc.SetTenantId(Guid.NewGuid());
+        await PoisonRowAsync(userId, "design");
+
+        var (status, body) = await Exec(await AcceptanceRulesEndpoints.Upsert(
+            "design", Req(85), _store, Principal(userId, "owner"), tc, Mode(TammaMode.SingleUser)));
+
+        status.Should().Be(StatusCodes.Status400BadRequest,
+            "a stored row this API cannot parse is a repairable state, not an opaque server fault");
+        body.Should().Contain("ACCEPTANCE_RULES.STORED_ROW_UNREADABLE");
+        body.Should().Contain("DELETE", "the response must name the repair path");
+    }
+
+    [Test]
+    public async Task One_malformed_BASE_row_makes_every_type_400_not_500()
+    {
+        // The blast radius that made this a MAJOR-shaped 500: nothing is wrong
+        // with `plan` or `test-plan` — they fall through to the poisoned base.
+        var userId = Guid.NewGuid();
+        var tc = new TenantContext();
+        tc.SetTenantId(Guid.NewGuid());
+        await PoisonRowAsync(userId, null);
+
+        foreach (var key in new[] { "design", "plan", "test-plan" })
+        {
+            var (status, body) = await Exec(await AcceptanceRulesEndpoints.Upsert(
+                key, Req(85), _store, Principal(userId, "owner"), tc, Mode(TammaMode.SingleUser)));
+            status.Should().Be(StatusCodes.Status400BadRequest, $"key={key}");
+            body.Should().Contain("ACCEPTANCE_RULES.STORED_ROW_UNREADABLE");
+            body.Should().Contain("base",
+                "the message must point at the BASE row, because that is the one that is corrupt "
+                + "even though the caller addressed a document type");
+        }
+    }
+
+    [Test]
+    public async Task Get_resolved_over_a_malformed_stored_row_is_400_not_500()
+    {
+        var userId = Guid.NewGuid();
+        var tc = new TenantContext();
+        tc.SetTenantId(Guid.NewGuid());
+        await PoisonRowAsync(userId, "design");
+
+        var (status, body) = await Exec(await AcceptanceRulesEndpoints.GetResolved(
+            "design", _store, Principal(userId, "owner"), tc, Mode(TammaMode.SingleUser)));
+
+        status.Should().Be(StatusCodes.Status400BadRequest);
+        body.Should().Contain("ACCEPTANCE_RULES.STORED_ROW_UNREADABLE");
+    }
+
+    [Test]
+    public async Task Delete_then_put_recovers_from_a_malformed_stored_row()
+    {
+        var userId = Guid.NewGuid();
+        var tc = new TenantContext();
+        tc.SetTenantId(Guid.NewGuid());
+        var principal = Principal(userId, "owner");
+        await PoisonRowAsync(userId, "design");
+
+        // DELETE never reads the body, so it is the repair.
+        (await Exec(await AcceptanceRulesEndpoints.Delete(
+            "design", _store, principal, tc, Mode(TammaMode.SingleUser))))
+            .Status.Should().Be(StatusCodes.Status200OK);
+
+        // …and the PUT that previously 400'd now succeeds.
+        (await Exec(await AcceptanceRulesEndpoints.Upsert(
+            "design", Req(85), _store, principal, tc, Mode(TammaMode.SingleUser))))
+            .Status.Should().Be(StatusCodes.Status200OK);
+
+        var resolved = await _store.ResolveAsync(userId, DocumentTypeKey.Design);
+        resolved.Source.Should().Be(AcceptanceRulesSource.TypeOverride);
+        resolved.Rules.AutonomyLevel.Should().Be(85);
+        resolved.Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human,
+            "and the repaired save still preserves design's shipped human floor — the whole "
+            + "point of 43-0; the fall-back tier supplied it once the corrupt row was gone");
+    }
+
     // ── RBAC matrix pin (AC7) ──
 
     [Test]

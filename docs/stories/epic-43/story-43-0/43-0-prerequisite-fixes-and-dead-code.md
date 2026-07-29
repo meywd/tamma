@@ -4,6 +4,12 @@ Status: done — implemented 2026-07-29. One deliberate deviation from the plan'
 under "Corrections applied while implementing (2026-07-29)" below: the fix is on BOTH sides, not the client
 only — the API no longer invents `acceptorRequirement` for a body that omits it.
 
+> **Read the scope boundary before quoting this story's headline.** The fix covers
+> `PUT /api/acceptance-rules/{documentTypeKey}`. A `PUT /api/acceptance-rules/base` can STILL erase the
+> shipped human acceptor floor on `design`, `sprint-plan` and `threat-model` — not through defaulting, but
+> through 39-5's tier-2 WHOLESALE shadowing, which predates this story and is a recorded follow-up. See
+> **"Amendment — 2026-07-29" → A1**.
+
 ## MANDATORY: Before You Code
 
 **ALL contributors MUST read and follow the comprehensive development process:**
@@ -184,9 +190,127 @@ stronger guard than the proposed test, so the "Handoff to 43-4" section is **con
 43-0 did add is the pointer: `GetAcceptanceRulesTool`'s class doc now explains why a singleton
 `IToolExecutor` registration would be wrong and names the allowlist.
 
+## Amendment — 2026-07-29 (adversarial review of the shipped slice)
+
+### A1. SCOPE BOUNDARY: the fix covers the PER-TYPE route only. The base route can still erase the human floor. (must-read)
+
+**This story's headline is "an admin save no longer resets `acceptorRequirement`".
+That is true of `PUT /api/acceptance-rules/{documentTypeKey}`. It is NOT true of
+`PUT /api/acceptance-rules/base`,** and the gap is not an omission-handling bug —
+preserve-on-absent works correctly on the base route too (it carries the BASE
+row's own in-force requirement forward). The gap is **tier-2 wholesale
+shadowing**, which is 39-5's D1/D2 resolution semantics and predates this story.
+
+**The mechanism.** `AcceptanceRulesService.ResolveAsync` resolves WHOLESALE:
+tier 1 is the per-type override row, tier 2 is the principal BASE override row,
+tier 3 is `AcceptanceDefaults.For(type)`. There is no field merge. So the moment
+a base override row exists, it shadows tier 3 **entirely** — including the
+per-type `AcceptorRequirement.Human` floors that `design`, `sprint-plan` and
+`threat-model` ship (and `threat-model`'s `security` reviewer selection).
+
+Consequence, proved: **one** `PUT /api/acceptance-rules/base` whose body omits
+`acceptorRequirement` writes a base row carrying the BASE row's in-force value
+(`any`), and from then on `design`, `sprint-plan` and `threat-model` all resolve
+to `any` — their human floor is gone, without any of them having been written.
+Worse, a subsequent OMITTING per-type save then reads that degraded value as
+"what is in force" and bakes it into a type row, at which point deleting the base
+row no longer restores the floor.
+
+**Not a regression, and not UI-reachable today.** The semantics are 39-5's, not
+43-0's; and the admin page renders only the ten per-type rows, so nothing in the
+shipped UI issues a base PUT. But it is the same user-visible failure this story
+claims to have closed, reachable by anything that speaks HTTP.
+
+**Decision: recorded as a FOLLOW-UP, not fixed here — with the reason.** The
+instruction to "apply the same in-force-preservation to the base route if it is
+genuinely the same shape" was evaluated and **it is not the same shape.**
+Preserve-on-absent carries forward *the value in force for the row being
+written*; the base row is ONE row standing in for ten document types with three
+different floors, so there is no single value to carry forward that would protect
+them. Closing this requires changing what tier 2 MEANS — either merging
+`AcceptorRequirement` per-type instead of shadowing it, or making the floor a
+`max()` across tiers rather than a wholesale pick. That is a deliberate change to
+39-5 D1/D2's wholesale-row contract, affects every field (not just this one), and
+belongs in a story that owns the resolution semantics. Doing it inside 43-0 would
+change resolution behaviour for every existing stored base row without a story
+saying so.
+
+**What a follow-up must decide:** whether tier 2 stays wholesale (and the base
+route grows a guard that REFUSES to lower a floor below any shipped per-type
+floor), or tier 2 becomes a per-field merge for `AcceptorRequirement`
+specifically. Either closes it; they are not equivalent and the choice is a
+product one.
+
+### A2. A corrupt stored row is now a 400, not a 500 (fixed)
+
+**This commit introduced a new 500 on a shipped admin surface.** Story 43-0 made
+`Upsert` READ before writing (that is how an omitted field is preserved). The
+read goes through `AcceptanceRulesService.Materialize` →
+`AcceptanceRulesJson.Deserialize`, which throws `TammaError`
+`ACCEPTANCE_RULES.INVALID` on an out-of-range body (caught → 400) **or
+`JsonException` on malformed JSON — which the endpoint's `catch (TammaError)` did
+not cover, so it escaped as a 500.** Because per-type resolution falls through to
+the base row, ONE corrupt base row made `PUT` fail for EVERY document type.
+Before this commit `Upsert` never read, so overwriting the row WAS the repair.
+
+**Fixed:** the catch is widened to `JsonException` on both `Upsert` and
+`GetResolved`, returning `400 ACCEPTANCE_RULES.STORED_ROW_UNREADABLE` whose
+message names the fall-through (the corrupt row may be `base` even though the
+caller addressed a type) and the repair path.
+
+**The repair path, documented:** `DELETE /api/acceptance-rules/{key}` — DELETE
+never reads the body — drops to the next tier, then `PUT` the wanted rules. A PUT
+alone can no longer repair a corrupt row, precisely because since 43-0 it must
+read the in-force value in order to preserve it. Pinned by
+`Upsert_over_a_malformed_stored_row_is_400_naming_the_problem_not_500`,
+`One_malformed_BASE_row_makes_every_type_400_not_500`,
+`Get_resolved_over_a_malformed_stored_row_is_400_not_500` and
+`Delete_then_put_recovers_from_a_malformed_stored_row`.
+
+*Adjacent, NOT changed:* `ListEffective` catches `InvalidOperationException` /
+`NpgsqlException` / `DbUpdateException` and degrades to shipped defaults. A
+corrupt row still throws past it. Widening that catch was deliberately NOT done —
+it would silently serve defaults over a corrupt row, masking the corruption
+instead of reporting it, which is the opposite of D3's "a corrupt row throws,
+never degrades".
+
+### A3. Comment corrections
+
+- **`RulesEditDialog.test.tsx`** — the whole-body test's comment claimed a future
+  tenth field "fails here". It cannot: the expected key list is a hardcoded
+  literal, so a tenth field forgotten in the memo leaves BOTH the memo and the
+  literal at nine and the assertion still passes. What actually catches it is
+  `tsc` (the memo is typed `useMemo<AcceptanceRules>`) plus the C#
+  `AcceptanceRulesUpsertRequestFieldSetTests` (reflection over the DTO). Comment
+  corrected to say what the test does catch: the memo dropping a field the
+  interface still declares — the original 43-0 defect shape.
+- **`AcceptanceRulesDtos.cs`** — documented `null` as "the caller did not say"
+  but never stated that a client SENDING `null` is treated identically to
+  omitting the field. It is: this is a plain `AcceptorRequirement?` reduced with
+  `?? current`, not a tri-state, so "clear this field" is not expressible. Now
+  stated, with the contrast to Story 44-2's `Optional<T>` tri-state (built in the
+  same commit for exactly the cases this member does not need, because an
+  always-present enum floor has no cleared state).
+
+### A4. Wiki corrected — `ResolveToolsActivity` was documented as live surface
+
+`wiki.tamma.dev` is live and still described the activity this story DELETED as
+existing surface, including Story 42-3 being specified as "extends
+`ResolveToolsActivity`". Corrected in both the wiki and its
+`apps/wiki-site/public/content/` mirrors: `Epics/Epic-42-Tool-Layer.md`
+(4 places), `Architecture.md`, `Workflow-LLM-Call.md`, `Roadmap.md`. Each now
+states plainly that Story 43-0 deleted it on 2026-07-29, that **nothing replaced
+it** (tool selection is not a workflow activity), and where the work has to land
+instead — `IToolExecutorRegistry` and the API-side tool loop
+(`InlineToolLoopRunner` / `ParallelToolExecutor`). Epic 42 is backlog, so this is
+a re-siting of unstarted work, not a lost implementation. Historical story
+documents under `content/stories/` are left as written — they are dated records
+of past state, and several already say "deleted by Story 43-0".
+
 ## Change Log
 
 | Date       | Version | Changes                | Author |
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-25 | 1.0.0   | Initial story creation | Claude |
 | 2026-07-29 | 1.1.0   | Implemented. D1 superseded — the API side no longer defaults an omitted `acceptorRequirement` (preserve-on-absent); `ResolveToolsActivity` deleted; 43-4's story text reconciled; AC8 recorded as satisfied by 43-4's allowlist. | Claude |
+| 2026-07-29 | 1.2.0   | Adversarial-review round (see "Amendment — 2026-07-29"). FIXED: a malformed stored row is now a typed 400 on `Upsert`/`GetResolved` instead of a 500 this commit introduced, with the DELETE-then-PUT repair path documented and tested. RECORDED as follow-up with reasoning: tier-2 wholesale shadowing means a `PUT .../base` omitting `acceptorRequirement` still erases the human floor on `design`/`sprint-plan`/`threat-model` — pre-existing 39-5 D1/D2 semantics, not the same shape as preserve-on-absent, and closing it changes what tier 2 means. Comment corrections in `RulesEditDialog.test.tsx` and `AcceptanceRulesDtos.cs`. Wiki + mirrors corrected: `ResolveToolsActivity` no longer documented as live surface. | Claude |

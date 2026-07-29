@@ -872,6 +872,383 @@ public class TrackerEndpointsTests
         body.GetProperty("code").GetString().Should().Be("TRACKER.UNKNOWN_KIND");
     }
 
+
+    // ══════════════ AC9 — concurrency, PROVED CONCURRENTLY ══════════════════
+    // Review MAJOR-2 / MODERATE-3 / MINOR-7 (2026-07-29). `Lost_update_is_409`
+    // above is SEQUENTIAL: writer one completes before writer two starts, so it
+    // would pass against a pure check-then-write with no atomic guard at all —
+    // which is exactly what projects and preferences had. The tests below are
+    // the ones that discriminate. Two shapes, deliberately:
+    //
+    //   (a) DETERMINISTIC, at the repository seam — reproduces the precise
+    //       interleaving W2.read(v1) → W1 completes(v2) → W2.repo-read(v2) →
+    //       W2 writes v3. The service check cannot see it (the service already
+    //       read v1) and the EF token alone cannot see it (the repository
+    //       re-read v2), so ONLY the plumbed-through precondition catches it.
+    //
+    //   (b) GENUINELY CONCURRENT, at the handler seam — two writers whose reads
+    //       both precede either write, run under Task.WhenAll. This is the
+    //       reviewer's own reproduction: before the fix BOTH returned 200 for
+    //       projects and preferences, and the first writer's rename was
+    //       silently reverted.
+
+    [Test]
+    public async Task Work_item_stale_precondition_loses_even_when_the_repository_reread_is_fresh()
+    {
+        var project = await NewProjectAsync();
+        var item = await NewItemAsync(project.Id);
+        item.Version.Should().Be(1);
+
+        // W2 reads v1 and holds the snapshot.
+        var writerTwoSnapshot = await _workItems.GetAsync(item.Id);
+        writerTwoSnapshot!.Version.Should().Be(1);
+        writerTwoSnapshot.Title = "writer two";
+
+        // W1 completes: the row is now v2.
+        var afterOne = await _workItems.UpdateAsync(
+            new WorkItemEntity
+            {
+                Id = item.Id, ProjectId = item.ProjectId, Kind = item.Kind, Status = item.Status,
+                Title = "writer one", Key = item.Key, Number = item.Number,
+                Rank = item.Rank, SiblingRank = item.SiblingRank,
+            },
+            expectedVersion: 1);
+        afterOne!.Version.Should().Be(2);
+
+        // W2 now writes. Its repository re-read WILL see v2 — the EF token on
+        // its own would be satisfied. The precondition it asserted (v1) is what
+        // must refuse it.
+        var writerTwo = async () => await _workItems.UpdateAsync(writerTwoSnapshot, expectedVersion: 1);
+
+        (await writerTwo.Should().ThrowAsync<TammaError>())
+            .Which.Code.Should().Be("TRACKER.CONCURRENCY_CONFLICT");
+
+        (await _workItems.GetAsync(item.Id))!.Title.Should().Be("writer one",
+            "the loser's write must not have landed");
+    }
+
+    [Test]
+    public async Task Project_stale_precondition_loses_even_when_the_repository_reread_is_fresh()
+    {
+        var project = await NewProjectAsync();
+        project.Version.Should().Be(1);
+
+        var writerTwoSnapshot = await _projects.GetAsync(project.Id);
+        writerTwoSnapshot!.Name = "writer two";
+
+        var afterOne = await _projects.UpdateAsync(
+            new ProjectEntity
+            {
+                Id = project.Id, Key = project.Key, Name = "writer one",
+                EstimateScale = project.EstimateScale,
+            },
+            expectedVersion: 1);
+        afterOne!.Version.Should().Be(2);
+
+        var writerTwo = async () => await _projects.UpdateAsync(writerTwoSnapshot, expectedVersion: 1);
+
+        (await writerTwo.Should().ThrowAsync<TammaError>())
+            .Which.Code.Should().Be("TRACKER.CONCURRENCY_CONFLICT");
+
+        (await _projects.GetAsync(project.Id))!.Name.Should().Be("writer one",
+            "before the fix ProjectEntity.Version was not an EF concurrency token and "
+            + "ProjectRepository.UpdateAsync copied the stale snapshot's columns wholesale, "
+            + "so writer one's rename was silently reverted");
+    }
+
+    [Test]
+    public async Task Concurrent_project_patches_with_the_same_if_match_produce_exactly_one_winner()
+    {
+        var project = await NewProjectAsync();
+        project.Version.Should().Be(1);
+
+        // Both writers read v1 BEFORE either writes — that is what the shared
+        // `If-Match: "1"` encodes — and both requests are in flight together.
+        async Task<(int Status, JsonElement Body, string? ETag)> Patch(string name)
+        {
+            var http = Context(ifMatch: "\"1\"");
+            return await Exec(
+                await TrackerEndpoints.PatchProject(
+                    project.Id,
+                    JsonSerializer.Deserialize<PatchProjectRequest>($$"""{"name":"{{name}}"}""", Json)!,
+                    Service(), http),
+                http);
+        }
+
+        var results = await Task.WhenAll(Patch("writer one"), Patch("writer two"));
+
+        results.Count(r => r.Status == StatusCodes.Status200OK).Should().Be(1,
+            "exactly one writer may win — the reviewer proved BOTH returned 200 before the fix");
+        var loser = results.Single(r => r.Status != StatusCodes.Status200OK);
+        loser.Status.Should().Be(StatusCodes.Status409Conflict);
+        loser.Body.GetProperty("code").GetString().Should().Be("TRACKER.CONCURRENCY_CONFLICT");
+        loser.Body.GetProperty("retryable").GetBoolean().Should().BeTrue();
+
+        var winnerName = results.Single(r => r.Status == StatusCodes.Status200OK)
+            .Body.GetProperty("name").GetString();
+        var stored = await _projects.GetAsync(project.Id);
+        stored!.Name.Should().Be(winnerName, "the loser's rename must not have landed on top");
+        stored.Version.Should().Be(2, "one winner, one version bump");
+    }
+
+    [Test]
+    public async Task Concurrent_preference_puts_with_the_same_if_match_produce_exactly_one_winner()
+    {
+        var userId = Guid.NewGuid();
+
+        // Seed the row so both writers have a v1 to assert against.
+        var seeded = await Service().UpsertPreferencesAsync(
+            userId, new UpsertTrackerPreferencesRequest(null, "task", "status"), userId);
+        seeded.Version.Should().Be(1);
+
+        async Task<(int Status, JsonElement Body, string? ETag)> Put(string groupBy)
+        {
+            var http = Context(ifMatch: "\"1\"");
+            return await Exec(
+                await TrackerEndpoints.PutPreferences(
+                    new UpsertTrackerPreferencesRequest(null, "task", groupBy),
+                    Service(), Principal(userId), _tenantContext,
+                    new StubModeProvider(TammaMode.SingleUser), http),
+                http);
+        }
+
+        var results = await Task.WhenAll(Put("assignee"), Put("kind"));
+
+        results.Count(r => r.Status == StatusCodes.Status200OK).Should().Be(1,
+            "tracker_preferences.Version was not an EF concurrency token either — the same "
+            + "AC9 claim was false on this surface too");
+        results.Single(r => r.Status != StatusCodes.Status200OK)
+            .Body.GetProperty("code").GetString().Should().Be("TRACKER.CONCURRENCY_CONFLICT");
+
+        var stored = await _preferences.GetAsync(userId);
+        stored!.Version.Should().Be(2, "one winner, one version bump");
+        stored.BoardGroupBy.Should().Be(
+            results.Single(r => r.Status == StatusCodes.Status200OK)
+                .Body.GetProperty("boardGroupBy").GetString());
+    }
+
+    [Test]
+    public async Task Concurrent_status_and_assign_with_the_same_if_match_produce_exactly_one_winner()
+    {
+        // The other two read-check-then-separate-write shapes (MODERATE-3):
+        // SetWorkItemStatusAsync and AssignWorkItemAsync.
+        var project = await NewProjectAsync();
+        var item = await NewItemAsync(project.Id);
+
+        async Task<(int Status, JsonElement Body, string? ETag)> Move(string status)
+        {
+            var http = Context(ifMatch: "\"1\"");
+            return await Exec(
+                await TrackerEndpoints.SetWorkItemStatus(
+                    item.Id, new SetStatusRequest(status), Service(), http),
+                http);
+        }
+
+        var moves = await Task.WhenAll(Move("in_progress"), Move("blocked"));
+        moves.Count(r => r.Status == StatusCodes.Status200OK).Should().Be(1);
+        moves.Single(r => r.Status != StatusCodes.Status200OK)
+            .Body.GetProperty("code").GetString().Should().Be("TRACKER.CONCURRENCY_CONFLICT");
+        (await _workItems.GetAsync(item.Id))!.Version.Should().Be(2);
+
+        var second = await NewItemAsync(project.Id, "second");
+        async Task<(int Status, JsonElement Body, string? ETag)> Assign(Guid assignee)
+        {
+            var http = Context(ifMatch: "\"1\"");
+            return await Exec(
+                await TrackerEndpoints.AssignWorkItem(
+                    second.Id,
+                    JsonSerializer.Deserialize<AssignRequest>(
+                        $$"""{"assigneeUserId":"{{assignee}}"}""", Json)!,
+                    Service(), http),
+                http);
+        }
+
+        var assigns = await Task.WhenAll(Assign(Guid.NewGuid()), Assign(Guid.NewGuid()));
+        assigns.Count(r => r.Status == StatusCodes.Status200OK).Should().Be(1);
+        assigns.Single(r => r.Status != StatusCodes.Status200OK)
+            .Body.GetProperty("code").GetString().Should().Be("TRACKER.CONCURRENCY_CONFLICT");
+        (await _workItems.GetAsync(second.Id))!.Version.Should().Be(2);
+    }
+
+    // ══════════════ MODERATE-4 — the racy delete pre-checks ═════════════════
+
+    [Test]
+    public async Task Deleting_a_project_that_gained_a_work_item_after_the_pre_check_is_409_not_500()
+    {
+        var project = await NewProjectAsync();
+        await NewItemAsync(project.Id);
+
+        // The seam: a service whose emptiness pre-check reports "empty" while
+        // the row is not. That is precisely the state a work item created in the
+        // gap between the pre-check and the DELETE leaves behind. Everything
+        // else delegates to the real service, so the FK RESTRICT is tripped for
+        // real by the real repository.
+        var http = Context();
+        var (status, body, _) = await Exec(
+            await TrackerEndpoints.DeleteProject(
+                project.Id, new BlindPreCheckTrackerService(Service()), http),
+            http);
+
+        status.Should().Be(StatusCodes.Status409Conflict,
+            "ProjectRepository.DeleteAsync's own comment promised the caller maps the constraint "
+            + "violation to a 409; before this fix only TammaError was caught and PostgresException "
+            + "23503 escaped as an unhandled 500");
+        body.GetProperty("code").GetString().Should().Be("TRACKER.PROJECT_NOT_EMPTY");
+
+        (await _projects.GetAsync(project.Id)).Should().NotBeNull("the refusal must not delete");
+    }
+
+    [Test]
+    public async Task Deleting_a_work_item_that_gained_a_child_after_the_pre_check_is_409_not_500()
+    {
+        var project = await NewProjectAsync();
+        var parent = await NewItemAsync(project.Id, "parent");
+        await _workItems.CreateAsync(new WorkItemEntity
+        {
+            ProjectId = project.Id,
+            Kind = "task",
+            Status = "backlog",
+            Title = "child",
+            ParentId = parent.Id,
+        });
+
+        var http = Context();
+        var (status, body, _) = await Exec(
+            await TrackerEndpoints.DeleteWorkItem(
+                parent.Id, new BlindPreCheckTrackerService(Service()), http),
+            http);
+
+        status.Should().Be(StatusCodes.Status409Conflict);
+        body.GetProperty("code").GetString().Should().Be("TRACKER.HAS_CHILDREN");
+
+        (await _workItems.GetAsync(parent.Id)).Should().NotBeNull();
+    }
+
+    // ══════════════ MINOR-9 — coherence on the PROJECT write ════════════════
+
+    [Test]
+    public async Task Setting_a_project_to_not_used_while_it_holds_estimates_is_refused()
+    {
+        var project = await NewProjectAsync(scale: "fibonacci");
+        await Service().CreateWorkItemAsync(
+            JsonSerializer.Deserialize<CreateWorkItemRequest>($$"""
+            {"projectId":"{{project.Id}}","title":"estimated","kind":"task","estimate":5}
+            """, Json)!, null);
+
+        var http = Context();
+        var (status, body, _) = await Exec(
+            await TrackerEndpoints.PatchProject(
+                project.Id,
+                JsonSerializer.Deserialize<PatchProjectRequest>(
+                    """{"estimateScale":"not_used"}""", Json)!,
+                Service(), http),
+            http);
+
+        status.Should().Be(StatusCodes.Status400BadRequest,
+            "coherence was enforced on the work-item write only, so the incoherent state "
+            + "(not_used scale + stored estimates) was reachable through the project write");
+        body.GetProperty("code").GetString().Should().Be("TRACKER.ESTIMATE_NOT_ALLOWED");
+
+        (await _projects.GetAsync(project.Id))!.EstimateScale.Should().Be("fibonacci",
+            "the refusal must not have written the scale");
+    }
+
+    [Test]
+    public async Task Setting_a_project_to_not_used_is_allowed_once_no_estimates_remain()
+    {
+        var project = await NewProjectAsync(scale: "fibonacci");
+        await NewItemAsync(project.Id); // no estimate
+
+        var http = Context();
+        var (status, _, _) = await Exec(
+            await TrackerEndpoints.PatchProject(
+                project.Id,
+                JsonSerializer.Deserialize<PatchProjectRequest>(
+                    """{"estimateScale":"not_used"}""", Json)!,
+                Service(), http),
+            http);
+
+        status.Should().Be(StatusCodes.Status200OK, "the guard blocks the incoherent case only");
+        (await _projects.GetAsync(project.Id))!.EstimateScale.Should().Be("not_used");
+    }
+
+    // ══════════════ MINOR-8 — visibility keys on the CREATOR ════════════════
+
+    [Test]
+    public async Task Visibility_is_keyed_on_the_creator_not_the_assignee()
+    {
+        // PINS TODAY'S BEHAVIOUR, WHICH IS A KNOWN GAP — not an endorsement.
+        // TrackerService builds TaskRef(tenantId, item.CreatedByUserId, …), and
+        // TaskRef carries exactly ONE principal axis (Story 39-20 owns that
+        // shape), so an item ASSIGNED TO the viewer but created by someone else
+        // is filtered OUT of the viewer's own list the day a real resolver
+        // replaces the stub. This test exists so that day is not a surprise: it
+        // will FAIL when 39-20 widens the axis, and its failure is the reminder
+        // to fix the keying at the same time.
+        var project = await NewProjectAsync();
+        var viewer = Guid.NewGuid();
+        var someoneElse = Guid.NewGuid();
+
+        var minecreated = await Service().CreateWorkItemAsync(
+            JsonSerializer.Deserialize<CreateWorkItemRequest>($$"""
+            {"projectId":"{{project.Id}}","title":"I filed this","kind":"task"}
+            """, Json)!, viewer);
+
+        var assignedToMe = await Service().CreateWorkItemAsync(
+            JsonSerializer.Deserialize<CreateWorkItemRequest>($$"""
+            {"projectId":"{{project.Id}}","title":"assigned to me","kind":"task",
+             "assigneeUserId":"{{viewer}}"}
+            """, Json)!, someoneElse);
+
+        var page = await Service(new FakeAudienceResolver([]), TammaMode.SaaS)
+            .ListWorkItemsAsync(new WorkItemListQuery { ProjectId = project.Id }, viewer);
+
+        page.VisibilityMode.Should().Be(TrackerService.VisibilityPerUser,
+            "a non-stub resolver is registered, so the per-user branch is live");
+        page.Items.Select(i => i.Id).Should().Contain(minecreated.Id);
+        page.Items.Select(i => i.Id).Should().NotContain(assignedToMe.Id,
+            "KNOWN GAP (review MINOR-8): the TaskRef is keyed on CreatedByUserId, so an item "
+            + "assigned to the viewer but created by another user is filtered out of the "
+            + "viewer's own list. Story 39-20 must widen TaskRef's principal axis when it "
+            + "swaps the resolver — if this assertion starts failing, that is what happened.");
+    }
+
+    /// <summary>
+    /// A <see cref="ITrackerService"/> decorator whose DELETE PRE-CHECKS report
+    /// "nothing blocks this" while the database says otherwise — the exact state
+    /// a row created between the pre-check and the DELETE produces. Everything
+    /// else delegates, so the FK RESTRICT is tripped by the real repository and
+    /// the endpoint's 23503 mapping is exercised end to end (review MODERATE-4).
+    /// </summary>
+    private sealed class BlindPreCheckTrackerService(ITrackerService inner) : ITrackerService
+    {
+        public Task<IReadOnlyList<WorkItemEntity>> ProjectWorkItemsAsync(Guid projectId, int limit) =>
+            Task.FromResult<IReadOnlyList<WorkItemEntity>>([]);
+
+        public Task<IReadOnlyList<WorkItemEntity>> ChildrenAsync(Guid id, int limit) =>
+            Task.FromResult<IReadOnlyList<WorkItemEntity>>([]);
+
+        public Task<IReadOnlyList<ProjectEntity>> ListProjectsAsync(bool includeArchived) => inner.ListProjectsAsync(includeArchived);
+        public Task<ProjectEntity?> GetProjectAsync(Guid projectId) => inner.GetProjectAsync(projectId);
+        public Task<ProjectEntity> CreateProjectAsync(CreateProjectRequest request, Guid? createdByUserId) => inner.CreateProjectAsync(request, createdByUserId);
+        public Task<ProjectEntity?> PatchProjectAsync(Guid projectId, PatchProjectRequest request, int? ifMatchVersion) => inner.PatchProjectAsync(projectId, request, ifMatchVersion);
+        public Task<bool> DeleteProjectAsync(Guid projectId, int? ifMatchVersion) => inner.DeleteProjectAsync(projectId, ifMatchVersion);
+        public Task<WorkItemEntity?> GetWorkItemAsync(Guid id) => inner.GetWorkItemAsync(id);
+        public Task<WorkItemEntity?> GetWorkItemByKeyAsync(string key) => inner.GetWorkItemByKeyAsync(key);
+        public Task<WorkItemPage> ListWorkItemsAsync(WorkItemListQuery query, Guid? viewerUserId) => inner.ListWorkItemsAsync(query, viewerUserId);
+        public Task<WorkItemEntity> CreateWorkItemAsync(CreateWorkItemRequest request, Guid? createdByUserId) => inner.CreateWorkItemAsync(request, createdByUserId);
+        public Task<WorkItemEntity?> PatchWorkItemAsync(Guid id, PatchWorkItemRequest request, int? ifMatchVersion) => inner.PatchWorkItemAsync(id, request, ifMatchVersion);
+        public Task<WorkItemEntity?> SetWorkItemStatusAsync(Guid id, string statusWire, int? ifMatchVersion) => inner.SetWorkItemStatusAsync(id, statusWire, ifMatchVersion);
+        public Task<WorkItemEntity?> AssignWorkItemAsync(Guid id, Guid? assigneeUserId, int? ifMatchVersion) => inner.AssignWorkItemAsync(id, assigneeUserId, ifMatchVersion);
+        public Task<bool> DeleteWorkItemAsync(Guid id, int? ifMatchVersion) => inner.DeleteWorkItemAsync(id, ifMatchVersion);
+        public Task<ResolvedTrackerPreferences> GetPreferencesAsync(Guid? userId) => inner.GetPreferencesAsync(userId);
+        public Task<ResolvedTrackerPreferences> GetPreferencesForTenantAsync(Guid tenantId) => inner.GetPreferencesForTenantAsync(tenantId);
+        public Task<ResolvedTrackerPreferences> UpsertPreferencesAsync(Guid? userId, UpsertTrackerPreferencesRequest request, Guid? actingUserId, int? ifMatchVersion = null) => inner.UpsertPreferencesAsync(userId, request, actingUserId, ifMatchVersion);
+        public Task<ResolvedTrackerPreferences> UpsertPreferencesForTenantAsync(Guid tenantId, UpsertTrackerPreferencesRequest request, Guid? actingUserId, int? ifMatchVersion = null) => inner.UpsertPreferencesForTenantAsync(tenantId, request, actingUserId, ifMatchVersion);
+        public Task<bool> DeletePreferencesAsync(Guid? userId) => inner.DeletePreferencesAsync(userId);
+        public Task<bool> DeletePreferencesForTenantAsync(Guid tenantId) => inner.DeletePreferencesForTenantAsync(tenantId);
+    }
+
     // ── Fakes ──────────────────────────────────────────────────────────────
 
     /// <summary>

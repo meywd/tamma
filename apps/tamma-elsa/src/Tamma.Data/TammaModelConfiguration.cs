@@ -2396,7 +2396,17 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.NextNumber).HasDefaultValue(1);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
-            entity.Property(e => e.Version).HasDefaultValue(1);
+            // Version IS the optimistic-concurrency token, exactly as on
+            // work_items (44-2 adversarial review, 2026-07-29). Before this it
+            // was a plain int with a default: two concurrent PATCHes both
+            // sending `If-Match: 1` BOTH returned 200 and the first writer's
+            // rename was silently reverted, because the service's check and the
+            // repository's write happened in different contexts. The token adds
+            // `WHERE "Version" = <as-read>` to the UPDATE/DELETE so the loser
+            // raises DbUpdateConcurrencyException, which ProjectRepository
+            // translates to the typed, retryable TRACKER.CONCURRENCY_CONFLICT.
+            // Model metadata only for a plain int — no migration (44-1 D10).
+            entity.Property(e => e.Version).HasDefaultValue(1).IsConcurrencyToken();
             // NOTE: RepositoryId is a bare Guid? — deliberately NO FK (story
             // AC10): 39-20's repositories table is control-plane resident and
             // a cross-plane FK is not expressible; no second repo registry.
@@ -2598,7 +2608,12 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.BoardGroupBy).HasMaxLength(32);
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
-            entity.Property(e => e.Version).HasDefaultValue(1);
+            // Version IS the optimistic-concurrency token (44-2 adversarial
+            // review, 2026-07-29) — same fix and same reason as projects above:
+            // AC9 claims "every mutation returns 409 on mismatch", and without
+            // the token two concurrent PUTs both carrying `If-Match: 1` both
+            // succeeded. Model metadata only for a plain int — no migration.
+            entity.Property(e => e.Version).HasDefaultValue(1).IsConcurrencyToken();
 
             entity.HasIndex(e => new { e.UserId, e.TenantId })
                 .IsUnique()

@@ -122,8 +122,14 @@ role (or the initiator) can accept in the Task View or by asking the orchestrato
    fails deterministically (the lifecycle suspends forever on its first `ActivityKind.Task` node with
    no bookmark to resume). Adding a sixth fixture that nothing runs would have recorded coverage that
    does not exist. Following F1's precedent, the executing coverage is
-   `AcceptanceCriteriaAuthoringWorkflowStructureTests` (13 tests) +
-   `AcceptanceCriteriaBindingHelperTests` (19 cases) + the two drift gates. **What that leaves
+   `AcceptanceCriteriaAuthoringWorkflowStructureTests` (**15** tests) +
+   `AcceptanceCriteriaBindingHelperTests` (**18** cases) + the two drift gates.
+   *(Counts corrected 2026-07-29, adversarial review F8: this amendment originally read "13 tests
+   + 19 cases"; the tree held 14 + 18, recounted per fixture with `dotnet test --filter`. The
+   structure suite moved 14 → 15 in the same pass, when follow-up F7 added
+   `DispatchLifecycle_ThreadsASessionId_AndTheBindingExposesIt`. These are the numbers a reader
+   uses to judge the no-execution-fixture redirect, so they are measured, not estimated.)*
+   **What that leaves
    unproven by THIS story:** AC3's persisted-lineage assertion and AC4's 41-15 read-back are carried
    by 41-1b's `NewDocumentTypeStoreRoundTripTests` — a real Postgres 17 Testcontainer sweep that
    already takes `acceptance-criteria` through envelope → `DocumentInstanceRepository.InsertAsync` →
@@ -137,3 +143,17 @@ role (or the initiator) can accept in the Task View or by asking the orchestrato
    (`.FAILED`/`.REJECTED`/`.ESCALATED` ⇒ error, `.STARTED` ⇒ started, else success). 41-3/41-4/41-5/
    41-6 now ship only a constants file. 41-9 consumed it in the same wave rather than carrying the
    near-identical `EmitAdrEventActivity` copy its own plan's D6 called for.
+
+8. **`sessionId` is threaded and exposed (added 2026-07-29, adversarial review F7).** As first
+   landed, this binding dispatched `document-lifecycle` with **no `sessionId` key** and exposed no
+   `sessionId` output — unlike every other lifecycle binding (`AdrAuthoringWorkflow.cs:245`/`:332`,
+   `DesignProposalWorkflow.cs:157`/`:247`, `DocumentLifecycleWorkflow.cs:653`). It never crashed,
+   because `DocumentLifecycleWorkflow` mints a UUIDv7 when the input is `Guid.Empty` — which is
+   exactly why nothing caught it: the accept decision was correlatable only to an id the child
+   invented and no caller ever saw. The binding now mints-or-accepts a `sessionId` in `ReadInputs`
+   (`AdrAuthoringWorkflow:118`'s shape verbatim), passes it into the dispatched lifecycle and
+   exposes it as an output. This is not cosmetic: 39-17/39-19 correlate decisions by session
+   handle. Pinned by `DispatchLifecycle_ThreadsASessionId_AndTheBindingExposesIt`, which is the
+   **first** such pin in the tree — no other binding's structure suite pinned `sessionId`
+   (verified 2026-07-29: zero hits across the three `*WorkflowStructureTests` files), so there was
+   nothing to copy and the other two bindings remain unpinned on this property.

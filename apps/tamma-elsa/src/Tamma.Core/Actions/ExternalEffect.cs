@@ -89,11 +89,19 @@ public enum ExternalEffect
 
     /// <summary>MCP tool invocation — ONE COARSE MEMBER, deliberately (epic risk
     /// list): server and tool names arrive in request bodies and are not
-    /// enumerable. C# surface today is the KB proxy
-    /// (<c>POST /api/kb/mcp/servers/{id}/start|stop</c>, <c>KbEndpoints</c>);
-    /// invocation itself happens inside the intelligence-server sidecar. Adding a
-    /// server, or a tool on an existing server, changes nothing in the catalog —
-    /// recorded, not closed.</summary>
+    /// enumerable. The C# site is the KB proxy route
+    /// <c>POST /api/kb/mcp/tools/invoke</c> (<c>KbEndpoints.InvokeMcpTool</c>);
+    /// the invocation it proxies executes inside the intelligence-server sidecar,
+    /// so the C# side carries the governable call and no drift signal for the tool
+    /// SET. Adding a server, or a tool on an existing server, changes nothing in
+    /// the catalog — recorded, not closed.
+    /// <para>Corrected 2026-07-29 (review F16): this doc and the descriptor SiteKey
+    /// previously named <c>POST /api/kb/mcp/servers/{id}/start|stop</c>, which is
+    /// not a route pattern — the alternation matches no registered route, making the
+    /// member structurally unbindable by 43-8's ordinal SiteKey↔RawText check. The
+    /// server start/stop pair is MCP-server LIFECYCLE, not tool invocation, and has
+    /// no catalog member; giving it one is a vocabulary decision, not a repair.</para>
+    /// </summary>
     [Wire("mcp.tool.invoke")] McpToolInvoke,
 
     /// <summary><c>GET /api/v1/secrets/reveal/{token}</c> —

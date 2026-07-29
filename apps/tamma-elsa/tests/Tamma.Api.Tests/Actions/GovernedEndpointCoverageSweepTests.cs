@@ -273,6 +273,28 @@ public class GovernedEndpointCoverageSweepTests
     }
 
     [Test]
+    public void PreProvisionedJustificationKeyword_isStillUnused()
+    {
+        // Review F18(b). `gate-evaluation-endpoint-cannot-gate-itself` is a
+        // classifier arm with ZERO uses: AC11 names it for the route Story 43-9 adds
+        // (POST /api/v1/governance/evaluate), which does not exist yet. A vocabulary
+        // arm nothing classifies is normally dead weight; this one is kept
+        // deliberately, so the fact that it is pre-provisioned is ASSERTED rather
+        // than left as a comment a reader has to trust.
+        var uses = KnownUngovernedEndpoints.All
+            .Where(e => e.Justification.Contains(
+                "gate-evaluation-endpoint-cannot-gate-itself", StringComparison.OrdinalIgnoreCase))
+            .Select(e => $"  {e.Method} {e.Pattern}")
+            .ToList();
+
+        uses.Should().BeEmpty(
+            "measured 2026-07-29: 0 uses, because the gate-evaluation route arrives with Story 43-9. "
+            + "When 43-9 lands it, DELETE this test (the arm is live from then on) rather than "
+            + "widening it — an unused arm and a used arm are different facts:"
+            + Environment.NewLine + string.Join(Environment.NewLine, uses));
+    }
+
+    [Test]
     public void Baseline_justificationsAreClassified()
     {
         var unclassified = KnownUngovernedEndpoints.All

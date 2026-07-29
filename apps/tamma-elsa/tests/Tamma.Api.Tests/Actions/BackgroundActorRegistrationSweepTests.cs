@@ -279,12 +279,18 @@ public class BackgroundActorRegistrationSweepTests
             .Should().Contain("Tamma.Api.Services.PlatformTasks.PlatformTaskWorker");
     }
 
-    [Test]
-    public void EveryRegisteredHostedService_IsACataloguedAutomationMember()
-    {
-        var uncatalogued = RegisteredImplementationTypes()
-            .Where(t => !FrameworkHostedServices.Contains(t.FullName!))
-            .Where(t => !ActorsBySiteKey.ContainsKey(t.FullName!))
+    /// <summary>
+    /// THE code → catalog rule, extracted as a pure function over its inputs (review
+    /// F18(a)) so the discrimination test below can DRIVE IT with synthetic input
+    /// instead of asserting a precondition and hoping the rule would have fired.
+    /// </summary>
+    internal static List<string> ClassifyRegistrations(
+        IReadOnlyList<Type> registered,
+        IReadOnlySet<string> frameworkExemptions,
+        IReadOnlyDictionary<string, BackgroundActor> actorsBySiteKey) =>
+        registered
+            .Where(t => !frameworkExemptions.Contains(t.FullName!))
+            .Where(t => !actorsBySiteKey.ContainsKey(t.FullName!))
             .Select(t =>
                 $"  {t.FullName}: registered as an IHostedService but has no automation:* catalog "
                 + "member. Add a BackgroundActor member and a descriptor whose SiteKey is this full "
@@ -292,6 +298,12 @@ public class BackgroundActorRegistrationSweepTests
                 + "in the loop at all.")
             .Distinct()
             .ToList();
+
+    [Test]
+    public void EveryRegisteredHostedService_IsACataloguedAutomationMember()
+    {
+        var uncatalogued = ClassifyRegistrations(
+            RegisteredImplementationTypes(), FrameworkHostedServices, ActorsBySiteKey);
 
         uncatalogued.Should().BeEmpty(
             "every registered background actor must be catalogued:"
@@ -458,12 +470,58 @@ public class BackgroundActorRegistrationSweepTests
     }
 
     [Test]
-    public void Discrimination_anUncataloguedHostedServiceWouldBeReported()
+    public void Discrimination_anUncataloguedHostedServiceIsReported()
     {
-        // Feed the real catalog lookup a class that is not catalogued.
-        ActorsBySiteKey.Should().NotContainKey(typeof(UncataloguedFixtureHostedService).FullName!,
-            "the fixture type is deliberately uncatalogued; EveryRegisteredHostedService_"
-            + "IsACataloguedAutomationMember reports exactly this condition");
+        // STRENGTHENED 2026-07-29 (review F18(a)). This test used to assert only that
+        // the fixture type was absent from ActorsBySiteKey — a precondition, not the
+        // rule — so its name overclaimed: it would have stayed green even if the rule
+        // had been gutted. It now runs the REAL rule
+        // (ClassifyRegistrations, the same function
+        // EveryRegisteredHostedService_IsACataloguedAutomationMember calls) over the
+        // real catalog lookup, with the fixture type as the registered surface.
+        typeof(UncataloguedFixtureHostedService).FullName.Should().NotBeNull();
+
+        var problems = ClassifyRegistrations(
+            [typeof(UncataloguedFixtureHostedService)], FrameworkHostedServices, ActorsBySiteKey);
+
+        problems.Should().ContainSingle(
+            "an uncatalogued hosted service MUST be reported — if it is not, a background actor can "
+            + "start running unattended with no catalog member and this whole fixture reads as "
+            + "coverage while covering nothing")
+            .Which.Should().Contain(nameof(UncataloguedFixtureHostedService));
+    }
+
+    [Test]
+    public void Discrimination_aCataloguedHostedServiceIsNotReported()
+    {
+        // The complement: prove the rule is not simply always-red. Feed it a type
+        // whose full name IS a catalogued automation SiteKey, taken from the real
+        // catalog rather than from a literal.
+        var catalogued = RegisteredImplementationTypes()
+            .First(t => ActorsBySiteKey.ContainsKey(t.FullName!));
+
+        ClassifyRegistrations([catalogued], FrameworkHostedServices, ActorsBySiteKey)
+            .Should().BeEmpty();
+    }
+
+    [Test]
+    public void Discrimination_aFrameworkHostedServiceIsExempted_butOnlyByName()
+    {
+        // The exemption arm, driven rather than described: a framework service is
+        // silent, and an IDENTICALLY-SHAPED type that is not on the named list is not.
+        var frameworkName = FrameworkHostedServices.First();
+        var frameworkType = RegisteredImplementationTypes().First(t => t.FullName == frameworkName);
+
+        ClassifyRegistrations([frameworkType], FrameworkHostedServices, ActorsBySiteKey)
+            .Should().BeEmpty("a named framework service is exempt");
+
+        ClassifyRegistrations(
+                [frameworkType],
+                new HashSet<string>(StringComparer.Ordinal),
+                ActorsBySiteKey)
+            .Should().ContainSingle(
+                "the exemption comes ONLY from the named list — there is no namespace rule that could "
+                + "swallow a future Tamma service that happens to live elsewhere");
     }
 
     [Test]

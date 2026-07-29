@@ -90,6 +90,12 @@ public class WorkItemRepository(
                 ? items.Where(w => w.ExternalRefJson != null)
                 : items.Where(w => w.ExternalRefJson == null);
         }
+        if (query.HasEstimate is bool hasEstimate)
+        {
+            items = hasEstimate
+                ? items.Where(w => w.Estimate != null)
+                : items.Where(w => w.Estimate == null);
+        }
         if (!string.IsNullOrWhiteSpace(query.TitleContains))
             items = items.Where(w => EF.Functions.ILike(
                 w.Title, $"%{EscapeLike(query.TitleContains)}%"));
@@ -192,7 +198,7 @@ public class WorkItemRepository(
         return item;
     }
 
-    public async Task<WorkItemEntity?> UpdateAsync(WorkItemEntity item)
+    public async Task<WorkItemEntity?> UpdateAsync(WorkItemEntity item, int? expectedVersion = null)
     {
         ArgumentNullException.ThrowIfNull(item);
         ValidateVocabulary(item);
@@ -218,11 +224,12 @@ public class WorkItemRepository(
         existing.ExternalRefJson = item.ExternalRefJson;
         existing.UpdatedAt = DateTime.UtcNow;
         existing.Version += 1;
+        PinExpectedVersion(db, existing, expectedVersion);
         await SaveGuardingVersionAsync(db, existing.Id);
         return existing;
     }
 
-    public async Task<WorkItemEntity?> SetStatusAsync(Guid id, string statusWire)
+    public async Task<WorkItemEntity?> SetStatusAsync(Guid id, string statusWire, int? expectedVersion = null)
     {
         // Parse first — fail-loud on junk (TRACKER.UNKNOWN_STATUS), and the
         // terminal rule stays DERIVED from Category() (44-0 AC3), never a
@@ -239,6 +246,7 @@ public class WorkItemRepository(
         existing.ClosedAt = status.IsTerminal() ? DateTime.UtcNow : null;
         existing.UpdatedAt = DateTime.UtcNow;
         existing.Version += 1;
+        PinExpectedVersion(db, existing, expectedVersion);
         await SaveGuardingVersionAsync(db, existing.Id);
         return existing;
     }
@@ -418,6 +426,23 @@ public class WorkItemRepository(
     /// never a silent last-write-wins that could lose <c>PreviousKeys</c>
     /// history or a status/rank/parent write.
     /// </summary>
+    /// <summary>
+    /// Make the caller's <c>If-Match</c> precondition ATOMIC with the write
+    /// (44-2 adversarial review, 2026-07-29). The EF token alone closes only the
+    /// window INSIDE this repository: the service reads, checks
+    /// <c>RequireVersion</c>, and then the repository RE-READS in a fresh
+    /// context, so <c>W2.read(v1) → W1 completes(v2) → W2.repo-read(v2) →
+    /// W2 writes v3</c> passed the service check and never tripped the token.
+    /// Pinning the token's ORIGINAL value to the version the caller asserted
+    /// puts <c>WHERE "Version" = @expected</c> in the UPDATE/DELETE itself, so
+    /// the stale writer matches no row and loses with the typed conflict.
+    /// </summary>
+    private static void PinExpectedVersion(TenantDbContext db, WorkItemEntity row, int? expectedVersion)
+    {
+        if (expectedVersion is int expected)
+            db.Entry(row).Property(w => w.Version).OriginalValue = expected;
+    }
+
     private static async Task SaveGuardingVersionAsync(TenantDbContext db, Guid workItemId)
     {
         try
@@ -443,7 +468,7 @@ public class WorkItemRepository(
         retryable: true,
         severity: TammaErrorSeverity.Medium);
 
-    public async Task<bool> DeleteAsync(Guid id)
+    public async Task<bool> DeleteAsync(Guid id, int? expectedVersion = null)
     {
         var tid = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(tid);
@@ -451,9 +476,10 @@ public class WorkItemRepository(
         if (row is null)
             return false;
         db.WorkItems.Remove(row);
-        // Children RESTRICT the parent FK (the 44-2 409); relation edges
-        // CASCADE away with the item.
-        await db.SaveChangesAsync();
+        PinExpectedVersion(db, row, expectedVersion);
+        // Children RESTRICT the parent FK — 44-2 maps SqlState 23503 to the
+        // documented 409; relation edges CASCADE away with the item.
+        await SaveGuardingVersionAsync(db, id);
         return true;
     }
 

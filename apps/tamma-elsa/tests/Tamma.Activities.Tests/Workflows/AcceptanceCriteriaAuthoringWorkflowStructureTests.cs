@@ -4,6 +4,7 @@ using System.Reflection;
 using Elsa.Workflows;
 using Elsa.Workflows.Activities;
 using Elsa.Workflows.Activities.Flowchart.Activities;
+using Elsa.Workflows.Management.Activities.SetOutput;
 using Elsa.Workflows.Runtime.Activities;
 using FluentAssertions;
 using NUnit.Framework;
@@ -91,6 +92,31 @@ public class AcceptanceCriteriaAuthoringWorkflowStructureTests
         (input!["feedbackVariableName"] as string).Should().Be("contextFindings",
             "D3 — repair/revise notes must land in a carrier the cell's front matter DECLARES " +
             "(role, workItemJson, contextFindings, conventions); an undeclared key is dropped at render");
+    }
+
+    [Test]
+    public void DispatchLifecycle_ThreadsASessionId_AndTheBindingExposesIt()
+    {
+        // 41-2 follow-up F7 (2026-07-29). This binding dispatched document-lifecycle
+        // with NO "sessionId" key and exposed no sessionId output, unlike
+        // AdrAuthoringWorkflow:245/:332, DesignProposalWorkflow:157/:247 and
+        // DocumentLifecycleWorkflow:653. It never crashed — the lifecycle mints a
+        // UUIDv7 when the input is Guid.Empty — which is exactly why nothing caught
+        // it: the accept decision was correlatable only to an id no caller ever saw.
+        // Pinned here because NO structure suite in the tree pinned this for ANY
+        // binding (verified 2026-07-29: zero "sessionId" hits across the three
+        // *WorkflowStructureTests files), so there was nothing to copy.
+        var input = TaxonomyDriftBuildTests.MaterializeDispatchInput(
+            "AcceptanceCriteriaAuthoringWorkflow", "DispatchLifecycle");
+
+        input.Should().NotBeNull();
+        input!.Should().ContainKey("sessionId",
+            "the dispatched lifecycle must receive the binding's decision-session handle, so the "
+            + "accept decision can be correlated back to this run when 39-17/39-19 land");
+
+        AllActivities().OfType<SetOutput>().Select(a => a.Id).Should().Contain("OutputSessionId",
+            "a session handle the binding does not EXPOSE is no handle at all — the caller cannot "
+            + "correlate what it never receives");
     }
 
     [Test]

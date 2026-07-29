@@ -31,6 +31,18 @@ public sealed record AcceptanceRulesUpsertRequest(
     // requirement into `ToRules` (same posture as the single-field writes in
     // `ActionPolicyEndpoints`, which call this "the 43-0 bug class").
     //
+    // AN EXPLICIT `"acceptorRequirement": null` IS TREATED IDENTICALLY TO OMITTING
+    // THE FIELD — both preserve what is in force (review MINOR-5, 2026-07-29). This
+    // is a plain `AcceptorRequirement?`, not a tri-state: `ToRules` reduces it with
+    // `?? currentAcceptorRequirement`, so "absent" and "present and null" collapse to
+    // the same instruction and a caller CANNOT say "clear this field" here. That is
+    // correct for this member — there is no cleared state; the floor is always one of
+    // the enum's values — but it is worth stating, because Story 44-2 builds an entire
+    // `Optional<T>` tri-state apparatus in the same commit precisely to keep those two
+    // cases distinguishable on the tracker's PATCH bodies. The difference is
+    // deliberate, not an inconsistency: a nullable column can be cleared, an
+    // always-present enum floor cannot.
+    //
     // Legacy stored rows are unaffected by this: persistence round-trips the DOMAIN
     // record `Tamma.Core.Documents.Policy.AcceptanceRules`, whose own
     // `AcceptorRequirement { get; init; } = AcceptorRequirement.Any` property default

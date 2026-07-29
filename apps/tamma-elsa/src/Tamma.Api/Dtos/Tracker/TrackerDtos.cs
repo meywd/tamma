@@ -29,9 +29,25 @@ namespace Tamma.Api.Dtos.Tracker;
 /// <see cref="Value"/> is <c>null</c>: clear the column.</item>
 /// <item><b>present with a value</b> — set the column.</item>
 /// </list>
-/// <para>The converter carries <c>HandleNull = true</c>; without it
-/// System.Text.Json short-circuits a JSON <c>null</c> to <c>default</c> (i.e.
-/// UNSET) and "clear this field" would silently become "leave it alone".</para>
+/// <para>The converter carries <c>HandleNull = true</c>. <b>The rationale first
+/// written here was wrong and is corrected (review MODERATE-6, 2026-07-29):</b>
+/// it claimed that without the override System.Text.Json short-circuits a JSON
+/// <c>null</c> to <c>default</c> (= UNSET), turning "clear this field" into
+/// "leave it alone". It does not. STJ's default is
+/// <c>HandleNullOnRead = !CanBeNull</c>, and <c>Optional&lt;T&gt;</c> is a
+/// non-nullable STRUCT, so <c>CanBeNull</c> is false and <c>Read</c> already
+/// receives the <c>Null</c> token — the converter would yield
+/// <c>IsSet = true, Value = null</c> for an explicit null with or without the
+/// override. The BEHAVIOUR the tri-state depends on was never at risk.
+/// <c>HandleNullOnWrite</c> is irrelevant here: <c>Optional&lt;T&gt;</c> appears
+/// in request records only, never in a response type.</para>
+///
+/// <para>The override is KEPT deliberately, as explicitness and as defence: it
+/// states the requirement at the one place a reader looks, and it pins the
+/// behaviour against a future change that makes this type nullable-shaped
+/// (a <c>class</c>, or a <c>Nullable</c>-annotated member), at which point
+/// <c>CanBeNull</c> flips, the STJ default flips with it, and the tri-state
+/// WOULD silently collapse. Cheap insurance against a one-word edit.</para>
 /// </summary>
 [JsonConverter(typeof(OptionalJsonConverterFactory))]
 public readonly struct Optional<T>
@@ -83,9 +99,12 @@ public sealed class OptionalJsonConverterFactory : JsonConverterFactory
 internal sealed class OptionalJsonConverter<T> : JsonConverter<Optional<T>>
 {
     /// <summary>
-    /// MUST be true: a JSON <c>null</c> is the "clear this field" instruction
-    /// and has to reach <see cref="Read"/> rather than being folded into
-    /// <c>default</c> (= unset) by the serializer.
+    /// A JSON <c>null</c> is the "clear this field" instruction and must reach
+    /// <see cref="Read"/> rather than being folded into <c>default</c>
+    /// (= unset). Because <see cref="Optional{T}"/> is a non-nullable struct,
+    /// STJ's own default (<c>HandleNullOnRead = !CanBeNull</c>) ALREADY delivers
+    /// the null token — see the <see cref="Optional{T}"/> doc for why this
+    /// override is nevertheless kept rather than removed as redundant.
     /// </summary>
     public override bool HandleNull => true;
 
