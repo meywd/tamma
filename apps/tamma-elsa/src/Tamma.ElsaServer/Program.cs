@@ -230,6 +230,24 @@ if (!string.IsNullOrWhiteSpace(cpConnection))
                 .GetSection(Tamma.ElsaServer.Workflows.TenantDeleteRequestedTriggerOptions.SectionName)
                 .Bind(opts));
     builder.Services.AddHostedService<Tamma.ElsaServer.Workflows.TenantDeleteRequestedTrigger>();
+
+    // Story 41-30 — the tenant-aware scheduled-trigger seam. Dispatches ANY
+    // workflow definition per tenant per cron window, at most once across the
+    // fleet (tenant-scoped advisory lock + the scheduled_trigger_fires
+    // ON CONFLICT ledger). Registered INSIDE this conditional control-plane
+    // block (Correction 6 — the TenantCleanupRequestedTrigger precedent): the
+    // service reads scheduled_triggers/tenants via ControlPlaneDbContext, so a
+    // dev composition without a control plane must not fail DI at startup.
+    // Enabled=false by default (AC9) — set ScheduledTriggers:Enabled=true to
+    // opt in.
+    builder.Services.AddScoped<Tamma.Data.Abstractions.IScheduledTriggerRepository,
+        Tamma.Data.Repositories.ScheduledTriggerRepository>();
+    builder.Services.AddOptions<Tamma.ElsaServer.Workflows.TenantScheduledTriggerOptions>()
+        .Configure(opts =>
+            builder.Configuration
+                .GetSection(Tamma.ElsaServer.Workflows.TenantScheduledTriggerOptions.SectionName)
+                .Bind(opts));
+    builder.Services.AddHostedService<Tamma.ElsaServer.Workflows.TenantScheduledTriggerService>();
 }
 
 // CORS for Tamma API and Dashboard

@@ -12,8 +12,9 @@ namespace Tamma.Core.Actions;
 /// one factory overload, 12 in <c>Tamma.Api/Extensions/*</c>) plus
 /// <c>PlatformTaskWorker</c> (registered via a <c>TryAddEnumerable</c>
 /// hosted-service descriptor in <c>AddPlatformTaskWorker</c>, so no literal
-/// <c>AddHostedService&lt;&gt;</c> line exists for it) = <b>26</b> (the design's
-/// figure of 25 plus the Epic 46 review-F1 settings-store primer). Wire rule:
+/// <c>AddHostedService&lt;&gt;</c> line exists for it) = <b>27</b> (the design's
+/// figure of 25 plus the Epic 46 review-F1 settings-store primer plus Story
+/// 41-30's <c>TenantScheduledTriggerService</c>). Wire rule:
 /// kebab-case of the class name with a trailing
 /// <c>HostedService</c>/<c>BackgroundService</c> suffix dropped.
 ///
@@ -43,6 +44,13 @@ public enum BackgroundActor
 
     /// <summary><c>Tamma.ElsaServer.AgentSeeder</c>.</summary>
     [Wire("agent-seeder")] AgentSeeder,
+
+    /// <summary><c>Tamma.ElsaServer.Workflows.TenantScheduledTriggerService</c>
+    /// — Story 41-30, the tenant-aware scheduled-trigger seam: dispatches any
+    /// registered workflow definition per tenant per cron window, at most once
+    /// across the fleet (tenant-scoped advisory lock + the
+    /// <c>scheduled_trigger_fires</c> ledger). Ships <c>Enabled=false</c>.</summary>
+    [Wire("tenant-scheduled-trigger-service")] TenantScheduledTriggerService,
 
     // ── Tamma.Api host — Program.cs registrations ──
 
@@ -114,6 +122,14 @@ public enum BackgroundActor
 
     /// <summary><c>Tamma.Api.Services.Audit.AuditProjectorBackgroundService</c>.</summary>
     [Wire("audit-projector")] AuditProjector,
+
+    /// <summary><c>Tamma.Api.Services.Actions.ActionCatalogStartupValidator</c> —
+    /// Story 43-4's fail-loud boot check that the tool vocabularies agree with
+    /// this catalog. Read-only by construction: its only "action" is refusing
+    /// to start the Tamma.Api host. Catalogued because the hosted-service sweep
+    /// binds EVERY <c>IHostedService</c> class, deliberately including the
+    /// governance machinery itself.</summary>
+    [Wire("action-catalog-startup-validator")] ActionCatalogStartupValidator,
 
     /// <summary><c>Tamma.Api.Services.PlatformTasks.PlatformTaskWorker</c> — the
     /// generic platform-task drain loop (one task at a time per process;

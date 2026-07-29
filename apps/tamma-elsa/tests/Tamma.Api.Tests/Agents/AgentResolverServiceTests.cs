@@ -66,7 +66,7 @@ public class AgentResolverServiceTests
     }
 
     [Test]
-    public async Task ResolveAsync_All_Eight_Roles_Have_Platform_Default()
+    public async Task ResolveAsync_All_Valid_Roles_Have_Platform_Default()
     {
         _repoMock.Setup(r => r.GetTenantConfigAsync(It.IsAny<Guid?>()))
             .ReturnsAsync((JsonDocument?)null);

@@ -29,7 +29,8 @@ public class CallLlmInlineCredentialTests
     [Test]
     public async Task LoadProviderConfigWithKey_NoResolver_LeavesApiKeyEmpty_LegacyPath()
     {
-        var runner = new InlineToolLoopRunner(null, null, null, null); // no resolver
+        var runner = new InlineToolLoopRunner(
+            null, null, null, null, new CatalogDefaultToolLoopAutonomyGate()); // no resolver
 
         var (config, source) = await runner.LoadProviderConfigWithKeyAsync(
             "anthropic", tenantId: null, CancellationToken.None);
@@ -53,7 +54,8 @@ public class CallLlmInlineCredentialTests
             ["Anthropic:ApiKey"] = "SHOULD-NEVER-BE-READ-EITHER",
         });
         var runner = new InlineToolLoopRunner(
-            NullLogger<InlineToolLoopRunner>.Instance, null, config, null);
+            NullLogger<InlineToolLoopRunner>.Instance, null, config, null,
+            new CatalogDefaultToolLoopAutonomyGate());
 
         var (cfg, source) = await runner.LoadProviderConfigWithKeyAsync(
             "anthropic", tenantId: null, CancellationToken.None);
@@ -175,6 +177,7 @@ public class CallLlmInlineCredentialTests
 
     private static InlineToolLoopRunner NewRunner(IProviderCredentialResolver resolver) =>
         new(NullLogger<InlineToolLoopRunner>.Instance, null, null, null,
+            new CatalogDefaultToolLoopAutonomyGate(),
             null, null, null, null, null, resolver);
 
     private static string AnthropicSuccessBody() => """

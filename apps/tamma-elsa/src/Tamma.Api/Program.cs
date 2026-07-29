@@ -1627,6 +1627,18 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("acceptance-rules:manage"));
         });
+        // Story 41-30 (D8) — scheduled-trigger writes. Mirrors PromptManage:
+        // a tenant's schedule mutations must be reachable by tenant_owner OR
+        // tenant_admin (member → 403 at the policy); the owner-only
+        // SettingsManage would 403 every tenant_admin. tenant_id-NULL
+        // TEMPLATE rows are additionally platform-owner-only inside the
+        // handler (ScheduledTriggerEndpoints.WriteGate). Single-user mode is
+        // unaffected — the sole user is auto-owner of their personal tenant.
+        options.AddPolicy("ScheduleManage", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("schedules:manage"));
+        });
         options.AddPolicy("WorkflowsView", p =>
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
@@ -1729,7 +1741,7 @@ else if (builder.Environment.IsDevelopment())
             .Build();
         // Register all named policies with permissive default
         foreach (var name in new[] { "AdminAccess", "OwnerAccess", "PlatformOwnerAccess", "MemberAccess", "SettingsView",
-            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "PricingManage", "AcceptanceRulesManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
+            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "PricingManage", "AcceptanceRulesManage", "ScheduleManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
             "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny", "EngineServiceOnly", "OrchestratorChannel" })
         {
             options.AddPolicy(name, p => p.AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement()));
@@ -2155,6 +2167,52 @@ admin.MapPatch("/tenant-databases/{databaseId:guid}",
 admin.MapDelete("/tenant-databases/{databaseId:guid}",
         Tamma.Api.Endpoints.Admin.AdminTenantDatabasesEndpoints.DeleteDatabase)
     .RequireAuthorization("PlatformOwnerAccess");
+
+// Story 44-1 AC8 — migrate-all-provisioned-tenants sweep (platform-owner
+// only). The sweeper migrates each tenant THROUGH its pooled NpgsqlDataSource
+// (a re-parsed connection string cannot authenticate — Npgsql strips the
+// password from NpgsqlDataSource.ConnectionString; see the 44-1 plan).
+admin.MapPost("/tenants/migrate",
+        async (bool? dryRun, int? maxConcurrency,
+               Tamma.Data.Abstractions.ITenantMigrationSweeper sweeper,
+               CancellationToken ct) =>
+            Results.Ok(await sweeper.SweepAsync(
+                dryRun ?? false,
+                maxConcurrency
+                    ?? Tamma.Data.Abstractions.TenantMigrationSweep.DefaultMaxConcurrency,
+                ct)))
+    .RequireAuthorization("PlatformOwnerAccess");
+
+// Story 41-30 (D8) — the tenant-aware scheduled-trigger seam's admin surface.
+// Deliberately a SIBLING group of `admin` (which carries AdminAccess at the
+// group level): D8's RBAC gives SaaS member-role callers 200 on READ and 403
+// only on write, so reads take MemberAccess (any authenticated tenant member;
+// SaaS scoping — own tenant + platform templates — happens in the handler)
+// while writes + run-now take the ScheduleManage policy (tenant_owner OR
+// tenant_admin; member → 403). A tenant_id-NULL TEMPLATE row is additionally
+// platform-owner-only inside the handler, and a definition id outside the
+// closed SchedulableDefinitions allowlist is a typed 400 (an admin-writable
+// definition_id is otherwise an arbitrary-workflow-dispatch primitive).
+// Malformed cron ⇒ 400 at write time (AC5), never a fire-time throw.
+var scheduledTriggers = app.MapGroup("/api/admin/scheduled-triggers");
+scheduledTriggers.MapGet("/",
+        Tamma.Api.Endpoints.Admin.ScheduledTriggerEndpoints.List)
+    .RequireAuthorization("MemberAccess");
+scheduledTriggers.MapGet("/{id:guid}",
+        Tamma.Api.Endpoints.Admin.ScheduledTriggerEndpoints.Get)
+    .RequireAuthorization("MemberAccess");
+scheduledTriggers.MapPost("/",
+        Tamma.Api.Endpoints.Admin.ScheduledTriggerEndpoints.Create)
+    .RequireAuthorization("ScheduleManage");
+scheduledTriggers.MapPut("/{id:guid}",
+        Tamma.Api.Endpoints.Admin.ScheduledTriggerEndpoints.Update)
+    .RequireAuthorization("ScheduleManage");
+scheduledTriggers.MapDelete("/{id:guid}",
+        Tamma.Api.Endpoints.Admin.ScheduledTriggerEndpoints.Delete)
+    .RequireAuthorization("ScheduleManage");
+scheduledTriggers.MapPost("/{id:guid}/run-now",
+        Tamma.Api.Endpoints.Admin.ScheduledTriggerEndpoints.RunNow)
+    .RequireAuthorization("ScheduleManage");
 
 // Story 28-R2 follow-up B — platform-admin impersonation surface (SOC2
 // audit table + middleware). Begin requires PlatformOwnerAccess (only a
@@ -3292,6 +3350,22 @@ using (var scope = app.Services.CreateScope())
 
         if (!preserveDb)
         {
+            // ── DELIBERATE EXCLUSIONS from this DROP list — read before adding
+            // a table. ──
+            //   * provider_settings (Story 46-1): UI model selections must
+            //     survive redeploys.
+            //   * scheduled_triggers + scheduled_trigger_fires (Story 41-30,
+            //     AC7/D9): the schedule registry and its at-most-once fire
+            //     ledger. Sweeping them in would mean EVERY deploy silently
+            //     disables every tenant's recurring audits — the exact failure
+            //     mode an audit exists to prevent — and would erase the ledger
+            //     that makes fires at-most-once across restarts. Pinned by
+            //     ScheduleTablesNotDroppedOnStartupTests, which reads this SQL
+            //     literal and fails if either name appears.
+            // Excluded tables carry NO FK to wiped tables (a cascade from
+            // tenants would defeat the exclusion) and use IF NOT EXISTS
+            // idempotent migrations (they persist while the migration history
+            // is rebuilt).
             Log.Information("Wiping Tamma-managed public-schema tables (TAMMA_PRESERVE_DB not set)");
             dbContext.Database.ExecuteSqlRaw(@"
                 DROP TABLE IF EXISTS

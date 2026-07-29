@@ -101,7 +101,9 @@ public class ProviderSettingsResolutionTests
     private static InlineToolLoopRunner Runner(
         IConfiguration? configuration = null, IProviderSettingsStore? store = null) =>
         new(logger: null, httpClientFactory: null, configuration: configuration,
-            sanitizer: null, settingsStore: store);
+            sanitizer: null,
+            autonomyGate: new Tamma.Api.Services.Agents.CatalogDefaultToolLoopAutonomyGate(),
+            settingsStore: store);
 
     // ── AC9 test 1: the precedence matrix ──────────────────────────────────
     //
@@ -542,6 +544,7 @@ public class ProviderSettingsResolutionTests
             httpClientFactory: new SingleClientFactory(handler),
             configuration: Config(),
             sanitizer: null,
+            autonomyGate: new CatalogDefaultToolLoopAutonomyGate(),
             settingsStore: new ThrowingSettingsStore());
 
         var result = await runner.RunAsync(

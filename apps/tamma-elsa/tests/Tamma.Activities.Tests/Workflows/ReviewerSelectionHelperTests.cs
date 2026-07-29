@@ -15,10 +15,12 @@ namespace Tamma.Activities.Tests.Workflows;
 [TestFixture]
 public class ReviewerSelectionHelperTests
 {
+    // 7 → 9 (Story 41-1a D1/D2): + TechWriter (review-docs) and UxDesigner (review-design).
     private static readonly AgentRole[] DocumentRoster =
     {
         AgentRole.Architect, AgentRole.SeniorDeveloper, AgentRole.Security,
         AgentRole.Developer, AgentRole.Tester, AgentRole.Devops, AgentRole.ProductOwner,
+        AgentRole.TechWriter, AgentRole.UxDesigner,
     };
 
     [Test]
@@ -89,14 +91,55 @@ public class ReviewerSelectionHelperTests
     }
 
     [Test]
-    public void AllDispatchablePairs_AreSixteenAndAllEligible()
+    public void AllDispatchablePairs_AreEighteenAndAllEligible()
     {
         // Story 39-15 — 12 → 16: the 4 triage-panel pairs (doc-type-aware) join the
         // 7 document + 5 diff pairs when TriagePanelReviewWorkflow's semantics moved to
         // the 39-7 panel over a triage-decision draft.
-        ReviewerSelectionHelper.AllDispatchablePairs.Should().HaveCount(16);
+        // Story 41-1a — 16 → 18: (tech_writer, review-docs) (D1) and
+        // (ux_designer, review-design) (D2) join the document-review pairs.
+        ReviewerSelectionHelper.AllDispatchablePairs.Should().HaveCount(18);
         ReviewerSelectionHelper.AllDispatchablePairs.Should().OnlyContain(
             p => RolePhaseMap.IsRoleEligibleForPhase(p.Action, p.Role));
+    }
+
+    // ── Story 41-1a — the new document-review arms and the asserted non-panel throws ──
+
+    [Test]
+    public void Resolve_TechWriterOnDocument_ReturnsReviewDocs()
+    {
+        // AC3's helper half: before 41-1a this threw REVIEW.PRODUCER.INVALID_REVIEWER
+        // (GetReviewActionForRole had no TechWriter arm and the helper rethrows).
+        var spec = ReviewerSelectionHelper.Resolve("tech_writer", null, "document", null);
+        spec.Role.Should().Be(AgentRole.TechWriter);
+        spec.Action.Should().Be(AgentAction.ReviewDocs);
+    }
+
+    [Test]
+    public void Resolve_UxDesignerOnDocument_ReturnsReviewDesign()
+    {
+        var spec = ReviewerSelectionHelper.Resolve("ux_designer", null, "document", null);
+        spec.Role.Should().Be(AgentRole.UxDesigner);
+        spec.Action.Should().Be(AgentAction.ReviewDesign);
+    }
+
+    [Test]
+    [TestCase("scrum_master")]
+    [TestCase("project_manager")]
+    public void Resolve_NonPanelNewRoleOnDocument_ThrowsInvalidReviewer(string role)
+    {
+        // AC4's "or" branch (D2): the two roles kept off the document panel fail
+        // with the typed INVALID_REVIEWER error, never a raw ArgumentOutOfRange.
+        var act = () => ReviewerSelectionHelper.Resolve(role, null, "document", null);
+        act.Should().Throw<TammaError>().Which.Code.Should().Be(ReviewerSelectionHelper.InvalidReviewerCode);
+    }
+
+    [Test]
+    public void Resolve_TechWriterOnDiff_StillThrowsRoleNotOnDiffPanel()
+    {
+        // D1 adds tech_writer to the DOCUMENT panel only; the diff roster is untouched.
+        var act = () => ReviewerSelectionHelper.Resolve("tech_writer", null, "diff", null);
+        act.Should().Throw<TammaError>().Which.Code.Should().Be(ReviewerSelectionHelper.RoleNotOnDiffPanelCode);
     }
 
     // ── Story 39-15 (39-7 extension) — the doc-type-aware panel action selection ──

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Tamma.Data.Abstractions;
+using Tamma.Data.Pooling;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Data;
@@ -158,6 +159,24 @@ public static class DependencyInjection
         // Story 39-5 — tenant-resident acceptance-rules overrides.
         services.AddScoped<IAcceptanceRulesRepository, AcceptanceRulesRepository>();
         services.AddScoped<IConventionRepository, ConventionRepository>();
+        // Story 44-1 — the native tracker (tenant-schema resident, Epic 44).
+        // Work items/projects/iterations carry NO mode split (content, epic
+        // D6); tracker_preferences is the dual-scoped parallel-plane surface.
+        services.AddScoped<IProjectRepository, ProjectRepository>();
+        services.AddScoped<IWorkItemRepository, WorkItemRepository>();
+        services.AddScoped<IIterationRepository, IterationRepository>();
+        services.AddScoped<ITrackerPreferenceRepository, TrackerPreferenceRepository>();
+        // Story 44-1 AC8/AC9 — the migrate-all-provisioned-tenants sweep.
+        // TryAdd on the migrator: Tamma.Api's PlatformEventsServiceCollection-
+        // Extensions also TryAdds ITenantDbMigrator; whichever composition
+        // runs first wins with the same implementation. The sweep itself
+        // rides the DATA-SOURCE seam (ITenantDataSourceDbMigrator): the
+        // resolver's NpgsqlDataSource.ConnectionString strips the password,
+        // so the string-based seam cannot authenticate from a resolved
+        // data source.
+        services.TryAddSingleton<ITenantDbMigrator, EfTenantDbMigrator>();
+        services.TryAddSingleton<ITenantDataSourceDbMigrator, EfTenantDbMigrator>();
+        services.TryAddSingleton<ITenantMigrationSweeper, TenantMigrationSweeper>();
         // Story 39-11 — the sole writer/reader of the tenant-resident
         // document_instances store (immutable revisions + supersession).
         services.AddScoped<IDocumentInstanceRepository, DocumentInstanceRepository>();

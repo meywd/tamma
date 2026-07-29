@@ -35,14 +35,18 @@ public class PanelReviewWorkflowStructureTests
     }
 
     [Test]
-    public void Panel_HasSevenMemberDispatches_EachGuardedByAnInPanelDecision()
+    public void Panel_HasNineMemberDispatches_EachGuardedByAnInPanelDecision()
     {
         var fc = Flowchart();
 
         var memberDispatches = fc.Activities.OfType<DispatchWorkflow>()
             .Where(d => ReadLiteralDefId(d) == "review-single-reviewer")
             .ToList();
-        memberDispatches.Should().HaveCount(7, "the static roster is the 7-role document panel superset");
+        // 7 → 9 (Story 41-1a D1/D2): tech_writer and ux_designer joined the
+        // document-panel superset (ReviewerSelectionHelper.DocumentPanelRoster).
+        // Their dispatches stay dormant unless a policy roster names them —
+        // AcceptanceDefaults.PanelRoster is deliberately still 7 (C7).
+        memberDispatches.Should().HaveCount(9, "the static roster is the 9-role document panel superset");
 
         // Every member dispatch is fed by an InPanel? FlowDecision "True" edge.
         foreach (var dispatch in memberDispatches)

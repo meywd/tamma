@@ -24,17 +24,21 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void AgentAction_plane_has_80_members()
+    public void AgentAction_plane_has_96_members()
     {
-        // Derivation: grep -c '\[Wire(' src/Tamma.Core/Agents/AgentAction.cs → 80.
-        Enum.GetValues<AgentAction>().Should().HaveCount(80);
+        // Derivation: grep -c '\[Wire(' src/Tamma.Core/Agents/AgentAction.cs → 96.
+        // 80 → 96 (Story 41-1a): the 16 Epic 41 tokens (incl. the 41-8 Phase B
+        // write-retro-narrative lockstep cell).
+        Enum.GetValues<AgentAction>().Should().HaveCount(96);
     }
 
     [Test]
-    public void DocumentType_plane_has_10_members()
+    public void DocumentType_plane_has_16_members()
     {
-        // Derivation: grep -c '\[Wire(' src/Tamma.Core/Documents/DocumentTypeKey.cs → 10.
-        Enum.GetValues<DocumentTypeKey>().Should().HaveCount(10);
+        // Derivation: grep -c '\[Wire(' src/Tamma.Core/Documents/DocumentTypeKey.cs → 16.
+        // 10 → 16 (Story 41-1b): AcceptanceCriteria, BacklogOrdering, SprintPlan,
+        // TestPlan, ThreatModel, UxSpec.
+        Enum.GetValues<DocumentTypeKey>().Should().HaveCount(16);
     }
 
     [Test]
@@ -47,19 +51,24 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void ExternalEffect_has_22_members()
+    public void ExternalEffect_has_25_members()
     {
         // Derivation: grep 'RequireAuthorization("EngineServiceOnly")'
         // src/Tamma.Api/Program.cs → 26 routes, 17 MUTATING (5 engine-group
         // writes + 12 app-level writes; the 9 GETs are not catalogued), plus
         // mcp.tool.invoke, secret.reveal, process.spawn, deploy.promote-prod,
-        // deploy.rollback → 22.
-        Enum.GetValues<ExternalEffect>().Should().HaveCount(22);
+        // deploy.rollback → 22. 22 → 25 (Story 41-30): the schedule.create /
+        // schedule.update / schedule.delete admin trio.
+        Enum.GetValues<ExternalEffect>().Should().HaveCount(25);
     }
 
     [Test]
-    public void BackgroundActor_has_26_members()
+    public void BackgroundActor_has_28_members()
     {
+        // 27 → 28 (Story 43-4): + ActionCatalogStartupValidator — the boot-time
+        // tool-vocabulary check is itself an IHostedService, and the sweep
+        // deliberately binds the governance machinery too.
+        // 26 → 27 (Story 41-30): + TenantScheduledTriggerService.
         // Derivation: grep -rn 'AddHostedService' src --include=*.cs → 25
         // registrations (5 ElsaServer + 8 Api/Program.cs incl. one factory
         // overload and the Epic 46 review-F1 ProviderSettingsStorePrimingService
@@ -67,8 +76,8 @@ public class ActionVocabularyCountTests
         // descriptor inside AddPlatformTaskWorker, no AddHostedService line)
         // → 26. Cross-checked: 26 non-abstract IHostedService classes exist
         // across both host assemblies (BackgroundActorCatalogSweepTests binds
-        // them by type name).
-        Enum.GetValues<BackgroundActor>().Should().HaveCount(26);
+        // them by type name). +1 (Story 41-30): TenantScheduledTriggerService.
+        Enum.GetValues<BackgroundActor>().Should().HaveCount(28);
     }
 
     [Test]
@@ -99,11 +108,14 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void TotalCatalogMembers_is_154()
+    public void TotalCatalogMembers_is_181()
     {
-        // 80 + 10 + 8 + 22 + 26 + 8 = 154 — the design's working figure (153)
-        // plus the Epic 46 review-F1 ProviderSettingsStorePrimingService.
-        ActionCatalog.All.Should().HaveCount(154);
-        ActionCatalog.ByKey.Should().HaveCount(154);
+        // 96 + 16 + 8 + 25 + 28 + 8 = 181 — was 180 (automation 27): Story 43-4
+        // added automation:action-catalog-startup-validator. Earlier: was 154
+        // (80 + 10 + 22 + 26 + …); the agent-action plane grew by 16 (Story
+        // 41-1a), the document-type plane by 6 (Story 41-1b), and
+        // effect/automation by 3 + 1 (Story 41-30).
+        ActionCatalog.All.Should().HaveCount(181);
+        ActionCatalog.ByKey.Should().HaveCount(181);
     }
 }

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
 using Tamma.Data.Abstractions;
 
 namespace Tamma.Data.Pooling;
@@ -22,7 +23,7 @@ namespace Tamma.Data.Pooling;
 /// workflow still calls into this method so the activity surface is
 /// stable when the dedicated Elsa DBs ship.</para>
 /// </summary>
-public sealed class EfTenantDbMigrator : ITenantDbMigrator
+public sealed class EfTenantDbMigrator : ITenantDbMigrator, ITenantDataSourceDbMigrator
 {
     private readonly ILogger<EfTenantDbMigrator> _logger;
 
@@ -66,6 +67,49 @@ public sealed class EfTenantDbMigrator : ITenantDbMigrator
                 npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema))
             .Options;
 
+        await MigrateCoreAsync(options, schema, ct).ConfigureAwait(false);
+    }
+
+    // ── Story 44-1: the data-source flavour (the sweep's path) ──
+    //
+    // NpgsqlDataSource.ConnectionString strips the password, so a caller
+    // holding a resolver-minted data source cannot round-trip through the
+    // string-based method above (SASL/SCRAM "No password has been provided").
+    // Migrating OVER the data source keeps the credentials where they live.
+    // Search Path survives the stripping, so schema derivation is unchanged.
+    // The Pooling=false rationale above does not apply here: connections come
+    // from the tenant's own long-lived resolver pool, not a one-shot
+    // migration-only pool that would otherwise strand a physical connection.
+
+    public Task MigrateTenantAppAsync(NpgsqlDataSource dataSource, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(dataSource);
+        var schema = TenantNaming.SchemaFromConnectionString(dataSource.ConnectionString);
+        return MigrateCoreAsync(BuildDataSourceOptions(dataSource, schema), schema, ct);
+    }
+
+    public async Task<int> CountPendingMigrationsAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(dataSource);
+        var schema = TenantNaming.SchemaFromConnectionString(dataSource.ConnectionString);
+        await using var ctx = new TenantDbContext(BuildDataSourceOptions(dataSource, schema));
+        // Reads the per-schema history table only; a schema without one (a
+        // tenant provisioned before the first sweep) reports the full set.
+        var pending = await ctx.Database.GetPendingMigrationsAsync(ct).ConfigureAwait(false);
+        return pending.Count();
+    }
+
+    private static DbContextOptions<TenantDbContext> BuildDataSourceOptions(
+        NpgsqlDataSource dataSource, string? schema) =>
+        new DbContextOptionsBuilder<TenantDbContext>()
+            .UseNpgsql(dataSource, npgsql =>
+                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema))
+            .Options;
+
+    private async Task MigrateCoreAsync(
+        DbContextOptions<TenantDbContext> options, string? schema, CancellationToken ct)
+    {
         await using var ctx = new TenantDbContext(options);
         if (schema is not null)
         {

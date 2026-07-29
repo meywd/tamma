@@ -743,6 +743,27 @@ public class ControlPlaneDbContext : DbContext
     /// </summary>
     public DbSet<ProviderSetting> ProviderSettings => Set<ProviderSetting>();
 
+    // ── Story 41-30 — tenant-aware scheduled-trigger seam ──
+
+    /// <summary>
+    /// Story 41-30 (D1) — the schedule registry. One row per
+    /// <c>(tenant, definition, name)</c>; <c>TenantId == null</c> is a
+    /// platform default template materialised per tenant at tick time.
+    /// CP-resident (the sweeper enumerates across tenants) and EXCLUDED from
+    /// the destructive startup DROP list (AC7 — a deploy must not silently
+    /// disable every tenant's audits).
+    /// </summary>
+    public DbSet<ScheduledTrigger> ScheduledTriggers => Set<ScheduledTrigger>();
+
+    /// <summary>
+    /// Story 41-30 (D2) — the durable at-most-once fire ledger.
+    /// <c>UNIQUE (TriggerId, WindowKey)</c> + <c>INSERT … ON CONFLICT DO
+    /// NOTHING</c> is the whole cross-pod dedupe; the advisory lock alone is
+    /// session-scoped and cannot survive a pod crash (Correction 3). Same
+    /// DROP-list exclusion as <see cref="ScheduledTriggers"/>.
+    /// </summary>
+    public DbSet<ScheduledTriggerFire> ScheduledTriggerFires => Set<ScheduledTriggerFire>();
+
     // Story 28-1 PR D: the 11 + 4 mentorship tenant-resident entities
     // (AgentConfig, PromptOverride, ProviderHealth, ProviderDiagnostic,
     // SanitizationRule, WorkflowDefinition, WorkflowInstance, DomainEvent,
@@ -876,6 +897,12 @@ public class ControlPlaneDbContext : DbContext
         // redeploys (epic 46 requirement: a UI model choice needs no deploy
         // and outlives one).
         TammaModelConfiguration.ConfigureProviderSettings(modelBuilder);
+
+        // Story 41-30 — the tenant-aware scheduled-trigger seam's two tables
+        // (scheduled_triggers + scheduled_trigger_fires). CP-resident; both
+        // EXCLUDED from the Epic 19 startup wipe (AC7) and therefore FK-free
+        // toward tenants (the provider_settings survival pattern).
+        TammaModelConfiguration.ConfigureScheduledTriggerEntities(modelBuilder);
     }
 
     /// <summary>

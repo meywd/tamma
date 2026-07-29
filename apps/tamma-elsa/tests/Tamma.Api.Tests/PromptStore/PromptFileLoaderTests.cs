@@ -77,6 +77,23 @@ public class PromptFileLoaderTests
     }
 
     [Test]
+    public void Build_MissingEpic41Cell_ThrowsNoBodyFamily_NamingTheCell()
+    {
+        // Story 41-1a AC8 over the enlarged grid: deleting one of the NEW cell
+        // files (scrum_master/plan-sprint) fails startup loud, naming the cell.
+        var files = EmbeddedFiles
+            .Where(f => f.Path != "Prompts/scrum_master/plan-sprint.md")
+            .ToList();
+
+        var act = () => PromptFileLoader.Build(files);
+
+        act.Should().Throw<TammaError>()
+            .Which.Should().Match<TammaError>(e =>
+                e.Code == "PROMPT.SEED.NO_BODY_FAMILY" &&
+                e.Message.Contains("scrum_master/plan-sprint"));
+    }
+
+    [Test]
     public void Build_FileOutsideTaxonomy_ThrowsUnknownCell()
     {
         // 'deploy' is devops-only — a developer/deploy.md file is drift.

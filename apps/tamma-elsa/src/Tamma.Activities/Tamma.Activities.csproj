@@ -13,6 +13,10 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Tamma.Activities.Tests" />
+    <!-- Story 43-4 (D8): Tamma.Api's ActionCatalogStartupValidator reads
+         ToolCallValidator.KnownShellToolNames (internal accessor) to check the
+         shell-alias set from outside without making it public surface. -->
+    <InternalsVisibleTo Include="Tamma.Api" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,82 +1,187 @@
 # Implementation Plan — Story 44-1: Storage, Repositories, and the Migrate-All-Provisioned-Tenants Sweep
 
-> **⚠️ PREDATES THE 44-0 REWORK (conformance review, 2026-07-28).** This plan was written before
-> the v2 rework of 44-0 and before 44-0 shipped. The STORY file is current; this plan is not — it
-> never mentions four things the story and the shipped `Tamma.Core.Tracking` now require 44-1 to
-> store: **`SiblingRank`** (second `COLLATE "C"` rank column), **`PreviousKeys`** (key history),
-> **`Estimate` + `EstimateScale`**, and the **`work_item_relations`** table (rows stored in
-> `Canonicalize`d lower-id-first form; validation is 44-3's). Re-cut this plan against the story
-> file and `Tamma.Core/Tracking/` before starting; treat effort figures as stale.
-
+> **RE-CUT 2026-07-29** against the current story file and the SHIPPED `Tamma.Core.Tracking`
+> (PR #506, all 11 files read). Supersedes the pre-44-0-rework plan, which missed the four
+> things the rework handed this story: **`SiblingRank`** (second `COLLATE "C"` rank column,
+> 44-0 AC10), **`PreviousKeys`** (frozen-key history, 44-0 AC8 / `WorkItemKeyHistory`),
+> **`Estimate` + `EstimateScale`** (scale-free `decimal?` on the item, scale on the project,
+> 44-0 AC13), and the **`work_item_relations`** table (44-0 AC14 — rows stored in the form
+> `WorkItemRelationKindExtensions.Canonicalize` returns: symmetric kinds lower-id-first;
+> `blocks` kept directed; the shipped helper is CALLED, never reimplemented).
 
 ## Scope & Deliverable
 
-When this story is done, four tables (`projects`, `work_items`, `iterations`, `tracker_preferences`) exist in every tenant schema — including tenants that were provisioned before the deploy, because this story also builds the `POST /api/admin/tenants/migrate` sweep the platform has never had. `work_items."Rank"` is `COLLATE "C"` so the database and the API agree on order; `ck_work_items_status` / `ck_work_items_kind` mirror 44-0's wire strings and a test proves it; keys are minted `(ProjectId, Number)`-unique under a row lock and a concurrency test proves that. Repositories exist for all four, with parallel never-joined mode surfaces on `tracker_preferences` only — work items are content, not per-principal configuration, and a test asserts no work-item query filters on a user ownership plane.
+When this story is done, **five** tables (`projects`, `work_items`, `work_item_relations`,
+`iterations`, `tracker_preferences`) exist in every tenant schema — including tenants
+provisioned before the deploy, because this story also builds the migrate-all-provisioned-tenants
+sweep the platform has never had. Both `work_items."Rank"` and `work_items."SiblingRank"` are
+`COLLATE "C"` so Postgres `ORDER BY` and `StringComparer.Ordinal` agree (the storage obligation
+`Rank.cs` states in its own doc); `ck_work_items_status` / `ck_work_items_kind` mirror 44-0's
+wire sets (8 and 4) and tests prove set equality by reflection; keys are minted
+`(ProjectId, Number)`-unique under a `FOR UPDATE` row lock; a re-key appends the outgoing key to
+`PreviousKeys` via `WorkItemKeyHistory.Record` and lookup-by-key resolves current-or-previous.
+Repositories exist for all of it, with parallel never-joined mode surfaces on
+`tracker_preferences` only.
 
-## Pre-Reading
+## Pre-Reading (all verified present)
 
-- `docs/stories/epic-44/README.md` — §5 (residency + the migration gap), §6 (ownership per mode, and why the XOR does not apply to work items), Decisions D5/D6/D7
-- `docs/stories/epic-44/story-44-0/implementation-plan.md` — D6 (`WorkItemRef` format is load-bearing), D7 (the `COLLATE "C"` obligation this story discharges)
-- `apps/tamma-elsa/src/Tamma.Data/Pooling/EfTenantDbMigrator.cs:25-100` — the whole migrator; note `:47` schema derivation, `:56-62` `Pooling=false`, `:64-67` history table, `:83-92` `CREATE SCHEMA IF NOT EXISTS`, `:97` `MigrateAsync`
-- `apps/tamma-elsa/src/Tamma.Api/Services/Provisioning/TenantProvisioningService.cs:147-176` — call site #1 and the `password is not null` skip that makes it creation-only
-- `apps/tamma-elsa/src/Tamma.Activities/TenantLifecycle/MigrateTenantDatabaseActivity.cs:53` + `Tamma.ElsaServer/Workflows/CreateTenantWorkflow.cs:158-160` — call site #2
-- `apps/tamma-elsa/src/Tamma.Data/Pooling/LruPooledTenantConnectionResolver.cs:233,340,495` — resolve / lease / evict
-- `apps/tamma-elsa/src/Tamma.Data/Migrations/Tenant/20260722011909_AddAcceptanceRulesOverrides.cs:14-40` — table + **strong** XOR (`:32`) + `NullsDistinct=false` unique index (`:35-40`)
-- `apps/tamma-elsa/src/Tamma.Data/Migrations/Tenant/20260722180002_AddDocumentInstances.cs` — the freshest tenant migration; `ck_document_instances_status` is the CHECK-mirrors-enum precedent
-- `apps/tamma-elsa/src/Tamma.Data/Repositories/IAcceptanceRulesRepository.cs:5-41` + `AcceptanceRulesRepository.cs:17-140` — the parallel-surface contract and its predicate style
-- `apps/tamma-elsa/tests/Tamma.Api.Tests/AcceptanceRules/AcceptanceRulesOverridesMigrationTests.cs:49` + `tests/Tamma.Api.Tests/Tenancy/SchemaPerTenantMigrationTests.cs:82-86` — the Testcontainers migration-test shape
-- `docs/stories/epic-39/story-39-20/implementation-plan.md:57-60` — 39-20's `repositories` table, which AC10 defers to
-- **All referenced paths exist.** NOT FOUND (this story creates them): the four entities, `Migrations/Tenant/*_AddTrackerCore.*`, the four repositories, `Endpoints/Admin/AdminTenantMigrationEndpoints.cs`.
+- `docs/stories/epic-44/README.md` — §5 (residency + the migration gap), §6 (ownership per mode;
+  why the XOR does NOT apply to work items), D5/D6/D7/D12/D13
+- `apps/tamma-elsa/src/Tamma.Core/Tracking/` — ALL 11 files. Load-bearing for this story:
+  `Rank.cs` (collation obligation stated at `:14-22`; `Append`/`Prepend` are digit-carry, not
+  midpoint — the pre-44-1 convention note at `:44-59`), `WorkItemRef.cs` (frozen key,
+  `IsValidProjectKey`, strict parse), `WorkItemKeyHistory.cs` (`Record`/`Matches` — the
+  current-or-previous rule, one implementation), `WorkItemRelationKind.cs`
+  (`Canonicalize` at `:92-109` — THE direction convention; `IsSymmetric`), `EstimateScale.cs`
+  (project-level scale; `AllowsEstimate`), `WorkItemStatus.cs` / `WorkItemKind.cs` (wire sets
+  the CHECKs mirror), `TrackerPriority.cs` (priority nullable; wires = `TriagePriority`'s)
+- `Tamma.Data/Pooling/EfTenantDbMigrator.cs` — schema from `Search Path` (`:48`),
+  `Pooling=false` (`:58-62`), `__TenantMigrationsHistory` pinned per schema (`:64-67`),
+  `CREATE SCHEMA` DO-block safety net (`:88-93`), idempotent `MigrateAsync` (`:97`)
+- `Tamma.Api/Services/Provisioning/TenantProvisioningService.cs:147-188` — creation-only call
+  site #1 (`password is not null` gate at `:169`); `Tamma.Activities/TenantLifecycle/
+  MigrateTenantDatabaseActivity.cs:52` — call site #2
+- `Tamma.Data/Abstractions/ITenantConnectionResolver.cs` — `GetDataSourceAsync`; the resolver
+  decrypts `tenants.EncryptedConnectionString`, so the sweep CAN reach a tenant the
+  provisioning re-run path cannot (no plaintext creds needed — the data source carries them)
+- `Tamma.Data/Migrations/Tenant/20260722011909_AddAcceptanceRulesOverrides.cs` — strong XOR
+  (`:32`) + `NullsDistinct=false` unique index (`:35-40`); `20260722180002_AddDocumentInstances.cs`
+  — CHECK-mirrors-enum precedent (`:39`); `20260704083332_AddDomainEventsUserIdIndex.cs` — the
+  raw-SQL `IF NOT EXISTS` pattern for indexes the EF model cannot express
+- `Tamma.Data/Repositories/IAcceptanceRulesRepository.cs` + `AcceptanceRulesRepository.cs` —
+  the parallel-surface contract and predicate style (`p.UserId == userId && p.TenantId ==
+  default(Guid?)`), and the `ITenantDbContextFactory` + ambient `ITenantContext` shape
+- `tests/Tamma.Api.Tests/AcceptanceRules/AcceptanceRulesOverridesMigrationTests.cs` +
+  `tests/Tamma.Api.Tests/Tenancy/SchemaPerTenantMigrationTests.cs` — the Testcontainers
+  migration-test shapes (single-schema and two-schema); Story 39-11's `AddDocumentInstances`
+  is the freshest table-adding tenant-migration precedent (EF-generated, house shape)
+- `Tamma.Api/Program.cs:3293-3335` — the Epic 19 destructive startup wipe. It enumerates
+  **public-schema CP-era tables by name**; tenant-schema tables (`document_instances`,
+  `acceptance_rules_overrides`, `channel_outbox`) are deliberately absent. The tracker tables
+  follow the same rule: **they are NOT added to the DROP list** (tenant-resident, reached only
+  through per-schema migrations — nothing to wipe in `public`).
 
 ## Design Decisions
 
-- **D1 — Tenant-schema residency, and the sweep is this story's price of admission.** Epic 43 put `action_assignments` in the control plane partly *because* a new tenant migration never reaches existing tenants (`epic-43/README.md:238-246`). That escape is not available here: work items are the highest-row-count operational data in the system and CP residency would put every tenant's backlog in one table, forfeiting the isolation `SchemaPerTenantMigrationTests.cs:82-86` exists to prove. So the gap gets fixed instead of avoided. `EfTenantDbMigrator` is already idempotent, already history-tabled per tenant, already schema-safe — the sweep is a caller over `tenants` × `LruPooledTenantConnectionResolver`, not a redesign.
-
-- **D2 — The sweep is an explicit admin action, never automatic on startup.** An automatic boot-time sweep over N tenants serializes deploy on N migrations and turns one bad migration into a total outage. `PlatformTaskWorker.RunOnStartup` is `false` for adjacent reasons. `POST /api/admin/tenants/migrate` under `PlatformOwnerAccess` (`Program.cs:1538` — deliberately *not* `OwnerAccess`, since every signed-up user auto-owns their personal tenant, `:1908-1913`), with `dryRun=true` reporting pending counts. Failure is **per tenant**: one tenant's `42501` or unreachable pool member is a row in the result list, never an abort. Bounded concurrency (default 4) because each migration takes a non-pooled physical connection (`EfTenantDbMigrator.cs:56-62`).
-
-- **D3 — `Rank` is `text COLLATE "C"`, and this is the single most silently-breakable decision in the epic.** 44-0's base-62 alphabet sorts `0-9 < A-Z < a-z` under ordinal comparison. Postgres agrees **only** under the `C` collation; under `en_US.UTF-8` it collates case-insensitively and `a` sorts before `B`. The failure is invisible in unit tests (which never touch Postgres) and produces an API order that disagrees with the board order. The column is declared `COLLATE "C"` in the migration, and AC4's Testcontainers test inserts real `Rank.Between` output and compares the SQL order to `StringComparer.Ordinal`.
-
-- **D4 — Four tables in ONE migration, including `iterations` which nothing populates until 44-4.** Tenant migrations are the scarcest resource in this repo — before the sweep exists they were effectively one-way, and even after it they are an operator action per deploy. Splitting the tracker across two tenant migrations doubles that cost for no benefit. `iterations` ships empty.
-
-- **D5 — No principal XOR on `work_items`, `projects` or `iterations`; the strong XOR on `tracker_preferences` only.** The XOR exists on `prompt_overrides` (`20260610013731_InitialTenant.cs:188`) and `acceptance_rules_overrides` because a *setting* has exactly one owning principal and the two planes must never join. A work item is content: it has a creator, an assignee and a project, all inside one tenant schema, and schema-per-tenant already supplies the isolation. A nullable `UserId` on `work_items` would encode a second ownership plane with no reader. `tracker_preferences` (default project, default kind, default board grouping) genuinely *is* per-principal configuration and takes the pattern exactly — including the **strong** form, not `ck_audit_records_principal_xor`'s weak `NOT (both NOT NULL)` (`20260619003624_AddAuditRecords.cs:42`) which permits both NULL, and including `.Annotation("Npgsql:NullsDistinct", false)` on the unique index without which the dedupe silently does nothing on the null half.
-
-- **D6 — Key minting is a per-project counter under `FOR UPDATE`, not a Postgres sequence.** A sequence per project means DDL on every project create and orphaned sequences on delete. A `projects."NextNumber"` column selected `FOR UPDATE` inside the create transaction gives gap-free, monotone numbering with one row lock, and gap-free matters here: `TAM-1, TAM-2, TAM-4` looks like data loss to a user. `(ProjectId, Number)` unique and `Key` unique are the belt-and-braces; the concurrency test drives 50 parallel creates and asserts 50 distinct contiguous keys.
-
-- **D7 — `ExternalRefJson` is one `jsonb` column, not four typed columns.** 44-8 owns the shape `(PlatformKind, RepoFullName, Number, Url)` and may need more once import is real. Freezing four columns two stories early is a second tenant migration waiting to happen. Null for native items; a partial index on `(ExternalRefJson->>'repoFullName', ExternalRefJson->>'number')` supports 44-8's already-linked skip.
-
-- **D8 — `projects.RepositoryId` is a bare `Guid?` with no FK and no local `repositories` table.** 39-20 owns `repositories`, control-plane resident (its plan D1 `:32`). A cross-plane FK is not expressible, and creating a tenant-local repo registry to satisfy referential integrity would be the second repo registry the epic boundary table forbids. It is nullable, unenforced, and documented as pointing at 39-20's row. Until 39-20 lands, 44-8 resolves the repo through `tenant_platform_installations` (`Tamma.Data/Entities/TenantPlatformInstallation.cs:35`) instead.
-
-- **D9 — Repositories go in `Tamma.Data/Repositories/`, DI in `Tamma.Data/DependencyInjection.cs`** — beside `AcceptanceRulesRepository` (`DependencyInjection.cs:159`) and `IConventionRepository` (`:160`), not inline in `Program.cs`. Services register in `Program.cs`; repositories do not. Following the split exactly avoids a review argument.
-
-- **D10 — `Version` is an `int` bumped on write, not an EF `[Timestamp]` rowversion.** `AcceptanceRulesOverride.Version` (`Tamma.Data/Entities/AcceptanceRulesOverride.cs:26`) is the shipped precedent and 44-2 needs a value it can put in an ETag header and accept in an `If-Match`. A `byte[]` rowversion would need base64 plumbing for no gain.
+- **D1 — Tenant-schema residency; the sweep is the price of admission.** (Unchanged from v1,
+  epic D5.) `EfTenantDbMigrator` is already idempotent, schema-pinned and history-tabled; the
+  sweep is a caller over `tenants` × `ITenantConnectionResolver`, not a redesign.
+- **D2 — The sweep core lives in `Tamma.Data` (`TenantMigrationSweeper`); the HTTP mapping is a
+  thin admin route.** This round the `Program.cs` mapping is owned by another lane (41-30), so
+  44-1 ships `ITenantMigrationSweeper` + implementation + DI + Testcontainers proof, and the
+  `POST /api/admin/tenants/migrate` route is a deferred one-liner recorded in the handoff.
+  Explicit admin action, never boot-time; per-tenant failure isolation; bounded concurrency
+  (default 4 — each migration takes a non-pooled physical connection); `dryRun` reports pending
+  counts without applying.
+- **D3 — BOTH rank columns are `text COLLATE "C"`** — `Rank` (flat backlog) and `SiblingRank`
+  (order under the parent, null parent included). One algebra, two columns (44-0 AC10). EF 8's
+  `UseCollation("C")` expresses this in the model, so the migration and snapshot carry it
+  natively (verify the generated `Up()` says `collation: "C"`; hand-fix if the provider drops
+  it). The Testcontainers test inserts real `Rank.Between`/`Append`/`Prepend` output shuffled
+  and asserts `ORDER BY` ≡ `StringComparer.Ordinal` for both columns.
+- **D4 — Five tables in ONE migration (`AddTrackerCore`)**, including `iterations` (populated
+  by 44-4) and `work_item_relations` (validated by 44-3). Tenant migrations are the scarcest
+  resource in the repo; the sweep makes them survivable, not free.
+- **D5 — No principal XOR on `projects`/`work_items`/`work_item_relations`/`iterations`; the
+  strong XOR + `NullsDistinct=false` unique index on `tracker_preferences` only.** Work items
+  are content (epic D6); `tracker_preferences` is genuine per-principal configuration and takes
+  the `acceptance_rules_overrides` pattern exactly.
+- **D6 — Key minting is `projects."NextNumber"` under `FOR UPDATE`**, in the create
+  transaction. Gap-free, monotone; `(ProjectId, Number)` unique + `Key` unique are the
+  belt-and-braces; a 50-way concurrency test proves contiguity. The minted string is
+  `new WorkItemRef(project.Key, number).ToWire()` — never string-interpolated by hand.
+- **D7 — `PreviousKeys` is `text[] NOT NULL DEFAULT '{}'`**, written ONLY through
+  `WorkItemKeyHistory.Record` (idempotent, order-preserving) on the explicit re-key seam
+  (`RekeyAsync`). A project MOVE writes nothing (the key is frozen — 44-0 AC8/D13).
+  `GetByKeyAsync` resolves `Key == k OR PreviousKeys @> {k}`; a GIN index on `PreviousKeys`
+  serves the array containment.
+- **D8 — `work_item_relations` stores rows in Canonicalize'd form and the unique index assumes
+  it.** `(SourceId, TargetId, Kind)` unique; the repository's `AddRelationAsync` calls
+  `WorkItemRelationKindExtensions.Canonicalize(kind, source, target)` — the single
+  implementation of "symmetric ⇒ lower id first, `blocks` ⇒ meaning-preserving" — so a mirror
+  duplicate of a symmetric edge maps onto the same stored row and hits the unique index.
+  A `ck_work_item_relations_no_self` CHECK (`SourceId <> TargetId`) backs `Canonicalize`'s
+  `TRACKER.SELF_RELATION` at the DB layer; everything further (cross-project, cycles-are-shown)
+  is 44-3's. FKs to `work_items` cascade — an item's edges die with it.
+- **D9 — `Estimate` is `numeric NULL` on the work item; `EstimateScale` is a wire string on the
+  project** (default `not_used`, CHECK over the 5 wires). NOT `EstimateHours`. Coherence
+  (`AllowsEstimate`) is 44-2's API-boundary rule; storage stays permissive per 44-0 AC13.
+- **D10 — `ExternalRefJson` is one `jsonb` column** (44-8 owns the shape). The already-linked
+  skip index is a raw-SQL partial expression index (`IF NOT EXISTS`, the
+  `AddDomainEventsUserIdIndex` pattern) because EF cannot express it.
+- **D11 — `projects.RepositoryId` is a bare `Guid?`, no FK, no local `repositories` table**
+  (39-20 owns the registry; epic boundary table).
+- **D12 — `Priority` and `IssueType` are nullable wire strings** with CHECKs permitting NULL.
+  `null` priority = "nobody prioritised" (44-0 AC11). `IssueType` is nullable for the same
+  triage-queue reason (an imported/triaged item exists before anyone classified it;
+  `TriageIssueType` has no "unset" member) — a deliberate small extension of AC12's binding,
+  recorded here; 44-2 may tighten at the API boundary.
+- **D13 — Repositories in `Tamma.Data/Repositories/`, DI in `Tamma.Data/DependencyInjection.cs`**
+  beside `IAcceptanceRulesRepository` — never in `Program.cs`. `Version` is an int bumped on
+  write (`AcceptanceRulesOverride.Version` precedent; 44-2's ETag).
+- **D14 — No entry in the Epic 19 startup DROP list.** The wipe enumerates public-schema tables
+  by name; tracker tables are tenant-schema-resident and must never appear there (matching
+  `document_instances` / `acceptance_rules_overrides` / `channel_outbox`).
 
 ## Implementation Steps
 
-1. **CREATE `apps/tamma-elsa/src/Tamma.Data/Entities/ProjectEntity.cs`** — `Id`, `Key` (the `PROJ` prefix, `WorkItemRef.IsValidProjectKey`), `Name`, `Description`, `RepositoryId` (`Guid?`, D8), `NextNumber` (int, D6), `ArchivedAt`, `CreatedByUserId`, `CreatedAt`, `UpdatedAt`, `Version`.
-
-2. **CREATE `.../Entities/WorkItemEntity.cs`** — per story AC1. `Kind`/`Status`/`Priority`/`IssueType` stored as **wire strings**, matching how `TriageDecision` (`Tamma.Core/Documents/Types/TriageDecision.cs:122-131`) and `DocumentInstance.Status` already store theirs; the CHECK constraints are the enforcement, and the Core extensions are the parse boundary.
-
-3. **CREATE `.../Entities/IterationEntity.cs`** — `Id`, `ProjectId`, `Name`, `StartsOn`, `EndsOn`, `Status` (`planned|active|closed`), `CapacityPoints` (`decimal?`), `CreatedAt`, `UpdatedAt`, `Version`. Populated by 44-4.
-
-4. **CREATE `.../Entities/TrackerPreference.cs`** — `Id`, `UserId` (`Guid?`), `TenantId` (`Guid?`), `DefaultProjectId`, `DefaultKind`, `BoardGroupBy`, `CreatedBy`, `UpdatedBy`, `CreatedAt`, `UpdatedAt`, `Version`. Doc comment mirrors `AcceptanceRulesOverride.cs:3-11`'s dual-scoping explanation verbatim in shape.
-
-5. **MODIFY `apps/tamma-elsa/src/Tamma.Data/TenantDbContext.cs`** — four `DbSet`s in the `:52-102` block.
-
-6. **MODIFY `apps/tamma-elsa/src/Tamma.Data/TammaModelConfiguration.cs`** — four `ToTable` blocks with indexes, CHECK constraints (`ck_work_items_status`, `ck_work_items_kind`, `ck_work_items_priority`, `ck_work_items_issue_type`, `ck_iterations_status`, `ck_tracker_preferences_principal_xor`), and the `NullsDistinct=false` unique index on `(UserId, TenantId)`.
-
-7. **CREATE the migration** `Migrations/Tenant/<ts>_AddTrackerCore.cs` (+ Designer + snapshot). Hand-edit the generated `Up()` to add `COLLATE "C"` on `work_items."Rank"` (EF does not emit column collations for Npgsql by default) and to add the partial `ExternalRefJson` index.
-
-8. **CREATE `Tamma.Data/Repositories/IWorkItemRepository.cs` + `WorkItemRepository.cs`** — `GetAsync(Guid id)`, `GetByKeyAsync(string key)`, `ListAsync(WorkItemQuery)` (project / status set / kind set / assignee / iteration / parent / text, ordered by `Rank`, keyset-paged on `(Rank, Id)`), `CreateAsync` (mints the key per D6), `UpdateAsync`, `SetRankAsync`, `SetStatusAsync`, `SetParentAsync`, `BulkSetRankAsync` (44-3's apply seam), `BulkSetIterationAsync` (44-4's).
-
-9. **CREATE `IProjectRepository` + `IIterationRepository`** — CRUD + list, no mode split.
-
-10. **CREATE `ITrackerPreferenceRepository` + impl** — the six paired methods of story AC6, predicates in `AcceptanceRulesRepository.cs:34,108` style, with the interface doc copying `IAcceptanceRulesRepository.cs:5-12`'s "PARALLEL — no method silently joins both planes" statement.
-
-11. **MODIFY `Tamma.Data/DependencyInjection.cs`** — four `AddScoped` registrations after `:160`.
-
-12. **CREATE `Tamma.Api/Endpoints/Admin/AdminTenantMigrationEndpoints.cs`** — `MigrateAll(bool dryRun, int? maxConcurrency)`. Enumerates `ControlPlaneDbContext.Tenants`, for each resolves the data source via `ITenantConnectionResolver`, reads pending migrations for `dryRun`, else calls `ITenantDbMigrator.MigrateTenantAppAsync`. Per-tenant try/catch → `{ tenantId, outcome, pendingBefore, error? }`. `SemaphoreSlim` bound.
-
-13. **MODIFY `Tamma.Api/Program.cs`** — map `POST /api/admin/tenants/migrate` in the admin group with `.RequireAuthorization("PlatformOwnerAccess")` and `.RequireRateLimiting("ConfigWrite")`, beside the existing `/api/admin/tenant-databases` routes.
+1. **CREATE `Tamma.Data/Entities/ProjectEntity.cs`** — `Id`, `Key`, `Name`, `Description`,
+   `RepositoryId` (`Guid?`, D11), `EstimateScale` (wire string, default `not_used`, D9),
+   `NextNumber` (D6), `ArchivedAt`, `CreatedByUserId`, `CreatedAt`, `UpdatedAt`, `Version`.
+2. **CREATE `Tamma.Data/Entities/WorkItemEntity.cs`** — story AC1 column set verbatim: `Id`,
+   `ProjectId`, `Key` (frozen), `PreviousKeys` (`text[]`, default `{}`), `Number`, `Kind`,
+   `Status`, `Priority` (nullable), `IssueType` (nullable, D12), `Title`, `Description`,
+   `ParentId`, `IterationId`, `Rank`, `SiblingRank`, `AssigneeUserId`, `CreatedByUserId`,
+   `Estimate` (`decimal?`), `ExternalRefJson`, `CreatedAt`, `UpdatedAt`, `ClosedAt`, `Version`.
+   Kind/Status/Priority/IssueType stored as **wire strings** (CHECKs enforce; Core parses).
+3. **CREATE `Tamma.Data/Entities/WorkItemRelation.cs`** — `Id`, `SourceId`, `TargetId`, `Kind`
+   (wire string), `CreatedByUserId`, `CreatedAt`. Doc comment states the canonical-form
+   invariant and points at `Canonicalize`.
+4. **CREATE `Tamma.Data/Entities/IterationEntity.cs`** — `Id`, `ProjectId`, `Name`, `StartsOn`,
+   `EndsOn`, `Status` (`planned|active|closed`), `CapacityPoints` (`decimal?`), timestamps,
+   `Version`. Populated by 44-4.
+5. **CREATE `Tamma.Data/Entities/TrackerPreference.cs`** — `Id`, `UserId?`, `TenantId?`,
+   `DefaultProjectId`, `DefaultKind`, `BoardGroupBy`, `CreatedBy`, `UpdatedBy`, timestamps,
+   `Version`. Dual-scoping doc mirrors `AcceptanceRulesOverride.cs`.
+6. **MODIFY `TenantDbContext.cs`** — five `DbSet`s in the tenant block.
+7. **MODIFY `TammaModelConfiguration.cs`** — one contiguous `ConfigureTrackerEntities` region
+   (five `ToTable` blocks: CHECKs `ck_projects_estimate_scale`, `ck_work_items_status` (8),
+   `ck_work_items_kind` (4), `ck_work_items_priority`, `ck_work_items_issue_type`,
+   `ck_work_item_relations_kind` (3), `ck_work_item_relations_no_self`, `ck_iterations_status`,
+   `ck_tracker_preferences_principal_xor` (strong), `ck_tracker_preferences_default_kind`;
+   `UseCollation("C")` on both rank columns; unique/GIN/covering indexes) + ONE call line at
+   the end of `ConfigureTenantEntities`.
+8. **CREATE the migration** `Migrations/Tenant/<ts>_AddTrackerCore` via
+   `dotnet ef migrations add AddTrackerCore --context TenantDbContext --output-dir Migrations/Tenant`.
+   Verify `collation: "C"` on both rank columns in the generated `Up()`; append the raw-SQL
+   `IF NOT EXISTS` partial expression index on `ExternalRefJson` (D10). Run
+   `dotnet ef migrations has-pending-model-changes` for both contexts — clean.
+9. **CREATE repositories** — `IProjectRepository`/`ProjectRepository`,
+   `IIterationRepository`/`IterationRepository`,
+   `IWorkItemRepository`/`WorkItemRepository` (get / get-by-key-current-or-previous /
+   list+keyset-page ordered `(Rank, Id)` / create-with-minting / update / set-status (stamps
+   `ClosedAt` from `IsTerminal()`) / set-ranks / set-parent / rekey (via
+   `WorkItemKeyHistory.Record`) / delete / relation add–remove–list via `Canonicalize`),
+   `ITrackerPreferenceRepository`/`TrackerPreferenceRepository` (the six paired parallel
+   methods, AC6). All via `ITenantDbContextFactory` + ambient `ITenantContext`.
+10. **CREATE `Tamma.Data/Abstractions/ITenantMigrationSweeper.cs` +
+    `Tamma.Data/Pooling/TenantMigrationSweeper.cs`** — `SweepAsync(dryRun, maxConcurrency, ct)`
+    → enumerate non-deleted `tenants` via `IDbContextFactory<ControlPlaneDbContext>`, resolve
+    each data source via `ITenantConnectionResolver`, then probe/apply THROUGH the data source.
+    **Found while applying (Testcontainers proof):** `NpgsqlDataSource.ConnectionString` strips
+    the password (SASL/SCRAM "No password has been provided"), so the sweep cannot round-trip
+    a resolved data source into the string-based `ITenantDbMigrator`. `EfTenantDbMigrator`
+    therefore gains a data-source seam — `ITenantDataSourceDbMigrator`
+    (`MigrateTenantAppAsync(NpgsqlDataSource)` + `CountPendingMigrationsAsync`), one shared
+    core, schema still derived from the data source's `Search Path` (which survives the
+    stripping); `ITenantDbMigrator` and its test stubs are unchanged. Per-tenant try/catch →
+    `migrated` / `already-current` / `pending` / `failed` rows; `SemaphoreSlim` bound.
+11. **MODIFY `Tamma.Data/DependencyInjection.cs`** — repository registrations after `:160` +
+    `TryAddSingleton<ITenantDbMigrator, EfTenantDbMigrator>` + the sweeper.
+12. **DEFERRED (out of lane, exact edits recorded in the handoff):** the
+    `POST /api/admin/tenants/migrate` route mapping (`PlatformOwnerAccess`) in `Program.cs` and
+    its endpoint file — the sweep service + tests land here; the HTTP skin is a MapPost over
+    `ITenantMigrationSweeper`.
 
 ## Data & Migrations
 
@@ -84,74 +189,60 @@ One tenant migration, `AddTrackerCore`:
 
 | Table | Notable |
 |---|---|
-| `projects` | `Key` unique per tenant; `NextNumber` for D6 minting; `RepositoryId Guid? ` unenforced (D8) |
-| `work_items` | `Rank text COLLATE "C"` (D3); `(ProjectId, Number)` unique; `Key` unique; `ParentId` self-FK `ON DELETE RESTRICT`; `IterationId` FK `ON DELETE SET NULL`; indexes on `(ProjectId, Status, Rank)`, `(AssigneeUserId, Status)`, `(ParentId)`, `(IterationId)`, partial on `ExternalRefJson` |
-| `iterations` | `(ProjectId, Name)` unique; `ck_iterations_status` |
-| `tracker_preferences` | strong `ck_tracker_preferences_principal_xor`; unique `(UserId, TenantId)` with `NullsDistinct=false` |
+| `projects` | `Key` unique; `NextNumber` (D6); `EstimateScale` + CHECK (D9); `RepositoryId Guid?` unenforced (D11) |
+| `work_items` | `Rank` **and** `SiblingRank` `text COLLATE "C"` (D3); `PreviousKeys text[] DEFAULT '{}'` + GIN (D7); `(ProjectId, Number)` unique; `Key` unique; `ParentId` self-FK RESTRICT; `IterationId` FK SET NULL; `ProjectId` FK RESTRICT; CHECKs status/kind/priority/issue-type; indexes `(ProjectId, Status, Rank)`, `(ProjectId, ParentId, SiblingRank)`, `(AssigneeUserId, Status)`, `(IterationId)`; raw-SQL partial index on `ExternalRefJson` keys (D10) |
+| `work_item_relations` | unique `(SourceId, TargetId, Kind)` **assuming canonical form** (D8); CHECKs kind + no-self; FKs CASCADE; index `(TargetId)` for reverse lookups |
+| `iterations` | `(ProjectId, Name)` unique; `ck_iterations_status`; FK CASCADE |
+| `tracker_preferences` | strong XOR; unique `(UserId, TenantId)` `NullsDistinct=false`; `ck_tracker_preferences_default_kind` |
 
-`ParentId` is `RESTRICT`, not `CASCADE`: silently deleting a whole epic's subtree because someone deleted the epic is not recoverable, and 44-2 returns a 409 telling the caller to reparent or delete children first.
-
-**No control-plane migration.** **No change to `domain_events`.**
+`ParentId` is RESTRICT (deleting an epic must not silently delete the subtree — 44-2 returns
+409). **No control-plane migration. No change to `domain_events`. No DROP-list entry (D14).**
 
 ## Events
 
-None — 44-5. The sweep endpoint emits no DCB event either: it is a platform DDL operation with no tenant context to append into, and its result list is the record. (If Epic 37's audit catalog wants it, that is a `SensitiveActionCatalog` entry, not a DCB row.)
+None — 44-5. The sweep emits no DCB event (platform DDL, no tenant stream to append into; the
+result list is the record).
 
 ## Test Plan
 
 | # | Test | Kind |
 |---|---|---|
-| 1 | `TrackerMigrationTests.All_four_tables_land_in_the_tenant_schema` | Testcontainers, `AcceptanceRulesOverridesMigrationTests.cs:49` shape |
-| 2 | `TrackerMigrationTests.Status_check_constraint_matches_the_enum` | reflect `WorkItemStatus` wires, read `pg_constraint`, assert set equality |
-| 3 | `TrackerMigrationTests.Kind_check_constraint_matches_the_enum` | as above |
-| 4 | `TrackerMigrationTests.Rank_column_is_C_collated_and_sorts_ordinally` | insert 500 `Rank.Between` values shuffled; `ORDER BY "Rank"` == `OrderBy(Ordinal)` — **the AC4 test** |
-| 5 | `TrackerMigrationTests.Preferences_xor_rejects_both_null_and_both_set` | both rejected (strong form) |
-| 6 | `TrackerMigrationTests.Preferences_unique_index_dedupes_the_null_half` | proves `NullsDistinct=false` |
-| 7 | `WorkItemRepositoryTests.Fifty_concurrent_creates_mint_contiguous_keys` | 50 parallel `CreateAsync`, assert distinct + contiguous 1..50 |
-| 8 | `WorkItemRepositoryTests.Keyset_paging_is_stable_under_insertion` | page, insert mid-range, page again — no duplicate, no skip |
-| 9 | `WorkItemRepositoryTests.Parent_delete_is_restricted` | FK violation surfaces, subtree intact |
-| 10 | `TrackerPreferenceRepositoryTests.Planes_never_join` | a user row is invisible to `GetByTenantAsync` and vice versa |
-| 11 | `TrackerOwnershipTests.No_work_item_query_filters_on_a_user_plane` | reflection/expression check over `IWorkItemRepository` — pins D5 |
-| 12 | `AdminTenantMigrationTests.Sweep_reaches_a_pre_existing_tenant` | two tenants, one migrated by the creation path; sweep; assert the other gains the tables — **the AC9 test** |
-| 13 | `AdminTenantMigrationTests.Sweep_is_idempotent` | second run reports `already-current`, no schema diff |
-| 14 | `AdminTenantMigrationTests.One_failing_tenant_does_not_abort_the_sweep` | inject an unreachable connection for tenant B; A still migrates; B reported failed |
-| 15 | `AdminTenantMigrationTests.DryRun_applies_nothing` | pending counts reported, `__TenantMigrationsHistory` unchanged |
-| 16 | `AdminTenantMigrationTests.Requires_platform_owner` | member/tenant-admin → 403 |
+| 1 | `TrackerMigrationTests.All_five_tables_land_in_the_tenant_schema` | Testcontainers |
+| 2 | `...Status_check_constraint_matches_the_enum` (reflect `WorkItemStatus` wires ↔ `pg_constraint`) | Testcontainers |
+| 3 | `...Kind_check_constraint_matches_the_enum` | Testcontainers |
+| 4 | `...Rank_and_SiblingRank_are_C_collated_and_sort_ordinally` (real `Rank` output, shuffled, both columns) — **AC4** | Testcontainers |
+| 5 | `...Preferences_xor_rejects_both_null_and_both_set` + `...unique_index_dedupes_the_null_half` | Testcontainers |
+| 6 | `...Relations_unique_index_rejects_duplicate_canonical_row` + no-self CHECK | Testcontainers |
+| 7 | `WorkItemRepositoryTests.Concurrent_creates_mint_distinct_contiguous_keys` — **AC5** | Testcontainers |
+| 8 | `...GetByKey_resolves_previous_key_after_rekey` (frozen-key + `PreviousKeys` history) | Testcontainers |
+| 9 | `...Mirror_symmetric_relation_is_rejected_and_blocks_stays_directed` (via `Canonicalize`) | Testcontainers |
+| 10 | `...Keyset_paging_is_stable_under_insertion`; `...Parent_delete_is_restricted` | Testcontainers |
+| 11 | `TrackerPreferenceRepositoryTests.Planes_never_join` | Testcontainers |
+| 12 | `TrackerOwnershipTests.No_work_item_surface_filters_on_a_principal_plane` (reflection — pins D5) | plain NUnit |
+| 13 | `TenantMigrationSweeperTests.Sweep_reaches_a_pre_provisioned_tenant` (two schemas; one migrated by the creation path; sweep; other gains tables; first `already-current`) — **AC9** | Testcontainers |
+| 14 | `...Sweep_is_idempotent`; `...One_failing_tenant_does_not_abort`; `...DryRun_applies_nothing` | Testcontainers |
 
-## Definition of Done
-
-- 16 tests green, Testcontainers Postgres 17.
-- `TenantDbContextModelSnapshot.cs` regenerated and committed with the migration.
-- `POST /api/admin/tenants/migrate` documented in the admin runbook with the `dryRun` workflow and the "run this after every deploy carrying a tenant migration" instruction.
-- A `.dev/findings/` note recording that tenant migrations previously reached only new tenants, with the two call sites, so the next author does not rediscover it.
-- Grep confirms no `repositories` table is created by this story (D8).
+Endpoint 403 test (platform-owner-only) ships with the deferred route mapping.
 
 ## Dependencies & Sequencing
 
-- **Blocked by:** 44-0 (entities bind `WorkItemKind`/`WorkItemStatus`/`Rank`/`WorkItemRef`).
-- **Blocks:** 44-2, 44-3, 44-4, 44-5, 44-7, 44-8, 44-9 — everything.
-- **Shared-edit register:** `TenantDbContext.cs`, `TammaModelConfiguration.cs`, `TenantDbContextModelSnapshot.cs`, `Tamma.Data/DependencyInjection.cs`, `Program.cs`. The snapshot is a **single-author token** shared with any other in-flight tenant migration (Epic 39's and Epic 40's `agent_run_waits` are both noted as sharing it). Coordinate before starting.
-- **Adjacent, not blocking:** 39-20's `repositories` (D8 is forward-compatible either way).
+- **Blocked by:** 44-0 (**shipped**, PR #506).
+- **Blocks:** 44-2, 44-3, 44-4, 44-5, 44-7, 44-8, 44-9.
+- **Shared-edit register:** `TenantDbContext.cs`, `TammaModelConfiguration.cs` (one contiguous
+  region), `TenantDbContextModelSnapshot.cs` (single-author token), `Tamma.Data/DependencyInjection.cs`.
+  `Program.cs` explicitly NOT touched this round (41-30's lane) — handoff carries the exact edits.
 
 ## Risks & Mitigations
 
 | Risk | Mitigation |
 |---|---|
-| **The collation trap ships undetected.** EF's Npgsql provider does not emit column collations by default, so a regenerated migration silently drops `COLLATE "C"`. | Test 4 is a Testcontainers test that fails loudly; the hand-edit is called out in step 7 and in the DoD; a comment sits on the column in `TammaModelConfiguration`. |
-| **The sweep is a new way to break production.** It runs DDL against every tenant. | `dryRun` default-off but documented first; per-tenant isolation (test 14); bounded concurrency; platform-owner only; `EfTenantDbMigrator` already idempotent and already used on both creation paths, so the sweep runs no code path that is not exercised on every tenant create today. |
-| **Migration-snapshot contention.** Three epics have in-flight tenant migrations. | Named in the shared-edit register; rebase-and-regenerate rather than hand-merging the snapshot. |
-| **Key minting under `FOR UPDATE` serializes project-level creates.** A bulk import (44-8, 44-9) of 900 items takes 900 sequential locks. | Acceptable at v1 volumes; `CreateManyAsync` takes the lock once and allocates a block, and 44-8/44-9 use it. Noted so the bulk paths are written against it rather than looping `CreateAsync`. |
-| **`iterations` ships empty and could rot.** | 44-4 lands two stories later in the same epic; if it slips, the table is inert and costs nothing. Recorded rather than deferred, because a second tenant migration is the more expensive outcome (D4). |
+| Collation silently dropped on regenerate | `UseCollation("C")` is in the MODEL (snapshot carries it); test 4 fails loudly against real Postgres |
+| A caller reimplements the direction convention | repository is the only writer of `work_item_relations` and calls `Canonicalize`; test 9 pins mirror rejection |
+| Sweep = new way to break production | dryRun; per-tenant isolation (test 14); bounded concurrency; runs only code every tenant-create already runs |
+| Key minting serializes bulk imports | acceptable v1; noted for 44-8/44-9 to batch under one lock if needed |
 
-## Effort Breakdown
+## Effort
 
-| Task | Days |
-|---|---|
-| Steps 1–6 (entities, DbSets, model config, constraints) | 1.5 |
-| Step 7 (migration + hand-edits + snapshot) | 0.75 |
-| Steps 8–11 (four repositories + DI) | 1.5 |
-| Steps 12–13 (the sweep endpoint) | 0.5 |
-| Tests 1–11 (schema + repository, Testcontainers) | 1.0 |
-| Tests 12–16 (the sweep, two-tenant fixtures) | 0.5 |
-| Findings note, runbook, review | 0.25 |
-| **Total** | **6.0** |
+Original 6.0d figure stale (banner). Re-cut: entities/config/migration 2.0, repositories 1.5,
+sweeper 0.5, tests 1.5, docs/handoff 0.5 → **6.0 days** (net unchanged — relations + second
+rank column + history offset by the endpoint skin moving out of lane).

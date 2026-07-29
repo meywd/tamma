@@ -188,7 +188,9 @@ public class ProviderSettingsEndpointsTests
 
     private static InlineToolLoopRunner Runner(IProviderSettingsStore store) =>
         new(logger: null, httpClientFactory: null, configuration: Config(),
-            sanitizer: null, settingsStore: store);
+            sanitizer: null,
+            autonomyGate: new Tamma.Api.Services.Agents.CatalogDefaultToolLoopAutonomyGate(),
+            settingsStore: store);
 
     private static ClaimsPrincipal Principal() =>
         new(new ClaimsIdentity(new[]

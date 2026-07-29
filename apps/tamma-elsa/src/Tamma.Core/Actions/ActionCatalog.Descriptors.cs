@@ -19,10 +19,12 @@ namespace Tamma.Core.Actions;
 // DEFAULTS — behaviour-preserving (epic decision D1: v1 ENFORCES, so shipped
 // defaults must change nothing). The derivation rule (43-3 D4): a member ships
 // AlwaysHuman if and only if, TODAY, a person must act before it can complete.
-// Applying it yields a ONE-member AlwaysHuman set: document-type:design
-// (AcceptanceDefaults.For(Design) ships AcceptorRequirement.Human — its only
-// production occurrence, AcceptanceDefaults.cs; design.md §3.1's "10 document
-// types" is VERIFIED FALSE, see 43-3 C2). Everything else ships AutonomyDial.Min.
+// At 43-3 time that yielded a ONE-member AlwaysHuman set: document-type:design
+// (AcceptanceDefaults.For(Design) ships AcceptorRequirement.Human;
+// design.md §3.1's "10 document types" is VERIFIED FALSE, see 43-3 C2). Story
+// 41-1b grew the set to THREE — document-type:sprint-plan and
+// document-type:threat-model follow their AcceptanceDefaults Human rows from
+// the day the types exist. Everything else ships AutonomyDial.Min.
 // Never literals — a literal would not move when the dial does.
 // ─────────────────────────────────────────────────────────────────────────────
 public static partial class ActionCatalog
@@ -73,7 +75,10 @@ public static partial class ActionCatalog
 
     private static IReadOnlyList<ActionDescriptor> BuildDescriptors() => new[]
     {
-        // ── agent-action (80) — AgentAction.cs declaration order ─────────────
+        // ── agent-action (96) — AgentAction.cs declaration order (80 + the 16
+        //    Epic 41 tokens, Story 41-1a; groups follow the 43-3 partition rule
+        //    exactly as the incumbent 80 do, MinAutonomy = Min per the
+        //    behaviour-preserving rule) ─────────────────────────────────────────
 
         Agent(AgentAction.ContextScan, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Context scan", "Scan the repository and issue context to build understanding before work starts."),
         Agent(AgentAction.TriageIntake, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Triage intake", "Classify and route an incoming issue. NOTE: ships at Min despite the live AlwaysEscalate entry (TriageBindingHelper) — the floor comes from the legacy surface via 43-5's max() composition, and duplicating it as a catalog default would make deleting the legacy entry fail to lower the threshold (43-3 D7; see 43-5's ShippedTriageDefault_StillEscalates)."),
@@ -102,6 +107,10 @@ public static partial class ActionCatalog
         Agent(AgentAction.CodeReviewArchitecture, ActionGroup.ReviewAndAcceptance, ActionRisk.Mutating, "Architecture code review", "Architecture-focused review verdict on a change."),
         Agent(AgentAction.AssessTechnicalRisk, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Assess technical risk", "Estimate the technical risk of a proposed change."),
         Agent(AgentAction.ProposeDesign, ActionGroup.Authoring, ActionRisk.Mutating, "Propose design", "Author a design proposal (the artifact the human-pinned design acceptance decides on)."),
+        // Story 41-1a — 41-11: classify/route debt items, produces understanding, like triage-technical.
+        Agent(AgentAction.TriageTechDebt, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Triage tech debt", "Classify and prioritise accumulated technical debt and standing risks."),
+        // Story 41-1a — 41-10: the Design document others build against (binding artifact — 43-3 D5.3, like design-api-contract).
+        Agent(AgentAction.DesignSystem, ActionGroup.Authoring, ActionRisk.Mutating, "System design document", "Author the full system-design document (API contract, data model, integration points) others build against."),
 
         Agent(AgentAction.CreateTasks, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Create tasks", "Break work into ordered tasks; ordering, not a binding artifact."),
         Agent(AgentAction.PlanImplementation, ActionGroup.Authoring, ActionRisk.Mutating, "Implementation plan", "Author the implementation plan the developer codes to (binding — 43-3 D5.3)."),
@@ -112,6 +121,8 @@ public static partial class ActionCatalog
         Agent(AgentAction.ResolveBlocker, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Resolve blocker", "Work out how to clear a blocking condition."),
         Agent(AgentAction.MentorFeedback, ActionGroup.ReviewAndAcceptance, ActionRisk.Mutating, "Mentor feedback", "Mentoring review feedback on a contributor's work."),
         Agent(AgentAction.DecomposeIssue, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Decompose issue", "Split an issue into smaller workable pieces."),
+        // Story 41-1a — 41-17: classify/route open PRs, produces routing, like triage-defect.
+        Agent(AgentAction.TriagePr, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Triage pull request", "Classify, prioritise and route an open pull request in the review queue."),
 
         Agent(AgentAction.PlanFix, ActionGroup.Authoring, ActionRisk.Mutating, "Fix plan", "Author the fix plan the developer codes to (binding — 43-3 D5.3)."),
         Agent(AgentAction.PlanDebugging, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Debugging plan", "Order the debugging investigation; analysis, not a binding artifact (43-3 D5.3)."),
@@ -136,6 +147,8 @@ public static partial class ActionCatalog
         Agent(AgentAction.CodeReviewCoverage, ActionGroup.ReviewAndAcceptance, ActionRisk.Mutating, "Coverage review", "Coverage-focused review verdict on a change."),
         Agent(AgentAction.TriageDefect, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Triage defect", "Classify and route a reported defect."),
         Agent(AgentAction.ReviewTestability, ActionGroup.ReviewAndAcceptance, ActionRisk.Mutating, "Testability review", "Verdict on whether a design/plan is testable."),
+        // Story 41-1a — 41-16: classify failures (regression|flaky|environmental); analysis, not test authoring.
+        Agent(AgentAction.ManageRegression, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Manage regressions", "Mine CI/DCB history for repeated and flaky failures and triage each suspect test."),
 
         Agent(AgentAction.ThreatModel, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Threat model", "Model threats against a design; produces understanding."),
         Agent(AgentAction.PlanReviewSecurity, ActionGroup.ReviewAndAcceptance, ActionRisk.Mutating, "Security plan review", "Security-focused review verdict on a plan."),
@@ -170,6 +183,8 @@ public static partial class ActionCatalog
         Agent(AgentAction.WritePostmortem, ActionGroup.Docs, ActionRisk.Mutating, "Write postmortem", "Write the postmortem for a resolved incident."),
         Agent(AgentAction.AssessCapacity, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Assess capacity", "Assess capacity and scaling headroom."),
         Agent(AgentAction.ReviewOperability, ActionGroup.ReviewAndAcceptance, ActionRisk.Mutating, "Operability review", "Verdict on operational readiness."),
+        // Story 41-1a — 41-22: root-cause an incident to a Diagnosis; produces understanding, like debug-rootcause.
+        Agent(AgentAction.IncidentRootcause, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Incident root cause", "Analyze an operational incident to its root cause (produces a Diagnosis; diagnose-incident stays the triage-panel lens)."),
 
         Agent(AgentAction.SummarizeChanges, ActionGroup.Docs, ActionRisk.Mutating, "Summarize changes", "Write a change summary for an audience."),
         Agent(AgentAction.WriteUserDocs, ActionGroup.Docs, ActionRisk.Mutating, "Write user docs", "Write end-user documentation."),
@@ -179,7 +194,39 @@ public static partial class ActionCatalog
         Agent(AgentAction.UpdateChangelog, ActionGroup.Docs, ActionRisk.Mutating, "Update changelog", "Update the changelog."),
         Agent(AgentAction.ReviewDocs, ActionGroup.ReviewAndAcceptance, ActionRisk.Mutating, "Docs review", "Review verdict on documentation."),
 
-        // ── document-type (10) — all review-and-acceptance (43-3 AC4): they are
+        // scrum_master (Story 41-1a)
+        // plan-sprint → authoring: the SprintPlan is the commitment the team executes
+        // against (binding — 43-3 D5.3, like plan-implementation; contrast plan-roadmap).
+        Agent(AgentAction.PlanSprint, ActionGroup.Authoring, ActionRisk.Mutating, "Plan sprint", "Author the sprint commitment (capacity-bounded scope, owners, estimates) the team executes against."),
+        // synthesize-standup → docs: a digest of work already done, like summarize-technical.
+        Agent(AgentAction.SynthesizeStandup, ActionGroup.Docs, ActionRisk.Mutating, "Synthesize standup", "Write the daily standup digest (what moved, what's blocked, what's at risk) from the event stream."),
+        // facilitate-retro → planning-and-analysis: retro findings are analysis of what
+        // happened, producing understanding (a Findings document), not a binding artifact.
+        Agent(AgentAction.FacilitateRetro, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Facilitate retrospective", "Assemble retrospective findings (went well / didn't / action items) from a sprint's history."),
+        // track-impediments → planning-and-analysis: impediment surfacing/routing, like resolve-blocker.
+        Agent(AgentAction.TrackImpediments, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Track impediments", "Surface, classify and route standing impediments and blockers."),
+        // write-retro-narrative → docs: prose narrative of a retro already held (41-8 Phase B lockstep), like write-postmortem.
+        Agent(AgentAction.WriteRetroNarrative, ActionGroup.Docs, ActionRisk.Mutating, "Write retro narrative", "Write the prose retrospective narrative for a completed sprint retro."),
+
+        // project_manager (Story 41-1a)
+        // report-status → docs: a stakeholder-facing report of work already done, like summarize-stakeholder.
+        Agent(AgentAction.ReportStatus, ActionGroup.Docs, ActionRisk.Mutating, "Report status", "Write an audience-tagged status report of progress against commitments."),
+        // coordinate-release → planning-and-analysis: cross-team sequencing/ordering, not
+        // pipeline control — deploy-control gates pipeline/production actions, which this is not.
+        Agent(AgentAction.CoordinateRelease, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Coordinate release", "Sequence a release across teams: readiness, sign-offs, timeline and communications."),
+
+        // ux_designer (Story 41-1a)
+        // draft-user-flow / author-ui-spec → authoring: the UxSpec is the artifact
+        // implementation builds against (binding — 43-3 D5.3).
+        Agent(AgentAction.DraftUserFlow, ActionGroup.Authoring, ActionRisk.Mutating, "Draft user flow", "Author the user flows (screens, states, transitions) for a feature."),
+        Agent(AgentAction.AuthorUiSpec, ActionGroup.Authoring, ActionRisk.Mutating, "Author UI spec", "Author the structured UI specification implementation builds against."),
+        // review-design → review-and-acceptance: a review verdict, like review-docs.
+        Agent(AgentAction.ReviewDesign, ActionGroup.ReviewAndAcceptance, ActionRisk.Mutating, "Design review", "Review verdict on a UX/design artifact against usability heuristics."),
+        // audit-accessibility → planning-and-analysis: an audit producing findings with
+        // no secret material, like audit-dependencies (contrast audit-secrets, 43-3 D5.4).
+        Agent(AgentAction.AuditAccessibility, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Audit accessibility", "Audit a spec or shipped UI against accessibility standards; no secret material involved."),
+
+        // ── document-type (16) — all review-and-acceptance (43-3 AC4): they are
         //    acceptance decisions by construction ────────────────────────────
 
         Doc(DocumentTypeKey.Findings, "Findings acceptance", "Accept/route a findings document."),
@@ -195,6 +242,17 @@ public static partial class ActionCatalog
         Doc(DocumentTypeKey.TriageDecision, "Triage decision acceptance", "Accept/route a triage decision document."),
         Doc(DocumentTypeKey.Diagnosis, "Diagnosis acceptance", "Accept/route a diagnosis document."),
         Doc(DocumentTypeKey.TestSpec, "Test spec acceptance", "Accept/route a test specification document."),
+        // Story 41-1b — the six Epic 41 types (document-type plane 10 -> 16).
+        // MinAutonomy follows AcceptanceDefaults.For (the 43-3 D4 derivation, read
+        // by DesignDocumentType_MatchesAcceptanceDefaults): sprint-plan and
+        // threat-model ship AcceptorRequirement.Human, so they are AlwaysHuman;
+        // the other four ship Min.
+        Doc(DocumentTypeKey.AcceptanceCriteria, "Acceptance criteria acceptance", "Accept/route an acceptance-criteria document (panel selection, not a human acceptor; ships Min per 43-3 C2)."),
+        Doc(DocumentTypeKey.BacklogOrdering, "Backlog ordering acceptance", "Accept/route a backlog-ordering document (product_owner reviewer; no human acceptor)."),
+        Doc(DocumentTypeKey.SprintPlan, "Sprint plan acceptance", "Accept a sprint plan — pinned to a human acceptor (AcceptanceDefaults.For(SprintPlan), Story 41-1b D1: a capacity commitment is a human commitment).", min: AutonomyDial.AlwaysHuman),
+        Doc(DocumentTypeKey.TestPlan, "Test plan acceptance", "Accept/route a test-plan document (tester reviewer; no human acceptor)."),
+        Doc(DocumentTypeKey.ThreatModel, "Threat model acceptance", "Accept a threat model — pinned to a human acceptor (AcceptanceDefaults.For(ThreatModel), Story 41-1b D1: unmitigated high-risk escalation is a security-owned human call).", min: AutonomyDial.AlwaysHuman),
+        Doc(DocumentTypeKey.UxSpec, "UX spec acceptance", "Accept/route a ux-spec document (panel selection, not a human acceptor; ships Min per 43-3 C2)."),
 
         // ── tool (8) ─────────────────────────────────────────────────────────
 
@@ -275,8 +333,20 @@ public static partial class ActionCatalog
             "Tamma.ElsaServer.Workflows.DeploymentPipelineWorkflow — production stage transition", reversible: false),
         Effect(ExternalEffect.DeployRollback, ActionGroup.DeployControl, ActionRisk.Destructive, "Roll back production", "Production rollback branch (same LLM-tool-loop limitation as promote).",
             "Tamma.ElsaServer.Workflows.DeploymentPipelineWorkflow — RollbackProduction branch", reversible: false),
+        // Story 41-30 (D8) — the scheduled-trigger admin mutations. Grouped
+        // platform-automation (43-3's grouping for the seam): the consequence
+        // at completion is arming/changing/stopping platform automation, not a
+        // source-control or deploy effect. All Mutating + reversible (a
+        // schedule row can be re-created; the workflows a schedule DISPATCHES
+        // are separately gated by their own catalog members).
+        Effect(ExternalEffect.ScheduleCreate, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Create schedule", "Create a scheduled trigger (arms a recurring per-tenant workflow dispatch; run-now claims a manual window on an existing schedule).",
+            "POST /api/admin/scheduled-triggers — ScheduledTriggerEndpoints.Create"),
+        Effect(ExternalEffect.ScheduleUpdate, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Update schedule", "Update a scheduled trigger's cron / target / enabled flag / input.",
+            "PUT /api/admin/scheduled-triggers/{id} — ScheduledTriggerEndpoints.Update"),
+        Effect(ExternalEffect.ScheduleDelete, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Delete schedule", "Delete a scheduled trigger (stops a tenant's recurring audit; audited via SCHEDULE.TRIGGER.CHANGED).",
+            "DELETE /api/admin/scheduled-triggers/{id} — ScheduledTriggerEndpoints.Delete"),
 
-        // ── automation (26) — EscalatableToHuman=false for the whole plane ────
+        // ── automation (27) — EscalatableToHuman=false for the whole plane ────
 
         Automation(BackgroundActor.HourlyAnalyticsRollupScheduler, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Hourly analytics rollup", "Rolls up analytics hourly.",
             "Tamma.ElsaServer.Workflows.HourlyAnalyticsRollupScheduler"),
@@ -288,6 +358,16 @@ public static partial class ActionCatalog
             "Tamma.ElsaServer.WorkflowSeeder"),
         Automation(BackgroundActor.AgentSeeder, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Agent seeder", "Seeds agent definitions at startup.",
             "Tamma.ElsaServer.AgentSeeder"),
+        // Story 41-30 — the tenant-aware scheduled-trigger seam. Mutating at
+        // Min (the ProviderSettingsStorePrimingService precedent for risk
+        // honesty + the behaviour-preserving default rule): the service
+        // writes ledger/registry rows and STARTS workflows, but every
+        // workflow it dispatches is separately governed by that workflow's
+        // own catalog members — the dial governs the dispatched work, not
+        // the dispatcher (story 41-30 "Autonomy behavior"). Ships
+        // Enabled=false (AC9), so cataloguing it changes nothing at runtime.
+        Automation(BackgroundActor.TenantScheduledTriggerService, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Tenant scheduled-trigger service", "Fires tenant-scoped scheduled workflow dispatches at most once per (tenant, trigger, window).",
+            "Tamma.ElsaServer.Workflows.TenantScheduledTriggerService"),
         Automation(BackgroundActor.PoolWarmupService, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Pool warmup", "Warms tenant connection pools.",
             "Tamma.Api.Services.PoolWarmupService"),
         Automation(BackgroundActor.WorkflowSyncService, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Workflow sync", "Synchronizes workflow definitions.",
@@ -332,6 +412,8 @@ public static partial class ActionCatalog
             "Tamma.Api.Services.Alerts.Rules.AlertRuleEvaluator"),
         Automation(BackgroundActor.AuditProjector, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Audit projector", "Projects sensitive-action audit rows from events.",
             "Tamma.Api.Services.Audit.AuditProjectorBackgroundService"),
+        Automation(BackgroundActor.ActionCatalogStartupValidator, ActionGroup.PlatformAutomation, ActionRisk.ReadOnly, "Action-catalog startup validator", "Boot-time fail-loud check that the tool vocabularies agree with the action catalog (Story 43-4); mutates nothing — it can only refuse to start the Tamma.Api host.",
+            "Tamma.Api.Services.Actions.ActionCatalogStartupValidator"),
         Automation(BackgroundActor.PlatformTaskWorker, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Platform task worker", "Drains the platform task queue (one task at a time per process; RunOnStartup ships false).",
             "Tamma.Api.Services.PlatformTasks.PlatformTaskWorker"),
 

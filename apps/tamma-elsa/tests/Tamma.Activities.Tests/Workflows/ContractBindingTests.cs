@@ -566,6 +566,17 @@ public class ContractBindingTests
                 "triage-panel producer pair: tester reviews a triage-decision draft via triage-defect; policy-only, no compiled emitter.",
             [("devops", "diagnose-incident")] =
                 "triage-panel producer pair: devops reviews a triage-decision draft via diagnose-incident; policy-only, no compiled emitter.",
+
+            // Story 41-1a (D1/D2) — the two new document-review producer pairs. No
+            // compiled emitter exists for either (41-24/41-25/41-26 build the
+            // tech_writer callers; 41-28 the ux_designer one), so they are
+            // policy-only, reachable via the 39-7 producers' data-driven dispatch.
+            [("tech_writer", "review-docs")] =
+                "document-review producer pair: tech_writer reviews a document via review-docs (the 41-1a D1 " +
+                "selector arm); policy-only, no compiled emitter until 41-24/41-25/41-26.",
+            [("ux_designer", "review-design")] =
+                "document-review producer pair: ux_designer reviews a design/UxSpec document via review-design " +
+                "(41-1a D2); policy-only, no compiled emitter until 41-28.",
         };
 
     [Test]
@@ -614,13 +625,15 @@ public class ContractBindingTests
     }
 
     [Test]
-    public void ReviewerSelectionHelper_AllDispatchablePairs_HasSixteenEligiblePairs()
+    public void ReviewerSelectionHelper_AllDispatchablePairs_HasEighteenEligiblePairs()
     {
-        // Pin the D9 surface: 7 document + 5 diff + 4 triage-panel = 16, each taxonomy-eligible.
+        // Pin the D9 surface: 9 document + 5 diff + 4 triage-panel = 18, each taxonomy-eligible.
         // Story 39-15 added the 4 triage-panel pairs (doc-type-aware GetPanelActionForRole) when
         // TriagePanelReviewWorkflow's semantics moved to the 39-7 panel over a triage-decision draft.
+        // Story 41-1a (D1/D2) added (tech_writer, review-docs) and (ux_designer, review-design)
+        // to the document roster: 16 → 18.
         var pairs = ReviewerSelectionHelper.AllDispatchablePairs;
-        pairs.Should().HaveCount(16, "7 document-review pairs + 5 diff-review pairs + 4 triage-panel pairs");
+        pairs.Should().HaveCount(18, "9 document-review pairs + 5 diff-review pairs + 4 triage-panel pairs");
         pairs.Should().OnlyContain(p => Tamma.Api.Services.Agents.RolePhaseMap.IsRoleEligibleForPhase(p.Action, p.Role),
             "every dispatchable review pair must be taxonomy-eligible");
     }

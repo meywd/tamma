@@ -27,6 +27,12 @@
     <PackageReference Include="Elsa.Workflows.Api" Version="3.5.3" />
     <PackageReference Include="Elsa.Identity" Version="3.5.3" />
     <PackageReference Include="Elsa.Scheduling" Version="3.5.3" />
+    <!-- Story 41-30 (D3) — Cronos is ALREADY in the restore graph as a direct
+         dependency of Elsa.Scheduling 3.5.3; this explicit reference declares
+         the dependency (ScheduleWindowCalculator uses Cronos.CronExpression
+         directly — ICronParser has no "next occurrence after an arbitrary
+         anchor" overload) rather than inheriting it. No new download. -->
+    <PackageReference Include="Cronos" Version="0.11.0" />
 
     <!-- ELSA Persistence -->
     <PackageReference Include="Elsa.EntityFrameworkCore" Version="3.5.3" />

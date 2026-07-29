@@ -88,6 +88,15 @@ public class TenantDbContext : DbContext
     // exclusively through IDocumentInstanceRepository; rebuildable from events.
     public DbSet<DocumentInstance> Documents => Set<DocumentInstance>();
 
+    // Story 44-1 — the native tracker (Epic 44). All five tables are
+    // tenant-schema resident (epic D5); tracker_preferences is the only one
+    // carrying the dual-scoped principal pattern (epic D6).
+    public DbSet<ProjectEntity> Projects => Set<ProjectEntity>();
+    public DbSet<WorkItemEntity> WorkItems => Set<WorkItemEntity>();
+    public DbSet<WorkItemRelation> WorkItemRelations => Set<WorkItemRelation>();
+    public DbSet<IterationEntity> Iterations => Set<IterationEntity>();
+    public DbSet<TrackerPreference> TrackerPreferences => Set<TrackerPreference>();
+
     /// <summary>
     /// Tenant-scoped API keys (Story 28-7). The tenant DB api_keys table
     /// is locked to <c>Scope = 'tenant'</c> via a CHECK constraint; user /

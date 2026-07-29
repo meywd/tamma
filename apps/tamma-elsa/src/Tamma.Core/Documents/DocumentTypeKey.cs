@@ -31,6 +31,17 @@ public enum DocumentTypeKey
     [Wire("triage-decision")]      TriageDecision,
     [Wire("diagnosis")]            Diagnosis,
     [Wire("test-spec")]            TestSpec,
+
+    // Story 41-1b — the six Epic 41 document types (epic README's new-types
+    // table). Registered atomically with their IDocumentType implementations
+    // (the registry's Every_vocabulary_key_now_resolves_to_an_implementation
+    // gate forbids a partial land).
+    [Wire("acceptance-criteria")]  AcceptanceCriteria,
+    [Wire("backlog-ordering")]     BacklogOrdering,
+    [Wire("sprint-plan")]          SprintPlan,
+    [Wire("test-plan")]            TestPlan,
+    [Wire("threat-model")]         ThreatModel,
+    [Wire("ux-spec")]              UxSpec,
 }
 
 public static class DocumentTypeKeyExtensions

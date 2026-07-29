@@ -46,6 +46,12 @@
          are non-sealed with virtual *Async methods, so tests mock at the
          service-interface boundary — no live Stripe in CI. -->
     <PackageReference Include="Stripe.net" Version="51.2.0" />
+    <!-- Story 41-30 (D8) — write-time cron validation for the scheduled-trigger
+         admin API: a malformed expression is a typed 400 at PUT/POST time,
+         never a fire-time throw. Cronos 0.11.0 is already in the restore graph
+         (it is what Elsa.Scheduling itself parses with); the explicit
+         reference declares the dependency. No new download. -->
+    <PackageReference Include="Cronos" Version="0.11.0" />
   </ItemGroup>
 
   <ItemGroup>

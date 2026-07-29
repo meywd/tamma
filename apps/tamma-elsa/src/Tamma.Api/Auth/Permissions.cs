@@ -78,6 +78,14 @@ public static class Permissions
         // grants admin+owner reach. Single-user mode is unaffected — every
         // signed-up user is auto-owner of their personal tenant.
         ["acceptance-rules:manage"] = ["admin", "owner"],
+        // Story 41-30 (D8) — scheduled-trigger management. Mirrors
+        // prompts:manage: a tenant's schedule create/update/delete/run-now
+        // must be reachable by tenant_owner OR tenant_admin (member → 403);
+        // the owner-only settings:manage would 403 every tenant_admin.
+        // tenant_id-NULL template rows are additionally platform-owner-only
+        // in the handler. Single-user mode is unaffected — every signed-up
+        // user is auto-owner of their personal tenant.
+        ["schedules:manage"] = ["admin", "owner"],
     };
 
     public static bool HasPermission(string? role, string? permission)

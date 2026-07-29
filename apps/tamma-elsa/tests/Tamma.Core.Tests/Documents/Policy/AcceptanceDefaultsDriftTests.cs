@@ -44,6 +44,13 @@ public class AcceptanceDefaultsDriftTests
     [Test]
     public void Panel_roster_is_the_exact_seven_roles()
     {
+        // Story 41-1a (C7): this roster is the DEFAULT PANEL MEMBERSHIP of the
+        // shipped acceptance rules and is DELIBERATELY unchanged by D1/D2 —
+        // tech_writer/ux_designer joined ReviewerSelectionHelper's SELECTOR
+        // domain (s_documentRoster, 7 -> 9), which is a different surface.
+        // Moving THIS roster would silently seat them on every existing panel
+        // review; 41-24/41-25/41-26/41-28 select them as single reviewers per
+        // document type instead. Do not "fix" the 7.
         AcceptanceDefaults.PanelRoster.Should().Equal(
             AgentRole.Architect.ToWire(),
             AgentRole.Developer.ToWire(),
@@ -58,7 +65,12 @@ public class AcceptanceDefaultsDriftTests
 
     [TestCase(DocumentTypeKey.Plan)]
     [TestCase(DocumentTypeKey.Review)]
-    public void Plan_and_review_default_to_a_majority_panel(DocumentTypeKey type)
+    // 41-1b D1: acceptance-criteria is the merge gate's definition of done (the
+    // same breadth plan/review get); a ux-spec is cross-functional — the 7-role
+    // panel is the honest default until 41-28 defines a design panel.
+    [TestCase(DocumentTypeKey.AcceptanceCriteria)]
+    [TestCase(DocumentTypeKey.UxSpec)]
+    public void Panel_types_default_to_a_majority_panel(DocumentTypeKey type)
     {
         var sel = AcceptanceDefaults.For(type).ReviewerSelection;
         sel.Mode.Should().Be(ReviewerMode.Panel);
@@ -80,6 +92,26 @@ public class AcceptanceDefaultsDriftTests
         var sel = AcceptanceDefaults.For(type).ReviewerSelection;
         sel.Mode.Should().Be(ReviewerMode.SingleReviewer);
         sel.ReviewerRole.Should().Be(AgentRole.Architect.ToWire());
+        sel.DecisionRule.Should().Be(ReviewDecisionRule.Unanimous);
+    }
+
+    // ── Story 41-1b D1 — the single-reviewer overrides for the new types ──
+
+    [TestCase(DocumentTypeKey.BacklogOrdering, AgentRole.ProductOwner)]
+    [TestCase(DocumentTypeKey.SprintPlan, AgentRole.ProductOwner)]
+    [TestCase(DocumentTypeKey.TestPlan, AgentRole.Tester)]
+    [TestCase(DocumentTypeKey.ThreatModel, AgentRole.Security)]
+    public void The_41_1b_single_reviewer_types_get_their_domain_reviewer(DocumentTypeKey type, AgentRole reviewer)
+    {
+        // backlog-ordering: a PO judgment; sprint-plan: PO until 41-1a/41-6 add a
+        // scrum_master surface; test-plan: QA reviews strategy; threat-model: a
+        // security-owned call. None falls through to the architect base row.
+        var rules = AcceptanceDefaults.For(type);
+        rules.Should().NotBe(AcceptanceDefaults.Rules,
+            $"'{type.ToWire()}' must not silently take the single-architect catch-all (41-1b D1)");
+        var sel = rules.ReviewerSelection;
+        sel.Mode.Should().Be(ReviewerMode.SingleReviewer);
+        sel.ReviewerRole.Should().Be(reviewer.ToWire());
         sel.DecisionRule.Should().Be(ReviewDecisionRule.Unanimous);
     }
 
@@ -106,15 +138,34 @@ public class AcceptanceDefaultsDriftTests
     [TestCase(DocumentTypeKey.TriageDecision)]
     [TestCase(DocumentTypeKey.Diagnosis)]
     [TestCase(DocumentTypeKey.TestSpec)]
-    public void Every_type_but_design_imposes_no_acceptor_floor(DocumentTypeKey type) =>
+    [TestCase(DocumentTypeKey.AcceptanceCriteria)]
+    [TestCase(DocumentTypeKey.BacklogOrdering)]
+    [TestCase(DocumentTypeKey.TestPlan)]
+    [TestCase(DocumentTypeKey.UxSpec)]
+    public void Every_unpinned_type_imposes_no_acceptor_floor(DocumentTypeKey type) =>
         AcceptanceDefaults.For(type).AcceptorRequirement.Should().Be(AcceptorRequirement.Any,
-            "the field is additive — only 'design' ships a non-default value");
+            "the field is additive — only 'design' (39-13 D4) and the 41-1b pair " +
+            "'sprint-plan'/'threat-model' (41-1b D1) ship a non-default value");
+
+    [TestCase(DocumentTypeKey.SprintPlan)]
+    [TestCase(DocumentTypeKey.ThreatModel)]
+    public void The_41_1b_human_pinned_types_get_a_human_acceptor(DocumentTypeKey type)
+    {
+        // 41-1b D1: a capacity commitment (sprint-plan) and an unmitigated
+        // high-risk escalation call (threat-model) are human decisions — the same
+        // posture 39-13 D4 gave design. Only WHO answers the accept decision is
+        // pinned; the autonomy dial itself is untouched.
+        var rules = AcceptanceDefaults.For(type);
+        rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human);
+        rules.AutonomyLevel.Should().Be(AcceptanceDefaults.DefaultAutonomyLevel,
+            "the human pin is independent of the autonomy dial, not a lower dial");
+    }
 
     [Test]
-    public void Design_is_the_only_type_with_an_acceptor_floor() =>
+    public void Design_sprint_plan_and_threat_model_are_the_only_types_with_an_acceptor_floor() =>
         Enum.GetValues<DocumentTypeKey>()
             .Where(t => AcceptanceDefaults.For(t).AcceptorRequirement != AcceptorRequirement.Any)
-            .Should().Equal(DocumentTypeKey.Design);
+            .Should().Equal(DocumentTypeKey.Design, DocumentTypeKey.SprintPlan, DocumentTypeKey.ThreatModel);
 
     [Test]
     public void Every_per_type_default_is_valid()

@@ -57,7 +57,15 @@ public static class ReviewerSelectionHelper
             severity: TammaErrorSeverity.High),
     };
 
-    /// <summary>The 7-role document-review roster (the domain of GetReviewActionForRole).</summary>
+    /// <summary>
+    /// The 9-role document-review roster (the domain of GetReviewActionForRole).
+    /// Story 41-1a: <c>TechWriter</c> (D1 — review-docs, the 41-24/41-25/41-26
+    /// review stage) and <c>UxDesigner</c> (D2 — review-design, 41-28) joined;
+    /// <c>ScrumMaster</c>/<c>ProjectManager</c> deliberately did NOT (they produce
+    /// and accept documents, they do not critique them — asserted by test).
+    /// NOTE: this is the SELECTOR domain, not <c>AcceptanceDefaults.PanelRoster</c>
+    /// (the default panel membership), which stays 7 — see 41-1a C7.
+    /// </summary>
     private static readonly AgentRole[] s_documentRoster =
     [
         AgentRole.Architect,
@@ -67,6 +75,8 @@ public static class ReviewerSelectionHelper
         AgentRole.Tester,
         AgentRole.Devops,
         AgentRole.ProductOwner,
+        AgentRole.TechWriter,
+        AgentRole.UxDesigner,
     ];
 
     /// <summary>The 5-role diff-review roster.</summary>
@@ -169,9 +179,10 @@ public static class ReviewerSelectionHelper
 
     /// <summary>
     /// Every <c>(role, action)</c> pair the producers can dispatch (Design Decision
-    /// D9 pin surface): the 7 document-review pairs + the 5 diff-review pairs + the 4
-    /// TRIAGE-panel pairs (Story 39-15, when the reviewed document is a
-    /// <c>triage-decision</c> draft) = 16. The <c>ContractBindingTests</c> classification
+    /// D9 pin surface): the 9 document-review pairs (7 + tech_writer/ux_designer,
+    /// Story 41-1a D1/D2) + the 5 diff-review pairs + the 4 TRIAGE-panel pairs
+    /// (Story 39-15, when the reviewed document is a <c>triage-decision</c> draft)
+    /// = 18. The <c>ContractBindingTests</c> classification
     /// guard iterates this so a reviewer cell reachable by policy but bound nowhere fails
     /// the build.
     /// </summary>
@@ -193,7 +204,7 @@ public static class ReviewerSelectionHelper
     }
 
     /// <summary>
-    /// The 7-role document panel roster (the superset the panel graph iterates).
+    /// The 9-role document panel roster (the superset the panel graph iterates).
     /// </summary>
     public static IReadOnlyList<AgentRole> DocumentPanelRoster => s_documentRoster;
 

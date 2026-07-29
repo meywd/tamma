@@ -2308,6 +2308,145 @@ namespace Tamma.Data.Migrations.ControlPlane
                         });
                 });
 
+            modelBuilder.Entity("Tamma.Data.Entities.ScheduledTrigger", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("CronExpression")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("DefinitionId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<bool>("Enabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("InputJson")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("jsonb")
+                        .HasDefaultValueSql("'{}'::jsonb");
+
+                    b.Property<DateTime?>("LastFiredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastWindowKey")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("NextDueAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Enabled", "NextDueAt")
+                        .HasDatabaseName("IX_scheduled_triggers_Enabled_NextDueAt");
+
+                    b.HasIndex("TenantId", "DefinitionId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("ux_scheduled_triggers_tenant_definition_name");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("TenantId", "DefinitionId", "Name"), false);
+
+                    b.ToTable("scheduled_triggers", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_scheduled_triggers_cron", "length(\"CronExpression\") > 0");
+
+                            t.HasCheckConstraint("ck_scheduled_triggers_definition_id", "length(\"DefinitionId\") > 0");
+
+                            t.HasCheckConstraint("ck_scheduled_triggers_name", "length(\"Name\") > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.ScheduledTriggerFire", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<DateTime>("ClaimedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("DefinitionId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Detail")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("DispatchedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Outcome")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("claimed");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TriggerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("WindowKey")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("WorkflowInstanceId")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClaimedAt")
+                        .HasDatabaseName("IX_scheduled_trigger_fires_ClaimedAt");
+
+                    b.HasIndex("TriggerId", "WindowKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_scheduled_trigger_fires_trigger_window");
+
+                    b.ToTable("scheduled_trigger_fires", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_scheduled_trigger_fires_outcome", "\"Outcome\" IN ('claimed','dispatched','failed')");
+                        });
+                });
+
             modelBuilder.Entity("Tamma.Data.Entities.SlackOutboxMessage", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3237,6 +3376,15 @@ namespace Tamma.Data.Migrations.ControlPlane
                         .IsRequired();
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.ScheduledTriggerFire", b =>
+                {
+                    b.HasOne("Tamma.Data.Entities.ScheduledTrigger", null)
+                        .WithMany()
+                        .HasForeignKey("TriggerId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Tamma.Data.Entities.Tenant", b =>

@@ -15,7 +15,8 @@ namespace Tamma.Api.Services.Agents;
 ///
 /// This is a CLEAN CUT to the new typed action vocabulary (Story 27-15). The
 /// old flat 8×10 string vocabulary is gone; the union of the per-role action
-/// sets is the 79-token <see cref="AgentAction"/> enum. Which <c>(role,
+/// sets is the 96-token <see cref="AgentAction"/> enum (80 + the 16 Epic 41
+/// tokens, Story 41-1a). Which <c>(role,
 /// action)</c> pairs are valid is the per-role eligibility matrix below — shared
 /// tokens (<c>context-scan</c>, <c>code-review</c>, <c>plan-review</c>,
 /// <c>write-tests</c>) appear in multiple role sets intentionally; the role half
@@ -74,7 +75,10 @@ public static class RolePhaseMap
                 AgentAction.PlanReview,
                 AgentAction.CodeReviewArchitecture,
                 AgentAction.AssessTechnicalRisk,
-                AgentAction.ProposeDesign),
+                AgentAction.ProposeDesign,
+                // Story 41-1a — 41-11's debt/risk triage + 41-10's Design producer.
+                AgentAction.TriageTechDebt,
+                AgentAction.DesignSystem),
 
             // senior_developer — tech lead: decomposition, review, mentorship
             [AgentRole.SeniorDeveloper] = FreezeSet(
@@ -89,7 +93,9 @@ public static class RolePhaseMap
                 AgentAction.SummarizeTechnical,
                 AgentAction.ResolveBlocker,
                 AgentAction.MentorFeedback,
-                AgentAction.DecomposeIssue),
+                AgentAction.DecomposeIssue,
+                // Story 41-1a — 41-17's PR-triage queue cell.
+                AgentAction.TriagePr),
 
             // developer — implementation
             [AgentRole.Developer] = FreezeSet(
@@ -121,7 +127,9 @@ public static class RolePhaseMap
                 AgentAction.VerifyAcceptance,
                 AgentAction.CodeReviewCoverage,
                 AgentAction.TriageDefect,
-                AgentAction.ReviewTestability),
+                AgentAction.ReviewTestability,
+                // Story 41-1a — 41-16's regression/flaky-test management cell.
+                AgentAction.ManageRegression),
 
             // security — security review, threat modelling
             [AgentRole.Security] = FreezeSet(
@@ -148,7 +156,10 @@ public static class RolePhaseMap
                 AgentAction.PlanIncidentResponse,
                 AgentAction.WritePostmortem,
                 AgentAction.AssessCapacity,
-                AgentAction.ReviewOperability),
+                AgentAction.ReviewOperability,
+                // Story 41-1a — 41-22's Diagnosis producer (diagnose-incident stays
+                // the triage-panel review lens).
+                AgentAction.IncidentRootcause),
 
             // tech_writer — documentation
             [AgentRole.TechWriter] = FreezeSet(
@@ -160,6 +171,34 @@ public static class RolePhaseMap
                 AgentAction.WriteRunbook,
                 AgentAction.UpdateChangelog,
                 AgentAction.ReviewDocs),
+
+            // scrum_master — agile facilitation: sprint cadence, ceremonies,
+            // impediment tracking (Story 41-1a). Carries context-scan like every
+            // other role (D4 — no asymmetry in the matrix).
+            [AgentRole.ScrumMaster] = FreezeSet(
+                AgentAction.ContextScan,
+                AgentAction.PlanSprint,
+                AgentAction.SynthesizeStandup,
+                AgentAction.FacilitateRetro,
+                AgentAction.TrackImpediments,
+                // 41-8 Phase B lockstep — the prose retro-narrative producer.
+                AgentAction.WriteRetroNarrative),
+
+            // project_manager — cross-team coordination, stakeholder reporting
+            // (Story 41-1a).
+            [AgentRole.ProjectManager] = FreezeSet(
+                AgentAction.ContextScan,
+                AgentAction.ReportStatus,
+                AgentAction.CoordinateRelease),
+
+            // ux_designer — UX and visual design: flows, UI specs, design review,
+            // accessibility (Story 41-1a).
+            [AgentRole.UxDesigner] = FreezeSet(
+                AgentAction.ContextScan,
+                AgentAction.DraftUserFlow,
+                AgentAction.AuthorUiSpec,
+                AgentAction.ReviewDesign,
+                AgentAction.AuditAccessibility),
         }.ToFrozenDictionary();
 
     /// <summary>
@@ -186,6 +225,10 @@ public static class RolePhaseMap
             [AgentRole.ProductOwner] = AgentAction.TriageIntake,
             [AgentRole.SeniorDeveloper] = AgentAction.PlanReview,
             [AgentRole.TechWriter] = AgentAction.SummarizeChanges,
+            // Story 41-1a (D6) — each new role's primary is in its own §4 set.
+            [AgentRole.ScrumMaster] = AgentAction.PlanSprint,
+            [AgentRole.ProjectManager] = AgentAction.ReportStatus,
+            [AgentRole.UxDesigner] = AgentAction.AuthorUiSpec,
         }.ToFrozenDictionary();
 
     // -----------------------------------------------------------------------
@@ -193,7 +236,7 @@ public static class RolePhaseMap
     // -----------------------------------------------------------------------
 
     /// <summary>
-    /// The 8 agent roles, as wire strings, derived from <see cref="AgentRole"/>.
+    /// The 11 agent roles, as wire strings, derived from <see cref="AgentRole"/>.
     /// Kept as <see cref="FrozenSet{T}"/> of string so string-keyed callers
     /// compile unchanged.
     /// </summary>
@@ -201,7 +244,7 @@ public static class RolePhaseMap
         Enum.GetValues<AgentRole>().Select(r => r.ToWire()).ToFrozenSet();
 
     /// <summary>
-    /// The 79 workflow actions, as wire strings, derived from
+    /// The 96 workflow actions, as wire strings, derived from
     /// <see cref="AgentAction"/> (the union of the per-role §4 sets).
     /// </summary>
     public static readonly FrozenSet<string> ValidActions =
@@ -224,8 +267,14 @@ public static class RolePhaseMap
     /// written by the deleted TS engine still use these names; instead of
     /// 400-ing, we accept them transparently and translate to the canonical
     /// C# role at validation / resolution time. Unmapped entries
-    /// (<c>analyst</c>, <c>scrum_master</c>, <c>researcher</c>) fall back to
-    /// <c>product_owner</c>, the closest equivalent in the new grid.
+    /// (<c>analyst</c>, <c>researcher</c>) fall back to <c>product_owner</c>,
+    /// the closest equivalent in the new grid.
+    ///
+    /// <para>Story 41-1a (D3): the <c>scrum_master</c> alias was REMOVED when
+    /// <see cref="AgentRole.ScrumMaster"/> became a first-class role — a stored
+    /// config keyed <c>scrum_master</c> now resolves to the new role via
+    /// <see cref="ValidRoles"/> (the name finally means what it says), a
+    /// deliberate behaviour change carved out of the story's AC6.</para>
     /// </summary>
     public static readonly FrozenDictionary<string, string> LegacyRoleAliases =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -236,7 +285,8 @@ public static class RolePhaseMap
             ["architect"] = "architect",
             ["documenter"] = "tech_writer",
             ["analyst"] = "product_owner",
-            ["scrum_master"] = "product_owner",
+            // ["scrum_master"] — removed by Story 41-1a (D3): scrum_master is now
+            // a first-class AgentRole and resolves via ValidRoles, not this table.
             ["planner"] = "senior_developer",
             ["researcher"] = "product_owner",
         }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
@@ -365,13 +415,20 @@ public static class RolePhaseMap
     /// <item>tester → <c>review-testability</c></item>
     /// <item>devops → <c>review-operability</c></item>
     /// <item>product_owner → <c>review-scope</c></item>
+    /// <item>tech_writer → <c>review-docs</c> (Story 41-1a D1 — the cell was
+    /// already taxonomy-eligible; the selector arm was the sole gap blocking a
+    /// <c>document-lifecycle</c> run with a tech_writer reviewer)</item>
+    /// <item>ux_designer → <c>review-design</c> (Story 41-1a D2 — 41-28's design
+    /// review over a UxSpec/Design document)</item>
     /// </list>
     /// Every returned <c>(role, action)</c> satisfies
     /// <see cref="IsRoleEligibleForPhase"/>.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">
     /// Thrown for a role that is not part of a review panel
-    /// (<see cref="AgentRole.TechWriter"/>).
+    /// (<see cref="AgentRole.ScrumMaster"/> and
+    /// <see cref="AgentRole.ProjectManager"/> — they produce and accept
+    /// documents, they do not critique them; Story 41-1a D2, asserted by test).
     /// </exception>
     public static AgentAction GetReviewActionForRole(AgentRole role) => role switch
     {
@@ -382,6 +439,12 @@ public static class RolePhaseMap
         AgentRole.Tester => AgentAction.ReviewTestability,
         AgentRole.Devops => AgentAction.ReviewOperability,
         AgentRole.ProductOwner => AgentAction.ReviewScope,
+        // Story 41-1a (D1): the (tech_writer, review-docs) cell shipped since
+        // 27-15 but the selector could not reach it — 41-24/41-25/41-26's review
+        // stage requires the arm.
+        AgentRole.TechWriter => AgentAction.ReviewDocs,
+        // Story 41-1a (D2): ux_designer joins the document-review panel for 41-28.
+        AgentRole.UxDesigner => AgentAction.ReviewDesign,
         _ => throw new ArgumentOutOfRangeException(
             nameof(role), role, $"Role '{role.ToWire()}' is not on a review panel."),
     };
@@ -399,7 +462,10 @@ public static class RolePhaseMap
     /// <see cref="IsRoleEligibleForPhase"/>.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// Thrown for a role that is not part of the triage panel.
+    /// Thrown for a role that is not part of the triage panel. Story 41-1a (D2):
+    /// none of the three Epic 41 roles (<c>scrum_master</c>, <c>project_manager</c>,
+    /// <c>ux_designer</c>) triages — the throw for them is asserted by test, not
+    /// left to accident.
     /// </exception>
     public static AgentAction GetTriageActionForRole(AgentRole role) => role switch
     {

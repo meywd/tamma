@@ -102,7 +102,8 @@ public class ProviderEgressRegressionTests
         logger: null,
         httpClientFactory: factory,
         configuration: configuration,
-        sanitizer: null);
+        sanitizer: null,
+        autonomyGate: new Tamma.Api.Services.Agents.CatalogDefaultToolLoopAutonomyGate());
 
     private static Task<InlineToolLoopResult> RunOnce(
         InlineToolLoopRunner runner, string provider, LlmProviderConfig config) =>
