@@ -1,6 +1,6 @@
 # Story 41-1b: New Document Types — AcceptanceCriteria, BacklogOrdering, SprintPlan, TestPlan, ThreatModel, UxSpec
 
-Status: drafted
+Status: done — conformance-reviewed 2026-07-29; all six types register, validate, and now round-trip through the store (`NewDocumentTypeStoreRoundTripTests`, 36 cases on a real Postgres 17); all six producing cells carry a contract entry (`ContractBindingTests.PendingProducerCells`) and the `(security, threat-model)` template — which instructed a shape its own validator rejected — was rewritten to the real ThreatModel wire; follow-up finding 4 (null array element ⇒ NRE) is resolved cross-type by the shared `DocumentPayloadGuard`. AC4's literal "16" reads **17** in the tree because 41-1c registered `prose` afterwards — see the dated AC4 amendment. Open: the three legacy-shape templates owned by 41-2/41-3/41-13, and the mis-attributed subject when a null element sits in a sibling *context* document
 
 *Split from 41-1 — see [the enabler-set umbrella](./41-1-team-role-and-document-type-extensions.md).
 Batch shape and effort follow the landed precedent: 39-3 registered four types, 39-4 registered six.*
@@ -61,6 +61,27 @@ README's new-types table:
    one accepting fixture per rule, each asserting the violation code, not just "invalid".
 3. A draft of each new type round-trips envelope → `DocumentInstance` row → 39-11 store read-back with
    `issueId` lineage intact.
+   > **Closed (2026-07-29 conformance round).** This AC had NO test when the story was first reviewed;
+   > it now has `tests/Tamma.Api.Tests/Documents/NewDocumentTypeStoreRoundTripTests.cs` — a Postgres 17
+   > Testcontainer fixture in the shape of `DocumentInstanceRepositoryTests` /
+   > `ProseStoreAndLineageTests`. **36 cases, all green.** The cases are generated from
+   > `DocumentTypeRegistry.All` rather than hand-written per type, so all **17** registered types are
+   > swept (the six 41-1b types, the ten 39-3/39-4 incumbents and 41-1c's `prose`) and the eighteenth is
+   > covered the day it registers. Each case takes the type's own shipped valid `DocumentExample` —
+   > no body invented here, none able to drift from its validator — through envelope →
+   > `DocumentInstanceRepository.InsertAsync` (which resolves the type and rejects a failing body with
+   > `DOCUMENT.STORE.INVALID_BODY` *before* persisting, so the write door is a validated one) →
+   > `ListByIssueAsync` and the production lineage handler `GET /api/documents/issues/{issueId}/lineage`,
+   > with the jsonb body byte-identical and the type re-resolving on read-back.
+   > `Sweep_covers_every_one_of_the_six_41_1b_types` pins this AC's explicit six against the generated
+   > set, and `AllSixNewTypes_InOneIssue_EachTypeTrailKeepsItsOwnPayload` puts all six in ONE issue and
+   > asserts each keeps its own type trail with zero unlinked reviews.
+   > **Two limits worth stating rather than glossing:** (a) the per-type sweep's lineage half asserts
+   > *reachability* — the document is found somewhere in the lineage response — not *placement*; a
+   > regression that let a document slip out of its type trail into `unlinkedReviews` is caught only by
+   > the all-six test, which does pin placement; (b) every case inserts an already-`Accepted` envelope
+   > with `audience: null`, so the draft→accepted transition and the audience-filtered read stay covered
+   > by `ProseStoreAndLineageTests`, not here.
 4. **The two document-vocabulary count pins are bumped consciously, with the reason in the comment:**
    `DocumentTypeKeyTests.cs:20` `Be(10)` → `Be(16)` and `DocumentTypeRegistryTests.cs:37`
    `HaveCount(10)` → `HaveCount(16)`. Both currently fail the build the moment a member is appended, and
@@ -89,6 +110,40 @@ README's new-types table:
    > none of the three tables, and its shipped template instructs an `{issues, verdict}` review shape
    > that cannot validate as `threat-model`. It needs a baseline entry (owned by 41-19) before this AC
    > can be called satisfied.
+   > **Closed (2026-07-29 conformance round) — all six producing cells now carry a contract entry, and
+   > the `(security, threat-model)` gap named above is gone.** `ContractBindingTests` gained a fourth
+   > classification, `PendingProducerCells` — "contract declared, dispatch pending" — with one entry per
+   > producing cell of the six types: `(product_owner, define-acceptance-criteria)` → 41-2,
+   > `(product_owner, prioritize-backlog)` → 41-3, `(tester, plan-test-strategy)` → 41-13,
+   > `(security, threat-model)` → 41-19, `(scrum_master, plan-sprint)` → 41-6,
+   > `(ux_designer, author-ui-spec)` → 41-27. Each pins the token contract its binding story will adopt
+   > verbatim, names that story, and states why it is not a live binding today. This was the only
+   > honest home for them: a `Bindings` entry asserts a dispatch that does not exist and an
+   > `IntentionallyUnbound` entry claims the cell has no structured contract when it has a typed one —
+   > both trip the existing stale-classification guard. **No `Bindings` entry was edited or added** (16
+   > before, 16 after), so the AC's "no existing `Bindings` entry is edited" clause still holds.
+   > Two new guards keep the table from becoming a place contracts go to stop being checked:
+   > `EveryPendingProducerCell_IsUndispatched_AndClassifiedNowhereElse` fails the build the day a
+   > compiled site emits the pair — forcing the entry to GRADUATE into `Bindings`, where the
+   > template-token gate takes over — and
+   > `EveryPendingProducerCell_IntendedContractIsCarriedByItsDocumentType` checks every pinned token
+   > group against the type's real `RenderContract()`, and re-asserts D4 (one producing cell per type).
+   > **Stated precisely:** that second guard checks the *contract*, not the *template*. All six token
+   > sets are carried by `RenderContract()` today, but only three of the six shipped TEMPLATES carry
+   > them (`threat-model` 9/9, `plan-sprint` 8/8, `author-ui-spec` 10/10);
+   > `define-acceptance-criteria`, `prioritize-backlog` and `plan-test-strategy` still instruct legacy
+   > wires and stay baselined in `TemplateExampleConformanceTests.KnownNonConformingTemplates` — their
+   > rewrite is 41-2/41-3/41-13's work, exactly as the amendment above says. The "adopt verbatim when it
+   > binds" promise therefore means *after* those three stories rewrite their template, not before it.
+   > **The template fix:** `Prompts/security/threat-model.md` was rewritten (version 1 → 2) from the
+   > `{issues, verdict}` review shape — measured against the real validator, that shipped example failed
+   > with `NO_ASSETS` + `NO_THREATS`, i.e. the template instructed a shape its own registered validator
+   > could never accept — to the real ThreatModel wire (`assets` /
+   > `threats[assetRef, category, description, mitigation, residualRisk]` / `escalation`). Its worked
+   > example now validates with zero violations and deliberately exercises the load-bearing
+   > unmitigated-high-risk ⇒ escalation rule rather than dodging it, and the cell is classified in
+   > `TemplateExampleConformanceTests.ConformingUnboundCells` until 41-19 binds it. Every rule the
+   > template's "Rules:" list states was checked to be a rule the validator actually enforces.
    > **Note — the shared-contract hazard.** `RenderContract` is per *document type*, not per producing
    > cell (`IDocumentType.cs:47-50`; `Plan.cs:135` returns one `Contract` const for both `plan`
    > producers). Any new type with two producing cells inherits the same constraint, so each of the six
@@ -121,7 +176,46 @@ areas with the same name (making `riskAreaRef` ambiguous) → new `RISK_AREA_NAM
 `THREAT_ID_DUPLICATED`. One rejecting and one accepting fixture per rule landed alongside (AC2
 discipline).
 
-**Open follow-up — finding 4 (null array element ⇒ NRE, not `MALFORMED_PAYLOAD`):** a payload whose
+**Resolved (2026-07-29 conformance round) — finding 4 (null array element ⇒ NRE, not
+`MALFORMED_PAYLOAD`).** Fixed as the shared cross-type hardening pass the finding asked for, NOT in the
+41-1b lane alone: a new `Tamma.Core/Documents/Types/DocumentPayloadGuard.cs` that **all 17** registered
+`IDocumentType.Validate` bodies — and the three `ValidateWithContext` overrides
+(`AcceptanceCriteria`, `TestSpec`, `UxSpec`) — now delegate through. Two layers, in order: a structural
+pre-scan that walks the raw `JsonElement` before the type's body runs and rejects any null element in
+any array with that type's own `MALFORMED_PAYLOAD` code and a message naming the offending JSON path
+(so 39-9's repair turn can tell the model which entry to fill in), then a widened catch mapping the
+other structural exceptions to the same violation. A null PROPERTY value (`{"criteria":null}`) is
+deliberately NOT caught — each type already degrades that to its own domain violation and that outcome
+is preserved. `TammaError` is deliberately NOT in the caught set, so a genuine invariant breach still
+fails loud. The proof is a registry-driven sweep,
+`tests/Tamma.Core.Tests/Documents/Types/DocumentTypesNullElementSweepTests.cs`, which reflects over each
+type's payload CLR type and mutates each shipped valid example rather than hand-writing per-type cases:
+16 of the 17 types declare an array member (`prose` has none) and every one is probed.
+`Tamma.Core.Tests` went 880 → 959 and 74 of the 79 new tests are red against the pre-fix tree — 35 of
+those threw the reported `NullReferenceException`.
+**Two things to state honestly.** (a) This is a deliberate *tightening*, not a pure no-op: a null
+element inside a **string** array (e.g. `plan.tasks[].files`, `findings.citations`,
+`ux-spec.errorStates`, `test-plan.entryCriteria`) was previously accepted as fully **valid** and now
+returns `MALFORMED_PAYLOAD`. The accurate no-drift statement is that *no shipped example and no payload
+without a null array element changes outcome* — which is what a 39-example, 272-null-property and
+2,265-case mutation differential against the pre-fix tree actually showed (zero differences). (b) The
+guard also catches a null element in a sibling **context** document, which previously threw an NRE —
+it now fails closed, but reports `MALFORMED_PAYLOAD` *against the payload*, which is the wrong subject.
+See the new open follow-up below.
+
+**Open follow-up — finding 4b (the context-null subject is mis-attributed, and the widened catch is
+broad):** when the null element sits in a sibling *context* document rather than in the payload, the
+guard returns `MALFORMED_PAYLOAD` with "The payload is structurally malformed…", so the repair ring
+would ask the model to fix a document that has nothing wrong with it; the cross-document readers
+(`ReadDecompositionSubtaskIds` and its `TestSpec`/`UxSpec` equivalents) still dereference context
+elements unguarded, and there is no test for that path. Relatedly, the widened catch swallows
+`InvalidOperationException` / `ArgumentException` / `KeyNotFoundException` / `IndexOutOfRangeException`
+— exactly what a `.Single()`, a dictionary miss or an off-by-one inside a FUTURE `ValidateCore` would
+throw — so a validator logic bug would be reported to the model as a malformed payload instead of
+surfacing. Neither is reachable by anything in the tree today (959/959 green); both are shape risks to
+close when a story next touches the guard.
+
+**The original finding 4, kept for the record (superseded by the resolution above):** a payload whose
 array carries a JSON `null` element (e.g. `{"items":[null]}`) deserializes to a list containing a null
 element; every per-item loop then dereferences it and throws `NullReferenceException` instead of
 returning a `MALFORMED_PAYLOAD` violation. The `try/catch` in each `Validate` only catches
@@ -132,4 +226,5 @@ across ALL registered types, including pre-existing ones (e.g. `Findings`)**, no
 41-1b types alone — the fix belongs in a shared-validator hardening pass (null-element guard or a
 shared deserialize helper that maps null elements to `MALFORMED_PAYLOAD`) across every
 `IDocumentType.Validate`, with one null-element fixture per type. Not fixed in the 41-1b lane to avoid
-piecemeal divergence from the pre-existing types.
+piecemeal divergence from the pre-existing types. *(That is exactly the shape the 2026-07-29 fix took —
+one shared guard and a registry-driven sweep, rather than per-type fixtures.)*

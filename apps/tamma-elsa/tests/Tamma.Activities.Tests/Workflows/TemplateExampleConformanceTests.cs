@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using FluentAssertions;
 using NUnit.Framework;
 using Tamma.Api.Auth;
+using Tamma.Api.Services.Agents;
 using Tamma.Core.Documents;
 
 namespace Tamma.Activities.Tests.Workflows;
@@ -42,6 +43,30 @@ namespace Tamma.Activities.Tests.Workflows;
 /// its FIRST alternative. Structural drift (wrong field names, objects where
 /// strings belong, missing required members, dangling ids) still fails.</para>
 ///
+/// <para><b>The classification is EXHAUSTIVE, not an allowlist</b> (adversarial
+/// review follow-up, 2026-07-29). Until this change the fixture only ever LOOKED at
+/// cells someone had already written into a table: bound cells (test 1), the
+/// <see cref="KnownNonConformingTemplates"/> ratchet (test 2), and a 5-entry
+/// hand-maintained <see cref="ConformingUnboundCells"/> list (test 4). Nothing
+/// enumerated the taxonomy, so a cell in NO table was simply never checked — which is
+/// exactly how <c>(security, threat-model)</c> could sit outside every table while
+/// instructing a shape its own registered validator rejects. Test 5
+/// (<see cref="EveryTaxonomyCell_IsClassifiedExactlyOnce"/>) now derives the FULL cell
+/// set from the real taxonomy and requires every cell to land in EXACTLY ONE of four
+/// classifications:
+/// <list type="number">
+///   <item>a live binding (<c>ContractBindingTests.Bindings</c>) — test 1's job;</item>
+///   <item><see cref="ConformingUnboundCells"/> — unbound, intended type registered,
+///         example must validate TODAY (test 4);</item>
+///   <item><see cref="KnownNonConformingTemplates"/> — unbound, intended type
+///         registered, example does NOT validate; shrink-only ratchet debt (test 2);</item>
+///   <item><see cref="IntentionallyUnboundCells"/> — no registered document type
+///         claims the cell at all, with a written reason.</item>
+/// </list>
+/// A cell in none of them fails the build naming the three entries the author could
+/// add and the evidence for choosing between them. A new taxonomy token (the way the
+/// Epic 41 cells arrived) therefore cannot ship unclassified.</para>
+///
 /// <para><b>Known pre-existing non-conformance</b> is baselined in
 /// <see cref="KnownNonConformingTemplates"/> — the same ratchet shape as
 /// <c>ContractBindingTests.KnownContractViolations</c>: entries may only ever be
@@ -67,15 +92,13 @@ public class TemplateExampleConformanceTests
     private sealed record BaselineEntry(string IntendedDocumentTypeKey, string OwningStory, string Reason);
 
     /// <summary>
-    /// Cells whose shipped template ALREADY fails example-conformance (discovered
-    /// while authoring this test — the Epic 41 planning pass's list, verified).
-    /// All are UNBOUND today; each is owned by the Epic 41 story that will bind it.
+    /// Cells whose shipped template ALREADY fails example-conformance. All are
+    /// UNBOUND today; each is owned by the Epic 41 story that will bind it.
     /// Baselining keeps the build green while making the debt explicit and
     /// un-growable: (a) any NEW violation on a bound cell still fails, (b) an entry
     /// whose template now conforms goes STALE and fails until deleted, (c) an entry
     /// whose cell gets BOUND fails until the binding story rewrites the template and
-    /// deletes the entry. Entries may only ever be REMOVED, never added — the count
-    /// pin below only goes DOWN.
+    /// deletes the entry.
     /// </summary>
     private static readonly IReadOnlyDictionary<(string Role, string Action), BaselineEntry> KnownNonConformingTemplates =
         new Dictionary<(string, string), BaselineEntry>
@@ -114,14 +137,52 @@ public class TemplateExampleConformanceTests
             [("tech_writer", "update-changelog")] = new("prose", "41-24",
                 "no JSON example — the template instructs a markdown issue-comment format; becomes " +
                 "prose (release-notes/changelog) once 41-1c lands"),
+
+            // ---- surfaced by the exhaustive classification (test 5), 2026-07-29 ----
+            // The five remaining prose-family cells. Prose.cs's kind vocabulary names a
+            // producing story for each of its ten kinds (adr → 41-9, release-notes and
+            // changelog → 41-24, user-docs and api-docs → 41-25, runbook → 41-26 …), so
+            // each of these cells HAS an intended registered type (prose landed with
+            // 41-1c). None of them instructs it: every one is a markdown-format template
+            // with no JSON fence at all, so a produce through the cell could not even be
+            // ingested. This is PRE-EXISTING debt of exactly the same shape as the
+            // (devops, write-postmortem) / (tech_writer, update-changelog) entries above —
+            // it became visible only because test 5 started enumerating the taxonomy. The
+            // templates are NOT rewritten here (each is owned by its story); they are
+            // recorded so the debt is explicit and shrink-only from now on.
+            [("architect", "write-adr")] = new("prose", "41-9",
+                "no JSON example — the template instructs a markdown ADR; 41-9 rewrites the cell as a " +
+                "prose (adr, audience=engineering) producer"),
+            [("tech_writer", "write-release-notes")] = new("prose", "41-24",
+                "no JSON example — the template instructs markdown release notes; 41-24 rewrites the cell " +
+                "as a prose (release-notes, audience=user) producer"),
+            [("tech_writer", "write-user-docs")] = new("prose", "41-25",
+                "no JSON example — the template instructs markdown user documentation; 41-25 rewrites the " +
+                "cell as a prose (user-docs, audience=user) producer"),
+            [("tech_writer", "write-api-docs")] = new("prose", "41-25",
+                "no JSON example — the template instructs markdown API reference output; 41-25 rewrites " +
+                "the cell as a prose (api-docs, audience=developer) producer"),
+            [("tech_writer", "write-runbook")] = new("prose", "41-26",
+                "no JSON example — the template instructs a markdown runbook; 41-26 rewrites the cell as a " +
+                "prose (runbook, audience=ops) producer"),
         };
 
     /// <summary>
-    /// The ratchet's count pin. This number may only ever DECREASE — remove the
-    /// baseline entry (and decrement this) when the owning story rewrites its
-    /// template; never add entries.
+    /// The ratchet's count pin.
+    ///
+    /// <para><b>Direction rule:</b> this number goes DOWN. Delete the baseline entry
+    /// and decrement the pin when the owning story rewrites its template. A template
+    /// edit may NEVER be accompanied by an increment — that is the whole point of the
+    /// ratchet, and every other gate in the fixture (tests 1–4) still fails loudly on
+    /// new non-conformance.</para>
+    ///
+    /// <para><b>Pin history.</b> 11 → 16 (2026-07-29). The only increase this pin may
+    /// ever record is the one in the change that WIDENED the gate: before test 5 the
+    /// fixture never looked outside its own tables, so the five prose cells added above
+    /// were invisible debt, not new drift. Widening the lens is allowed to reveal what
+    /// was already there; nothing else may raise this number.</para>
     /// </summary>
-    private const int KnownNonConformingTemplateCount = 11;
+    private const int KnownNonConformingTemplateCount = 16;
 
     // NOTE (2026-07-29): the PlannedFutureTypeKeys escape hatch is gone — 41-1b
     // registered test-plan / acceptance-criteria / backlog-ordering and 41-1c
@@ -137,22 +198,50 @@ public class TemplateExampleConformanceTests
     /// covers cells BOUND in ContractBindingTests and the ratchet only covers cells
     /// already known non-conforming, so an unbound cell whose type had landed sat
     /// in neither net — exactly how plan-sprint and author-ui-spec shipped examples
-    /// that failed their own validators (adversarial review, 2026-07-29). This is
-    /// an EXPLICIT mapping, not a discovery mechanism: add an entry when a story
-    /// establishes an unbound cell's intended registered type (the type source's
-    /// "Producing cell" comment is the authority). An entry may never name a cell
-    /// that is bound (test 1's job) or baselined in
+    /// that failed their own validators (adversarial review, 2026-07-29).
+    ///
+    /// <para><b>Admission evidence.</b> An entry is justified when a LANDED artifact
+    /// ties the cell to a registered type. Two evidence classes are accepted, and every
+    /// entry below names which one it rests on:
+    /// <list type="bullet">
+    ///   <item>a <c>// Producing cell</c> comment in <c>Tamma.Core/Documents/Types/*.cs</c>,
+    ///         the <c>Prose.cs</c> kind→story seed, or a <c>RolePhaseMap</c> producer note
+    ///         — a story has DECLARED the cell's intended type;</item>
+    ///   <item>the shipped template demonstrably instructs a registered type's wire —
+    ///         its example validates against a DISCRIMINATING validator (one with
+    ///         required members / closed enums, so acceptance cannot be an accident).
+    ///         Pinning it here keeps that true instead of leaving it to luck.</item>
+    /// </list>
+    /// An entry may never name a cell that is bound (test 1's job) or baselined in
     /// <see cref="KnownNonConformingTemplates"/> (the ratchet's job) — both are
-    /// asserted by the gate. When the owning story binds the cell, its entry here
-    /// is deleted in the same change (test 1 takes over).
+    /// asserted. When the owning story binds the cell, its entry here is deleted in
+    /// the same change (test 1 takes over).</para>
     /// </summary>
     private static readonly IReadOnlyDictionary<(string Role, string Action), string> ConformingUnboundCells =
         new Dictionary<(string, string), string>
         {
+            // ---- declared intent: a "Producing cell" comment on the type ----------
             // SprintPlan.cs "Producing cell (41-1b D4)" — 41-6 binds it.
             [("scrum_master", "plan-sprint")] = "sprint-plan",
             // UxSpec.cs "Producing cell (41-1b D4)" — 41-27 binds it.
             [("ux_designer", "author-ui-spec")] = "ux-spec",
+            // ThreatModel.cs "Producing cell (41-1b D4): (security, threat-model)" — the cell
+            // sat in NO table until test 5 enumerated the taxonomy (it is the drift this
+            // whole change exists to make impossible). Its template instructs the
+            // ThreatModel wire and validates; 41-19 binds it.
+            [("security", "threat-model")] = "threat-model",
+
+            // ---- declared intent: RolePhaseMap producer notes ----------------------
+            // RolePhaseMap: "41-10's Design producer". The template instructs the Design
+            // wire (summary / recommendation / recommendedAlternativeId /
+            // constraintEvaluation / alternatives[id,name,tradeoffs]) and validates.
+            [("architect", "design-system")] = "design",
+            // RolePhaseMap: "41-22's Diagnosis producer (diagnose-incident stays the
+            // triage-panel review lens)". The template instructs the canonical Diagnosis
+            // wire (analysisSummary / ranked hypotheses with confidence + affectedFiles).
+            [("devops", "incident-rootcause")] = "diagnosis",
+
+            // ---- declared intent: Prose.cs kind→story seed -------------------------
             // Prompts/project_manager/report-status.md instructs prose (kind status-update) — 41-5 binds it.
             [("project_manager", "report-status")] = "prose",
             // Prompts/scrum_master/write-retro-narrative.md instructs prose (kind retro-narrative) — 41-8 binds it.
@@ -160,6 +249,159 @@ public class TemplateExampleConformanceTests
             // Prompts/project_manager/coordinate-release.md instructs prose (kind status-update reused —
             // a conscious vocabulary decision, no dedicated kind; no Epic 41 story binds the cell yet).
             [("project_manager", "coordinate-release")] = "prose",
+
+            // ---- demonstrated intent: the template instructs a discriminating wire --
+            // The three scrum_master reporting cells instruct the Findings wire verbatim
+            // (topic/summary/findings[title,summary,relevance,confidence,citations]/
+            // overallConfidence). FindingsDocumentType requires all of it, so acceptance
+            // is not an accident — these were written to the wire on purpose.
+            [("scrum_master", "synthesize-standup")] = "findings",
+            [("scrum_master", "facilitate-retro")] = "findings",
+            [("scrum_master", "track-impediments")] = "findings",
+            // The two ux_designer critique cells instruct the CANONICAL Review wire
+            // (root-level subject{kind,documentId,documentType} / decision / summary /
+            // issues[severity,category,description,suggestedFix]) rather than the legacy
+            // {issues, verdict} cell shape ReviewProducerHelper also accepts. Pinned so the
+            // 41-28 review stage cannot regress them to the legacy half.
+            [("ux_designer", "review-design")] = "review",
+            [("ux_designer", "audit-accessibility")] = "review",
+            // The three Epic 41 triage cells instruct the 26-1 TriageDecision wire
+            // (priority/type/complexity/automation closed enums + required reasoning) —
+            // the same wire (product_owner, triage-intake) is BOUND to. Closed enums plus a
+            // required field make acceptance discriminating. 41-11 / 41-17 / 41-16 bind them.
+            [("architect", "triage-tech-debt")] = "triage-decision",
+            [("senior_developer", "triage-pr")] = "triage-decision",
+            [("tester", "manage-regression")] = "triage-decision",
+        };
+
+    // ====================================================================
+    // Cells that produce no registered document at all
+    // ====================================================================
+
+    /// <summary>
+    /// Taxonomy cells that NO registered document type claims: nothing names them as a
+    /// producer — no <c>// Producing cell</c> comment in <c>Tamma.Core/Documents/Types/*.cs</c>,
+    /// no <c>Prose.cs</c> kind→story seed, no <c>RolePhaseMap</c> producer note, no
+    /// <c>ContractBindingTests.Bindings</c> entry — so there is no type to validate their
+    /// worked example against and no conformance to assert. Each entry carries the reason.
+    ///
+    /// <para><b>This is NOT the same set as</b> <c>ContractBindingTests.IntentionallyUnbound</c>.
+    /// That one answers "this DISPATCHED pair's caller slices no structured reply" and only
+    /// ever covers pairs a compiled workflow emits. This one answers "this TAXONOMY cell
+    /// mints no document", and covers every cell in the grid, dispatched or not.</para>
+    ///
+    /// <para><b>What an entry costs.</b> It is a claim that the cell is outside the document
+    /// vocabulary — so it is the ONE classification that turns the gate off for a cell. If a
+    /// story later declares an intended type for one of these, its entry moves to
+    /// <see cref="ConformingUnboundCells"/> (rewriting the template in the same change) — it
+    /// does not stay here with a "future work" note.</para>
+    /// </summary>
+    private static readonly IReadOnlyDictionary<(string Role, string Action), string> IntentionallyUnboundCells =
+        new Dictionary<(string, string), string>
+        {
+            // ---- context scans: cell-local scan shape, consumed as free text ---------
+            // All eleven instruct the same cell-local {relevantFiles, …} shape and are read
+            // verbatim by ContextGatheringWorkflow.Extract. The Findings-PRODUCING scan is the
+            // separate (developer, triage-context-scan) cell minted by 39-15 D5 precisely so a
+            // document producer never shares a cell with a free-text scan.
+            [("architect", "context-scan")] = "free-text scan findings (ContextGatheringWorkflow.Extract); the Findings producer is the split (developer, triage-context-scan) cell",
+            [("developer", "context-scan")] = "free-text scan findings (ContextGatheringWorkflow.Extract); the Findings producer is the split (developer, triage-context-scan) cell",
+            [("devops", "context-scan")] = "free-text scan findings (ContextGatheringWorkflow.Extract)",
+            [("product_owner", "context-scan")] = "free-text scan findings (ContextGatheringWorkflow.Extract)",
+            [("project_manager", "context-scan")] = "free-text scan findings; no compiled dispatch site and no document type",
+            [("scrum_master", "context-scan")] = "free-text scan findings; no compiled dispatch site and no document type",
+            [("security", "context-scan")] = "free-text scan findings (ContextGatheringWorkflow.Extract)",
+            [("senior_developer", "context-scan")] = "free-text scan findings; no compiled dispatch site and no document type",
+            [("tech_writer", "context-scan")] = "free-text scan findings; no compiled dispatch site and no document type",
+            [("tester", "context-scan")] = "free-text scan findings (ContextGatheringWorkflow.Extract)",
+            [("ux_designer", "context-scan")] = "free-text scan findings; no compiled dispatch site and no document type",
+
+            // ---- planning-shaped cells on the legacy plan wire -----------------------
+            // Each instructs tasks[] with files as {path, action} objects plus "dependencies" —
+            // the legacy wire PlanDocumentType rejects (it wants files: string[] + dependsOn +
+            // testing). NOTHING declares these as Plan producers, so there is no conformance to
+            // assert; recorded here with the shape they carry so that if a story ever DOES bind
+            // one to Plan, the rewrite is a known cost and the entry moves to the tables above.
+            [("product_owner", "plan-scope")] = "scoping notes on the legacy plan wire; no story declares it a Plan producer",
+            [("architect", "design-api-contract")] = "API-contract notes on the legacy plan wire; the declared Design producer is (architect, design-system)",
+            [("architect", "design-data-model")] = "data-model notes on the legacy plan wire; the declared Design producer is (architect, design-system)",
+            [("architect", "design-integration")] = "integration notes on the legacy plan wire; the declared Design producer is (architect, design-system)",
+            [("developer", "plan-implementation")] = "implementation notes on the legacy plan wire; the bound Plan producers are (architect, plan-system-design) and (senior_developer, create-tasks)",
+            [("developer", "plan-fix")] = "fix-planning notes on the legacy plan wire; no story declares it a Plan producer",
+            [("developer", "plan-debugging")] = "debug-planning notes on the legacy plan wire; the Diagnosis producer is (senior_developer, debug-rootcause)",
+            [("senior_developer", "plan-implementation")] = "implementation notes on the legacy plan wire; the bound Plan producer is (senior_developer, create-tasks)",
+            [("senior_developer", "plan-refactor")] = "refactor notes on the legacy plan wire; no story declares it a Plan producer",
+            [("devops", "plan-deployment")] = "deployment notes on the legacy plan wire; no story declares it a Plan producer",
+
+            // ---- plan/task review lenses on the legacy verdict wire ------------------
+            // Every one instructs the CURRENT reviewer cell shape — top-level issues[] plus a
+            // verdict half — which ReviewProducerHelper.MapReviewerReply explicitly accepts and
+            // folds onto Review (D4, path 2). The raw example is therefore not required to pass
+            // ReviewDocumentType.Validate on its own, and pinning it as a Review producer would
+            // fail a shape the runtime deliberately supports.
+            [("architect", "plan-review")] = "plan-review lens on the legacy {issues, verdict} wire that ReviewProducerHelper maps onto Review",
+            [("senior_developer", "plan-review")] = "plan-review lens on the legacy {issues, verdict} wire that ReviewProducerHelper maps onto Review",
+            [("security", "plan-review-security")] = "plan-review lens on the legacy {issues, verdict} wire that ReviewProducerHelper maps onto Review",
+            [("developer", "review-feasibility")] = "plan-review lens on the legacy {issues, verdict} wire that ReviewProducerHelper maps onto Review",
+            [("tester", "review-testability")] = "plan-review lens on the legacy {issues, verdict} wire that ReviewProducerHelper maps onto Review",
+            [("devops", "review-operability")] = "plan-review lens on the legacy {issues, verdict} wire that ReviewProducerHelper maps onto Review",
+            [("product_owner", "review-scope")] = "plan-review lens on the legacy {issues, verdict} wire that ReviewProducerHelper maps onto Review",
+            [("tech_writer", "review-docs")] = "plan-review lens on the legacy {issues, verdict} wire that ReviewProducerHelper maps onto Review",
+            [("product_owner", "review-acceptance")] = "acceptance-review lens on the legacy {issues, verdict} wire that ReviewProducerHelper maps onto Review",
+            [("architect", "assess-technical-risk")] = "risk-review lens on the legacy {issues, verdict} wire that ReviewProducerHelper maps onto Review",
+
+            // ---- code-review lenses on the legacy code-review wire -------------------
+            // All instruct issues[] of {file, line, severity, category, issue, fix} — the diff
+            // review shape. CodeReviewWorkflow.StoreAnalysis keeps the raw text; where a review
+            // document IS minted it goes through ReviewProducerHelper's legacy path.
+            [("developer", "code-review")] = "diff-review lens: legacy code-review issue wire, raw text kept by CodeReviewWorkflow.StoreAnalysis",
+            [("senior_developer", "code-review")] = "diff-review lens: legacy code-review issue wire, raw text kept by CodeReviewWorkflow.StoreAnalysis",
+            [("architect", "code-review-architecture")] = "diff-review lens: legacy code-review issue wire",
+            [("security", "code-review-security")] = "diff-review lens: legacy code-review issue wire",
+            [("tester", "code-review-coverage")] = "diff-review lens: legacy code-review issue wire",
+            [("developer", "self-review")] = "diff-review lens: legacy code-review issue wire, consumed before PR creation",
+            [("security", "audit-dependencies")] = "audit lens on the legacy code-review issue wire; no document type claims it",
+            [("security", "audit-secrets")] = "audit lens on the legacy code-review issue wire; no document type claims it",
+            [("security", "review-compliance")] = "compliance lens on the legacy code-review issue wire; no document type claims it",
+            [("senior_developer", "mentor-feedback")] = "free-text mentoring guidance posted verbatim; MentorshipWorkflow discards the structured half",
+
+            // ---- triage-panel lenses -------------------------------------------------
+            // RolePhaseMap.GetTriageActionForRole's panel arms. The panel's TriageDecision draft
+            // is produced by the SEPARATE bound cell (product_owner, triage-intake); these replies
+            // are critiques aggregated by ReviewPanelAggregation, not documents.
+            [("developer", "triage-defect")] = "triage-panel lens (GetTriageActionForRole); the TriageDecision producer is the bound (product_owner, triage-intake) cell",
+            [("tester", "triage-defect")] = "triage-panel lens (GetTriageActionForRole); the TriageDecision producer is the bound (product_owner, triage-intake) cell",
+            [("security", "assess-vulnerability")] = "triage-panel lens (GetTriageActionForRole) on the legacy {issues, verdict} wire",
+            [("devops", "diagnose-incident")] = "triage-panel lens (GetTriageActionForRole); RolePhaseMap keeps it the review lens while (devops, incident-rootcause) is the Diagnosis producer",
+            [("architect", "triage-technical")] = "technical-triage lens on the retired P0-P3 / severity / ownerRole vocabulary; no document type claims it",
+            [("senior_developer", "triage-technical")] = "technical-triage lens on the retired P0-P3 / severity / ownerRole vocabulary; no document type claims it",
+
+            // ---- operational assessments on the retired triage vocabulary ------------
+            [("devops", "monitor-health")] = "health report on the retired P0-P3 / severity / ownerRole vocabulary; no document type claims it",
+            [("devops", "assess-capacity")] = "capacity report on the retired P0-P3 / severity / ownerRole vocabulary; no document type claims it",
+
+            // ---- cell-local diagnosis-shaped analyses --------------------------------
+            [("senior_developer", "resolve-blocker")] = "cell-local {diagnosis, …} shape; ClassifyBlockerActivity.ParseAIDiagnosis treats every field as optional and degrades to heuristics",
+            [("security", "analyze-security-incident")] = "cell-local {diagnosis, …} incident shape; no document type claims it",
+
+            // ---- code / file-format output, consumed via the success flag ------------
+            [("developer", "implement-feature")] = "file-format code output; callers read only the llm-call success flag",
+            [("developer", "implement-fix")] = "file-format code output; callers read only the llm-call success flag",
+            [("developer", "refactor")] = "file-format code output; callers read only the llm-call success flag",
+            [("developer", "debug")] = "file-format code output; DebuggingWorkflow.applyFix reads only the llm-call success flag",
+            [("developer", "address-review-comments")] = "patch text; ReviewFixWorkflow.ExtractGenerateSuccess reads only the llm-call success flag",
+            [("developer", "write-tests")] = "file-format test code; the TestSpec producer is the SEPARATE bound (tester, write-tests) cell",
+            [("devops", "implement-infrastructure")] = "file-format infrastructure code; callers read only the llm-call success flag",
+            [("devops", "configure-cicd")] = "file-format pipeline configuration; callers read only the llm-call success flag",
+
+            // ---- free-text summaries --------------------------------------------------
+            [("product_owner", "summarize-stakeholder")] = "free text; ContextGatheringWorkflow.ExtractPO falls back to the raw text as the summary",
+            [("senior_developer", "summarize-technical")] = "free-text technical summary; no document type claims it",
+            [("tech_writer", "summarize-changes")] = "free-text PR description; PullRequestWorkflow.CaptureDescription takes the raw text",
+
+            // ---- bespoke cell-local shapes --------------------------------------------
+            [("ux_designer", "draft-user-flow")] = "cell-local {summary, flows[screens…]} shape; the UxSpec producer is (ux_designer, author-ui-spec)",
+            [("tester", "write-test-cases")] = "file-format test code (no JSON fence); the TestSpec producer is the bound (tester, write-tests) cell",
         };
 
     // ====================================================================
@@ -441,7 +683,182 @@ public class TemplateExampleConformanceTests
     }
 
     // ====================================================================
-    // Test 5 — extractor/normalizer behavior pins
+    // Test 5 — EXHAUSTIVE classification: every taxonomy cell, exactly one bucket
+    // ====================================================================
+
+    /// <summary>
+    /// The four classifications a taxonomy cell can carry, for the completeness sweep.
+    /// </summary>
+    private enum Classification
+    {
+        Bound,
+        ConformingUnbound,
+        Baselined,
+        IntentionallyUnbound,
+    }
+
+    /// <summary>
+    /// The authoritative cell set: <see cref="RolePhaseMap.EligibleActions"/> — the SPEC §4
+    /// per-role eligibility matrix every resolver validates against. Cross-checked against
+    /// the embedded prompt-file grid so neither source can drift silently behind the gate.
+    /// </summary>
+    private static IReadOnlyList<(string Role, string Action)> AllTaxonomyCells() =>
+        RolePhaseMap.EligibleActions
+            .SelectMany(kv => kv.Value.Select(a => (Role: kv.Key.ToWire(), Action: a.ToWire())))
+            .OrderBy(c => c.Role, StringComparer.Ordinal)
+            .ThenBy(c => c.Action, StringComparer.Ordinal)
+            .ToList();
+
+    [Test]
+    public void TaxonomyCellSet_MatchesTheEmbeddedPromptFileGrid()
+    {
+        // Defence in depth for test 5's derivation. PromptFileLoader already fails loud at
+        // static init on a taxonomy cell with no file (PROMPT.SEED.NO_BODY_FAMILY) or a file
+        // outside the taxonomy (PROMPT.SEED.UNKNOWN_CELL); asserting it HERE makes the
+        // completeness sweep's authority explicit rather than assumed, so "the gate enumerates
+        // every cell" cannot quietly become "the gate enumerates every cell one source knows".
+        var fromMatrix = AllTaxonomyCells().ToHashSet();
+        var fromFiles = SystemPrompts.RoleActionTemplates
+            .Select(t => (Role: t.Role!, t.Action))
+            .ToHashSet();
+
+        fromMatrix.Should().BeEquivalentTo(fromFiles,
+            "the RolePhaseMap eligibility matrix and the embedded Prompts/{role}/{action}.md grid must " +
+            "describe the SAME cell set — test 5 derives the universe it sweeps from the matrix");
+    }
+
+    [Test]
+    public void EveryTaxonomyCell_IsClassifiedExactlyOnce()
+    {
+        var cells = AllTaxonomyCells();
+        cells.Should().NotBeEmpty("the taxonomy came back empty — the completeness sweep would be a no-op");
+
+        var bound = ContractBindingTests.AllBoundCells.ToHashSet();
+
+        // ---- (a) no classification may name a cell outside the taxonomy -------------
+        var known = cells.ToHashSet();
+        var strays = new List<string>();
+        strays.AddRange(ConformingUnboundCells.Keys.Where(k => !known.Contains(k))
+            .Select(k => $"  ConformingUnbound: ({k.Role}, {k.Action})"));
+        strays.AddRange(KnownNonConformingTemplates.Keys.Where(k => !known.Contains(k))
+            .Select(k => $"  KnownNonConformingTemplates: ({k.Role}, {k.Action})"));
+        strays.AddRange(IntentionallyUnboundCells.Keys.Where(k => !known.Contains(k))
+            .Select(k => $"  IntentionallyUnboundCells: ({k.Role}, {k.Action})"));
+
+        strays.Should().BeEmpty(
+            "a classification entry naming a (role, action) that is not in the taxonomy is dead weight — the " +
+            "cell left RolePhaseMap; delete the entry:" + Environment.NewLine + string.Join(Environment.NewLine, strays));
+
+        // ---- (b) every entry that claims a reason must carry one --------------------
+        var blank = IntentionallyUnboundCells
+            .Where(kv => string.IsNullOrWhiteSpace(kv.Value))
+            .Select(kv => $"  ({kv.Key.Role}, {kv.Key.Action})")
+            .ToList();
+        blank.Should().BeEmpty(
+            "IntentionallyUnboundCells is the one classification that switches the conformance gate OFF for a " +
+            "cell — every entry must say WHY no registered document type claims it:" + Environment.NewLine +
+            string.Join(Environment.NewLine, blank));
+
+        // ---- (c) the sweep: exactly one classification per cell ---------------------
+        var unclassified = new List<string>();
+        var overlapping = new List<string>();
+
+        foreach (var cell in cells)
+        {
+            var buckets = new List<Classification>();
+            if (bound.Contains(cell)) buckets.Add(Classification.Bound);
+            if (ConformingUnboundCells.ContainsKey(cell)) buckets.Add(Classification.ConformingUnbound);
+            if (KnownNonConformingTemplates.ContainsKey(cell)) buckets.Add(Classification.Baselined);
+            if (IntentionallyUnboundCells.ContainsKey(cell)) buckets.Add(Classification.IntentionallyUnbound);
+
+            if (buckets.Count > 1)
+            {
+                overlapping.Add(
+                    $"  ({cell.Role}, {cell.Action}): classified {buckets.Count} times — " +
+                    string.Join(" + ", buckets) + ". The four classifications are mutually exclusive; " +
+                    "a cell has exactly one status. Delete all but the true one.");
+                continue;
+            }
+
+            if (buckets.Count == 0)
+                unclassified.Add(DescribeUnclassified(cell));
+        }
+
+        overlapping.Should().BeEmpty(
+            "a taxonomy cell may hold only ONE classification:" + Environment.NewLine +
+            string.Join(Environment.NewLine, overlapping));
+
+        unclassified.Should().BeEmpty(
+            "EVERY cell in the taxonomy must be accounted for by exactly one classification. An unclassified " +
+            "cell is a cell this fixture never looks at — which is precisely how a template can drift into " +
+            "instructing a shape its own registered validator rejects while every test stays green " +
+            "((security, threat-model) did exactly that under the old 5-entry allowlist). Classify each cell " +
+            "below — do NOT reach for the ratchet unless the example genuinely fails its intended type:" +
+            Environment.NewLine + string.Join(Environment.NewLine, unclassified));
+    }
+
+    /// <summary>
+    /// Build the actionable failure text for one unclassified cell: what its template
+    /// actually instructs, which registered validators accept it, and the exact entry to
+    /// add for each of the three author-owned classifications.
+    /// </summary>
+    private static string DescribeUnclassified((string Role, string Action) cell)
+    {
+        var (role, action) = cell;
+        var template = SystemPrompts.GetRoleAction(role, action);
+
+        string evidence;
+        var accepting = new List<string>();
+        if (template is null)
+        {
+            evidence = "no shipped template — PromptFileLoader should have refused to start; investigate first";
+        }
+        else
+        {
+            var (example, reason) = ExtractExample(template.Template);
+            if (example is null)
+            {
+                evidence = $"the template instructs NO ingestible JSON example ({reason})";
+            }
+            else
+            {
+                var normalized = NormalizeClosedSetPlaceholders(example.Value);
+                accepting = DocumentTypeRegistry.All
+                    .Where(t => t.Validate(normalized).IsValid)
+                    .Select(t => t.Key)
+                    .OrderBy(k => k, StringComparer.Ordinal)
+                    .ToList();
+                evidence = accepting.Count == 0
+                    ? "the template's fenced example validates against NO registered document type"
+                    : "the template's fenced example validates against: " + string.Join(", ", accepting);
+            }
+        }
+
+        var caveat = accepting.Contains("diagnosis")
+            ? Environment.NewLine +
+              "      NOTE: 'diagnosis' declares no required members, so it accepts almost any JSON object — " +
+              "its presence above is NOT evidence of intent."
+            : "";
+
+        return
+            $"  ({role}, {action}) — UNCLASSIFIED. {evidence}{caveat}" + Environment.NewLine +
+            "      Add EXACTLY ONE of:" + Environment.NewLine +
+            $"        1. ConformingUnboundCells[(\"{role}\", \"{action}\")] = \"<registered key>\"  — when a landed " +
+            "artifact ties the cell to a registered type (a `// Producing cell` comment in " +
+            "Tamma.Core/Documents/Types/*.cs, the Prose.cs kind→story seed, a RolePhaseMap producer note) OR the " +
+            "template demonstrably instructs that type's wire, AND the example validates today." + Environment.NewLine +
+            $"        2. KnownNonConformingTemplates[(\"{role}\", \"{action}\")] = new(\"<key>\", \"<story>\", \"<why>\") " +
+            "— same intent, but the example does NOT validate. Ratchet debt: it must name the story that will fix " +
+            "it, and the count pin moves with it. Never use this to silence a cell you have not checked." + Environment.NewLine +
+            $"        3. IntentionallyUnboundCells[(\"{role}\", \"{action}\")] = \"<why nothing claims it>\"  — when " +
+            "NOTHING names the cell as a document producer (free text, code/file-format output, a review or triage " +
+            "lens whose reply the runtime maps itself). This switches the gate off for the cell, so it is a claim, " +
+            "not a default." + Environment.NewLine +
+            $"      If the cell IS bound, add it to ContractBindingTests.Bindings instead — test 1 then owns it.";
+    }
+
+    // ====================================================================
+    // Test 6 — extractor/normalizer behavior pins
     // ====================================================================
 
     [Test]

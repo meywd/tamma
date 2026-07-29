@@ -84,7 +84,10 @@ public sealed class SprintPlanDocumentType : IDocumentType
     public int SchemaVersion => 1;
     public Type PayloadClrType => typeof(SprintPlan);
 
-    public DocumentValidationResult Validate(JsonElement payload)
+    public DocumentValidationResult Validate(JsonElement payload) =>
+        DocumentPayloadGuard.Run(payload, ValidateCore);
+
+    private DocumentValidationResult ValidateCore(JsonElement payload)
     {
         SprintPlan? doc;
         try

@@ -46,6 +46,44 @@ public class BacklogOrderingTypeTests
     public void Malformed_payload_is_reported() =>
         Codes(Validate("""{ "items": 3 }""")).Should().Contain(BacklogOrderingDocumentType.MalformedPayload);
 
+    /// <summary>
+    /// Story 41-1b follow-up finding 4, the reviewer's cited case: a NULL ITEM
+    /// deserializes into the list happily and the per-element <c>item.ItemId</c>
+    /// dereference used to throw a <see cref="NullReferenceException"/> straight out
+    /// of Validate — faulting the lifecycle instead of routing to the repair ring.
+    /// It must be the ordinary MALFORMED_PAYLOAD violation. The property is proved
+    /// generically for every registered type in
+    /// <see cref="DocumentTypesNullElementSweepTests"/>; this pins the named case.
+    /// </summary>
+    [Test]
+    public void Null_item_element_is_MALFORMED_PAYLOAD_not_a_throw()
+    {
+        var validate = () => Validate("""{"items":[null]}""");
+
+        validate.Should().NotThrow();
+        Codes(validate()).Should().Contain(BacklogOrderingDocumentType.MalformedPayload);
+        validate().IsValid.Should().BeFalse();
+    }
+
+    [Test]
+    public void Null_item_alongside_real_items_is_MALFORMED_PAYLOAD_not_a_throw()
+    {
+        var payload =
+            """
+            {
+              "items": [
+                { "itemId": "issue-7", "rank": 1, "rationale": "Unblocks two teams.", "value": "high", "effort": "1d" },
+                null
+              ]
+            }
+            """;
+
+        var validate = () => Validate(payload);
+
+        validate.Should().NotThrow();
+        Codes(validate()).Should().Contain(BacklogOrderingDocumentType.MalformedPayload);
+    }
+
     // ── NO_ITEMS ────────────────────────────────────────────────────────────
 
     [Test]

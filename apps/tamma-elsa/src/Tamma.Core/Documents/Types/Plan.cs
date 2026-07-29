@@ -81,7 +81,10 @@ public sealed class PlanDocumentType : IDocumentType
     public int SchemaVersion => 1;
     public Type PayloadClrType => typeof(Plan);
 
-    public DocumentValidationResult Validate(JsonElement payload)
+    public DocumentValidationResult Validate(JsonElement payload) =>
+        DocumentPayloadGuard.Run(payload, ValidateCore);
+
+    private DocumentValidationResult ValidateCore(JsonElement payload)
     {
         Plan? doc;
         try

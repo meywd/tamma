@@ -60,7 +60,10 @@ public sealed class DesignDocumentType : IDocumentType
     public int SchemaVersion => 1;
     public Type PayloadClrType => typeof(Design);
 
-    public DocumentValidationResult Validate(JsonElement payload)
+    public DocumentValidationResult Validate(JsonElement payload) =>
+        DocumentPayloadGuard.Run(payload, ValidateCore);
+
+    private DocumentValidationResult ValidateCore(JsonElement payload)
     {
         Design? doc;
         try

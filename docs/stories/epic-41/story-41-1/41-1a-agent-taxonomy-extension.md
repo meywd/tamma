@@ -1,6 +1,6 @@
 # Story 41-1a: Agent-Taxonomy Extension — three roles, fifteen actions (eighteen cells), the panel-selector maps
 
-Status: drafted
+Status: done — conformance-reviewed 2026-07-29; the three roles, sixteen action tokens, nineteen new cells, twenty-two prompt files, the derived panel-selector maps and the `scrum_master` alias removal all ship. The template-conformance gate is now **exhaustive** — every one of the 112 taxonomy cells is classified exactly once, replacing the 5-entry allowlist the earlier follow-up left open — and both AC5's `ProviderChainResolver` alias path and the case-variant `NormalizeRole` behaviour (finding 6) are now pinned by tests. Open: AC3's end-to-end half is still proven at the selector/helper/envelope level only (both full-runtime lifecycle fixtures remain `[Explicit]`), `IntentionallyUnboundCells` reasons are checked for presence but not against evidence, and finding 7 (the 41-27 single-producer watch) stands
 
 *Split from 41-1 — see [the enabler-set umbrella](./41-1-team-role-and-document-type-extensions.md).*
 
@@ -123,6 +123,28 @@ summarize-stakeholder)` cell is unusable, see 41-5), 41-6, 41-7, 41-8, 41-10, 41
    a provider chain (`ProviderChainResolver.cs:264`, `AgentResolverService.cs:702`) after the entry is
    gone; a test asserts which role it now resolves to (D3) and that the resolved chain/prompt set is the
    one D3 chose.
+   > **Closed (2026-07-29 conformance round) — the `ProviderChainResolver` half is now asserted.** The
+   > `AgentResolverService.cs:702` walk was already pinned by `AgentAliasMigrationTests`; the
+   > `ProviderChainResolver.cs:264` walk this AC also names was not pinned by anything. It is now, by
+   > `tests/Tamma.Api.Tests/Agents/ProviderChainAliasMigrationTests.cs` — 11 cases, all green (72 green
+   > across the whole alias/provider-chain filter). D3's polarity is what they assert: a stored
+   > `roles.scrum_master.providerChain` is served under its own canonical key, and `product_owner` no
+   > longer harvests it.
+   > **Which of the eleven actually GUARD the removal, stated precisely:** three.
+   > `ProductOwnerRequest_NoLongerHarvests_TheScrumMasterChain` and
+   > `ProductOwnerRequest_FallsThroughToDefaults_NotTheScrumMasterChain` both change verdict if the alias
+   > entry is restored (they would resolve to the `scrum_master` chain again), and
+   > `NoAliasEntry_ShadowsACanonicalRole` carries an unconditional
+   > `LegacyRoleAliases.Should().NotContainKey("scrum_master")` plus a sweep over the live table
+   > asserting no alias shadows a canonical role. The rest — the canonical-key lookup, both
+   > cross-contamination directions, the reverse-inheritance case and the ordinal case-sensitivity case —
+   > hold identically with or without the alias entry: they document the surrounding behaviour rather
+   > than guarding the removal, and the fixture's inline claim that a present canonical
+   > `roles.product_owner.providerChain` could ever have been served the `scrum_master` chain is wrong
+   > (`ProviderChainResolver.cs:259` tries the canonical key first, alias or no alias).
+   > `EveryRetainedAlias_StillFoldsToItsCanonicalRole` sweeps the live eight-entry table, but two of
+   > those entries (`tester`, `architect`) are self-mappings served by the canonical branch, so for those
+   > two it proves nothing about the alias walk.
 6. **No behaviour change for the 8 current roles, except the deliberate alias removal and the D1
    `tech_writer` selector arm.**
    > **Corrected (2026-07-29) — the carve-out was incomplete.** Two further deliberate changes to the
@@ -188,7 +210,56 @@ examples in already-registered shapes (`findings` for `synthesize-standup`/`faci
 `Bindings`, nor `KnownNonConformingTemplates`, nor `ConformingUnboundCells`. Closing that requires
 either entries for them or a completeness rule; tracked as an open follow-up, not a resolved one.
 
-**Open follow-up — finding 6 (case-variant alias removal nit):** `LegacyRoleAliases` is an
+**Resolved (2026-07-29 conformance round) — the gate is now EXHAUSTIVE, not an allowlist.** The scope
+note above was accurate when written; its gap is closed by a *completeness rule*, the stronger of the
+two options it named. `TemplateExampleConformanceTests` gained
+`EveryTaxonomyCell_IsClassifiedExactlyOnce`, which **derives** the full cell set from
+`RolePhaseMap.EligibleActions` (a second test cross-checks that derived grid against the embedded
+prompt-file grid in BOTH directions, so neither can drift behind the other) and requires every cell to
+land in exactly ONE of four classifications: a live `ContractBindingTests.Bindings` entry (16),
+`ConformingUnboundCells` (16 — up from 5), the `KnownNonConformingTemplates` ratchet (16), or the new
+`IntentionallyUnboundCells` (64, each carrying a written reason). **16 + 16 + 16 + 64 = 112 = the
+taxonomy** (112 prompt files across 11 role directories, `_system.md` excluded), and both failure
+branches execute: a cell in no bucket fails naming the three entries an author could add and the
+evidence for choosing between them; a cell in two buckets fails naming both. The eleven cells the note
+above listed as being "in no net" are now classified — ten in `ConformingUnboundCells` against their
+real registered types (`findings` x3, `review` x2, `triage-decision` x3, `design`, `diagnosis`) and
+`(ux_designer, draft-user-flow)` in `IntentionallyUnboundCells` with its reason (a cell-local
+`{summary, flows[screens…]}` shape; the `UxSpec` producer is `author-ui-spec`). A new taxonomy token —
+the way this story's own cells arrived — can no longer ship unclassified. This is also the mechanism
+that would have caught 41-1b's `(security, threat-model)` drift, which sat outside every table while
+instructing a shape its own registered validator rejected.
+
+**Three limits of that gate, stated precisely rather than glossed.** (a) `IntentionallyUnboundCells` is
+the one classification that turns the gate OFF for a cell, and it is validated only for a non-blank
+reason string — nothing cross-checks a reason against the evidence it claims is absent (no check for a
+`// Producing cell` comment, a `Prose.cs` kind seed or a `RolePhaseMap` producer note), so a future
+author can still mis-file a cell there. What the gate guarantees is therefore that no cell goes
+UNNOTICED — an unclassified cell fails the build until someone makes an explicit written decision — not
+that every written decision is correct. (b) The ratchet's count pin rose 11 → 16 in this change: the
+five prose templates added carry no JSON fence at all, so they are pre-existing invisible debt the
+widened lens revealed, and each is actively re-verified as still non-conforming by the ratchet's
+staleness test rather than silently waived. The constant records this as a one-time exception to its own
+shrink-only direction rule; nothing mechanically prevents the same justification being reused. (c) The
+completeness sweep counts all 16 `Bindings` keys as "bound", but only the 12 parsed by a `DocumentType`
+are example-validated — so binding a cell with a non-`DocumentType` parser drops it out of
+example-conformance with no gate firing.
+
+**Resolved (2026-07-29 conformance round) — finding 6 (case-variant alias removal nit):** decided as
+"keep the behaviour, record it", and now recorded by test rather than by prose.
+`ProviderChainAliasMigrationTests.NormalizeRole_UppercaseScrumMaster_PassesThroughAndThenThrows` pins
+that `NormalizeRole("SCRUM_MASTER")` passes the string through unchanged and
+`AgentRoleExtensions.Parse` then throws — before the removal it folded case-insensitively to
+`product_owner`, so the test is non-vacuous with respect to the removal.
+`NormalizeRole_UppercaseRetainedAlias_StillFolds` pins the asymmetry control (a retained alias still
+folds case-insensitively, because `LegacyRoleAliases` is `OrdinalIgnoreCase` while
+`RolePhaseMap.ValidRoles` is an ordinal frozen set), and
+`ChainLookup_IsOrdinal_UppercaseRoleKeyFindsNoChain` records the same ordinal rule on the
+provider-chain lookup. `NormalizeRole` was deliberately NOT changed to case-fold against `ValidRoles`;
+exact-case `scrum_master` remains the only spelling the system ever wrote. The finding as originally
+written follows, for the record.
+
+**Finding 6 as originally written (superseded by the resolution above):** `LegacyRoleAliases` is an
 `OrdinalIgnoreCase` table while `RolePhaseMap.ValidRoles` is an Ordinal (case-sensitive) set derived
 from the enum wire strings. Before D3, a case-variant key such as `Scrum_Master` or `SCRUM_MASTER`
 resolved (case-insensitively) through the alias to `product_owner`; after the alias removal it matches

@@ -120,7 +120,10 @@ public sealed class ThreatModelDocumentType : IDocumentType
     public int SchemaVersion => 1;
     public Type PayloadClrType => typeof(ThreatModel);
 
-    public DocumentValidationResult Validate(JsonElement payload)
+    public DocumentValidationResult Validate(JsonElement payload) =>
+        DocumentPayloadGuard.Run(payload, ValidateCore);
+
+    private DocumentValidationResult ValidateCore(JsonElement payload)
     {
         ThreatModel? doc;
         try

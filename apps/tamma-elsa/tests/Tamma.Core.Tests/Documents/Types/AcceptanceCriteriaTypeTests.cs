@@ -53,6 +53,45 @@ public class AcceptanceCriteriaTypeTests
             .Should().Contain(AcceptanceCriteriaDocumentType.MalformedPayload);
     }
 
+    /// <summary>
+    /// Story 41-1b follow-up finding 4, the reviewer's cited case: a NULL CRITERION
+    /// deserializes into the list happily and the per-element <c>criterion.Id</c>
+    /// dereference used to throw a <see cref="NullReferenceException"/> straight out
+    /// of Validate — faulting the lifecycle instead of routing to the repair ring.
+    /// It must be the ordinary MALFORMED_PAYLOAD violation. The property is proved
+    /// generically for every registered type in
+    /// <see cref="DocumentTypesNullElementSweepTests"/>; this pins the named case.
+    /// </summary>
+    [Test]
+    public void Null_criterion_element_is_MALFORMED_PAYLOAD_not_a_throw()
+    {
+        var validate = () => Validate("""{"criteria":[null]}""");
+
+        validate.Should().NotThrow();
+        Codes(validate()).Should().Contain(AcceptanceCriteriaDocumentType.MalformedPayload);
+        validate().IsValid.Should().BeFalse();
+    }
+
+    [Test]
+    public void Null_criterion_alongside_real_criteria_is_MALFORMED_PAYLOAD_not_a_throw()
+    {
+        var payload =
+            """
+            {
+              "issueId": "issue-42",
+              "criteria": [
+                { "id": "AC-1", "form": "checklist", "statement": "s", "verifiable": true },
+                null
+              ]
+            }
+            """;
+
+        var validate = () => Validate(payload);
+
+        validate.Should().NotThrow();
+        Codes(validate()).Should().Contain(AcceptanceCriteriaDocumentType.MalformedPayload);
+    }
+
     // ── ISSUE_ID_MISSING ────────────────────────────────────────────────────
 
     [Test]

@@ -1,6 +1,7 @@
 using FluentAssertions;
 using NUnit.Framework;
 using Tamma.Api.Auth;
+using Tamma.Core.Documents;
 using Tamma.ElsaServer.Workflows.Helpers;
 
 namespace Tamma.Activities.Tests.Workflows;
@@ -47,6 +48,17 @@ namespace Tamma.Activities.Tests.Workflows;
 /// <see cref="KnownContractViolations"/> (a ratchet: entries may only be removed,
 /// and a stale entry — one whose template now satisfies its contract — fails the
 /// build so the baseline cannot rot).</para>
+///
+/// <para><b>Contract declared, dispatch pending</b> is a fourth state, recorded in
+/// <see cref="PendingProducerCells"/> (Story 41-1b AC6). A producing cell that no
+/// compiled workflow dispatches yet cannot be a live <see cref="Bindings"/> entry —
+/// the stale-classification guard in
+/// <see cref="EveryDispatchedPair_IsBoundOrExplicitlyAllowlisted"/> rejects a
+/// classification with no emitter — but its contract is nonetheless KNOWN, because
+/// the typed document type that will validate its replies already ships. The table
+/// records that contract per producing cell and fails the build the day the cell IS
+/// dispatched, so the entry GRADUATES into <see cref="Bindings"/> rather than rotting
+/// into a shape nobody rechecks.</para>
 /// </summary>
 [TestFixture]
 public class ContractBindingTests
@@ -636,6 +648,248 @@ public class ContractBindingTests
         pairs.Should().HaveCount(18, "9 document-review pairs + 5 diff-review pairs + 4 triage-panel pairs");
         pairs.Should().OnlyContain(p => Tamma.Api.Services.Agents.RolePhaseMap.IsRoleEligibleForPhase(p.Action, p.Role),
             "every dispatchable review pair must be taxonomy-eligible");
+    }
+
+    // ====================================================================
+    // Pending producer cells (Story 41-1b AC6) — contract declared, dispatch pending
+    // ====================================================================
+
+    /// <summary>
+    /// One producing cell that exists in the taxonomy but that NO compiled workflow
+    /// dispatches yet: the contract its binding story will pin
+    /// (<paramref name="IntendedContract"/> — moved VERBATIM into
+    /// <see cref="Bindings"/> the day that story lands), the Epic 41 story that will
+    /// bind it, and why it is not a live binding today.
+    /// </summary>
+    private sealed record PendingProducerCell(
+        CellContract IntendedContract, string OwningStory, string Justification);
+
+    /// <summary>
+    /// Story 41-1b (AC6 / D4) — one entry per PRODUCING cell of the six document
+    /// types 41-1b minted. Each type declares exactly one producing cell (D4), and
+    /// none of those cells is dispatched by any workflow until its owning Epic 41
+    /// story lands. None of the three existing tables can hold them honestly: a
+    /// <see cref="Bindings"/> entry would assert a dispatch that does not exist (and
+    /// trips the stale-classification guard in
+    /// <see cref="EveryDispatchedPair_IsBoundOrExplicitlyAllowlisted"/>), an
+    /// <see cref="IntentionallyUnbound"/> entry would claim the cell has NO structured
+    /// contract when it has a typed one (and trips the same guard), and
+    /// <see cref="ReviewProducerDispatchablePairs"/> is for REVIEWER pairs the 39-7
+    /// producers can reach by policy — these are produce cells, reachable by nothing.
+    ///
+    /// <para>It is not a free pass.
+    /// <see cref="EveryPendingProducerCell_IsUndispatched_AndClassifiedNowhereElse"/>
+    /// fails the day a compiled site starts emitting the pair — forcing the entry to
+    /// GRADUATE into <see cref="Bindings"/>, where the template-token gate takes over —
+    /// and <see cref="EveryPendingProducerCell_IntendedContractIsCarriedByItsDocumentType"/>
+    /// checks every declared token group against the REAL <c>RenderContract()</c> of the
+    /// type that will validate the reply, so the contract pinned here is one the binding
+    /// story can adopt without rewriting it.</para>
+    ///
+    /// <para>Template SHAPE conformance is a DIFFERENT gate:
+    /// <c>TemplateExampleConformanceTests</c> owns whether each cell's shipped worked
+    /// example validates — its <c>ConformingUnboundCells</c> map for the cells whose
+    /// templates already instruct the right wire, its <c>KnownNonConformingTemplates</c>
+    /// ratchet for the ones whose binding story still has to rewrite them.</para>
+    /// </summary>
+    private static readonly IReadOnlyDictionary<(string Role, string Action), PendingProducerCell>
+        PendingProducerCells = new Dictionary<(string, string), PendingProducerCell>
+        {
+            // AcceptanceCriteria.cs "Producing cell (41-1b D4)". Template rewrite is
+            // 41-2's job (it still instructs a task breakdown — baselined in
+            // TemplateExampleConformanceTests.KnownNonConformingTemplates).
+            [("product_owner", "define-acceptance-criteria")] = new(
+                new CellContract("AcceptanceCriteriaDocumentType.Validate",
+                [
+                    One("\"issueId\""), One("\"criteria\""), One("\"id\""), One("\"form\""),
+                    One("\"given\""), One("\"when\""), One("\"then\""), One("\"statement\""),
+                    One("\"verifiable\""), One("\"scopeRef\""),
+                ]),
+                "41-2 (acceptance-criteria authoring)",
+                "no compiled dispatch site exists until 41-2 lands its workflow; the cell's shape " +
+                "authority is already typed (AcceptanceCriteria.cs), so it is a declared contract, " +
+                "not an unbound free-text consumer"),
+
+            // BacklogOrdering.cs "Producing cell (41-1b D4)". Template rewrite is 41-3's
+            // job (it still instructs the retired P0-P3 triage vocabulary — baselined).
+            [("product_owner", "prioritize-backlog")] = new(
+                new CellContract("BacklogOrderingDocumentType.Validate",
+                [
+                    One("\"items\""), One("\"itemId\""), One("\"rank\""),
+                    One("\"rationale\""), One("\"value\""), One("\"effort\""),
+                ]),
+                "41-3 (backlog prioritization and grooming)",
+                "no compiled dispatch site exists until 41-3 lands its workflow; the shape authority " +
+                "is typed (BacklogOrdering.cs)"),
+
+            // TestPlan.cs "Producing cell (41-1b D4)". Template rewrite is 41-13's job
+            // (it still instructs the legacy plan wire — baselined).
+            [("tester", "plan-test-strategy")] = new(
+                new CellContract("TestPlanDocumentType.Validate",
+                [
+                    One("\"scope\""), One("\"riskAreas\""), One("\"name\""), One("\"rank\""),
+                    One("\"rationale\""), One("\"strategyLines\""), One("\"description\""),
+                    One("\"coverageTarget\""), One("\"riskAreaRef\""), One("\"environments\""),
+                    One("\"entryCriteria\""), One("\"exitCriteria\""),
+                ]),
+                "41-13 (test-plan authoring)",
+                "no compiled dispatch site exists until 41-13 lands its workflow; the shape authority " +
+                "is typed (TestPlan.cs)"),
+
+            // ThreatModel.cs "Producing cell (41-1b D4)". Prompts/security/threat-model.md
+            // instructed a REVIEW shape ({issues, verdict}) that could never validate as a
+            // threat-model and sat in NO conformance table; it now instructs the real
+            // ThreatModel wire and its worked example validates with zero violations.
+            [("security", "threat-model")] = new(
+                new CellContract("ThreatModelDocumentType.Validate",
+                [
+                    One("\"assets\""), One("\"threats\""), One("\"id\""), One("\"assetRef\""),
+                    One("\"category\""), One("\"description\""), One("\"mitigation\""),
+                    One("\"residualRisk\""), One("\"escalation\""),
+                ]),
+                "41-19 (threat modeling)",
+                "no compiled dispatch site exists until 41-19 lands its workflow; the shape authority " +
+                "is typed (ThreatModel.cs), including the load-bearing unmitigated-high-risk escalation rule"),
+
+            // SprintPlan.cs "Producing cell (41-1b D4)" — role + template minted by 41-1a.
+            // Template already instructs the SprintPlan wire (rewritten with author-ui-spec
+            // in the 2026-07-29 pass); TemplateExampleConformanceTests.ConformingUnboundCells
+            // holds it to that shape until 41-6 binds it.
+            [("scrum_master", "plan-sprint")] = new(
+                new CellContract("SprintPlanDocumentType.Validate",
+                [
+                    One("\"sprintId\""), One("\"capacity\""), One("\"committed\""),
+                    One("\"issueId\""), One("\"ownerRole\""), One("\"estimate\""),
+                    One("\"carryOver\""), One("\"reason\""),
+                ]),
+                "41-6 (sprint planning)",
+                "no compiled dispatch site exists until 41-6 lands its workflow; the shape authority " +
+                "is typed (SprintPlan.cs)"),
+
+            // UxSpec.cs "Producing cell (41-1b D4)" — role + template minted by 41-1a.
+            // Template already instructs the UxSpec wire; ConformingUnboundCells holds it
+            // to that shape until 41-27 binds it.
+            [("ux_designer", "author-ui-spec")] = new(
+                new CellContract("UxSpecDocumentType.Validate",
+                [
+                    One("\"flows\""), One("\"screens\""), One("\"id\""), One("\"name\""),
+                    One("\"entryState\""), One("\"successState\""), One("\"errorStates\""),
+                    One("\"acceptanceCriteriaRefs\""), One("\"flowRef\""), One("\"a11yRequirements\""),
+                ]),
+                "41-27 (user-flow and wireframe drafting)",
+                "no compiled dispatch site exists until 41-27 lands its workflow; the shape authority " +
+                "is typed (UxSpec.cs)"),
+        };
+
+    [Test]
+    public void EveryPendingProducerCell_IsUndispatched_AndClassifiedNowhereElse()
+    {
+        // The graduation guard. A pending entry is only honest while NOTHING can
+        // dispatch the cell: the day a compiled site (or the review producers' policy
+        // selection) can reach it, the entry must move to the table that owns live
+        // pairs — otherwise this table becomes the place contracts go to stop being
+        // checked.
+        var dispatched = TaxonomyDriftBuildTests.EnumerateAllDispatchPairs()
+            .Select(p => (p.Role, p.Action))
+            .ToHashSet();
+        var reviewDispatchable = ReviewerSelectionHelper.AllDispatchablePairs
+            .Select(p => (p.Role, p.Action))
+            .ToHashSet();
+
+        var problems = new List<string>();
+        foreach (var ((role, action), pending) in PendingProducerCells)
+        {
+            pending.OwningStory.Should().NotBeNullOrWhiteSpace(
+                $"({role}, {action}) must name the Epic 41 story that will bind it");
+            pending.Justification.Should().NotBeNullOrWhiteSpace(
+                $"({role}, {action}) must say why it is not a live binding today");
+
+            if (SystemPrompts.GetRoleAction(role, action) is null)
+                problems.Add(
+                    $"  ({role}, {action}): no shipped template — the cell is not in the taxonomy " +
+                    "(SystemPrompts has no entry); fix the key or delete the entry");
+
+            if (dispatched.Contains((role, action)))
+                problems.Add(
+                    $"  ({role}, {action}): a compiled llm-call dispatch site NOW emits this pair — " +
+                    $"{pending.OwningStory} has landed, so GRADUATE the entry: move its IntendedContract " +
+                    "verbatim into Bindings (the template-token gate then checks it) and delete it here");
+
+            if (reviewDispatchable.Contains((role, action)))
+                problems.Add(
+                    $"  ({role}, {action}): the 39-7 review producers can now dispatch this pair by " +
+                    "policy — it belongs in ReviewProducerDispatchablePairs, not here (this table is " +
+                    "for PRODUCE cells nothing can reach yet)");
+
+            if (Bindings.ContainsKey((role, action)) ||
+                IntentionallyUnbound.ContainsKey((role, action)) ||
+                ReviewProducerDispatchablePairs.ContainsKey((role, action)))
+                problems.Add(
+                    $"  ({role}, {action}): already classified in Bindings / IntentionallyUnbound / " +
+                    "ReviewProducerDispatchablePairs — a cell carries exactly one classification");
+        }
+
+        problems.Should().BeEmpty(
+            "PendingProducerCells must list ONLY producing cells that exist in the taxonomy, are " +
+            "dispatched by nothing, and are classified nowhere else:" + Environment.NewLine +
+            string.Join(Environment.NewLine, problems));
+    }
+
+    [Test]
+    public void EveryPendingProducerCell_IntendedContractIsCarriedByItsDocumentType()
+    {
+        // What makes a pending entry a CONTRACT rather than a comment: the token set
+        // pinned here must actually appear in the contract the producing cell will be
+        // handed — IDocumentType.RenderContract of the type that validates the reply.
+        // A drifting type therefore fails HERE, before its binding story inherits a
+        // token list that no longer matches the wire.
+        var problems = new List<string>();
+        var declaredBy = new Dictionary<string, (string Role, string Action)>(StringComparer.Ordinal);
+
+        foreach (var ((role, action), pending) in PendingProducerCells)
+        {
+            var authority = pending.IntendedContract.Parser;
+
+            if (!authority.EndsWith("DocumentType.Validate", StringComparison.Ordinal))
+            {
+                problems.Add(
+                    $"  ({role}, {action}): intended authority '{authority}' is not a typed " +
+                    "DocumentType.Validate — a document producer's shape authority is its validator (D7c)");
+                continue;
+            }
+
+            // 41-1b D4: every document type declares EXACTLY ONE producing cell.
+            if (declaredBy.TryGetValue(authority, out var owner))
+                problems.Add(
+                    $"  ({role}, {action}): '{authority}' is already the declared producing cell of " +
+                    $"({owner.Role}, {owner.Action}) — each document type declares exactly one (41-1b D4)");
+            else
+                declaredBy[authority] = (role, action);
+
+            var typeName = authority[..^".Validate".Length];
+            var type = DocumentTypeRegistry.All.SingleOrDefault(t => t.GetType().Name == typeName);
+            if (type is null)
+            {
+                problems.Add(
+                    $"  ({role}, {action}): intended authority '{authority}' names no registered " +
+                    $"IDocumentType (DocumentTypeRegistry.All has no '{typeName}') — the entry is " +
+                    "premature, or the name is a typo");
+                continue;
+            }
+
+            var contract = type.RenderContract();
+            problems.AddRange(pending.IntendedContract.RequiredTokenGroups
+                .Where(group => !group.Any(alt => contract.Contains(alt, StringComparison.Ordinal)))
+                .Select(group =>
+                    $"  ({role}, {action}): the '{type.Key}' contract does not carry " +
+                    $"{string.Join(" | ", group)} — the token set pinned here must be one " +
+                    $"{pending.OwningStory} can adopt verbatim when it binds the cell"));
+        }
+
+        problems.Should().BeEmpty(
+            "every pending producer cell's intended contract must be carried by the registered document " +
+            "type that will validate its replies:" + Environment.NewLine +
+            string.Join(Environment.NewLine, problems));
     }
 
     // ====================================================================

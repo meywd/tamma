@@ -87,7 +87,10 @@ public sealed class UxSpecDocumentType : IDocumentType
     public int SchemaVersion => 1;
     public Type PayloadClrType => typeof(UxSpec);
 
-    public DocumentValidationResult Validate(JsonElement payload)
+    public DocumentValidationResult Validate(JsonElement payload) =>
+        DocumentPayloadGuard.Run(payload, ValidateCore);
+
+    private DocumentValidationResult ValidateCore(JsonElement payload)
     {
         UxSpec? doc;
         try
@@ -171,7 +174,10 @@ public sealed class UxSpecDocumentType : IDocumentType
     /// context degrades to payload-only validation, never a throw — the
     /// <c>TestSpec</c> precedent (39-15 D3).
     /// </summary>
-    public DocumentValidationResult ValidateWithContext(JsonElement payload, string validationContextJson)
+    public DocumentValidationResult ValidateWithContext(JsonElement payload, string validationContextJson) =>
+        DocumentPayloadGuard.Run(payload, p => ValidateWithContextCore(p, validationContextJson));
+
+    private DocumentValidationResult ValidateWithContextCore(JsonElement payload, string validationContextJson)
     {
         var baseResult = Validate(payload);
 
