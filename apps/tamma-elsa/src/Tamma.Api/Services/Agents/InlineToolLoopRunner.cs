@@ -342,13 +342,7 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
                 var gateDecision = _autonomyGate.Evaluate(tc.ToolName, tc.ArgumentsJson);
                 if (gateDecision.IsDenied)
                 {
-                    var detail = gateDecision.Reason == "always-human"
-                        ? "is configured to always require a person"
-                        : $"requires minimum autonomy {gateDecision.MinAutonomy}, above the current autonomy level {gateDecision.Dial}";
-                    rejectedToolCalls[tc.Id] =
-                        $"Tool call denied by autonomy policy: '{tc.ToolName}'"
-                        + (gateDecision.ActionKey is { } k ? $" (action '{k.ToWire()}')" : string.Empty)
-                        + $" {detail}. This action cannot run automatically; continue without it.";
+                    rejectedToolCalls[tc.Id] = ComposeDenialMessage(tc.ToolName, gateDecision);
 
                     // A denial under enforcement is never swallowed silently
                     // (epic audit rule; the 43-9 audit event family joins here).
@@ -716,6 +710,26 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         var turns = completedTurns;
 
         return (lastResponse, totalTokens, turns, exhausted, contentValid, repairTurns, repairHistory);
+    }
+
+    /// <summary>
+    /// The denial tool-result message fed back to the model for a Seam B gate
+    /// denial. Internal for the message-shape tests (43-4 review, 2026-07-29):
+    /// a decision with <see cref="ToolLoopGateDecision.MinAutonomy"/> == null
+    /// and a reason other than <c>always-human</c> previously rendered
+    /// "requires minimum autonomy , above ..." — the null case now omits the
+    /// threshold clause and stays a well-formed sentence.
+    /// </summary>
+    internal static string ComposeDenialMessage(string toolName, ToolLoopGateDecision decision)
+    {
+        var detail = decision.Reason == "always-human"
+            ? "is configured to always require a person"
+            : decision.MinAutonomy is { } minAutonomy
+                ? $"requires minimum autonomy {minAutonomy}, above the current autonomy level {decision.Dial}"
+                : $"is not permitted at the current autonomy level {decision.Dial}";
+        return $"Tool call denied by autonomy policy: '{toolName}'"
+            + (decision.ActionKey is { } k ? $" (action '{k.ToWire()}')" : string.Empty)
+            + $" {detail}. This action cannot run automatically; continue without it.";
     }
 
     // =======================================================================

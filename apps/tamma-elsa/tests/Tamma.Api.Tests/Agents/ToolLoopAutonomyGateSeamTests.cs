@@ -6,6 +6,7 @@ using Moq;
 using NUnit.Framework;
 using Tamma.Activities.LlmCall.Models;
 using Tamma.Activities.LlmCall.Tools;
+using Tamma.Activities.ToolExecution;
 using Tamma.Api.Services.Agents;
 using Tamma.Core.Documents.Policy;
 
@@ -138,6 +139,99 @@ public class ToolLoopAutonomyGateSeamTests
     }
 
     [Test]
+    public async Task A_denied_tool_call_is_excluded_from_the_parallel_execution_path_too()
+    {
+        // 43-4 review (2026-07-29): the earlier seam tests only exercised the
+        // SEQUENTIAL fork. The gate sits pre-fork, so a denial must equally
+        // keep the call out of ParallelToolExecutor's batch — proven here
+        // end-to-end with EnableParallelTools and a real parallel executor.
+        var executed = new List<string>();
+        var registry = RegistryRecording(executed);
+        var handler = new SequencedCapturingHandler(
+            ToolUse(("tc-1", "shell_execute", """{"command":"deploy.sh"}"""),
+                    ("tc-2", "file_read", """{"path":"README.md"}"""),
+                    ("tc-3", "file_write", """{"path":"a","content":"b"}""")),
+            EndTurn("done", 5, 2));
+
+        var gate = new Mock<IToolLoopAutonomyGate>();
+        gate.Setup(g => g.Evaluate(It.IsAny<string>(), It.IsAny<string?>()))
+            .Returns((string name, string? _) => name == "shell_execute"
+                ? new ToolLoopGateDecision(
+                    ToolLoopGateOutcome.Denied,
+                    new Tamma.Core.Actions.ActionKey(Tamma.Core.Actions.ActionNamespace.Tool, "shell_execute"),
+                    AutonomyDial.AlwaysHuman, AutonomyDial.Min, "always-human")
+                : new ToolLoopGateDecision(ToolLoopGateOutcome.Allowed, null, null, AutonomyDial.Min, "at-or-above-min-autonomy"));
+
+        var runner = NewRunner(handler, gate.Object, registry,
+            new ParallelToolExecutor(NullLogger<ParallelToolExecutor>.Instance));
+        var result = await RunAsync(runner, new ToolLoopConfig { EnableParallelTools = true });
+
+        executed.Should().BeEquivalentTo(new[] { "file_read", "file_write" },
+            "the denied call must never reach the parallel executor; the allowed calls all run");
+        executed.Should().NotContain("shell_execute");
+
+        // All three calls still answer back to the model — the denial as an
+        // ordinary tool result alongside the two parallel results.
+        handler.CapturedBodies.Should().HaveCount(2);
+        handler.CapturedBodies[1].Should().Contain("denied by autonomy policy");
+        handler.CapturedBodies[1].Should().Contain("tc-1");
+        handler.CapturedBodies[1].Should().Contain("tc-2");
+        handler.CapturedBodies[1].Should().Contain("tc-3");
+        result.Response.Success.Should().BeTrue();
+    }
+
+    // ── Denial message shape (43-4 review, 2026-07-29) ────────────────────
+
+    [Test]
+    public void Denial_message_names_the_threshold_when_MinAutonomy_is_present()
+    {
+        var decision = new ToolLoopGateDecision(
+            ToolLoopGateOutcome.Denied,
+            new Tamma.Core.Actions.ActionKey(Tamma.Core.Actions.ActionNamespace.Tool, "shell_execute"),
+            MinAutonomy: 90, Dial: 70, "below-min-autonomy");
+
+        InlineToolLoopRunner.ComposeDenialMessage("shell_execute", decision).Should().Be(
+            "Tool call denied by autonomy policy: 'shell_execute' (action 'tool:shell_execute') "
+            + "requires minimum autonomy 90, above the current autonomy level 70. "
+            + "This action cannot run automatically; continue without it.");
+    }
+
+    [Test]
+    public void Denial_message_with_a_null_threshold_is_a_well_formed_sentence()
+    {
+        // The bug this pins: MinAutonomy=null with a non-"always-human" reason
+        // used to render "requires minimum autonomy , above the current
+        // autonomy level 70" — the null case must omit the threshold clause.
+        var decision = new ToolLoopGateDecision(
+            ToolLoopGateOutcome.Denied, ActionKey: null,
+            MinAutonomy: null, Dial: 70, "policy-denied");
+
+        var message = InlineToolLoopRunner.ComposeDenialMessage("shell_execute", decision);
+
+        message.Should().Be(
+            "Tool call denied by autonomy policy: 'shell_execute' "
+            + "is not permitted at the current autonomy level 70. "
+            + "This action cannot run automatically; continue without it.");
+        message.Should().NotContain("minimum autonomy ,");
+    }
+
+    [Test]
+    public void Denial_message_for_always_human_says_a_person_is_required()
+    {
+        // always-human carries MinAutonomy=AlwaysHuman, but the message speaks
+        // human, not numbers — and stays well-formed either way.
+        var decision = new ToolLoopGateDecision(
+            ToolLoopGateOutcome.Denied,
+            new Tamma.Core.Actions.ActionKey(Tamma.Core.Actions.ActionNamespace.Tool, "shell_execute"),
+            AutonomyDial.AlwaysHuman, AutonomyDial.Min, "always-human");
+
+        InlineToolLoopRunner.ComposeDenialMessage("shell_execute", decision).Should().Be(
+            "Tool call denied by autonomy policy: 'shell_execute' (action 'tool:shell_execute') "
+            + "is configured to always require a person. "
+            + "This action cannot run automatically; continue without it.");
+    }
+
+    [Test]
     public void The_gate_is_a_required_constructor_dependency()
     {
         // The epic's binding decision: REQUIRED-constructor-injected, never
@@ -153,10 +247,11 @@ public class ToolLoopAutonomyGateSeamTests
     // Helpers
     // ─────────────────────────────────────────────────────────────────────
 
-    private static async Task<InlineToolLoopResult> RunAsync(InlineToolLoopRunner runner) =>
+    private static async Task<InlineToolLoopResult> RunAsync(
+        InlineToolLoopRunner runner, ToolLoopConfig? loopConfig = null) =>
         await runner.RunAsync(
             "anthropic", Config(), Model, "sys", "user", 4096, 0.7,
-            tools: null, enableToolLoop: true, new ToolLoopConfig(), "corr-gate",
+            tools: null, enableToolLoop: true, loopConfig ?? new ToolLoopConfig(), "corr-gate",
             repair: null, CancellationToken.None);
 
     /// <summary>A registry of stub executors that records execution order.</summary>
@@ -185,14 +280,16 @@ public class ToolLoopAutonomyGateSeamTests
     }
 
     private static InlineToolLoopRunner NewRunner(
-        HttpMessageHandler handler, IToolLoopAutonomyGate gate, IToolExecutorRegistry registry)
+        HttpMessageHandler handler, IToolLoopAutonomyGate gate, IToolExecutorRegistry registry,
+        ParallelToolExecutor? parallelExecutor = null)
     {
         var factory = new Mock<IHttpClientFactory>();
         factory.Setup(f => f.CreateClient(It.IsAny<string>()))
             .Returns(() => new HttpClient(handler, disposeHandler: false));
         return new InlineToolLoopRunner(
             NullLogger<InlineToolLoopRunner>.Instance, factory.Object, configuration: null,
-            sanitizer: null, autonomyGate: gate, toolRegistry: registry);
+            sanitizer: null, autonomyGate: gate, toolRegistry: registry,
+            parallelExecutor: parallelExecutor);
     }
 
     private static LlmProviderConfig Config() => new()

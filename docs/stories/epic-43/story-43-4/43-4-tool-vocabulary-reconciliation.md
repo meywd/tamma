@@ -198,8 +198,33 @@ applies that posture to tools, which has never been done.
 
 3 days
 
+## Follow-ups from review (2026-07-29) — all closed 2026-07-29
+
+- **Git grading hole recorded in the catalog.** The `git_operations` read/write split grades by
+  SUBCOMMAND ONLY while args are screened only for shell metacharacters — a read-graded call can still
+  mutate (`{"subcommand":"log","args":"--output=FILE"}` writes a file; `branch -D x` deletes local
+  refs; `fetch`/`branch` are graded Read by the documented local-refs rationale in
+  `GitSubcommand.cs:60-64`). Now candidly disclosed next to the existing `file_write`/`shell_execute`
+  hole disclosures: a comment block + description note on `tool:git_operations.read` in
+  `ActionCatalog.Descriptors.cs`, stating it MUST be revisited when `tool:git_operations.write` is
+  human-gated (at that point the Read grade is a gate bypass, not a nuance).
+- **Two gate-suite test gaps closed.** (i) The `Enforceable=false` short-circuit in
+  `CatalogDefaultToolLoopAutonomyGate.Evaluate` is now driven directly: the internal rehearsal seam
+  gained an `enforceableOverride` (no shipped tool descriptor is non-enforceable), pinned by
+  `ToolLoopAutonomyGateTests.Evaluate_short_circuits_a_non_enforceable_descriptor_before_any_threshold`.
+  (ii) The PARALLEL execution fork is now proven to exclude denied calls end-to-end
+  (`ToolLoopAutonomyGateSeamTests.A_denied_tool_call_is_excluded_from_the_parallel_execution_path_too`,
+  with `EnableParallelTools` + a real `ParallelToolExecutor`) — the earlier seam tests only exercised
+  the sequential path.
+- **Malformed denial message fixed.** A gate denial with `MinAutonomy=null` and a reason other than
+  `always-human` rendered "requires minimum autonomy , above the current autonomy level 70". The
+  composition now lives in `InlineToolLoopRunner.ComposeDenialMessage` (internal for tests); the null
+  case omits the threshold clause ("is not permitted at the current autonomy level 70"). Message shape
+  pinned for null, non-null, and always-human decisions in `ToolLoopAutonomyGateSeamTests`.
+
 ## Change Log
 
 | Date       | Version | Changes                | Author |
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-25 | 1.0.0   | Initial story creation | Claude |
+| 2026-07-29 | 1.0.1   | Review follow-ups closed: git-grading hole recorded in catalog; non-enforceable + parallel-path gate tests added; null-threshold denial message fixed | Claude |

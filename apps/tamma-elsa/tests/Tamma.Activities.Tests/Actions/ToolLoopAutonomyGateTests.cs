@@ -194,4 +194,32 @@ public class ToolLoopAutonomyGateTests
             .Should().OnlyContain(d => d.Key.Ns != ActionNamespace.Tool,
                 "if a tool member ever ships non-enforceable, extend this fixture to evaluate it");
     }
+
+    [Test]
+    public void Evaluate_short_circuits_a_non_enforceable_descriptor_before_any_threshold()
+    {
+        // 43-4 review (2026-07-29): the branch itself, driven through Evaluate.
+        // No shipped tool descriptor is non-enforceable, so the rehearsal seam
+        // marks every descriptor non-enforceable while an AlwaysHuman threshold
+        // is armed — the short-circuit must win BEFORE the threshold is even
+        // consulted, at every valid dial position.
+        foreach (var dial in AutonomyDial.ValidLevels())
+        {
+            var gate = new CatalogDefaultToolLoopAutonomyGate(
+                dial,
+                minAutonomyOverride: _ => AutonomyDial.AlwaysHuman,
+                enforceableOverride: _ => false);
+
+            var decision = gate.Evaluate("shell_execute", "{}");
+
+            decision.Outcome.Should().Be(ToolLoopGateOutcome.Allowed,
+                $"a non-enforceable descriptor may never be denied (dial {dial})");
+            decision.Reason.Should().Be("not-enforceable");
+            decision.MinAutonomy.Should().BeNull(
+                "no threshold was applied — the short-circuit precedes threshold resolution");
+            decision.ActionKey.Should().Be(Tool(ToolAction.ShellExecute),
+                "the resolved key is still reported for logging/audit");
+            decision.Dial.Should().Be(dial);
+        }
+    }
 }

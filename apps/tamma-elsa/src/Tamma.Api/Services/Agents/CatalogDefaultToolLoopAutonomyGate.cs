@@ -30,6 +30,7 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
 {
     private readonly int _dial;
     private readonly Func<ActionDescriptor, int>? _minAutonomyOverride;
+    private readonly Func<ActionDescriptor, bool>? _enforceableOverride;
     private readonly Actions.IGovernancePolicySnapshotProvider? _snapshots;
     private readonly Tamma.Data.ITenantContext? _tenantContext;
     private readonly ILogger<CatalogDefaultToolLoopAutonomyGate>? _logger;
@@ -77,16 +78,21 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
     /// Test/rehearsal seam (InternalsVisibleTo): pins the decision semantics for
     /// dial positions and thresholds the shipped defaults cannot reach (the
     /// shipped tool table is all-<see cref="AutonomyDial.Min"/> by design).
-    /// 43-5's resolver-backed gate supersedes this seam.
+    /// <paramref name="enforceableOverride"/> likewise pins the
+    /// <c>Enforceable = false</c> short-circuit, which no shipped TOOL
+    /// descriptor can reach naturally (43-4 review, 2026-07-29). 43-5's
+    /// resolver-backed gate supersedes this seam.
     /// </summary>
     internal CatalogDefaultToolLoopAutonomyGate(
         int dial,
         Func<ActionDescriptor, int>? minAutonomyOverride = null,
-        ILogger<CatalogDefaultToolLoopAutonomyGate>? logger = null)
+        ILogger<CatalogDefaultToolLoopAutonomyGate>? logger = null,
+        Func<ActionDescriptor, bool>? enforceableOverride = null)
     {
         _dial = dial;
         _minAutonomyOverride = minAutonomyOverride;
         _logger = logger;
+        _enforceableOverride = enforceableOverride;
     }
 
     /// <inheritdoc />
@@ -109,7 +115,7 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
                 ToolLoopGateOutcome.Allowed, key, null, _dial, "uncatalogued");
         }
 
-        if (!descriptor.Enforceable)
+        if (!(_enforceableOverride?.Invoke(descriptor) ?? descriptor.Enforceable))
         {
             return new ToolLoopGateDecision(
                 ToolLoopGateOutcome.Allowed, key, null, _dial, "not-enforceable");

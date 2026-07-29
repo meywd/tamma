@@ -65,8 +65,13 @@ namespace Tamma.Data.Migrations.ControlPlane
                     ON scheduled_triggers ("TenantId", "DefinitionId", "Name")
                     NULLS NOT DISTINCT;
 
-                CREATE INDEX IF NOT EXISTS "IX_scheduled_triggers_Enabled_NextDueAt"
-                    ON scheduled_triggers ("Enabled", "NextDueAt");
+                -- 41-30 review follow-up (2026-07-29): the (Enabled, NextDueAt)
+                -- index this migration originally created was DEAD — the tick
+                -- query lists by Enabled (+ tenant) and never filters NextDueAt.
+                -- Because both tables survive the Epic 19 startup wipe, a DB
+                -- that ran the original version still carries it; the
+                -- idempotent DROP below cleans that up on re-run.
+                DROP INDEX IF EXISTS "IX_scheduled_triggers_Enabled_NextDueAt";
 
                 CREATE TABLE IF NOT EXISTS scheduled_trigger_fires (
                     "Id" uuid NOT NULL DEFAULT gen_random_uuid(),

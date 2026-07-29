@@ -1194,9 +1194,10 @@ internal static class TammaModelConfiguration
                 .AreNullsDistinct(false)
                 .HasDatabaseName("ux_scheduled_triggers_tenant_definition_name");
 
-            // The tick's hot path: enabled rows ordered by due time.
-            entity.HasIndex(e => new { e.Enabled, e.NextDueAt })
-                .HasDatabaseName("IX_scheduled_triggers_Enabled_NextDueAt");
+            // NO (Enabled, NextDueAt) index: the tick query lists by Enabled
+            // (+ tenant) and never filters NextDueAt, so the old
+            // IX_scheduled_triggers_Enabled_NextDueAt was dead weight — removed
+            // 2026-07-29 (41-30 review follow-up; the migration is unreleased).
         });
 
         modelBuilder.Entity<Entities.ScheduledTriggerFire>(entity =>
@@ -2451,7 +2452,14 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.ExternalRefJson).HasColumnType("jsonb");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
             entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
-            entity.Property(e => e.Version).HasDefaultValue(1);
+            // Version IS the optimistic-concurrency token (44-2's ETag): every
+            // repository write bumps it and EF adds `WHERE "Version" = <read>`
+            // to the UPDATE/DELETE, so an interleaved writer loses with
+            // DbUpdateConcurrencyException (translated to the typed, retryable
+            // TRACKER.CONCURRENCY_CONFLICT in WorkItemRepository) instead of
+            // silently last-write-winning — which could drop PreviousKeys
+            // history on concurrent rekeys (44-1 review finding, 2026-07-29).
+            entity.Property(e => e.Version).HasDefaultValue(1).IsConcurrencyToken();
 
             entity.HasOne<ProjectEntity>()
                 .WithMany()

@@ -177,6 +177,96 @@ public class WorkItemRepositoryTests
     }
 
     [Test]
+    public async Task Interleaved_rekeys_conflict_typed_instead_of_silently_losing_history()
+    {
+        // The 2026-07-29 review finding: without the Version concurrency token,
+        // two interleaved rekeys both read (Key=TAM-1, PreviousKeys=[]), and
+        // the second write silently OVERWRITES the first — the winner's key
+        // vanishes from PreviousKeys forever. With the token, the loser's
+        // UPDATE (WHERE "Version" = 1) matches no row and surfaces as the
+        // typed, retryable TRACKER.CONCURRENCY_CONFLICT.
+        //
+        // Deterministic interleave: an external transaction holds the TAM
+        // project row FOR UPDATE. Both rekeys read the work item (no lock),
+        // then queue on RekeyAsync's own projects FOR UPDATE — so BOTH have
+        // read Version=1 before EITHER can write. Release, and they serialize.
+        var project = await NewProjectAsync();
+        var item = await _repository.CreateAsync(NewItem(project.Id)); // TAM-1
+
+        await using var blocker = new NpgsqlConnection(CsFor(_schema));
+        await blocker.OpenAsync();
+        await using var blockTx = await blocker.BeginTransactionAsync();
+        await using (var lockCmd = new NpgsqlCommand(
+            """SELECT * FROM projects WHERE "Key" = 'TAM' FOR UPDATE""", blocker, blockTx))
+        {
+            await lockCmd.ExecuteNonQueryAsync();
+        }
+
+        var first = Task.Run(() => _repository.RekeyAsync(item.Id, "TAM-100"));
+        var second = Task.Run(() => _repository.RekeyAsync(item.Id, "TAM-200"));
+
+        // Wait until BOTH rekeys are queued on the project row lock (each has
+        // already read the work item at Version=1 by then), then release.
+        await WaitForProjectLockWaitersAsync(expected: 2, TimeSpan.FromSeconds(30));
+        await blockTx.RollbackAsync();
+
+        var outcomes = await Task.WhenAll(WrapAsync(first), WrapAsync(second));
+
+        var winners = outcomes.Where(o => o.Error is null).ToList();
+        var losers = outcomes.Where(o => o.Error is not null).ToList();
+        winners.Should().HaveCount(1, "exactly one interleaved rekey may win");
+        losers.Should().HaveCount(1,
+            "the loser must surface, never silently last-write-win over the winner's history");
+
+        var error = losers[0].Error!;
+        error.Code.Should().Be("TRACKER.CONCURRENCY_CONFLICT");
+        error.Retryable.Should().BeTrue("the caller re-reads and retries against current state");
+
+        // The stored row is EXACTLY the winner's write; the PreviousKeys chain
+        // is intact (the loser's stale [TAM-1] overwrite never landed).
+        var stored = (await _repository.GetAsync(item.Id))!;
+        stored.Key.Should().Be(winners[0].Result!.Key);
+        stored.PreviousKeys.Should().Equal(
+            new[] { "TAM-1" }, "the winner recorded the outgoing key; the loser changed nothing");
+        (await _repository.GetByKeyAsync("TAM-1"))!.Id.Should().Be(item.Id);
+    }
+
+    private static async Task<(WorkItemEntity? Result, TammaError? Error)> WrapAsync(
+        Task<WorkItemEntity?> rekey)
+    {
+        try
+        {
+            return (await rekey, null);
+        }
+        catch (TammaError error)
+        {
+            return (null, error);
+        }
+    }
+
+    private async Task WaitForProjectLockWaitersAsync(int expected, TimeSpan timeout)
+    {
+        await using var monitor = new NpgsqlConnection(_baseConnectionString);
+        await monitor.OpenAsync();
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            await using var cmd = new NpgsqlCommand(
+                """
+                SELECT count(*) FROM pg_stat_activity
+                WHERE wait_event_type = 'Lock' AND query ILIKE '%FOR UPDATE%'
+                """, monitor);
+            var waiting = (long)(await cmd.ExecuteScalarAsync())!;
+            if (waiting >= expected)
+                return;
+            await Task.Delay(50);
+        }
+        throw new InvalidOperationException(
+            $"Timed out waiting for {expected} rekey transactions to queue on the project "
+            + "row lock — the interleave was not established, so the test would be meaningless.");
+    }
+
+    [Test]
     public async Task Rekey_into_the_projects_future_mint_space_advances_the_counter()
     {
         var project = await NewProjectAsync();

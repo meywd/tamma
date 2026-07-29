@@ -2372,9 +2372,6 @@ namespace Tamma.Data.Migrations.ControlPlane
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Enabled", "NextDueAt")
-                        .HasDatabaseName("IX_scheduled_triggers_Enabled_NextDueAt");
-
                     b.HasIndex("TenantId", "DefinitionId", "Name")
                         .IsUnique()
                         .HasDatabaseName("ux_scheduled_triggers_tenant_definition_name");

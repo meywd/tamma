@@ -98,10 +98,10 @@ Fixed in this lane (see `.dev/bugs/2026-07-29-ef-migrator-service-provider-explo
 - **Relation-add race** — `AddRelationAsync` is insert-first; the unique-index loser (23505) returns the stored row, making the documented idempotent contract hold under concurrency. `TrackerPreferenceRepository`'s first-upsert race retries once as an update of the winner's row.
 - **`DefaultKind` wire validation** — junk fails as typed `TRACKER.UNKNOWN_KIND` at the write boundary, never as raw 23514 off `ck_tracker_preferences_default_kind` (`BoardGroupBy` stays freeform by design).
 - **Sweeper OCE isolation** — an `OperationCanceledException` from one tenant's own stack no longer aborts the whole sweep; it is only treated as sweep-cancellation when the sweep's token is actually canceled.
+- **`WorkItemEntity.Version` is now the EF optimistic-concurrency token** *(done 2026-07-29)* — `TammaModelConfiguration` configures `Version` with `IsConcurrencyToken()` (no migration required: for a plain `int` token the config is model-metadata only — `dotnet ef migrations has-pending-model-changes -c TenantDbContext` reports none). All five mutating repository seams (`UpdateAsync`/`SetStatusAsync`/`SetRanksAsync`/`SetParentAsync`/`RekeyAsync`) already bump `Version` and now translate `DbUpdateConcurrencyException` into the typed, **retryable** `TRACKER.CONCURRENCY_CONFLICT`. Real-Postgres proof: `WorkItemRepositoryTests.Interleaved_rekeys_conflict_typed_instead_of_silently_losing_history` establishes a deterministic interleave (both rekeys read at `Version=1`, queued behind an external `FOR UPDATE` on the project row) and shows the loser gets the typed conflict while the winner's `PreviousKeys` chain stays intact — no more silent last-write-wins losing key history.
 
 Still open (owned by OTHER lanes — do not close this section until they land):
 
-- **`WorkItemEntity.Version` is not an EF concurrency token** (`IsConcurrencyToken` missing in `TammaModelConfiguration`/snapshot — model-config lane). Concurrent rekeys can interleave read-modify-write on `PreviousKeys` and silently LOSE key history. **Must land before 44-2 exposes rekey over HTTP.**
 - **Sweep endpoint hygiene** (`Program.cs` — coordinator's lane): `dryRun` defaults to `false` (a bare POST applies DDL fleet-wide); no single-flight guard (two concurrent sweeps double-migrate); the sweep runs synchronously in-request (a large fleet outlives HTTP timeouts); the pool's `CommandTimeout=30s` applies to migration DDL and will spuriously fail heavy migrations.
 
 ## Change Log
@@ -110,3 +110,4 @@ Still open (owned by OTHER lanes — do not close this section until they land):
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-25 | 1.0.0   | Initial story creation | Claude |
 | 2026-07-29 | 1.0.1   | Adversarial-review follow-ups section (fixes landed in the tracker-storage lane; deferred items listed) | Claude |
+| 2026-07-29 | 1.0.2   | `Version` concurrency-token follow-up closed: `IsConcurrencyToken()` + typed retryable `TRACKER.CONCURRENCY_CONFLICT` on all update seams + interleaved-rekey Postgres proof (no migration needed) | Claude |

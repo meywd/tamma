@@ -200,8 +200,11 @@ and the per-dispatch timeout / materialisation isolation above ARE fixed as of 2
   `claimed` row with non-null `DispatchedAt`). Nothing sweeps or surfaces these beyond retention
   pruning. Follow-up: a periodic sweep that stamps rows older than a threshold `failed` with a
   `SCHEDULE.FIRE.FAILED` event, or a metric/admin listing.
-- **Dead index `IX_scheduled_triggers_Enabled_NextDueAt`** (no query filters on `NextDueAt`; the tick
-  lists by `Enabled` + tenant): left in place on 2026-07-29 because removing it cleanly spans four
-  files (`20260729035316_AddScheduledTriggers.cs`, its `.Designer.cs`, `TammaModelConfiguration.cs`,
-  `ControlPlaneDbContextModelSnapshot.cs`), two of which carried other in-flight work at the time.
-  Trivial to drop later in one dedicated change (the migration is unreleased — no migration anxiety).
+- ~~**Dead index `IX_scheduled_triggers_Enabled_NextDueAt`**~~ — **removed 2026-07-29** (no query
+  filters on `NextDueAt`; the tick lists by `Enabled` + tenant). Dropped from
+  `TammaModelConfiguration.cs`, the unreleased `20260729035316_AddScheduledTriggers.cs` migration
+  (edited in place per the no-migration-anxiety policy; the migration now carries an idempotent
+  `DROP INDEX IF EXISTS` because `scheduled_triggers` survives the Epic 19 startup wipe, so a DB that
+  ran the original version still carried the index), both affected `.Designer.cs` files, and
+  `ControlPlaneDbContextModelSnapshot.cs`. `dotnet ef migrations has-pending-model-changes
+  -c ControlPlaneDbContext` reports none.

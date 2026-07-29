@@ -274,7 +274,18 @@ public static partial class ActionCatalog
             "Tamma.Activities.LlmCall.Tools.RunTestsTool"),
         Tool(ToolAction.GetAcceptanceRules, ActionGroup.CodeRead, ActionRisk.ReadOnly, "Read acceptance rules", "Read the resolved acceptance policy (principal-bound, per-session tool; deliberately not DI-registered — Story 39-5 D6).",
             "Tamma.Api.Services.AcceptanceRules.GetAcceptanceRulesTool"),
-        Tool(ToolAction.GitOperationsRead, ActionGroup.SourceControlRead, ActionRisk.ReadOnly, "Git read operations", "Read-graded git subcommands (status/diff/log/show/rev-parse/ls-files/fetch/branch).",
+        // KNOWN HOLE (recorded 2026-07-29, 43-4 review — same candid family as
+        // the file_write/shell_execute disclosures above): the read/write split
+        // grades by SUBCOMMAND ONLY, while the call's args are screened only
+        // for shell metacharacters, never for semantics. A read-graded call can
+        // therefore still mutate: {"subcommand":"log","args":"--output=FILE"}
+        // writes a file into the workspace; "branch -D x" deletes local refs
+        // ("fetch"/"branch" are deliberately graded Read by the local-refs
+        // rationale in GitSubcommand.cs:60-64). Harmless while both members
+        // ship at Min; MUST be revisited the moment tool:git_operations.write
+        // is human-gated — at that point the Read grade is a bypass of the
+        // gate, not a nuance.
+        Tool(ToolAction.GitOperationsRead, ActionGroup.SourceControlRead, ActionRisk.ReadOnly, "Git read operations", "Read-graded git subcommands (status/diff/log/show/rev-parse/ls-files/fetch/branch). Known hole: grading is subcommand-only — args can still mutate (log --output=FILE writes; branch -D deletes local refs); revisit when git_operations.write is human-gated.",
             "Tamma.Activities.LlmCall.Tools.GitOperationsTool (read-graded GitSubcommand members)"),
         Tool(ToolAction.GitOperationsWrite, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Git write operations", "Write-graded git subcommands (add/commit/push/checkout/stash/pull) — includes push.",
             "Tamma.Activities.LlmCall.Tools.GitOperationsTool (write-graded GitSubcommand members)"),

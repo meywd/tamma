@@ -212,7 +212,7 @@ public class WorkItemRepository(
         existing.ExternalRefJson = item.ExternalRefJson;
         existing.UpdatedAt = DateTime.UtcNow;
         existing.Version += 1;
-        await db.SaveChangesAsync();
+        await SaveGuardingVersionAsync(db, existing.Id);
         return existing;
     }
 
@@ -233,7 +233,7 @@ public class WorkItemRepository(
         existing.ClosedAt = status.IsTerminal() ? DateTime.UtcNow : null;
         existing.UpdatedAt = DateTime.UtcNow;
         existing.Version += 1;
-        await db.SaveChangesAsync();
+        await SaveGuardingVersionAsync(db, existing.Id);
         return existing;
     }
 
@@ -258,7 +258,7 @@ public class WorkItemRepository(
             existing.SiblingRank = siblingRank;
         existing.UpdatedAt = DateTime.UtcNow;
         existing.Version += 1;
-        await db.SaveChangesAsync();
+        await SaveGuardingVersionAsync(db, existing.Id);
         return existing;
     }
 
@@ -300,7 +300,7 @@ public class WorkItemRepository(
         }
         existing.UpdatedAt = DateTime.UtcNow;
         existing.Version += 1;
-        await db.SaveChangesAsync();
+        await SaveGuardingVersionAsync(db, existing.Id);
         return existing;
     }
 
@@ -375,6 +375,14 @@ public class WorkItemRepository(
         {
             await db.SaveChangesAsync();
         }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            // The Version token (44-1 review, 2026-07-29): an interleaved
+            // writer bumped Version after our read, so our UPDATE matched no
+            // row. Losing silently here would drop the loser's PreviousKeys
+            // recording — surface the typed, retryable conflict instead.
+            throw ConcurrencyConflict(id, ex);
+        }
         catch (DbUpdateException ex) when (IsUniqueViolation(ex))
         {
             // A concurrent writer took the key between the pre-check and the
@@ -395,6 +403,39 @@ public class WorkItemRepository(
         },
         retryable: false,
         severity: TammaErrorSeverity.High);
+
+    /// <summary>
+    /// Save guarding the <c>Version</c> optimistic-concurrency token (44-1
+    /// review, 2026-07-29): the caller has already bumped <c>Version</c>; EF
+    /// adds <c>WHERE "Version" = &lt;as-read&gt;</c>, so an interleaved writer
+    /// surfaces as a typed, RETRYABLE <c>TRACKER.CONCURRENCY_CONFLICT</c> —
+    /// never a silent last-write-wins that could lose <c>PreviousKeys</c>
+    /// history or a status/rank/parent write.
+    /// </summary>
+    private static async Task SaveGuardingVersionAsync(TenantDbContext db, Guid workItemId)
+    {
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw ConcurrencyConflict(workItemId, ex);
+        }
+    }
+
+    private static TammaError ConcurrencyConflict(Guid workItemId, DbUpdateConcurrencyException ex) => new(
+        "TRACKER.CONCURRENCY_CONFLICT",
+        $"Work item '{workItemId}' was modified by another writer while this update "
+        + "was in flight (optimistic-concurrency Version mismatch). Re-read the item "
+        + "and retry the operation against its current state.",
+        new Dictionary<string, object?>
+        {
+            ["workItemId"] = workItemId,
+            ["conflictEntries"] = ex.Entries.Count,
+        },
+        retryable: true,
+        severity: TammaErrorSeverity.Medium);
 
     public async Task<bool> DeleteAsync(Guid id)
     {
