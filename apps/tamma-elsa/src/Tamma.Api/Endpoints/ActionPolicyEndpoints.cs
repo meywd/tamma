@@ -195,9 +195,8 @@ public static class ActionPolicyEndpoints
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider)
         => WriteActionField(ns, key, "enforce", body?.Enforce,
-            (repo, tid, uid, wire, actor, ct) => repo.UpsertAsync(
-                tid, uid, "action", wire, RequiredThresholdFor(tid, uid, wire, snapshots),
-                body!.Enforce, null, null, null, actor, ct),
+            (repo, tid, uid, wire, actor, ct) => UpsertNonThresholdFieldAsync(
+                repo, tid, uid, wire, body!.Enforce, enabled: null, allowedRoles: null, actor, ct),
             validate: null,
             repository, snapshots, events, soleUser, principal, tenantContext, modeProvider);
 
@@ -211,9 +210,8 @@ public static class ActionPolicyEndpoints
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider)
         => WriteActionField(ns, key, "enabled", body?.Enabled,
-            (repo, tid, uid, wire, actor, ct) => repo.UpsertAsync(
-                tid, uid, "action", wire, RequiredThresholdFor(tid, uid, wire, snapshots),
-                null, body!.Enabled, null, null, actor, ct),
+            (repo, tid, uid, wire, actor, ct) => UpsertNonThresholdFieldAsync(
+                repo, tid, uid, wire, enforce: null, body!.Enabled, allowedRoles: null, actor, ct),
             validate: null,
             repository, snapshots, events, soleUser, principal, tenantContext, modeProvider);
 
@@ -227,9 +225,8 @@ public static class ActionPolicyEndpoints
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider)
         => WriteActionField(ns, key, "allowedRoles", (object?)body?.AllowedRoles,
-            (repo, tid, uid, wire, actor, ct) => repo.UpsertAsync(
-                tid, uid, "action", wire, RequiredThresholdFor(tid, uid, wire, snapshots),
-                null, null, body!.AllowedRoles, null, actor, ct),
+            (repo, tid, uid, wire, actor, ct) => UpsertNonThresholdFieldAsync(
+                repo, tid, uid, wire, enforce: null, enabled: null, body!.AllowedRoles, actor, ct),
             validate: null,
             repository, snapshots, events, soleUser, principal, tenantContext, modeProvider);
 
@@ -278,6 +275,8 @@ public static class ActionPolicyEndpoints
             return MissingField("minAutonomy");
         if (!AutonomyDial.IsValidThreshold(minAutonomy))
             return InvalidThreshold(minAutonomy);
+        if (InvalidGroupThreshold(g, minAutonomy) is IResult invalidForMembers)
+            return invalidForMembers;
 
         var (tid, uid, resolveError) = await ResolvePrincipalKeysAsync(
             soleUser, principal, tenantContext, modeProvider);
@@ -380,6 +379,8 @@ public static class ActionPolicyEndpoints
         if (!TryResolveGroup(group, out var g, out var error)) return error!;
         if (body?.MinAutonomy is not int minAutonomy) return MissingField("minAutonomy");
         if (!AutonomyDial.IsValidThreshold(minAutonomy)) return InvalidThreshold(minAutonomy);
+        if (InvalidGroupThreshold(g, minAutonomy) is IResult invalidForMembers)
+            return invalidForMembers;
 
         await repository.UpsertAsync(
             null, null, "group", g.ToWire(), minAutonomy, null, null, null, null,
@@ -462,29 +463,121 @@ public static class ActionPolicyEndpoints
     }
 
     /// <summary>
-    /// The mode-row CHECK requires action/group rows to carry a threshold, so
-    /// a first write of enforce/enabled/roles needs one: reuse the row's
-    /// stored threshold when present, else the CURRENT effective threshold
-    /// (which, with no rows, is the shipped default — behaviour-preserving).
-    /// On an existing row the repository leaves the stored value unchanged.
+    /// Write enforce/enabled/roles without disturbing the threshold. The
+    /// mode-row CHECK requires action rows to carry a threshold, so a FIRST
+    /// write of these fields must materialize one — but an EXISTING row's
+    /// stored threshold must never be re-derived (adversarial review F4,
+    /// 2026-07-29: the old path re-supplied MinAutonomy from the ≤60s-stale
+    /// snapshot, so an enforce write on pod B within the TTL of a threshold
+    /// tightening on pod A silently reverted the tightening). Resolution:
+    /// <list type="bullet">
+    /// <item>existing row (decided by a FRESH repository read, never the
+    /// snapshot) → pass a null threshold; <c>UpsertAsync</c>'s per-field
+    /// independence leaves the stored value untouched.</item>
+    /// <item>genuinely-new row → MATERIALIZE-AND-PIN: the threshold is pinned
+    /// at the current effective value computed from FRESH repository reads
+    /// through the evaluator's own ladder. Documented design consequence
+    /// (story amendment 2026-07-29): the pinned action row thereafter beats
+    /// group-scope rows (<c>??</c> inside the principal ladder), so a LATER
+    /// group tightening no longer reaches this member, and the pin survives
+    /// group-row deletion. 43-6's UI surfaces provenance
+    /// (<c>action-override</c>) so an admin can see the pin.</item>
+    /// </list>
     /// </summary>
-    private static int RequiredThresholdFor(
-        Guid? tenantId, Guid? userId, string actionWire,
-        IGovernancePolicySnapshotProvider snapshots)
+    private static async Task<(Tamma.Data.Entities.ActionAssignment Entity, bool WasCreated)>
+        UpsertNonThresholdFieldAsync(
+            IActionAssignmentRepository repository,
+            Guid? tenantId, Guid? userId, string actionWire,
+            bool? enforce, bool? enabled, string[]? allowedRoles,
+            Guid? actingUserId, CancellationToken ct)
     {
-        var gp = tenantId is Guid t
-            ? GovernancePrincipal.ForTenant(t)
-            : userId is Guid u ? GovernancePrincipal.ForUser(u) : GovernancePrincipal.Platform;
-        var snapshot = snapshots.GetSnapshot(gp);
-        if (snapshot.PrincipalActionRows.TryGetValue(actionWire, out var row)
-            && row.MinAutonomy is int stored)
+        var principalRows = await repository.ListForPrincipalAsync(tenantId, userId, ct);
+        int? threshold = null;
+        if (!principalRows.Any(r =>
+                r.TargetKind == "action"
+                && string.Equals(r.TargetKey, actionWire, StringComparison.Ordinal)))
         {
-            return stored;
+            var platformRows = await repository.ListPlatformAsync(ct);
+            threshold = PinnedEffectiveThreshold(actionWire, platformRows, principalRows);
         }
-        return ActionKey.TryParse(actionWire, out var k)
-            && ActionCatalog.TryGet(k, out var d) && d is not null
-            ? AutonomyGateEvaluator.ResolveEffectiveMinAutonomy(d, snapshot).EffectiveMinAutonomy
-            : AutonomyDial.Min;
+
+        return await repository.UpsertAsync(
+            tenantId, userId, "action", actionWire, threshold,
+            enforce, enabled, allowedRoles, null, actingUserId, ct);
+    }
+
+    /// <summary>The materialize-and-pin value for a genuinely-new row: the
+    /// current effective threshold from FRESH rows (not the snapshot), via the
+    /// evaluator's own ladder so the pin cannot drift from enforcement.</summary>
+    private static int PinnedEffectiveThreshold(
+        string actionWire,
+        IReadOnlyList<Tamma.Data.Entities.ActionAssignment> platformRows,
+        IReadOnlyList<Tamma.Data.Entities.ActionAssignment> principalRows)
+    {
+        if (!ActionKey.TryParse(actionWire, out var k)
+            || !ActionCatalog.TryGet(k, out var d) || d is null)
+        {
+            return AutonomyDial.Min; // unreachable: the route already resolved the descriptor
+        }
+
+        var snapshot = new GovernancePolicySnapshot(
+            RowsByKind(platformRows, "action"),
+            RowsByKind(platformRows, "group"),
+            RowsByKind(principalRows, "action"),
+            RowsByKind(principalRows, "group"));
+        return AutonomyGateEvaluator.ResolveEffectiveMinAutonomy(d, snapshot).EffectiveMinAutonomy;
+    }
+
+    private static IReadOnlyDictionary<string, ActionAssignmentValue> RowsByKind(
+        IReadOnlyList<Tamma.Data.Entities.ActionAssignment> rows, string kind)
+        => rows
+            .Where(r => string.Equals(r.TargetKind, kind, StringComparison.Ordinal))
+            .ToDictionary(
+                r => r.TargetKey,
+                r => new ActionAssignmentValue(r.MinAutonomy, r.Enforce, r.Enabled, r.AllowedRoles),
+                StringComparer.Ordinal);
+
+    /// <summary>
+    /// Adversarial review F5 (2026-07-29): a GROUP threshold write must pass
+    /// the same per-action validation the action route applies to each member
+    /// it will govern. A mid-range value on a group containing
+    /// non-escalatable (<c>automation:*</c>) members would silently behave as
+    /// Deny for them — the exact value the action route 400s. Non-enforceable
+    /// members are exempt: the evaluator never blocks on them, so a group
+    /// threshold cannot harm them (and the secrets group, which contains
+    /// <c>effect:secret.reveal</c>, must stay writable at any legal value).
+    /// Returns the 400 naming every offending member, or null when the write
+    /// is legal for the whole group.
+    /// </summary>
+    private static IResult? InvalidGroupThreshold(ActionGroup group, int minAutonomy)
+    {
+        if (minAutonomy == AutonomyDial.Min || minAutonomy == AutonomyDial.AlwaysHuman)
+        {
+            return null; // the two-state values are legal for every member
+        }
+
+        var offenders = ActionCatalog.ByGroup[group]
+            .Select(k => ActionCatalog.ByKey[k])
+            .Where(d => d.Enforceable && !d.EscalatableToHuman)
+            .Select(d => d.Key.ToWire())
+            .OrderBy(w => w, StringComparer.Ordinal)
+            .ToArray();
+        if (offenders.Length == 0)
+        {
+            return null;
+        }
+
+        return Results.BadRequest(new
+        {
+            error = $"minAutonomy {minAutonomy} is mid-range, and group '{group.ToWire()}' "
+                + "contains member(s) that are not escalatable to a human — a mid-range "
+                + "threshold would silently behave as Deny for: "
+                + string.Join(", ", offenders)
+                + $". Use {AutonomyDial.Min} (automated) or {AutonomyDial.AlwaysHuman} (off), "
+                + "or set per-action thresholds on the escalatable members.",
+            code = "ACTION_POLICY.INVALID",
+            members = offenders,
+        });
     }
 
     private static Func<ActionDescriptor, IResult?>? ValidateThresholdForAction(int? minAutonomy)

@@ -181,6 +181,45 @@ public class ProseStoreAndLineageTests
         (await ctx.Documents.IgnoreQueryFilters().CountAsync(d => d.IssueId == "issue-p5")).Should().Be(0);
     }
 
+    // ── Adversarial-review follow-up (2026-07-29) — the audience column's closed
+    //    vocabulary holds for HAND-BUILT envelopes on ANY type: the column is
+    //    type-agnostic by design (a valid tag may ride any document type), but a
+    //    junk value must never persist. Non-prose validators never look at
+    //    audience, so the write door itself enforces the vocabulary. ──────────
+
+    [Test]
+    public async Task InsertAsync_JunkAudienceOnNonProseEnvelope_IsRejected_NothingPersisted()
+    {
+        var (repo, tenant, schema) = await NewRepoAsync();
+        var envelope = DocumentTestData.DecompositionEnvelope("issue-p7")
+            with { Audience = "junk" };
+
+        var act = async () => await repo.InsertAsync(tenant, envelope, null, CancellationToken.None);
+        var err = (await act.Should().ThrowAsync<TammaError>()).Which;
+        err.Code.Should().Be("PROSE_AUDIENCE_OUT_OF_VOCABULARY",
+            "a hand-built envelope with an out-of-vocabulary audience must fail loud, never persist 'junk'");
+
+        await using var ctx = NewContext(schema);
+        (await ctx.Documents.IgnoreQueryFilters().CountAsync(d => d.IssueId == "issue-p7")).Should().Be(0,
+            "nothing is persisted on a vocabulary violation");
+    }
+
+    [Test]
+    public async Task InsertAsync_ValidAudienceOnNonProseEnvelope_Persists()
+    {
+        var (repo, tenant, schema) = await NewRepoAsync();
+        var envelope = DocumentTestData.DecompositionEnvelope("issue-p8")
+            with { Audience = "engineering" };
+
+        var row = await repo.InsertAsync(tenant, envelope, null, CancellationToken.None);
+        row.Audience.Should().Be("engineering",
+            "the audience column is type-agnostic — any type may carry a VALID vocabulary value");
+
+        await using var ctx = NewContext(schema);
+        var stored = await ctx.Documents.IgnoreQueryFilters().SingleAsync(d => d.Id == envelope.Id);
+        stored.Audience.Should().Be("engineering");
+    }
+
     [Test]
     public async Task InsertAsync_EnvelopeAudienceDisagreesWithPayload_IsRejected()
     {

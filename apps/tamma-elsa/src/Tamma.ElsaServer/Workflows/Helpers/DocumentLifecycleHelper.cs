@@ -650,10 +650,15 @@ public static class DocumentLifecycleHelper
             };
             using var doc = JsonDocument.Parse(
                 "{\"decision\":\"approve\",\"summary\":\"recovered on re-entry\",\"issues\":[]}");
+            // 41-1c follow-up (adversarial review 2026-07-29): the synthesized
+            // re-entry review is OVER the recovered draft — link it parent-first
+            // (39-11 D8) so lineage never needs the body probe for it.
             var review = DocumentEnvelope.CreateDraft(
                 DocumentTypeKey.Review, 1, state.IssueId,
                 string.IsNullOrWhiteSpace(state.CorrelationId) ? state.IssueId : state.CorrelationId,
-                reviewer, doc.RootElement, now: DateTimeOffset.UtcNow);
+                reviewer, doc.RootElement,
+                parentDocumentId: existing.Id,
+                now: DateTimeOffset.UtcNow);
             withDraft = AppendReview(withDraft, review);
         }
 

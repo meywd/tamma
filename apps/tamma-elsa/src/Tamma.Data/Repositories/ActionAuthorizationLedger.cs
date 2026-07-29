@@ -1,15 +1,26 @@
 using Microsoft.EntityFrameworkCore;
+using Tamma.Core.Actions;
 using Tamma.Data.Entities;
 
 namespace Tamma.Data.Repositories;
 
 /// <inheritdoc />
 /// <remarks>
-/// CP context directly (<see cref="IDbContextFactory{TContext}"/>) — see
+/// <para>CP context directly (<see cref="IDbContextFactory{TContext}"/>) — see
 /// <see cref="EfActionAssignmentRepository"/>'s remarks; the same residency
 /// rules apply. The default TTL matches Story 43-5 AC4 (+24h,
 /// config <c>Tamma:Governance:AuthorizationTtlHours</c> resolved by the
-/// caller in Tamma.Api — Tamma.Data carries no IConfiguration dependency).
+/// caller in Tamma.Api — Tamma.Data carries no IConfiguration dependency).</para>
+///
+/// <para><b>Every state transition is a conditional single-statement UPDATE
+/// (CAS)</b> — the <c>ScheduledTriggerRepository.TryClaimManualFireForDispatchAsync</c>
+/// posture (adversarial review F1, 2026-07-29): a load-then-SaveChanges
+/// transition is check-then-write, and two contexts that both read before
+/// either writes would double-consume a grant (or let a concurrent grant and
+/// deny both report success, last write winning). Postgres arbitrates via the
+/// UPDATE's WHERE predicate: affected-rows 1 = this caller owns the
+/// transition, 0 = it lost. Pinned by the race tests in
+/// <c>ActionAssignmentStorageTests</c>.</para>
 /// </remarks>
 public sealed class EfActionAuthorizationLedger : IActionAuthorizationLedger
 {
@@ -46,45 +57,14 @@ public sealed class EfActionAuthorizationLedger : IActionAuthorizationLedger
 
         await using var db = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
 
-        var open = await db.ActionAuthorizations
-            .FirstOrDefaultAsync(
-                a => a.TenantId == tenantId && a.UserId == userId
-                    && a.CorrelationId == correlationId
-                    && a.TargetKind == targetKind && a.TargetKey == targetKey
-                    && (a.State == "pending" || a.State == "granted"),
-                ct)
-            .ConfigureAwait(false);
-        if (open is not null)
+        // Bounded retry: each iteration either returns a LIVE open row, or
+        // closes a time-expired one and races to insert a fresh row. Losing
+        // the unique-index race re-reads the winner on the next pass.
+        for (var attempt = 0; ; attempt++)
         {
-            return open; // idempotent: one open request per (principal, run, target)
-        }
-
-        var now = DateTime.UtcNow;
-        var row = new ActionAuthorization
-        {
-            TenantId = tenantId,
-            UserId = userId,
-            CorrelationId = correlationId,
-            TargetKind = targetKind,
-            TargetKey = targetKey,
-            State = "pending",
-            RequestedAtUtc = now,
-            ExpiresAtUtc = now + (ttl ?? DefaultTtl),
-            Reason = reason,
-            AutonomyLevelAtRequest = autonomyLevelAtRequest,
-        };
-        db.ActionAuthorizations.Add(row);
-        try
-        {
-            await db.SaveChangesAsync(ct).ConfigureAwait(false);
-            return row;
-        }
-        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
-        {
-            // A concurrent request won the partial unique index — return the
-            // winner's open row.
-            db.Entry(row).State = EntityState.Detached;
-            var winner = await db.ActionAuthorizations
+            var now = DateTime.UtcNow;
+            var open = await db.ActionAuthorizations
+                .AsNoTracking()
                 .FirstOrDefaultAsync(
                     a => a.TenantId == tenantId && a.UserId == userId
                         && a.CorrelationId == correlationId
@@ -92,8 +72,59 @@ public sealed class EfActionAuthorizationLedger : IActionAuthorizationLedger
                         && (a.State == "pending" || a.State == "granted"),
                     ct)
                 .ConfigureAwait(false);
-            return winner ?? throw new InvalidOperationException(
-                "Authorization request lost a unique-index race but the winning row is gone.");
+            if (open is not null)
+            {
+                if (open.ExpiresAtUtc is not DateTime exp || exp > now)
+                {
+                    return open; // idempotent: one LIVE open request per (principal, run, target)
+                }
+
+                // Adversarial review F3 (2026-07-29): a time-expired open row
+                // would otherwise deadlock this key forever — the partial
+                // unique index (State IN pending/granted) blocks a fresh row,
+                // this method idempotently returned the stale one, and
+                // DecideAsync refuses it. Close it with a CAS (WHERE still
+                // open AND still past expiry) so the index frees the slot;
+                // whether this caller or a concurrent one wins the CAS, the
+                // insert below (re)arbitrates via the unique index.
+                await db.ActionAuthorizations
+                    .Where(a => a.Id == open.Id
+                        && (a.State == "pending" || a.State == "granted")
+                        && a.ExpiresAtUtc != null && a.ExpiresAtUtc <= now)
+                    .ExecuteUpdateAsync(s => s.SetProperty(a => a.State, "expired"), ct)
+                    .ConfigureAwait(false);
+            }
+
+            var row = new ActionAuthorization
+            {
+                TenantId = tenantId,
+                UserId = userId,
+                CorrelationId = correlationId,
+                TargetKind = targetKind,
+                TargetKey = targetKey,
+                State = "pending",
+                RequestedAtUtc = now,
+                ExpiresAtUtc = now + (ttl ?? DefaultTtl),
+                Reason = reason,
+                AutonomyLevelAtRequest = autonomyLevelAtRequest,
+            };
+            db.ActionAuthorizations.Add(row);
+            try
+            {
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+                return row;
+            }
+            catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+            {
+                // A concurrent request won the partial unique index; loop to
+                // return the winner's open row (or expire it in turn).
+                db.Entry(row).State = EntityState.Detached;
+                if (attempt >= 2)
+                {
+                    throw new InvalidOperationException(
+                        "Authorization request repeatedly lost the open-row unique-index race.");
+                }
+            }
         }
     }
 
@@ -103,12 +134,26 @@ public sealed class EfActionAuthorizationLedger : IActionAuthorizationLedger
         Guid? userId,
         string correlationId,
         string actionKeyWire,
-        string groupWire,
         CancellationToken ct = default)
     {
         if (tenantId is not null && userId is not null)
         {
             throw new ArgumentException("At most one principal key may be set.");
+        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(actionKeyWire);
+
+        // Adversarial review F2 (2026-07-29): the covering group is derived
+        // from the CATALOG, never supplied by the caller — a group grant must
+        // only cover actual members of that group, and trusting a
+        // caller-supplied group wire let a deploy-control grant be consumed
+        // for tool:shell_execute. An uncatalogued action key has no derivable
+        // group, so only an exact action-scoped grant can cover it.
+        string? groupWire = null;
+        if (ActionKey.TryParse(actionKeyWire, out var key)
+            && ActionCatalog.TryGet(key, out var descriptor) && descriptor is not null)
+        {
+            groupWire = descriptor.Group.ToWire();
         }
 
         await using var db = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
@@ -116,22 +161,42 @@ public sealed class EfActionAuthorizationLedger : IActionAuthorizationLedger
 
         // An action grant covers itself; a group grant covers every member of
         // that group. Expired or consumed grants do not cover (AC4).
-        var grant = await db.ActionAuthorizations
+        var candidateIds = await db.ActionAuthorizations
+            .AsNoTracking()
             .Where(a => a.TenantId == tenantId && a.UserId == userId
                 && a.CorrelationId == correlationId
                 && a.State == "granted"
                 && a.ConsumedAtUtc == null
                 && (a.ExpiresAtUtc == null || a.ExpiresAtUtc > now)
                 && ((a.TargetKind == "action" && a.TargetKey == actionKeyWire)
-                    || (a.TargetKind == "group" && a.TargetKey == groupWire)))
+                    || (groupWire != null && a.TargetKind == "group" && a.TargetKey == groupWire)))
             .OrderBy(a => a.TargetKind) // deterministic: an action grant wins over a group grant
-            .FirstOrDefaultAsync(ct)
+            .Select(a => a.Id)
+            .ToListAsync(ct)
             .ConfigureAwait(false);
-        if (grant is null) return null;
 
-        grant.ConsumedAtUtc = now;
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return grant;
+        foreach (var id in candidateIds)
+        {
+            // F1 CAS: only the caller whose conditional UPDATE affects the row
+            // consumes it — a concurrent consumer of the same grant loses
+            // (affected == 0) and falls through to the next candidate / null.
+            var affected = await db.ActionAuthorizations
+                .Where(a => a.Id == id
+                    && a.State == "granted"
+                    && a.ConsumedAtUtc == null
+                    && (a.ExpiresAtUtc == null || a.ExpiresAtUtc > now))
+                .ExecuteUpdateAsync(s => s.SetProperty(a => a.ConsumedAtUtc, now), ct)
+                .ConfigureAwait(false);
+            if (affected == 1)
+            {
+                return await db.ActionAuthorizations
+                    .AsNoTracking()
+                    .FirstAsync(a => a.Id == id, ct)
+                    .ConfigureAwait(false);
+            }
+        }
+
+        return null;
     }
 
     /// <inheritdoc />
@@ -140,23 +205,30 @@ public sealed class EfActionAuthorizationLedger : IActionAuthorizationLedger
         CancellationToken ct = default)
     {
         await using var db = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
-        var row = await db.ActionAuthorizations
-            .FirstOrDefaultAsync(a => a.Id == id, ct)
-            .ConfigureAwait(false);
         var now = DateTime.UtcNow;
-        if (row is null
-            || row.State != "pending"
-            || (row.ExpiresAtUtc is DateTime exp && exp <= now))
-        {
-            return null; // missing, already decided, or expired → the caller 409s
-        }
+        var state = granted ? "granted" : "denied";
 
-        row.State = granted ? "granted" : "denied";
-        row.DecidedAtUtc = now;
-        row.DecidedByUserId = decidedByUserId;
-        if (reason is not null) row.Reason = reason;
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        return row;
+        // F1 CAS: WHERE State = 'pending' (and not past expiry — F3: a
+        // time-expired pending row can never be decided) makes concurrent
+        // grant-vs-deny mutually exclusive: exactly one caller's UPDATE
+        // affects the row; the other returns null and the caller 409s.
+        var affected = await db.ActionAuthorizations
+            .Where(a => a.Id == id
+                && a.State == "pending"
+                && (a.ExpiresAtUtc == null || a.ExpiresAtUtc > now))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(a => a.State, state)
+                .SetProperty(a => a.DecidedAtUtc, now)
+                .SetProperty(a => a.DecidedByUserId, decidedByUserId)
+                .SetProperty(a => a.Reason, a => reason ?? a.Reason), ct)
+            .ConfigureAwait(false);
+
+        return affected == 1
+            ? await db.ActionAuthorizations
+                .AsNoTracking()
+                .FirstAsync(a => a.Id == id, ct)
+                .ConfigureAwait(false)
+            : null; // missing, already decided, or expired → the caller 409s
     }
 
     private static bool IsUniqueViolation(DbUpdateException ex) =>

@@ -37,6 +37,33 @@ public static class ReviewProducerHelper
     }
 
     /// <summary>
+    /// Story 41-1c follow-up (adversarial review 2026-07-29) — the parent-linkage
+    /// rule for a producer-minted Review envelope: a <c>document</c> subject's id is
+    /// the Review's <c>ParentDocumentId</c> (the 39-11 D8 parent-first linkage, so
+    /// lineage never has to fall back to the body probe); a <c>diff</c> subject has
+    /// no parent document (code is not a document type) — null.
+    /// </summary>
+    public static Guid? ParentDocumentIdFor(ReviewSubject subject) =>
+        string.Equals(subject.Kind, ReviewerSelectionHelper.DocumentSubjectKind, StringComparison.Ordinal)
+            ? subject.DocumentId
+            : null;
+
+    /// <summary>
+    /// The ONE envelope-mint site for the 39-7 review producers (single-reviewer and
+    /// panel aggregate). Mints a Validated <c>Review</c> envelope whose
+    /// <c>ParentDocumentId</c> comes from <paramref name="subject"/> via
+    /// <see cref="ParentDocumentIdFor"/>.
+    /// </summary>
+    public static DocumentEnvelope MintReviewEnvelope(
+        ReviewSubject subject, DocumentProducer producer,
+        string issueId, string correlationId, JsonElement payload, DateTimeOffset now)
+        => DocumentEnvelope.CreateDraft(
+                DocumentTypeKey.Review, 1, issueId, correlationId, producer, payload,
+                parentDocumentId: ParentDocumentIdFor(subject),
+                now: now)
+            .WithState(DocumentState.Validated, now);
+
+    /// <summary>
     /// Map an <c>llm-call</c> reviewer reply onto a validated unified
     /// <see cref="Review"/> (D4). Order: (1) canonical <see cref="Review"/> JSON;
     /// (2) the legacy cell shape — top-level <c>issues[]</c> folded with the

@@ -327,6 +327,140 @@ public class ActionPolicyEndpointsTests
             .GetProperty("code").GetString().Should().Be("ACTION_POLICY.NOT_ENFORCEABLE");
     }
 
+    // ── Adversarial review F4 — field writes never revert the threshold ────
+
+    [Test]
+    public async Task EnforceOnlyWrite_OnAnExistingRow_PreservesItsStoredThreshold_EvenWhenTheSnapshotIsStale()
+    {
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+        const string route = "/api/actions/policy/actions/tool/file_write";
+
+        // Seed a row through the endpoint (the local snapshot now holds 90)…
+        (await admin.PutAsJsonAsync($"{route}/threshold", new { minAutonomy = 90 }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // …then tighten it BEHIND the snapshot's back (the cross-pod shape:
+        // pod A tightened; pod B's ≤60s-stale snapshot still says 90).
+        await using (var db = Db())
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                """UPDATE action_assignments SET "MinAutonomy" = 101 WHERE "TargetKey" = 'tool:file_write';""");
+        }
+
+        // An enforce-only write on the stale pod must NOT re-materialize the
+        // stale 90 over the stored 101 (review F4: silent revert of a
+        // tightening). The fix reads the row FRESH from the repository and
+        // passes a null threshold, preserving the stored value.
+        (await admin.PutAsJsonAsync($"{route}/enforce", new { enforce = true }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        await using (var db = Db())
+        {
+            var row = db.ActionAssignments.Single(a => a.TargetKey == "tool:file_write");
+            row.MinAutonomy.Should().Be(101,
+                "an enforce-only write must never overwrite a stored threshold "
+                + "with a snapshot-derived value");
+            row.Enforce.Should().BeTrue();
+        }
+    }
+
+    [Test]
+    public async Task EnforceFirstWrite_MaterializesAndPinsTheCurrentEffective_SoALaterGroupTighteningDoesNotReachThisAction()
+    {
+        // Documented materialize-and-pin semantics (43-5 story amendment,
+        // 2026-07-29): a first enforce/enabled/roles write on an action with
+        // no row MATERIALIZES one, pinning the threshold at the CURRENT
+        // effective value. That pinned action row thereafter beats group rows
+        // (?? inside the principal ladder) — a later group tightening no
+        // longer reaches this member. This is the accepted design
+        // consequence, not a bug; provenance ('action-override') makes the
+        // pin visible in the 43-6 UI.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        (await admin.PutAsJsonAsync(
+                "/api/actions/policy/actions/tool/file_write/enforce", new { enforce = true }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        await using (var db = Db())
+        {
+            db.ActionAssignments.Single(a => a.TargetKey == "tool:file_write")
+                .MinAutonomy.Should().Be(AutonomyDial.Min,
+                    "with no rows the current effective is the shipped default — "
+                    + "the pin is behaviour-preserving at write time");
+        }
+
+        // The later group tightening…
+        (await admin.PutAsJsonAsync(
+                "/api/actions/policy/groups/code-write/threshold",
+                new { minAutonomy = AutonomyDial.AlwaysHuman }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // …does NOT reach the pinned member: the action row wins outright.
+        var policy = await admin.GetFromJsonAsync<JsonElement>("/api/actions/policy");
+        var fileWrite = policy.GetProperty("actions").EnumerateArray()
+            .Single(a => a.GetProperty("key").GetString() == "tool:file_write");
+        fileWrite.GetProperty("minAutonomy").GetInt32().Should().Be(AutonomyDial.Min);
+        fileWrite.GetProperty("source").GetString().Should().Be("action-override",
+            "provenance surfaces the pin so an admin can see why the group row lost");
+    }
+
+    // ── Adversarial review F5 — group writes validate every member ─────────
+
+    [Test]
+    public async Task GroupWrite_MidRangeOnAGroupWithNonEscalatableMembers_Is400NamingThem()
+    {
+        var user = Guid.NewGuid();
+
+        // The offenders, computed from the catalog (the secrets group carries
+        // two automation:* members; its non-enforceable effect:secret.reveal
+        // member is exempt — the evaluator never blocks on it).
+        var expected = Tamma.Core.Actions.ActionCatalog
+            .ByGroup[Tamma.Core.Actions.ActionGroup.Secrets]
+            .Select(k => Tamma.Core.Actions.ActionCatalog.ByKey[k])
+            .Where(d => d.Enforceable && !d.EscalatableToHuman)
+            .Select(d => d.Key.ToWire())
+            .OrderBy(w => w, StringComparer.Ordinal)
+            .ToArray();
+        expected.Should().NotBeEmpty("the probe needs a group with automation members");
+
+        using (var admin = Client(user, "admin"))
+        {
+            var response = await admin.PutAsJsonAsync(
+                "/api/actions/policy/groups/secrets/threshold", new { minAutonomy = 85 });
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+                "the action route 400s a mid-range threshold on these members — the group "
+                + "route must not smuggle the same value in as a silent Deny");
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            body.GetProperty("code").GetString().Should().Be("ACTION_POLICY.INVALID");
+            body.GetProperty("members").EnumerateArray().Select(m => m.GetString())
+                .Should().BeEquivalentTo(expected, "the 400 names every offending member");
+
+            // The two-state values stay legal for the same group…
+            (await admin.PutAsJsonAsync(
+                    "/api/actions/policy/groups/secrets/threshold",
+                    new { minAutonomy = AutonomyDial.AlwaysHuman }))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+
+            // …and a clean group (no automation members) accepts mid-range.
+            (await admin.PutAsJsonAsync(
+                    "/api/actions/policy/groups/deploy-control/threshold",
+                    new { minAutonomy = 85 }))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        // The ceiling route applies the SAME member validation.
+        using (var platformAdmin = Client(user, "member", platformRole: "platform_admin"))
+        {
+            var ceiling = await platformAdmin.PutAsJsonAsync(
+                "/api/admin/actions/ceiling/groups/secrets/threshold", new { minAutonomy = 85 });
+            ceiling.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            (await ceiling.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("code").GetString().Should().Be("ACTION_POLICY.INVALID");
+        }
+    }
+
     // ── The resolved view reflects writes, ceilings and provenance ──────────
 
     [Test]

@@ -305,20 +305,21 @@ public class ActionAssignmentStorageTests
         await ledger.DecideAsync(request.Id, granted: true, decider, null);
 
         var consumed = await ledger.TryConsumeAsync(
-            tid, null, "wf-1", "effect:deploy.promote-prod", "deploy-control");
+            tid, null, "wf-1", "effect:deploy.promote-prod");
         consumed.Should().NotBeNull();
         consumed!.ConsumedAtUtc.Should().NotBeNull();
 
         (await ledger.TryConsumeAsync(
-                tid, null, "wf-1", "effect:deploy.promote-prod", "deploy-control"))
+                tid, null, "wf-1", "effect:deploy.promote-prod"))
             .Should().BeNull("a consumed grant does not cover a second call");
 
-        // Group-scoped grant covers every member of the group.
+        // Group-scoped grant covers every member of the group (membership
+        // resolved from ActionCatalog inside the ledger — F2).
         var groupRequest = await ledger.RequestAsync(
             tid, null, "wf-2", "group", "deploy-control", null, 70);
         await ledger.DecideAsync(groupRequest.Id, granted: true, decider, null);
         (await ledger.TryConsumeAsync(
-                tid, null, "wf-2", "effect:deploy.rollback", "deploy-control"))
+                tid, null, "wf-2", "effect:deploy.rollback"))
             .Should().NotBeNull("a group grant covers every member of that group");
 
         // An expired grant does not cover.
@@ -328,14 +329,172 @@ public class ActionAssignmentStorageTests
         await ledger.DecideAsync(expired.Id, granted: true, decider, null);
         // (DecideAsync refuses expired pending rows → returns null; verify.)
         var decidedExpired = await ledger.TryConsumeAsync(
-            tid, null, "wf-3", "effect:deploy.promote-prod", "deploy-control");
+            tid, null, "wf-3", "effect:deploy.promote-prod");
         decidedExpired.Should().BeNull("an expired grant never covers");
 
         // A pending (undecided) grant does not cover.
         await ledger.RequestAsync(tid, null, "wf-4", "action", "effect:deploy.promote-prod", null, 70);
         (await ledger.TryConsumeAsync(
-                tid, null, "wf-4", "effect:deploy.promote-prod", "deploy-control"))
+                tid, null, "wf-4", "effect:deploy.promote-prod"))
             .Should().BeNull("only a granted row covers");
+    }
+
+    // ── Adversarial review F2 — a group grant only covers its own members ──
+
+    [Test]
+    public async Task GroupGrant_CannotBeConsumedForAnActionOutsideTheGroup()
+    {
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var tid = Guid.NewGuid();
+
+        // A deploy-control group grant…
+        var request = await ledger.RequestAsync(
+            tid, null, "wf-f2", "group", "deploy-control", null, 70);
+        await ledger.DecideAsync(request.Id, granted: true, Guid.NewGuid(), null);
+
+        // …must NOT cover tool:shell_execute (command-execution group), no
+        // matter what group the caller claims: membership is resolved from
+        // ActionCatalog inside the ledger, never from caller input.
+        (await ledger.TryConsumeAsync(tid, null, "wf-f2", "tool:shell_execute"))
+            .Should().BeNull(
+                "a group grant covers only catalog members of that group (review F2)");
+
+        // The grant is still live and still covers a genuine member.
+        (await ledger.TryConsumeAsync(tid, null, "wf-f2", "effect:deploy.promote-prod"))
+            .Should().NotBeNull("the failed non-member consume must not burn the grant");
+    }
+
+    // ── Adversarial review F1 — CAS: exactly one winner under concurrency ──
+
+    [Test]
+    public async Task ConcurrentConsume_OfOneGrant_HasExactlyOneWinner()
+    {
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var tid = Guid.NewGuid();
+
+        var request = await ledger.RequestAsync(
+            tid, null, "wf-race", "action", "effect:deploy.promote-prod", null, 70);
+        await ledger.DecideAsync(request.Id, granted: true, Guid.NewGuid(), null);
+
+        // The reviewer's probe shape: multiple contexts race the same grant.
+        // Each TryConsumeAsync call creates its OWN DbContext (factory-made),
+        // so every contender reads the candidate before any single row-level
+        // CAS has stamped it; the conditional UPDATE (WHERE granted AND
+        // unconsumed) is what must arbitrate — never last-write-wins.
+        var barrier = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var contenders = Enumerable.Range(0, 8)
+            .Select(async _ =>
+            {
+                await barrier.Task;
+                return await ledger.TryConsumeAsync(
+                    tid, null, "wf-race", "effect:deploy.promote-prod");
+            })
+            .ToArray();
+        barrier.SetResult();
+        var results = await Task.WhenAll(contenders);
+
+        results.Count(r => r is not null).Should().Be(1,
+            "one human decision covers ONE run — a double-consume is the F1 bug");
+
+        await using var db = _factory.CreateDbContext();
+        db.ActionAuthorizations.Single(a => a.Id == request.Id)
+            .ConsumedAtUtc.Should().NotBeNull();
+    }
+
+    [Test]
+    public async Task ConcurrentGrantAndDeny_ExactlyOneWins_AndTheRowMatchesTheWinner()
+    {
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var tid = Guid.NewGuid();
+
+        var request = await ledger.RequestAsync(
+            tid, null, "wf-race-2", "action", "effect:deploy.promote-prod", null, 70);
+
+        var granter = Guid.NewGuid();
+        var denier = Guid.NewGuid();
+        var barrier = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var grantTask = Task.Run(async () =>
+        {
+            await barrier.Task;
+            return await ledger.DecideAsync(request.Id, granted: true, granter, "yes");
+        });
+        var denyTask = Task.Run(async () =>
+        {
+            await barrier.Task;
+            return await ledger.DecideAsync(request.Id, granted: false, denier, "no");
+        });
+        barrier.SetResult();
+        var outcomes = await Task.WhenAll(grantTask, denyTask);
+
+        outcomes.Count(o => o is not null).Should().Be(1,
+            "DecideAsync must CAS on state='pending' — concurrent grant and deny "
+            + "both returning non-null (last write wins) is the F1 bug");
+
+        var winnerGranted = outcomes.Single(o => o is not null)!.State == "granted";
+        await using var db = _factory.CreateDbContext();
+        var row = db.ActionAuthorizations.Single(a => a.Id == request.Id);
+        row.State.Should().Be(winnerGranted ? "granted" : "denied",
+            "the persisted state must match the single winner's verdict");
+        row.DecidedByUserId.Should().Be(winnerGranted ? granter : denier);
+    }
+
+    // ── Adversarial review F3 — time-expired rows never deadlock the key ───
+
+    [Test]
+    public async Task ExpiredPendingRow_DoesNotDeadlockTheKey_AFreshRequestSucceeds()
+    {
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var tid = Guid.NewGuid();
+
+        var stale = await ledger.RequestAsync(
+            tid, null, "wf-f3", "action", "effect:deploy.promote-prod", null, 70,
+            ttl: TimeSpan.FromMilliseconds(-1));
+        stale.State.Should().Be("pending");
+
+        // Before the fix: the open-row check idempotently returned the stale
+        // row (which DecideAsync refuses), and the partial unique index
+        // blocked a fresh insert — the key was dead forever.
+        var fresh = await ledger.RequestAsync(
+            tid, null, "wf-f3", "action", "effect:deploy.promote-prod", "retry", 70);
+
+        fresh.Id.Should().NotBe(stale.Id, "a time-expired open row is closed, not returned");
+        fresh.State.Should().Be("pending");
+        fresh.ExpiresAtUtc.Should().BeAfter(DateTime.UtcNow, "the fresh row carries a live TTL");
+
+        await using var db = _factory.CreateDbContext();
+        db.ActionAuthorizations.Single(a => a.Id == stale.Id).State.Should().Be("expired",
+            "the stale row is transitioned out of the partial unique index");
+
+        // And the fresh row is decidable — the whole point of unblocking.
+        (await ledger.DecideAsync(fresh.Id, granted: true, Guid.NewGuid(), null))
+            .Should().NotBeNull();
+    }
+
+    [Test]
+    public async Task TimeExpiredGrant_IsNotConsumable()
+    {
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var tid = Guid.NewGuid();
+
+        // Grant while live, then push the expiry into the past — the shape a
+        // grant reaches 24h after the decision.
+        var request = await ledger.RequestAsync(
+            tid, null, "wf-f3b", "action", "effect:deploy.promote-prod", null, 70);
+        (await ledger.DecideAsync(request.Id, granted: true, Guid.NewGuid(), null))
+            .Should().NotBeNull();
+        await ExecAsync(
+            """
+            UPDATE action_authorizations
+            SET "ExpiresAtUtc" = now() - interval '1 minute'
+            WHERE "Id" = @id;
+            """, ("id", request.Id));
+
+        (await ledger.TryConsumeAsync(tid, null, "wf-f3b", "effect:deploy.promote-prod"))
+            .Should().BeNull("the consume predicate excludes expired-by-time grants");
+
+        await using var db = _factory.CreateDbContext();
+        db.ActionAuthorizations.Single(a => a.Id == request.Id)
+            .ConsumedAtUtc.Should().BeNull("a refused consume must not stamp the row");
     }
 
     [Test]

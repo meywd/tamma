@@ -153,6 +153,13 @@ public class TemplateExampleConformanceTests
             [("scrum_master", "plan-sprint")] = "sprint-plan",
             // UxSpec.cs "Producing cell (41-1b D4)" — 41-27 binds it.
             [("ux_designer", "author-ui-spec")] = "ux-spec",
+            // Prompts/project_manager/report-status.md instructs prose (kind status-update) — 41-5 binds it.
+            [("project_manager", "report-status")] = "prose",
+            // Prompts/scrum_master/write-retro-narrative.md instructs prose (kind retro-narrative) — 41-8 binds it.
+            [("scrum_master", "write-retro-narrative")] = "prose",
+            // Prompts/project_manager/coordinate-release.md instructs prose (kind status-update reused —
+            // a conscious vocabulary decision, no dedicated kind; no Epic 41 story binds the cell yet).
+            [("project_manager", "coordinate-release")] = "prose",
         };
 
     // ====================================================================

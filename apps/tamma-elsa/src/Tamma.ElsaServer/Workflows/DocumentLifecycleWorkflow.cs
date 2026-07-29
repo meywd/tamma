@@ -1197,7 +1197,10 @@ public class DocumentLifecycleWorkflow : WorkflowBase
         return (DocumentLifecycleHelper.AppendDraft(state, envelope), true, payloadJson);
     }
 
-    private static DocumentEnvelope BuildReviewEnvelope(
+    // Internal (InternalsVisibleTo Tamma.Activities.Tests) so the ParentDocumentId
+    // linkage is asserted by an EXECUTING unit test — the full-runtime execution
+    // fixture does not currently run anywhere (see ProseLifecycleExecutionTests).
+    internal static DocumentEnvelope BuildReviewEnvelope(
         DocumentLifecycleHelper.LifecycleState state, string reviewJson, string reviewDefId)
     {
         JsonElement payload;

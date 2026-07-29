@@ -258,10 +258,12 @@ public class PanelReviewWorkflow : WorkflowBase
                 var producer = DocumentProducer.Create(
                     aggregateProducerRole.Get(ctx), aggregateProducerAction.Get(ctx), ReviewPanelDefinitionId);
 
-                var envelope = DocumentEnvelope.CreateDraft(
-                        DocumentTypeKey.Review, 1, issueId.Get(ctx), correlationId.Get(ctx), producer, payload,
-                        now: DateTimeOffset.UtcNow)
-                    .WithState(DocumentState.Validated, DateTimeOffset.UtcNow);
+                // 41-1c follow-up (adversarial review 2026-07-29): the subject's
+                // document id becomes the aggregate Review's ParentDocumentId
+                // (39-11 D8 parent-first linkage); a diff subject yields null.
+                var envelope = ReviewProducerHelper.MintReviewEnvelope(
+                    ParseSubject(subjectJson.Get(ctx)), producer,
+                    issueId.Get(ctx), correlationId.Get(ctx), payload, DateTimeOffset.UtcNow);
 
                 aggregateDocumentId.Set(ctx, envelope.Id.ToString());
                 return DocumentJson.Serialize(envelope);

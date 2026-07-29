@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Tamma.Core;
 using Tamma.Core.Documents;
+using Tamma.Core.Documents.Types;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 
@@ -72,6 +73,31 @@ public class DocumentInstanceRepository(
                 retryable: false,
                 severity: TammaErrorSeverity.High);
 
+        // 41-1c follow-up (adversarial review 2026-07-29) — the audience COLUMN is
+        // type-agnostic by design (any document type may carry a valid tag; the
+        // lineage filter works across types), but its vocabulary is closed: the
+        // effective value (envelope-authoritative, payload fallback — exactly what
+        // the row below persists) must be a ProseAudience wire string. Prose bodies
+        // are already vocabulary-checked by ProseDocumentType.Validate above; this
+        // gate closes the hand-built-envelope hole where a non-prose envelope (whose
+        // validator never looks at audience) would persist audience='junk'.
+        var effectiveAudience = envelope.Audience ?? payloadAudience;
+        if (effectiveAudience is not null
+            && !ProseAudienceExtensions.TryParse(effectiveAudience, out _))
+            throw new TammaError(
+                ProseDocumentType.AudienceOutOfVocabulary,
+                $"Envelope audience '{effectiveAudience}' is not in the closed ProseAudience vocabulary " +
+                $"({string.Join(", ", Enum.GetValues<ProseAudience>().Select(a => a.ToWire()))}) — " +
+                "the store never persists an out-of-vocabulary audience column.",
+                new Dictionary<string, object?>
+                {
+                    ["documentId"] = envelope.Id,
+                    ["type"] = envelope.Type,
+                    ["audience"] = effectiveAudience,
+                },
+                retryable: false,
+                severity: TammaErrorSeverity.High);
+
         var dbTenant = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(dbTenant, ct);
 
@@ -115,7 +141,7 @@ public class DocumentInstanceRepository(
             ParentDocumentId = envelope.ParentDocumentId,
             CorrelatingEventId = correlatingEventId,
             TenantId = tenantId,
-            Audience = envelope.Audience ?? payloadAudience,
+            Audience = effectiveAudience,
             BodyJson = envelope.Payload.GetRawText(),
             CreatedAt = DateTime.SpecifyKind(envelope.CreatedAt.UtcDateTime, DateTimeKind.Utc),
             UpdatedAt = now,
