@@ -1,6 +1,6 @@
 # Story 41-1c: Prose Documents & Audience Tags — the mechanism eight stories assume
 
-Status: drafted
+Status: done — conformance-reviewed 2026-07-29; the prose type, the audience field and the reviewer row all execute (the Dependencies note about 41-1a's missing TechWriter arm is resolved — 41-1a landed in `665f9a2`); F5/F6 remain advisory notes, not defects
 
 *Split from 41-1 — see [the enabler-set umbrella](./41-1-team-role-and-document-type-extensions.md).*
 
@@ -94,9 +94,14 @@ this mechanism as if it had shipped. It has not, and before this split no story 
 - **Blocking:** Epic 39 (39-2 registry + envelope, 39-8/39-12 lifecycle, 39-7 review producers, 39-11
   store + lineage API).
 - **Related:** **41-1a** — prose reviewed by `(tech_writer, review-docs)` also needs 41-1a's TechWriter
-  arm on `RolePhaseMap.GetReviewActionForRole` (`RolePhaseMap.cs:376-387`), which throws today (41-1a AC3). D2's default reviewer row
-  therefore cannot be exercised end-to-end until 41-1a lands; a non-TechWriter reviewer proves this story
-  in the meantime.
+  arm on `RolePhaseMap.GetReviewActionForRole`. *(Resolved 2026-07-29: 41-1a landed in `665f9a2`, before
+  this story's slice. The arm exists — `RolePhaseMap.GetReviewActionForRole` maps
+  `AgentRole.TechWriter => AgentAction.ReviewDocs` — so it no longer throws, and D2's default reviewer row
+  IS exercised end-to-end: `ProseLifecycleHelperTests.ResolveRules_ForProse_ResolvesTheTechWriterRow` and
+  `TechWriterReviewerLens_IsExecutableForProse` are executing tests over the `tech_writer` row. The
+  previous text — "throws today (41-1a AC3)", "cannot be exercised end-to-end until 41-1a lands", and the
+  non-TechWriter-reviewer workaround — is stale; the cited line range `RolePhaseMap.cs:376-387` had also
+  drifted and the line numbers are dropped rather than re-pinned.)*
 - **Unblocks:** 41-4, 41-5, 41-9, 41-22, 41-24, 41-25, 41-26 (prose type + audience); 41-8 (audience tag
   on its retro narrative — its `Findings` half needs only 41-1a).
 

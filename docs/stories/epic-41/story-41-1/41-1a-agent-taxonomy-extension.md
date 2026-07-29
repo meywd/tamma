@@ -104,7 +104,15 @@ summarize-stakeholder)` cell is unusable, see 41-5), 41-6, 41-7, 41-8, 41-10, 41
    (`DocumentLifecycleWorkflow.cs:1199`) and it throws for `TechWriter`, which
    `ReviewerSelectionHelper.ResolveDocumentAction` (`:153-168`) rethrows as an invalid-reviewer error.
    After this story `GetReviewActionForRole(TechWriter)` returns `ReviewDocs` and
-   `ReviewerSelectionHelper.DocumentPanelRoster` has 8 entries.
+   `ReviewerSelectionHelper.DocumentPanelRoster` has **9** entries.
+   > **Corrected (2026-07-29):** the "8" assumed D1 alone. D2's `ux_designer => review-design` arm also
+   > landed, so the selector roster is 9 and `AllDispatchablePairs` is 18 — the arithmetic
+   > implementation-plan-41-1a D2 pinned. The end-to-end half of this AC is proven at the selector,
+   > helper and envelope level (`RolePhaseMapTests.GetReviewActionForRole_Maps_Each_Panel_Role`,
+   > `ReviewerSelectionHelperTests.Resolve_TechWriterOnDocument_ReturnsReviewDocs`,
+   > `BuildReviewEnvelopeTests`), NOT by a full `document-lifecycle` run: both full-runtime fixtures
+   > (`DocumentLifecycleExecutionTests`, `ProseLifecycleExecutionTests`) are `[Explicit]` and documented
+   > as not running anywhere today.
 4. **Every new role's panel membership is asserted in both directions.** For each of `scrum_master`,
    `project_manager`, `ux_designer`: either `GetReviewActionForRole`/`GetTriageActionForRole` returns the
    documented action and a lifecycle run with that reviewer completes, **or** a test asserts the call
@@ -115,7 +123,14 @@ summarize-stakeholder)` cell is unusable, see 41-5), 41-6, 41-7, 41-8, 41-10, 41
    a provider chain (`ProviderChainResolver.cs:264`, `AgentResolverService.cs:702`) after the entry is
    gone; a test asserts which role it now resolves to (D3) and that the resolved chain/prompt set is the
    one D3 chose.
-6. **No behaviour change for the 8 current roles, except the deliberate alias removal.**
+6. **No behaviour change for the 8 current roles, except the deliberate alias removal and the D1
+   `tech_writer` selector arm.**
+   > **Corrected (2026-07-29) — the carve-out was incomplete.** Two further deliberate changes to the
+   > incumbent 8 landed with this story: (a) `GetReviewActionForRole(TechWriter)` moved from *throw* to
+   > `ReviewDocs` (AC3/D1 — `RolePhaseMapTests.GetReviewActionForRole_TechWriter_Throws` was inverted,
+   > not extended), and (b) four incumbent roles gained eligible actions (`architect`
+   > +`triage-tech-debt`/`design-system`, `senior_developer` +`triage-pr`, `tester`
+   > +`manage-regression`, `devops` +`incident-rootcause`). Everything else about the 8 is unchanged.
    > **Corrected — the old AC5 ("No existing role/action/document behaviour changes (byte-stable for the
    > 8 current roles)") contradicted Scope item 1.** Removing the `scrum_master` alias *is* a behaviour
    > change: the alias resolves today to `product_owner`, which **is** one of the 8, so any tenant config
@@ -132,7 +147,11 @@ summarize-stakeholder)` cell is unusable, see 41-5), 41-6, 41-7, 41-8, 41-10, 41
    **derived** (`ExpectedCellCount`, `RolePhaseMap.ValidRoles.Count`) and must NOT be hand-edited.
 8. `PromptFileLoader` starts fail-loud over the enlarged grid: every new taxonomy cell has a file and no
    file sits outside the taxonomy — a deliberately deleted cell file fails startup with
-   `PROMPT.SEED.UNKNOWN_CELL`.
+   `PROMPT.SEED.NO_BODY_FAMILY`, and a file outside the taxonomy with `PROMPT.SEED.UNKNOWN_CELL`.
+   > **Corrected (2026-07-29):** the original text attached `UNKNOWN_CELL` to the deleted-file
+   > direction (implementation-plan-41-1a C1). `PromptFileLoader` throws `PROMPT.SEED.NO_BODY_FAMILY`
+   > for a taxonomy cell with no file and `PROMPT.SEED.UNKNOWN_CELL` for a file outside the taxonomy;
+   > `PromptFileLoaderTests` asserts both, plus `MISSING_SYSTEM_PROMPT` and `MALFORMED_FILE`.
 9. `ContractBindingTests` classifies every newly-dispatchable reviewer pair (D1/D2 additions to
    `ReviewerSelectionHelper.AllDispatchablePairs`) as `Bindings`, `IntentionallyUnbound` or residual —
    an unclassified pair fails the build, which is the gate working as designed.
@@ -157,7 +176,17 @@ templates instructed JSON shapes that fail their own intended validators
 this story's D5 cross-lane promise. Both templates were rewritten to the exact wire shapes
 (version 1 → 2), and `TemplateExampleConformanceTests` gained an unbound-cell gate
 (`ConformingUnboundCells` + `EveryConformingUnboundCell_ShippedExampleValidatesAgainstItsIntendedType`)
-so an unbound cell whose intended type is registered can no longer drift silently.
+so an **enumerated** unbound cell whose intended type is registered can no longer drift silently.
+
+**Scope of that gate (stated precisely):** `ConformingUnboundCells` is an explicit allowlist with no
+completeness assertion — it lists five cells today (`plan-sprint`, `author-ui-spec`, `report-status`,
+`write-retro-narrative`, `coordinate-release`). The other eleven cells this story mints instruct
+examples in already-registered shapes (`findings` for `synthesize-standup`/`facilitate-retro`/
+`track-impediments`; `review` for `review-design`/`audit-accessibility`; `triage-decision` for
+`triage-tech-debt`/`triage-pr`/`manage-regression`; `design` for `design-system`; `diagnosis` for
+`incident-rootcause`; a bespoke flow shape for `draft-user-flow`) and are in **no** net — neither
+`Bindings`, nor `KnownNonConformingTemplates`, nor `ConformingUnboundCells`. Closing that requires
+either entries for them or a completeness rule; tracked as an open follow-up, not a resolved one.
 
 **Open follow-up — finding 6 (case-variant alias removal nit):** `LegacyRoleAliases` is an
 `OrdinalIgnoreCase` table while `RolePhaseMap.ValidRoles` is an Ordinal (case-sensitive) set derived

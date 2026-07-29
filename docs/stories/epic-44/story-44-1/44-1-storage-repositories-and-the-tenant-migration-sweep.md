@@ -1,6 +1,6 @@
 # Story 44-1: Storage, Repositories, and the Migrate-All-Provisioned-Tenants Sweep
 
-Status: drafted
+Status: done — conformance-reviewed 2026-07-29; entities, the `AddTrackerCore` tenant migration, the repositories and the `POST /api/admin/tenants/migrate` sweep all ship (the Architectural Context section is pre-implementation prose, now marked as such); sweep-endpoint hygiene and the endpoint's missing HTTP authorization test remain open follow-ups
 
 ## MANDATORY: Before You Code
 
@@ -25,13 +25,17 @@ So that a customer's backlog is isolated by the same mechanism as their document
 
 P0 — Wave 0. Nothing in Epic 44 reads or writes without this. **The sweep half is a platform fix, not tracker scope**, and it is here because Epic 44 is the first feature that cannot ship without it.
 
-## Architectural Context (READ FIRST)
+## Architectural Context (state at drafting, pre-44-1) (READ FIRST)
 
-- **The migration-reach gap is real and has no operational escape hatch today.** `ITenantDbMigrator.MigrateTenantAppAsync` (`apps/tamma-elsa/src/Tamma.Data/Abstractions/ITenantDbMigrator.cs:33`, impl `Tamma.Data/Pooling/EfTenantDbMigrator.cs:25`) has **exactly two production call sites**, both creation-only:
+*Everything in this section is written in the present tense of 2026-07-25, before this story landed. It
+describes the gap the story closes — it is not a description of the current tree. The sweep, the admin
+endpoint and the data-source migrator flavour all exist as of 2026-07-29.*
+
+- **The migration-reach gap is real and has no operational escape hatch today.** `ITenantDbMigrator.MigrateTenantAppAsync` (`apps/tamma-elsa/src/Tamma.Data/Abstractions/ITenantDbMigrator.cs:33`, impl `Tamma.Data/Pooling/EfTenantDbMigrator.cs:26`) has **exactly two production call sites**, both creation-only:
   - `Tamma.Api/Services/Provisioning/TenantProvisioningService.cs:172`, inside `ProvisionAsync` (`:147`), reached only from `Tamma.Api/Middleware/EnsurePersonalTenantMiddleware.cs:176-177`. It runs **only when `password is not null`** (a freshly minted role); an idempotent re-run explicitly skips it (`:167-176`).
   - `Tamma.Activities/TenantLifecycle/MigrateTenantDatabaseActivity.cs:53`, step 4 of `CreateTenantWorkflow` (`Tamma.ElsaServer/Workflows/CreateTenantWorkflow.cs:158-160`).
   There is no admin endpoint (`Tamma.Api/Endpoints/Admin/` contains no `migrate` handler), no hosted service and no queued-task handler that fans DDL over tenants. `Program.cs:3278` migrates the **control plane** only.
-- **`EfTenantDbMigrator` is already idempotent and safe to call repeatedly.** It derives the schema from the connection string's `Search Path` (`:47`), forces `Pooling=false` on the migration connection (`:56-62`), pins the per-tenant history table `__TenantMigrationsHistory` (`:64-67`), runs an idempotent `CREATE SCHEMA IF NOT EXISTS` safety net (`:83-92`) and then `MigrateAsync` (`:97`). **The sweep is a caller, not a redesign.**
+- **`EfTenantDbMigrator` is already idempotent and safe to call repeatedly.** It derives the schema from the connection string's `Search Path` (`:47`), forces `Pooling=false` on the migration connection (`:51-63`), pins the per-tenant history table `__TenantMigrationsHistory` (`:64-67`), runs an idempotent `CREATE SCHEMA IF NOT EXISTS` safety net (`:83-92`) and then `MigrateAsync` (`:97`). **The sweep is a caller, not a redesign.**
 - **Tenant connection resolution:** `Tamma.Data/Pooling/LruPooledTenantConnectionResolver.cs` — `GetDataSourceAsync:233`, `LeaseAsync:340`, `EvictAsync:495`. Registered singleton at `Pooling/TenantConnectionPoolServiceCollectionExtensions.cs:134-139`. Schema naming `Pooling/TenantNaming.cs:57` (`t_<hex>`); search path set on the connection string at `Pooling/TenantDatabasePool.cs:175-181`; DbContext wiring at `Tamma.Data/TenantDbContextFactory.cs:46-68`.
 - **The residency precedent:** every operational tenant table is tenant-resident — `document_instances` (`Migrations/Tenant/20260722180002_AddDocumentInstances`), `channel_outbox` (`20260722211145_AddChannelOutbox`), `acceptance_rules_overrides` (`20260722011909_AddAcceptanceRulesOverrides`).
 - **The XOR form to copy — and the one NOT to copy.** `20260722011909_AddAcceptanceRulesOverrides.cs:32` is the strong form `(A NOT NULL AND B NULL) OR (A NULL AND B NOT NULL)`, paired with a unique index carrying `.Annotation("Npgsql:NullsDistinct", false)` (`:35-40`). `ck_audit_records_principal_xor` (`Migrations/Tenant/20260619003624_AddAuditRecords.cs:42`) is the **weak** form `NOT (both NOT NULL)` and permits both NULL — do not copy it.
@@ -103,6 +107,11 @@ Fixed in this lane (see `.dev/bugs/2026-07-29-ef-migrator-service-provider-explo
 Still open (owned by OTHER lanes — do not close this section until they land):
 
 - **Sweep endpoint hygiene** (`Program.cs` — coordinator's lane): `dryRun` defaults to `false` (a bare POST applies DDL fleet-wide); no single-flight guard (two concurrent sweeps double-migrate); the sweep runs synchronously in-request (a large fleet outlives HTTP timeouts); the pool's `CommandTimeout=30s` applies to migration DDL and will spuriously fail heavy migrations.
+- **No HTTP-level authorization test for `POST /api/admin/tenants/migrate`.** The endpoint carries
+  `.RequireAuthorization("PlatformOwnerAccess")` in `Program.cs`, but that is verified only by inspection —
+  no test drives the route as a non-platform-owner and asserts 403, so a future edit that drops or weakens
+  the policy would land green. The shipped suite (`Tamma.Api.Tests/Tracker/TenantMigrationSweeperTests.cs`)
+  covers the sweeper's behaviour, not the route's auth. Open gap as of 2026-07-29.
 
 ## Change Log
 

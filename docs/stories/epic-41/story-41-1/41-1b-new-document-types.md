@@ -65,13 +65,30 @@ README's new-types table:
    `DocumentTypeKeyTests.cs:20` `Be(10)` → `Be(16)` and `DocumentTypeRegistryTests.cs:37`
    `HaveCount(10)` → `HaveCount(16)`. Both currently fail the build the moment a member is appended, and
    neither was named anywhere in the pre-split story.
+   > **Amendment (2026-07-29):** 41-1b moved both pins 10 → 16 as written; **41-1c then moved them
+   > 16 → 17** by registering `prose`. The tree therefore reads `Be(17)` /
+   > `HaveCount(17)` — each delta is attributed in the pin comments (39-3 +4, 39-4 +6, 41-1b +6,
+   > 41-1c +1). A future reader checking this AC against the tree should expect 17, not 16.
 5. **`AcceptanceDefaults.For` returns the documented row for each of the six** (D1): a test asserts the
    chosen `AcceptorRequirement` / `ReviewerSelection` per type, so a type that should fall through to the
    base row does so on purpose and one that should not gets its own arm in
    `AcceptanceDefaults.cs:128-133`.
-6. Each type has a prompt-contract renderer (`IDocumentType.RenderContract`) and one `ContractBindingTests`
-   entry per producing cell; **no existing `Bindings` entry is edited**, and the build gate is green with
-   no new `IntentionallyUnbound` or residual entry.
+6. Each type has a prompt-contract renderer (`IDocumentType.RenderContract`) and a classification for its
+   producing cell in the template/contract gates; **no existing `Bindings` entry is edited**, and the
+   build gate is green with no new `IntentionallyUnbound` or residual entry.
+   > **Amendment (2026-07-29) — no `Bindings` entry landed for any of the six.** A `Bindings` entry is
+   > permitted but not required (implementation-plan-41-1b C4: the coverage guard enumerates only
+   > *dispatched* pairs), and three of the six producing cells still ship legacy-shape templates that
+   > `EveryBoundCell_TemplateStillCarriesEveryParserRequiredToken` would reject — those templates belong
+   > to 41-2/41-3/41-13. What landed instead: `(product_owner, define-acceptance-criteria)`,
+   > `(product_owner, prioritize-backlog)` and `(tester, plan-test-strategy)` are baselined in
+   > `TemplateExampleConformanceTests.KnownNonConformingTemplates` with their intended type and owning
+   > story; `(scrum_master, plan-sprint)` and `(ux_designer, author-ui-spec)` are in
+   > `ConformingUnboundCells` and validate against their real types today. **Gap:**
+   > `(security, threat-model)` — `ThreatModel`'s declared producing cell (`ThreatModel.cs:227`) — is in
+   > none of the three tables, and its shipped template instructs an `{issues, verdict}` review shape
+   > that cannot validate as `threat-model`. It needs a baseline entry (owned by 41-19) before this AC
+   > can be called satisfied.
    > **Note — the shared-contract hazard.** `RenderContract` is per *document type*, not per producing
    > cell (`IDocumentType.cs:47-50`; `Plan.cs:135` returns one `Contract` const for both `plan`
    > producers). Any new type with two producing cells inherits the same constraint, so each of the six

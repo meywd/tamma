@@ -1,6 +1,6 @@
 # Story 41-30: The Tenant-Aware Scheduled-Trigger Seam
 
-Status: drafted
+Status: done — conformance-reviewed 2026-07-29; the hosted service, both control-plane tables, the admin API and the DROP-list exclusion all ship (`Enabled=false` by default, so no running deployment changes); AC1's at-most-once key is per-trigger, not per-(tenant, definition) — see LOW-7; MODERATE-5 / LOW-8 remain open follow-ups
 
 ## User Story
 
@@ -54,8 +54,9 @@ new workflows, zero new `(role, action)` cells, zero new document types.
    `input_json` as workflow inputs.
 4. **Cron evaluation with no new dependency** — `Cronos` is already in the graph (Correction 1).
 5. **Catch-up policy, bounded** — a tenant whose engine was down for a day does not get 24 audits. One
-   run for the most recent missed window, and a `SCHEDULE.WINDOW.SKIPPED` event per window dropped, so
-   the gap is *auditable* rather than invisible.
+   run for the most recent missed window, and **one** `SCHEDULE.WINDOW.SKIPPED` event naming the count
+   and the window range (first/last key) of the windows dropped, so the gap is *auditable* rather than
+   invisible.
 6. **Admin API + RBAC**, answered separately per operating mode (D7), per CLAUDE.md's universal rule.
 7. **`SCHEDULE.*` DCB events** so a fire, a skip and a suppression are all in the audit trail.
 
@@ -93,7 +94,10 @@ apply to *it*. The dial governs the workflows it dispatches, unchanged. What Epi
 
 1. **At most one dispatch per `(tenantId, definitionId, windowKey)` across the whole fleet, durably.**
    Proven with two pods racing the same window, and again across a process kill between the ledger
-   claim and the dispatch.
+   claim and the dispatch. *[Amended 2026-07-29 — see follow-up LOW-7: the implemented key is
+   **per-trigger**, `(triggerId, windowKey)`, for both the ledger's unique index and the advisory lock.
+   Two different trigger rows for the same tenant + definition (distinct `Name`s) can each fire the same
+   window. Read this AC with LOW-7.]*
 2. **Tenant isolation.** Tenant A's fire never suppresses tenant B's for the same window — the exact
    defect at `HourlyAnalyticsRollupScheduler.cs:241`, pinned by a regression test that fails if a
    tenant component is ever dropped from the lock key.
@@ -107,9 +111,12 @@ apply to *it*. The dial governs the workflows it dispatches, unchanged. What Epi
    expression is rejected **at write time** by the admin API with a typed error, never at fire time.
 6. **Bounded catch-up.** After a 24-hour outage an hourly schedule fires **once**, and emits
    `SCHEDULE.WINDOW.SKIPPED` naming the number of windows dropped.
-7. **The two tables are excluded from the destructive startup DROP list** (`Program.cs:3243-3282`) — a
-   deploy must not silently disable every tenant's audits. Pinned by a test that reads the DROP
-   statement and asserts neither table name appears (D9).
+7. **The two tables are excluded from the destructive startup DROP list** (the `DROP TABLE IF EXISTS …
+   CASCADE` literal in `Tamma.Api/Program.cs` — line numbers deliberately not pinned, they drift; the
+   pin test locates the statement dynamically) — a deploy must not silently disable every tenant's
+   audits. Pinned by
+   `ScheduledTriggerSourcePinTests.Schedule_Tables_Are_Not_In_The_Destructive_Startup_DropList`, which
+   reads the DROP statement and asserts neither table name appears (D9).
 8. **Registered in Epic 43's catalog**: one `BackgroundActor` / `automation:*` member so 43-8's
    bidirectional hosted-service sweep stays green, and `effect:schedule.create|update|delete` for the
    admin mutations.

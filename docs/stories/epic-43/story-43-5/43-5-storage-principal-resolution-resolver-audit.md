@@ -1,6 +1,6 @@
 # Story 43-5: Storage, Principal Resolution, the Resolver, and Audit
 
-Status: drafted
+Status: done — conformance-reviewed 2026-07-29; both control-plane tables, the principal resolver, the pure evaluator, the ledger and the audit family ship; AC12 superseded by F7 (singleton 60 s TTL store, no Redis — `Registration_IsScoped` / `TwoGateCallsInOneRequest_IssueOneRepositoryRead` do not exist) and AC13's `.ALLOWED` "or Enforced" arm dropped per F9; `IAutonomyGate` has no production caller, but Seam B enforcement is live and resolver-backed; F6/F10 open
 
 ## MANDATORY: Before You Code
 
@@ -58,7 +58,8 @@ binary, which is stronger still.
 and the `ControlPlaneDbContextModelTests` strict entity list." **This story takes the second half and
 deliberately refuses the first.**
 
-`apps/tamma-elsa/src/Tamma.Api/Program.cs:3234-3276` runs
+`apps/tamma-elsa/src/Tamma.Api/Program.cs`'s `ExecuteSqlRaw` block (line numbers deliberately unpinned —
+they drift; the residency test locates the literal dynamically) runs
 `DROP TABLE IF EXISTS … CASCADE` over ~55 tables **on every startup** unless `TAMMA_PRESERVE_DB=1`. Every
 other table on that list is operational data — events, outbox rows, webhook deliveries, workflow instances.
 `action_assignments` and `action_authorizations` are not operational data: **they are the only thing between
@@ -134,14 +135,17 @@ and `ApplyTenantFilter` would break the platform-ceiling read path outright.
    `correlation_id`, `target_kind`/`target_key` (the **granted scope** — an action or a whole group),
    `state ∈ {pending, granted, denied, expired}`, `requested_at_utc` **NOT NULL from day one**,
    `decided_at_utc`, `decided_by_user_id`, `expires_at_utc` (default +24h, config
-   `Tamma:Governance:AuthorizationTtlHours`), `consumed_at_utc`, `reason`, `autonomy_level_at_request`.
+   `Tamma:Governance:AuthorizationTtlHours` — *note 2026-07-29: this key has **no reader** in the tree yet;
+   it is named in the entity/ledger doc comments as the intended knob, and 43-9's decision endpoint is the
+   caller that will resolve it. Do not read it as shipped configuration*), `consumed_at_utc`, `reason`,
+   `autonomy_level_at_request`.
    A partial unique index over `(tenant_id, user_id, correlation_id, target_kind, target_key)`
    `NULLS NOT DISTINCT WHERE state IN ('pending','granted')`.
 
 5. **Both tables are on the strict CP entity list and NOT on the destructive DROP list.**
    `tests/Tamma.Api.Tests/Epic28/ControlPlaneDbContextModelTests.cs`'s `BeEquivalentTo` set gains both
-   names (an unlisted table fails there). `Program.cs:3234-3276` is **not** modified. A dedicated test,
-   `ActionAssignmentResidencyTests.Tables_AreNotInTheDestructiveDropList`, reads the `ExecuteSqlRaw` string
+   names (an unlisted table fails there). `Program.cs`'s DROP list is **not** modified. A dedicated test,
+   `ActionGovernanceResidencyTests.Tables_AreNotInTheDestructiveDropList`, reads the `ExecuteSqlRaw` string
    from source and fails if either name appears — with a message explaining why, citing this AC.
 
 6. **Repository surfaces are parallel and never joined, and reads do not use the tenant factory.**
@@ -197,14 +201,24 @@ and `ApplyTenantFilter` would break the platform-ceiling read path outright.
     row for the current dial level; today the interface cannot reach it. Method naming follows the
     `ForTenant` rationale documented at `IAcceptanceRulesResolver.cs:9-15`.
 
-12. **Snapshot caching is scoped, and proven so.** `IGovernancePolicySnapshotProvider` is registered
+12. **[Superseded 2026-07-29 — see Follow-ups F7.]** The shipped provider is a **singleton TTL store**
+    (`GovernancePolicySnapshotStore`, 60 s lazy-refresh TTL, a startup priming service, monotonic
+    version-gated installs, invalidate-on-write via `RefreshAsync`, **no Redis**). The scoped registration,
+    the Redis clause and both named tests below (`Registration_IsScoped`,
+    `TwoGateCallsInOneRequest_IssueOneRepositoryRead`) do **not** exist in the tree. The AC text is kept
+    verbatim below for provenance; F7 is the governing statement.
+    ~~**Snapshot caching is scoped, and proven so.**~~ `IGovernancePolicySnapshotProvider` is registered
     **scoped** and loads lazily once per HTTP request (one CP read pair per request, not per gate call — a
     tool loop gating 40 calls must issue one read). Background actors get a per-tick scope. Cross-process
     invalidation rides the already-present Redis connection when `ConnectionStrings:Redis` is set, in-process
     otherwise with a 30 s ceiling. Tested: `Registration_IsScoped`,
     `TwoGateCallsInOneRequest_IssueOneRepositoryRead`.
 
-13. **One audit event family, and denials are not swallowed.** `ActionGateEventsService`
+13. **[Partially superseded 2026-07-29 — see Follow-ups F9: the `.ALLOWED` volume gate's "or `Enforced`"
+    arm was deliberately DROPPED.]** `.ALLOWED` emits only when the resolution's provenance is not
+    `system-default`; the "or `Enforced`" clause at the end of this AC is not implemented, because under
+    epic D1 enforce defaults to TRUE and that arm would have defeated the volume gate entirely.
+    **One audit event family, and denials are not swallowed.** `ActionGateEventsService`
     (`AcceptanceRulesEventsService.cs:16-18,54-93` template — `const` type strings, tags,
     `{workflowVersion, eventSource}` metadata) emits `ACTION.GATE.ALLOWED` / `.REQUIRES_HUMAN` / `.DENIED` /
     `.AUTHORIZED` / `.AUTHORIZATION_DENIED` / `.PRINCIPAL_UNRESOLVED` / `.EVALUATION_FAILED`.
@@ -228,7 +242,7 @@ and `ApplyTenantFilter` would break the platform-ceiling read path outright.
 - **Story 43-4 (Tool-vocabulary reconciliation)** — the resolver resolves an emitted tool name through
   `ToolNameAliases` before it can look up an assignment. Blocking for the `tool:*` plane only.
 - **Existing, verified:** `ControlPlaneDbContext`; `TammaModelConfiguration.cs:1621-1654` (the shape);
-  `ControlPlaneDbContextModelTests.cs:33-48`; `Program.cs:3234-3276` (the DROP list, untouched);
+  `ControlPlaneDbContextModelTests.cs:33-48`; `Program.cs`'s DROP list (untouched);
   `AcceptanceRulesRepository.cs:21-25,34,108`; `AuthPrincipal.cs:30-39`;
   `IAcceptanceRulesResolver` + `AcceptanceRulesService.cs:52-64,91-108`;
   `AcceptanceGuardrails.TryPreGate:45`; `AcceptanceRulesEventsService.cs:16-18,54-93`; `IEventRepository`;
@@ -241,12 +255,19 @@ and `ApplyTenantFilter` would break the platform-ceiling read path outright.
 
 - **The enforcement seams themselves.** No call site of `IAutonomyGate` is added here — Story 43-9 owns all
   five. This story ships the component and its tests; nothing invokes it in production yet.
+  *[Clarified 2026-07-29 — literally true of `IAutonomyGate` (zero production callers), but do not read it
+  as "no enforcement is live": **Seam B enforcement IS live and is now resolver-backed**.
+  `CatalogDefaultToolLoopAutonomyGate`'s production constructor consumes this story's
+  `IGovernancePolicySnapshotProvider`, and that gate is a REQUIRED constructor dependency of
+  `InlineToolLoopRunner` — wired at
+  `apps/tamma-elsa/src/Tamma.Api/Extensions/ActionCatalogGovernanceServiceCollectionExtensions.cs:79-82`.
+  So this story's assignment ladder already decides live tool calls; the four remaining seams are 43-9's.]*
 - **The admin API and its DTOs.** Story 43-6.
 - **Writing authorization rows from human surfaces.** The ledger table and `TryConsumeAsync` ship here;
   the decision endpoint and the resume-endpoint wiring are Story 43-9.
 - **A new suspend activity or bookmark prefix.** `CanonicalSuspendActivities` is keyed by activity `Type`,
   so a new prefix requires a new activity; v1 grants arrive through the 11 landed resume endpoints.
-- **Any change to `Program.cs:3234-3276`.** Deliberately untouched (AC5).
+- **Any change to `Program.cs`'s DROP list.** Deliberately untouched (AC5).
 - **Migrating `AcceptorRequirement` into the catalog.** It ships `design=Human` with zero consumers and
   stays a separate concept; folding it in means touching the document-lifecycle acceptance path.
 - **Payload-predicate policy.** The gate matches on identity, not argument values — same limitation
