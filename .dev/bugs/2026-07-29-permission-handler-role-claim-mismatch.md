@@ -1,7 +1,7 @@
 # PermissionHandler never matches production JWT role claims — every PermissionRequirement route is dead for real bearer tokens
 
 **Date**: 2026-07-29
-**Status**: 🐛 Open — fail-closed (functionality broken, no privilege escalation)
+**Status**: ✅ Resolved (2026-07-29) — see "Resolution" below
 **Found by**: Story 41-30's endpoint tests (all admin writes 403'd through the production-JWT test factory)
 
 ## The defect
@@ -34,8 +34,45 @@ proxy/cookie identities) instead of a hardcoded `FindFirst(ClaimTypes.Role)`. Sh
 handler-direct tests for both claim shapes AND one over-HTTP test per shape (the 41-30 endpoint
 fixture's dual-claim `MintToken` documents the quirk and is the template).
 
-## Interim state
+## Resolution (2026-07-29)
 
-Story 41-30's tests mint tokens carrying BOTH claim shapes (documented in the fixture) so its
-RBAC assertions test the intended policy semantics. Do not copy that dual-claim workaround into
-production token minting — fix the handler.
+Role resolution now goes through `ClaimsPrincipal.IsInRole` via a new principal-shaped overload
+`Permissions.HasPermission(ClaimsPrincipal, string)` (`src/Tamma.Api/Auth/Permissions.cs`) that
+probes the closed role hierarchy (`member`/`admin`/`owner`) — claim-shape-agnostic (each identity's
+own `RoleClaimType` wins: bare `"role"` for JWT identities, `ClaimTypes.Role` for default-built
+identities) and still fail-closed for unknown role values.
+
+**Sites fixed (authorization-gating):**
+- `src/Tamma.Api/Auth/PermissionHandler.cs` — the platform-wide defect. The API-key
+  `permission`-claim path and the `platformRole=platform_admin` superuser rule are unchanged.
+- `src/Tamma.Api/Auth/SelfOrPermissionRequirement.cs` (`SelfOrPermissionHandler`) — same
+  hardcoded `FindFirst(ClaimTypes.Role)` in its permission branch.
+- `src/Tamma.Api/Endpoints/AgentEndpoints.cs` `IsTenantAdminOrOwner` — gated
+  `?includeDisabled=true`; same dead read for bearer JWTs.
+- `src/Tamma.Api/Middleware/ProxyHeaderAuthMiddleware.cs` `BuildPrincipalFromJwt` — the
+  first-bridged-request principal was built from RAW jwt claims (bare `"role"`) on an identity
+  with the DEFAULT role claim type, so `IsInRole`/`Identity.Name` missed on that one request;
+  the identity now declares `nameType: sub, roleType: "role"` like the JwtBearer options.
+
+**Report-only (already dual-read `"role"` → `ClaimTypes.Role` fallback, so not broken):**
+`AuthEndpoints.cs` `/api/auth/me` (~1646, payload/telemetry), `AuthEndpoints.cs` `RoleCheck`
+(~1693), `AdminEndpoints.cs` caller-role read (~168, defense-in-depth behind PlatformOwnerAccess).
+Also noted: `ApiKeyAuthHandler` mints a bare `"role"` claim into a default-role-type identity, so
+API-key principals still never match the role branch — they are (and always were) gated by their
+explicit `permission` claims; deliberately NOT changed to avoid widening API-key grants.
+
+**Tests:**
+- Handler-direct: `tests/Tamma.Api.Tests/Auth/PermissionHandlerRoleClaimTests.cs` — both claim
+  shapes × allowed/denied roles for `PermissionHandler` AND `SelfOrPermissionHandler`, plus pins
+  for the preserved API-key and platform-admin paths.
+- Over-HTTP: `ScheduledTriggerEndpointsTests.ProductionShapeBearerJwt_BareRoleClaimOnly_...`
+  proves a real production-shape JWT (bare `"role"` only) passes the ScheduleManage
+  `PermissionRequirement` and a member still 403s on writes.
+- The 41-30 fixture's dual-claim `MintToken` workaround is REMOVED — the whole suite now runs on
+  single-shape production tokens and stays green, so its RBAC assertions pass for the right reason.
+
+## Interim state (historical)
+
+Story 41-30's tests minted tokens carrying BOTH claim shapes so its RBAC assertions tested the
+intended policy semantics while the handler was broken. That workaround is now removed (see
+Resolution) — production token minting was never changed.

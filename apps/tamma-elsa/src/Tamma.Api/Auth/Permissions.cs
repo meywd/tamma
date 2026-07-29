@@ -1,3 +1,5 @@
+using System.Security.Claims;
+
 namespace Tamma.Api.Auth;
 
 public static class Permissions
@@ -111,6 +113,35 @@ public static class Permissions
         }
 
         return roleRank >= minRank;
+    }
+
+    /// <summary>
+    /// Principal-shaped overload — resolves the caller's role via
+    /// <see cref="ClaimsPrincipal.IsInRole"/>, which respects each identity's
+    /// OWN <c>RoleClaimType</c>: bare <c>"role"</c> for production JwtBearer
+    /// identities (Program.cs sets <c>MapInboundClaims=false</c> +
+    /// <c>RoleClaimType="role"</c>, matching the shape <see cref="JwtService"/>
+    /// mints) and <see cref="ClaimTypes.Role"/> for identities built with the
+    /// <see cref="ClaimsIdentity"/> default. A hardcoded
+    /// <c>FindFirst(ClaimTypes.Role)</c> never matched a real bearer JWT, which
+    /// fail-closed every <see cref="PermissionRequirement"/> policy for API
+    /// tokens — see
+    /// <c>.dev/bugs/2026-07-29-permission-handler-role-claim-mismatch.md</c>.
+    /// </summary>
+    public static bool HasPermission(ClaimsPrincipal? user, string? permission)
+    {
+        if (user is null || permission is null)
+            return false;
+
+        // Known roles are the closed hierarchy; probing each via IsInRole is
+        // both claim-shape-agnostic and fail-closed for unknown role values.
+        foreach (var role in RoleHierarchy.Keys)
+        {
+            if (user.IsInRole(role) && HasPermission(role, permission))
+                return true;
+        }
+
+        return false;
     }
 
     public static string[] GetRolePermissions(string? role)

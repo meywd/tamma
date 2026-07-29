@@ -29,6 +29,13 @@ namespace Tamma.Api.Tests.Epic41;
 /// tenant's row ⇒ 404 (no existence leak); a non-platform-owner writing a
 /// tenant_id-null TEMPLATE ⇒ 403; a definition id outside the closed
 /// allowlist (<c>delete-tenant</c>) ⇒ 400.</para>
+///
+/// <para>Tokens are minted with the SINGLE production claim shape (bare
+/// <c>"role"</c> only) — the dual-claim workaround was removed with the
+/// PermissionHandler role-claim fix
+/// (<c>.dev/bugs/2026-07-29-permission-handler-role-claim-mismatch.md</c>), so
+/// every green assertion here is proof the real bearer-JWT pipeline passes the
+/// PermissionRequirement gates for the right reason.</para>
 /// </summary>
 [TestFixture]
 public class ScheduledTriggerEndpointsTests
@@ -91,17 +98,16 @@ public class ScheduledTriggerEndpointsTests
             {
                 new Claim(JwtRegisteredClaimNames.Sub, Guid.NewGuid().ToString()),
                 new Claim("tenantId", tenantId.ToString()),
+                // SINGLE production claim shape — the bare "role" claim
+                // exactly as JwtService mints it. PermissionHandler now
+                // resolves roles via IsInRole (which honours the production
+                // JwtBearer RoleClaimType="role"), so these tokens exercise
+                // the real ScheduleManage policy pipeline end-to-end. The
+                // dual-claim workaround (an extra ClaimTypes.Role copy) that
+                // papered over the handler's FindFirst(ClaimTypes.Role)
+                // mismatch was removed when that bug was fixed — see
+                // .dev/bugs/2026-07-29-permission-handler-role-claim-mismatch.md.
                 new Claim("role", role),
-                // PermissionHandler (the ScheduleManage / schedules:manage
-                // gate) matches ClaimTypes.Role, NOT the bare "role" claim —
-                // the production JwtBearer options set MapInboundClaims=false
-                // + RoleClaimType="role", so a bare-"role" JWT never
-                // satisfies a PermissionRequirement (pre-existing, platform
-                // wide: PromptManage/AgentManage behave identically; their
-                // RBAC suites pin Permissions.HasPermission handler-direct
-                // instead). Carrying BOTH claim shapes lets this suite
-                // exercise the real policy pipeline end-to-end.
-                new Claim(ClaimTypes.Role, role),
                 new Claim("platformRole", platformRole),
                 new Claim(JwtRegisteredClaimNames.Email, "actor@example.com"),
                 new Claim("name", "Actor"),
@@ -136,6 +142,35 @@ public class ScheduledTriggerEndpointsTests
         enabled = true,
         input = new { lens = "full" },
     };
+
+    // ── PermissionHandler role-claim fix — a production-shape bearer JWT
+    // (bare "role" claim ONLY, no ClaimTypes.Role copy) passes the
+    // ScheduleManage PermissionRequirement gate; member still 403s ──
+
+    [Test]
+    public async Task ProductionShapeBearerJwt_BareRoleClaimOnly_PassesPermissionRequirementGate()
+    {
+        var tenant = Guid.NewGuid();
+
+        using (var admin = Client("admin", "user", tenant))
+        {
+            var create = await admin.PostAsJsonAsync(
+                "/api/admin/scheduled-triggers/", ValidBody(tenant));
+            create.StatusCode.Should().Be(HttpStatusCode.Created,
+                "a real production JWT (bare \"role\" claim, MapInboundClaims=false, "
+                + "RoleClaimType=\"role\") must satisfy the ScheduleManage "
+                + "PermissionRequirement — this was fail-closed before the "
+                + "PermissionHandler IsInRole fix");
+        }
+
+        using (var member = Client("member", "user", tenant))
+        {
+            var write = await member.PostAsJsonAsync(
+                "/api/admin/scheduled-triggers/", ValidBody(tenant, name: "member-write"));
+            write.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+                "the fix unlocks admin/owner bearer JWTs only — member stays 403 on writes");
+        }
+    }
 
     // ── AC5 — malformed cron ⇒ typed 400, NO row written ──
 

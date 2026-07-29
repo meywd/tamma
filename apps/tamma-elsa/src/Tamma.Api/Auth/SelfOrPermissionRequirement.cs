@@ -44,9 +44,13 @@ public class SelfOrPermissionHandler(IHttpContextAccessor httpContextAccessor)
             return Task.CompletedTask;
         }
 
-        // Permission check: role-derived or API-key-claim-derived.
-        var roleClaim = context.User.FindFirst(ClaimTypes.Role)?.Value;
-        if (roleClaim is not null && Permissions.HasPermission(roleClaim, requirement.Permission))
+        // Permission check: role-derived or API-key-claim-derived. Role
+        // resolution goes through IsInRole (the ClaimsPrincipal overload) so
+        // each identity's own RoleClaimType is honoured — bare "role" for
+        // production JwtBearer identities, ClaimTypes.Role for default-built
+        // identities. Mirrors the PermissionHandler fix — see
+        // .dev/bugs/2026-07-29-permission-handler-role-claim-mismatch.md.
+        if (Permissions.HasPermission(context.User, requirement.Permission))
         {
             context.Succeed(requirement);
             return Task.CompletedTask;

@@ -881,13 +881,15 @@ public static class AgentEndpoints
     /// admin / service key), i.e. holds the <c>agents:manage</c> permission. Used
     /// to gate the <c>?includeDisabled=true</c> full-catalog list view (members
     /// never see disabled public personas). Mirrors <see cref="PermissionHandler"/>:
-    /// the per-tenant <c>role</c> claim against the <see cref="Permissions"/>
-    /// matrix, an API-key <c>permission</c> claim, or the platform-admin claim.
+    /// the per-tenant <c>role</c> claim (resolved via <c>IsInRole</c> so both the
+    /// bare-<c>"role"</c> bearer-JWT shape and <c>ClaimTypes.Role</c> identities
+    /// match — see <c>.dev/bugs/2026-07-29-permission-handler-role-claim-mismatch.md</c>)
+    /// against the <see cref="Permissions"/> matrix, an API-key
+    /// <c>permission</c> claim, or the platform-admin claim.
     /// </summary>
     private static bool IsTenantAdminOrOwner(ClaimsPrincipal principal)
     {
-        var role = principal.FindFirst(ClaimTypes.Role)?.Value;
-        if (Permissions.HasPermission(role, "agents:manage"))
+        if (Permissions.HasPermission(principal, "agents:manage"))
         {
             return true;
         }

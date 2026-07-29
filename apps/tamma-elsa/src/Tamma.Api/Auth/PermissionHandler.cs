@@ -15,8 +15,15 @@ public class PermissionHandler : AuthorizationHandler<PermissionRequirement>
         AuthorizationHandlerContext context,
         PermissionRequirement requirement)
     {
-        var roleClaim = context.User.FindFirst(ClaimTypes.Role)?.Value;
-        if (roleClaim is not null && Permissions.HasPermission(roleClaim, requirement.Permission))
+        // Role resolution goes through IsInRole (the ClaimsPrincipal overload
+        // of Permissions.HasPermission) so each identity's own RoleClaimType
+        // is honoured — bare "role" for production JwtBearer identities
+        // (MapInboundClaims=false + RoleClaimType="role"), ClaimTypes.Role for
+        // identities built with the ClaimsIdentity default. The previous
+        // hardcoded FindFirst(ClaimTypes.Role) never matched a real bearer
+        // JWT, fail-closing every PermissionRequirement policy for API tokens
+        // — see .dev/bugs/2026-07-29-permission-handler-role-claim-mismatch.md.
+        if (Permissions.HasPermission(context.User, requirement.Permission))
         {
             context.Succeed(requirement);
         }
