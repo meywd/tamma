@@ -8,8 +8,9 @@ namespace Tamma.Api.Tests.Agents;
 public class AgentRoleTests
 {
     [Test]
-    public void Has_exactly_eight_roles() =>
-        Enum.GetValues<AgentRole>().Length.Should().Be(8);
+    public void Has_exactly_eleven_roles() =>
+        // 8 → 11 (Story 41-1a): scrum_master, project_manager, ux_designer.
+        Enum.GetValues<AgentRole>().Length.Should().Be(11);
 
     [TestCase(AgentRole.Developer, "developer")]
     [TestCase(AgentRole.ProductOwner, "product_owner")]
@@ -21,6 +22,13 @@ public class AgentRoleTests
     [TestCase("implementer", AgentRole.Developer)]
     [TestCase("analyst", AgentRole.ProductOwner)]
     [TestCase("developer", AgentRole.Developer)]
+    // Story 41-1a (D3 proof at the Parse level): scrum_master resolved to
+    // ProductOwner via the removed alias; it now parses to its own role, while
+    // analyst/researcher stay aliased.
+    [TestCase("scrum_master", AgentRole.ScrumMaster)]
+    [TestCase("researcher", AgentRole.ProductOwner)]
+    [TestCase("project_manager", AgentRole.ProjectManager)]
+    [TestCase("ux_designer", AgentRole.UxDesigner)]
     public void Parse_applies_legacy_aliases_then_exact(string input, AgentRole expected) =>
         AgentRoleExtensions.Parse(input).Should().Be(expected);
 

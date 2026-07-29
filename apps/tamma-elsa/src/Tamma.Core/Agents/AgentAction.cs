@@ -46,6 +46,11 @@ public enum AgentAction
     [Wire("code-review-architecture")] CodeReviewArchitecture,
     [Wire("assess-technical-risk")] AssessTechnicalRisk,
     [Wire("propose-design")] ProposeDesign,
+    // Story 41-1a — 41-11's tech-debt/risk triage cell.
+    [Wire("triage-tech-debt")] TriageTechDebt,
+    // Story 41-1a — 41-10's Design producer. Distinct from plan-system-design,
+    // which is reserved as plan-generation's Plan producer (ContractBindingTests).
+    [Wire("design-system")] DesignSystem,
 
     // senior_developer
     [Wire("create-tasks")] CreateTasks,
@@ -57,6 +62,8 @@ public enum AgentAction
     [Wire("resolve-blocker")] ResolveBlocker,
     [Wire("mentor-feedback")] MentorFeedback,
     [Wire("decompose-issue")] DecomposeIssue,
+    // Story 41-1a — 41-17's PR-triage cell (the PR queue half; code review is separate).
+    [Wire("triage-pr")] TriagePr,
 
     // developer
     [Wire("plan-fix")] PlanFix,
@@ -83,6 +90,8 @@ public enum AgentAction
     [Wire("code-review-coverage")] CodeReviewCoverage,
     [Wire("triage-defect")] TriageDefect,
     [Wire("review-testability")] ReviewTestability,
+    // Story 41-1a — 41-16's regression/flaky-test management cell.
+    [Wire("manage-regression")] ManageRegression,
 
     // security
     [Wire("threat-model")] ThreatModel,
@@ -106,6 +115,9 @@ public enum AgentAction
     [Wire("write-postmortem")] WritePostmortem,
     [Wire("assess-capacity")] AssessCapacity,
     [Wire("review-operability")] ReviewOperability,
+    // Story 41-1a — 41-22's Diagnosis producer. Distinct from diagnose-incident,
+    // which is the triage-panel review lens (RolePhaseMap.GetTriageActionForRole).
+    [Wire("incident-rootcause")] IncidentRootcause,
 
     // tech_writer
     [Wire("summarize-changes")] SummarizeChanges,
@@ -115,6 +127,26 @@ public enum AgentAction
     [Wire("write-runbook")] WriteRunbook,
     [Wire("update-changelog")] UpdateChangelog,
     [Wire("review-docs")] ReviewDocs,
+
+    // scrum_master (Story 41-1a)
+    [Wire("plan-sprint")] PlanSprint,
+    [Wire("synthesize-standup")] SynthesizeStandup,
+    [Wire("facilitate-retro")] FacilitateRetro,
+    [Wire("track-impediments")] TrackImpediments,
+    // Story 41-1a (41-8 Phase B lockstep amendment) — the prose retro-narrative
+    // producer cell. One dispatch = one document; the Findings retro (facilitate-retro)
+    // and the prose narrative cannot share a cell, so the narrative gets its own token.
+    [Wire("write-retro-narrative")] WriteRetroNarrative,
+
+    // project_manager (Story 41-1a)
+    [Wire("report-status")] ReportStatus,
+    [Wire("coordinate-release")] CoordinateRelease,
+
+    // ux_designer (Story 41-1a)
+    [Wire("draft-user-flow")] DraftUserFlow,
+    [Wire("author-ui-spec")] AuthorUiSpec,
+    [Wire("review-design")] ReviewDesign,
+    [Wire("audit-accessibility")] AuditAccessibility,
 }
 
 public static class AgentActionExtensions

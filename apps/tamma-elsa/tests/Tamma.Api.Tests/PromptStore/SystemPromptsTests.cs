@@ -25,8 +25,9 @@ public class SystemPromptsTests
     [Test]
     public void RoleActionTemplates_MatchesJaggedTaxonomyCellCount()
     {
-        // 87 cells (79 distinct action tokens; shared tokens repeat across
-        // roles). Asserted against the live taxonomy so it never drifts.
+        // 112 cells (96 distinct action tokens; shared tokens repeat across
+        // roles — 93 + the 19 Story 41-1a cells). Asserted against the live
+        // taxonomy so it never drifts.
         SystemPrompts.RoleActionTemplates.Should().HaveCount(ExpectedCellCount);
     }
 
@@ -56,9 +57,11 @@ public class SystemPromptsTests
     }
 
     [Test]
-    public void RoleSystemPrompts_ContainsAllEightRoles()
+    public void RoleSystemPrompts_ContainsAllElevenRoles()
     {
-        SystemPrompts.RoleSystemPrompts.Should().HaveCount(8);
+        // 8 → 11 (Story 41-1a): scrum_master, project_manager, ux_designer each
+        // ship a Prompts/{role}/_system.md identity preamble.
+        SystemPrompts.RoleSystemPrompts.Should().HaveCount(11);
         foreach (var role in Roles)
         {
             SystemPrompts.RoleSystemPrompts.Should().ContainKey(role);

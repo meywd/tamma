@@ -8,10 +8,11 @@ namespace Tamma.Api.Tests.Agents;
 /// Tests for the static role ↔ action mapping, rebuilt on the
 /// <see cref="AgentRole"/> / <see cref="AgentAction"/> enums (SPEC §4).
 ///
-/// The 8 roles: developer, tester, security, devops, architect, product_owner,
-/// senior_developer, tech_writer.
+/// The 11 roles: developer, tester, security, devops, architect, product_owner,
+/// senior_developer, tech_writer, plus the Epic 41 three (Story 41-1a):
+/// scrum_master, project_manager, ux_designer.
 ///
-/// The 79 actions are the union of the per-role action sets in SPEC §4
+/// The 96 actions are the union of the per-role action sets in SPEC §4
 /// (72 original + 2 assessment actions: generate-assessment-questions,
 /// analyze-assessment-response under product_owner — added in assessment P0 —
 /// + 1 research action under product_owner, Story 3.4
@@ -30,12 +31,14 @@ public class RolePhaseMapTests
     // -----------------------------------------------------------------------
 
     [Test]
-    public void ValidRoles_Should_Contain_All_Eight_Roles()
+    public void ValidRoles_Should_Contain_All_Eleven_Roles()
     {
+        // 8 → 11 (Story 41-1a): + scrum_master, project_manager, ux_designer.
         RolePhaseMap.ValidRoles.Should().BeEquivalentTo(new[]
         {
             "developer", "tester", "security", "devops",
-            "architect", "product_owner", "senior_developer", "tech_writer"
+            "architect", "product_owner", "senior_developer", "tech_writer",
+            "scrum_master", "project_manager", "ux_designer"
         });
     }
 
@@ -47,7 +50,7 @@ public class RolePhaseMapTests
     }
 
     [Test]
-    public void ValidActions_Should_Contain_Seventy_Nine_Actions()
+    public void ValidActions_Should_Contain_Ninety_Six_Actions()
     {
         // 72 original actions + 2 assessment actions added in assessment P0
         // (generate-assessment-questions, analyze-assessment-response under product_owner)
@@ -61,7 +64,14 @@ public class RolePhaseMapTests
         // carries exactly one output contract.
         // + 1 triage-context-scan action (Story 39-15 D5 — developer; the Findings-producing
         // triage-context cell split out of the free-text context-scan). 79 → 80.
-        RolePhaseMap.ValidActions.Should().HaveCount(80);
+        // + 16 Epic 41 tokens (Story 41-1a): plan-sprint, synthesize-standup,
+        // facilitate-retro, track-impediments, write-retro-narrative (41-8 Phase B
+        // lockstep) under scrum_master; report-status, coordinate-release under
+        // project_manager; draft-user-flow, author-ui-spec, review-design,
+        // audit-accessibility under ux_designer; triage-tech-debt + design-system
+        // (architect), triage-pr (senior_developer), manage-regression (tester),
+        // incident-rootcause (devops). 80 → 96.
+        RolePhaseMap.ValidActions.Should().HaveCount(96);
     }
 
     [Test]
@@ -123,6 +133,27 @@ public class RolePhaseMapTests
         RolePhaseMap.GetPrimaryPhaseForRole("tech_writer").Should().Be("summarize-changes");
     }
 
+    // Story 41-1a (C3/D6) — every new role needs an s_primaryAction row: the map
+    // is a raw indexer, so a missing row would throw for a valid role.
+
+    [Test]
+    public void GetPrimaryPhaseForRole_ScrumMaster_Returns_PlanSprint()
+    {
+        RolePhaseMap.GetPrimaryPhaseForRole("scrum_master").Should().Be("plan-sprint");
+    }
+
+    [Test]
+    public void GetPrimaryPhaseForRole_ProjectManager_Returns_ReportStatus()
+    {
+        RolePhaseMap.GetPrimaryPhaseForRole("project_manager").Should().Be("report-status");
+    }
+
+    [Test]
+    public void GetPrimaryPhaseForRole_UxDesigner_Returns_AuthorUiSpec()
+    {
+        RolePhaseMap.GetPrimaryPhaseForRole("ux_designer").Should().Be("author-ui-spec");
+    }
+
     [Test]
     public void GetPrimaryPhaseForRole_Every_Primary_Is_In_That_Roles_Set()
     {
@@ -156,8 +187,10 @@ public class RolePhaseMapTests
     // -----------------------------------------------------------------------
 
     [Test]
-    public void GetEligibleRolesForPhase_ContextScan_Includes_All_Eight_Roles()
+    public void GetEligibleRolesForPhase_ContextScan_Includes_All_Eleven_Roles()
     {
+        // Story 41-1a (D4): the three new roles carry context-scan like the
+        // incumbent 8 — no asymmetry in the matrix.
         RolePhaseMap.GetEligibleRolesForPhase("context-scan")
             .Should().BeEquivalentTo(RolePhaseMap.ValidRoles);
     }
@@ -271,6 +304,10 @@ public class RolePhaseMapTests
     [TestCase("product_owner")]
     [TestCase("senior_developer")]
     [TestCase("tech_writer")]
+    // Story 41-1a (D4) — the three new roles carry context-scan too.
+    [TestCase("scrum_master")]
+    [TestCase("project_manager")]
+    [TestCase("ux_designer")]
     public void IsRoleEligibleForPhase_ContextScan_True_For_Every_Role(string role)
     {
         RolePhaseMap.IsRoleEligibleForPhase("context-scan", role).Should().BeTrue();
@@ -551,9 +588,21 @@ public class RolePhaseMapTests
     [TestCase("reviewer", "senior_developer")]
     [TestCase("documenter", "tech_writer")]
     [TestCase("analyst", "product_owner")]
+    [TestCase("researcher", "product_owner")]
     public void NormalizeRole_LegacyAlias_Resolves(string legacy, string expected)
     {
         RolePhaseMap.NormalizeRole(legacy).Should().Be(expected);
+    }
+
+    [Test]
+    public void NormalizeRole_ScrumMaster_IsNoLongerAliased_To_ProductOwner()
+    {
+        // Story 41-1a (D3) — the deliberate behaviour change carved out of AC6:
+        // scrum_master used to alias to product_owner; it is now a first-class
+        // role, so NormalizeRole passes it through via ValidRoles and the alias
+        // table no longer contains it.
+        RolePhaseMap.NormalizeRole("scrum_master").Should().Be("scrum_master");
+        RolePhaseMap.LegacyRoleAliases.Should().NotContainKey("scrum_master");
     }
 
     // -----------------------------------------------------------------------
@@ -601,6 +650,10 @@ public class RolePhaseMapTests
     [TestCase(AgentRole.Tester, AgentAction.ReviewTestability)]
     [TestCase(AgentRole.Devops, AgentAction.ReviewOperability)]
     [TestCase(AgentRole.ProductOwner, AgentAction.ReviewScope)]
+    // Story 41-1a — D1 (tech_writer joins the document-review selector; the arm
+    // 41-24/41-25/41-26's review stage requires) and D2 (ux_designer joins for 41-28).
+    [TestCase(AgentRole.TechWriter, AgentAction.ReviewDocs)]
+    [TestCase(AgentRole.UxDesigner, AgentAction.ReviewDesign)]
     public void GetReviewActionForRole_Maps_Each_Panel_Role(AgentRole role, AgentAction expected)
     {
         RolePhaseMap.GetReviewActionForRole(role).Should().Be(expected);
@@ -614,6 +667,8 @@ public class RolePhaseMapTests
     [TestCase(AgentRole.Tester)]
     [TestCase(AgentRole.Devops)]
     [TestCase(AgentRole.ProductOwner)]
+    [TestCase(AgentRole.TechWriter)]
+    [TestCase(AgentRole.UxDesigner)]
     public void GetReviewActionForRole_Result_Is_Eligible_For_That_Role(AgentRole role)
     {
         var action = RolePhaseMap.GetReviewActionForRole(role);
@@ -621,11 +676,19 @@ public class RolePhaseMapTests
             .Should().BeTrue($"({role.ToWire()}, {action.ToWire()}) must be a taxonomy-valid pair");
     }
 
+    // Story 41-1a (AC4/D2) — the INVERTED TechWriter assertion: the old
+    // GetReviewActionForRole_TechWriter_Throws pinned the selector gap this story
+    // closes (D1); TechWriter now RETURNS ReviewDocs (asserted above). The two
+    // roles deliberately kept OFF the document-review panel are asserted to throw
+    // with the panel message, so neither reaches a selector by accident.
     [Test]
-    public void GetReviewActionForRole_TechWriter_Throws()
+    [TestCase(AgentRole.ScrumMaster)]
+    [TestCase(AgentRole.ProjectManager)]
+    public void GetReviewActionForRole_NonPanelRole_Throws(AgentRole role)
     {
-        Action act = () => RolePhaseMap.GetReviewActionForRole(AgentRole.TechWriter);
-        act.Should().Throw<ArgumentOutOfRangeException>();
+        Action act = () => RolePhaseMap.GetReviewActionForRole(role);
+        act.Should().Throw<ArgumentOutOfRangeException>()
+            .WithMessage("*is not on a review panel*");
     }
 
     [Test]
@@ -655,9 +718,64 @@ public class RolePhaseMapTests
     [TestCase(AgentRole.SeniorDeveloper)]
     [TestCase(AgentRole.ProductOwner)]
     [TestCase(AgentRole.TechWriter)]
+    // Story 41-1a (AC4/D2) — none of the three new roles triages; the throw is
+    // asserted, not left to accident.
+    [TestCase(AgentRole.ScrumMaster)]
+    [TestCase(AgentRole.ProjectManager)]
+    [TestCase(AgentRole.UxDesigner)]
     public void GetTriageActionForRole_NonPanelRole_Throws(AgentRole role)
     {
         Action act = () => RolePhaseMap.GetTriageActionForRole(role);
-        act.Should().Throw<ArgumentOutOfRangeException>();
+        act.Should().Throw<ArgumentOutOfRangeException>()
+            .WithMessage("*is not on the triage panel*");
+    }
+
+    // -----------------------------------------------------------------------
+    // Story 41-1a (AC2) — every new (role, action) cell is taxonomy-eligible,
+    // with the two Scope-2-correction cells as named cases.
+    // -----------------------------------------------------------------------
+
+    [Test]
+    // scrum_master (incl. the 41-8 Phase B write-retro-narrative lockstep cell)
+    [TestCase("context-scan", "scrum_master")]
+    [TestCase("plan-sprint", "scrum_master")]
+    [TestCase("synthesize-standup", "scrum_master")]
+    [TestCase("facilitate-retro", "scrum_master")]
+    [TestCase("track-impediments", "scrum_master")]
+    [TestCase("write-retro-narrative", "scrum_master")]
+    // project_manager
+    [TestCase("context-scan", "project_manager")]
+    [TestCase("report-status", "project_manager")]
+    [TestCase("coordinate-release", "project_manager")]
+    // ux_designer
+    [TestCase("context-scan", "ux_designer")]
+    [TestCase("draft-user-flow", "ux_designer")]
+    [TestCase("author-ui-spec", "ux_designer")]
+    [TestCase("review-design", "ux_designer")]
+    [TestCase("audit-accessibility", "ux_designer")]
+    // incumbent-role additions — design-system (41-10) and incident-rootcause
+    // (41-22) are the two cells the story's Corrected note added.
+    [TestCase("triage-tech-debt", "architect")]
+    [TestCase("design-system", "architect")]
+    [TestCase("triage-pr", "senior_developer")]
+    [TestCase("manage-regression", "tester")]
+    [TestCase("incident-rootcause", "devops")]
+    public void IsRoleEligibleForPhase_Epic41_NewCell_Returns_True(string action, string role)
+    {
+        RolePhaseMap.IsRoleEligibleForPhase(action, role).Should().BeTrue(
+            $"Story 41-1a mints the ({role}, {action}) cell");
+    }
+
+    [Test]
+    public void Epic41_NewSingleRoleActions_Are_Owned_By_Exactly_That_Role()
+    {
+        RolePhaseMap.GetEligibleRolesForPhase("design-system")
+            .Should().BeEquivalentTo(new[] { "architect" });
+        RolePhaseMap.GetEligibleRolesForPhase("incident-rootcause")
+            .Should().BeEquivalentTo(new[] { "devops" });
+        RolePhaseMap.GetEligibleRolesForPhase("write-retro-narrative")
+            .Should().BeEquivalentTo(new[] { "scrum_master" });
+        RolePhaseMap.GetEligibleRolesForPhase("triage-pr")
+            .Should().BeEquivalentTo(new[] { "senior_developer" });
     }
 }

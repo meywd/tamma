@@ -45,7 +45,9 @@ public class ActionWirePinTests
             "llm.call", "git.branch.create", "git.branch.delete", "git.pull-request.create",
             "git.pull-request.merge", "git.release.create", "git.issue.patch", "jira.ticket.patch",
             "ci.tests.trigger", "agent-dispatch.run", "notify.slack.queue", "notify.email.send",
-            "mcp.tool.invoke", "secret.reveal", "process.spawn", "deploy.promote-prod", "deploy.rollback");
+            "mcp.tool.invoke", "secret.reveal", "process.spawn", "deploy.promote-prod", "deploy.rollback",
+            // 41-30 — the scheduled-trigger admin surface (tree-truth reconcile).
+            "schedule.create", "schedule.update", "schedule.delete");
     }
 
     [Test]
@@ -54,6 +56,8 @@ public class ActionWirePinTests
         Enum.GetValues<BackgroundActor>().Select(b => b.ToWire()).Should().Equal(
             "hourly-analytics-rollup-scheduler", "tenant-cleanup-requested-trigger",
             "tenant-delete-requested-trigger", "workflow-seeder", "agent-seeder",
+            // 41-30 — the tenant-aware scheduler seam (tree-truth reconcile).
+            "tenant-scheduled-trigger-service",
             "pool-warmup-service", "workflow-sync-service", "channel-outbox-sweeper",
             "secret-auto-rotation-scheduler", "retire-sweep", "engine-registry-heartbeat-service",
             "tenant-status-invalidation-listener", "provider-settings-store-priming-service",
@@ -61,7 +65,14 @@ public class ActionWirePinTests
             "convention-store-seeder", "provider-session-cleanup-service", "task-queue-processor",
             "outbox-slack-sender", "outbox-smtp-sender", "audit-chain-checkpoint-scheduler",
             "reveal-token-sweeper", "notification-dispatcher", "built-in-alert-rule-seeder",
-            "alert-rule-evaluator", "audit-projector", "platform-task-worker");
+            "alert-rule-evaluator", "audit-projector",
+            // 43-4 — the boot-time tool-vocabulary check (itself an IHostedService,
+            // so the hosted-service sweep demands it be catalogued).
+            "action-catalog-startup-validator",
+            // 43-5 — the policy-snapshot cold-start primer (the same rule:
+            // every IHostedService class is catalogued, governance included).
+            "governance-policy-snapshot-priming-service",
+            "platform-task-worker");
     }
 
     [Test]

@@ -258,7 +258,18 @@ public class ProxyHeaderAuthMiddleware : IMiddleware
         // is safe and avoids a redundant verification round-trip.
         var handler = new JwtSecurityTokenHandler();
         var jwt = handler.ReadJwtToken(token);
-        var identity = new ClaimsIdentity(jwt.Claims, JwtBearerDefaults.AuthenticationScheme);
+        // ReadJwtToken yields RAW claim types (bare "sub"/"role" — the shape
+        // JwtService mints), so the identity must declare the SAME name/role
+        // claim types the production JwtBearer options use. With the
+        // ClaimsIdentity defaults (ClaimTypes.Role), Identity.Name and
+        // IsInRole would silently miss on this first bridged request — same
+        // claim-shape mismatch class as
+        // .dev/bugs/2026-07-29-permission-handler-role-claim-mismatch.md.
+        var identity = new ClaimsIdentity(
+            jwt.Claims,
+            JwtBearerDefaults.AuthenticationScheme,
+            nameType: JwtRegisteredClaimNames.Sub,
+            roleType: "role");
         return new ClaimsPrincipal(identity);
     }
 

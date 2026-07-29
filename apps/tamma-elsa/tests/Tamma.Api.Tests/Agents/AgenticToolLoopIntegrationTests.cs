@@ -32,6 +32,9 @@ public class AgenticToolLoopIntegrationTests
 {
     private InlineToolLoopRunner _activity = null!;
     private Mock<ILogger<InlineToolLoopRunner>> _activityLoggerMock = null!;
+
+    /// <summary>Epic 43 Seam B — the required gate, at its behaviour-preserving v1 default.</summary>
+    private static readonly IToolLoopAutonomyGate DefaultGate = new CatalogDefaultToolLoopAutonomyGate();
     private ToolExecutorRegistry _registry = null!;
     private Mock<ILogger<ToolExecutorRegistry>> _registryLoggerMock = null!;
     private ContextCompactor _compactor = null!;
@@ -65,7 +68,7 @@ public class AgenticToolLoopIntegrationTests
     {
         var config = loopConfig ?? new ToolLoopConfig();
         var activity = new InlineToolLoopRunner(
-            _activityLoggerMock.Object, null, null, null, toolRegistry);
+            _activityLoggerMock.Object, null, null, null, DefaultGate, toolRegistry);
 
         var messages = new List<ConversationMessage>
         {
@@ -195,7 +198,7 @@ public class AgenticToolLoopIntegrationTests
     {
         var config = loopConfig ?? new ToolLoopConfig();
         var activity = new InlineToolLoopRunner(
-            _activityLoggerMock.Object, null, null, null, toolRegistry);
+            _activityLoggerMock.Object, null, null, null, DefaultGate, toolRegistry);
 
         var messages = new List<ConversationMessage>
         {
@@ -1083,7 +1086,7 @@ public class AgenticToolLoopIntegrationTests
 
         // Verify the body builder produces correct Anthropic format
         var activity = new InlineToolLoopRunner(
-            _activityLoggerMock.Object, null, null, null, registry);
+            _activityLoggerMock.Object, null, null, null, DefaultGate, registry);
 
         var messages = new List<ConversationMessage>
         {
@@ -1177,7 +1180,7 @@ public class AgenticToolLoopIntegrationTests
 
         // Verify the body builder produces correct OpenAI format
         var activity = new InlineToolLoopRunner(
-            _activityLoggerMock.Object, null, null, null, registry);
+            _activityLoggerMock.Object, null, null, null, DefaultGate, registry);
 
         var messages = new List<ConversationMessage>
         {
@@ -1477,7 +1480,7 @@ public class AgenticToolLoopIntegrationTests
     {
         // Arrange: Full conversation with parallel tool calls
         var activity = new InlineToolLoopRunner(
-            _activityLoggerMock.Object, null, null, null, null);
+            _activityLoggerMock.Object, null, null, null, DefaultGate, null);
 
         var messages = new List<ConversationMessage>
         {
@@ -1620,7 +1623,7 @@ public class AgenticToolLoopIntegrationTests
 
         // Verify OpenAI body format for tool results
         var activity = new InlineToolLoopRunner(
-            _activityLoggerMock.Object, null, null, null, registry);
+            _activityLoggerMock.Object, null, null, null, DefaultGate, registry);
         var body = activity.BuildOpenAiMultiTurnBody(result.Messages, "gpt-4o", 4096, 0.7, tools);
         var apiMessages = body["messages"] as List<object>;
 

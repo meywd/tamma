@@ -49,6 +49,7 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     private readonly IConfiguration? _configuration;
     private readonly ILogger? _logger;
     private readonly IContentSanitizer? _sanitizer;
+    private readonly IToolLoopAutonomyGate _autonomyGate;
     private readonly IToolExecutorRegistry? _toolRegistry;
     private readonly IToolCallValidator? _toolCallValidator;
     private readonly ContextCompactor? _contextCompactor;
@@ -62,6 +63,12 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         IHttpClientFactory? httpClientFactory,
         IConfiguration? configuration,
         IContentSanitizer? sanitizer,
+        // Epic 43 Seam B — the tool-dispatch autonomy gate. REQUIRED, not
+        // optional-nullable like every other collaborator on this path: an
+        // optional gate would be absent exactly when the optional validator
+        // is absent, which is the failure the epic's siting decision forbids
+        // (epic README, Seam B). Sits post-sanitization, pre-fork below.
+        IToolLoopAutonomyGate autonomyGate,
         IToolExecutorRegistry? toolRegistry = null,
         IToolCallValidator? toolCallValidator = null,
         ContextCompactor? contextCompactor = null,
@@ -74,6 +81,10 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _sanitizer = sanitizer;
+        _autonomyGate = autonomyGate ?? throw new ArgumentNullException(
+            nameof(autonomyGate),
+            "The Seam B autonomy gate is a required collaborator (Epic 43): "
+            + "pass CatalogDefaultToolLoopAutonomyGate for the behaviour-preserving v1 default.");
         _toolRegistry = toolRegistry;
         _toolCallValidator = toolCallValidator;
         _contextCompactor = contextCompactor;
@@ -304,6 +315,42 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
                             "Tool call rejected by validator: WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, ToolCallId={ToolCallId}, ToolName={ToolName}",
                             workflowInstanceId, step, tc.Id, tc.ToolName);
                     }
+                }
+            }
+
+            // ═══ Seam B — the tool-dispatch autonomy gate (Epic 43, Story 43-4) ═══
+            // Sited POST-SANITIZATION (the validator above has already applied
+            // sanitized arguments onto tc.ArgumentsJson) and PRE-FORK (before the
+            // parallel/sequential execution split), and deliberately NOT nested
+            // inside the optional validator block — every other dependency on
+            // this path is optional-nullable, and a gate that vanished whenever
+            // the validator was absent would be the exact siting failure the
+            // epic forbids. The gate itself is a required constructor parameter.
+            // A denial joins rejectedToolCalls, so the existing machinery below
+            // feeds it back to the model as a tool result — no exception, no new
+            // plumbing. The outcome is Denied, never RequiresHuman: there is no
+            // human wait on this path. The two fail-open allowlist checks
+            // further down are untouched — the gate is additive and cannot be
+            // defeated by a null allowlist.
+            foreach (var tc in response.ToolCalls)
+            {
+                if (rejectedToolCalls.ContainsKey(tc.Id))
+                {
+                    continue; // already rejected by the validator — one result per call
+                }
+
+                var gateDecision = _autonomyGate.Evaluate(tc.ToolName, tc.ArgumentsJson);
+                if (gateDecision.IsDenied)
+                {
+                    rejectedToolCalls[tc.Id] = ComposeDenialMessage(tc.ToolName, gateDecision);
+
+                    // A denial under enforcement is never swallowed silently
+                    // (epic audit rule; the 43-9 audit event family joins here).
+                    _logger?.LogWarning(
+                        "Tool call denied by autonomy gate: WorkflowInstanceId={WorkflowInstanceId}, TurnNumber={TurnNumber}, ToolCallId={ToolCallId}, ToolName={ToolName}, ActionKey={ActionKey}, MinAutonomy={MinAutonomy}, Dial={Dial}, Reason={Reason}",
+                        workflowInstanceId, step, tc.Id, tc.ToolName,
+                        gateDecision.ActionKey?.ToWire(), gateDecision.MinAutonomy,
+                        gateDecision.Dial, gateDecision.Reason);
                 }
             }
 
@@ -663,6 +710,26 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         var turns = completedTurns;
 
         return (lastResponse, totalTokens, turns, exhausted, contentValid, repairTurns, repairHistory);
+    }
+
+    /// <summary>
+    /// The denial tool-result message fed back to the model for a Seam B gate
+    /// denial. Internal for the message-shape tests (43-4 review, 2026-07-29):
+    /// a decision with <see cref="ToolLoopGateDecision.MinAutonomy"/> == null
+    /// and a reason other than <c>always-human</c> previously rendered
+    /// "requires minimum autonomy , above ..." — the null case now omits the
+    /// threshold clause and stays a well-formed sentence.
+    /// </summary>
+    internal static string ComposeDenialMessage(string toolName, ToolLoopGateDecision decision)
+    {
+        var detail = decision.Reason == "always-human"
+            ? "is configured to always require a person"
+            : decision.MinAutonomy is { } minAutonomy
+                ? $"requires minimum autonomy {minAutonomy}, above the current autonomy level {decision.Dial}"
+                : $"is not permitted at the current autonomy level {decision.Dial}";
+        return $"Tool call denied by autonomy policy: '{toolName}'"
+            + (decision.ActionKey is { } k ? $" (action '{k.ToWire()}')" : string.Empty)
+            + $" {detail}. This action cannot run automatically; continue without it.";
     }
 
     // =======================================================================

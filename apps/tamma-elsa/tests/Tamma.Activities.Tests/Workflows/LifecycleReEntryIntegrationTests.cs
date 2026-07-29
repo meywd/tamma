@@ -384,7 +384,7 @@ public class LifecycleReEntryIntegrationTests
             => Task.FromResult(_latestAccepted);
         public Task<DocumentInstance?> GetByIdAsync(Guid tenantId, Guid documentId, CancellationToken ct)
             => Task.FromResult(_byId.TryGetValue(documentId, out var d) ? d : null);
-        public Task<IReadOnlyList<DocumentInstance>> ListByIssueAsync(Guid tenantId, string issueId, CancellationToken ct)
+        public Task<IReadOnlyList<DocumentInstance>> ListByIssueAsync(Guid tenantId, string issueId, string? audience, CancellationToken ct)
             => Task.FromResult<IReadOnlyList<DocumentInstance>>(_byId.Values.ToList());
         public Task<DocumentInstance> InsertAsync(Guid tenantId, DocumentEnvelope envelope, Guid? correlatingEventId, CancellationToken ct)
             => throw new NotSupportedException();

@@ -37,6 +37,20 @@ public static class DocumentTypeRegistry
         new TriageDecisionDocumentType(),
         new DiagnosisDocumentType(),
         new TestSpecDocumentType(),
+        // 41-1b — the six Epic 41 types (count pin 10 -> 16). No workflow edges
+        // land here (D2): each of 41-2/41-3/41-6/41-13/41-19/41-27 declares its
+        // own BuildSeed row when its producing workflow binds.
+        new AcceptanceCriteriaDocumentType(),
+        new BacklogOrderingDocumentType(),
+        new SprintPlanDocumentType(),
+        new TestPlanDocumentType(),
+        new ThreatModelDocumentType(),
+        new UxSpecDocumentType(),
+        // 41-1c — prose (count pin 16 -> 17): one type for all ten prose kinds,
+        // body unvalidated markdown. No workflow edge lands here — each of
+        // 41-4/41-5/41-8/41-9/41-22/41-24/41-25/41-26 declares its own
+        // BuildSeed row when its producing workflow binds.
+        new ProseDocumentType(),
     };
 
     private static readonly IReadOnlyDictionary<string, IDocumentType> s_index =

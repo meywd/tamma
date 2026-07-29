@@ -21,7 +21,7 @@ Nothing calls the gate yet. Story 43-9 owns every seam.
 - `docs/stories/epic-43/README.md` — "Storage" and "Enforcement"; **D1: v1 enforces, with defaults
   reproducing today's behaviour** (there is no observe-only phase and no soak precondition)
 - `docs/stories/epic-43/story-43-1/` — `AutonomyDial` (`Min`/`Max`/`Default`/`AlwaysHuman`/`IsValidThreshold`)
-- `docs/stories/epic-43/story-43-3/` — the 15-group partition and every descriptor's `DefaultMinAutonomy`;
+- `docs/stories/epic-43/story-43-3/` — the **16**-group partition and every descriptor's `DefaultMinAutonomy`;
   the evaluator's `system-default` tier is literally this
 - `apps/tamma-elsa/src/Tamma.Core/Documents/Policy/IAcceptanceRulesResolver.cs` — **the Core/Api split
   being copied**, including the `ForTenant`-vs-overload naming rationale at `:9-15` (a non-null `Guid` binds
@@ -140,6 +140,16 @@ Nothing calls the gate yet. Story 43-9 owns every seam.
   `RateLimitService` when `ConnectionStrings:Redis` is set; otherwise in-process with a 30 s ceiling.
   `Registration_IsScoped` and `TwoGateCallsInOneRequest_IssueOneRepositoryRead` are the pins.
 
+  > **[Superseded 2026-07-29 — story Follow-ups F7.]** D10 above records the plan as written; it is **not**
+  > what shipped. The implementation is a **singleton** `GovernancePolicySnapshotStore` with a 60 s
+  > lazy-refresh TTL, a startup priming service, monotonic version-gated installs and invalidate-on-write
+  > (`RefreshAsync` after every policy write) — and **no Redis invalidation**. Consequence: a ≤60 s
+  > cross-instance staleness bound (the writing instance is consistent immediately). Neither
+  > `Registration_IsScoped` nor `TwoGateCallsInOneRequest_IssueOneRepositoryRead` exists; the store's
+  > behaviour is pinned by `GovernancePolicySnapshotStoreTests`. The scoped/Redis design remains available
+  > if the bound ever becomes unacceptable. This note supersedes D10 rather than rewriting it, so the
+  > decision history stays legible.
+
 - **D11 — Audit appends directly through `IEventRepository`, not `TammaEventEmitter`.** The emitter
   structurally requires an `ActivityExecutionContext`; the tool loop and the endpoint filter both run inside
   a blocking HTTP request with no such context. The swallowing try/catch of the `<Feature>EventsService`
@@ -230,6 +240,10 @@ Nothing calls the gate yet. Story 43-9 owns every seam.
     service composes: principal resolver → snapshot provider → `ResolveBase*Async` → pure evaluator →
     events. Register the snapshot provider **scoped** in `Tamma.Api/Program.cs`, beside the acceptance-rules
     registrations at `:414-422`, with a comment naming `Registration_IsScoped`.
+    *[Superseded 2026-07-29 — see the note under D10: the provider shipped as a **singleton** TTL store
+    (`GovernancePolicySnapshotStore`, registered in
+    `Tamma.Api/Extensions/ActionCatalogGovernanceServiceCollectionExtensions.cs`, not `Program.cs`), and
+    `Registration_IsScoped` was never written.]*
 
 11. **CREATE `apps/tamma-elsa/src/Tamma.Api/Services/Actions/ActionGateEventsService.cs`** (AC13, D11) —
     the `AcceptanceRulesEventsService` template with the eight `const` type strings and the 13-tag set;

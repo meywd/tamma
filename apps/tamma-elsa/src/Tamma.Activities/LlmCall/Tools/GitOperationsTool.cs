@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Core.Actions;
 
 namespace Tamma.Activities.LlmCall.Tools;
 
@@ -17,17 +18,31 @@ public class GitOperationsTool : IToolExecutor
     private readonly string _gitBinary;
     private readonly int _timeoutSeconds;
 
-    /// <summary>Allowed git subcommands.</summary>
-    private static readonly HashSet<string> AllowedSubcommands = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "status", "diff", "log", "add", "commit", "push", "branch", "checkout",
-        "stash", "show", "fetch", "pull", "rev-parse", "ls-files"
-    };
+    /// <summary>
+    /// Allowed git subcommands — Story 43-4 (AC6, D6): a PROJECTION over the
+    /// Story 43-2 <see cref="GitSubcommand"/> wire set, no longer a hand-written
+    /// copy. The comparer stays <see cref="StringComparer.OrdinalIgnoreCase"/>
+    /// deliberately: the pre-refactor set matched case-insensitively, so a
+    /// model-issued <c>"STATUS"</c>/<c>"Push"</c> must keep being accepted (bug
+    /// 2026-07-27-gitoperationstool-case-insensitive-subcommand-refactor-trap —
+    /// <c>EnumWire</c> parsing alone is ordinal case-sensitive and would have
+    /// silently regressed it). Fourteen in, fourteen out: parity with the
+    /// literal pre-refactor names is pinned by
+    /// <c>GitOperationsSubcommandTests</c> / <c>GitSubcommandParitySweepTests</c>.
+    /// </summary>
+    private static readonly HashSet<string> AllowedSubcommands =
+        Enum.GetValues<GitSubcommand>()
+            .Select(s => s.ToWire())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The canonical subcommand list, derived from the same enum the allow-set projects.</summary>
+    private static readonly string SubcommandList =
+        string.Join(", ", Enum.GetValues<GitSubcommand>().Select(s => s.ToWire()));
 
     public string ToolName => "git_operations";
 
     public string Description =>
-        "Execute git operations in the workspace. Supports subcommands: status, diff, log, add, commit, push, branch, checkout, stash, show, fetch, pull, rev-parse, ls-files.";
+        $"Execute git operations in the workspace. Supports subcommands: {SubcommandList}.";
 
     public Dictionary<string, object> InputSchema => new()
     {
@@ -78,7 +93,7 @@ public class GitOperationsTool : IToolExecutor
             if (!AllowedSubcommands.Contains(subcommand))
             {
                 var errorResult = new ToolExecutionResult(toolCallId, ToolName, false,
-                    $"Unknown git subcommand: '{subcommand}'. Allowed: {string.Join(", ", AllowedSubcommands)}",
+                    $"Unknown git subcommand: '{subcommand}'. Allowed: {SubcommandList}",
                     sw.ElapsedMilliseconds);
                 LogCompletion(toolCallId, errorResult, subcommand);
                 return errorResult;

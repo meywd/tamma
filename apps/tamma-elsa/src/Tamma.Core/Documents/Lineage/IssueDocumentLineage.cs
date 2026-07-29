@@ -23,6 +23,9 @@ public sealed record LineageDocumentEntry(
     [property: JsonPropertyName("producedByAction")] string ProducedByAction,
     [property: JsonPropertyName("revision")] int Revision,
     [property: JsonPropertyName("status")] string Status,
+    // Story 41-1c AC3 — the audience tag (ProseAudience wire string); null for
+    // non-prose documents and rows written before the tag existed.
+    [property: JsonPropertyName("audience")] string? Audience,
     [property: JsonPropertyName("supersedesDocumentId")] Guid? SupersedesDocumentId,
     [property: JsonPropertyName("parentDocumentId")] Guid? ParentDocumentId,
     [property: JsonPropertyName("correlatingEventId")] Guid? CorrelatingEventId,

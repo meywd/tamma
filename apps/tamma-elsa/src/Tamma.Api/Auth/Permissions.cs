@@ -1,3 +1,5 @@
+using System.Security.Claims;
+
 namespace Tamma.Api.Auth;
 
 public static class Permissions
@@ -78,6 +80,27 @@ public static class Permissions
         // grants admin+owner reach. Single-user mode is unaffected — every
         // signed-up user is auto-owner of their personal tenant.
         ["acceptance-rules:manage"] = ["admin", "owner"],
+        // Story 41-30 (D8) — scheduled-trigger management. Mirrors
+        // prompts:manage: a tenant's schedule create/update/delete/run-now
+        // must be reachable by tenant_owner OR tenant_admin (member → 403);
+        // the owner-only settings:manage would 403 every tenant_admin.
+        // tenant_id-NULL template rows are additionally platform-owner-only
+        // in the handler. Single-user mode is unaffected — every signed-up
+        // user is auto-owner of their personal tenant.
+        ["schedules:manage"] = ["admin", "owner"],
+        // Story 43-5/43-6 — Action Catalog automation toggles. Mirrors
+        // acceptance-rules:manage: a tenant's per-action / per-group autonomy
+        // assignments must be reachable by tenant_owner OR tenant_admin
+        // (member → 403); the owner-only settings:manage would 403 every
+        // tenant_admin. The PLATFORM CEILING is deliberately NOT covered by
+        // this permission — ceiling writes ride PlatformOwnerAccess (the
+        // platformRole=platform_admin claim), because the ceiling is the only
+        // thing standing between a tenant admin and full automation of a
+        // destructive action (epic 43 README OQ4). One permission for the
+        // whole gating plane — tools:manage is never created. Single-user
+        // mode is unaffected — every signed-up user is auto-owner of their
+        // personal tenant.
+        ["actions:manage"] = ["admin", "owner"],
     };
 
     public static bool HasPermission(string? role, string? permission)
@@ -103,6 +126,35 @@ public static class Permissions
         }
 
         return roleRank >= minRank;
+    }
+
+    /// <summary>
+    /// Principal-shaped overload — resolves the caller's role via
+    /// <see cref="ClaimsPrincipal.IsInRole"/>, which respects each identity's
+    /// OWN <c>RoleClaimType</c>: bare <c>"role"</c> for production JwtBearer
+    /// identities (Program.cs sets <c>MapInboundClaims=false</c> +
+    /// <c>RoleClaimType="role"</c>, matching the shape <see cref="JwtService"/>
+    /// mints) and <see cref="ClaimTypes.Role"/> for identities built with the
+    /// <see cref="ClaimsIdentity"/> default. A hardcoded
+    /// <c>FindFirst(ClaimTypes.Role)</c> never matched a real bearer JWT, which
+    /// fail-closed every <see cref="PermissionRequirement"/> policy for API
+    /// tokens — see
+    /// <c>.dev/bugs/2026-07-29-permission-handler-role-claim-mismatch.md</c>.
+    /// </summary>
+    public static bool HasPermission(ClaimsPrincipal? user, string? permission)
+    {
+        if (user is null || permission is null)
+            return false;
+
+        // Known roles are the closed hierarchy; probing each via IsInRole is
+        // both claim-shape-agnostic and fail-closed for unknown role values.
+        foreach (var role in RoleHierarchy.Keys)
+        {
+            if (user.IsInRole(role) && HasPermission(role, permission))
+                return true;
+        }
+
+        return false;
     }
 
     public static string[] GetRolePermissions(string? role)

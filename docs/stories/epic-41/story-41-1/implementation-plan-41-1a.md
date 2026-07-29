@@ -2,9 +2,9 @@
 
 ## Scope & Deliverable
 
-When this story is done, `Tamma.Core/Agents` models **11 roles and 95 actions** instead of 8 and 80;
-`RolePhaseMap.EligibleActions` carries **111 jagged cells** instead of 93 (see D4 — 15 new tokens, but 18
-new cells); `Tamma.Api/Prompts/` ships **119 embedded files** instead of 101 (18 new cells + 3 new
+When this story is done, `Tamma.Core/Agents` models **11 roles and 96 actions** instead of 8 and 80;
+`RolePhaseMap.EligibleActions` carries **112 jagged cells** instead of 93 (see D4 — 16 new tokens, but 19
+new cells); `Tamma.Api/Prompts/` ships **123 embedded files** instead of 101 (19 new cells + 3 new
 `_system.md` preambles); `DefaultAgentConfig` has a per-role row for each new role so
 `AgentResolverService` cannot `KeyNotFoundException` on them; `RolePhaseMap.GetReviewActionForRole`
 returns `ReviewDocs` for `TechWriter` so a `document-lifecycle` run with a `tech_writer` reviewer
@@ -170,12 +170,13 @@ against reality, not the snapshot.
   `product_owner` in `agent_configs.config`) is rejected — it destroys the user's expressed intent to
   configure a scrum master, and the platform is not in production with users (CLAUDE.md, "No migration
   anxiety"). `analyst` and `researcher` stay aliased to `product_owner`.
-- **D4 — the three new roles each carry `context-scan`, so the change is +15 tokens / +18 cells / +21
-  files.** All 8 incumbent roles include `AgentAction.ContextScan` in their eligibility set
+- **D4 — the three new roles each carry `context-scan`, so the change is +16 tokens / +19 cells / +22
+  files** (the story's 41-8 Phase B lockstep cell `(scrum_master, write-retro-narrative)` is included —
+  it moved every base number here by one).** All 8 incumbent roles include `AgentAction.ContextScan` in their eligibility set
   (`RolePhaseMap.cs:48, 66, 81, 96, 115, 128, 140, 155`), and `context-scan` is the free-text
   context-gathering cell every role can be asked to run. Omitting it for three roles would be the only
-  asymmetry in the matrix. `ContextScan` is an existing token, so `AgentAction` still moves 80 → **95**,
-  but `EligibleActions.Sum(Count)` moves 93 → **111** and the embedded file count 101 → **122** (18 new
+  asymmetry in the matrix. `ContextScan` is an existing token, so `AgentAction` still moves 80 → **96**,
+  but `EligibleActions.Sum(Count)` moves 93 → **112** and the embedded file count 101 → **123** (19 new
   cells + 3 `_system.md`). The story's "fifteen new cells" is the token count, not the cell count.
 - **D5 — new prompt cells are written as real templates against a named parser-free contract, not
   placeholders.** `SystemPromptsTests.RoleActionTemplates_EveryCell_HasNonEmptyBody` (`:48-58`) forbids
@@ -189,6 +190,17 @@ against reality, not the snapshot.
   convention exactly: `variables, enableTools, maxTokens, version` in that order, `enableTools: false`
   for every new cell (no governed tools exist for these families — epic-41 README, Epic 42 dependency),
   `version: 1`.
+  > **Amendment (2026-07-29, adversarial review):** this promise was initially BROKEN for
+  > `plan-sprint` and `author-ui-spec` — both shipped (commit 665f9a2) instructing shapes that fail
+  > their own intended validators (`sprintGoal`/`timebox`/`capacityPoints`/`committedItems` vs
+  > `SprintPlan`'s `sprintId`/`capacity`/`committed`/`carryOver`; a components/screens spec vs
+  > `UxSpec`'s flows/screens). Nothing caught it because `TemplateExampleConformanceTests` only
+  > checked cells BOUND in `ContractBindingTests`, and these cells are unbound. Both templates are
+  > rewritten to the exact wire shapes (version 1 → 2), and the promise is now ENFORCED for unbound
+  > cells whose intended type is registered: `TemplateExampleConformanceTests.ConformingUnboundCells`
+  > maps unbound cell → intended registered type and
+  > `EveryConformingUnboundCell_ShippedExampleValidatesAgainstItsIntendedType` runs each template's
+  > fenced example through the type's real `Validate()`.
 - **D6 — `s_primaryAction` values (C3):** `ScrumMaster => PlanSprint`, `ProjectManager => ReportStatus`,
   `UxDesigner => AuthorUiSpec`. Each is in that role's own eligibility set, which is the invariant
   `RolePhaseMapTests` asserts for the incumbent 8.
@@ -239,7 +251,8 @@ against reality, not the snapshot.
 4. **MODIFY `apps/tamma-elsa/src/Tamma.Api/Services/Agents/DefaultAgentConfig.cs`** (C2/D7) — three new
    `s_perRole` rows.
 
-5. **CREATE 21 files under `apps/tamma-elsa/src/Tamma.Api/Prompts/`** (D4/D5):
+5. **CREATE 22 files under `apps/tamma-elsa/src/Tamma.Api/Prompts/`** (D4/D5 — 19 cell files + 3
+   `_system.md`; the 19th cell is `scrum_master/write-retro-narrative.md`, the 41-8 Phase B lockstep):
    - `scrum_master/_system.md`, `project_manager/_system.md`, `ux_designer/_system.md` (front matter:
      `version: 1` only — any other key is `PROMPT.SEED.MALFORMED_FILE`, `PromptFileLoader.cs:256-272`);
    - 18 cell files: `scrum_master/{context-scan,plan-sprint,synthesize-standup,facilitate-retro,track-impediments}.md`,

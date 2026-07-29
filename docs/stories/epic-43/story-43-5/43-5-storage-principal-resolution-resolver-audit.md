@@ -1,6 +1,6 @@
 # Story 43-5: Storage, Principal Resolution, the Resolver, and Audit
 
-Status: drafted
+Status: done — conformance-reviewed 2026-07-29; both control-plane tables, the principal resolver, the pure evaluator, the ledger and the audit family ship; AC12 superseded by F7 (singleton 60 s TTL store, no Redis — `Registration_IsScoped` / `TwoGateCallsInOneRequest_IssueOneRepositoryRead` do not exist) and AC13's `.ALLOWED` "or Enforced" arm dropped per F9; `IAutonomyGate` has no production caller, but Seam B enforcement is live and resolver-backed; F6/F10 open
 
 ## MANDATORY: Before You Code
 
@@ -58,7 +58,8 @@ binary, which is stronger still.
 and the `ControlPlaneDbContextModelTests` strict entity list." **This story takes the second half and
 deliberately refuses the first.**
 
-`apps/tamma-elsa/src/Tamma.Api/Program.cs:3234-3276` runs
+`apps/tamma-elsa/src/Tamma.Api/Program.cs`'s `ExecuteSqlRaw` block (line numbers deliberately unpinned —
+they drift; the residency test locates the literal dynamically) runs
 `DROP TABLE IF EXISTS … CASCADE` over ~55 tables **on every startup** unless `TAMMA_PRESERVE_DB=1`. Every
 other table on that list is operational data — events, outbox rows, webhook deliveries, workflow instances.
 `action_assignments` and `action_authorizations` are not operational data: **they are the only thing between
@@ -134,14 +135,17 @@ and `ApplyTenantFilter` would break the platform-ceiling read path outright.
    `correlation_id`, `target_kind`/`target_key` (the **granted scope** — an action or a whole group),
    `state ∈ {pending, granted, denied, expired}`, `requested_at_utc` **NOT NULL from day one**,
    `decided_at_utc`, `decided_by_user_id`, `expires_at_utc` (default +24h, config
-   `Tamma:Governance:AuthorizationTtlHours`), `consumed_at_utc`, `reason`, `autonomy_level_at_request`.
+   `Tamma:Governance:AuthorizationTtlHours` — *note 2026-07-29: this key has **no reader** in the tree yet;
+   it is named in the entity/ledger doc comments as the intended knob, and 43-9's decision endpoint is the
+   caller that will resolve it. Do not read it as shipped configuration*), `consumed_at_utc`, `reason`,
+   `autonomy_level_at_request`.
    A partial unique index over `(tenant_id, user_id, correlation_id, target_kind, target_key)`
    `NULLS NOT DISTINCT WHERE state IN ('pending','granted')`.
 
 5. **Both tables are on the strict CP entity list and NOT on the destructive DROP list.**
    `tests/Tamma.Api.Tests/Epic28/ControlPlaneDbContextModelTests.cs`'s `BeEquivalentTo` set gains both
-   names (an unlisted table fails there). `Program.cs:3234-3276` is **not** modified. A dedicated test,
-   `ActionAssignmentResidencyTests.Tables_AreNotInTheDestructiveDropList`, reads the `ExecuteSqlRaw` string
+   names (an unlisted table fails there). `Program.cs`'s DROP list is **not** modified. A dedicated test,
+   `ActionGovernanceResidencyTests.Tables_AreNotInTheDestructiveDropList`, reads the `ExecuteSqlRaw` string
    from source and fails if either name appears — with a message explaining why, citing this AC.
 
 6. **Repository surfaces are parallel and never joined, and reads do not use the tenant factory.**
@@ -197,14 +201,24 @@ and `ApplyTenantFilter` would break the platform-ceiling read path outright.
     row for the current dial level; today the interface cannot reach it. Method naming follows the
     `ForTenant` rationale documented at `IAcceptanceRulesResolver.cs:9-15`.
 
-12. **Snapshot caching is scoped, and proven so.** `IGovernancePolicySnapshotProvider` is registered
+12. **[Superseded 2026-07-29 — see Follow-ups F7.]** The shipped provider is a **singleton TTL store**
+    (`GovernancePolicySnapshotStore`, 60 s lazy-refresh TTL, a startup priming service, monotonic
+    version-gated installs, invalidate-on-write via `RefreshAsync`, **no Redis**). The scoped registration,
+    the Redis clause and both named tests below (`Registration_IsScoped`,
+    `TwoGateCallsInOneRequest_IssueOneRepositoryRead`) do **not** exist in the tree. The AC text is kept
+    verbatim below for provenance; F7 is the governing statement.
+    ~~**Snapshot caching is scoped, and proven so.**~~ `IGovernancePolicySnapshotProvider` is registered
     **scoped** and loads lazily once per HTTP request (one CP read pair per request, not per gate call — a
     tool loop gating 40 calls must issue one read). Background actors get a per-tick scope. Cross-process
     invalidation rides the already-present Redis connection when `ConnectionStrings:Redis` is set, in-process
     otherwise with a 30 s ceiling. Tested: `Registration_IsScoped`,
     `TwoGateCallsInOneRequest_IssueOneRepositoryRead`.
 
-13. **One audit event family, and denials are not swallowed.** `ActionGateEventsService`
+13. **[Partially superseded 2026-07-29 — see Follow-ups F9: the `.ALLOWED` volume gate's "or `Enforced`"
+    arm was deliberately DROPPED.]** `.ALLOWED` emits only when the resolution's provenance is not
+    `system-default`; the "or `Enforced`" clause at the end of this AC is not implemented, because under
+    epic D1 enforce defaults to TRUE and that arm would have defeated the volume gate entirely.
+    **One audit event family, and denials are not swallowed.** `ActionGateEventsService`
     (`AcceptanceRulesEventsService.cs:16-18,54-93` template — `const` type strings, tags,
     `{workflowVersion, eventSource}` metadata) emits `ACTION.GATE.ALLOWED` / `.REQUIRES_HUMAN` / `.DENIED` /
     `.AUTHORIZED` / `.AUTHORIZATION_DENIED` / `.PRINCIPAL_UNRESOLVED` / `.EVALUATION_FAILED`.
@@ -228,7 +242,7 @@ and `ApplyTenantFilter` would break the platform-ceiling read path outright.
 - **Story 43-4 (Tool-vocabulary reconciliation)** — the resolver resolves an emitted tool name through
   `ToolNameAliases` before it can look up an assignment. Blocking for the `tool:*` plane only.
 - **Existing, verified:** `ControlPlaneDbContext`; `TammaModelConfiguration.cs:1621-1654` (the shape);
-  `ControlPlaneDbContextModelTests.cs:33-48`; `Program.cs:3234-3276` (the DROP list, untouched);
+  `ControlPlaneDbContextModelTests.cs:33-48`; `Program.cs`'s DROP list (untouched);
   `AcceptanceRulesRepository.cs:21-25,34,108`; `AuthPrincipal.cs:30-39`;
   `IAcceptanceRulesResolver` + `AcceptanceRulesService.cs:52-64,91-108`;
   `AcceptanceGuardrails.TryPreGate:45`; `AcceptanceRulesEventsService.cs:16-18,54-93`; `IEventRepository`;
@@ -241,12 +255,19 @@ and `ApplyTenantFilter` would break the platform-ceiling read path outright.
 
 - **The enforcement seams themselves.** No call site of `IAutonomyGate` is added here — Story 43-9 owns all
   five. This story ships the component and its tests; nothing invokes it in production yet.
+  *[Clarified 2026-07-29 — literally true of `IAutonomyGate` (zero production callers), but do not read it
+  as "no enforcement is live": **Seam B enforcement IS live and is now resolver-backed**.
+  `CatalogDefaultToolLoopAutonomyGate`'s production constructor consumes this story's
+  `IGovernancePolicySnapshotProvider`, and that gate is a REQUIRED constructor dependency of
+  `InlineToolLoopRunner` — wired at
+  `apps/tamma-elsa/src/Tamma.Api/Extensions/ActionCatalogGovernanceServiceCollectionExtensions.cs:79-82`.
+  So this story's assignment ladder already decides live tool calls; the four remaining seams are 43-9's.]*
 - **The admin API and its DTOs.** Story 43-6.
 - **Writing authorization rows from human surfaces.** The ledger table and `TryConsumeAsync` ship here;
   the decision endpoint and the resume-endpoint wiring are Story 43-9.
 - **A new suspend activity or bookmark prefix.** `CanonicalSuspendActivities` is keyed by activity `Type`,
   so a new prefix requires a new activity; v1 grants arrive through the 11 landed resume endpoints.
-- **Any change to `Program.cs:3234-3276`.** Deliberately untouched (AC5).
+- **Any change to `Program.cs`'s DROP list.** Deliberately untouched (AC5).
 - **Migrating `AcceptorRequirement` into the catalog.** It ships `design=Human` with zero consumers and
   stays a separate concept; folding it in means touching the document-lifecycle acceptance path.
 - **Payload-predicate policy.** The gate matches on identity, not argument values — same limitation
@@ -256,8 +277,99 @@ and `ApplyTenantFilter` would break the platform-ceiling read path outright.
 
 5 days
 
+## Follow-ups from adversarial review (2026-07-29)
+
+The 43-5 slice passed adversarial review **approve-with-conditions**. F1–F5 were fixed in the same
+cycle (see below); F6–F10 are recorded here as open follow-ups so they cannot silently vanish.
+
+### Fixed in this cycle (F1–F5)
+
+- **F1 (MAJOR)** — `EfActionAuthorizationLedger.TryConsumeAsync`/`DecideAsync` were
+  check-then-write (load → mutate → `SaveChangesAsync`, no concurrency token): two contexts that
+  both read before either wrote could double-consume a grant, and a concurrent grant + deny both
+  returned non-null with last-write-wins. Both transitions are now conditional single-statement
+  `ExecuteUpdate` CAS writes (the `ScheduledTriggerRepository.TryClaimManualFireForDispatchAsync`
+  pattern): consume CASes on `state='granted' AND ConsumedAtUtc IS NULL` (and not past expiry),
+  decide CASes on `state='pending'` (and not past expiry); affected-rows 1 wins, the loser gets
+  null. Pinned by `ConcurrentConsume_OfOneGrant_HasExactlyOneWinner` and
+  `ConcurrentGrantAndDeny_ExactlyOneWins_AndTheRowMatchesTheWinner` (real Postgres).
+- **F2** — a group grant was consumable for an action OUTSIDE the group: `TryConsumeAsync` trusted
+  a caller-supplied `groupWire`. The parameter is removed; the ledger resolves the covering group
+  from `ActionCatalog` itself (Tamma.Data already references Tamma.Core). An uncatalogued action
+  key can only be covered by an exact action-scoped grant. Pinned by
+  `GroupGrant_CannotBeConsumedForAnActionOutsideTheGroup` (deploy-control grant vs
+  `tool:shell_execute`).
+- **F3** — a time-expired open (pending/granted) row deadlocked its
+  (principal, correlation, target) key forever: nothing transitioned `state→'expired'`, the
+  partial unique open-row index blocked a fresh row, `RequestAsync` idempotently returned the
+  stale row, and `DecideAsync` refused it. `RequestAsync` now CAS-transitions a past-expiry open
+  row to `'expired'` (removing it from the partial index — the index `WHERE` clause is unchanged)
+  and mints a fresh pending row; the decide/consume predicates exclude expired-by-time rows in
+  SQL. Pinned by `ExpiredPendingRow_DoesNotDeadlockTheKey_AFreshRequestSucceeds` and
+  `TimeExpiredGrant_IsNotConsumable`.
+- **F4 (staleness half)** — `ActionPolicyEndpoints` derived the threshold it materialized into
+  enforce/enabled/roles-first writes from the ≤60 s-stale snapshot and re-supplied it on EXISTING
+  rows, so an enforce write on pod B within the TTL of a threshold tightening on pod A silently
+  reverted the tightening. Fixed: the row's existence is decided by a FRESH repository read; an
+  existing row gets a null threshold (per-field independence preserves the stored value), and a
+  genuinely-new row's pin is computed from fresh repository rows through
+  `AutonomyGateEvaluator.ResolveEffectiveMinAutonomy`, never the snapshot. Pinned by
+  `EnforceOnlyWrite_OnAnExistingRow_PreservesItsStoredThreshold_EvenWhenTheSnapshotIsStale`.
+  **Materialize-and-pin semantics for genuinely-new rows (design consequence, deliberate):** a
+  first enforce/enabled/roles write materializes an action row whose threshold is pinned at the
+  CURRENT effective value. From then on that action row beats group rows (`??` inside the
+  principal ladder): a LATER group-scope tightening no longer reaches this member, and the pin
+  survives deletion of the group row. Provenance resolves as `action-override`, which the 43-6 UI
+  surfaces so the pin is visible. Pinned by
+  `EnforceFirstWrite_MaterializesAndPinsTheCurrentEffective_SoALaterGroupTighteningDoesNotReachThisAction`.
+- **F5** — group-level threshold writes (principal AND ceiling routes) bypassed the per-action
+  validation: a mid-range threshold on a group containing `automation:*` (non-escalatable)
+  members silently behaved as Deny for them — the exact value the action route 400s. Group writes
+  now run the member check and reject with `ACTION_POLICY.INVALID` naming every offending member.
+  Non-enforceable members (`effect:secret.reveal`) are exempt — the evaluator never blocks on
+  them, and the secrets group must stay writable. Pinned by
+  `GroupWrite_MidRangeOnAGroupWithNonEscalatableMembers_Is400NamingThem`.
+
+### Open follow-ups (record only — NOT implemented)
+
+- **F6 — fail-open on cold snapshot / CP outage. MUST be revisited before 43-9 wires the
+  enforcing seams A/C/D/E.** If the snapshot store is cold (priming failed and the lazy refresh
+  has not landed) the gate evaluates against zero rows — shipped defaults — so every admin
+  tightening is silently not applied for that window. Worse, if the base-rules read degrades
+  (`ResolveBaseAsync` throwing → shipped `AcceptanceDefaults.Rules`), the legacy
+  **AlwaysEscalate floor vanishes**: an action a user pinned to always-human via acceptance rules
+  evaluates as automated. Dial degrade (falling back to the default dial level) is safe — it can
+  only be more conservative than a raised dial. Before any seam ENFORCES, decide: fail-closed on
+  cold snapshot for enforce-marked rows, or a bounded startup gate.
+- **F7 — AC12 deviations are now formal.** The shipped snapshot provider deviates from AC12's
+  sketch: it is a **singleton** (not scoped), with a **60 s TTL** and **no Redis cross-instance
+  invalidation** (the story's Redis clause is unimplemented). Consequence: enforcement changes
+  have a **≤60 s cross-instance staleness bound** (the writing instance is consistent immediately
+  via invalidate-on-write). This amendment supersedes the AC text rather than leaving it
+  contradicted; the scoped/Redis design remains available if the bound ever becomes unacceptable.
+- **F9 — audit-event gaps, by design, until 43-9.** The shipped `.ALLOWED` volume gate DROPS
+  AC13's "or `Enforced`" arm (deliberately: under epic D1 enforce defaults to TRUE, so that arm
+  would have defeated the volume gate entirely) — `.ALLOWED` emits only when the resolution's
+  provenance is not `system-default`. Consequence: Automated decisions whose resolution stays
+  system-default are suppressed even where an enforce opinion exists, and live tool-loop denials
+  emit **no event at all** until 43-9 wires the seam emitters. Anyone reading the audit stream
+  before 43-9 lands must not conclude "no events = no gated activity". (Post-F4 note: an
+  enforce-only WRITE now materializes a pinned action row, so those specific resolutions carry
+  `action-override` provenance and do emit.)
+- **F10 — cross-plane Enforce/AllowedRoles composition is non-monotone (trap for 43-6).** The
+  evaluator composes `Enforce` as platform-wins-when-present and `AllowedRoles` as
+  principal-wins-when-present — neither is `max()`-monotone like the threshold. Today the ceiling
+  routes only write thresholds, so this is latent. If 43-6 (or later) adds ceiling
+  enforce/roles endpoints, a platform `Enforce=false` would OVERRIDE a tenant's `Enforce=true`
+  (and a tenant roles list already overrides a platform one) — decide the intended lattice before
+  exposing those endpoints.
+
+See also `.dev/findings/2026-07-29-governance-wipe-orphans-policy-rows.md` (review F8: the
+dev-mode wipe orphans `action_assignments` principal keys).
+
 ## Change Log
 
-| Date       | Version | Changes                | Author |
-| ---------- | ------- | ---------------------- | ------ |
-| 2026-07-25 | 1.0.0   | Initial story creation | Claude |
+| Date       | Version | Changes                                                                | Author |
+| ---------- | ------- | ---------------------------------------------------------------------- | ------ |
+| 2026-07-25 | 1.0.0   | Initial story creation                                                  | Claude |
+| 2026-07-29 | 1.1.0   | Adversarial-review amendments: F1–F5 fixed (ledger CAS, catalog-derived group coverage, expired-row unblocking, fresh-read threshold preservation + documented materialize-and-pin, group-write member validation); F6/F7/F9/F10 recorded as follow-ups | Claude |

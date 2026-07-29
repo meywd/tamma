@@ -24,13 +24,16 @@ public class AgenticToolLoopTests
     private Mock<IToolExecutorRegistry> _registryMock = null!;
     private Mock<ILogger<InlineToolLoopRunner>> _loggerMock = null!;
 
+    /// <summary>Epic 43 Seam B — the required gate, at its behaviour-preserving v1 default.</summary>
+    private static readonly IToolLoopAutonomyGate DefaultGate = new CatalogDefaultToolLoopAutonomyGate();
+
     [SetUp]
     public void SetUp()
     {
         _registryMock = new Mock<IToolExecutorRegistry>();
         _loggerMock = new Mock<ILogger<InlineToolLoopRunner>>();
         _activity = new InlineToolLoopRunner(
-            _loggerMock.Object, null, null, null, _registryMock.Object);
+            _loggerMock.Object, null, null, null, DefaultGate, _registryMock.Object);
     }
 
     // =====================================================================
@@ -41,7 +44,7 @@ public class AgenticToolLoopTests
     public void EnableToolLoopFalse_ConstructorWithRegistry_DoesNotThrow()
     {
         // Verify that adding IToolExecutorRegistry to constructor does not break anything
-        var action = () => new InlineToolLoopRunner(null, null, null, null, _registryMock.Object);
+        var action = () => new InlineToolLoopRunner(null, null, null, null, DefaultGate, _registryMock.Object);
         action.Should().NotThrow();
     }
 
@@ -49,7 +52,8 @@ public class AgenticToolLoopTests
     public void NullToolRegistry_ConstructorStillWorks()
     {
         // When IToolExecutorRegistry is null, the activity should still be constructible
-        var action = () => new InlineToolLoopRunner(null, null, null, null, null);
+        // (the Seam B gate, by contrast, is REQUIRED — see ToolLoopAutonomyGateSeamTests).
+        var action = () => new InlineToolLoopRunner(null, null, null, null, DefaultGate, null);
         action.Should().NotThrow();
     }
 
@@ -66,7 +70,7 @@ public class AgenticToolLoopTests
     {
         var sanitizer = new ContentSanitizer();
         var action = () => new InlineToolLoopRunner(
-            _loggerMock.Object, null, null, sanitizer, _registryMock.Object);
+            _loggerMock.Object, null, null, sanitizer, DefaultGate, _registryMock.Object);
         action.Should().NotThrow();
     }
 

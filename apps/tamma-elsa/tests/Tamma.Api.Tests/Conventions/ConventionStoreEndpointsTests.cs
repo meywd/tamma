@@ -710,15 +710,16 @@ public class ConventionStoreEndpointsTests
     // ======================================================================
 
     [Test]
-    public async Task RegistryRoles_ReturnsAllEightRoles()
+    public async Task RegistryRoles_ReturnsAllElevenRoles()
     {
         var result = ConventionStoreEndpoints.RegistryRoles();
         var (status, body) = await ExecuteAsync(result);
         status.Should().Be(StatusCodes.Status200OK);
 
         var roles = Deserialize<List<string>>(body);
-        roles.Should().HaveCount(8);
-        roles.Should().Contain(new[] { "developer", "tester", "security", "devops", "architect", "product_owner", "senior_developer", "tech_writer" });
+        // 8 → 11 (Story 41-1a): + scrum_master, project_manager, ux_designer.
+        roles.Should().HaveCount(11);
+        roles.Should().Contain(new[] { "developer", "tester", "security", "devops", "architect", "product_owner", "senior_developer", "tech_writer", "scrum_master", "project_manager", "ux_designer" });
     }
 
     [Test]
@@ -741,7 +742,8 @@ public class ConventionStoreEndpointsTests
         status.Should().Be(StatusCodes.Status200OK);
 
         var perRole = Deserialize<List<RoleActionsResponse>>(body);
-        perRole.Should().HaveCount(8);
+        // 8 → 11 (Story 41-1a).
+        perRole.Should().HaveCount(11);
         perRole.Single(r => r.Role == RoleWire).Actions.Should().Contain(ActionWire);
     }
 }

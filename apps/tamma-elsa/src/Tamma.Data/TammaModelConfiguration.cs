@@ -1140,6 +1140,206 @@ internal static class TammaModelConfiguration
         });
     }
 
+    #region Story 41-30 — tenant-aware scheduled-trigger seam (control plane)
+
+    /// <summary>
+    /// Story 41-30 — the two control-plane tables of the tenant-aware
+    /// scheduled-trigger seam: <c>scheduled_triggers</c> (the schedule
+    /// registry, D1) and <c>scheduled_trigger_fires</c> (the durable
+    /// at-most-once ledger, D2). CP-resident for the 43-5 reasons (the sweeper
+    /// enumerates across tenants; tenant-schema migrations don't reach
+    /// already-provisioned tenants). Both tables are deliberately EXCLUDED
+    /// from the destructive startup DROP list (AC7) and therefore — mirroring
+    /// <see cref="ConfigureProviderSettings"/> — carry NO FK to
+    /// <c>tenants</c>: the tenants table IS wiped each deploy and a cascade
+    /// would take the surviving schedule rows with it. Configured ONLY on
+    /// <see cref="ControlPlaneDbContext"/>, never on the tenant context.
+    /// </summary>
+    public static void ConfigureScheduledTriggerEntities(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Entities.ScheduledTrigger>(entity =>
+        {
+            entity.ToTable("scheduled_triggers", t =>
+            {
+                // Never an empty target / name / cron — the admin API rejects
+                // them with a typed 400; these CHECKs make raw SQL fail too.
+                t.HasCheckConstraint(
+                    "ck_scheduled_triggers_definition_id",
+                    "length(\"DefinitionId\") > 0");
+                t.HasCheckConstraint(
+                    "ck_scheduled_triggers_name",
+                    "length(\"Name\") > 0");
+                t.HasCheckConstraint(
+                    "ck_scheduled_triggers_cron",
+                    "length(\"CronExpression\") > 0");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.DefinitionId).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.CronExpression).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Enabled).IsRequired().HasDefaultValue(true);
+            entity.Property(e => e.InputJson)
+                .IsRequired().HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.LastWindowKey).HasMaxLength(64);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // The natural key: one row per (tenant, definition, name). NULLS
+            // NOT DISTINCT so at most ONE platform template per
+            // (definition, name) — the prompt_overrides idiom for a
+            // nullable-principal key (D1).
+            entity.HasIndex(e => new { e.TenantId, e.DefinitionId, e.Name })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("ux_scheduled_triggers_tenant_definition_name");
+
+            // NO (Enabled, NextDueAt) index: the tick query lists by Enabled
+            // (+ tenant) and never filters NextDueAt, so the old
+            // IX_scheduled_triggers_Enabled_NextDueAt was dead weight — removed
+            // 2026-07-29 (41-30 review follow-up; the migration is unreleased).
+        });
+
+        modelBuilder.Entity<Entities.ScheduledTriggerFire>(entity =>
+        {
+            entity.ToTable("scheduled_trigger_fires", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_scheduled_trigger_fires_outcome",
+                    "\"Outcome\" IN ('claimed','dispatched','failed')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.DefinitionId).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.WindowKey).IsRequired().HasMaxLength(64);
+            entity.Property(e => e.Outcome)
+                .IsRequired().HasMaxLength(16).HasDefaultValue("claimed");
+            entity.Property(e => e.ClaimedAt).HasDefaultValueSql("now()");
+
+            // THE at-most-once invariant (D2/Correction 3): the ON CONFLICT
+            // DO NOTHING claim races against this index; Postgres arbitrates.
+            entity.HasIndex(e => new { e.TriggerId, e.WindowKey })
+                .IsUnique()
+                .HasDatabaseName("ux_scheduled_trigger_fires_trigger_window");
+
+            // Retention pruning scans by claim time.
+            entity.HasIndex(e => e.ClaimedAt)
+                .HasDatabaseName("IX_scheduled_trigger_fires_ClaimedAt");
+
+            // Ledger dies with its trigger; intra-seam FK is safe because both
+            // tables share the DROP-list exclusion (they survive together).
+            entity.HasOne<Entities.ScheduledTrigger>()
+                .WithMany()
+                .HasForeignKey(e => e.TriggerId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+    }
+
+    #endregion
+
+    #region Story 43-5 — governed action catalog storage (control plane)
+
+    /// <summary>
+    /// Story 43-5 — the two control-plane tables of the governed action
+    /// catalog: <c>action_assignments</c> (per-principal autonomy policy,
+    /// three scopes: platform ceiling / tenant / user) and
+    /// <c>action_authorizations</c> (the one-human-decision-per-run ledger).
+    /// CP-resident in BOTH modes — forced, not preferred (see
+    /// <see cref="Entities.ActionAssignment"/>'s doc comment for the three
+    /// reasons) — and deliberately EXCLUDED from the destructive startup DROP
+    /// list (AC5), so, mirroring <see cref="ConfigureProviderSettings"/>, both
+    /// carry NO FK to <c>tenants</c>/<c>users</c> and their migration is
+    /// IF-NOT-EXISTS idempotent. Configured ONLY on
+    /// <see cref="ControlPlaneDbContext"/>, never on the tenant context; no
+    /// <c>ApplyTenantFilter</c> (it would break the platform-ceiling read
+    /// path outright).
+    /// </summary>
+    public static void ConfigureActionGovernanceEntities(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Entities.ActionAssignment>(entity =>
+        {
+            entity.ToTable("action_assignments", t =>
+            {
+                // THREE admissible scopes — tenant-only, user-only, and
+                // NEITHER (the platform ceiling). Deliberately NOT named
+                // _principal_xor: six shipped stores use that name for a
+                // two-case rule, and this table's third case IS the ceiling
+                // (43-5 D2 — the name is the documentation).
+                t.HasCheckConstraint(
+                    "ck_action_assignments_principal_scope",
+                    "NOT (\"TenantId\" IS NOT NULL AND \"UserId\" IS NOT NULL)");
+                t.HasCheckConstraint(
+                    "ck_action_assignments_target_kind",
+                    "\"TargetKind\" IN ('action','group','mode')");
+                // Mode rows carry no threshold; action/group rows always do.
+                t.HasCheckConstraint(
+                    "ck_action_assignments_mode_row",
+                    "(\"TargetKind\" = 'mode') = (\"MinAutonomy\" IS NULL)");
+                // NO CHECK on the MinAutonomy VALUE — deliberate (AC3/D5): a
+                // numeric CHECK frozen into a migration snapshot would be a
+                // second permanent hardcoding of the AutonomyDial bound.
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.TargetKind).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.TargetKey).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.Note).HasMaxLength(500);
+            entity.Property(e => e.Version).IsRequired().HasDefaultValue(1);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // One row per (principal, target). NULLS NOT DISTINCT so the
+            // all-null platform principal dedupes like any other (PG15+;
+            // production runs PG17 — the provider_settings pattern).
+            entity.HasIndex(e => new { e.TenantId, e.UserId, e.TargetKind, e.TargetKey })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("ux_action_assignments_principal_target");
+        });
+
+        modelBuilder.Entity<Entities.ActionAuthorization>(entity =>
+        {
+            entity.ToTable("action_authorizations", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_action_authorizations_principal_scope",
+                    "NOT (\"TenantId\" IS NOT NULL AND \"UserId\" IS NOT NULL)");
+                t.HasCheckConstraint(
+                    "ck_action_authorizations_state",
+                    "\"State\" IN ('pending','granted','denied','expired')");
+                // The granted scope is an action or a whole group.
+                t.HasCheckConstraint(
+                    "ck_action_authorizations_target_kind",
+                    "\"TargetKind\" IN ('action','group')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.CorrelationId).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.TargetKind).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.TargetKey).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.State).IsRequired().HasMaxLength(16).HasDefaultValue("pending");
+            // NOT NULL from day one (AC4).
+            entity.Property(e => e.RequestedAtUtc).IsRequired().HasDefaultValueSql("now()");
+            entity.Property(e => e.Reason).HasMaxLength(1000);
+
+            // At most one OPEN (pending/granted) authorization per
+            // (principal, correlation, target); a denied/expired row permits
+            // a fresh request.
+            entity.HasIndex(e => new
+                { e.TenantId, e.UserId, e.CorrelationId, e.TargetKind, e.TargetKey })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasFilter("\"State\" IN ('pending','granted')")
+                .HasDatabaseName("ux_action_authorizations_open");
+
+            // The consume path scans open grants by correlation.
+            entity.HasIndex(e => new { e.CorrelationId, e.State })
+                .HasDatabaseName("IX_action_authorizations_Correlation_State");
+        });
+    }
+
+    #endregion
+
     /// <summary>
     /// Story 35-1 — billing foundation entities. The tenant→Stripe customer
     /// mapping (<c>billing_customers</c>, unique <c>TenantId</c>) and the
@@ -1453,6 +1653,12 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.ParentDocumentId).HasColumnName("parent_document_id");
             entity.Property(e => e.CorrelatingEventId).HasColumnName("correlating_event_id");
             entity.Property(e => e.TenantId).HasColumnName("tenant_id");
+            // Story 41-1c — the audience tag (ProseAudience wire string). Nullable:
+            // non-prose rows and pre-41-1c rows carry NULL. No CHECK constraint —
+            // the vocabulary is enforced by ProseDocumentType.Validate with a named
+            // violation code (AC4); a DB CHECK would turn a vocabulary extension
+            // into a migration (D7).
+            entity.Property(e => e.Audience).HasColumnName("audience").HasMaxLength(32);
             entity.Property(e => e.BodyJson)
                 .HasColumnName("body").HasColumnType("jsonb")
                 .IsRequired().HasDefaultValueSql("'{}'::jsonb");
@@ -1467,6 +1673,12 @@ internal static class TammaModelConfiguration
                 .HasDatabaseName("IX_document_instances_issue_type_status");
             entity.HasIndex(e => new { e.IssueId, e.CreatedAt })
                 .HasDatabaseName("IX_document_instances_issue_created");
+
+            // Story 41-1c D7 — the audience filter is always issue-scoped and only
+            // prose rows carry an audience, so the index is partial on NOT NULL.
+            entity.HasIndex(e => new { e.IssueId, e.Audience })
+                .HasFilter("audience IS NOT NULL")
+                .HasDatabaseName("IX_document_instances_issue_audience");
 
             // Supersession self-reference (D4): the prior revision. Restrict so a
             // superseded row can't be deleted out from under its successor
@@ -2133,7 +2345,270 @@ internal static class TammaModelConfiguration
         // configured on the CP context for single-user user-keyed rows — one
         // physical schema, two homes (mirrors audit_records / prompt_overrides).
         ConfigureAgentRoleSelections(modelBuilder, fixedTenantId);
+
+        // ── Native tracker (Story 44-1) ──
+        // projects / work_items / work_item_relations / iterations /
+        // tracker_preferences. Tenant model ONLY — the CP context never
+        // carries these tables (work-tracking rows are tenant data, epic D5).
+        ConfigureTrackerEntities(modelBuilder, fixedTenantId);
     }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // ── Story 44-1 — Native tracker entity configuration (Epic 44) ──
+    //
+    // ONE contiguous region; do not interleave other stories' configs here.
+    // Five tenant-schema tables. Vocabulary columns store 44-0's wire strings
+    // and every CHECK below mirrors the corresponding Tamma.Core.Tracking
+    // enum's [Wire] set EXACTLY — TrackerMigrationTests asserts set equality
+    // by reflection, so a member added there without an amendment here fails
+    // loudly in CI (the ck_document_instances_status posture).
+    //
+    // The two rank columns carry UseCollation("C") IN THE MODEL: the base-62
+    // rank alphabet (Rank.cs) agrees with Postgres ORDER BY only under the C
+    // collation — under en_US.UTF-8 case interleaves ('a' before 'B') and the
+    // board order silently diverges from API order. Keeping the collation in
+    // the model (not a migration hand-edit) means a regenerated migration or
+    // snapshot cannot silently drop it.
+    // ═════════════════════════════════════════════════════════════════════════
+    public static void ConfigureTrackerEntities(
+        ModelBuilder modelBuilder, Guid? fixedTenantId = null)
+    {
+        // ── ProjectEntity ──
+        modelBuilder.Entity<ProjectEntity>(entity =>
+        {
+            entity.ToTable("projects", t =>
+            {
+                // Mirrors EstimateScale's 5 wire strings (44-0 AC13).
+                t.HasCheckConstraint(
+                    "ck_projects_estimate_scale",
+                    "\"EstimateScale\" IN ('not_used','linear','fibonacci','exponential','t_shirt')");
+                // The mint counter can never fall below the first mintable number.
+                t.HasCheckConstraint("ck_projects_next_number", "\"NextNumber\" >= 1");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            // ^[A-Z][A-Z0-9]{1,9}$ — 10 chars max (WorkItemRef.IsValidProjectKey
+            // is the validation boundary; the width just pins the invariant).
+            entity.Property(e => e.Key).IsRequired().HasMaxLength(10);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.EstimateScale)
+                .IsRequired().HasMaxLength(16).HasDefaultValue("not_used");
+            entity.Property(e => e.NextNumber).HasDefaultValue(1);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.Version).HasDefaultValue(1);
+            // NOTE: RepositoryId is a bare Guid? — deliberately NO FK (story
+            // AC10): 39-20's repositories table is control-plane resident and
+            // a cross-plane FK is not expressible; no second repo registry.
+
+            entity.HasIndex(e => e.Key).IsUnique()
+                .HasDatabaseName("UX_projects_key");
+        });
+
+        // ── WorkItemEntity ──
+        modelBuilder.Entity<WorkItemEntity>(entity =>
+        {
+            entity.ToTable("work_items", t =>
+            {
+                // Mirrors WorkItemStatus's EIGHT wire strings (triage included
+                // from day one — 44-0 AC2; adding a member later is a
+                // fleet-wide migration through the 44-1 sweep).
+                t.HasCheckConstraint(
+                    "ck_work_items_status",
+                    "\"Status\" IN ('triage','backlog','ready','in_progress','in_review','blocked','done','cancelled')");
+                // Mirrors WorkItemKind's FOUR wire strings — no bug, no chore;
+                // those live on the IssueType axis (44-0 AC1).
+                t.HasCheckConstraint(
+                    "ck_work_items_kind",
+                    "\"Kind\" IN ('epic','story','task','spike')");
+                // Mirrors TriagePriority's wires; NULL = unprioritised (44-0 AC11).
+                t.HasCheckConstraint(
+                    "ck_work_items_priority",
+                    "\"Priority\" IS NULL OR \"Priority\" IN ('urgent','high','normal','low')");
+                // Mirrors TriageIssueType's wires; NULL = not yet classified.
+                t.HasCheckConstraint(
+                    "ck_work_items_issue_type",
+                    "\"IssueType\" IS NULL OR \"IssueType\" IN ('bug','feature','chore','question','security','docs')");
+                t.HasCheckConstraint("ck_work_items_number", "\"Number\" >= 1");
+            });
+            entity.HasKey(e => e.Id);
+            // Client-set UUIDv7 (UuidV7.NewGuid() in the repository) — NO DB
+            // default: the id is minted before the row exists so events/docs
+            // can reference it (the DocumentInstance client-set-id posture).
+            entity.Property(e => e.Key).IsRequired();
+            entity.Property(e => e.PreviousKeys)
+                .IsRequired().HasColumnType("text[]").HasDefaultValueSql("'{}'::text[]");
+            entity.Property(e => e.Kind).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.Priority).HasMaxLength(16);
+            entity.Property(e => e.IssueType).HasMaxLength(16);
+            entity.Property(e => e.Title).IsRequired().HasMaxLength(500);
+            // THE collation obligation (Rank.cs; 44-0 D7 / this story AC4):
+            // both rank axes, ordinal byte order, in the model so a
+            // regenerate cannot drop it.
+            entity.Property(e => e.Rank).IsRequired().UseCollation("C");
+            entity.Property(e => e.SiblingRank).IsRequired().UseCollation("C");
+            entity.Property(e => e.Estimate).HasColumnType("numeric");
+            entity.Property(e => e.ExternalRefJson).HasColumnType("jsonb");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+            // Version IS the optimistic-concurrency token (44-2's ETag): every
+            // repository write bumps it and EF adds `WHERE "Version" = <read>`
+            // to the UPDATE/DELETE, so an interleaved writer loses with
+            // DbUpdateConcurrencyException (translated to the typed, retryable
+            // TRACKER.CONCURRENCY_CONFLICT in WorkItemRepository) instead of
+            // silently last-write-winning — which could drop PreviousKeys
+            // history on concurrent rekeys (44-1 review finding, 2026-07-29).
+            entity.Property(e => e.Version).HasDefaultValue(1).IsConcurrencyToken();
+
+            entity.HasOne<ProjectEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // Parent delete is RESTRICT, not CASCADE: silently deleting an
+            // epic's subtree is unrecoverable; 44-2 returns 409 (reparent or
+            // delete children first).
+            entity.HasOne<WorkItemEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.ParentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<IterationEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.IterationId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Key identity: unique wire key per tenant; (ProjectId, Number)
+            // unique is the mint's belt-and-braces (story AC5).
+            entity.HasIndex(e => e.Key).IsUnique()
+                .HasDatabaseName("UX_work_items_key");
+            entity.HasIndex(e => new { e.ProjectId, e.Number }).IsUnique()
+                .HasDatabaseName("UX_work_items_project_number");
+            // Board/backlog hot path: project rank order filtered by status.
+            entity.HasIndex(e => new { e.ProjectId, e.Status, e.Rank })
+                .HasDatabaseName("IX_work_items_project_status_rank");
+            // Sibling ordering under a parent (44-0 AC10's second axis).
+            entity.HasIndex(e => new { e.ProjectId, e.ParentId, e.SiblingRank })
+                .HasDatabaseName("IX_work_items_project_parent_sibling_rank");
+            entity.HasIndex(e => new { e.AssigneeUserId, e.Status })
+                .HasDatabaseName("IX_work_items_assignee_status");
+            entity.HasIndex(e => e.IterationId)
+                .HasDatabaseName("IX_work_items_iteration");
+            // Current-or-previous key lookup (WorkItemKeyHistory.Matches in
+            // SQL: PreviousKeys @> ARRAY[key]) — GIN serves the containment.
+            entity.HasIndex(e => e.PreviousKeys)
+                .HasMethod("gin")
+                .HasDatabaseName("IX_work_items_previous_keys");
+            // The 44-8 already-linked skip index on ExternalRefJson keys is an
+            // expression index the EF model cannot express — raw SQL in the
+            // AddTrackerCore migration (AddDomainEventsUserIdIndex pattern).
+
+            // No principal plane on work items (epic D6) — the no-op filter
+            // seam documents the posture; schema is the isolation plane.
+            ApplyTenantFilter<WorkItemEntity>(entity, fixedTenantId, _ => null);
+        });
+
+        // ── WorkItemRelation ──
+        modelBuilder.Entity<WorkItemRelation>(entity =>
+        {
+            entity.ToTable("work_item_relations", t =>
+            {
+                // Mirrors WorkItemRelationKind's THREE wire strings (44-0 AC14).
+                t.HasCheckConstraint(
+                    "ck_work_item_relations_kind",
+                    "\"Kind\" IN ('blocks','duplicate','related')");
+                // Backs Canonicalize's TRACKER.SELF_RELATION at the DB layer.
+                t.HasCheckConstraint(
+                    "ck_work_item_relations_no_self",
+                    "\"SourceId\" <> \"TargetId\"");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Kind).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+
+            // An item's edges die with it — relations are annotations, not
+            // history (the DCB stream is the history).
+            entity.HasOne<WorkItemEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.SourceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<WorkItemEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.TargetId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // ASSUMES canonical form (WorkItemRelationKind.Canonicalize:
+            // symmetric kinds lower-id-first) — a mirror duplicate of a
+            // symmetric edge maps onto the same stored triple and collides
+            // here. The repository is the only writer and always canonicalizes.
+            entity.HasIndex(e => new { e.SourceId, e.TargetId, e.Kind }).IsUnique()
+                .HasDatabaseName("UX_work_item_relations_source_target_kind");
+            entity.HasIndex(e => e.TargetId)
+                .HasDatabaseName("IX_work_item_relations_target");
+        });
+
+        // ── IterationEntity ──
+        modelBuilder.Entity<IterationEntity>(entity =>
+        {
+            entity.ToTable("iterations", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_iterations_status",
+                    "\"Status\" IN ('planned','active','closed')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.Status)
+                .IsRequired().HasMaxLength(16).HasDefaultValue("planned");
+            entity.Property(e => e.CapacityPoints).HasColumnType("numeric");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.Version).HasDefaultValue(1);
+
+            entity.HasOne<ProjectEntity>()
+                .WithMany()
+                .HasForeignKey(e => e.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(e => new { e.ProjectId, e.Name }).IsUnique()
+                .HasDatabaseName("UX_iterations_project_name");
+        });
+
+        // ── TrackerPreference ──
+        // The ONE tracker table with the dual-scoped principal pattern:
+        // STRONG XOR (acceptance_rules_overrides form — both-NULL rejected,
+        // NOT the weak audit_records form) + NULLS NOT DISTINCT unique index
+        // so each plane's null half dedupes (PG15+; production PG17).
+        modelBuilder.Entity<TrackerPreference>(entity =>
+        {
+            entity.ToTable("tracker_preferences", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_tracker_preferences_principal_xor",
+                    "(\"UserId\" IS NOT NULL AND \"TenantId\" IS NULL) " +
+                    "OR (\"UserId\" IS NULL AND \"TenantId\" IS NOT NULL)");
+                t.HasCheckConstraint(
+                    "ck_tracker_preferences_default_kind",
+                    "\"DefaultKind\" IS NULL OR \"DefaultKind\" IN ('epic','story','task','spike')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.DefaultKind).HasMaxLength(16);
+            entity.Property(e => e.BoardGroupBy).HasMaxLength(32);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.Version).HasDefaultValue(1);
+
+            entity.HasIndex(e => new { e.UserId, e.TenantId })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("UX_tracker_preferences_principal");
+
+            ApplyTenantFilter(entity, fixedTenantId, e => e.TenantId);
+        });
+    }
+    // ═══════════════════ end Story 44-1 tracker region ═══════════════════════
 
     /// <summary>
     /// Story 36-1 — maps the two per-tenant dimensional analytics fact tables

@@ -46,6 +46,18 @@ public sealed class ToolCallValidator : IToolCallValidator
         { "command", "cmd", "script", "code", "shell_command", "input" };
 
     /// <summary>
+    /// Story 43-4 (D8) — read-only view of <see cref="ShellToolNames"/> for the
+    /// Tamma.Api catalog startup validator, which checks the set from OUTSIDE
+    /// (every member must resolve through the tool-name alias map or be a
+    /// justified defensive alias). The set itself is deliberately NOT derived
+    /// from the catalog — deriving it would delete twelve defensive aliases and
+    /// newly subject <c>run_tests</c> to ActionGate's regexes (see the story's
+    /// Architectural Context). This accessor is the ONLY 43-4 edit to this
+    /// file; a source scan pins that no catalog/alias identifier appears here.
+    /// </summary>
+    internal static IReadOnlyCollection<string> KnownShellToolNames => ShellToolNames;
+
+    /// <summary>
     /// Creates a new <see cref="ToolCallValidator"/>.
     /// </summary>
     /// <param name="sanitizer">Content sanitizer for string argument values.</param>

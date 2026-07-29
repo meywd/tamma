@@ -21,7 +21,7 @@ public interface IAgentResolverService
     /// </list>
     /// </summary>
     /// <param name="tenantId">The tenant scope; <c>null</c> returns platform default.</param>
-    /// <param name="role">One of the 8 valid roles (see <see cref="RolePhaseMap.ValidRoles"/>).</param>
+    /// <param name="role">One of the valid roles (see <see cref="RolePhaseMap.ValidRoles"/>).</param>
     /// <exception cref="ArgumentException">
     /// Thrown if <paramref name="role"/> is unknown or forbidden.
     /// </exception>

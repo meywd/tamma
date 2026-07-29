@@ -173,7 +173,8 @@ public class InlineToolLoopRunnerTests
     private static InlineToolLoopRunner NewRunner(
         IHttpClientFactory factory, IToolExecutorRegistry? registry, IContentSanitizer? sanitizer = null) =>
         new(NullLogger<InlineToolLoopRunner>.Instance, factory, configuration: null,
-            sanitizer: sanitizer, toolRegistry: registry,
+            sanitizer: sanitizer, autonomyGate: new CatalogDefaultToolLoopAutonomyGate(),
+            toolRegistry: registry,
             toolCallValidator: null, contextCompactor: null,
             eventEmitter: null, parallelExecutor: null, credentialResolver: null);
 

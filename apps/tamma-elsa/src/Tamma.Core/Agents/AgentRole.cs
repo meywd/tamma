@@ -16,6 +16,13 @@ public enum AgentRole
     [Wire("product_owner")]    ProductOwner,
     [Wire("senior_developer")] SeniorDeveloper,
     [Wire("tech_writer")]      TechWriter,
+    // Story 41-1a — the three Epic 41 roles. scrum_master was previously a
+    // LegacyRoleAliases entry pointing at product_owner; that alias is removed
+    // in the same change (RolePhaseMap.LegacyRoleAliases), so the name finally
+    // resolves to its own role. ux_designer covers both UX and visual-design work.
+    [Wire("scrum_master")]     ScrumMaster,
+    [Wire("project_manager")]  ProjectManager,
+    [Wire("ux_designer")]      UxDesigner,
 }
 
 public static class AgentRoleExtensions

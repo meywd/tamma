@@ -36,7 +36,9 @@ namespace Tamma.Activities.Tests.Workflows;
 /// sub-workflows + bookmarks). It is built as a REUSABLE fixture (39-8 / 39-12 reuse
 /// the harness) and is <b>CI-only</b>: the class name contains <c>Execution</c> so
 /// the fast local filter (<c>FullyQualifiedName!~Execution</c>) skips it, and
-/// <c>[Explicit]</c> keeps it out of the default gate; the Postgres CI jobs run it.
+/// <c>[Explicit]</c> keeps it out of the default gate. NOTE (2026-07-29): no CI job
+/// currently selects [Explicit] fixtures, and the harness does not yet work — see
+/// the [Explicit] reason below.
 /// The property-level correctness burden lives in
 /// <see cref="DocumentLifecycleHelperTests"/> — this proves the WIRING.</para>
 ///
@@ -49,7 +51,12 @@ namespace Tamma.Activities.Tests.Workflows;
 /// Escalate).</para>
 /// </summary>
 [TestFixture]
-[Explicit("Full Elsa workflow-runtime integration — runs in the CI Postgres jobs, skipped in the fast local gate")]
+[Explicit("DOES NOT RUN ANYWHERE TODAY and FAILS when invoked: no CI job passes a filter that selects " +
+    "[Explicit] fixtures, and under this bare-provider harness the lifecycle suspends forever on its first " +
+    "Kind=ActivityKind.Task activity (ComputeReEntryPosition) — Elsa's background activity invoker defers it " +
+    "but no BackgroundActivity bookmark is ever created, so nothing resumes it (diagnosed 2026-07-29). The " +
+    "property-level correctness burden lives in DocumentLifecycleHelperTests and BuildReviewEnvelopeTests; " +
+    "keep this fixture as the full-runtime target for a future working harness.")]
 public class DocumentLifecycleExecutionTests
 {
     private const string TenantId = "";

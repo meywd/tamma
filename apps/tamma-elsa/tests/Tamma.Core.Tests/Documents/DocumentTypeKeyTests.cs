@@ -14,10 +14,14 @@ namespace Tamma.Core.Tests.Documents;
 public class DocumentTypeKeyTests
 {
     [Test]
-    public void Has_exactly_ten_document_types() =>
-        // The README's 10-type table. Adding/removing a type is a conscious edit
-        // here AND to DocumentTypeRegistry's registration list (39-3 +4, 39-4 +6).
-        Enum.GetValues<DocumentTypeKey>().Length.Should().Be(10);
+    public void Has_exactly_seventeen_document_types() =>
+        // The README's 10-type table + the six Epic 41 types (Story 41-1b:
+        // acceptance-criteria, backlog-ordering, sprint-plan, test-plan,
+        // threat-model, ux-spec) + prose (Story 41-1c: one type for the whole
+        // prose family, body unvalidated markdown). Adding/removing a type is a
+        // conscious edit here AND to DocumentTypeRegistry's registration list
+        // (39-3 +4, 39-4 +6, 41-1b +6, 41-1c +1).
+        Enum.GetValues<DocumentTypeKey>().Length.Should().Be(17);
 
     [TestCase(DocumentTypeKey.Findings, "findings")]
     [TestCase(DocumentTypeKey.AmbiguityAssessment, "ambiguity-assessment")]
@@ -29,6 +33,13 @@ public class DocumentTypeKeyTests
     [TestCase(DocumentTypeKey.TriageDecision, "triage-decision")]
     [TestCase(DocumentTypeKey.Diagnosis, "diagnosis")]
     [TestCase(DocumentTypeKey.TestSpec, "test-spec")]
+    [TestCase(DocumentTypeKey.AcceptanceCriteria, "acceptance-criteria")]
+    [TestCase(DocumentTypeKey.BacklogOrdering, "backlog-ordering")]
+    [TestCase(DocumentTypeKey.SprintPlan, "sprint-plan")]
+    [TestCase(DocumentTypeKey.TestPlan, "test-plan")]
+    [TestCase(DocumentTypeKey.ThreatModel, "threat-model")]
+    [TestCase(DocumentTypeKey.UxSpec, "ux-spec")]
+    [TestCase(DocumentTypeKey.Prose, "prose")]
     public void ToWire_returns_canonical_kebab_string(DocumentTypeKey key, string wire) =>
         key.ToWire().Should().Be(wire);
 

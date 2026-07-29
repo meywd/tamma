@@ -30,6 +30,14 @@ public static class AgentResolverServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddAgentResolverServices(this IServiceCollection services)
     {
+        // Story 43-4 — the Seam B tool-loop autonomy gate (a REQUIRED
+        // constructor dependency of InlineToolLoopRunner, which Program.cs
+        // registers) plus the fail-loud tool-vocabulary startup validator.
+        // Idempotent (TryAdd*); invoked here so the host is wired without a
+        // Program.cs edit. Tamma.ElsaServer must not gain this call — see
+        // ActionCatalogGovernanceServiceCollectionExtensions.
+        services.AddActionCatalogGovernance();
+
         // Story 32-15 — bind Tamma:Agents:DefaultPersonaName (default "claude")
         // for the configured-default-persona resolution.
         services.AddOptions<DefaultPersonaOptions>()

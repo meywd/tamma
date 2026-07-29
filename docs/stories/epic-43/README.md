@@ -218,6 +218,17 @@ Mechanisms, all existing house patterns:
   them is a **privilege expansion, not a cleanup** — those tools currently cannot execute for roles
   advertising Claude-Code names.
 - **Count pins and wire pins** on the closed vocabularies this epic authors.
+
+> **Shipped by 43-4, and what it deliberately does NOT close.** The validator above is live
+> (`ActionCatalogStartupValidator`, Tamma.Api host only — the engine registers no tools), and
+> `ToolNameAliases` now resolves both vocabularies onto `tool:*` keys **for policy only**. The
+> divergence itself remains open by design: the advertised Claude-Code names
+> (`Read`/`Write`/`Edit`/`Bash`/`Grep`/`Glob`) **still do not execute** — `ToolExecutorRegistry` is
+> keyed on the registry names and `ManagedAgent.ToResolvedTools` still advertises byte-identical
+> names (pinned by `AdvertisedToolNamesUnchangedTests`, including a source scan that fails if the
+> alias map is ever wired into the advertisement path). Making those names execute is a **privilege
+> expansion** — five roles' tool surfaces would go from inert to live — and is filed as a separate
+> story outside Epic 43 with its own review; it must not ride a validator or an alias map.
 - **Reflection over real call sites** — the only mechanism that checks the catalog against reality
   rather than against another declaration. Covers mutating routes (including attribute-routed
   controllers and hub endpoints, which no syntax analysis can see), the mediation client's mutating

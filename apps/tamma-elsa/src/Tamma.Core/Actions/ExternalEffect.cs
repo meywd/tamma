@@ -12,7 +12,10 @@ namespace Tamma.Core.Actions;
 /// <c>grep 'RequireAuthorization("EngineServiceOnly")' Tamma.Api/Program.cs</c>
 /// finds 26 routes of which 17 are MUTATING (the engine group's 5 writes + 12
 /// app-level writes); the other 9 are GETs and are not catalogued. 17 + 5
-/// non-route members = 22, matching the design's figure.
+/// non-route members = 22, matching the design's figure — plus Story 41-30's
+/// <c>effect:schedule.create|update|delete</c> trio (the scheduled-trigger
+/// admin mutations, which ride the ScheduleManage-gated /api/admin routes,
+/// not EngineServiceOnly) = 25.
 ///
 /// <para>
 /// LIMITATION (43-2 D9, recorded not hidden): unlike <c>agent-action</c> /
@@ -117,6 +120,27 @@ public enum ExternalEffect
     /// <c>Tamma.ElsaServer/Workflows/DeploymentPipelineWorkflow</c>. Same
     /// LLM-tool-loop limitation as <see cref="DeployPromoteProd"/>.</summary>
     [Wire("deploy.rollback")] DeployRollback,
+
+    // ── Story 41-30 — scheduled-trigger admin mutations (the seam's
+    //    effect:schedule.* trio; the background actor itself is
+    //    automation:tenant-scheduled-trigger-service) ──
+
+    /// <summary><c>POST /api/admin/scheduled-triggers</c> —
+    /// <c>ScheduledTriggerEndpoints.Create</c>. Creating a schedule arms a
+    /// recurring per-tenant workflow dispatch (run-now shares this member —
+    /// it claims a <c>manual:*</c> ledger window on an existing schedule).</summary>
+    [Wire("schedule.create")] ScheduleCreate,
+
+    /// <summary><c>PUT /api/admin/scheduled-triggers/{id}</c> —
+    /// <c>ScheduledTriggerEndpoints.Update</c> (cron / target / enabled /
+    /// input changes, including disable).</summary>
+    [Wire("schedule.update")] ScheduleUpdate,
+
+    /// <summary><c>DELETE /api/admin/scheduled-triggers/{id}</c> —
+    /// <c>ScheduledTriggerEndpoints.Delete</c>. Deleting a schedule silently
+    /// stops a tenant's recurring audit — audited via
+    /// <c>SCHEDULE.TRIGGER.CHANGED</c>.</summary>
+    [Wire("schedule.delete")] ScheduleDelete,
 }
 
 /// <summary><see cref="ExternalEffect"/> wire helper.</summary>

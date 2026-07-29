@@ -29,6 +29,18 @@ public sealed record DocumentEnvelope
     [JsonPropertyName("schemaVersion")]
     public required int SchemaVersion { get; init; }
 
+    /// <summary>
+    /// Story 41-1c — the document's audience tag (a <c>ProseAudience</c> wire
+    /// string). Nullable: every non-prose document has none. The envelope value
+    /// is AUTHORITATIVE for the store's <c>audience</c> column (41-1c D2); the
+    /// prose payload carries the same value because the model writes it, and
+    /// <see cref="CreateDraft"/> copies payload → envelope when the caller passes
+    /// none, failing loud (<c>PROSE_AUDIENCE_ENVELOPE_MISMATCH</c>) if both are
+    /// supplied and disagree.
+    /// </summary>
+    [JsonPropertyName("audience")]
+    public string? Audience { get; init; }
+
     [JsonPropertyName("issueId")]
     public required string IssueId { get; init; }
 
@@ -64,6 +76,9 @@ public sealed record DocumentEnvelope
     /// <exception cref="TammaError">
     /// Code <c>DOCUMENT.ENVELOPE.INVALID</c> for an empty <paramref name="issueId"/>
     /// or <paramref name="correlationId"/> — the lineage anchor is mandatory.
+    /// Code <c>PROSE_AUDIENCE_ENVELOPE_MISMATCH</c> when an explicit
+    /// <paramref name="audience"/> disagrees with the payload's top-level
+    /// <c>audience</c> string (41-1c D2 — the two must never diverge).
     /// </exception>
     public static DocumentEnvelope CreateDraft(
         DocumentTypeKey type,
@@ -74,12 +89,28 @@ public sealed record DocumentEnvelope
         JsonElement payload,
         Guid? parentDocumentId = null,
         Guid? supersedesDocumentId = null,
+        string? audience = null,
         DateTimeOffset? now = null)
     {
         if (string.IsNullOrWhiteSpace(issueId))
             throw Invalid("issueId", "The issueId lineage anchor must not be empty.");
         if (string.IsNullOrWhiteSpace(correlationId))
             throw Invalid("correlationId", "The correlationId must not be empty.");
+
+        // 41-1c D2 — the draft-mint path copies payload → envelope so the store
+        // can filter on audience without parsing bodies. The envelope is
+        // authoritative; a caller supplying BOTH an explicit audience and a
+        // payload audience that disagree is a programming error, failed loud.
+        var payloadAudience = ReadPayloadAudience(payload);
+        if (audience is not null && payloadAudience is not null
+            && !string.Equals(audience, payloadAudience, StringComparison.Ordinal))
+            throw new TammaError(
+                "PROSE_AUDIENCE_ENVELOPE_MISMATCH",
+                $"The explicit envelope audience '{audience}' disagrees with the payload's audience " +
+                $"'{payloadAudience}' — the envelope copy must mirror the payload, never diverge.",
+                new Dictionary<string, object?> { ["audience"] = audience, ["payloadAudience"] = payloadAudience },
+                retryable: false,
+                severity: TammaErrorSeverity.High);
 
         var timestamp = Truncate(now ?? DateTimeOffset.UtcNow);
 
@@ -88,6 +119,7 @@ public sealed record DocumentEnvelope
             Id = UuidV7.NewGuid(timestamp),
             Type = type.ToWire(),
             SchemaVersion = schemaVersion,
+            Audience = audience ?? payloadAudience,
             IssueId = issueId,
             CorrelationId = correlationId,
             ParentDocumentId = parentDocumentId,
@@ -98,6 +130,23 @@ public sealed record DocumentEnvelope
             UpdatedAt = timestamp,
             Payload = payload.Clone(),
         };
+    }
+
+    /// <summary>
+    /// The payload's top-level <c>audience</c> string, when present (41-1c D2's
+    /// payload → envelope copy source). Null for non-object payloads, a missing
+    /// key, or a non-string value — vocabulary enforcement belongs to
+    /// <c>ProseDocumentType.Validate</c>, not the envelope. Public so the store's
+    /// write door (<c>DocumentInstanceRepository.InsertAsync</c>) applies the same
+    /// coherence rule to hand-built envelopes.
+    /// </summary>
+    public static string? ReadPayloadAudience(JsonElement payload)
+    {
+        if (payload.ValueKind != JsonValueKind.Object) return null;
+        if (!payload.TryGetProperty("audience", out var value) || value.ValueKind != JsonValueKind.String)
+            return null;
+        var audience = value.GetString();
+        return string.IsNullOrWhiteSpace(audience) ? null : audience;
     }
 
     /// <summary>
@@ -147,6 +196,7 @@ public sealed record DocumentEnvelope
         return Id.Equals(other.Id)
             && Type == other.Type
             && SchemaVersion == other.SchemaVersion
+            && Audience == other.Audience
             && IssueId == other.IssueId
             && CorrelationId == other.CorrelationId
             && Nullable.Equals(ParentDocumentId, other.ParentDocumentId)
@@ -159,5 +209,5 @@ public sealed record DocumentEnvelope
     }
 
     public override int GetHashCode() =>
-        HashCode.Combine(Id, Type, SchemaVersion, IssueId, CorrelationId, ProducedBy, State);
+        HashCode.Combine(Id, Type, SchemaVersion, Audience, IssueId, CorrelationId, ProducedBy, State);
 }

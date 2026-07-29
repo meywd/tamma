@@ -186,7 +186,8 @@ public class InlineToolLoopRunnerRepairTests
             .Returns(() => new HttpClient(handler, disposeHandler: false));
         return new InlineToolLoopRunner(
             NullLogger<InlineToolLoopRunner>.Instance, factory.Object, configuration: null,
-            sanitizer: null, toolRegistry: null, toolCallValidator: null, contextCompactor: null,
+            sanitizer: null, autonomyGate: new CatalogDefaultToolLoopAutonomyGate(),
+            toolRegistry: null, toolCallValidator: null, contextCompactor: null,
             eventEmitter: null, parallelExecutor: null, credentialResolver: null);
     }
 

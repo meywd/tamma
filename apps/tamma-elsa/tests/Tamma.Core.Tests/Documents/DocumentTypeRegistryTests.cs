@@ -29,12 +29,17 @@ public class DocumentTypeRegistryTests
         //   Story 39-3 registers +4  (0 -> 4)  <-- DONE (Decomposition, Findings,
         //                                        AmbiguityAssessment, Clarification)
         //   Story 39-4 registers +6  (4 -> 10) <-- DONE (Plan, Design, Review,
-        //                                        TriageDecision, Diagnosis, TestSpec) —
-        //                                        the vocabulary is now COMPLETE, matching
-        //                                        the DocumentTypeKey member count.
+        //                                        TriageDecision, Diagnosis, TestSpec)
+        //   Story 41-1b registers +6 (10 -> 16) <-- DONE (AcceptanceCriteria,
+        //                                        BacklogOrdering, SprintPlan, TestPlan,
+        //                                        ThreatModel, UxSpec) — the vocabulary
+        //                                        stays COMPLETE, matching the
+        //                                        DocumentTypeKey member count.
+        //   Story 41-1c registers +1 (16 -> 17) <-- DONE (Prose — the prose family's
+        //                                        single type; body unvalidated markdown).
         // Same posture as RolePhaseMapTests' HaveCount(79): the number moving is a
         // conscious, reviewed edit here, never an accident.
-        DocumentTypeRegistry.All.Should().HaveCount(10);
+        DocumentTypeRegistry.All.Should().HaveCount(17);
     }
 
     // -----------------------------------------------------------------------
@@ -134,6 +139,34 @@ public class DocumentTypeRegistryTests
             .Should().Be(typeof(Tamma.Core.Documents.Types.AmbiguityAssessment));
         DocumentTypeRegistry.Resolve(DocumentTypeKey.Clarification).PayloadClrType
             .Should().Be(typeof(Tamma.Core.Documents.Types.Clarification));
+    }
+
+    [Test]
+    public void Registered_41_1b_keys_resolve_to_their_implementations()
+    {
+        DocumentTypeRegistry.Resolve(DocumentTypeKey.AcceptanceCriteria).PayloadClrType
+            .Should().Be(typeof(Tamma.Core.Documents.Types.AcceptanceCriteria));
+        DocumentTypeRegistry.Resolve(DocumentTypeKey.BacklogOrdering).PayloadClrType
+            .Should().Be(typeof(Tamma.Core.Documents.Types.BacklogOrdering));
+        DocumentTypeRegistry.Resolve(DocumentTypeKey.SprintPlan).PayloadClrType
+            .Should().Be(typeof(Tamma.Core.Documents.Types.SprintPlan));
+        DocumentTypeRegistry.Resolve(DocumentTypeKey.TestPlan).PayloadClrType
+            .Should().Be(typeof(Tamma.Core.Documents.Types.TestPlan));
+        DocumentTypeRegistry.Resolve(DocumentTypeKey.ThreatModel).PayloadClrType
+            .Should().Be(typeof(Tamma.Core.Documents.Types.ThreatModel));
+        DocumentTypeRegistry.Resolve(DocumentTypeKey.UxSpec).PayloadClrType
+            .Should().Be(typeof(Tamma.Core.Documents.Types.UxSpec));
+    }
+
+    [Test]
+    public void Registered_41_1c_prose_key_resolves_to_its_implementation()
+    {
+        // Story 41-1c AC1 — both resolution doors open: the wire string parses
+        // (used to throw DOCUMENT.TYPE.UNKNOWN) and the registry resolves (used
+        // to throw DOCUMENT.TYPE.NOT_REGISTERED).
+        DocumentTypeKeyExtensions.Parse("prose").Should().Be(DocumentTypeKey.Prose);
+        DocumentTypeRegistry.Resolve("prose").PayloadClrType
+            .Should().Be(typeof(Tamma.Core.Documents.Types.Prose));
     }
 
     // -----------------------------------------------------------------------

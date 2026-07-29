@@ -1,6 +1,6 @@
 # Story 41-30: The Tenant-Aware Scheduled-Trigger Seam
 
-Status: drafted
+Status: done — conformance-reviewed 2026-07-29; the hosted service, both control-plane tables, the admin API and the DROP-list exclusion all ship (`Enabled=false` by default, so no running deployment changes); AC1's at-most-once key is per-trigger, not per-(tenant, definition) — see LOW-7; MODERATE-5 / LOW-8 remain open follow-ups
 
 ## User Story
 
@@ -54,8 +54,9 @@ new workflows, zero new `(role, action)` cells, zero new document types.
    `input_json` as workflow inputs.
 4. **Cron evaluation with no new dependency** — `Cronos` is already in the graph (Correction 1).
 5. **Catch-up policy, bounded** — a tenant whose engine was down for a day does not get 24 audits. One
-   run for the most recent missed window, and a `SCHEDULE.WINDOW.SKIPPED` event per window dropped, so
-   the gap is *auditable* rather than invisible.
+   run for the most recent missed window, and **one** `SCHEDULE.WINDOW.SKIPPED` event naming the count
+   and the window range (first/last key) of the windows dropped, so the gap is *auditable* rather than
+   invisible.
 6. **Admin API + RBAC**, answered separately per operating mode (D7), per CLAUDE.md's universal rule.
 7. **`SCHEDULE.*` DCB events** so a fire, a skip and a suppression are all in the audit trail.
 
@@ -76,7 +77,10 @@ new workflows, zero new `(role, action)` cells, zero new document types.
 `SCHEDULE.FIRE.DISPATCHED` (tags `tenantId`, `definitionId`, `windowKey`, `triggerId`),
 `SCHEDULE.FIRE.SUPPRESSED` (another pod won the window — INFO, not an error),
 `SCHEDULE.WINDOW.SKIPPED` (LOUD — catch-up dropped a window, with the count),
-`SCHEDULE.FIRE.FAILED` (LOUD — dispatch threw; the ledger row is released so the next tick retries),
+`SCHEDULE.FIRE.FAILED` (LOUD — dispatch threw or timed out. *[Amended 2026-07-29]* the ledger row is
+**stamped `failed` and the window is burnt** — the NEXT window is the recovery path; there is no
+same-window retry. The original "row is released so the next tick retries" wording contradicted the
+at-most-once contract the implementation ships),
 `SCHEDULE.TRIGGER.CHANGED` (an admin created/updated/disabled a schedule).
 
 ## Autonomy behavior
@@ -90,7 +94,10 @@ apply to *it*. The dial governs the workflows it dispatches, unchanged. What Epi
 
 1. **At most one dispatch per `(tenantId, definitionId, windowKey)` across the whole fleet, durably.**
    Proven with two pods racing the same window, and again across a process kill between the ledger
-   claim and the dispatch.
+   claim and the dispatch. *[Amended 2026-07-29 — see follow-up LOW-7: the implemented key is
+   **per-trigger**, `(triggerId, windowKey)`, for both the ledger's unique index and the advisory lock.
+   Two different trigger rows for the same tenant + definition (distinct `Name`s) can each fire the same
+   window. Read this AC with LOW-7.]*
 2. **Tenant isolation.** Tenant A's fire never suppresses tenant B's for the same window — the exact
    defect at `HourlyAnalyticsRollupScheduler.cs:241`, pinned by a regression test that fails if a
    tenant component is ever dropped from the lock key.
@@ -104,9 +111,12 @@ apply to *it*. The dial governs the workflows it dispatches, unchanged. What Epi
    expression is rejected **at write time** by the admin API with a typed error, never at fire time.
 6. **Bounded catch-up.** After a 24-hour outage an hourly schedule fires **once**, and emits
    `SCHEDULE.WINDOW.SKIPPED` naming the number of windows dropped.
-7. **The two tables are excluded from the destructive startup DROP list** (`Program.cs:3243-3282`) — a
-   deploy must not silently disable every tenant's audits. Pinned by a test that reads the DROP
-   statement and asserts neither table name appears (D9).
+7. **The two tables are excluded from the destructive startup DROP list** (the `DROP TABLE IF EXISTS …
+   CASCADE` literal in `Tamma.Api/Program.cs` — line numbers deliberately not pinned, they drift; the
+   pin test locates the statement dynamically) — a deploy must not silently disable every tenant's
+   audits. Pinned by
+   `ScheduledTriggerSourcePinTests.Schedule_Tables_Are_Not_In_The_Destructive_Startup_DropList`, which
+   reads the DROP statement and asserts neither table name appears (D9).
 8. **Registered in Epic 43's catalog**: one `BackgroundActor` / `automation:*` member so 43-8's
    bidirectional hosted-service sweep stays green, and `effect:schedule.create|update|delete` for the
    admin mutations.
@@ -140,3 +150,68 @@ apply to *it*. The dial governs the workflows it dispatches, unchanged. What Epi
 
 **5–6 days.** (2 storage + migration, 1.5 service, 1 admin API + RBAC, 1.5 tests incl. the two-pod race
 and the restart scenario.)
+
+## Amendments — 2026-07-29 (adversarial-review fixes)
+
+The following behaviour contracts changed (or were made explicit) relative to the text above:
+
+1. **Manual run-now fires are now at-most-once (MAJOR-1, fixed).** The engine's manual drain no
+   longer dispatches straight off the pending list. Each pending `manual:{timestamp}` row must first
+   be won via a conditional CAS (`ScheduledTriggerRepository.TryClaimManualFireForDispatchAsync`:
+   `UPDATE … SET "DispatchedAt" = @now WHERE "Id" = @id AND "Outcome" = 'claimed' AND "DispatchedAt"
+   IS NULL`, arbitrated by Postgres row-count) — exactly one pod wins; concurrent pods skip. A crash
+   or a failed outcome stamp after a won CAS **burns** the fire (the pending list filters
+   `DispatchedAt IS NULL`), and a dispatch failure stamps `failed` — matching the cron path's
+   burn-the-window semantics. A pending manual row can never be double-dispatched or re-dispatched in
+   a loop. Proven by an 8-way real-Postgres CAS race test and an 8-pod service-level drain race test.
+2. **Bounded catch-up now provably fires the LATEST missed window (MAJOR-2, fixed).** The old
+   calculator collected due windows into an ascending list capped at 1000 and the service fired the
+   list's last element — so a backlog over the cap (minutely cron + >16.7 h gap) fired a ~7 h-stale
+   window and never accounted for the newest ones. `ScheduleWindowCalculator.ComputeDue` now yields
+   the true latest due occurrence regardless of backlog size; the due count is bounded and, when the
+   bound is hit, flagged (`skippedCountSaturated: true` in the `SCHEDULE.WINDOW.SKIPPED` event data,
+   meaning `skippedCount` is "at least N"). AC6's "most recent missed window" now holds unconditionally.
+3. **Per-dispatch timeout (MODERATE-3, fixed).** New option `ScheduledTriggers:DispatchTimeout`
+   (default 30 s; non-positive disables). A dispatch that exceeds it — even one that ignores its
+   cancellation token — is stamped `failed` (burn-the-window) and the fire loop continues, so one
+   hung dispatch cannot stall the remaining tenants on the pod while holding the advisory-lock
+   connection.
+4. **Template materialisation is inside the tick's failure isolation (MODERATE-4, fixed).** The
+   repository isolates each template (a poison template row is logged and skipped, the rest still
+   materialise) and the service additionally wraps the whole materialisation call, so a wholesale
+   failure can no longer abort every tick forever — existing concrete triggers keep firing.
+5. **Run-now on a DISABLED trigger is a 409 (`trigger_disabled`), and the manual drain only
+   dispatches enabled triggers' claims.** Contract decision resolving the previous ambiguity (the
+   repository interface doc promised "(enabled) trigger rows" but neither the query nor the endpoint
+   checked). A claim that was pending when its trigger got disabled waits, un-burnt, and drains after
+   re-enablement.
+6. **Same-millisecond duplicate run-now is a 409 (`duplicate_run_now`)**, mirroring Create's
+   duplicate handling, instead of an unhandled unique-violation 500. The first claim stands.
+
+## Known limitations / follow-ups — 2026-07-29
+
+Recorded during the same adversarial review, deliberately NOT fixed in this pass (MAJOR-1, MAJOR-2
+and the per-dispatch timeout / materialisation isolation above ARE fixed as of 2026-07-29):
+
+- **MODERATE-5 — event spam dedup.** A persistently-suppressed or persistently-failing trigger emits
+  `SCHEDULE.FIRE.SUPPRESSED` / `SCHEDULE.FIRE.FAILED` (and, while a backlog persists,
+  `SCHEDULE.WINDOW.SKIPPED`) every tick with no dedup/cooldown, so a stuck fleet writes a steady
+  drip of audit rows. Follow-up: per-(trigger, reason) emission cooldown or aggregation.
+- **LOW-7 — AC1 wording vs implementation key.** AC1 promises at-most-once per
+  `(tenantId, definitionId, windowKey)` but the ledger's unique index and the advisory-lock key are
+  per `(triggerId, windowKey)` — two DIFFERENT trigger rows for the same tenant + definition (distinct
+  `Name`s) can each fire the same window. Follow-up: either amend AC1 to say per-trigger, or add a
+  definition-level uniqueness decision.
+- **LOW-8 — stale-claimed-row observability.** A pod crash between ledger claim and dispatch leaves a
+  `claimed` row that never becomes `dispatched`/`failed` (and, post-MAJOR-1, a burnt manual fire is a
+  `claimed` row with non-null `DispatchedAt`). Nothing sweeps or surfaces these beyond retention
+  pruning. Follow-up: a periodic sweep that stamps rows older than a threshold `failed` with a
+  `SCHEDULE.FIRE.FAILED` event, or a metric/admin listing.
+- ~~**Dead index `IX_scheduled_triggers_Enabled_NextDueAt`**~~ — **removed 2026-07-29** (no query
+  filters on `NextDueAt`; the tick lists by `Enabled` + tenant). Dropped from
+  `TammaModelConfiguration.cs`, the unreleased `20260729035316_AddScheduledTriggers.cs` migration
+  (edited in place per the no-migration-anxiety policy; the migration now carries an idempotent
+  `DROP INDEX IF EXISTS` because `scheduled_triggers` survives the Epic 19 startup wipe, so a DB that
+  ran the original version still carried the index), both affected `.Designer.cs` files, and
+  `ControlPlaneDbContextModelSnapshot.cs`. `dotnet ef migrations has-pending-model-changes
+  -c ControlPlaneDbContext` reports none.

@@ -1,6 +1,6 @@
 # Story 41-1c: Prose Documents & Audience Tags — the mechanism eight stories assume
 
-Status: drafted
+Status: done — conformance-reviewed 2026-07-29; the prose type, the audience field and the reviewer row all execute (the Dependencies note about 41-1a's missing TechWriter arm is resolved — 41-1a landed in `665f9a2`); F5/F6 remain advisory notes, not defects
 
 *Split from 41-1 — see [the enabler-set umbrella](./41-1-team-role-and-document-type-extensions.md).*
 
@@ -94,9 +94,14 @@ this mechanism as if it had shipped. It has not, and before this split no story 
 - **Blocking:** Epic 39 (39-2 registry + envelope, 39-8/39-12 lifecycle, 39-7 review producers, 39-11
   store + lineage API).
 - **Related:** **41-1a** — prose reviewed by `(tech_writer, review-docs)` also needs 41-1a's TechWriter
-  arm on `RolePhaseMap.GetReviewActionForRole` (`RolePhaseMap.cs:376-387`), which throws today (41-1a AC3). D2's default reviewer row
-  therefore cannot be exercised end-to-end until 41-1a lands; a non-TechWriter reviewer proves this story
-  in the meantime.
+  arm on `RolePhaseMap.GetReviewActionForRole`. *(Resolved 2026-07-29: 41-1a landed in `665f9a2`, before
+  this story's slice. The arm exists — `RolePhaseMap.GetReviewActionForRole` maps
+  `AgentRole.TechWriter => AgentAction.ReviewDocs` — so it no longer throws, and D2's default reviewer row
+  IS exercised end-to-end: `ProseLifecycleHelperTests.ResolveRules_ForProse_ResolvesTheTechWriterRow` and
+  `TechWriterReviewerLens_IsExecutableForProse` are executing tests over the `tech_writer` row. The
+  previous text — "throws today (41-1a AC3)", "cannot be exercised end-to-end until 41-1a lands", and the
+  non-TechWriter-reviewer workaround — is stale; the cited line range `RolePhaseMap.cs:376-387` had also
+  drifted and the line numbers are dropped rather than re-pinned.)*
 - **Unblocks:** 41-4, 41-5, 41-9, 41-22, 41-24, 41-25, 41-26 (prose type + audience); 41-8 (audience tag
   on its retro narrative — its `Findings` half needs only 41-1a).
 
@@ -113,3 +118,62 @@ this mechanism as if it had shipped. It has not, and before this split no story 
 ## Estimated Effort
 
 3–4 days
+
+## Follow-ups from adversarial review (2026-07-29)
+
+The 41-1c slice (bdc86aa) was adversarially reviewed; the findings below were fixed (F1–F4) or recorded
+as advisory notes (F5–F6) in the same pass.
+
+**Fixed:**
+
+- **F1 — the `BuildReviewEnvelope` ParentDocumentId change had zero executing tests.** The only
+  workflow-level assertions lived in `ProseLifecycleExecutionTests`, whose `[Explicit]` reason falsely
+  claimed "the CI Postgres jobs run it" — no CI workflow passes any filter that selects `[Explicit]`
+  fixtures, and when actually invoked the fixture fails deterministically: under the bare-provider
+  harness the lifecycle suspends forever on its first `Kind=ActivityKind.Task` activity
+  (`ComputeReEntryPosition`) — Elsa's background activity invoker defers it, but no `BackgroundActivity`
+  bookmark is ever created, so nothing resumes it. (A minimal `DispatchWorkflow` parent/child harness
+  *does* drain once `IRegistriesPopulator` + the `IHostedService`s are started, so the mediated-dispatch
+  half works; the Task-kind background-deferral half is what a future harness fix must address.) Both
+  `ProseLifecycleExecutionTests` and `DocumentLifecycleExecutionTests` now carry honest `[Explicit]`
+  reasons stating exactly that. The executing coverage now lives in
+  `tests/Tamma.Activities.Tests/Workflows/BuildReviewEnvelopeTests.cs`: `BuildReviewEnvelope` was made
+  `internal` (the `InternalsVisibleTo("Tamma.Activities.Tests")` grant already existed) and is driven
+  with lifecycle state built through the real helper chain (`Init → MintDraft → AppendDraft`) for a
+  prose draft AND a legacy decomposition draft — the minted Review's `ParentDocumentId` equals the
+  current draft's id, type-agnostically, including after a second (superseding) draft.
+- **F2 — AC5 promised "the 39-7 review path produces a Review whose ParentDocumentId is the prose
+  document", but only the lifecycle-internal mint site was fixed.** All three producer mint sites now
+  link parent-first: `SingleReviewerWorkflow.BuildEnvelope` and `PanelReviewWorkflow.
+  BuildAggregateEnvelope` route through a new shared `ReviewProducerHelper.MintReviewEnvelope`
+  (document subject → `ParentDocumentId = subject.documentId`; diff subject → null, code is not a
+  document type), and `DocumentLifecycleHelper.ApplyReEntry`'s synthesized Accept-re-entry review is
+  parent-linked to the recovered draft (`existing.Id` is in scope there). `parent_document_id` has no
+  FK; `LineageAssembler`'s parent-wins-over-body-probe rule means no double-link. Tests in
+  `BuildReviewEnvelopeTests` cover the helper (both subject kinds) and the re-entry synthesis.
+- **F3 — the store's write door only checked audience *coherence*, not *vocabulary*, for hand-built
+  envelopes.** `DocumentInstanceRepository.InsertAsync` accepted e.g. `Type="findings",
+  Audience="junk"` and persisted `audience='junk'` (non-prose validators never look at audience).
+  The write door now vocabulary-checks the effective audience (envelope-authoritative, payload
+  fallback — exactly the value the row persists) against the closed `ProseAudience` set (ordinal) and
+  throws `PROSE_AUDIENCE_OUT_OF_VOCABULARY` before touching the database. **Decision:** the audience
+  column stays type-agnostic — any document type may carry a *valid* vocabulary value (the lineage
+  filter works across types) — but junk never persists. Testcontainer tests in
+  `ProseStoreAndLineageTests`: junk audience on a non-prose envelope is rejected with nothing
+  persisted; a valid audience on a non-prose envelope persists.
+- **F4 — the three prose-idiom cells were in no conformance net.** `(project_manager, report-status)`,
+  `(scrum_master, write-retro-narrative)` and `(project_manager, coordinate-release)` → `prose` are now
+  pinned in `TemplateExampleConformanceTests.ConformingUnboundCells` (their shipped worked examples
+  validate against `ProseDocumentType` today).
+
+**Advisory notes (not fixed here):**
+
+- **F5 — audience-filtered lineage reads compute `outcome`/`reviews` from the FILTERED subset.**
+  Reviews all carry a NULL audience, so `GET …/lineage?audience=X` responses always show review-less
+  entries and can claim a misleading `outcome`. Consumers of `outcome`/`reviews` must use unfiltered
+  reads; a later story may recompute `outcome` pre-filter and only then apply the audience filter to
+  the returned revisions.
+- **F6 — `coordinate-release` reuses `kind=status-update`.** The release-coordination brief is an
+  audience-tagged status communication; no dedicated `ProseKind` member exists. This is a conscious
+  closed-vocabulary decision (the kind names what the document *is*, and a coordination brief is a
+  status update), not an omission — revisit only if a consumer story needs to distinguish the two.

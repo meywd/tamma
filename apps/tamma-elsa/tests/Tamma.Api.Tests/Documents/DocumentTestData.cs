@@ -43,6 +43,31 @@ internal static class DocumentTestData
         }
         """;
 
+    public const string ProseType = "prose";
+
+    /// <summary>A valid prose body (Story 41-1c) tagged with <paramref name="audience"/>.</summary>
+    public static string ValidProseBody(string audience = "engineering", string kind = "adr") =>
+        $$"""
+        {
+          "kind": "{{kind}}",
+          "audience": "{{audience}}",
+          "title": "ADR-001: Prose rides the lifecycle",
+          "body": "## Decision\nProse is a registered type whose body is free markdown."
+        }
+        """;
+
+    /// <summary>Build a prose envelope (Story 41-1c) — CreateDraft copies the payload audience onto the envelope.</summary>
+    public static DocumentEnvelope ProseEnvelope(
+        string issueId, string audience = "engineering", string kind = "adr",
+        DocumentState state = DocumentState.Draft, string? body = null)
+    {
+        var draft = DocumentEnvelope.CreateDraft(
+            DocumentTypeKey.Prose, 1, issueId, "corr-1",
+            DocumentProducer.Create("devops", "write-postmortem", "document-lifecycle"),
+            Payload(body ?? ValidProseBody(audience, kind)));
+        return state == DocumentState.Draft ? draft : draft with { State = state };
+    }
+
     public static JsonElement Payload(string json)
     {
         using var doc = JsonDocument.Parse(json);

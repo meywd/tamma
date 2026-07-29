@@ -1197,7 +1197,10 @@ public class DocumentLifecycleWorkflow : WorkflowBase
         return (DocumentLifecycleHelper.AppendDraft(state, envelope), true, payloadJson);
     }
 
-    private static DocumentEnvelope BuildReviewEnvelope(
+    // Internal (InternalsVisibleTo Tamma.Activities.Tests) so the ParentDocumentId
+    // linkage is asserted by an EXECUTING unit test — the full-runtime execution
+    // fixture does not currently run anywhere (see ProseLifecycleExecutionTests).
+    internal static DocumentEnvelope BuildReviewEnvelope(
         DocumentLifecycleHelper.LifecycleState state, string reviewJson, string reviewDefId)
     {
         JsonElement payload;
@@ -1219,8 +1222,13 @@ public class DocumentLifecycleWorkflow : WorkflowBase
         var reviewAction = RolePhaseMap.GetPanelActionForRole(reviewerRole, state.TypeKey).ToWire();
         var producer = DocumentProducer.Create(reviewerRoleWire, reviewAction, reviewDefId);
 
+        // Story 41-1c AC5 (type-AGNOSTIC, no prose branch): the Review's
+        // ParentDocumentId is the reviewed draft — the 39-11 D8 parent-first
+        // linkage, so the lineage never has to fall back to the body probe for
+        // lifecycle-minted reviews.
         return DocumentEnvelope.CreateDraft(
             DocumentTypeKey.Review, 1, state.IssueId, state.CorrelationId, producer, payload,
+            parentDocumentId: state.Current?.Id,
             now: DateTimeOffset.UtcNow);
     }
 

@@ -1,6 +1,6 @@
 # Story 43-4: Tool-Vocabulary Reconciliation + Fail-Loud Startup Validator
 
-Status: drafted
+Status: done — conformance-reviewed 2026-07-29; `ToolNameAliases`, the fail-loud `ActionCatalogStartupValidator` and the `GitSubcommand` consumption all ship, plus the Seam B tool-loop gate (an undeclared deliverable — see the 2026-07-29 addendum); vocabulary (c) `ResolveToolsActivity` is NOT deleted (43-0 has not landed), so the third vocabulary is still alive and unvalidated
 
 ## MANDATORY: Before You Code
 
@@ -31,9 +31,18 @@ P0 — Blocks Story 5 (the resolver must be able to answer "what does the emitte
 
 | # | Vocabulary | Names | Canonical site |
 |---|---|---|---|
-| (a) | Executor registry — what can actually run | `file_read`, `file_write`, `search_code`, `shell_execute`, `git_operations`, `run_tests`, `get_acceptance_rules` | 7 classes implementing `IToolExecutor`; 6 DI-registered at `apps/tamma-elsa/src/Tamma.Api/Program.cs:753-764`, registry at `:765` |
+| (a) | Executor registry — what can actually run | `file_read`, `file_write`, `search_code`, `shell_execute`, `git_operations`, `run_tests`, `get_acceptance_rules` | 7 classes implementing `IToolExecutor`; 6 DI-registered at `apps/tamma-elsa/src/Tamma.Api/Program.cs:723-734`, registry at `:735-736` |
 | (b) | Per-role agent config — what is **advertised to the model** | `Read`, `Write`, `Edit`, `Bash`, `Grep`, `Glob` (Claude-Code names) | `apps/tamma-elsa/src/Tamma.Api/Services/Agents/DefaultAgentConfig.cs:53,70,85,102,118,149,165` |
-| (c) | Dead built-in map | `search_code`, `read_file`, `run_tests` | `apps/tamma-elsa/src/Tamma.Activities/LlmCall/ResolveToolsActivity.cs:161-224` (`"read_file"` at `:188`) — **zero callers**; deleted by Story 43-0 |
+| (c) | Dead built-in map | `search_code`, `read_file`, `run_tests` | `apps/tamma-elsa/src/Tamma.Activities/LlmCall/ResolveToolsActivity.cs` — **zero code callers** (one doc-comment mention in `GetAcceptanceRulesTool.cs`); **to be** deleted by Story 43-0 |
+
+*[Amended 2026-07-29 — vocabulary (c) is still alive.]* Row (c) previously read "deleted by Story 43-0".
+That is not true of the tree: `ResolveToolsActivity.cs` still exists (zero code callers) and **Story 43-0
+is still `drafted`** — it has not landed. This story's Dependencies section anticipated exactly this
+contingency ("if it has not landed the validator must either ignore that file or Story 43-0 must land
+first; ignoring it leaves a third vocabulary alive"), and that is the branch reality took: the third
+vocabulary remains present and **unvalidated** by `ActionCatalogStartupValidator`. Nothing here is broken
+by it — it has no callers — but the "three vocabularies reconciled" claim holds for (a) and (b) only until
+43-0 deletes (c).
 
 The advertised list reaches the model verbatim and is never checked against the registry:
 `ManagedAgent.ToResolvedTools` (`apps/tamma-elsa/src/Tamma.Api/Services/Agents/ManagedAgent.cs:923-937`) does
@@ -174,7 +183,7 @@ applies that posture to tools, which has never been done.
   (vocabulary (c), zero callers). Not strictly blocking, but if it has not landed the validator must either
   ignore that file or Story 43-0 must land first; ignoring it leaves a third vocabulary alive.
 - **Existing, verified:** `IToolExecutorRegistry` / `ToolExecutorRegistry`
-  (`Tamma.Activities/LlmCall/Tools/`), the six DI registrations (`Tamma.Api/Program.cs:753-764`),
+  (`Tamma.Activities/LlmCall/Tools/`), the six DI registrations (`Tamma.Api/Program.cs:723-734`),
   `GetAcceptanceRulesToolFactory` (`Program.cs:422`), `ToolCallValidator`
   (`Tamma.Activities/Security/ToolCallValidator.cs`), `DefaultAgentConfig`, `ManagedAgent.ToResolvedTools`.
 - **Feeds:** Story 43-5 (the resolver resolves emitted names through `ToolNameAliases`), Story 43-9 Seam B
@@ -198,8 +207,55 @@ applies that posture to tools, which has never been done.
 
 3 days
 
+## Addendum — 2026-07-29: the tool-loop enforcement gate shipped under this story's label
+
+No AC, scope item or design section above introduces the gate, yet it landed with the 43-4 slice and the
+follow-ups below already presume it. Recording it here so the story's own text accounts for its deliverables.
+
+- **What it is.** `IToolLoopAutonomyGate` (`Tamma.Api/Services/Agents/IToolLoopAutonomyGate.cs`) and its
+  implementation `CatalogDefaultToolLoopAutonomyGate` — a per-tool-call gate that resolves an emitted tool
+  name to an `ActionKey` and answers allow / deny for that call.
+- **Where it sits.** Inside `InlineToolLoopRunner`, **post-sanitization, pre-fork** (before the
+  sequential/parallel execution split), and it is a **REQUIRED** constructor dependency — not
+  optional-nullable like the runner's other collaborators, deliberately, because an optional gate would be
+  absent exactly when the optional validator is absent. A denial does not throw: it feeds back to the model
+  as a tool **result**, so the loop continues with the denial visible to it.
+- **v1 is behaviour-preserving.** The decision is `dial >= MinAutonomy`; `AutonomyDial.AlwaysHuman` always
+  denies; a descriptor with `Enforceable = false` is never denied. Every shipped `tool:*` descriptor carries
+  `DefaultMinAutonomy = AutonomyDial.Min`, so with no assignment rows the gate allows exactly what ran
+  before. (Story 43-5 later fed the same class from the assignment ladder via
+  `IGovernancePolicySnapshotProvider`; day-one behaviour is byte-identical either way.)
+- **Consequence for the epic's sequencing record.** Epic 43's "43-9 owns all five seams" must be read with
+  **Seam B pulled forward into 43-4** — Seam B's enforcement is live in the tree today; 43-9 owns the
+  remaining four.
+
+## Follow-ups from review (2026-07-29) — all closed 2026-07-29
+
+- **Git grading hole recorded in the catalog.** The `git_operations` read/write split grades by
+  SUBCOMMAND ONLY while args are screened only for shell metacharacters — a read-graded call can still
+  mutate (`{"subcommand":"log","args":"--output=FILE"}` writes a file; `branch -D x` deletes local
+  refs; `fetch`/`branch` are graded Read by the documented local-refs rationale in
+  `GitSubcommand.cs:60-64`). Now candidly disclosed next to the existing `file_write`/`shell_execute`
+  hole disclosures: a comment block + description note on `tool:git_operations.read` in
+  `ActionCatalog.Descriptors.cs`, stating it MUST be revisited when `tool:git_operations.write` is
+  human-gated (at that point the Read grade is a gate bypass, not a nuance).
+- **Two gate-suite test gaps closed.** (i) The `Enforceable=false` short-circuit in
+  `CatalogDefaultToolLoopAutonomyGate.Evaluate` is now driven directly: the internal rehearsal seam
+  gained an `enforceableOverride` (no shipped tool descriptor is non-enforceable), pinned by
+  `ToolLoopAutonomyGateTests.Evaluate_short_circuits_a_non_enforceable_descriptor_before_any_threshold`.
+  (ii) The PARALLEL execution fork is now proven to exclude denied calls end-to-end
+  (`ToolLoopAutonomyGateSeamTests.A_denied_tool_call_is_excluded_from_the_parallel_execution_path_too`,
+  with `EnableParallelTools` + a real `ParallelToolExecutor`) — the earlier seam tests only exercised
+  the sequential path.
+- **Malformed denial message fixed.** A gate denial with `MinAutonomy=null` and a reason other than
+  `always-human` rendered "requires minimum autonomy , above the current autonomy level 70". The
+  composition now lives in `InlineToolLoopRunner.ComposeDenialMessage` (internal for tests); the null
+  case omits the threshold clause ("is not permitted at the current autonomy level 70"). Message shape
+  pinned for null, non-null, and always-human decisions in `ToolLoopAutonomyGateSeamTests`.
+
 ## Change Log
 
 | Date       | Version | Changes                | Author |
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-25 | 1.0.0   | Initial story creation | Claude |
+| 2026-07-29 | 1.0.1   | Review follow-ups closed: git-grading hole recorded in catalog; non-enforceable + parallel-path gate tests added; null-threshold denial message fixed | Claude |

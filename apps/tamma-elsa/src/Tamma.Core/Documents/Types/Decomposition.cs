@@ -109,7 +109,10 @@ public sealed class DecompositionDocumentType : IDocumentType
     public int SchemaVersion => 1;
     public Type PayloadClrType => typeof(Decomposition);
 
-    public DocumentValidationResult Validate(JsonElement payload)
+    public DocumentValidationResult Validate(JsonElement payload) =>
+        DocumentPayloadGuard.Run(payload, ValidateCore);
+
+    private DocumentValidationResult ValidateCore(JsonElement payload)
     {
         Decomposition? doc;
         try

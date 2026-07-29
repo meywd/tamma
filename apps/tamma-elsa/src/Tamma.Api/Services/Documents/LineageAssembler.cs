@@ -173,6 +173,7 @@ public static class LineageAssembler
             row.ProducedByAction,
             row.Revision,
             row.Status,
+            row.Audience,
             row.SupersedesDocumentId,
             row.ParentDocumentId,
             row.CorrelatingEventId,

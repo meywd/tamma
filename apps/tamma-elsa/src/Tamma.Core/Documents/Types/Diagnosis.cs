@@ -148,7 +148,10 @@ public sealed class DiagnosisDocumentType : IDocumentType
     public int SchemaVersion => 1;
     public Type PayloadClrType => typeof(Diagnosis);
 
-    public DocumentValidationResult Validate(JsonElement payload)
+    public DocumentValidationResult Validate(JsonElement payload) =>
+        DocumentPayloadGuard.Run(payload, ValidateCore);
+
+    private DocumentValidationResult ValidateCore(JsonElement payload)
     {
         Diagnosis? doc;
         try

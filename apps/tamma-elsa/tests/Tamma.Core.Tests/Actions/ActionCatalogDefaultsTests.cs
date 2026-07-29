@@ -28,13 +28,20 @@ public class ActionCatalogDefaultsTests
     /// </summary>
     private static readonly string[] ShippedAlwaysHuman =
     {
-        // AcceptanceDefaults.For(Design) ships AcceptorRequirement.Human — the
-        // ONLY production occurrence (AcceptanceDefaults.cs; 43-3 C2). design.md
-        // §3.1's "the 10 document-types with a human acceptor" is VERIFIED FALSE:
-        // Plan/Review get panel SELECTION (a reviewer roster), not a human
-        // acceptor. Under enforcing-v1 that error would have gated nine document
-        // types on day one.
+        // AcceptanceDefaults.For(Design) ships AcceptorRequirement.Human — at
+        // 43-3 time the ONLY production occurrence (AcceptanceDefaults.cs; 43-3
+        // C2). design.md §3.1's "the 10 document-types with a human acceptor" is
+        // VERIFIED FALSE: Plan/Review get panel SELECTION (a reviewer roster),
+        // not a human acceptor. Under enforcing-v1 that error would have gated
+        // nine document types on day one.
         "document-type:design",
+        // Story 41-1b D1 grew the AcceptorRequirement.Human set by two — the
+        // catalog default follows the real AcceptanceDefaults switch (43-3 D4):
+        // a sprint commitment and an unmitigated-high-risk escalation call are
+        // human decisions from the day the types exist, so this is not a
+        // behaviour change on an existing surface.
+        "document-type:sprint-plan",
+        "document-type:threat-model",
     };
 
     [Test]
@@ -71,8 +78,12 @@ public class ActionCatalogDefaultsTests
 
             if (acceptor == AcceptorRequirement.Human)
             {
-                type.Should().Be(DocumentTypeKey.Design,
-                    "AcceptorRequirement.Human occurs exactly once in production");
+                type.Should().BeOneOf(new[]
+                    {
+                        DocumentTypeKey.Design, DocumentTypeKey.SprintPlan, DocumentTypeKey.ThreatModel,
+                    },
+                    "AcceptorRequirement.Human occurs for exactly design (39-13 D4) plus " +
+                    "sprint-plan/threat-model (Story 41-1b D1)");
                 descriptor.DefaultMinAutonomy.Should().Be(AutonomyDial.AlwaysHuman);
             }
             else

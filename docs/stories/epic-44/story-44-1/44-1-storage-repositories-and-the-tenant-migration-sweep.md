@@ -1,6 +1,6 @@
 # Story 44-1: Storage, Repositories, and the Migrate-All-Provisioned-Tenants Sweep
 
-Status: drafted
+Status: done — conformance-reviewed 2026-07-29; entities, the `AddTrackerCore` tenant migration, the repositories and the `POST /api/admin/tenants/migrate` sweep all ship (the Architectural Context section is pre-implementation prose, now marked as such); sweep-endpoint hygiene and the endpoint's missing HTTP authorization test remain open follow-ups
 
 ## MANDATORY: Before You Code
 
@@ -25,13 +25,17 @@ So that a customer's backlog is isolated by the same mechanism as their document
 
 P0 — Wave 0. Nothing in Epic 44 reads or writes without this. **The sweep half is a platform fix, not tracker scope**, and it is here because Epic 44 is the first feature that cannot ship without it.
 
-## Architectural Context (READ FIRST)
+## Architectural Context (state at drafting, pre-44-1) (READ FIRST)
 
-- **The migration-reach gap is real and has no operational escape hatch today.** `ITenantDbMigrator.MigrateTenantAppAsync` (`apps/tamma-elsa/src/Tamma.Data/Abstractions/ITenantDbMigrator.cs:33`, impl `Tamma.Data/Pooling/EfTenantDbMigrator.cs:25`) has **exactly two production call sites**, both creation-only:
+*Everything in this section is written in the present tense of 2026-07-25, before this story landed. It
+describes the gap the story closes — it is not a description of the current tree. The sweep, the admin
+endpoint and the data-source migrator flavour all exist as of 2026-07-29.*
+
+- **The migration-reach gap is real and has no operational escape hatch today.** `ITenantDbMigrator.MigrateTenantAppAsync` (`apps/tamma-elsa/src/Tamma.Data/Abstractions/ITenantDbMigrator.cs:33`, impl `Tamma.Data/Pooling/EfTenantDbMigrator.cs:26`) has **exactly two production call sites**, both creation-only:
   - `Tamma.Api/Services/Provisioning/TenantProvisioningService.cs:172`, inside `ProvisionAsync` (`:147`), reached only from `Tamma.Api/Middleware/EnsurePersonalTenantMiddleware.cs:176-177`. It runs **only when `password is not null`** (a freshly minted role); an idempotent re-run explicitly skips it (`:167-176`).
   - `Tamma.Activities/TenantLifecycle/MigrateTenantDatabaseActivity.cs:53`, step 4 of `CreateTenantWorkflow` (`Tamma.ElsaServer/Workflows/CreateTenantWorkflow.cs:158-160`).
   There is no admin endpoint (`Tamma.Api/Endpoints/Admin/` contains no `migrate` handler), no hosted service and no queued-task handler that fans DDL over tenants. `Program.cs:3278` migrates the **control plane** only.
-- **`EfTenantDbMigrator` is already idempotent and safe to call repeatedly.** It derives the schema from the connection string's `Search Path` (`:47`), forces `Pooling=false` on the migration connection (`:56-62`), pins the per-tenant history table `__TenantMigrationsHistory` (`:64-67`), runs an idempotent `CREATE SCHEMA IF NOT EXISTS` safety net (`:83-92`) and then `MigrateAsync` (`:97`). **The sweep is a caller, not a redesign.**
+- **`EfTenantDbMigrator` is already idempotent and safe to call repeatedly.** It derives the schema from the connection string's `Search Path` (`:47`), forces `Pooling=false` on the migration connection (`:51-63`), pins the per-tenant history table `__TenantMigrationsHistory` (`:64-67`), runs an idempotent `CREATE SCHEMA IF NOT EXISTS` safety net (`:83-92`) and then `MigrateAsync` (`:97`). **The sweep is a caller, not a redesign.**
 - **Tenant connection resolution:** `Tamma.Data/Pooling/LruPooledTenantConnectionResolver.cs` — `GetDataSourceAsync:233`, `LeaseAsync:340`, `EvictAsync:495`. Registered singleton at `Pooling/TenantConnectionPoolServiceCollectionExtensions.cs:134-139`. Schema naming `Pooling/TenantNaming.cs:57` (`t_<hex>`); search path set on the connection string at `Pooling/TenantDatabasePool.cs:175-181`; DbContext wiring at `Tamma.Data/TenantDbContextFactory.cs:46-68`.
 - **The residency precedent:** every operational tenant table is tenant-resident — `document_instances` (`Migrations/Tenant/20260722180002_AddDocumentInstances`), `channel_outbox` (`20260722211145_AddChannelOutbox`), `acceptance_rules_overrides` (`20260722011909_AddAcceptanceRulesOverrides`).
 - **The XOR form to copy — and the one NOT to copy.** `20260722011909_AddAcceptanceRulesOverrides.cs:32` is the strong form `(A NOT NULL AND B NULL) OR (A NULL AND B NOT NULL)`, paired with a unique index carrying `.Annotation("Npgsql:NullsDistinct", false)` (`:35-40`). `ck_audit_records_principal_xor` (`Migrations/Tenant/20260619003624_AddAuditRecords.cs:42`) is the **weak** form `NOT (both NOT NULL)` and permits both NULL — do not copy it.
@@ -88,8 +92,31 @@ P0 — Wave 0. Nothing in Epic 44 reads or writes without this. **The sweep half
 
 6 days
 
+## Follow-ups from adversarial review (2026-07-29)
+
+Fixed in this lane (see `.dev/bugs/2026-07-29-ef-migrator-service-provider-explosion.md` for the HIGH finding):
+
+- **EF internal-service-provider explosion (HIGH)** — `EfTenantDbMigrator`'s data-source path passed the `NpgsqlDataSource` into `UseNpgsql`, minting one EF internal provider per swept tenant; EF throws at the 21st and the cap is process-global. Now migrates over a borrowed connection (the `TenantDbContextFactory` pattern); regression-pinned at 25 tenants + same-process re-run.
+- **Rekey collision guards** — rekey onto an existing current key is a typed `TRACKER.KEY_CONFLICT` (pre-check + 23505 catch); rekey into the item's own project's future mint space advances `NextNumber` past the target under the `FOR UPDATE` lock so minting can never wedge; rekey into a **different** existing project's prefix is rejected (`TRACKER.CROSS_PROJECT_REKEY`) — a cross-project rekey is a move, not a rename, and moves never re-mint keys (out of scope for this seam by contract).
+- **`GetByKeyAsync` determinism** — the current-Key match always wins; previous-keys containment is only a fallback (with an Id-ordered tie-break), so a key that is one row's current key and another row's history entry resolves to the current holder.
+- **Relation-add race** — `AddRelationAsync` is insert-first; the unique-index loser (23505) returns the stored row, making the documented idempotent contract hold under concurrency. `TrackerPreferenceRepository`'s first-upsert race retries once as an update of the winner's row.
+- **`DefaultKind` wire validation** — junk fails as typed `TRACKER.UNKNOWN_KIND` at the write boundary, never as raw 23514 off `ck_tracker_preferences_default_kind` (`BoardGroupBy` stays freeform by design).
+- **Sweeper OCE isolation** — an `OperationCanceledException` from one tenant's own stack no longer aborts the whole sweep; it is only treated as sweep-cancellation when the sweep's token is actually canceled.
+- **`WorkItemEntity.Version` is now the EF optimistic-concurrency token** *(done 2026-07-29)* — `TammaModelConfiguration` configures `Version` with `IsConcurrencyToken()` (no migration required: for a plain `int` token the config is model-metadata only — `dotnet ef migrations has-pending-model-changes -c TenantDbContext` reports none). All five mutating repository seams (`UpdateAsync`/`SetStatusAsync`/`SetRanksAsync`/`SetParentAsync`/`RekeyAsync`) already bump `Version` and now translate `DbUpdateConcurrencyException` into the typed, **retryable** `TRACKER.CONCURRENCY_CONFLICT`. Real-Postgres proof: `WorkItemRepositoryTests.Interleaved_rekeys_conflict_typed_instead_of_silently_losing_history` establishes a deterministic interleave (both rekeys read at `Version=1`, queued behind an external `FOR UPDATE` on the project row) and shows the loser gets the typed conflict while the winner's `PreviousKeys` chain stays intact — no more silent last-write-wins losing key history.
+
+Still open (owned by OTHER lanes — do not close this section until they land):
+
+- **Sweep endpoint hygiene** (`Program.cs` — coordinator's lane): `dryRun` defaults to `false` (a bare POST applies DDL fleet-wide); no single-flight guard (two concurrent sweeps double-migrate); the sweep runs synchronously in-request (a large fleet outlives HTTP timeouts); the pool's `CommandTimeout=30s` applies to migration DDL and will spuriously fail heavy migrations.
+- **No HTTP-level authorization test for `POST /api/admin/tenants/migrate`.** The endpoint carries
+  `.RequireAuthorization("PlatformOwnerAccess")` in `Program.cs`, but that is verified only by inspection —
+  no test drives the route as a non-platform-owner and asserts 403, so a future edit that drops or weakens
+  the policy would land green. The shipped suite (`Tamma.Api.Tests/Tracker/TenantMigrationSweeperTests.cs`)
+  covers the sweeper's behaviour, not the route's auth. Open gap as of 2026-07-29.
+
 ## Change Log
 
 | Date       | Version | Changes                | Author |
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-25 | 1.0.0   | Initial story creation | Claude |
+| 2026-07-29 | 1.0.1   | Adversarial-review follow-ups section (fixes landed in the tracker-storage lane; deferred items listed) | Claude |
+| 2026-07-29 | 1.0.2   | `Version` concurrency-token follow-up closed: `IsConcurrencyToken()` + typed retryable `TRACKER.CONCURRENCY_CONFLICT` on all update seams + interleaved-rekey Postgres proof (no migration needed) | Claude |

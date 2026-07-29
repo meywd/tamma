@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
 using Tamma.Data.Abstractions;
 
 namespace Tamma.Data.Pooling;
@@ -22,7 +23,7 @@ namespace Tamma.Data.Pooling;
 /// workflow still calls into this method so the activity surface is
 /// stable when the dedicated Elsa DBs ship.</para>
 /// </summary>
-public sealed class EfTenantDbMigrator : ITenantDbMigrator
+public sealed class EfTenantDbMigrator : ITenantDbMigrator, ITenantDataSourceDbMigrator
 {
     private readonly ILogger<EfTenantDbMigrator> _logger;
 
@@ -66,6 +67,70 @@ public sealed class EfTenantDbMigrator : ITenantDbMigrator
                 npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema))
             .Options;
 
+        await MigrateCoreAsync(options, schema, ct).ConfigureAwait(false);
+    }
+
+    // ── Story 44-1: the data-source flavour (the sweep's path) ──
+    //
+    // NpgsqlDataSource.ConnectionString strips the password, so a caller
+    // holding a resolver-minted data source cannot round-trip through the
+    // string-based method above (SASL/SCRAM "No password has been provided").
+    // Migrating OVER the data source keeps the credentials where they live.
+    // Search Path survives the stripping, so schema derivation is unchanged.
+    // The Pooling=false rationale above does not apply here: connections come
+    // from the tenant's own long-lived resolver pool, not a one-shot
+    // migration-only pool that would otherwise strand a physical connection.
+
+    public async Task MigrateTenantAppAsync(NpgsqlDataSource dataSource, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(dataSource);
+        var schema = TenantNaming.SchemaFromConnectionString(dataSource.ConnectionString);
+        // Borrow a connection; dispose deterministically when the migration
+        // completes (returns it to the resolver's pool — see the comment on
+        // BuildConnectionOptions for why NOT the data source itself).
+        await using var connection = dataSource.CreateConnection();
+        await MigrateCoreAsync(BuildConnectionOptions(connection, schema), schema, ct)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<int> CountPendingMigrationsAsync(
+        NpgsqlDataSource dataSource, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(dataSource);
+        var schema = TenantNaming.SchemaFromConnectionString(dataSource.ConnectionString);
+        await using var connection = dataSource.CreateConnection();
+        await using var ctx = new TenantDbContext(BuildConnectionOptions(connection, schema));
+        // Reads the per-schema history table only; a schema without one (a
+        // tenant provisioned before the first sweep) reports the full set.
+        var pending = await ctx.Database.GetPendingMigrationsAsync(ct).ConfigureAwait(false);
+        return pending.Count();
+    }
+
+    // EF is handed a BORROWED CONNECTION, never the NpgsqlDataSource itself.
+    // Passing a data source into UseNpgsql makes that data-source INSTANCE
+    // part of EF's internal service-provider cache key — every swept tenant
+    // then mints (and leaks) a fresh internal provider, and EF's
+    // ManyServiceProvidersCreatedWarning THROWS at the 21st distinct provider.
+    // The cap is process-global, so one >20-tenant sweep poisons every later
+    // sweep in the same process. A DbConnection is connection-level state: all
+    // tenants share one cached internal provider. Same fix as
+    // TenantDbContextFactory (Tamma.Data/TenantDbContextFactory.cs:53-66);
+    // here the CALLER owns/disposes the connection (contextOwnsConnection
+    // defaults to false for the DbConnection overload), returning it to the
+    // resolver's pool. The connection string embedded in the data source
+    // carries Search Path, so the borrowed connection lands unqualified DDL in
+    // the tenant schema, and the history table stays pinned to that same
+    // schema — semantics identical to the string-based path above.
+    private static DbContextOptions<TenantDbContext> BuildConnectionOptions(
+        NpgsqlConnection connection, string? schema) =>
+        new DbContextOptionsBuilder<TenantDbContext>()
+            .UseNpgsql(connection, npgsql =>
+                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema))
+            .Options;
+
+    private async Task MigrateCoreAsync(
+        DbContextOptions<TenantDbContext> options, string? schema, CancellationToken ct)
+    {
         await using var ctx = new TenantDbContext(options);
         if (schema is not null)
         {

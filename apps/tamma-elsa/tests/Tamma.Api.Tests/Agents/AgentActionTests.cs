@@ -35,7 +35,11 @@ public class AgentActionTests
         // Story 39-15 (D5) — 79 → 80: the split (developer, triage-context-scan) action
         // was minted so the Findings-producing triage-context use is a document contract
         // while ContextGatheringWorkflow keeps context-scan free-text.
-        Enum.GetValues<AgentAction>().Length.Should().Be(80);
+        // Story 41-1a — 80 → 96: the 16 Epic 41 tokens (4 scrum_master + the 41-8
+        // Phase B write-retro-narrative lockstep cell + 2 project_manager +
+        // 4 ux_designer + triage-tech-debt/design-system (architect) + triage-pr
+        // (senior_developer) + manage-regression (tester) + incident-rootcause (devops)).
+        Enum.GetValues<AgentAction>().Length.Should().Be(96);
     }
 
     [TestCase("context-scan", AgentAction.ContextScan)]

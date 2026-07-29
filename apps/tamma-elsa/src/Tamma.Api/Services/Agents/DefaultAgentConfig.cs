@@ -168,6 +168,56 @@ public static class DefaultAgentConfig
                     "for developer audiences.",
                 Source = "platform-default",
             },
+            // Story 41-1a (C2/D7) — every AgentRole member MUST have a row here:
+            // ForRole asserts the role then indexes raw, so a missing row is a
+            // KeyNotFoundException from AgentResolverService. The three Epic 41
+            // roles clone the product_owner row's shape (planning/prose roles,
+            // no code tools).
+            ["scrum_master"] = new()
+            {
+                Role = "scrum_master",
+                Handle = "tamma-scrum-master",
+                Provider = DefaultProvider,
+                Model = DefaultModel,
+                Temperature = 0.3,
+                MaxTokens = 4096,
+                TokenBudget = 16000,
+                Tools = Array.Empty<string>(),
+                SystemPrompt =
+                    "You are a scrum master facilitating agile delivery: sprint planning, " +
+                    "standups, retrospectives, and impediment tracking.",
+                Source = "platform-default",
+            },
+            ["project_manager"] = new()
+            {
+                Role = "project_manager",
+                Handle = "tamma-project-manager",
+                Provider = DefaultProvider,
+                Model = DefaultModel,
+                Temperature = 0.3,
+                MaxTokens = 4096,
+                TokenBudget = 16000,
+                Tools = Array.Empty<string>(),
+                SystemPrompt =
+                    "You are a project manager coordinating delivery across teams: status " +
+                    "reporting against commitments and release coordination.",
+                Source = "platform-default",
+            },
+            ["ux_designer"] = new()
+            {
+                Role = "ux_designer",
+                Handle = "tamma-ux-designer",
+                Provider = DefaultProvider,
+                Model = DefaultModel,
+                Temperature = 0.4,
+                MaxTokens = 4096,
+                TokenBudget = 16000,
+                Tools = Array.Empty<string>(),
+                SystemPrompt =
+                    "You are a UX and visual designer producing user flows, structured UI " +
+                    "specifications, design reviews, and accessibility audits.",
+                Source = "platform-default",
+            },
         }.ToFrozenDictionary();
 
     // -----------------------------------------------------------------------

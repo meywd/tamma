@@ -109,6 +109,48 @@ public class DocumentEndpointsGuardTests
         ErrorOf(result).Should().Be("document_not_found");
     }
 
+    // ── Story 41-1c AC3/AC4 — the audience query filter ────────────────────────
+
+    [Test]
+    public async Task GetIssueLineage_UnknownAudience_Returns400_WithoutCallingRepo()
+    {
+        // An out-of-vocabulary audience is a 400 (unknown_audience), never an
+        // empty 200 — silence would read as "no documents" when the truth is
+        // "no such audience".
+        var repo = new RecordingRepo();
+        var result = await DocumentEndpoints.GetIssueLineage(
+            "i", repo, new DocumentTestData.FakeTenantContext(_tenant), CancellationToken.None,
+            audience: "marketing");
+
+        StatusOf(result).Should().Be(400);
+        ErrorOf(result).Should().Be("unknown_audience");
+        repo.ListByIssueCalled.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task GetIssueLineage_VocabularyAudience_IsThreadedToTheRepository()
+    {
+        var repo = new RecordingRepo();
+        var result = await DocumentEndpoints.GetIssueLineage(
+            "i", repo, new DocumentTestData.FakeTenantContext(_tenant), CancellationToken.None,
+            audience: "stakeholder");
+
+        StatusOf(result).Should().Be(200);
+        repo.ListByIssueCalled.Should().BeTrue();
+        repo.RequestedAudience.Should().Be("stakeholder");
+    }
+
+    [Test]
+    public async Task GetIssueLineage_NoAudience_PassesNullFilter()
+    {
+        var repo = new RecordingRepo();
+        await DocumentEndpoints.GetIssueLineage(
+            "i", repo, new DocumentTestData.FakeTenantContext(_tenant), CancellationToken.None);
+
+        repo.ListByIssueCalled.Should().BeTrue();
+        repo.RequestedAudience.Should().BeNull("no filter means the pre-41-1c unfiltered read");
+    }
+
     // ── Happy-path projections ─────────────────────────────────────────────────
 
     [Test]
@@ -184,14 +226,16 @@ public class DocumentEndpointsGuardTests
         public bool GetLatestAcceptedCalled { get; private set; }
         public bool GetByIdCalled { get; private set; }
         public Guid? RequestedTenant { get; private set; }
+        public string? RequestedAudience { get; private set; }
         public List<DocumentInstance> IssueRows { get; } = new();
         public List<DocumentInstance> LatestRows { get; } = new();
         public DocumentInstance? RowById { get; set; }
 
-        public Task<IReadOnlyList<DocumentInstance>> ListByIssueAsync(Guid tenantId, string issueId, CancellationToken ct)
+        public Task<IReadOnlyList<DocumentInstance>> ListByIssueAsync(Guid tenantId, string issueId, string? audience, CancellationToken ct)
         {
             ListByIssueCalled = true;
             RequestedTenant = tenantId;
+            RequestedAudience = audience;
             return Task.FromResult<IReadOnlyList<DocumentInstance>>(IssueRows);
         }
 

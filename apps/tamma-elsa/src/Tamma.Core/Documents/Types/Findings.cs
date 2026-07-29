@@ -79,7 +79,10 @@ public sealed class FindingsDocumentType : IDocumentType
     public int SchemaVersion => 1;
     public Type PayloadClrType => typeof(Findings);
 
-    public DocumentValidationResult Validate(JsonElement payload)
+    public DocumentValidationResult Validate(JsonElement payload) =>
+        DocumentPayloadGuard.Run(payload, ValidateCore);
+
+    private DocumentValidationResult ValidateCore(JsonElement payload)
     {
         Findings? doc;
         try

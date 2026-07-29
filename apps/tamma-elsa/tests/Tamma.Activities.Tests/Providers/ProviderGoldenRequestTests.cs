@@ -103,7 +103,8 @@ public class ProviderGoldenRequestTests
         logger: null,
         httpClientFactory: factory,
         configuration: null,
-        sanitizer: null);
+        sanitizer: null,
+        autonomyGate: new Tamma.Api.Services.Agents.CatalogDefaultToolLoopAutonomyGate());
 
     // Tool result the loop feeds back when no IToolExecutorRegistry is wired.
     private const string NoRegistryToolResult =
