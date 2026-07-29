@@ -123,6 +123,12 @@ public class TrackerServiceContractTests
             nameof(ITrackerService.SetWorkItemStatusAsync),
             nameof(ITrackerService.AssignWorkItemAsync),
             nameof(ITrackerService.DeleteWorkItemAsync),
+            // Added by the 44-2 conformance round (2026-07-29). Both were
+            // silently absent from this list while the AC claimed "every
+            // mutation" — the enumeration was the reason the gap survived
+            // review, so the gap and the enumeration are fixed together.
+            nameof(ITrackerService.DeletePreferencesAsync),
+            nameof(ITrackerService.DeletePreferencesForTenantAsync),
         })
         {
             typeof(ITrackerService).GetMethod(name)!.GetParameters()

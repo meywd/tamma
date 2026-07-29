@@ -453,17 +453,30 @@ public sealed class TrackerService(
     }
 
     /// <inheritdoc />
-    public Task<bool> DeletePreferencesAsync(Guid? userId)
+    public async Task<bool> DeletePreferencesAsync(Guid? userId, int? ifMatchVersion = null)
     {
         EnsureTenant();
-        return preferences.DeleteAsync(userId);
+        // The eager check names the ACTUAL version in the 409 (the atomic guard
+        // in the repository can only say "you lost"); `ifMatchVersion` still
+        // rides down, because these are two different DbContexts and only the
+        // pinned token makes the precondition atomic with the DELETE. Same
+        // shape as DeleteProjectAsync / DeleteWorkItemAsync.
+        var existing = await preferences.GetAsync(userId);
+        if (existing is null)
+            return false;
+        RequireVersion(existing.Version, ifMatchVersion, "tracker preferences", userId ?? Guid.Empty);
+        return await preferences.DeleteAsync(userId, ifMatchVersion);
     }
 
     /// <inheritdoc />
-    public Task<bool> DeletePreferencesForTenantAsync(Guid tenantId)
+    public async Task<bool> DeletePreferencesForTenantAsync(Guid tenantId, int? ifMatchVersion = null)
     {
         EnsureTenant();
-        return preferences.DeleteByTenantAsync(tenantId);
+        var existing = await preferences.GetByTenantAsync(tenantId);
+        if (existing is null)
+            return false;
+        RequireVersion(existing.Version, ifMatchVersion, "tracker preferences", tenantId);
+        return await preferences.DeleteByTenantAsync(tenantId, ifMatchVersion);
     }
 
     // ═══════════════════════════ Helpers ════════════════════════════════════

@@ -55,6 +55,18 @@ public static class DocumentLifecycleHelper
         [JsonPropertyName("producerAction")] public required string ProducerAction { get; init; }
         [JsonPropertyName("producerVariablesJson")] public required string ProducerVariablesJson { get; init; }
         [JsonPropertyName("feedbackVariableName")] public required string FeedbackVariableName { get; init; }
+
+        /// <summary>
+        /// Story 41-2 AC3 — the UPSTREAM document this lifecycle's drafts descend from
+        /// (the binding's single-parent lineage slot), or <c>null</c> when the caller
+        /// supplies none. Optional and defaulted, so every producer that dispatches
+        /// <c>document-lifecycle</c> without a <c>parentDocumentId</c> key keeps
+        /// minting drafts with a null parent exactly as before. NOT the supersession
+        /// edge (<see cref="DocumentEnvelope.SupersedesDocumentId"/>) and NOT the
+        /// review's subject edge (which <c>BuildReviewEnvelope</c> sets to the
+        /// reviewed draft) — this is the "what did this document come FROM" edge.
+        /// </summary>
+        [JsonPropertyName("parentDocumentId")] public Guid? ParentDocumentId { get; init; }
         [JsonPropertyName("round")] public int Round { get; init; }
         [JsonPropertyName("repairAttempts")] public int RepairAttempts { get; init; }
         [JsonPropertyName("ambiguityScore")] public double? AmbiguityScore { get; init; }
@@ -153,7 +165,10 @@ public static class DocumentLifecycleHelper
         Guid sessionId,
         string feedbackVariableName,
         double? ambiguityScore,
-        ResolvedAcceptanceRules rules)
+        ResolvedAcceptanceRules rules,
+        // Story 41-2 AC3 — OPTIONAL and TRAILING on purpose: every pre-existing caller
+        // omits it and keeps minting drafts with a null parent, byte-for-byte.
+        Guid? parentDocumentId = null)
     {
         ValidateProducerSpec(role, action, typeKey);
 
@@ -176,8 +191,18 @@ public static class DocumentLifecycleHelper
             RepairAttempts = 0,
             AmbiguityScore = ambiguityScore,
             Rules = rules,
+            ParentDocumentId = parentDocumentId,
         };
     }
+
+    /// <summary>
+    /// Story 41-2 AC3 — parse the optional <c>parentDocumentId</c> dispatch input.
+    /// Empty / whitespace / unparseable ⇒ <c>null</c> (no parent), never a throw: a
+    /// lineage hint must not be able to fail a produce. Extracted so the
+    /// input-reading rule is unit-testable rather than buried in a builder lambda.
+    /// </summary>
+    public static Guid? ParseParentDocumentId(string? raw)
+        => Guid.TryParse(raw?.Trim(), out var id) && id != Guid.Empty ? id : null;
 
     /// <summary>
     /// Resolve the effective rules from the input JSON, falling back to the per-type
@@ -213,6 +238,12 @@ public static class DocumentLifecycleHelper
     /// Mint a fresh Draft envelope for a produce/repair/revise turn. On a revise turn
     /// (<paramref name="supersedes"/> non-null) it records the supersedes chain — a
     /// revision never rewinds (39-2 D4).
+    ///
+    /// <para>Story 41-2 AC3 — every draft of this lifecycle (produce, repair AND
+    /// revise) inherits <see cref="LifecycleState.ParentDocumentId"/>: the upstream
+    /// document the whole run descends from does not change between rounds. When the
+    /// dispatching binding supplied none the slot stays <c>null</c>, which is the
+    /// pre-41-2 behaviour for every other producer.</para>
     /// </summary>
     public static DocumentEnvelope MintDraft(
         LifecycleState state, JsonElement payload, DocumentProducer producer, Guid? supersedes, DateTimeOffset now)
@@ -223,6 +254,7 @@ public static class DocumentLifecycleHelper
             state.CorrelationId,
             producer,
             payload,
+            parentDocumentId: state.ParentDocumentId,
             supersedesDocumentId: supersedes,
             now: now);
 

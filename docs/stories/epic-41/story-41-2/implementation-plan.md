@@ -161,6 +161,16 @@ this story's** — 41-1b owns it (see Blocked by).
    the shared emitter, modelled on `EmitDocumentEventActivity` minus the `DocumentEvents.StatusForEvent`
    coupling. Ships with its own unit test (`Tamma.Activities.Tests/Documents/`).
 
+   > **Note (2026-07-29, conformance round).** The activity landed; the unit test **did not**. Until
+   > this note, the emitter's only executing coverage was three `StatusForEvent` assertions borrowed
+   > inside `AcceptanceCriteriaAuthoringWorkflowStructureTests` and `AdrAuthoringWorkflowStructureTests`
+   > — each pinning one binding's family constants, not the emitter's generic contract, even though
+   > one activity now serves the whole Epic 41 batch. The gap was closed rather than merely recorded:
+   > `tests/Tamma.Activities.Tests/Documents/EmitDomainLifecycleEventActivityTests.cs` (**14** cases)
+   > now covers `StatusForEvent`'s suffix rule across families (including its Ordinal/suffix-position
+   > sensitivity and the empty-type ⇒ `error` fail-loud), `ParseTenantId`, and `BuildTammaEvent`'s
+   > tag/data mapping (every queryable tag present; blank tags omitted rather than written empty).
+
 3. **CREATE `apps/tamma-elsa/src/Tamma.Activities/Documents/AcceptanceCriteriaEvents.cs`** — `Started`,
    `Drafted`, `Accepted`, `Failed` = `"ACCEPTANCE_CRITERIA.STARTED"` / `.DRAFTED` / `.ACCEPTED` / `.FAILED`.
    Tags on every emission: `issueId`, `repository`, `tenantId`, `correlationId`.

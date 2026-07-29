@@ -413,10 +413,28 @@ Built through as one epic. The ordering below is sequencing, not separate releas
 
 **Total ~43 days.** Stories 0 and 1 are independently valuable and ship first.
 
-**Story 0** fixes a live bug worth landing on its own: the acceptance-rules edit dialog builds its
-save body without `acceptorRequirement`, and the API defaults the missing field — so **every admin
-save silently resets `design` from human-required back to `any`**. Also deletes a dead tool-resolution
+**Story 0** fixes a live bug worth landing on its own: the acceptance-rules edit dialog **built** its
+save body without `acceptorRequirement`, and the API **defaulted** the missing field — so **every admin
+save silently reset `design` from human-required back to `any`**. Also deletes a dead tool-resolution
 activity with zero callers (a third dead tool vocabulary).
+
+> **Status (2026-07-29): FIXED, on both sides.** The DTO field is now `AcceptorRequirement?`
+> (`null` = "the caller did not say") and `AcceptanceRulesEndpoints.Upsert` resolves the in-force
+> value before mapping, so an omitted field is preserved rather than invented; the dashboard sends
+> and edits the field. The blast radius was three document types, not one — `sprint-plan` and
+> `threat-model` also ship `AcceptorRequirement.Human` since 41-1b/41-1c. **The fix covers
+> `PUT /api/acceptance-rules/{documentTypeKey}` only** — see carried defect **CD-1** below before
+> treating the class as closed.
+
+### Carried defects and follow-ups
+
+Defects found while implementing an Epic 43 story, deliberately NOT fixed in that story, and
+therefore not owned by any story that has landed. **A follow-up recorded only inside the story that
+deferred it is not tracked** — that is what this table is for.
+
+| # | Defect | Found in | Owner | Status |
+|---|---|---|---|---|
+| **CD-1** | **Tier-2 wholesale shadowing erases the shipped human acceptor floor via the BASE route.** `AcceptanceRulesService.ResolveAsync` resolves **wholesale** — tier 1 per-type override row, tier 2 principal BASE override row, tier 3 `AcceptanceDefaults.For(type)` — with **no field merge**. So the moment a base override row exists it shadows tier 3 *entirely*. Consequence, proved: **one** `PUT /api/acceptance-rules/base` writes a base row carrying that row's in-force `acceptorRequirement` (`any`), and from then on `design`, `sprint-plan` **and** `threat-model` all resolve to `any` — their human floor gone, without any of them having been written — and `threat-model` additionally loses its `security` reviewer selection. Worse, a **later omitting per-type save** then reads the degraded value as "what is in force" and bakes it into a type row, after which deleting the base row no longer restores the floor. **This is a resolution-semantics issue, not an omission bug:** it fires on an *explicitly stated* `acceptorRequirement` exactly as it does on an omitted one, so 43-0's preserve-on-absent cannot close it. **Not UI-reachable today** — the admin page renders only the ten per-type rows and issues no base PUT — but reachable by anything that speaks HTTP. Semantics are 39-5 D1/D2's and predate 43-0. **The follow-up must decide** whether tier 2 stays wholesale (and the base route grows a guard REFUSING to lower a floor below any shipped per-type floor) or tier 2 becomes a per-field merge for `AcceptorRequirement`. The two are not equivalent and the choice is a product one. | Story 43-0 adversarial review, 2026-07-29 (recorded as that story's amendment **A1**) | **unassigned** — needs a story that owns acceptance-rules resolution semantics; explicitly NOT 43-0 (changing tier-2 meaning alters resolution for every existing stored base row and every field, not just this one) | **open** |
 
 > **Correction (2026-07-25).** An earlier draft of this line also asked Story 0 to "resolve
 > `GetAcceptanceRulesTool` — DI-register or delete, it must not stay a tool the registry cannot

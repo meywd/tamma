@@ -1,5 +1,69 @@
 # Implementation Plan — Story 44-2: Work-Item & Project API, RBAC, `tracker_preferences`, Action-Catalog Descriptors
 
+> ## ⚠️ PLAN-VS-SHIPPED BANNER — 2026-07-29 (conformance round)
+>
+> **This plan is the DRAFT.** Several things below name artifacts that do not
+> exist. Read this banner before trusting any name in the Test Plan, step 9 or
+> the Definition of Done. The story's Amendment section is the normative record
+> of what shipped; this banner only covers the plan's own stale names.
+>
+> **1. Nine of the Test Plan's fixture names do not exist.** The plan spreads 21
+> tests across nine fixtures — `TrackerModeTests`, `TrackerAssigneeTests`,
+> `TrackerVisibilityTests`, `TrackerConcurrencyTests`, `TrackerListTests`,
+> `TrackerValidationTests`, `TrackerDeleteTests`, `TrackerCatalogDescriptorTests`,
+> `TrackerRouteOrderTests`. **None were created.** Everything consolidated into
+> three real fixtures under `apps/tamma-elsa/tests/Tamma.Api.Tests/Tracker/`:
+> `TrackerEndpointsTests` (behaviour, Testcontainers), `TrackerRbacTests`
+> (three-place RBAC + policy roster), `TrackerServiceContractTests` (pure
+> reflection over `ITrackerService`, no Docker). Searching for a plan fixture
+> name finds nothing; search the three real ones.
+>
+> **2. "21 tests green" (DoD) understates the shipped suite** — the three
+> fixtures carry ~60 `[Test]` attributes between them (56 before this
+> conformance round, +4 from it: `TrackerEndpointsTests` 44,
+> `TrackerRbacTests` 11, `TrackerServiceContractTests` 5), because the
+> adversarial and conformance rounds added concurrency, RBAC, catalog and
+> If-Match coverage the plan never enumerated. The DoD number is a floor, not a
+> count; do not use it as a pin.
+>
+> **3. Step 9 / D10's `TrackerActionDescriptors.cs` was never created.** 43-2's
+> core HAD landed, so the descriptors ship as real `ExternalEffect` members in
+> `Tamma.Core/Actions/ActionCatalog.Descriptors.cs`. Recorded as amendment A2;
+> the data-file branch of AC10 is unused.
+>
+> **4. ⚠️ Test 16 shipped as a DIFFERENT test, and the substitution mattered.**
+> The plan specifies `TrackerListTests.Keyset_paging_is_stable_under_reorder` —
+> "page, **re-rank** mid-set, page again — no dup, no skip". What shipped was
+> `TrackerEndpointsTests.Keyset_paging_is_stable_under_concurrent_insertion`, an
+> **INSERTION** test: a new row lands at the front between pages. Insertion and
+> re-rank are not the same mutation, and the difference is not cosmetic —
+> **amendment A1 warns that a rekey changes the `Key` half of the `(Rank, Key)`
+> tie-break and can move a row across an already-served page boundary**, i.e.
+> the one test that would exercise A1's own stated failure mode is exactly the
+> one that was replaced. The gap went unrecorded until the 2026-07-29
+> conformance round.
+>
+> **Closed, partly.** The conformance round added the specified re-rank test —
+> `TrackerEndpointsTests.Keyset_paging_is_stable_under_reorder` — driving
+> `IWorkItemRepository.SetRanksAsync` mid-paging (44-2 ships no ranking ROUTE:
+> `PatchWorkItemRequest` has no `rank` field and 44-3 owns the endpoints, so the
+> repository seam is the only surface, exactly as the insertion test already
+> drives its intruder). It asserts the honest guarantee — rows that did not move
+> are never duplicated and never skipped; a row dragged across the cursor is
+> legitimately re-delivered or missed, which is inherent to keyset paging.
+>
+> **⚠️ CONSTRAINT ON 44-3 — what is still NOT covered.** A1's failure mode is a
+> COMPOUND: a duplicate rank inside one project *plus* a rekey. Only the
+> premise is now pinned, by
+> `TrackerEndpointsTests.Duplicate_ranks_within_a_project_are_accepted_today`,
+> which proves `SetRanksAsync` validates rank FORMAT only and will happily
+> collide two ranks. The compound itself is not driven, because the rekey path
+> (`IWorkItemRepository.RekeyAsync`) has no 44-2 route and re-keying is 44-3's
+> surface. **44-3 must either enforce rank uniqueness within a project (unique
+> index or validation in `SetRanksAsync`) or move the cursor to an immutable
+> tie-break — and must add the duplicate-rank + rekey paging test when it does.**
+> Until then the invariant holds only incidentally, as A1 states.
+
 ## Scope & Deliverable
 
 When this story is done the tracker has an HTTP surface: projects and work items are creatable, readable, filterable, patchable, assignable and status-movable; `tracker_preferences` resolves per-principal in both operating modes over parallel never-joined repository surfaces; `tracker:view` / `tracker:manage` exist in all three RBAC places; every mutation is a single-field PATCH with `If-Match`/`ETag` optimistic concurrency (never a defaulted full-body PUT — the 43-0 bug class); the assignee picker degrades honestly against 39-20's no-op stub instead of rendering empty; and every mutating route carries an Epic 43 catalog descriptor in the `issue-tracking` group.
@@ -24,7 +88,7 @@ When this story is done the tracker has an HTTP surface: projects and work items
 
 - **D1 — One endpoint class, `TrackerEndpoints`, covering projects + work items + (in 44-4) iterations.** Three classes would mean three mapping sites and three places to get the literal-before-parameterized ordering wrong. `AcceptanceRulesEndpoints` covers rules, defaults and resets in one class for the same reason.
 
-- **D2 — Single-field PATCH with explicit tri-state, never a defaulted full-body PUT.** This is the 43-0 bug class stated as a rule: the acceptance-rules dialog omits `acceptorRequirement` from its PUT body and the API defaults it, so **every admin save silently resets `design` from human-required to any**. The DTO uses a tri-state wrapper (absent / null / value) so "not sent" and "explicitly cleared" are distinguishable at the model-binding layer — `System.Text.Json`'s `JsonElement`-per-field or an `Optional<T>` struct, decided at implementation, but the *contract* is fixed here and AC3's byte-unchanged test enforces it.
+- **D2 — Single-field PATCH with explicit tri-state, never a defaulted full-body PUT.** This is the 43-0 bug class stated as a rule *(historical — **FIXED by Story 43-0 on 2026-07-29**, in this same wave; kept here in the past tense because the rule is why it must not recur)*: the acceptance-rules dialog **omitted** `acceptorRequirement` from its PUT body and the API **defaulted** it, so **every admin save silently reset `design` from human-required to any**. 43-0 fixed both sides — the DTO field is nullable and an omitted `acceptorRequirement` preserves the stored value, and the client sends the field. The DTO uses a tri-state wrapper (absent / null / value) so "not sent" and "explicitly cleared" are distinguishable at the model-binding layer — `System.Text.Json`'s `JsonElement`-per-field or an `Optional<T>` struct, decided at implementation, but the *contract* is fixed here and AC3's byte-unchanged test enforces it.
   `PUT` survives on `/api/tracker/preferences` only, where the body genuinely is the whole resource.
 
 - **D3 — `tracker:view` gates work-item CRUD; `tracker:manage` gates project and iteration structure.** A tracker in which a `member` cannot file a bug or move their own card is not a tracker. But a `member` renaming a project key, deleting a project, or closing an iteration affects everyone's identifiers, so structure is `["admin","owner"]`. The split is the same one 39-20 draws between `tasks:assign` (admin) and task *completion* (any eligible holder).

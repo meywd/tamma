@@ -513,18 +513,30 @@ public static class TrackerEndpoints
         }
     }
 
-    /// <summary>Delete the principal's override so the shipped defaults take over (AC8).</summary>
+    /// <summary>
+    /// Delete the principal's override so the shipped defaults take over (AC8).
+    ///
+    /// <para>Honours <c>If-Match</c> like every other mutation (AC9). Until the
+    /// 44-2 conformance round (2026-07-29) this route was the single carve-out:
+    /// it never read the header, so a reset raced against a concurrent save
+    /// discarded that save with no 409. Absent header still means "no
+    /// precondition"; <c>*</c> passes; junk is a 400; a stale version is a
+    /// retryable 409.</para>
+    /// </summary>
     public static async Task<IResult> DeletePreferences(
         ITrackerService tracker,
         ClaimsPrincipal principal,
         ITenantContext tenantContext,
-        ITammaModeProvider modeProvider)
+        ITammaModeProvider modeProvider,
+        HttpContext http)
     {
+        if (!TryReadIfMatch(http, out var ifMatch, out var precondition))
+            return precondition!;
         try
         {
             var deleted = modeProvider.Mode == TammaMode.SaaS && tenantContext.TenantId is Guid tenantId
-                ? await tracker.DeletePreferencesForTenantAsync(tenantId)
-                : await tracker.DeletePreferencesAsync(principal.GetUserId());
+                ? await tracker.DeletePreferencesForTenantAsync(tenantId, ifMatch)
+                : await tracker.DeletePreferencesAsync(principal.GetUserId(), ifMatch);
 
             if (!deleted)
                 return Results.NotFound(new { error = "No tracker-preferences override to delete" });

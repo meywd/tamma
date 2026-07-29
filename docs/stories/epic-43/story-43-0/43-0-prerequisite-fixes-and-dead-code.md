@@ -27,7 +27,7 @@ Then, before writing any code, check the knowledge base:
 
 As a **platform/tenant admin editing acceptance rules**,
 I want a save from the admin dialog to preserve every field the API models — not silently reset the ones the dialog does not know about —
-So that `design`'s shipped `acceptorRequirement = human` survives an unrelated edit, and so that Epic 43's catalog is not layered on top of a surface that already loses policy on write.
+So that `design`'s shipped `acceptorRequirement = human` survives an unrelated edit, and so that Epic 43's catalog is not layered on top of a surface that already loses policy on write. *[SCOPE-BOUNDED — true of `PUT /api/acceptance-rules/{documentTypeKey}` only; a `PUT /api/acceptance-rules/base` can still erase that floor via 39-5's tier-2 wholesale shadowing. See the header callout and amendment A1 before quoting this line.]*
 
 Secondarily, as a **developer about to author the action catalog**, I want the two orphan tool vocabularies and the mistyped registry client removed or resolved first, so the catalog is derived from vocabularies that are actually reachable.
 
@@ -37,7 +37,13 @@ P1 — **ships standalone, before anything else in Epic 43.** The `acceptorRequi
 
 ## Architectural Context (READ FIRST)
 
-### (1) The live bug: every admin save resets `acceptorRequirement`
+### (1) The live bug: every admin save resets `acceptorRequirement` *[pre-fix state — see "Corrections applied while implementing"]*
+
+> The code quoted in this section **no longer exists**. In particular the DTO's
+> trailing parameter is now `AcceptorRequirement?` defaulting to `null`, not the
+> non-nullable `AcceptorRequirement AcceptorRequirement = AcceptorRequirement.Any`
+> quoted below, and the dashboard interface/memo now carry the field. Kept
+> verbatim as the diagnosis that motivated the fix.
 
 Three files, one silent loss:
 
@@ -49,7 +55,10 @@ Three files, one silent loss:
 
 Net effect: a PUT from the dialog binds `AcceptorRequirement.Any`, `ToRules()` (`:28-39`) maps it through, and the row is written with `any`. `AcceptanceDefaults.For` ships `design` with `AcceptorRequirement.Human`; **the first admin save of `design` for any unrelated reason destroys that.** The write path validates (`AcceptanceRulesService`) but validation does not object to `any` — it is a legal value.
 
-### (2) The mistyped conventions registry client
+### (2) The mistyped conventions registry client *[pre-fix state — see "Corrections applied while implementing"]*
+
+> `conventions-api-client.ts:160` no longer returns `string[]`; AC6 was applied.
+> The snippet below is the pre-fix declaration, kept as the diagnosis.
 
 `packages/dashboard/src/services/admin/conventions-api-client.ts:160`:
 
@@ -102,7 +111,7 @@ So "DI-register or delete" is a false dichotomy. The resolution is: **keep, do n
 
 2. **The dialog can edit it, not merely echo it.** `RulesEditDialog.tsx` renders an `acceptorRequirement` control (select/segmented, alongside the existing reviewer-selection controls) with helper text stating what each value means. Echoing-without-editing would fix the data loss but leave a field that only the API can set — a second instance of the same class of trap.
 
-3. **Server-side regression pin.** `AcceptanceRulesEndpointsTests.Upsert_PreservesAcceptorRequirement` — PUT a body with `acceptorRequirement: "human"`, GET it back, assert `human`; and a second case PUTs a body **omitting** the field and asserts the documented legacy default (`any`) still applies, so the DTO's deliberate default is pinned as intentional rather than deleted.
+3. **Server-side regression pin.** ~~`AcceptanceRulesEndpointsTests.Upsert_PreservesAcceptorRequirement`~~ *[RENAMED AND SPLIT — no test by that name exists. D1 was superseded (see "Corrections applied while implementing"), so the one pin became five, all in `apps/tamma-elsa/tests/Tamma.Api.Tests/AcceptanceRules/`:* `AcceptanceRulesEndpointsTests.Upsert_stated_acceptorRequirement_human_round_trips`, `…Upsert_omitting_acceptorRequirement_preserves_shipped_human_floor`, `…Upsert_omitting_acceptorRequirement_preserves_a_stored_human_override`, `…Upsert_omitting_acceptorRequirement_on_an_any_type_stays_any`, `…Bind_body_without_acceptorRequirement_yields_null_not_any`.*]* — PUT a body with `acceptorRequirement: "human"`, GET it back, assert `human`; and a second case PUTs a body **omitting** the field and asserts the documented legacy default (`any`) still applies, so the DTO's deliberate default is pinned as intentional rather than deleted. *[The second clause is superseded too: omission now preserves the value IN FORCE rather than writing the constant `any`; the `any`-type case survives as `…on_an_any_type_stays_any`. See "Effect on AC3" below.]*
 
 4. **Client-side regression pin.** A dashboard test (`RulesEditDialog` / `AcceptanceRulesAdminPage` suite, Vitest) renders the dialog over a resolved payload carrying `acceptorRequirement: 'human'`, changes an unrelated field (e.g. `maxRevisionRounds`), saves, and asserts the captured `onSave` body contains `acceptorRequirement: 'human'`. This is the test that would have caught the bug.
 

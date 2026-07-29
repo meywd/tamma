@@ -103,9 +103,11 @@ public class AcceptanceCriteriaAuthoringWorkflowStructureTests
         // DocumentLifecycleWorkflow:653. It never crashed — the lifecycle mints a
         // UUIDv7 when the input is Guid.Empty — which is exactly why nothing caught
         // it: the accept decision was correlatable only to an id no caller ever saw.
-        // Pinned here because NO structure suite in the tree pinned this for ANY
-        // binding (verified 2026-07-29: zero "sessionId" hits across the three
-        // *WorkflowStructureTests files), so there was nothing to copy.
+        // Scope of the novelty (narrowed 2026-07-29, conformance round): no other
+        // BINDING's structure suite pins a sessionId on its lifecycle DISPATCH — of the
+        // 19 *WorkflowStructureTests files in the tree, 2 mention sessionId, and the
+        // other is DocumentLifecycleWorkflowStructureTests:211, which pins sessionId as
+        // an OUTPUT name of the lifecycle itself, not as a dispatch input of a binding.
         var input = TaxonomyDriftBuildTests.MaterializeDispatchInput(
             "AcceptanceCriteriaAuthoringWorkflow", "DispatchLifecycle");
 
@@ -117,6 +119,30 @@ public class AcceptanceCriteriaAuthoringWorkflowStructureTests
         AllActivities().OfType<SetOutput>().Select(a => a.Id).Should().Contain("OutputSessionId",
             "a session handle the binding does not EXPOSE is no handle at all — the caller cannot "
             + "correlate what it never receives");
+    }
+
+    [Test]
+    public void DispatchLifecycle_HandsTheParentDocumentIdBeforeTheProduce_NotOnlyOnTheWayOut()
+    {
+        // 41-2 follow-up F9 (2026-07-29). AC3 claims the accepted AcceptanceCriteria is
+        // "persisted with lineage: Issue → Clarification? → AcceptanceCriteria", carried
+        // by DocumentInstance.ParentDocumentId. As first landed the binding computed that
+        // parent in ReadLifecycleExit — AFTER the lifecycle had already minted and
+        // persisted the draft — and exposed it as a workflow OUTPUT only. MintDraft called
+        // CreateDraft with no parentDocumentId, so document_instances.parent_document_id
+        // was null for every acceptance-criteria row. The edge is now handed to the
+        // lifecycle at dispatch; this pins the key so the fix cannot silently regress to
+        // an output-only claim.
+        var input = TaxonomyDriftBuildTests.MaterializeDispatchInput(
+            "AcceptanceCriteriaAuthoringWorkflow", "DispatchLifecycle");
+
+        input.Should().NotBeNull();
+        input!.Should().ContainKey("parentDocumentId",
+            "the lifecycle mints the draft envelope, so the single-parent lineage slot must be an "
+            + "INPUT to it — a parent computed on the way out is persisted nowhere");
+
+        // The output stays: it mirrors the edge that was persisted.
+        AllActivities().OfType<SetOutput>().Select(a => a.Id).Should().Contain("OutputParentDocumentId");
     }
 
     [Test]

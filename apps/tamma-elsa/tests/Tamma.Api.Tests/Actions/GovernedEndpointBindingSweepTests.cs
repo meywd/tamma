@@ -43,8 +43,16 @@ namespace Tamma.Api.Tests.Actions;
 /// so that when the first binding lands, someone must look at this file.</para>
 ///
 /// <para>NAMING: Story 43-8 AC3 calls this <c>GovernedEndpointBindingTests</c>; the
-/// <c>…SweepTests</c> suffix makes the epic's CI drift filter
-/// (<c>~Drift|~Sweep|~Catalog</c>) select it.</para>
+/// <c>…SweepTests</c> suffix is a naming convention shared with the other Epic 43
+/// drift harnesses, nothing more.
+/// <b>Correction (2026-07-29, conformance round):</b> this note previously justified
+/// the suffix by claiming it "makes the epic's CI drift filter
+/// (<c>~Drift|~Sweep|~Catalog</c>) select it". <b>No such filter exists.</b> CI runs
+/// each test project whole and unfiltered (<c>.github/workflows/ci.yml:248</c>:
+/// <c>dotnet test "$proj" --no-build -c Release …</c>, no <c>--filter</c>), and the
+/// string appears nowhere in <c>docs/</c>. AC10 makes these doc-comments
+/// load-bearing, so a reader must not be told a selection mechanism protects this
+/// file when none does. The suffix is fine; the justification was not.</para>
 /// </summary>
 [TestFixture]
 public class GovernedEndpointBindingSweepTests
@@ -126,7 +134,11 @@ public class GovernedEndpointBindingSweepTests
             .Should().Be(0,
                 "no route carries ActionGateMetadata yet (Story 43-9 owns attaching it). If this "
                 + "fails, bindings have started landing: confirm EveryBoundEndpoint_… now has real "
-                + "inputs, then update this pin to the new count.");
+                + "inputs, then DELETE this test in the same commit. It is a day-one pin, not a "
+                + "permanent invariant — its own name asserts zero bindings, so raising the number "
+                + "would make the name a lie. (Message corrected 2026-07-29, conformance round: it "
+                + "previously said 'update this pin to the new count', contradicting story 43-8 "
+                + "amendment A3 step 2, which says to delete it. Delete is the resolution.)");
     }
 
     // ====================================================================

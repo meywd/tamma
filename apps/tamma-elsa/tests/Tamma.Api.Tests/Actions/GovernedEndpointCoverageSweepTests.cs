@@ -49,10 +49,18 @@ namespace Tamma.Api.Tests.Actions;
 ///   measured ~40% structural miss rate.</item>
 /// </list>
 ///
-/// <para>NAMING: Story 43-8 AC2 calls this <c>GovernedEndpointCoverageTests</c>. The
-/// <c>…SweepTests</c> suffix is deliberate — the epic's drift suites are selected in
-/// CI by <c>--filter "FullyQualifiedName~Drift|~Sweep|~Catalog"</c>, and a harness
-/// that harness-filter misses is a harness that does not run.</para>
+/// <para>NAMING: Story 43-8 AC2 calls this <c>GovernedEndpointCoverageTests</c>; the
+/// <c>…SweepTests</c> suffix is a naming convention shared with the other Epic 43
+/// drift harnesses.
+/// <b>Correction (2026-07-29, conformance round):</b> this note previously said the
+/// suffix was needed because "the epic's drift suites are selected in CI by
+/// <c>--filter "FullyQualifiedName~Drift|~Sweep|~Catalog"</c>, and a harness that
+/// filter misses is a harness that does not run". <b>That filter does not exist.</b>
+/// CI runs every test project whole and unfiltered
+/// (<c>.github/workflows/ci.yml:248</c>), so this harness runs because it is in
+/// <c>tests/Tamma.Api.Tests</c>, not because of its name. AC10 makes these
+/// doc-comments load-bearing; a false safety mechanism in one is exactly the kind of
+/// claim this epic exists to prevent.</para>
 /// </summary>
 [TestFixture]
 public class GovernedEndpointCoverageSweepTests

@@ -37,7 +37,7 @@ P0 — Wave 0. 44-3, 44-4, 44-6, 44-7 and 44-8 are all consumers of this surface
 - **Mode detection:** `apps/tamma-elsa/src/Tamma.Api/Services/PromptStore/TammaMode.cs:67` — explicit `Tamma:Mode`, else inferred SaaS from `Tamma:TenantSharedSecret` / `ConnectionStrings:ControlPlane`, else `SingleUser`.
 - **The assignee-eligibility seam is a fail-closed stub today.** `apps/tamma-elsa/src/Tamma.Api/Services/Access/ITaskAudienceResolver.cs:45-56` returns the initiator only, and its sole production consumer `Tamma.Api/Services/Channels/ChannelOutboxService.cs:143` **hardcodes `InitiatorUserId: null`**, so `EligibleAudienceAsync` returns empty unconditionally. Nothing may assume it works.
 - **Epic 43's drift harness is bidirectional and CI-blocking** (`docs/stories/epic-43/README.md:186-190`, D2 at `:395`): a mutating route without a catalog entry is unmergeable once 43-8 arms. The `issue-tracking` `ActionGroup` already exists in the 15-member partition (`:104-107`) and is near-empty.
-- **The 43-0 bug class to not repeat:** the acceptance-rules edit dialog builds its PUT body without `acceptorRequirement` and the API defaults the missing field, so every admin save silently resets it (`epic-43/README.md:380-383`). **Single-field PATCHes, never defaulted full-body PUTs.**
+- **The 43-0 bug class to not repeat** *(historical — FIXED by Story 43-0, 2026-07-29, in this same wave; stated here in the past tense because the rule is why it must not recur, not because it is still live)*: the acceptance-rules edit dialog **built** its PUT body without `acceptorRequirement` and the API **defaulted** the missing field, so every admin save silently reset it (`epic-43/README.md:380-383`). 43-0 fixed BOTH sides — the DTO field is nullable and an omitted `acceptorRequirement` now preserves the stored value, and the client sends the field. **Single-field PATCHes, never defaulted full-body PUTs.**
 
 ## Acceptance Criteria
 
@@ -56,7 +56,7 @@ P0 — Wave 0. 44-3, 44-4, 44-6, 44-7 and 44-8 are all consumers of this surface
 4. **RBAC, three places, both modes.**
    - `tracker:view` = `["member","admin","owner"]` and `tracker:manage` = `["admin","owner"]` added to `Permissions.Matrix`.
    - Policies `TrackerView` and `TrackerManage` added to the `AddAuthorization` block and to the roster array at `Program.cs:1724-1726`.
-   - **Project and iteration structure** (`POST/PATCH/DELETE /api/projects`) requires `TrackerManage`. **Work-item CRUD, status and assignment** requires `TrackerView` — a `member` can file and move their own work, which is the point of a tracker.
+   - **Project and iteration structure** (`POST/PATCH/DELETE /api/projects`) requires `TrackerManage`. **Work-item CRUD, status and assignment** requires `TrackerView` — a `member` can file and move their own work, which is the point of a tracker. *[TIGHTENED — `DELETE /api/work-items/{id}` is `TrackerManage`, not `TrackerView`; there is no ownership plane, so at `TrackerView` any member could hard-delete any item in the tenant. See amendment B1. The recoverable writes (create/patch/status/assign) are as written here.]*
    - In single-user mode both policies admit the sole user (per the Operating Modes rule).
 
 5. **Mode-correct scoping, with parallel service methods.** `TrackerService` exposes `…Async(Guid? userId)` / `…ForTenantAsync(Guid tenantId)` pairs for **preferences only** (the per-principal configuration). Work-item and project reads/writes are tenant-schema scoped and carry no mode split — a test asserts no work-item service method takes a `userId` scoping parameter (epic Decisions D6).
@@ -112,6 +112,7 @@ exists; this story owns calling it at the boundary.
 | Date       | Version | Changes                | Author |
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-25 | 1.0.0   | Initial story creation | Claude |
+| 2026-07-29 | 1.2.0   | Conformance round. Code fix: `DELETE /api/tracker/preferences` now honours `If-Match` (AC9 was literally false for that one route — amendment B10), with the contract test's enumerated list corrected. Doc fixes: AC4's work-item-CRUD clause carries an inline `[TIGHTENED]` marker pointing at B1; the Architectural Context's 43-0 bug-class note retagged as historical now that Story 43-0 fixed both sides. | Claude |
 | 2026-07-29 | 1.1.0   | Amendment section added (see below). Records the four implementation deviations never written down at the time — `(Rank, Key)` keyset (plan D7), descriptors as real `ActionCatalog` members rather than the planned data file, `TrackerManage` on the preference writes (absent from AC4) — plus the adversarial-review round: `DELETE /api/work-items/{id}` tightened to `TrackerManage` (no ownership plane exists), `Version` made a real EF concurrency token on projects and preferences (AC9 was false for both), the `If-Match` precondition plumbed into the repositories so it is atomic with the write, FK-violation races on both deletes mapped to the documented 409, six catalog SiteKeys corrected to carry route constraints (and 44-2's own harness made strict), the `HandleNull` rationale corrected, and estimate/scale coherence extended to the project write. Status intentionally left `drafted` — conformance is a separate round. | Claude |
 
 ---
@@ -263,6 +264,48 @@ tests that actually discriminate: deterministic repository-seam tests reproducin
 the B3 interleaving, and genuinely concurrent handler-level tests
 (`Task.WhenAll`, both writers' reads preceding either write) asserting exactly
 one winner — for work items, projects AND preferences.
+
+### B (cont.). Conformance round — 2026-07-29
+
+**B10. (MAJOR) AC9 was still literally FALSE for one route: `DELETE
+/api/tracker/preferences`.** B2/B3 above fixed the token and the atomicity for
+the preference UPSERT and left the DELETE untouched. The handler never called
+`TryReadIfMatch`, and `ITrackerService.DeletePreferencesAsync` /
+`DeletePreferencesForTenantAsync` took no `ifMatchVersion` at all — so the
+header was not merely unenforced, it was structurally unreachable. A reset
+racing a concurrent save therefore discarded that save with a `200`.
+
+**The gap survived review because the guard that should have caught it shares
+the omission.** `TrackerServiceContractTests.Every_mutation_accepts_an_if_match_version`
+enumerates its six methods BY NAME and both delete-preferences methods were
+simply absent from the list, so the "a handler physically cannot forget to plumb
+the precondition through" claim in that test's own comment was not true of the
+two methods it did not name.
+
+**Fixed in the CODE, not by amending the AC.** A carve-out ("every mutation
+except this one") is worse than consistency, and the guarantee is worth having:
+deleting the override is a destructive reset of whatever the concurrent editor
+just saved, which is precisely the lost update AC9 exists to refuse. So
+`int? ifMatchVersion` is plumbed through both service methods and both
+repository methods (`ITrackerPreferenceRepository.DeleteAsync` /
+`DeleteByTenantAsync`), the handler reads `If-Match` exactly as its siblings do,
+and the repository pins the concurrency token's ORIGINAL value so the DELETE
+itself carries `WHERE "Version" = @expected` — the same shape as the upsert's
+`ApplyUpdateAsync` and `ProjectRepository.PinExpectedVersion`, i.e. atomic with
+the write, not merely checked against an earlier read (B3).
+
+Established semantics are matched exactly: absent `If-Match` still opts OUT
+(unconditional delete), `*` passes, junk is `400 TRACKER.INVALID_IF_MATCH`, a
+stale version is `409 TRACKER.CONCURRENCY_CONFLICT` with `retryable: true`, and
+"no override to delete" stays a `404`. **No convergence loop here**, unlike the
+opted-out upsert: a delete that asserted a version is asking to remove exactly
+THAT row, and re-reading and deleting the winner's newer row would destroy the
+very edit the precondition exists to protect.
+
+Pinned by `TrackerEndpointsTests.Delete_preferences_honours_if_match` and
+`Delete_preferences_without_if_match_still_opts_out`, and both methods added to
+`Every_mutation_accepts_an_if_match_version`'s enumerated list so the contract
+test now covers the surface it claims to.
 
 ### C. Recorded, not fixed
 

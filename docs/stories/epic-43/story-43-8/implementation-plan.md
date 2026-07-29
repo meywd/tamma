@@ -18,7 +18,7 @@ Concretely: one metadata type (`ActionGateMetadata`) with two authoring shapes (
 - `apps/tamma-elsa/src/Tamma.Api/Services/PlatformTasks/PlatformTaskServiceCollectionExtensions.cs:44-47` — `TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, PlatformTaskWorker>())`, the registration with no `AddHostedService` line
 - `apps/tamma-elsa/src/Tamma.Api/Controllers/MentorshipController.cs` — the repo's **only** controller; `[HttpPost]` at `:53,141,164,187`
 - `apps/tamma-elsa/src/Tamma.Activities/LlmCall/TammaApiClient.cs` — 36 public `Task`-returning methods; the 17 mutating ones enumerated in AC4
-- `apps/tamma-elsa/src/Tamma.Activities/SecretsRotation/Activities/` — the 13 files with no `[Activity]`
+- `apps/tamma-elsa/src/Tamma.Activities/SecretsRotation/Activities/` — the 13 files with no `[Activity]` *(9 of which are `IActivity` classes — see step 10's dated note)*
 - `apps/tamma-elsa/src/Tamma.ElsaServer/Program.cs:103,403` — `UseWorkflowsApi()`, the out-of-process surface named in AC10(c)
 - `docs/stories/epic-43/story-43-9/implementation-plan.md` — the consumer of `.Governs`; keep the metadata shape in lockstep
 - **NOT FOUND (authored by prerequisite stories, no code yet):** `Tamma.Core/Actions/` in its entirety — `ActionKey`, `ActionNamespace`, `ActionCatalog`, `ActionDescriptor.SiteKey`, `ExternalEffect`, `BackgroundActor` (Story 43-2); `NotDiRegisteredTools` (Story 43-4); the `/api/actions` response DTOs (Story 43-6). See Blocked by.
@@ -26,6 +26,21 @@ Concretely: one metadata type (`ActionGateMetadata`) with two authoring shapes (
 ## Design Decisions
 
 - **D1 — No Roslyn analyzer. Decided on measurement, not preference.** An analyzer was designed to assert `.Governs(...)` on every mutating `Map*` and rejected. Re-verified on 2026-07-25: `Program.cs` holds **200** mutating `Map*` calls and **79 of them terminate `);` on the same line** — no fluent chain, therefore nothing for a syntax walker to inspect: a **~40% structural miss rate**. Independently, `app.MapControllers()` (`:1806`), the two `app.MapHub<…>` (`:3384-3385`) and Elsa's `UseWorkflowsApi()` (`ElsaServer/Program.cs:103,403`, a **different process**) are invisible to syntax analysis outright. An analyzer with a 40% blind spot is **worse than none**: it would be believed, and a completeness guarantee that is not complete is precisely the failure mode this epic exists to prevent. CI blocks the merge either way; the loss is **local-build feedback**, and that loss is stated in the epic README, in AC10(f) and in the harness doc-comments rather than papered over. *(An analyzer could still be added later for the 121 chain-terminated calls as a convenience — but it must never be described as the guarantee.)*
+
+  > **Dated note (2026-07-29, conformance round).** The counts above are stale and the derived rate is
+  > unmeasured. `grep -cE '\.Map(Post|Put|Patch|Delete)\(' apps/tamma-elsa/src/Tamma.Api/Program.cs`
+  > returns **231** today, not 200, so "79 of those 200", "~40% structural miss rate" and "the 121
+  > chain-terminated calls" are all derived from a superseded denominator. They have **not** been
+  > re-derived here — doing so honestly requires re-running the same-line-termination classification
+  > over the current 231 and stating the method, which is more than a `grep -c`. **The decision is
+  > unaffected:** it rests on the three syntax-invisible surfaces named in the same bullet
+  > (`MapControllers`, the two `MapHub`, Elsa's out-of-process `UseWorkflowsApi`), which are unchanged
+  > and are alone sufficient to reject an analyzer that claims completeness. Read the percentage as
+  > "a large fraction, last measured 2026-07-25 at ~40% of 200". D3's "200 sites" and Correction 4's
+  > "exactly 200" carry the same caveat; Correction 4's *instruction* — derive the number from
+  > `EndpointDataSource` at runtime and pin it — is exactly what landed
+  > (`KnownUngovernedEndpoints.PinnedInScopeCount = 237`, asserted by `InScopeEndpointCount_isPinned`),
+  > which is why the drift in the literal costs nothing.
 
 - **D2 — Reflect over the built `IServiceCollection`, never over source text.** `PlatformTaskWorker` has **no `AddHostedService` line anywhere** — it is registered by `TryAddEnumerable` inside `PlatformTaskServiceCollectionExtensions.cs:44-47`. A source-grep sweep misses it entirely; a descriptor sweep sees it with a non-null `ImplementationType`. Conversely `TenantStatusInvalidationListener` (`Program.cs:1385`) *is* an `AddHostedService` line but has a **null** `ImplementationType`. The two failure modes are complementary and only descriptor reflection plus an explicit factory-pair list covers both. See Corrections to the design.
 
@@ -84,6 +99,15 @@ Concretely: one metadata type (`ActionGateMetadata`) with two authoring shapes (
 9. **CREATE `apps/tamma-elsa/tests/Tamma.Api.Tests/Actions/BackgroundActorCoverageTests.cs`** (AC5, D2, Correction 1) — two fixtures: `WebApplicationFactory` (Tamma.Api) and a `Host.CreateApplicationBuilder`-based fixture mirroring `ElsaServer/Program.cs` registrations. Enumerate `IServiceCollection` descriptors with `ServiceType == typeof(IHostedService)`. For each: resolve implementation type from `ImplementationType`, else from `KnownFactoryRegisteredServices` (one entry: `TenantStatusInvalidationListener`), else **fail** naming the descriptor. Map to `automation:*`. Bidirectional against `BackgroundActor` members. Assert `PlatformTaskWorker` is present (a regression pin for D2 — if someone converts the registration and it vanishes, the sweep must go red, not quiet).
 
 10. **CREATE `apps/tamma-elsa/tests/Tamma.Activities.Tests/Actions/UnattributedActivityTests.cs`** (AC6) — reflect `typeof(TammaApiClient).Assembly` for types assignable to Elsa's `IActivity` (or deriving `CodeActivity`/`Activity`) with no `[Activity]`; assert each is in `UnattributedActivities`, seeded with the **13** `SecretsRotation/Activities/` types, staleness + `Count.Should().Be(13)`.
+
+    > **Corrected 2026-07-29 (conformance round).** The tree pins **9**, not 13:
+    > `UnattributedActivitySweepTests.Baseline_countIsPinned` asserts `HaveCount(9)`. The directory
+    > holds 13 FILES but only 9 `IActivity` CLASSES — `RotationActivityBase` is abstract, and
+    > `DrainRotationAuditEmitter`, `RotationAuditDrainScope` and `RotationWorkflowState` are not
+    > activities at all. The sweep counts classes, which is the thing that can carry `[Activity]`, so
+    > 9 is the correct pin and `Be(13)` would have been unsatisfiable. The fixture also landed under
+    > the name `UnattributedActivitySweepTests`, not `UnattributedActivityTests`, and sweeps three
+    > production assemblies (`Tamma.Activities`, `Tamma.Api`, `Tamma.ElsaServer`) rather than one.
 
 11. **MODIFY `apps/tamma-elsa/tests/Tamma.Activities.Tests/Workflows/TaxonomyDriftBuildTests.cs`** (AC7) — beside `:226-242`, assert the materialized action wire resolves to `ActionKey(ActionNamespace.AgentAction, wire)` in `ActionCatalog.ByKey`. ~15 lines; no new enumeration, no new fixture.
 

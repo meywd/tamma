@@ -1,5 +1,49 @@
 # Implementation Plan — Story 43-0: Prerequisite Fixes and Dead Code
 
+> ## ⚠️ PLAN-VS-SHIPPED BANNER — 2026-07-29 (conformance round)
+>
+> **This plan is the DRAFT.** Three things in it were superseded during
+> implementation. Until now only **D1** was marked historical (by the story
+> file's "Corrections applied while implementing" section); the other two were
+> not marked anywhere in this file. The story document is the normative record;
+> this banner exists so nobody greps a name out of the plan and expects to find
+> it.
+>
+> **1. D1 is SUPERSEDED (already recorded).** D1 says fix the TypeScript only and
+> keep the DTO's non-nullable `AcceptorRequirement AcceptorRequirement =
+> AcceptorRequirement.Any`. What shipped is a **two-sided** fix: the DTO field is
+> `AcceptorRequirement?` defaulting to `null` ("the caller did not say") and
+> `AcceptanceRulesEndpoints.Upsert` resolves the in-force value before mapping,
+> so an omitted field is PRESERVED rather than invented. D1's text is retained
+> deliberately as the historical record; see the story's "Corrections applied
+> while implementing (2026-07-29)" for why D1's reasoning did not survive contact
+> with the code.
+>
+> **2. `Upsert_PreservesAcceptorRequirement` DOES NOT EXIST.** Step 3, Test Plan
+> bullet 1 and Definition-of-Done row 3 all name it. Because D1 was superseded
+> the single pin became five, all in
+> `apps/tamma-elsa/tests/Tamma.Api.Tests/AcceptanceRules/`:
+> `AcceptanceRulesEndpointsTests.Upsert_stated_acceptorRequirement_human_round_trips`,
+> `…Upsert_omitting_acceptorRequirement_preserves_shipped_human_floor`,
+> `…Upsert_omitting_acceptorRequirement_preserves_a_stored_human_override`,
+> `…Upsert_omitting_acceptorRequirement_on_an_any_type_stays_any`, and
+> `…Bind_body_without_acceptorRequirement_yields_null_not_any`. Note the plan's
+> "case (b) omitted → `any`" is superseded too: omission now preserves the value
+> in force, and the literal-`any` case survives only for types with no human
+> floor.
+>
+> **3. Step 8 was DELIBERATELY NOT DONE — no `Program.cs` comment edit, no
+> `GetAcceptanceRulesToolReachabilityTests`.** Step 8, Test Plan bullet 4 and
+> DoD row 8 specify both; neither exists in the tree. Story 43-4 landed first and
+> already carries the exemption as a **strictly stronger** guard:
+> `ToolCatalogAllowlists.NotDiRegisteredTools` (one entry,
+> `tool:get_acceptance_rules`, justification-bearing and shrink-only), pinned by
+> `Tamma.Activities.Tests/Actions/ToolCatalogAllowlistTests` and enforced at boot
+> by `ActionCatalogStartupValidator`. What 43-0 did add instead is the pointer in
+> `GetAcceptanceRulesTool`'s class doc. Recorded in the story's "AC8 partially
+> deferred (already satisfied elsewhere)"; consequently the **"Handoff to 43-4"
+> section below is CONSUMED, not pending.**
+
 ## Scope & Deliverable
 
 When this story is done: an acceptance-rules save from the admin dialog round-trips **every** field the API models — `acceptorRequirement` is in the TS interface, in the PUT body, editable in the dialog, and pinned by a server test and a dashboard test that each fail on the pre-fix code; a field-set pin makes a future 10th DTO field unable to repeat the omission silently; `/conventions/registry/actions` is no longer misdeclared as `string[]` anywhere in the tree; `ResolveToolsActivity.cs` (226 lines, zero callers, a third dead tool vocabulary) is deleted; and `GetAcceptanceRulesTool`'s registered-but-unreachable status is documented at the registration site and pinned by a test, with the justification Story 43-4's boot validator will consume written down here rather than re-derived there.

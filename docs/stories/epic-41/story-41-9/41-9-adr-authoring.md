@@ -33,6 +33,14 @@ validated schema), audience-tagged, `issueId`-lineaged.
 
 Accept gate routes per autonomy; a decision affecting a public contract can be a configured always-escalate
 class. Accepted ADRs are queryable per issue and per repo.
+*(Qualified 2026-07-29, conformance round: "per issue" is exact only for the SCOPED key. Per D3/amendment
+8 this binding keys the lifecycle on `{issueId}#adr` — `AdrAuthoringWorkflow.cs:138` via
+`CreationBindingHelper.ScopeIssueId(baseIssueId, AdrBindingHelper.ProducerScope)`, where
+`AdrBindingHelper.ProducerScope = "adr"` — so a 39-11 lineage / latest-accepted read on the **bare** issue
+id does **not** return the ADR; the caller must ask for `{issueId}#adr`. "Per repo" is not a query this
+story ships at all: no repo-scoped read exists on the 39-11 store. The general fix — a producer or `kind`
+filter on the latest-accepted read, so producer scoping stops being encoded in the issue key — stays FILED
+against 39-11, per amendment 8.)*
 
 ## Autonomy behavior
 

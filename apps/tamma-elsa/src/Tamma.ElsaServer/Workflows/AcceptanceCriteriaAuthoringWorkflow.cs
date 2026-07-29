@@ -43,7 +43,11 @@ namespace Tamma.ElsaServer.Workflows;
 /// <para><b>Single-parent lineage (D4).</b> <c>DocumentInstance</c> carries one
 /// <c>ParentDocumentId</c>, so the parent is the accepted Clarification when one exists, else the
 /// Findings, else none; the full consumes-set rides the <c>ACCEPTANCE_CRITERIA.DRAFTED</c> event
-/// payload.</para>
+/// payload. The chosen parent is handed to <c>document-lifecycle</c> as the
+/// <c>parentDocumentId</c> dispatch input (added 2026-07-29, conformance follow-up F9), so the
+/// PERSISTED row carries the edge — as first landed the binding computed it only on the way out
+/// and exposed it as a workflow output, leaving <c>document_instances.parent_document_id</c>
+/// null for every acceptance-criteria draft.</para>
 ///
 /// <para><b>Resumable by design (D5).</b> <c>[ResumeBehavior(LatestStateReEntry)]</c> with a
 /// <see cref="ComputeReEntryPositionActivity"/> node and NO allowlist entry: a thin binding owns
@@ -242,6 +246,14 @@ public class AcceptanceCriteriaAuthoringWorkflow : WorkflowBase
                 // decision is correlatable to this run rather than to a UUID the child
                 // minted and nobody upstream ever sees.
                 ["sessionId"]           = sessionId.Get(ctx),
+                // D4 / AC3 follow-up (2026-07-29) — the SINGLE parent slot, handed to the
+                // lifecycle BEFORE the produce so the minted draft's envelope (and hence
+                // the persisted `document_instances` row) carries the Issue → Clarification
+                // → AcceptanceCriteria edge. Computing it only on the way out, as this
+                // binding originally did, left the edge in the workflow output and the
+                // DRAFTED payload while the persisted row's parent stayed null.
+                ["parentDocumentId"]    = AcceptanceCriteriaBindingHelper.ChooseParentDocumentId(
+                                              clarificationDocId.Get(ctx), findingsDocId.Get(ctx)),
                 ["issueId"]             = issueId.Get(ctx) ?? "",
                 ["correlationId"]       = issueId.Get(ctx) ?? "",
                 ["tenantId"]            = tenantId.Get(ctx) ?? "",
@@ -269,7 +281,10 @@ public class AcceptanceCriteriaAuthoringWorkflow : WorkflowBase
                 outputStatus.Set(ctx, accepted ? "completed" : exit.Status);
                 failureDetail.Set(ctx, CreationBindingHelper.BuildFailureDetail(exit));
                 criteriaCount.Set(ctx, AcceptanceCriteriaBindingHelper.CountCriteria(exit.DocumentJson));
-                // D4 — one parent slot: the accepted Clarification, else the Findings, else none.
+                // D4 — one parent slot: the accepted Clarification, else the Findings, else
+                // none. The SAME value was handed to the lifecycle at dispatch (see
+                // DispatchLifecycle's "parentDocumentId" key), so this output mirrors the
+                // edge that was persisted rather than asserting one that was not.
                 parentDocumentId.Set(ctx, AcceptanceCriteriaBindingHelper.ChooseParentDocumentId(
                     clarificationDocId.Get(ctx), findingsDocId.Get(ctx)));
 

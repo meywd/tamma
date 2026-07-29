@@ -48,7 +48,7 @@ public class TrackerPreferenceRepository(
         return await UpsertInternal(db, preference, actingUserId, expectedVersion);
     }
 
-    public async Task<bool> DeleteAsync(Guid? userId)
+    public async Task<bool> DeleteAsync(Guid? userId, int? expectedVersion = null)
     {
         var tid = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(tid);
@@ -57,7 +57,8 @@ public class TrackerPreferenceRepository(
         if (row is null)
             return false;
         db.TrackerPreferences.Remove(row);
-        await db.SaveChangesAsync();
+        PinExpectedVersion(db, row, expectedVersion);
+        await SaveGuardingVersionAsync(db, row);
         return true;
     }
 
@@ -87,7 +88,7 @@ public class TrackerPreferenceRepository(
         return await UpsertInternal(db, preference, actingUserId, expectedVersion);
     }
 
-    public async Task<bool> DeleteByTenantAsync(Guid tenantId)
+    public async Task<bool> DeleteByTenantAsync(Guid tenantId, int? expectedVersion = null)
     {
         if (tenantId == Guid.Empty)
             throw new ArgumentException("Tenant id required.", nameof(tenantId));
@@ -98,8 +99,48 @@ public class TrackerPreferenceRepository(
         if (row is null)
             return false;
         db.TrackerPreferences.Remove(row);
-        await db.SaveChangesAsync();
+        PinExpectedVersion(db, row, expectedVersion);
+        await SaveGuardingVersionAsync(db, row);
         return true;
+    }
+
+    /// <summary>
+    /// Make the caller's <c>If-Match</c> precondition ATOMIC with the DELETE
+    /// (44-2 conformance round, 2026-07-29 — the same shape
+    /// <see cref="ApplyUpdateAsync"/> uses for the UPDATE branch and
+    /// <c>ProjectRepository.PinExpectedVersion</c> uses for both). Without it
+    /// the handler's version check and the repository's own re-read sit in
+    /// different contexts, so the interleaving
+    /// <c>W2.read(v1) → W1 upserts(v2) → W2.repo-read(v2) → W2 deletes</c>
+    /// passes the check and silently discards W1's edit. Pinning the
+    /// concurrency token's ORIGINAL value puts <c>WHERE "Version" = @expected</c>
+    /// in the DELETE itself: rowcount 0 → <c>DbUpdateConcurrencyException</c> →
+    /// the typed, retryable conflict.
+    ///
+    /// <para>No convergence loop here, unlike the opted-out upsert: a delete
+    /// that asserted a version is asking to remove exactly THAT row, and
+    /// re-reading and deleting the winner's newer row would destroy the very
+    /// edit the precondition exists to protect. An absent precondition keeps
+    /// the unconditional delete (<c>TryReadIfMatch</c>: no header means no
+    /// precondition).</para>
+    /// </summary>
+    private static void PinExpectedVersion(
+        TenantDbContext db, TrackerPreference row, int? expectedVersion)
+    {
+        if (expectedVersion is int expected)
+            db.Entry(row).Property(p => p.Version).OriginalValue = expected;
+    }
+
+    private static async Task SaveGuardingVersionAsync(TenantDbContext db, TrackerPreference row)
+    {
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw Conflict(row, ex);
+        }
     }
 
     // Match on BOTH keys so the two planes cannot collide; the principal_xor
@@ -240,7 +281,7 @@ public class TrackerPreferenceRepository(
 
     private static Tamma.Core.TammaError Conflict(TrackerPreference row, DbUpdateConcurrencyException ex) => new(
         "TRACKER.CONCURRENCY_CONFLICT",
-        "The tracker preferences were modified by another writer while this update "
+        "The tracker preferences were modified by another writer while this write "
         + "was in flight (optimistic-concurrency Version mismatch). Re-read the "
         + "preferences and retry against their current state.",
         new Dictionary<string, object?>

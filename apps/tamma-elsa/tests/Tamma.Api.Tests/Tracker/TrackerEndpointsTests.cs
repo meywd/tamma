@@ -561,6 +561,114 @@ public class TrackerEndpointsTests
             + "the guarantee is no-dup/no-skip for rows that did not move");
     }
 
+    /// <summary>
+    /// Plan test 16 as SPECIFIED — "page, re-rank mid-set, page again — no dup,
+    /// no skip". Shipped originally as
+    /// <see cref="Keyset_paging_is_stable_under_concurrent_insertion"/>, an
+    /// INSERTION test, which leaves the RE-RANK half unexercised; amendment A1
+    /// is itself about a row MOVING across an already-served page boundary, so
+    /// the substituted test was the one that would have exercised A1's own
+    /// stated failure mode (44-2 conformance round, 2026-07-29).
+    ///
+    /// <para>Re-ranking is driven at the repository seam
+    /// (<c>IWorkItemRepository.SetRanksAsync</c>) because 44-2 ships no ranking
+    /// ROUTE — <c>PatchWorkItemRequest</c> has no <c>rank</c> field and 44-3
+    /// owns the endpoints. That is the same level the insertion test already
+    /// drives its intruder at, and the paging under test is unaffected.</para>
+    ///
+    /// <para>The guarantee asserted is the honest one, matching the insertion
+    /// test: rows that did NOT move are never duplicated and never skipped. A
+    /// row that moves ACROSS the cursor is legitimately re-delivered or missed —
+    /// that is inherent to keyset paging over a mutating ordered set, and it is
+    /// still strictly better than offset paging, which corrupts the pages of
+    /// rows that did not move at all.</para>
+    /// </summary>
+    [Test]
+    public async Task Keyset_paging_is_stable_under_reorder()
+    {
+        var project = await NewProjectAsync();
+        var originals = new List<WorkItemEntity>();
+        for (var i = 0; i < 6; i++)
+            originals.Add(await NewItemAsync(project.Id, $"item {i}"));
+
+        var service = Service();
+        var seen = new List<string>();
+
+        var first = await service.ListWorkItemsAsync(new WorkItemListQuery { Limit = 2 }, null);
+        seen.AddRange(first.Items.Select(i => i.Key));
+        seen.Should().BeEquivalentTo([originals[0].Key, originals[1].Key]);
+        first.NextCursor.Should().NotBeNull();
+
+        // (a) A still-unseen row is dragged to the FRONT, behind the cursor the
+        //     caller already holds. This is the mutation the plan named.
+        var movedBack = await _workItems.SetRanksAsync(
+            originals[4].Id, Tamma.Core.Tracking.Rank.Prepend(originals[0].Rank), null);
+        movedBack.Should().NotBeNull();
+
+        // (b) A still-unseen row is dragged WITHIN the unseen region — it must
+        //     be delivered exactly once regardless of where it lands.
+        var movedWithin = await _workItems.SetRanksAsync(
+            originals[2].Id,
+            Tamma.Core.Tracking.Rank.Between(originals[3].Rank, originals[5].Rank),
+            null);
+        movedWithin.Should().NotBeNull();
+
+        var cursor = first.NextCursor;
+        while (cursor is not null)
+        {
+            var page = await service.ListWorkItemsAsync(
+                new WorkItemListQuery { Limit = 2, Cursor = cursor }, null);
+            seen.AddRange(page.Items.Select(i => i.Key));
+            cursor = page.Items.Count == 0 ? null : page.NextCursor;
+        }
+
+        seen.Should().OnlyHaveUniqueItems(
+            "a re-rank must never cause keyset paging to return a row twice");
+
+        var unmoved = new[] { originals[0], originals[1], originals[3], originals[5] }
+            .Select(o => o.Key);
+        seen.Should().Contain(unmoved,
+            "a row that did not move is never skipped, whatever its neighbours did");
+        seen.Should().Contain(originals[2].Key,
+            "a row re-ranked WITHIN the unseen region is still delivered exactly once");
+        seen.Should().NotContain(originals[4].Key,
+            "a row dragged BEHIND the cursor is legitimately not in this iteration — "
+            + "the guarantee is no-dup/no-skip for rows that did not move");
+    }
+
+    /// <summary>
+    /// Amendment A1's PREMISE, made executable (44-2 conformance round): the
+    /// <c>(Rank, Key)</c> cursor is a total order only while ranks are unique
+    /// within a project, and <b>nothing enforces that</b> —
+    /// <c>SetRanksAsync</c> validates rank FORMAT and nothing else. This test
+    /// pins today's permissiveness so 44-3 has something to flip when it either
+    /// enforces uniqueness or moves the tie-break to an immutable column.
+    /// It is deliberately NOT a demonstration of the resulting paging defect:
+    /// that defect needs a rekey on top of the duplicate, and the rekey route
+    /// is 44-3's.
+    /// </summary>
+    [Test]
+    public async Task Duplicate_ranks_within_a_project_are_accepted_today()
+    {
+        var project = await NewProjectAsync();
+        var a = await NewItemAsync(project.Id, "a");
+        var b = await NewItemAsync(project.Id, "b");
+
+        var collided = await _workItems.SetRanksAsync(b.Id, a.Rank, null);
+        collided.Should().NotBeNull();
+        collided!.Rank.Should().Be(a.Rank,
+            "rank uniqueness within a project is an UNENFORCED invariant — the "
+            + "(Rank, Key) keyset tie-break rests on it (amendment A1). 44-3 must "
+            + "either enforce it or move the cursor to an immutable tie-break; "
+            + "when it does, this test is the one to flip.");
+
+        // The tie-break still yields a deterministic order today, because Key is
+        // unique and the SQL ORDER BY carries it.
+        var page = await Service().ListWorkItemsAsync(new WorkItemListQuery { Limit = 10 }, null);
+        page.Items.Select(i => i.Key).Should().BeEquivalentTo(
+            [a.Key, b.Key], o => o.WithStrictOrdering());
+    }
+
     [Test]
     public async Task A_forged_cursor_is_400_rather_than_a_silent_restart()
     {
@@ -844,9 +952,10 @@ public class TrackerEndpointsTests
                 Service(), Principal(userId), _tenantContext, mode, put),
             put);
 
+        var del = Context();
         var (deleteStatus, _, _) = await Exec(
-            await TrackerEndpoints.DeletePreferences(Service(), Principal(userId), _tenantContext, mode),
-            Context());
+            await TrackerEndpoints.DeletePreferences(Service(), Principal(userId), _tenantContext, mode, del),
+            del);
         deleteStatus.Should().Be(StatusCodes.Status200OK);
 
         var after = Context();
@@ -855,6 +964,109 @@ public class TrackerEndpointsTests
             after);
         resolvedAgain.GetProperty("source").GetString().Should().Be("system-default",
             "DELETE removes the row so the shipped defaults take over (the AcceptanceRulesService posture)");
+    }
+
+    /// <summary>
+    /// AC9 on the ONE route that used to be exempt (44-2 conformance round,
+    /// 2026-07-29): <c>DELETE /api/tracker/preferences</c> never read
+    /// <c>If-Match</c>, so a reset racing a concurrent save silently discarded
+    /// that save. All four established semantics are asserted here, because a
+    /// route that honours the header only partly is the harder bug to find.
+    /// </summary>
+    [Test]
+    public async Task Delete_preferences_honours_if_match()
+    {
+        var userId = Guid.NewGuid();
+        var mode = new StubModeProvider(TammaMode.SingleUser);
+
+        var put = Context();
+        var (_, _, etag) = await Exec(
+            await TrackerEndpoints.PutPreferences(
+                new UpsertTrackerPreferencesRequest(null, "epic", "kind"),
+                Service(), Principal(userId), _tenantContext, mode, put),
+            put);
+        etag.Should().Be("\"1\"");
+
+        // (a) junk precondition — 400, never silently ignored.
+        var junk = Context(ifMatch: "\"not-a-version\"");
+        var (junkStatus, junkBody, _) = await Exec(
+            await TrackerEndpoints.DeletePreferences(
+                Service(), Principal(userId), _tenantContext, mode, junk),
+            junk);
+        junkStatus.Should().Be(StatusCodes.Status400BadRequest);
+        junkBody.GetProperty("code").GetString().Should().Be("TRACKER.INVALID_IF_MATCH");
+
+        // (b) stale precondition — 409 retryable, and the row survives.
+        //     A concurrent editor bumps the row to v2 while this caller still
+        //     holds the v1 ETag; the reset must lose, not erase their save.
+        await Service().UpsertPreferencesAsync(
+            userId, new UpsertTrackerPreferencesRequest(null, "story", "status"), userId);
+
+        var stale = Context(ifMatch: "\"1\"");
+        var (staleStatus, staleBody, _) = await Exec(
+            await TrackerEndpoints.DeletePreferences(
+                Service(), Principal(userId), _tenantContext, mode, stale),
+            stale);
+        staleStatus.Should().Be(StatusCodes.Status409Conflict,
+            "deleting the override discards the concurrent edit; a stale If-Match must refuse");
+        staleBody.GetProperty("code").GetString().Should().Be("TRACKER.CONCURRENCY_CONFLICT");
+        staleBody.GetProperty("retryable").GetBoolean().Should().BeTrue();
+        (await _preferences.GetAsync(userId)).Should().NotBeNull(
+            "the loser's delete must not have landed");
+
+        // (c) current precondition — passes.
+        var current = Context(ifMatch: "\"2\"");
+        (await Exec(
+            await TrackerEndpoints.DeletePreferences(
+                Service(), Principal(userId), _tenantContext, mode, current),
+            current)).Status.Should().Be(StatusCodes.Status200OK);
+        (await _preferences.GetAsync(userId)).Should().BeNull();
+    }
+
+    /// <summary>
+    /// The opt-out half of AC9 on the same route: an absent <c>If-Match</c>
+    /// still means "no precondition" (and <c>*</c> passes) — tightening the
+    /// route must not turn every unconditional reset into a 409/428.
+    /// </summary>
+    [Test]
+    public async Task Delete_preferences_without_if_match_still_opts_out()
+    {
+        var userId = Guid.NewGuid();
+        var mode = new StubModeProvider(TammaMode.SingleUser);
+
+        // Drive the row to v3 so an accidental "expected 1" default would fail.
+        var svc = Service();
+        foreach (var kind in new[] { "epic", "story", "task" })
+        {
+            await svc.UpsertPreferencesAsync(
+                userId, new UpsertTrackerPreferencesRequest(null, kind, "status"), userId);
+        }
+        (await _preferences.GetAsync(userId))!.Version.Should().Be(3);
+
+        var none = Context();
+        (await Exec(
+            await TrackerEndpoints.DeletePreferences(
+                Service(), Principal(userId), _tenantContext, mode, none),
+            none)).Status.Should().Be(StatusCodes.Status200OK,
+            "an absent If-Match opts OUT of the precondition — that is the established semantics");
+        (await _preferences.GetAsync(userId)).Should().BeNull();
+
+        // `*` is "any current version", and there must be one: a second delete
+        // has nothing left to remove, so it is a 404, not a 409.
+        await svc.UpsertPreferencesAsync(
+            userId, new UpsertTrackerPreferencesRequest(null, "spike", "status"), userId);
+        var star = Context(ifMatch: "*");
+        (await Exec(
+            await TrackerEndpoints.DeletePreferences(
+                Service(), Principal(userId), _tenantContext, mode, star),
+            star)).Status.Should().Be(StatusCodes.Status200OK);
+
+        var gone = Context(ifMatch: "*");
+        (await Exec(
+            await TrackerEndpoints.DeletePreferences(
+                Service(), Principal(userId), _tenantContext, mode, gone),
+            gone)).Status.Should().Be(StatusCodes.Status404NotFound,
+            "no override to delete is a 404, unchanged by the precondition");
     }
 
     [Test]
@@ -1245,8 +1457,8 @@ public class TrackerEndpointsTests
         public Task<ResolvedTrackerPreferences> GetPreferencesForTenantAsync(Guid tenantId) => inner.GetPreferencesForTenantAsync(tenantId);
         public Task<ResolvedTrackerPreferences> UpsertPreferencesAsync(Guid? userId, UpsertTrackerPreferencesRequest request, Guid? actingUserId, int? ifMatchVersion = null) => inner.UpsertPreferencesAsync(userId, request, actingUserId, ifMatchVersion);
         public Task<ResolvedTrackerPreferences> UpsertPreferencesForTenantAsync(Guid tenantId, UpsertTrackerPreferencesRequest request, Guid? actingUserId, int? ifMatchVersion = null) => inner.UpsertPreferencesForTenantAsync(tenantId, request, actingUserId, ifMatchVersion);
-        public Task<bool> DeletePreferencesAsync(Guid? userId) => inner.DeletePreferencesAsync(userId);
-        public Task<bool> DeletePreferencesForTenantAsync(Guid tenantId) => inner.DeletePreferencesForTenantAsync(tenantId);
+        public Task<bool> DeletePreferencesAsync(Guid? userId, int? ifMatchVersion = null) => inner.DeletePreferencesAsync(userId, ifMatchVersion);
+        public Task<bool> DeletePreferencesForTenantAsync(Guid tenantId, int? ifMatchVersion = null) => inner.DeletePreferencesForTenantAsync(tenantId, ifMatchVersion);
     }
 
     // ── Fakes ──────────────────────────────────────────────────────────────

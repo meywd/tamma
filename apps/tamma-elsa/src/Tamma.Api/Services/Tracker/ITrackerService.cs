@@ -147,9 +147,18 @@ public interface ITrackerService
         Guid tenantId, UpsertTrackerPreferencesRequest request, Guid? actingUserId,
         int? ifMatchVersion = null);
 
-    Task<bool> DeletePreferencesAsync(Guid? userId);
+    /// <param name="ifMatchVersion">
+    /// See <see cref="UpsertPreferencesAsync"/>. AC9 says EVERY mutation, and a
+    /// delete is one: resetting the override to the shipped defaults discards
+    /// whatever a concurrent editor just saved, so the same precondition is
+    /// available here (44-2 conformance round 2026-07-29 — this route was the
+    /// one carve-out, and a carve-out is worse than consistency). Absent =
+    /// unconditional delete, exactly as elsewhere.
+    /// </param>
+    Task<bool> DeletePreferencesAsync(Guid? userId, int? ifMatchVersion = null);
 
-    Task<bool> DeletePreferencesForTenantAsync(Guid tenantId);
+    /// <param name="ifMatchVersion">See <see cref="DeletePreferencesAsync"/>.</param>
+    Task<bool> DeletePreferencesForTenantAsync(Guid tenantId, int? ifMatchVersion = null);
 }
 
 /// <summary>

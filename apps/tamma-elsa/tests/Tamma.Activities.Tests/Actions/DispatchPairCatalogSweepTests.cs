@@ -25,8 +25,11 @@ namespace Tamma.Activities.Tests.Actions;
 /// <c>TaxonomyDriftBuildTests</c></b> (which is what AC7 literally asks for): the
 /// enumeration is <c>internal</c> and therefore reusable from here with no change to
 /// the file that owns it, and keeping the catalog binding in the Actions folder puts
-/// it next to the other Epic 43 sweeps and inside the epic's CI drift filter. The
-/// assertion is the one AC7 specifies.</para>
+/// it next to the other Epic 43 sweeps. The assertion is the one AC7 specifies.
+/// <b>Correction (2026-07-29, conformance round):</b> this paragraph also claimed the
+/// location put the fixture "inside the epic's CI drift filter". <b>No such filter
+/// exists</b> — CI runs each test project whole and unfiltered
+/// (<c>.github/workflows/ci.yml:248</c>). The placement is organisational only.</para>
 ///
 /// <para><b>WHAT THIS SWEEP CANNOT SEE:</b> pairs that no compiled site emits.
 /// Data-driven dispatches (<c>DocumentLifecycleWorkflow</c>,

@@ -101,8 +101,11 @@ narrative, 41-22, 41-24, 41-25 and 41-26 — which is precisely why it cannot pr
    (D4). The story does not mention this.
 5. **Rule-3/rule-4 reachability.** Per the epic README's Dependencies table, 39-17 (the deciding
    orchestrator), 39-19 (Task View / chat) and 39-20 (role-addressed delivery) have not landed —
-   `AgentOfflineChatRelay` refuses every chat message (`Program.cs:448-451`) and
-   `InitiatorOnlyTaskAudienceResolver` admits only the issue initiator (`:445-447`). The accept gate
+   `AgentOfflineChatRelay` refuses every chat message and
+   `InitiatorOnlyTaskAudienceResolver` admits only the issue initiator (both registered in
+   `Program.cs`). *(Line numbers dropped 2026-07-29, conformance round: this cited
+   `Program.cs:448-451` / `:445-447`; the two stub registrations are at `:414` and `:410` today and
+   will move again. The claim is about the registrations, not their addresses.)* The accept gate
    publishes and suspends correctly; nothing decides on the other end except a test-side resume through
    `DocumentDecisionResumeEndpoint`. AC1–AC3 are fully claimable; the "architect accepts" half of the
    Autonomy-behavior section is **wired, not reachable end-to-end**, and the story's ACs should say so.
@@ -161,6 +164,15 @@ narrative, 41-22, 41-24, 41-25 and 41-26 — which is precisely why it cannot pr
   (architect reviewer, `AcceptorRequirement.Human` for the always-escalate class). The always-escalate
   mechanism already accepts `AgentAction.WriteAdr` as an `EscalationClass` value
   (`AcceptanceRulesModelTests.cs:84`) — no new machinery.
+
+  > **Note (2026-07-29, conformance round).** The pass-through half landed; the **default rules JSON
+  > did not**. `AdrAuthoringWorkflow` forwards the caller-supplied `acceptanceRulesJson` verbatim and
+  > ships nothing else — there is no ADR default rules document, no architect-reviewer default and no
+  > `AcceptorRequirement.Human` always-escalate row anywhere in the tree for this cell. A bare
+  > dispatch therefore takes 41-1c D2's prose default (`AcceptanceDefaults.For(Prose)`), not an
+  > ADR-specific one. Recorded, not fixed: choosing a per-kind reviewer default touches 41-1c's file
+  > and is a per-type/per-kind policy decision that belongs to a story that owns it. See also the
+  > Risks note below — the mitigation this D7 item was supposed to provide never landed either.
 - **D8 — the lockstep set for this story is enumerated, not implied.** A new producing workflow moves
   exactly these, in one change: (i) `DocumentTypeRegistry.BuildSeed` += `new WorkflowDocumentInterface(
   "adr-authoring", empty, DocumentTypeKey.Prose, false)`; (ii)
@@ -282,6 +294,16 @@ NUnit + FluentAssertions (+ Testcontainers for the execution suite).
   `RolePhaseMap.GetReviewActionForRole` **throws** today (`:376-387`, no `TechWriter` arm) and
   `DocumentLifecycleWorkflow.cs:1199` calls it unguarded. Mitigation: this story's shipped default rules
   name `architect` (D7), which works today; the `tech_writer` path is 41-1a AC3's, not this story's.
+
+  > **Note (2026-07-29, conformance round) — this risk is CLOSED, but not by the stated mitigation.**
+  > Both halves of the sentence above are now false of the tree. (1) `GetReviewActionForRole` no
+  > longer throws for `tech_writer`: **41-1a** added the arm —
+  > `AgentRole.TechWriter => AgentAction.ReviewDocs` at `src/Tamma.Core/Agents/RolePhaseMap.cs:445`,
+  > inside `GetReviewActionForRole` (declared at `:433`), with 41-1a D1's own comment recording why.
+  > (2) The stated mitigation never shipped: 41-9 ships **no** default rules JSON naming `architect`
+  > (see the D7 note above), so had the arm still been missing, a bare dispatch would have taken
+  > 41-1c D2's `tech_writer` prose default and hit exactly the throw this bullet feared. The risk was
+  > retired by 41-1a landing first, not by anything in this story.
 
 ## Est. Effort
 

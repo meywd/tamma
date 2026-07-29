@@ -60,6 +60,10 @@ role (or the initiator) can accept in the Task View or by asking the orchestrato
    `DocumentInstance` carries a single `ParentDocumentId`, so the parent is the accepted Clarification when
    one exists (else the Findings, else null); the other consumed document ids ride the
    `ACCEPTANCE_CRITERIA.DRAFTED` event payload.
+   *(This was NOT true of the tree as first landed — the parent was computed after the lifecycle
+   returned and exposed as a workflow output only, while the persisted row's parent stayed null. Made
+   true 2026-07-29 by threading an optional `parentDocumentId` through the lifecycle dispatch into
+   `MintDraft`. See amendment 9.)*
 4. 41-15 can read the latest accepted `AcceptanceCriteria` for an issue via the 39-11 store.
 5. `[ResumeBehavior(LatestStateReEntry)]` (a thin binding owns no suspend node — the accept gate suspends
    inside the dispatched `document-lifecycle` child); passes the 39-10 structural test with no allowlist
@@ -140,9 +144,14 @@ role (or the initiator) can accept in the Task View or by asking the orchestrato
 7. **Shared emitter (plan D7) landed here:**
    `Tamma.Activities/Documents/EmitDomainLifecycleEventActivity.cs` — one activity for the whole Epic
    41 producer batch, with the event family as an input and the status derived from the type suffix
-   (`.FAILED`/`.REJECTED`/`.ESCALATED` ⇒ error, `.STARTED` ⇒ started, else success). 41-3/41-4/41-5/
-   41-6 now ship only a constants file. 41-9 consumed it in the same wave rather than carrying the
-   near-identical `EmitAdrEventActivity` copy its own plan's D6 called for.
+   (`.FAILED`/`.REJECTED`/`.ESCALATED` ⇒ error, `.STARTED` ⇒ started, else success). 41-9 consumed it
+   in the same wave rather than carrying the near-identical `EmitAdrEventActivity` copy its own
+   plan's D6 called for.
+   *(Tense corrected 2026-07-29, conformance round: this amendment originally read "41-3/41-4/41-5/
+   41-6 **now ship** only a constants file". Those four stories have **not landed** — nothing of
+   theirs is in the tree. The emitter is built so that when they do land, each needs only a
+   constants file; that is INTENT for those stories, not a description of the tree. The only
+   landed consumers today are 41-2 (`AcceptanceCriteriaEvents`) and 41-9 (`AdrEvents`).)*
 
 8. **`sessionId` is threaded and exposed (added 2026-07-29, adversarial review F7).** As first
    landed, this binding dispatched `document-lifecycle` with **no `sessionId` key** and exposed no
@@ -153,7 +162,66 @@ role (or the initiator) can accept in the Task View or by asking the orchestrato
    invented and no caller ever saw. The binding now mints-or-accepts a `sessionId` in `ReadInputs`
    (`AdrAuthoringWorkflow:118`'s shape verbatim), passes it into the dispatched lifecycle and
    exposes it as an output. This is not cosmetic: 39-17/39-19 correlate decisions by session
-   handle. Pinned by `DispatchLifecycle_ThreadsASessionId_AndTheBindingExposesIt`, which is the
-   **first** such pin in the tree — no other binding's structure suite pinned `sessionId`
-   (verified 2026-07-29: zero hits across the three `*WorkflowStructureTests` files), so there was
-   nothing to copy and the other two bindings remain unpinned on this property.
+   handle. Pinned by `DispatchLifecycle_ThreadsASessionId_AndTheBindingExposesIt`.
+   *(Novelty claim narrowed 2026-07-29, conformance round. This originally read "the **first** such
+   pin in the tree — zero hits across the three `*WorkflowStructureTests` files". Both halves were
+   imprecise: the tree holds **19** `*WorkflowStructureTests` files, not three, and **2** of them
+   mention `sessionId` —
+   `DocumentLifecycleWorkflowStructureTests.cs:211` already pins `sessionId` as a lifecycle OUTPUT
+   name. The accurate claim is narrower: no other **binding's** structure suite pins a `sessionId`
+   on its lifecycle **dispatch**, so there was nothing to copy for the input half, and the other
+   bindings remain unpinned on it. The test's own doc-comment was corrected to match.)*
+
+9. **AC3's persisted parent was NOT real as first landed — it is now (added 2026-07-29, conformance
+   round F9).** AC3 (above) states that `DocumentInstance` carries a single `ParentDocumentId` "so
+   the parent is the accepted Clarification when one exists (else the Findings, else null)". That
+   was **false of the tree**: `AcceptanceCriteriaAuthoringWorkflow.cs:273` computed the parent
+   inside `ReadLifecycleExit` — i.e. AFTER the lifecycle had already minted and persisted the
+   document — and `:342` exposed it as a WORKFLOW OUTPUT only. The persisted row's parent was never
+   set, because `DocumentLifecycleWorkflow.cs:1196` → `DocumentLifecycleHelper.MintDraft` called
+   `DocumentEnvelope.CreateDraft` **without** `parentDocumentId` (defaulting null,
+   `DocumentEnvelope.cs:90`), and that was the ONLY `MintDraft` call site in `src/`. The
+   Review→document edge WAS real (`DocumentLifecycleWorkflow.cs:1231`,
+   `parentDocumentId: state.Current?.Id`), and the redirect target
+   `NewDocumentTypeStoreRoundTripTests` held **zero** `ParentDocumentId` assertions, so nothing
+   caught it.
+
+   **Resolution: the claim was made true rather than weakened.** An optional `parentDocumentId` is
+   now threaded through the lifecycle dispatch:
+
+   - `DocumentLifecycleHelper.LifecycleState` gains `ParentDocumentId` (`Guid?`, JSON member
+     `parentDocumentId`, defaulted — so a state serialized before this change rehydrates to null).
+   - `DocumentLifecycleHelper.Init(...)` gains a **trailing optional** `Guid? parentDocumentId =
+     null`; every pre-existing call site is unchanged, argument-for-argument.
+   - `DocumentLifecycleHelper.MintDraft` passes `state.ParentDocumentId` into `CreateDraft`, so the
+     produce draft **and** every repair/revise draft of the same run carry the edge (the upstream
+     document the run descends from does not change between rounds; the supersession edge is
+     untouched and orthogonal).
+   - `DocumentLifecycleWorkflow`'s Init reads the new optional `parentDocumentId` dispatch input via
+     `DocumentLifecycleHelper.ParseParentDocumentId` — blank / unparseable / all-zero ⇒ `null`,
+     never a throw: a lineage hint must not be able to fail a produce.
+   - `AcceptanceCriteriaAuthoringWorkflow` now hands `ChooseParentDocumentId(clarification,
+     findings)` to the lifecycle **at dispatch**, before the produce. The `parentDocumentId` output
+     stays and now mirrors an edge that was actually persisted.
+
+   Every other producer that dispatches `document-lifecycle` supplies no key and keeps persisting a
+   null parent — asserted in both directions, not assumed. New coverage:
+   `AcceptanceCriteriaParentLineageTests` (8 tests, `Tamma.Activities.Tests`) proves the real chain
+   `ChooseParentDocumentId → ParseParentDocumentId → Init → MintDraft → envelope`, the
+   produce/repair/revise inheritance, the state-serialization round trip, the pre-change-state
+   rehydration, and the decomposition pilot's untouched null;
+   `AcceptanceCriteriaAuthoringWorkflowStructureTests.DispatchLifecycle_HandsTheParentDocumentIdBeforeTheProduce_NotOnlyOnTheWayOut`
+   pins the dispatch key so the fix cannot regress to an output-only claim; and
+   `NewDocumentTypeStoreRoundTripTests` gains
+   `AcceptanceCriteria_PersistsAndReadsBackItsParentDocumentEdge` +
+   `ADocumentMintedWithoutAParent_PersistsANullParentDocumentId` — the redirect target's first
+   `ParentDocumentId` assertions, against a real Postgres 17 container, read back through both
+   `ListByIssueAsync` and the 39-11 lineage projection. `Tamma.Core.Tests` (959),
+   `Tamma.Activities.Tests` (3251, unfiltered) and the filtered `Tamma.Api.Tests` document/sweep run
+   (177) are all green after the change.
+
+   **What is still NOT proven by an executing run:** no fixture runs the acceptance-criteria
+   lifecycle end-to-end (amendment 6's boundary is unchanged), so "the AC row the WORKFLOW produced
+   has the Clarification as its parent" is carried by the composition of the two halves above — the
+   binding's dispatch input (pinned structurally) and the helper chain + store (both executing) —
+   not by a single end-to-end assertion.
