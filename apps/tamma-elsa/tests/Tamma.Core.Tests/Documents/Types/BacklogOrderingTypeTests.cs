@@ -72,6 +72,49 @@ public class BacklogOrderingTypeTests
     public void Item_ids_present_are_accepted() =>
         Codes(Validate(ValidDoc)).Should().NotContain(BacklogOrderingDocumentType.ItemIdMissing);
 
+    // ── ITEM_ID_DUPLICATED (adversarial review 2026-07-29) ──────────────────
+
+    [Test]
+    public void Duplicate_item_ids_are_rejected_with_item_id_duplicated()
+    {
+        // The reviewer's exact counter-example: the same item at two ranks used to
+        // VALIDATE, breaking "total order over the referenced item set".
+        var r = Validate(
+            """
+            {
+              "items": [
+                { "itemId": "issue-7", "rank": 1, "rationale": "a", "value": "v", "effort": "e" },
+                { "itemId": "issue-7", "rank": 2, "rationale": "b", "value": "v", "effort": "e" }
+              ]
+            }
+            """);
+        r.IsValid.Should().BeFalse();
+        Codes(r).Should().Contain(BacklogOrderingDocumentType.ItemIdDuplicated);
+        r.Violations.Single(v => v.Code == BacklogOrderingDocumentType.ItemIdDuplicated)
+            .Message.Should().Contain("issue-7");
+    }
+
+    [Test]
+    public void Triplicate_item_id_is_reported_once()
+    {
+        var r = Validate(
+            """
+            {
+              "items": [
+                { "itemId": "issue-7", "rank": 1, "rationale": "a", "value": "v", "effort": "e" },
+                { "itemId": "issue-7", "rank": 2, "rationale": "b", "value": "v", "effort": "e" },
+                { "itemId": "issue-7", "rank": 3, "rationale": "c", "value": "v", "effort": "e" }
+              ]
+            }
+            """);
+        r.Violations.Count(v => v.Code == BacklogOrderingDocumentType.ItemIdDuplicated).Should().Be(1,
+            "one duplicated id is one defect, not one per extra occurrence (the CRITERION_ID_DUPLICATED pattern)");
+    }
+
+    [Test]
+    public void Distinct_item_ids_are_accepted() =>
+        Codes(Validate(ValidDoc)).Should().NotContain(BacklogOrderingDocumentType.ItemIdDuplicated);
+
     // ── RANK_DUPLICATED (the story's named counter-example) ─────────────────
 
     [Test]

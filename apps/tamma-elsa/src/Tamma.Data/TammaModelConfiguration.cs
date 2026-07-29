@@ -1236,6 +1236,109 @@ internal static class TammaModelConfiguration
 
     #endregion
 
+    #region Story 43-5 — governed action catalog storage (control plane)
+
+    /// <summary>
+    /// Story 43-5 — the two control-plane tables of the governed action
+    /// catalog: <c>action_assignments</c> (per-principal autonomy policy,
+    /// three scopes: platform ceiling / tenant / user) and
+    /// <c>action_authorizations</c> (the one-human-decision-per-run ledger).
+    /// CP-resident in BOTH modes — forced, not preferred (see
+    /// <see cref="Entities.ActionAssignment"/>'s doc comment for the three
+    /// reasons) — and deliberately EXCLUDED from the destructive startup DROP
+    /// list (AC5), so, mirroring <see cref="ConfigureProviderSettings"/>, both
+    /// carry NO FK to <c>tenants</c>/<c>users</c> and their migration is
+    /// IF-NOT-EXISTS idempotent. Configured ONLY on
+    /// <see cref="ControlPlaneDbContext"/>, never on the tenant context; no
+    /// <c>ApplyTenantFilter</c> (it would break the platform-ceiling read
+    /// path outright).
+    /// </summary>
+    public static void ConfigureActionGovernanceEntities(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<Entities.ActionAssignment>(entity =>
+        {
+            entity.ToTable("action_assignments", t =>
+            {
+                // THREE admissible scopes — tenant-only, user-only, and
+                // NEITHER (the platform ceiling). Deliberately NOT named
+                // _principal_xor: six shipped stores use that name for a
+                // two-case rule, and this table's third case IS the ceiling
+                // (43-5 D2 — the name is the documentation).
+                t.HasCheckConstraint(
+                    "ck_action_assignments_principal_scope",
+                    "NOT (\"TenantId\" IS NOT NULL AND \"UserId\" IS NOT NULL)");
+                t.HasCheckConstraint(
+                    "ck_action_assignments_target_kind",
+                    "\"TargetKind\" IN ('action','group','mode')");
+                // Mode rows carry no threshold; action/group rows always do.
+                t.HasCheckConstraint(
+                    "ck_action_assignments_mode_row",
+                    "(\"TargetKind\" = 'mode') = (\"MinAutonomy\" IS NULL)");
+                // NO CHECK on the MinAutonomy VALUE — deliberate (AC3/D5): a
+                // numeric CHECK frozen into a migration snapshot would be a
+                // second permanent hardcoding of the AutonomyDial bound.
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.TargetKind).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.TargetKey).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.Note).HasMaxLength(500);
+            entity.Property(e => e.Version).IsRequired().HasDefaultValue(1);
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("now()");
+
+            // One row per (principal, target). NULLS NOT DISTINCT so the
+            // all-null platform principal dedupes like any other (PG15+;
+            // production runs PG17 — the provider_settings pattern).
+            entity.HasIndex(e => new { e.TenantId, e.UserId, e.TargetKind, e.TargetKey })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasDatabaseName("ux_action_assignments_principal_target");
+        });
+
+        modelBuilder.Entity<Entities.ActionAuthorization>(entity =>
+        {
+            entity.ToTable("action_authorizations", t =>
+            {
+                t.HasCheckConstraint(
+                    "ck_action_authorizations_principal_scope",
+                    "NOT (\"TenantId\" IS NOT NULL AND \"UserId\" IS NOT NULL)");
+                t.HasCheckConstraint(
+                    "ck_action_authorizations_state",
+                    "\"State\" IN ('pending','granted','denied','expired')");
+                // The granted scope is an action or a whole group.
+                t.HasCheckConstraint(
+                    "ck_action_authorizations_target_kind",
+                    "\"TargetKind\" IN ('action','group')");
+            });
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
+            entity.Property(e => e.CorrelationId).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.TargetKind).IsRequired().HasMaxLength(16);
+            entity.Property(e => e.TargetKey).IsRequired().HasMaxLength(200);
+            entity.Property(e => e.State).IsRequired().HasMaxLength(16).HasDefaultValue("pending");
+            // NOT NULL from day one (AC4).
+            entity.Property(e => e.RequestedAtUtc).IsRequired().HasDefaultValueSql("now()");
+            entity.Property(e => e.Reason).HasMaxLength(1000);
+
+            // At most one OPEN (pending/granted) authorization per
+            // (principal, correlation, target); a denied/expired row permits
+            // a fresh request.
+            entity.HasIndex(e => new
+                { e.TenantId, e.UserId, e.CorrelationId, e.TargetKind, e.TargetKey })
+                .IsUnique()
+                .AreNullsDistinct(false)
+                .HasFilter("\"State\" IN ('pending','granted')")
+                .HasDatabaseName("ux_action_authorizations_open");
+
+            // The consume path scans open grants by correlation.
+            entity.HasIndex(e => new { e.CorrelationId, e.State })
+                .HasDatabaseName("IX_action_authorizations_Correlation_State");
+        });
+    }
+
+    #endregion
+
     /// <summary>
     /// Story 35-1 — billing foundation entities. The tenant→Stripe customer
     /// mapping (<c>billing_customers</c>, unique <c>TenantId</c>) and the
@@ -1549,6 +1652,12 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.ParentDocumentId).HasColumnName("parent_document_id");
             entity.Property(e => e.CorrelatingEventId).HasColumnName("correlating_event_id");
             entity.Property(e => e.TenantId).HasColumnName("tenant_id");
+            // Story 41-1c — the audience tag (ProseAudience wire string). Nullable:
+            // non-prose rows and pre-41-1c rows carry NULL. No CHECK constraint —
+            // the vocabulary is enforced by ProseDocumentType.Validate with a named
+            // violation code (AC4); a DB CHECK would turn a vocabulary extension
+            // into a migration (D7).
+            entity.Property(e => e.Audience).HasColumnName("audience").HasMaxLength(32);
             entity.Property(e => e.BodyJson)
                 .HasColumnName("body").HasColumnType("jsonb")
                 .IsRequired().HasDefaultValueSql("'{}'::jsonb");
@@ -1563,6 +1672,12 @@ internal static class TammaModelConfiguration
                 .HasDatabaseName("IX_document_instances_issue_type_status");
             entity.HasIndex(e => new { e.IssueId, e.CreatedAt })
                 .HasDatabaseName("IX_document_instances_issue_created");
+
+            // Story 41-1c D7 — the audience filter is always issue-scoped and only
+            // prose rows carry an audience, so the index is partial on NOT NULL.
+            entity.HasIndex(e => new { e.IssueId, e.Audience })
+                .HasFilter("audience IS NOT NULL")
+                .HasDatabaseName("IX_document_instances_issue_audience");
 
             // Supersession self-reference (D4): the prior revision. Restrict so a
             // superseded row can't be deleted out from under its successor

@@ -2,14 +2,14 @@
 variables: role, workItemJson, userFlowJson, contextFindings, conventions
 enableTools: false
 maxTokens: 8192
-version: 1
+version: 2
 ---
-You are a {{role}} authoring the structured UI specification implementation will build against: components, layout, content, interaction behaviour, and accessibility requirements per screen — precise enough to implement without guessing.
+You are a {{role}} authoring the structured UX specification implementation will build against: the user flows with their entry, success, and error states, the screens each flow passes through, and the accessibility requirements per screen — precise enough to implement without guessing.
 
 ## Work Item
 {{workItemJson}}
 
-## User Flow (may be empty — then derive the screens from the work item)
+## User Flow (may be empty — then derive the flows from the work item)
 {{userFlowJson}}
 
 ## Context Findings
@@ -18,36 +18,32 @@ You are a {{role}} authoring the structured UI specification implementation will
 ## Conventions
 {{conventions}}
 
-Specify each screen fully: the components it is composed of, the content and data each shows, how each interaction behaves (including keyboard behaviour), and the accessibility requirements (labels, roles, focus order, contrast). Reuse existing components from the findings where they fit; only spec new ones where nothing fits.
+Specify each flow fully: where the user starts (`entryState`), what done looks like (`successState`), and at least one designed failure path (`errorStates`) — a flow that cannot fail is a flow that was not designed. Bind every screen to the flow it belongs to and state its accessibility requirements explicitly (labels, roles, focus order, contrast, keyboard behaviour). Where the work item carries acceptance criteria, map each flow to the criteria it satisfies via `acceptanceCriteriaRefs`. Do NOT leave interaction behaviour implicit — undecided behaviour belongs in a named error state or an explicit requirement, never in a gap.
 
 Return ONLY a single JSON object (no markdown fences, no prose outside it) of this EXACT shape:
 ```json
 {
-  "summary": "what this spec covers and the design intent in one or two sentences",
+  "flows": [
+    {
+      "id": "F1",
+      "name": "the user flow",
+      "entryState": "where the user starts",
+      "successState": "what done looks like",
+      "errorStates": ["at least one designed failure path"],
+      "acceptanceCriteriaRefs": ["AC-1"]
+    }
+  ],
   "screens": [
     {
       "id": "S1",
-      "name": "screen name",
-      "layout": "how the screen is arranged",
-      "components": [
-        {
-          "id": "C1",
-          "name": "component name",
-          "reuse": "existing | new",
-          "content": "what it shows and where the data comes from",
-          "behaviour": "how it responds to interaction, including keyboard",
-          "accessibility": ["label/role/focus/contrast requirements"]
-        }
-      ],
-      "states": ["default", "empty", "loading", "error"]
+      "flowRef": "F1",
+      "a11yRequirements": ["all inputs labelled for screen readers", "focus order follows the visual order"]
     }
-  ],
-  "accessibilityRequirements": ["spec-wide a11y requirements (standards, contrast, focus management)"],
-  "openQuestions": ["anything left undecided, for the reviewer"]
+  ]
 }
 ```
 
 Rules:
-- Every screen needs at least one component; every component needs non-empty `content`, `behaviour`, and `accessibility`.
-- `reuse` MUST be `existing` or `new` — prefer `existing` when the findings show a fit.
-- Do NOT leave interaction behaviour implicit; if it is undecided, put it in `openQuestions`.
+- Define at least one flow; every flow MUST state an `entryState`, a `successState`, and at least one entry in `errorStates`.
+- Every screen MUST reference a declared flow via `flowRef` and list at least one entry in `a11yRequirements` — no screen ships without stated accessibility.
+- `acceptanceCriteriaRefs` maps each flow to the acceptance criteria it satisfies; leave it empty only when the work item carries no criteria.

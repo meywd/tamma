@@ -39,8 +39,15 @@ public interface IDocumentInstanceRepository
     /// <summary>Single-document fetch, tenant-checked. Null when missing or foreign.</summary>
     Task<DocumentInstance?> GetByIdAsync(Guid tenantId, Guid documentId, CancellationToken ct);
 
-    /// <summary>Every revision of every type for the issue, oldest-first (lineage source).</summary>
-    Task<IReadOnlyList<DocumentInstance>> ListByIssueAsync(Guid tenantId, string issueId, CancellationToken ct);
+    /// <summary>
+    /// Every revision of every type for the issue, oldest-first (lineage source).
+    /// <paramref name="audience"/> (Story 41-1c AC3) is an OPTIONAL filter on the
+    /// stored audience tag: <c>null</c> means UNFILTERED — every existing caller
+    /// (including 39-10's re-entry read path) keeps its exact behaviour; a value
+    /// returns only rows whose <c>audience</c> column equals it.
+    /// </summary>
+    Task<IReadOnlyList<DocumentInstance>> ListByIssueAsync(
+        Guid tenantId, string issueId, string? audience, CancellationToken ct);
 
     /// <summary>
     /// Design Decision D10 — the 39-10 lockstep in-process read: the single latest

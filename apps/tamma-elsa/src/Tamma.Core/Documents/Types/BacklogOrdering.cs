@@ -46,6 +46,13 @@ public sealed class BacklogOrderingDocumentType : IDocumentType
     /// <summary>An item names no itemId — the ordering must reference real backlog items.</summary>
     public const string ItemIdMissing = "ITEM_ID_MISSING";
 
+    /// <summary>
+    /// Two entries reference the same itemId — a total order over the referenced
+    /// item set assigns each item exactly one position (adversarial review
+    /// 2026-07-29; the <c>CRITERION_ID_DUPLICATED</c> naming pattern).
+    /// </summary>
+    public const string ItemIdDuplicated = "ITEM_ID_DUPLICATED";
+
     /// <summary>Two items share the same rank (a tie) — the message names both item ids and the rank.</summary>
     public const string RankDuplicated = "RANK_DUPLICATED";
 
@@ -86,15 +93,23 @@ public sealed class BacklogOrderingDocumentType : IDocumentType
             violations.Add(new DocumentViolation(
                 NoItems, "The ordering has no items — an empty ordering orders nothing."));
 
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        var reportedDupes = new HashSet<string>(StringComparer.Ordinal);
         var index = 0;
         foreach (var item in items)
         {
             index++;
-            var label = string.IsNullOrWhiteSpace(item.ItemId) ? $"#{index}" : $"'{item.ItemId}'";
+            var id = item.ItemId?.Trim() ?? "";
+            var label = id.Length == 0 ? $"#{index}" : $"'{id}'";
 
-            if (string.IsNullOrWhiteSpace(item.ItemId))
+            if (id.Length == 0)
                 violations.Add(new DocumentViolation(
                     ItemIdMissing, $"Item {label} names no itemId — every entry must reference a real backlog item."));
+            else if (!seenIds.Add(id) && reportedDupes.Add(id))
+                violations.Add(new DocumentViolation(
+                    ItemIdDuplicated,
+                    $"Item id '{id}' appears more than once — the ordering is a total order over the referenced " +
+                    "item set, so each item holds exactly one position."));
 
             if (string.IsNullOrWhiteSpace(item.Rationale))
                 violations.Add(new DocumentViolation(

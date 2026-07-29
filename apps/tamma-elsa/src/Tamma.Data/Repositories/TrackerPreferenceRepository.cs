@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Tamma.Core.Tracking;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 
@@ -107,19 +108,18 @@ public class TrackerPreferenceRepository(
     private static async Task<(TrackerPreference Entity, bool WasCreated)> UpsertInternal(
         TenantDbContext db, TrackerPreference preference, Guid? actingUserId)
     {
+        // Wire-boundary validation (the "typed TammaError, never a DB CHECK
+        // surprise" posture): DefaultKind must be a WorkItemKind wire string
+        // or null — otherwise junk reaches Postgres and surfaces as a raw
+        // 23514 off ck_tracker_preferences_default_kind. BoardGroupBy stays
+        // freeform by design.
+        if (preference.DefaultKind is not null)
+            _ = WorkItemKindExtensions.Parse(preference.DefaultKind); // TRACKER.UNKNOWN_KIND
+
         var existing = await db.TrackerPreferences.FirstOrDefaultAsync(p =>
             p.UserId == preference.UserId && p.TenantId == preference.TenantId);
         if (existing is not null)
-        {
-            existing.DefaultProjectId = preference.DefaultProjectId;
-            existing.DefaultKind = preference.DefaultKind;
-            existing.BoardGroupBy = preference.BoardGroupBy;
-            existing.UpdatedAt = DateTime.UtcNow;
-            existing.Version += 1;
-            existing.UpdatedBy = actingUserId ?? preference.UserId;
-            await db.SaveChangesAsync();
-            return (existing, false);
-        }
+            return (await ApplyUpdateAsync(db, existing, preference, actingUserId), false);
 
         preference.CreatedAt = DateTime.UtcNow;
         preference.UpdatedAt = preference.CreatedAt;
@@ -127,7 +127,38 @@ public class TrackerPreferenceRepository(
         preference.CreatedBy = actingUserId ?? preference.UserId;
         preference.UpdatedBy = actingUserId ?? preference.UserId;
         db.TrackerPreferences.Add(preference);
+        try
+        {
+            await db.SaveChangesAsync();
+            return (preference, true);
+        }
+        catch (DbUpdateException ex) when (
+            ex.InnerException is Npgsql.PostgresException { SqlState: "23505" })
+        {
+            // Two concurrent FIRST upserts for the same principal raced the
+            // check-then-insert window; the loser hit
+            // UX_tracker_preferences_principal. Retry ONCE as an update of the
+            // winner's row — the documented upsert semantics, idempotent under
+            // the race. The row can no longer vanish mid-retry without a
+            // delete, in which case First throws and the caller sees a real
+            // failure, not a silent swallow.
+            db.Entry(preference).State = EntityState.Detached;
+            var winner = await db.TrackerPreferences.FirstAsync(p =>
+                p.UserId == preference.UserId && p.TenantId == preference.TenantId);
+            return (await ApplyUpdateAsync(db, winner, preference, actingUserId), false);
+        }
+    }
+
+    private static async Task<TrackerPreference> ApplyUpdateAsync(
+        TenantDbContext db, TrackerPreference existing, TrackerPreference incoming, Guid? actingUserId)
+    {
+        existing.DefaultProjectId = incoming.DefaultProjectId;
+        existing.DefaultKind = incoming.DefaultKind;
+        existing.BoardGroupBy = incoming.BoardGroupBy;
+        existing.UpdatedAt = DateTime.UtcNow;
+        existing.Version += 1;
+        existing.UpdatedBy = actingUserId ?? incoming.UserId;
         await db.SaveChangesAsync();
-        return (preference, true);
+        return existing;
     }
 }

@@ -76,7 +76,10 @@ new workflows, zero new `(role, action)` cells, zero new document types.
 `SCHEDULE.FIRE.DISPATCHED` (tags `tenantId`, `definitionId`, `windowKey`, `triggerId`),
 `SCHEDULE.FIRE.SUPPRESSED` (another pod won the window — INFO, not an error),
 `SCHEDULE.WINDOW.SKIPPED` (LOUD — catch-up dropped a window, with the count),
-`SCHEDULE.FIRE.FAILED` (LOUD — dispatch threw; the ledger row is released so the next tick retries),
+`SCHEDULE.FIRE.FAILED` (LOUD — dispatch threw or timed out. *[Amended 2026-07-29]* the ledger row is
+**stamped `failed` and the window is burnt** — the NEXT window is the recovery path; there is no
+same-window retry. The original "row is released so the next tick retries" wording contradicted the
+at-most-once contract the implementation ships),
 `SCHEDULE.TRIGGER.CHANGED` (an admin created/updated/disabled a schedule).
 
 ## Autonomy behavior
@@ -140,3 +143,65 @@ apply to *it*. The dial governs the workflows it dispatches, unchanged. What Epi
 
 **5–6 days.** (2 storage + migration, 1.5 service, 1 admin API + RBAC, 1.5 tests incl. the two-pod race
 and the restart scenario.)
+
+## Amendments — 2026-07-29 (adversarial-review fixes)
+
+The following behaviour contracts changed (or were made explicit) relative to the text above:
+
+1. **Manual run-now fires are now at-most-once (MAJOR-1, fixed).** The engine's manual drain no
+   longer dispatches straight off the pending list. Each pending `manual:{timestamp}` row must first
+   be won via a conditional CAS (`ScheduledTriggerRepository.TryClaimManualFireForDispatchAsync`:
+   `UPDATE … SET "DispatchedAt" = @now WHERE "Id" = @id AND "Outcome" = 'claimed' AND "DispatchedAt"
+   IS NULL`, arbitrated by Postgres row-count) — exactly one pod wins; concurrent pods skip. A crash
+   or a failed outcome stamp after a won CAS **burns** the fire (the pending list filters
+   `DispatchedAt IS NULL`), and a dispatch failure stamps `failed` — matching the cron path's
+   burn-the-window semantics. A pending manual row can never be double-dispatched or re-dispatched in
+   a loop. Proven by an 8-way real-Postgres CAS race test and an 8-pod service-level drain race test.
+2. **Bounded catch-up now provably fires the LATEST missed window (MAJOR-2, fixed).** The old
+   calculator collected due windows into an ascending list capped at 1000 and the service fired the
+   list's last element — so a backlog over the cap (minutely cron + >16.7 h gap) fired a ~7 h-stale
+   window and never accounted for the newest ones. `ScheduleWindowCalculator.ComputeDue` now yields
+   the true latest due occurrence regardless of backlog size; the due count is bounded and, when the
+   bound is hit, flagged (`skippedCountSaturated: true` in the `SCHEDULE.WINDOW.SKIPPED` event data,
+   meaning `skippedCount` is "at least N"). AC6's "most recent missed window" now holds unconditionally.
+3. **Per-dispatch timeout (MODERATE-3, fixed).** New option `ScheduledTriggers:DispatchTimeout`
+   (default 30 s; non-positive disables). A dispatch that exceeds it — even one that ignores its
+   cancellation token — is stamped `failed` (burn-the-window) and the fire loop continues, so one
+   hung dispatch cannot stall the remaining tenants on the pod while holding the advisory-lock
+   connection.
+4. **Template materialisation is inside the tick's failure isolation (MODERATE-4, fixed).** The
+   repository isolates each template (a poison template row is logged and skipped, the rest still
+   materialise) and the service additionally wraps the whole materialisation call, so a wholesale
+   failure can no longer abort every tick forever — existing concrete triggers keep firing.
+5. **Run-now on a DISABLED trigger is a 409 (`trigger_disabled`), and the manual drain only
+   dispatches enabled triggers' claims.** Contract decision resolving the previous ambiguity (the
+   repository interface doc promised "(enabled) trigger rows" but neither the query nor the endpoint
+   checked). A claim that was pending when its trigger got disabled waits, un-burnt, and drains after
+   re-enablement.
+6. **Same-millisecond duplicate run-now is a 409 (`duplicate_run_now`)**, mirroring Create's
+   duplicate handling, instead of an unhandled unique-violation 500. The first claim stands.
+
+## Known limitations / follow-ups — 2026-07-29
+
+Recorded during the same adversarial review, deliberately NOT fixed in this pass (MAJOR-1, MAJOR-2
+and the per-dispatch timeout / materialisation isolation above ARE fixed as of 2026-07-29):
+
+- **MODERATE-5 — event spam dedup.** A persistently-suppressed or persistently-failing trigger emits
+  `SCHEDULE.FIRE.SUPPRESSED` / `SCHEDULE.FIRE.FAILED` (and, while a backlog persists,
+  `SCHEDULE.WINDOW.SKIPPED`) every tick with no dedup/cooldown, so a stuck fleet writes a steady
+  drip of audit rows. Follow-up: per-(trigger, reason) emission cooldown or aggregation.
+- **LOW-7 — AC1 wording vs implementation key.** AC1 promises at-most-once per
+  `(tenantId, definitionId, windowKey)` but the ledger's unique index and the advisory-lock key are
+  per `(triggerId, windowKey)` — two DIFFERENT trigger rows for the same tenant + definition (distinct
+  `Name`s) can each fire the same window. Follow-up: either amend AC1 to say per-trigger, or add a
+  definition-level uniqueness decision.
+- **LOW-8 — stale-claimed-row observability.** A pod crash between ledger claim and dispatch leaves a
+  `claimed` row that never becomes `dispatched`/`failed` (and, post-MAJOR-1, a burnt manual fire is a
+  `claimed` row with non-null `DispatchedAt`). Nothing sweeps or surfaces these beyond retention
+  pruning. Follow-up: a periodic sweep that stamps rows older than a threshold `failed` with a
+  `SCHEDULE.FIRE.FAILED` event, or a metric/admin listing.
+- **Dead index `IX_scheduled_triggers_Enabled_NextDueAt`** (no query filters on `NextDueAt`; the tick
+  lists by `Enabled` + tenant): left in place on 2026-07-29 because removing it cleanly spans four
+  files (`20260729035316_AddScheduledTriggers.cs`, its `.Designer.cs`, `TammaModelConfiguration.cs`,
+  `ControlPlaneDbContextModelSnapshot.cs`), two of which carried other in-flight work at the time.
+  Trivial to drop later in one dedicated change (the migration is unreleased — no migration anxiety).

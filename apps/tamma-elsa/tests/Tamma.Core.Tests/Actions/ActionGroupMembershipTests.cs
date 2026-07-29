@@ -66,11 +66,12 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void ReviewAndAcceptance_has_the_17_agent_plus_16_document_members()
+    public void ReviewAndAcceptance_has_the_17_agent_plus_17_document_members()
     {
         // 16 → 17 agent members (Story 41-1a: + review-design); 10 → 16 document
         // members (Story 41-1b: + acceptance-criteria, backlog-ordering,
-        // sprint-plan, test-plan, threat-model, ux-spec).
+        // sprint-plan, test-plan, threat-model, ux-spec); 16 → 17 document
+        // members (Story 41-1c: + prose).
         WiresIn(ActionGroup.ReviewAndAcceptance).Should().BeEquivalentTo(new[]
         {
             "agent-action:review-acceptance", "agent-action:review-scope", "agent-action:plan-review",
@@ -86,6 +87,7 @@ public class ActionGroupMembershipTests
             "document-type:test-spec",
             "document-type:acceptance-criteria", "document-type:backlog-ordering", "document-type:sprint-plan",
             "document-type:test-plan", "document-type:threat-model", "document-type:ux-spec",
+            "document-type:prose",
         });
     }
 
@@ -205,7 +207,7 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void PlatformAutomation_has_the_42_expected_members()
+    public void PlatformAutomation_has_the_43_expected_members()
     {
         var expected = new List<string>
         {
@@ -216,32 +218,35 @@ public class ActionGroupMembershipTests
             // work-product surface).
             "effect:schedule.create", "effect:schedule.update", "effect:schedule.delete",
         };
-        // The 26 automation members outside the secrets group (41-30 added
+        // The 27 automation members outside the secrets group (41-30 added
         // TenantScheduledTriggerService; 43-4 added the catalog startup
-        // validator — the governance machinery is itself a swept hosted service).
+        // validator; 43-5 added the governance snapshot primer — the
+        // governance machinery is itself a swept hosted service).
         expected.AddRange(Enum.GetValues<BackgroundActor>()
             .Where(b => b is not (BackgroundActor.SecretAutoRotationScheduler or BackgroundActor.RetireSweep))
             .Select(b => $"automation:{b.ToWire()}"));
         // All 8 platform tasks.
         expected.AddRange(Enum.GetValues<PlatformTaskKind>().Select(p => $"platform-task:{p.ToWire()}"));
 
-        expected.Should().HaveCount(42, "5 engine effects + 3 schedule effects + 26 automation + 8 platform tasks");
+        expected.Should().HaveCount(43, "5 engine effects + 3 schedule effects + 27 automation + 8 platform tasks");
         WiresIn(ActionGroup.PlatformAutomation).Should().BeEquivalentTo(expected);
     }
 
     [Test]
-    public void The_per_group_counts_sum_to_181()
+    public void The_per_group_counts_sum_to_183()
     {
         // 154 → 176: +16 agent-actions (Story 41-1a) and +6 document types
         // (Story 41-1b); 176 → 180: +3 schedule effects and +1 scheduler
         // automation member (Story 41-30); 180 → 181: +1 automation member
-        // (Story 43-4's catalog startup validator) — distributed per the
-        // membership tests above.
+        // (Story 43-4's catalog startup validator); 181 → 182: +1 document type
+        // (Story 41-1c's prose); 182 → 183: +1 automation member (Story 43-5's
+        // governance snapshot primer) — distributed per the membership tests
+        // above.
         var counts = new Dictionary<ActionGroup, int>
         {
             [ActionGroup.PlanningAndAnalysis] = 37,
             [ActionGroup.Authoring] = 23,
-            [ActionGroup.ReviewAndAcceptance] = 33,
+            [ActionGroup.ReviewAndAcceptance] = 34,
             [ActionGroup.Docs] = 13,
             [ActionGroup.CodeRead] = 3,
             [ActionGroup.CodeWrite] = 1,
@@ -254,10 +259,10 @@ public class ActionGroupMembershipTests
             [ActionGroup.ExternalComms] = 2,
             [ActionGroup.ModelInvocation] = 3,
             [ActionGroup.Secrets] = 4,
-            [ActionGroup.PlatformAutomation] = 42,
+            [ActionGroup.PlatformAutomation] = 43,
         };
 
-        counts.Values.Sum().Should().Be(181);
+        counts.Values.Sum().Should().Be(183);
         foreach (var (group, count) in counts)
             ActionCatalog.ByGroup[group].Should().HaveCount(count, $"group '{group.ToWire()}'");
     }

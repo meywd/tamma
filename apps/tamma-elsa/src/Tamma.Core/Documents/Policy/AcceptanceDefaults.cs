@@ -83,6 +83,7 @@ public static class AcceptanceDefaults
     private static readonly AcceptanceRules s_humanProductOwnerRules;
     private static readonly AcceptanceRules s_testerRules;
     private static readonly AcceptanceRules s_securityRules;
+    private static readonly AcceptanceRules s_techWriterRules;
 
     static AcceptanceDefaults()
     {
@@ -169,6 +170,23 @@ public static class AcceptanceDefaults
             AcceptorRequirement = AcceptorRequirement.Human,
         }).Validate();
 
+        // Story 41-1c D6 — prose: a SINGLE tech_writer reviewer, unanimous,
+        // AcceptorRequirement unchanged from base. Deliberately NOT a panel row:
+        // PanelRoster excludes tech_writer by design (the drift test pins the
+        // exclusion), and prose review is a docs-review judgment, not an
+        // architecture one. Per-kind overrides (a runbook wants ops eyes, a
+        // stakeholder update may want none) are left to the consuming stories
+        // via the existing per-document-type autonomy override.
+        s_techWriterRules = (Rules with
+        {
+            ReviewerSelection = new ReviewerSelection(
+                Mode: ReviewerMode.SingleReviewer,
+                ReviewerRole: AgentRole.TechWriter.ToWire(),
+                PanelRoles: Array.Empty<string>(),
+                Quorum: null,
+                DecisionRule: ReviewDecisionRule.Unanimous),
+        }).Validate();
+
         // Fail loud if any per-type default is invalid.
         foreach (var type in Enum.GetValues<DocumentTypeKey>())
             _ = For(type);
@@ -181,8 +199,9 @@ public static class AcceptanceDefaults
     /// <c>ux-spec</c> the panel; <c>backlog-ordering</c> a product_owner
     /// reviewer; <c>sprint-plan</c> a product_owner reviewer + human acceptor;
     /// <c>test-plan</c> a tester reviewer; <c>threat-model</c> a security
-    /// reviewer + human acceptor); every other type gets the
-    /// single-<c>architect</c> unanimous base row.
+    /// reviewer + human acceptor); <c>prose</c> gets a single <c>tech_writer</c>
+    /// reviewer (41-1c D6); every other type gets the single-<c>architect</c>
+    /// unanimous base row.
     /// </summary>
     public static AcceptanceRules For(DocumentTypeKey type) => type switch
     {
@@ -197,6 +216,9 @@ public static class AcceptanceDefaults
         DocumentTypeKey.SprintPlan => s_humanProductOwnerRules,
         DocumentTypeKey.TestPlan => s_testerRules,
         DocumentTypeKey.ThreatModel => s_securityRules,
+        // prose (41-1c D6): reviewed by the tech_writer, never the architect
+        // catch-all — AC6 pins that prose does not reach `_ => Rules` by accident.
+        DocumentTypeKey.Prose => s_techWriterRules,
         _ => Rules,
     };
 }

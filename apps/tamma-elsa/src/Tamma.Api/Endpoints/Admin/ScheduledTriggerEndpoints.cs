@@ -274,6 +274,22 @@ public static class ScheduledTriggerEndpoints
             });
         }
 
+        // 2026-07-29 contract decision: run-now on a DISABLED trigger is a
+        // 409, and the engine's manual drain only dispatches enabled
+        // triggers' claims — otherwise a claim would sit pending invisibly
+        // (or, worse, fire a schedule an admin explicitly switched off).
+        if (!row.Enabled)
+        {
+            return Results.Json(
+                new
+                {
+                    error = "trigger_disabled",
+                    message = "This schedule is disabled; the engine only drains run-now claims "
+                        + "for enabled schedules. Enable the schedule first, then run it.",
+                },
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
         var now = timeProvider.GetUtcNow();
         var fire = new ScheduledTriggerFire
         {
@@ -286,7 +302,26 @@ public static class ScheduledTriggerEndpoints
             Outcome = "claimed",
         };
         db.ScheduledTriggerFires.Add(fire);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is Npgsql.PostgresException { SqlState: "23505" })
+        {
+            // Two run-now requests in the SAME millisecond produce the same
+            // manual:{timestamp} window key — the ledger's unique
+            // (TriggerId, WindowKey) index rejects the second. 409, mirroring
+            // Create's duplicate handling; the first claim stands.
+            return Results.Json(
+                new
+                {
+                    error = "duplicate_run_now",
+                    message = "A run-now claim with the same window key already exists "
+                        + "(same-millisecond duplicate). The earlier claim will fire; retry "
+                        + "if another run is genuinely wanted.",
+                },
+                statusCode: StatusCodes.Status409Conflict);
+        }
 
         await EmitChangedAsync(events, row, "run-now", principal, ct);
         return Results.Accepted(

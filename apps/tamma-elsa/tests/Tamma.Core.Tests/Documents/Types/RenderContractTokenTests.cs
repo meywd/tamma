@@ -89,6 +89,16 @@ public class RenderContractTokenTests
         "\"description\"", "\"mitigation\"", "\"residualRisk\"", "\"escalation\"",
     };
 
+    // ── Story 41-1c — prose. Its producing cells (41-4/41-5/41-8/41-9/41-22/
+    // 41-24/41-25/41-26) are NOT bound yet; this pin is the Core-side stand-in
+    // for the envelope contract every prose binding story renders against. The
+    // four payload keys ONLY — the body is unvalidated markdown by design, so
+    // there are no body tokens to pin.
+    private static readonly string[] ProseTokens =
+    {
+        "\"kind\"", "\"audience\"", "\"title\"", "\"body\"",
+    };
+
     // Intended cell (41-1b D4): (ux_designer, author-ui-spec) → UxSpecDocumentType.Validate (10 tokens)
     private static readonly string[] UxSpecTokens =
     {
@@ -126,5 +136,7 @@ public class RenderContractTokenTests
         yield return new TestCaseData(new TestPlanDocumentType(), TestPlanTokens).SetName("test-plan");
         yield return new TestCaseData(new ThreatModelDocumentType(), ThreatModelTokens).SetName("threat-model");
         yield return new TestCaseData(new UxSpecDocumentType(), UxSpecTokens).SetName("ux-spec");
+        // Story 41-1c — prose.
+        yield return new TestCaseData(new ProseDocumentType(), ProseTokens).SetName("prose");
     }
 }

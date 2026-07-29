@@ -81,11 +81,16 @@ public sealed class EfTenantDbMigrator : ITenantDbMigrator, ITenantDataSourceDbM
     // from the tenant's own long-lived resolver pool, not a one-shot
     // migration-only pool that would otherwise strand a physical connection.
 
-    public Task MigrateTenantAppAsync(NpgsqlDataSource dataSource, CancellationToken ct = default)
+    public async Task MigrateTenantAppAsync(NpgsqlDataSource dataSource, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         var schema = TenantNaming.SchemaFromConnectionString(dataSource.ConnectionString);
-        return MigrateCoreAsync(BuildDataSourceOptions(dataSource, schema), schema, ct);
+        // Borrow a connection; dispose deterministically when the migration
+        // completes (returns it to the resolver's pool — see the comment on
+        // BuildConnectionOptions for why NOT the data source itself).
+        await using var connection = dataSource.CreateConnection();
+        await MigrateCoreAsync(BuildConnectionOptions(connection, schema), schema, ct)
+            .ConfigureAwait(false);
     }
 
     public async Task<int> CountPendingMigrationsAsync(
@@ -93,17 +98,33 @@ public sealed class EfTenantDbMigrator : ITenantDbMigrator, ITenantDataSourceDbM
     {
         ArgumentNullException.ThrowIfNull(dataSource);
         var schema = TenantNaming.SchemaFromConnectionString(dataSource.ConnectionString);
-        await using var ctx = new TenantDbContext(BuildDataSourceOptions(dataSource, schema));
+        await using var connection = dataSource.CreateConnection();
+        await using var ctx = new TenantDbContext(BuildConnectionOptions(connection, schema));
         // Reads the per-schema history table only; a schema without one (a
         // tenant provisioned before the first sweep) reports the full set.
         var pending = await ctx.Database.GetPendingMigrationsAsync(ct).ConfigureAwait(false);
         return pending.Count();
     }
 
-    private static DbContextOptions<TenantDbContext> BuildDataSourceOptions(
-        NpgsqlDataSource dataSource, string? schema) =>
+    // EF is handed a BORROWED CONNECTION, never the NpgsqlDataSource itself.
+    // Passing a data source into UseNpgsql makes that data-source INSTANCE
+    // part of EF's internal service-provider cache key — every swept tenant
+    // then mints (and leaks) a fresh internal provider, and EF's
+    // ManyServiceProvidersCreatedWarning THROWS at the 21st distinct provider.
+    // The cap is process-global, so one >20-tenant sweep poisons every later
+    // sweep in the same process. A DbConnection is connection-level state: all
+    // tenants share one cached internal provider. Same fix as
+    // TenantDbContextFactory (Tamma.Data/TenantDbContextFactory.cs:53-66);
+    // here the CALLER owns/disposes the connection (contextOwnsConnection
+    // defaults to false for the DbConnection overload), returning it to the
+    // resolver's pool. The connection string embedded in the data source
+    // carries Search Path, so the borrowed connection lands unqualified DDL in
+    // the tenant schema, and the history table stays pinned to that same
+    // schema — semantics identical to the string-based path above.
+    private static DbContextOptions<TenantDbContext> BuildConnectionOptions(
+        NpgsqlConnection connection, string? schema) =>
         new DbContextOptionsBuilder<TenantDbContext>()
-            .UseNpgsql(dataSource, npgsql =>
+            .UseNpgsql(connection, npgsql =>
                 npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema))
             .Options;
 

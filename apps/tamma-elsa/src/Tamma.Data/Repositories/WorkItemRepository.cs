@@ -45,11 +45,22 @@ public class WorkItemRepository(
             return null;
         var tid = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(tid);
-        // Current-or-previous (44-0 AC8 / WorkItemKeyHistory.Matches in SQL):
-        // the unique Key index serves the common case; the previous-keys
-        // containment rides the text[] column.
-        return await db.WorkItems.FirstOrDefaultAsync(
-            w => w.Key == key || w.PreviousKeys.Contains(key));
+        // Current-or-previous (44-0 AC8 / WorkItemKeyHistory.Matches in SQL),
+        // resolved DETERMINISTICALLY: the current-Key match (unique index)
+        // always wins; only when no row currently holds the key do we fall
+        // back to the previous-keys containment on the text[] column. A single
+        // OR query with FirstOrDefault is nondeterministic when one row's
+        // current key is another row's previous key (a rekey freed the key and
+        // a later rekey re-took it).
+        var current = await db.WorkItems.FirstOrDefaultAsync(w => w.Key == key);
+        if (current is not null)
+            return current;
+        // Among previous-keys holders the Id order is a stable tie-break (a
+        // key can sit in two rows' histories after chained rekeys).
+        return await db.WorkItems
+            .Where(w => w.PreviousKeys.Contains(key))
+            .OrderBy(w => w.Id)
+            .FirstOrDefaultAsync();
     }
 
     public async Task<List<WorkItemEntity>> ListAsync(WorkItemQuery query)
@@ -297,27 +308,93 @@ public class WorkItemRepository(
     {
         // Strict, non-normalizing parse — a bad key is rejected, never coerced.
         var parsed = WorkItemRef.Parse(newKey);
+        var target = parsed.ToWire();
 
         var tid = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(tid);
+        await using var tx = await db.Database.BeginTransactionAsync();
+
         var existing = await db.WorkItems.FirstOrDefaultAsync(w => w.Id == id);
         if (existing is null)
             return null;
 
-        if (string.Equals(existing.Key, parsed.ToWire(), StringComparison.Ordinal))
+        if (string.Equals(existing.Key, target, StringComparison.Ordinal))
             return existing; // no-op re-key: nothing to record
+
+        // Collision guard: the target must not be another row's CURRENT key.
+        // Pre-checked here for a typed error; the UX_work_items_key catch
+        // below closes the check-then-write race window.
+        if (await db.WorkItems.AnyAsync(w => w.Key == target && w.Id != id))
+            throw KeyConflict(target, id);
+
+        // Mint-space guard: when the target prefix is an EXISTING project's
+        // key, decide whose number space this key lives in.
+        //  - A DIFFERENT project's prefix is rejected: a cross-project rekey
+        //    is not a rename, it's a move, and a move never re-mints the key
+        //    (44-0 AC8) — out of scope for this seam by contract.
+        //  - The item's OWN project: a target number at/above NextNumber
+        //    would wedge minting forever (when the counter reaches it,
+        //    CreateAsync hits UX_work_items_key, rolls back, and NextNumber
+        //    never advances) — so advance the counter past it, under the same
+        //    FOR UPDATE row-lock discipline as CreateAsync.
+        // A prefix that matches NO project (the operator prefix-rename,
+        // TAM → TAMMA) has no counter to guard and passes through.
+        var targetProject = await db.Projects
+            .FromSqlInterpolated(
+                $"""SELECT * FROM projects WHERE "Key" = {parsed.ProjectKey} FOR UPDATE""")
+            .AsTracking()
+            .SingleOrDefaultAsync();
+        if (targetProject is not null && targetProject.Id != existing.ProjectId)
+        {
+            throw new TammaError(
+                "TRACKER.CROSS_PROJECT_REKEY",
+                $"Cannot rekey to '{target}': prefix '{parsed.ProjectKey}' belongs to a "
+                + "different project. A rekey is a rename within the item's own key space; "
+                + "moving an item between projects keeps its frozen key (44-0 AC8).",
+                new Dictionary<string, object?>
+                {
+                    ["workItemId"] = id,
+                    ["targetKey"] = target,
+                    ["targetProjectId"] = targetProject.Id,
+                },
+                retryable: false,
+                severity: TammaErrorSeverity.High);
+        }
+        if (targetProject is not null && parsed.Number >= targetProject.NextNumber)
+            targetProject.NextNumber = parsed.Number + 1;
 
         // The single implementation of the history rule (44-0 AC8):
         // idempotent, order-preserving, oldest first. A project MOVE never
         // reaches this method — the key is frozen on a move.
         var outgoing = WorkItemRef.Parse(existing.Key);
         existing.PreviousKeys = WorkItemKeyHistory.Record(existing.PreviousKeys, outgoing).ToList();
-        existing.Key = parsed.ToWire();
+        existing.Key = target;
         existing.UpdatedAt = DateTime.UtcNow;
         existing.Version += 1;
-        await db.SaveChangesAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            // A concurrent writer took the key between the pre-check and the
+            // save — same fact, typed the same way.
+            throw KeyConflict(target, id);
+        }
+        await tx.CommitAsync();
         return existing;
     }
+
+    private static TammaError KeyConflict(string target, Guid workItemId) => new(
+        "TRACKER.KEY_CONFLICT",
+        $"Cannot rekey to '{target}': another work item already holds that key.",
+        new Dictionary<string, object?>
+        {
+            ["workItemId"] = workItemId,
+            ["targetKey"] = target,
+        },
+        retryable: false,
+        severity: TammaErrorSeverity.High);
 
     public async Task<bool> DeleteAsync(Guid id)
     {
@@ -347,11 +424,11 @@ public class WorkItemRepository(
         var tid = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(tid);
 
-        var existing = await db.WorkItemRelations.FirstOrDefaultAsync(r =>
-            r.SourceId == canonicalSource && r.TargetId == canonicalTarget && r.Kind == wire);
-        if (existing is not null)
-            return existing; // idempotent — the canonical row already exists
-
+        // Insert-first, no check-then-insert window: two concurrent adds of
+        // the same canonical edge race the unique index, and the loser's
+        // 23505 IS the "already exists" fact — caught below and answered with
+        // the stored row, so the documented idempotent contract holds under
+        // concurrency, not just in sequence.
         var relation = new WorkItemRelation
         {
             Id = UuidV7.NewGuid(),
@@ -362,8 +439,25 @@ public class WorkItemRepository(
             CreatedAt = DateTime.UtcNow,
         };
         db.WorkItemRelations.Add(relation);
-        await db.SaveChangesAsync();
-        return relation;
+        try
+        {
+            await db.SaveChangesAsync();
+            return relation;
+        }
+        catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+        {
+            // The canonical row already exists (concurrent writer or an
+            // earlier add) — UX_work_item_relations_source_target_kind.
+            // Detach the failed insert and hand back the winner. A row that
+            // vanished between violation and re-read (concurrent remove) means
+            // the edge does not exist NOW — rethrow so the caller retries.
+            db.Entry(relation).State = EntityState.Detached;
+            var winner = await db.WorkItemRelations.FirstOrDefaultAsync(r =>
+                r.SourceId == canonicalSource && r.TargetId == canonicalTarget && r.Kind == wire);
+            if (winner is null)
+                throw;
+            return winner;
+        }
     }
 
     public async Task<bool> RemoveRelationAsync(Guid sourceId, Guid targetId, WorkItemRelationKind kind)
@@ -391,6 +485,13 @@ public class WorkItemRepository(
             .OrderBy(r => r.CreatedAt)
             .ToListAsync();
     }
+
+    /// <summary>
+    /// Postgres unique-violation (SqlState 23505) — ONLY that; any other
+    /// <see cref="DbUpdateException"/> (FK 23503, CHECK 23514, …) propagates.
+    /// </summary>
+    private static bool IsUniqueViolation(DbUpdateException ex) =>
+        ex.InnerException is Npgsql.PostgresException { SqlState: "23505" };
 
     // ── Validation helpers (wire boundary — fail loud, never coerce) ──
 

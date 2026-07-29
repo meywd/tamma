@@ -65,6 +65,13 @@ public sealed class TestPlanDocumentType : IDocumentType
     /// <summary>A risk area has no name — strategy lines map by name.</summary>
     public const string RiskAreaNameMissing = "RISK_AREA_NAME_MISSING";
 
+    /// <summary>
+    /// Two risk areas share a name — strategy lines map by name, so a duplicate
+    /// makes every <c>riskAreaRef</c> to it ambiguous (adversarial review
+    /// 2026-07-29; the <c>CRITERION_ID_DUPLICATED</c> naming pattern).
+    /// </summary>
+    public const string RiskAreaNameDuplicated = "RISK_AREA_NAME_DUPLICATED";
+
     /// <summary>The risk-area ranks are not a unique, gap-free 1-based total order.</summary>
     public const string RiskRankNotTotalOrder = "RISK_RANK_NOT_TOTAL_ORDER";
 
@@ -116,6 +123,7 @@ public sealed class TestPlanDocumentType : IDocumentType
                 NoRiskAreas, "The plan declares no risk areas — a risk-based strategy needs ranked risks."));
 
         var declaredNames = new HashSet<string>(StringComparer.Ordinal);
+        var reportedDupeNames = new HashSet<string>(StringComparer.Ordinal);
         var index = 0;
         foreach (var area in riskAreas)
         {
@@ -124,8 +132,11 @@ public sealed class TestPlanDocumentType : IDocumentType
             if (name.Length == 0)
                 violations.Add(new DocumentViolation(
                     RiskAreaNameMissing, $"Risk area #{index} has no name — strategy lines map to risk areas by name."));
-            else
-                declaredNames.Add(name);
+            else if (!declaredNames.Add(name) && reportedDupeNames.Add(name))
+                violations.Add(new DocumentViolation(
+                    RiskAreaNameDuplicated,
+                    $"Risk area name '{name}' is declared more than once — strategy lines map by name, so a " +
+                    "duplicate makes every riskAreaRef to it ambiguous."));
         }
 
         AddRankViolations(riskAreas, violations);

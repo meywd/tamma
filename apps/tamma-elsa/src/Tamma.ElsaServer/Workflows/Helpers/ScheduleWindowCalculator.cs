@@ -62,9 +62,13 @@ public static class ScheduleWindowCalculator
     /// expression, a <paramref name="since"/> in the future, or an empty
     /// range all yield an EMPTY list (never negative, never a throw) —
     /// fire-time code cannot be brought down by row data. Bounded by
-    /// <paramref name="maxWindows"/> as a defence against a pathological
-    /// every-second-like backlog (the catch-up policy D7 only ever fires the
-    /// most recent window anyway).
+    /// <paramref name="maxWindows"/>: the list holds the FIRST (oldest)
+    /// <paramref name="maxWindows"/> due occurrences, so when a backlog
+    /// exceeds the cap the NEWEST occurrences are absent. Therefore this
+    /// method must NEVER be used to pick "the most recent due window" —
+    /// that is <see cref="ComputeDue"/>'s job (MAJOR-2 fix, 2026-07-29).
+    /// Remaining valid uses: forward-looking next-due probes
+    /// (<c>maxWindows: 1</c> from <c>now</c>) and tests.
     /// </summary>
     public static IReadOnlyList<DateTimeOffset> DueWindows(
         string cronExpression,
@@ -90,6 +94,128 @@ public static class ScheduleWindowCalculator
     }
 
     /// <summary>
+    /// MAJOR-2 fix (2026-07-29) — the catch-up computation the fire path uses.
+    /// Yields the TRUE latest due occurrence (the window AC6's bounded
+    /// catch-up fires) regardless of how large the backlog is, plus the
+    /// first due occurrence, the occurrence immediately before the last one
+    /// (the newest SKIPPED window), and the total due count. The count walk
+    /// is bounded by <paramref name="maxCount"/>; when the bound is hit the
+    /// result is flagged <see cref="DueWindowResult.CountSaturated"/>
+    /// (<see cref="DueWindowResult.DueCount"/> then means "at least") and the
+    /// latest window is recovered by re-anchoring the walk near
+    /// <paramref name="now"/> — never by returning a stale early window
+    /// (the pre-fix defect: a capped ascending list fired the OLDEST
+    /// occurrence when more than the cap were due).
+    ///
+    /// <para>Total like <see cref="DueWindows"/>: malformed cron, future
+    /// <paramref name="since"/>, or an empty range yield the default result
+    /// (<c>LastWindow = null</c>), never a throw.</para>
+    /// </summary>
+    public static DueWindowResult ComputeDue(
+        string cronExpression,
+        DateTimeOffset since,
+        DateTimeOffset now,
+        int maxCount = 100_000)
+    {
+        if (!TryParse(cronExpression, out _)) return default;
+        if (since >= now) return default;
+        if (maxCount < 1) maxCount = 1;
+
+        var cron = CronExpression.Parse(cronExpression, CronFormat.Standard);
+        DateTimeOffset? first = null, prev = null, last = null;
+        var count = 0;
+        var saturated = false;
+        var cursor = since;
+        while (true)
+        {
+            var next = cron.GetNextOccurrence(cursor, TimeZoneInfo.Utc, inclusive: false);
+            if (next is null || next > now) break;
+            first ??= next;
+            prev = last;
+            last = next;
+            count++;
+            cursor = next.Value;
+            if (count >= maxCount)
+            {
+                saturated = true;
+                break;
+            }
+        }
+
+        if (last is null) return default;
+
+        if (saturated)
+        {
+            // The bounded walk stopped at `cursor` — occurrences may remain
+            // between there and `now`, and the FIRED window must be the true
+            // latest one. Standard cron granularity is one minute, so a span
+            // near `now` that contains any occurrence is cheap to walk;
+            // widen until one hits (a backlog dense enough to saturate
+            // virtually always hits the first span).
+            var trueLast = LatestOccurrenceNotAfter(cron, cursor, now);
+            if (trueLast is not null && trueLast != last)
+            {
+                last = trueLast;
+                prev = LatestOccurrenceNotAfter(cron, since, trueLast.Value.AddTicks(-1)) ?? prev;
+            }
+            // trueLast == null means nothing was due after the walked cursor
+            // — the walk had in fact reached the final due occurrence.
+        }
+
+        return new DueWindowResult(last, first, prev, count, saturated);
+    }
+
+    /// <summary>
+    /// The latest occurrence strictly after <paramref name="floor"/> and at
+    /// or before <paramref name="ceiling"/>, or <c>null</c> when there is
+    /// none. Searches by widening spans back from the ceiling so the walk
+    /// cost is proportional to the occurrences inside the FIRST span that
+    /// contains any — never the whole (floor, ceiling] range unless every
+    /// span is empty (only possible for sparse expressions, whose walks are
+    /// short by definition).
+    /// </summary>
+    private static DateTimeOffset? LatestOccurrenceNotAfter(
+        CronExpression cron, DateTimeOffset floor, DateTimeOffset ceiling)
+    {
+        if (floor >= ceiling) return null;
+
+        foreach (var span in new[]
+        {
+            TimeSpan.FromHours(1), TimeSpan.FromDays(1),
+            TimeSpan.FromDays(35), TimeSpan.FromDays(366),
+        })
+        {
+            var anchor = ceiling - span;
+            if (anchor < floor) anchor = floor;
+            var probe = cron.GetNextOccurrence(anchor, TimeZoneInfo.Utc, inclusive: false);
+            if (probe is null || probe > ceiling)
+            {
+                if (anchor == floor) return null; // the whole range is empty
+                continue; // this span is empty — widen
+            }
+            return WalkToLast(cron, probe.Value, ceiling);
+        }
+
+        // Nothing within 366 days of the ceiling but the floor is earlier
+        // still: full walk (sparse by construction — a dense expression
+        // would have hit a span above).
+        var start = cron.GetNextOccurrence(floor, TimeZoneInfo.Utc, inclusive: false);
+        return start is null || start > ceiling ? null : WalkToLast(cron, start.Value, ceiling);
+    }
+
+    private static DateTimeOffset WalkToLast(
+        CronExpression cron, DateTimeOffset from, DateTimeOffset ceiling)
+    {
+        var last = from;
+        while (true)
+        {
+            var next = cron.GetNextOccurrence(last, TimeZoneInfo.Utc, inclusive: false);
+            if (next is null || next > ceiling) return last;
+            last = next.Value;
+        }
+    }
+
+    /// <summary>
     /// The opaque window key: the ISO-8601 UTC instant of the window's
     /// scheduled fire time, e.g. <c>2026-07-27T03:00:00Z</c>. Derived,
     /// deterministic, lexicographically sorts in time order, and treated as
@@ -99,6 +225,33 @@ public static class ScheduleWindowCalculator
     public static string WindowKey(DateTimeOffset window)
         => window.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'");
 }
+
+/// <summary>
+/// Result of <see cref="ScheduleWindowCalculator.ComputeDue"/> (MAJOR-2 fix,
+/// 2026-07-29). <c>default</c> (<see cref="LastWindow"/> null,
+/// <see cref="DueCount"/> 0) means nothing is due.
+/// </summary>
+/// <param name="LastWindow">The TRUE latest due occurrence — the one window
+/// the bounded catch-up (D7/AC6) fires. Guaranteed the most recent even when
+/// the count walk saturated.</param>
+/// <param name="FirstWindow">The earliest due occurrence (equals
+/// <paramref name="LastWindow"/> when exactly one is due) — the oldest
+/// SKIPPED window when more than one is due.</param>
+/// <param name="PreviousWindow">The occurrence immediately before
+/// <paramref name="LastWindow"/> — the newest SKIPPED window. Non-null
+/// whenever <paramref name="DueCount"/> &gt; 1.</param>
+/// <param name="DueCount">Total due occurrences in <c>(since, now]</c>. When
+/// <paramref name="CountSaturated"/> is true this is a floor ("at least
+/// N"), not an exact count.</param>
+/// <param name="CountSaturated">True when the counting walk hit its bound —
+/// <paramref name="DueCount"/> saturated, but <paramref name="LastWindow"/>
+/// is still exact.</param>
+public readonly record struct DueWindowResult(
+    DateTimeOffset? LastWindow,
+    DateTimeOffset? FirstWindow,
+    DateTimeOffset? PreviousWindow,
+    int DueCount,
+    bool CountSaturated);
 
 /// <summary>
 /// Story 41-30 (D4) — the tenant-aware advisory-lock key. The one thing

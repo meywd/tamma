@@ -286,4 +286,77 @@ public class ScheduledTriggerRepositoryTests
         await _repository.StampOutcomeAsync(manual.Id, "dispatched", "i-1", null, DateTime.UtcNow);
         (await _repository.ListPendingManualFiresAsync(10)).Should().BeEmpty();
     }
+
+    // ── MAJOR-1 (2026-07-29): the manual drain's CAS race ──
+
+    /// <summary>
+    /// The manual mirror of the 8-way cron claim race above: eight
+    /// concurrent "pods" (independent connections) racing the per-row CAS
+    /// over ONE pending manual fire — exactly one may own the dispatch
+    /// attempt. Pre-fix the drain had no arbiter at all: every pod that
+    /// listed the pending row dispatched it.
+    /// </summary>
+    [Test]
+    public async Task TryClaimManualFireForDispatch_EightConcurrentClaims_ExactlyOneWins_AndTheRowIsNeverRelisted()
+    {
+        var tenant = await SeedTenantAsync();
+        var trigger = await SeedTriggerAsync(tenant);
+        var manual = Fire(trigger, "manual:20260729T120000.000Z");
+        (await _repository.TryClaimFireAsync(manual)).Should().BeTrue();
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 8)
+            .Select(_ => Task.Run(() => _repository.TryClaimManualFireForDispatchAsync(
+                manual.Id, DateTime.UtcNow))));
+
+        results.Count(r => r).Should().Be(1,
+            "MAJOR-1 — exactly one pod may own a pending manual fire's dispatch attempt");
+        (await _repository.ListPendingManualFiresAsync(10)).Should().BeEmpty(
+            "a CAS-claimed row must never be re-listed — a crash after the CAS burns the "
+            + "fire (at-most-once), it does not re-dispatch it every tick");
+    }
+
+    [Test]
+    public async Task TryClaimManualFireForDispatch_OnAFailedOrDispatchedRow_ReturnsFalse()
+    {
+        var tenant = await SeedTenantAsync();
+        var trigger = await SeedTriggerAsync(tenant);
+        var manual = Fire(trigger, "manual:20260729T120000.000Z");
+        (await _repository.TryClaimFireAsync(manual)).Should().BeTrue();
+
+        await _repository.StampOutcomeAsync(manual.Id, "failed", null, "burnt", null);
+
+        (await _repository.TryClaimManualFireForDispatchAsync(manual.Id, DateTime.UtcNow))
+            .Should().BeFalse("a terminal outcome is a burnt fire — never re-claimable");
+    }
+
+    // ── 2026-07-29 contract: the drain skips disabled triggers ──
+
+    [Test]
+    public async Task ListPendingManualFires_Excludes_DisabledTriggersClaims()
+    {
+        var tenant = await SeedTenantAsync();
+        var trigger = await SeedTriggerAsync(tenant);
+        var manual = Fire(trigger, "manual:20260729T120000.000Z");
+        (await _repository.TryClaimFireAsync(manual)).Should().BeTrue();
+
+        await using (var db = _dbFactory.CreateDbContext())
+        {
+            await db.ScheduledTriggers
+                .Where(t => t.Id == trigger.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.Enabled, false));
+        }
+
+        (await _repository.ListPendingManualFiresAsync(10)).Should().BeEmpty(
+            "a disabled trigger's pending manual claims wait, un-burnt, for re-enablement");
+
+        await using (var db = _dbFactory.CreateDbContext())
+        {
+            await db.ScheduledTriggers
+                .Where(t => t.Id == trigger.Id)
+                .ExecuteUpdateAsync(s => s.SetProperty(t => t.Enabled, true));
+        }
+
+        (await _repository.ListPendingManualFiresAsync(10)).Should().ContainSingle(
+            p => p.Fire.Id == manual.Id, "re-enabling the trigger releases the pending claim");
+    }
 }

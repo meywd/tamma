@@ -191,6 +191,76 @@ public class TenantMigrationSweeperTests
     }
 
     [Test]
+    public async Task Sweep_over_more_than_twenty_tenants_all_succeed_and_a_rerun_stays_clean()
+    {
+        // Regression pin for the EF internal-service-provider explosion:
+        // passing the NpgsqlDataSource itself into UseNpgsql makes each
+        // tenant's data-source INSTANCE part of EF's provider cache key, and
+        // EF's ManyServiceProvidersCreatedWarning THROWS at the 21st distinct
+        // provider — a 25-tenant sweep failed 7 and, because the cap is
+        // process-global, every re-run in the same process failed too. The
+        // migrator now hands EF a borrowed connection (one shared provider),
+        // so a fleet beyond 20 must sweep clean twice in one process.
+        const int count = 25;
+        var tenantIds = new List<Guid>(count);
+        for (var i = 0; i < count; i++)
+            tenantIds.Add(await RegisterTenantAsync($"fleet-{i}"));
+
+        await using var resolver = new RoutingResolver();
+        foreach (var id in tenantIds)
+            resolver.Map(id, CsFor(id));
+        var sweeper = NewSweeper(resolver);
+
+        var result = await sweeper.SweepAsync();
+
+        result.Total.Should().Be(count);
+        result.Failed.Should().Be(0,
+            "no tenant may fail on EF's ManyServiceProvidersCreatedWarning past the 20th; "
+            + "failures were: {0}",
+            string.Join("; ", result.Tenants.Where(t => t.Error is not null)
+                .Select(t => $"{t.TenantId}: {t.Error}")));
+        result.Migrated.Should().Be(count);
+
+        // The cap is process-global — the original defect made every LATER
+        // sweep in the same process fail for uncached tenants forever.
+        var again = await sweeper.SweepAsync();
+        again.Failed.Should().Be(0);
+        again.AlreadyCurrent.Should().Be(count);
+    }
+
+    [Test]
+    public async Task A_tenants_own_OperationCanceledException_is_a_failed_row_not_an_abort()
+    {
+        // An OCE surfaced by ONE tenant's provider/driver stack (an internal
+        // timeout, a poisoned pool) while the SWEEP's token is not canceled
+        // must be that tenant's failure row — not an abort of Task.WhenAll
+        // that defeats per-tenant isolation.
+        var healthy1 = await RegisterTenantAsync("oce-healthy-1");
+        var poisoned = await RegisterTenantAsync("oce-poisoned");
+        var healthy2 = await RegisterTenantAsync("oce-healthy-2");
+
+        await using var resolver = new RoutingResolver();
+        resolver.Map(healthy1, CsFor(healthy1))
+            .Map(poisoned, CsFor(poisoned))
+            .Map(healthy2, CsFor(healthy2));
+
+        var sweeper = new TenantMigrationSweeper(
+            new PlainCpFactory(_cs),
+            resolver,
+            new OcePoisonedMigrator(TenantNaming.SchemaName(poisoned)));
+
+        var result = await sweeper.SweepAsync();
+
+        result.Total.Should().Be(3);
+        result.Failed.Should().Be(1);
+        result.Migrated.Should().Be(2,
+            "the two healthy tenants must complete despite the sibling's OCE");
+        var failed = result.Tenants.Single(t => t.TenantId == poisoned);
+        failed.Outcome.Should().Be(TenantMigrationSweep.OutcomeFailed);
+        failed.Error.Should().NotBeNullOrEmpty();
+    }
+
+    [Test]
     public async Task Soft_deleted_tenants_are_skipped()
     {
         var live = await RegisterTenantAsync("live");
@@ -256,6 +326,32 @@ public class TenantMigrationSweeperTests
             foreach (var source in _sources.Values)
                 await source.DisposeAsync();
         }
+    }
+
+    /// <summary>
+    /// Delegates to the real <see cref="EfTenantDbMigrator"/> except for the
+    /// tenant whose schema matches <paramref name="poisonedSchema"/>, whose
+    /// migration surfaces an <see cref="OperationCanceledException"/> from its
+    /// OWN stack (no sweep-token involvement) — the driver-internal-OCE shape.
+    /// </summary>
+    private sealed class OcePoisonedMigrator(string poisonedSchema) : ITenantDataSourceDbMigrator
+    {
+        private readonly EfTenantDbMigrator _inner = new();
+
+        public Task MigrateTenantAppAsync(NpgsqlDataSource dataSource, CancellationToken ct = default)
+        {
+            if (SchemaOf(dataSource) == poisonedSchema)
+                throw new OperationCanceledException(
+                    "provider-internal timeout surfaced as OCE (sweep token NOT canceled)");
+            return _inner.MigrateTenantAppAsync(dataSource, ct);
+        }
+
+        public Task<int> CountPendingMigrationsAsync(
+            NpgsqlDataSource dataSource, CancellationToken ct = default) =>
+            _inner.CountPendingMigrationsAsync(dataSource, ct);
+
+        private static string? SchemaOf(NpgsqlDataSource dataSource) =>
+            TenantNaming.SchemaFromConnectionString(dataSource.ConnectionString);
     }
 
     /// <summary>Minimal CP factory over the container's public schema.</summary>

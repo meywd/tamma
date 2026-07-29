@@ -51,6 +51,27 @@ public class DocumentInstanceRepository(
                 retryable: false,
                 severity: TammaErrorSeverity.High);
 
+        // 41-1c D2 — the envelope's Audience is authoritative for the store
+        // column. CreateDraft already copies payload → envelope, so a divergence
+        // can only come from a hand-built envelope: fail it loud rather than
+        // persist a row whose column contradicts its body; backfill a missing
+        // envelope copy from the payload so the column never silently lags.
+        var payloadAudience = DocumentEnvelope.ReadPayloadAudience(envelope.Payload);
+        if (envelope.Audience is not null && payloadAudience is not null
+            && !string.Equals(envelope.Audience, payloadAudience, StringComparison.Ordinal))
+            throw new TammaError(
+                "PROSE_AUDIENCE_ENVELOPE_MISMATCH",
+                $"Envelope audience '{envelope.Audience}' disagrees with the payload audience " +
+                $"'{payloadAudience}' — the store column mirrors the payload, never diverges.",
+                new Dictionary<string, object?>
+                {
+                    ["documentId"] = envelope.Id,
+                    ["audience"] = envelope.Audience,
+                    ["payloadAudience"] = payloadAudience,
+                },
+                retryable: false,
+                severity: TammaErrorSeverity.High);
+
         var dbTenant = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(dbTenant, ct);
 
@@ -94,6 +115,7 @@ public class DocumentInstanceRepository(
             ParentDocumentId = envelope.ParentDocumentId,
             CorrelatingEventId = correlatingEventId,
             TenantId = tenantId,
+            Audience = envelope.Audience ?? payloadAudience,
             BodyJson = envelope.Payload.GetRawText(),
             CreatedAt = DateTime.SpecifyKind(envelope.CreatedAt.UtcDateTime, DateTimeKind.Utc),
             UpdatedAt = now,
@@ -155,15 +177,21 @@ public class DocumentInstanceRepository(
     }
 
     public async Task<IReadOnlyList<DocumentInstance>> ListByIssueAsync(
-        Guid tenantId, string issueId, CancellationToken ct)
+        Guid tenantId, string issueId, string? audience, CancellationToken ct)
     {
         if (tenantId == Guid.Empty)
             throw new ArgumentException("Tenant id required.", nameof(tenantId));
 
         var dbTenant = RequireTenantId();
         await using var db = await tenantDbFactory.CreateAsync(dbTenant, ct);
-        return await db.Documents.IgnoreQueryFilters()
-            .Where(d => d.TenantId == tenantId && d.IssueId == issueId)
+        var query = db.Documents.IgnoreQueryFilters()
+            .Where(d => d.TenantId == tenantId && d.IssueId == issueId);
+        // 41-1c AC3 — null means UNFILTERED (the pre-41-1c behaviour, provably
+        // unchanged for every existing caller); a value filters in SQL on the
+        // partial (issue_id, audience) index.
+        if (audience is not null)
+            query = query.Where(d => d.Audience == audience);
+        return await query
             .OrderBy(d => d.CreatedAt).ThenBy(d => d.Revision)
             .ToListAsync(ct);
     }

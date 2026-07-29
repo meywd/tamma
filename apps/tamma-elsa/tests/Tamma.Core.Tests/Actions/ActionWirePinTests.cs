@@ -69,6 +69,9 @@ public class ActionWirePinTests
             // 43-4 — the boot-time tool-vocabulary check (itself an IHostedService,
             // so the hosted-service sweep demands it be catalogued).
             "action-catalog-startup-validator",
+            // 43-5 — the policy-snapshot cold-start primer (the same rule:
+            // every IHostedService class is catalogued, governance included).
+            "governance-policy-snapshot-priming-service",
             "platform-task-worker");
     }
 

@@ -78,15 +78,17 @@ public class BackgroundActorCatalogSweepTests
     }
 
     [Test]
-    public void The_hosted_service_count_is_pinned_at_28()
+    public void The_hosted_service_count_is_pinned_at_29()
     {
-        // Derivation 2026-07-29 (Story 43-4): 6 ElsaServer (incl. Story 41-30's
+        // Derivation 2026-07-29 (Story 43-5): 6 ElsaServer (incl. Story 41-30's
         // TenantScheduledTriggerService — the tenant-aware scheduled-trigger
-        // seam, registered inside the conditional control-plane block) + 21
+        // seam, registered inside the conditional control-plane block) + 22
         // Tamma.Api BackgroundService/IHostedService classes (incl. the Epic
-        // 46 review-F1 ProviderSettingsStorePrimingService and Story 43-4's
-        // ActionCatalogStartupValidator, registered via TryAddEnumerable in
-        // AddActionCatalogGovernance) + PlatformTaskWorker = 28.
-        HostedServiceTypes().Should().HaveCount(28);
+        // 46 review-F1 ProviderSettingsStorePrimingService, Story 43-4's
+        // ActionCatalogStartupValidator, and Story 43-5's
+        // GovernancePolicySnapshotPrimingService — both registered via
+        // TryAddEnumerable in AddActionCatalogGovernance) +
+        // PlatformTaskWorker = 29.
+        HostedServiceTypes().Should().HaveCount(29);
     }
 }

@@ -226,8 +226,8 @@ public static partial class ActionCatalog
         // no secret material, like audit-dependencies (contrast audit-secrets, 43-3 D5.4).
         Agent(AgentAction.AuditAccessibility, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Audit accessibility", "Audit a spec or shipped UI against accessibility standards; no secret material involved."),
 
-        // ── document-type (16) — all review-and-acceptance (43-3 AC4): they are
-        //    acceptance decisions by construction ────────────────────────────
+        // ── document-type (17) — all review-and-acceptance (43-3 AC4): they are
+        //    acceptance decisions by construction (16 + prose, Story 41-1c) ────
 
         Doc(DocumentTypeKey.Findings, "Findings acceptance", "Accept/route a findings document."),
         Doc(DocumentTypeKey.AmbiguityAssessment, "Ambiguity assessment acceptance", "Accept/route an ambiguity assessment."),
@@ -253,6 +253,12 @@ public static partial class ActionCatalog
         Doc(DocumentTypeKey.TestPlan, "Test plan acceptance", "Accept/route a test-plan document (tester reviewer; no human acceptor)."),
         Doc(DocumentTypeKey.ThreatModel, "Threat model acceptance", "Accept a threat model — pinned to a human acceptor (AcceptanceDefaults.For(ThreatModel), Story 41-1b D1: unmitigated high-risk escalation is a security-owned human call).", min: AutonomyDial.AlwaysHuman),
         Doc(DocumentTypeKey.UxSpec, "UX spec acceptance", "Accept/route a ux-spec document (panel selection, not a human acceptor; ships Min per 43-3 C2)."),
+        // Story 41-1c — prose (document-type plane 16 -> 17): one type for the
+        // whole prose family (ADR, postmortem, release notes, changelog, docs,
+        // runbook, roadmap, status update, retro narrative). MinAutonomy follows
+        // AcceptanceDefaults.For (43-3 D4): a single tech_writer reviewer, no
+        // human acceptor, so it ships Min.
+        Doc(DocumentTypeKey.Prose, "Prose document acceptance", "Accept/route a prose document (tech_writer reviewer; audience-tagged free markdown, no human acceptor)."),
 
         // ── tool (8) ─────────────────────────────────────────────────────────
 
@@ -414,6 +420,11 @@ public static partial class ActionCatalog
             "Tamma.Api.Services.Audit.AuditProjectorBackgroundService"),
         Automation(BackgroundActor.ActionCatalogStartupValidator, ActionGroup.PlatformAutomation, ActionRisk.ReadOnly, "Action-catalog startup validator", "Boot-time fail-loud check that the tool vocabularies agree with the action catalog (Story 43-4); mutates nothing — it can only refuse to start the Tamma.Api host.",
             "Tamma.Api.Services.Actions.ActionCatalogStartupValidator"),
+        // ReadOnly: primes the action-assignments policy snapshot from one CP
+        // read at startup — writes nothing (the ProviderSettingsStorePrimingService
+        // risk-honesty precedent; Story 43-5).
+        Automation(BackgroundActor.GovernancePolicySnapshotPrimingService, ActionGroup.PlatformAutomation, ActionRisk.ReadOnly, "Governance policy snapshot primer", "Primes the action-assignments policy snapshot before the host serves traffic (fail-soft; the lazy TTL refresh is the fallback).",
+            "Tamma.Api.Services.Actions.GovernancePolicySnapshotPrimingService"),
         Automation(BackgroundActor.PlatformTaskWorker, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Platform task worker", "Drains the platform task queue (one task at a time per process; RunOnStartup ships false).",
             "Tamma.Api.Services.PlatformTasks.PlatformTaskWorker"),
 

@@ -160,6 +160,84 @@ public class WorkItemRepositoryTests
     }
 
     [Test]
+    public async Task Rekey_onto_another_rows_current_key_is_a_typed_conflict()
+    {
+        var project = await NewProjectAsync();
+        var first = await _repository.CreateAsync(NewItem(project.Id, "first"));   // TAM-1
+        var second = await _repository.CreateAsync(NewItem(project.Id, "second")); // TAM-2
+
+        var act = () => _repository.RekeyAsync(second.Id, "TAM-1");
+        (await act.Should().ThrowExactlyAsync<TammaError>(
+                "a key collision is the class's typed-error contract, never a raw 23505"))
+            .Which.Code.Should().Be("TRACKER.KEY_CONFLICT");
+
+        (await _repository.GetAsync(second.Id))!.Key.Should().Be("TAM-2",
+            "the failed rekey must not touch the row");
+        (await _repository.GetAsync(first.Id))!.Key.Should().Be("TAM-1");
+    }
+
+    [Test]
+    public async Task Rekey_into_the_projects_future_mint_space_advances_the_counter()
+    {
+        var project = await NewProjectAsync();
+        var item = await _repository.CreateAsync(NewItem(project.Id)); // TAM-1, NextNumber=2
+
+        // Rekey into the un-minted future: without the counter guard, the
+        // counter eventually reaches 100, CreateAsync hits UX_work_items_key,
+        // the transaction rolls back so NextNumber never advances — and every
+        // subsequent create fails forever.
+        var rekeyed = await _repository.RekeyAsync(item.Id, "TAM-100");
+        rekeyed!.Key.Should().Be("TAM-100");
+
+        var next = await _repository.CreateAsync(NewItem(project.Id, "after the jump"));
+        next.Number.Should().Be(101,
+            "the rekey must advance NextNumber past the reserved key so minting can never wedge");
+        next.Key.Should().Be("TAM-101");
+
+        // A rekey BELOW the counter leaves it alone.
+        var back = await _repository.RekeyAsync(item.Id, "TAM-99");
+        back!.Key.Should().Be("TAM-99");
+        (await _repository.CreateAsync(NewItem(project.Id, "still fine"))).Number.Should().Be(102);
+    }
+
+    [Test]
+    public async Task Rekey_into_a_different_projects_prefix_is_rejected()
+    {
+        var tam = await NewProjectAsync("TAM");
+        var ops = await NewProjectAsync("OPS");
+        var item = await _repository.CreateAsync(NewItem(tam.Id));
+
+        var act = () => _repository.RekeyAsync(item.Id, "OPS-5");
+        (await act.Should().ThrowExactlyAsync<TammaError>(
+                "a cross-project rekey is a move, not a rename — out of scope by contract"))
+            .Which.Code.Should().Be("TRACKER.CROSS_PROJECT_REKEY");
+
+        (await _repository.GetAsync(item.Id))!.Key.Should().Be("TAM-1");
+        (await _projects.GetAsync(ops.Id))!.NextNumber.Should().Be(1,
+            "the rejected rekey must not disturb the other project's counter");
+    }
+
+    [Test]
+    public async Task GetByKey_prefers_the_current_key_holder_over_a_previous_keys_match()
+    {
+        var project = await NewProjectAsync();
+        var a = await _repository.CreateAsync(NewItem(project.Id, "a")); // TAM-1
+        var b = await _repository.CreateAsync(NewItem(project.Id, "b")); // TAM-2
+
+        // A vacates TAM-1 (now in A.PreviousKeys); B re-takes it as its
+        // CURRENT key. "TAM-1" now matches A on PreviousKeys and B on Key —
+        // resolution must deterministically pick the current holder.
+        await _repository.RekeyAsync(a.Id, "TAMMA-1");
+        await _repository.RekeyAsync(b.Id, "TAM-1");
+
+        (await _repository.GetByKeyAsync("TAM-1"))!.Id.Should().Be(b.Id,
+            "the current-Key match must always win over a previous-keys containment");
+        (await _repository.GetByKeyAsync("TAMMA-1"))!.Id.Should().Be(a.Id);
+        (await _repository.GetByKeyAsync("TAM-2"))!.Id.Should().Be(b.Id,
+            "B's vacated key still resolves through its history");
+    }
+
+    [Test]
     public async Task Rekey_rejects_a_malformed_key_without_touching_the_row()
     {
         var project = await NewProjectAsync();
@@ -289,6 +367,33 @@ public class WorkItemRepositoryTests
         var self = () => _repository.AddRelationAsync(a.Id, a.Id, WorkItemRelationKind.Duplicate);
         (await self.Should().ThrowAsync<TammaError>())
             .Which.Code.Should().Be("TRACKER.SELF_RELATION");
+    }
+
+    [Test]
+    public async Task Re_adding_an_edge_rides_the_unique_index_and_returns_the_stored_row()
+    {
+        // AddRelationAsync is insert-first: the duplicate add hits
+        // UX_work_item_relations_source_target_kind and the 23505 handler
+        // returns the stored row — the SAME path a concurrent loser takes, so
+        // this deterministically exercises the race's violation branch.
+        var project = await NewProjectAsync();
+        var a = await _repository.CreateAsync(NewItem(project.Id, "a"));
+        var b = await _repository.CreateAsync(NewItem(project.Id, "b"));
+
+        var first = await _repository.AddRelationAsync(a.Id, b.Id, WorkItemRelationKind.Blocks);
+        var duplicate = await _repository.AddRelationAsync(a.Id, b.Id, WorkItemRelationKind.Blocks);
+
+        duplicate.Id.Should().Be(first.Id,
+            "the loser of the unique-index race must get the existing row, not a DbUpdateException");
+        (await _repository.ListRelationsAsync(a.Id)).Should().HaveCount(1);
+
+        // And truly concurrent adds of the same canonical edge all converge.
+        var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(i => i % 2 == 0
+            ? _repository.AddRelationAsync(a.Id, b.Id, WorkItemRelationKind.Related)
+            : _repository.AddRelationAsync(b.Id, a.Id, WorkItemRelationKind.Related)));
+        results.Select(r => r.Id).Distinct().Should().HaveCount(1,
+            "every concurrent add (including mirrors) must converge on one canonical row");
+        (await _repository.ListRelationsAsync(a.Id)).Should().HaveCount(2);
     }
 
     [Test]

@@ -126,9 +126,15 @@ public sealed class TenantMigrationSweeper : ITenantMigrationSweeper
             return new TenantMigrationSweepEntry(
                 tenantId, TenantMigrationSweep.OutcomeMigrated, pending, null);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException
+            || !ct.IsCancellationRequested)
         {
             // Per-tenant isolation (AC8): one bad tenant is a row, not an abort.
+            // An OperationCanceledException is only sweep-cancellation when the
+            // SWEEP'S token is actually canceled — a provider/driver stack can
+            // surface an OCE of its own (e.g. an internal timeout), and that is
+            // one tenant's failure, never a reason to abort the whole
+            // Task.WhenAll for the fleet.
             _logger.LogWarning(ex,
                 "tenant.migration_sweep.tenant_failed tenantId={TenantId}", tenantId);
             return new TenantMigrationSweepEntry(

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Tamma.Api.Services.Documents;
 using Tamma.Core;
 using Tamma.Core.Documents;
+using Tamma.Core.Documents.Types;
 using Tamma.Data;
 using Tamma.Data.Repositories;
 
@@ -27,18 +28,30 @@ public static class DocumentEndpoints
     /// The full document trail for an issue, grouped by type in first-produced
     /// order with reviews attached to their subject and a terminal outcome. An
     /// issue with no documents is a valid state → 200 with empty <c>types</c>, NOT
-    /// 404.
+    /// 404. <paramref name="audience"/> (Story 41-1c AC3, query string) optionally
+    /// filters to rows carrying that audience tag; an out-of-vocabulary value is a
+    /// 400 (<c>unknown_audience</c>), never an empty 200 — silence would read as
+    /// "no documents" when the truth is "no such audience".
     /// </summary>
     public static async Task<IResult> GetIssueLineage(
         string issueId,
         IDocumentInstanceRepository repo,
         ITenantContext tc,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? audience = null)
     {
         if (tc.TenantId is not Guid tenantId || tenantId == Guid.Empty)
             return Results.NotFound(new { error = "no_active_tenant" });
 
-        var rows = await repo.ListByIssueAsync(tenantId, issueId, ct).ConfigureAwait(false);
+        if (audience is not null && !ProseAudienceExtensions.TryParse(audience, out _))
+            return Results.BadRequest(new
+            {
+                error = "unknown_audience",
+                detail = $"'{audience}' is not a prose audience. Valid values: " +
+                    string.Join(", ", Enum.GetValues<ProseAudience>().Select(a => a.ToWire())) + ".",
+            });
+
+        var rows = await repo.ListByIssueAsync(tenantId, issueId, audience, ct).ConfigureAwait(false);
         var lineage = LineageAssembler.Assemble(issueId, rows);
         return Results.Json(lineage, DocumentJson.Options, statusCode: StatusCodes.Status200OK);
     }

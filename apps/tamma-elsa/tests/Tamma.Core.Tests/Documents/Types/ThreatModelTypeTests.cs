@@ -84,6 +84,78 @@ public class ThreatModelTypeTests
     public void Threat_referencing_declared_asset_is_accepted() =>
         Codes(Validate(ValidDoc)).Should().NotContain(ThreatModelDocumentType.ThreatUnknownAsset);
 
+    // ── ASSET_ID_DUPLICATED / THREAT_ID_DUPLICATED (adversarial review 2026-07-29) ──
+
+    [Test]
+    public void Duplicate_asset_ids_are_rejected_with_asset_id_duplicated()
+    {
+        // Two assets with the same id used to VALIDATE, making assetRef ambiguous.
+        var r = Validate(
+            """
+            {
+              "assets": [
+                { "id": "A1", "name": "tenant connection strings" },
+                { "id": "A1", "name": "tenant schemas" }
+              ],
+              "threats": [
+                {
+                  "id": "T1",
+                  "assetRef": "A1",
+                  "category": "tampering",
+                  "description": "d",
+                  "mitigation": "m",
+                  "residualRisk": "low"
+                }
+              ]
+            }
+            """);
+        r.IsValid.Should().BeFalse();
+        Codes(r).Should().Contain(ThreatModelDocumentType.AssetIdDuplicated);
+        r.Violations.Single(v => v.Code == ThreatModelDocumentType.AssetIdDuplicated)
+            .Message.Should().Contain("A1");
+    }
+
+    [Test]
+    public void Duplicate_threat_ids_are_rejected_with_threat_id_duplicated()
+    {
+        var r = Validate(
+            """
+            {
+              "assets": [ { "id": "A1", "name": "tenant connection strings" } ],
+              "threats": [
+                {
+                  "id": "T1",
+                  "assetRef": "A1",
+                  "category": "tampering",
+                  "description": "d",
+                  "mitigation": "m",
+                  "residualRisk": "low"
+                },
+                {
+                  "id": "T1",
+                  "assetRef": "A1",
+                  "category": "spoofing",
+                  "description": "d2",
+                  "mitigation": "m2",
+                  "residualRisk": "low"
+                }
+              ]
+            }
+            """);
+        r.IsValid.Should().BeFalse();
+        Codes(r).Should().Contain(ThreatModelDocumentType.ThreatIdDuplicated);
+        r.Violations.Single(v => v.Code == ThreatModelDocumentType.ThreatIdDuplicated)
+            .Message.Should().Contain("T1");
+    }
+
+    [Test]
+    public void Distinct_asset_and_threat_ids_are_accepted()
+    {
+        var codes = Codes(Validate(ValidDoc)).ToList();
+        codes.Should().NotContain(ThreatModelDocumentType.AssetIdDuplicated);
+        codes.Should().NotContain(ThreatModelDocumentType.ThreatIdDuplicated);
+    }
+
     // ── THREAT_CATEGORY_OUT_OF_VOCABULARY ───────────────────────────────────
 
     [Test]

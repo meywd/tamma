@@ -8,7 +8,9 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
 using NUnit.Framework;
 using Tamma.Api.Tests.Infrastructure;
@@ -351,5 +353,84 @@ public class ScheduledTriggerEndpointsTests
         var duplicate = await admin.PostAsJsonAsync(
             "/api/admin/scheduled-triggers/", ValidBody(tenant));
         duplicate.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
+    // ── run-now guard rails (2026-07-29) ──
+
+    [Test]
+    public async Task RunNow_OnADisabledTrigger_Returns409_AndClaimsNothing()
+    {
+        var tenant = Guid.NewGuid();
+        using var admin = Client("admin", "user", tenant);
+
+        var create = await admin.PostAsJsonAsync("/api/admin/scheduled-triggers/", new
+        {
+            tenantId = tenant,
+            definitionId = "security-audit",
+            name = "disabled-schedule",
+            cronExpression = "0 3 * * *",
+            enabled = false,
+        });
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var id = (await create.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("id").GetGuid();
+
+        var runNow = await admin.PostAsync(
+            $"/api/admin/scheduled-triggers/{id}/run-now", content: null);
+
+        runNow.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            "2026-07-29 contract — the engine's drain only dispatches ENABLED triggers' "
+            + "claims, so accepting this claim would let it sit pending invisibly");
+        var body = await runNow.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("error").GetString().Should().Be("trigger_disabled");
+
+        await using var db = Db();
+        (await db.ScheduledTriggerFires.CountAsync()).Should().Be(0,
+            "no ledger claim may be written for a refused run-now");
+    }
+
+    private sealed class FrozenTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    /// <summary>
+    /// Two run-now requests in the SAME millisecond mint the same
+    /// <c>manual:{timestamp}</c> window key; the ledger's unique
+    /// <c>(TriggerId, WindowKey)</c> index rejects the second. Pre-fix that
+    /// surfaced as an unhandled DbUpdateException (500); it must be a typed
+    /// 409 like Create's duplicate handling. Pinned with a frozen
+    /// <see cref="TimeProvider"/> so the collision is deterministic.
+    /// </summary>
+    [Test]
+    public async Task RunNow_SameMillisecondDuplicate_Returns409_NotAnUnhandled500()
+    {
+        using var pinned = _factory.WithWebHostBuilder(b => b.ConfigureTestServices(s =>
+            s.AddSingleton<TimeProvider>(new FrozenTimeProvider(
+                new DateTimeOffset(2026, 07, 29, 12, 00, 00, TimeSpan.Zero)))));
+        var tenant = Guid.NewGuid();
+        using var client = pinned.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer", MintToken("admin", "user", tenant));
+
+        var create = await client.PostAsJsonAsync(
+            "/api/admin/scheduled-triggers/", ValidBody(tenant));
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var id = (await create.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("id").GetGuid();
+
+        (await client.PostAsync($"/api/admin/scheduled-triggers/{id}/run-now", content: null))
+            .StatusCode.Should().Be(HttpStatusCode.Accepted);
+
+        var duplicate = await client.PostAsync(
+            $"/api/admin/scheduled-triggers/{id}/run-now", content: null);
+
+        duplicate.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var body = await duplicate.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("error").GetString().Should().Be("duplicate_run_now");
+
+        await using var db = Db();
+        (await db.ScheduledTriggerFires.CountAsync()).Should().Be(1,
+            "the first claim stands; the duplicate writes nothing");
     }
 }

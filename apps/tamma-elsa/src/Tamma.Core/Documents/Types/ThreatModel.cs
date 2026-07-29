@@ -84,6 +84,19 @@ public sealed class ThreatModelDocumentType : IDocumentType
     /// <summary>No threats — a threat model with no threats models nothing.</summary>
     public const string NoThreats = "NO_THREATS";
 
+    /// <summary>
+    /// Two assets share an id — threats bind by <c>assetRef</c>, so a duplicate
+    /// asset id makes the binding ambiguous (adversarial review 2026-07-29; the
+    /// <c>CRITERION_ID_DUPLICATED</c> naming pattern).
+    /// </summary>
+    public const string AssetIdDuplicated = "ASSET_ID_DUPLICATED";
+
+    /// <summary>
+    /// Two threats share an id — mitigations and escalations reference threats by
+    /// id, so ids must be unique (adversarial review 2026-07-29).
+    /// </summary>
+    public const string ThreatIdDuplicated = "THREAT_ID_DUPLICATED";
+
     /// <summary>A threat references no declared asset.</summary>
     public const string ThreatUnknownAsset = "THREAT_UNKNOWN_ASSET";
 
@@ -132,11 +145,17 @@ public sealed class ThreatModelDocumentType : IDocumentType
                 NoAssets, "The model declares no assets — a threat model must name what is at risk."));
 
         var assetIds = new HashSet<string>(StringComparer.Ordinal);
+        var reportedAssetDupes = new HashSet<string>(StringComparer.Ordinal);
         foreach (var asset in assets)
         {
             var id = asset.Id?.Trim();
-            if (!string.IsNullOrEmpty(id))
-                assetIds.Add(id);
+            if (string.IsNullOrEmpty(id))
+                continue;
+            if (!assetIds.Add(id) && reportedAssetDupes.Add(id))
+                violations.Add(new DocumentViolation(
+                    AssetIdDuplicated,
+                    $"Asset id '{id}' is declared more than once — threats bind by assetRef, so asset ids must " +
+                    "be unique."));
         }
 
         var threats = doc.Threats ?? [];
@@ -146,11 +165,19 @@ public sealed class ThreatModelDocumentType : IDocumentType
 
         var escalationStated = !string.IsNullOrWhiteSpace(doc.Escalation);
         var highRiskReported = false;
+        var seenThreatIds = new HashSet<string>(StringComparer.Ordinal);
+        var reportedThreatDupes = new HashSet<string>(StringComparer.Ordinal);
         var index = 0;
         foreach (var threat in threats)
         {
             index++;
-            var label = string.IsNullOrWhiteSpace(threat.Id) ? $"#{index}" : $"'{threat.Id}'";
+            var threatId = threat.Id?.Trim() ?? "";
+            var label = threatId.Length == 0 ? $"#{index}" : $"'{threatId}'";
+
+            if (threatId.Length > 0 && !seenThreatIds.Add(threatId) && reportedThreatDupes.Add(threatId))
+                violations.Add(new DocumentViolation(
+                    ThreatIdDuplicated,
+                    $"Threat id '{threatId}' is used more than once — threat ids must be unique."));
 
             var assetRef = threat.AssetRef?.Trim() ?? "";
             if (assetRef.Length == 0 || !assetIds.Contains(assetRef))

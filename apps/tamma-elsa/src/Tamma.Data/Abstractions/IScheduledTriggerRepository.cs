@@ -66,12 +66,32 @@ public interface IScheduledTriggerRepository
 
     /// <summary>
     /// D8 run-now — <c>manual:{timestamp}</c> ledger rows claimed by the
-    /// admin API but not yet dispatched, paired with their (enabled) trigger
-    /// rows. The tick drains these with the same dispatch + stamp path as
-    /// cron windows.
+    /// admin API whose dispatch has not been attempted
+    /// (<c>Outcome = 'claimed'</c> AND <c>DispatchedAt IS NULL</c>), paired
+    /// with their trigger rows, filtered to ENABLED triggers only
+    /// (2026-07-29 contract decision: a disabled trigger's pending manual
+    /// fires wait until the trigger is re-enabled; the admin API refuses new
+    /// run-now claims on a disabled trigger with 409). This read is NOT a
+    /// claim — the drain must win
+    /// <see cref="TryClaimManualFireForDispatchAsync"/> for each row before
+    /// dispatching it.
     /// </summary>
     Task<IReadOnlyList<(ScheduledTriggerFire Fire, ScheduledTrigger Trigger)>>
         ListPendingManualFiresAsync(int limit, CancellationToken ct = default);
+
+    /// <summary>
+    /// MAJOR-1 fix (2026-07-29) — the manual drain's at-most-once arbiter: a
+    /// conditional CAS that stamps <c>DispatchedAt</c> while the row is still
+    /// <c>Outcome = 'claimed'</c> and unstamped. Exactly one concurrent
+    /// caller gets <c>true</c> (it owns the dispatch attempt); every other
+    /// pod gets <c>false</c> and skips. A crash — or a failed terminal
+    /// outcome stamp — after a won CAS BURNS the fire (the pending list
+    /// filters <c>DispatchedAt IS NULL</c>), mirroring the cron path's
+    /// burn-the-window semantics; a pending manual row can never be
+    /// double-dispatched or re-dispatched in a loop.
+    /// </summary>
+    Task<bool> TryClaimManualFireForDispatchAsync(
+        Guid fireId, DateTime attemptAtUtc, CancellationToken ct = default);
 
     /// <summary>
     /// Bounded ledger retention (D2): delete fire rows claimed before

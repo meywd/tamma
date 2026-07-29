@@ -22,6 +22,165 @@ namespace Tamma.Data.Migrations.ControlPlane
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("Tamma.Data.Entities.ActionAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<string[]>("AllowedRoles")
+                        .HasColumnType("text[]");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool?>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool?>("Enforce")
+                        .HasColumnType("boolean");
+
+                    b.Property<int?>("MinAutonomy")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("TargetKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("TargetKind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Version")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "UserId", "TargetKind", "TargetKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_action_assignments_principal_target");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("TenantId", "UserId", "TargetKind", "TargetKey"), false);
+
+                    b.ToTable("action_assignments", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_action_assignments_mode_row", "(\"TargetKind\" = 'mode') = (\"MinAutonomy\" IS NULL)");
+
+                            t.HasCheckConstraint("ck_action_assignments_principal_scope", "NOT (\"TenantId\" IS NOT NULL AND \"UserId\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_action_assignments_target_kind", "\"TargetKind\" IN ('action','group','mode')");
+                        });
+                });
+
+            modelBuilder.Entity("Tamma.Data.Entities.ActionAuthorization", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasDefaultValueSql("gen_random_uuid()");
+
+                    b.Property<int?>("AutonomyLevelAtRequest")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ConsumedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CorrelationId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<DateTime?>("DecidedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("DecidedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ExpiresAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime>("RequestedAtUtc")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("pending");
+
+                    b.Property<string>("TargetKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("TargetKind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CorrelationId", "State")
+                        .HasDatabaseName("IX_action_authorizations_Correlation_State");
+
+                    b.HasIndex("TenantId", "UserId", "CorrelationId", "TargetKind", "TargetKey")
+                        .IsUnique()
+                        .HasDatabaseName("ux_action_authorizations_open")
+                        .HasFilter("\"State\" IN ('pending','granted')");
+
+                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("TenantId", "UserId", "CorrelationId", "TargetKind", "TargetKey"), false);
+
+                    b.ToTable("action_authorizations", null, t =>
+                        {
+                            t.HasCheckConstraint("ck_action_authorizations_principal_scope", "NOT (\"TenantId\" IS NOT NULL AND \"UserId\" IS NOT NULL)");
+
+                            t.HasCheckConstraint("ck_action_authorizations_state", "\"State\" IN ('pending','granted','denied','expired')");
+
+                            t.HasCheckConstraint("ck_action_authorizations_target_kind", "\"TargetKind\" IN ('action','group')");
+                        });
+                });
+
             modelBuilder.Entity("Tamma.Data.Entities.AdminImpersonation", b =>
                 {
                     b.Property<Guid>("Id")

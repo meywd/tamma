@@ -63,12 +63,12 @@ public class DocumentStoreIsolationTests
             tenantB, DocumentTestData.DecompositionEnvelope("issue-Y", DocumentState.Accepted), null, CancellationToken.None);
 
         // B's lineage read for A's issue → empty.
-        (await repoB.ListByIssueAsync(tenantB, "issue-X", CancellationToken.None)).Should().BeEmpty();
+        (await repoB.ListByIssueAsync(tenantB, "issue-X", audience: null, CancellationToken.None)).Should().BeEmpty();
         // B fetching A's document id → null.
         (await repoB.GetByIdAsync(tenantB, aDoc.Id, CancellationToken.None)).Should().BeNull();
         // A sees only A.
-        var aRows = await repoA.ListByIssueAsync(tenantA, "issue-X", CancellationToken.None);
+        var aRows = await repoA.ListByIssueAsync(tenantA, "issue-X", audience: null, CancellationToken.None);
         aRows.Should().ContainSingle().Which.Id.Should().Be(aDoc.Id);
-        (await repoA.ListByIssueAsync(tenantA, "issue-Y", CancellationToken.None)).Should().BeEmpty();
+        (await repoA.ListByIssueAsync(tenantA, "issue-Y", audience: null, CancellationToken.None)).Should().BeEmpty();
     }
 }

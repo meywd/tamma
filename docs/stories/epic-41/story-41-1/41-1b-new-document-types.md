@@ -92,3 +92,27 @@ README's new-types table:
 ## Estimated Effort
 
 5–6 days (39-4 shipped six types in 5–6 days)
+
+## Follow-ups from adversarial review (2026-07-29)
+
+**Resolved in the review-fix pass (same date):** three duplicate-identifier gaps in the shipped
+validators, each following the `CRITERION_ID_DUPLICATED` naming pattern —
+`BacklogOrdering` accepted duplicate `itemId` entries (the same item at two ranks validated, breaking
+"total order over the referenced item set") → new `ITEM_ID_DUPLICATED`; `TestPlan` accepted two risk
+areas with the same name (making `riskAreaRef` ambiguous) → new `RISK_AREA_NAME_DUPLICATED`;
+`ThreatModel` accepted duplicate asset ids and duplicate threat ids → new `ASSET_ID_DUPLICATED` and
+`THREAT_ID_DUPLICATED`. One rejecting and one accepting fixture per rule landed alongside (AC2
+discipline).
+
+**Open follow-up — finding 4 (null array element ⇒ NRE, not `MALFORMED_PAYLOAD`):** a payload whose
+array carries a JSON `null` element (e.g. `{"items":[null]}`) deserializes to a list containing a null
+element; every per-item loop then dereferences it and throws `NullReferenceException` instead of
+returning a `MALFORMED_PAYLOAD` violation. The `try/catch` in each `Validate` only catches
+`JsonException`, so the NRE escapes and **faults `DocumentLifecycleWorkflow` (the `Validate` call site
+at ~line 342) instead of routing the document to the repair ring** — a malformed agent reply becomes a
+faulted workflow instance rather than a repairable validation failure. This is an **inherited pattern
+across ALL registered types, including pre-existing ones (e.g. `Findings`)**, not a defect of the six
+41-1b types alone — the fix belongs in a shared-validator hardening pass (null-element guard or a
+shared deserialize helper that maps null elements to `MALFORMED_PAYLOAD`) across every
+`IDocumentType.Validate`, with one null-element fixture per type. Not fixed in the 41-1b lane to avoid
+piecemeal divergence from the pre-existing types.

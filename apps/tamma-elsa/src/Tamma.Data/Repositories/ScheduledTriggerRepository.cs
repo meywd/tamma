@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 
@@ -23,7 +24,8 @@ namespace Tamma.Data.Repositories;
 /// tick step (the <c>TenantCleanupRequestedTrigger</c> composition shape).</para>
 /// </summary>
 public class ScheduledTriggerRepository(
-    IDbContextFactory<ControlPlaneDbContext> dbFactory) : IScheduledTriggerRepository
+    IDbContextFactory<ControlPlaneDbContext> dbFactory,
+    ILogger<ScheduledTriggerRepository>? logger = null) : IScheduledTriggerRepository
 {
     public async Task<IReadOnlyList<Guid>> SnapshotActiveTenantIdsAsync(
         CancellationToken ct = default)
@@ -55,33 +57,52 @@ public class ScheduledTriggerRepository(
         var created = 0;
         foreach (var template in templates)
         {
-            // Which active tenants already have a concrete row for this
-            // (DefinitionId, Name)? Insert the rest, ON CONFLICT DO NOTHING
-            // so two pods materialising the same tick stay idempotent.
-            var existing = await db.ScheduledTriggers
-                .AsNoTracking()
-                .Where(t => t.TenantId != null
-                    && t.DefinitionId == template.DefinitionId
-                    && t.Name == template.Name)
-                .Select(t => t.TenantId!.Value)
-                .ToListAsync(ct);
-            var existingSet = existing.ToHashSet();
-
-            foreach (var tenantId in activeTenantIds)
+            try
             {
-                if (existingSet.Contains(tenantId)) continue;
-                ct.ThrowIfCancellationRequested();
+                // Which active tenants already have a concrete row for this
+                // (DefinitionId, Name)? Insert the rest, ON CONFLICT DO NOTHING
+                // so two pods materialising the same tick stay idempotent.
+                var existing = await db.ScheduledTriggers
+                    .AsNoTracking()
+                    .Where(t => t.TenantId != null
+                        && t.DefinitionId == template.DefinitionId
+                        && t.Name == template.Name)
+                    .Select(t => t.TenantId!.Value)
+                    .ToListAsync(ct);
+                var existingSet = existing.ToHashSet();
 
-                created += await db.Database.ExecuteSqlInterpolatedAsync($"""
-                    INSERT INTO scheduled_triggers
-                        ("Id", "TenantId", "DefinitionId", "Name", "CronExpression",
-                         "Enabled", "InputJson", "CreatedAt", "UpdatedAt")
-                    VALUES
-                        (gen_random_uuid(), {tenantId}, {template.DefinitionId},
-                         {template.Name}, {template.CronExpression}, {template.Enabled},
-                         CAST({template.InputJson} AS jsonb), {nowUtc}, {nowUtc})
-                    ON CONFLICT ("TenantId", "DefinitionId", "Name") DO NOTHING;
-                    """, ct);
+                foreach (var tenantId in activeTenantIds)
+                {
+                    if (existingSet.Contains(tenantId)) continue;
+                    ct.ThrowIfCancellationRequested();
+
+                    created += await db.Database.ExecuteSqlInterpolatedAsync($"""
+                        INSERT INTO scheduled_triggers
+                            ("Id", "TenantId", "DefinitionId", "Name", "CronExpression",
+                             "Enabled", "InputJson", "CreatedAt", "UpdatedAt")
+                        VALUES
+                            (gen_random_uuid(), {tenantId}, {template.DefinitionId},
+                             {template.Name}, {template.CronExpression}, {template.Enabled},
+                             CAST({template.InputJson} AS jsonb), {nowUtc}, {nowUtc})
+                        ON CONFLICT ("TenantId", "DefinitionId", "Name") DO NOTHING;
+                        """, ct);
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                // MODERATE-4 fix (2026-07-29): per-template failure isolation.
+                // A poison template row (e.g. a value the CAST(... AS jsonb)
+                // rejects, smuggled in by raw SQL) must not stop the REMAINING
+                // templates from materialising — and the service additionally
+                // isolates this whole method so a wholesale failure cannot
+                // kill the tick either. WARN + skip; the next tick retries.
+                logger?.LogWarning(ex,
+                    "schedule.materialise.template_failed template={TemplateId} definition={DefinitionId} name={Name} — skipping this template, continuing with the rest",
+                    template.Id, template.DefinitionId, template.Name);
             }
         }
 
@@ -154,21 +175,48 @@ public class ScheduledTriggerRepository(
         ListPendingManualFiresAsync(int limit, CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
+        // Enabled-trigger filter BEFORE Take so disabled triggers' pending
+        // rows (which wait for re-enablement — the 2026-07-29 contract) do
+        // not eat the drain budget. NOT a claim: the drain must win
+        // TryClaimManualFireForDispatchAsync per row before dispatching.
         var rows = await db.ScheduledTriggerFires
             .AsNoTracking()
             .Where(f => f.Outcome == "claimed"
                 && f.DispatchedAt == null
                 && f.WindowKey.StartsWith("manual:"))
-            .OrderBy(f => f.ClaimedAt)
-            .Take(limit)
             .Join(
                 db.ScheduledTriggers.AsNoTracking(),
                 f => f.TriggerId,
                 t => t.Id,
                 (f, t) => new { Fire = f, Trigger = t })
+            .Where(r => r.Trigger.Enabled)
+            .OrderBy(r => r.Fire.ClaimedAt)
+            .Take(limit)
             .ToListAsync(ct);
 
         return rows.Select(r => (r.Fire, r.Trigger)).ToList();
+    }
+
+    public async Task<bool> TryClaimManualFireForDispatchAsync(
+        Guid fireId, DateTime attemptAtUtc, CancellationToken ct = default)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        // MAJOR-1 fix (2026-07-29): conditional CAS — stamping DispatchedAt
+        // while Outcome is still 'claimed' marks "dispatch attempt started"
+        // without widening the CHECK-pinned outcome set. Postgres arbitrates:
+        // affected-rows 1 = this pod owns the dispatch attempt, 0 = another
+        // pod (or an earlier attempt) already does. Because
+        // ListPendingManualFiresAsync filters DispatchedAt IS NULL, a crash
+        // after this CAS burns the fire (at-most-once) instead of
+        // re-dispatching it on every subsequent tick.
+        var affected = await db.Database.ExecuteSqlInterpolatedAsync($"""
+            UPDATE scheduled_trigger_fires
+            SET "DispatchedAt" = {attemptAtUtc}
+            WHERE "Id" = {fireId}
+              AND "Outcome" = 'claimed'
+              AND "DispatchedAt" IS NULL;
+            """, ct);
+        return affected == 1;
     }
 
     public async Task<int> PruneLedgerAsync(

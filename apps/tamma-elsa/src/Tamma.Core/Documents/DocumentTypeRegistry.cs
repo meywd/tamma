@@ -46,6 +46,11 @@ public static class DocumentTypeRegistry
         new TestPlanDocumentType(),
         new ThreatModelDocumentType(),
         new UxSpecDocumentType(),
+        // 41-1c — prose (count pin 16 -> 17): one type for all ten prose kinds,
+        // body unvalidated markdown. No workflow edge lands here — each of
+        // 41-4/41-5/41-8/41-9/41-22/41-24/41-25/41-26 declares its own
+        // BuildSeed row when its producing workflow binds.
+        new ProseDocumentType(),
     };
 
     private static readonly IReadOnlyDictionary<string, IDocumentType> s_index =

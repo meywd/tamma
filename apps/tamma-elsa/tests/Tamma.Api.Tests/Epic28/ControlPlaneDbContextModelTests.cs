@@ -174,6 +174,17 @@ public class ControlPlaneDbContextModelTests
             // survival pattern).
             "scheduled_triggers",
             "scheduled_trigger_fires",
+            // Story 43-5 — the governed action catalog's storage: per-principal
+            // autonomy assignments (three scopes: platform ceiling / tenant /
+            // user) + the one-human-decision-per-run authorization ledger.
+            // CP-resident in BOTH modes (forced — sweepers have no tenant
+            // context, the engine plane may carry none, and tenant migrations
+            // never reach already-provisioned tenants); both EXCLUDED from the
+            // destructive startup DROP list (safety policy, not operational
+            // data) and therefore FK-free toward tenants/users (the
+            // provider_settings survival pattern).
+            "action_assignments",
+            "action_authorizations",
         }, because: "Story 28-1 PR D (Decision #4) — enumerate every "
             + "CP-resident table; the 11 + 4 mentorship tenant-resident "
             + "entities have moved to TenantDbContext. Story 31-2 adds "
@@ -193,7 +204,8 @@ public class ControlPlaneDbContextModelTests
             + "Story 34-3 adds tenant_provider_billing. "
             + "Story 38-3 adds slack_outbox. "
             + "Story 37-2 adds audit_chain_checkpoints. "
-            + "Story 41-30 adds scheduled_triggers + scheduled_trigger_fires.");
+            + "Story 41-30 adds scheduled_triggers + scheduled_trigger_fires. "
+            + "Story 43-5 adds action_assignments + action_authorizations.");
     }
 
     // ── Story 34-11 — provider cost price-book model shape ──

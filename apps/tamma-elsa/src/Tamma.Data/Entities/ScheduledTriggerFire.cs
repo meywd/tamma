@@ -46,7 +46,18 @@ public class ScheduledTriggerFire
     public string WindowKey { get; set; } = null!;
 
     public DateTime ClaimedAt { get; set; }
+
+    /// <summary>
+    /// For cron fires: the successful dispatch instant. For manual run-now
+    /// fires it is ALSO the drain's CAS marker (stamped the moment a pod wins
+    /// the dispatch attempt, while <see cref="Outcome"/> is still
+    /// <c>claimed</c> — MAJOR-1 fix, 2026-07-29). A <c>claimed</c> row with a
+    /// non-null <c>DispatchedAt</c> is therefore a BURNT manual fire (the pod
+    /// crashed or the outcome stamp failed mid-dispatch) — it is never
+    /// re-drained; at-most-once wins over delivery.
+    /// </summary>
     public DateTime? DispatchedAt { get; set; }
+
     public string? WorkflowInstanceId { get; set; }
 
     /// <summary>Closed set: <c>claimed</c> | <c>dispatched</c> | <c>failed</c> (CHECK-pinned).</summary>

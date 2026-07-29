@@ -109,6 +109,36 @@ public class TestPlanTypeTests
         codes.Should().NotContain(TestPlanDocumentType.RiskAreaNameMissing);
     }
 
+    // ── RISK_AREA_NAME_DUPLICATED (adversarial review 2026-07-29) ───────────
+
+    [Test]
+    public void Duplicate_risk_area_names_are_rejected_with_risk_area_name_duplicated()
+    {
+        // Two risk areas named the same used to VALIDATE, making every
+        // riskAreaRef to that name ambiguous.
+        var r = Validate(
+            """
+            {
+              "scope": "s",
+              "riskAreas": [
+                { "name": "concurrency", "rank": 1, "rationale": "a" },
+                { "name": "concurrency", "rank": 2, "rationale": "b" }
+              ],
+              "strategyLines": [ { "description": "d", "coverageTarget": "c", "riskAreaRef": "concurrency" } ],
+              "entryCriteria": ["e"],
+              "exitCriteria": ["x"]
+            }
+            """);
+        r.IsValid.Should().BeFalse();
+        Codes(r).Should().Contain(TestPlanDocumentType.RiskAreaNameDuplicated);
+        r.Violations.Single(v => v.Code == TestPlanDocumentType.RiskAreaNameDuplicated)
+            .Message.Should().Contain("concurrency");
+    }
+
+    [Test]
+    public void Distinct_risk_area_names_are_accepted() =>
+        Codes(Validate(ValidDoc)).Should().NotContain(TestPlanDocumentType.RiskAreaNameDuplicated);
+
     // ── RISK_RANK_NOT_TOTAL_ORDER ───────────────────────────────────────────
 
     [Test]

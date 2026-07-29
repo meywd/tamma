@@ -60,8 +60,8 @@ public class TemplateExampleConformanceTests
 
     /// <summary>
     /// One baselined cell: the document type its Epic 41 owner will bind it to
-    /// (<paramref name="IntendedDocumentTypeKey"/> — a registered wire key when the
-    /// type exists today, else one of <see cref="PlannedFutureTypeKeys"/>), the
+    /// (<paramref name="IntendedDocumentTypeKey"/> — a registered wire key; every
+    /// planned Epic 41 key has now landed, so an unregistered key is a typo), the
     /// owning story, and why the shipped template does not conform today.
     /// </summary>
     private sealed record BaselineEntry(string IntendedDocumentTypeKey, string OwningStory, string Reason);
@@ -123,18 +123,37 @@ public class TemplateExampleConformanceTests
     /// </summary>
     private const int KnownNonConformingTemplateCount = 11;
 
+    // NOTE (2026-07-29): the PlannedFutureTypeKeys escape hatch is gone — 41-1b
+    // registered test-plan / acceptance-criteria / backlog-ordering and 41-1c
+    // registered prose, so every baseline entry's intended key now resolves in
+    // DocumentTypeRegistry and is staleness-checked against the real validator.
+    // An intended key that does NOT resolve is a typo, full stop.
+
     /// <summary>
-    /// The document-type keys Epic 41 plans to mint (41-1b: TestPlan,
-    /// AcceptanceCriteria, BacklogOrdering; 41-1c: prose). A baseline entry whose
-    /// intended key is not registered in <see cref="DocumentTypeRegistry"/> must
-    /// name one of these — anything else is a typo. The moment one of these keys IS
-    /// registered, its entries start being staleness-checked against the real
-    /// validator automatically.
+    /// UNBOUND cells whose intended document type IS registered and whose shipped
+    /// template must therefore instruct a CONFORMING example TODAY — the 41-1a
+    /// cross-lane contract (implementation-plan-41-1a.md D5: "each template
+    /// instructs the JSON shape its future consumer story will pin"). Test 1 only
+    /// covers cells BOUND in ContractBindingTests and the ratchet only covers cells
+    /// already known non-conforming, so an unbound cell whose type had landed sat
+    /// in neither net — exactly how plan-sprint and author-ui-spec shipped examples
+    /// that failed their own validators (adversarial review, 2026-07-29). This is
+    /// an EXPLICIT mapping, not a discovery mechanism: add an entry when a story
+    /// establishes an unbound cell's intended registered type (the type source's
+    /// "Producing cell" comment is the authority). An entry may never name a cell
+    /// that is bound (test 1's job) or baselined in
+    /// <see cref="KnownNonConformingTemplates"/> (the ratchet's job) — both are
+    /// asserted by the gate. When the owning story binds the cell, its entry here
+    /// is deleted in the same change (test 1 takes over).
     /// </summary>
-    private static readonly IReadOnlySet<string> PlannedFutureTypeKeys = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "test-plan", "acceptance-criteria", "backlog-ordering", "prose",
-    };
+    private static readonly IReadOnlyDictionary<(string Role, string Action), string> ConformingUnboundCells =
+        new Dictionary<(string, string), string>
+        {
+            // SprintPlan.cs "Producing cell (41-1b D4)" — 41-6 binds it.
+            [("scrum_master", "plan-sprint")] = "sprint-plan",
+            // UxSpec.cs "Producing cell (41-1b D4)" — 41-27 binds it.
+            [("ux_designer", "author-ui-spec")] = "ux-spec",
+        };
 
     // ====================================================================
     // Extraction — mirrors the runtime ingest path
@@ -320,13 +339,12 @@ public class TemplateExampleConformanceTests
 
             if (!TryResolveRegisteredType(entry.IntendedDocumentTypeKey, out var type))
             {
-                // Intended type not registered yet — it must be one of the PLANNED Epic 41
-                // keys (else it is a typo). Once 41-1b/41-1c registers the key, this entry
-                // automatically starts being staleness-checked against the real validator.
-                if (!PlannedFutureTypeKeys.Contains(entry.IntendedDocumentTypeKey))
-                    problems.Add($"  ({role}, {action}): intended document type '{entry.IntendedDocumentTypeKey}' is " +
-                                 "neither registered in DocumentTypeRegistry nor one of the planned Epic 41 keys " +
-                                 $"({string.Join(", ", PlannedFutureTypeKeys.OrderBy(k => k))}) — fix the key");
+                // Every planned Epic 41 key (test-plan, acceptance-criteria,
+                // backlog-ordering via 41-1b; prose via 41-1c) is registered now,
+                // so an unresolvable intended key can only be a typo.
+                problems.Add($"  ({role}, {action}): intended document type '{entry.IntendedDocumentTypeKey}' is " +
+                             "not registered in DocumentTypeRegistry — every planned Epic 41 key has landed, " +
+                             "so this is a typo; fix the key");
                 continue;
             }
 
@@ -372,7 +390,51 @@ public class TemplateExampleConformanceTests
     }
 
     // ====================================================================
-    // Test 4 — extractor/normalizer behavior pins
+    // Test 4 — unbound cells with a REGISTERED intended type must conform
+    // ====================================================================
+
+    [Test]
+    public void EveryConformingUnboundCell_ShippedExampleValidatesAgainstItsIntendedType()
+    {
+        ConformingUnboundCells.Should().NotBeEmpty(
+            "the unbound-cell gate must at least cover the two cells whose drift motivated it " +
+            "(plan-sprint → sprint-plan, author-ui-spec → ux-spec; adversarial review 2026-07-29)");
+
+        var bound = ContractBindingTests.AllBoundCells.ToHashSet();
+        var violations = new List<string>();
+        foreach (var ((role, action), typeKey) in ConformingUnboundCells.OrderBy(kv => kv.Key))
+        {
+            bound.Should().NotContain((role, action),
+                $"({role}, {action}) is BOUND in ContractBindingTests — bound cells are test 1's job; " +
+                "delete its ConformingUnboundCells entry in the same change that bound it");
+            KnownNonConformingTemplates.Should().NotContainKey((role, action),
+                $"({role}, {action}) cannot be both pinned conforming here and baselined non-conforming " +
+                "in KnownNonConformingTemplates — the two sets are complements");
+
+            TryResolveRegisteredType(typeKey, out var type).Should().BeTrue(
+                $"({role}, {action}) declares intended document type '{typeKey}', which is not registered " +
+                "in DocumentTypeRegistry — fix the key (or the entry is premature)");
+
+            var nonConformance = EvaluateNonConformance(role, action, type!);
+            if (nonConformance is not null)
+            {
+                violations.Add(
+                    $"  ({role}, {action}) → {type!.GetType().Name}: {nonConformance}" + Environment.NewLine +
+                    $"      fix Prompts/{role}/{action}.md so its worked example is a VALID '{type.Key}' document " +
+                    "(mirror the type's RenderContract) — the 41-1a cross-lane contract promises the template " +
+                    "instructs the shape its consumer story will pin, BEFORE the cell is bound.");
+            }
+        }
+
+        violations.Should().BeEmpty(
+            "an unbound cell whose intended document type is already registered must instruct a conforming " +
+            "worked example — otherwise its consumer story binds against a template whose own example fails " +
+            "the validator on day one, and no bound-cell gate catches it until then:" + Environment.NewLine +
+            string.Join(Environment.NewLine, violations));
+    }
+
+    // ====================================================================
+    // Test 5 — extractor/normalizer behavior pins
     // ====================================================================
 
     [Test]

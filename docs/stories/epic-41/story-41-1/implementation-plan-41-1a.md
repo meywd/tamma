@@ -189,6 +189,17 @@ against reality, not the snapshot.
   convention exactly: `variables, enableTools, maxTokens, version` in that order, `enableTools: false`
   for every new cell (no governed tools exist for these families — epic-41 README, Epic 42 dependency),
   `version: 1`.
+  > **Amendment (2026-07-29, adversarial review):** this promise was initially BROKEN for
+  > `plan-sprint` and `author-ui-spec` — both shipped (commit 665f9a2) instructing shapes that fail
+  > their own intended validators (`sprintGoal`/`timebox`/`capacityPoints`/`committedItems` vs
+  > `SprintPlan`'s `sprintId`/`capacity`/`committed`/`carryOver`; a components/screens spec vs
+  > `UxSpec`'s flows/screens). Nothing caught it because `TemplateExampleConformanceTests` only
+  > checked cells BOUND in `ContractBindingTests`, and these cells are unbound. Both templates are
+  > rewritten to the exact wire shapes (version 1 → 2), and the promise is now ENFORCED for unbound
+  > cells whose intended type is registered: `TemplateExampleConformanceTests.ConformingUnboundCells`
+  > maps unbound cell → intended registered type and
+  > `EveryConformingUnboundCell_ShippedExampleValidatesAgainstItsIntendedType` runs each template's
+  > fenced example through the type's real `Validate()`.
 - **D6 — `s_primaryAction` values (C3):** `ScrumMaster => PlanSprint`, `ProjectManager => ReportStatus`,
   `UxDesigner => AuthorUiSpec`. Each is in that role's own eligibility set, which is the invariant
   `RolePhaseMapTests` asserts for the incumbent 8.

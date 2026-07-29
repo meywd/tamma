@@ -35,9 +35,11 @@ public class DocumentTypeRegistryTests
         //                                        ThreatModel, UxSpec) — the vocabulary
         //                                        stays COMPLETE, matching the
         //                                        DocumentTypeKey member count.
+        //   Story 41-1c registers +1 (16 -> 17) <-- DONE (Prose — the prose family's
+        //                                        single type; body unvalidated markdown).
         // Same posture as RolePhaseMapTests' HaveCount(79): the number moving is a
         // conscious, reviewed edit here, never an accident.
-        DocumentTypeRegistry.All.Should().HaveCount(16);
+        DocumentTypeRegistry.All.Should().HaveCount(17);
     }
 
     // -----------------------------------------------------------------------
@@ -154,6 +156,17 @@ public class DocumentTypeRegistryTests
             .Should().Be(typeof(Tamma.Core.Documents.Types.ThreatModel));
         DocumentTypeRegistry.Resolve(DocumentTypeKey.UxSpec).PayloadClrType
             .Should().Be(typeof(Tamma.Core.Documents.Types.UxSpec));
+    }
+
+    [Test]
+    public void Registered_41_1c_prose_key_resolves_to_its_implementation()
+    {
+        // Story 41-1c AC1 — both resolution doors open: the wire string parses
+        // (used to throw DOCUMENT.TYPE.UNKNOWN) and the registry resolves (used
+        // to throw DOCUMENT.TYPE.NOT_REGISTERED).
+        DocumentTypeKeyExtensions.Parse("prose").Should().Be(DocumentTypeKey.Prose);
+        DocumentTypeRegistry.Resolve("prose").PayloadClrType
+            .Should().Be(typeof(Tamma.Core.Documents.Types.Prose));
     }
 
     // -----------------------------------------------------------------------

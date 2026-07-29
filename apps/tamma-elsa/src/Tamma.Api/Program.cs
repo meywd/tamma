@@ -1639,6 +1639,17 @@ if (!string.IsNullOrEmpty(jwtSecret))
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
             p.AddRequirements(new PermissionRequirement("schedules:manage"));
         });
+        // Story 43-5/43-6 — Action Catalog automation toggles. Mirrors
+        // AcceptanceRulesManage exactly: a tenant's per-action / per-group
+        // autonomy writes must be reachable by tenant_owner OR tenant_admin
+        // (member → 403 at the policy). The PLATFORM CEILING routes
+        // (/api/admin/actions/ceiling/*) use PlatformOwnerAccess instead —
+        // the ceiling is platform-owner-only by the epic's scoping table.
+        options.AddPolicy("ActionsManage", p =>
+        {
+            p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
+            p.AddRequirements(new PermissionRequirement("actions:manage"));
+        });
         options.AddPolicy("WorkflowsView", p =>
         {
             p.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, "ApiKey");
@@ -1741,7 +1752,7 @@ else if (builder.Environment.IsDevelopment())
             .Build();
         // Register all named policies with permissive default
         foreach (var name in new[] { "AdminAccess", "OwnerAccess", "PlatformOwnerAccess", "MemberAccess", "SettingsView",
-            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "PricingManage", "AcceptanceRulesManage", "ScheduleManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
+            "SettingsManage", "PromptManage", "ConventionManage", "PlatformsManage", "AgentManage", "PricingManage", "AcceptanceRulesManage", "ScheduleManage", "ActionsManage", "WorkflowsView", "WorkflowsManage", "WorkflowsDelete", "DashboardView", "ApiKeysManage",
             "SelfOrApiKeysManage", "SelfOrUsersView", "AuthenticatedAny", "EngineServiceOnly", "OrchestratorChannel" })
         {
             options.AddPolicy(name, p => p.AddRequirements(new Tamma.Api.Infrastructure.AllowAnonymousRequirement()));
@@ -2850,6 +2861,36 @@ acceptanceRules.MapGet("/{documentTypeKey}", AcceptanceRulesEndpoints.GetResolve
 acceptanceRules.MapPut("/{documentTypeKey}", AcceptanceRulesEndpoints.Upsert).RequireAuthorization("AcceptanceRulesManage");
 acceptanceRules.MapDelete("/{documentTypeKey}", AcceptanceRulesEndpoints.Delete).RequireAuthorization("AcceptanceRulesManage");
 
+// ── Story 43-5/43-6 — the Action Catalog policy surface ──
+// Reads ride AuthenticatedAny for the acceptance-rules reason (every
+// role-holder and the orchestrator need the effective policy); principal
+// writes take ActionsManage (tenant_owner/tenant_admin — member → 403).
+// Route ordering: literal routes (/dial, /catalog, /policy, /policy/reset)
+// are registered BEFORE the parameterized /policy/actions/{ns}/{key} and
+// /policy/groups/{group} siblings so no literal is swallowed by a parameter
+// (the /api/acceptance-rules /defaults warning, same shape).
+var actionsPolicy = app.MapGroup("/api/actions").RequireAuthorization("AuthenticatedAny");
+actionsPolicy.MapGet("/dial", ActionPolicyEndpoints.GetDial);
+actionsPolicy.MapGet("/catalog", ActionPolicyEndpoints.GetCatalog);
+actionsPolicy.MapGet("/policy", ActionPolicyEndpoints.GetPolicy);
+actionsPolicy.MapPost("/policy/reset", ActionPolicyEndpoints.ResetPolicy).RequireAuthorization("ActionsManage");
+actionsPolicy.MapPut("/policy/groups/{group}/threshold", ActionPolicyEndpoints.PutGroupThreshold).RequireAuthorization("ActionsManage");
+actionsPolicy.MapDelete("/policy/groups/{group}", ActionPolicyEndpoints.DeleteGroup).RequireAuthorization("ActionsManage");
+actionsPolicy.MapPut("/policy/actions/{ns}/{key}/threshold", ActionPolicyEndpoints.PutActionThreshold).RequireAuthorization("ActionsManage");
+actionsPolicy.MapPut("/policy/actions/{ns}/{key}/enforce", ActionPolicyEndpoints.PutActionEnforce).RequireAuthorization("ActionsManage");
+actionsPolicy.MapPut("/policy/actions/{ns}/{key}/enabled", ActionPolicyEndpoints.PutActionEnabled).RequireAuthorization("ActionsManage");
+actionsPolicy.MapPut("/policy/actions/{ns}/{key}/roles", ActionPolicyEndpoints.PutActionRoles).RequireAuthorization("ActionsManage");
+actionsPolicy.MapDelete("/policy/actions/{ns}/{key}", ActionPolicyEndpoints.DeleteAction).RequireAuthorization("ActionsManage");
+
+// The PLATFORM CEILING — platform-owner only (epic 43 README OQ4: the
+// ceiling is the load-bearing protection; a tenant admin can never lower a
+// platform gate because the evaluator composes it with max()).
+var actionsCeiling = app.MapGroup("/api/admin/actions/ceiling").RequireAuthorization("PlatformOwnerAccess");
+actionsCeiling.MapPut("/actions/{ns}/{key}/threshold", ActionPolicyEndpoints.PutCeilingActionThreshold);
+actionsCeiling.MapDelete("/actions/{ns}/{key}", ActionPolicyEndpoints.DeleteCeilingAction);
+actionsCeiling.MapPut("/groups/{group}/threshold", ActionPolicyEndpoints.PutCeilingGroupThreshold);
+actionsCeiling.MapDelete("/groups/{group}", ActionPolicyEndpoints.DeleteCeilingGroup);
+
 // ── Settings / Config ──
 // Rate limit (finding 020): ConfigRead default for the group; ConfigWrite
 // override on each write surface. Sanitize is a runtime POST and shares the
@@ -3360,8 +3401,8 @@ using (var scope = app.Services.CreateScope())
             //     disables every tenant's recurring audits — the exact failure
             //     mode an audit exists to prevent — and would erase the ledger
             //     that makes fires at-most-once across restarts. Pinned by
-            //     ScheduleTablesNotDroppedOnStartupTests, which reads this SQL
-            //     literal and fails if either name appears.
+            //     ScheduledTriggerSourcePinTests.Schedule_Tables_Are_Not_In_The_Destructive_Startup_DropList,
+            //     which reads this SQL literal and fails if either name appears.
             // Excluded tables carry NO FK to wiped tables (a cascade from
             // tenants would defeat the exclusion) and use IF NOT EXISTS
             // idempotent migrations (they persist while the migration history

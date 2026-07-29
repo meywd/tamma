@@ -88,8 +88,25 @@ P0 — Wave 0. Nothing in Epic 44 reads or writes without this. **The sweep half
 
 6 days
 
+## Follow-ups from adversarial review (2026-07-29)
+
+Fixed in this lane (see `.dev/bugs/2026-07-29-ef-migrator-service-provider-explosion.md` for the HIGH finding):
+
+- **EF internal-service-provider explosion (HIGH)** — `EfTenantDbMigrator`'s data-source path passed the `NpgsqlDataSource` into `UseNpgsql`, minting one EF internal provider per swept tenant; EF throws at the 21st and the cap is process-global. Now migrates over a borrowed connection (the `TenantDbContextFactory` pattern); regression-pinned at 25 tenants + same-process re-run.
+- **Rekey collision guards** — rekey onto an existing current key is a typed `TRACKER.KEY_CONFLICT` (pre-check + 23505 catch); rekey into the item's own project's future mint space advances `NextNumber` past the target under the `FOR UPDATE` lock so minting can never wedge; rekey into a **different** existing project's prefix is rejected (`TRACKER.CROSS_PROJECT_REKEY`) — a cross-project rekey is a move, not a rename, and moves never re-mint keys (out of scope for this seam by contract).
+- **`GetByKeyAsync` determinism** — the current-Key match always wins; previous-keys containment is only a fallback (with an Id-ordered tie-break), so a key that is one row's current key and another row's history entry resolves to the current holder.
+- **Relation-add race** — `AddRelationAsync` is insert-first; the unique-index loser (23505) returns the stored row, making the documented idempotent contract hold under concurrency. `TrackerPreferenceRepository`'s first-upsert race retries once as an update of the winner's row.
+- **`DefaultKind` wire validation** — junk fails as typed `TRACKER.UNKNOWN_KIND` at the write boundary, never as raw 23514 off `ck_tracker_preferences_default_kind` (`BoardGroupBy` stays freeform by design).
+- **Sweeper OCE isolation** — an `OperationCanceledException` from one tenant's own stack no longer aborts the whole sweep; it is only treated as sweep-cancellation when the sweep's token is actually canceled.
+
+Still open (owned by OTHER lanes — do not close this section until they land):
+
+- **`WorkItemEntity.Version` is not an EF concurrency token** (`IsConcurrencyToken` missing in `TammaModelConfiguration`/snapshot — model-config lane). Concurrent rekeys can interleave read-modify-write on `PreviousKeys` and silently LOSE key history. **Must land before 44-2 exposes rekey over HTTP.**
+- **Sweep endpoint hygiene** (`Program.cs` — coordinator's lane): `dryRun` defaults to `false` (a bare POST applies DDL fleet-wide); no single-flight guard (two concurrent sweeps double-migrate); the sweep runs synchronously in-request (a large fleet outlives HTTP timeouts); the pool's `CommandTimeout=30s` applies to migration DDL and will spuriously fail heavy migrations.
+
 ## Change Log
 
 | Date       | Version | Changes                | Author |
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-25 | 1.0.0   | Initial story creation | Claude |
+| 2026-07-29 | 1.0.1   | Adversarial-review follow-ups section (fixes landed in the tracker-storage lane; deferred items listed) | Claude |

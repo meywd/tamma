@@ -33,12 +33,12 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void DocumentType_plane_has_16_members()
+    public void DocumentType_plane_has_17_members()
     {
-        // Derivation: grep -c '\[Wire(' src/Tamma.Core/Documents/DocumentTypeKey.cs → 16.
+        // Derivation: grep -c '\[Wire(' src/Tamma.Core/Documents/DocumentTypeKey.cs → 17.
         // 10 → 16 (Story 41-1b): AcceptanceCriteria, BacklogOrdering, SprintPlan,
-        // TestPlan, ThreatModel, UxSpec.
-        Enum.GetValues<DocumentTypeKey>().Should().HaveCount(16);
+        // TestPlan, ThreatModel, UxSpec. 16 → 17 (Story 41-1c): Prose.
+        Enum.GetValues<DocumentTypeKey>().Should().HaveCount(17);
     }
 
     [Test]
@@ -63,8 +63,11 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void BackgroundActor_has_28_members()
+    public void BackgroundActor_has_29_members()
     {
+        // 28 → 29 (Story 43-5): + GovernancePolicySnapshotPrimingService — the
+        // action-assignments snapshot's cold-start primer is itself an
+        // IHostedService, and the sweep binds the governance machinery too.
         // 27 → 28 (Story 43-4): + ActionCatalogStartupValidator — the boot-time
         // tool-vocabulary check is itself an IHostedService, and the sweep
         // deliberately binds the governance machinery too.
@@ -77,7 +80,7 @@ public class ActionVocabularyCountTests
         // → 26. Cross-checked: 26 non-abstract IHostedService classes exist
         // across both host assemblies (BackgroundActorCatalogSweepTests binds
         // them by type name). +1 (Story 41-30): TenantScheduledTriggerService.
-        Enum.GetValues<BackgroundActor>().Should().HaveCount(28);
+        Enum.GetValues<BackgroundActor>().Should().HaveCount(29);
     }
 
     [Test]
@@ -108,14 +111,17 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void TotalCatalogMembers_is_181()
+    public void TotalCatalogMembers_is_183()
     {
-        // 96 + 16 + 8 + 25 + 28 + 8 = 181 — was 180 (automation 27): Story 43-4
-        // added automation:action-catalog-startup-validator. Earlier: was 154
+        // 96 + 17 + 8 + 25 + 29 + 8 = 183 — was 182 (automation 28): Story 43-5
+        // added automation:governance-policy-snapshot-priming-service. Earlier:
+        // was 181 (document-type 16): Story 41-1c added document-type:prose;
+        // was 180 (automation 27, Story 43-4 added
+        // automation:action-catalog-startup-validator); was 154
         // (80 + 10 + 22 + 26 + …); the agent-action plane grew by 16 (Story
         // 41-1a), the document-type plane by 6 (Story 41-1b), and
         // effect/automation by 3 + 1 (Story 41-30).
-        ActionCatalog.All.Should().HaveCount(181);
-        ActionCatalog.ByKey.Should().HaveCount(181);
+        ActionCatalog.All.Should().HaveCount(183);
+        ActionCatalog.ByKey.Should().HaveCount(183);
     }
 }

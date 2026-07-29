@@ -43,7 +43,9 @@ public class DocumentEnvelopeSerializationTests
         var names = root.EnumerateObject().Select(p => p.Name).ToArray();
         names.Should().BeEquivalentTo(new[]
         {
-            "id", "type", "schemaVersion", "issueId", "correlationId",
+            // "audience" joined the wire contract in Story 41-1c (nullable — null
+            // for every non-prose document, serialized explicitly per D8).
+            "id", "type", "schemaVersion", "audience", "issueId", "correlationId",
             "parentDocumentId", "supersedesDocumentId", "producedBy",
             "state", "createdAt", "updatedAt", "payload",
         });

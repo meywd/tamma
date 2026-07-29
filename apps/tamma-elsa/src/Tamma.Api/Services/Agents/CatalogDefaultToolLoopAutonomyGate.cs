@@ -30,6 +30,8 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
 {
     private readonly int _dial;
     private readonly Func<ActionDescriptor, int>? _minAutonomyOverride;
+    private readonly Actions.IGovernancePolicySnapshotProvider? _snapshots;
+    private readonly Tamma.Data.ITenantContext? _tenantContext;
     private readonly ILogger<CatalogDefaultToolLoopAutonomyGate>? _logger;
 
     /// <summary>Production constructor — shipped dial default, shipped catalog thresholds.</summary>
@@ -37,6 +39,38 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
         ILogger<CatalogDefaultToolLoopAutonomyGate>? logger = null)
         : this(AcceptanceDefaults.DefaultAutonomyLevel, minAutonomyOverride: null, logger)
     {
+    }
+
+    /// <summary>
+    /// Story 43-5 — the RESOLVER-BACKED production constructor (the data-source
+    /// seam the 43-4 doc promised): thresholds come from the 43-5 assignment
+    /// ladder (platform ceiling → principal action row → group row → shipped
+    /// default) via the sync <see cref="Actions.IGovernancePolicySnapshotProvider"/>
+    /// snapshot, projected for the ambient principal
+    /// (<see cref="Tamma.Data.ITenantContext"/> in SaaS; the collapsed sole-user
+    /// rows in single-user mode). With ZERO assignment rows the ladder returns
+    /// every descriptor's <c>DefaultMinAutonomy</c> — byte-identical to the
+    /// 43-4 catalog-default behaviour, pinned by
+    /// <c>ResolverBackedToolLoopGateTests</c>.
+    ///
+    /// <para>The DIAL stays <see cref="AcceptanceDefaults.DefaultAutonomyLevel"/>
+    /// on this seam, exactly as 43-4 shipped it: the per-principal base-row dial
+    /// is an async tenant-DB read that has no place on a sync per-tool-call
+    /// path — it rides <c>IAutonomyGate</c> (43-9's seams). The legacy
+    /// always-escalate floor is structurally irrelevant here (it exists only on
+    /// the agent-action/document-type planes; this seam gates <c>tool:*</c>).</para>
+    /// </summary>
+    public CatalogDefaultToolLoopAutonomyGate(
+        Actions.IGovernancePolicySnapshotProvider snapshots,
+        Tamma.Data.ITenantContext tenantContext,
+        ILogger<CatalogDefaultToolLoopAutonomyGate>? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(snapshots);
+        ArgumentNullException.ThrowIfNull(tenantContext);
+        _dial = AcceptanceDefaults.DefaultAutonomyLevel;
+        _snapshots = snapshots;
+        _tenantContext = tenantContext;
+        _logger = logger;
     }
 
     /// <summary>
@@ -81,7 +115,7 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
                 ToolLoopGateOutcome.Allowed, key, null, _dial, "not-enforceable");
         }
 
-        var minAutonomy = _minAutonomyOverride?.Invoke(descriptor) ?? descriptor.DefaultMinAutonomy;
+        var minAutonomy = ResolveMinAutonomy(descriptor);
         if (IsAutomated(minAutonomy, _dial))
         {
             return new ToolLoopGateDecision(
@@ -97,6 +131,26 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
         return new ToolLoopGateDecision(
             ToolLoopGateOutcome.Denied, key, minAutonomy, _dial,
             minAutonomy == AutonomyDial.AlwaysHuman ? "always-human" : "below-min-autonomy");
+    }
+
+    /// <summary>
+    /// The threshold's data source (Story 43-5): the assignment ladder when the
+    /// snapshot provider is wired (production DI), else the internal rehearsal
+    /// seam, else the shipped catalog default — the 43-4 shape, unchanged.
+    /// </summary>
+    private int ResolveMinAutonomy(ActionDescriptor descriptor)
+    {
+        if (_minAutonomyOverride is not null)
+        {
+            return _minAutonomyOverride(descriptor);
+        }
+        if (_snapshots is not null)
+        {
+            var snapshot = _snapshots.GetSnapshotForAmbient(_tenantContext?.TenantId);
+            return AutonomyGateEvaluator.ResolveEffectiveMinAutonomy(descriptor, snapshot)
+                .EffectiveMinAutonomy;
+        }
+        return descriptor.DefaultMinAutonomy;
     }
 
     /// <summary>

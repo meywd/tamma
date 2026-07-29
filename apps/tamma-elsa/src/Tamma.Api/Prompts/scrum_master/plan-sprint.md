@@ -2,7 +2,7 @@
 variables: role, backlogJson, teamCapacity, carryOverJson, conventions
 enableTools: false
 maxTokens: 4096
-version: 1
+version: 2
 ---
 You are a {{role}} planning a sprint: committing a capacity-bounded set of prioritised items to a time-box, with owners and estimates, so the commitment is explicit and reviewable instead of decided in an untracked meeting.
 
@@ -18,32 +18,31 @@ You are a {{role}} planning a sprint: committing a capacity-bounded set of prior
 ## Conventions
 {{conventions}}
 
-Commit only what fits the stated capacity — carry-over items count against it first. Every committed item needs an owner role and an estimate; the sprint goal must be one sentence the team can test the sprint against. Do NOT invent backlog items or capacity that are not in the inputs.
+Commit only what fits the stated capacity — carry-over items count against it first. Every committed item needs an owner role and a positive estimate in the same unit as the capacity, and every item entering this sprint unfinished from the last one is flagged in `carryOver` with the reason it did not finish. Do NOT invent backlog items or capacity that are not in the inputs.
 
 Return ONLY a single JSON object (no markdown fences, no prose outside it) of this EXACT shape:
 ```json
 {
-  "sprintGoal": "the one-sentence outcome this sprint commits to",
-  "timebox": {"start": "2026-08-03", "end": "2026-08-14"},
-  "capacityPoints": 20,
-  "committedItems": [
+  "sprintId": "sprint-2026-08-A",
+  "capacity": 20,
+  "committed": [
     {
-      "id": "the backlog item's id",
-      "title": "short item title",
+      "issueId": "the backlog item's issue id",
       "ownerRole": "developer",
-      "estimatePoints": 3,
-      "carryOver": false,
-      "rationale": "why this item made the commitment"
+      "estimate": 5
     }
   ],
-  "deferred": [
-    {"id": "item id", "reason": "why it did not fit the capacity"}
-  ],
-  "risks": ["known risks to the commitment"]
+  "carryOver": [
+    {
+      "issueId": "issue-3",
+      "reason": "why this item did not finish last sprint"
+    }
+  ]
 }
 ```
 
 Rules:
-- The sum of `estimatePoints` across `committedItems` MUST NOT exceed `capacityPoints`.
-- Every committed item MUST carry an `ownerRole`, an `estimatePoints`, and a non-empty `rationale`.
-- Items you considered but excluded go in `deferred` with a reason — do not silently drop them.
+- Name the `sprintId` (the time-box this commitment binds to) and a positive `capacity`.
+- Commit at least one item; the sum of `estimate` across `committed` MUST NOT exceed `capacity`.
+- Every committed item MUST carry an `issueId`, an `ownerRole` that is an agent-role wire string from the taxonomy (e.g. `developer`, `tester`, `architect`), and a positive `estimate`.
+- Every `carryOver` entry MUST state its `issueId` and a non-empty `reason` — carry-over is flagged, never silent. Use an empty `carryOver` array when nothing carries over.

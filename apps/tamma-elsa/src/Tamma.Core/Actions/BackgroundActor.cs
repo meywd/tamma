@@ -131,6 +131,16 @@ public enum BackgroundActor
     /// governance machinery itself.</summary>
     [Wire("action-catalog-startup-validator")] ActionCatalogStartupValidator,
 
+    /// <summary><c>Tamma.Api.Services.Actions.GovernancePolicySnapshotPrimingService</c>
+    /// — Story 43-5's cold-start primer for the action-assignments policy
+    /// snapshot (the ProviderSettingsStorePrimingService review-F1 posture):
+    /// awaits one control-plane read before the host serves traffic, fail-soft,
+    /// so persisted autonomy policy applies from the first request. Read-only —
+    /// it writes nothing anywhere. Catalogued because the hosted-service sweep
+    /// binds EVERY <c>IHostedService</c> class, the governance machinery
+    /// included.</summary>
+    [Wire("governance-policy-snapshot-priming-service")] GovernancePolicySnapshotPrimingService,
+
     /// <summary><c>Tamma.Api.Services.PlatformTasks.PlatformTaskWorker</c> — the
     /// generic platform-task drain loop (one task at a time per process;
     /// <c>RunOnStartup</c> ships <c>false</c>). Registered via a

@@ -29,4 +29,22 @@ public interface IAcceptanceRulesResolver
     /// </summary>
     Task<ResolvedAcceptanceRules> ResolveForTenantAsync(
         Guid tenantId, DocumentTypeKey documentType, CancellationToken ct = default);
+
+    /// <summary>
+    /// Story 43-5 AC11 — resolve the single-user principal's BASE row (the
+    /// deployment-wide dial + the always-escalate list): base user override →
+    /// shipped <see cref="AcceptanceDefaults.Rules"/>. Lifted from the concrete
+    /// <c>AcceptanceRulesService</c> so the autonomy gate (which needs the dial
+    /// for the current principal) can reach it through the interface.
+    /// </summary>
+    Task<ResolvedAcceptanceRules> ResolveBaseAsync(
+        Guid? userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Tenant variant of <see cref="ResolveBaseAsync"/> (the <c>ForTenant</c>
+    /// naming rationale above applies — never an overload on <c>Guid</c> vs
+    /// <c>Guid?</c>).
+    /// </summary>
+    Task<ResolvedAcceptanceRules> ResolveBaseForTenantAsync(
+        Guid tenantId, CancellationToken ct = default);
 }

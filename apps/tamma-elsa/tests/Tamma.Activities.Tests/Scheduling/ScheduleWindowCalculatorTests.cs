@@ -126,6 +126,86 @@ public class ScheduleWindowCalculatorTests
         windows.Should().HaveCount(10);
     }
 
+    // ── ComputeDue (MAJOR-2 fix, 2026-07-29) — the fire path's catch-up
+    // computation must yield the TRUE latest due window regardless of the
+    // backlog size ──
+
+    [Test]
+    public void ComputeDue_MinutelyCron_18HourGap_YieldsTheMostRecentDueWindow_AndTheTrueCount()
+    {
+        var now = new DateTimeOffset(2026, 07, 27, 12, 30, 00, TimeSpan.Zero);
+        var since = now.AddHours(-18); // 1080 due windows — over the OLD 1000 cap
+
+        var due = ScheduleWindowCalculator.ComputeDue("* * * * *", since, now);
+
+        due.LastWindow.Should().Be(now,
+            "MAJOR-2 — the pre-fix capped ascending list held the OLDEST 1000 windows, "
+            + "so the 'most recent' fired window was ~7h stale");
+        due.FirstWindow.Should().Be(since.AddMinutes(1));
+        due.PreviousWindow.Should().Be(now.AddMinutes(-1));
+        due.DueCount.Should().Be(1080);
+        due.CountSaturated.Should().BeFalse();
+    }
+
+    [Test]
+    public void ComputeDue_WhenTheCountCapSaturates_StillYieldsTheTrueLatestWindow_AndFlagsIt()
+    {
+        var now = new DateTimeOffset(2026, 07, 27, 12, 30, 00, TimeSpan.Zero);
+        var since = now.AddHours(-18);
+
+        var due = ScheduleWindowCalculator.ComputeDue("* * * * *", since, now, maxCount: 1000);
+
+        due.LastWindow.Should().Be(now,
+            "the counting cap must never make the FIRED window stale — the walk re-anchors near now");
+        due.PreviousWindow.Should().Be(now.AddMinutes(-1));
+        due.DueCount.Should().Be(1000, "the count saturates at the cap");
+        due.CountSaturated.Should().BeTrue("so consumers know DueCount means 'at least'");
+    }
+
+    [Test]
+    public void ComputeDue_SparseCron_SaturatedCap_StillFindsTheTrueLatestWindow_AndItsPredecessor()
+    {
+        var now = new DateTimeOffset(2026, 07, 27, 12, 30, 00, TimeSpan.Zero);
+        var since = now.AddHours(-24);
+
+        // Hourly with a cap of 2: the primary walk stops a long way from now.
+        var due = ScheduleWindowCalculator.ComputeDue("0 * * * *", since, now, maxCount: 2);
+
+        due.LastWindow.Should().Be(new DateTimeOffset(2026, 07, 27, 12, 00, 00, TimeSpan.Zero));
+        due.PreviousWindow.Should().Be(new DateTimeOffset(2026, 07, 27, 11, 00, 00, TimeSpan.Zero),
+            "the newest SKIPPED window must be the one immediately before the fired window, "
+            + "not wherever the capped walk happened to stop");
+        due.CountSaturated.Should().BeTrue();
+    }
+
+    [Test]
+    public void ComputeDue_SingleDueWindow_FirstEqualsLast_AndHasNoPredecessor()
+    {
+        var now = new DateTimeOffset(2026, 07, 27, 12, 30, 00, TimeSpan.Zero);
+        var since = now.AddMinutes(-61);
+
+        var due = ScheduleWindowCalculator.ComputeDue("0 * * * *", since, now);
+
+        due.LastWindow.Should().Be(new DateTimeOffset(2026, 07, 27, 12, 00, 00, TimeSpan.Zero));
+        due.FirstWindow.Should().Be(due.LastWindow);
+        due.PreviousWindow.Should().BeNull();
+        due.DueCount.Should().Be(1);
+        due.CountSaturated.Should().BeFalse();
+    }
+
+    [Test]
+    public void ComputeDue_MalformedCron_FutureSince_OrEmptyRange_YieldTheDefault_FailClosed()
+    {
+        var now = new DateTimeOffset(2026, 07, 27, 12, 30, 00, TimeSpan.Zero);
+
+        ScheduleWindowCalculator.ComputeDue("garbage", now.AddDays(-1), now)
+            .Should().Be(default(DueWindowResult), "row data must never throw at fire time");
+        ScheduleWindowCalculator.ComputeDue("0 * * * *", now.AddHours(2), now)
+            .Should().Be(default(DueWindowResult), "clock skew must not produce a bogus window");
+        ScheduleWindowCalculator.ComputeDue("0 * * * *", now.AddSeconds(-30), now)
+            .Should().Be(default(DueWindowResult), "no occurrence in the range ⇒ nothing due");
+    }
+
     // ── WindowKey ──
 
     [Test]

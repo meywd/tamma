@@ -79,6 +79,15 @@ public class DocumentInstance
     /// </summary>
     public Guid? TenantId { get; set; }
 
+    /// <summary>
+    /// Story 41-1c — the document's audience tag (a <c>ProseAudience</c> wire
+    /// string; envelope <c>audience</c>). NULL for every non-prose document and
+    /// for rows written before the tag existed; a prose row cannot be WRITTEN
+    /// without one (enforced by <c>ProseDocumentType.Validate</c> at the
+    /// repository's write door, never by a NOT NULL column — 41-1c D8).
+    /// </summary>
+    public string? Audience { get; set; }
+
     /// <summary>The typed document body as JSONB (envelope payload raw JSON).</summary>
     public string BodyJson { get; set; } = "{}";
 

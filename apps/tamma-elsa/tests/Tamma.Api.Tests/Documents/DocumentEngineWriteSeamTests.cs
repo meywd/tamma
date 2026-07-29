@@ -183,7 +183,7 @@ public class DocumentEngineWriteSeamTests
 
         public Task<DocumentInstance?> GetByIdAsync(Guid tenantId, Guid documentId, CancellationToken ct)
             => throw new NotSupportedException();
-        public Task<IReadOnlyList<DocumentInstance>> ListByIssueAsync(Guid tenantId, string issueId, CancellationToken ct)
+        public Task<IReadOnlyList<DocumentInstance>> ListByIssueAsync(Guid tenantId, string issueId, string? audience, CancellationToken ct)
             => throw new NotSupportedException();
         public Task<IReadOnlyList<DocumentInstance>> GetLatestAcceptedAsync(Guid tenantId, string issueId, CancellationToken ct)
             => throw new NotSupportedException();

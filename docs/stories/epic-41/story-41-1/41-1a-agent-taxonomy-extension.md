@@ -147,3 +147,31 @@ summarize-stakeholder)` cell is unusable, see 41-5), 41-6, 41-7, 41-8, 41-10, 41
 ## Estimated Effort
 
 4–5 days
+
+## Follow-ups from adversarial review (2026-07-29)
+
+**Resolved in the review-fix pass (same date):** the shipped `plan-sprint` and `author-ui-spec`
+templates instructed JSON shapes that fail their own intended validators
+(`SprintPlanDocumentType`: `SPRINT_ID_MISSING`/`CAPACITY_INVALID`/`NO_COMMITTED_ITEMS`;
+`UxSpecDocumentType`: `NO_FLOWS`/`SCREEN_UNKNOWN_FLOW`/`SCREEN_MISSING_A11Y_REQUIREMENTS`), breaking
+this story's D5 cross-lane promise. Both templates were rewritten to the exact wire shapes
+(version 1 → 2), and `TemplateExampleConformanceTests` gained an unbound-cell gate
+(`ConformingUnboundCells` + `EveryConformingUnboundCell_ShippedExampleValidatesAgainstItsIntendedType`)
+so an unbound cell whose intended type is registered can no longer drift silently.
+
+**Open follow-up — finding 6 (case-variant alias removal nit):** `LegacyRoleAliases` is an
+`OrdinalIgnoreCase` table while `RolePhaseMap.ValidRoles` is an Ordinal (case-sensitive) set derived
+from the enum wire strings. Before D3, a case-variant key such as `Scrum_Master` or `SCRUM_MASTER`
+resolved (case-insensitively) through the alias to `product_owner`; after the alias removal it matches
+neither the alias table nor `ValidRoles`, so `NormalizeRole` passes it through unchanged and
+`AgentRoleExtensions.Parse` throws. Exact-case `scrum_master` (the only spelling the system ever
+wrote) is unaffected. Low impact; if case-variant tolerance is wanted, `NormalizeRole` should
+case-fold against `ValidRoles` — decide once, with a test either way.
+
+**Open follow-up — finding 7 (single-producer watch for 41-27):** `ux_designer` carries both
+`draft-user-flow` and `author-ui-spec`. 41-1b's shared-contract rule (its AC6 note) requires each
+document type to declare exactly ONE producing cell, and `UxSpec` declares `(ux_designer,
+author-ui-spec)`. When 41-27 lands its workflow it must bind `author-ui-spec` as the `ux-spec`
+producer and must NOT also dispatch `draft-user-flow` as a `ux-spec` producer — if `draft-user-flow`
+produces a typed document at all, it needs its own type (or stays prose/unbound). Watch this at
+41-27's `ContractBindingTests` entry.

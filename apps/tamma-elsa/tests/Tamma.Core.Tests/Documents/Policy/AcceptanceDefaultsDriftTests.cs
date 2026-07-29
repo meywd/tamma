@@ -115,6 +115,26 @@ public class AcceptanceDefaultsDriftTests
         sel.DecisionRule.Should().Be(ReviewDecisionRule.Unanimous);
     }
 
+    // ── Story 41-1c D6 — prose gets a single tech_writer reviewer ──
+
+    [Test]
+    public void Prose_defaults_to_a_single_tech_writer_reviewer()
+    {
+        // 41-1c AC6: prose must NOT reach the `_ => Rules` architect catch-all by
+        // accident, and must NOT be a panel row (PanelRoster deliberately excludes
+        // tech_writer — the pin above). Acceptor requirement stays Any: the
+        // autonomy dial alone decides who accepts prose.
+        var rules = AcceptanceDefaults.For(DocumentTypeKey.Prose);
+        rules.Should().NotBe(AcceptanceDefaults.Rules,
+            "'prose' must not silently take the single-architect catch-all (41-1c AC6)");
+        var sel = rules.ReviewerSelection;
+        sel.Mode.Should().Be(ReviewerMode.SingleReviewer);
+        sel.ReviewerRole.Should().Be(AgentRole.TechWriter.ToWire());
+        sel.PanelRoles.Should().BeEmpty();
+        sel.DecisionRule.Should().Be(ReviewDecisionRule.Unanimous);
+        rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Any);
+    }
+
     // ── Story 39-13 D4 — the per-type acceptor requirement (autonomy floor) ──
 
     [Test]
@@ -142,6 +162,7 @@ public class AcceptanceDefaultsDriftTests
     [TestCase(DocumentTypeKey.BacklogOrdering)]
     [TestCase(DocumentTypeKey.TestPlan)]
     [TestCase(DocumentTypeKey.UxSpec)]
+    [TestCase(DocumentTypeKey.Prose)]
     public void Every_unpinned_type_imposes_no_acceptor_floor(DocumentTypeKey type) =>
         AcceptanceDefaults.For(type).AcceptorRequirement.Should().Be(AcceptorRequirement.Any,
             "the field is additive — only 'design' (39-13 D4) and the 41-1b pair " +

@@ -42,6 +42,11 @@ public enum DocumentTypeKey
     [Wire("test-plan")]            TestPlan,
     [Wire("threat-model")]         ThreatModel,
     [Wire("ux-spec")]              UxSpec,
+
+    // Story 41-1c — the prose family's single type: kind + audience from closed
+    // vocabularies, body deliberately unvalidated markdown ("prose stays prose").
+    // Registered atomically with ProseDocumentType (same gate as the 41-1b six).
+    [Wire("prose")]                Prose,
 }
 
 public static class DocumentTypeKeyExtensions

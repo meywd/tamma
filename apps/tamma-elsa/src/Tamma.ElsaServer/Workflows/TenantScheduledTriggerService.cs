@@ -35,6 +35,17 @@ public sealed class TenantScheduledTriggerOptions
     /// <summary>Bounds a cold start on a large fleet (D5).</summary>
     public int MaxFiresPerTick { get; set; } = 50;
 
+    /// <summary>
+    /// Per-dispatch timeout (MODERATE-3 fix, 2026-07-29). One hung
+    /// <c>IWorkflowDispatcher.DispatchAsync</c> call would otherwise stall
+    /// every remaining tenant on the pod for the rest of the tick while
+    /// holding the advisory-lock connection. On timeout the fire is stamped
+    /// <c>failed</c> (burn-the-window, Correction 4 — the NEXT window is the
+    /// recovery path) and the loop continues. Non-positive disables the
+    /// timeout.
+    /// </summary>
+    public TimeSpan DispatchTimeout { get; set; } = TimeSpan.FromSeconds(30);
+
     /// <summary>Fire-ledger retention window (D2).</summary>
     public TimeSpan LedgerRetention { get; set; } = TimeSpan.FromDays(90);
 }
@@ -175,8 +186,26 @@ public sealed class TenantScheduledTriggerService : BackgroundService
         // tick before the due computation below sees the concrete rows.
         var activeTenantIds = await repository.SnapshotActiveTenantIdsAsync(ct)
             .ConfigureAwait(false);
-        await repository.MaterialiseTemplatesAsync(activeTenantIds, now.UtcDateTime, ct)
-            .ConfigureAwait(false);
+        try
+        {
+            await repository.MaterialiseTemplatesAsync(activeTenantIds, now.UtcDateTime, ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // MODERATE-4 fix (2026-07-29): materialisation is INSIDE the
+            // tick's failure isolation. A poison template row (the repository
+            // additionally isolates per template) or a transient DB error here
+            // must not abort the tick — the already-materialised concrete
+            // triggers below still fire, and the next tick retries
+            // materialisation.
+            _logger.LogWarning(ex,
+                "schedule.materialise.failed — template materialisation failed; continuing the tick with existing concrete triggers.");
+        }
 
         var triggers = await repository
             .ListEnabledConcreteTriggersAsync(activeTenantIds, ct)
@@ -243,30 +272,37 @@ public sealed class TenantScheduledTriggerService : BackgroundService
     {
         var since = new DateTimeOffset(
             DateTime.SpecifyKind(trigger.LastFiredAt ?? trigger.CreatedAt, DateTimeKind.Utc));
-        var windows = ScheduleWindowCalculator.DueWindows(trigger.CronExpression, since, now);
-        if (windows.Count == 0) return false;
+        // MAJOR-2 fix (2026-07-29): ComputeDue guarantees LastWindow is the
+        // TRUE most recent due occurrence even when the backlog exceeds the
+        // counting cap (the old capped ascending list held the OLDEST 1000,
+        // so a >16.7h minutely backlog fired a ~7h-stale window).
+        var due = ScheduleWindowCalculator.ComputeDue(trigger.CronExpression, since, now);
+        if (due.LastWindow is not { } window) return false;
 
         // D7 — bounded catch-up: fire ONLY the most recent window; record the
-        // gap LOUDLY so it is auditable rather than invisible.
-        if (windows.Count > 1)
+        // gap LOUDLY so it is auditable rather than invisible. When the count
+        // saturated, skippedCount is a floor ("at least N") and the event
+        // says so via skippedCountSaturated.
+        if (due.DueCount > 1)
         {
-            var skipped = windows.Count - 1;
+            var skipped = due.DueCount - 1;
+            var firstSkippedKey = ScheduleWindowCalculator.WindowKey(due.FirstWindow!.Value);
+            var lastSkippedKey = ScheduleWindowCalculator.WindowKey(due.PreviousWindow!.Value);
             _logger.LogWarning(
-                "schedule.window.skipped trigger={TriggerId} tenant={TenantId} skippedCount={Skipped} first={First} last={Last}",
-                trigger.Id, trigger.TenantId, skipped,
-                ScheduleWindowCalculator.WindowKey(windows[0]),
-                ScheduleWindowCalculator.WindowKey(windows[^2]));
+                "schedule.window.skipped trigger={TriggerId} tenant={TenantId} skippedCount={Skipped} saturated={Saturated} first={First} last={Last}",
+                trigger.Id, trigger.TenantId, skipped, due.CountSaturated,
+                firstSkippedKey, lastSkippedKey);
             await EmitAsync(events, ScheduleEvents.WindowSkipped, trigger.TenantId, trigger,
-                windowKey: ScheduleWindowCalculator.WindowKey(windows[^1]),
+                windowKey: ScheduleWindowCalculator.WindowKey(window),
                 data: new
                 {
                     skippedCount = skipped,
-                    firstSkippedWindowKey = ScheduleWindowCalculator.WindowKey(windows[0]),
-                    lastSkippedWindowKey = ScheduleWindowCalculator.WindowKey(windows[^2]),
+                    skippedCountSaturated = due.CountSaturated,
+                    firstSkippedWindowKey = firstSkippedKey,
+                    lastSkippedWindowKey = lastSkippedKey,
                 }, ct).ConfigureAwait(false);
         }
 
-        var window = windows[^1];
         var windowKey = ScheduleWindowCalculator.WindowKey(window);
         var tenantId = trigger.TenantId!.Value;
 
@@ -333,6 +369,22 @@ public sealed class TenantScheduledTriggerService : BackgroundService
             if (ct.IsCancellationRequested) break;
             try
             {
+                // MAJOR-1 fix (2026-07-29): the list above is an unclaimed
+                // read — two pods ticking concurrently both see the same
+                // pending row. This CAS is the arbiter: exactly one pod wins
+                // the dispatch attempt (DispatchedAt stamped while Outcome is
+                // still 'claimed'); losers skip. A crash — or a failed
+                // outcome stamp — after a won CAS BURNS the fire (the
+                // pending list filters DispatchedAt IS NULL), matching the
+                // cron path's burn-the-window at-most-once semantics; a
+                // pending manual row can never be dispatched twice nor loop.
+                if (!await repository.TryClaimManualFireForDispatchAsync(
+                        fire.Id, _timeProvider.GetUtcNow().UtcDateTime, ct)
+                        .ConfigureAwait(false))
+                {
+                    continue;
+                }
+
                 if (await DispatchAndStampAsync(
                         repository, dispatcher, events, trigger, fire,
                         _timeProvider.GetUtcNow(), ct).ConfigureAwait(false))
@@ -381,23 +433,46 @@ public sealed class TenantScheduledTriggerService : BackgroundService
             Input = input,
         };
 
+        // MODERATE-3 fix (2026-07-29): per-dispatch timeout. The linked CTS
+        // cancels a cooperative dispatcher; WaitAsync additionally abandons a
+        // dispatcher that IGNORES its token, so one hung dispatch cannot
+        // stall the remaining tenants on the pod while holding the
+        // advisory-lock connection. Timeout ⇒ stamp 'failed' (burn the
+        // window) and continue the loop.
+        var timeout = _options.Value.DispatchTimeout;
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (timeout > TimeSpan.Zero) timeoutCts.CancelAfter(timeout);
         try
         {
-            await dispatcher.DispatchAsync(request, new DispatchWorkflowOptions(), ct)
+            var dispatchTask = dispatcher.DispatchAsync(
+                request, new DispatchWorkflowOptions(), timeoutCts.Token);
+            await (timeout > TimeSpan.Zero
+                    ? dispatchTask.WaitAsync(timeout, ct)
+                    : dispatchTask)
                 .ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw; // service stop — propagate, never stamp
+        }
+        catch (Exception ex)
         {
             // Correction 4 — at-most-once: stamp 'failed' and let the NEXT
-            // window recover; never re-dispatch this window.
+            // window recover; never re-dispatch this window. A timeout
+            // (TimeoutException from WaitAsync, or the linked token's OCE)
+            // is a failure like any other.
+            timeoutCts.Cancel(); // tell an abandoned in-flight dispatch to stop
+            var detail = ex is TimeoutException or OperationCanceledException
+                ? $"dispatch timed out after {timeout}"
+                : ex.Message;
             await repository.StampOutcomeAsync(
-                    fire.Id, "failed", null, ex.Message, null, ct)
+                    fire.Id, "failed", null, detail, null, ct)
                 .ConfigureAwait(false);
             _logger.LogWarning(ex,
-                "schedule.fire.dispatch_failed trigger={TriggerId} tenant={TenantId} window={WindowKey} — next window is the recovery path",
-                fire.TriggerId, fire.TenantId, fire.WindowKey);
+                "schedule.fire.dispatch_failed trigger={TriggerId} tenant={TenantId} window={WindowKey} detail={Detail} — next window is the recovery path",
+                fire.TriggerId, fire.TenantId, fire.WindowKey, detail);
             await EmitAsync(events, ScheduleEvents.FireFailed, fire.TenantId, trigger,
-                fire.WindowKey, data: new { error = ex.Message }, ct).ConfigureAwait(false);
+                fire.WindowKey, data: new { error = detail }, ct).ConfigureAwait(false);
             return false;
         }
 

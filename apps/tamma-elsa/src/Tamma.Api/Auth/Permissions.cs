@@ -88,6 +88,19 @@ public static class Permissions
         // in the handler. Single-user mode is unaffected — every signed-up
         // user is auto-owner of their personal tenant.
         ["schedules:manage"] = ["admin", "owner"],
+        // Story 43-5/43-6 — Action Catalog automation toggles. Mirrors
+        // acceptance-rules:manage: a tenant's per-action / per-group autonomy
+        // assignments must be reachable by tenant_owner OR tenant_admin
+        // (member → 403); the owner-only settings:manage would 403 every
+        // tenant_admin. The PLATFORM CEILING is deliberately NOT covered by
+        // this permission — ceiling writes ride PlatformOwnerAccess (the
+        // platformRole=platform_admin claim), because the ceiling is the only
+        // thing standing between a tenant admin and full automation of a
+        // destructive action (epic 43 README OQ4). One permission for the
+        // whole gating plane — tools:manage is never created. Single-user
+        // mode is unaffected — every signed-up user is auto-owner of their
+        // personal tenant.
+        ["actions:manage"] = ["admin", "owner"],
     };
 
     public static bool HasPermission(string? role, string? permission)

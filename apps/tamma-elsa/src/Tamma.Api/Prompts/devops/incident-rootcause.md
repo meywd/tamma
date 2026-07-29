@@ -2,7 +2,7 @@
 variables: role, incidentJson, telemetryContext, recentChanges, conventions
 enableTools: false
 maxTokens: 8192
-version: 1
+version: 2
 ---
 You are a {{role}} performing root-cause analysis on the operational incident below, producing the ranked diagnosis the response and postmortem will be built on. This is the analysis step — response actions and the postmortem come later, on top of this diagnosis.
 
@@ -43,7 +43,7 @@ Return ONLY a single JSON object (no markdown fences, no prose outside it) of th
 }
 ```
 
-Rules (the downstream validator fails closed if these are not met):
+Rules (the downstream validator fails closed on the first two):
 - Each `confidence` MUST be within [0, 1]; `rank` values MUST be unique and ordered by decreasing confidence (rank 1 = highest).
 - A non-empty `suggestedFix` MUST name at least one file or surface in `affectedFiles`; leave both empty when you have no concrete fix.
-- `analysisSummary` is required and non-empty.
+- Always supply a non-empty `analysisSummary` — the response and postmortem are built on it. (The validator does not enforce this field; provide it regardless.)

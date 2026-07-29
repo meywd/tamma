@@ -2,6 +2,7 @@ using FluentAssertions;
 using Npgsql;
 using NUnit.Framework;
 using Tamma.Api.Tests.Documents;
+using Tamma.Core;
 using Tamma.Data.Entities;
 using Tamma.Data.Pooling;
 using Tamma.Data.Repositories;
@@ -114,6 +115,71 @@ public class TrackerPreferenceRepositoryTests
         wasCreatedAgain.Should().BeFalse();
         updated.Version.Should().Be(2);
         updated.BoardGroupBy.Should().Be("kind");
+    }
+
+    [Test]
+    public async Task Junk_DefaultKind_is_a_typed_error_not_a_db_check_violation()
+    {
+        var userId = Guid.NewGuid();
+
+        var junk = () => _repository.UpsertAsync(new TrackerPreference
+        {
+            UserId = userId,
+            DefaultKind = "sprinting", // not a WorkItemKind wire
+        });
+        (await junk.Should().ThrowExactlyAsync<TammaError>(
+                "junk must fail loud at the wire boundary, never as raw 23514 off "
+                + "ck_tracker_preferences_default_kind"))
+            .Which.Code.Should().Be("TRACKER.UNKNOWN_KIND");
+        (await _repository.GetAsync(userId)).Should().BeNull("nothing may reach the database");
+
+        // The tenant surface routes through the same choke point.
+        var tenantJunk = () => _repository.UpsertForTenantAsync(new TrackerPreference
+        {
+            TenantId = Guid.NewGuid(),
+            DefaultKind = "bug", // TriageIssueType's axis, not WorkItemKind's
+        });
+        (await tenantJunk.Should().ThrowExactlyAsync<TammaError>())
+            .Which.Code.Should().Be("TRACKER.UNKNOWN_KIND");
+
+        // Null stays a valid "no default" fact; a valid wire passes.
+        var (row, _) = await _repository.UpsertAsync(new TrackerPreference { UserId = userId });
+        row.DefaultKind.Should().BeNull();
+        var (updated, _) = await _repository.UpsertAsync(new TrackerPreference
+        {
+            UserId = userId,
+            DefaultKind = "spike",
+        });
+        updated.DefaultKind.Should().Be("spike");
+    }
+
+    [Test]
+    public async Task Concurrent_first_upserts_for_one_principal_converge_on_a_single_row()
+    {
+        // Two (here: eight) concurrent FIRST upserts race the
+        // check-then-insert window; losers hit UX_tracker_preferences_principal
+        // and must retry as an update of the winner's row — never surface the
+        // raw DbUpdateException.
+        var userId = Guid.NewGuid();
+
+        var results = await Task.WhenAll(Enumerable.Range(0, 8).Select(i =>
+            _repository.UpsertAsync(new TrackerPreference
+            {
+                UserId = userId,
+                BoardGroupBy = $"group-{i}",
+            })));
+
+        results.Count(r => r.WasCreated).Should().Be(1,
+            "exactly one racer may insert; every loser reports an update of the winner's row");
+        results.Select(r => r.Entity.Id).Distinct().Should().HaveCount(1);
+
+        var final = await _repository.GetAsync(userId);
+        final.Should().NotBeNull();
+        // NOTE: no Version == 8 assertion — Version is not yet a concurrency
+        // token (adversarial-review finding 3, deferred to the model-config
+        // lane), so concurrent updates can lose increments. Row-singularity
+        // and the typed contract are what THIS fix owns.
+        final!.Version.Should().BeGreaterThanOrEqualTo(1);
     }
 
     [Test]

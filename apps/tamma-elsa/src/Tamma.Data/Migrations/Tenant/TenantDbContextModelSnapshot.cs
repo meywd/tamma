@@ -1041,6 +1041,11 @@ namespace Tamma.Data.Migrations.Tenant
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("Audience")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)")
+                        .HasColumnName("audience");
+
                     b.Property<string>("BodyJson")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -1124,6 +1129,10 @@ namespace Tamma.Data.Migrations.Tenant
                         .IsUnique()
                         .HasDatabaseName("UX_document_instances_supersedes")
                         .HasFilter("supersedes_document_id IS NOT NULL");
+
+                    b.HasIndex("IssueId", "Audience")
+                        .HasDatabaseName("IX_document_instances_issue_audience")
+                        .HasFilter("audience IS NOT NULL");
 
                     b.HasIndex("IssueId", "CreatedAt")
                         .HasDatabaseName("IX_document_instances_issue_created");

@@ -171,6 +171,13 @@ types) `Tamma.Activities.Tests/Workflows/ContractBindingTests.cs`.
   capacity), `COMMITTED_ITEM_MISSING_OWNER_ROLE`, `COMMITTED_ITEM_MISSING_ESTIMATE`,
   `CARRYOVER_NOT_FLAGGED`. The codes are the deliverable — AC2 requires the *code*, not "invalid" —
   and they are what 39-9's repair ring feeds back to the model.
+  > **Amendment (2026-07-29, adversarial review):** four duplicate-identifier codes were added after
+  > review found the shipped validators accepted ambiguous identifier sets (all follow the
+  > `CRITERION_ID_DUPLICATED` pattern): `BacklogOrdering` gains `ITEM_ID_DUPLICATED` (the same
+  > `itemId` at two ranks validated, breaking the total-order rule), `TestPlan` gains
+  > `RISK_AREA_NAME_DUPLICATED` (duplicate risk-area names made `riskAreaRef` ambiguous), and
+  > `ThreatModel` gains `ASSET_ID_DUPLICATED` and `THREAT_ID_DUPLICATED`. One rejecting and one
+  > accepting fixture per new rule in the corresponding `Tamma.Core.Tests` type-test files.
 - **D8 — tests live in `Tamma.Core.Tests` only, except the two `ContractBindingTests` entries.** 39-3 D7 /
   39-4 D8 settled that `Tamma.Core.Tests` takes no `ProjectReference` to `Tamma.ElsaServer` or
   `Tamma.Activities`. AC3's store round-trip therefore runs where the existing 39-11 store tests run
