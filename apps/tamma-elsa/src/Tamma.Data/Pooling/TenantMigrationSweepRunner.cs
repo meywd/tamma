@@ -39,6 +39,30 @@ namespace Tamma.Data.Pooling;
 /// no stuck gate needing manual clearing, which is the property a fleet-DDL
 /// escape hatch must have.</para>
 ///
+/// <para><b>…and that is why the lease session is NON-POOLED</b> (2026-07-31,
+/// the CI flake in <c>Dry_runs_are_not_gated_by_the_apply_single_flight</c>).
+/// "The lock dies with the connection" is only true of a connection that is
+/// actually CLOSED. The lease used to be an <see cref="ControlPlaneDbContext"/>
+/// straight off <see cref="IDbContextFactory{TContext}"/>, i.e. an Npgsql
+/// POOLED connection: disposing it returns the connector to the pool with the
+/// backend session — and therefore the advisory lock — still alive, and
+/// Npgsql defers its <c>DISCARD ALL</c> reset (which is what runs
+/// <c>pg_advisory_unlock_all()</c>) until that connector is next USED. So any
+/// path that dropped the context without an explicit <c>pg_advisory_unlock</c>
+/// — <see cref="Dispose"/> on host shutdown, or <see cref="Dispose"/> winning
+/// the <see cref="RunLease.TakeSession"/> race against
+/// <see cref="ReleaseAsync"/> — parked the cluster-wide fleet-DDL gate SHUT on
+/// an idle pooled connection, for as long as the pool kept that connector
+/// (Npgsql's <c>Connection Idle Lifetime</c> is 300s by default and
+/// <c>MinPoolSize</c> connectors are never pruned at all). That is exactly the
+/// "stuck gate needing manual clearing" this design says it cannot have. The
+/// lease now opens its own connection with <c>Pooling=false</c>, so closing it
+/// really does end the backend session and really does drop the lock — on the
+/// orderly path, on the Dispose path, on an unlock that throws, and on a
+/// process crash alike. It costs one extra connect per apply run (there is at
+/// most one at a time) and it stops the lease pinning a pooled EF context for
+/// the entire duration of a fleet-wide sweep.</para>
+///
 /// <para><b>…and the lock is re-verified, because a connection can die without
 /// the pod dying</b> (2026-07-30 review, Finding 1.1). "The lock dies with the
 /// connection" is true but was only half the story: the sweep runs over
@@ -429,13 +453,14 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
 
     private async Task<bool> StillHoldsClusterLockAsync(RunLease lease, CancellationToken ct)
     {
-        var cp = lease.Context;
-        if (cp is null) return false;
+        // Only ever non-null on the Postgres path — the non-Postgres branch of
+        // TryAcquireClusterLockAsync leaves HoldsClusterLock false, and the
+        // watchdog only starts for a lease that holds the cluster lock.
+        var conn = lease.Session;
+        if (conn is null) return false;
 
         try
         {
-            if (!cp.Database.IsNpgsql()) return true;
-            var conn = (NpgsqlConnection)cp.Database.GetDbConnection();
             if (conn.State != ConnectionState.Open) return false;
 
             await using var cmd = conn.CreateCommand();
@@ -458,28 +483,45 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
     }
 
     /// <summary>
-    /// Open a dedicated control-plane session and take the sweep's advisory
-    /// lock on it. The session (and therefore the lock) lives for the run's
-    /// duration on <see cref="RunLease.Context"/>.
+    /// Open a dedicated, NON-POOLED control-plane session and take the sweep's
+    /// advisory lock on it. The session (and therefore the lock) lives for the
+    /// run's duration on <see cref="RunLease.Session"/>.
+    ///
+    /// <para>The control-plane <see cref="DbContext"/> is used only to learn
+    /// the provider and the connection string, and is disposed immediately.
+    /// The lock must NOT ride a pooled connection — see the class doc: a
+    /// pooled connector handed back to the pool keeps the session, and
+    /// therefore the lock, alive.</para>
     /// </summary>
     private async Task<bool> TryAcquireClusterLockAsync(RunLease lease, CancellationToken ct)
     {
-        var cp = await _cpFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
-        lease.Context = cp;
-
-        if (!cp.Database.IsNpgsql())
+        string connectionString;
+        await using (var cp = await _cpFactory.CreateDbContextAsync(ct).ConfigureAwait(false))
         {
-            // Non-Postgres (in-memory/sqlite test hosts): the process-local
-            // slot is the whole guard. Single-pod by construction there.
-            lease.HoldsClusterLock = false;
-            return true;
+            if (!cp.Database.IsNpgsql())
+            {
+                // Non-Postgres (in-memory/sqlite test hosts): the process-local
+                // slot is the whole guard. Single-pod by construction there.
+                lease.HoldsClusterLock = false;
+                return true;
+            }
+
+            connectionString = cp.Database.GetConnectionString()
+                ?? throw new InvalidOperationException(
+                    "The control-plane context exposes no connection string, so the sweep's "
+                    + "cluster-wide advisory lock cannot be taken on a dedicated session.");
         }
 
-        var conn = (NpgsqlConnection)cp.Database.GetDbConnection();
-        if (conn.State != ConnectionState.Open)
-            await conn.OpenAsync(ct).ConfigureAwait(false);
+        // Pooling=false is load-bearing, not a tuning choice: it is what makes
+        // "closing the connection releases the lock" true. See the class doc.
+        var dedicated = new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false };
+        var session = new NpgsqlConnection(dedicated.ConnectionString);
+        // Published BEFORE the open, so a failed open still hands the
+        // connection to ReleaseAsync/Dispose to be torn down.
+        lease.Session = session;
+        await session.OpenAsync(ct).ConfigureAwait(false);
 
-        await using var cmd = conn.CreateCommand();
+        await using var cmd = session.CreateCommand();
         cmd.CommandText = "SELECT pg_try_advisory_lock(@k);";
         cmd.Parameters.AddWithValue("k", AdvisoryLockKey);
         var acquired = (bool?)await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) == true;
@@ -495,34 +537,33 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
         }
 
         // Interlocked, not read-then-null: Dispose races this method for the
-        // same context and exactly one of them may dispose it.
-        var cp = lease.TakeContext();
-        if (cp is null) return;
+        // same session and exactly one of them may dispose it.
+        var session = lease.TakeSession();
+        if (session is null) return;
 
         try
         {
-            if (lease.HoldsClusterLock && cp.Database.IsNpgsql())
+            if (lease.HoldsClusterLock && session.State == ConnectionState.Open)
             {
-                var conn = (NpgsqlConnection)cp.Database.GetDbConnection();
-                if (conn.State == ConnectionState.Open)
-                {
-                    await using var unlock = conn.CreateCommand();
-                    unlock.CommandText = "SELECT pg_advisory_unlock(@k);";
-                    unlock.Parameters.AddWithValue("k", AdvisoryLockKey);
-                    await unlock.ExecuteScalarAsync().ConfigureAwait(false);
-                }
+                await using var unlock = session.CreateCommand();
+                unlock.CommandText = "SELECT pg_advisory_unlock(@k);";
+                unlock.Parameters.AddWithValue("k", AdvisoryLockKey);
+                await unlock.ExecuteScalarAsync().ConfigureAwait(false);
             }
         }
         catch (Exception ex)
         {
-            // Session-scoped: closing the connection releases it anyway. This
-            // is the reason the lock is session- and not transaction-scoped —
-            // there is no failure mode that leaves the gate stuck shut.
+            // Session-scoped on a NON-POOLED connection: the dispose below
+            // really does end the backend session, which releases the lock
+            // anyway. That is the reason the lock is session- and not
+            // transaction-scoped — there is no failure mode that leaves the
+            // gate stuck shut. (It is only true because the connection is not
+            // pooled; see the class doc.)
             _logger.LogDebug(ex, "tenant.migration_sweep.unlock_failed");
         }
         finally
         {
-            await cp.DisposeAsync().ConfigureAwait(false);
+            await session.DisposeAsync().ConfigureAwait(false);
         }
     }
 
@@ -573,38 +614,44 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
 
         RunLease? lease;
         lock (_gate) { lease = _localRun; _localRun = null; }
-        // TakeContext is interlocked: if ReleaseAsync is concurrently ending
-        // the run, exactly one of us gets the context and disposes it once.
-        if (lease?.TakeContext() is { } cp)
+        // TakeSession is interlocked: if ReleaseAsync is concurrently ending
+        // the run, exactly one of us gets the session and disposes it once.
+        if (lease?.TakeSession() is { } session)
         {
-            // Disposing the context closes the session, which releases the
-            // advisory lock — the crashed/stopped-pod path, exercised here on
-            // the orderly-shutdown path too.
-            cp.Dispose();
+            // The session is NON-POOLED, so disposing it genuinely closes the
+            // backend — which is what releases the advisory lock. This is the
+            // crashed/stopped-pod path, exercised here on the orderly-shutdown
+            // path too. On a pooled connection this line would hand the
+            // connector back to the pool with the lock still held and wedge
+            // the cluster-wide gate shut; see the class doc.
+            session.Dispose();
         }
     }
 
     /// <summary>The mutable half of a run: what has to be released when it ends.</summary>
     private sealed class RunLease(Guid runId, DateTimeOffset startedAt)
     {
-        private ControlPlaneDbContext? _context;
+        private NpgsqlConnection? _session;
 
         public Guid RunId { get; } = runId;
         public DateTimeOffset StartedAt { get; } = startedAt;
 
-        /// <summary>Holds the advisory lock's Postgres session open.</summary>
-        public ControlPlaneDbContext? Context
+        /// <summary>
+        /// The dedicated, NON-POOLED Postgres session that holds the advisory
+        /// lock open. Null on a non-Postgres provider (nothing to hold).
+        /// </summary>
+        public NpgsqlConnection? Session
         {
-            get => Volatile.Read(ref _context);
-            set => Volatile.Write(ref _context, value);
+            get => Volatile.Read(ref _session);
+            set => Volatile.Write(ref _session, value);
         }
 
         /// <summary>
-        /// Atomically claim the context for disposal. Dispose and ReleaseAsync
+        /// Atomically claim the session for disposal. Dispose and ReleaseAsync
         /// both end a run and both used to read-then-null, so both could
-        /// dispose the same context (Finding 1.5, second half).
+        /// dispose the same connection (Finding 1.5, second half).
         /// </summary>
-        public ControlPlaneDbContext? TakeContext() => Interlocked.Exchange(ref _context, null);
+        public NpgsqlConnection? TakeSession() => Interlocked.Exchange(ref _session, null);
 
         public bool HoldsClusterLock { get; set; }
     }

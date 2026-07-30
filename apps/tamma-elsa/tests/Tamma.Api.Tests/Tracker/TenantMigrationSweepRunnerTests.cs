@@ -417,6 +417,63 @@ public class TenantMigrationSweepRunnerTests
         runner.Dispose(); // idempotent
     }
 
+    [Test]
+    public async Task Disposing_mid_run_ends_the_lock_session_instead_of_parking_the_lock_on_a_pooled_connection()
+    {
+        // THE DEFECT (2026-07-31, found as a CI flake in
+        // Dry_runs_are_not_gated_by_the_apply_single_flight, which runs next
+        // alphabetically and was the first thing after this fixture's Dispose
+        // test to want the cluster lock):
+        //
+        // The lease held the advisory lock on an Npgsql POOLED connection, and
+        // Dispose() drops the lease WITHOUT issuing pg_advisory_unlock — it
+        // relied on "closing the connection ends the session". Closing a POOLED
+        // connection does not end the session: the connector goes back to the
+        // pool with the backend, and therefore the lock, still alive, and
+        // Npgsql defers the DISCARD ALL reset (which is what runs
+        // pg_advisory_unlock_all) until that connector is next USED. The
+        // cluster-wide fleet-DDL gate was therefore parked SHUT on an idle
+        // pooled connection — for up to Npgsql's 300s idle lifetime, or
+        // forever for a MinPoolSize connector — and the next pg_try_advisory_lock
+        // was refused unless the pool happened to hand back that exact
+        // connector. "Refused unless you win a pool draw" is the whole flake.
+        //
+        // The observer below is deliberately NOT pooled: a pooled probe could
+        // draw the leaked connector itself and clear the lock (via the deferred
+        // DISCARD ALL) before reading pg_locks, which is precisely how this bug
+        // hid. A separate session sees the truth every time.
+        var sweeper = new GatedSweeper();
+        var runner = NewRunner(sweeper);
+
+        var start = await runner.StartAsync(dryRun: false);
+        start.Accepted.Should().BeTrue();
+        await sweeper.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        (await SweepLockIsHeldOnTheClusterAsync()).Should().BeTrue(
+            "the running apply really does hold the gate — otherwise this test proves nothing");
+
+        runner.Dispose();
+        await WaitForTerminalAsync(runner, start.Run!.RunId);
+
+        (await SweepLockIsHeldOnTheClusterAsync()).Should().BeFalse(
+            "disposing the runner must END the lock-holding Postgres session, not hand it "
+            + "back to a connection pool still holding the gate — a fleet-DDL escape hatch "
+            + "that can wedge itself shut for the pool's idle lifetime is the one failure "
+            + "mode this design says it cannot have");
+
+        // …and the gate must be usable again by a fresh pod, whichever
+        // connection that pod's next lock attempt happens to land on.
+        var nextSweeper = new GatedSweeper();
+        using var nextPod = NewRunner(nextSweeper);
+        (await nextPod.IsSweepRunningAsync()).Should().BeFalse(
+            "the cross-pod pg_locks signal must not report a sweep that ended at Dispose");
+
+        var second = await nextPod.StartAsync(dryRun: false);
+        second.Accepted.Should().BeTrue(
+            "a disposed runner must leave the cluster gate open for the next process");
+        nextSweeper.Release.TrySetResult();
+        await WaitForCompletionAsync(nextPod, second.Run!.RunId);
+    }
+
     // ─────────── lock probe qualification (Finding 1.6) ───────────
 
     [Test]
@@ -505,6 +562,38 @@ public class TenantMigrationSweepRunnerTests
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         await cmd.ExecuteNonQueryAsync();
+    }
+
+    /// <summary>
+    /// Is the sweep's advisory lock held by ANY session on this database, read
+    /// from a connection that is deliberately NOT pooled?
+    ///
+    /// <para>The "not pooled" part is the whole point. A pooled observer can be
+    /// handed the very connector that leaked a lock, and Npgsql prepends its
+    /// deferred <c>DISCARD ALL</c> reset (which runs
+    /// <c>pg_advisory_unlock_all()</c>) to the observer's own query — so the
+    /// probe silently repairs the state it was sent to measure. A private
+    /// session cannot do that.</para>
+    /// </summary>
+    private async Task<bool> SweepLockIsHeldOnTheClusterAsync()
+    {
+        var unpooled = new NpgsqlConnectionStringBuilder(_cs) { Pooling = false };
+        await using var conn = new NpgsqlConnection(unpooled.ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText =
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM pg_locks
+                WHERE locktype = 'advisory'
+                  AND granted
+                  AND objsubid = 1
+                  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+                  AND ((classid::bigint << 32) + objid::bigint) = @k
+            );
+            """;
+        cmd.Parameters.AddWithValue("k", TenantMigrationSweepRunner.AdvisoryLockKey);
+        return (bool?)await cmd.ExecuteScalarAsync() == true;
     }
 
     /// <summary>
