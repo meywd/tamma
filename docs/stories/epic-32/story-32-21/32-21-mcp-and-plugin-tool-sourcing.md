@@ -231,6 +231,17 @@ public interface IMcpServerEnablementReader
 
 ### Strategy decision (deep-dive §7.3) — **RECOMMENDED: .NET MCP SDK (`ModelContextProtocol`), TS `mcp-client` as the behavioural reference**
 
+> **ACCEPTED 2026-07-30.** This recommendation is now the decision of record for the whole repo, taken
+> under Story 42-6 §0 / Epic 42 Open Question 3 and written up in
+> `.dev/decisions/story-42-6-mcp-client-port-vs-adopt.md`. Two refinements from that pass: the package
+> to reference is **`ModelContextProtocol.Core`** (the minimal-dependency client package), not the
+> umbrella `ModelContextProtocol`; and the "always research latest docs before pinning" note below was
+> right to insist — doing so found that **every** available version requires the 10.x
+> `Microsoft.Extensions.AI.Abstractions` line on net8.0, while this repo resolves 9.5.0 through
+> `Elsa.Agents.Core 3.5.3` → `Microsoft.SemanticKernel 1.57.0`. That bump is a prerequisite the
+> dependency does not merge without proving. Transport coverage confirmed as stdio + Streamable HTTP;
+> the TS client's WebSocket transport has no counterpart in the current spec.
+
 Three options were weighed; the recommendation is **option (c) with a thin in-house adapter layer** that preserves the TS client's hardening:
 
 | Option | What it is | Pros | Cons | Verdict |

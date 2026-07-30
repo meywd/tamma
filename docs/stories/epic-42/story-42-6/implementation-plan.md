@@ -13,7 +13,7 @@ The deltas:
 | **Part B §3 / B6 / B8** — 42-3 stage-2 authorization, "no `ExecuteAsync` before an `Authorize` decision" | **42-3 is DELETED.** Gating is Epic 43's **Seam B**, one call site in the shared tool-loop path. B8 is rewritten (D6) to assert that an MCP tool is subject to Seam B *identically to a native tool* — which follows from it being an ordinary `IToolExecutor` behind the same registry, and is exactly what this story must prove. |
 | **Part B §1** — the 64-char budget "enforced twice: the validator regex and `tool_bindings.ToolName`'s `HasMaxLength(64)` (42-2 §1c)" | The second enforcement **no longer exists**. Epic 43's `ActionKey` is `(ActionNamespace Ns, string Key)` with no stated length constraint. So the budget is enforced by the validator regex **and by this story's registration-time check** — which therefore becomes load-bearing rather than belt-and-braces (D4). |
 | **Part B Dependencies** — 42-1, 42-2, 42-3, 42-4, 42-5 | 42-2 and 42-3 are gone; **Epic 43's catalog (Stories 2/3/5) joins as a hard prerequisite** for D5. Surviving: 42-1 (`Register`/`Unregister`), 42-4 (secret binding), 42-5 (audit). |
-| §0 / Open Question 3 — port `packages/mcp-client/` to C# **vs** adopt an MCP C# SDK | **Still open. This plan does not decide it** and deliberately does not estimate Part B's implementation. It is a product/architecture call with a large cost delta, and the reconciliation did not touch it. Framed for the decider in D1, with the evidence updated (the LOC figure in every existing document is wrong — see X1). |
+| §0 / Open Question 3 — port `packages/mcp-client/` to C# **vs** adopt an MCP C# SDK | **DECIDED 2026-07-30 — adopt `ModelContextProtocol.Core` behind an `IMcpTransport` seam; delete `packages/mcp-client/` outright.** *This plan did not decide it; the decision record `.dev/decisions/story-42-6-mcp-client-port-vs-adopt.md` does, and adopts X1's corrected 9,662 LOC.* Part B's implementation is now estimable (~4–6 days, +~0.5 for P1). Two facts the plan's framing did not have: the TS client's WebSocket transport has **no counterpart in the current spec** (MCP's transports are stdio + Streamable HTTP), so a faithful port would port a transport the protocol dropped; and the SDK requires the **10.x `Microsoft.Extensions.AI.Abstractions` line on net8.0 at every available version**, while `Tamma.Api` resolves 9.5.0 via `Elsa.Agents.Core 3.5.3` → `Microsoft.SemanticKernel 1.57.0` — see D3. |
 
 ## Scope & Deliverable
 
@@ -55,7 +55,8 @@ implementation is **not estimated** pending §0.
   including `__tests__` it is 15,121. The figure 7,865 appears in the story (§(a)), in
   `epic-42/README.md` (twice) and in its Open Question 3. **Every port-vs-adopt cost estimate keyed on 7,865
   is understated by ~23%.** Since §0's decision is explicitly cost-driven, correct the number before
-  deciding.
+  deciding. **Applied 2026-07-30** — all four call sites now read 9,662, and §0's decision was taken on
+  the corrected figure.
 - **X2 — "never built" is imprecise, and the imprecision matters.** Verified: no `package.json` anywhere
   declares `@tamma/mcp-client` as a dependency (the only two repo-wide mentions are *comments* at
   `packages/intelligence/src/context/sources/mcp-source.ts:6` and
@@ -109,9 +110,31 @@ implementation is **not estimated** pending §0.
 
 ### Part B
 
-- **D3 — §0 (port vs adopt) is an OPEN PRODUCT QUESTION and this plan does not answer it.** The two live
-  options — port the (X1-corrected) **9,662 LOC** TS client to C#, or adopt an MCP C# SDK — have materially
-  different costs and different long-run maintenance stories. Proxying through the TS sidecar is already
+- **D3 — §0 (port vs adopt) — ANSWERED 2026-07-30, not by this plan: adopt the SDK.** See
+  `.dev/decisions/story-42-6-mcp-client-port-vs-adopt.md`. Take **`ModelContextProtocol.Core`** (the
+  minimal-dependency client package — *not* the umbrella `ModelContextProtocol`, which adds hosting/DI
+  sugar, and not `.AspNetCore`, which hosts a server) behind the `IMcpTransport` /
+  `IMcpConnectionPool` seam; **delete `packages/mcp-client/` outright** when Part B lands. Verified
+  2026-07-30: 2.0.0 (2026-07-28) stable, last 1.x 1.4.1 (2026-07-09), net8.0 among its target
+  frameworks. Answers to the inputs (i)–(v) the plan assembled below: **(i)** stdio + Streamable HTTP,
+  both SDK-covered — and the TS client's third transport, WebSocket (246 LOC), has no counterpart in
+  the current spec, so porting it would port a transport MCP dropped; **(ii)** the maintenance burden
+  is the whole argument and it decided this; **(iii)** the rate limiter, path validator, resource
+  monitor, audit log and connection pool are already the 42-1/42-4/42-5 + Epic 43 envelope's job — a
+  faithful port would import a second enforcement path that then has to be deleted.
+  **The one thing the decision could not settle, carried as prerequisite P1:** the SDK requires the
+  **10.x** `Microsoft.Extensions.AI.Abstractions` / `Logging.Abstractions` / `System.IO.Pipelines` line
+  on net8.0 **at every available version**, while `Tamma.Api` resolves the 9.x line today via
+  `Tamma.Activities` → `Elsa.Agents.Core 3.5.3` → `Microsoft.SemanticKernel 1.57.0` →
+  `Microsoft.Extensions.AI 9.5.0`. Elsa.Agents is load-bearing (`ResolveAgentConfigActivity`,
+  `AgentSeeder`); no older SDK avoids the bump; a separate assembly does not avoid it either (one
+  process, one dependency graph). **The package reference does not merge until a full unfiltered
+  `Tamma.Api.Tests` run proves Semantic Kernel still loads** — a filter would hide exactly this, and a
+  green build proves nothing because the failure mode is at type load. Fallbacks, in order: upgrade
+  Elsa to a 3.x pinning a 10.x-compatible SK, or hand-roll a narrow stdio + Streamable-HTTP client
+  behind the same seam. *Superseded framing follows, kept because it lists the inputs the decision
+  used:* The two live options — port the (X1-corrected) **9,662 LOC** TS client to C#, or adopt an MCP
+  C# SDK — have materially different costs and different long-run maintenance stories. Proxying through the TS sidecar is already
   ruled out on evidence (it would put tool execution behind an HTTP hop outside the tool envelope,
   re-creating in Part B exactly the bypass Part A deletes). Inputs a decider needs, assembled here rather
   than decided: (i) which transports are actually required — stdio vs SSE/streamable HTTP; (ii) protocol

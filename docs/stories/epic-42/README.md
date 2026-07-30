@@ -42,7 +42,7 @@ things **do** ship today and change how the stories are scoped:
   sidecar's `McpManagementService` is constructed with an undefined client on every production boot
   (`buildIntelligenceBundleFromEnv` never sets `mcpClient`; `@tamma/mcp-client` is not a dependency of
   `@tamma/intelligence-server`), so invoke returns `{success:false, error:'MCP client not
-  configured'}`. Separately, `packages/mcp-client/` is a **7,865-LOC hand-rolled TS MCP client**
+  configured'}`. Separately, `packages/mcp-client/` is a **9,662-LOC hand-rolled TS MCP client**
   (stdio/SSE/WebSocket transports, tool/resource/prompt registries, validator + rate-limiter +
   sandbox, audit, connection pool, `SERVER_PRESETS`) with **zero dependents**, never built. **This
   makes 42-6 urgent, not deferrable** — reconciling a route that dead-ends is cheap now and expensive
@@ -479,11 +479,13 @@ only one of the two carries that cost (the per-story estimates state both figure
   `ToolExecutorRegistry`, `ManagedAgent.ToResolvedTools`, `InlineToolLoopRunner`, `ParallelToolExecutor`,
   `ToolCallValidator` + `ActionGate`, `IToolLoopEventSink` / `ToolLoopEventEmitter`. *(Corrected:
   `ResolveToolsActivity` removed from this list — it is dead code.)*
-- **Existing MCP prior art (42-6 must decide on each):** `packages/mcp-client/` (7,865 LOC, orphaned,
-  never built) — **port to C# or adopt an official MCP C# SDK**; *proxying via the sidecar is ruled out
+- **Existing MCP prior art (42-6 must decide on each):** `packages/mcp-client/` (9,662 LOC, orphaned,
+  never built) — port to C# or adopt an official MCP C# SDK; *proxying via the sidecar is ruled out
   by 42-6 §0* (it would put tool execution behind an HTTP hop outside the tool envelope, re-creating in
-  Part B exactly the bypass Part A deletes). Either way the package must not stay orphaned — it becomes
-  the port's source of truth and is then deleted, or it is deleted outright. The 8 `/api/kb/mcp/*`
+  Part B exactly the bypass Part A deletes). **Decided 2026-07-30: adopt `ModelContextProtocol.Core`
+  behind an `IMcpTransport` seam; the package is deleted outright when Part B lands** — see
+  `.dev/decisions/story-42-6-mcp-client-port-vs-adopt.md`. Either way the package must not stay
+  orphaned — it becomes the port's source of truth and is then deleted, or it is deleted outright. The 8 `/api/kb/mcp/*`
   routes — **retire 2, re-scope 6** (settled in 42-6 A1/A2). `MCPSource` (an MCP *resource* consumer,
   not a tool consumer) whose `IMCPClientLike` seam should converge on whatever client 42-6 lands.
 
@@ -522,14 +524,23 @@ design questions" below — that list has been renumbered; cite these as **D1** 
    tenant-scoped MCP registration is ever permitted; if it is, 42-6 Part B also owns building the
    per-principal registry view (which is separately what would give the 39-5 D6 principal-bound-tool
    pattern a delivery path).
-3. **MCP client: port or adopt.** `packages/mcp-client/` is 7,865 LOC of working hand-rolled TS with
-   zero dependents; the C# backend has no MCP client at all. The two live options — port it to C#, or
-   adopt an official MCP C# SDK — have materially different costs, and 42-6 Part B's effort estimate is
-   not meaningful until one is chosen (time-boxed spike, recorded in `.dev/decisions/`). *Proxying
-   through the TS sidecar is no longer one of the options: 42-6 §0 rules it out on evidence.* Note a
-   second, independent customer for whatever transport is chosen: `HttpProviderClient.NonHttpProviders`
-   fails `zen-mcp`/`zen` with `PROVIDER_NOT_SUPPORTED` because the MCP transport "is not yet ported to
-   C#" — worth knowing when choosing, without taking that provider port on.
+3. ~~**MCP client: port or adopt.**~~ **RESOLVED 2026-07-30 — adopt the C# SDK.** Recorded in
+   `.dev/decisions/story-42-6-mcp-client-port-vs-adopt.md`: take `ModelContextProtocol.Core` behind an
+   `IMcpTransport` / `IMcpConnectionPool` seam and delete `packages/mcp-client/` outright. 42-6 Part B's
+   estimate is unblocked at ~4–6 days (+~0.5 for the prerequisite below).
+   *Original framing, kept for the record:* `packages/mcp-client/` is **9,662** LOC of working
+   hand-rolled TS with zero dependents (*corrected — this said 7,865 in three places*); the C# backend
+   has no MCP client at all. The two live options — port it to C#, or adopt an official MCP C# SDK — had
+   materially different costs. *Proxying through the TS sidecar was never one of the options: 42-6 §0
+   rules it out on evidence.*
+   **The prerequisite the decision surfaced (P1):** the SDK requires the **10.x**
+   `Microsoft.Extensions.AI.Abstractions` line on net8.0 at every available version, and `Tamma.Api`
+   resolves **9.5.0** through `Elsa.Agents.Core 3.5.3` → `Microsoft.SemanticKernel 1.57.0`. Elsa.Agents
+   is load-bearing, no older SDK avoids the bump, and a separate assembly does not avoid it either. The
+   package reference does not merge until a full unfiltered `Tamma.Api.Tests` run proves SK still loads.
+   Fallbacks in the decision record. Note a second, independent customer for the chosen transport:
+   `HttpProviderClient.NonHttpProviders` fails `zen-mcp`/`zen` with `PROVIDER_NOT_SUPPORTED` because the
+   MCP transport "is not yet ported to C#" — worth knowing, without taking that provider port on.
 4. **Autonomy-dial design change (needs Epic 39 sign-off).** `AutonomyFloor ≤ currentAutonomy` would be
    the **first** control-flow use of `AcceptanceRules.AutonomyLevel` anywhere in the codebase. Confirm
    with Epic 39 that the dial is intended to gate behaviour (not just annotate audit), and that the
