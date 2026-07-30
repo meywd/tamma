@@ -8,6 +8,27 @@ Concretely: one metadata type (`ActionGateMetadata`) with two authoring shapes (
 
 **No Roslyn analyzer ships.** See D1.
 
+> **Dated note (2026-07-30) — steps 2 (annotation half), 3, 7 and 12 landed; the story's §A1
+> carve-outs #1–#5 are closed.** What this scope paragraph describes as one story actually shipped
+> in two passes: the harnesses on 2026-07-29, the ANNOTATIONS on 2026-07-30. Concretely, against
+> this paragraph's own wording:
+>
+> - "`[Governs]` for the one controller" — done, and it required **minting four catalog members**
+>   (`effect:mentorship.session.*`), which this plan did not anticipate; see story §A1 row 1.
+> - "sweeping **all ~205 mutating endpoints**" — the derived, pinned number is **237** (Correction 4's
+>   *instruction* is what landed; its literal was superseded on 2026-07-29). Of those, **21 are now
+>   bound** and **216 baselined**.
+> - "`[PerformsEffect]` on the 17 mutating `TammaApiClient` methods … with a bidirectional test and a
+>   19-entry counted read-only list" — done; the list is named `KnownNonEffectClientMethods` and
+>   stays at 19.
+> - "seeded with the 13 `SecretsRotation/Activities/` files" — 9 CLASSES; see step 10's dated note.
+> - "Four ratchets, each shrink-only **and** staleness-checked **and** count-pinned" — plus, from
+>   2026-07-30, **mechanically** shrink-only via `PinHistory` (story §A6), and a `RatchetDisciplineTests`
+>   meta-test in each of the two test assemblies (step 12's Test-Plan entry assumed one fixture could
+>   see all four; the projects do not reference each other, so it cannot).
+> - "`enforcementSites` in the admin response" — landed on **Story 43-5**'s `ActionPolicyEndpoints`,
+>   not 43-6's file as step 12 and D9 both assumed; 43-5's `/api/actions` surface already shipped.
+
 ## Pre-Reading
 
 - `docs/stories/epic-43/story-43-8/43-8-drift-harnesses.md` — this story (ACs are source of truth)

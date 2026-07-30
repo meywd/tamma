@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -80,6 +81,16 @@ public static class ActionCatalogGovernanceServiceCollectionExtensions
             sp.GetRequiredService<IGovernancePolicySnapshotProvider>(),
             sp.GetRequiredService<ITenantContext>(),
             sp.GetService<ILogger<CatalogDefaultToolLoopAutonomyGate>>()));
+
+        // ── Story 43-8 AC9 — enforcementSites ───────────────────────────────
+        // Computes, per ActionKey, the concrete bound sites (routes carrying
+        // IActionGateMetadata + TammaApiClient methods carrying [PerformsEffect])
+        // so the admin API can serialise them and the 43-7 UI can render "not
+        // enforced anywhere yet" for an EMPTY array. Singleton with a lazy first
+        // computation: endpoint building happens on the first request, so eager
+        // resolution here would capture an empty data source.
+        services.TryAddSingleton<IActionEnforcementSites>(sp =>
+            new ActionEnforcementSites(() => ActionEnforcementSites.DiscoverEndpoints(sp)));
 
         // The fail-loud startup validator (Tamma.Api host only — see class doc).
         // TryAddEnumerable keeps a repeated call from running the checks twice.

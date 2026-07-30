@@ -57,6 +57,17 @@ public class GovernanceHostFixture
         s_endpoints ?? throw new InvalidOperationException("GovernanceHostFixture did not run.");
 
     /// <summary>
+    /// The booted host's service provider. Added 2026-07-30 so
+    /// <c>ActionEnforcementSitesTests</c> can resolve the PRODUCTION
+    /// <c>IActionEnforcementSites</c> off the same host this fixture reflects, and
+    /// cross-check it against <see cref="Endpoints"/> — one reflection in
+    /// production, one independent view in the harness, and a test that fails if
+    /// they ever disagree.
+    /// </summary>
+    public static IServiceProvider Services =>
+        s_factory?.Services ?? throw new InvalidOperationException("GovernanceHostFixture did not run.");
+
+    /// <summary>
     /// The COMPLETE service-descriptor list of the built host — the only view that
     /// sees both awkward hosted-service registration shapes (43-8 D2).
     /// </summary>

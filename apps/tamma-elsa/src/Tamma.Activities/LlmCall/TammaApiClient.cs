@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall.Models;
+using Tamma.Core.Actions;
 
 namespace Tamma.Activities.LlmCall;
 
@@ -106,6 +107,7 @@ public class TammaApiClient
     /// <c>null</c> per the existing contract; the shim treats that as a transient
     /// (httpStatusCode 0) failure so the workflow's RetryCheck advances.</para>
     /// </summary>
+    [PerformsEffect(ExternalEffect.LlmCall)]
     public Task<LlmCallApiResponse?> CallLlmAsync(
         LlmCallApiRequest request,
         string? tenantId = null,
@@ -125,6 +127,7 @@ public class TammaApiClient
     /// 401 / transport), which the thin activity maps to its Error outcome
     /// (fail-closed). The token is resolved + used server-side; it never travels here.
     /// </summary>
+    [PerformsEffect(ExternalEffect.GitBranchCreate)]
     public Task<GitCallResponse?> CreateBranchAsync(
         string repo, GitCreateBranchRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -133,6 +136,7 @@ public class TammaApiClient
     }
 
     /// <summary>Story 38-1 (AC5) — <c>POST /api/v1/git/{owner}/{repo}/pull-requests</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestCreate)]
     public Task<GitCallResponse?> CreatePullRequestAsync(
         string repo, GitCreatePrRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -141,6 +145,7 @@ public class TammaApiClient
     }
 
     /// <summary>Story 38-1 (AC5) — <c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n}/merge</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestMerge)]
     public Task<GitCallResponse?> MergePullRequestAsync(
         string repo, int prNumber, GitMergePrRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -149,6 +154,7 @@ public class TammaApiClient
     }
 
     /// <summary>Story 38-1 (AC5) — <c>PATCH /api/v1/git/{owner}/{repo}/issues/{n}</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitIssuePatch)]
     public Task<GitCallResponse?> UpdateIssueStatusAsync(
         string repo, int issueNumber, GitUpdateIssueRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -164,6 +170,7 @@ public class TammaApiClient
     /// any non-2xx / transport failure (the thin activity maps it to its Error edge,
     /// fail-closed).
     /// </summary>
+    [PerformsEffect(ExternalEffect.GitReleaseCreate)]
     public virtual Task<GitCallResponse?> CreateReleaseAsync(
         string repo, GitCreateReleaseRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -214,6 +221,7 @@ public class TammaApiClient
     /// <c>DELETE /api/v1/git/{owner}/{repo}/branches?branch=&amp;correlationId=</c>. The
     /// branch name (may carry a slash) travels as a query param. Write op — fail-closed
     /// (null on any non-2xx / transport failure).</summary>
+    [PerformsEffect(ExternalEffect.GitBranchDelete)]
     public virtual async Task<GitCallResponse?> DeleteBranchAsync(
         string repo, string branchName, string? correlationId = null, string? tenantId = null, CancellationToken ct = default)
     {
@@ -246,6 +254,7 @@ public class TammaApiClient
     /// <summary>Story 38 (Phase 1) — trigger the CI workflow on a branch via
     /// <c>POST /api/v1/ci/{owner}/{repo}/test-runs</c>. The per-tenant git token is
     /// resolved + used server-side; it never travels here.</summary>
+    [PerformsEffect(ExternalEffect.CiTestsTrigger)]
     public virtual Task<Models.CiCallResponse?> TriggerTestsAsync(
         string repo, Models.CiTriggerTestsRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -280,6 +289,7 @@ public class TammaApiClient
 
     /// <summary>Story 38 (Phase 1) — update a JIRA ticket (status + comment) via
     /// <c>PATCH /api/v1/jira/tickets/{ticketId}</c>.</summary>
+    [PerformsEffect(ExternalEffect.JiraTicketPatch)]
     public virtual Task<Models.JiraCallResponse?> UpdateJiraTicketAsync(
         string ticketId, Models.JiraUpdateTicketRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -297,6 +307,7 @@ public class TammaApiClient
     /// transport), which the thin phase service maps to its failure result (fail-closed).
     /// The per-repo installation token is minted + used server-side; it never travels here.
     /// </summary>
+    [PerformsEffect(ExternalEffect.AgentDispatchRun)]
     public virtual Task<Models.AgentDispatchRunApiResponse?> DispatchAgentRunAsync(
         string repo, Models.AgentDispatchRunApiRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -383,6 +394,7 @@ public class TammaApiClient
     /// failed" (the workflow continues; a missing Slack post must not break a
     /// mentorship session). The Slack token never travels here.
     /// </summary>
+    [PerformsEffect(ExternalEffect.NotifySlackQueue)]
     public virtual Task<bool> QueueSlackNotificationAsync(
         Models.SlackNotificationRequest request,
         string? tenantId = null,
@@ -400,6 +412,7 @@ public class TammaApiClient
     /// missing notification does not break the workflow. Returns null on transport /
     /// 5xx failure.
     /// </summary>
+    [PerformsEffect(ExternalEffect.NotifyEmailSend)]
     public virtual Task<Models.EmailCallResponse?> SendEmailAsync(
         Models.EmailSendRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -527,6 +540,7 @@ public class TammaApiClient
     /// pipes the observed response into the shared health monitor exactly
     /// like every other call site.</para>
     /// </summary>
+    [PerformsEffect(ExternalEffect.EngineEventsAppend)]
     public async Task<bool> AppendEventsAsync(
         IReadOnlyList<Models.EngineEventRecord> events,
         Guid? tenantId = null,
@@ -576,6 +590,7 @@ public class TammaApiClient
     /// lifecycle's product, not telemetry; the caller (persist activity) must fault,
     /// not swallow.</para>
     /// </summary>
+    [PerformsEffect(ExternalEffect.EngineDocumentPersist)]
     public async Task PersistDocumentAsync(
         Models.PersistDocumentRequest request,
         string? tenantId = null,
@@ -606,6 +621,7 @@ public class TammaApiClient
     /// <c>POST /api/engine/documents/{documentId}/status</c>
     /// (<c>EngineServiceOnly</c>). FAIL-LOUD (non-2xx / transport throws).
     /// </summary>
+    [PerformsEffect(ExternalEffect.EngineDocumentSetStatus)]
     public async Task SetDocumentStatusAsync(
         Guid documentId,
         string status,
@@ -660,6 +676,7 @@ public class TammaApiClient
     /// recoverable via the suspended bookmark). It never throws — the caller
     /// (<c>EngineChannelPublisher</c>) logs ERROR and continues.</para>
     /// </summary>
+    [PerformsEffect(ExternalEffect.EngineChannelOutboxEnqueue)]
     public virtual async Task<bool> PostChannelOutboxAsync(
         string envelopeJson, string? tenantId = null, CancellationToken ct = default)
     {
@@ -707,6 +724,7 @@ public class TammaApiClient
     /// travels per-event in the body, and <c>EngineServiceOnly</c> auth is
     /// satisfied by the service Bearer token the client already attaches.</para>
     /// </summary>
+    [PerformsEffect(ExternalEffect.EnginePlatformEventsAppend)]
     public async Task<bool> AppendPlatformEventsAsync(
         IReadOnlyList<Models.PlatformEventRecord> events,
         CancellationToken ct = default)

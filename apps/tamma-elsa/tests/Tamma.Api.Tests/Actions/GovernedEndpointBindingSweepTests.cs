@@ -32,15 +32,25 @@ namespace Tamma.Api.Tests.Actions;
 /// everything. The route plane gets a structural check; the method plane gets review
 /// of a small enumerable set. Do not read a green run here as covering both.</para>
 ///
-/// <para><b>Day-one state.</b> No production route carries
-/// <see cref="ActionGateMetadata"/> yet — Story 43-9 attaches <c>.Governs</c> along
-/// with the enforcement filter. Two consequences, both handled rather than hidden:
-/// the live assertion below has no inputs today, so
-/// <see cref="Discrimination_aMisBoundRouteIsDetected"/> and its siblings drive the
-/// SAME classifier over a real, purpose-built <see cref="WebApplication"/> — the
-/// harness is proven to discriminate before it has anything to discriminate; and
-/// <see cref="NoProductionRouteIsBoundYet_isTheDayOneState"/> pins the day-one count
-/// so that when the first binding lands, someone must look at this file.</para>
+/// <para><b>State (updated 2026-07-30).</b> 21 production routes now carry
+/// <see cref="IActionGateMetadata"/>: the 17 mediation routes bound with
+/// <c>.Governs</c> in <c>Program.cs</c> and <c>MentorshipController</c>'s four
+/// <c>[HttpPost]</c> actions bound with <c>[Governs]</c> (Story 43-8 AC1 steps 2–3,
+/// carve-outs §A1 #1/#2). The live assertion therefore has real inputs, and
+/// <see cref="TheBindingSweep_hasRealInputs"/> keeps it that way — it replaced the
+/// deleted day-one pin <c>NoProductionRouteIsBoundYet_isTheDayOneState</c>, which
+/// was removed on its own failure message's instruction.
+/// <see cref="Discrimination_aMisBoundRouteIsDetected"/> and its siblings still
+/// drive the SAME classifier over a purpose-built <see cref="WebApplication"/>, so
+/// the harness remains proven to discriminate independently of what production
+/// happens to contain.</para>
+///
+/// <para><b>This check earned its keep on the first use.</b> Three catalog SiteKeys
+/// were PRETTIFIED renderings of their routes rather than the live patterns —
+/// <c>{documentId}</c>, and <c>{n}</c> twice — and would have been rejected here the
+/// moment their routes were bound. They were corrected in the same change (the wave-4
+/// tracker-SiteKey precedent). A SiteKey is compared ORDINALLY against
+/// <c>RoutePattern.RawText</c>, constraints included; it is not documentation.</para>
 ///
 /// <para>NAMING: Story 43-8 AC3 calls this <c>GovernedEndpointBindingTests</c>; the
 /// <c>…SweepTests</c> suffix is a naming convention shared with the other Epic 43
@@ -122,23 +132,45 @@ public class GovernedEndpointBindingSweepTests
             + Environment.NewLine + string.Join(Environment.NewLine, problems));
     }
 
+    // DELETED 2026-07-30: `NoProductionRouteIsBoundYet_isTheDayOneState`. It pinned
+    // the day-one fact that zero production routes carried ActionGateMetadata, and
+    // its own failure message instructed the first binder to DELETE it rather than
+    // raise the number (story 43-8 §A3 step 2: "delete that test in the same commit
+    // … its NAME asserts zero bindings, so raising the number would make the name a
+    // lie"). Story 43-8 AC1 steps 2–3 landed 21 real bindings, so the test is
+    // deleted on its own instruction. What replaces it is not another count pin but
+    // a LOWER BOUND with teeth — EveryBoundEndpoint_… now has real inputs, and
+    // TheBindingSweep_hasRealInputs below fails if the bound set ever collapses to
+    // nothing (which would silently make this whole fixture vacuous again).
+
     [Test]
-    public void NoProductionRouteIsBoundYet_isTheDayOneState()
+    public void TheBindingSweep_hasRealInputs()
     {
-        // AC9's honesty requirement, as an assertion rather than a comment: on the
-        // day Story 43-8 lands, ZERO of the ~230 mutating endpoints carry a binding.
-        // Story 43-9 attaches .Governs together with the enforcement filter. When
-        // this number moves, the mover must read this file — in particular the
-        // limitation note about the method plane.
-        GovernanceHostFixture.Endpoints.Count(f => f.Action is not null)
-            .Should().Be(0,
-                "no route carries ActionGateMetadata yet (Story 43-9 owns attaching it). If this "
-                + "fails, bindings have started landing: confirm EveryBoundEndpoint_… now has real "
-                + "inputs, then DELETE this test in the same commit. It is a day-one pin, not a "
-                + "permanent invariant — its own name asserts zero bindings, so raising the number "
-                + "would make the name a lie. (Message corrected 2026-07-29, conformance round: it "
-                + "previously said 'update this pin to the new count', contradicting story 43-8 "
-                + "amendment A3 step 2, which says to delete it. Delete is the resolution.)");
+        // ANTI-NO-OP TRIPWIRE, and the replacement for the deleted day-one pin.
+        // EveryBoundEndpoint_… passes trivially over an empty input set: from
+        // 2026-07-29 to 2026-07-30 that is exactly what it did. If bindings ever
+        // disappear — a .Governs chain dropped in a merge, a metadata lookup broken
+        // by a framework upgrade — this fixture must go RED rather than quiet.
+        var bound = GovernanceHostFixture.Endpoints.Where(f => f.Action is not null).ToList();
+
+        bound.Should().HaveCountGreaterThanOrEqualTo(21,
+            "21 routes carry a binding as of 2026-07-30: the 17 mediation routes bound with "
+            + ".Governs in Program.cs plus MentorshipController's 4 [HttpPost] actions bound with "
+            + "[Governs]. Fewer means bindings were lost, or that endpoint metadata discovery "
+            + "stopped seeing them — either way EveryBoundEndpoint_… is no longer checking what "
+            + "it claims to check. A LOWER bound, not an equality: adding governance to a route "
+            + "must never require editing this test.");
+
+        bound.Select(f => f.Kind).Distinct().Should().Contain(
+            GovernanceHostFixture.EndpointKind.ControllerAction,
+            "the [Governs] ATTRIBUTE path must be exercised by the real host, not only the "
+            + "builder path. Nothing else proves that MVC copies an action-method attribute "
+            + "implementing IActionGateMetadata into Endpoint.Metadata — the assumption Story "
+            + "43-9's filter and ActionEnforcementSites both rest on.");
+
+        bound.Select(f => f.Kind).Distinct().Should().Contain(
+            GovernanceHostFixture.EndpointKind.MinimalApi,
+            "and the minimal-API builder path likewise");
     }
 
     // ====================================================================

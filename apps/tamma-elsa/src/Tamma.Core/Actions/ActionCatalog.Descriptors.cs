@@ -298,8 +298,15 @@ public static partial class ActionCatalog
             "POST /api/engine/platform-events — EngineEndpoints.AppendPlatformEvents", reversible: false),
         Effect(ExternalEffect.EngineDocumentPersist, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Persist document", "Engine persists a document envelope through the mediation seam.",
             "POST /api/engine/documents — DocumentEndpoints.PersistFromEngine"),
+        // SiteKey carries the ROUTE CONSTRAINT `{documentId:guid}`, corrected
+        // 2026-07-30 (Story 43-8 AC1 step 3, carve-out §A1 #2). The live pattern is
+        // `engine.MapPost("/documents/{documentId:guid}/status", …)`; 43-8's binding
+        // sweep compares RoutePartOf(SiteKey) with the endpoint's RawText ORDINALLY
+        // and does not strip constraints, so the prettified "{documentId}" would have
+        // been rejected the moment the route was bound — the same class of defect as
+        // the six tracker SiteKeys corrected in wave 4 (adversarial review MODERATE-5).
         Effect(ExternalEffect.EngineDocumentSetStatus, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Set document status", "Engine transitions a document's lifecycle status.",
-            "POST /api/engine/documents/{documentId}/status — DocumentEndpoints.SetStatusFromEngine"),
+            "POST /api/engine/documents/{documentId:guid}/status — DocumentEndpoints.SetStatusFromEngine"),
         Effect(ExternalEffect.EngineChannelOutboxEnqueue, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Enqueue channel message", "Engine enqueues an outbound channel message.",
             "POST /api/engine/channel/outbox — ChannelEndpoints.EnqueueFromEngine"),
         Effect(ExternalEffect.LlmCall, ActionGroup.ModelInvocation, ActionRisk.Mutating, "LLM call", "Dispatch an LLM call (Seam A observes and never blocks — epic decision D1: 44 of 45 calling workflows have no human route).",
@@ -310,12 +317,16 @@ public static partial class ActionCatalog
             "DELETE /api/v1/git/{owner}/{repo}/branches — GitEndpoints.DeleteBranch", reversible: false),
         Effect(ExternalEffect.GitPullRequestCreate, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Create pull request", "Open a pull request on the git platform (known bypass: defeatable by git push under tool:git_operations.write).",
             "POST /api/v1/git/{owner}/{repo}/pull-requests — GitEndpoints.CreatePullRequest"),
+        // SiteKey carries `{n:int}` (corrected 2026-07-30, 43-8 AC1 step 3) — the
+        // live pattern is MapPut("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/merge").
         Effect(ExternalEffect.GitPullRequestMerge, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Merge pull request", "Merge a pull request on the git platform.",
-            "PUT /api/v1/git/{owner}/{repo}/pull-requests/{n}/merge — GitEndpoints.MergePullRequest", reversible: false),
+            "PUT /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/merge — GitEndpoints.MergePullRequest", reversible: false),
         Effect(ExternalEffect.GitReleaseCreate, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Create release", "Cut a release on the git platform.",
             "POST /api/v1/git/{owner}/{repo}/releases — GitEndpoints.CreateRelease"),
+        // SiteKey carries `{n:int}` (corrected 2026-07-30, 43-8 AC1 step 3) — the
+        // live pattern is MapPatch("/api/v1/git/{owner}/{repo}/issues/{n:int}").
         Effect(ExternalEffect.GitIssuePatch, ActionGroup.IssueTracking, ActionRisk.Mutating, "Update issue", "Update an issue on the git platform.",
-            "PATCH /api/v1/git/{owner}/{repo}/issues/{n} — GitEndpoints.UpdateIssue"),
+            "PATCH /api/v1/git/{owner}/{repo}/issues/{n:int} — GitEndpoints.UpdateIssue"),
         Effect(ExternalEffect.JiraTicketPatch, ActionGroup.IssueTracking, ActionRisk.Mutating, "Update Jira ticket", "Update a Jira ticket.",
             "PATCH /api/v1/jira/tickets/{ticketId} — JiraEndpoints.UpdateTicket"),
         Effect(ExternalEffect.CiTestsTrigger, ActionGroup.CiAndTest, ActionRisk.Command, "Trigger CI tests", "Trigger a CI test run.",
@@ -417,6 +428,44 @@ public static partial class ActionCatalog
             "PUT /api/tracker/preferences — TrackerEndpoints.PutPreferences"),
         Effect(ExternalEffect.TrackerPreferencesDelete, ActionGroup.IssueTracking, ActionRisk.Mutating, "Reset tracker preferences", "Delete the tracker preference row so the shipped defaults apply again.",
             "DELETE /api/tracker/preferences — TrackerEndpoints.DeletePreferences"),
+
+        // Story 43-8 (AC1 step 2, carve-out §A1 #1 closed 2026-07-30) — the four
+        // MentorshipController [HttpPost] actions, the repo's only attribute-routed
+        // controller and the only day-one users of the [Governs] attribute shape.
+        //
+        // GROUP — model-invocation, by the 43-3 D1 partition rule (kind of
+        // consequence AT COMPLETION): completing any of these leaves an autonomous,
+        // LLM-driven agent run started / suspended / resumed / terminated. That is
+        // the same consequence as effect:agent-dispatch.run, which already sits
+        // here. REJECTED alternative: platform-automation "because it starts a
+        // workflow" — that group is platform HOUSEKEEPING (engine mediation writes,
+        // sweepers, platform tasks), and filing an agent-run control there would
+        // bury it in the same admin lever as the outbox sweeper, invisible to
+        // anyone gating model invocation.
+        //
+        // RISK — graded on the CONSEQUENCE, not the caller (the 44-2 rule):
+        // start is Command (it causes agent execution) and irreversible (the
+        // guidance, reviews and commits the run performs while it lives cannot be
+        // undone by cancelling the session afterwards); pause/resume are Mutating
+        // and exactly reversible by each other; cancel is Destructive and
+        // irreversible (the workflow instance is terminated and the in-flight run
+        // abandoned — a new session is a new run, not a restoration).
+        //
+        // MinAutonomy — AutonomyDial.Min for all four (the Effect() helper's only
+        // value): behaviour-preserving per epic decision D1. Nothing gates these
+        // today and cataloguing them changes nothing at runtime.
+        //
+        // SiteKeys are the LIVE attribute-routed patterns verbatim, constraints
+        // included ({sessionId:guid}), normalised with a leading slash the way
+        // GovernanceHostFixture normalises controller RawText.
+        Effect(ExternalEffect.MentorshipSessionStart, ActionGroup.ModelInvocation, ActionRisk.Command, "Start mentorship session", "Open a mentorship session and dispatch the tamma-autonomous-mentorship workflow — after this completes an autonomous agent run is under way.",
+            "POST /api/Mentorship/start — MentorshipController.StartMentorship", reversible: false),
+        Effect(ExternalEffect.MentorshipSessionPause, ActionGroup.ModelInvocation, ActionRisk.Mutating, "Pause mentorship session", "Suspend a running mentorship workflow (resume restores it exactly).",
+            "POST /api/Mentorship/sessions/{sessionId:guid}/pause — MentorshipController.PauseSession"),
+        Effect(ExternalEffect.MentorshipSessionResume, ActionGroup.ModelInvocation, ActionRisk.Mutating, "Resume mentorship session", "Put a paused mentorship workflow back into execution.",
+            "POST /api/Mentorship/sessions/{sessionId:guid}/resume — MentorshipController.ResumeSession"),
+        Effect(ExternalEffect.MentorshipSessionCancel, ActionGroup.ModelInvocation, ActionRisk.Destructive, "Cancel mentorship session", "Terminate a mentorship workflow instance — the in-flight agent run is abandoned and cannot be resumed.",
+            "POST /api/Mentorship/sessions/{sessionId:guid}/cancel — MentorshipController.CancelSession", reversible: false),
 
         // ── automation (27) — EscalatableToHuman=false for the whole plane ────
 

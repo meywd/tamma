@@ -55,7 +55,13 @@ public class ActionWirePinTests
             "tracker.project.create", "tracker.project.update", "tracker.project.delete",
             "tracker.work-item.create", "tracker.work-item.update", "tracker.work-item.delete",
             "tracker.work-item.assign", "tracker.work-item.set-status",
-            "tracker.preferences.set", "tracker.preferences.delete");
+            "tracker.preferences.set", "tracker.preferences.delete",
+            // 43-8 (AC1 step 2) — MentorshipController's four [HttpPost] actions, the
+            // repo's only attribute-routed controller and the only users of the
+            // [Governs] attribute shape. `mentorship.session.` prefixed so they read
+            // as one lifecycle family.
+            "mentorship.session.start", "mentorship.session.pause",
+            "mentorship.session.resume", "mentorship.session.cancel");
     }
 
     [Test]

@@ -1,6 +1,6 @@
 # Story 41-30: The Tenant-Aware Scheduled-Trigger Seam
 
-Status: done — conformance-reviewed 2026-07-29; the hosted service, both control-plane tables, the admin API and the DROP-list exclusion all ship (`Enabled=false` by default, so no running deployment changes); AC1's at-most-once key is per-trigger, not per-(tenant, definition) — see LOW-7; MODERATE-5 / LOW-8 remain open follow-ups
+Status: done — conformance-reviewed 2026-07-29; the hosted service, both control-plane tables, the admin API and the DROP-list exclusion all ship (`Enabled=false` by default, so no running deployment changes); AC1's at-most-once key is per-trigger, not per-(tenant, definition) — a deliberate, now-documented decision (LOW-7, resolved 2026-07-30); MODERATE-5 and LOW-8 are also resolved as of 2026-07-30, so the three gates on turning the seam on are closed
 
 ## User Story
 
@@ -51,7 +51,8 @@ new workflows, zero new `(role, action)` cells, zero new document types.
 3. **`TenantScheduledTriggerService : BackgroundService`** in `Tamma.ElsaServer` — polls, computes due
    windows per tenant, takes a **tenant-scoped** advisory lock, claims the fire in the ledger, and
    dispatches through the in-process `IWorkflowDispatcher` with `tenantId` + `windowKey` + the row's
-   `input_json` as workflow inputs.
+   `input_json` as workflow inputs. *[2026-07-30]* The tick additionally runs a **bounded stale-claim
+   sweep** (LOW-8) that burns and announces ledger rows abandoned by a dead pod.
 4. **Cron evaluation with no new dependency** — `Cronos` is already in the graph (Correction 1).
 5. **Catch-up policy, bounded** — a tenant whose engine was down for a day does not get 24 audits. One
    run for the most recent missed window, and **one** `SCHEDULE.WINDOW.SKIPPED` event naming the count
@@ -75,13 +76,31 @@ new workflows, zero new `(role, action)` cells, zero new document types.
 ## Events
 
 `SCHEDULE.FIRE.DISPATCHED` (tags `tenantId`, `definitionId`, `windowKey`, `triggerId`),
-`SCHEDULE.FIRE.SUPPRESSED` (another pod won the window — INFO, not an error),
-`SCHEDULE.WINDOW.SKIPPED` (LOUD — catch-up dropped a window, with the count),
+`SCHEDULE.FIRE.SUPPRESSED` (a CONCURRENT pod won the window — INFO, not an error. *[Amended
+2026-07-30, MODERATE-5]* NOT emitted when re-observing a window that already reached a terminal ledger
+outcome; that case is silent),
+`SCHEDULE.WINDOW.SKIPPED` (LOUD — catch-up dropped a window, with the count. *[Amended 2026-07-30,
+MODERATE-5]* emitted **after the ledger claim for the firing window is won**, so a given
+`(trigger, window)` emits it at most once fleet-wide. `skippedCount` counts every window since the last
+SUCCESSFUL dispatch that this trigger did not run, which includes windows that were attempted and burnt —
+each of those carries its own `SCHEDULE.FIRE.FAILED`),
 `SCHEDULE.FIRE.FAILED` (LOUD — dispatch threw or timed out. *[Amended 2026-07-29]* the ledger row is
 **stamped `failed` and the window is burnt** — the NEXT window is the recovery path; there is no
 same-window retry. The original "row is released so the next tick retries" wording contradicted the
 at-most-once contract the implementation ships),
+`SCHEDULE.FIRE.ABANDONED` (LOUD — *[Added 2026-07-30, LOW-8]* the stale-claim sweep found a ledger row
+still `claimed` past the threshold: the pod that won the claim died before it could stamp an outcome. The
+sweep burns the row and emits this once, fleet-wide. Distinct from `SCHEDULE.FIRE.FAILED` so "attempted
+and threw" and "vanished with its pod" stay separable),
 `SCHEDULE.TRIGGER.CHANGED` (an admin created/updated/disabled a schedule).
+
+**One window, one audit row** *[Added 2026-07-30, MODERATE-5]* — there is no same-window retry anywhere
+in this seam, and every fire-path emission hangs off a state transition that can happen only once per
+`(trigger, window)`: the skip audit off the won claim, the terminal audit off the outcome stamp, the
+abandonment audit off the sweep's CAS. So a window contributes **at most one** terminal row
+(`DISPATCHED` | `FAILED` | `ABANDONED`) plus at most one `WINDOW.SKIPPED`. Repeated rows for one
+`windowKey` therefore always mean genuine concurrency, never a retry loop — a run of `FIRE.SUPPRESSED`
+rows is bounded by how long a claim stays in flight and, for an abandoned claim, by the sweep threshold.
 
 ## Autonomy behavior
 
@@ -92,21 +111,45 @@ apply to *it*. The dial governs the workflows it dispatches, unchanged. What Epi
 
 ## Acceptance Criteria
 
-1. **At most one dispatch per `(tenantId, definitionId, windowKey)` across the whole fleet, durably.**
+1. **At most one dispatch per `(triggerId, windowKey)` across the whole fleet, durably.**
    Proven with two pods racing the same window, and again across a process kill between the ledger
-   claim and the dispatch. *[Amended 2026-07-29 — see follow-up LOW-7: the implemented key is
-   **per-trigger**, `(triggerId, windowKey)`, for both the ledger's unique index and the advisory lock.
-   Two different trigger rows for the same tenant + definition (distinct `Name`s) can each fire the same
-   window. Read this AC with LOW-7.]*
+   claim and the dispatch.
+
+   *[Amended 2026-07-30 — LOW-7 resolved. This AC originally said `(tenantId, definitionId, windowKey)`,
+   which the code has never done and now deliberately will not. **A trigger row IS a schedule.** The
+   registry's natural key is `(tenant_id, definition_id, name)` precisely so one tenant can run one
+   definition on two cadences with two `input_json` payloads; folding `definition_id` into the ledger key
+   would make one of those schedules silently swallow the other whenever their windows coincide —
+   dropping configured work, which is a worse failure than the duplicate it prevents. So the shipped key
+   stays `(triggerId, windowKey)` for both the ledger's unique index and the advisory lock.*
+
+   ***What a consumer can actually rely on*** — stated plainly, so this AC stops promising what the code
+   does not do:
+   - The seam **guarantees** that a given **schedule** (trigger row) invokes its target **at most once per
+     window**, fleet-wide, durably across pods, restarts and clock skew.
+   - The seam does **not** guarantee at-most-once per `(tenantId, definitionId, windowKey)`. If an operator
+     creates two enabled schedules in one tenant for the same definition and their cron windows coincide,
+     the consumer **is** invoked twice for that instant — same `tenantId`, same `windowKey`, different
+     `triggerId`, usually different merged `input_json`. That is a supported configuration, not a defect.
+   - Both discriminators are on the wire: every dispatch carries `tenantId`, `definitionId`, `windowKey`
+     **and `triggerId`** as inputs. A consumer wanting per-schedule semantics keys its idempotency on
+     `(tenantId, triggerId, windowKey)`; one wanting definition-level semantics keys on
+     `(tenantId, definitionId, windowKey)` and treats the second call as the replay AC4 already obliges it
+     to tolerate (41-20 D3) — in which case the second schedule's distinct inputs are intentionally ignored,
+     so do not configure two overlapping schedules for such a consumer.
+
+   Pinned by `TwoSchedules_ForOneTenantAndDefinition_EachFireTheSharedWindow_TheKeyIsPerTrigger`.]*
 2. **Tenant isolation.** Tenant A's fire never suppresses tenant B's for the same window — the exact
    defect at `HourlyAnalyticsRollupScheduler.cs:241`, pinned by a regression test that fails if a
    tenant component is ever dropped from the lock key.
 3. **Target-agnostic.** The workflow definition id is **row data**, never a compile-time constant. A
    test asserts no `DefinitionId` constant of any consumer workflow appears in the service's source.
-4. **`tenantId` and `windowKey` reach the dispatched workflow as inputs**, and a workflow dispatched
-   twice with the same `windowKey` is the consumers' own idempotency contract (41-20 D3) — this story
-   guarantees it is not *called* twice, and states plainly that it does not guarantee the target is
-   idempotent.
+4. **`tenantId`, `windowKey`, `triggerId` and `definitionId` reach the dispatched workflow as inputs**,
+   and a workflow dispatched twice with the same `windowKey` is the consumers' own idempotency contract
+   (41-20 D3) — this story guarantees a given **schedule** does not *call* it twice for one window, and
+   states plainly that it does not guarantee the target is idempotent. *[Clarified 2026-07-30, LOW-7 —
+   "not called twice" is scoped to the trigger row; `triggerId` is on the wire so a consumer can pick
+   per-schedule or per-definition idempotency. See AC1.]*
 5. **Cron shape, not a `FireAtMinute` int**; standard 5-field expressions evaluated in UTC; a malformed
    expression is rejected **at write time** by the admin API with a typed error, never at fire time.
 6. **Bounded catch-up.** After a 24-hour outage an hourly schedule fires **once**, and emits
@@ -188,25 +231,132 @@ The following behaviour contracts changed (or were made explicit) relative to th
 6. **Same-millisecond duplicate run-now is a 409 (`duplicate_run_now`)**, mirroring Create's
    duplicate handling, instead of an unhandled unique-violation 500. The first claim stands.
 
+## Resolved follow-ups — 2026-07-30
+
+The three items left open by the 2026-07-29 adversarial review are closed. They were the stated gate on
+turning the seam on (`ScheduledTriggers:Enabled=true`), and with them the five blocked consumer stories
+(41-11 / 41-16 / 41-17 / 41-20 / 41-23) are unblocked. **No schema change was required** —
+`dotnet ef migrations has-pending-model-changes` is clean for both `ControlPlaneDbContext` and
+`TenantDbContext`, and the shipped `20260729035316_AddScheduledTriggers` migration is untouched.
+
+### MODERATE-5 — duplicate audit-event spam after a failed dispatch — **FIXED**
+
+**What it actually was.** `since` for the window computation is the trigger row's `LastFiredAt`, which
+only advances on a **successful** dispatch. So a window whose dispatch failed kept recomputing as the due
+window for the rest of its cadence — a whole day for a daily schedule. Every 60-second tick, on every pod,
+re-emitted the same `SCHEDULE.WINDOW.SKIPPED` (it was emitted **before** the lock and claim), re-took the
+advisory lock, lost the ledger claim and wrote another `SCHEDULE.FIRE.SUPPRESSED`: up to ~1440 duplicate
+rows per day per pod for one failed window. Correctness was never at risk — the committed ledger row is
+what refuses the re-dispatch — but the audit trail, which is the entire point of the `SCHEDULE.*` family,
+degraded into noise.
+
+**What shipped**, three pieces, each hanging an emission off a transition that can only happen once per
+`(trigger, window)`:
+
+1. **Settled-window short circuit, before the lock.** `IScheduledTriggerRepository.GetFireOutcomeAsync
+   (triggerId, windowKey)` probes the ledger's unique index up front. A window already `dispatched` or
+   `failed` is re-observed **silently** — DEBUG log, no event, no advisory lock, no claim attempt. This
+   also removes the per-tick lock churn a stuck trigger used to generate.
+2. **`SCHEDULE.WINDOW.SKIPPED` moved to after the claim is won.** The ledger claim is this seam's
+   at-most-once arbiter, so hanging the skip audit off it gives the audit the same guarantee the fire
+   has: exactly one skip row per `(trigger, window)`, fleet-wide, however many pods tick and however long
+   the backlog persists.
+3. **`SCHEDULE.FIRE.SUPPRESSED` now means genuine concurrency only.** With (1) in place the suppression
+   paths (advisory lock held, claim lost) are reachable only while a claim is actually in flight; and a
+   claim orphaned by a dead pod is terminated by the LOW-8 sweep below, so even that drip is bounded by
+   the sweep threshold instead of by the schedule's cadence.
+
+**Skipped vs retried, for an operator reading the stream.** There is no same-window retry anywhere in the
+seam. A window contributes at most one terminal row (`DISPATCHED` | `FAILED` | `ABANDONED`) plus at most
+one `WINDOW.SKIPPED`. So repeated rows for one `windowKey` always mean concurrency, never a retry loop.
+One honest caveat recorded rather than hidden: because `LastFiredAt` still only advances on success,
+`skippedCount` counts every window since the last **successful** dispatch that the trigger did not run —
+including windows that were attempted and burnt. Each of those carries its own `SCHEDULE.FIRE.FAILED`, so
+the two are distinguishable; the event's meaning is documented on `ScheduleEvents.WindowSkipped`.
+
+**Tests.** `AFailedWindow_TickedRepeatedly_EmitsItsSkipAndFailure_Once_NotOncePerTick` ticks 120 times
+across one failed daily window and asserts **exactly 2** audit rows total (one SKIPPED, one FAILED), zero
+SUPPRESSED, one dispatch attempt and one advisory-lock acquisition — pre-fix that run produced 240.
+`AnOrphanedClaim_OnTheDueWindow_Drips_Suppression_OnlyUntilTheSweepBurnsIt` proves the stream reaches a
+steady state (event count after 10 ticks == after 30). `SecondTick_InTheSameWindow_Dispatches_Nothing`
+was updated to assert the new silence. `GetFireOutcome_Returns_TheLedgerRowsOutcome_And_Null_WhenTheWindow
+IsUnclaimed` covers the probe against real Postgres.
+
+### LOW-7 — AC1's key vs the shipped key — **RESOLVED as option (b): keep the per-trigger key**
+
+**Decision: (b).** The ledger's unique index and the advisory-lock key stay `(triggerId, windowKey)`; AC1
+has been rewritten to state that guarantee and to spell out what a consumer can rely on (see AC1 above).
+
+**Why not (a).** Folding `definition_id` into the key would be a correctness regression, not a
+tightening. The registry's natural key is `(tenant_id, definition_id, name)` **specifically** so one
+tenant can run one definition as two schedules — e.g. a nightly full `security-audit` and an hourly
+changed-files one, with different `input_json`. Under (a) the two collide whenever their windows coincide
+(every night at midnight, for that example) and one is silently dropped: configured work vanishing with
+no event, which is worse than the duplicate invocation it would prevent. It would also collide two
+different schedules' same-millisecond `manual:{timestamp}` run-now claims, and it would require a
+migration to a key the rest of the design (per-trigger advisory lock, per-trigger `LastFiredAt`
+bookkeeping, per-trigger run-now) does not use.
+
+**Why (b) is defensible.** AC4 already makes idempotency under a replayed `windowKey` the consumer's
+contract (41-20 D3), and both discriminators are already on the wire — every dispatch carries `tenantId`,
+`definitionId`, `windowKey` **and `triggerId`**. A consumer picks its own scope. The AC now says so
+instead of promising a fleet-wide property the code does not implement.
+
+**Test.** `TwoSchedules_ForOneTenantAndDefinition_EachFireTheSharedWindow_TheKeyIsPerTrigger` pins the
+shipped behaviour: two schedules, one tenant, one definition, one window ⇒ two dispatches, same
+`windowKey`, same `tenantId`, distinct `triggerId`s, distinct advisory-lock keys.
+
+### LOW-8 — the claim-then-crash contract had no surface — **FIXED**
+
+**What it actually was.** `ScheduledTriggerFire`'s doc promised a lost fire was "surfaced as a claimed row
+that never became dispatched plus `SCHEDULE.FIRE.FAILED` where detectable". For the crash case that was
+false in both halves: the process that would emit the event is dead, and **nothing** — no sweep, metric,
+log or alert — ever inspected stale `claimed` rows. The only way to find one was manual SQL against the
+ledger.
+
+**What shipped.** A bounded stale-claim sweep at the end of each tick
+(`TenantScheduledTriggerService.SweepStaleClaimsAsync`):
+
+- `ListStaleClaimedFiresAsync(cutoff, limit)` reads rows still `Outcome = 'claimed'` whose `ClaimedAt`
+  predates `now - StaleClaimThreshold`, oldest first, at most `MaxStaleClaimsSweptPerTick` per tick.
+- `TryMarkFireAbandonedAsync(fireId, detail)` is a conditional CAS (`UPDATE … SET "Outcome" = 'failed',
+  "Detail" = … WHERE "Id" = … AND "Outcome" = 'claimed'`) — Postgres picks the one pod that owns the
+  announcement. `DispatchedAt` is deliberately left alone so a burnt **manual** fire keeps its drain CAS
+  marker (that case shows up as `dispatchAttempted: true` in the event data).
+- On a won CAS: a WARN log naming fire / trigger / tenant / definition / window / claim age, plus a
+  distinct `SCHEDULE.FIRE.ABANDONED` DCB event (LOUD status, `retried: false`).
+
+**Explicitly not a retry.** At-most-once means the window is burnt; the sweep only stamps and reports, and
+the next window is the recovery path. Stamping the terminal outcome is also what makes the sweep
+**emit-once** — a swept row leaves the feed permanently, so the new surface cannot become the very
+per-tick drip MODERATE-5 was about.
+
+**New options on the existing `TenantScheduledTriggerOptions`** (section `ScheduledTriggers`):
+`StaleClaimThreshold` (default **15 min**; must exceed `DispatchTimeout`'s 30 s so a legitimately
+in-flight claim is never burnt — pinned by a test; non-positive disables the sweep) and
+`MaxStaleClaimsSweptPerTick` (default **50**, so a pod that died holding hundreds of claims is announced
+over several ticks rather than in one burst).
+
+**Tests.** `AStaleClaimedRow_IsBurnt_AndAnnounced_Once_As_FireAbandoned` (burn + event shape + emit-once
+across three ticks + never re-dispatched), `AnInFlightClaim_YoungerThanTheThreshold_IsNeverSwept`,
+`TheStaleClaimSweep_Is_Bounded_PerTick`, `ANonPositive_StaleClaimThreshold_DisablesTheSweep`,
+`Options_StaleClaimSweep_Defaults_Exceed_TheDispatchTimeout`, and against real Postgres
+`ListStaleClaimedFires_Returns_OnlyClaimedRowsOlderThanTheCutoff_OldestFirst_Bounded` +
+`TryMarkFireAbandoned_EightConcurrentSweeps_ExactlyOneWins_AndTheRowLeavesTheFeed`.
+
 ## Known limitations / follow-ups — 2026-07-29
 
-Recorded during the same adversarial review, deliberately NOT fixed in this pass (MAJOR-1, MAJOR-2
-and the per-dispatch timeout / materialisation isolation above ARE fixed as of 2026-07-29):
+Recorded during the 2026-07-29 adversarial review. MAJOR-1, MAJOR-2, the per-dispatch timeout and the
+materialisation isolation were fixed the same day; **MODERATE-5, LOW-7 and LOW-8 were closed 2026-07-30 —
+see "Resolved follow-ups" above.** Nothing in this section is open.
 
-- **MODERATE-5 — event spam dedup.** A persistently-suppressed or persistently-failing trigger emits
-  `SCHEDULE.FIRE.SUPPRESSED` / `SCHEDULE.FIRE.FAILED` (and, while a backlog persists,
-  `SCHEDULE.WINDOW.SKIPPED`) every tick with no dedup/cooldown, so a stuck fleet writes a steady
-  drip of audit rows. Follow-up: per-(trigger, reason) emission cooldown or aggregation.
-- **LOW-7 — AC1 wording vs implementation key.** AC1 promises at-most-once per
-  `(tenantId, definitionId, windowKey)` but the ledger's unique index and the advisory-lock key are
-  per `(triggerId, windowKey)` — two DIFFERENT trigger rows for the same tenant + definition (distinct
-  `Name`s) can each fire the same window. Follow-up: either amend AC1 to say per-trigger, or add a
-  definition-level uniqueness decision.
-- **LOW-8 — stale-claimed-row observability.** A pod crash between ledger claim and dispatch leaves a
-  `claimed` row that never becomes `dispatched`/`failed` (and, post-MAJOR-1, a burnt manual fire is a
-  `claimed` row with non-null `DispatchedAt`). Nothing sweeps or surfaces these beyond retention
-  pruning. Follow-up: a periodic sweep that stamps rows older than a threshold `failed` with a
-  `SCHEDULE.FIRE.FAILED` event, or a metric/admin listing.
+- ~~**MODERATE-5 — event spam dedup.**~~ — **FIXED 2026-07-30.** A persistently-suppressed or
+  persistently-failing trigger emitted `SCHEDULE.FIRE.SUPPRESSED` / `SCHEDULE.WINDOW.SKIPPED` every tick
+  with no dedup, so a stuck fleet wrote a steady drip of audit rows.
+- ~~**LOW-7 — AC1 wording vs implementation key.**~~ — **RESOLVED 2026-07-30** as option (b): the
+  per-trigger key is the intended design and AC1 now states it.
+- ~~**LOW-8 — stale-claimed-row observability.**~~ — **FIXED 2026-07-30** by the bounded stale-claim
+  sweep + `SCHEDULE.FIRE.ABANDONED`.
 - ~~**Dead index `IX_scheduled_triggers_Enabled_NextDueAt`**~~ — **removed 2026-07-29** (no query
   filters on `NextDueAt`; the tick lists by `Enabled` + tenant). Dropped from
   `TammaModelConfiguration.cs`, the unreleased `20260729035316_AddScheduledTriggers.cs` migration

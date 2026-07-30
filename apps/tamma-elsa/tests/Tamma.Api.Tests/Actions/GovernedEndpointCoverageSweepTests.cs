@@ -267,6 +267,35 @@ public class GovernedEndpointCoverageSweepTests
     }
 
     [Test]
+    public void TheRatchetPin_IsMechanicallyShrinkOnly()
+    {
+        // 2026-07-30 — adopted from TemplateExampleConformanceTests'
+        // TheRatchetPin_IsMechanicallyShrinkOnly (43-8 follow-up F2) for all four of
+        // this story's ratchets. Until now PinnedCount was a bare const compared with
+        // HaveCount: nothing mechanically forbade replacing 216 with a larger literal,
+        // so "the ratchet only turns one way" was PROSE — the exact defect this
+        // story's own plan (D7) cites about ContractBindingTests.cs:255-271. Binding
+        // the pin to its recorded history and asserting the history's DIRECTION means
+        // raising the pin now requires appending a value that makes this test red.
+        KnownUngovernedEndpoints.PinHistory.Should().NotBeEmpty();
+
+        KnownUngovernedEndpoints.PinnedCount.Should().Be(KnownUngovernedEndpoints.PinHistory[^1],
+            "the pin IS the last recorded high-water value; changing one without the other is the "
+            + "shape of an undeclared re-widening");
+
+        for (var i = 1; i < KnownUngovernedEndpoints.PinHistory.Length; i++)
+        {
+            KnownUngovernedEndpoints.PinHistory[i].Should()
+                .BeLessThan(KnownUngovernedEndpoints.PinHistory[i - 1],
+                    $"pin history entry #{i} ({KnownUngovernedEndpoints.PinHistory[i]}) must be "
+                    + $"strictly smaller than #{i - 1} ({KnownUngovernedEndpoints.PinHistory[i - 1]}). "
+                    + "An entry may only leave this baseline by being GOVERNED or by ceasing to "
+                    + "exist. A new ungoverned route is not a reason to raise the pin — it is the "
+                    + "signal the ratchet exists to produce.");
+        }
+    }
+
+    [Test]
     public void Baseline_hasNoDuplicateSiteKeys()
     {
         var duplicates = KnownUngovernedEndpoints.All
@@ -315,6 +344,27 @@ public class GovernedEndpointCoverageSweepTests
             + string.Join(", ", KnownUngovernedEndpoints.JustificationKeywords)
             + "] — a bare placeholder must not buy an entry into the ratchet:"
             + Environment.NewLine + string.Join(Environment.NewLine, unclassified));
+    }
+
+    // ====================================================================
+    // Ratchet-discipline surface (Story 43-8 AC8, carve-out §A1 #5) — the seam
+    // RatchetDisciplineTests reads, so the meta-test can assert this ratchet has
+    // all three properties by driving the REAL classifier, not a description of it.
+    // ====================================================================
+
+    /// <summary>
+    /// Drives the REAL <see cref="Classify"/> with a baselined endpoint that is now
+    /// bound — the stale case. Non-empty output is the proof that the staleness arm
+    /// exists and fires.
+    /// </summary>
+    internal static IReadOnlyList<string> RatchetStalenessProbe()
+    {
+        var key = new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineEventsAppend.ToWire());
+        var (_, stale) = Classify(
+            [Fact("POST", "/api/fixture/ratchet-probe", key)],
+            Baseline(new KnownUngovernedEndpoints.Entry(
+                "POST", "/api/fixture/ratchet-probe", "human-operated: fixture")));
+        return stale;
     }
 
     // ====================================================================

@@ -28,15 +28,24 @@ namespace Tamma.Activities.Tests.Actions;
 /// call site to satisfy the test manufactures a phantom capability, which is worse
 /// than the gap.</para>
 ///
-/// <para><b>WHY A TABLE AND NOT ONLY THE ATTRIBUTE.</b>
-/// <see cref="PerformsEffectAttribute"/> is the authoring shape 43-9 consumes, and
-/// this sweep honours it (<see cref="EveryAttributedMethod_AgreesWithTheTable"/>):
-/// an attributed method must name the effect the table maps it to, so attributes
-/// can be applied incrementally without weakening anything. Applying the 17
-/// attributes to <c>TammaApiClient</c> itself is a source edit to a file another
-/// in-flight story is extending; the mapping is therefore carried here, where it is
-/// checked by reflection today, and each entry GRADUATES to an attribute without
-/// changing what is asserted.</para>
+/// <para><b>WHY BOTH A TABLE AND THE ATTRIBUTE (updated 2026-07-30).</b>
+/// <see cref="PerformsEffectAttribute"/> is the authoring shape Story 43-9 consumes,
+/// and <b>all 17 attributes are now applied</b> to <see cref="TammaApiClient"/>
+/// (43-8 AC4 step 7, carve-out §A1 #3). The table is KEPT, not retired, and the two
+/// are held in agreement by <see cref="EveryAttributedMethod_AgreesWithTheTable"/> —
+/// because they catch different things:</para>
+/// <list type="bullet">
+///   <item>the <b>attribute</b> is readable by PRODUCTION code (43-9's enforcement
+///   seam and <c>ActionEnforcementSites</c> live in <c>src/</c> and cannot see a
+///   table declared in a test assembly — story 43-8 §A2);</item>
+///   <item>the <b>table</b> is what makes a RENAME fail: its method names are
+///   resolved by reflection, whereas an attribute travels with the method it
+///   decorates and survives any rename silently.</item>
+/// </list>
+/// <para>Keeping both is therefore not duplication; deleting either loses a distinct
+/// guarantee. Story 43-8 §A1 carve-out #3 recorded the original justification for
+/// table-only ("a file another in-flight story is extending") — §A2 established that
+/// justification was factually wrong, and this is its closure.</para>
 ///
 /// <para><b>WHAT THIS SWEEP CANNOT SEE</b> — stated so a green run is not read as a
 /// stronger guarantee than it is:</para>
@@ -173,6 +182,24 @@ public class MediationClientEffectSweepTests
                 "native tracker route (Story 44-2); tenant tracker configuration written from the UI"),
             [ExternalEffect.TrackerPreferencesDelete] = new(SiteKind.RouteOnly, null,
                 "native tracker route (Story 44-2); tenant tracker configuration written from the UI"),
+
+            // ── Story 43-8 AC1 step 2 (carve-out §A1 #1, closed 2026-07-30) ──
+            // The four MentorshipController [HttpPost] actions. RouteOnly: they are
+            // reached from a UI, never through the engine's mediation client, so no
+            // TammaApiClient method exists (or should) to attribute.
+            [ExternalEffect.MentorshipSessionStart] = new(SiteKind.RouteOnly, null,
+                "POST /api/Mentorship/start — the only [Governs]-attributed controller action family; "
+                + "it dispatches the tamma-autonomous-mentorship Elsa workflow, so an agent run is "
+                + "under way when it completes"),
+            [ExternalEffect.MentorshipSessionPause] = new(SiteKind.RouteOnly, null,
+                "POST /api/Mentorship/sessions/{sessionId:guid}/pause — control over an in-flight "
+                + "mentorship run, reached from the UI"),
+            [ExternalEffect.MentorshipSessionResume] = new(SiteKind.RouteOnly, null,
+                "POST /api/Mentorship/sessions/{sessionId:guid}/resume — control over an in-flight "
+                + "mentorship run, reached from the UI"),
+            [ExternalEffect.MentorshipSessionCancel] = new(SiteKind.RouteOnly, null,
+                "POST /api/Mentorship/sessions/{sessionId:guid}/cancel — terminates the mentorship "
+                + "workflow instance; reached from the UI, never through the mediation client"),
 
             // ── In-process: no HTTP hop, so no route sweep can ever see them ──
             [ExternalEffect.ProcessSpawn] = new(SiteKind.InProcess, null,
@@ -449,10 +476,25 @@ public class MediationClientEffectSweepTests
     [Test]
     public void EveryAttributedMethod_AgreesWithTheTable()
     {
-        // The GRADUATION path. [PerformsEffect] is the shape Story 43-9 consumes; as
-        // attributes are applied to TammaApiClient they must name the effect the
-        // table already maps — so the two can never disagree, and the table can be
-        // retired member by member.
+        // [PerformsEffect] is the shape Story 43-9 and ActionEnforcementSites consume;
+        // the table is what makes a rename fail. This test is what keeps the two from
+        // ever disagreeing.
+        //
+        // ANTI-VACUITY TRIPWIRE (2026-07-30). Until the attributes landed, this test
+        // iterated zero attributed methods and passed unconditionally — it read as a
+        // guarantee while guaranteeing nothing, which is the failure mode this whole
+        // story exists to prevent. Assert the attributed count FIRST, so the loop
+        // below can never silently become a no-op again.
+        var attributed = ClientMethods(typeof(TammaApiClient))
+            .Where(m => m.GetCustomAttribute<PerformsEffectAttribute>(inherit: false) is not null)
+            .ToList();
+
+        attributed.Should().HaveCount(17,
+            "all 17 mutating TammaApiClient methods carry [PerformsEffect] as of 2026-07-30 (43-8 AC4 "
+            + "step 7). If this is 0 the attributes were stripped and the agreement check below is "
+            + "vacuous; if it is higher, a method was attributed without a corresponding "
+            + "EffectPerformingSites entry — decide which effect it performs, in the table, first.");
+
         var problems = new List<string>();
 
         foreach (var method in ClientMethods(typeof(TammaApiClient)))
@@ -487,6 +529,36 @@ public class MediationClientEffectSweepTests
                 "AC4 enumerates exactly 17 mutating TammaApiClient methods. A change here means a "
                 + "mediation method became (or stopped being) a governed effect — that is a "
                 + "governance decision, not a refactor.");
+    }
+
+    /// <summary>
+    /// The <see cref="KnownNonEffectClientMethods"/> pin's recorded high-water
+    /// history, oldest first; every element must be strictly LESS than its
+    /// predecessor (asserted by
+    /// <see cref="TheRatchetPin_IsMechanicallyShrinkOnly"/>). Seeded at 19 on
+    /// 2026-07-29 and unmoved since — applying the 17 <c>[PerformsEffect]</c>
+    /// attributes on 2026-07-30 reclassified nothing, because the table already
+    /// mapped exactly those 17 methods.
+    /// </summary>
+    internal static readonly int[] NonEffectPinHistory = [19];
+
+    [Test]
+    public void TheRatchetPin_IsMechanicallyShrinkOnly()
+    {
+        // Adopted 2026-07-30 from TemplateExampleConformanceTests for all four 43-8
+        // ratchets: a bare const compared with HaveCount makes "shrink-only" prose an
+        // author can defeat by editing one literal.
+        NonEffectPinHistory.Should().NotBeEmpty();
+        NonEffectPinHistory[^1].Should().Be(19,
+            "the pin IS the last recorded high-water value; changing one without the other is the "
+            + "shape of an undeclared re-widening");
+
+        for (var i = 1; i < NonEffectPinHistory.Length; i++)
+        {
+            NonEffectPinHistory[i].Should().BeLessThan(NonEffectPinHistory[i - 1],
+                $"pin history entry #{i} must be strictly smaller than #{i - 1}. A method leaves "
+                + "this baseline by becoming a governed effect, never by the list growing.");
+        }
     }
 
     [Test]
@@ -539,6 +611,42 @@ public class MediationClientEffectSweepTests
                 + "this list the place mutating methods hide");
         }
     }
+
+    // ====================================================================
+    // Ratchet-discipline surface (Story 43-8 AC8, carve-out §A1 #5) — the seam
+    // RatchetDisciplineTests reads, so the meta-test can assert all three
+    // properties without KnownNonEffectClientMethods becoming public API.
+    // ====================================================================
+
+    /// <summary>The ratchet's justification strings, for the meta-test.</summary>
+    internal static IReadOnlyList<string> RatchetJustifications() =>
+        KnownNonEffectClientMethods.Values.ToArray();
+
+    /// <summary>The ratchet's justification classifier, for the meta-test.</summary>
+    internal static bool RatchetClassifies(string justification) =>
+        !string.IsNullOrWhiteSpace(justification)
+        && JustificationKeywords.Any(k => justification.Contains(k, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The ratchet's live entry count, for the meta-test.</summary>
+    internal static int RatchetCount() => KnownNonEffectClientMethods.Count;
+
+    /// <summary>
+    /// Drives the REAL <see cref="Classify"/> with a baselined method that is now
+    /// mapped to an effect — the stale case. Non-empty output is the proof that this
+    /// ratchet's staleness arm fires.
+    /// </summary>
+    internal static IReadOnlyList<string> RatchetStalenessProbe() =>
+        Classify(
+            typeof(FixtureClient),
+            [ExternalEffect.LlmCall],
+            FixtureSites,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["ReadSomethingAsync"] = "read-only: fixture",
+                ["DeleteTheUniverseAsync"] = "read-only: fixture",
+            })
+        .Where(p => p.Contains("DELETE its KnownNonEffectClientMethods entry", StringComparison.Ordinal))
+        .ToArray();
 
     // ====================================================================
     // DISCRIMINATION PROOFS — the sweep must FAIL on ungoverned input

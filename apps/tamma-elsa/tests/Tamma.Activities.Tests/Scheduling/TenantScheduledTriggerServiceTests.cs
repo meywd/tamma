@@ -117,6 +117,46 @@ public class TenantScheduledTriggerServiceTests
             }
         }
 
+        public Task<string?> GetFireOutcomeAsync(
+            Guid triggerId, string windowKey, CancellationToken ct = default)
+        {
+            lock (_claimGate)
+            {
+                return Task.FromResult(
+                    Fires.TryGetValue((triggerId, windowKey), out var fire) ? fire.Outcome : null);
+            }
+        }
+
+        public Task<IReadOnlyList<ScheduledTriggerFire>> ListStaleClaimedFiresAsync(
+            DateTime claimedBeforeUtc, int limit, CancellationToken ct = default)
+        {
+            lock (_claimGate)
+            {
+                return Task.FromResult<IReadOnlyList<ScheduledTriggerFire>>(Fires.Values
+                    .Where(f => f.Outcome == "claimed" && f.ClaimedAt < claimedBeforeUtc)
+                    .OrderBy(f => f.ClaimedAt)
+                    .Take(limit)
+                    .ToList());
+            }
+        }
+
+        public Task<bool> TryMarkFireAbandonedAsync(
+            Guid fireId, string detail, CancellationToken ct = default)
+        {
+            // The in-memory analogue of the real repository's
+            // UPDATE … WHERE Outcome='claimed' CAS (LOW-8): exactly one
+            // sweeper wins a row, and the row becomes terminal so the sweep
+            // never sees it again.
+            lock (_claimGate)
+            {
+                var fire = Fires.Values.SingleOrDefault(f => f.Id == fireId);
+                if (fire is null || fire.Outcome != "claimed") return Task.FromResult(false);
+                fire.Outcome = "failed";
+                fire.Detail = detail;
+                return Task.FromResult(true);
+            }
+        }
+
         public Task StampOutcomeAsync(
             Guid fireId, string outcome, string? workflowInstanceId, string? detail,
             DateTime? dispatchedAtUtc, CancellationToken ct = default)
@@ -263,7 +303,8 @@ public class TenantScheduledTriggerServiceTests
         StubTimeProvider Time);
 
     private static Harness Build(
-        bool enabled = true, int maxFiresPerTick = 50, TimeSpan? dispatchTimeout = null)
+        bool enabled = true, int maxFiresPerTick = 50, TimeSpan? dispatchTimeout = null,
+        TimeSpan? staleClaimThreshold = null, int? maxStaleClaimsSweptPerTick = null)
     {
         var repository = new FakeRepository();
         var dispatcher = new CapturingDispatcher();
@@ -283,6 +324,10 @@ public class TenantScheduledTriggerServiceTests
             MaxFiresPerTick = maxFiresPerTick,
         };
         if (dispatchTimeout is { } timeout) options.DispatchTimeout = timeout;
+        if (staleClaimThreshold is { } staleThreshold)
+            options.StaleClaimThreshold = staleThreshold;
+        if (maxStaleClaimsSweptPerTick is { } maxSwept)
+            options.MaxStaleClaimsSweptPerTick = maxSwept;
 
         var service = new TenantScheduledTriggerService(
             services,
@@ -359,7 +404,17 @@ public class TenantScheduledTriggerServiceTests
 
         (await h.Service.InvokeTickForTestsAsync(default)).Should().Be(0);
         h.Dispatcher.Definitions.Should().HaveCount(1, "the committed claim is the dedupe");
-        h.Events.Events.Should().ContainSingle(e => e.Type == ScheduleEvents.FireSuppressed);
+
+        // MODERATE-5 (2026-07-30) — behaviour change: re-observing a window
+        // that already reached a TERMINAL ledger outcome is SILENT. It used to
+        // emit SCHEDULE.FIRE.SUPPRESSED here, which is what turned one stuck
+        // window into a per-tick, per-pod drip of identical audit rows.
+        // Suppression events are now reserved for genuine concurrency.
+        h.Events.Events.Should().ContainSingle()
+            .Which.Type.Should().Be(ScheduleEvents.FireDispatched,
+                "a settled window contributes exactly one terminal audit row, not one per tick");
+        h.LeaderLock.Attempts.Should().HaveCount(1,
+            "a settled window is short-circuited BEFORE the advisory lock — no lock churn either");
     }
 
     // ── (c) AC2 — three tenants, one schedule ⇒ three dispatches, three lock keys ──
@@ -619,7 +674,7 @@ public class TenantScheduledTriggerServiceTests
             TenantId = tenant,
             DefinitionId = trigger.DefinitionId,
             WindowKey = "manual:20260727T121500.000Z",
-            ClaimedAt = Now.AddMinutes(-15).UtcDateTime,
+            ClaimedAt = Now.AddMinutes(-5).UtcDateTime, // well inside StaleClaimThreshold
             Outcome = "claimed",
         };
         h.Repository.Fires[(trigger.Id, manual.WindowKey)] = manual;
@@ -640,7 +695,7 @@ public class TenantScheduledTriggerServiceTests
         TenantId = trigger.TenantId!.Value,
         DefinitionId = trigger.DefinitionId,
         WindowKey = windowKey,
-        ClaimedAt = Now.AddMinutes(-15).UtcDateTime,
+        ClaimedAt = Now.AddMinutes(-5).UtcDateTime, // well inside StaleClaimThreshold
         Outcome = "claimed",
     };
 
@@ -805,5 +860,286 @@ public class TenantScheduledTriggerServiceTests
             .Should().Be("2026-07-26T18:31:00Z");
         data.RootElement.GetProperty("lastSkippedWindowKey").GetString()
             .Should().Be("2026-07-27T12:29:00Z");
+    }
+
+    // ── MODERATE-5 (2026-07-30) — one window, one audit row ──
+
+    /// <summary>
+    /// THE regression this fix exists for. A daily schedule whose dispatch
+    /// fails once: the ledger row is burnt but the trigger row's
+    /// <c>LastFiredAt</c> only advances on SUCCESS, so the SAME window
+    /// recomputes as due on every one of that day's ~1440 sixty-second ticks
+    /// — on every pod. Pre-fix each of those ticks re-emitted
+    /// <c>SCHEDULE.WINDOW.SKIPPED</c>, re-took the advisory lock, lost the
+    /// claim and wrote another <c>SCHEDULE.FIRE.SUPPRESSED</c>. Correctness
+    /// held throughout (the committed claim is what refuses the re-dispatch);
+    /// the audit trail did not.
+    /// </summary>
+    [Test]
+    public async Task AFailedWindow_TickedRepeatedly_EmitsItsSkipAndFailure_Once_NotOncePerTick()
+    {
+        var h = Build();
+        var tenant = Guid.NewGuid();
+        h.Repository.ActiveTenants.Add(tenant);
+        var trigger = HourlyTrigger(tenant);
+        trigger.CronExpression = "0 12 * * *";                            // daily at noon
+        trigger.LastFiredAt = Now.AddDays(-2).AddHours(-2).UtcDateTime;   // + a real backlog
+        h.Repository.Triggers.Add(trigger);
+
+        var attempts = 0;
+        h.Dispatcher.ThrowFor = _ =>
+        {
+            attempts++;
+            return new InvalidOperationException("engine unavailable");
+        };
+
+        // Two hours of a 60-second cadence over ONE failed daily window.
+        for (var minute = 0; minute < 120; minute++)
+        {
+            h.Time.UtcNow = Now.AddMinutes(minute);
+            (await h.Service.InvokeTickForTestsAsync(default)).Should().Be(0);
+        }
+
+        attempts.Should().Be(1, "at-most-once: the window is burnt, never retried");
+        h.Events.Events.Should().HaveCount(2,
+            "MODERATE-5 — 120 ticks over one failed window must produce ONE skip row and ONE "
+            + "failure row, not 120 of each (pre-fix: 120 SKIPPED + 119 SUPPRESSED + 1 FAILED)");
+        h.Events.Events.Count(e => e.Type == ScheduleEvents.WindowSkipped).Should().Be(1,
+            "the skip audit now hangs off the WON ledger claim — the same at-most-once "
+            + "arbiter the fire itself uses");
+        h.Events.Events.Count(e => e.Type == ScheduleEvents.FireFailed).Should().Be(1);
+        h.Events.Events.Should().NotContain(e => e.Type == ScheduleEvents.FireSuppressed,
+            "a settled window is re-observed silently; SUPPRESSED now means real concurrency");
+        h.LeaderLock.Attempts.Should().HaveCount(1,
+            "the settled-window short circuit runs BEFORE the lock, so there is no lock churn "
+            + "either — an operator reading the stream sees 'skipped once', not 'retrying'");
+    }
+
+    /// <summary>
+    /// The other half of the bound: a claim orphaned by a dead pod sits
+    /// non-terminal, so the fire path legitimately reports concurrency —
+    /// but only until the LOW-8 sweep burns it. The event stream must reach a
+    /// STEADY STATE rather than drip forever.
+    /// </summary>
+    [Test]
+    public async Task AnOrphanedClaim_OnTheDueWindow_Drips_Suppression_OnlyUntilTheSweepBurnsIt()
+    {
+        var h = Build(staleClaimThreshold: TimeSpan.FromMinutes(5));
+        var tenant = Guid.NewGuid();
+        h.Repository.ActiveTenants.Add(tenant);
+        var trigger = HourlyTrigger(tenant);       // due window 2026-07-27T12:00:00Z
+        h.Repository.Triggers.Add(trigger);
+
+        // Another pod claimed the due window and died before dispatching.
+        var orphan = new ScheduledTriggerFire
+        {
+            Id = Guid.NewGuid(),
+            TriggerId = trigger.Id,
+            TenantId = tenant,
+            DefinitionId = trigger.DefinitionId,
+            WindowKey = "2026-07-27T12:00:00Z",
+            ClaimedAt = Now.UtcDateTime,
+            Outcome = "claimed",
+        };
+        h.Repository.Fires[(trigger.Id, orphan.WindowKey)] = orphan;
+
+        for (var minute = 0; minute < 10; minute++)
+        {
+            h.Time.UtcNow = Now.AddMinutes(minute);
+            await h.Service.InvokeTickForTestsAsync(default);
+        }
+        var afterTenTicks = h.Events.Events.Count;
+
+        // Twenty more ticks, all inside the same hourly window (…12:59Z).
+        for (var minute = 10; minute < 30; minute++)
+        {
+            h.Time.UtcNow = Now.AddMinutes(minute);
+            await h.Service.InvokeTickForTestsAsync(default);
+        }
+
+        h.Events.Events.Count.Should().Be(afterTenTicks,
+            "once the sweep burns the orphaned claim the window is terminal and every "
+            + "later tick is silent — the drip STOPS instead of running for the cadence");
+        afterTenTicks.Should().BeLessThanOrEqualTo(10,
+            "and while it drips it is bounded by the stale-claim threshold, not by the "
+            + "schedule's cadence");
+        h.Events.Events.Count(e => e.Type == ScheduleEvents.FireAbandoned).Should().Be(1);
+        h.Dispatcher.Definitions.Should().BeEmpty("the burnt window is never re-dispatched");
+    }
+
+    // ── LOW-7 (2026-07-30) — the shipped at-most-once key is PER TRIGGER ──
+
+    /// <summary>
+    /// Executable statement of what AC1 actually guarantees. Two schedules in
+    /// ONE tenant for ONE definition (distinct <c>Name</c>s — the registry's
+    /// natural key makes that legal, and it is the whole point of being able
+    /// to run one definition on two cadences with two payloads) each fire the
+    /// shared window once. The key is <c>(triggerId, windowKey)</c>; folding
+    /// <c>definitionId</c> in would make one schedule silently swallow the
+    /// other. Consumers get <c>triggerId</c> on the wire and choose their own
+    /// idempotency scope.
+    /// </summary>
+    [Test]
+    public async Task TwoSchedules_ForOneTenantAndDefinition_EachFireTheSharedWindow_TheKeyIsPerTrigger()
+    {
+        var h = Build();
+        var tenant = Guid.NewGuid();
+        h.Repository.ActiveTenants.Add(tenant);
+        h.Repository.Triggers.Add(HourlyTrigger(tenant, name: "nightly-full"));
+        h.Repository.Triggers.Add(HourlyTrigger(
+            tenant, name: "hourly-quick", inputJson: """{"scope":"changed-files"}"""));
+
+        var dispatched = await h.Service.InvokeTickForTestsAsync(default);
+
+        dispatched.Should().Be(2,
+            "LOW-7 — the shipped guarantee is at-most-once per (triggerId, windowKey); two "
+            + "schedules for the same (tenant, definition) are two schedules, not a duplicate");
+        h.Dispatcher.Definitions.Should().OnlyContain(
+            d => (string)d.Input!["windowKey"] == "2026-07-27T12:00:00Z");
+        h.Dispatcher.Definitions.Should().OnlyContain(
+            d => (string)d.Input!["tenantId"] == tenant.ToString("D"));
+        h.Dispatcher.Definitions.Select(d => d.Input!["triggerId"]).Should().OnlyHaveUniqueItems(
+            "triggerId is the discriminator a consumer needs to scope idempotency per SCHEDULE "
+            + "rather than per (tenant, definition, window)");
+        h.LeaderLock.Attempts.Should().OnlyHaveUniqueItems(
+            "the advisory-lock key is per-trigger for the same reason");
+    }
+
+    // ── LOW-8 (2026-07-30) — the claim-then-crash surface ──
+
+    private static ScheduledTriggerFire OrphanedClaim(
+        ScheduledTrigger trigger, DateTime claimedAtUtc, string windowKey) => new()
+    {
+        Id = Guid.NewGuid(),
+        TriggerId = trigger.Id,
+        TenantId = trigger.TenantId!.Value,
+        DefinitionId = trigger.DefinitionId,
+        WindowKey = windowKey,
+        ClaimedAt = claimedAtUtc,
+        Outcome = "claimed",
+    };
+
+    [Test]
+    public async Task AStaleClaimedRow_IsBurnt_AndAnnounced_Once_As_FireAbandoned()
+    {
+        var h = Build();
+        var tenant = Guid.NewGuid();
+        h.Repository.ActiveTenants.Add(tenant);
+        var trigger = HourlyTrigger(tenant);
+        trigger.LastFiredAt = Now.UtcDateTime; // no cron window due — isolate the sweep
+        h.Repository.Triggers.Add(trigger);
+        var orphan = OrphanedClaim(
+            trigger, Now.AddHours(-3).UtcDateTime, "2026-07-27T09:00:00Z");
+        h.Repository.Fires[(trigger.Id, orphan.WindowKey)] = orphan;
+
+        (await h.Service.InvokeTickForTestsAsync(default)).Should().Be(0,
+            "the sweep reports a lost fire; it must NEVER re-dispatch it (at-most-once "
+            + "means the window is burnt)");
+        h.Dispatcher.Definitions.Should().BeEmpty();
+
+        orphan.Outcome.Should().Be("failed", "burning the row is what makes the sweep emit-once");
+        orphan.Detail.Should().StartWith("abandoned:");
+
+        var announced = h.Events.Events.Should()
+            .ContainSingle(e => e.Type == ScheduleEvents.FireAbandoned).Which;
+        using (var tags = JsonDocument.Parse(announced.Tags))
+        {
+            tags.RootElement.GetProperty("windowKey").GetString().Should().Be(orphan.WindowKey);
+            tags.RootElement.GetProperty("triggerId").GetString()
+                .Should().Be(trigger.Id.ToString("D"));
+            tags.RootElement.GetProperty("status").GetString().Should().Be("error",
+                "a fire that vanished with its pod is LOUD");
+        }
+        using (var data = JsonDocument.Parse(announced.Data))
+        {
+            data.RootElement.GetProperty("fireId").GetString().Should().Be(orphan.Id.ToString("D"));
+            data.RootElement.GetProperty("retried").GetBoolean().Should().BeFalse();
+            data.RootElement.GetProperty("ageMinutes").GetDouble().Should().BeApproximately(180, 1);
+        }
+
+        // Emit-once: a swept row is terminal, so later ticks find nothing.
+        await h.Service.InvokeTickForTestsAsync(default);
+        await h.Service.InvokeTickForTestsAsync(default);
+        h.Events.Events.Count(e => e.Type == ScheduleEvents.FireAbandoned).Should().Be(1,
+            "the new surface must not become the very per-tick drip MODERATE-5 was about");
+    }
+
+    [Test]
+    public async Task AnInFlightClaim_YoungerThanTheThreshold_IsNeverSwept()
+    {
+        var h = Build();
+        var tenant = Guid.NewGuid();
+        h.Repository.ActiveTenants.Add(tenant);
+        var trigger = HourlyTrigger(tenant);
+        trigger.LastFiredAt = Now.UtcDateTime;
+        h.Repository.Triggers.Add(trigger);
+        var inFlight = OrphanedClaim(
+            trigger, Now.AddMinutes(-5).UtcDateTime, "2026-07-27T12:00:00Z");
+        h.Repository.Fires[(trigger.Id, inFlight.WindowKey)] = inFlight;
+
+        await h.Service.InvokeTickForTestsAsync(default);
+
+        inFlight.Outcome.Should().Be("claimed",
+            "a claim inside the threshold is a dispatch IN FLIGHT on another pod — burning it "
+            + "would invent a failure and, worse, could race a live dispatch");
+        h.Events.Events.Should().NotContain(e => e.Type == ScheduleEvents.FireAbandoned);
+    }
+
+    [Test]
+    public async Task TheStaleClaimSweep_Is_Bounded_PerTick()
+    {
+        var h = Build(maxStaleClaimsSweptPerTick: 2);
+        var tenant = Guid.NewGuid();
+        h.Repository.ActiveTenants.Add(tenant);
+        var trigger = HourlyTrigger(tenant);
+        trigger.LastFiredAt = Now.UtcDateTime;
+        h.Repository.Triggers.Add(trigger);
+        for (var i = 0; i < 5; i++)
+        {
+            var orphan = OrphanedClaim(
+                trigger, Now.AddHours(-3).AddMinutes(i).UtcDateTime, $"2026-07-27T0{i}:00:00Z");
+            h.Repository.Fires[(trigger.Id, orphan.WindowKey)] = orphan;
+        }
+
+        await h.Service.InvokeTickForTestsAsync(default);
+        h.Events.Events.Count(e => e.Type == ScheduleEvents.FireAbandoned).Should().Be(2,
+            "a pod that died holding hundreds of claims is announced over several ticks, "
+            + "never in one unbounded burst");
+
+        await h.Service.InvokeTickForTestsAsync(default);
+        await h.Service.InvokeTickForTestsAsync(default);
+        h.Events.Events.Count(e => e.Type == ScheduleEvents.FireAbandoned).Should().Be(5);
+        h.Repository.Fires.Values.Should().OnlyContain(f => f.Outcome == "failed");
+    }
+
+    [Test]
+    public async Task ANonPositive_StaleClaimThreshold_DisablesTheSweep()
+    {
+        var h = Build(staleClaimThreshold: TimeSpan.Zero);
+        var tenant = Guid.NewGuid();
+        h.Repository.ActiveTenants.Add(tenant);
+        var trigger = HourlyTrigger(tenant);
+        trigger.LastFiredAt = Now.UtcDateTime;
+        h.Repository.Triggers.Add(trigger);
+        var orphan = OrphanedClaim(
+            trigger, Now.AddDays(-3).UtcDateTime, "2026-07-24T12:00:00Z");
+        h.Repository.Fires[(trigger.Id, orphan.WindowKey)] = orphan;
+
+        await h.Service.InvokeTickForTestsAsync(default);
+
+        orphan.Outcome.Should().Be("claimed");
+        h.Events.Events.Should().NotContain(e => e.Type == ScheduleEvents.FireAbandoned);
+    }
+
+    [Test]
+    public void Options_StaleClaimSweep_Defaults_Exceed_TheDispatchTimeout()
+    {
+        var options = new TenantScheduledTriggerOptions();
+
+        options.StaleClaimThreshold.Should().Be(TimeSpan.FromMinutes(15));
+        options.StaleClaimThreshold.Should().BeGreaterThan(options.DispatchTimeout,
+            "LOW-8 — an in-flight dispatch is legitimately 'claimed'; the threshold must not "
+            + "be able to burn one");
+        options.MaxStaleClaimsSweptPerTick.Should().Be(50);
     }
 }

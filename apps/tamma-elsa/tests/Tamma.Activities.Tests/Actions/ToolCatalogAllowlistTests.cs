@@ -17,13 +17,53 @@ namespace Tamma.Activities.Tests.Actions;
 [TestFixture]
 public class ToolCatalogAllowlistTests
 {
+    /// <summary>
+    /// The <c>NotDiRegisteredTools</c> pin's recorded high-water history, oldest
+    /// first; strictly decreasing (asserted by
+    /// <see cref="TheRatchetPin_IsMechanicallyShrinkOnly"/>). Adopted 2026-07-30 for
+    /// all four of Story 43-8's ratchets, from
+    /// <c>TemplateExampleConformanceTests</c>. Seeded at 1 (Story 43-4) and unmoved.
+    /// </summary>
+    internal static readonly int[] NotDiRegisteredToolsPinHistory = [1];
+
+    [Test]
+    public void TheRatchetPin_IsMechanicallyShrinkOnly()
+    {
+        // A bare literal inside HaveCount makes "shrink-only" prose an author defeats
+        // by editing one character — the ContractBindingTests.cs:255-271 defect that
+        // Story 43-8 D7 exists to not inherit. Bind the pin to a recorded history and
+        // assert the history's DIRECTION.
+        NotDiRegisteredToolsPinHistory.Should().NotBeEmpty();
+
+        for (var i = 1; i < NotDiRegisteredToolsPinHistory.Length; i++)
+        {
+            NotDiRegisteredToolsPinHistory[i].Should()
+                .BeLessThan(NotDiRegisteredToolsPinHistory[i - 1],
+                    $"pin history entry #{i} must be strictly smaller than #{i - 1}. A tool leaves "
+                    + "this allowlist by GAINING a DI-registered executor, never by the allowlist "
+                    + "growing to fit a new exemption.");
+        }
+    }
+
+    /// <summary>
+    /// The justification classifier for <c>ToolCatalogAllowlists</c>, extracted
+    /// 2026-07-30 so that both <see cref="Every_justification_is_non_empty_and_cites_a_source"/>
+    /// and the AC8 meta-test <c>RatchetDisciplineTests</c> drive the SAME rule
+    /// rather than two copies that can drift.
+    /// </summary>
+    internal static bool CitesASource(string justification) =>
+        !string.IsNullOrWhiteSpace(justification)
+        && System.Text.RegularExpressions.Regex.IsMatch(
+            justification, "Program\\.cs|ToolCallValidator|D6");
+
     [Test]
     public void NotDiRegisteredTools_is_pinned_at_exactly_one_entry()
     {
         // SHRINK-ONLY: deleting an entry (because the tool became registered or
         // was deleted) is fine; ADDING one requires updating this pin in the
         // same reviewed change, with a justification citing a design decision.
-        ToolCatalogAllowlists.NotDiRegisteredTools.Should().HaveCount(1);
+        ToolCatalogAllowlists.NotDiRegisteredTools
+            .Should().HaveCount(NotDiRegisteredToolsPinHistory[^1]);
         ToolCatalogAllowlists.NotDiRegisteredTools[0].Key.Should().Be("tool:get_acceptance_rules");
     }
 
@@ -90,8 +130,9 @@ public class ToolCatalogAllowlistTests
             entry.Justification.Should().NotBeNullOrWhiteSpace(
                 $"allowlist entry '{entry.Key}' must say WHY it is allowed");
             // The ContractBindingTests keyword-classification shape: every
-            // justification names the file/decision it rests on.
-            entry.Justification.Should().MatchRegex("Program\\.cs|ToolCallValidator|D6",
+            // justification names the file/decision it rests on. Delegated to
+            // CitesASource so the AC8 meta-test drives the identical rule.
+            CitesASource(entry.Justification).Should().BeTrue(
                 $"allowlist entry '{entry.Key}' must cite its source");
         }
     }

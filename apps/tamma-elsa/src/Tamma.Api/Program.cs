@@ -19,6 +19,7 @@ using Tamma.Api.Services.Provisioning.V2;
 using Tamma.Core.Interfaces;
 using Tamma.Api.Services.PlatformTasks;
 using Tamma.Api.Services.Webhooks;
+using Tamma.Core.Actions;
 using Tamma.Data;
 using Tamma.Data.Pooling;
 using Tamma.Data.Repositories;
@@ -3113,12 +3114,20 @@ engine.MapGet("/cycle-results", EngineEndpoints.GetCycleResults);
 // the events were written to a write-only transient list nothing drained).
 // Gated to EngineServiceOnly (service principal) — NOT WorkflowsManage, which
 // every tenant owner/admin holds and would let them forge audit events (I4).
-engine.MapPost("/events", EngineEndpoints.AppendEvents).RequireAuthorization("EngineServiceOnly");
+// Story 43-8 AC1 step 3 (carve-out §A1 #2, closed 2026-07-30): `.Governs(key)`
+// binds this route to its catalog member. METADATA ONLY — Story 43-9 adds
+// `.AddEndpointFilter<ActionGateFilter>()` inside GovernsExtensions.Governs, so
+// annotating and enforcing stay one call and nothing here changes behaviour today.
+// The bound member's descriptor SiteKey must equal "{METHOD} {RawText}" of this
+// very route (GovernedEndpointBindingSweepTests) — bind a route to its OWN member.
+engine.MapPost("/events", EngineEndpoints.AppendEvents).RequireAuthorization("EngineServiceOnly")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineEventsAppend.ToWire()));
 // Engine→platform_events callback: cross-tenant lifecycle / analytics events that the
 // engine drains from its in-process list and POSTs here for durable control-plane
 // persistence + in-process fan-out. Gated EngineServiceOnly (same rationale as /events).
 engine.MapPost("/platform-events", EngineEndpoints.AppendPlatformEvents)
-    .RequireAuthorization("EngineServiceOnly");
+    .RequireAuthorization("EngineServiceOnly")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EnginePlatformEventsAppend.ToWire()));
 // Audit finding 002 — `agent-available` is a GET liveness probe (no body),
 // not a POST registration call. The previous wiring as POST silently drifted
 // from the TS contract.
@@ -3129,9 +3138,11 @@ engine.MapGet("/agent-available", EngineEndpoints.AgentAvailable);
 // documents through this fail-loud HTTP hop (mirrors /events). Gated
 // EngineServiceOnly (same rationale as /events): the service principal only.
 engine.MapPost("/documents", DocumentEndpoints.PersistFromEngine)
-    .RequireAuthorization("EngineServiceOnly");
+    .RequireAuthorization("EngineServiceOnly")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineDocumentPersist.ToWire()));
 engine.MapPost("/documents/{documentId:guid}/status", DocumentEndpoints.SetStatusFromEngine)
-    .RequireAuthorization("EngineServiceOnly");
+    .RequireAuthorization("EngineServiceOnly")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineDocumentSetStatus.ToWire()));
 
 // ── Story 39-18: engine→API channel enqueue seam (D2) ──
 // The lifecycle engine publishes AcceptanceRequest / escalation / guidance messages
@@ -3139,7 +3150,8 @@ engine.MapPost("/documents/{documentId:guid}/status", DocumentEndpoints.SetStatu
 // Gated EngineServiceOnly (same rationale as /events): the service principal only, so
 // a user JWT can never forge a channel message into another tenant's stream.
 engine.MapPost("/channel/outbox", ChannelEndpoints.EnqueueFromEngine)
-    .RequireAuthorization("EngineServiceOnly");
+    .RequireAuthorization("EngineServiceOnly")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineChannelOutboxEnqueue.ToWire()));
 
 // ── User dashboard: Repos & Workflow Runs (Story 21-4) ──
 // Tenant-facing read surface behind the SPA's /repos + /runs destinations.
@@ -3303,7 +3315,8 @@ app.MapPost("/api/v1/llm/chat", SaaSEndpoints.LlmChat).RequireAuthorization();
 // +httpStatusCode / 400 / 403; NEVER a raw 5xx).
 app.MapPost("/api/v1/llm/call", LlmCallEndpoints.CallLlm)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("CallLlm");
+    .WithName("CallLlm")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.LlmCall.ToWire()));
 
 // ── Story 32-23 — the streaming run tap (human SSE plane) ──
 // GET /api/v1/llm/runs/{correlationId}/stream — a live, READ-ONLY view of a
@@ -3325,19 +3338,23 @@ app.MapGet("/api/v1/llm/runs/{correlationId}/stream", LlmRunStreamEndpoints.Stre
 // as two segments (an owner/name full name carries a slash).
 app.MapPost("/api/v1/git/{owner}/{repo}/branches", GitEndpoints.CreateBranch)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("GitCreateBranch");
+    .WithName("GitCreateBranch")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitBranchCreate.ToWire()));
 app.MapPost("/api/v1/git/{owner}/{repo}/pull-requests", GitEndpoints.CreatePullRequest)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("GitCreatePullRequest");
+    .WithName("GitCreatePullRequest")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestCreate.ToWire()));
 app.MapPut("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/merge", GitEndpoints.MergePullRequest)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("GitMergePullRequest");
+    .WithName("GitMergePullRequest")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestMerge.ToWire()));
 app.MapGet("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/comments", GitEndpoints.GetPullRequestComments)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitGetPullRequestComments");
 app.MapPatch("/api/v1/git/{owner}/{repo}/issues/{n:int}", GitEndpoints.UpdateIssue)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("GitUpdateIssue");
+    .WithName("GitUpdateIssue")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitIssuePatch.ToWire()));
 
 // ── Story 38 (Phase 1) — GitHub "extra ops" (commits + file-changes reads,
 // standalone branch delete) the engine's context/debug/integration activities call
@@ -3352,20 +3369,23 @@ app.MapGet("/api/v1/git/{owner}/{repo}/file-changes", GitEndpoints.GetFileChange
     .WithName("GitGetFileChanges");
 app.MapDelete("/api/v1/git/{owner}/{repo}/branches", GitEndpoints.DeleteBranch)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("GitDeleteBranch");
+    .WithName("GitDeleteBranch")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitBranchDelete.ToWire()));
 
 // ── Epic 38 follow-up #21 — deployment-pipeline release step. Create a GitHub
 // release/tag for the shipped version. Same engine-only plane + guard→token→
 // platform→one-event mediation as the git-platform ops above.
 app.MapPost("/api/v1/git/{owner}/{repo}/releases", GitEndpoints.CreateRelease)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("GitCreateRelease");
+    .WithName("GitCreateRelease")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitReleaseCreate.ToWire()));
 
 // ── Story 38 (Phase 1) — CI (GitHub Actions) step mediation ──
 // Same engine-only plane + guard→token→platform→one-event mediation as git.
 app.MapPost("/api/v1/ci/{owner}/{repo}/test-runs", CiEndpoints.TriggerTests)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("CiTriggerTests");
+    .WithName("CiTriggerTests")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.CiTestsTrigger.ToWire()));
 app.MapGet("/api/v1/ci/{owner}/{repo}/build-status", CiEndpoints.GetBuildStatus)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("CiGetBuildStatus");
@@ -3378,7 +3398,8 @@ app.MapGet("/api/v1/jira/tickets/{ticketId}", JiraEndpoints.GetTicket)
     .WithName("JiraGetTicket");
 app.MapPatch("/api/v1/jira/tickets/{ticketId}", JiraEndpoints.UpdateTicket)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("JiraUpdateTicket");
+    .WithName("JiraUpdateTicket")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.JiraTicketPatch.ToWire()));
 
 // ── Story 38-2 (Epic 38) — agent-dispatch step mediation (Class C) ──
 // Same engine-only plane as /api/v1/git and /api/v1/llm/call: the engine's thin
@@ -3390,7 +3411,8 @@ app.MapPatch("/api/v1/jira/tickets/{ticketId}", JiraEndpoints.UpdateTicket)
 // {owner}/{repo} is bound as two segments.
 app.MapPost("/api/v1/agent-dispatch/{owner}/{repo}/runs", AgentDispatchEndpoints.TriggerRun)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("DispatchAgentRun");
+    .WithName("DispatchAgentRun")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.AgentDispatchRun.ToWire()));
 app.MapGet("/api/v1/agent-dispatch/{owner}/{repo}/runs", AgentDispatchEndpoints.DiscoverRun)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("DiscoverAgentRun");
@@ -3413,7 +3435,8 @@ app.MapGet("/api/v1/agent-dispatch/{owner}/{repo}/installation", AgentDispatchEn
 // the transport, and audits to platform_events. NO Slack token ever reaches here.
 app.MapPost("/api/v1/notifications/slack", NotificationEndpoints.QueueSlack)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("QueueSlackNotification");
+    .WithName("QueueSlackNotification")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.NotifySlackQueue.ToWire()));
 
 // ── Story 38 (Phase 1) — email step mediation ──
 // Same engine-only plane as the Slack notification: the engine posts an
@@ -3422,7 +3445,8 @@ app.MapPost("/api/v1/notifications/slack", NotificationEndpoints.QueueSlack)
 // tenant scopes the message. NO SMTP/Resend credential ever reaches the engine.
 app.MapPost("/api/v1/notifications/email", EmailEndpoints.SendEmail)
     .RequireAuthorization("EngineServiceOnly")
-    .WithName("SendEmailNotification");
+    .WithName("SendEmailNotification")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.NotifyEmailSend.ToWire()));
 app.MapPost("/api/v1/workflows/{id}/status", SaaSEndpoints.UpdateWorkflowStatus).RequireAuthorization();
 app.MapPost("/api/v1/workflows/{id}/result", SaaSEndpoints.PostWorkflowResult).RequireAuthorization();
 app.MapPost("/api/v1/installations/{id}/rotate-key", SaaSEndpoints.RotateInstallationKey).RequireAuthorization();

@@ -51,7 +51,7 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void ExternalEffect_has_35_members()
+    public void ExternalEffect_has_39_members()
     {
         // Derivation: grep 'RequireAuthorization("EngineServiceOnly")'
         // src/Tamma.Api/Program.cs → 26 routes, 17 MUTATING (5 engine-group
@@ -67,7 +67,17 @@ public class ActionVocabularyCountTests
         // reads and are not catalogued, matching the EngineServiceOnly rule
         // above). These write Tamma's OWN system of record — distinct from
         // git.issue.patch / jira.ticket.patch, which mutate external trackers.
-        Enum.GetValues<ExternalEffect>().Should().HaveCount(35);
+        // 35 -> 39 (Story 43-8 AC1 step 2, 2026-07-30): the four MENTORSHIP SESSION
+        // LIFECYCLE mutations — mentorship.session.{start,pause,resume,cancel}.
+        // Derivation: the four [HttpPost] actions on MentorshipController, the repo's
+        // ONLY attribute-routed controller (`ls src/Tamma.Api/Controllers/` -> one
+        // file; the four [HttpGet] actions are reads and are not catalogued, matching
+        // the EngineServiceOnly rule above). They were baselined `no-catalog-member`
+        // when 43-8's harnesses landed; they are catalogued now because
+        // POST /api/Mentorship/start DISPATCHES the tamma-autonomous-mentorship Elsa
+        // workflow rather than merely writing a row, which is the same kind of
+        // consequence as effect:schedule.create and effect:agent-dispatch.run.
+        Enum.GetValues<ExternalEffect>().Should().HaveCount(39);
     }
 
     [Test]
@@ -119,9 +129,11 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void TotalCatalogMembers_is_193()
+    public void TotalCatalogMembers_is_197()
     {
-        // 96 + 17 + 8 + 35 + 29 + 8 = 193 — was 183 (effect 25): Story 44-2
+        // 96 + 17 + 8 + 39 + 29 + 8 = 197 — was 193 (effect 35): Story 43-8
+        // added the four mentorship-session effects (see
+        // ExternalEffect_has_39_members). Earlier: was 183 (effect 25): Story 44-2
         // added the native tracker's ten mutating routes to the effect plane
         // (see ExternalEffect_has_35_members for the derivation). Earlier:
         // was 182 (automation 28): Story 43-5
@@ -132,7 +144,7 @@ public class ActionVocabularyCountTests
         // (80 + 10 + 22 + 26 + …); the agent-action plane grew by 16 (Story
         // 41-1a), the document-type plane by 6 (Story 41-1b), and
         // effect/automation by 3 + 1 (Story 41-30).
-        ActionCatalog.All.Should().HaveCount(193);
-        ActionCatalog.ByKey.Should().HaveCount(193);
+        ActionCatalog.All.Should().HaveCount(197);
+        ActionCatalog.ByKey.Should().HaveCount(197);
     }
 }

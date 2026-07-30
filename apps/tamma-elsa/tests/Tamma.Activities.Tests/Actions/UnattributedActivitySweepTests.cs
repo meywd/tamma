@@ -222,12 +222,41 @@ public class UnattributedActivitySweepTests
     }
 
     [Test]
+    public void TheRatchetPin_IsMechanicallyShrinkOnly()
+    {
+        // Adopted 2026-07-30 from TemplateExampleConformanceTests
+        // (TheRatchetPin_IsMechanicallyShrinkOnly, 43-8 follow-up F2) for all four of
+        // Story 43-8's ratchets. A bare literal inside HaveCount makes "shrink-only"
+        // prose that an author defeats by editing one character; binding the pin to a
+        // recorded history and asserting the history's DIRECTION means an increase
+        // has to be appended, in a diff, against a red test.
+        UnattributedPinHistory.Should().NotBeEmpty();
+
+        for (var i = 1; i < UnattributedPinHistory.Length; i++)
+        {
+            UnattributedPinHistory[i].Should().BeLessThan(UnattributedPinHistory[i - 1],
+                $"pin history entry #{i} ({UnattributedPinHistory[i]}) must be strictly smaller "
+                + $"than #{i - 1} ({UnattributedPinHistory[i - 1]}). An activity leaves this "
+                + "baseline by GAINING [Activity], never by the baseline growing to fit it.");
+        }
+    }
+
+    /// <summary>
+    /// The <see cref="UnattributedActivities"/> pin's recorded high-water history,
+    /// oldest first; strictly decreasing (asserted by
+    /// <see cref="TheRatchetPin_IsMechanicallyShrinkOnly"/>). Seeded at 9 on
+    /// 2026-07-29 and unmoved: Story 43-8's 2026-07-30 annotation round touched
+    /// routes and mediation methods, not activities.
+    /// </summary>
+    internal static readonly int[] UnattributedPinHistory = [9];
+
+    [Test]
     public void Baseline_countIsPinned()
     {
         // (c) of the three ratchet properties — WITHOUT this, an ADDITION to the
         // baseline is undetectable and the ratchet is decorative.
         UnattributedActivities.Should().HaveCount(
-            9,
+            UnattributedPinHistory[^1],
             "9 activity CLASSES in SecretsRotation/Activities/ (AC6's '13 files' counts four non-activity "
             + "files too — see the seeding note on UnattributedActivities). "
             + "The ungoverned backlog may only SHRINK. If this fails because you added an entry, that "
@@ -249,6 +278,41 @@ public class UnattributedActivitySweepTests
             "every UnattributedActivities justification must classify as one of ["
             + string.Join(", ", JustificationKeywords) + "]:"
             + Environment.NewLine + string.Join(Environment.NewLine, unclassified));
+    }
+
+    // ====================================================================
+    // Ratchet-discipline surface (Story 43-8 AC8, carve-out §A1 #5)
+    //
+    // RatchetDisciplineTests is the META-test: it asserts that EVERY ratchet in
+    // this epic has all three properties, so a FIFTH ratchet cannot ship with two
+    // of them. It needs to reach this fixture's ratchet without those members
+    // becoming public API, so the three accessors below are the declared seam.
+    // ====================================================================
+
+    /// <summary>The ratchet's justification strings, for the meta-test.</summary>
+    internal static IReadOnlyList<string> RatchetJustifications() =>
+        UnattributedActivities.Values.ToArray();
+
+    /// <summary>The ratchet's justification classifier, for the meta-test.</summary>
+    internal static bool RatchetClassifies(string justification) =>
+        !string.IsNullOrWhiteSpace(justification)
+        && JustificationKeywords.Any(k => justification.Contains(k, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Drives the REAL <see cref="Classify"/> with a synthetic baseline entry that
+    /// is stale (its class carries <c>[Activity]</c>), and returns what the sweep
+    /// reports. The meta-test asserts this is non-empty — i.e. that the staleness
+    /// arm exists and actually fires, rather than being claimed in a comment.
+    /// </summary>
+    internal static IReadOnlyList<string> RatchetStalenessProbe()
+    {
+        var (_, stale) = Classify(
+            [typeof(GovernedFixtureActivity)],
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [typeof(GovernedFixtureActivity).FullName!] = "saga step: synthetic probe",
+            });
+        return stale;
     }
 
     // ====================================================================

@@ -48,6 +48,25 @@ public sealed class TenantScheduledTriggerOptions
 
     /// <summary>Fire-ledger retention window (D2).</summary>
     public TimeSpan LedgerRetention { get; set; } = TimeSpan.FromDays(90);
+
+    /// <summary>
+    /// LOW-8 fix (2026-07-30) — how long a ledger row may sit in
+    /// <c>Outcome = 'claimed'</c> before the tick's stale-claim sweep
+    /// declares its owning pod dead, burns the row (<c>failed</c>) and emits
+    /// <c>SCHEDULE.FIRE.ABANDONED</c>. Must comfortably exceed
+    /// <see cref="DispatchTimeout"/> — an in-flight dispatch is legitimately
+    /// <c>claimed</c> — hence the 15-minute default against a 30-second
+    /// dispatch timeout. Non-positive disables the sweep.
+    /// </summary>
+    public TimeSpan StaleClaimThreshold { get; set; } = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// LOW-8 — per-tick bound on the stale-claim sweep, so a pathological
+    /// backlog (a pod that died holding hundreds of claims) is announced over
+    /// several ticks rather than in one unbounded burst. The sweep is NOT a
+    /// retry: it only stamps and reports.
+    /// </summary>
+    public int MaxStaleClaimsSweptPerTick { get; set; } = 50;
 }
 
 /// <summary>
@@ -75,15 +94,35 @@ public sealed class TenantScheduledTriggerOptions
 /// concurrent pods off the same window cheaply; the committed
 /// <c>ON CONFLICT DO NOTHING</c> ledger row is what survives a pod crash
 /// (a session-scoped lock does not). Exactly-once is impossible across a
-/// process boundary (Correction 4): a lost fire is surfaced as
-/// <c>SCHEDULE.FIRE.FAILED</c> / an unstamped claim and the NEXT window is
-/// the recovery path — never a silent same-window retry.</para>
+/// process boundary (Correction 4): a lost fire is surfaced — by the tick's
+/// stale-claim sweep, since the dead process cannot surface itself — as
+/// <c>SCHEDULE.FIRE.ABANDONED</c> over a burnt ledger row, and the NEXT
+/// window is the recovery path, never a silent same-window retry.</para>
+///
+/// <para><b>The at-most-once unit is the TRIGGER ROW</b> (LOW-7, decided
+/// 2026-07-30): <c>(triggerId, windowKey)</c> for both the ledger's unique
+/// index and the advisory-lock key — NOT
+/// <c>(tenantId, definitionId, windowKey)</c>. A trigger row is a schedule,
+/// and one tenant may deliberately run one definition on two cadences with
+/// two payloads; a definition-level key would make one of those silently
+/// swallow the other. Consumers receive <c>triggerId</c> as an input and pick
+/// their own idempotency scope — see
+/// <see cref="Tamma.Data.Abstractions.IScheduledTriggerRepository.TryClaimFireAsync"/>.</para>
 ///
 /// <para><b>Failure isolation:</b> one trigger's failure never aborts the
 /// tick (per-row, the <c>ListPendingFromAnyTenantAsync</c> discipline).
 /// <b>Bounded catch-up</b> (D7): after an outage only the MOST RECENT missed
 /// window fires; the dropped windows are recorded with
 /// <c>SCHEDULE.WINDOW.SKIPPED</c> so the gap is auditable.</para>
+///
+/// <para><b>One window, one audit row</b> (MODERATE-5 fix, 2026-07-30): every
+/// <c>SCHEDULE.*</c> emission on the fire path hangs off a state transition
+/// that can only happen once per <c>(trigger, window)</c> — the skip audit
+/// off the won ledger claim, the terminal audit off the outcome stamp, the
+/// abandonment audit off the sweep's CAS — and a window that already reached
+/// a terminal ledger outcome is re-observed silently. A failed daily window
+/// used to re-emit its skip + suppression on all ~1440 of that day's ticks,
+/// per pod.</para>
 /// </summary>
 public sealed class TenantScheduledTriggerService : BackgroundService
 {
@@ -253,6 +292,9 @@ public sealed class TenantScheduledTriggerService : BackgroundService
         dispatched += await DrainManualFiresAsync(repository, dispatcher, events, opts, dispatched, ct)
             .ConfigureAwait(false);
 
+        // LOW-8 — give the claim-then-crash contract a real surface.
+        await SweepStaleClaimsAsync(repository, events, opts, now, ct).ConfigureAwait(false);
+
         // 7. Bounded ledger retention.
         await repository.PruneLedgerAsync(
                 now.UtcDateTime - opts.LedgerRetention, maxRows: 1000, ct)
@@ -279,32 +321,37 @@ public sealed class TenantScheduledTriggerService : BackgroundService
         var due = ScheduleWindowCalculator.ComputeDue(trigger.CronExpression, since, now);
         if (due.LastWindow is not { } window) return false;
 
-        // D7 — bounded catch-up: fire ONLY the most recent window; record the
-        // gap LOUDLY so it is auditable rather than invisible. When the count
-        // saturated, skippedCount is a floor ("at least N") and the event
-        // says so via skippedCountSaturated.
-        if (due.DueCount > 1)
-        {
-            var skipped = due.DueCount - 1;
-            var firstSkippedKey = ScheduleWindowCalculator.WindowKey(due.FirstWindow!.Value);
-            var lastSkippedKey = ScheduleWindowCalculator.WindowKey(due.PreviousWindow!.Value);
-            _logger.LogWarning(
-                "schedule.window.skipped trigger={TriggerId} tenant={TenantId} skippedCount={Skipped} saturated={Saturated} first={First} last={Last}",
-                trigger.Id, trigger.TenantId, skipped, due.CountSaturated,
-                firstSkippedKey, lastSkippedKey);
-            await EmitAsync(events, ScheduleEvents.WindowSkipped, trigger.TenantId, trigger,
-                windowKey: ScheduleWindowCalculator.WindowKey(window),
-                data: new
-                {
-                    skippedCount = skipped,
-                    skippedCountSaturated = due.CountSaturated,
-                    firstSkippedWindowKey = firstSkippedKey,
-                    lastSkippedWindowKey = lastSkippedKey,
-                }, ct).ConfigureAwait(false);
-        }
-
         var windowKey = ScheduleWindowCalculator.WindowKey(window);
         var tenantId = trigger.TenantId!.Value;
+
+        // MODERATE-5 fix (2026-07-30) — the SETTLED-WINDOW short circuit, and
+        // the reason it has to come first.
+        //
+        // `since` is the trigger row's LastFiredAt, which only advances on a
+        // SUCCESSFUL dispatch. So a window whose dispatch FAILED keeps
+        // recomputing as the due window for the rest of its cadence (a whole
+        // day, for a daily schedule). Pre-fix, each of those ~1440 ticks per
+        // pod re-emitted the same SCHEDULE.WINDOW.SKIPPED, re-took the
+        // advisory lock, lost the ledger claim and wrote yet another
+        // SCHEDULE.FIRE.SUPPRESSED row. At-most-once was never in danger —
+        // the committed ledger row is what refuses the re-dispatch — but the
+        // audit trail degraded into noise, which is the one thing this seam's
+        // event stream exists for.
+        //
+        // Asking the ledger for the window's outcome up front makes a settled
+        // (dispatched / failed / abandoned-and-burnt) window SILENT: no lock,
+        // no claim, no event. What remains reaches the lock only while a
+        // claim is genuinely in flight, so a SUPPRESSED row now means real
+        // concurrency instead of a stuck trigger's heartbeat.
+        var settled = await repository.GetFireOutcomeAsync(trigger.Id, windowKey, ct)
+            .ConfigureAwait(false);
+        if (settled is "dispatched" or "failed")
+        {
+            _logger.LogDebug(
+                "schedule.fire.window_settled trigger={TriggerId} tenant={TenantId} window={WindowKey} outcome={Outcome} — already terminal; the NEXT window is the recovery path",
+                trigger.Id, tenantId, windowKey, settled);
+            return false;
+        }
 
         // D4 order of operations: lock → claim → dispatch → stamp → release.
         // The KEY carries the tenant (AC2) so tenant A's leader never
@@ -346,8 +393,179 @@ public sealed class TenantScheduledTriggerService : BackgroundService
             return false;
         }
 
+        // D7 — bounded catch-up: fire ONLY the most recent window; record the
+        // gap LOUDLY so it is auditable rather than invisible. When the count
+        // saturated, skippedCount is a floor ("at least N") and the event says
+        // so via skippedCountSaturated.
+        //
+        // MODERATE-5 fix (2026-07-30): emitted AFTER the claim is won, not
+        // before the lock. The claim is this seam's at-most-once arbiter, so
+        // hanging the emission off it gives the skip audit the same
+        // guarantee the fire itself has — exactly one SCHEDULE.WINDOW.SKIPPED
+        // per (trigger, window), fleet-wide, no matter how many pods tick or
+        // how long the backlog persists.
+        if (due.DueCount > 1)
+        {
+            var skipped = due.DueCount - 1;
+            var firstSkippedKey = ScheduleWindowCalculator.WindowKey(due.FirstWindow!.Value);
+            var lastSkippedKey = ScheduleWindowCalculator.WindowKey(due.PreviousWindow!.Value);
+            _logger.LogWarning(
+                "schedule.window.skipped trigger={TriggerId} tenant={TenantId} window={WindowKey} skippedCount={Skipped} saturated={Saturated} first={First} last={Last}",
+                trigger.Id, tenantId, windowKey, skipped, due.CountSaturated,
+                firstSkippedKey, lastSkippedKey);
+            await EmitAsync(events, ScheduleEvents.WindowSkipped, tenantId, trigger,
+                windowKey,
+                data: new
+                {
+                    skippedCount = skipped,
+                    skippedCountSaturated = due.CountSaturated,
+                    firstSkippedWindowKey = firstSkippedKey,
+                    lastSkippedWindowKey = lastSkippedKey,
+                }, ct).ConfigureAwait(false);
+        }
+
         return await DispatchAndStampAsync(
             repository, dispatcher, events, trigger, fire, now, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// LOW-8 fix (2026-07-30) — the claim-then-crash surface.
+    ///
+    /// <para>The at-most-once contract has always said that a pod dying
+    /// between the ledger claim and the dispatch LOSES that fire, and that the
+    /// loss is "surfaced as a claimed row that never became dispatched". It
+    /// was not: nothing looked. The crashing process cannot emit its own
+    /// <c>SCHEDULE.FIRE.FAILED</c> (it is gone), and no sweep, metric, log or
+    /// alert ever inspected stale <c>claimed</c> rows — the only way to find
+    /// one was manual SQL against the ledger.</para>
+    ///
+    /// <para>This is that surface: bounded
+    /// (<see cref="TenantScheduledTriggerOptions.MaxStaleClaimsSweptPerTick"/>
+    /// rows per tick), thresholded
+    /// (<see cref="TenantScheduledTriggerOptions.StaleClaimThreshold"/>, which
+    /// must exceed the dispatch timeout so an in-flight claim is never
+    /// mistaken for an abandoned one), and deliberately NOT a retry — it
+    /// stamps the row <c>failed</c> and emits
+    /// <c>SCHEDULE.FIRE.ABANDONED</c> + a WARN. At-most-once means the window
+    /// is burnt; the NEXT window is the recovery path. Stamping the terminal
+    /// outcome is also what keeps the sweep emit-once: a swept row is never
+    /// seen again.</para>
+    /// </summary>
+    private async Task SweepStaleClaimsAsync(
+        IScheduledTriggerRepository repository,
+        IPlatformEventPublisher? events,
+        TenantScheduledTriggerOptions opts,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        if (opts.StaleClaimThreshold <= TimeSpan.Zero) return;
+        if (opts.MaxStaleClaimsSweptPerTick <= 0) return;
+
+        var cutoff = now.UtcDateTime - opts.StaleClaimThreshold;
+        IReadOnlyList<ScheduledTriggerFire> stale;
+        try
+        {
+            stale = await repository
+                .ListStaleClaimedFiresAsync(cutoff, opts.MaxStaleClaimsSweptPerTick, ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "schedule.stale_claim.sweep_failed — continuing; the next tick retries.");
+            return;
+        }
+
+        foreach (var fire in stale)
+        {
+            if (ct.IsCancellationRequested) break;
+            var age = now.UtcDateTime - fire.ClaimedAt;
+            var detail =
+                $"abandoned: claimed {age.TotalMinutes:F0}m ago and never stamped "
+                + $"(threshold {opts.StaleClaimThreshold}); the owning process did not survive "
+                + "its dispatch. Window burnt — at-most-once forbids a retry.";
+            try
+            {
+                if (!await repository.TryMarkFireAbandonedAsync(fire.Id, detail, ct)
+                        .ConfigureAwait(false))
+                {
+                    // Another pod's sweep (or a late outcome stamp) got there
+                    // first — it owns the announcement.
+                    continue;
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "schedule.stale_claim.stamp_failed fire={FireId} trigger={TriggerId}",
+                    fire.Id, fire.TriggerId);
+                continue;
+            }
+
+            _logger.LogWarning(
+                "schedule.fire.abandoned fire={FireId} trigger={TriggerId} tenant={TenantId} definition={DefinitionId} window={WindowKey} claimedAt={ClaimedAt:O} ageMinutes={AgeMinutes:F0} — a pod claimed this window and died before dispatching; the window is BURNT, the next window is the recovery path",
+                fire.Id, fire.TriggerId, fire.TenantId, fire.DefinitionId, fire.WindowKey,
+                fire.ClaimedAt, age.TotalMinutes);
+
+            await EmitAbandonedAsync(events, fire, age, opts, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// LOW-8 — the abandoned-fire audit row. Emitted straight off the ledger
+    /// row (the trigger row may since have been edited or deleted), so this
+    /// does not reuse <see cref="EmitAsync"/>'s trigger-shaped tags.
+    /// </summary>
+    private async Task EmitAbandonedAsync(
+        IPlatformEventPublisher? events,
+        ScheduledTriggerFire fire,
+        TimeSpan age,
+        TenantScheduledTriggerOptions opts,
+        CancellationToken ct)
+    {
+        if (events is null) return;
+        try
+        {
+            await events.AppendAndPublishAsync(new PlatformEvent
+            {
+                Type = ScheduleEvents.FireAbandoned,
+                TenantId = fire.TenantId,
+                Tags = JsonSerializer.Serialize(new
+                {
+                    tenantId = fire.TenantId.ToString("D"),
+                    definitionId = fire.DefinitionId,
+                    windowKey = fire.WindowKey,
+                    triggerId = fire.TriggerId.ToString("D"),
+                    status = ScheduleEvents.StatusForEvent(ScheduleEvents.FireAbandoned),
+                }),
+                Metadata = "{\"eventSource\":\"system\",\"emitter\":\"TenantScheduledTriggerService\"}",
+                Data = JsonSerializer.Serialize(new
+                {
+                    fireId = fire.Id.ToString("D"),
+                    claimedAt = fire.ClaimedAt.ToString("O"),
+                    ageMinutes = Math.Round(age.TotalMinutes, 1),
+                    thresholdMinutes = opts.StaleClaimThreshold.TotalMinutes,
+                    // A manual fire that was CAS-marked and then lost its pod
+                    // is distinguishable here (D8 / MAJOR-1): DispatchedAt is
+                    // the drain's marker, not a dispatch time.
+                    dispatchAttempted = fire.DispatchedAt is not null,
+                    retried = false,
+                }),
+            }, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "schedule.events.emit_failed type={Type}",
+                ScheduleEvents.FireAbandoned);
+        }
     }
 
     private async Task<int> DrainManualFiresAsync(

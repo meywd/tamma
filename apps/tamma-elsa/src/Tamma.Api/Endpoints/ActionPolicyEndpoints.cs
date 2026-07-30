@@ -69,20 +69,27 @@ public static class ActionPolicyEndpoints
     // GET /api/actions/catalog — the full code-resident vocabulary
     // =======================================================================
 
-    public static IResult GetCatalog() => Results.Ok(ActionCatalog.All.Select(d => new
-    {
-        key = d.Key.ToWire(),
-        ns = d.Key.Ns.ToWire(),
-        group = d.Group.ToWire(),
-        risk = d.Risk.ToWire(),
-        title = d.Title,
-        summary = d.Summary,
-        reversible = d.Reversible,
-        defaultMinAutonomy = d.DefaultMinAutonomy,
-        escalatableToHuman = d.EscalatableToHuman,
-        enforceable = d.Enforceable,
-        siteKey = d.SiteKey,
-    }));
+    public static IResult GetCatalog(IActionEnforcementSites enforcementSites) =>
+        Results.Ok(ActionCatalog.All.Select(d => new
+        {
+            key = d.Key.ToWire(),
+            ns = d.Key.Ns.ToWire(),
+            group = d.Group.ToWire(),
+            risk = d.Risk.ToWire(),
+            title = d.Title,
+            summary = d.Summary,
+            reversible = d.Reversible,
+            defaultMinAutonomy = d.DefaultMinAutonomy,
+            escalatableToHuman = d.EscalatableToHuman,
+            enforceable = d.Enforceable,
+            siteKey = d.SiteKey,
+            // Story 43-8 AC9. `siteKey` is the descriptor's DECLARED site — a string
+            // an author wrote. `enforcementSites` is what the RUNNING host actually
+            // has bound. They are different facts and the difference is the point:
+            // an EMPTY array means this row governs nothing, and the UI must say so
+            // rather than render it as governed.
+            enforcementSites = enforcementSites.For(d.Key),
+        }));
 
     // =======================================================================
     // GET /api/actions/policy?level=NN — the resolved, level-parameterized view
@@ -93,6 +100,7 @@ public static class ActionPolicyEndpoints
         IGovernancePolicySnapshotProvider snapshots,
         IAcceptanceRulesResolver acceptanceRules,
         IGovernancePrincipalResolver principals,
+        IActionEnforcementSites enforcementSites,
         ClaimsPrincipal principal,
         ITenantContext tenantContext,
         ITammaModeProvider modeProvider)
@@ -138,6 +146,12 @@ public static class ActionPolicyEndpoints
                 // setting a threshold that only matters at a future lower
                 // floor is the entire point (S3).
                 editable = true,
+                // Story 43-8 AC9 — the concrete sites this action is bound at, read
+                // off the RUNNING host. An EMPTY array means the row is enforced
+                // NOWHERE; rendering such a row as "governed" claims coverage that
+                // does not exist, which is the lie the epic exists to prevent. See
+                // ActionEnforcementSites for what a site does and does not prove.
+                enforcementSites = enforcementSites.For(d.Key),
             };
         }).ToList();
 

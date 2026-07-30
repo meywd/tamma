@@ -18,13 +18,19 @@ namespace Tamma.Core.Actions;
 /// not EngineServiceOnly) = 25 — plus Story 44-2's ten NATIVE-tracker
 /// mutations (<c>tracker.project.*</c>, <c>tracker.work-item.*</c>,
 /// <c>tracker.preferences.*</c>, on the TrackerView/TrackerManage-gated
-/// <c>/api</c> routes) = 35.
+/// <c>/api</c> routes) = 35 — plus Story 43-8's four MENTORSHIP SESSION
+/// LIFECYCLE mutations (<c>mentorship.session.*</c>, the repo's only
+/// attribute-routed controller) = 39.
 ///
 /// <para>
 /// LIMITATION (43-2 D9, recorded not hidden): unlike <c>agent-action</c> /
 /// <c>document-type</c>, this enum validates only against itself until Story
 /// 43-8's route-table reflection harness lands — a new mutating route does not
 /// fail any test authored in 43-2/43-3.
+/// <b>Closed 2026-07-30</b> for the route-backed members: 21 of them now carry a
+/// live <c>.Governs</c>/<c>[Governs]</c> binding whose descriptor <c>SiteKey</c>
+/// is checked ordinally against the registered route pattern by
+/// <c>GovernedEndpointBindingSweepTests</c>.
 /// </para>
 /// </summary>
 [JsonConverter(typeof(WireEnumJsonConverter<ExternalEffect>))]
@@ -212,6 +218,50 @@ public enum ExternalEffect
     /// <c>TrackerEndpoints.DeletePreferences</c> (falls back to the shipped
     /// defaults).</summary>
     [Wire("tracker.preferences.delete")] TrackerPreferencesDelete,
+
+    // ── Story 43-8 (AC1 step 2, carve-out §A1 #1, closed 2026-07-30) — the
+    //    MENTORSHIP SESSION LIFECYCLE. These four are the ONLY attribute-routed
+    //    controller actions in the repo (MentorshipController), and they were
+    //    baselined `no-catalog-member` when 43-8's harnesses landed because no
+    //    member described them.
+    //
+    //    WHY THEY ARE CATALOGUED NOW, and why that is not "inventing a member to
+    //    make a test green" (43-8 D10 forbids exactly that):
+    //    POST /api/Mentorship/start does not merely write a row — it dispatches
+    //    the Elsa `tamma-autonomous-mentorship` workflow
+    //    (MentorshipController.cs:80 → ElsaWorkflowService.StartWorkflowAsync →
+    //    POST /elsa/api/workflow-definitions/{name}/execute), i.e. it ARMS an
+    //    autonomous, LLM-driven agent run across MentorshipWorkflow's 28 states.
+    //    That is a real, executing capability, not a placeholder, and it is the
+    //    same KIND of thing as effect:schedule.create (arms a recurring workflow
+    //    dispatch) and effect:agent-dispatch.run (triggers an agent run) — both
+    //    already catalogued, both reached from a UI rather than by the engine.
+    //    Pause/resume/cancel are the controls over that in-flight run.
+    //
+    //    All four ship at AutonomyDial.Min (behaviour-preserving, epic decision
+    //    D1): nothing gates them today and cataloguing them changes no behaviour.
+
+    /// <summary><c>POST /api/Mentorship/start</c> —
+    /// <c>MentorshipController.StartMentorship</c>. Mints a mentorship session AND
+    /// dispatches the <c>tamma-autonomous-mentorship</c> Elsa workflow: after this
+    /// completes, an autonomous agent run is under way.</summary>
+    [Wire("mentorship.session.start")] MentorshipSessionStart,
+
+    /// <summary><c>POST /api/Mentorship/sessions/{sessionId}/pause</c> —
+    /// <c>MentorshipController.PauseSession</c>. Suspends the running mentorship
+    /// workflow; <see cref="MentorshipSessionResume"/> restores it exactly.</summary>
+    [Wire("mentorship.session.pause")] MentorshipSessionPause,
+
+    /// <summary><c>POST /api/Mentorship/sessions/{sessionId}/resume</c> —
+    /// <c>MentorshipController.ResumeSession</c>. Puts a paused mentorship
+    /// workflow back into execution.</summary>
+    [Wire("mentorship.session.resume")] MentorshipSessionResume,
+
+    /// <summary><c>POST /api/Mentorship/sessions/{sessionId}/cancel</c> —
+    /// <c>MentorshipController.CancelSession</c>. Terminates the mentorship
+    /// workflow instance: the in-flight run is abandoned and cannot be
+    /// resumed.</summary>
+    [Wire("mentorship.session.cancel")] MentorshipSessionCancel,
 }
 
 /// <summary><see cref="ExternalEffect"/> wire helper.</summary>

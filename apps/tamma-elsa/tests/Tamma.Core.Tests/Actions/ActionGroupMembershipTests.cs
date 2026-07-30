@@ -199,11 +199,21 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void ModelInvocation_has_the_3_expected_members()
+    public void ModelInvocation_has_the_7_expected_members()
     {
+        // 3 -> 7 (Story 43-8, 2026-07-30): the four mentorship-session lifecycle
+        // effects. The 43-3 D1 partition rule is KIND OF CONSEQUENCE AT COMPLETION,
+        // and each of these completes by leaving an autonomous, LLM-driven agent run
+        // started / suspended / resumed / terminated — the same consequence as
+        // effect:agent-dispatch.run, which already sits here. REJECTED alternative:
+        // platform-automation "because it starts a workflow", which is HOUSEKEEPING
+        // (engine mediation writes, sweepers, platform tasks) and would bury an
+        // agent-run control in the same admin lever as the outbox sweeper.
         WiresIn(ActionGroup.ModelInvocation).Should().BeEquivalentTo(new[]
         {
             "effect:llm.call", "effect:mcp.tool.invoke", "effect:agent-dispatch.run",
+            "effect:mentorship.session.start", "effect:mentorship.session.pause",
+            "effect:mentorship.session.resume", "effect:mentorship.session.cancel",
         });
     }
 
@@ -246,8 +256,10 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void The_per_group_counts_sum_to_193()
+    public void The_per_group_counts_sum_to_197()
     {
+        // 193 → 197: +4 mentorship-session effects, ALL in model-invocation
+        // (Story 43-8) — the group goes 3 → 7 and nothing else moves.
         // 183 → 193: +10 native-tracker effects, ALL in issue-tracking
         // (Story 44-2 AC10) — the group goes 2 → 12 and nothing else moves.
         // 154 → 176: +16 agent-actions (Story 41-1a) and +6 document types
@@ -272,12 +284,12 @@ public class ActionGroupMembershipTests
             [ActionGroup.IssueTracking] = 12,
             [ActionGroup.DeployControl] = 6,
             [ActionGroup.ExternalComms] = 2,
-            [ActionGroup.ModelInvocation] = 3,
+            [ActionGroup.ModelInvocation] = 7,
             [ActionGroup.Secrets] = 4,
             [ActionGroup.PlatformAutomation] = 43,
         };
 
-        counts.Values.Sum().Should().Be(193);
+        counts.Values.Sum().Should().Be(197);
         foreach (var (group, count) in counts)
             ActionCatalog.ByGroup[group].Should().HaveCount(count, $"group '{group.ToWire()}'");
     }
