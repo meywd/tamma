@@ -440,6 +440,15 @@ public class AcceptanceRulesEndpointsTests
     /// <summary>
     /// The SaaS path takes the identical rule — a tenant base row is one row for
     /// every document type, exactly like the single-user one.
+    ///
+    /// <para>Review 3.2/3.3 (2026-07-30): this used to assert ONE document type
+    /// (<c>threat-model</c>) while the single-user path had four tests. The code
+    /// IS symmetric — <c>ResolveAsync</c> and <c>ResolveForTenantAsync</c> apply
+    /// <see cref="AcceptanceFloors.ApplyShippedAcceptorFloor"/> on the same tier-2
+    /// branch and exempt tier 1 identically — but symmetric code is a reason to
+    /// EXPECT the tests to agree, not a substitute for them. SaaS now mirrors
+    /// single-user: all three human-pinned types plus a control here, the bake-in
+    /// path and the per-type-<c>any</c> exemption below.</para>
     /// </summary>
     [Test]
     public async Task Upsert_base_cannot_erase_the_human_floor_in_SaaS_mode_either()
@@ -453,10 +462,90 @@ public class AcceptanceRulesEndpointsTests
             "base", ReqWithAcceptor(AcceptorRequirement.Any, 80),
             _store, user, tc, Mode(TammaMode.SaaS)));
 
-        var resolved = await _store.ResolveForTenantAsync(tenantId, DocumentTypeKey.ThreatModel);
-        resolved.Source.Should().Be(AcceptanceRulesSource.PrincipalDefault);
-        resolved.Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human);
-        resolved.AcceptorRequirementFloored.Should().BeTrue();
+        foreach (var type in new[]
+        {
+            DocumentTypeKey.Design, DocumentTypeKey.SprintPlan, DocumentTypeKey.ThreatModel,
+        })
+        {
+            var resolved = await _store.ResolveForTenantAsync(tenantId, type);
+            resolved.Source.Should().Be(AcceptanceRulesSource.PrincipalDefault,
+                "the tenant base row still supplies every OTHER field wholesale");
+            resolved.Rules.AutonomyLevel.Should().Be(80);
+            resolved.Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human,
+                $"'{type.ToWire()}' ships a human acceptor FLOOR, and a TENANT base row is "
+                + "just as unable to express intent about one type as a user base row is");
+            resolved.AcceptorRequirementFloored.Should().BeTrue();
+        }
+
+        // The control: a type with no shipped floor is untouched in SaaS too.
+        var findings = await _store.ResolveForTenantAsync(tenantId, DocumentTypeKey.Findings);
+        findings.Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Any);
+        findings.AcceptorRequirementFloored.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The SaaS mirror of <see cref="A_later_omitting_per_type_save_cannot_bake_in_a_lost_floor"/>:
+    /// 43-0's preserve-on-absent reads "what is in force", so if the floor were
+    /// missing on the tenant path a later omitting per-type PUT would bake the
+    /// loss into a tenant type row and deleting the base row would no longer
+    /// restore it.
+    /// </summary>
+    [Test]
+    public async Task A_later_omitting_per_type_save_cannot_bake_in_a_lost_floor_in_SaaS_mode()
+    {
+        var tenantId = Guid.NewGuid();
+        var tc = new TenantContext();
+        tc.SetTenantId(tenantId);
+        var user = Principal(Guid.NewGuid(), "owner");
+
+        await Exec(await AcceptanceRulesEndpoints.Upsert(
+            "base", ReqWithAcceptor(AcceptorRequirement.Any, 80),
+            _store, user, tc, Mode(TammaMode.SaaS)));
+
+        // An unrelated per-type edit, silent about acceptorRequirement.
+        await Exec(await AcceptanceRulesEndpoints.Upsert(
+            "design", Req(85), _store, user, tc, Mode(TammaMode.SaaS)));
+
+        var withBase = await _store.ResolveForTenantAsync(tenantId, DocumentTypeKey.Design);
+        withBase.Source.Should().Be(AcceptanceRulesSource.TypeOverride);
+        withBase.Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human);
+
+        await Exec(await AcceptanceRulesEndpoints.Delete(
+            "base", _store, user, tc, Mode(TammaMode.SaaS)));
+        (await _store.ResolveForTenantAsync(tenantId, DocumentTypeKey.Design))
+            .Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human);
+    }
+
+    /// <summary>
+    /// The SaaS mirror of the tier-1 EXEMPTION: a tenant admin may still lower a
+    /// shipped human floor, but only by naming the type. If this ever starts
+    /// failing, the floor has become absolute and a real capability was removed.
+    /// </summary>
+    [Test]
+    public async Task An_explicit_per_type_any_still_wins_over_the_base_floor_in_SaaS_mode()
+    {
+        var tenantId = Guid.NewGuid();
+        var tc = new TenantContext();
+        tc.SetTenantId(tenantId);
+        var user = Principal(Guid.NewGuid(), "owner");
+
+        await Exec(await AcceptanceRulesEndpoints.Upsert(
+            "design", ReqWithAcceptor(AcceptorRequirement.Any, 85),
+            _store, user, tc, Mode(TammaMode.SaaS)));
+        await Exec(await AcceptanceRulesEndpoints.Upsert(
+            "base", Req(80), _store, user, tc, Mode(TammaMode.SaaS)));
+
+        var resolved = await _store.ResolveForTenantAsync(tenantId, DocumentTypeKey.Design);
+        resolved.Source.Should().Be(AcceptanceRulesSource.TypeOverride);
+        resolved.Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Any,
+            "tier 1 is exempt on the tenant path exactly as on the user path");
+        resolved.AcceptorRequirementFloored.Should().BeFalse();
+
+        // …and an unwritten sibling type keeps its floor, so the exemption is
+        // per-type rather than a blanket switch-off.
+        var sprintPlan = await _store.ResolveForTenantAsync(tenantId, DocumentTypeKey.SprintPlan);
+        sprintPlan.Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human);
+        sprintPlan.AcceptorRequirementFloored.Should().BeTrue();
     }
 
     /// <summary>

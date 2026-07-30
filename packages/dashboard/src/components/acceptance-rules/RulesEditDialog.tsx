@@ -13,6 +13,12 @@
  * shipped a body the API defaulted, silently resetting `design`/`sprint-plan`/
  * `threat-model` from a human acceptor back to `any`. Do not reintroduce a
  * partial literal here: spread-or-list every field.
+ *
+ * Review 3.2 (2026-07-30): the dialog also RENDERS `acceptorRequirementFloored`.
+ * Resolution is otherwise wholesale, so `source` naming e.g. `principal-default`
+ * next to an acceptor of `human` reads as a contradiction unless the one
+ * exception is stated — the flag exists specifically so that exception is
+ * visible rather than surprising, and it was previously visible only in raw JSON.
  */
 
 import { useMemo, useState, type JSX } from 'react';
@@ -362,6 +368,18 @@ export function RulesEditDialog({
             human — a person must accept this document type regardless of the autonomy
             level · any — the autonomy dial decides
           </span>
+          {resolved.acceptorRequirementFloored === true && (
+            <p
+              data-testid="acceptor-floor-note"
+              className="mt-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+            >
+              Shipped floor: <span className="font-mono">{resolved.documentTypeKey}</span> requires
+              a human acceptor, so this value came from the shipped default rather than from the{' '}
+              <span className="font-mono">{resolved.source}</span> row that supplied every other
+              field. A base-level save cannot lower it — only a save on this document type that
+              explicitly selects <span className="font-mono">any</span>.
+            </p>
+          )}
         </label>
 
         {/* Guidance */}

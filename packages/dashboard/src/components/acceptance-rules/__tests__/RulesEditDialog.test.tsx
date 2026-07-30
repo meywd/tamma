@@ -28,13 +28,17 @@ function makeRules(overrides?: Partial<AcceptanceRules>): AcceptanceRules {
   };
 }
 
-function makeResolved(rules?: Partial<AcceptanceRules>): ResolvedAcceptanceRules {
+function makeResolved(
+  rules?: Partial<AcceptanceRules>,
+  overrides?: Partial<ResolvedAcceptanceRules>,
+): ResolvedAcceptanceRules {
   return {
     rules: makeRules(rules),
     source: 'system-default',
     version: 1,
     documentTypeKey: 'design',
     resolvedAt: '2026-07-29T00:00:00.000Z',
+    ...overrides,
   };
 }
 
@@ -107,6 +111,63 @@ describe('RulesEditDialog', () => {
     expect(screen.getByLabelText<HTMLSelectElement>('Acceptor requirement').value).toBe(
       'human',
     );
+  });
+
+  /**
+   * Review 3.2 (2026-07-30). The API started sending `acceptorRequirementFloored`
+   * but no component read it, so an admin saw provenance `principal-default`
+   * sitting next to an acceptor of `human` with nothing explaining the
+   * contradiction. The flag exists precisely so the one non-wholesale field is
+   * visible; if it is only in the JSON it is not.
+   */
+  it('explains the shipped acceptor floor when the resolution was floored', () => {
+    render(
+      <RulesEditDialog
+        resolved={makeResolved(
+          { acceptorRequirement: 'human' },
+          { source: 'principal-default', acceptorRequirementFloored: true },
+        )}
+        onSave={vi.fn()}
+        onReset={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const note = screen.getByTestId('acceptor-floor-note');
+    expect(note.textContent).toMatch(/Shipped floor/);
+    expect(note.textContent).toMatch(/design/);
+    expect(note.textContent).toMatch(/base-level save cannot lower it/);
+  });
+
+  /** The control: an ordinary resolution must not grow an unexplained warning. */
+  it('shows no floor note when the resolution was not floored', () => {
+    render(
+      <RulesEditDialog
+        resolved={makeResolved(
+          { acceptorRequirement: 'human' },
+          { source: 'type-override', acceptorRequirementFloored: false },
+        )}
+        onSave={vi.fn()}
+        onReset={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId('acceptor-floor-note')).toBeNull();
+  });
+
+  /** An API that omits the additive field is treated as "not floored". */
+  it('shows no floor note when the field is absent from the payload', () => {
+    render(
+      <RulesEditDialog
+        resolved={makeResolved({ acceptorRequirement: 'human' })}
+        onSave={vi.fn()}
+        onReset={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId('acceptor-floor-note')).toBeNull();
   });
 
   /**

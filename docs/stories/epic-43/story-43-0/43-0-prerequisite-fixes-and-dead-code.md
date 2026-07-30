@@ -307,6 +307,20 @@ gains `AcceptorRequirementFloored` (wire `acceptorRequirementFloored`, additive)
 so the one non-wholesale field is VISIBLE rather than surprising; the dashboard's
 hand-maintained `ResolvedAcceptanceRules` interface carries it too.
 
+**Review 3.2 (2026-07-30) — the flag is now RENDERED, not only declared.** As
+first shipped, `acceptorRequirementFloored` reached the TypeScript interface but
+no component read it, so `RulesEditDialog` showed provenance `principal-default`
+next to an acceptor of `human` with nothing explaining the contradiction — the
+field existed to make the one exception visible and was visible only in raw JSON.
+`RulesEditDialog` now renders a short note beside the acceptor control when the
+flag is set, naming the document type and stating that a base-level save cannot
+lower the shipped requirement (only a save on that type explicitly selecting
+`any`). Pinned by `RulesEditDialog.test.tsx`:
+`explains the shipped acceptor floor when the resolution was floored`, with two
+controls — `shows no floor note when the resolution was not floored` and
+`shows no floor note when the field is absent from the payload` — so an ordinary
+resolution does not grow an unexplained warning.
+
 **Tests** — `AcceptanceFloorsTests` (the pure lattice + a monotonicity sweep over
 every document type × every requirement), and, in
 `AcceptanceRulesEndpointsTests`:
@@ -319,6 +333,22 @@ omission bug), `A_later_omitting_per_type_save_cannot_bake_in_a_lost_floor`,
 needed changing — `ResolveAsync_falls_back_to_base_override` and
 `Upsert_base_writes_principal_base_row` still pass unmodified, because tier-2
 precedence itself is untouched.
+
+**Review 3.3 (2026-07-30) — SaaS coverage broadened to match single-user.** As
+first shipped the SaaS path had exactly ONE test on ONE document type
+(`threat-model`) while single-user had four. The code IS symmetric —
+`ResolveAsync` and `ResolveForTenantAsync` apply the floor on the same tier-2
+branch and exempt tier 1 identically — but symmetric code is a reason to *expect*
+the tests to agree, not a substitute for them: nothing structural stops the two
+methods diverging, and the SaaS branch is the one an auditor cares about most.
+`Upsert_base_cannot_erase_the_human_floor_in_SaaS_mode_either` now sweeps all
+three human-pinned types plus a `findings` control, and two new tests mirror the
+remaining single-user cases:
+`A_later_omitting_per_type_save_cannot_bake_in_a_lost_floor_in_SaaS_mode` (the
+bake-in path, including that deleting the tenant base row still restores the
+floor) and `An_explicit_per_type_any_still_wins_over_the_base_floor_in_SaaS_mode`
+(the tier-1 exemption, plus an unwritten sibling type keeping its floor, so the
+exemption is proven per-type rather than a blanket switch-off).
 
 **NOT closed, deliberately: `threat-model`'s `security` reviewer selection is
 still shadowed by a base row.** Reviewer selection has no ordering — there is no
@@ -405,3 +435,4 @@ of past state, and several already say "deleted by Story 43-0".
 | 2026-07-29 | 1.1.0   | Implemented. D1 superseded — the API side no longer defaults an omitted `acceptorRequirement` (preserve-on-absent); `ResolveToolsActivity` deleted; 43-4's story text reconciled; AC8 recorded as satisfied by 43-4's allowlist. | Claude |
 | 2026-07-29 | 1.2.0   | Adversarial-review round (see "Amendment — 2026-07-29"). FIXED: a malformed stored row is now a typed 400 on `Upsert`/`GetResolved` instead of a 500 this commit introduced, with the DELETE-then-PUT repair path documented and tested. RECORDED as follow-up with reasoning: tier-2 wholesale shadowing means a `PUT .../base` omitting `acceptorRequirement` still erases the human floor on `design`/`sprint-plan`/`threat-model` — pre-existing 39-5 D1/D2 semantics, not the same shape as preserve-on-absent, and closing it changes what tier 2 means. Comment corrections in `RulesEditDialog.test.tsx` and `AcceptanceRulesDtos.cs`. Wiki + mirrors corrected: `ResolveToolsActivity` no longer documented as live surface. | Claude |
 | 2026-07-30 | 1.3.0   | **A1 CLOSED.** Tier 2 stays wholesale; the shipped per-type `AcceptorRequirement` is now a FLOOR composed by `max()` across tiers (tier-1 per-type rows exempt — lowering requires naming the type). New `AcceptanceFloors` in `Tamma.Core`; `ResolvedAcceptanceRules.AcceptorRequirementFloored` surfaces the raise; dashboard interface updated. The general per-field merge was evaluated against 39-5 D2 and rejected. Reviewer-selection shadowing is recorded as the deliberate remainder (no lattice exists for it). | Claude |
+| 2026-07-30 | 1.3.1   | Adversarial review of the A1 close. **3.2 fixed** — `RulesEditDialog` now RENDERS `acceptorRequirementFloored` (a note beside the acceptor control naming the type and the floor); it had reached the TypeScript interface but no component read it, so an admin saw `principal-default` next to `human` with no explanation. **3.3 fixed** — SaaS floor coverage broadened from one test on one document type to match single-user: all three human-pinned types plus a control, the bake-in path, and the explicit-per-type-`any` exemption. | Claude |

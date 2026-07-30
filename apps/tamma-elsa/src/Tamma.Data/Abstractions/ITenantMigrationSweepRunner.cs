@@ -26,7 +26,14 @@ namespace Tamma.Data.Abstractions;
 /// <para><b>Scope of the guard:</b> only APPLY sweeps take the lock. A dry run
 /// writes nothing — two concurrent dry runs are wasted metadata reads, never a
 /// double-migration — and refusing "what would change?" while a long apply
-/// runs would remove the one question an operator most wants answered mid-run.</para>
+/// runs would remove the one question an operator most wants answered mid-run.
+/// Dry runs are NOT unbounded though: they are capped by a separate, much
+/// looser admission gate (<c>TenantMigrationSweepRunner.MaxConcurrentDryRuns</c>)
+/// because each one opens a pooled connection per tenant, N-way parallel, and a
+/// repeated curl would otherwise amplify one request into arbitrarily many
+/// concurrent fleet-wide connection walks. Over the cap the start is refused
+/// with <see cref="TenantMigrationSweepConflict.ScopeDryRunCapacity"/> —
+/// a capacity refusal, not a single-flight refusal.</para>
 ///
 /// <para><b>Where run state lives:</b> in the process that accepted the POST.
 /// A poll that lands on another pod cannot see the run; the runner exposes
@@ -75,7 +82,14 @@ public static class TenantMigrationSweepRunState
     /// <summary>The sweep finished; <see cref="TenantMigrationSweepRun.Result"/> is populated.</summary>
     public const string Completed = "completed";
 
-    /// <summary>The sweep itself threw (not a per-tenant failure, which is a result row).</summary>
+    /// <summary>
+    /// The sweep itself threw (not a per-tenant failure, which is a result row).
+    /// <see cref="TenantMigrationSweepRun.Result"/> is still populated, with the
+    /// PARTIAL set of tenants that completed before the throw
+    /// (<see cref="TenantMigrationSweepRun.ResultIsPartial"/> is true) — see the
+    /// note on that property for why a failed fleet-DDL run may not answer
+    /// "which tenants got the DDL?" with silence.
+    /// </summary>
     public const string Failed = "failed";
 }
 
@@ -88,14 +102,27 @@ public sealed record TenantMigrationSweepRun(
     DateTimeOffset StartedAt,
     DateTimeOffset? CompletedAt,
     string? Error,
-    TenantMigrationSweepResult? Result);
+    TenantMigrationSweepResult? Result,
+    /// <summary>
+    /// True when <see cref="Result"/> holds only the tenants that finished
+    /// before the sweep died, not the whole fleet. A fleet-DDL primitive that
+    /// reports nothing after a partial failure leaves the operator unable to
+    /// tell which tenants already carry the new schema — the single worst
+    /// post-failure state this endpoint can be in — so the runner keeps every
+    /// per-tenant row it observed and flags the set as incomplete rather than
+    /// discarding it. Tenants absent from a partial result were either never
+    /// attempted or were in flight when the sweep died.
+    /// </summary>
+    bool ResultIsPartial = false);
 
 /// <summary>
-/// Why a start was refused: a sweep is already running. <see cref="Scope"/> is
-/// <c>this-instance</c> when this process owns it (then <see cref="RunId"/> and
-/// <see cref="StartedAt"/> are exact) or <c>another-instance</c> when the
-/// cluster advisory lock is held elsewhere (this process cannot know the remote
-/// run's id or start time, and says so rather than inventing one).
+/// Why a start was refused. <see cref="Scope"/> is <c>this-instance</c> when
+/// this process owns the running apply sweep (then <see cref="RunId"/> and
+/// <see cref="StartedAt"/> are exact), <c>another-instance</c> when the cluster
+/// advisory lock is held elsewhere (this process cannot know the remote run's
+/// id or start time, and says so rather than inventing one), or
+/// <c>dry-run-capacity</c> when too many background dry runs are already in
+/// flight on this instance.
 /// </summary>
 public sealed record TenantMigrationSweepConflict(
     string Scope,
@@ -104,6 +131,15 @@ public sealed record TenantMigrationSweepConflict(
 {
     public const string ScopeThisInstance = "this-instance";
     public const string ScopeAnotherInstance = "another-instance";
+
+    /// <summary>
+    /// Not a single-flight refusal — concurrent dry runs are legitimate and
+    /// deliberately ungated by the apply lock. This is the admission cap that
+    /// stops one repeated curl from amplifying into unbounded concurrent
+    /// fleet-wide connection walks. Retryable the moment a slot frees, which
+    /// is why the HTTP layer answers 429 rather than 409.
+    /// </summary>
+    public const string ScopeDryRunCapacity = "dry-run-capacity";
 }
 
 /// <summary>The outcome of <see cref="ITenantMigrationSweepRunner.StartAsync"/>.</summary>

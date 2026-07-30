@@ -206,6 +206,60 @@ public class AutonomyGateServiceFailurePostureTests
     }
 
     /// <summary>
+    /// Review 2.1 (2026-07-30) — THE claim this fixture is here to make good on:
+    /// "a degraded governance decision is never silent". It was false for
+    /// UNCATALOGUED keys, which is the worst place for it to be false: during a
+    /// control-plane outage the uncatalogued surface is the one that stays OPEN,
+    /// so it is the one an auditor wants a record of. The old short-circuit
+    /// returned <c>system-default</c> provenance before the degradation check, and
+    /// the <c>.ALLOWED</c> volume gate then suppressed the row entirely
+    /// (<c>appended == 0</c>).
+    ///
+    /// <para>The outcome is deliberately UNCHANGED (epic D2 — still Automated,
+    /// still observe-only); only the provenance moved, and with it the audit
+    /// row.</para>
+    /// </summary>
+    [Test]
+    public async Task AnUncataloguedKey_UnderDegradation_StaysAutomated_AndStillEmitsADegradedRow()
+    {
+        var (gate, events) = Build(
+            baseReadThrows: false, snapshot: GovernancePolicySnapshot.Unavailable);
+
+        var decision = await gate.EvaluateAsync(Query("tool:not_a_tool"));
+
+        decision.Outcome.Should().Be(AutonomyOutcome.Automated,
+            "epic D2 — an unread policy table does not create a catalog entry");
+        decision.Reason.Should().Be(AutonomyGateEvaluator.ReasonUncatalogued);
+        decision.Enforced.Should().BeFalse("an uncatalogued allow stays observe-only");
+        decision.Source.Should().Be(ActionAssignmentSource.Unavailable);
+
+        var evt = events.Appended.Should().ContainSingle(
+            "an allow decided over unreadable policy is exactly the fact an auditor needs; "
+            + "the volume gate only suppresses genuine system-default 'nothing happened' rows")
+            .Subject;
+        evt.Type.Should().Be(ActionGateEventsService.AllowedType);
+        Tag(evt, "degraded").Should().Be("true");
+        Tag(evt, "assignmentSource").Should().Be("policy-unavailable");
+        Tag(evt, "actionKey").Should().Be("tool:not_a_tool");
+    }
+
+    /// <summary>The control for the test above: with policy READABLE, the same
+    /// uncatalogued key is a genuine "nothing happened" and the volume gate
+    /// suppresses it — so the new row is a degradation signal, not new noise on
+    /// the healthy path.</summary>
+    [Test]
+    public async Task AnUncataloguedKey_WithReadablePolicy_EmitsNothing()
+    {
+        var (gate, events) = Build(baseReadThrows: false);
+
+        var decision = await gate.EvaluateAsync(Query("tool:not_a_tool"));
+
+        decision.Outcome.Should().Be(AutonomyOutcome.Automated);
+        decision.Source.Should().Be(ActionAssignmentSource.SystemDefault);
+        events.Appended.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// A live legacy floor still resolves normally when the read WORKS — the
     /// fail-closed branch must not have swallowed the ordinary path.
     /// </summary>

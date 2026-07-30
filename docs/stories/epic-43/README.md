@@ -448,6 +448,18 @@ read that threw, silently discarded the legacy always-escalate floor). It now fa
 compose by `OR` and by INTERSECTION respectively, making every cross-plane field monotone. See
 `story-43-5/43-5-storage-principal-resolution-resolver-audit.md` → "F6 — CLOSED" / "F10 — CLOSED".
 
+**⛔ OPENED by the F6 close, and BLOCKING Story 43-9 — `43-5 F11`: there is no break-glass override
+for the fail-closed posture.** A non-authoritative governance snapshot now DENIES every catalogued
+tool, in both SaaS and single-user-with-a-control-plane deployments, and no config flag, env var or
+admin endpoint can force the gate open. It self-heals within the 60 s refresh TTL and logs loudly at
+ERROR, so this is a *recovery-lever* gap and not a diagnosis one — but 43-9 carries the same posture
+into four more seams with larger blast radius. **Deliberately not built:** the knob's shape (who may
+set it, whether it auto-expires, how each use is audited) is a product decision. Recorded in full
+under 43-5 → "Open follow-ups" → **F11**, and cross-listed in 43-9's Dependencies. Alongside it,
+**`43-5 F12`** records that the one live seam HARD-DENIES rather than escalating —
+`ToolLoopGateOutcome` has no `RequiresHuman` case, so a degraded decision reaches the model as a
+tool rejection and reaches no person at all.
+
 > **Correction (2026-07-25).** An earlier draft of this line also asked Story 0 to "resolve
 > `GetAcceptanceRulesTool` — DI-register or delete, it must not stay a tool the registry cannot
 > see." That was wrong. It is deliberately not registered as an `IToolExecutor`

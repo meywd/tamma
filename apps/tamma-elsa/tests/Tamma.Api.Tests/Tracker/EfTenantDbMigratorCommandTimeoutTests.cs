@@ -54,6 +54,35 @@ public class EfTenantDbMigratorCommandTimeoutTests
     }
 
     [Test]
+    public void The_pending_count_read_keeps_the_short_request_path_timeout()
+    {
+        // 2026-07-30 review, Finding 1.2. The 900s ceiling landed on
+        // BuildConnectionOptions, which CountPendingMigrationsAsync shares — and
+        // that method runs NO DDL: it is the __TenantMigrationsHistory read the
+        // DRY RUN does per tenant, 4-way parallel, on the endpoint's new
+        // DEFAULT and SYNCHRONOUS path. One wedged tenant database therefore
+        // held a bare POST open for up to 15 minutes where it used to fail at
+        // 30 seconds. The read path is now short and the DDL path is still long.
+        using var connection = new NpgsqlConnection(PoolStyleConnectionString);
+
+        using var read = new TenantDbContext(
+            EfTenantDbMigrator.BuildPendingCountOptions(connection, "t_deadbeef"));
+        using var ddl = new TenantDbContext(
+            EfTenantDbMigrator.BuildConnectionOptions(connection, "t_deadbeef"));
+
+        read.Database.GetCommandTimeout().Should().Be(
+            EfTenantDbMigrator.PendingCountCommandTimeoutSeconds,
+            "a metadata read on a synchronous admin request path is a request-path query");
+        EfTenantDbMigrator.PendingCountCommandTimeoutSeconds.Should().Be(
+            new TenantConnectionPoolOptions().CommandTimeoutSeconds,
+            "the read deliberately matches the runtime pool's ceiling — it is the same "
+            + "kind of work, and matching restores exactly the pre-fix behaviour for it");
+        ddl.Database.GetCommandTimeout().Should().Be(
+            EfTenantDbMigrator.MigrationCommandTimeoutSeconds,
+            "and the fix must not have walked back the DDL ceiling it was meant to raise");
+    }
+
+    [Test]
     public void Migration_over_a_connection_string_uses_the_long_DDL_timeout()
     {
         // The provisioning flavour: a slow baseline on a freshly minted schema

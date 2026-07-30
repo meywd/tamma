@@ -34,7 +34,7 @@ public class AutonomyGateEvaluatorTests
         Dictionary<string, ActionAssignmentValue>? platformGroups = null,
         Dictionary<string, ActionAssignmentValue>? principalActions = null,
         Dictionary<string, ActionAssignmentValue>? principalGroups = null)
-        => new(
+        => GovernancePolicySnapshot.FromSuccessfulRead(
             platformActions ?? new(StringComparer.Ordinal),
             platformGroups ?? new(StringComparer.Ordinal),
             principalActions ?? new(StringComparer.Ordinal),
@@ -611,6 +611,55 @@ public class AutonomyGateEvaluatorTests
         Evaluate(new ActionKey(ActionNamespace.Tool, "not_a_tool"),
                 GovernancePolicySnapshot.Unavailable)
             .Reason.Should().Be(AutonomyGateEvaluator.ReasonUncatalogued);
+    }
+
+    /// <summary>
+    /// Review 2.1 (2026-07-30) — the D2 carve-out keeps its OUTCOME under
+    /// degradation and CHANGES ONLY ITS PROVENANCE.
+    ///
+    /// <para>The uncatalogued short-circuit used to return before the degradation
+    /// check and hard-code <see cref="ActionAssignmentSource.SystemDefault"/>. That
+    /// made a degraded uncatalogued allow byte-identical to a healthy one, and the
+    /// <c>.ALLOWED</c> volume gate (which suppresses system-default allows)
+    /// therefore wrote NO audit row at all — while the <c>degraded</c> tag, keyed
+    /// on <c>Unavailable</c> provenance, would have read false even if it had. The
+    /// uncatalogued surface is the one that STAYS OPEN during a control-plane
+    /// outage, so it is the one an auditor most needs a record of.</para>
+    ///
+    /// <para>Every other field of the decision is asserted equal to the healthy
+    /// answer, so this pins that the fix moved provenance and nothing else.</para>
+    /// </summary>
+    [Test]
+    public void UncataloguedKey_UnderDegradation_StaysAutomated_ButCarriesDegradedProvenance()
+    {
+        var key = new ActionKey(ActionNamespace.Tool, "not_a_tool");
+
+        var healthy = Evaluate(key, GovernancePolicySnapshot.Empty);
+        healthy.Outcome.Should().Be(AutonomyOutcome.Automated);
+        healthy.Source.Should().Be(ActionAssignmentSource.SystemDefault,
+            "a healthy uncatalogued allow is exactly that — nothing happened");
+
+        var degraded = new[]
+        {
+            Evaluate(key, GovernancePolicySnapshot.Unavailable),
+            EvaluateWithUnreadableBaseRules(key, GovernancePolicySnapshot.Empty),
+        };
+
+        foreach (var decision in degraded)
+        {
+            decision.Outcome.Should().Be(AutonomyOutcome.Automated,
+                "epic D2 is unchanged — an unread policy input does not create a catalog "
+                + "entry, and a catalog gap must never stall a live workflow");
+            decision.Reason.Should().Be(AutonomyGateEvaluator.ReasonUncatalogued);
+            decision.Enforced.Should().Be(healthy.Enforced);
+            decision.Enabled.Should().Be(healthy.Enabled);
+            decision.AllowedRoles.Should().BeEquivalentTo(healthy.AllowedRoles);
+            decision.EffectiveMinAutonomy.Should().Be(healthy.EffectiveMinAutonomy);
+
+            decision.Source.Should().Be(ActionAssignmentSource.Unavailable,
+                "the ALLOW was decided over an unreadable policy input, and that provenance "
+                + "is what carries it past the .ALLOWED volume gate into the audit stream");
+        }
     }
 
     /// <summary>The Seam B entry point degrades the same way — the sync

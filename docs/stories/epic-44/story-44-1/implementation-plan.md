@@ -246,3 +246,29 @@ Endpoint 403 test (platform-owner-only) ships with the deferred route mapping.
 Original 6.0d figure stale (banner). Re-cut: entities/config/migration 2.0, repositories 1.5,
 sweeper 0.5, tests 1.5, docs/handoff 0.5 → **6.0 days** (net unchanged — relations + second
 rank column + history offset by the endpoint skin moving out of lane).
+
+## Post-landing amendment — 2026-07-30 sweep-runner adversarial review
+
+Six findings against the sweep-hygiene commit (`d1e9362`) are closed; full write-up in the story
+file's "Sweep-runner adversarial review — fixed 2026-07-30" section. The two that change what a
+reader of this plan would otherwise assume:
+
+- **New deployment requirement.** The cluster single-flight gate is a *session-scoped*
+  `pg_try_advisory_lock`, so `ConnectionStrings:ControlPlane` **must not** sit behind a
+  transaction-mode connection pooler (PgBouncer `pool_mode = transaction` and equivalents). There
+  the lock is taken on one backend and released on another — silently ineffective while appearing to
+  work. Direct connection or `pool_mode = session` only.
+- **Wire change.** `applied` on every `/api/admin/tenants/migrate` response is now a tri-state
+  string (`not-applied` / `partially-applied` / `applied`), not a boolean, and a failed run reports
+  the partial per-tenant result (`resultIsPartial: true`) rather than `null`.
+
+Also: the advisory lock is re-verified every 15s from its own session and the run aborts on loss;
+the dry run's pending-count read no longer inherits the 900s DDL ceiling on the endpoint's
+synchronous default path; background dry runs are admission-capped at 4 per instance
+(`429 dry_run_capacity_exhausted`); `Dispose` no longer disposes the shutdown source under a running
+sweep; and the `pg_locks` probe is qualified by `objsubid` and database oid.
+
+Seam changes: `ITenantMigrationSweeper.SweepAsync` gained an `Action<TenantMigrationSweepEntry>?
+onTenantCompleted` parameter **before** `ct`; `TenantMigrationSweepRun` gained `ResultIsPartial`;
+`TenantMigrationSweepConflict` gained `ScopeDryRunCapacity`; `TenantMigrationSweep` gained
+`Summarize`.

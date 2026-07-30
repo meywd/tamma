@@ -68,6 +68,18 @@ namespace Tamma.Core.Actions;
 /// reasons, and both are distinct from a successful read that found nothing
 /// (which stays <see cref="ActionAssignmentSource.SystemDefault"/> and is
 /// perfectly automatable).</para>
+///
+/// <para><b>The two carve-outs from fail-closed still carry degraded
+/// PROVENANCE (review 2.1, 2026-07-30).</b> An uncatalogued key (epic D2) and a
+/// non-enforceable member (epic OQ2) stay <see cref="AutonomyOutcome.Automated"/>
+/// under degradation — that is deliberate and unchanged — but the decision is
+/// stamped <see cref="ActionAssignmentSource.Unavailable"/> so it is not
+/// indistinguishable from a healthy shipped-default allow. That stamp is what
+/// carries it past <c>ActionGateEventsService</c>'s <c>.ALLOWED</c> volume gate
+/// (which suppresses <see cref="ActionAssignmentSource.SystemDefault"/>
+/// allows) and sets the <c>degraded</c> audit tag. During a control-plane outage
+/// the carve-outs are the surfaces that STAY OPEN, which is exactly why they
+/// need an audit row.</para>
 /// </summary>
 public static class AutonomyGateEvaluator
 {
@@ -115,14 +127,41 @@ public static class AutonomyGateEvaluator
         // FLOOR loss that made the old fallback dangerous.)
         var dial = baseRules?.Rules.AutonomyLevel ?? AutonomyDial.Min;
 
+        // ── Degradation (F6): WHICH input we could not read, if any. Checked in
+        //    a fixed order so the audit reason is deterministic when both are
+        //    degraded at once (the snapshot is the outer, cheaper failure).
+        //
+        //    Computed BEFORE the uncatalogued short-circuit (review 2.1,
+        //    2026-07-30). It used to be computed after, so an uncatalogued key
+        //    evaluated during an outage came out with SystemDefault provenance —
+        //    which the `.ALLOWED` volume gate then suppressed entirely, and whose
+        //    `degraded` tag (keyed on Unavailable provenance) would have read
+        //    false anyway. The uncatalogued surface is precisely the surface that
+        //    STAYS OPEN during a control-plane outage, so it is precisely the
+        //    surface an auditor needs a record of.
+        var degradedReason =
+            !snapshot.IsAuthoritative ? ReasonPolicySnapshotUnavailable
+            : baseRules is null ? ReasonAcceptanceRulesUnavailable
+            : null;
+
         if (!ActionCatalog.TryGet(query.Action, out var descriptor) || descriptor is null)
         {
             // Epic decision D2 — unclassified is allowed at RUNTIME (and
             // unmergeable in CI via the drift harnesses); a catalog gap must
             // never stall a live workflow. Not silent: callers log/audit it.
+            //
+            // The OUTCOME is unchanged under degradation (still Automated, still
+            // observe-only, still reason `uncatalogued` — an unread policy table
+            // does not create a catalog entry, and D2 stands). Only the
+            // PROVENANCE changes: `Unavailable` records that this allow was
+            // decided over an unreadable policy input, which is also what carries
+            // it past the volume gate into the audit stream with `degraded=true`.
             return new AutonomyDecision(
                 AutonomyOutcome.Automated, query.Action, default, default,
-                dial, AutonomyDial.Min, ActionAssignmentSource.SystemDefault,
+                dial, AutonomyDial.Min,
+                degradedReason is null
+                    ? ActionAssignmentSource.SystemDefault
+                    : ActionAssignmentSource.Unavailable,
                 Enforced: false, Enabled: true, AllowedRoles: null,
                 Reason: ReasonUncatalogued);
         }
@@ -134,14 +173,6 @@ public static class AutonomyGateEvaluator
         var platformGroup = Row(snapshot.PlatformGroupRows, groupWire);
         var principalAction = Row(snapshot.PrincipalActionRows, actionWire);
         var principalGroup = Row(snapshot.PrincipalGroupRows, groupWire);
-
-        // ── Degradation (F6): WHICH input we could not read, if any. Checked in
-        //    a fixed order so the audit reason is deterministic when both are
-        //    degraded at once (the snapshot is the outer, cheaper failure).
-        var degradedReason =
-            !snapshot.IsAuthoritative ? ReasonPolicySnapshotUnavailable
-            : baseRules is null ? ReasonAcceptanceRulesUnavailable
-            : null;
 
         // ── The threshold ladder (principal ladder + platform ceiling — the
         //    same composition the Seam B tool-loop gate reads) ───────────────

@@ -126,7 +126,7 @@ to see what it does mutated the whole fleet. The safe action is now the default.
 
 | Request | Behaviour |
 | --- | --- |
-| `POST .../migrate` (bare) | **Dry run.** `200` + per-tenant pending counts, `applied=false`, nothing written. |
+| `POST .../migrate` (bare) | **Dry run.** `200` + per-tenant pending counts, `applied="not-applied"`, nothing written. (`applied` became a tri-state STRING in the 2026-07-30 review — see Finding 1.3 below.) |
 | `POST .../migrate?dryRun=true` | Same (explicit spelling; unchanged from before). |
 | `POST .../migrate?async=true` | Dry run as a background run: `202` + run id (for a fleet big enough that even the pending-count walk is slow). |
 | `POST .../migrate?apply=true` **+** `X-Admin-Confirm: migrate-all-tenants` | The real sweep. `202 Accepted` + run id + status URL. |
@@ -141,7 +141,8 @@ affirmative, never as a double negative. The paired confirmation header follows 
 admin surface — `force-delete` and `cleanup` (`AdminTenantsEndpoints.cs:556`, `:637`) both demand
 `X-Admin-Confirm` echoing the tenant id. A sweep has no single tenant id to echo, so the constant
 `migrate-all-tenants` plays that role; it is not typeable by accident. Every response carries both
-`mode` (`dry-run` | `apply`) and `applied` so which mode ran is never inferred from counts; the
+`mode` (`dry-run` | `apply`) and `applied` (a TRI-STATE string as of the 2026-07-30 review — see
+Finding 1.3) so which mode ran and what is known to have been written are never inferred from counts; the
 200 body is otherwise **flat and field-compatible** with the old result (`dryRun`, `total`,
 `migrated`, `alreadyCurrent`, `pending`, `failed`, `tenants` stay top-level).
 
@@ -170,6 +171,12 @@ ASCII namespace convention (`"MGSW"`, key `0x4D47535700000001`; no partition com
 there is exactly one sweep gate for the whole cluster). Session scope means a crashed pod's lock
 dies with its connection — the gate cannot wedge shut, which is the property a fleet-DDL escape
 hatch must have.
+
+> **Amended 2026-07-30 (review Finding 1.1).** "The lock dies with the connection" is true but was
+> only half the story: the connection can die *without the pod dying*, and the sweep runs over
+> entirely different connections. The lock is now re-verified from the lease session every 15s and
+> the run aborts on loss. A session-scoped advisory lock is also **incompatible with a
+> transaction-mode connection pooler** — see the deployment requirement below.
 
 A process-local slot is taken *first*, purely so the 409 can be exact: `scope=this-instance` with
 the running sweep's `runId` and `startedAt`, versus `scope=another-instance` with both null and a
@@ -228,8 +235,12 @@ borrowed from that pool — so the CHECK-widening this story predicts on the hig
 would abort at 30s and land as a per-tenant `failed` row indistinguishable from a real breakage.
 
 `EfTenantDbMigrator.MigrationCommandTimeoutSeconds = 900` (15 min) is now set **at the EF layer on
-the migration context's options only** (`BuildConnectionOptions` and `BuildStringOptions` — the
-provisioning flavour gets it too; a slow baseline on a fresh schema exceeds 30s just as easily).
+the options of the contexts that run migration DDL** (`BuildConnectionOptions` and
+`BuildStringOptions` — the provisioning flavour gets it too; a slow baseline on a fresh schema
+exceeds 30s just as easily). *(Corrected 2026-07-30, review Finding 1.2: this originally read "the
+migration context's options only", which was inaccurate — `BuildConnectionOptions` was also used by
+the dry run's pending-count READ, putting a 15-minute ceiling on the endpoint's synchronous default
+path. That read now takes its own 30s timeout via `BuildPendingCountOptions`.)*
 The pool, the connection strings and `TenantDbContextFactory` are untouched, so every runtime
 context over the same data source still inherits the 30s ceiling. EF migrations stay transactional
 per migration, so a genuine timeout still rolls that migration back — the longer ceiling removes
@@ -251,6 +262,178 @@ asserts 401 unauthenticated / 403 for member, tenant-admin and tenant-owner / 20
 `GET .../migrate/{runId}` route carries the same `PlatformOwnerAccess` gate) and the contract
 tests above.
 
+## Sweep-runner adversarial review — fixed 2026-07-30
+
+A second adversarial pass over the sweep-hygiene commit (`d1e9362`) found six defects, each
+proved by a working probe. All six are closed. Two of them change things a reader of the section
+above would otherwise get wrong, so they are called out first.
+
+### ⚠️ DEPLOYMENT REQUIREMENT (new, was never stated): no transaction-mode pooler on the control plane
+
+The cluster-wide single-flight gate is a Postgres **session-scoped** `pg_try_advisory_lock`. Its
+entire meaning is "this lock lives exactly as long as this backend session". **PgBouncer in
+`pool_mode = transaction`** — and every proxy modelled on it — hands the next transaction a
+*different* backend, so the lock would be taken on one backend while every later statement,
+including the release, runs on another. The gate would be **silently ineffective while appearing to
+work**, and two concurrent fleet-wide applies would both be admitted.
+
+`ConnectionStrings:ControlPlane` **must** be a direct connection or `pool_mode = session`. This is a
+hard requirement of the primitive, not a tuning preference. If the control plane ever has to move
+behind a transaction pooler, this gate must be replaced first (a control-plane lease row with a
+heartbeat). Documented in `TenantMigrationSweepRunner`'s class doc as well as here.
+
+### ⚠️ WIRE CHANGE: `applied` is now a tri-state string, not a boolean
+
+`AdminTenantMigrationRunResponse` / `AdminTenantMigrationSweepResponse` /
+`AdminTenantMigrationAcceptedResponse` all carry `applied` as a **string**:
+
+| Value | Meaning |
+| --- | --- |
+| `not-applied` | **Guaranteed** nothing was written. A dry run in any state, or an apply that died having migrated zero tenants (proved by its partial result). |
+| `partially-applied` | Some subset of the fleet may already carry the DDL: an apply that is still `running`, or one that died partway, or one whose outcome cannot be proved. |
+| `applied` | The apply sweep ran to completion over the whole fleet (individual tenants may still be `failed` rows). |
+
+The boolean it replaces was computed `!DryRun && State != Failed`, which said the opposite of the
+truth at the two worst moments: `applied=true` for a run still `running` before a single tenant had
+been touched, and `applied=false` — the field whose stated purpose is "nothing was written" — after
+a partial failure that may have migrated most of the fleet. `mode` (`dry-run` | `apply`) is
+unchanged and remains the INTENT; `applied` is now strictly about what is known to be written. The
+flat result fields (`dryRun`, `total`, `migrated`, `alreadyCurrent`, `pending`, `failed`,
+`tenants`) are untouched.
+
+### 1.1 — The advisory lock was never re-verified (MODERATE)
+
+`TryAcquireClusterLockAsync` took the lock on a dedicated `ControlPlaneDbContext` session held for
+the run, but **nothing monitored that session**, and the sweep itself runs over entirely different
+connections (each tenant's own pooled data source). Lock liveness and sweep liveness were decoupled
+in the dangerous direction. The reviewer terminated the single backend holding the lock — the
+process untouched, exactly what a pooler recycle, an idle timeout or a `pg_terminate_backend`
+does — and a second runner was then **accepted for a concurrent fleet-wide apply** while the first
+was still running. The commit's framing ("a crashed pod's lock dies with its connection") is true
+but incomplete: the connection can die without the pod dying, and then the guard is gone while the
+danger is not.
+
+Fixed: a heartbeat re-verifies, **from the lease session itself**, that the lease session still
+holds the lock (`pg_locks` filtered by `pid = pg_backend_pid()`, read-only, no re-acquire that
+could disturb the hold count), and the run is **aborted** on loss with an explicit error naming the
+cause. Any probe failure counts as loss — the dominant reason a command on the lease connection
+throws is that the backend is gone, and the opposite bias continues fleet-wide DDL on an
+unverifiable guarantee. Aborting is recoverable and reported; two concurrent applies are not.
+
+**Interval: 15s** (`TenantMigrationSweepRunner.LockHeartbeatInterval`), chosen against the shape of
+the work rather than arbitrarily. The check is one indexed `pg_locks` read on an otherwise idle
+dedicated session, so its cost is nil (240 reads for an hour-long sweep). What it bounds is how
+long an apply can keep issuing DDL after losing exclusivity; a single tenant's migration is
+typically seconds to minutes, so 15s keeps the unguarded window under roughly one tenant's worth of
+work — a racing second sweep cannot get far before this one aborts.
+
+Tests (`TenantMigrationSweepRunnerTests`, real Postgres):
+`A_run_whose_lock_holding_backend_is_killed_aborts_instead_of_sweeping_on_unguarded` (the
+reviewer's probe in shape: kill the lock-holding backend from a separate session, never release the
+sweep — reaching a terminal state at all IS the abort), and
+`A_completed_run_is_never_falsely_aborted_by_the_heartbeat` (the other side: a re-verification that
+mistook normal completion for loss would turn every successful sweep into a scary failure).
+
+### 1.2 — The 900s DDL ceiling landed on the dry run's synchronous read path (MODERATE)
+
+`CountPendingMigrationsAsync` shared `BuildConnectionOptions`, which stamps
+`CommandTimeout(900)`. That method runs **no DDL** — it is the `__TenantMigrationsHistory` read the
+dry run performs per tenant, 4-way parallel — and the dry run is now both the **default** and
+**synchronous**. One wedged tenant database therefore held a bare `POST /api/admin/tenants/migrate`
+open for up to 15 minutes where it used to fail at 30 seconds. The class doc's claim that the
+timeout was "set at the EF layer on the MIGRATION context's options only" was inaccurate and is
+corrected in place.
+
+Fixed: `EfTenantDbMigrator.PendingCountCommandTimeoutSeconds = 30` via a dedicated
+`BuildPendingCountOptions` seam. 30s deliberately equals
+`TenantConnectionPoolOptions.CommandTimeoutSeconds` — reading one small history table is a
+request-path query in every respect, and matching restores exactly the pre-fix behaviour for it. A
+wedged tenant surfaces as a prompt per-tenant `failed` row, which is what the dry run is *for*.
+Test: `EfTenantDbMigratorCommandTimeoutTests.The_pending_count_read_keeps_the_short_request_path_timeout`
+(asserts the read is short, that it matches the pool default, and that the DDL path is still 900s —
+so the fix cannot walk back the ceiling it was meant to raise).
+
+### 1.3 — `applied` said the opposite of the truth, and a failed run reported nothing (MINOR)
+
+The wire change is described above. The second half: the failure path recorded `Result: null`, so
+after a partial failure the operator **could not tell which tenants got the DDL** — the worst
+possible post-failure state for a fleet-DDL primitive. Fixed by threading an
+`onTenantCompleted` observer through `ITenantMigrationSweeper.SweepAsync`: the runner collects
+per-tenant rows as they complete and, on a throw, records them as a **partial result** with
+`resultIsPartial: true` (a new field on the run response) and a `PARTIAL RESULT — the sweep did not
+finish` message on the nested body. Tenants absent from a partial result were never attempted or
+were in flight. An observer that throws is swallowed — bookkeeping must never abort a fleet
+migration.
+
+Tests: `TenantMigrationSweepRunnerTests.A_failed_run_reports_the_tenants_it_already_migrated`
+(names the tenants, not just counts them), the updated
+`A_sweep_that_throws_fails_the_run_and_still_releases_the_gate`, and the new
+`AdminTenantMigrationRunResponseTests` fixture pinning the tri-state in all five reachable
+combinations (`A_running_apply_is_not_reported_as_applied`,
+`A_failed_apply_that_migrated_tenants_is_not_reported_as_not_applied`,
+`A_failed_apply_that_migrated_nothing_may_say_so`,
+`A_failed_apply_with_no_result_at_all_stays_pessimistic`, `A_completed_apply_is_applied`,
+`A_dry_run_is_never_anything_but_not_applied`).
+
+### 1.4 — Background dry runs were unbounded (MINOR)
+
+A dry run takes neither the process slot nor the cluster lock (deliberately — see §2 above), and
+`Record`'s eviction only evicts non-`running` runs, so concurrent background dry runs grew the run
+registry past `MaxRetainedRuns=20` without limit. The reviewer got **200/200** background dry runs
+accepted on one instance, each opening a pooled connection per tenant, 4-way parallel. Platform-owner
+auth makes it a foot-gun rather than an attack, but it is an unbounded resource amplifier from one
+repeated curl.
+
+Fixed: `TenantMigrationSweepRunner.MaxConcurrentDryRuns = 4` — an **admission cap**, not
+single-flight. 4 matches `TenantMigrationSweep.DefaultMaxConcurrency`, so at the default it bounds
+in-flight tenant connections at 4×4 and even at the `maxConcurrency` ceiling of 16 stays two
+digits; more than four simultaneous "what is pending?" questions is a stuck script, not an
+operator. Over the cap the start is refused with scope `dry-run-capacity` →
+**`429 dry_run_capacity_exhausted`** with `Retry-After` (retryable the moment a slot frees, which is
+a different thing to tell an operator than the apply path's `409 sweep_already_running`).
+
+The cap is also what makes the ring a real bound: at most one apply plus four dry runs can be in
+the un-evictable `running` state, so eviction (now a loop under a lock, rather than a single
+computed batch size that concurrent recorders could race past) always brings the ring back to 20.
+Tests: `Background_dry_runs_are_capped_and_the_cap_frees_up_again` (including that the cap frees
+rather than latches) and `The_run_registry_stays_bounded_under_repeated_dry_runs` (60 runs, ≤20
+retained, newest kept, oldest evicted).
+
+### 1.5 — `Dispose` raced the running sweep (MINOR)
+
+`Dispose()` cancelled **and disposed** `_shutdown` while `ExecuteAsync` could be inside
+`SweepAsync(..., _shutdown.Token)`, so an orderly shutdown surfaced as an
+`ObjectDisposedException` in the run's `Error` — a wrong story about why a fleet migration stopped.
+Fixed: `_shutdown` is cancelled but not disposed (a CTS with no timer holds nothing needing
+deterministic release; the per-run linked sources are disposed by their own runs). The benign
+double-dispose race on `lease.Context` between `Dispose` and `ReleaseAsync` — both read-then-nulled
+the same field — is closed with an interlocked `RunLease.TakeContext()`, so exactly one of them
+disposes it. Test: `Disposing_mid_run_cancels_the_run_instead_of_reporting_ObjectDisposed`.
+
+### 1.6 — The `pg_locks` probe was under-qualified (MINOR)
+
+`IsSweepRunningAsync` matched advisory locks without filtering `objsubid` or database. `pg_locks` is
+**cluster-wide** while advisory locks are **per-database**, so a same-key lock in another database
+on the same cluster read as "a sweep is running"; and `objsubid` distinguishes the one-argument
+`pg_advisory_lock(bigint)` form (1) from the two-argument `(int, int)` form (2), whose halves
+reassemble to the same 64-bit value while being a different lock entirely. This probe is the only
+cross-pod signal an operator gets, so a false positive sends them looking for a run that does not
+exist. Fixed: the predicate now pins `objsubid = 1` and `database = (SELECT oid FROM pg_database
+WHERE datname = current_database())`, and is shared with the 1.1 heartbeat (which adds
+`pid = pg_backend_pid()`). Tests:
+`IsSweepRunning_ignores_a_two_argument_advisory_lock_with_the_same_halves` and
+`IsSweepRunning_ignores_the_same_key_held_in_another_database_on_the_cluster` (creates a second
+database on the container, takes the identical key there, asserts `false`).
+
+### Seam changes worth knowing about
+
+- `ITenantMigrationSweeper.SweepAsync` gained an `Action<TenantMigrationSweepEntry>?
+  onTenantCompleted` parameter **before** `CancellationToken ct` (1.3). In-code call sites that
+  passed `ct` positionally must name it or pass `onTenantCompleted: null`.
+- `TenantMigrationSweepRun` gained `ResultIsPartial`; `TenantMigrationSweepConflict` gained
+  `ScopeDryRunCapacity`; `TenantMigrationSweep` gained a shared `Summarize` helper so a partial
+  roll-up counts identically to a complete one.
+
 ## Change Log
 
 | Date       | Version | Changes                | Author |
@@ -259,3 +442,4 @@ tests above.
 | 2026-07-29 | 1.0.1   | Adversarial-review follow-ups section (fixes landed in the tracker-storage lane; deferred items listed) | Claude |
 | 2026-07-29 | 1.0.2   | `Version` concurrency-token follow-up closed: `IsConcurrencyToken()` + typed retryable `TRACKER.CONCURRENCY_CONFLICT` on all update seams + interleaved-rekey Postgres proof (no migration needed) | Claude |
 | 2026-07-30 | 1.1.0   | **Sweep-endpoint hygiene closed (BREAKING: `POST /api/admin/tenants/migrate` now defaults to a DRY RUN; applying needs `?apply=true` + `X-Admin-Confirm: migrate-all-tenants`)** — plus cluster-wide `pg_try_advisory_lock` single-flight with a typed 409, 202-plus-poll background execution, and a 15-minute migration-DDL command timeout that leaves the runtime pool's 30s untouched | Claude |
+| 2026-07-30 | 1.1.1   | **Sweep-runner adversarial review closed (six findings).** New DEPLOYMENT REQUIREMENT: the control-plane connection must not sit behind a transaction-mode pooler (the session-scoped advisory lock is meaningless there). **WIRE CHANGE:** `applied` is a tri-state string (`not-applied` / `partially-applied` / `applied`) instead of a boolean, and a failed run now reports the PARTIAL per-tenant result (`resultIsPartial`) instead of `null`. Plus: the advisory lock is re-verified every 15s from the lease session and the run aborts on loss; the dry run's pending-count read gets a 30s timeout instead of inheriting the 900s DDL ceiling on the synchronous default path; background dry runs are admission-capped at 4 per instance (`429 dry_run_capacity_exhausted`) which also makes the run ring a real bound; `Dispose` no longer disposes the shutdown source under a running sweep or races `ReleaseAsync` for the lease context; the `pg_locks` probe is qualified by `objsubid` and database oid | Claude |

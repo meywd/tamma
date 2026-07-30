@@ -14,6 +14,21 @@ namespace Tamma.Data.Pooling;
 /// adds over the raw <see cref="ITenantMigrationSweeper"/>; the implementation
 /// notes below cover only the mechanics.
 ///
+/// <para><b>⚠ DEPLOYMENT REQUIREMENT — the control-plane connection must not sit
+/// behind a transaction-mode connection pooler.</b> The cluster-wide gate is a
+/// Postgres SESSION-scoped <c>pg_try_advisory_lock</c>, whose entire meaning is
+/// "this lock lives exactly as long as this backend session". PgBouncer in
+/// <c>pool_mode = transaction</c> (and every proxy modelled on it) hands the
+/// next transaction a DIFFERENT backend, so the lock is taken on one backend
+/// and every later statement — including the release — runs on another: the
+/// gate would be silently ineffective while appearing to work, and two
+/// concurrent fleet-wide applies would both be admitted. <c>pool_mode =
+/// session</c>, or a direct connection, is REQUIRED for
+/// <c>ConnectionStrings:ControlPlane</c>. This is a hard requirement of the
+/// primitive, not a tuning preference; if the control plane must move behind a
+/// transaction pooler, this gate has to be replaced (a control-plane lease row
+/// with a heartbeat) before it does.</para>
+///
 /// <para><b>The gate is two-layered on purpose.</b> A process-local slot
 /// (<see cref="_localRun"/>) is taken first: it is what makes the 409 body
 /// exact ("this instance, run X, started at T") and it is the only guard that
@@ -23,6 +38,20 @@ namespace Tamma.Data.Pooling;
 /// pods. Session scope means a crashed pod's lock dies with its connection —
 /// no stuck gate needing manual clearing, which is the property a fleet-DDL
 /// escape hatch must have.</para>
+///
+/// <para><b>…and the lock is re-verified, because a connection can die without
+/// the pod dying</b> (2026-07-30 review, Finding 1.1). "The lock dies with the
+/// connection" is true but was only half the story: the sweep runs over
+/// entirely DIFFERENT connections (each tenant's own pooled data source), so
+/// lock liveness and sweep liveness were decoupled in the dangerous direction.
+/// An idle-timeout drop, a proxy recycle, or a
+/// <c>pg_terminate_backend</c> on the lease session removed the guard while the
+/// fleet-wide DDL kept running — and a second runner was then admitted for a
+/// concurrent apply. So <see cref="LockHeartbeatInterval"/> re-checks, from the
+/// lease session itself, that the lease session still holds the lock, and the
+/// run is ABORTED on loss. A fleet-wide apply that has lost its exclusivity
+/// guarantee must not continue silently; the tenants already migrated are
+/// reported as a partial result (see <see cref="TenantMigrationSweepRun.ResultIsPartial"/>).</para>
 ///
 /// <para><b>Why not the platform task queue</b> (the shape
 /// <c>POST /api/admin/tenants/{id}/move</c> uses)? <c>PlatformTaskWorker</c>
@@ -44,11 +73,32 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
     /// </summary>
     public const long AdvisoryLockKey = 0x4D47535700000001L;
 
+    /// <summary>
+    /// How many BACKGROUND dry runs may be in flight on this instance at once
+    /// (Finding 1.4). Dry runs are deliberately ungated by the apply
+    /// single-flight — "what is still pending?" is the question an operator
+    /// most wants answered mid-apply — but ungated is not the same as
+    /// unbounded: each dry run opens a pooled connection per tenant,
+    /// <c>maxConcurrency</c>-way parallel, so a repeated
+    /// <c>POST .../migrate?async=true</c> amplified one curl into arbitrarily
+    /// many concurrent fleet-wide connection walks (the reviewer got 200
+    /// accepted on one instance). 4 is chosen to match
+    /// <see cref="TenantMigrationSweep.DefaultMaxConcurrency"/>: at the default
+    /// it bounds in-flight tenant connections at 4×4, and even at the
+    /// <c>maxConcurrency</c> ceiling of 16 it stays a two-digit number. More
+    /// than four simultaneous "what is pending?" questions is a stuck script,
+    /// not an operator. Capping this is also what makes
+    /// <see cref="MaxRetainedRuns"/> a real bound: at most one apply plus this
+    /// many dry runs can be in the un-evictable <c>running</c> state.
+    /// </summary>
+    public const int MaxConcurrentDryRuns = 4;
+
     private readonly IDbContextFactory<ControlPlaneDbContext> _cpFactory;
     private readonly ITenantMigrationSweeper _sweeper;
     private readonly ILogger<TenantMigrationSweepRunner> _logger;
 
     private readonly object _gate = new();
+    private readonly object _ringGate = new();
     private readonly CancellationTokenSource _shutdown = new();
 
     /// <summary>Bounded ring of recent runs, keyed by run id.</summary>
@@ -58,7 +108,24 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
     /// <summary>The apply run this process currently owns, or null.</summary>
     private RunLease? _localRun;
 
+    /// <summary>Background dry runs in flight on this instance.</summary>
+    private int _dryRunsInFlight;
+
     private int _disposed;
+
+    /// <summary>
+    /// How often a running APPLY sweep re-verifies that its lease session still
+    /// holds the cluster lock. 15s is chosen against the shape of the work, not
+    /// arbitrarily: the check is one indexed <c>pg_locks</c> read on an
+    /// otherwise idle dedicated session (free), while the thing it bounds is
+    /// how long a fleet-wide apply can keep issuing DDL after losing
+    /// exclusivity. A single tenant's migration is typically seconds to
+    /// minutes, so 15s keeps the unguarded window under roughly one tenant's
+    /// worth of work — small enough that a concurrent second sweep cannot get
+    /// far before this one aborts, and long enough that a whole-fleet sweep
+    /// lasting an hour costs 240 trivial reads. Overridable for tests only.
+    /// </summary>
+    internal TimeSpan LockHeartbeatInterval { get; init; } = TimeSpan.FromSeconds(15);
 
     public TenantMigrationSweepRunner(
         IDbContextFactory<ControlPlaneDbContext> cpFactory,
@@ -80,8 +147,29 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
         var runId = Guid.NewGuid();
         var startedAt = DateTimeOffset.UtcNow;
         RunLease? lease = null;
+        var tookDryRunSlot = false;
 
-        if (!dryRun)
+        if (dryRun)
+        {
+            // ── admission cap (NOT single-flight — see MaxConcurrentDryRuns) ──
+            if (Interlocked.Increment(ref _dryRunsInFlight) > MaxConcurrentDryRuns)
+            {
+                Interlocked.Decrement(ref _dryRunsInFlight);
+                _logger.LogWarning(
+                    "tenant.migration_sweep.rejected reason=dry_run_capacity inFlight={InFlight} cap={Cap}",
+                    Volatile.Read(ref _dryRunsInFlight), MaxConcurrentDryRuns);
+                return new TenantMigrationSweepStart(
+                    Accepted: false,
+                    Run: null,
+                    Conflict: new TenantMigrationSweepConflict(
+                        TenantMigrationSweepConflict.ScopeDryRunCapacity,
+                        RunId: null,
+                        StartedAt: null));
+            }
+
+            tookDryRunSlot = true;
+        }
+        else
         {
             // ── layer 1: process-local slot ──
             lock (_gate)
@@ -145,7 +233,7 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
         // Deliberately NOT the request's cancellation token: the HTTP request
         // completes the instant this method returns, and a run tied to it would
         // be canceled before it started. The run is tied to process shutdown.
-        _ = Task.Run(() => ExecuteAsync(run, lease), CancellationToken.None);
+        _ = Task.Run(() => ExecuteAsync(run, lease, tookDryRunSlot), CancellationToken.None);
 
         return new TenantMigrationSweepStart(Accepted: true, Run: run, Conflict: null);
     }
@@ -173,15 +261,7 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
             // start spuriously 409 — a status poll must never be able to
             // perturb the thing it is reporting on.
             await using var cmd = conn.CreateCommand();
-            cmd.CommandText =
-                """
-                SELECT EXISTS (
-                    SELECT 1 FROM pg_locks
-                    WHERE locktype = 'advisory'
-                      AND granted
-                      AND ((classid::bigint << 32) + objid::bigint) = @k
-                );
-                """;
+            cmd.CommandText = AdvisoryLockHeldSql(byThisBackend: false);
             cmd.Parameters.AddWithValue("k", AdvisoryLockKey);
             return (bool?)await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) == true;
         }
@@ -194,36 +274,186 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
         }
     }
 
-    private async Task ExecuteAsync(TenantMigrationSweepRun run, RunLease? lease)
+    /// <summary>
+    /// The <c>pg_locks</c> predicate for "the sweep's advisory lock is held".
+    ///
+    /// <para>Fully qualified (Finding 1.6). <c>pg_locks</c> is CLUSTER-wide and
+    /// advisory locks are per-database, so an unqualified match reported a
+    /// sweep running when a lock with the same key was held in a completely
+    /// different database on the same cluster. And <c>objsubid</c> distinguishes
+    /// the one-argument <c>pg_advisory_lock(bigint)</c> form (1) from the
+    /// two-argument <c>(int, int)</c> form (2), whose halves reassemble to the
+    /// same 64-bit value — a different lock entirely. This is the only
+    /// cross-pod signal an operator gets; a false "a sweep is running" sends
+    /// them to look for a run that does not exist.</para>
+    ///
+    /// <para><paramref name="byThisBackend"/> additionally pins the holder to
+    /// the current session — that is the liveness re-verification (Finding 1.1),
+    /// which must not be satisfied by SOMEONE ELSE holding the lock.</para>
+    /// </summary>
+    private static string AdvisoryLockHeldSql(bool byThisBackend) =>
+        $"""
+        SELECT EXISTS (
+            SELECT 1 FROM pg_locks
+            WHERE locktype = 'advisory'
+              AND granted
+              AND objsubid = 1
+              AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+              {(byThisBackend ? "AND pid = pg_backend_pid()" : string.Empty)}
+              AND ((classid::bigint << 32) + objid::bigint) = @k
+        );
+        """;
+
+    private async Task ExecuteAsync(
+        TenantMigrationSweepRun run, RunLease? lease, bool tookDryRunSlot)
     {
+        // Per-tenant rows as they complete, so a sweep that dies partway can
+        // still answer "which tenants got the DDL?" (Finding 1.3).
+        var observed = new List<TenantMigrationSweepEntry>();
+        void OnTenant(TenantMigrationSweepEntry e)
+        {
+            lock (observed) observed.Add(e);
+        }
+
+        TenantMigrationSweepEntry[] Snapshot()
+        {
+            lock (observed) return observed.ToArray();
+        }
+
+        // Linked so the watchdog can abort THIS run without touching the
+        // process-wide shutdown source.
+        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
+        var lockLost = 0;
+        var watchdog = lease is { HoldsClusterLock: true }
+            ? WatchClusterLockAsync(run, lease, runCts, () => Interlocked.Exchange(ref lockLost, 1))
+            : Task.CompletedTask;
+
         try
         {
             var result = await _sweeper
-                .SweepAsync(run.DryRun, run.MaxConcurrency, _shutdown.Token)
+                .SweepAsync(run.DryRun, run.MaxConcurrency, OnTenant, runCts.Token)
                 .ConfigureAwait(false);
             Record(run with
             {
                 State = TenantMigrationSweepRunState.Completed,
                 CompletedAt = DateTimeOffset.UtcNow,
                 Result = result,
+                ResultIsPartial = false,
             });
         }
         catch (Exception ex)
         {
             // A per-tenant failure is a result ROW (the sweeper isolates it);
             // reaching here means the sweep itself died (control-plane
-            // unreachable, shutdown) and the run has no result at all.
-            _logger.LogError(ex, "tenant.migration_sweep.run_failed runId={RunId}", run.RunId);
+            // unreachable, shutdown, or a LOST advisory lock). The run keeps
+            // whatever per-tenant rows completed first — reporting nothing is
+            // the worst possible post-failure state for a fleet-DDL primitive.
+            var partial = Snapshot();
+            var error = Volatile.Read(ref lockLost) == 1
+                ? "The cluster-wide sweep lock was lost mid-run (the control-plane session "
+                  + "holding pg_try_advisory_lock died — a pooler/proxy drop, an idle timeout, "
+                  + "or a terminated backend). The sweep was ABORTED because it could no longer "
+                  + "guarantee it was the only fleet-wide apply running. "
+                  + $"{partial.Count(e => e.Outcome == TenantMigrationSweep.OutcomeMigrated)} "
+                  + "tenant(s) were migrated before the abort; see the partial result. "
+                  + "Original error: " + ex.Message
+                : ex.Message;
+
+            _logger.LogError(ex,
+                "tenant.migration_sweep.run_failed runId={RunId} lockLost={LockLost} partialTenants={Partial}",
+                run.RunId, Volatile.Read(ref lockLost) == 1, partial.Length);
             Record(run with
             {
                 State = TenantMigrationSweepRunState.Failed,
                 CompletedAt = DateTimeOffset.UtcNow,
-                Error = ex.Message,
+                Error = error,
+                Result = TenantMigrationSweep.Summarize(run.DryRun, partial),
+                ResultIsPartial = true,
             });
         }
         finally
         {
+            // Stop the watchdog before the lease connection goes away, so its
+            // probe can never race the release into a spurious "lock lost".
+            if (!runCts.IsCancellationRequested) runCts.Cancel();
+            try { await watchdog.ConfigureAwait(false); } catch { /* best effort */ }
+
             if (lease is not null) await ReleaseAsync(lease).ConfigureAwait(false);
+            if (tookDryRunSlot) Interlocked.Decrement(ref _dryRunsInFlight);
+        }
+    }
+
+    /// <summary>
+    /// Re-verify, on the LEASE session itself, that this run still holds the
+    /// cluster lock; cancel the run on loss. See the class doc (Finding 1.1)
+    /// for why "the lock dies with the connection" was not sufficient.
+    ///
+    /// <para>Any failure of the probe counts as loss. That is deliberate: the
+    /// dominant reason a command on the lease connection throws is that the
+    /// backend is gone — which IS loss — and the alternative bias (treat a
+    /// blip as "probably still held") continues fleet-wide DDL on an
+    /// unverifiable guarantee. Aborting a sweep is recoverable and reported;
+    /// two concurrent applies are not.</para>
+    /// </summary>
+    private async Task WatchClusterLockAsync(
+        TenantMigrationSweepRun run, RunLease lease, CancellationTokenSource runCts, Action onLost)
+    {
+        var token = runCts.Token;
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                await Task.Delay(LockHeartbeatInterval, token).ConfigureAwait(false);
+                if (token.IsCancellationRequested) return;
+                if (await StillHoldsClusterLockAsync(lease, token).ConfigureAwait(false)) continue;
+
+                _logger.LogError(
+                    "tenant.migration_sweep.lock_lost runId={RunId} — aborting: the sweep can no "
+                    + "longer guarantee it is the only fleet-wide apply running", run.RunId);
+                onLost();
+                lease.HoldsClusterLock = false;
+                await runCts.CancelAsync().ConfigureAwait(false);
+                return;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal: the run finished and the finally block cancelled us.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "tenant.migration_sweep.lock_watchdog_failed runId={RunId}", run.RunId);
+        }
+    }
+
+    private async Task<bool> StillHoldsClusterLockAsync(RunLease lease, CancellationToken ct)
+    {
+        var cp = lease.Context;
+        if (cp is null) return false;
+
+        try
+        {
+            if (!cp.Database.IsNpgsql()) return true;
+            var conn = (NpgsqlConnection)cp.Database.GetDbConnection();
+            if (conn.State != ConnectionState.Open) return false;
+
+            await using var cmd = conn.CreateCommand();
+            // pid = pg_backend_pid() — the lock must still be held by THIS
+            // session. A reconnect (new pid) or another pod having taken the
+            // key both read as loss, which is the honest answer either way.
+            cmd.CommandText = AdvisoryLockHeldSql(byThisBackend: true);
+            cmd.Parameters.AddWithValue("k", AdvisoryLockKey);
+            return (bool?)await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) == true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "tenant.migration_sweep.lock_recheck_failed");
+            return false;
         }
     }
 
@@ -264,8 +494,9 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
             if (ReferenceEquals(_localRun, lease)) _localRun = null;
         }
 
-        var cp = lease.Context;
-        lease.Context = null;
+        // Interlocked, not read-then-null: Dispose races this method for the
+        // same context and exactly one of them may dispose it.
+        var cp = lease.TakeContext();
         if (cp is null) return;
 
         try
@@ -295,33 +526,57 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
         }
     }
 
+    /// <summary>
+    /// Record a run and keep the ring bounded.
+    ///
+    /// <para>Eviction skips <c>running</c> runs — a running sweep must stay
+    /// pollable no matter how many finished runs pile up behind it — which is
+    /// only a real bound because the number of simultaneously-running runs is
+    /// itself capped: at most one apply (single-flight) plus
+    /// <see cref="MaxConcurrentDryRuns"/> dry runs. Before that cap existed
+    /// (Finding 1.4), unbounded concurrent dry runs grew the ring without
+    /// limit. Eviction loops under a lock rather than computing a single
+    /// batch size, so concurrent recorders cannot leave the ring over its
+    /// bound.</para>
+    /// </summary>
     private void Record(TenantMigrationSweepRun run)
     {
         _runs[run.RunId] = run;
         if (_runs.Count <= MaxRetainedRuns) return;
 
-        // Evict oldest COMPLETED runs only — a running sweep must stay pollable
-        // no matter how many finished runs pile up behind it.
-        foreach (var stale in _runs.Values
-            .Where(r => r.State != TenantMigrationSweepRunState.Running)
-            .OrderBy(r => r.StartedAt)
-            .Take(Math.Max(0, _runs.Count - MaxRetainedRuns)))
+        lock (_ringGate)
         {
-            _runs.TryRemove(stale.RunId, out _);
+            while (_runs.Count > MaxRetainedRuns)
+            {
+                var stale = _runs.Values
+                    .Where(r => r.State != TenantMigrationSweepRunState.Running)
+                    .OrderBy(r => r.StartedAt)
+                    .FirstOrDefault();
+                if (stale is null) break;              // all remaining are running (≤ 1 + cap)
+                if (!_runs.TryRemove(stale.RunId, out _)) break;
+            }
         }
     }
 
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
-        try { _shutdown.Cancel(); } catch { /* best effort */ }
-        _shutdown.Dispose();
+
+        // Cancel but do NOT dispose _shutdown (Finding 1.5): ExecuteAsync may
+        // be inside SweepAsync on a token linked to this source, and disposing
+        // it underneath turns a clean cancellation into an
+        // ObjectDisposedException that surfaces as the run's Error — a
+        // confusing, wrong story about why a fleet migration stopped. A CTS
+        // with no timer holds nothing that needs deterministic release; the
+        // linked per-run sources are disposed by their own runs.
+        try { _shutdown.Cancel(); } catch (ObjectDisposedException) { /* best effort */ }
 
         RunLease? lease;
         lock (_gate) { lease = _localRun; _localRun = null; }
-        if (lease?.Context is { } cp)
+        // TakeContext is interlocked: if ReleaseAsync is concurrently ending
+        // the run, exactly one of us gets the context and disposes it once.
+        if (lease?.TakeContext() is { } cp)
         {
-            lease.Context = null;
             // Disposing the context closes the session, which releases the
             // advisory lock — the crashed/stopped-pod path, exercised here on
             // the orderly-shutdown path too.
@@ -332,11 +587,24 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
     /// <summary>The mutable half of a run: what has to be released when it ends.</summary>
     private sealed class RunLease(Guid runId, DateTimeOffset startedAt)
     {
+        private ControlPlaneDbContext? _context;
+
         public Guid RunId { get; } = runId;
         public DateTimeOffset StartedAt { get; } = startedAt;
 
         /// <summary>Holds the advisory lock's Postgres session open.</summary>
-        public ControlPlaneDbContext? Context { get; set; }
+        public ControlPlaneDbContext? Context
+        {
+            get => Volatile.Read(ref _context);
+            set => Volatile.Write(ref _context, value);
+        }
+
+        /// <summary>
+        /// Atomically claim the context for disposal. Dispose and ReleaseAsync
+        /// both end a run and both used to read-then-null, so both could
+        /// dispose the same context (Finding 1.5, second half).
+        /// </summary>
+        public ControlPlaneDbContext? TakeContext() => Interlocked.Exchange(ref _context, null);
 
         public bool HoldsClusterLock { get; set; }
     }

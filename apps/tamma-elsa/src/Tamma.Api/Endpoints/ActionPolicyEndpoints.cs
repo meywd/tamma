@@ -534,7 +534,10 @@ public static class ActionPolicyEndpoints
             return AutonomyDial.Min; // unreachable: the route already resolved the descriptor
         }
 
-        var snapshot = new GovernancePolicySnapshot(
+        // FromSuccessfulRead is the honest factory here (review 2.2): both row
+        // sets were just read straight out of the repository on this request and
+        // both reads returned — this snapshot is NOT the degraded one.
+        var snapshot = GovernancePolicySnapshot.FromSuccessfulRead(
             RowsByKind(platformRows, "action"),
             RowsByKind(platformRows, "group"),
             RowsByKind(principalRows, "action"),

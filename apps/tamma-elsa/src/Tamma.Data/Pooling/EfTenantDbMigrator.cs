@@ -39,18 +39,42 @@ public sealed class EfTenantDbMigrator : ITenantDbMigrator, ITenantDataSourceDbM
     /// slow — with the tenant apparently stranded mid-migration.</para>
     ///
     /// <para>The fix is scoped so the runtime pool is untouched: the timeout is
-    /// set at the EF layer on the MIGRATION context's options only
-    /// (<see cref="BuildConnectionOptions"/> / <see cref="BuildStringOptions"/>),
-    /// so EF stamps it onto migration commands while every other context built
-    /// over the same data source (<c>TenantDbContextFactory</c>, which sets no
-    /// EF-level timeout) keeps inheriting the connection string's 30s.
+    /// set at the EF layer on the options of the contexts that RUN MIGRATION
+    /// DDL, so EF stamps it onto migration commands while every other context
+    /// built over the same data source (<c>TenantDbContextFactory</c>, which
+    /// sets no EF-level timeout) keeps inheriting the connection string's 30s.
     /// <c>EfTenantDbMigratorCommandTimeoutTests</c> pins both halves.</para>
+    ///
+    /// <para><b>2026-07-30 review correction.</b> This doc previously claimed
+    /// the ceiling applied to "the MIGRATION context's options only". It did
+    /// not: <see cref="BuildConnectionOptions"/> is shared with
+    /// <see cref="CountPendingMigrationsAsync"/>, which runs NO DDL — it is the
+    /// <c>__TenantMigrationsHistory</c> read the DRY RUN performs per tenant,
+    /// and the dry run is both the default and (unless <c>?async=true</c>)
+    /// synchronous. One wedged tenant database therefore pinned a bare
+    /// <c>POST /api/admin/tenants/migrate</c> open for up to 15 minutes where it
+    /// used to fail at 30 seconds. The read path now takes
+    /// <see cref="PendingCountCommandTimeoutSeconds"/> and only the DDL paths
+    /// take this one.</para>
     ///
     /// <para>EF migrations are transactional per migration, so a genuine
     /// timeout still rolls that migration back — the longer ceiling removes
     /// spurious failures, it does not create partially-applied schemas.</para>
     /// </summary>
     public const int MigrationCommandTimeoutSeconds = 900;
+
+    /// <summary>
+    /// Command timeout (seconds) for the pending-migration COUNT — the metadata
+    /// read behind a dry-run sweep. 30s, deliberately identical to the runtime
+    /// pool's <c>TenantConnectionPoolOptions.CommandTimeoutSeconds</c>: reading
+    /// one small history table is a request-path query in every respect, and it
+    /// sits on the endpoint's synchronous default path, where a long ceiling is
+    /// not patience but a held-open HTTP request multiplied by the number of
+    /// unreachable tenants. A tenant whose database is wedged must surface as a
+    /// prompt per-tenant <c>failed</c> row, which is exactly what the dry run is
+    /// for.
+    /// </summary>
+    public const int PendingCountCommandTimeoutSeconds = 30;
 
     private readonly ILogger<EfTenantDbMigrator> _logger;
 
@@ -123,7 +147,9 @@ public sealed class EfTenantDbMigrator : ITenantDbMigrator, ITenantDataSourceDbM
         ArgumentNullException.ThrowIfNull(dataSource);
         var schema = TenantNaming.SchemaFromConnectionString(dataSource.ConnectionString);
         await using var connection = dataSource.CreateConnection();
-        await using var ctx = new TenantDbContext(BuildConnectionOptions(connection, schema));
+        // SHORT timeout: this is a metadata read on the dry run's synchronous
+        // default path, not DDL. See PendingCountCommandTimeoutSeconds.
+        await using var ctx = new TenantDbContext(BuildPendingCountOptions(connection, schema));
         // Reads the per-schema history table only; a schema without one (a
         // tenant provisioned before the first sweep) reports the full set.
         var pending = await ctx.Database.GetPendingMigrationsAsync(ct).ConfigureAwait(false);
@@ -145,18 +171,36 @@ public sealed class EfTenantDbMigrator : ITenantDbMigrator, ITenantDataSourceDbM
     // carries Search Path, so the borrowed connection lands unqualified DDL in
     // the tenant schema, and the history table stays pinned to that same
     // schema — semantics identical to the string-based path above.
+    //
+    // commandTimeoutSeconds defaults to the DDL ceiling because the migration
+    // path is the one that must not inherit a request-path timeout; the
+    // pending-count READ passes PendingCountCommandTimeoutSeconds explicitly.
+    // The default is the dangerous-if-wrong direction only for reads, and there
+    // is exactly one read caller — it states its own value.
     internal static DbContextOptions<TenantDbContext> BuildConnectionOptions(
-        NpgsqlConnection connection, string? schema) =>
+        NpgsqlConnection connection,
+        string? schema,
+        int commandTimeoutSeconds = MigrationCommandTimeoutSeconds) =>
         new DbContextOptionsBuilder<TenantDbContext>()
             .UseNpgsql(connection, npgsql =>
             {
                 npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema);
-                // DDL, not request-path SQL — see MigrationCommandTimeoutSeconds.
                 // EF-level only: the data source's own CommandTimeout=30 still
                 // governs every non-migration context over the same pool.
-                npgsql.CommandTimeout(MigrationCommandTimeoutSeconds);
+                npgsql.CommandTimeout(commandTimeoutSeconds);
             })
             .Options;
+
+    /// <summary>
+    /// The pending-migration COUNT's options — same context, same history-table
+    /// pinning, but the request-path timeout. Separate seam (rather than an
+    /// inline argument) so the two ceilings are individually assertable:
+    /// <c>EfTenantDbMigratorCommandTimeoutTests</c> pins that the read path is
+    /// short and the DDL paths are long, which is the whole point of the split.
+    /// </summary>
+    internal static DbContextOptions<TenantDbContext> BuildPendingCountOptions(
+        NpgsqlConnection connection, string? schema) =>
+        BuildConnectionOptions(connection, schema, PendingCountCommandTimeoutSeconds);
 
     /// <summary>
     /// The provisioning (connection-string) flavour's options. Same

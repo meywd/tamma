@@ -43,15 +43,53 @@ public sealed record ActionAssignmentValue(
 /// the resolving principal's own rows, each split by target kind. Keys are wire
 /// strings — <see cref="ActionKey.ToWire"/> for action rows,
 /// <see cref="ActionGroupExtensions.ToWire"/> for group rows.
+///
+/// <para><b>There is no public constructor</b> (review 2.2, 2026-07-30). A
+/// snapshot is minted through one of the two NAMED factories below, so a caller
+/// must STATE whether these rows came from a successful read or from ignorance.
+/// <see cref="IsAuthoritative"/> was previously an <c>init</c> property
+/// defaulting to TRUE for test convenience — a default-true safety bit, which
+/// means the next hand-built snapshot written by someone who has not read this
+/// comment silently claims an authority it may not have and restores the
+/// fail-open. Test convenience is not a reason to default a production safety
+/// property.</para>
 /// </summary>
-public sealed record GovernancePolicySnapshot(
-    IReadOnlyDictionary<string, ActionAssignmentValue> PlatformActionRows,
-    IReadOnlyDictionary<string, ActionAssignmentValue> PlatformGroupRows,
-    IReadOnlyDictionary<string, ActionAssignmentValue> PrincipalActionRows,
-    IReadOnlyDictionary<string, ActionAssignmentValue> PrincipalGroupRows)
+public sealed record GovernancePolicySnapshot
 {
     private static readonly IReadOnlyDictionary<string, ActionAssignmentValue> s_none =
         new Dictionary<string, ActionAssignmentValue>(StringComparer.Ordinal);
+
+    private GovernancePolicySnapshot(
+        IReadOnlyDictionary<string, ActionAssignmentValue> platformActionRows,
+        IReadOnlyDictionary<string, ActionAssignmentValue> platformGroupRows,
+        IReadOnlyDictionary<string, ActionAssignmentValue> principalActionRows,
+        IReadOnlyDictionary<string, ActionAssignmentValue> principalGroupRows,
+        bool isAuthoritative)
+    {
+        ArgumentNullException.ThrowIfNull(platformActionRows);
+        ArgumentNullException.ThrowIfNull(platformGroupRows);
+        ArgumentNullException.ThrowIfNull(principalActionRows);
+        ArgumentNullException.ThrowIfNull(principalGroupRows);
+        PlatformActionRows = platformActionRows;
+        PlatformGroupRows = platformGroupRows;
+        PrincipalActionRows = principalActionRows;
+        PrincipalGroupRows = principalGroupRows;
+        IsAuthoritative = isAuthoritative;
+    }
+
+    /// <summary>Platform-scope action rows (the ceiling), keyed by
+    /// <see cref="ActionKey.ToWire"/>.</summary>
+    public IReadOnlyDictionary<string, ActionAssignmentValue> PlatformActionRows { get; }
+
+    /// <summary>Platform-scope group rows, keyed by
+    /// <see cref="ActionGroupExtensions.ToWire"/>.</summary>
+    public IReadOnlyDictionary<string, ActionAssignmentValue> PlatformGroupRows { get; }
+
+    /// <summary>The resolving principal's own action rows.</summary>
+    public IReadOnlyDictionary<string, ActionAssignmentValue> PrincipalActionRows { get; }
+
+    /// <summary>The resolving principal's own group rows.</summary>
+    public IReadOnlyDictionary<string, ActionAssignmentValue> PrincipalGroupRows { get; }
 
     /// <summary>
     /// TRUE when these rows are backed by a SUCCESSFUL read of
@@ -64,20 +102,41 @@ public sealed record GovernancePolicySnapshot(
     /// with the control plane down served an empty snapshot and every admin
     /// tightening was silently unenforced until a refresh succeeded — the gate
     /// failed OPEN on a degraded read. The evaluator now fails CLOSED on a
-    /// non-authoritative snapshot (<see cref="AutonomyGateEvaluator.ReasonPolicySnapshotUnavailable"/>).
-    /// Defaults to TRUE so every hand-built snapshot (tests, the 43-6 fresh-read
-    /// pin) keeps meaning "these ARE the rows".</para>
+    /// non-authoritative snapshot (<see cref="AutonomyGateEvaluator.ReasonPolicySnapshotUnavailable"/>).</para>
+    ///
+    /// <para>It is set ONLY by <see cref="FromSuccessfulRead"/> (true) and
+    /// <see cref="Unavailable"/> (false) — there is no way to construct a
+    /// snapshot without choosing one.</para>
     /// </summary>
-    public bool IsAuthoritative { get; init; } = true;
+    public bool IsAuthoritative { get; }
+
+    /// <summary>
+    /// THE authoritative factory: these rows came back from a read of
+    /// <c>action_assignments</c> that SUCCEEDED, so the absence of a row is the
+    /// absence of policy and every member without a row resolves to its shipped
+    /// default. Zero rows here is the ordinary zero-config deployment.
+    /// </summary>
+    public static GovernancePolicySnapshot FromSuccessfulRead(
+        IReadOnlyDictionary<string, ActionAssignmentValue> platformActionRows,
+        IReadOnlyDictionary<string, ActionAssignmentValue> platformGroupRows,
+        IReadOnlyDictionary<string, ActionAssignmentValue> principalActionRows,
+        IReadOnlyDictionary<string, ActionAssignmentValue> principalGroupRows)
+        => new(platformActionRows, platformGroupRows,
+               principalActionRows, principalGroupRows, isAuthoritative: true);
 
     /// <summary>Zero rows, AUTHORITATIVELY — the table was read and it is empty,
     /// so every member resolves to its shipped default (AC10).</summary>
-    public static GovernancePolicySnapshot Empty { get; } = new(s_none, s_none, s_none, s_none);
+    public static GovernancePolicySnapshot Empty { get; } =
+        FromSuccessfulRead(s_none, s_none, s_none, s_none);
 
-    /// <summary>The DEGRADED snapshot: no successful read has ever completed, so
-    /// nothing may be concluded from the absence of a row (43-5 F6).</summary>
+    /// <summary>
+    /// The DEGRADED snapshot: no successful read has ever completed, so nothing
+    /// may be concluded from the absence of a row (43-5 F6). It carries NO rows
+    /// by construction — a snapshot that cannot testify about the rows it lacks
+    /// has no business testifying about the rows it holds either.
+    /// </summary>
     public static GovernancePolicySnapshot Unavailable { get; } =
-        Empty with { IsAuthoritative = false };
+        new(s_none, s_none, s_none, s_none, isAuthoritative: false);
 }
 
 /// <summary>Gate outcome for one governed action (Story 43-5 AC8).</summary>

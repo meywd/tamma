@@ -253,7 +253,8 @@ public class TenantMigrationEndpointAuthTests
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         body.GetProperty("mode").GetString().Should().Be("dry-run",
             "a POST with no body and no query must report, never mutate");
-        body.GetProperty("applied").GetBoolean().Should().BeFalse();
+        body.GetProperty("applied").GetString().Should().Be("not-applied",
+            "the tri-state's one guarantee-carrying value — a dry run writes nothing");
         body.GetProperty("dryRun").GetBoolean().Should().BeTrue();
         body.GetProperty("message").GetString().Should().Contain("DRY RUN");
     }
@@ -315,7 +316,9 @@ public class TenantMigrationEndpointAuthTests
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         var accepted = await response.Content.ReadFromJsonAsync<JsonElement>();
         accepted.GetProperty("mode").GetString().Should().Be("apply");
-        accepted.GetProperty("applied").GetBoolean().Should().BeTrue();
+        accepted.GetProperty("applied").GetString().Should().Be("partially-applied",
+            "the run is accepted and may already be issuing DDL by the time the caller reads "
+            + "this; only 'not-applied' is allowed to be a guarantee (2026-07-30 Finding 1.3)");
         var runId = accepted.GetProperty("runId").GetGuid();
         var statusUrl = accepted.GetProperty("statusUrl").GetString()!;
         statusUrl.Should().Be($"/api/admin/tenants/migrate/{runId:D}");
@@ -336,7 +339,7 @@ public class TenantMigrationEndpointAuthTests
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         var accepted = await response.Content.ReadFromJsonAsync<JsonElement>();
         accepted.GetProperty("mode").GetString().Should().Be("dry-run");
-        accepted.GetProperty("applied").GetBoolean().Should().BeFalse();
+        accepted.GetProperty("applied").GetString().Should().Be("not-applied");
 
         var final = await PollToTerminalAsync(
             platformAdmin, accepted.GetProperty("statusUrl").GetString()!);

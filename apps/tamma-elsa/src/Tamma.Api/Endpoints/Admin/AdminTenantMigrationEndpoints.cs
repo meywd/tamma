@@ -1,5 +1,6 @@
 using Tamma.Api.Dtos.Admin;
 using Tamma.Data.Abstractions;
+using Tamma.Data.Pooling;
 
 namespace Tamma.Api.Endpoints.Admin;
 
@@ -18,7 +19,7 @@ namespace Tamma.Api.Endpoints.Admin;
 ///
 /// <list type="bullet">
 ///   <item><c>POST .../migrate</c> (bare) ⇒ DRY RUN. 200 with the per-tenant
-///   pending counts, <c>applied=false</c>, nothing written.</item>
+///   pending counts, <c>applied="not-applied"</c>, nothing written.</item>
 ///   <item><c>POST .../migrate?apply=true</c> + <c>X-Admin-Confirm:
 ///   migrate-all-tenants</c> ⇒ the real sweep. 202 + a run id to poll.</item>
 ///   <item><c>POST .../migrate?dryRun=false</c> ⇒ 400. The old spelling for
@@ -45,6 +46,18 @@ namespace Tamma.Api.Endpoints.Admin;
 /// to learn "nothing is pending" would be a worse surface. A caller who expects
 /// their dry run to be slow anyway (a very large fleet) can pass
 /// <c>?async=true</c> and get the same 202 + poll treatment.</para>
+///
+/// <para><b>2026-07-30 review follow-ups.</b> (a) <c>applied</c> is now a
+/// TRI-STATE string (<c>not-applied</c> | <c>partially-applied</c> |
+/// <c>applied</c>) rather than a boolean — see
+/// <see cref="AdminTenantMigrationApplied"/>: the boolean claimed
+/// <c>true</c> for a run that had not yet touched a tenant and <c>false</c>
+/// (i.e. "nothing was written") after a partial failure that may have migrated
+/// most of the fleet. A failed run now also carries the PARTIAL per-tenant
+/// result. (b) <c>?async=true</c> dry runs are admission-capped per instance and
+/// answer <c>429 dry_run_capacity_exhausted</c> over the cap — background dry
+/// runs take neither the process slot nor the cluster lock, so nothing else
+/// bounded them.</para>
 /// </summary>
 public static class AdminTenantMigrationEndpoints
 {
@@ -109,25 +122,57 @@ public static class AdminTenantMigrationEndpoints
                     },
                     statusCode: StatusCodes.Status400BadRequest);
 
-            return await StartAsync(runner, dryRun: false, concurrency, ct);
+            return await StartAsync(http, runner, dryRun: false, concurrency, ct);
         }
 
         // Dry run — synchronous by default, 202 + poll on request.
         if (async == true)
-            return await StartAsync(runner, dryRun: true, concurrency, ct);
+            return await StartAsync(http, runner, dryRun: true, concurrency, ct);
 
-        var result = await sweeper.SweepAsync(dryRun: true, concurrency, ct);
+        var result = await sweeper.SweepAsync(
+            dryRun: true, concurrency, onTenantCompleted: null, ct);
         return Results.Ok(AdminTenantMigrationSweepResponse.From(result));
     }
 
     private static async Task<IResult> StartAsync(
-        ITenantMigrationSweepRunner runner, bool dryRun, int concurrency, CancellationToken ct)
+        HttpContext http,
+        ITenantMigrationSweepRunner runner,
+        bool dryRun,
+        int concurrency,
+        CancellationToken ct)
     {
         var start = await runner.StartAsync(dryRun, concurrency, ct);
 
         if (!start.Accepted)
         {
             var conflict = start.Conflict!;
+
+            // A capacity refusal is NOT a single-flight refusal: concurrent dry
+            // runs are legitimate and deliberately ungated by the apply lock —
+            // this is the admission cap that stops one repeated curl becoming
+            // unbounded concurrent fleet-wide connection walks. It clears as
+            // soon as a slot frees, so it is 429 (retry), not 409 (conflict),
+            // and it carries Retry-After for the same reason.
+            if (conflict.Scope == TenantMigrationSweepConflict.ScopeDryRunCapacity)
+            {
+                http.Response.Headers.RetryAfter = "5";
+                return Results.Json(
+                    new
+                    {
+                        error = "dry_run_capacity_exhausted",
+                        scope = conflict.Scope,
+                        maxConcurrentDryRuns = TenantMigrationSweepRunner.MaxConcurrentDryRuns,
+                        message =
+                            "Too many background dry-run sweeps are already in flight on this "
+                            + $"instance (cap {TenantMigrationSweepRunner.MaxConcurrentDryRuns}). "
+                            + "Each dry run opens a pooled connection per tenant; the cap keeps a "
+                            + "repeated request from amplifying into unbounded fleet-wide "
+                            + "connection walks. Retry when one finishes, or drop ?async=true to "
+                            + "run the dry sweep synchronously.",
+                    },
+                    statusCode: StatusCodes.Status429TooManyRequests);
+            }
+
             return Results.Json(
                 new
                 {
@@ -154,7 +199,12 @@ public static class AdminTenantMigrationEndpoints
             new AdminTenantMigrationAcceptedResponse(
                 run.RunId,
                 run.DryRun ? AdminTenantMigrationMode.DryRun : AdminTenantMigrationMode.Apply,
-                Applied: !run.DryRun,
+                // A dry run writes nothing, ever. An apply that has been
+                // accepted may already be issuing DDL by the time the caller
+                // reads this — only "not-applied" is allowed to be a guarantee.
+                run.DryRun
+                    ? AdminTenantMigrationApplied.No
+                    : AdminTenantMigrationApplied.Partial,
                 run.DryRun,
                 run.StartedAt,
                 statusUrl,

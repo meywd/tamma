@@ -50,7 +50,7 @@ public class ResolverBackedToolLoopGateTests
         Dictionary<string, ActionAssignmentValue>? platformGroups = null,
         Dictionary<string, ActionAssignmentValue>? principalActions = null,
         Dictionary<string, ActionAssignmentValue>? principalGroups = null)
-        => new(
+        => GovernancePolicySnapshot.FromSuccessfulRead(
             platformActions ?? new(StringComparer.Ordinal),
             platformGroups ?? new(StringComparer.Ordinal),
             principalActions ?? new(StringComparer.Ordinal),

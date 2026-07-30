@@ -237,16 +237,25 @@ public sealed class GovernancePolicySnapshotStore : IGovernancePolicySnapshotPro
         return _snapshot;
     }
 
-    private GovernancePolicySnapshot Project(FullSnapshot s, PrincipalRows? principalRows) =>
-        new(
+    private GovernancePolicySnapshot Project(FullSnapshot s, PrincipalRows? principalRows)
+    {
+        // F6 — an unprimed store's empty rows are IGNORANCE, not policy, and the
+        // named factories make a caller state which it is (review 2.2). The
+        // degraded branch discards nothing: `_snapshot` is only ever assigned
+        // inside `_installLock` together with `_everLoaded = 1`, so
+        // `!IsAuthoritative` implies `s == FullSnapshot.Empty` — there are
+        // provably no rows to lose here.
+        if (!IsAuthoritative)
+        {
+            return GovernancePolicySnapshot.Unavailable;
+        }
+
+        return GovernancePolicySnapshot.FromSuccessfulRead(
             s.PlatformRows.ActionRows,
             s.PlatformRows.GroupRows,
             principalRows?.ActionRows ?? PrincipalRows.None.ActionRows,
-            principalRows?.GroupRows ?? PrincipalRows.None.GroupRows)
-        {
-            // F6 — an unprimed store's empty rows are IGNORANCE, not policy.
-            IsAuthoritative = this.IsAuthoritative,
-        };
+            principalRows?.GroupRows ?? PrincipalRows.None.GroupRows);
+    }
 
     /// <summary>One principal's rows split by target kind.</summary>
     private sealed record PrincipalRows(
