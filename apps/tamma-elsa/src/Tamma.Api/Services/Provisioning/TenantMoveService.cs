@@ -120,10 +120,15 @@ public sealed class TenantMoveOptions
 /// step-8 verify probe, then activate.</para>
 ///
 /// <para><b>Concurrency:</b> the whole of <see cref="MoveAsync"/> runs
-/// under a per-tenant Postgres advisory lock on a dedicated control-plane
-/// session (<c>pg_try_advisory_lock(hashtextextended(tenantId, 0))</c>) —
-/// a second concurrent move for the same tenant is rejected up front. The
-/// lock is released in a finally and dies with the session regardless.</para>
+/// under a per-tenant Postgres advisory lock on a dedicated, NON-POOLED
+/// control-plane session
+/// (<c>pg_try_advisory_lock(hashtextextended(tenantId, 0))</c>) — a second
+/// concurrent move for the same tenant is rejected up front. The lock is
+/// released when the lease is disposed, and dies with the session
+/// regardless — which is true only because that session is not pooled
+/// (see <see cref="PostgresAdvisoryLock"/>; on a pooled connection the
+/// connector returns to the pool with the lock still held and the gate
+/// parks shut for that tenant indefinitely).</para>
 ///
 /// <para><b>Aliasing guard:</b> two tenant_databases rows that point at
 /// the SAME physical (Host, Port, Database) would make a "move" between
@@ -845,102 +850,63 @@ public sealed class TenantMoveService : ITenantMoveService
 
     /// <summary>
     /// Take <c>pg_try_advisory_lock(hashtextextended(tenantId, 0))</c> on a
-    /// DEDICATED control-plane session held for the whole move (the session
-    /// lives inside the returned handle; disposing it unlocks — and the
-    /// lock dies with the session regardless). Not acquired → a move for
+    /// DEDICATED, NON-POOLED control-plane session held for the whole move
+    /// (the session lives inside the returned lease; disposing it unlocks,
+    /// and — because the session is not pooled — closing it drops the lock
+    /// even when the unlock itself never runs). Not acquired → a move for
     /// this tenant is already running somewhere → throw. Returns null when
     /// the control plane is non-relational (EF InMemory unit suites — no
     /// session to lock on; production CP is always Postgres).
+    ///
+    /// <para><b>2026-07-30 audit.</b> This used to take the lock on the
+    /// pooled connection of an EF <see cref="ControlPlaneDbContext"/>, and
+    /// its release path swallowed a failed unlock on the grounds that "the
+    /// lock dies with the session regardless". On a POOLED connection that
+    /// is false: the connector goes back to the pool with the session and
+    /// the lock still alive. Since the key is per tenant and never
+    /// rotates, a single swallowed unlock parked THAT TENANT's move gate
+    /// shut indefinitely, and every later move for it failed with the
+    /// misleading "already in progress". See
+    /// <see cref="PostgresAdvisoryLock"/>.</para>
     /// </summary>
-    private async Task<MoveAdvisoryLock?> AcquireMoveLockAsync(
+    private async Task<PostgresAdvisoryLockLease?> AcquireMoveLockAsync(
         Guid tenantId, CancellationToken ct)
     {
-        var db = await _cpFactory.CreateDbContextAsync(ct);
-        try
+        string connectionString;
+        await using (var db = await _cpFactory.CreateDbContextAsync(ct))
         {
             if (!db.Database.IsRelational())
             {
                 _logger.LogDebug(
                     "tenant.move.lock skipped_non_relational tenantId={TenantId}", tenantId);
-                await db.DisposeAsync();
                 return null;
             }
 
-            await db.Database.OpenConnectionAsync(ct);
-            var conn = db.Database.GetDbConnection();
-            bool acquired;
-            await using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText =
-                    "SELECT pg_try_advisory_lock(hashtextextended(@tid, 0));";
-                var p = cmd.CreateParameter();
-                p.ParameterName = "tid";
-                p.Value = tenantId.ToString("D");
-                cmd.Parameters.Add(p);
-                acquired = await cmd.ExecuteScalarAsync(ct) is true;
-            }
-
-            if (!acquired)
-            {
-                throw new InvalidOperationException(
-                    $"A move for tenant '{tenantId}' is already in progress (the per-tenant "
-                    + "control-plane advisory lock is held by another session) — wait for "
-                    + "it to finish or fail before retrying.");
-            }
-            _logger.LogInformation(
-                "tenant.move.lock acquired tenantId={TenantId}", tenantId);
-            return new MoveAdvisoryLock(db, tenantId, _logger);
+            connectionString = db.Database.GetConnectionString()
+                ?? throw new InvalidOperationException(
+                    "The control-plane context exposes no connection string, so the "
+                    + "per-tenant move advisory lock cannot be taken on a dedicated session.");
         }
-        catch
+
+        // Key unchanged: hashtextextended is still evaluated by Postgres over
+        // the same "D"-formatted tenant id, so this lock excludes exactly who
+        // it excluded before.
+        var lease = await PostgresAdvisoryLock.TryAcquireAsync(
+            connectionString,
+            PostgresAdvisoryLockKey.FromHashTextExtended(tenantId.ToString("D")),
+            _logger,
+            ct);
+
+        if (lease is null)
         {
-            await db.DisposeAsync();
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Holds the dedicated CP session carrying the per-tenant advisory
-    /// lock. Dispose unlocks explicitly (best-effort — the session-scoped
-    /// lock is released by Postgres when the connection closes anyway) and
-    /// disposes the session.
-    /// </summary>
-    private sealed class MoveAdvisoryLock : IAsyncDisposable
-    {
-        private readonly ControlPlaneDbContext _db;
-        private readonly Guid _tenantId;
-        private readonly ILogger _logger;
-
-        public MoveAdvisoryLock(ControlPlaneDbContext db, Guid tenantId, ILogger logger)
-        {
-            _db = db;
-            _tenantId = tenantId;
-            _logger = logger;
+            throw new InvalidOperationException(
+                $"A move for tenant '{tenantId}' is already in progress (the per-tenant "
+                + "control-plane advisory lock is held by another session) — wait for "
+                + "it to finish or fail before retrying.");
         }
 
-        public async ValueTask DisposeAsync()
-        {
-            try
-            {
-                var conn = _db.Database.GetDbConnection();
-                await using var cmd = conn.CreateCommand();
-                cmd.CommandText =
-                    "SELECT pg_advisory_unlock(hashtextextended(@tid, 0));";
-                var p = cmd.CreateParameter();
-                p.ParameterName = "tid";
-                p.Value = _tenantId.ToString("D");
-                cmd.Parameters.Add(p);
-                await cmd.ExecuteScalarAsync();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex, "tenant.move.lock_release_failed tenantId={TenantId} (the lock "
-                    + "dies with the session regardless)", _tenantId);
-            }
-            finally
-            {
-                await _db.DisposeAsync();
-            }
-        }
+        _logger.LogInformation(
+            "tenant.move.lock acquired tenantId={TenantId}", tenantId);
+        return lease;
     }
 }

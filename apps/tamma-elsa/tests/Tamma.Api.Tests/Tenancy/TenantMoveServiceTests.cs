@@ -9,6 +9,7 @@ using NUnit.Framework;
 using Tamma.Activities.AgentDispatch;
 using Tamma.Api.Services.Provisioning;
 using Tamma.Api.Services.Secrets;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
@@ -1250,13 +1251,126 @@ public class TenantMoveServiceConcurrencyTests
     {
         // ── arrange: plans + two pool rows + one placed tenant on real CP ─
         var tenantId = Guid.NewGuid();
+        await SeedPlacedTenantAsync(tenantId);
+
+        var runner = new GatedRunner();
+        var service = BuildService(runner);
+
+        // ── act: park the first move inside pg_dump (lock held) ─────────
+        var first = service.MoveAsync(tenantId, TargetDbId);
+        await runner.Entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        var second = async () => await service.MoveAsync(tenantId, TargetDbId);
+        (await second.Should().ThrowAsync<InvalidOperationException>())
+            .WithMessage("*already in progress*");
+
+        // ── release: the first move completes and the lock is freed ─────
+        runner.Release.TrySetResult();
+        await first.WaitAsync(TimeSpan.FromSeconds(60));
+
+        await using var conn = new NpgsqlConnection(_postgres.GetConnectionString());
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT pg_try_advisory_lock(hashtextextended(@tid, 0));";
+        cmd.Parameters.AddWithValue("tid", tenantId.ToString("D"));
+        (await cmd.ExecuteScalarAsync()).Should().Be(true,
+            "the advisory lock must be released once the move finishes");
+    }
+
+    [Test]
+    public async Task Move_lock_rides_a_session_that_dies_with_the_move_not_a_pooled_connector()
+    {
+        // 2026-07-30 advisory-lock audit. The per-tenant move gate used to
+        // be taken on the POOLED connection of an EF ControlPlaneDbContext,
+        // and its release swallowed a failed unlock on the documented
+        // grounds that "the lock dies with the session regardless". For a
+        // pooled connection that is false: disposal returns the connector
+        // to the pool with the backend session — and the lock — still
+        // alive, and Npgsql defers the DISCARD ALL that releases it until
+        // that connector is next USED. Because this key is per tenant and
+        // never rotates, one swallowed unlock parked THAT TENANT's move
+        // gate shut indefinitely, and every later move for it failed with
+        // the untrue "a move for tenant X is already in progress".
+        //
+        // The fix is to hold the lock on a Pooling=false session, so that
+        // closing it really does end the backend. This test pins that
+        // property directly: the backend that held the gate must be GONE
+        // when the move ends, not parked idle in a pool where it could
+        // still be holding the lock on any path that skipped the unlock.
+        //
+        // The observer is deliberately NOT pooled — see AdvisoryLockProbe.
+        var tenantId = Guid.NewGuid();
+        await SeedPlacedTenantAsync(tenantId);
+
+        var cs = _postgres.GetConnectionString();
+        var key = await AdvisoryLockProbe.HashTextExtendedAsync(cs, tenantId.ToString("D"));
+
+        var runner = new GatedRunner();
+        var service = BuildService(runner);
+
+        var move = service.MoveAsync(tenantId, TargetDbId);
+        await runner.Entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        var pid = await AdvisoryLockProbe.HolderPidAsync(cs, key);
+        pid.Should().NotBeNull(
+            "the parked move really does hold the per-tenant gate — otherwise this "
+            + "test proves nothing");
+
+        runner.Release.TrySetResult();
+        await move.WaitAsync(TimeSpan.FromSeconds(60));
+
+        (await AdvisoryLockProbe.WaitForBackendGoneAsync(cs, pid!.Value, TimeSpan.FromSeconds(10)))
+            .Should().BeTrue(
+                "the move gate's Postgres session must END with the move. A surviving "
+                + "backend means the lock rode a pooled connector, and every exit path "
+                + "that skips or fails the explicit unlock then wedges this tenant's "
+                + "move gate shut for the pool's idle lifetime — or forever");
+        (await AdvisoryLockProbe.IsHeldAsync(cs, key)).Should().BeFalse();
+    }
+
+    private TenantMoveService BuildService(GatedRunner runner)
+    {
+        var timeline = new List<string>();
+        var pool = new TenantMoveServiceTests.RecordingPool(timeline);
+        pool.Infos[SourceDbId] = new TenantAdminConnectionInfo(
+            Host, Port, "tamma_provisioner", "admin-src-pw", "srcdb");
+        pool.Infos[TargetDbId] = new TenantAdminConnectionInfo(
+            Host, Port, "tamma_provisioner", "admin-tgt-pw", "tgtdb");
+        pool.Names[SourceDbId] = "source";
+        pool.Names[TargetDbId] = "target";
+        return new TenantMoveService(
+            _factory,
+            pool,
+            new TenantMoveServiceTests.RecordingProvisioning(timeline),
+            runner,
+            new TenantMoveServiceTests.Utf8Decryptor(),
+            new TenantMoveServiceTests.Utf8Protector(),
+            new TenantMoveServiceTests.RecordingResolver(timeline),
+            new TenantMoveServiceTests.FakeTenantDbFactory(timeline),
+            Options.Create(new TenantMoveOptions { DrainGraceSeconds = 0 }),
+            NullLogger<TenantMoveService>.Instance);
+    }
+
+    private async Task SeedPlacedTenantAsync(Guid tenantId)
+    {
         var schema = TenantNaming.SchemaName(tenantId);
         var role = TenantNaming.RoleName(tenantId);
         await using (var cp = await _factory.CreateDbContextAsync())
         {
             await PlansSeeder.SeedAsync(cp);
+            // The pool rows are fixture-wide (fixed ids) — seed them once,
+            // so a second test in this fixture does not collide on the PK.
             foreach (var (id, label) in new[] { (SourceDbId, "src"), (TargetDbId, "tgt") })
             {
+                var existing = await cp.TenantDatabases.FirstOrDefaultAsync(d => d.Id == id);
+                if (existing is not null)
+                {
+                    // Reset to the pristine arrange state so each test in
+                    // this fixture starts from the same placement.
+                    existing.TenantCount = label == "src" ? 1 : 0;
+                    existing.Status = "active";
+                    continue;
+                }
                 cp.TenantDatabases.Add(new TenantDatabase
                 {
                     Id = id,
@@ -1292,47 +1406,6 @@ public class TenantMoveServiceConcurrencyTests
             entry.Property<Guid?>("DatabaseId").CurrentValue = SourceDbId;
             await cp.SaveChangesAsync();
         }
-
-        var timeline = new List<string>();
-        var pool = new TenantMoveServiceTests.RecordingPool(timeline);
-        pool.Infos[SourceDbId] = new TenantAdminConnectionInfo(
-            Host, Port, "tamma_provisioner", "admin-src-pw", "srcdb");
-        pool.Infos[TargetDbId] = new TenantAdminConnectionInfo(
-            Host, Port, "tamma_provisioner", "admin-tgt-pw", "tgtdb");
-        pool.Names[SourceDbId] = "source";
-        pool.Names[TargetDbId] = "target";
-        var runner = new GatedRunner();
-        var service = new TenantMoveService(
-            _factory,
-            pool,
-            new TenantMoveServiceTests.RecordingProvisioning(timeline),
-            runner,
-            new TenantMoveServiceTests.Utf8Decryptor(),
-            new TenantMoveServiceTests.Utf8Protector(),
-            new TenantMoveServiceTests.RecordingResolver(timeline),
-            new TenantMoveServiceTests.FakeTenantDbFactory(timeline),
-            Options.Create(new TenantMoveOptions { DrainGraceSeconds = 0 }),
-            NullLogger<TenantMoveService>.Instance);
-
-        // ── act: park the first move inside pg_dump (lock held) ─────────
-        var first = service.MoveAsync(tenantId, TargetDbId);
-        await runner.Entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
-
-        var second = async () => await service.MoveAsync(tenantId, TargetDbId);
-        (await second.Should().ThrowAsync<InvalidOperationException>())
-            .WithMessage("*already in progress*");
-
-        // ── release: the first move completes and the lock is freed ─────
-        runner.Release.TrySetResult();
-        await first.WaitAsync(TimeSpan.FromSeconds(60));
-
-        await using var conn = new NpgsqlConnection(_postgres.GetConnectionString());
-        await conn.OpenAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT pg_try_advisory_lock(hashtextextended(@tid, 0));";
-        cmd.Parameters.AddWithValue("tid", tenantId.ToString("D"));
-        (await cmd.ExecuteScalarAsync()).Should().Be(true,
-            "the advisory lock must be released once the move finishes");
     }
 
     private sealed class GatedRunner : IProcessRunner

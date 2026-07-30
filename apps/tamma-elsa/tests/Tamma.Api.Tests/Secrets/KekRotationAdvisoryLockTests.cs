@@ -112,6 +112,20 @@ public class KekRotationAdvisoryLockTests
         services.AddLogging();
         services.AddSingleton<IPlatformEventRepository, NoopPlatformEventRepository>();
         services.AddSingleton(NpgsqlDataSource.Create(_connectionString));
+        // 2026-07-30 advisory-lock audit: the coordinator now opens its
+        // cluster-wide lock on a dedicated NON-POOLED session, which means it
+        // needs a connection string that still carries the password. Neither
+        // NpgsqlDataSource.ConnectionString nor (once an NpgsqlDataSource is in
+        // DI) EF's GetConnectionString() does — Npgsql strips it. The host
+        // always has it in configuration under ConnectionStrings:ControlPlane
+        // (that is the very string the data source is built from), so register
+        // it here too; a data source with no matching configuration is a
+        // container shape production never produces.
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:ControlPlane"] = _connectionString,
+            }).Build());
         var sp = services.BuildServiceProvider();
 
         var primaryKey = new byte[32];

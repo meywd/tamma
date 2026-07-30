@@ -284,6 +284,20 @@ public class KekRotationPostFixTests
         services.AddLogging();
         services.AddSingleton<IPlatformEventRepository, NoopPlatformEventRepository>();
         services.AddSingleton(NpgsqlDataSource.Create(connectionString));
+        // 2026-07-30 advisory-lock audit: the coordinator now opens its
+        // cluster-wide lock on a dedicated NON-POOLED session, which means it
+        // needs a connection string that still carries the password. Neither
+        // NpgsqlDataSource.ConnectionString nor (once an NpgsqlDataSource is in
+        // DI) EF's GetConnectionString() does — Npgsql strips it. The host
+        // always has it in configuration under ConnectionStrings:ControlPlane
+        // (that is the very string the data source is built from), so register
+        // it here too; a data source with no matching configuration is a
+        // container shape production never produces.
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:ControlPlane"] = connectionString,
+            }).Build());
         await using var sp = services.BuildServiceProvider();
 
         // Create the schema so the kek_rotations + tenants tables
@@ -434,6 +448,15 @@ public class KekRotationPostFixTests
         const string brokenConnectionString =
             "Host=127.0.0.1;Port=1;Database=tamma;Username=tamma;Password=tamma;Timeout=2";
         services.AddSingleton(NpgsqlDataSource.Create(brokenConnectionString));
+        // Point the CP configuration at the same dead port, so the lock's
+        // dedicated session genuinely attempts a connection and genuinely
+        // throws NpgsqlException — which is the transient failure this test
+        // exists to prove is fatal rather than a free pass.
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:ControlPlane"] = brokenConnectionString,
+            }).Build());
         await using var sp = services.BuildServiceProvider();
 
         var initialPrimary = BuildKek(seed: 1);

@@ -3,14 +3,17 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Npgsql;
 using Tamma.Activities.Security;
+using Tamma.Api.Infrastructure;
 using Tamma.Api.Services.PlatformEvents;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
+using Tamma.Data.Pooling;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Services.Secrets;
@@ -56,11 +59,24 @@ namespace Tamma.Api.Services.Secrets;
 /// <list type="bullet">
 ///   <item><description><b>Lock lifetime owned by Npgsql, not EF</b>:
 ///     the advisory lock is acquired on a dedicated
-///     <see cref="NpgsqlConnection"/> opened from the registered
-///     <see cref="NpgsqlDataSource"/> (PF-C3). EF's pooled
-///     <c>DbContext</c> sends <c>DISCARD ALL</c> on connection return,
-///     which silently releases session-level advisory locks; bypassing
-///     EF for the lock keeps the contract explicit.</description></item>
+///     <see cref="NpgsqlConnection"/> built from the registered
+///     <see cref="NpgsqlDataSource"/>'s connection string (PF-C3). EF's
+///     pooled <c>DbContext</c> sends <c>DISCARD ALL</c> on connection
+///     return, which silently releases session-level advisory locks;
+///     bypassing EF for the lock keeps the contract explicit.
+///     <b>2026-07-30 audit</b>: "dedicated" was necessary but not
+///     sufficient — the connection was taken from the data source's POOL,
+///     so the mirror-image failure applied. Returning a pooled connector
+///     to the pool keeps its session, and the lock, ALIVE (the
+///     <c>DISCARD ALL</c> that would release it is deferred until that
+///     connector is next used), so any exit that skipped or failed the
+///     explicit unlock parked this CONSTANT, never-rotating key shut for
+///     the entire cluster — every later <c>/start</c> failing with the
+///     untrue "another rotation is already in progress". The lock now
+///     rides a <c>Pooling=false</c> session
+///     (<see cref="Tamma.Data.Pooling.PostgresAdvisoryLock"/>), which is
+///     what makes "closing the connection releases the lock" actually
+///     true.</description></item>
 ///   <item><description><b>State changes happen INSIDE the lock</b>
 ///     (PF-S5): the retry path no longer mutates
 ///     <see cref="KekProvider"/>'s in-memory secondary or flips the
@@ -431,7 +447,19 @@ public sealed class KekRotationCoordinator
         // open for the full RunRotationAsync lifetime keeps the lock
         // until we explicitly release it in the finally-block.
         //
-        // The connection is resolved lazily through the service scope
+        // 2026-07-30 audit: "dedicated" is not enough — it must also be
+        // NON-POOLED. NpgsqlDataSource.OpenConnectionAsync hands out a
+        // POOLED connector, so disposing it in the finally-block returned
+        // it to the pool with the backend session, and the rotation lock,
+        // still alive; the DISCARD ALL that would have released the lock
+        // is deferred until that connector is next used. Because this key
+        // is a CONSTANT that never rotates, one swallowed unlock (the
+        // catch below is best-effort) wedged KEK rotation shut for the
+        // whole cluster with the operator-visible lie "another rotation is
+        // already in progress". The lock now rides a Pooling=false session
+        // via PostgresAdvisoryLock, where closing really does release.
+        //
+        // The data source is resolved lazily through the service scope
         // factory: when the test container has no NpgsqlDataSource
         // registered (EF InMemory fixtures), we fall back to the
         // in-process _lock as the only guard, which matches the
@@ -439,7 +467,7 @@ public sealed class KekRotationCoordinator
         await using var lockScope = _scopeFactory.CreateAsyncScope();
         var dataSource = lockScope.ServiceProvider.GetService<NpgsqlDataSource>();
 
-        NpgsqlConnection? lockConnection = null;
+        PostgresAdvisoryLockLease? lockLease = null;
         bool acquired;
         try
         {
@@ -458,17 +486,50 @@ public sealed class KekRotationCoordinator
             }
             else
             {
-                lockConnection = await dataSource
-                    .OpenConnectionAsync(ct).ConfigureAwait(false);
-                acquired = await TryAcquireAdvisoryLockAsync(lockConnection, ct)
-                    .ConfigureAwait(false);
+                // Same key, same pg_try_advisory_lock(bigint) call — only
+                // the session it rides on changed.
+                //
+                // NOTE — do NOT reach for dataSource.ConnectionString here.
+                // Npgsql STRIPS THE PASSWORD from it (PersistSecurityInfo is
+                // false by default), so a connection re-parsed from it cannot
+                // authenticate; the lock attempt would throw NpgsqlException,
+                // fall into the PF-S8 fail-closed branch below, and abort
+                // EVERY rotation with the untrue "another rotation is already
+                // in progress". Story 44-1 hit the same trap (see the note at
+                // Program.cs on the migrate-all sweep). The credentials-
+                // bearing string is the control plane's own, and the singleton
+                // NpgsqlDataSource is built from exactly that string
+                // (TenantConnectionPoolServiceCollectionExtensions), so this
+                // targets the same database the lock has always lived on.
+                var connectionString = ResolveLockConnectionString(
+                    lockScope.ServiceProvider);
+
+                if (connectionString is null)
+                {
+                    // Fail closed, never open: an unresolvable lock target is
+                    // not permission to rotate.
+                    _logger.LogWarning(
+                        "tenant.kek.rotate aborted: no usable control-plane connection string "
+                        + "for the cluster-wide advisory lock lockKey={LockKey}",
+                        AdvisoryLockKey);
+                    acquired = false;
+                }
+                else
+                {
+                    lockLease = await PostgresAdvisoryLock.TryAcquireAsync(
+                        connectionString,
+                        PostgresAdvisoryLockKey.FromInt64(AdvisoryLockKey),
+                        _logger,
+                        ct).ConfigureAwait(false);
+                    acquired = lockLease is not null;
+                }
             }
         }
         catch (OperationCanceledException)
         {
-            if (lockConnection is not null)
+            if (lockLease is not null)
             {
-                await lockConnection.DisposeAsync().ConfigureAwait(false);
+                await lockLease.DisposeAsync().ConfigureAwait(false);
             }
             throw;
         }
@@ -484,10 +545,10 @@ public sealed class KekRotationCoordinator
                 + "advisory lock acquisition lockKey={LockKey}",
                 AdvisoryLockKey);
             acquired = false;
-            if (lockConnection is not null)
+            if (lockLease is not null)
             {
-                await lockConnection.DisposeAsync().ConfigureAwait(false);
-                lockConnection = null;
+                await lockLease.DisposeAsync().ConfigureAwait(false);
+                lockLease = null;
             }
         }
 
@@ -855,22 +916,15 @@ public sealed class KekRotationCoordinator
             {
                 CryptographicOperations.ZeroMemory(retryStagedSecondary);
             }
-            // PF-C3: release the advisory lock on the dedicated
-            // NpgsqlConnection. Disposing the connection auto-releases
-            // any session-level locks it holds (unlock is best-effort —
-            // the connection drop is the actual guarantee).
-            if (lockConnection is not null)
+            // PF-C3: release the advisory lock. The lease unlocks
+            // explicitly (best-effort, on CancellationToken.None so the
+            // cancelled path still issues it) and then ends its NON-POOLED
+            // session — and that session ending is the actual guarantee,
+            // which is only true because it is not pooled (2026-07-30
+            // audit; see PostgresAdvisoryLock).
+            if (lockLease is not null)
             {
-                try
-                {
-                    await ReleaseAdvisoryLockAsync(lockConnection, CancellationToken.None)
-                        .ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "advisory lock release skipped");
-                }
-                await lockConnection.DisposeAsync().ConfigureAwait(false);
+                await lockLease.DisposeAsync().ConfigureAwait(false);
             }
             lock (_lock) { _activeRotationId = null; }
         }
@@ -922,46 +976,94 @@ public sealed class KekRotationCoordinator
     }
 
     /// <summary>
-    /// R2-H14 + PF-C3: try to acquire the cluster-wide rotation
-    /// advisory lock on a dedicated <see cref="NpgsqlConnection"/>.
-    /// Returns true on success. Pg's <c>pg_try_advisory_lock</c> never
-    /// blocks — it returns false immediately when another pod holds
-    /// the lock. The connection itself is owned by the caller and held
-    /// open for the rotation lifetime so the session-level lock isn't
-    /// released by EF's pooled-context recycling.
+    /// The connection string the cluster-wide rotation lock's dedicated,
+    /// non-pooled session should be opened from.
+    ///
+    /// <para>The control-plane EF connection string is the answer, because
+    /// it carries credentials and because the singleton
+    /// <see cref="NpgsqlDataSource"/> is built from that very string — so
+    /// the lock stays on the database it has always been on.
+    /// <c>NpgsqlDataSource.ConnectionString</c> cannot be used: Npgsql
+    /// removes the password from it.</para>
+    ///
+    /// <para>The data-source fallback exists only for fixtures that pair a
+    /// non-relational (EF InMemory) control plane with a real
+    /// <see cref="NpgsqlDataSource"/> — production always has a relational
+    /// control plane. It is password-less by construction, so if it is ever
+    /// reached against a live cluster it fails to authenticate, which the
+    /// caller treats as "did not acquire". That is the safe direction.</para>
     /// </summary>
-    private static async Task<bool> TryAcquireAdvisoryLockAsync(
-        NpgsqlConnection conn, CancellationToken ct)
+    private static string? ResolveLockConnectionString(
+        IServiceProvider scopedProvider)
     {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT pg_try_advisory_lock(@key)";
-        var p = cmd.CreateParameter();
-        p.ParameterName = "key";
-        p.Value = AdvisoryLockKey;
-        cmd.Parameters.Add(p);
-        var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        return result is bool b && b;
+        // 1. Configuration — the only source guaranteed to still carry the
+        //    password. This is the same string the singleton NpgsqlDataSource
+        //    was built from (Program.cs resolves it with
+        //    ConnectionStringResolver.ResolveControlPlane and hands it to
+        //    AddTenantConnectionPool), so the lock stays on the same database.
+        var cfg = scopedProvider.GetService<IConfiguration>();
+        if (cfg is not null)
+        {
+            var fromConfig = ConnectionStringResolver.ResolveControlPlane(cfg)
+                ?? ConnectionStringResolver.ResolveAdmin(cfg);
+            if (HasCredentials(fromConfig)) return fromConfig;
+        }
+
+        // 2. EF's view of the control-plane connection. Usually complete, but
+        //    NOT reliably so: once EF/Npgsql has materialised the connection
+        //    (notably when an NpgsqlDataSource is in play) this can come back
+        //    with the password removed. Only accepted when it still has one.
+        var cpFactory = scopedProvider
+            .GetService<IDbContextFactory<ControlPlaneDbContext>>();
+        if (cpFactory is not null)
+        {
+            using var cp = cpFactory.CreateDbContext();
+            if (cp.Database.IsNpgsql())
+            {
+                var cs = cp.Database.GetConnectionString();
+                if (HasCredentials(cs)) return cs;
+            }
+        }
+
+        // 3. Nothing usable. Deliberately do NOT fall back to
+        //    dataSource.ConnectionString: Npgsql removes the password from it,
+        //    so it would connect only to a trust-auth cluster and otherwise
+        //    throw — which the caller (correctly) reads as "another rotation is
+        //    already in progress", i.e. it would silently disable rotation.
+        return null;
     }
 
     /// <summary>
-    /// R2-H14 + PF-C3: release the advisory lock on the dedicated
-    /// connection. Safe to call even when the lock was never acquired
-    /// — Postgres ignores spurious releases. The follow-up
-    /// <c>DisposeAsync</c> on the connection itself also releases any
-    /// remaining session-level locks; this explicit unlock makes the
-    /// release deterministic on the happy path.
+    /// Is this connection string usable for opening a NEW session — i.e. does
+    /// it still carry a password?
+    ///
+    /// <para>A password-less string is the specific trap this site fell into:
+    /// both <c>NpgsqlDataSource.ConnectionString</c> and (once the connection
+    /// has been materialised) EF's <c>GetConnectionString()</c> can hand back
+    /// the connection string with the password stripped, because Npgsql
+    /// defaults <c>PersistSecurityInfo</c> to false. Re-parsing one of those
+    /// yields a connection that cannot authenticate — and, because the caller
+    /// fails closed on an <see cref="NpgsqlException"/>, that turns into
+    /// "rotation is permanently already-in-progress". Story 44-1 hit the same
+    /// trap (see the migrate-all note in Program.cs).</para>
+    ///
+    /// <para>Integrated-security / trust-auth strings legitimately have no
+    /// password; they are rejected here too, which costs those deployments the
+    /// cluster-wide lock but never grants a rotation that should not run. Fail
+    /// closed, loudly, over fail open.</para>
     /// </summary>
-    private static async Task ReleaseAdvisoryLockAsync(
-        NpgsqlConnection conn, CancellationToken ct)
+    private static bool HasCredentials(string? connectionString)
     {
-        if (conn.State != System.Data.ConnectionState.Open) return;
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT pg_advisory_unlock(@key)";
-        var p = cmd.CreateParameter();
-        p.ParameterName = "key";
-        p.Value = AdvisoryLockKey;
-        cmd.Parameters.Add(p);
-        await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(connectionString)) return false;
+        try
+        {
+            return !string.IsNullOrEmpty(
+                new NpgsqlConnectionStringBuilder(connectionString).Password);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     private static async Task<Guid> PersistRotationStartAsync(

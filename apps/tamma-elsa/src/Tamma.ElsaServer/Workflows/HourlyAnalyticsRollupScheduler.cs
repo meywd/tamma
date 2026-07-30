@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using Tamma.Data.Pooling;
 
 namespace Tamma.ElsaServer.Workflows;
 
@@ -275,9 +276,24 @@ public interface IRollupSchedulerLeaderLock
 
 /// <summary>
 /// Round-2 H9 — Postgres-backed leader-election lock that uses
-/// <c>pg_try_advisory_lock(bigint)</c> on a transient
+/// <c>pg_try_advisory_lock(bigint)</c> on a transient, NON-POOLED
 /// <see cref="NpgsqlConnection"/>. The lock is session-scoped — once
 /// the connection closes, the lock auto-releases.
+///
+/// <para><b>2026-07-30 audit.</b> "Once the connection closes, the lock
+/// auto-releases" used to be false here: the lease opened
+/// <c>new NpgsqlConnection(cs)</c> against a plain connection string, so
+/// the connection was POOLED, and disposing it returned the connector to
+/// the pool with the backend session — and the hour's lock — still alive.
+/// The unlock in the lease's dispose was swallowed on failure "because
+/// closing the connection releases the lock either way", which was
+/// exactly the false invariant. A swallowed unlock parked that hour's
+/// leader lock shut, so every pod skipped the hour and the rollup for it
+/// was never dispatched by anyone (the workflow infers its target hour
+/// from the clock, so a skipped hour is not backfilled). Acquisition now
+/// goes through <see cref="PostgresAdvisoryLock"/>, which opens a
+/// <c>Pooling=false</c> session; the key and the
+/// acquired/refused/throwing contract are unchanged.</para>
 /// </summary>
 internal sealed class PostgresAdvisoryLeaderLock : IRollupSchedulerLeaderLock
 {
@@ -300,67 +316,15 @@ internal sealed class PostgresAdvisoryLeaderLock : IRollupSchedulerLeaderLock
             return new NoOpLease();
         }
 
-        var conn = new NpgsqlConnection(cs);
-        try
-        {
-            await conn.OpenAsync(ct).ConfigureAwait(false);
-
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT pg_try_advisory_lock(@k);";
-            cmd.Parameters.AddWithValue("k", lockKey);
-            var acquired = (bool?)await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-            if (acquired != true)
-            {
-                await conn.DisposeAsync().ConfigureAwait(false);
-                return null;
-            }
-
-            return new AdvisoryLockLease(conn, lockKey);
-        }
-        catch
-        {
-            await conn.DisposeAsync().ConfigureAwait(false);
-            throw;
-        }
+        // Same key, same pg_try_advisory_lock(bigint) call; null still
+        // means "another pod holds this hour", a throw still propagates.
+        return await PostgresAdvisoryLock.TryAcquireAsync(
+            cs, PostgresAdvisoryLockKey.FromInt64(lockKey), logger: null, ct)
+            .ConfigureAwait(false);
     }
 
     private sealed class NoOpLease : IAsyncDisposable
     {
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
-
-    private sealed class AdvisoryLockLease : IAsyncDisposable
-    {
-        private readonly NpgsqlConnection _conn;
-        private readonly long _lockKey;
-        private int _disposed;
-
-        public AdvisoryLockLease(NpgsqlConnection conn, long lockKey)
-        {
-            _conn = conn;
-            _lockKey = lockKey;
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
-            try
-            {
-                await using var cmd = _conn.CreateCommand();
-                cmd.CommandText = "SELECT pg_advisory_unlock(@k);";
-                cmd.Parameters.AddWithValue("k", _lockKey);
-                await cmd.ExecuteScalarAsync().ConfigureAwait(false);
-            }
-            catch
-            {
-                // Swallow — closing the connection releases the lock
-                // either way. Logging here would require an injected
-                // logger; the failure is operationally invisible.
-            }
-            finally
-            {
-                await _conn.DisposeAsync().ConfigureAwait(false);
-            }
-        }
     }
 }
