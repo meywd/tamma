@@ -25,6 +25,33 @@ namespace Tamma.Data.Pooling;
 /// </summary>
 public sealed class EfTenantDbMigrator : ITenantDbMigrator, ITenantDataSourceDbMigrator
 {
+    /// <summary>
+    /// Command timeout (seconds) for migration DDL — 15 minutes.
+    ///
+    /// <para>Story 44-1 follow-up (2026-07-30). The pooled runtime connection
+    /// string carries <c>CommandTimeout=30</c>
+    /// (<c>TenantConnectionPoolOptions.CommandTimeoutSeconds</c>, applied in
+    /// <c>LruPooledTenantConnectionResolver.BuildDataSource</c>). That is the
+    /// right ceiling for a request-path query and the wrong one for DDL: an
+    /// <c>ALTER TABLE ... ADD CONSTRAINT</c> that rewrites or validates the
+    /// biggest table in a large tenant blows 30s routinely, and the operator
+    /// sees a per-tenant <c>failed</c> row for a migration that was merely
+    /// slow — with the tenant apparently stranded mid-migration.</para>
+    ///
+    /// <para>The fix is scoped so the runtime pool is untouched: the timeout is
+    /// set at the EF layer on the MIGRATION context's options only
+    /// (<see cref="BuildConnectionOptions"/> / <see cref="BuildStringOptions"/>),
+    /// so EF stamps it onto migration commands while every other context built
+    /// over the same data source (<c>TenantDbContextFactory</c>, which sets no
+    /// EF-level timeout) keeps inheriting the connection string's 30s.
+    /// <c>EfTenantDbMigratorCommandTimeoutTests</c> pins both halves.</para>
+    ///
+    /// <para>EF migrations are transactional per migration, so a genuine
+    /// timeout still rolls that migration back — the longer ceiling removes
+    /// spurious failures, it does not create partially-applied schemas.</para>
+    /// </summary>
+    public const int MigrationCommandTimeoutSeconds = 900;
+
     private readonly ILogger<EfTenantDbMigrator> _logger;
 
     public EfTenantDbMigrator(ILogger<EfTenantDbMigrator>? logger = null)
@@ -62,12 +89,9 @@ public sealed class EfTenantDbMigrator : ITenantDbMigrator, ITenantDataSourceDbM
             Pooling = false,
         }.ConnectionString;
 
-        var options = new DbContextOptionsBuilder<TenantDbContext>()
-            .UseNpgsql(migrationConnectionString, npgsql =>
-                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema))
-            .Options;
-
-        await MigrateCoreAsync(options, schema, ct).ConfigureAwait(false);
+        await MigrateCoreAsync(
+            BuildStringOptions(migrationConnectionString, schema), schema, ct)
+            .ConfigureAwait(false);
     }
 
     // ── Story 44-1: the data-source flavour (the sweep's path) ──
@@ -121,11 +145,33 @@ public sealed class EfTenantDbMigrator : ITenantDbMigrator, ITenantDataSourceDbM
     // carries Search Path, so the borrowed connection lands unqualified DDL in
     // the tenant schema, and the history table stays pinned to that same
     // schema — semantics identical to the string-based path above.
-    private static DbContextOptions<TenantDbContext> BuildConnectionOptions(
+    internal static DbContextOptions<TenantDbContext> BuildConnectionOptions(
         NpgsqlConnection connection, string? schema) =>
         new DbContextOptionsBuilder<TenantDbContext>()
             .UseNpgsql(connection, npgsql =>
-                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema))
+            {
+                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema);
+                // DDL, not request-path SQL — see MigrationCommandTimeoutSeconds.
+                // EF-level only: the data source's own CommandTimeout=30 still
+                // governs every non-migration context over the same pool.
+                npgsql.CommandTimeout(MigrationCommandTimeoutSeconds);
+            })
+            .Options;
+
+    /// <summary>
+    /// The provisioning (connection-string) flavour's options. Same
+    /// migration-DDL timeout as <see cref="BuildConnectionOptions"/>: a slow
+    /// baseline on a freshly minted schema is just as capable of exceeding 30s
+    /// as a sweep is.
+    /// </summary>
+    internal static DbContextOptions<TenantDbContext> BuildStringOptions(
+        string connectionString, string? schema) =>
+        new DbContextOptionsBuilder<TenantDbContext>()
+            .UseNpgsql(connectionString, npgsql =>
+            {
+                npgsql.MigrationsHistoryTable("__TenantMigrationsHistory", schema);
+                npgsql.CommandTimeout(MigrationCommandTimeoutSeconds);
+            })
             .Options;
 
     private async Task MigrateCoreAsync(

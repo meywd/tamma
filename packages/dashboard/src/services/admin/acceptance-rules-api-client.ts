@@ -112,6 +112,21 @@ export interface ResolvedAcceptanceRules {
   version: number;
   documentTypeKey: string;
   resolvedAt: string;
+  /**
+   * True when `rules.acceptorRequirement` did NOT come from the row `source`
+   * names, but from this document type's SHIPPED human-acceptor floor, which a
+   * base (principal-default) row may not lower (epic-43 CD-1, 2026-07-30).
+   *
+   * Resolution is otherwise wholesale — `source` names the one row that supplied
+   * every other field. This flag exists so the one exception is visible rather
+   * than surprising: `design`, `sprint-plan` and `threat-model` keep their human
+   * acceptor even when a base override says `any`. Lowering it requires a
+   * per-type PUT that states `acceptorRequirement: 'any'` explicitly.
+   *
+   * Optional on this interface only because it is additive; the API always
+   * sends it.
+   */
+  acceptorRequirementFloored?: boolean;
 }
 
 export type AcceptanceRulesUpsertRequest = AcceptanceRules;

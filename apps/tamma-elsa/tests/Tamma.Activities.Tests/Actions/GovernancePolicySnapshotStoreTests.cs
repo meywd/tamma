@@ -26,10 +26,12 @@ public class GovernancePolicySnapshotStoreTests
         public List<ActionAssignment> Rows { get; } = new();
         public int LoadCount;
         public TaskCompletionSource? LoadGate;
+        public bool ThrowOnLoad;
 
         public async Task<IReadOnlyList<ActionAssignment>> LoadAllAsync(CancellationToken ct = default)
         {
             Interlocked.Increment(ref LoadCount);
+            if (ThrowOnLoad) throw new InvalidOperationException("control plane down");
             // Capture the view BEFORE blocking, so a gated load models a read
             // that BEGAN before a concurrent write (the F2 race shape).
             var view = Rows.ToList();
@@ -228,6 +230,9 @@ public class GovernancePolicySnapshotStoreTests
         var snapshot = store.GetSnapshot(GovernancePrincipal.ForTenant(Guid.NewGuid()));
         snapshot.PlatformActionRows.Should().BeEmpty();
         snapshot.PrincipalActionRows.Should().BeEmpty();
+        snapshot.IsAuthoritative.Should().BeTrue(
+            "with no control-plane repository there are no rows to miss — the empty "
+            + "snapshot IS the truth, so this deployment must not fail closed (F6)");
     }
 
     [Test]
@@ -252,6 +257,85 @@ public class GovernancePolicySnapshotStoreTests
             throwing, NullLogger<GovernancePolicySnapshotPrimingService>.Instance);
         await failSoft.Invoking(s => s.StartAsync(CancellationToken.None))
             .Should().NotThrowAsync();
+    }
+
+    // ── F6 (2026-07-30): "never loaded" is not "loaded and empty" ────────────
+
+    /// <summary>
+    /// The store-level half of the F6 pair. Before this, both states served
+    /// <c>GovernancePolicySnapshot.Empty</c> — byte-identical — so a restart
+    /// with the control plane down silently discarded every admin tightening.
+    /// </summary>
+    [Test]
+    public async Task AStoreThatHasNeverLoaded_ServesANonAuthoritativeSnapshot()
+    {
+        var repo = new FakeRepository();
+        var store = Store(repo);
+
+        // Never refreshed: the empty rows are IGNORANCE.
+        store.IsAuthoritative.Should().BeFalse();
+        store.GetSnapshot(GovernancePrincipal.ForTenant(Guid.NewGuid()))
+            .IsAuthoritative.Should().BeFalse();
+        store.GetSnapshotForAmbient(tenantId: null)
+            .IsAuthoritative.Should().BeFalse();
+
+        // One SUCCESSFUL load over the very same (empty) table flips it — and
+        // the rows are identical, which is the whole point.
+        await store.RefreshAsync();
+
+        store.IsAuthoritative.Should().BeTrue();
+        var loaded = store.GetSnapshot(GovernancePrincipal.ForTenant(Guid.NewGuid()));
+        loaded.IsAuthoritative.Should().BeTrue();
+        loaded.PrincipalActionRows.Should().BeEmpty();
+        loaded.PlatformActionRows.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task AFailedLoad_LeavesTheStoreNonAuthoritative_SoGatesFailClosed()
+    {
+        var repo = new FakeRepository { ThrowOnLoad = true };
+        var store = Store(repo);
+
+        await store.RefreshAsync(); // swallowed — priming must never crash the host
+
+        repo.LoadCount.Should().Be(1);
+        store.IsAuthoritative.Should().BeFalse(
+            "a refresh that threw did not read anything, so nothing may be concluded "
+            + "from the absence of rows");
+        store.GetSnapshotForAmbient(tenantId: null).IsAuthoritative.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task AFailedRefreshAfterASuccessfulLoad_KeepsTheLastGoodSnapshot_AndStaysAuthoritative()
+    {
+        var repo = new FakeRepository();
+        var tid = Guid.NewGuid();
+        repo.Rows.Add(Row(tid, null, "action", "tool:file_write", 95));
+        var store = Store(repo);
+        await store.RefreshAsync();
+
+        repo.ThrowOnLoad = true;
+        await store.RefreshAsync();
+
+        store.IsAuthoritative.Should().BeTrue(
+            "a transient blip after a good load must not convert the whole deployment "
+            + "to fail-closed — the last known good snapshot is still real policy");
+        store.GetSnapshot(GovernancePrincipal.ForTenant(tid))
+            .PrincipalActionRows["tool:file_write"].MinAutonomy.Should().Be(95);
+    }
+
+    [Test]
+    public async Task FailedPriming_LeavesTheStoreNonAuthoritative_ButDoesNotCrashStartup()
+    {
+        var repo = new FakeRepository { ThrowOnLoad = true };
+        var store = Store(repo);
+        var priming = new GovernancePolicySnapshotPrimingService(
+            store, NullLogger<GovernancePolicySnapshotPrimingService>.Instance);
+
+        await priming.Invoking(p => p.StartAsync(CancellationToken.None))
+            .Should().NotThrowAsync();
+
+        store.IsAuthoritative.Should().BeFalse();
     }
 
     private sealed class ThrowingProvider : IGovernancePolicySnapshotProvider

@@ -53,8 +53,31 @@ public sealed record GovernancePolicySnapshot(
     private static readonly IReadOnlyDictionary<string, ActionAssignmentValue> s_none =
         new Dictionary<string, ActionAssignmentValue>(StringComparer.Ordinal);
 
-    /// <summary>Zero rows — every member resolves to its shipped default (AC10).</summary>
+    /// <summary>
+    /// TRUE when these rows are backed by a SUCCESSFUL read of
+    /// <c>action_assignments</c> (43-5 F6 close, 2026-07-30). FALSE means the
+    /// store has never completed a load — priming failed and no lazy refresh has
+    /// landed yet — so "zero rows" is IGNORANCE, not the absence of policy.
+    ///
+    /// <para><b>Why the distinction is load-bearing:</b> before this field the two
+    /// states were byte-identical (both were <see cref="Empty"/>), so a restart
+    /// with the control plane down served an empty snapshot and every admin
+    /// tightening was silently unenforced until a refresh succeeded — the gate
+    /// failed OPEN on a degraded read. The evaluator now fails CLOSED on a
+    /// non-authoritative snapshot (<see cref="AutonomyGateEvaluator.ReasonPolicySnapshotUnavailable"/>).
+    /// Defaults to TRUE so every hand-built snapshot (tests, the 43-6 fresh-read
+    /// pin) keeps meaning "these ARE the rows".</para>
+    /// </summary>
+    public bool IsAuthoritative { get; init; } = true;
+
+    /// <summary>Zero rows, AUTHORITATIVELY — the table was read and it is empty,
+    /// so every member resolves to its shipped default (AC10).</summary>
     public static GovernancePolicySnapshot Empty { get; } = new(s_none, s_none, s_none, s_none);
+
+    /// <summary>The DEGRADED snapshot: no successful read has ever completed, so
+    /// nothing may be concluded from the absence of a row (43-5 F6).</summary>
+    public static GovernancePolicySnapshot Unavailable { get; } =
+        Empty with { IsAuthoritative = false };
 }
 
 /// <summary>Gate outcome for one governed action (Story 43-5 AC8).</summary>
@@ -92,6 +115,19 @@ public enum ActionAssignmentSource
 
     /// <summary>The shipped <see cref="ActionDescriptor.DefaultMinAutonomy"/>.</summary>
     SystemDefault,
+
+    /// <summary>
+    /// NO tier could be resolved — a policy input was UNREADABLE (43-5 F6 close,
+    /// 2026-07-30): either the assignment snapshot has never loaded
+    /// (<see cref="GovernancePolicySnapshot.IsAuthoritative"/> false) or the
+    /// principal's base acceptance rules could not be read, which means the
+    /// legacy always-escalate floor cannot be ruled out. The decision is
+    /// FAIL-CLOSED at <see cref="Documents.Policy.AutonomyDial.AlwaysHuman"/> and
+    /// <c>Enforced</c> is forced TRUE — never a silently-defaulted automation.
+    /// It is a distinct provenance precisely so a degraded decision can never be
+    /// mistaken for <see cref="SystemDefault"/> in the audit stream.
+    /// </summary>
+    Unavailable,
 }
 
 /// <summary>One gate question (Story 43-5 AC8).</summary>

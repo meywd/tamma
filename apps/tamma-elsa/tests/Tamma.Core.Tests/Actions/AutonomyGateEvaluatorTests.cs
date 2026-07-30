@@ -52,6 +52,14 @@ public class AutonomyGateEvaluatorTests
         => AutonomyGateEvaluator.Evaluate(
             new AutonomyQuery(key, User, role), snapshot, baseRules ?? BaseRules());
 
+    /// <summary>Evaluate with the base-rules read EXPLICITLY failed (null) —
+    /// distinct from <see cref="Evaluate"/>'s default of a successful read that
+    /// found no overrides (F6).</summary>
+    private static AutonomyDecision EvaluateWithUnreadableBaseRules(
+        ActionKey key, GovernancePolicySnapshot snapshot, string? role = null)
+        => AutonomyGateEvaluator.Evaluate(
+            new AutonomyQuery(key, User, role), snapshot, baseRules: null);
+
     // ─────────────────────────────────────────────────────────────────────
     // AC10 — THE ZERO-ROWS GOLDEN PROOF (behaviour-preserving mandate):
     // with an empty table, EVERY catalog member resolves to its shipped
@@ -458,6 +466,295 @@ public class AutonomyGateEvaluatorTests
         Evaluate(Key("tool:git_operations.write"), snapshot, role: null)
             .Outcome.Should().Be(AutonomyOutcome.Denied,
                 "an unknown caller role cannot satisfy an explicit allowlist");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // F6 (2026-07-30) — DEGRADED READS FAIL CLOSED, and "read failed" is
+    // distinguishable from "read succeeded and found nothing". These are the
+    // tests the F6 record demanded before any seam enforces.
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// THE F6 pair. Same action, same rules, two snapshots that used to be the
+    /// SAME VALUE: a table that was read and is empty (automate at the shipped
+    /// default) versus a table that has never been read (fail closed). If these
+    /// two ever collapse back into one answer, the fail-open is back.
+    /// </summary>
+    [Test]
+    public void UnavailableSnapshot_FailsClosed_WhileALoadedEmptyTableAutomates()
+    {
+        var key = Key("tool:file_write");
+
+        var loadedEmpty = Evaluate(key, GovernancePolicySnapshot.Empty);
+        loadedEmpty.Outcome.Should().Be(AutonomyOutcome.Automated,
+            "a SUCCESSFUL read that found no rows is the zero-config deployment");
+        loadedEmpty.Source.Should().Be(ActionAssignmentSource.SystemDefault);
+        loadedEmpty.Reason.Should().Be(AutonomyGateEvaluator.ReasonAutomated);
+
+        var neverLoaded = Evaluate(key, GovernancePolicySnapshot.Unavailable);
+        neverLoaded.Outcome.Should().Be(AutonomyOutcome.RequiresHuman,
+            "an unread table cannot testify that no ceiling exists — ignorance is not absence");
+        neverLoaded.Source.Should().Be(ActionAssignmentSource.Unavailable);
+        neverLoaded.EffectiveMinAutonomy.Should().Be(AutonomyDial.AlwaysHuman);
+        neverLoaded.Reason.Should().Be(
+            AutonomyGateEvaluator.ReasonPolicySnapshotUnavailable);
+
+        // …and the two are not merely different outcomes: they are different
+        // PROVENANCE, which is what the audit stream keys on.
+        neverLoaded.Source.Should().NotBe(loadedEmpty.Source);
+    }
+
+    /// <summary>
+    /// The concrete F6 loss, reproduced: <c>triage-intake</c> ships at the
+    /// catalog minimum and gets its human floor ONLY from the legacy
+    /// always-escalate list. Substituting the shipped defaults for a failed
+    /// base-rules read (the pre-fix behaviour) discarded that floor and made the
+    /// action AUTOMATED — the exact inverse of what a failure should do.
+    /// </summary>
+    [Test]
+    public void UnreadableBaseRules_CannotConcludeThereIsNoLegacyFloor()
+    {
+        var key = Key("agent-action:triage-intake");
+        ActionCatalog.Get(key).DefaultMinAutonomy.Should().Be(AutonomyDial.Min);
+
+        // Read SUCCEEDED, and the principal genuinely has no always-escalate
+        // entry: automated. (This is what the old fallback pretended to know.)
+        var readSucceededNoFloor = Evaluate(key, GovernancePolicySnapshot.Empty, BaseRules());
+        readSucceededNoFloor.Outcome.Should().Be(AutonomyOutcome.Automated);
+        readSucceededNoFloor.Source.Should().Be(ActionAssignmentSource.SystemDefault);
+
+        // Read FAILED: the floor cannot be ruled out, so it is assumed.
+        var readFailed = EvaluateWithUnreadableBaseRules(key, GovernancePolicySnapshot.Empty);
+        readFailed.Outcome.Should().Be(AutonomyOutcome.RequiresHuman);
+        readFailed.EffectiveMinAutonomy.Should().Be(AutonomyDial.AlwaysHuman);
+        readFailed.Source.Should().Be(ActionAssignmentSource.Unavailable);
+        readFailed.Reason.Should().Be(
+            AutonomyGateEvaluator.ReasonAcceptanceRulesUnavailable);
+    }
+
+    /// <summary>
+    /// The two degraded causes are separately identifiable in the audit stream —
+    /// "the assignment table never loaded" and "this principal's acceptance
+    /// rules could not be read" are different operational problems.
+    /// </summary>
+    [Test]
+    public void TheTwoDegradedCauses_CarryDistinctReasons()
+    {
+        var key = Key("tool:file_write");
+
+        EvaluateWithUnreadableBaseRules(key, GovernancePolicySnapshot.Empty)
+            .Reason.Should().Be(AutonomyGateEvaluator.ReasonAcceptanceRulesUnavailable);
+        Evaluate(key, GovernancePolicySnapshot.Unavailable)
+            .Reason.Should().Be(AutonomyGateEvaluator.ReasonPolicySnapshotUnavailable);
+
+        // Both degraded at once: deterministic, the snapshot is reported.
+        EvaluateWithUnreadableBaseRules(key, GovernancePolicySnapshot.Unavailable)
+            .Reason.Should().Be(AutonomyGateEvaluator.ReasonPolicySnapshotUnavailable);
+    }
+
+    /// <summary>
+    /// A degraded decision a seam is free to ignore would be the same fail-open
+    /// wearing a warning label — so <c>Enforced</c> is forced TRUE even when a
+    /// stored row says otherwise.
+    /// </summary>
+    [Test]
+    public void DegradedDecision_IsAlwaysEnforced_EvenAgainstAStoredEnforceFalse()
+    {
+        var snapshot = Snapshot(
+            principalActions: new(StringComparer.Ordinal)
+            {
+                ["tool:file_write"] = Value(min: AutonomyDial.Min, enforce: false),
+            });
+
+        var decision = EvaluateWithUnreadableBaseRules(Key("tool:file_write"), snapshot);
+
+        decision.Outcome.Should().Be(AutonomyOutcome.RequiresHuman);
+        decision.Enforced.Should().BeTrue(
+            "an observe-only opinion must not be able to silence a fail-closed decision");
+    }
+
+    [Test]
+    public void Degraded_DeniesRatherThanEscalates_WhereNoHumanWaitExists()
+    {
+        var actor = ActionCatalog.All.First(
+            d => d.Key.Ns == ActionNamespace.Automation && d.Enforceable);
+
+        var decision = Evaluate(actor.Key, GovernancePolicySnapshot.Unavailable);
+
+        decision.Outcome.Should().Be(AutonomyOutcome.Denied,
+            "a sweeper cannot wait for a person; calling it escalation would be a lie");
+        decision.Reason.Should().Be(AutonomyGateEvaluator.ReasonPolicySnapshotUnavailable);
+    }
+
+    /// <summary>
+    /// Fail-closed stops at the members the epic already answered are never
+    /// gateable (OQ2): turning every credential fetch into a human approval
+    /// during a control-plane blip would amplify the outage, not contain it.
+    /// </summary>
+    [Test]
+    public void NonEnforceableMember_StaysAutomated_WhenPolicyIsUnavailable()
+    {
+        var reveal = ActionCatalog.All.Single(d => !d.Enforceable);
+
+        var decision = Evaluate(reveal.Key, GovernancePolicySnapshot.Unavailable);
+
+        decision.Outcome.Should().Be(AutonomyOutcome.Automated);
+        decision.Enforced.Should().BeFalse();
+        decision.Reason.Should().Be(AutonomyGateEvaluator.ReasonNotEnforceable);
+    }
+
+    /// <summary>An unreadable snapshot does not create a catalog entry: epic D2
+    /// still allows an unclassified key at runtime.</summary>
+    [Test]
+    public void UncataloguedKey_StaysAllowed_EvenWhenPolicyIsUnavailable()
+    {
+        Evaluate(new ActionKey(ActionNamespace.Tool, "not_a_tool"),
+                GovernancePolicySnapshot.Unavailable)
+            .Reason.Should().Be(AutonomyGateEvaluator.ReasonUncatalogued);
+    }
+
+    /// <summary>The Seam B entry point degrades the same way — the sync
+    /// threshold resolver is what the live tool-loop gate calls.</summary>
+    [Test]
+    public void ResolveEffectiveMinAutonomy_OnAnUnavailableSnapshot_IsAlwaysHuman()
+    {
+        var descriptor = ActionCatalog.Get(Key("tool:file_read"));
+
+        AutonomyGateEvaluator.ResolveEffectiveMinAutonomy(
+                descriptor, GovernancePolicySnapshot.Empty)
+            .Should().Be((descriptor.DefaultMinAutonomy, ActionAssignmentSource.SystemDefault));
+
+        AutonomyGateEvaluator.ResolveEffectiveMinAutonomy(
+                descriptor, GovernancePolicySnapshot.Unavailable)
+            .Should().Be((AutonomyDial.AlwaysHuman, ActionAssignmentSource.Unavailable));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // F10 (2026-07-30) — cross-plane Enforce and AllowedRoles are MONOTONE.
+    // Unreachable from today's ceiling endpoints (they author thresholds
+    // only), which is exactly why the invariant is pinned in code here rather
+    // than left as prose for whoever adds those endpoints.
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Test]
+    public void PlatformEnforceFalse_CannotUnEnforceAPrincipalEnforceTrue()
+    {
+        var snapshot = Snapshot(
+            platformActions: new(StringComparer.Ordinal)
+            {
+                ["agent-action:deploy"] = Value(min: AutonomyDial.Min, enforce: false),
+            },
+            principalActions: new(StringComparer.Ordinal)
+            {
+                ["agent-action:deploy"] = Value(min: AutonomyDial.AlwaysHuman, enforce: true),
+            });
+
+        Evaluate(Key("agent-action:deploy"), snapshot).Enforced.Should().BeTrue(
+            "Enforce composes by OR — a ceiling may only tighten, never loosen (F10)");
+    }
+
+    [Test]
+    public void PrincipalEnforceFalse_CannotUnEnforceAPlatformEnforceTrue()
+    {
+        var snapshot = Snapshot(
+            platformActions: new(StringComparer.Ordinal)
+            {
+                ["agent-action:deploy"] = Value(min: AutonomyDial.Min, enforce: true),
+            },
+            principalActions: new(StringComparer.Ordinal)
+            {
+                ["agent-action:deploy"] = Value(min: AutonomyDial.Min, enforce: false),
+            });
+
+        Evaluate(Key("agent-action:deploy"), snapshot).Enforced.Should().BeTrue();
+    }
+
+    [Test]
+    public void SinglePlaneEnforceOpinion_StillApplies_AndTheDefaultStaysTrue()
+    {
+        // OR's identity is "no opinion", not false: one plane saying observe-only
+        // with no opposing opinion is still honoured (that is a default being
+        // lowered, not a plane overriding another plane).
+        var platformOnly = Snapshot(
+            platformActions: new(StringComparer.Ordinal)
+            {
+                ["agent-action:deploy"] = Value(min: AutonomyDial.Min, enforce: false),
+            });
+        Evaluate(Key("agent-action:deploy"), platformOnly).Enforced.Should().BeFalse();
+
+        var principalOnly = Snapshot(
+            principalActions: new(StringComparer.Ordinal)
+            {
+                ["agent-action:deploy"] = Value(min: AutonomyDial.Min, enforce: false),
+            });
+        Evaluate(Key("agent-action:deploy"), principalOnly).Enforced.Should().BeFalse();
+
+        // Neither plane: epic D1 — v1 enforces.
+        Evaluate(Key("agent-action:deploy"), GovernancePolicySnapshot.Empty)
+            .Enforced.Should().BeTrue();
+    }
+
+    [Test]
+    public void PrincipalRoles_CannotWidenAPlatformRoleRestriction()
+    {
+        var snapshot = Snapshot(
+            platformActions: new(StringComparer.Ordinal)
+            {
+                ["tool:git_operations.write"] = Value(
+                    min: AutonomyDial.Min, roles: new[] { "developer" }),
+            },
+            principalActions: new(StringComparer.Ordinal)
+            {
+                ["tool:git_operations.write"] = Value(
+                    min: AutonomyDial.Min, roles: new[] { "developer", "tester" }),
+            });
+
+        Evaluate(Key("tool:git_operations.write"), snapshot, role: "developer")
+            .Outcome.Should().Be(AutonomyOutcome.Automated,
+                "the intersection keeps the role BOTH planes allow");
+        Evaluate(Key("tool:git_operations.write"), snapshot, role: "tester")
+            .Outcome.Should().Be(AutonomyOutcome.Denied,
+                "a principal list may narrow a platform restriction, never widen it (F10)");
+    }
+
+    [Test]
+    public void DisjointRoleRestrictions_AllowNobody()
+    {
+        var snapshot = Snapshot(
+            platformActions: new(StringComparer.Ordinal)
+            {
+                ["tool:git_operations.write"] = Value(
+                    min: AutonomyDial.Min, roles: new[] { "developer" }),
+            },
+            principalActions: new(StringComparer.Ordinal)
+            {
+                ["tool:git_operations.write"] = Value(
+                    min: AutonomyDial.Min, roles: new[] { "tester" }),
+            });
+
+        foreach (var role in new[] { "developer", "tester", "architect" })
+        {
+            Evaluate(Key("tool:git_operations.write"), snapshot, role: role)
+                .Outcome.Should().Be(AutonomyOutcome.Denied,
+                    "\"developer only\" AND \"tester only\" is nobody — an EMPTY intersection "
+                    + "is a restriction, not the absence of one");
+        }
+    }
+
+    [Test]
+    public void AnEmptyStoredRolesArray_StillMeansUnrestricted()
+    {
+        // The pre-F10 `Count > 0` reading of a stored empty array is preserved
+        // so no stored row changes meaning; only an intersection can be empty
+        // AND restrictive.
+        var snapshot = Snapshot(
+            principalActions: new(StringComparer.Ordinal)
+            {
+                ["tool:file_write"] = Value(min: AutonomyDial.Min, roles: Array.Empty<string>()),
+            });
+
+        Evaluate(Key("tool:file_write"), snapshot, role: null)
+            .Outcome.Should().Be(AutonomyOutcome.Automated);
     }
 
     [Test]

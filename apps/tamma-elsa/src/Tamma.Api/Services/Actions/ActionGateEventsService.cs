@@ -87,6 +87,11 @@ public sealed class ActionGateEventsService
             ["assignmentSource"] = SourceWire(decision.Source),
             ["outcome"] = decision.Outcome.ToString().ToLowerInvariant(),
             ["enforced"] = decision.Enforced ? "true" : "false",
+            // F6 — a queryable "this decision was made over an unreadable policy
+            // input" tag, so a degraded window is one tag filter away rather
+            // than an inference from provenance.
+            ["degraded"] =
+                decision.Source == ActionAssignmentSource.Unavailable ? "true" : "false",
         };
         if (query.Role is not null) tags["role"] = query.Role;
         if (query.CorrelationId is not null) tags["correlationId"] = query.CorrelationId;
@@ -193,6 +198,11 @@ public sealed class ActionGateEventsService
         ActionAssignmentSource.AlwaysEscalateLegacy => "always-escalate-legacy",
         ActionAssignmentSource.ActionOverride => "action-override",
         ActionAssignmentSource.GroupOverride => "group-override",
+        // F6 — a fail-closed decision made over an UNREADABLE policy input. It
+        // must never share a wire value with system-default: "we applied the
+        // shipped default" and "we could not read policy and refused to
+        // automate" are opposite facts about the same audit stream.
+        ActionAssignmentSource.Unavailable => "policy-unavailable",
         _ => "system-default",
     };
 

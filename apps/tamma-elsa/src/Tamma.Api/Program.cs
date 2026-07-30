@@ -2231,15 +2231,17 @@ admin.MapDelete("/tenant-databases/{databaseId:guid}",
 // only). The sweeper migrates each tenant THROUGH its pooled NpgsqlDataSource
 // (a re-parsed connection string cannot authenticate — Npgsql strips the
 // password from NpgsqlDataSource.ConnectionString; see the 44-1 plan).
+//
+// 2026-07-30 sweep-hygiene follow-up (see AdminTenantMigrationEndpoints for
+// the full rationale): the default flipped from apply to DRY RUN (breaking);
+// applying needs ?apply=true + the X-Admin-Confirm header and returns 202 +
+// a status URL instead of blocking the request for the whole fleet; a second
+// concurrent apply gets 409 off a cluster-wide advisory lock.
 admin.MapPost("/tenants/migrate",
-        async (bool? dryRun, int? maxConcurrency,
-               Tamma.Data.Abstractions.ITenantMigrationSweeper sweeper,
-               CancellationToken ct) =>
-            Results.Ok(await sweeper.SweepAsync(
-                dryRun ?? false,
-                maxConcurrency
-                    ?? Tamma.Data.Abstractions.TenantMigrationSweep.DefaultMaxConcurrency,
-                ct)))
+        Tamma.Api.Endpoints.Admin.AdminTenantMigrationEndpoints.Migrate)
+    .RequireAuthorization("PlatformOwnerAccess");
+admin.MapGet("/tenants/migrate/{runId:guid}",
+        Tamma.Api.Endpoints.Admin.AdminTenantMigrationEndpoints.GetRun)
     .RequireAuthorization("PlatformOwnerAccess");
 
 // Story 41-30 (D8) — the tenant-aware scheduled-trigger seam's admin surface.

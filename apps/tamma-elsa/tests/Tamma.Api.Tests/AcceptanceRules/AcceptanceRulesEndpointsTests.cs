@@ -323,6 +323,172 @@ public class AcceptanceRulesEndpointsTests
             .Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Any);
     }
 
+    // ── CD-1 / amendment A1 (closed 2026-07-30): the BASE route cannot erase a
+    //    shipped human acceptor floor, and a later per-type save cannot bake the
+    //    loss in ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// THE CD-1 regression pin, and the reason it is NOT the same bug as 43-0's.
+    /// It fires on an EXPLICIT value, not just an omitted one: 43-0's
+    /// preserve-on-absent works correctly on the base route (it carries the BASE
+    /// row's own in-force requirement forward) — the loss came from 39-5 D2's
+    /// tier-2 WHOLESALE shadowing, which made one base row shadow the shipped
+    /// per-type defaults entirely. One PUT used to strip the human acceptor from
+    /// design, sprint-plan AND threat-model at once, none of which was written.
+    /// </summary>
+    [Test]
+    public async Task Upsert_base_cannot_erase_the_shipped_human_acceptor_floor()
+    {
+        var userId = Guid.NewGuid();
+        var tc = new TenantContext();
+        tc.SetTenantId(Guid.NewGuid());
+        var user = Principal(userId, "owner");
+
+        // The most hostile shape: the base PUT STATES `any` outright.
+        (await Exec(await AcceptanceRulesEndpoints.Upsert(
+            "base", ReqWithAcceptor(AcceptorRequirement.Any, 80),
+            _store, user, tc, Mode(TammaMode.SingleUser))))
+            .Status.Should().Be(StatusCodes.Status200OK);
+
+        foreach (var type in new[]
+        {
+            DocumentTypeKey.Design, DocumentTypeKey.SprintPlan, DocumentTypeKey.ThreatModel,
+        })
+        {
+            var resolved = await _store.ResolveAsync(userId, type);
+            resolved.Source.Should().Be(AcceptanceRulesSource.PrincipalDefault,
+                "the base row still supplies every OTHER field wholesale (39-5 D2 stands)");
+            resolved.Rules.AutonomyLevel.Should().Be(80, "…including the dial it was written for");
+            resolved.Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human,
+                $"'{type.ToWire()}' ships a human acceptor FLOOR — a base row, which stands "
+                + "in for every document type at once, cannot express intent about this one "
+                + "and therefore cannot lower it (CD-1)");
+            resolved.AcceptorRequirementFloored.Should().BeTrue(
+                "the raise is surfaced, not silent");
+        }
+
+        // A type with no shipped floor is untouched by any of this.
+        var findings = await _store.ResolveAsync(userId, DocumentTypeKey.Findings);
+        findings.Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Any);
+        findings.AcceptorRequirementFloored.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The second half of CD-1: a later OMITTING per-type save used to read the
+    /// already-degraded value as "what is in force" and bake it into a type row,
+    /// after which deleting the base row no longer restored the floor. With the
+    /// floor applied at resolution, the value 43-0's preserve-on-absent reads is
+    /// the floored one, so the bake-in writes `human`.
+    /// </summary>
+    [Test]
+    public async Task A_later_omitting_per_type_save_cannot_bake_in_a_lost_floor()
+    {
+        var userId = Guid.NewGuid();
+        var tc = new TenantContext();
+        tc.SetTenantId(Guid.NewGuid());
+        var user = Principal(userId, "owner");
+
+        await Exec(await AcceptanceRulesEndpoints.Upsert(
+            "base", ReqWithAcceptor(AcceptorRequirement.Any, 80),
+            _store, user, tc, Mode(TammaMode.SingleUser)));
+
+        // An unrelated per-type edit, silent about acceptorRequirement.
+        await Exec(await AcceptanceRulesEndpoints.Upsert(
+            "design", Req(85), _store, user, tc, Mode(TammaMode.SingleUser)));
+
+        var withBase = await _store.ResolveAsync(userId, DocumentTypeKey.Design);
+        withBase.Source.Should().Be(AcceptanceRulesSource.TypeOverride);
+        withBase.Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human);
+
+        // …and deleting the base row still restores everything, because nothing
+        // was ever degraded to bake in.
+        await Exec(await AcceptanceRulesEndpoints.Delete(
+            "base", _store, user, tc, Mode(TammaMode.SingleUser)));
+        (await _store.ResolveAsync(userId, DocumentTypeKey.Design))
+            .Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human);
+    }
+
+    /// <summary>
+    /// The product decision, pinned from the other side: the floor is not
+    /// absolute — a PER-TYPE route may still lower it, because writing that row
+    /// NAMES the type. (The pre-existing
+    /// <c>Upsert_explicit_any_clears_the_human_floor</c> pins the same semantic;
+    /// this one pins that a base row cannot then re-raise it back.)
+    /// </summary>
+    [Test]
+    public async Task An_explicit_per_type_any_still_wins_over_the_base_floor()
+    {
+        var userId = Guid.NewGuid();
+        var tc = new TenantContext();
+        tc.SetTenantId(Guid.NewGuid());
+        var user = Principal(userId, "owner");
+
+        await Exec(await AcceptanceRulesEndpoints.Upsert(
+            "design", ReqWithAcceptor(AcceptorRequirement.Any, 85),
+            _store, user, tc, Mode(TammaMode.SingleUser)));
+        await Exec(await AcceptanceRulesEndpoints.Upsert(
+            "base", Req(80), _store, user, tc, Mode(TammaMode.SingleUser)));
+
+        var resolved = await _store.ResolveAsync(userId, DocumentTypeKey.Design);
+        resolved.Source.Should().Be(AcceptanceRulesSource.TypeOverride);
+        resolved.Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Any,
+            "lowering a shipped human floor requires naming the type — and that "
+            + "deliberate act is not undone by the floor (tier 1 is exempt)");
+        resolved.AcceptorRequirementFloored.Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The SaaS path takes the identical rule — a tenant base row is one row for
+    /// every document type, exactly like the single-user one.
+    /// </summary>
+    [Test]
+    public async Task Upsert_base_cannot_erase_the_human_floor_in_SaaS_mode_either()
+    {
+        var tenantId = Guid.NewGuid();
+        var tc = new TenantContext();
+        tc.SetTenantId(tenantId);
+        var user = Principal(Guid.NewGuid(), "owner");
+
+        await Exec(await AcceptanceRulesEndpoints.Upsert(
+            "base", ReqWithAcceptor(AcceptorRequirement.Any, 80),
+            _store, user, tc, Mode(TammaMode.SaaS)));
+
+        var resolved = await _store.ResolveForTenantAsync(tenantId, DocumentTypeKey.ThreatModel);
+        resolved.Source.Should().Be(AcceptanceRulesSource.PrincipalDefault);
+        resolved.Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human);
+        resolved.AcceptorRequirementFloored.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// The scope of the fix, stated as a test so it is not mis-read: reviewer
+    /// selection is STILL shadowed wholesale by a base row. There is no ordering
+    /// on reviewer roles — no <c>max(architect, security)</c> — so no monotone
+    /// floor exists for it, and a deployment-wide reviewer choice is a legitimate
+    /// thing for a base row to say. Recorded in 43-0 A1 / epic-43 CD-1 as the
+    /// deliberate remainder.
+    /// </summary>
+    [Test]
+    public async Task Base_row_still_shadows_per_type_reviewer_selection_by_design()
+    {
+        var userId = Guid.NewGuid();
+        var tc = new TenantContext();
+        tc.SetTenantId(Guid.NewGuid());
+        var user = Principal(userId, "owner");
+
+        AcceptanceDefaults.For(DocumentTypeKey.ThreatModel).ReviewerSelection.ReviewerRole
+            .Should().Be("security");
+
+        await Exec(await AcceptanceRulesEndpoints.Upsert(
+            "base", Req(80), _store, user, tc, Mode(TammaMode.SingleUser)));
+
+        var resolved = await _store.ResolveAsync(userId, DocumentTypeKey.ThreatModel);
+        resolved.Rules.ReviewerSelection.ReviewerRole.Should().Be("architect",
+            "wholesale tier-2 precedence is unchanged for every field except the "
+            + "acceptor floor — this is the documented remainder of CD-1, not an oversight");
+        resolved.Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human,
+            "…while the safety-critical field that DOES have a lattice survives");
+    }
+
     /// <summary>
     /// The binder-level pin: absent property → <c>null</c> ("not said"), never
     /// <c>Any</c>. This is the property the old DTO default violated; a future

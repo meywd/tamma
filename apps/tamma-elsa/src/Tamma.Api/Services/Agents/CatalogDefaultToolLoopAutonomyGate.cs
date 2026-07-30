@@ -121,7 +121,21 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
                 ToolLoopGateOutcome.Allowed, key, null, _dial, "not-enforceable");
         }
 
-        var minAutonomy = ResolveMinAutonomy(descriptor);
+        var (minAutonomy, source) = ResolveMinAutonomy(descriptor);
+        if (source == ActionAssignmentSource.Unavailable)
+        {
+            // 43-5 F6 — the governance snapshot has never loaded, so "no ceiling
+            // row" is ignorance, not policy. Fail CLOSED and say so distinctly:
+            // this is NOT the same event as "policy says this needs a person".
+            _logger?.LogError(
+                "Autonomy gate DENIED tool call because the governance policy snapshot has "
+                + "never loaded (fail-closed, 43-5 F6): Action={ActionKey}, Dial={Dial}",
+                key.ToWire(), _dial);
+            return new ToolLoopGateDecision(
+                ToolLoopGateOutcome.Denied, key, minAutonomy, _dial,
+                AutonomyGateEvaluator.ReasonPolicySnapshotUnavailable);
+        }
+
         if (IsAutomated(minAutonomy, _dial))
         {
             return new ToolLoopGateDecision(
@@ -142,21 +156,23 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
     /// <summary>
     /// The threshold's data source (Story 43-5): the assignment ladder when the
     /// snapshot provider is wired (production DI), else the internal rehearsal
-    /// seam, else the shipped catalog default — the 43-4 shape, unchanged.
+    /// seam, else the shipped catalog default — the 43-4 shape, unchanged. The
+    /// returned provenance is <see cref="ActionAssignmentSource.Unavailable"/>
+    /// when the snapshot has never loaded (43-5 F6).
     /// </summary>
-    private int ResolveMinAutonomy(ActionDescriptor descriptor)
+    private (int MinAutonomy, ActionAssignmentSource Source) ResolveMinAutonomy(
+        ActionDescriptor descriptor)
     {
         if (_minAutonomyOverride is not null)
         {
-            return _minAutonomyOverride(descriptor);
+            return (_minAutonomyOverride(descriptor), ActionAssignmentSource.SystemDefault);
         }
         if (_snapshots is not null)
         {
             var snapshot = _snapshots.GetSnapshotForAmbient(_tenantContext?.TenantId);
-            return AutonomyGateEvaluator.ResolveEffectiveMinAutonomy(descriptor, snapshot)
-                .EffectiveMinAutonomy;
+            return AutonomyGateEvaluator.ResolveEffectiveMinAutonomy(descriptor, snapshot);
         }
-        return descriptor.DefaultMinAutonomy;
+        return (descriptor.DefaultMinAutonomy, ActionAssignmentSource.SystemDefault);
     }
 
     /// <summary>

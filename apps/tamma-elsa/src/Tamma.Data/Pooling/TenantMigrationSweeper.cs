@@ -44,7 +44,7 @@ public sealed class TenantMigrationSweeper : ITenantMigrationSweeper
     }
 
     public async Task<TenantMigrationSweepResult> SweepAsync(
-        bool dryRun = false,
+        bool dryRun,
         int maxConcurrency = TenantMigrationSweep.DefaultMaxConcurrency,
         CancellationToken ct = default)
     {

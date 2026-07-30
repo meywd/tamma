@@ -19,6 +19,18 @@ namespace Tamma.Api.Services.AcceptanceRules;
 /// resolution picks the highest-precedence row wholesale (no field merge). Bodies
 /// are validated defensively on read (a corrupt row throws <see cref="TammaError"/>)
 /// and fail-loud on write. Mutations emit DCB events best-effort (D12).
+///
+/// <para><b>ONE exception to "wholesale", added 2026-07-30 (epic-43 CD-1 /
+/// Story 43-0 amendment A1): the shipped per-type <see cref="AcceptorRequirement"/>
+/// is a FLOOR.</b> A tier-2 BASE row may not lower it — one
+/// <c>PUT /api/acceptance-rules/base</c> used to erase the human acceptor that
+/// <c>design</c>, <c>sprint-plan</c> and <c>threat-model</c> ship, for all three
+/// at once, without any of them being written. Resolution still picks ONE row
+/// wholesale; that row's acceptor requirement is then composed with the shipped
+/// per-type floor by <c>max()</c>. A per-type override row is exempt — lowering
+/// a human floor requires naming the type. See
+/// <see cref="AcceptanceFloors"/> for the full argument, including why a general
+/// per-field merge (the other CD-1 candidate) was rejected against 39-5 D2.</para>
 /// </summary>
 public sealed class AcceptanceRulesService : IAcceptanceRulesResolver
 {
@@ -55,11 +67,18 @@ public sealed class AcceptanceRulesService : IAcceptanceRulesResolver
 
         var typeOverride = await _repository.GetAsync(userId, key);
         if (typeOverride is not null)
+            // Tier 1 is EXEMPT from the acceptor floor: writing this row named
+            // this type, which is what lowering a shipped human floor requires.
             return Materialize(typeOverride, AcceptanceRulesSource.TypeOverride, key);
 
         var baseOverride = await _repository.GetAsync(userId, null);
         if (baseOverride is not null)
-            return Materialize(baseOverride, AcceptanceRulesSource.PrincipalDefault, key);
+            // CD-1: one base row stands in for every document type and cannot
+            // express intent about any one of them — so it may not lower a
+            // shipped human acceptor floor.
+            return AcceptanceFloors.ApplyShippedAcceptorFloor(
+                Materialize(baseOverride, AcceptanceRulesSource.PrincipalDefault, key),
+                documentType);
 
         return SystemDefault(documentType, key);
     }
@@ -78,7 +97,11 @@ public sealed class AcceptanceRulesService : IAcceptanceRulesResolver
 
         var baseOverride = await _repository.GetByTenantAsync(tenantId, null);
         if (baseOverride is not null)
-            return Materialize(baseOverride, AcceptanceRulesSource.PrincipalDefault, key);
+            // CD-1 — identical rule on the SaaS path (the tenant base row is one
+            // row for every document type, same as the single-user one).
+            return AcceptanceFloors.ApplyShippedAcceptorFloor(
+                Materialize(baseOverride, AcceptanceRulesSource.PrincipalDefault, key),
+                documentType);
 
         return SystemDefault(documentType, key);
     }

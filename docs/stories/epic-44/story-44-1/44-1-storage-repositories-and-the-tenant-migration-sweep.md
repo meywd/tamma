@@ -1,6 +1,6 @@
 # Story 44-1: Storage, Repositories, and the Migrate-All-Provisioned-Tenants Sweep
 
-Status: done — conformance-reviewed 2026-07-29; entities, the `AddTrackerCore` tenant migration, the repositories and the `POST /api/admin/tenants/migrate` sweep all ship (the Architectural Context section is pre-implementation prose, now marked as such); sweep-endpoint hygiene and the endpoint's missing HTTP authorization test remain open follow-ups
+Status: done — conformance-reviewed 2026-07-29; entities, the `AddTrackerCore` tenant migration, the repositories and the `POST /api/admin/tenants/migrate` sweep all ship (the Architectural Context section is pre-implementation prose, now marked as such); sweep-endpoint hygiene CLOSED 2026-07-30 (a bare POST is now a dry run and applying needs an explicit `?apply=true` plus a confirmation header, `?dryRun=false` is refused loudly rather than silently reinterpreted; cluster-wide single-flight via a session-scoped advisory lock so a crashed pod cannot wedge the gate; apply returns 202 with a pollable run instead of sweeping inside the request; migration DDL got its own 900s timeout at the EF layer with the runtime pool's 30s proven unchanged). The `SweepAsync` seam also lost its `dryRun = false` default, so the dangerous call cannot be written by omission. The second bullet — no HTTP authorization test — was already stale: `TenantMigrationEndpointAuthTests` landed in wave 4 and drives the real JWT pipeline. Remaining, deliberate and documented: run state is per-instance, so on a multi-pod deploy a status poll may reach a different pod and get a self-explaining 404 plus a read-only `pg_locks` probe telling it a sweep is running somewhere; making that cluster-visible needs a control-plane table and is not built
 
 ## MANDATORY: Before You Code
 
@@ -104,14 +104,152 @@ Fixed in this lane (see `.dev/bugs/2026-07-29-ef-migrator-service-provider-explo
 - **Sweeper OCE isolation** — an `OperationCanceledException` from one tenant's own stack no longer aborts the whole sweep; it is only treated as sweep-cancellation when the sweep's token is actually canceled.
 - **`WorkItemEntity.Version` is now the EF optimistic-concurrency token** *(done 2026-07-29)* — `TammaModelConfiguration` configures `Version` with `IsConcurrencyToken()` (no migration required: for a plain `int` token the config is model-metadata only — `dotnet ef migrations has-pending-model-changes -c TenantDbContext` reports none). All five mutating repository seams (`UpdateAsync`/`SetStatusAsync`/`SetRanksAsync`/`SetParentAsync`/`RekeyAsync`) already bump `Version` and now translate `DbUpdateConcurrencyException` into the typed, **retryable** `TRACKER.CONCURRENCY_CONFLICT`. Real-Postgres proof: `WorkItemRepositoryTests.Interleaved_rekeys_conflict_typed_instead_of_silently_losing_history` establishes a deterministic interleave (both rekeys read at `Version=1`, queued behind an external `FOR UPDATE` on the project row) and shows the loser gets the typed conflict while the winner's `PreviousKeys` chain stays intact — no more silent last-write-wins losing key history.
 
-Still open (owned by OTHER lanes — do not close this section until they land):
+Still open: none. Both items below closed on 2026-07-30 — see the next section.
 
-- **Sweep endpoint hygiene** (`Program.cs` — coordinator's lane): `dryRun` defaults to `false` (a bare POST applies DDL fleet-wide); no single-flight guard (two concurrent sweeps double-migrate); the sweep runs synchronously in-request (a large fleet outlives HTTP timeouts); the pool's `CommandTimeout=30s` applies to migration DDL and will spuriously fail heavy migrations.
-- **No HTTP-level authorization test for `POST /api/admin/tenants/migrate`.** The endpoint carries
-  `.RequireAuthorization("PlatformOwnerAccess")` in `Program.cs`, but that is verified only by inspection —
-  no test drives the route as a non-platform-owner and asserts 403, so a future edit that drops or weakens
-  the policy would land green. The shipped suite (`Tamma.Api.Tests/Tracker/TenantMigrationSweeperTests.cs`)
-  covers the sweeper's behaviour, not the route's auth. Open gap as of 2026-07-29.
+## Sweep-endpoint hygiene — resolved 2026-07-30
+
+All four items of the "sweep endpoint hygiene" follow-up shipped, plus the endpoint's
+missing HTTP-authorization proof. New/changed code:
+`Tamma.Api/Endpoints/Admin/AdminTenantMigrationEndpoints.cs` (new — the handler moved out of
+the `Program.cs` lambda), `Tamma.Api/Dtos/Admin/AdminTenantMigrationDtos.cs` (new),
+`Tamma.Data/Abstractions/ITenantMigrationSweepRunner.cs` (new),
+`Tamma.Data/Pooling/TenantMigrationSweepRunner.cs` (new),
+`Tamma.Data/Pooling/EfTenantDbMigrator.cs`, `Tamma.Data/DependencyInjection.cs`,
+`Tamma.Api/Program.cs` (route mapping only). `TenantMigrationSweeper` itself is unchanged —
+the hygiene is a wrapper, not a redesign, exactly as the sweep was a caller and not a redesign.
+
+### ⚠️ BREAKING — the endpoint's default flipped from APPLY to DRY RUN
+
+`POST /api/admin/tenants/migrate` used to be `dryRun ?? false`: a bare POST with no body and no
+query **applied schema migrations to every provisioned tenant**. An operator poking the endpoint
+to see what it does mutated the whole fleet. The safe action is now the default. The new contract:
+
+| Request | Behaviour |
+| --- | --- |
+| `POST .../migrate` (bare) | **Dry run.** `200` + per-tenant pending counts, `applied=false`, nothing written. |
+| `POST .../migrate?dryRun=true` | Same (explicit spelling; unchanged from before). |
+| `POST .../migrate?async=true` | Dry run as a background run: `202` + run id (for a fleet big enough that even the pending-count walk is slow). |
+| `POST .../migrate?apply=true` **+** `X-Admin-Confirm: migrate-all-tenants` | The real sweep. `202 Accepted` + run id + status URL. |
+| `POST .../migrate?apply=true` without the header | `400 confirmation_required`. |
+| `POST .../migrate?dryRun=false` | `400 apply_requires_explicit_opt_in` — the OLD spelling for "apply" is refused **loudly**. Anyone already scripted against the old default learns from an error, not from a fleet that migrated when they expected a report (and not from a silent no-op either). |
+| `POST .../migrate?apply=true&dryRun=true` | `400 conflicting_mode`. |
+| A second apply while one runs | `409 sweep_already_running` (see item 2). |
+| `GET .../migrate/{runId}` | Run status; `404 run_not_found_on_this_instance` if this instance never had it. |
+
+**Why `?apply=true` and not `?dryRun=false`:** the opt-in to a destructive action reads as an
+affirmative, never as a double negative. The paired confirmation header follows the neighbouring
+admin surface — `force-delete` and `cleanup` (`AdminTenantsEndpoints.cs:556`, `:637`) both demand
+`X-Admin-Confirm` echoing the tenant id. A sweep has no single tenant id to echo, so the constant
+`migrate-all-tenants` plays that role; it is not typeable by accident. Every response carries both
+`mode` (`dry-run` | `apply`) and `applied` so which mode ran is never inferred from counts; the
+200 body is otherwise **flat and field-compatible** with the old result (`dryRun`, `total`,
+`migrated`, `alreadyCurrent`, `pending`, `failed`, `tenants` stay top-level).
+
+### 1. `dryRun` default — done
+
+Flipped as above. Mode resolution rejects every ambiguous combination rather than picking a
+winner. Tests: `TenantMigrationEndpointAuthTests.BarePost_IsADryRun_AndSaysSoUnmistakably`,
+`.DryRunFalse_IsRefused_LoudlyRatherThanReinterpreted`, `.ApplyAndDryRunTogether_Is400`,
+`.Apply_WithoutTheConfirmHeader_Is400`.
+
+The same defect one layer down is closed too: `ITenantMigrationSweeper.SweepAsync`'s `dryRun`
+parameter **lost its `= false` default**, so `SweepAsync()` — the shortest thing an in-code caller
+can write — no longer means "apply DDL to every tenant". Every call site now states the mode
+(compiler-enforced; the existing sweeper tests were updated to `SweepAsync(dryRun: false)` where
+they were already testing the apply path).
+
+### 2. Single-flight guard — done, CLUSTER-wide
+
+Two concurrent applies used to both sweep, double-migrating every tenant (EF's per-migration
+transaction makes the loser mostly record failures — noise and wasted fleet-wide load at best).
+The guard is **cluster-wide**, not per-process: on a multi-pod deploy the two racing POSTs are
+exactly as likely to land on two different pods, where a `SemaphoreSlim` is decoration. It is a
+Postgres **session-scoped `pg_try_advisory_lock`** on a dedicated control-plane connection —
+the `HourlyAnalyticsRollupScheduler` / `ScheduleLockKey` idiom, with the same `pg_locks`-greppable
+ASCII namespace convention (`"MGSW"`, key `0x4D47535700000001`; no partition component because
+there is exactly one sweep gate for the whole cluster). Session scope means a crashed pod's lock
+dies with its connection — the gate cannot wedge shut, which is the property a fleet-DDL escape
+hatch must have.
+
+A process-local slot is taken *first*, purely so the 409 can be exact: `scope=this-instance` with
+the running sweep's `runId` and `startedAt`, versus `scope=another-instance` with both null and a
+message saying so (this process genuinely cannot know a remote run's identity, and inventing one
+would be fiction). It is also the whole guard on a non-Postgres provider (test hosts).
+
+**Only apply sweeps take the lock.** A dry run writes nothing, so it cannot double-migrate
+anything, and refusing "what is still pending?" while a long apply runs would remove the one
+question an operator most wants answered mid-run.
+
+Tests (`TenantMigrationSweepRunnerTests`, real Postgres):
+`Second_apply_sweep_on_the_same_instance_is_refused_with_the_running_runs_identity`,
+`Second_apply_sweep_from_another_instance_is_refused_by_the_cluster_lock` (two runner instances
+over one database = two pods — the case a per-process lock misses),
+`The_gate_reopens_after_the_run_completes`,
+`A_sweep_that_throws_fails_the_run_and_still_releases_the_gate`,
+`Dry_runs_are_not_gated_by_the_apply_single_flight`,
+`IsSweepRunning_sees_a_sweep_held_by_another_instance_and_clears_afterwards`.
+
+### 3. Synchronous in-request execution — done, 202 + poll
+
+Apply now returns `202 Accepted` with a `runId` and a `statusUrl`, mirroring the existing
+`POST /api/admin/tenants/{id}/provision` + `GET .../provisioning` and
+`POST /api/admin/tenants/{id}/move` + `GET .../move` shape.
+
+**Only the wire shape is borrowed, not the mechanism.** The move endpoint enqueues a
+`PlatformQueuedTask`; a sweep must not, because `PlatformTaskWorker` ships `RunOnStartup=false`
+(CLAUDE.md, "Known constraint"), so a queued sweep would sit un-drained in the default deployment
+— the endpoint would silently do nothing, strictly worse than the synchronous version it replaces.
+The run therefore executes on an in-process background task tied to process shutdown (explicitly
+**not** the request's `CancellationToken`, which is canceled the moment the 202 is written).
+
+**Dry run stays synchronous (200).** It does no DDL: per tenant it is one pooled connection and
+one `__TenantMigrationsHistory` read, 4-way parallel. The unbounded cost item 3 is about is the
+migration DDL itself, which only the apply path runs — and the dry run is now the *default*, so
+making an operator poll twice to learn "nothing is pending" would be a worse surface. `?async=true`
+gives a dry run the same 202 treatment for a fleet large enough that even that walk is slow.
+
+**Known limitation, deliberate:** run state is in-memory and per-instance. A poll that
+load-balances onto another pod gets `404 run_not_found_on_this_instance` plus
+`sweepRunningOnSomeInstance` (a read-only `pg_locks` probe — acquiring-then-releasing would let a
+status poll perturb the gate it is reporting on). Durable cluster-visible run rows would need a
+control-plane table; not built, because the lock already prevents the damage and the operator's
+fallback (poll the accepting instance, or re-POST and read the 409) is honest. Tests:
+`Start_returns_before_the_sweep_finishes_and_the_result_arrives_by_polling`,
+`TenantMigrationEndpointAuthTests.Apply_WithConfirmHeader_Is202_AndTheRunIsPollableToCompletion`,
+`.DryRun_CanOptIntoTheSame202_ForAVeryLargeFleet`,
+`.UnknownRunId_Is404_AndSaysRunStateIsPerInstance`.
+
+### 4. `CommandTimeout=30s` on migration DDL — done
+
+The tenant pool stamps `CommandTimeout=30` onto every tenant connection string
+(`TenantConnectionPoolOptions.CommandTimeoutSeconds`, applied in
+`LruPooledTenantConnectionResolver.BuildDataSource`), and the sweep migrates over connections
+borrowed from that pool — so the CHECK-widening this story predicts on the highest-row-count table
+would abort at 30s and land as a per-tenant `failed` row indistinguishable from a real breakage.
+
+`EfTenantDbMigrator.MigrationCommandTimeoutSeconds = 900` (15 min) is now set **at the EF layer on
+the migration context's options only** (`BuildConnectionOptions` and `BuildStringOptions` — the
+provisioning flavour gets it too; a slow baseline on a fresh schema exceeds 30s just as easily).
+The pool, the connection strings and `TenantDbContextFactory` are untouched, so every runtime
+context over the same data source still inherits the 30s ceiling. EF migrations stay transactional
+per migration, so a genuine timeout still rolls that migration back — the longer ceiling removes
+spurious failures, it does not create partially-applied schemas.
+
+Both halves pinned by `EfTenantDbMigratorCommandTimeoutTests`:
+`Migration_over_a_borrowed_connection_uses_the_long_DDL_timeout`,
+`Migration_over_a_connection_string_uses_the_long_DDL_timeout`, and
+`The_runtime_tenant_context_still_gets_the_pools_thirty_second_timeout` (the runtime factory sets
+no EF-level timeout and the pool default is still 30 — a "fix" that raised the pool's timeout
+would silently give every request-path query a 15-minute ceiling).
+
+### 5. The missing HTTP-authorization test — closed (stale entry)
+
+The "no HTTP-level authorization test" item was already stale: `Tamma.Api.Tests/Tracker/
+TenantMigrationEndpointAuthTests.cs` drives the real (non-permissive) bearer-JWT pipeline and
+asserts 401 unauthenticated / 403 for member, tenant-admin and tenant-owner / 200 for
+`platformRole=platform_admin`. This lane extended it with `Member_Gets403_OnRunStatus` (the new
+`GET .../migrate/{runId}` route carries the same `PlatformOwnerAccess` gate) and the contract
+tests above.
 
 ## Change Log
 
@@ -120,3 +258,4 @@ Still open (owned by OTHER lanes — do not close this section until they land):
 | 2026-07-25 | 1.0.0   | Initial story creation | Claude |
 | 2026-07-29 | 1.0.1   | Adversarial-review follow-ups section (fixes landed in the tracker-storage lane; deferred items listed) | Claude |
 | 2026-07-29 | 1.0.2   | `Version` concurrency-token follow-up closed: `IsConcurrencyToken()` + typed retryable `TRACKER.CONCURRENCY_CONFLICT` on all update seams + interleaved-rekey Postgres proof (no migration needed) | Claude |
+| 2026-07-30 | 1.1.0   | **Sweep-endpoint hygiene closed (BREAKING: `POST /api/admin/tenants/migrate` now defaults to a DRY RUN; applying needs `?apply=true` + `X-Admin-Confirm: migrate-all-tenants`)** — plus cluster-wide `pg_try_advisory_lock` single-flight with a typed 409, 202-plus-poll background execution, and a 15-minute migration-DDL command timeout that leaves the runtime pool's 30s untouched | Claude |

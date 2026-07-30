@@ -25,9 +25,16 @@ public interface ITenantMigrationSweeper
     /// count per tenant without applying anything;
     /// <paramref name="maxConcurrency"/> bounds parallel tenant migrations
     /// (default 4, clamped to [1, 16]).
+    ///
+    /// <para><paramref name="dryRun"/> has <b>no default</b> (2026-07-30): the
+    /// same "the safe action must be the explicit-free one" reasoning that
+    /// flipped the HTTP endpoint's default applies to the seam. A default of
+    /// <c>false</c> made <c>SweepAsync()</c> — the shortest thing to write —
+    /// mean "apply DDL to every tenant"; there is no defensible default for
+    /// that choice, so every call site states it.</para>
     /// </summary>
     Task<TenantMigrationSweepResult> SweepAsync(
-        bool dryRun = false,
+        bool dryRun,
         int maxConcurrency = TenantMigrationSweep.DefaultMaxConcurrency,
         CancellationToken ct = default);
 }

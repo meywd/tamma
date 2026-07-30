@@ -9,6 +9,12 @@ only — the API no longer invents `acceptorRequirement` for a body that omits i
 > shipped human acceptor floor on `design`, `sprint-plan` and `threat-model` — not through defaulting, but
 > through 39-5's tier-2 WHOLESALE shadowing, which predates this story and is a recorded follow-up. See
 > **"Amendment — 2026-07-29" → A1**.
+>
+> **UPDATE 2026-07-30 — that follow-up is CLOSED.** The base route can no longer lower a shipped human
+> acceptor floor: the shipped per-type `AcceptorRequirement` is now a FLOOR composed by `max()` across
+> tiers, with tier 1 (a per-type override row) deliberately exempt. The paragraph above is kept as the
+> statement of the defect; read **A1's "RESOLUTION — 2026-07-30"** for what shipped and what
+> deliberately did not.
 
 ## MANDATORY: Before You Code
 
@@ -250,6 +256,81 @@ floor), or tier 2 becomes a per-field merge for `AcceptorRequirement`
 specifically. Either closes it; they are not equivalent and the choice is a
 product one.
 
+#### RESOLUTION — 2026-07-30 (the follow-up, decided and shipped)
+
+**Decision: tier 2 stays WHOLESALE, and the shipped human-acceptance requirement
+becomes a FLOOR — a tier may raise it, never silently lower it. Lowering it
+requires naming the type.** The general per-field merge was rejected.
+
+**Why not the per-field merge.** It is precisely what 39-5 **D2** rejected, in
+those words: "*field-level deep-merging is rejected: it makes provenance
+unexplainable in the admin UI and has no precedent (a prompt override replaces
+the template entirely)*". Merging every field would also change resolution for
+every stored base row across every field, which is the reason 43-0 declined to
+do it here. The floor is the narrow, monotone alternative: **exactly one field**
+composes across tiers, by `max()` over a two-element lattice
+(`any` &lt; `human`); every other field keeps wholesale-row precedence, so
+`source` still names the single row that produced the resolution.
+
+**Why the floor framing is the right one, on this codebase's own terms.** The
+epic already uses `max()` for every policy input that can only tighten:
+`AutonomyGateEvaluator` composes the platform ceiling and the legacy
+always-escalate floor that way. Decisively, the **action catalog already treats
+the shipped acceptor requirement as non-negotiable**:
+`ActionCatalog.Descriptors` pins `document-type:design`,
+`document-type:sprint-plan` and `document-type:threat-model` at
+`AutonomyDial.AlwaysHuman` *because* `AcceptanceDefaults.For` ships them
+`AcceptorRequirement.Human` (`DesignDocumentType_MatchesAcceptanceDefaults`
+pins the derivation). Before this fix, one base `PUT` put the two governance
+surfaces into open disagreement — the catalog saying a design needs a person,
+the acceptance-rules resolver saying it does not. The floor restores coherence.
+
+**The tier-1 exemption is the product decision, and it was already the
+established semantic.** A per-type `PUT /api/acceptance-rules/design` stating
+`"acceptorRequirement": "any"` still lowers it — pinned since 43-0 by
+`Upsert_explicit_any_clears_the_human_floor` ("*an admin can still LOWER the
+floor — but only by saying so; that is the difference between silence and
+intent*"). A BASE row is one row standing in for every document type with three
+different floors: it has no way to express intent about any single one, which is
+exactly why it may not lower any of them.
+
+**The bake-in path closes as a consequence.** 43-0's preserve-on-absent reads
+"what is in force"; with the floor applied at resolution, that value is now
+`human`, so a later omitting per-type save writes `human` rather than baking in
+a loss. Deleting the base row therefore still restores everything.
+
+**Implementation** — `apps/tamma-elsa/src/Tamma.Core/Documents/Policy/AcceptanceFloors.cs`
+(the lattice, `ShippedFloorFor`, `ApplyShippedAcceptorFloor`, and the full
+argument in its doc comment), applied in `AcceptanceRulesService.ResolveAsync` /
+`ResolveForTenantAsync` on the tier-2 branch only. `ResolvedAcceptanceRules`
+gains `AcceptorRequirementFloored` (wire `acceptorRequirementFloored`, additive)
+so the one non-wholesale field is VISIBLE rather than surprising; the dashboard's
+hand-maintained `ResolvedAcceptanceRules` interface carries it too.
+
+**Tests** — `AcceptanceFloorsTests` (the pure lattice + a monotonicity sweep over
+every document type × every requirement), and, in
+`AcceptanceRulesEndpointsTests`:
+`Upsert_base_cannot_erase_the_shipped_human_acceptor_floor` (fires on an
+EXPLICIT `any`, which is what makes it a resolution-semantics bug and not 43-0's
+omission bug), `A_later_omitting_per_type_save_cannot_bake_in_a_lost_floor`,
+`An_explicit_per_type_any_still_wins_over_the_base_floor`,
+`Upsert_base_cannot_erase_the_human_floor_in_SaaS_mode_either`, and
+`Base_row_still_shadows_per_type_reviewer_selection_by_design`. No existing test
+needed changing — `ResolveAsync_falls_back_to_base_override` and
+`Upsert_base_writes_principal_base_row` still pass unmodified, because tier-2
+precedence itself is untouched.
+
+**NOT closed, deliberately: `threat-model`'s `security` reviewer selection is
+still shadowed by a base row.** Reviewer selection has no ordering — there is no
+`max(architect, security)` — so no monotone floor exists for it, and a
+deployment-wide reviewer choice is a legitimate thing for a base row to say
+(that is what tier 2 is for). Closing it would require either the rejected
+per-field merge or forbidding `reviewerSelection` on the base route, both of
+which remove a real capability to protect a preference rather than a safety
+property. Pinned as deliberate by
+`Base_row_still_shadows_per_type_reviewer_selection_by_design` so a future reader
+finds a decision rather than a gap.
+
 ### A2. A corrupt stored row is now a 400, not a 500 (fixed)
 
 **This commit introduced a new 500 on a shipped admin surface.** Story 43-0 made
@@ -323,3 +404,4 @@ of past state, and several already say "deleted by Story 43-0".
 | 2026-07-25 | 1.0.0   | Initial story creation | Claude |
 | 2026-07-29 | 1.1.0   | Implemented. D1 superseded — the API side no longer defaults an omitted `acceptorRequirement` (preserve-on-absent); `ResolveToolsActivity` deleted; 43-4's story text reconciled; AC8 recorded as satisfied by 43-4's allowlist. | Claude |
 | 2026-07-29 | 1.2.0   | Adversarial-review round (see "Amendment — 2026-07-29"). FIXED: a malformed stored row is now a typed 400 on `Upsert`/`GetResolved` instead of a 500 this commit introduced, with the DELETE-then-PUT repair path documented and tested. RECORDED as follow-up with reasoning: tier-2 wholesale shadowing means a `PUT .../base` omitting `acceptorRequirement` still erases the human floor on `design`/`sprint-plan`/`threat-model` — pre-existing 39-5 D1/D2 semantics, not the same shape as preserve-on-absent, and closing it changes what tier 2 means. Comment corrections in `RulesEditDialog.test.tsx` and `AcceptanceRulesDtos.cs`. Wiki + mirrors corrected: `ResolveToolsActivity` no longer documented as live surface. | Claude |
+| 2026-07-30 | 1.3.0   | **A1 CLOSED.** Tier 2 stays wholesale; the shipped per-type `AcceptorRequirement` is now a FLOOR composed by `max()` across tiers (tier-1 per-type rows exempt — lowering requires naming the type). New `AcceptanceFloors` in `Tamma.Core`; `ResolvedAcceptanceRules.AcceptorRequirementFloored` surfaces the raise; dashboard interface updated. The general per-field merge was evaluated against 39-5 D2 and rejected. Reviewer-selection shadowing is recorded as the deliberate remainder (no lattice exists for it). | Claude |

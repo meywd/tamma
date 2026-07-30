@@ -157,6 +157,45 @@ public class ResolverBackedToolLoopGateTests
             "policy must be resolved for the ambient principal, never a global scope");
     }
 
+    // ── F6 (2026-07-30): the LIVE seam fails closed on a snapshot that has
+    //    never loaded, and says so with its own reason ────────────────────────
+
+    /// <summary>
+    /// Seam B is the one gate that already enforces in production, so the F6
+    /// posture has to hold here or it holds nowhere. A never-loaded snapshot
+    /// used to be indistinguishable from an empty table — every tool call sailed
+    /// through on shipped defaults while the admin's tightenings sat unread.
+    /// </summary>
+    [Test]
+    public void AnUnavailableSnapshot_DeniesEveryCatalogedTool_WithItsOwnReason()
+    {
+        var gate = Gate(GovernancePolicySnapshot.Unavailable);
+
+        foreach (var toolName in new[] { "file_read", "file_write", "shell_execute", "run_tests" })
+        {
+            var decision = gate.Evaluate(toolName, "{}");
+            decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied,
+                $"'{toolName}' must not ride shipped defaults when the policy table has "
+                + "never been read (43-5 F6)");
+            decision.Reason.Should().Be(
+                AutonomyGateEvaluator.ReasonPolicySnapshotUnavailable,
+                "the reason must NOT be 'below-min-autonomy' — this is an outage of the "
+                + "governance surface, not a policy decision");
+        }
+
+        // The loaded-and-empty table is the opposite answer, unchanged.
+        Gate(GovernancePolicySnapshot.Empty).Evaluate("file_write", "{}")
+            .Outcome.Should().Be(ToolLoopGateOutcome.Allowed);
+    }
+
+    [Test]
+    public void AnUnavailableSnapshot_StillAllowsUncataloguedNames_EpicD2()
+    {
+        Gate(GovernancePolicySnapshot.Unavailable).Evaluate("mcp__server__tool", "{}")
+            .Outcome.Should().Be(ToolLoopGateOutcome.Allowed,
+                "a catalog gap is still never a production stall (epic D2)");
+    }
+
     [Test]
     public void UncataloguedNames_StayAllowed_UnderTheResolverBackedGate()
     {

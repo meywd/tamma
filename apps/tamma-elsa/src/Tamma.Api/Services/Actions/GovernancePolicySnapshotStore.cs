@@ -16,7 +16,11 @@ namespace Tamma.Api.Services.Actions;
 /// singleton <c>volatile</c> whole-snapshot swapped atomically, a lazy
 /// 60-second TTL refresh (readers never block), a cold-start priming hosted
 /// service (<see cref="GovernancePolicySnapshotPrimingService"/>) so the first
-/// requests after a restart honour persisted policy, MONOTONIC version-gated
+/// requests after a restart honour persisted policy — and, since the 43-5 F6
+/// close (2026-07-30), an explicit <see cref="GovernancePolicySnapshot.IsAuthoritative"/>
+/// bit so that a store which has NEVER loaded is distinguishable from one that
+/// loaded an empty table (the former makes every gate fail CLOSED; the latter is
+/// the ordinary zero-config deployment), MONOTONIC version-gated
 /// installs (a slow load that began before a write can never swap the
 /// pre-write snapshot back in), and invalidate-on-write (the policy endpoints
 /// call <see cref="RefreshAsync"/> after every repository write, so the
@@ -64,6 +68,17 @@ public sealed class GovernancePolicySnapshotStore : IGovernancePolicySnapshotPro
     private readonly TimeProvider _timeProvider;
 
     private volatile FullSnapshot _snapshot = FullSnapshot.Empty;
+
+    /// <summary>
+    /// 0 until a load has SUCCEEDED at least once (43-5 F6 close, 2026-07-30).
+    /// Every projection carries it as
+    /// <see cref="GovernancePolicySnapshot.IsAuthoritative"/>, so "the table is
+    /// empty" and "the table has never been read" stop being the same value on
+    /// the wire. A store with no repository is authoritative from birth: with no
+    /// control-plane database there are no rows to miss.
+    /// </summary>
+    private int _everLoaded;
+
     private long _loadedAtTicks = DateTimeOffset.MinValue.UtcTicks;
     private int _refreshing; // 0|1 — single-flight guard for the lazy refresh
 
@@ -86,7 +101,20 @@ public sealed class GovernancePolicySnapshotStore : IGovernancePolicySnapshotPro
         _mode = mode;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        if (repository is null)
+        {
+            // No control-plane repository — the empty snapshot IS the truth, and
+            // it is authoritative (nothing could ever be read).
+            _everLoaded = 1;
+        }
     }
+
+    /// <summary>
+    /// FALSE until a load has succeeded (F6). Exposed for the priming service's
+    /// fail-loud logging and for tests; the evaluator consumes it through
+    /// <see cref="GovernancePolicySnapshot.IsAuthoritative"/>.
+    /// </summary>
+    public bool IsAuthoritative => Volatile.Read(ref _everLoaded) == 1;
 
     /// <inheritdoc />
     public GovernancePolicySnapshot GetSnapshot(GovernancePrincipal principal)
@@ -139,6 +167,9 @@ public sealed class GovernancePolicySnapshotStore : IGovernancePolicySnapshotPro
                     _installedVersion = version;
                     _snapshot = snapshot;
                     Volatile.Write(ref _loadedAtTicks, _timeProvider.GetUtcNow().UtcTicks);
+                    // A successful read is what makes the snapshot authoritative
+                    // (F6) — never set on the failure path below.
+                    Volatile.Write(ref _everLoaded, 1);
                 }
                 // else: a newer load already installed — discard this one.
             }
@@ -146,10 +177,24 @@ public sealed class GovernancePolicySnapshotStore : IGovernancePolicySnapshotPro
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            // Never break a gate read over a policy-store blip — keep serving
-            // the previous snapshot; the next TTL expiry retries.
-            _logger.LogWarning(ex,
-                "action_assignments snapshot refresh failed; serving the previous snapshot.");
+            // A refresh failure AFTER a successful load keeps serving the last
+            // good snapshot (a policy-store blip must not break a gate read).
+            // A refresh failure BEFORE any successful load leaves the store
+            // NON-authoritative, and every gate that reads it fails CLOSED
+            // (F6) — which is an error, not a warning: it is an outage of the
+            // governance surface, and until 43-5 F6 it was silent.
+            if (IsAuthoritative)
+            {
+                _logger.LogWarning(ex,
+                    "action_assignments snapshot refresh failed; serving the previous snapshot.");
+            }
+            else
+            {
+                _logger.LogError(ex,
+                    "action_assignments snapshot has NEVER loaded successfully; the governance "
+                    + "snapshot is NOT authoritative and every autonomy-gate evaluation will fail "
+                    + "CLOSED (requires-human / denied) until a refresh succeeds.");
+            }
         }
     }
 
@@ -192,12 +237,16 @@ public sealed class GovernancePolicySnapshotStore : IGovernancePolicySnapshotPro
         return _snapshot;
     }
 
-    private static GovernancePolicySnapshot Project(FullSnapshot s, PrincipalRows? principalRows) =>
+    private GovernancePolicySnapshot Project(FullSnapshot s, PrincipalRows? principalRows) =>
         new(
             s.PlatformRows.ActionRows,
             s.PlatformRows.GroupRows,
             principalRows?.ActionRows ?? PrincipalRows.None.ActionRows,
-            principalRows?.GroupRows ?? PrincipalRows.None.GroupRows);
+            principalRows?.GroupRows ?? PrincipalRows.None.GroupRows)
+        {
+            // F6 — an unprimed store's empty rows are IGNORANCE, not policy.
+            IsAuthoritative = this.IsAuthoritative,
+        };
 
     /// <summary>One principal's rows split by target kind.</summary>
     private sealed record PrincipalRows(
@@ -310,6 +359,14 @@ public sealed class GovernancePolicySnapshotStore : IGovernancePolicySnapshotPro
 /// refresh landed — for a SAFETY store that window is an admin tightening
 /// silently not applied. Fail-soft: a briefly-unavailable DB must not crash
 /// the host; the lazy TTL refresh remains the fallback.
+///
+/// <para><b>Fail-soft is no longer fail-OPEN (43-5 F6, 2026-07-30).</b> Priming
+/// still never crashes the host, but an unprimed store now serves a
+/// NON-authoritative snapshot, and every autonomy-gate evaluation over it fails
+/// CLOSED (requires-human, or denied where no human wait exists) with
+/// <c>policy-snapshot-unavailable</c> provenance. The host coming up during a
+/// control-plane outage therefore withholds automation instead of silently
+/// discarding every admin tightening.</para>
 /// </summary>
 public sealed class GovernancePolicySnapshotPrimingService : IHostedService
 {
@@ -335,9 +392,11 @@ public sealed class GovernancePolicySnapshotPrimingService : IHostedService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex,
-                "action_assignments startup priming failed; the store starts empty "
-                + "(shipped defaults) and the lazy TTL refresh remains the fallback.");
+            _logger.LogError(ex,
+                "action_assignments startup priming failed; the governance snapshot is NOT "
+                + "authoritative, so every autonomy-gate evaluation FAILS CLOSED "
+                + "(requires-human / denied) until the lazy TTL refresh succeeds. This is an "
+                + "outage of the governance surface, not a benign default (43-5 F6).");
         }
     }
 

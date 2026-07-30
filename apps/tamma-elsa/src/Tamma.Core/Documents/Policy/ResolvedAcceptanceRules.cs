@@ -33,4 +33,19 @@ public sealed record ResolvedAcceptanceRules(
     [property: JsonPropertyName("source")] AcceptanceRulesSource Source,
     [property: JsonPropertyName("version")] int Version,
     [property: JsonPropertyName("documentTypeKey")] string DocumentTypeKey,
-    [property: JsonPropertyName("resolvedAt")] DateTimeOffset ResolvedAt);
+    [property: JsonPropertyName("resolvedAt")] DateTimeOffset ResolvedAt)
+{
+    /// <summary>
+    /// TRUE when the winning tier carried a LOWER <see cref="AcceptorRequirement"/>
+    /// than this document type's shipped floor and was raised back up to it
+    /// (<see cref="AcceptanceFloors.ApplyShippedAcceptorFloor"/>, epic-43 CD-1,
+    /// 2026-07-30). It makes the one non-wholesale field in an otherwise
+    /// wholesale resolution VISIBLE rather than surprising: <see cref="Source"/>
+    /// still names the row that supplied every other field, and this flag says
+    /// "…except the acceptor requirement, which the shipped per-type floor
+    /// supplied". Additive on the wire; false for every resolution that was not
+    /// raised.
+    /// </summary>
+    [JsonPropertyName("acceptorRequirementFloored")]
+    public bool AcceptorRequirementFloored { get; init; }
+}

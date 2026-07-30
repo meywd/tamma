@@ -43,6 +43,13 @@ namespace Tamma.Api.Tests.Tracker;
 /// <see cref="ApiTestFixture.ResetDatabaseAsync"/> in <c>[SetUp]</c>, so the
 /// sweep enumerates an empty fleet and returns immediately.</para>
 ///
+/// <para>2026-07-30 — this fixture also carries the endpoint's CONTRACT tests
+/// (the "── the 2026-07-30 contract ──" region), because they need exactly the
+/// same production-auth host and the env manipulation that builds it is
+/// process-global. They pin the flipped default (a bare POST is a dry run), the
+/// loud rejection of the old <c>dryRun=false</c> spelling, the confirmation
+/// header, and the 202-plus-poll shape of an apply.</para>
+///
 /// <para>REQUIRES DOCKER (the shared assembly fixture's Postgres container).</para>
 /// </summary>
 [TestFixture]
@@ -203,5 +210,167 @@ public class TenantMigrationEndpointAuthTests
         body.GetProperty("total").GetInt32().Should().Be(0,
             "[SetUp] truncated the tenants table, so the sweep enumerates an empty fleet");
         body.GetProperty("failed").GetInt32().Should().Be(0);
+    }
+
+    [Test]
+    public async Task Member_Gets403_OnRunStatus()
+    {
+        // The status route reads sweep state and, on a miss, probes the cluster
+        // lock — same platform-owner gate as the sweep itself.
+        using var member = Client("member", "user");
+
+        var response = await member.GetAsync($"/api/admin/tenants/migrate/{Guid.NewGuid():D}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    // ── the 2026-07-30 contract ────────────────────────────────────────
+    //
+    // Item 1 of the sweep-hygiene follow-up: `dryRun` used to default to FALSE,
+    // so a bare POST — the exact request an operator makes to see what the
+    // endpoint does — applied schema migrations across the whole fleet.
+
+    private const string MigrateBase = "/api/admin/tenants/migrate";
+
+    private static HttpRequestMessage Post(string url, bool confirm = false)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, url);
+        if (confirm)
+            request.Headers.Add(
+                Tamma.Api.Endpoints.Admin.AdminTenantMigrationEndpoints.ConfirmHeader,
+                Tamma.Api.Endpoints.Admin.AdminTenantMigrationEndpoints.ConfirmValue);
+        return request;
+    }
+
+    [Test]
+    public async Task BarePost_IsADryRun_AndSaysSoUnmistakably()
+    {
+        using var platformAdmin = Client("member", "platform_admin");
+
+        var response = await platformAdmin.SendAsync(Post(MigrateBase));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("mode").GetString().Should().Be("dry-run",
+            "a POST with no body and no query must report, never mutate");
+        body.GetProperty("applied").GetBoolean().Should().BeFalse();
+        body.GetProperty("dryRun").GetBoolean().Should().BeTrue();
+        body.GetProperty("message").GetString().Should().Contain("DRY RUN");
+    }
+
+    [Test]
+    public async Task DryRunFalse_IsRefused_LoudlyRatherThanReinterpreted()
+    {
+        // A caller scripted against the old default must learn about the change
+        // from an error, not from a fleet that migrated when they expected a
+        // report — and not from a silent no-op either.
+        using var platformAdmin = Client("member", "platform_admin");
+
+        var response = await platformAdmin.SendAsync(Post($"{MigrateBase}?dryRun=false"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("error").GetString().Should().Be("apply_requires_explicit_opt_in");
+    }
+
+    [Test]
+    public async Task Apply_WithoutTheConfirmHeader_Is400()
+    {
+        using var platformAdmin = Client("member", "platform_admin");
+
+        var response = await platformAdmin.SendAsync(Post($"{MigrateBase}?apply=true"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("error").GetString().Should().Be("confirmation_required",
+            "the destructive routes one file over (force-delete, cleanup) demand "
+            + "X-Admin-Confirm; a fleet-wide migration is not a smaller blast radius");
+    }
+
+    [Test]
+    public async Task ApplyAndDryRunTogether_Is400()
+    {
+        using var platformAdmin = Client("member", "platform_admin");
+
+        var response = await platformAdmin.SendAsync(
+            Post($"{MigrateBase}?apply=true&dryRun=true", confirm: true));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await response.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("error").GetString().Should().Be("conflicting_mode");
+    }
+
+    [Test]
+    public async Task Apply_WithConfirmHeader_Is202_AndTheRunIsPollableToCompletion()
+    {
+        // Item 3: the sweep used to run inside the request, so a large fleet
+        // timed the caller out while the DDL kept going. Now: prompt 202 + a
+        // run id. (The fleet here is empty — [SetUp] truncated tenants — so the
+        // background run completes almost immediately.)
+        using var platformAdmin = Client("member", "platform_admin");
+
+        var response = await platformAdmin.SendAsync(
+            Post($"{MigrateBase}?apply=true", confirm: true));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var accepted = await response.Content.ReadFromJsonAsync<JsonElement>();
+        accepted.GetProperty("mode").GetString().Should().Be("apply");
+        accepted.GetProperty("applied").GetBoolean().Should().BeTrue();
+        var runId = accepted.GetProperty("runId").GetGuid();
+        var statusUrl = accepted.GetProperty("statusUrl").GetString()!;
+        statusUrl.Should().Be($"/api/admin/tenants/migrate/{runId:D}");
+
+        var final = await PollToTerminalAsync(platformAdmin, statusUrl);
+        final.GetProperty("state").GetString().Should().Be("completed");
+        final.GetProperty("mode").GetString().Should().Be("apply");
+        final.GetProperty("result").GetProperty("total").GetInt32().Should().Be(0);
+    }
+
+    [Test]
+    public async Task DryRun_CanOptIntoTheSame202_ForAVeryLargeFleet()
+    {
+        using var platformAdmin = Client("member", "platform_admin");
+
+        var response = await platformAdmin.SendAsync(Post($"{MigrateBase}?async=true"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var accepted = await response.Content.ReadFromJsonAsync<JsonElement>();
+        accepted.GetProperty("mode").GetString().Should().Be("dry-run");
+        accepted.GetProperty("applied").GetBoolean().Should().BeFalse();
+
+        var final = await PollToTerminalAsync(
+            platformAdmin, accepted.GetProperty("statusUrl").GetString()!);
+        final.GetProperty("state").GetString().Should().Be("completed");
+        final.GetProperty("result").GetProperty("dryRun").GetBoolean().Should().BeTrue();
+    }
+
+    [Test]
+    public async Task UnknownRunId_Is404_AndSaysRunStateIsPerInstance()
+    {
+        using var platformAdmin = Client("member", "platform_admin");
+
+        var response = await platformAdmin.GetAsync(
+            $"/api/admin/tenants/migrate/{Guid.NewGuid():D}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("error").GetString().Should().Be("run_not_found_on_this_instance");
+        body.GetProperty("sweepRunningOnSomeInstance").GetBoolean().Should().BeFalse();
+    }
+
+    private static async Task<JsonElement> PollToTerminalAsync(HttpClient client, string statusUrl)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (DateTime.UtcNow < deadline)
+        {
+            var status = await client.GetAsync(statusUrl);
+            status.StatusCode.Should().Be(HttpStatusCode.OK,
+                "the run was started by this very instance, so its status must be readable");
+            var body = await status.Content.ReadFromJsonAsync<JsonElement>();
+            if (body.GetProperty("state").GetString() != "running") return body;
+            await Task.Delay(50);
+        }
+
+        throw new TimeoutException($"{statusUrl} never left the running state");
     }
 }
