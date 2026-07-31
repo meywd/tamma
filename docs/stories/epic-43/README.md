@@ -497,15 +497,32 @@ governance snapshot DENIED every catalogued tool, in both SaaS and single-user-w
 deployments, with no operator lever short of a code change. What shipped: a **config-sourced**
 override (`Tamma:Governance:BreakGlass:Enabled` / `:ExpiresAtUtc` / `:Reason`) — no endpoint and no
 writer, because an API that can switch off a governance posture is itself a governance surface; it
-**refuses to engage** without an explicit UTC expiry or with one already past; it logs at ERROR on
-engage, refusal, expiry and **every bypassed decision**; and each bypassed decision writes a distinct
-`ACTION.GATE.BREAK_GLASS_BYPASS` audit row on the **non-swallowing** append path, with its own
-provenance value (`break-glass`). **The load-bearing scoping decision:** it bypasses **degradation
-only** — a decision denied by a policy row that was read successfully, by a platform ceiling, by a
-disable, by a role restriction or by an `AlwaysHuman` shipped default is **still denied** while it is
-engaged. That is the difference between an outage lever and a backdoor, and it is enforced by
-construction in `AutonomyGateEvaluator` rather than by convention. Full write-up: 43-5 → "F11 —
-CLOSED". Alongside it, **`43-5 F12` remains OPEN**: the one live seam HARD-DENIES rather than
+**refuses to engage** without an explicit UTC expiry, with one already past, or with one **more than
+24 hours away** (the cap added by review MEDIUM-3, 2026-07-31 — without it `9999-12-31T23:59:59Z`
+satisfied "mandatory expiry"); it logs at ERROR on engage, refusal, expiry and **every bypassed
+decision**; and each bypassed decision writes a distinct `ACTION.GATE.BREAK_GLASS_BYPASS` audit row
+on the **non-swallowing** append path, with its own provenance value (`break-glass`). **The
+load-bearing scoping decision:** it bypasses **degradation only** — a decision denied by a policy row
+that was read successfully, by a platform ceiling, by a disable, by a role restriction or by an
+`AlwaysHuman` shipped default is **still denied** while it is engaged. That is the difference between
+an outage lever and a backdoor, and it is enforced by construction in `AutonomyGateEvaluator` rather
+than by convention.
+
+Two precisions this paragraph used to get wrong, both corrected 2026-07-31:
+
+- **"every bypassed decision" means the decisions the override PERMITTED**, and since review
+  MEDIUM-1 that is exactly what `break-glass` provenance and the `BREAK_GLASS_BYPASS` row select.
+  Until then the evaluator stamped `BreakGlass` on the whole evaluation as soon as the override was
+  in play, so denials the override had never touched emitted bypass rows and carried
+  `breakGlass=true` on their `ACTION.GATE.DENIED` row — the correspondence read as 1:1 and was not.
+  One residual asymmetry, deliberate and documented: **Seam B** (`InlineToolLoopRunner`) emits its
+  row for the allowed *and* the denied shape, so there it means "the override was in force for this
+  call". Union the two seams only with a `seam` filter.
+- **There is ONE live gate, not two.** `IAutonomyGate`/`AutonomyGateService` has **no production
+  caller** (43-5 D12 — Story 43-9 adds them), so the only gate a bypass can actually happen at today
+  is Seam B. Wherever this epic said "at both live gates", read "at the gate that is live".
+
+Full write-up: 43-5 → "F11 — CLOSED". Alongside it, **`43-5 F12` remains OPEN**: the one live seam HARD-DENIES rather than
 escalating — `ToolLoopGateOutcome` has no `RequiresHuman` case, so a degraded decision reaches the
 model as a tool rejection and reaches no person at all. Break-glass changes *whether* work continues,
 not *who is asked*.

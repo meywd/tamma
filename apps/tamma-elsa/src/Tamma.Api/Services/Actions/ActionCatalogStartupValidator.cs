@@ -191,9 +191,22 @@ internal sealed class ActionCatalogStartupValidator : Microsoft.Extensions.Hosti
 
         // ── Check 3: advertised + defensive names resolve
         //    (ACTION.CATALOG.UNRESOLVABLE_TOOL_ALIAS) ──
+        //
+        // `key.Ns == Tool` is required here for the same reason checks 1, 2 and 4
+        // require it, and its absence was a real loosening (review LOW-5,
+        // 2026-07-31): once `TryResolve` grew the `mcp__*` PREFIX rule, EVERY name
+        // starting `mcp__` resolved — to `effect:mcp.tool.invoke`, which is a real
+        // catalog member — so `("developer", "mcp__evil__anything")` stopped being
+        // a violation and Tamma.Api booted on it. These two vocabularies are the
+        // FINITE ones: an agent config advertising a name, and the shell-tool
+        // defensive list. A remote MCP server's tools reach the gate at runtime by
+        // design and are governed there; a name baked into a shipped agent config
+        // is a drift bug, and CI is the half of the D2 bargain that must still
+        // catch it.
         foreach (var (role, name) in inputs.AdvertisedNames)
         {
             if (!ToolNameAliases.TryResolve(name, out var key)
+                || key.Ns != ActionNamespace.Tool
                 || !ActionCatalog.TryGet(key, out _))
             {
                 violations.Add(new Violation(
@@ -210,6 +223,7 @@ internal sealed class ActionCatalogStartupValidator : Microsoft.Extensions.Hosti
         foreach (var name in inputs.ShellToolNames)
         {
             var resolves = ToolNameAliases.TryResolve(name, out var key)
+                           && key.Ns == ActionNamespace.Tool   // LOW-5 — see check 3
                            && ActionCatalog.TryGet(key, out _);
             if (!resolves && !defensive.Contains(name))
             {

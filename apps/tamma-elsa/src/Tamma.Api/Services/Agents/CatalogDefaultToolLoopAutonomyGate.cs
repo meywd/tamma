@@ -243,6 +243,17 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
         key = default;
         if (string.IsNullOrWhiteSpace(toolName)) return false;
 
+        // TRIM before resolving (review LOW-6, 2026-07-31). The name comes off a
+        // model's tool call, and both resolution routes are exact-prefix/exact-key
+        // matches: `" mcp__server__tool"` missed `IsMcpToolName`'s StartsWith and
+        // came back UNCATALOGUED — i.e. Allowed — where `"mcp__server__tool"` is
+        // Denied. No capability exists behind an MCP name today (no executor is
+        // registered), so nothing was reachable through the gap, but a governance
+        // pin a leading space evades is not a pin. The whitespace guard above
+        // already treats blank as unresolvable; this makes the rest of the string
+        // agree with it.
+        toolName = toolName.Trim();
+
         // git_operations is the one argument-bound split (43-2 AC8): grade by
         // the call's subcommand; bare/unparseable grades as .write (fail-safe).
         if (string.Equals(toolName, "git_operations", StringComparison.OrdinalIgnoreCase))

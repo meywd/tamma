@@ -132,6 +132,138 @@ public class GovernanceBreakGlassTests
             + "no lingering half-engaged state");
     }
 
+    /// <summary>
+    /// <b>LOW-4 (review 2026-07-31).</b> Expiry is LATCHED: once the process has
+    /// seen the override expire, it stays expired for the lifetime of the process.
+    /// It used to be re-derived from the clock on every call with nothing
+    /// remembered, so a clock that went backwards — an NTP step correction, a
+    /// suspended VM resuming, a host with a bad RTC — silently RE-ENGAGED the
+    /// override. Silently is the operative word: the "EXPIRED" ERROR is latched by
+    /// its own flag and the "ENGAGED" ERROR is constructor-only, so the second
+    /// engagement produced ZERO log lines.
+    /// </summary>
+    [Test]
+    public void AnExpiredOverride_StaysExpired_EvenIfTheClockGoesBackwards()
+    {
+        var time = new FakeTimeProvider(Now);
+        var bg = Build(time,
+            (ConfigurationGovernanceBreakGlass.EnabledKey, "true"),
+            (ConfigurationGovernanceBreakGlass.ExpiresAtUtcKey, "2026-07-30T13:00:00Z"));
+
+        bg.Current().IsEngaged.Should().BeTrue();
+
+        time.Advance(TimeSpan.FromHours(1));
+        bg.Current().IsEngaged.Should().BeFalse();
+
+        time.Advance(TimeSpan.FromHours(-1)); // the clock steps back before the expiry
+        bg.Current().Should().Be(BreakGlassState.NotEngaged,
+            "an override that has already ended must not come back because the clock moved; "
+            + "re-engaging is a configuration change plus a restart, and nothing else");
+    }
+
+    // ── MEDIUM-3: the maximum duration ──────────────────────────────────────
+
+    /// <summary>
+    /// A future expiry is not enough on its own: the window is CAPPED at 24 hours.
+    /// Break-glass is an outage lever, and an outage still unresolved after a day
+    /// needs a real fix rather than a longer bypass.
+    /// </summary>
+    [Test]
+    public void EnabledWithAnExpiryBeyondTheMaximumDuration_REFUSES_ToEngage()
+    {
+        var bg = Build(new FakeTimeProvider(Now),
+            (ConfigurationGovernanceBreakGlass.EnabledKey, "true"),
+            (ConfigurationGovernanceBreakGlass.ExpiresAtUtcKey, "2026-07-31T12:00:01Z"));
+
+        bg.Current().IsEngaged.Should().BeFalse(
+            "one second past the 24h cap is past the cap; the refusal is logged at ERROR");
+    }
+
+    [Test]
+    public void EnabledWithAnExpiryExactlyAtTheMaximumDuration_Engages()
+    {
+        var bg = Build(new FakeTimeProvider(Now),
+            (ConfigurationGovernanceBreakGlass.EnabledKey, "true"),
+            (ConfigurationGovernanceBreakGlass.ExpiresAtUtcKey, "2026-07-31T12:00:00Z"));
+
+        bg.Current().IsEngaged.Should().BeTrue("the cap is inclusive — exactly 24h is allowed");
+    }
+
+    /// <summary>
+    /// The concrete failure MEDIUM-3 named: only <c>expiresAt &lt;= now</c> was
+    /// rejected, so a year-9999 expiry engaged and stayed engaged — precisely the
+    /// "left on forever" outcome the mandatory expiry exists to prevent, wearing a
+    /// timestamp.
+    /// </summary>
+    [Test]
+    public void AFarFutureExpiry_REFUSES_ToEngage()
+    {
+        var bg = Build(new FakeTimeProvider(Now),
+            (ConfigurationGovernanceBreakGlass.EnabledKey, "true"),
+            (ConfigurationGovernanceBreakGlass.ExpiresAtUtcKey, "9999-12-31T23:59:59Z"));
+
+        bg.Current().IsEngaged.Should().BeFalse(
+            "a mandatory expiry with no upper bound is not a bound");
+    }
+
+    /// <summary>
+    /// The permissive parses are INTENDED — <c>DateTimeOffset.TryParse</c> accepts
+    /// partial forms, and rejecting them would only push operators toward
+    /// copy-pasted full timestamps they understand less. What was missing was the
+    /// bound: a month-precision value engaged for MONTHS. The cap is what makes the
+    /// permissiveness safe, so these are pinned as REFUSALS rather than as parse
+    /// failures.
+    /// </summary>
+    [TestCase("2026-12")]
+    [TestCase("Dec 2026")]
+    public void AMonthPrecisionExpiry_ParsesButIsRefusedByTheCap(string raw)
+    {
+        ConfigurationGovernanceBreakGlass.TryParseUtc(raw, out var parsed)
+            .Should().BeTrue("the parse is deliberately permissive");
+        parsed.Should().BeAfter(Now.AddHours(24));
+
+        Build(new FakeTimeProvider(Now),
+                (ConfigurationGovernanceBreakGlass.EnabledKey, "true"),
+                (ConfigurationGovernanceBreakGlass.ExpiresAtUtcKey, raw))
+            .Current().IsEngaged.Should().BeFalse(
+                "a month-long break-glass is the permanent configuration with extra steps");
+    }
+
+    // ── INFO-8: a malformed Enabled flag fails CLOSED, at construction ───────
+
+    /// <summary>
+    /// <c>IConfiguration.GetValue&lt;bool&gt;</c> THROWS on a non-boolean string.
+    /// Since this type is built inside a DI factory, that surfaced as a
+    /// service-resolution failure on the first gate call — not a startup refusal,
+    /// not an ERROR log, just a 500 from somewhere unrelated. A governance switch
+    /// must fail CLOSED and say so.
+    /// </summary>
+    [TestCase("yes")]
+    [TestCase("1")]
+    [TestCase("on")]
+    [TestCase("TRUE-ish")]
+    public void AnUnparseableEnabledValue_FailsClosed_WithoutThrowing(string raw)
+    {
+        var act = () => Build(new FakeTimeProvider(Now),
+            (ConfigurationGovernanceBreakGlass.EnabledKey, raw),
+            (ConfigurationGovernanceBreakGlass.ExpiresAtUtcKey, "2026-07-30T18:00:00Z"));
+
+        act.Should().NotThrow("a malformed governance flag must not take the DI graph down");
+        act().Current().IsEngaged.Should().BeFalse(
+            "an unreadable Enabled flag is not a true one — the fail-closed posture stays");
+    }
+
+    /// <summary>The genuine boolean spellings still work.</summary>
+    [TestCase("true")]
+    [TestCase("True")]
+    public void AParseableEnabledValue_StillEngages(string raw)
+    {
+        Build(new FakeTimeProvider(Now),
+                (ConfigurationGovernanceBreakGlass.EnabledKey, raw),
+                (ConfigurationGovernanceBreakGlass.ExpiresAtUtcKey, "2026-07-30T18:00:00Z"))
+            .Current().IsEngaged.Should().BeTrue();
+    }
+
     // ── Expiry parsing ──────────────────────────────────────────────────────
 
     [Test]

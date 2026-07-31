@@ -372,10 +372,83 @@ public class AutonomyGateServiceFailurePostureTests
             + "not an off switch for policy that was successfully read");
         decision.EffectiveMinAutonomy.Should().Be(AutonomyDial.AlwaysHuman);
         decision.Reason.Should().Be(AutonomyGateEvaluator.ReasonAlwaysHuman);
+        decision.Source.Should().Be(ActionAssignmentSource.ActionOverride,
+            "review MEDIUM-1 (2026-07-31) — the ROW denied, so the row is what the decision "
+            + "reports; it used to report BreakGlass");
 
-        // Still fully audited: the block row AND the bypass row.
-        events.Appended.Should().Contain(e => e.Type == ActionGateEventsService.RequiresHumanType);
-        events.Appended.Should().Contain(e => e.Type == ActionGateEventsService.BreakGlassBypassType);
+        // Audited as the block it is — and NOT as a bypass.
+        var blockRow = events.Appended.Should()
+            .ContainSingle(e => e.Type == ActionGateEventsService.RequiresHumanType).Subject;
+        Tag(blockRow, "breakGlass").Should().Be("false",
+            "a dashboard filtering breakGlass=true must return the decisions the operator's "
+            + "lever let through, not every decision taken while it happened to be engaged");
+        Tag(blockRow, "assignmentSource").Should().Be("action-override");
+        events.Appended.Should().NotContain(
+            e => e.Type == ActionGateEventsService.BreakGlassBypassType,
+            "MEDIUM-1: the override bypassed nothing here — it was a successfully-read policy "
+            + "row that denied — so there is no bypass to record. This assertion used to be its "
+            + "own inverse (`Should().Contain`), which is what made the bug look intended");
+    }
+
+    /// <summary>
+    /// <b>MEDIUM-2, the sharp end.</b> Before the MEDIUM-1 fix, a denial the
+    /// override had not touched was stamped <c>BreakGlass</c>, which routed it
+    /// through <c>EmitBreakGlassBypassAsync(mustNotSwallow: true)</c> — sequenced
+    /// BEFORE the decision row. So an event store that could not take the (bogus)
+    /// bypass row made <c>EvaluateAsync</c> THROW, and the <c>ACTION.GATE.DENIED</c>
+    /// row was never written either: a disabled action plus an engaged override
+    /// plus a blipping event store took out the gate entirely.
+    /// </summary>
+    [Test]
+    public async Task ADenialUnderAnEngagedOverride_SurvivesAFailingBypassAppend()
+    {
+        var snapshot = GovernancePolicySnapshot.FromSuccessfulRead(
+            new Dictionary<string, ActionAssignmentValue>(StringComparer.Ordinal),
+            new Dictionary<string, ActionAssignmentValue>(StringComparer.Ordinal),
+            new Dictionary<string, ActionAssignmentValue>(StringComparer.Ordinal)
+            {
+                ["agent-action:triage-intake"] = new(null, null, false, null),
+            },
+            new Dictionary<string, ActionAssignmentValue>(StringComparer.Ordinal));
+
+        var events = new FakeEventRepository();
+        events.FailOnTypes.Add(ActionGateEventsService.BreakGlassBypassType);
+        var (gate, _) = Build(
+            baseReadThrows: true, snapshot: snapshot,
+            breakGlass: EngagedOverride, events: events);
+
+        var decision = await gate.EvaluateAsync(Query("agent-action:triage-intake"));
+
+        decision.Outcome.Should().Be(AutonomyOutcome.Denied);
+        decision.Reason.Should().Be(AutonomyGateEvaluator.ReasonDisabled);
+        events.Appended.Should().ContainSingle(e => e.Type == ActionGateEventsService.DeniedType,
+            "the denial's own audit row is the compliance artefact and must not be collateral "
+            + "damage of a bypass row that should never have been attempted");
+    }
+
+    /// <summary>
+    /// The other half of MEDIUM-2: <c>effect:secret.reveal</c> is
+    /// <c>Enforceable = false</c>, so it is Automated whatever policy says and the
+    /// override bypasses nothing. It used to carry <c>BreakGlass</c> anyway, so an
+    /// unavailable snapshot plus an engaged override plus a failing append threw
+    /// on a credential read.
+    /// </summary>
+    [Test]
+    public async Task ANonEnforceableAllow_UnderAnEngagedOverride_IsNotAnAuditableBypass()
+    {
+        var events = new FakeEventRepository();
+        events.FailOnTypes.Add(ActionGateEventsService.BreakGlassBypassType);
+        var (gate, _) = Build(
+            baseReadThrows: false, snapshot: GovernancePolicySnapshot.Unavailable,
+            breakGlass: EngagedOverride, events: events);
+
+        var decision = await gate.EvaluateAsync(Query("effect:secret.reveal"));
+
+        decision.Outcome.Should().Be(AutonomyOutcome.Automated);
+        decision.Reason.Should().Be(AutonomyGateEvaluator.ReasonNotEnforceable);
+        decision.Source.Should().Be(ActionAssignmentSource.Unavailable);
+        events.Appended.Should().NotContain(
+            e => e.Type == ActionGateEventsService.BreakGlassBypassType);
     }
 
     /// <summary>Not engaged ⇒ byte-identical to the F6 posture the rest of this

@@ -202,8 +202,19 @@ public enum ActionAssignmentSource
     /// be able to select exactly those decisions.</para>
     ///
     /// <para><b>It never appears on a decision that a successfully-read policy
-    /// row would have denied</b> — break-glass bypasses degradation only. See
-    /// <see cref="AutonomyGateEvaluator"/>.</para>
+    /// row would have denied</b> — break-glass bypasses degradation only. That
+    /// sentence shipped ahead of the code: until review MEDIUM-1 (2026-07-31) the
+    /// evaluator stamped this value on the whole evaluation as soon as the
+    /// override was in play, so a disabled row, a role mismatch and a platform
+    /// ceiling all came back labelled <c>break-glass</c>. It is now true by
+    /// construction, and true of MORE than it claimed: this value appears on
+    /// exactly the decisions the override PERMITTED. A decision the override did
+    /// not decide — denied by a read row, blocked by a shipped default, or allowed
+    /// by a carve-out that was never going to be blocked — keeps the provenance of
+    /// whatever actually decided it. Pinned in both directions by
+    /// <c>BreakGlassProvenance_NeverAppearsOnADecisionTheOverrideDidNotPermit</c>
+    /// and <c>BreakGlassProvenance_IsStillStamped_WhenTheOverrideGenuinelyPermitted</c>.
+    /// See <see cref="AutonomyGateEvaluator"/>.</para>
     /// </summary>
     BreakGlass,
 }

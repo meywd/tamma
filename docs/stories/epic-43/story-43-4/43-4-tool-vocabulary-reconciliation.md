@@ -239,6 +239,28 @@ applies that posture to tools, which has never been done.
   what the validator iterates for the two FINITE vocabularies; and no capability was added or
   removed — no MCP `IToolExecutor` is registered, so such a call already came back "Unknown tool"
   from `ToolExecutorRegistry`. Only the rejection's provenance changed.
+
+  **Absence from `All` was not, by itself, enough — corrected 2026-07-31 (review LOW-5).** Two of
+  the startup validator's four checks ask "does this name resolve?" by calling `TryResolve` and were
+  written before the prefix rule existed. Checks 1, 2 and 4 also require `key.Ns == ActionNamespace.Tool`;
+  **check 3 (the advertised `DefaultAgentConfig` names) and the `KnownShellToolNames` check did
+  not.** Once every `mcp__*` name resolved — to a real catalog member — those two checks silently
+  stopped firing for the whole family: `("developer", "mcp__evil__anything")` produced no
+  `ACTION.CATALOG.UNRESOLVABLE_TOOL_ALIAS` violation where before the prefix rule it refused startup.
+  Both now require the `tool:` namespace, restoring the strictness. The distinction being enforced:
+  an `mcp__*` name arriving at the GATE at runtime is the design and is governed there; an `mcp__*`
+  name baked into a shipped agent config or the shell-tool defensive list is **drift**, and CI is the
+  half of D2's bargain that has to catch it. Pinned by `Boot_Throws_WhenAnAdvertisedNameIsAnMcpName`,
+  `Boot_Throws_WhenAShellToolNameIsAnMcpName`, and `TheLiveVocabularies_StillProduceNoViolations` as
+  the control.
+
+  **Whitespace, same family (review LOW-6, fixed 2026-07-31).** `IsMcpToolName` is a `StartsWith`
+  and `CatalogDefaultToolLoopAutonomyGate.TryResolveKey` guarded `IsNullOrWhiteSpace` without ever
+  TRIMMING, so `" mcp__server__tool"` resolved to nothing and came back Allowed/uncatalogued while
+  `"mcp__server__tool"` was Denied. Nothing was reachable through it — still no MCP executor — but a
+  governance pin one leading space walks around is not a pin. The gate now trims before resolving;
+  pinned by `AnMcpToolName_IsStillDenied_WhenTheModelPadsItWithWhitespace` and
+  `APaddedRegistryName_StillResolvesToItsCatalogMember`.
 - **Registering `GetAcceptanceRulesTool` in DI.** Deliberately excluded (39-5 D6); it is an allowlist entry,
   not a bug.
 - **Anything in `Tamma.ElsaServer`'s tool surface.** There is none.
@@ -299,4 +321,5 @@ follow-ups below already presume it. Recording it here so the story's own text a
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-25 | 1.0.0   | Initial story creation | Claude |
 | 2026-07-29 | 1.0.1   | Review follow-ups closed: git-grading hole recorded in catalog; non-enforceable + parallel-path gate tests added; null-threshold denial message fixed | Claude |
+| 2026-07-31 | 1.0.3   | Adversarial-review fixes to the MCP prefix rule. **LOW-5** — the prefix rule had loosened two drift checks: `ActionCatalogStartupValidator.Check`'s advertised-names check and its `KnownShellToolNames` check called `TryResolve` without also requiring `key.Ns == Tool` (checks 1, 2 and 4 do), so an `mcp__*` name in a shipped agent config stopped being a startup violation. Strictness restored, with the tool-plane requirement now on all four. **LOW-6** — `CatalogDefaultToolLoopAutonomyGate.TryResolveKey` now TRIMS before resolving; a leading space made an `mcp__*` name resolve to nothing and come back Allowed. | Claude |
 | 2026-07-30 | 1.0.2   | MCP governance decision: `ToolNameAliases` resolves the `mcp__*` prefix family to `effect:mcp.tool.invoke` (the one alias outside the `tool:` plane) and that member now ships `AlwaysHuman` — because MCP is the one family for which epic D2's "unmergeable in CI" half cannot exist. Resolution-only guarantee, `All`-iterating validator checks and advertised names all unchanged. Also: the Seam B gate now honours the 43-5 F11 break-glass override. | Claude |

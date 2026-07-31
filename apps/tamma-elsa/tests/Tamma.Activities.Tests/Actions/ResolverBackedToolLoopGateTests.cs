@@ -238,6 +238,44 @@ public class ResolverBackedToolLoopGateTests
     }
 
     /// <summary>
+    /// <b>Review LOW-6 (2026-07-31).</b> The gate guarded
+    /// <c>IsNullOrWhiteSpace</c> but never TRIMMED, and both resolution routes are
+    /// exact matches — <c>IsMcpToolName</c> is a <c>StartsWith</c>. So
+    /// <c>" mcp__server__tool"</c> resolved to nothing and came back
+    /// Allowed/uncatalogued while the identical name without the space was Denied:
+    /// a governance pin one leading space walked around. Nothing was reachable
+    /// through it (no MCP executor is registered, so the call would still have
+    /// died at the registry), but a pin that whitespace evades is not a pin.
+    /// </summary>
+    [TestCase(" mcp__server__tool")]
+    [TestCase("mcp__server__tool ")]
+    [TestCase("\tmcp__server__tool\n")]
+    public void AnMcpToolName_IsStillDenied_WhenTheModelPadsItWithWhitespace(string emitted)
+    {
+        var decision = Gate(GovernancePolicySnapshot.Empty).Evaluate(emitted, "{}");
+
+        decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied,
+            "the trimmed name is the name; whitespace is not a namespace");
+        decision.Reason.Should().Be("always-human");
+        decision.ActionKey.Should().Be(
+            new ActionKey(ActionNamespace.Effect, ExternalEffect.McpToolInvoke.ToWire()));
+    }
+
+    /// <summary>The same trim on an ordinary registry name, so the fix is not
+    /// MCP-shaped: a padded <c>shell_execute</c> is graded, not waved through.</summary>
+    [Test]
+    public void APaddedRegistryName_StillResolvesToItsCatalogMember()
+    {
+        var snapshot = With(principalActions: new(StringComparer.Ordinal)
+        {
+            ["tool:shell_execute"] = new(AutonomyDial.AlwaysHuman, null, null, null),
+        });
+
+        Gate(snapshot).Evaluate("  shell_execute  ", "{}")
+            .Outcome.Should().Be(ToolLoopGateOutcome.Denied);
+    }
+
+    /// <summary>
     /// And a single admin row at the floor re-opens the whole family — the
     /// reversibility the decision rests on, proved through the real assignment
     /// ladder rather than the rehearsal seam.

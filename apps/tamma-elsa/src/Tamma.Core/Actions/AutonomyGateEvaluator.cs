@@ -102,9 +102,24 @@ namespace Tamma.Core.Actions;
 /// So the override can only ever restore the answer the system would have given
 /// had the unreadable input said "nothing" — it can never produce an answer more
 /// permissive than a healthy read of the rows it could not see would have
-/// allowed at their most permissive. A bypassed decision is stamped
-/// <see cref="ActionAssignmentSource.BreakGlass"/> so it is distinguishable in
-/// provenance from both a healthy decision and a degraded-denied one.</para>
+/// allowed at their most permissive.</para>
+///
+/// <para><b>PROVENANCE follows the same boundary, and did not used to (review
+/// MEDIUM-1, 2026-07-31).</b>
+/// <see cref="ActionAssignmentSource.BreakGlass"/> is stamped at exactly ONE
+/// return — the automated one reached with the bypass in force — so it marks
+/// decisions the override PERMITTED and nothing else. Every decision the
+/// override did not decide keeps the provenance of whatever DID decide it: a
+/// disabled row reports the plane that disabled, a role mismatch reports the
+/// plane whose restriction excluded, a platform ceiling reports
+/// <see cref="ActionAssignmentSource.PlatformCeiling"/>, a shipped default
+/// resolved over an unreadable snapshot reports
+/// <see cref="ActionAssignmentSource.Unavailable"/>. This matters beyond
+/// tidiness: the <c>breakGlass</c> audit tag and the dedicated
+/// <c>ACTION.GATE.BREAK_GLASS_BYPASS</c> row are gated on this provenance, so
+/// the old blanket stamp emitted bypass rows for denials the override had never
+/// touched — and, because that append deliberately does not swallow, could fail
+/// the whole evaluation over one.</para>
 /// </summary>
 public static class AutonomyGateEvaluator
 {
@@ -229,6 +244,23 @@ public static class AutonomyGateEvaluator
         //    same composition the Seam B tool-loop gate reads) ───────────────
         var (effectiveMin, source) = ResolveEffectiveMinAutonomy(descriptor, snapshot, breakGlass);
 
+        // F11, corrected 2026-07-31 (review MEDIUM-1). `ResolveEffectiveMinAutonomy`
+        // reports `BreakGlass` to mean "the fail-closed SUBSTITUTION was suspended
+        // and the SHIPPED DEFAULT was used instead" — a fact about the
+        // RESOLUTION, not yet about the decision. Whether the override actually
+        // PERMITTED anything is only knowable at the outcome, so the provenance is
+        // carried honestly here (the value in hand was resolved over an unreadable
+        // snapshot ⇒ `Unavailable`, which is what keeps the `degraded` audit tag
+        // true) and `BreakGlass` is stamped at the ONE return where the bypass
+        // decided the answer. Before this, every guard below inherited
+        // `BreakGlass` and a disabled row / role mismatch / platform ceiling came
+        // out labelled as a bypass, emitting a spurious BREAK_GLASS_BYPASS row for
+        // a denial the override had nothing to do with.
+        if (source == ActionAssignmentSource.BreakGlass)
+        {
+            source = ActionAssignmentSource.Unavailable;
+        }
+
         if (baseRules is null && !bypassing)
         {
             // The base-rules read FAILED. The legacy always-escalate floor lives
@@ -240,20 +272,19 @@ public static class AutonomyGateEvaluator
             // floor, became AUTOMATED on a blip.
             (effectiveMin, source) = (AutonomyDial.AlwaysHuman, ActionAssignmentSource.Unavailable);
         }
-        else if (baseRules is null)
-        {
-            // BREAK-GLASS, acceptance-rules half (F11). The ASSIGNMENT ROWS were
-            // read successfully in this branch (degradedReason is checked in a
-            // fixed order — a non-authoritative snapshot wins, so reaching here
-            // with null baseRules means the snapshot IS authoritative). So
-            // `effectiveMin` above is a REAL, successfully-read resolution and is
-            // kept verbatim: the override skips the unreadable LEGACY FLOOR and
-            // nothing else. If that real resolution blocks, it still blocks —
-            // this is the anti-backdoor boundary, and it is why the assignment
-            // is not overwritten here.
-            source = ActionAssignmentSource.BreakGlass;
-        }
-        else if (LegacyAlwaysEscalates(descriptor.Key, baseRules.Rules)
+        // else if (baseRules is null) — BREAK-GLASS, acceptance-rules half (F11).
+        // Deliberately NO branch: the ASSIGNMENT ROWS were read successfully here
+        // (degradedReason is checked in a fixed order — a non-authoritative
+        // snapshot wins, so reaching here with null baseRules means the snapshot
+        // IS authoritative), so `effectiveMin` AND its provenance are a REAL,
+        // successfully-read resolution and are kept verbatim. The override skips
+        // the unreadable LEGACY FLOOR and nothing else. If that real resolution
+        // blocks, it still blocks, and it is attributed to the ROW that blocked it
+        // — this is the anti-backdoor boundary, and stamping `BreakGlass` here (as
+        // the code did until review MEDIUM-1, 2026-07-31) both invented a bypass
+        // that had not happened and destroyed the real provenance.
+        else if (baseRules is not null
+            && LegacyAlwaysEscalates(descriptor.Key, baseRules.Rules)
             && AutonomyDial.AlwaysHuman > effectiveMin)
         {
             // Legacy always-escalate floor (agent-action / document-type planes
@@ -301,22 +332,43 @@ public static class AutonomyGateEvaluator
         // that holds under degradation too. Turning a credential fetch into a
         // human gate during a control-plane blip would amplify the outage, not
         // make anything safer (epic OQ2: reading a secret never needs a human).
+        //
+        // BREAK-GLASS (F11) is deliberately NOT stamped here even when engaged,
+        // for exactly the reason already given at the uncatalogued short-circuit
+        // above: this allow was never going to be blocked, so the override
+        // bypassed nothing (review MEDIUM-2, 2026-07-31 — the identical reasoning
+        // had simply never been applied to this carve-out, so a not-enforceable
+        // allow came back stamped `BreakGlass` and drove the non-swallowing bypass
+        // append, which could fail the whole evaluation over a decision nothing
+        // had bypassed). The DEGRADED provenance is kept, matching the
+        // uncatalogued carve-out: an allow decided over an unreadable input is
+        // still the surface an auditor needs a record of.
         if (!descriptor.Enforceable)
         {
-            return Decision(AutonomyOutcome.Automated, ReasonNotEnforceable, enforcedOverride: false);
+            return Decision(
+                AutonomyOutcome.Automated, ReasonNotEnforceable, enforcedOverride: false,
+                sourceOverride: degradedReason is null
+                    ? source
+                    : ActionAssignmentSource.Unavailable);
         }
 
         if (!enabled)
         {
             // Strictly more restrictive than the degraded outcome below, so it
-            // legitimately wins when both apply.
-            return Decision(AutonomyOutcome.Denied, ReasonDisabled);
+            // legitimately wins when both apply. It stamps the ROW that disabled
+            // (review MEDIUM-1): a denial must name what denied it, and inheriting
+            // the threshold ladder's provenance made a disabled row unattributable
+            // — and, while break-glass was engaged, made it look like a bypass.
+            return Decision(
+                AutonomyOutcome.Denied, ReasonDisabled, sourceOverride: DisabledSource());
         }
 
         if (allowedRoles is not null
             && (query.Role is null || !allowedRoles.Contains(query.Role, StringComparer.Ordinal)))
         {
-            return Decision(AutonomyOutcome.Denied, ReasonRoleNotAllowed);
+            return Decision(
+                AutonomyOutcome.Denied, ReasonRoleNotAllowed,
+                sourceOverride: RoleRestrictionSource());
         }
 
         if (degradedReason is not null && !bypassing)
@@ -347,14 +399,28 @@ public static class AutonomyGateEvaluator
         // position with no special case.
         if (dial >= effectiveMin)
         {
+            // THE ONE PLACE `BreakGlass` provenance is stamped (F11, narrowed by
+            // review MEDIUM-1 on 2026-07-31). Reaching here with `bypassing` true
+            // means the decision came out AUTOMATED and, without the override,
+            // would have been the degraded block — i.e. the override actually
+            // permitted this. Every other return above and below is a decision the
+            // override did not decide, and must not be labelled as one: the
+            // `breakGlass` audit tag and the dedicated BREAK_GLASS_BYPASS row are
+            // gated on this provenance, and a dashboard selecting on it must get
+            // exactly the set of things the operator's lever let through.
             return Decision(
                 AutonomyOutcome.Automated,
-                bypassing ? ReasonBreakGlassBypass : ReasonAutomated);
+                bypassing ? ReasonBreakGlassBypass : ReasonAutomated,
+                sourceOverride: bypassing ? ActionAssignmentSource.BreakGlass : null);
         }
 
         // Below the threshold: a person decides where a human wait can exist;
         // a non-escalatable target (every automation:* member) can only be
-        // denied — there is nobody on that path to wait for (Seam D).
+        // denied — there is nobody on that path to wait for (Seam D). The
+        // provenance is the THRESHOLD's own (`source`), so a platform ceiling
+        // reports `PlatformCeiling` and a shipped default resolved over an
+        // unreadable snapshot reports `Unavailable` — never `BreakGlass`, because
+        // a block is precisely what the override did not achieve.
         var outcome = descriptor.EscalatableToHuman
             ? AutonomyOutcome.RequiresHuman
             : AutonomyOutcome.Denied;
@@ -362,10 +428,48 @@ public static class AutonomyGateEvaluator
             outcome,
             effectiveMin == AutonomyDial.AlwaysHuman ? ReasonAlwaysHuman : ReasonBelowMinAutonomy);
 
-        AutonomyDecision Decision(AutonomyOutcome o, string reason, bool? enforcedOverride = null) =>
+        AutonomyDecision Decision(
+            AutonomyOutcome o, string reason,
+            bool? enforcedOverride = null,
+            ActionAssignmentSource? sourceOverride = null) =>
             new(o, descriptor.Key, descriptor.Group, descriptor.Risk,
-                dial, effectiveMin, source,
+                dial, effectiveMin, sourceOverride ?? source,
                 enforcedOverride ?? enforced, enabled, allowedRoles, reason);
+
+        // Which plane's row resolved Enabled to FALSE. The PLATFORM plane is
+        // reported first when both disable: it is the one a tenant admin cannot
+        // undo, so it is the one an operator reading the audit row needs to see.
+        // Mirrors the `??` masking of the resolution above — a platform action row
+        // saying `true` hides its group's `false`, and so does this.
+        ActionAssignmentSource DisabledSource() =>
+            (platformAction?.Enabled ?? platformGroup?.Enabled) is false
+                ? ActionAssignmentSource.PlatformCeiling
+                : principalAction?.Enabled is not null
+                    ? ActionAssignmentSource.ActionOverride
+                    : ActionAssignmentSource.GroupOverride;
+
+        // Which plane's role restriction excludes this caller. Platform first for
+        // the same reason; an INTERSECTION that excludes everybody without either
+        // plane excluding on its own is attributed to the platform half, since
+        // that is the half the tenant cannot widen.
+        ActionAssignmentSource RoleRestrictionSource()
+        {
+            var platformRoles = platformAction?.AllowedRoles ?? platformGroup?.AllowedRoles;
+            var principalRoles = principalAction?.AllowedRoles ?? principalGroup?.AllowedRoles;
+            if (Excludes(platformRoles)) return ActionAssignmentSource.PlatformCeiling;
+            if (Excludes(principalRoles))
+            {
+                return principalAction?.AllowedRoles is not null
+                    ? ActionAssignmentSource.ActionOverride
+                    : ActionAssignmentSource.GroupOverride;
+            }
+            return ActionAssignmentSource.PlatformCeiling;
+
+            bool Excludes(IReadOnlyList<string>? restriction) =>
+                restriction is { Count: > 0 }
+                && (query.Role is null
+                    || !restriction.Contains(query.Role, StringComparer.Ordinal));
+        }
     }
 
     /// <summary>
