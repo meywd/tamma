@@ -24,7 +24,23 @@ namespace Tamma.Api.Services.Agents;
 /// <para>Resolution tolerance (epic decision D2): a tool name with no catalog
 /// member is <c>Allowed</c> at runtime — unclassified is unmergeable in CI (the
 /// 43-4 startup validator + sweeps), never a production stall. A descriptor
-/// with <c>Enforceable = false</c> is likewise never denied.</para>
+/// with <c>Enforceable = false</c> is likewise never denied.
+/// <b>The one named exception is the <c>mcp__*</c> family</b>, which is no longer
+/// uncatalogued: <c>ToolNameAliases</c> resolves it to
+/// <c>effect:mcp.tool.invoke</c>, which ships
+/// <see cref="AutonomyDial.AlwaysHuman"/>. D2's bargain is "allowed at runtime
+/// BECAUSE unmergeable in CI", and for MCP the CI half cannot exist — no harness
+/// can enumerate a remote server's tools — so the runtime half is not owed
+/// either. Nothing regresses: no MCP executor is registered, so such a call was
+/// already going to come back "Unknown tool".</para>
+///
+/// <para><b>Break-glass (43-5 F11).</b> With
+/// <see cref="Actions.IGovernanceBreakGlass"/> engaged, a never-loaded snapshot
+/// resolves on shipped defaults instead of denying. It is not an allow: the
+/// shipped threshold is then applied normally, so an <c>AlwaysHuman</c> default
+/// still blocks. Every bypassed call logs at ERROR here and is audited by
+/// <see cref="InlineToolLoopRunner"/> (this gate is sync by design, so the
+/// durable append rides the runner's async path).</para>
 /// </summary>
 public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
 {
@@ -33,6 +49,7 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
     private readonly Func<ActionDescriptor, bool>? _enforceableOverride;
     private readonly Actions.IGovernancePolicySnapshotProvider? _snapshots;
     private readonly Tamma.Data.ITenantContext? _tenantContext;
+    private readonly Actions.IGovernanceBreakGlass? _breakGlass;
     private readonly ILogger<CatalogDefaultToolLoopAutonomyGate>? _logger;
 
     /// <summary>Production constructor — shipped dial default, shipped catalog thresholds.</summary>
@@ -64,13 +81,15 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
     public CatalogDefaultToolLoopAutonomyGate(
         Actions.IGovernancePolicySnapshotProvider snapshots,
         Tamma.Data.ITenantContext tenantContext,
-        ILogger<CatalogDefaultToolLoopAutonomyGate>? logger = null)
+        ILogger<CatalogDefaultToolLoopAutonomyGate>? logger = null,
+        Actions.IGovernanceBreakGlass? breakGlass = null)
     {
         ArgumentNullException.ThrowIfNull(snapshots);
         ArgumentNullException.ThrowIfNull(tenantContext);
         _dial = AcceptanceDefaults.DefaultAutonomyLevel;
         _snapshots = snapshots;
         _tenantContext = tenantContext;
+        _breakGlass = breakGlass;
         _logger = logger;
     }
 
@@ -121,7 +140,35 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
                 ToolLoopGateOutcome.Allowed, key, null, _dial, "not-enforceable");
         }
 
-        var (minAutonomy, source) = ResolveMinAutonomy(descriptor);
+        var (minAutonomy, source) = ResolveMinAutonomy(descriptor, out var breakGlass);
+        if (source == ActionAssignmentSource.BreakGlass)
+        {
+            // 43-5 F11 — the operator's break-glass override suspended the F6
+            // fail-closed substitution for this call. NOT a pass: the shipped
+            // threshold below still applies (effect:mcp.tool.invoke and the three
+            // human-acceptor document types still block), and only the SUBSTITUTED
+            // AlwaysHuman was skipped. Loud at ERROR on every bypassed call; the
+            // durable audit row is emitted by InlineToolLoopRunner, which is on
+            // an async path (this gate is sync by design — 43-5 AC12).
+            _logger?.LogError(
+                "GOVERNANCE BREAK-GLASS BYPASS (tool loop): the governance policy snapshot has "
+                + "never loaded, and the break-glass override (engaged until {ExpiresAt:O}, "
+                + "reason: {Reason}) let this call resolve on shipped defaults instead of failing "
+                + "closed: Action={ActionKey}, MinAutonomy={MinAutonomy}, Dial={Dial}",
+                breakGlass?.ExpiresAtUtc, breakGlass?.ReasonOrUnspecified,
+                key.ToWire(), minAutonomy, _dial);
+
+            return new ToolLoopGateDecision(
+                IsAutomated(minAutonomy, _dial)
+                    ? ToolLoopGateOutcome.Allowed
+                    : ToolLoopGateOutcome.Denied,
+                key, minAutonomy, _dial,
+                IsAutomated(minAutonomy, _dial)
+                    ? AutonomyGateEvaluator.ReasonBreakGlassBypass
+                    : minAutonomy == AutonomyDial.AlwaysHuman ? "always-human" : "below-min-autonomy",
+                breakGlass);
+        }
+
         if (source == ActionAssignmentSource.Unavailable)
         {
             // 43-5 F6 — the governance snapshot has never loaded, so "no ceiling
@@ -161,8 +208,9 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
     /// when the snapshot has never loaded (43-5 F6).
     /// </summary>
     private (int MinAutonomy, ActionAssignmentSource Source) ResolveMinAutonomy(
-        ActionDescriptor descriptor)
+        ActionDescriptor descriptor, out BreakGlassState? breakGlass)
     {
+        breakGlass = null;
         if (_minAutonomyOverride is not null)
         {
             return (_minAutonomyOverride(descriptor), ActionAssignmentSource.SystemDefault);
@@ -170,7 +218,14 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
         if (_snapshots is not null)
         {
             var snapshot = _snapshots.GetSnapshotForAmbient(_tenantContext?.TenantId);
-            return AutonomyGateEvaluator.ResolveEffectiveMinAutonomy(descriptor, snapshot);
+            var state = _breakGlass?.Current();
+            var resolved = AutonomyGateEvaluator.ResolveEffectiveMinAutonomy(
+                descriptor, snapshot, state);
+            if (resolved.Source == ActionAssignmentSource.BreakGlass)
+            {
+                breakGlass = state;
+            }
+            return resolved;
         }
         return (descriptor.DefaultMinAutonomy, ActionAssignmentSource.SystemDefault);
     }

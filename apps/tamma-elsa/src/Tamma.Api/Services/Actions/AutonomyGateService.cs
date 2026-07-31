@@ -36,6 +36,15 @@ namespace Tamma.Api.Services.Actions;
 /// <see cref="AcceptanceRulesSource.SystemDefault"/> and evaluates normally
 /// (zero-config deployments keep automating). Only an exception produces
 /// <c>null</c>.</para>
+///
+/// <para><b>BREAK-GLASS (43-5 F11 close, 2026-07-30).</b> When
+/// <see cref="IGovernanceBreakGlass"/> reports an engaged, unexpired override,
+/// the fail-closed substitution above is suspended — and ONLY that. A denial
+/// produced by a policy row that was read successfully is unaffected. Every
+/// decision the override actually lets through is logged at ERROR and written to
+/// the audit stream as <c>ACTION.GATE.BREAK_GLASS_BYPASS</c> on the
+/// NON-swallowing append path, so an unrecordable bypass fails rather than
+/// happening silently.</para>
 /// </summary>
 public sealed class AutonomyGateService : IAutonomyGate
 {
@@ -43,6 +52,7 @@ public sealed class AutonomyGateService : IAutonomyGate
     private readonly IGovernancePolicySnapshotProvider _snapshots;
     private readonly IAcceptanceRulesResolver _acceptanceRules;
     private readonly ActionGateEventsService _events;
+    private readonly IGovernanceBreakGlass? _breakGlass;
     private readonly ILogger<AutonomyGateService>? _logger;
     private readonly TimeProvider _time;
 
@@ -51,9 +61,11 @@ public sealed class AutonomyGateService : IAutonomyGate
         IGovernancePolicySnapshotProvider snapshots,
         IAcceptanceRulesResolver acceptanceRules,
         ActionGateEventsService events,
+        IGovernanceBreakGlass? breakGlass = null,
         ILogger<AutonomyGateService>? logger = null,
         TimeProvider? timeProvider = null)
     {
+        _breakGlass = breakGlass;
         ArgumentNullException.ThrowIfNull(principals);
         ArgumentNullException.ThrowIfNull(snapshots);
         ArgumentNullException.ThrowIfNull(acceptanceRules);
@@ -84,11 +96,12 @@ public sealed class AutonomyGateService : IAutonomyGate
         }
 
         AutonomyDecision decision;
+        var breakGlass = _breakGlass?.Current() ?? BreakGlassState.NotEngaged;
         try
         {
             var snapshot = _snapshots.GetSnapshot(principal);
             var baseRules = await ResolveBaseRulesAsync(principal, ct).ConfigureAwait(false);
-            decision = AutonomyGateEvaluator.Evaluate(query, snapshot, baseRules);
+            decision = AutonomyGateEvaluator.Evaluate(query, snapshot, baseRules, breakGlass);
         }
         catch (Exception ex)
         {
@@ -96,6 +109,34 @@ public sealed class AutonomyGateService : IAutonomyGate
                 query.Action.ToWire(), ex.Message, principal.TenantId, principal.UserId)
                 .ConfigureAwait(false);
             throw;
+        }
+
+        // F11 — a bypassed decision is loud AND audited, per decision. The
+        // dedicated row goes first and on the non-swallowing path: if it cannot
+        // be written, the bypass does not happen quietly.
+        if (decision.Source == ActionAssignmentSource.BreakGlass)
+        {
+            _logger?.LogError(
+                "GOVERNANCE BREAK-GLASS BYPASS: the autonomy gate did NOT fail closed for "
+                + "{ActionKey} because the break-glass override is engaged until {ExpiresAt:O} "
+                + "(reason: {Reason}). Outcome={Outcome}, EffectiveMinAutonomy={EffectiveMin}, "
+                + "Dial={Dial}.",
+                decision.Action.ToWire(), breakGlass.ExpiresAtUtc, breakGlass.ReasonOrUnspecified,
+                decision.Outcome, decision.EffectiveMinAutonomy, decision.AutonomyLevel);
+
+            await _events.EmitBreakGlassBypassAsync(
+                decision.Action.ToWire(),
+                decision.Group.ToWire(),
+                breakGlass,
+                seam: "autonomy-gate",
+                outcome: decision.Outcome.ToString().ToLowerInvariant(),
+                autonomyLevel: decision.AutonomyLevel,
+                effectiveMinAutonomy: decision.EffectiveMinAutonomy,
+                tenantId: principal.TenantId,
+                userId: principal.UserId,
+                correlationId: query.CorrelationId,
+                degradedReason: decision.Reason)
+                .ConfigureAwait(false);
         }
 
         await _events.EmitDecisionAsync(decision, query).ConfigureAwait(false);

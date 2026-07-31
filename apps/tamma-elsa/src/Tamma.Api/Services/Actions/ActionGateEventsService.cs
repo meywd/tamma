@@ -41,6 +41,16 @@ public sealed class ActionGateEventsService
     public const string EvaluationFailedType = "ACTION.GATE.EVALUATION_FAILED";
     public const string AssignmentChangedType = "ACTION.GATE.ASSIGNMENT_CHANGED";
 
+    /// <summary>
+    /// F11 — ONE row per decision that the break-glass override let through a
+    /// degraded read instead of failing closed. Distinct type, not a tag on
+    /// <see cref="AllowedType"/>: "an operator suspended the fail-closed posture
+    /// and this specific action proceeded because of it" is the fact a reviewer
+    /// after the outage needs to select on, and it must not be lost inside the
+    /// allow stream or filtered out by the volume gate.
+    /// </summary>
+    public const string BreakGlassBypassType = "ACTION.GATE.BREAK_GLASS_BYPASS";
+
     private readonly IEventRepository _events;
     private readonly ILogger<ActionGateEventsService>? _logger;
 
@@ -89,9 +99,16 @@ public sealed class ActionGateEventsService
             ["enforced"] = decision.Enforced ? "true" : "false",
             // F6 — a queryable "this decision was made over an unreadable policy
             // input" tag, so a degraded window is one tag filter away rather
-            // than an inference from provenance.
-            ["degraded"] =
-                decision.Source == ActionAssignmentSource.Unavailable ? "true" : "false",
+            // than an inference from provenance. F11 — a break-glass bypass is
+            // ALSO a decision made over an unreadable input (it can only occur
+            // under degradation), so it sets the same tag; `assignmentSource`
+            // and the dedicated BREAK_GLASS_BYPASS row are what tell the two
+            // apart.
+            ["degraded"] = decision.Source
+                is ActionAssignmentSource.Unavailable or ActionAssignmentSource.BreakGlass
+                ? "true" : "false",
+            ["breakGlass"] =
+                decision.Source == ActionAssignmentSource.BreakGlass ? "true" : "false",
         };
         if (query.Role is not null) tags["role"] = query.Role;
         if (query.CorrelationId is not null) tags["correlationId"] = query.CorrelationId;
@@ -112,6 +129,66 @@ public sealed class ActionGateEventsService
             decision.Enforced && type is DeniedType or RequiresHumanType;
         await AppendAsync(type, query.Principal.TenantId, tags, data, mustNotSwallow)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// F11 — record ONE bypassed decision. <b>Deliberately on the NON-SWALLOWING
+    /// append path</b>, unlike every other allow-shaped emission here.
+    ///
+    /// <para>The F6 close reasoned that rethrowing on a failed audit append for an
+    /// ALLOW would turn an event-store blip into a second outage on a surface that
+    /// is deliberately staying open, and that reasoning still governs
+    /// <c>.ALLOWED</c>. Break-glass is the one exception, because the audit row is
+    /// not commentary on the decision — it IS the justification for having a
+    /// bypass at all. An unrecorded bypass is indistinguishable from an
+    /// unauthorised one, and "loud and audited" is the entire condition on which
+    /// this lever exists. So a bypass that cannot be recorded does not happen
+    /// quietly; the append failure propagates.</para>
+    /// </summary>
+    /// <param name="seam">Which enforcement surface bypassed (<c>tool-loop</c>,
+    /// <c>autonomy-gate</c>) — a bypass at Seam B and one at a 43-9 seam have very
+    /// different blast radii and a reviewer must be able to tell them apart.</param>
+    public Task EmitBreakGlassBypassAsync(
+        string actionKeyWire,
+        string? actionGroupWire,
+        BreakGlassState breakGlass,
+        string seam,
+        string outcome,
+        int autonomyLevel,
+        int? effectiveMinAutonomy,
+        Guid? tenantId = null,
+        Guid? userId = null,
+        string? correlationId = null,
+        string? degradedReason = null)
+    {
+        ArgumentNullException.ThrowIfNull(breakGlass);
+
+        var tags = new Dictionary<string, string?>
+        {
+            ["actionKey"] = actionKeyWire,
+            ["outcome"] = outcome,
+            ["seam"] = seam,
+            ["breakGlass"] = "true",
+            ["degraded"] = "true",
+            ["assignmentSource"] = SourceWire(ActionAssignmentSource.BreakGlass),
+            ["autonomyLevel"] = autonomyLevel.ToString(),
+            ["expiresAtUtc"] = breakGlass.ExpiresAtUtc?.ToString("O"),
+        };
+        if (actionGroupWire is not null) tags["actionGroup"] = actionGroupWire;
+        if (effectiveMinAutonomy is int m) tags["effectiveMinAutonomy"] = m.ToString();
+        if (correlationId is not null) tags["correlationId"] = correlationId;
+        if (tenantId is Guid t) tags["tenantId"] = t.ToString();
+        if (userId is Guid u) tags["userId"] = u.ToString();
+
+        return AppendAsync(
+            BreakGlassBypassType, tenantId, tags,
+            new Dictionary<string, object?>
+            {
+                ["reason"] = breakGlass.ReasonOrUnspecified,
+                ["expiresAtUtc"] = breakGlass.ExpiresAtUtc?.ToString("O"),
+                ["degradedReason"] = degradedReason,
+            },
+            mustNotSwallow: true);
     }
 
     /// <summary>SaaS request with no resolvable tenant — resolved against the
@@ -203,6 +280,10 @@ public sealed class ActionGateEventsService
         // shipped default" and "we could not read policy and refused to
         // automate" are opposite facts about the same audit stream.
         ActionAssignmentSource.Unavailable => "policy-unavailable",
+        // F11 — a THIRD value. It must not share a wire with `policy-unavailable`
+        // (that one means the gate REFUSED) nor with `system-default` (that one
+        // means nothing was wrong).
+        ActionAssignmentSource.BreakGlass => "break-glass",
         _ => "system-default",
     };
 

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Npgsql;
@@ -77,6 +78,18 @@ namespace Tamma.Data.Pooling;
 /// guarantee must not continue silently; the tenants already migrated are
 /// reported as a partial result (see <see cref="TenantMigrationSweepRun.ResultIsPartial"/>).</para>
 ///
+/// <para><b>Both of those now live in the shared primitive</b> (2026-07-30
+/// follow-up). This runner used to carry its own inlined copy of the
+/// non-pooled-session discipline AND its own copy of the heartbeat, because it
+/// was the site where both were first worked out. Two implementations of one
+/// idea is exactly how the pooled-connection defect got into four other places
+/// to begin with, so the session, the release handoff and the heartbeat are all
+/// <see cref="PostgresAdvisoryLock"/>'s now — the runner keeps only what is
+/// genuinely sweep-specific: the process-local slot, the partial-result
+/// reporting, and the cross-pod <c>pg_locks</c> probe behind
+/// <see cref="IsSweepRunningAsync"/> (which reads OTHER pods' locks, so it is
+/// not a lease question at all).</para>
+///
 /// <para><b>Why not the platform task queue</b> (the shape
 /// <c>POST /api/admin/tenants/{id}/move</c> uses)? <c>PlatformTaskWorker</c>
 /// ships with <c>RunOnStartup=false</c>, so a queued sweep would sit
@@ -119,6 +132,7 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
 
     private readonly IDbContextFactory<ControlPlaneDbContext> _cpFactory;
     private readonly ITenantMigrationSweeper _sweeper;
+    private readonly IConfiguration? _configuration;
     private readonly ILogger<TenantMigrationSweepRunner> _logger;
 
     private readonly object _gate = new();
@@ -148,16 +162,31 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
     /// worth of work — small enough that a concurrent second sweep cannot get
     /// far before this one aborts, and long enough that a whole-fleet sweep
     /// lasting an hour costs 240 trivial reads. Overridable for tests only.
+    ///
+    /// <para>Handed to <see cref="PostgresAdvisoryLockLease.WatchLiveness"/>,
+    /// which owns the loop; the interval stays here because it is a judgement
+    /// about THIS site's work, not about the primitive.</para>
     /// </summary>
     internal TimeSpan LockHeartbeatInterval { get; init; } = TimeSpan.FromSeconds(15);
 
+    /// <param name="cpFactory">Control-plane context factory.</param>
+    /// <param name="sweeper">The fleet-migration sweeper this runner gates.</param>
+    /// <param name="configuration">Host configuration, when there is one. It is
+    /// the FIRST place the lock's dedicated session looks for its connection
+    /// string, because it is the only source Npgsql never launders — see
+    /// <see cref="PostgresAdvisoryLock.TryResolveSessionConnectionString"/>.
+    /// Optional so unit fixtures that bind a context straight to a container
+    /// (no configuration at all) keep working off the EF view.</param>
+    /// <param name="logger">Optional logger.</param>
     public TenantMigrationSweepRunner(
         IDbContextFactory<ControlPlaneDbContext> cpFactory,
         ITenantMigrationSweeper sweeper,
+        IConfiguration? configuration = null,
         ILogger<TenantMigrationSweepRunner>? logger = null)
     {
         _cpFactory = cpFactory;
         _sweeper = sweeper;
+        _configuration = configuration;
         _logger = logger ?? NullLogger<TenantMigrationSweepRunner>.Instance;
     }
 
@@ -285,7 +314,7 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
             // start spuriously 409 — a status poll must never be able to
             // perturb the thing it is reporting on.
             await using var cmd = conn.CreateCommand();
-            cmd.CommandText = AdvisoryLockHeldSql(byThisBackend: false);
+            cmd.CommandText = AnyoneHoldsTheSweepLockSql;
             cmd.Parameters.AddWithValue("k", AdvisoryLockKey);
             return (bool?)await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) == true;
         }
@@ -299,7 +328,11 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
     }
 
     /// <summary>
-    /// The <c>pg_locks</c> predicate for "the sweep's advisory lock is held".
+    /// The <c>pg_locks</c> predicate for "SOMEONE — this pod or any other —
+    /// holds the sweep's advisory lock". This is the cross-pod status probe
+    /// behind <see cref="IsSweepRunningAsync"/>; the lease's own "do I still
+    /// hold it" re-verification is a different question and lives in
+    /// <see cref="PostgresAdvisoryLockKey.HeldByThisBackendSql"/>.
     ///
     /// <para>Fully qualified (Finding 1.6). <c>pg_locks</c> is CLUSTER-wide and
     /// advisory locks are per-database, so an unqualified match reported a
@@ -310,20 +343,15 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
     /// same 64-bit value — a different lock entirely. This is the only
     /// cross-pod signal an operator gets; a false "a sweep is running" sends
     /// them to look for a run that does not exist.</para>
-    ///
-    /// <para><paramref name="byThisBackend"/> additionally pins the holder to
-    /// the current session — that is the liveness re-verification (Finding 1.1),
-    /// which must not be satisfied by SOMEONE ELSE holding the lock.</para>
     /// </summary>
-    private static string AdvisoryLockHeldSql(bool byThisBackend) =>
-        $"""
+    private const string AnyoneHoldsTheSweepLockSql =
+        """
         SELECT EXISTS (
             SELECT 1 FROM pg_locks
             WHERE locktype = 'advisory'
               AND granted
               AND objsubid = 1
               AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
-              {(byThisBackend ? "AND pid = pg_backend_pid()" : string.Empty)}
               AND ((classid::bigint << 32) + objid::bigint) = @k
         );
         """;
@@ -344,18 +372,22 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
             lock (observed) return observed.ToArray();
         }
 
-        // Linked so the watchdog can abort THIS run without touching the
-        // process-wide shutdown source.
-        using var runCts = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
-        var lockLost = 0;
-        var watchdog = lease is { HoldsClusterLock: true }
-            ? WatchClusterLockAsync(run, lease, runCts, () => Interlocked.Exchange(ref lockLost, 1))
-            : Task.CompletedTask;
+        // The watchdog's token is linked to process shutdown, so it aborts
+        // THIS run on lock loss without touching the process-wide source.
+        // A dry run (no lease) and a non-Postgres provider (no lock) both
+        // fall through to the plain shutdown token.
+        var clusterLock = lease?.Lock;
+        var watchdog = clusterLock?.WatchLiveness(
+            LockHeartbeatInterval,
+            _shutdown.Token,
+            _logger,
+            $"tenant.migration_sweep runId={run.RunId}");
+        var workToken = watchdog?.Token ?? _shutdown.Token;
 
         try
         {
             var result = await _sweeper
-                .SweepAsync(run.DryRun, run.MaxConcurrency, OnTenant, runCts.Token)
+                .SweepAsync(run.DryRun, run.MaxConcurrency, OnTenant, workToken)
                 .ConfigureAwait(false);
             Record(run with
             {
@@ -373,7 +405,8 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
             // whatever per-tenant rows completed first — reporting nothing is
             // the worst possible post-failure state for a fleet-DDL primitive.
             var partial = Snapshot();
-            var error = Volatile.Read(ref lockLost) == 1
+            var lockLost = watchdog?.LockLost == true;
+            var error = lockLost
                 ? "The cluster-wide sweep lock was lost mid-run (the control-plane session "
                   + "holding pg_try_advisory_lock died — a pooler/proxy drop, an idle timeout, "
                   + "or a terminated backend). The sweep was ABORTED because it could no longer "
@@ -385,7 +418,7 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
 
             _logger.LogError(ex,
                 "tenant.migration_sweep.run_failed runId={RunId} lockLost={LockLost} partialTenants={Partial}",
-                run.RunId, Volatile.Read(ref lockLost) == 1, partial.Length);
+                run.RunId, lockLost, partial.Length);
             Record(run with
             {
                 State = TenantMigrationSweepRunState.Failed,
@@ -399,8 +432,10 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
         {
             // Stop the watchdog before the lease connection goes away, so its
             // probe can never race the release into a spurious "lock lost".
-            if (!runCts.IsCancellationRequested) runCts.Cancel();
-            try { await watchdog.ConfigureAwait(false); } catch { /* best effort */ }
+            // The shared watchdog's DisposeAsync does exactly that and does
+            // NOT cancel the work token, so a run that finished normally
+            // cannot be retro-cancelled here.
+            if (watchdog is not null) await watchdog.DisposeAsync().ConfigureAwait(false);
 
             if (lease is not null) await ReleaseAsync(lease).ConfigureAwait(false);
             if (tookDryRunSlot) Interlocked.Decrement(ref _dryRunsInFlight);
@@ -408,90 +443,16 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
     }
 
     /// <summary>
-    /// Re-verify, on the LEASE session itself, that this run still holds the
-    /// cluster lock; cancel the run on loss. See the class doc (Finding 1.1)
-    /// for why "the lock dies with the connection" was not sufficient.
-    ///
-    /// <para>Any failure of the probe counts as loss. That is deliberate: the
-    /// dominant reason a command on the lease connection throws is that the
-    /// backend is gone — which IS loss — and the alternative bias (treat a
-    /// blip as "probably still held") continues fleet-wide DDL on an
-    /// unverifiable guarantee. Aborting a sweep is recoverable and reported;
-    /// two concurrent applies are not.</para>
-    /// </summary>
-    private async Task WatchClusterLockAsync(
-        TenantMigrationSweepRun run, RunLease lease, CancellationTokenSource runCts, Action onLost)
-    {
-        var token = runCts.Token;
-        try
-        {
-            while (!token.IsCancellationRequested)
-            {
-                await Task.Delay(LockHeartbeatInterval, token).ConfigureAwait(false);
-                if (token.IsCancellationRequested) return;
-                if (await StillHoldsClusterLockAsync(lease, token).ConfigureAwait(false)) continue;
-
-                _logger.LogError(
-                    "tenant.migration_sweep.lock_lost runId={RunId} — aborting: the sweep can no "
-                    + "longer guarantee it is the only fleet-wide apply running", run.RunId);
-                onLost();
-                lease.HoldsClusterLock = false;
-                await runCts.CancelAsync().ConfigureAwait(false);
-                return;
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Normal: the run finished and the finally block cancelled us.
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "tenant.migration_sweep.lock_watchdog_failed runId={RunId}", run.RunId);
-        }
-    }
-
-    private async Task<bool> StillHoldsClusterLockAsync(RunLease lease, CancellationToken ct)
-    {
-        // Only ever non-null on the Postgres path — the non-Postgres branch of
-        // TryAcquireClusterLockAsync leaves HoldsClusterLock false, and the
-        // watchdog only starts for a lease that holds the cluster lock.
-        var conn = lease.Session;
-        if (conn is null) return false;
-
-        try
-        {
-            if (conn.State != ConnectionState.Open) return false;
-
-            await using var cmd = conn.CreateCommand();
-            // pid = pg_backend_pid() — the lock must still be held by THIS
-            // session. A reconnect (new pid) or another pod having taken the
-            // key both read as loss, which is the honest answer either way.
-            cmd.CommandText = AdvisoryLockHeldSql(byThisBackend: true);
-            cmd.Parameters.AddWithValue("k", AdvisoryLockKey);
-            return (bool?)await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) == true;
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "tenant.migration_sweep.lock_recheck_failed");
-            return false;
-        }
-    }
-
-    /// <summary>
     /// Open a dedicated, NON-POOLED control-plane session and take the sweep's
-    /// advisory lock on it. The session (and therefore the lock) lives for the
-    /// run's duration on <see cref="RunLease.Session"/>.
+    /// advisory lock on it, through the shared
+    /// <see cref="PostgresAdvisoryLock"/>. The lease (and therefore the lock)
+    /// lives for the run's duration on <see cref="RunLease.Lock"/>.
     ///
     /// <para>The control-plane <see cref="DbContext"/> is used only to learn
-    /// the provider and the connection string, and is disposed immediately.
-    /// The lock must NOT ride a pooled connection — see the class doc: a
-    /// pooled connector handed back to the pool keeps the session, and
-    /// therefore the lock, alive.</para>
+    /// the provider and (as a fallback behind configuration) the connection
+    /// string, and is disposed immediately. The lock must NOT ride a pooled
+    /// connection — see the class doc: a pooled connector handed back to the
+    /// pool keeps the session, and therefore the lock, alive.</para>
     /// </summary>
     private async Task<bool> TryAcquireClusterLockAsync(RunLease lease, CancellationToken ct)
     {
@@ -502,31 +463,25 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
             {
                 // Non-Postgres (in-memory/sqlite test hosts): the process-local
                 // slot is the whole guard. Single-pod by construction there.
-                lease.HoldsClusterLock = false;
                 return true;
             }
 
-            connectionString = cp.Database.GetConnectionString()
-                ?? throw new InvalidOperationException(
-                    "The control-plane context exposes no connection string, so the sweep's "
-                    + "cluster-wide advisory lock cannot be taken on a dedicated session.");
+            // Configuration first, EF second, each rejected unless it still
+            // carries credentials — EF's view is laundered whenever an
+            // NpgsqlDataSource is in DI, and a password-less string would make
+            // this gate fail closed for a reason nobody could diagnose. Throws
+            // (naming the mechanism) when nothing usable resolves.
+            connectionString = PostgresAdvisoryLock.ResolveSessionConnectionString(
+                _configuration, cp, "the fleet-migration sweep", _logger);
         }
 
-        // Pooling=false is load-bearing, not a tuning choice: it is what makes
-        // "closing the connection releases the lock" true. See the class doc.
-        var dedicated = new NpgsqlConnectionStringBuilder(connectionString) { Pooling = false };
-        var session = new NpgsqlConnection(dedicated.ConnectionString);
-        // Published BEFORE the open, so a failed open still hands the
-        // connection to ReleaseAsync/Dispose to be torn down.
-        lease.Session = session;
-        await session.OpenAsync(ct).ConfigureAwait(false);
+        lease.Lock = await PostgresAdvisoryLock.TryAcquireAsync(
+            connectionString,
+            PostgresAdvisoryLockKey.FromInt64(AdvisoryLockKey),
+            _logger,
+            ct).ConfigureAwait(false);
 
-        await using var cmd = session.CreateCommand();
-        cmd.CommandText = "SELECT pg_try_advisory_lock(@k);";
-        cmd.Parameters.AddWithValue("k", AdvisoryLockKey);
-        var acquired = (bool?)await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) == true;
-        lease.HoldsClusterLock = acquired;
-        return acquired;
+        return lease.Lock is not null;
     }
 
     private async Task ReleaseAsync(RunLease lease)
@@ -537,34 +492,10 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
         }
 
         // Interlocked, not read-then-null: Dispose races this method for the
-        // same session and exactly one of them may dispose it.
-        var session = lease.TakeSession();
-        if (session is null) return;
-
-        try
-        {
-            if (lease.HoldsClusterLock && session.State == ConnectionState.Open)
-            {
-                await using var unlock = session.CreateCommand();
-                unlock.CommandText = "SELECT pg_advisory_unlock(@k);";
-                unlock.Parameters.AddWithValue("k", AdvisoryLockKey);
-                await unlock.ExecuteScalarAsync().ConfigureAwait(false);
-            }
-        }
-        catch (Exception ex)
-        {
-            // Session-scoped on a NON-POOLED connection: the dispose below
-            // really does end the backend session, which releases the lock
-            // anyway. That is the reason the lock is session- and not
-            // transaction-scoped — there is no failure mode that leaves the
-            // gate stuck shut. (It is only true because the connection is not
-            // pooled; see the class doc.)
-            _logger.LogDebug(ex, "tenant.migration_sweep.unlock_failed");
-        }
-        finally
-        {
-            await session.DisposeAsync().ConfigureAwait(false);
-        }
+        // same lease and exactly one of them may dispose it.
+        var held = lease.TakeLock();
+        if (held is null) return;
+        await held.DisposeAsync().ConfigureAwait(false);
     }
 
     /// <summary>
@@ -614,45 +545,42 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
 
         RunLease? lease;
         lock (_gate) { lease = _localRun; _localRun = null; }
-        // TakeSession is interlocked: if ReleaseAsync is concurrently ending
-        // the run, exactly one of us gets the session and disposes it once.
-        if (lease?.TakeSession() is { } session)
-        {
-            // The session is NON-POOLED, so disposing it genuinely closes the
-            // backend — which is what releases the advisory lock. This is the
-            // crashed/stopped-pod path, exercised here on the orderly-shutdown
-            // path too. On a pooled connection this line would hand the
-            // connector back to the pool with the lock still held and wedge
-            // the cluster-wide gate shut; see the class doc.
-            session.Dispose();
-        }
+        // TakeLock is interlocked: if ReleaseAsync is concurrently ending
+        // the run, exactly one of us gets the lease and disposes it once.
+        // DisposeSession (rather than DisposeAsync) because this path cannot
+        // await: it skips the explicit unlock and just ends the session, which
+        // on a NON-POOLED connection is what actually releases the lock. This
+        // is the crashed/stopped-pod path, exercised here on the
+        // orderly-shutdown path too. On a pooled connection it would hand the
+        // connector back to the pool with the lock still held and wedge the
+        // cluster-wide gate shut; see the class doc.
+        lease?.TakeLock()?.DisposeSession();
     }
 
     /// <summary>The mutable half of a run: what has to be released when it ends.</summary>
     private sealed class RunLease(Guid runId, DateTimeOffset startedAt)
     {
-        private NpgsqlConnection? _session;
+        private PostgresAdvisoryLockLease? _lock;
 
         public Guid RunId { get; } = runId;
         public DateTimeOffset StartedAt { get; } = startedAt;
 
         /// <summary>
-        /// The dedicated, NON-POOLED Postgres session that holds the advisory
-        /// lock open. Null on a non-Postgres provider (nothing to hold).
+        /// The held cluster-wide advisory lock, riding its own dedicated,
+        /// NON-POOLED Postgres session. Null on a non-Postgres provider
+        /// (nothing to hold).
         /// </summary>
-        public NpgsqlConnection? Session
+        public PostgresAdvisoryLockLease? Lock
         {
-            get => Volatile.Read(ref _session);
-            set => Volatile.Write(ref _session, value);
+            get => Volatile.Read(ref _lock);
+            set => Volatile.Write(ref _lock, value);
         }
 
         /// <summary>
-        /// Atomically claim the session for disposal. Dispose and ReleaseAsync
+        /// Atomically claim the lease for disposal. Dispose and ReleaseAsync
         /// both end a run and both used to read-then-null, so both could
         /// dispose the same connection (Finding 1.5, second half).
         /// </summary>
-        public NpgsqlConnection? TakeSession() => Interlocked.Exchange(ref _session, null);
-
-        public bool HoldsClusterLock { get; set; }
+        public PostgresAdvisoryLockLease? TakeLock() => Interlocked.Exchange(ref _lock, null);
     }
 }

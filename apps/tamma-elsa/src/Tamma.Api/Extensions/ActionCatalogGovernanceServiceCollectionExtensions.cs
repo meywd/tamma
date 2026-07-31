@@ -66,6 +66,18 @@ public static class ActionCatalogGovernanceServiceCollectionExtensions
             sp.GetService<IDbContextFactory<ControlPlaneDbContext>>()));
         services.TryAddScoped<IGovernancePrincipalResolver, GovernancePrincipalResolver>();
 
+        // ── Story 43-5 F11 — the BREAK-GLASS override ───────────────────────
+        // Config-sourced and singleton BY DESIGN, not by convenience: the state
+        // is read once at construction, so engaging it requires a configuration
+        // change AND a restart. There is deliberately no endpoint and no writer
+        // — an API that can switch off a governance posture is itself a
+        // governance surface, and a compromised admin session would reach it.
+        services.TryAddSingleton<IGovernanceBreakGlass>(sp =>
+            new ConfigurationGovernanceBreakGlass(
+                sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>(),
+                sp.GetService<ILogger<ConfigurationGovernanceBreakGlass>>(),
+                sp.GetService<TimeProvider>()));
+
         // The audit event family (43-5 AC13) + the DB-backed IAutonomyGate
         // (scoped: IEventRepository / IAcceptanceRulesResolver are scoped).
         services.TryAddScoped<ActionGateEventsService>();
@@ -80,7 +92,8 @@ public static class ActionCatalogGovernanceServiceCollectionExtensions
         services.TryAddScoped<IToolLoopAutonomyGate>(sp => new CatalogDefaultToolLoopAutonomyGate(
             sp.GetRequiredService<IGovernancePolicySnapshotProvider>(),
             sp.GetRequiredService<ITenantContext>(),
-            sp.GetService<ILogger<CatalogDefaultToolLoopAutonomyGate>>()));
+            sp.GetService<ILogger<CatalogDefaultToolLoopAutonomyGate>>(),
+            sp.GetService<IGovernanceBreakGlass>()));
 
         // ── Story 43-8 AC9 — enforcementSites ───────────────────────────────
         // Computes, per ActionKey, the concrete bound sites (routes carrying

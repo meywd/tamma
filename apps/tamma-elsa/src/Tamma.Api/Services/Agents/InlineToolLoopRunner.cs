@@ -11,6 +11,7 @@ using Tamma.Activities.Security;
 using Tamma.Activities.ToolExecution;
 using Tamma.Api.Services.Providers;
 using Tamma.Core;
+using Tamma.Core.Actions;
 
 namespace Tamma.Api.Services.Agents;
 
@@ -57,6 +58,7 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
     private readonly ParallelToolExecutor? _parallelExecutor;
     private readonly IProviderCredentialResolver? _credentialResolver;
     private readonly IProviderSettingsStore? _settingsStore;
+    private readonly Tamma.Api.Services.Actions.ActionGateEventsService? _actionGateEvents;
 
     public InlineToolLoopRunner(
         ILogger<InlineToolLoopRunner>? logger,
@@ -75,7 +77,15 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         ToolLoopEventEmitter? eventEmitter = null,
         ParallelToolExecutor? parallelExecutor = null,
         IProviderCredentialResolver? credentialResolver = null,
-        IProviderSettingsStore? settingsStore = null)
+        IProviderSettingsStore? settingsStore = null,
+        // Epic 43 F11 — the durable record of a BREAK-GLASS BYPASS at Seam B.
+        // It lives here rather than in the gate because the gate is sync by
+        // design (43-5 AC12: the per-tool-call path must never block on a
+        // database) while this loop is async, and the append is deliberately
+        // NON-swallowing: a bypass that cannot be recorded must not happen
+        // quietly. Optional only so pre-43 unit compositions still construct;
+        // production DI always supplies it.
+        Tamma.Api.Services.Actions.ActionGateEventsService? actionGateEvents = null)
     {
         _logger = logger;
         _httpClientFactory = httpClientFactory;
@@ -95,6 +105,7 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
         // the standalone engine and in pre-46 unit-test compositions): with no
         // store, default-model resolution is byte-identical to pre-46-1.
         _settingsStore = settingsStore;
+        _actionGateEvents = actionGateEvents;
     }
 
     /// <inheritdoc />
@@ -340,6 +351,31 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
                 }
 
                 var gateDecision = _autonomyGate.Evaluate(tc.ToolName, tc.ArgumentsJson);
+
+                // Epic 43 F11 — one durable row per decision the break-glass
+                // override let through a degraded policy read, on the
+                // NON-swallowing append path. Emitted for the ALLOWED and the
+                // DENIED shape alike: what is being recorded is "the fail-closed
+                // posture was suspended for this call", which is a fact about
+                // the operator's override, not about the outcome. If the append
+                // throws, the run fails — deliberately: an unrecordable bypass
+                // is indistinguishable from an unauthorised one.
+                if (gateDecision.BreakGlass is { } breakGlassState
+                    && _actionGateEvents is not null)
+                {
+                    await _actionGateEvents.EmitBreakGlassBypassAsync(
+                        gateDecision.ActionKey?.ToWire() ?? tc.ToolName,
+                        actionGroupWire: null,
+                        breakGlassState,
+                        seam: "tool-loop",
+                        outcome: gateDecision.IsDenied ? "denied" : "automated",
+                        autonomyLevel: gateDecision.Dial,
+                        effectiveMinAutonomy: gateDecision.MinAutonomy,
+                        correlationId: workflowInstanceId,
+                        degradedReason: AutonomyGateEvaluator.ReasonPolicySnapshotUnavailable)
+                        .ConfigureAwait(false);
+                }
+
                 if (gateDecision.IsDenied)
                 {
                     rejectedToolCalls[tc.Id] = ComposeDenialMessage(tc.ToolName, gateDecision);

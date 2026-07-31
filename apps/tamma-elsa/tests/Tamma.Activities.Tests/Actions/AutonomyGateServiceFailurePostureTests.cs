@@ -79,12 +79,25 @@ public class AutonomyGateServiceFailurePostureTests
         }
     }
 
+    private sealed class FixedBreakGlass(BreakGlassState state) : IGovernanceBreakGlass
+    {
+        public BreakGlassState Current() => state;
+    }
+
     private sealed class FakeEventRepository : IEventRepository
     {
         public List<DomainEvent> Appended { get; } = new();
 
+        /// <summary>Event types whose append should blow up (F11's
+        /// "the audit row cannot be suppressed" pin).</summary>
+        public HashSet<string> FailOnTypes { get; } = new(StringComparer.Ordinal);
+
         public Task<DomainEvent> AppendAsync(DomainEvent evt)
         {
+            if (FailOnTypes.Contains(evt.Type))
+            {
+                throw new InvalidOperationException("event store unavailable");
+            }
             Appended.Add(evt);
             return Task.FromResult(evt);
         }
@@ -109,16 +122,23 @@ public class AutonomyGateServiceFailurePostureTests
     private static (AutonomyGateService Gate, FakeEventRepository Events) Build(
         bool baseReadThrows,
         GovernancePolicySnapshot? snapshot = null,
-        AcceptanceRules? rules = null)
+        AcceptanceRules? rules = null,
+        BreakGlassState? breakGlass = null,
+        FakeEventRepository? events = null)
     {
-        var events = new FakeEventRepository();
+        events ??= new FakeEventRepository();
         var gate = new AutonomyGateService(
             new FixedPrincipal(Principal),
             new FixedSnapshots(snapshot ?? GovernancePolicySnapshot.Empty),
             new ScriptedRules(baseReadThrows, rules),
-            new ActionGateEventsService(events));
+            new ActionGateEventsService(events),
+            breakGlass is null ? null : new FixedBreakGlass(breakGlass));
         return (gate, events);
     }
+
+    private static readonly BreakGlassState EngagedOverride =
+        BreakGlassState.Engaged(
+            DateTimeOffset.Parse("2026-08-01T00:00:00Z"), "control plane unreachable, INC-4412");
 
     private static AutonomyQuery Query(string wire) =>
         new(ActionKey.Parse(wire), Principal, Role: "senior_developer", CorrelationId: "wf-1");
@@ -280,5 +300,155 @@ public class AutonomyGateServiceFailurePostureTests
         decision.Outcome.Should().Be(AutonomyOutcome.RequiresHuman);
         decision.Source.Should().Be(ActionAssignmentSource.AlwaysEscalateLegacy,
             "a READ floor is attributed to the legacy list, never to the degraded branch");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // F11 (closed 2026-07-30) — the BREAK-GLASS override, through the composed
+    // service. The fixture above proves the fail-closed posture; this half
+    // proves the operator's lever out of it, and — more importantly — proves the
+    // lever's boundary.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Engaged + degraded ⇒ the work proceeds, with bypass provenance AND its own
+    /// audit row. Before F11 this evaluation denied, with no way for an operator
+    /// who had diagnosed the outage and accepted the risk to keep the fleet
+    /// working short of editing code.
+    /// </summary>
+    [Test]
+    public async Task BreakGlassEngaged_OverADegradedRead_Proceeds_AndWritesItsOwnAuditRow()
+    {
+        var (gate, events) = Build(baseReadThrows: true, breakGlass: EngagedOverride);
+
+        var decision = await gate.EvaluateAsync(Query("agent-action:triage-intake"));
+
+        decision.Outcome.Should().Be(AutonomyOutcome.Automated);
+        decision.Source.Should().Be(ActionAssignmentSource.BreakGlass);
+        decision.Reason.Should().Be(AutonomyGateEvaluator.ReasonBreakGlassBypass);
+
+        var bypass = events.Appended.Should()
+            .ContainSingle(e => e.Type == ActionGateEventsService.BreakGlassBypassType).Subject;
+        Tag(bypass, "breakGlass").Should().Be("true");
+        Tag(bypass, "degraded").Should().Be("true");
+        Tag(bypass, "assignmentSource").Should().Be("break-glass",
+            "'break-glass' must share a wire value with neither 'policy-unavailable' (the gate "
+            + "REFUSED) nor 'system-default' (nothing was wrong)");
+        Tag(bypass, "actionKey").Should().Be("agent-action:triage-intake");
+        Tag(bypass, "seam").Should().Be("autonomy-gate");
+        Tag(bypass, "expiresAtUtc").Should().NotBeNullOrEmpty(
+            "an auditor must be able to see the window the operator opened");
+
+        using var data = JsonDocument.Parse(bypass.Data!);
+        data.RootElement.GetProperty("reason").GetString()
+            .Should().Be("control plane unreachable, INC-4412");
+        data.RootElement.GetProperty("degradedReason").GetString()
+            .Should().NotBeNullOrEmpty();
+    }
+
+    /// <summary>
+    /// <b>THE anti-backdoor pin at the service level.</b> A policy row that was
+    /// READ SUCCESSFULLY denies; the acceptance-rules read then fails; the
+    /// override is engaged. The answer must still be the policy's.
+    /// </summary>
+    [Test]
+    public async Task BreakGlassEngaged_AgainstARealPolicyDenial_IsSTILLDenied()
+    {
+        var snapshot = GovernancePolicySnapshot.FromSuccessfulRead(
+            new Dictionary<string, ActionAssignmentValue>(StringComparer.Ordinal),
+            new Dictionary<string, ActionAssignmentValue>(StringComparer.Ordinal),
+            new Dictionary<string, ActionAssignmentValue>(StringComparer.Ordinal)
+            {
+                ["agent-action:deploy"] = new(AutonomyDial.AlwaysHuman, null, null, null),
+            },
+            new Dictionary<string, ActionAssignmentValue>(StringComparer.Ordinal));
+
+        var (gate, events) = Build(
+            baseReadThrows: true, snapshot: snapshot, breakGlass: EngagedOverride);
+
+        var decision = await gate.EvaluateAsync(Query("agent-action:deploy"));
+
+        decision.Outcome.Should().Be(AutonomyOutcome.RequiresHuman,
+            "break-glass suspends the fail-closed SUBSTITUTION for an unreadable input; it is "
+            + "not an off switch for policy that was successfully read");
+        decision.EffectiveMinAutonomy.Should().Be(AutonomyDial.AlwaysHuman);
+        decision.Reason.Should().Be(AutonomyGateEvaluator.ReasonAlwaysHuman);
+
+        // Still fully audited: the block row AND the bypass row.
+        events.Appended.Should().Contain(e => e.Type == ActionGateEventsService.RequiresHumanType);
+        events.Appended.Should().Contain(e => e.Type == ActionGateEventsService.BreakGlassBypassType);
+    }
+
+    /// <summary>Not engaged ⇒ byte-identical to the F6 posture the rest of this
+    /// fixture pins.</summary>
+    [Test]
+    public async Task BreakGlassNotEngaged_LeavesTheFailClosedPostureUntouched()
+    {
+        var (gate, _) = Build(baseReadThrows: true, breakGlass: BreakGlassState.NotEngaged);
+
+        var decision = await gate.EvaluateAsync(Query("agent-action:triage-intake"));
+
+        decision.Outcome.Should().Be(AutonomyOutcome.RequiresHuman);
+        decision.Source.Should().Be(ActionAssignmentSource.Unavailable);
+    }
+
+    /// <summary>
+    /// An engaged override is INERT on a healthy evaluation. It is a fallback for
+    /// an unreadable input, not a mode the system runs in — so leaving it
+    /// configured after the outage does not quietly change behaviour (the expiry
+    /// is the belt; this is the braces).
+    /// </summary>
+    [Test]
+    public async Task BreakGlassEngaged_ChangesNothing_WhenEveryReadSucceeds()
+    {
+        var (gate, events) = Build(baseReadThrows: false, breakGlass: EngagedOverride);
+
+        var decision = await gate.EvaluateAsync(Query("agent-action:triage-intake"));
+
+        decision.Outcome.Should().Be(AutonomyOutcome.Automated);
+        decision.Source.Should().Be(ActionAssignmentSource.SystemDefault);
+        decision.Reason.Should().Be(AutonomyGateEvaluator.ReasonAutomated);
+        events.Appended.Should().BeEmpty("nothing degraded, so nothing was bypassed");
+    }
+
+    /// <summary>
+    /// <b>The audit row cannot be suppressed.</b> The bypass append rides the
+    /// NON-swallowing path, so an event store that refuses it fails the
+    /// evaluation instead of letting the bypass happen quietly.
+    ///
+    /// <para>This is a deliberate departure from the F6 close's reasoning that
+    /// rethrowing on a failed append for an ALLOW would turn an event-store blip
+    /// into a second outage. That reasoning still governs <c>.ALLOWED</c> (see the
+    /// control below). Break-glass is the exception because the audit row is not
+    /// commentary on the decision — it is the entire justification for having a
+    /// bypass: an unrecorded bypass is indistinguishable from an unauthorised
+    /// one.</para>
+    /// </summary>
+    [Test]
+    public async Task ABypassThatCannotBeAudited_FailsRatherThanHappeningQuietly()
+    {
+        var events = new FakeEventRepository();
+        events.FailOnTypes.Add(ActionGateEventsService.BreakGlassBypassType);
+        var (gate, _) = Build(baseReadThrows: true, breakGlass: EngagedOverride, events: events);
+
+        var act = async () => await gate.EvaluateAsync(Query("agent-action:triage-intake"));
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        events.Appended.Should().BeEmpty();
+    }
+
+    /// <summary>The control: an ordinary degraded ALLOW keeps the F6 posture — its
+    /// emission failure is swallowed, because that surface is deliberately
+    /// staying open and must not acquire a second outage.</summary>
+    [Test]
+    public async Task AnOrdinaryDegradedAllow_StillSwallowsItsEmissionFailure()
+    {
+        var events = new FakeEventRepository();
+        events.FailOnTypes.Add(ActionGateEventsService.AllowedType);
+        var (gate, _) = Build(
+            baseReadThrows: false, snapshot: GovernancePolicySnapshot.Unavailable, events: events);
+
+        var decision = await gate.EvaluateAsync(Query("tool:not_a_tool"));
+
+        decision.Outcome.Should().Be(AutonomyOutcome.Automated);
     }
 }

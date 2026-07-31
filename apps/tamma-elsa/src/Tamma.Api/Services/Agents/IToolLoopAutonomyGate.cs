@@ -47,13 +47,25 @@ public enum ToolLoopGateOutcome
 /// <param name="MinAutonomy">The effective minimum-autonomy threshold applied, when one was.</param>
 /// <param name="Dial">The dial position the decision was taken at.</param>
 /// <param name="Reason">Machine-readable reason tag (e.g. <c>below-min-autonomy</c>, <c>uncatalogued</c>).</param>
+/// <param name="BreakGlass">
+/// Non-null when this decision was let through by the operator's BREAK-GLASS
+/// override instead of failing closed on an unreadable policy input (43-5 F11).
+/// It carries the override's expiry and reason so the seam can log and audit
+/// them. Null on every ordinary decision, including every decision taken while
+/// the control plane is healthy — an engaged override has no effect at all
+/// unless a read has actually degraded.
+/// </param>
 public sealed record ToolLoopGateDecision(
     ToolLoopGateOutcome Outcome,
     ActionKey? ActionKey,
     int? MinAutonomy,
     int Dial,
-    string Reason)
+    string Reason,
+    BreakGlassState? BreakGlass = null)
 {
     /// <summary>Convenience: is this a denial?</summary>
     public bool IsDenied => Outcome == ToolLoopGateOutcome.Denied;
+
+    /// <summary>Convenience: did the break-glass override decide this one?</summary>
+    public bool IsBreakGlassBypass => BreakGlass is not null;
 }

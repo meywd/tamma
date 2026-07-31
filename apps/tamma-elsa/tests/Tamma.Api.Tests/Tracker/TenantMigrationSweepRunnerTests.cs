@@ -1,7 +1,10 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 using NUnit.Framework;
+using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
 using Tamma.Data.Abstractions;
 using Tamma.Data.Pooling;
@@ -285,6 +288,99 @@ public class TenantMigrationSweepRunnerTests
         var run = await WaitForCompletionAsync(runner, start.Run!.RunId);
         run.Error.Should().BeNull();
         run.ResultIsPartial.Should().BeFalse();
+    }
+
+    // ─── connection-string sourcing (2026-07-30 audit, second trap) ───
+
+    [Test]
+    public async Task The_cluster_lock_still_opens_when_EF_hands_back_a_password_less_string()
+    {
+        // THE PRODUCTION HAZARD, which no container reproduced when the sweep
+        // gate was first moved onto its own session. Program.cs registers a
+        // singleton CP NpgsqlDataSource next to the EF factory; Npgsql's EF
+        // provider then mints the context's DbConnection from that data
+        // source, and EF's Database.GetConnectionString() — which this runner
+        // used to read directly — comes back with the password stripped. The
+        // dedicated lock session would fail to open, and a fleet-migration
+        // apply would refuse to start with an error nobody could diagnose.
+        //
+        // The stripping itself cannot be asserted: whether Npgsql's EF
+        // provider picks up the DI-registered data source is a PROCESS-wide,
+        // first-context-wins property of EF Core's internal service-provider
+        // cache, so it flips with test ordering (see
+        // PostgresAdvisoryLockConnectionStringTests). The context is therefore
+        // bound to an explicitly password-less string — indistinguishable, at
+        // the seam, from a laundered one — while configuration carries the
+        // real one, exactly as the host has it. A runner still on the EF route
+        // cannot take the gate at all here.
+        await using var sp = BuildDataSourceInDiContainer();
+        var factory = sp.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
+
+        var sweeper = new GatedSweeper();
+        using var runner = new TenantMigrationSweepRunner(
+            factory, sweeper, sp.GetRequiredService<IConfiguration>());
+
+        var start = await runner.StartAsync(dryRun: false);
+        start.Accepted.Should().BeTrue("run error, if any: " + runner.TryGetRun(start.Run!.RunId)?.Error);
+        await sweeper.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        (await AdvisoryLockProbe.IsHeldAsync(_cs, TenantMigrationSweepRunner.AdvisoryLockKey))
+            .Should().BeTrue(
+                "the cluster-wide gate must actually be held. Accepting the start without it "
+                + "would mean two pods could both sweep the fleet");
+
+        sweeper.Release.TrySetResult();
+        await WaitForCompletionAsync(runner, start.Run!.RunId);
+    }
+
+    [Test]
+    public async Task A_sweep_with_no_usable_connection_string_fails_closed_and_names_the_trap()
+    {
+        // No configuration, and EF's view laundered: indistinguishable from a
+        // stripped string, so the runner must refuse rather than open an
+        // unauthenticable session (whose failure would read as "another pod is
+        // already sweeping" — an untruth that sends an operator hunting a run
+        // that does not exist).
+        await using var sp = BuildDataSourceInDiContainer();
+        var factory = sp.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
+
+        var sweeper = new GatedSweeper();
+        using var runner = new TenantMigrationSweepRunner(factory, sweeper, configuration: null);
+
+        var act = async () => await runner.StartAsync(dryRun: false);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .WithMessage("*fleet-migration sweep*")
+            .WithMessage("*NpgsqlDataSource*")
+            .WithMessage("*ConnectionStrings:ControlPlane*");
+        sweeper.Started.Task.IsCompleted.Should().BeFalse(
+            "a sweep that could not take the gate must never have run");
+
+        // …and the refusal must not have wedged the process-local slot.
+        (await runner.IsSweepRunningAsync()).Should().BeFalse();
+    }
+
+    /// <summary>
+    /// The production container shape: a singleton <see cref="NpgsqlDataSource"/>
+    /// registered next to an EF factory, the credentials-bearing string in
+    /// configuration where the host puts it, and the EF factory bound to a
+    /// password-less one — which is what the host's context hands back in the
+    /// shape under test.
+    /// </summary>
+    private ServiceProvider BuildDataSourceInDiContainer()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:ControlPlane"] = _cs,
+            }).Build());
+        services.AddSingleton(NpgsqlDataSource.Create(_cs));
+        services.AddDbContextFactory<ControlPlaneDbContext>(
+            o => o.UseNpgsql(new NpgsqlConnectionStringBuilder(_cs) { Password = null }
+                .ConnectionString));
+        return services.BuildServiceProvider();
     }
 
     // ─────────── partial results (Finding 1.3) ───────────

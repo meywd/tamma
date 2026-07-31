@@ -174,6 +174,140 @@ public class PostgresAdvisoryLockTests
         (await AdvisoryLockProbe.IsHeldAsync(_cs, expected)).Should().BeFalse();
     }
 
+    // ───────── liveness watchdog: the REVERSE hazard ─────────
+    //
+    // Everything above tests "the lock outlived the work". These test the
+    // other direction: the WORK outlives the lock. A pooler recycle, an idle
+    // timeout or an administrative pg_terminate_backend ends the lease session
+    // without touching the process, the gate silently opens, and the guarded
+    // work carries on believing it is alone — which for a tenant move or a KEK
+    // re-encrypt means two of them running at once.
+
+    [Test]
+    public async Task A_watchdog_cancels_its_token_when_the_lock_holding_backend_is_killed()
+    {
+        const long key = 0x7A11_0006L;
+
+        // Declaration order IS the disposal contract: the lease is declared
+        // first so it is disposed LAST, i.e. after the watchdog that shares
+        // its session. Reversing them races a probe against the release.
+        await using var lease = await PostgresAdvisoryLock.TryAcquireAsync(
+            _cs, PostgresAdvisoryLockKey.FromInt64(key));
+        lease.Should().NotBeNull();
+
+        await using var watchdog = lease!.WatchLiveness(
+            TimeSpan.FromMilliseconds(100), CancellationToken.None, site: "test");
+        watchdog.Token.IsCancellationRequested.Should().BeFalse(
+            "a watchdog over a genuinely held lock must not fire on its own");
+
+        (await AdvisoryLockProbe.TerminateHolderAsync(_cs, key)).Should().BeTrue(
+            "the test must actually kill the lock-holding backend — otherwise it proves nothing");
+
+        await WaitForCancellationAsync(watchdog.Token, TimeSpan.FromSeconds(10));
+
+        watchdog.Token.IsCancellationRequested.Should().BeTrue(
+            "the guarded work must be aborted, not left running unguarded: the gate is now "
+            + "open and a second holder can start at any moment");
+        watchdog.LockLost.Should().BeTrue(
+            "and the caller must be able to tell 'we lost exclusivity' from 'the host asked "
+            + "us to stop' — they are different stories for an operator, and different "
+            + "recovery states");
+    }
+
+    [Test]
+    public async Task A_watchdog_does_not_cry_wolf_while_the_lock_is_genuinely_held()
+    {
+        // The other side of the guarantee: a heartbeat that mistook normal
+        // operation for loss would abort every long move and every rotation.
+        const long key = 0x7A11_0007L;
+
+        await using var lease = await PostgresAdvisoryLock.TryAcquireAsync(
+            _cs, PostgresAdvisoryLockKey.FromInt64(key));
+        lease.Should().NotBeNull();
+
+        await using var watchdog = lease!.WatchLiveness(
+            TimeSpan.FromMilliseconds(50), CancellationToken.None, site: "test");
+
+        await Task.Delay(1000); // ~20 heartbeats
+
+        watchdog.Token.IsCancellationRequested.Should().BeFalse();
+        watchdog.LockLost.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task A_watchdog_over_a_hashtextextended_key_watches_that_exact_key()
+    {
+        // The move gate keys on hashtextextended, which is frequently NEGATIVE
+        // — the pg_locks re-assembly of (classid, objid) has to round-trip
+        // that. A watchdog that silently watched the wrong key would either
+        // never fire (guard gone) or fire immediately (every move aborts).
+        var tenantId = Guid.NewGuid().ToString("D");
+        var key = await AdvisoryLockProbe.HashTextExtendedAsync(_cs, tenantId);
+
+        await using var lease = await PostgresAdvisoryLock.TryAcquireAsync(
+            _cs, PostgresAdvisoryLockKey.FromHashTextExtended(tenantId));
+        lease.Should().NotBeNull();
+
+        await using var watchdog = lease!.WatchLiveness(
+            TimeSpan.FromMilliseconds(100), CancellationToken.None, site: "test");
+        await Task.Delay(400);
+        watchdog.LockLost.Should().BeFalse("the key really is held — the probe must see it");
+
+        (await AdvisoryLockProbe.TerminateHolderAsync(_cs, key)).Should().BeTrue();
+        await WaitForCancellationAsync(watchdog.Token, TimeSpan.FromSeconds(10));
+        watchdog.LockLost.Should().BeTrue();
+    }
+
+    [Test]
+    public async Task A_watchdogs_token_is_cancelled_by_the_callers_token_too()
+    {
+        // Wrapping the caller's token must not DISCARD it: host shutdown has
+        // to keep reaching the guarded work.
+        const long key = 0x7A11_0008L;
+        using var caller = new CancellationTokenSource();
+
+        await using var lease = await PostgresAdvisoryLock.TryAcquireAsync(
+            _cs, PostgresAdvisoryLockKey.FromInt64(key));
+        await using var watchdog = lease!.WatchLiveness(
+            TimeSpan.FromMilliseconds(100), caller.Token, site: "test");
+
+        await caller.CancelAsync();
+
+        watchdog.Token.IsCancellationRequested.Should().BeTrue();
+        watchdog.LockLost.Should().BeFalse(
+            "an ordinary cancellation is not lock loss — reporting it as such would send an "
+            + "operator hunting a database problem that did not happen");
+    }
+
+    [Test]
+    public async Task Disposing_a_watchdog_does_not_cancel_the_work_it_was_watching()
+    {
+        // Callers dispose the watchdog in a finally, AFTER the guarded work
+        // completed successfully. If that disposal cancelled the token, every
+        // successful run would end by cancelling itself — and any cleanup
+        // still riding that token would fail.
+        const long key = 0x7A11_0009L;
+
+        await using var lease = await PostgresAdvisoryLock.TryAcquireAsync(
+            _cs, PostgresAdvisoryLockKey.FromInt64(key));
+        var watchdog = lease!.WatchLiveness(
+            TimeSpan.FromMilliseconds(50), CancellationToken.None, site: "test");
+        var token = watchdog.Token;
+
+        await watchdog.DisposeAsync();
+
+        token.IsCancellationRequested.Should().BeFalse();
+        watchdog.LockLost.Should().BeFalse();
+        await watchdog.DisposeAsync(); // idempotent
+    }
+
+    private static async Task WaitForCancellationAsync(CancellationToken token, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline && !token.IsCancellationRequested)
+            await Task.Delay(25);
+    }
+
     [Test]
     public async Task A_failed_connect_leaves_nothing_holding_anything()
     {

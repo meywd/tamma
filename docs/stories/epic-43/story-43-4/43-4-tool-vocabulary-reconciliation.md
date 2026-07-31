@@ -224,6 +224,21 @@ applies that posture to tools, which has never been done.
 - **A protected-path selector for `file_write`.** `PathValidator` enforces workspace-root containment only;
   a `file_write.protected` member would be a row that can never be selected, so it is not shipped.
 - **MCP tool granularity.** MCP stays one coarse catalog member with no drift signal.
+  *[Amended 2026-07-30 — GRANULARITY is still out of scope, but the coarse member's THRESHOLD and
+  its alias resolution changed.]* `ToolNameAliases.TryResolve` now recognises the
+  `mcp__<server>__<tool>` **prefix family** and resolves it to `effect:mcp.tool.invoke` — the one
+  alias that leaves the `tool:` plane — and that member now ships `AutonomyDial.AlwaysHuman` instead
+  of `AutonomyDial.Min`. Rationale (epic README → "MCP: the one family where the CI half cannot
+  exist"): epic D2 permits an unclassified action at runtime *because* the harnesses make it
+  unmergeable in CI, and no harness in this tree can enumerate a remote MCP server's tools, so for
+  MCP the CI half never fires. Left uncatalogued, an `mcp__*` name sailed through the Seam B gate
+  as `uncatalogued` forever.
+  **Still true of this story's other commitments:** the map remains RESOLUTION-ONLY (AC1/AC2 —
+  advertised names are byte-identical, `AdvertisedToolNamesUnchangedTests` unchanged and green); the
+  prefix family is deliberately NOT in `ToolNameAliases.All`, because it is unbounded and `All` is
+  what the validator iterates for the two FINITE vocabularies; and no capability was added or
+  removed — no MCP `IToolExecutor` is registered, so such a call already came back "Unknown tool"
+  from `ToolExecutorRegistry`. Only the rejection's provenance changed.
 - **Registering `GetAcceptanceRulesTool` in DI.** Deliberately excluded (39-5 D6); it is an allowlist entry,
   not a bug.
 - **Anything in `Tamma.ElsaServer`'s tool surface.** There is none.
@@ -284,3 +299,4 @@ follow-ups below already presume it. Recording it here so the story's own text a
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-07-25 | 1.0.0   | Initial story creation | Claude |
 | 2026-07-29 | 1.0.1   | Review follow-ups closed: git-grading hole recorded in catalog; non-enforceable + parallel-path gate tests added; null-threshold denial message fixed | Claude |
+| 2026-07-30 | 1.0.2   | MCP governance decision: `ToolNameAliases` resolves the `mcp__*` prefix family to `effect:mcp.tool.invoke` (the one alias outside the `tool:` plane) and that member now ships `AlwaysHuman` — because MCP is the one family for which epic D2's "unmergeable in CI" half cannot exist. Resolution-only guarantee, `All`-iterating validator checks and advertised names all unchanged. Also: the Seam B gate now honours the 43-5 F11 break-glass override. | Claude |

@@ -247,6 +247,133 @@ public class ToolLoopAutonomyGateSeamTests
     // Helpers
     // ─────────────────────────────────────────────────────────────────────
 
+    // ── F11 (2026-07-30) — a BREAK-GLASS BYPASS at Seam B is audited, and the
+    //    audit row cannot be silently dropped ─────────────────────────────────
+
+    /// <summary>
+    /// The gate is sync by design (43-5 AC12: the per-tool-call path must never
+    /// block on a database), so the DURABLE record of a bypass is written here,
+    /// on the loop's async path. One row per bypassed call, carrying the
+    /// override's reason and expiry.
+    /// </summary>
+    [Test]
+    public async Task A_break_glass_bypass_writes_an_audit_row_per_call()
+    {
+        var events = new RecordingEventRepository();
+        var handler = new SequencedCapturingHandler(
+            ToolUse(("tc-1", "file_read", """{"path":"README.md"}"""),
+                    ("tc-2", "file_write", """{"path":"a","content":"b"}""")),
+            EndTurn("done", 5, 2));
+
+        var runner = NewRunner(
+            handler, BypassingGate(), RegistryRecording(new List<string>()),
+            actionGateEvents: new Tamma.Api.Services.Actions.ActionGateEventsService(events));
+
+        await RunAsync(runner);
+
+        events.Appended.Should().HaveCount(2,
+            "one durable row per bypassed decision, not one per outage");
+        events.Appended.Should().OnlyContain(e =>
+            e.Type == Tamma.Api.Services.Actions.ActionGateEventsService.BreakGlassBypassType);
+
+        using var tags = JsonDocument.Parse(events.Appended[0].Tags!);
+        tags.RootElement.GetProperty("seam").GetString().Should().Be("tool-loop",
+            "a bypass on the tool loop and one at a 43-9 seam have very different blast radii");
+        tags.RootElement.GetProperty("breakGlass").GetString().Should().Be("true");
+        tags.RootElement.GetProperty("expiresAtUtc").GetString().Should().NotBeNullOrEmpty();
+
+        using var data = JsonDocument.Parse(events.Appended[0].Data!);
+        data.RootElement.GetProperty("reason").GetString().Should().Be("INC-4412");
+    }
+
+    /// <summary>
+    /// The append is on the NON-swallowing path: a bypass that cannot be recorded
+    /// fails the run instead of happening quietly. An unrecorded bypass is
+    /// indistinguishable from an unauthorised one, and "loud and audited" is the
+    /// whole condition on which this lever exists.
+    /// </summary>
+    [Test]
+    public async Task A_break_glass_bypass_that_cannot_be_audited_does_not_happen_quietly()
+    {
+        var events = new RecordingEventRepository { Throw = true };
+        var handler = new SequencedCapturingHandler(
+            ToolUse(("tc-1", "file_read", """{"path":"README.md"}""")),
+            EndTurn("done", 5, 2));
+
+        var runner = NewRunner(
+            handler, BypassingGate(), RegistryRecording(new List<string>()),
+            actionGateEvents: new Tamma.Api.Services.Actions.ActionGateEventsService(events));
+
+        var act = async () => await RunAsync(runner);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    /// <summary>An ordinary (non-bypassed) decision writes nothing here — the
+    /// bypass row is a signal, not new noise on the healthy path.</summary>
+    [Test]
+    public async Task An_ordinary_decision_writes_no_break_glass_row()
+    {
+        var events = new RecordingEventRepository();
+        var handler = new SequencedCapturingHandler(
+            ToolUse(("tc-1", "file_read", """{"path":"README.md"}""")),
+            EndTurn("done", 5, 2));
+
+        var runner = NewRunner(
+            handler, new CatalogDefaultToolLoopAutonomyGate(), RegistryRecording(new List<string>()),
+            actionGateEvents: new Tamma.Api.Services.Actions.ActionGateEventsService(events));
+
+        await RunAsync(runner);
+
+        events.Appended.Should().BeEmpty();
+    }
+
+    /// <summary>A gate whose every decision is a break-glass bypass.</summary>
+    private static IToolLoopAutonomyGate BypassingGate()
+    {
+        var state = Tamma.Core.Actions.BreakGlassState.Engaged(
+            DateTimeOffset.UtcNow.AddHours(1), "INC-4412");
+        var gate = new Mock<IToolLoopAutonomyGate>();
+        gate.Setup(g => g.Evaluate(It.IsAny<string>(), It.IsAny<string?>()))
+            .Returns((string name, string? _) => new ToolLoopGateDecision(
+                ToolLoopGateOutcome.Allowed,
+                new Tamma.Core.Actions.ActionKey(Tamma.Core.Actions.ActionNamespace.Tool, name),
+                AutonomyDial.Min, AutonomyDial.Min,
+                Tamma.Core.Actions.AutonomyGateEvaluator.ReasonBreakGlassBypass,
+                state));
+        return gate.Object;
+    }
+
+    private sealed class RecordingEventRepository : Tamma.Data.Repositories.IEventRepository
+    {
+        public List<Tamma.Data.Entities.DomainEvent> Appended { get; } = new();
+        public bool Throw { get; init; }
+
+        public Task<Tamma.Data.Entities.DomainEvent> AppendAsync(Tamma.Data.Entities.DomainEvent evt)
+        {
+            if (Throw) throw new InvalidOperationException("event store unavailable");
+            Appended.Add(evt);
+            return Task.FromResult(evt);
+        }
+
+        public Task<Tamma.Data.Entities.DomainEvent?> GetByIdAsync(Guid id)
+            => Task.FromResult<Tamma.Data.Entities.DomainEvent?>(null);
+        public Task<List<Tamma.Data.Entities.DomainEvent>> QueryAsync(
+            Guid? tenantId, string? type, int? issueNumber, int limit)
+            => Task.FromResult(new List<Tamma.Data.Entities.DomainEvent>());
+        public Task<Tamma.Data.Entities.DomainEvent?> GetLastByTypeAsync(Guid tenantId, string type)
+            => Task.FromResult<Tamma.Data.Entities.DomainEvent?>(null);
+        public Task ClearAsync(Guid tenantId) => Task.CompletedTask;
+        public Task<(IReadOnlyList<Tamma.Data.Entities.DomainEvent> Events, int Total)>
+            QueryWithPaginationAsync(Guid? tenantId, string? type, int? issueNumber, int limit, int offset)
+            => Task.FromResult<(IReadOnlyList<Tamma.Data.Entities.DomainEvent>, int)>(
+                (Array.Empty<Tamma.Data.Entities.DomainEvent>(), 0));
+        public Task<(IReadOnlyList<Tamma.Data.Entities.DomainEvent> Events, int Total)>
+            ListByTenantAsync(Guid tenantId, string? typePrefix, int limit, int offset)
+            => Task.FromResult<(IReadOnlyList<Tamma.Data.Entities.DomainEvent>, int)>(
+                (Array.Empty<Tamma.Data.Entities.DomainEvent>(), 0));
+    }
+
     private static async Task<InlineToolLoopResult> RunAsync(
         InlineToolLoopRunner runner, ToolLoopConfig? loopConfig = null) =>
         await runner.RunAsync(
@@ -281,7 +408,8 @@ public class ToolLoopAutonomyGateSeamTests
 
     private static InlineToolLoopRunner NewRunner(
         HttpMessageHandler handler, IToolLoopAutonomyGate gate, IToolExecutorRegistry registry,
-        ParallelToolExecutor? parallelExecutor = null)
+        ParallelToolExecutor? parallelExecutor = null,
+        Tamma.Api.Services.Actions.ActionGateEventsService? actionGateEvents = null)
     {
         var factory = new Mock<IHttpClientFactory>();
         factory.Setup(f => f.CreateClient(It.IsAny<string>()))
@@ -289,7 +417,8 @@ public class ToolLoopAutonomyGateSeamTests
         return new InlineToolLoopRunner(
             NullLogger<InlineToolLoopRunner>.Instance, factory.Object, configuration: null,
             sanitizer: null, autonomyGate: gate, toolRegistry: registry,
-            parallelExecutor: parallelExecutor);
+            parallelExecutor: parallelExecutor,
+            actionGateEvents: actionGateEvents);
     }
 
     private static LlmProviderConfig Config() => new()

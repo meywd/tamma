@@ -1,8 +1,10 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
+using Npgsql;
 using NUnit.Framework;
 using Tamma.Api.Services.Audit;
 using Tamma.Api.Tests.TestDoubles;
@@ -191,6 +193,105 @@ public class AuditChainCheckpointSchedulerLockTests
         (await AdvisoryLockProbe.IsHeldAsync(_cs, key)).Should().BeTrue(
             "and it must not have released the winner's lock either");
     }
+
+    // ─── connection-string sourcing (2026-07-30 audit, second trap) ───
+
+    [Test]
+    public async Task The_leader_lock_still_opens_when_EF_hands_back_a_password_less_string()
+    {
+        // THE PRODUCTION HAZARD, which no container reproduced when this lock
+        // was first moved onto its own session. Program.cs registers a
+        // singleton CP NpgsqlDataSource next to the EF registration; Npgsql's
+        // EF provider then mints the context's DbConnection from that data
+        // source, so EF's Database.GetConnectionString() — which this
+        // scheduler used to read directly — comes back with the password
+        // stripped. Opening a session from it throws, this pod reads that as
+        // "another pod is the leader", every pod does the same, and the hour
+        // gets NO audit-chain checkpoints from anyone.
+        //
+        // The stripping itself cannot be asserted here: whether Npgsql's EF
+        // provider picks up the DI-registered data source is a PROCESS-wide,
+        // first-context-wins property of EF Core's internal service-provider
+        // cache, so it flips depending on what else ran first (see
+        // PostgresAdvisoryLockConnectionStringTests). So the context is bound
+        // to an explicitly password-less string instead — indistinguishable,
+        // at the seam, from one Npgsql laundered — while configuration carries
+        // the real one, exactly as the host has it. If the scheduler still
+        // took the EF route, this test would fail to elect a leader.
+        var now = new DateTimeOffset(2026, 07, 30, 17, 30, 00, TimeSpan.Zero);
+        var key = LockKeyFor(now);
+
+        var checkpoints = new BlockingCheckpointService();
+        await using var sp = BuildDataSourceInDiServices(checkpoints);
+
+        var scheduler = BuildScheduler(sp, now);
+        await ((IHostedService)scheduler).StartAsync(CancellationToken.None);
+        await checkpoints.Entered.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        (await AdvisoryLockProbe.IsHeldAsync(_cs, key)).Should().BeTrue(
+            "this pod must have genuinely won the hour's leader election. Writing "
+            + "checkpoints WITHOUT the lock would be worse than not writing them");
+
+        checkpoints.Release.TrySetResult();
+        await ((IHostedService)scheduler).StopAsync(CancellationToken.None);
+        (await AdvisoryLockProbe.IsHeldAsync(_cs, key)).Should().BeFalse();
+    }
+
+    [Test]
+    public async Task A_tick_with_no_usable_connection_string_fails_closed_and_names_the_trap()
+    {
+        // No configuration, and EF's view laundered: indistinguishable from a
+        // stripped string, so the tick must refuse rather than open an
+        // unauthenticable session — whose failure would read as "another pod
+        // is the leader" and silently cost the hour its checkpoints.
+        var now = new DateTimeOffset(2026, 07, 30, 18, 30, 00, TimeSpan.Zero);
+
+        var checkpoints = new BlockingCheckpointService();
+        checkpoints.Release.TrySetResult();
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(NpgsqlDataSource.Create(_cs));
+        services.AddDbContext<ControlPlaneDbContext>(o => o.UseNpgsql(StripPassword(_cs)));
+        services.AddSingleton<IAuditChainCheckpointService>(checkpoints);
+        await using var sp = services.BuildServiceProvider();
+
+        var scheduler = BuildScheduler(sp, now);
+
+        var act = async () => await scheduler.TickForTestAsync(CancellationToken.None);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .WithMessage("*audit-chain checkpoint leader election*")
+            .WithMessage("*NpgsqlDataSource*")
+            .WithMessage("*ConnectionStrings:ControlPlane*");
+        checkpoints.Calls.Should().Be(0,
+            "a tick that could not take the leader lock must not write checkpoints");
+    }
+
+    /// <summary>
+    /// The production container shape: a singleton <see cref="NpgsqlDataSource"/>
+    /// registered next to the scoped EF context, plus the credentials-bearing
+    /// string in configuration where the host puts it — and the EF context
+    /// bound to a password-less one, which is what the host's context hands
+    /// back in the shape under test.
+    /// </summary>
+    private ServiceProvider BuildDataSourceInDiServices(IAuditChainCheckpointService checkpoints)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:ControlPlane"] = _cs,
+            }).Build());
+        services.AddSingleton(NpgsqlDataSource.Create(_cs));
+        services.AddDbContext<ControlPlaneDbContext>(o => o.UseNpgsql(StripPassword(_cs)));
+        services.AddSingleton(checkpoints);
+        return services.BuildServiceProvider();
+    }
+
+    private static string StripPassword(string connectionString)
+        => new NpgsqlConnectionStringBuilder(connectionString) { Password = null }
+            .ConnectionString;
 
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {

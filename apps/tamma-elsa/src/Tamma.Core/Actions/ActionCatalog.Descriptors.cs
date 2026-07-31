@@ -54,9 +54,10 @@ public static partial class ActionCatalog
 
     private static ActionDescriptor Effect(
         ExternalEffect effect, ActionGroup group, ActionRisk risk, string title, string summary, string site,
-        bool reversible = true, string? sensitive = null, bool enforceable = true) =>
+        bool reversible = true, string? sensitive = null, bool enforceable = true,
+        int min = AutonomyDial.Min) =>
         new(new ActionKey(ActionNamespace.Effect, effect.ToWire()), group, risk, reversible,
-            title, summary, AutonomyDial.Min, site, sensitive, EscalatableToHuman: true, Enforceable: enforceable);
+            title, summary, min, site, sensitive, EscalatableToHuman: true, Enforceable: enforceable);
 
     private static ActionDescriptor Automation(
         BackgroundActor actor, ActionGroup group, ActionRisk risk, string title, string summary, string site,
@@ -338,10 +339,38 @@ public static partial class ActionCatalog
             "POST /api/v1/notifications/slack — NotificationEndpoints.QueueSlack", reversible: false),
         Effect(ExternalEffect.NotifyEmailSend, ActionGroup.ExternalComms, ActionRisk.Mutating, "Send email", "Send an outbound email (a sent message cannot be unsent).",
             "POST /api/v1/notifications/email — EmailEndpoints.SendEmail", reversible: false),
-        // Ships at Min, NOT AlwaysHuman (43-3 D3/C4, binding deviation from design.md
-        // §3.1): under enforcing-v1 (epic D1) an AlwaysHuman default would gate every
-        // MCP invocation on day one — a behaviour change in a behaviour-preserving
-        // story. The admin opts in. Pinned by DeployAndMcp_ShipAtMin_PerEpicDecisionD1.
+        // SHIPS AlwaysHuman — REVERSED 2026-07-30 (epic governance decision on MCP;
+        // see docs/stories/epic-43/README.md → Drift prevention → "MCP: the one
+        // family where the CI half cannot exist").
+        //
+        // It previously shipped at Min under 43-3 D3/C4 ("under enforcing-v1 an
+        // AlwaysHuman default would gate every MCP invocation on day one — a
+        // behaviour change in a behaviour-preserving story"). That reasoning is
+        // superseded, not forgotten, on two grounds:
+        //
+        //  1. THE SAFETY ARGUMENT DOES NOT HOLD FOR MCP. Epic D2 tolerates an
+        //     unclassified action at RUNTIME because the drift harnesses make it
+        //     UNMERGEABLE in CI. No harness can enumerate an MCP server's tools —
+        //     the tool list lives in a separate process behind
+        //     POST /api/kb/mcp/tools/invoke and is not derivable from this tree —
+        //     so for MCP the CI half of that bargain does not exist and never
+        //     becomes unmergeable. An open capability class that is both
+        //     unenforceable and drift-invisible is not a tolerated gap; it is the
+        //     hole the epic exists to close.
+        //  2. THE BLAST RADIUS IS EMPTY TODAY. No MCP tool executor is registered
+        //     (ToolExecutorRegistry holds file_read/file_write/search_code/
+        //     shell_execute/git_operations/run_tests), so an `mcp__*` name emitted
+        //     into the tool loop already terminates as "Unknown tool"; and the one
+        //     route that does invoke MCP is a human-authenticated
+        //     SettingsManage endpoint, not an agent path. Nothing that works today
+        //     stops working.
+        //
+        // Reversible by ONE admin policy row (action scope, min = AutonomyDial.Min)
+        // the moment MCP can be catalogued per server/tool and swept — that is the
+        // intended off switch, and it is why this is a DEFAULT rather than an
+        // Enforceable=false or a hardcoded refusal.
+        // Pinned by McpToolInvoke_ShipsAlwaysHuman_BecauseTheCiHalfCannotExist.
+        //
         // SiteKey corrected 2026-07-29 (adversarial review F16). It previously read
         // "POST /api/kb/mcp/servers/{id}/start|stop", which is not a route pattern:
         // the alternation matches no registered route, so 43-8's binding sweep
@@ -352,10 +381,11 @@ public static partial class ActionCatalog
         // (Program.cs `kb.MapPost("/mcp/tools/invoke", KbEndpoints.InvokeMcpTool)`),
         // verbatim. The server start/stop pair is MCP-server LIFECYCLE, not tool
         // invocation; it has no catalog member of its own and gaining one is a
-        // vocabulary decision, not a SiteKey repair. Risk grade and
-        // DefaultMinAutonomy deliberately UNCHANGED.
-        Effect(ExternalEffect.McpToolInvoke, ActionGroup.ModelInvocation, ActionRisk.Command, "Invoke MCP tool", "Invoke an MCP tool (ONE COARSE MEMBER — no per-server/per-tool granularity; recorded hole).",
-            "POST /api/kb/mcp/tools/invoke — KbEndpoints.InvokeMcpTool", reversible: false),
+        // vocabulary decision, not a SiteKey repair. Risk grade deliberately
+        // UNCHANGED (the DefaultMinAutonomy is not — see the block above).
+        Effect(ExternalEffect.McpToolInvoke, ActionGroup.ModelInvocation, ActionRisk.Command, "Invoke MCP tool", "Invoke an MCP tool. ONE COARSE MEMBER — no per-server/per-tool granularity, and NO drift signal: adding a server, or a tool on an existing server, changes nothing in this catalog and nothing in CI. Because the 'unclassified is unmergeable in CI' half of epic D2 cannot exist here, this member REQUIRES A HUMAN BY DEFAULT; an admin policy row re-opens it.",
+            "POST /api/kb/mcp/tools/invoke — KbEndpoints.InvokeMcpTool", reversible: false,
+            min: AutonomyDial.AlwaysHuman),
         // INFORMATIONAL ONLY, NEVER ENFORCEABLE (epic README OQ2, answered
         // 2026-07-25): the reveal is how an authorized action gets its credential;
         // gating it would demand a human per credential fetch. Enforceable=false is

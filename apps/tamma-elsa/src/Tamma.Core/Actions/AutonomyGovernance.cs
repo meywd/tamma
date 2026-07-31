@@ -187,6 +187,73 @@ public enum ActionAssignmentSource
     /// mistaken for <see cref="SystemDefault"/> in the audit stream.
     /// </summary>
     Unavailable,
+
+    /// <summary>
+    /// A policy input was UNREADABLE and the operator's BREAK-GLASS override was
+    /// engaged, so the gate did NOT fail closed (43-5 F11 close, 2026-07-30).
+    /// The resolution fell back to the shipped default (snapshot half) or kept
+    /// the successfully-read row threshold minus the unreadable legacy floor
+    /// (acceptance-rules half).
+    ///
+    /// <para>It is a THIRD value, distinct from both <see cref="SystemDefault"/>
+    /// (a healthy decision) and <see cref="Unavailable"/> (a degraded decision
+    /// that DID fail closed), because "an operator deliberately suspended the
+    /// fail-closed posture" is a different fact from either, and an auditor must
+    /// be able to select exactly those decisions.</para>
+    ///
+    /// <para><b>It never appears on a decision that a successfully-read policy
+    /// row would have denied</b> — break-glass bypasses degradation only. See
+    /// <see cref="AutonomyGateEvaluator"/>.</para>
+    /// </summary>
+    BreakGlass,
+}
+
+/// <summary>
+/// THE BREAK-GLASS OVERRIDE for the fail-closed governance posture (Story 43-5
+/// follow-up F11, closed 2026-07-30 — it was recorded as a BLOCKER on Story
+/// 43-9).
+///
+/// <para><b>What it is for.</b> Since the F6 close, a governance policy input
+/// that cannot be READ makes every catalogued action fail closed. That is the
+/// right failure direction, but during a control-plane outage it leaves an
+/// operator who has diagnosed the problem and accepted the risk with no lever
+/// short of editing code. This is that lever.</para>
+///
+/// <para><b>What it is NOT.</b> It is not an off switch for policy. It suspends
+/// exactly one thing: the substitution of
+/// <see cref="Documents.Policy.AutonomyDial.AlwaysHuman"/> for an UNREADABLE
+/// input. A decision denied by a policy row that WAS read successfully stays
+/// denied while break-glass is engaged, and so does a shipped default that
+/// blocks. That boundary is the difference between an outage lever and a
+/// backdoor, and it is enforced by construction in
+/// <see cref="AutonomyGateEvaluator"/> rather than by convention.</para>
+///
+/// <para><b>Why it carries a mandatory expiry.</b> A break-glass with no expiry
+/// becomes the permanent configuration — the fail-open the F6 close removed,
+/// re-introduced by an operator who forgot. The configuration source REFUSES to
+/// engage without an explicit UTC expiry, or with one already in the past.</para>
+/// </summary>
+/// <param name="IsEngaged">Whether the override is in force right now.</param>
+/// <param name="ExpiresAtUtc">When it stops being in force. Always non-null when
+/// <paramref name="IsEngaged"/> is true — engaging without an expiry is refused
+/// at the source.</param>
+/// <param name="Reason">The operator's stated reason, carried into every audit
+/// row the override produces.</param>
+public sealed record BreakGlassState(
+    bool IsEngaged,
+    DateTimeOffset? ExpiresAtUtc,
+    string? Reason)
+{
+    /// <summary>The ordinary state: no override, fail-closed intact.</summary>
+    public static BreakGlassState NotEngaged { get; } = new(false, null, null);
+
+    /// <summary>Engage until <paramref name="expiresAtUtc"/>.</summary>
+    public static BreakGlassState Engaged(DateTimeOffset expiresAtUtc, string? reason) =>
+        new(true, expiresAtUtc, reason);
+
+    /// <summary>Reason text for audit, never null (the source defaults it).</summary>
+    public string ReasonOrUnspecified =>
+        string.IsNullOrWhiteSpace(Reason) ? "unspecified" : Reason!;
 }
 
 /// <summary>One gate question (Story 43-5 AC8).</summary>

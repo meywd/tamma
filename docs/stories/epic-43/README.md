@@ -266,7 +266,50 @@ CI blocks the merge either way; what is lost is local-build feedback.
   deploy itself happens inside the loop. This must appear in the group description in the UI, not
   only in a doc.
 - MCP is one coarse member with no drift signal. Adding a server, or a tool on an existing server,
-  changes nothing in the catalog.
+  changes nothing in the catalog. **This is the one hole that D2's safety net cannot cover — see the
+  section immediately below.**
+
+### MCP: the one family where the CI half of D2 cannot exist
+
+*(Decided 2026-07-30. This is an amendment to **D2**, not an exception to it; the decision row in
+the table below is updated to match.)*
+
+D2 reads "an unclassified action is **allowed at runtime**, **unmergeable in CI**". The two halves
+are a bargain: runtime tolerance is affordable *because* the drift harnesses turn an uncatalogued
+capability into a build failure, so the gap is always temporary and always someone's to close.
+
+**For MCP the second half does not exist and cannot be built here.** An MCP server's tool list lives
+in another process — reachable only through `POST /api/kb/mcp/tools/invoke` — and is not derivable
+from this tree by reflection, by a route sweep, or by any of the mechanisms above. Adding a server,
+or a tool to an existing server, never becomes unmergeable, because there is nothing in the
+repository to notice. So MCP was an open capability class that was simultaneously **unenforceable**
+(one coarse member at the lowest threshold) and **drift-invisible** (no harness will ever flag it) —
+the exact combination the epic exists to prevent.
+
+**What compensates, since a harness cannot:**
+
+1. **`effect:mcp.tool.invoke` ships `AutonomyDial.AlwaysHuman`** instead of `AutonomyDial.Min`. Where
+   CI cannot make an unclassified MCP capability *unmergeable*, the default makes it *unautomatable*
+   — a person decides until an admin says otherwise. This is the deliberate exception to 43-3 D4's
+   "AlwaysHuman iff a person must act today" derivation, and to the D1 behaviour-preservation rule;
+   both are recorded at the descriptor and in `ActionCatalogDefaultsTests`.
+2. **`mcp__<server>__<tool>` names are no longer uncatalogued at the gate.** `ToolNameAliases`
+   resolves the prefix family onto that one member, so a model-emitted MCP name is *governed* rather
+   than passing through the Seam B tool-loop gate as `uncatalogued`. Deliberately narrow: this is a
+   named family, **not** a change to the uncatalogued rule — every other unknown tool name is still
+   allowed at runtime under D2, and a test guards that.
+3. **The blast radius is empty today, and that is why this could ship as a tightening.** No MCP
+   `IToolExecutor` is registered, so an `mcp__*` call already terminated as "Unknown tool" from
+   `ToolExecutorRegistry`; the only live MCP surface is a human-authenticated `SettingsManage` HTTP
+   route, not an agent path. What changed is *which* rejection the model receives.
+4. **Reversal is one admin policy row** (`effect:mcp.tool.invoke`, action scope, `min = Min`), and a
+   platform ceiling can still hold it shut against a tenant. It is a default, not a refusal.
+
+**What this does NOT claim to fix.** MCP is still ONE coarse member: per-server and per-tool
+granularity remain impossible without a catalog binding that can enumerate a remote server (epic
+Story 42-6's prerequisite, and open question 1 below). An admin who re-opens the member re-opens
+*every* server and *every* tool on it. When per-server members exist, this default should be
+revisited — the right long-term answer is granular members plus a sweep, not a blanket floor.
 
 ---
 
@@ -448,17 +491,24 @@ read that threw, silently discarded the legacy always-escalate floor). It now fa
 compose by `OR` and by INTERSECTION respectively, making every cross-plane field monotone. See
 `story-43-5/43-5-storage-principal-resolution-resolver-audit.md` → "F6 — CLOSED" / "F10 — CLOSED".
 
-**⛔ OPENED by the F6 close, and BLOCKING Story 43-9 — `43-5 F11`: there is no break-glass override
-for the fail-closed posture.** A non-authoritative governance snapshot now DENIES every catalogued
-tool, in both SaaS and single-user-with-a-control-plane deployments, and no config flag, env var or
-admin endpoint can force the gate open. It self-heals within the 60 s refresh TTL and logs loudly at
-ERROR, so this is a *recovery-lever* gap and not a diagnosis one — but 43-9 carries the same posture
-into four more seams with larger blast radius. **Deliberately not built:** the knob's shape (who may
-set it, whether it auto-expires, how each use is audited) is a product decision. Recorded in full
-under 43-5 → "Open follow-ups" → **F11**, and cross-listed in 43-9's Dependencies. Alongside it,
-**`43-5 F12`** records that the one live seam HARD-DENIES rather than escalating —
-`ToolLoopGateOutcome` has no `RequiresHuman` case, so a degraded decision reaches the model as a
-tool rejection and reaches no person at all.
+**✅ `43-5 F11` — the break-glass override for the fail-closed posture. Opened by the F6 close as a
+BLOCKER on Story 43-9; CLOSED 2026-07-30, and 43-9 is unblocked.** The gap: a non-authoritative
+governance snapshot DENIED every catalogued tool, in both SaaS and single-user-with-a-control-plane
+deployments, with no operator lever short of a code change. What shipped: a **config-sourced**
+override (`Tamma:Governance:BreakGlass:Enabled` / `:ExpiresAtUtc` / `:Reason`) — no endpoint and no
+writer, because an API that can switch off a governance posture is itself a governance surface; it
+**refuses to engage** without an explicit UTC expiry or with one already past; it logs at ERROR on
+engage, refusal, expiry and **every bypassed decision**; and each bypassed decision writes a distinct
+`ACTION.GATE.BREAK_GLASS_BYPASS` audit row on the **non-swallowing** append path, with its own
+provenance value (`break-glass`). **The load-bearing scoping decision:** it bypasses **degradation
+only** — a decision denied by a policy row that was read successfully, by a platform ceiling, by a
+disable, by a role restriction or by an `AlwaysHuman` shipped default is **still denied** while it is
+engaged. That is the difference between an outage lever and a backdoor, and it is enforced by
+construction in `AutonomyGateEvaluator` rather than by convention. Full write-up: 43-5 → "F11 —
+CLOSED". Alongside it, **`43-5 F12` remains OPEN**: the one live seam HARD-DENIES rather than
+escalating — `ToolLoopGateOutcome` has no `RequiresHuman` case, so a degraded decision reaches the
+model as a tool rejection and reaches no person at all. Break-glass changes *whether* work continues,
+not *who is asked*.
 
 > **Correction (2026-07-25).** An earlier draft of this line also asked Story 0 to "resolve
 > `GetAcceptanceRulesTool` — DI-register or delete, it must not stay a tool the registry cannot
@@ -478,7 +528,7 @@ dimmed-row treatment exists in the repo, but in Blazor.
 | | Decision | Rejected |
 |---|---|---|
 | **D1** | v1 **enforces**, with defaults reproducing today's behaviour. Admins opt into gating. | Declarative v1; enforce-with-pre-gated-defaults (two behaviour changes in one release) |
-| **D2** | Unclassified action is **allowed at runtime, unmergeable in CI**. | Fail-closed at runtime (any gap becomes a production stall); no guard at all |
+| **D2** | Unclassified action is **allowed at runtime, unmergeable in CI**. **Amended 2026-07-30:** the runtime tolerance is affordable only because the CI half exists. **MCP is the one family where the CI half cannot exist** — no harness can enumerate a remote server's tools — so `effect:mcp.tool.invoke` ships `AlwaysHuman` and `mcp__*` names resolve to it rather than passing as uncatalogued. Every OTHER unclassified name is unchanged. See "MCP: the one family where the CI half cannot exist". | Fail-closed at runtime (any gap becomes a production stall); no guard at all. **Also rejected in the 2026-07-30 amendment: making ALL uncatalogued tool names deny** — a far larger behaviour change than the evidence supports, and it would re-create the production-stall failure D2 was chosen to avoid |
 | **D3** | Model carries **no lower bound**; `[70,100]` stays as one named constant. | Widening now; keeping 70 permanently (which would make the greyed rows pointless) |
 | **S1** | Union catalog across all namespaces | Agent-actions only |
 | **S2** | Single source of truth; Epic 42 consumes | Two peer governance models |
@@ -493,6 +543,11 @@ dimmed-row treatment exists in the repo, but in Blazor.
 1. **MCP server trust and tenancy** — may a tenant admin register a tenant-scoped MCP server, or is
    the allowlist platform-owned? Determines whether MCP invocation can ever be finer-grained than one
    member. Not derivable from code.
+
+   **Still open — but the DEFAULT while it is open was settled on 2026-07-30**: `effect:mcp.tool.invoke`
+   ships `AlwaysHuman`, because an unanswered trust question plus an unenforceable, drift-invisible
+   capability class is not a state to leave automated. Answering this question is what makes a
+   finer-grained model possible, and the AlwaysHuman default should be revisited then — not before.
 2. ~~**Is secret-reveal gateable at all?**~~ — **ANSWERED (2026-07-25): NO. Reading a secret never
    requires a human.**
 

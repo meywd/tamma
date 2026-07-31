@@ -130,6 +130,20 @@ public sealed class TenantMoveOptions
 /// connector returns to the pool with the lock still held and the gate
 /// parks shut for that tenant indefinitely).</para>
 ///
+/// <para><b>…and the gate is WATCHED for the whole move</b> (2026-07-30
+/// follow-up). The lock above answers "may a second mover start?"; it said
+/// nothing about "is this mover still the only one?". A move holds the gate
+/// across <c>pg_dump</c> and <c>pg_restore</c> — minutes during which the lock
+/// session is idle and therefore exactly the thing a pooler recycle, an idle
+/// timeout or an administrative <c>pg_terminate_backend</c> kills. The gate
+/// would then open silently, a second move for the same tenant would be
+/// admitted, and two movers would interleave DROP SCHEMA CASCADE / restore /
+/// re-point on one tenant's data. <see cref="LockHeartbeatInterval"/>
+/// re-verifies from the lock session itself and ABORTS the move on loss,
+/// surfacing an error that names the lost gate rather than a bare
+/// cancellation. The tenant is left mid-move and the operator re-runs — every
+/// step is idempotent and the resume path is the documented one.</para>
+///
 /// <para><b>Aliasing guard:</b> two tenant_databases rows that point at
 /// the SAME physical (Host, Port, Database) would make a "move" between
 /// them dump-and-drop the live schema — validation rejects that before
@@ -148,7 +162,30 @@ public sealed class TenantMoveService : ITenantMoveService
     private readonly IPoolResolver _resolver;
     private readonly ITenantDbContextFactory _tenantDbFactory;
     private readonly TenantMoveOptions _options;
+    private readonly IConfiguration? _configuration;
     private readonly ILogger<TenantMoveService> _logger;
+
+    /// <summary>
+    /// How often a running move re-verifies, from the lock session itself,
+    /// that it still holds the per-tenant move gate.
+    ///
+    /// <para>10s, judged against the shape of THIS work, not copied from
+    /// elsewhere. A move holds the gate across a <c>pg_dump</c> and a
+    /// <c>pg_restore</c> — minutes of wall clock during which the lock session
+    /// does nothing at all, which is precisely the profile an idle timeout, a
+    /// pooler recycle or an admin <c>pg_terminate_backend</c> kills. What the
+    /// interval buys is a bound on how long this move can keep issuing
+    /// destructive steps (DROP SCHEMA CASCADE on the target, the re-point
+    /// commit, the source-schema drop) after a second mover has been let in
+    /// behind it; those steps are seconds apart, so 10s keeps the unguarded
+    /// window to roughly one of them. What it costs is one indexed
+    /// <c>pg_locks</c> read on an otherwise idle dedicated session: a
+    /// half-hour move pays 180 of them. Tighter than the fleet sweep's 15s
+    /// because a move's steps are individually destructive and irreversible,
+    /// looser than the KEK rotation's 5s because a move's unit of work is
+    /// minutes rather than milliseconds. Overridable for tests only.</para>
+    /// </summary>
+    internal TimeSpan LockHeartbeatInterval { get; init; } = TimeSpan.FromSeconds(10);
 
     public TenantMoveService(
         IDbContextFactory<ControlPlaneDbContext> cpFactory,
@@ -160,7 +197,8 @@ public sealed class TenantMoveService : ITenantMoveService
         IPoolResolver resolver,
         ITenantDbContextFactory tenantDbFactory,
         Microsoft.Extensions.Options.IOptions<TenantMoveOptions> options,
-        ILogger<TenantMoveService> logger)
+        ILogger<TenantMoveService> logger,
+        IConfiguration? configuration = null)
     {
         _cpFactory = cpFactory;
         _pool = pool;
@@ -171,6 +209,7 @@ public sealed class TenantMoveService : ITenantMoveService
         _resolver = resolver;
         _tenantDbFactory = tenantDbFactory;
         _options = options.Value;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -180,10 +219,49 @@ public sealed class TenantMoveService : ITenantMoveService
         // ── Step 0: per-tenant advisory lock for the WHOLE move ──────────
         // Two concurrent MoveAsync calls for one tenant would interleave
         // destructive steps (drop/restore/repoint) unpredictably — the
-        // second caller is rejected up front. Held on a dedicated CP
-        // session; released in the finally (and by session death anyway).
+        // second caller is rejected up front. Held on a dedicated, NON-POOLED
+        // CP session; released when the lease is disposed (and by session
+        // death anyway, which is only true because it is not pooled).
         await using var moveLock = await AcquireMoveLockAsync(tenantId, ct);
 
+        // ── Step 0b: watch the gate for the WHOLE move ───────────────────
+        // The reverse hazard (2026-07-30 follow-up). The gate above stops a
+        // second mover being ADMITTED; nothing stopped this move from carrying
+        // on after the gate silently OPENED underneath it. A move holds the
+        // lock across pg_dump and pg_restore — minutes with the lock session
+        // completely idle — so an idle timeout, a pooler recycle or an admin
+        // pg_terminate_backend ends the lease while the dump is still running,
+        // a second move for the same tenant is then let in, and the two of
+        // them interleave DROP SCHEMA CASCADE / restore / re-point on one
+        // tenant's data. The watchdog re-verifies from the lock session itself
+        // and cancels the move's token on loss; declaration order matters, as
+        // it disposes BEFORE the lease it is watching (see WatchLiveness).
+        await using var moveGuard = moveLock?.WatchLiveness(
+            LockHeartbeatInterval, ct, _logger, $"tenant.move tenantId={tenantId}");
+
+        try
+        {
+            await MoveCoreAsync(tenantId, targetDatabaseId, moveGuard?.Token ?? ct);
+        }
+        catch (OperationCanceledException ex) when (moveGuard?.LockLost == true)
+        {
+            // A bare "operation cancelled" here would send an operator looking
+            // for a shutdown that did not happen. Name what actually went
+            // wrong, and what state the tenant is in.
+            throw new InvalidOperationException(
+                $"The per-tenant move gate for '{tenantId}' was LOST mid-move: the control-plane "
+                + "session holding pg_try_advisory_lock died (a pooler/proxy drop, an idle "
+                + "timeout, or a terminated backend). The move was ABORTED rather than continued "
+                + "unguarded — while the gate is open a second move for this tenant can start, "
+                + "and two movers interleaving dump/restore/re-point on one schema lose data. The "
+                + "tenant is left mid-move (see its status); re-run the move, which resumes "
+                + "idempotently from wherever this attempt stopped.", ex);
+        }
+    }
+
+    private async Task MoveCoreAsync(
+        Guid tenantId, Guid targetDatabaseId, CancellationToken ct)
+    {
         // ── Step 1: validate ─────────────────────────────────────────────
         var plan = await ValidateAsync(tenantId, targetDatabaseId, ct);
         var schema = plan.SchemaName;
@@ -882,10 +960,15 @@ public sealed class TenantMoveService : ITenantMoveService
                 return null;
             }
 
-            connectionString = db.Database.GetConnectionString()
-                ?? throw new InvalidOperationException(
-                    "The control-plane context exposes no connection string, so the "
-                    + "per-tenant move advisory lock cannot be taken on a dedicated session.");
+            // Configuration first, EF second, each rejected unless it still
+            // carries credentials. EF's Database.GetConnectionString() — what
+            // this used to read directly — comes back with the password
+            // stripped whenever an NpgsqlDataSource is registered in DI, which
+            // is the production shape. The lock would then throw on open and
+            // every move would abort with the untrue "already in progress".
+            // Throws, naming the mechanism, when nothing usable resolves.
+            connectionString = PostgresAdvisoryLock.ResolveSessionConnectionString(
+                _configuration, db, $"the tenant-move gate for '{tenantId}'", _logger);
         }
 
         // Key unchanged: hashtextextended is still evaluated by Postgres over

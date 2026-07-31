@@ -8,6 +8,7 @@ using NUnit.Framework;
 using Tamma.Api.Services.Secrets;
 using Tamma.Api.Tests.TestDoubles;
 using Tamma.Data;
+using Tamma.Data.Abstractions;
 using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 using Testcontainers.PostgreSql;
@@ -281,6 +282,164 @@ public class KekRotationLockSessionTests
         second.GetStatus().Phase.Should().NotBe(KekRotationPhase.Failed,
             "with the gate released the same wiring must rotate — otherwise the "
             + "stand-down above proved nothing about the lock");
+    }
+
+    // ───────── the REVERSE hazard: the lock dies, the re-encrypt does not ─────────
+
+    [Test]
+    public async Task A_rotation_whose_lock_holding_backend_dies_aborts_instead_of_re_encrypting_on_unguarded()
+    {
+        // 2026-07-30 follow-up. Everything above guards the direction "the
+        // lock outlives the rotation". This is the reverse, and it is the
+        // worse one: a pooler recycle, an idle timeout or an administrative
+        // pg_terminate_backend ends the lock session WITHOUT touching this
+        // process. The re-encrypt runs over entirely different connections, so
+        // nothing notices — the cluster-wide gate is now open, a second pod's
+        // /rotate is admitted, and two pods re-encrypt the same tenant rows
+        // under two different keys. The surviving envelope is then readable
+        // only by whichever pod's key gets promoted; the other tenants' rows
+        // are unreadable by everyone. That is not recoverable by re-running.
+        //
+        // The kill happens from a SEPARATE, non-pooled session while the
+        // rotation is genuinely parked inside its per-tenant loop, which is
+        // the shape of the production incident.
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(ControlPlaneConfig());
+        services.AddDbContextFactory<ControlPlaneDbContext>(o => o.UseNpgsql(_cs));
+        services.AddSingleton<IPlatformEventRepository, NoopPlatformEventRepository>();
+        services.AddSingleton(NpgsqlDataSource.Create(_cs));
+        await using var sp = services.BuildServiceProvider();
+
+        var factory = sp.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
+        await using (var boot = await factory.CreateDbContextAsync())
+        {
+            await boot.Database.EnsureCreatedAsync();
+        }
+
+        // Two rotatable tenants. One is enough to prove the abort; the second
+        // is what proves the rotation did not simply carry on regardless.
+        var primary = BuildKek(seed: 1);
+        await SeedRotatableTenantsAsync(factory, primary, count: 2);
+
+        // The resolver is called once per tenant INSIDE the guarded loop, with
+        // the rotation's own token — so it is the natural place to (a) kill the
+        // lock holder and (b) sit there, exactly as a slow re-encrypt would,
+        // while the watchdog decides.
+        var saboteur = new LockKillingResolver(_cs);
+
+        var coordinator = new KekRotationCoordinator(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            BuildProvider(primary),
+            saboteur,
+            NullLogger<KekRotationCoordinator>.Instance)
+        {
+            // Production is 5s (see KekRotationCoordinator.LockHeartbeatInterval);
+            // the INTERVAL is a tuning constant, the abort-on-loss is not.
+            LockHeartbeatInterval = TimeSpan.FromMilliseconds(150),
+        };
+
+        coordinator.Start(BuildKek(seed: 90));
+        await coordinator.WaitForCompletionAsync();
+
+        saboteur.Killed.Should().BeTrue(
+            "the test must actually have terminated the lock-holding backend — otherwise it "
+            + "proves nothing about losing the gate");
+
+        var status = coordinator.GetStatus();
+        status.Phase.Should().Be(KekRotationPhase.Failed,
+            "a rotation that can no longer guarantee it is the only re-encryption running "
+            + "must ABORT, not finish. FailureReason: " + status.FailureReason);
+        status.FailureReason.Should().Contain("rotation lock was LOST",
+            "the operator has to be told WHY it stopped — a bare 'rotation cancelled' sends "
+            + "them looking for a shutdown that did not happen");
+        status.FailureReason.Should().Contain("retry",
+            "…and what to do about the rows that are already on the new key");
+
+        saboteur.Evictions.Should().Be(1,
+            "the abort must stop the per-tenant loop where it stood. Reaching the second "
+            + "tenant means the re-encrypt kept running with the cluster-wide gate open, "
+            + "which is the entire defect");
+
+        // The staged secondary is kept so /retry can finish the job — a
+        // lock-loss abort is a partial rotation, not a cancelled one.
+        await using var check = await factory.CreateDbContextAsync();
+        var row = await check.KekRotations
+            .OrderByDescending(r => r.StartedAt).FirstAsync();
+        row.Status.Should().Be("failed");
+        row.StagedSecondaryProtected.Should().NotBeNull(
+            "a rotation aborted part-way through the fleet must stay resumable; persisting it "
+            + "as 'cancelled' would zero the staged key and strand the already-rotated rows");
+    }
+
+    private static async Task SeedRotatableTenantsAsync(
+        IDbContextFactory<ControlPlaneDbContext> factory, byte[] primary, int count)
+    {
+        await using var ctx = await factory.CreateDbContextAsync();
+        for (var i = 0; i < count; i++)
+        {
+            var tenant = new Tenant
+            {
+                Id = Guid.NewGuid(),
+                Name = $"T{i}",
+                Slug = $"slug-{Guid.NewGuid():N}",
+                Type = "personal",
+                Plan = "free",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+            };
+            var entry = ctx.Tenants.Add(tenant);
+            entry.Property("Status").CurrentValue = "active";
+            entry.Property("EncryptedConnectionString").CurrentValue =
+                AesGcmConnectionStringDecryptor.EncryptWithKey(
+                    "Host=h;Database=t;Username=u;Password=p", primary);
+            entry.Property("KekVersion").CurrentValue = (short)1;
+        }
+        await ctx.SaveChangesAsync();
+    }
+
+    /// <summary>
+    /// Kills the backend holding the rotation gate the first time the
+    /// rotation reaches its per-tenant eviction, then blocks on the
+    /// rotation's own token — i.e. the guarded work is still in flight when
+    /// the lock disappears, which is the whole scenario. If the token is
+    /// never cancelled (no watchdog), the wait times out and the rotation
+    /// carries on to the next tenant, which is exactly what must not happen.
+    /// </summary>
+    private sealed class LockKillingResolver(string connectionString) : ITenantConnectionResolver
+    {
+        private int _evictions;
+
+        public int Evictions => Volatile.Read(ref _evictions);
+        public bool Killed { get; private set; }
+
+        public async ValueTask EvictAsync(Guid tenantId, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _evictions) == 1)
+            {
+                Killed = await AdvisoryLockProbe.TerminateHolderAsync(
+                    connectionString, KekRotationCoordinator.AdvisoryLockKey);
+
+                // Stand in for the rest of a slow re-encrypt. A watchdog-armed
+                // rotation cancels this within a heartbeat; an unguarded one
+                // sits here for the full delay and then rotates tenant #2.
+                await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+            }
+        }
+
+        public ValueTask<NpgsqlDataSource> GetDataSourceAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public ValueTask<NpgsqlDataSource> GetElsaDataSourceAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public ValueTask<ITenantConnectionLease> LeaseAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public TenantConnectionPoolStats GetStats() => new(0, 0, 0);
     }
 
     /// <summary>

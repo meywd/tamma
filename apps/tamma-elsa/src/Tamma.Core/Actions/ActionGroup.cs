@@ -149,7 +149,9 @@ public static class ActionGroupExtensions
             [ActionGroup.ModelInvocation] =
                 "Invoking LLMs, dispatching agents, and invoking MCP tools. LIMITATION: MCP is one coarse "
                 + "member with no per-server or per-tool granularity — adding an MCP server, or a tool on an "
-                + "existing server, changes nothing in this catalog.",
+                + "existing server, changes nothing in this catalog and nothing in CI, so no build check will "
+                + "ever tell you a new MCP capability appeared. Because of that, MCP tool invocation REQUIRES "
+                + "A PERSON by default; re-opening it re-opens EVERY server and EVERY tool on it.",
             [ActionGroup.Secrets] =
                 "Everything touching secret material: the secrets audit action, secret rotation automation, and "
                 + "the reveal effect. Secret reveal is informational-only and never enforceable — what governs "

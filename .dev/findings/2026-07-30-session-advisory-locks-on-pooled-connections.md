@@ -9,6 +9,14 @@ that take a session-scoped `pg_try_advisory_lock` the same way and asked for the
 pattern. Two reverse-direction hazards (lock dies while the guarded work continues) are recorded
 here as open, not fixed.
 
+> **UPDATE 2026-07-30 (later the same day) — both open items are now CLOSED.** The reverse hazard
+> has a shared, opt-in liveness watchdog on the helper, enabled at the two long-held gates
+> (`TenantMoveService`, `KekRotationCoordinator`); `TenantMigrationSweepRunner` was migrated onto
+> it and its bespoke copy deleted. All four sites now resolve their lock-session connection string
+> through one seam on `PostgresAdvisoryLock`. See **"Closing the two open items"** at the end of
+> this document, which also records **why the EF password-stripping shape could not be reproduced
+> in a container** — it is a process-wide EF Core cache property, not a container one.
+
 ## The mechanism
 
 Every advisory-lock holder in this codebase documented the same invariant, in almost the same
@@ -183,7 +191,8 @@ a different subsystem — see the Story 44-1 note on the migrate-all sweep in `P
 | `PostgresAdvisoryLeaderLock` | `IConfiguration.GetConnectionString("DefaultConnection")` | Raw configuration, never laundered |
 | `AuditChainCheckpointScheduler`, `TenantMoveService` | EF `Database.GetConnectionString()` | Verified working against a real cluster by their pinning tests, and by the full suite |
 
-**Open risk (not fixed, needs a decision):** `AuditChainCheckpointScheduler`, `TenantMoveService`
+**~~Open risk (not fixed, needs a decision)~~ CLOSED — see "Closing the two open items":**
+`AuditChainCheckpointScheduler`, `TenantMoveService`
 **and the already-shipped `TenantMigrationSweepRunner` (`b958adc`)** all take the EF route. Their
 tests pass, but none of those test containers reproduces the exact production shape (a registered
 `NpgsqlDataSource` **plus** a materialised control-plane connection) under which EF was observed
@@ -198,7 +207,11 @@ strength of a hazard not yet observed in production.
 
 ## Open / not fixed
 
-1. **The reverse hazard is unaddressed at two sites.** `b958adc`'s Finding 1.1 fixed the *other*
+*(Items 1 and 2 below were the state at the end of the first pass. Both are now closed — see
+"Closing the two open items". Item 3 remains open. The original text is kept because it is the
+statement of the problem the follow-up solved.)*
+
+1. **~~The reverse hazard is unaddressed at two sites.~~ CLOSED.** `b958adc`'s Finding 1.1 fixed the *other*
    direction for the sweep runner: a connection can die without the pod dying (pooler drop, idle
    timeout, `pg_terminate_backend`), which releases the lock while the guarded work carries on
    believing it is alone. Neither `TenantMoveService` (a move holds the gate across `pg_dump` /
@@ -262,3 +275,198 @@ Testcontainers Postgres instances concurrently and produce spurious failures —
 14.6s to become ready in one observed run. Those same tests pass individually and in the full
 suite. **Trust the full unfiltered run**; a filtered one is not a reliable signal here, in either
 direction. It was the full run that caught the password-stripping regression above.
+
+---
+
+# Closing the two open items (2026-07-30, follow-up pass)
+
+## Item 1 — the reverse hazard: a lock can die while the work it guards continues
+
+### What shipped
+
+`PostgresAdvisoryLockLease.WatchLiveness(interval, callerToken, logger, site)` returns a
+`PostgresAdvisoryLockWatchdog` that:
+
+- re-reads `pg_locks` **from the lease session itself**, pinned to `pid = pg_backend_pid()`, fully
+  qualified by database and `objsubid = 1`, with the 64-bit key reassembled using `|` (not `+`)
+  so `hashtextextended` keys — frequently negative — round-trip;
+- treats **any** failed probe as loss, because the dominant reason a command on the lease
+  connection throws is that the backend is gone;
+- exposes `Token` (a `CancellationTokenSource` linked to the caller's) which it cancels on loss,
+  and `LockLost` so a caller can tell "we lost exclusivity" from "the host stopped us" — two very
+  different stories to put in front of an operator, and two different recovery states;
+- on `DisposeAsync` stops the heartbeat and does **not** cancel `Token`, so a critical section
+  that finished normally cannot be retro-cancelled by its own cleanup.
+
+Ordering contract, documented on the method and honoured at every site: **dispose the watchdog
+before the lease.** Both ride the same single session; a probe racing the release would either
+fault on a concurrently-executing command or report a spurious loss. `await using` in declaration
+order (lease first, watchdog second) gets this right.
+
+### Enabled where, and the interval, per site
+
+| Site | Watchdog | Interval | Why |
+|---|---|---|---|
+| `KekRotationCoordinator` | **yes** | **5s** | Holds the gate across a full fleet re-encrypt. Its unit of work is a single row — milliseconds — so a long interval buys a second pod a great many rows. And two concurrent re-encrypts are not "duplicate work": pod A rewrites a row under key A and bumps its version, pod B rewrites it under key B, and the surviving envelope is readable only by whichever key is eventually promoted. Unreadable tenant secrets, not recoverable by re-running. Tightest interval of the three because the consequence is the worst and the work unit the smallest. A half-hour rotation pays 360 trivial reads. |
+| `TenantMoveService` | **yes** | **10s** | Holds the gate across `pg_dump` + `pg_restore` — minutes with the lock session completely idle, which is exactly the profile an idle timeout / pooler recycle / admin `pg_terminate_backend` kills. The bound that matters is how long the move can keep issuing destructive steps (DROP SCHEMA CASCADE on target, the re-point commit, the source drop) after a second mover is admitted; those are seconds apart, so 10s keeps the unguarded window to about one of them. A half-hour move pays 180 reads. |
+| `TenantMigrationSweepRunner` | **yes** (migrated) | **15s**, unchanged | Existing judgement kept verbatim: one tenant's migration is seconds to minutes, so 15s keeps the unguarded window under roughly one tenant's worth of fleet DDL. Only the implementation moved. |
+| `AuditChainCheckpointScheduler` | **no** | — | A tick writes one signed checkpoint per active scope and is over in seconds, with the connection actively in use throughout — the window is too small for the hazard. And the cost if it happened is one duplicate append-only checkpoint row for an hour, not data lost. Documented on the class so the omission reads as a decision. |
+| `PostgresAdvisoryLeaderLock` (analytics rollup + scheduled triggers) | **no** | — | Same shape: elect a leader, dispatch a workflow, release. Short bounded critical section, per-hour self-healing key, and a rare double-dispatch is duplicated work rather than corruption. |
+
+### The sweep runner WAS migrated onto the shared watchdog
+
+The first pass deliberately left it alone: it was the one site already known good, and its lease
+carried extra machinery (an `Interlocked` ownership handoff between `ReleaseAsync` and `Dispose`,
+plus the watchdog). Migrating it now, because:
+
+- once the helper grew a watchdog, the runner's copy was **a literal duplicate of shared code**,
+  and "two implementations of one idea" is the mechanism that put this bug in four places to begin
+  with. Leaving it means the next fix has to be found and applied twice.
+- the "extra machinery" turned out to already exist in the helper or to be one line: the ownership
+  handoff is `PostgresAdvisoryLockLease.DisposeAsync`'s own `Interlocked.Exchange`, and the
+  synchronous `Dispose` path needed only `DisposeSession()` — a named method rather than an
+  `IDisposable` implementation, deliberately, so a `using` written where `await using` was meant
+  cannot silently pick the weaker path.
+- the risk is bounded by the best-covered fixture in this area (19 tests, including the
+  kill-the-backend abort pin and the pooled-connector pin), plus the full unfiltered suite.
+
+What stayed in the runner: the process-local slot, partial-result reporting, and the **cross-pod**
+`pg_locks` probe behind `IsSweepRunningAsync` — that one asks "does ANY pod hold the key", which
+is a different question from the lease's "do *I* still hold it" and correctly lives elsewhere.
+
+### Behavioural consequences at each site
+
+- **KEK**: on loss the rotation aborts, the status reads *"the cluster-wide rotation lock was LOST
+  mid-rotation … re-run /api/admin/kek/retry"*, and the `kek_rotations` row is persisted as
+  **`failed` with the staged secondary KEPT** (not `cancelled`, which zeroes it) — because a
+  lock-loss abort is a *partial* rotation and must stay resumable. The coordinator returns instead
+  of rethrowing the `OperationCanceledException`, so a lost lock is never reported as an orderly
+  shutdown.
+- **Move**: `MoveAsync` is now a thin wrapper (lock → watchdog → `MoveCoreAsync`) that translates
+  a watchdog cancellation into an `InvalidOperationException` naming the lost gate, what it means,
+  and that a re-run resumes idempotently. A bare `OperationCanceledException` would have sent an
+  operator looking for a shutdown that did not happen.
+- **Sweep**: unchanged wire behaviour — `Failed` + partial result + the "lock was lost" error.
+
+## Item 2 — one seam for the lock session's connection string
+
+All four sites now call `PostgresAdvisoryLock.TryResolveSessionConnectionString(configuration,
+efContext, logger, site)` (or `ResolveSessionConnectionString`, which throws instead of returning
+null, for the three whose fail-closed path is an exception). `KekRotationCoordinator`'s private
+copy was deleted and now delegates. The policy, in one place:
+
+1. **configuration, if it still carries a password** — `ControlPlane` → `TammaDb` →
+   `DefaultConnection`, the same order and the same keys `Tamma.Api`'s own `ConnectionStringResolver`
+   uses, pinned by a test that asserts both against each other. Raw configuration is the only
+   source Npgsql never launders.
+2. **EF's `GetConnectionString()`, if it still carries a password** — correct in most shapes, and
+   the only thing a fixture with no configuration has.
+3. **configuration verbatim, even without a password** — a trust-auth / integrated-security
+   deployment legitimately has none, and configuration is *raw*, so a missing password THERE is
+   the deployment's own, not a stripped one. This tier is a deliberate widening of the KEK site's
+   original credentials-only rule: without it, extending that rule to the audit scheduler would
+   have cost trust-auth deployments their checkpoints outright.
+4. otherwise **null / throw** — a password-less string that only EF produced is indistinguishable
+   from a laundered one, and it is exactly the shape observed in production. The exception names
+   the laundering mechanism and the config key to set, because "connection string missing" sends
+   an operator to the wrong place.
+
+Wiring: `TenantMigrationSweepRunner` and `TenantMoveService` gained an **optional trailing
+`IConfiguration?` constructor parameter** (DI fills it in the host; fixtures that construct them
+directly keep the EF route and are unaffected). `AuditChainCheckpointScheduler` resolves
+`IConfiguration` from its per-tick scope. `KekRotationCoordinator` already did.
+
+### Why no container reproduced the stripping — the actual mechanism
+
+This was the loose end from the first pass ("no test container reproduces the production shape").
+It is now understood, and it is worse than "the container was wired differently":
+
+> **Whether Npgsql's EF provider picks up a DI-registered `NpgsqlDataSource` — and therefore
+> whether EF's connection string comes back stripped — is decided by EF Core's PROCESS-WIDE
+> internal service-provider cache, populated by whichever context of that options shape is built
+> FIRST in the process.**
+
+Two probes proved it. Build a data-source-less container first, and every later context in that
+process keeps its password even when a data source *is* registered. Build a data-source-bearing
+one first, and every later context loses it — including ones whose own container has no data
+source. Observed directly in the suite too: `AuditChainCheckpointSchedulerLockTests` sees a
+credentialed EF string when the whole fixture runs and a stripped one when the same test runs
+alone.
+
+Consequences, both recorded here because they generalise:
+
+- **The audit's inability to reproduce it was not a wiring mistake.** It is a per-process property,
+  so the same code reproduces or does not reproduce depending on what ran earlier.
+- **No test may assert on it.** Any `HasCredentials(ef.GetConnectionString())` assertion is a coin
+  flip that depends on test ordering — a flake generator. The pins therefore *simulate* the
+  laundering deterministically: a context bound to an explicitly password-less connection string is
+  indistinguishable, at the seam, from one Npgsql stripped. That is what every new pinning test
+  does.
+- **It also means production can flip.** A deployment that today gets a credentialed EF string can
+  start getting a stripped one after an unrelated change to startup ordering. That is precisely why
+  the durable fix is "prefer configuration", not "the EF route works for us".
+
+## Tests added in this pass
+
+Behavioural, all observing through the non-pooled `AdvisoryLockProbe` (which gained
+`TerminateHolderAsync` — the reverse hazard's probe: it kills the lock holder from a separate
+session while the guarded work keeps running):
+
+- `PostgresAdvisoryLockTests` (+5): `A_watchdog_cancels_its_token_when_the_lock_holding_backend_is_killed`,
+  `A_watchdog_does_not_cry_wolf_while_the_lock_is_genuinely_held`,
+  `A_watchdog_over_a_hashtextextended_key_watches_that_exact_key`,
+  `A_watchdogs_token_is_cancelled_by_the_callers_token_too`,
+  `Disposing_a_watchdog_does_not_cancel_the_work_it_was_watching`.
+- `KekRotationLockSessionTests.A_rotation_whose_lock_holding_backend_dies_aborts_instead_of_re_encrypting_on_unguarded`
+  — kills the gate's backend from inside the per-tenant loop and requires the rotation to stop
+  *where it stood* (one eviction, not two), with the lock-lost reason and a resumable `failed` row.
+- `TenantMoveServiceConcurrencyTests.A_move_whose_lock_holding_backend_dies_mid_dump_aborts_instead_of_restoring_on_unguarded`
+  — kills the gate while the move is parked in `pg_dump`; requires a prompt named abort and that
+  `pg_restore` never ran.
+- `PostgresAdvisoryLockConnectionStringTests` (9, new file) — the seam: the data-source string is
+  always password-less; configuration wins over a laundered EF string; the resolved string opens a
+  real authenticated session *in the right database*; EF is used when there is no configuration;
+  a password-less EF-only string is refused with a message naming the trap; a trust-auth
+  deployment keeps its lock; and the configuration key order is pinned against
+  `ConnectionStringResolver`.
+- Per-site sourcing pins: `TenantMigrationSweepRunnerTests` (+2),
+  `AuditChainCheckpointSchedulerLockTests` (+2), `TenantMoveServiceConcurrencyTests` (+2) — each
+  one "the gate still opens when EF's string has no password" plus "no usable connection string
+  fails closed and names the trap".
+
+`AuditChainCheckpointScheduler` gained an `internal TickForTestAsync` seam, because
+`ExecuteAsync`'s loop deliberately swallows a failing tick and the fail-closed path is otherwise
+unobservable.
+
+### Confirmed discriminating against the pre-fix code
+
+Run in a `git worktree` at `6df34fc` with adapted copies (the new production APIs do not exist
+there, so the assertions were reduced to the observable behaviour):
+
+| Pre-fix behaviour observed | Fixed-code expectation |
+|---|---|
+| KEK: `phase=Completed`, `evictions=2` after the gate's backend was killed — the rotation re-encrypted the *next* tenant with the cluster gate open, and took the full 31s unguarded delay to do it | aborts at eviction 1 with "rotation lock was LOST" |
+| Move: sat in `pg_dump` for the full 60s after the gate died, then `TimeoutException` | prompt `InvalidOperationException` "… LOST mid-move …" |
+| Sweep, password-less EF string: `NpgsqlException: No password has been provided but the backend requires one` out of `StartAsync` | start accepted (configuration route) / `InvalidOperationException` naming the trap |
+| Audit, password-less EF string: `leaderLockHeld=False checkpointCalls=0` — the hour gets no checkpoints from anyone | leader elected, checkpoints written |
+| Move, password-less EF string + externally-held gate: `NpgsqlException: No password has been provided …` | stands down with "already in progress" (i.e. the real gate was evaluated) |
+
+## Still open
+
+Item 3 of the original list is unchanged and still open: **no audit of non-advisory session
+state.** This pass and the previous one looked only at `pg_try_advisory_lock` /
+`pg_advisory_unlock`. Anything else that sets session-scoped state on a pooled connector (`SET
+LOCAL` is fine; plain `SET`, `LISTEN`, temp tables, prepared statements, advisory locks taken
+inside raw SQL activities) has the same deferred-reset property and has not been surveyed.
+
+Two smaller things worth naming rather than leaving implicit:
+
+- **`PostgresAdvisoryLeaderLock`'s pin is still structural**, for the reasons in item 2 of the
+  original list (it is `internal` to `Tamma.ElsaServer`, visible only to a suite with no
+  Testcontainers). Unchanged by this pass; it takes no watchdog and its connection string comes
+  from raw `IConfiguration`, so neither closed item applies to it.
+- **The watchdog is a heartbeat, not a fence.** It bounds how long work continues after losing
+  exclusivity; it cannot make the window zero. A gate whose critical section genuinely must never
+  overlap needs a fenced token (a control-plane lease row with a monotonically increasing epoch
+  checked at every write), which is a much larger change and is not warranted by anything observed
+  here.

@@ -42,6 +42,31 @@ public class ActionCatalogDefaultsTests
         // behaviour change on an existing surface.
         "document-type:sprint-plan",
         "document-type:threat-model",
+        // 3 → 4 (2026-07-30, the MCP governance decision). This one is NOT
+        // derived from "a person must act today" — it is the deliberate,
+        // reviewed exception to 43-3 D4, and the reasoning is different in kind:
+        //
+        //   Epic D2 tolerates an UNCLASSIFIED action at runtime because the drift
+        //   harnesses make it unmergeable in CI. MCP is the one capability family
+        //   for which that second half CANNOT EXIST — an MCP server's tool list
+        //   lives in another process and no harness in this tree can enumerate
+        //   it, so adding a server, or a tool on a server, never becomes
+        //   unmergeable. Shipping it at Min meant an open capability class that
+        //   was simultaneously unenforceable and drift-invisible.
+        //
+        // The behaviour-preserving obligation is still met, which is why this is
+        // a default rather than a hard refusal: NO MCP EXECUTOR IS REGISTERED, so
+        // no agent path can invoke MCP today (ToolExecutorRegistry holds
+        // file_read/file_write/search_code/shell_execute/git_operations/
+        // run_tests). The one live MCP surface, POST /api/kb/mcp/tools/invoke, is
+        // a human-authenticated SettingsManage route. Nothing that worked
+        // yesterday stops working.
+        //
+        // Reversal is ONE admin policy row (action scope, min = AutonomyDial.Min)
+        // — deliberately cheap, because the right long-term answer is per-server /
+        // per-tool catalog members plus a sweep, and this default should be
+        // revisited the moment those exist (epic open question 1).
+        "effect:mcp.tool.invoke",
     };
 
     [Test]
@@ -95,19 +120,49 @@ public class ActionCatalogDefaultsTests
     }
 
     [Test]
-    public void DeployAndMcp_ShipAtMin_PerEpicDecisionD1()
+    public void Deploy_ShipsAtMin_PerEpicDecisionD1()
     {
         // BINDING deviation from design.md §3.1 (43-3 D3/C4): the design proposed
-        // AlwaysHuman for these three, reasoning "enforce defaults false so
-        // nothing changes". Epic decision D1 removed that shield — v1 ENFORCES —
-        // so AlwaysHuman here would gate every production deploy and every MCP
-        // invocation on upgrade day. The admin opts in. Restoring AlwaysHuman is
-        // NOT a bug fix; it requires deleting this assertion and its reasoning.
+        // AlwaysHuman for these, reasoning "enforce defaults false so nothing
+        // changes". Epic decision D1 removed that shield — v1 ENFORCES — so
+        // AlwaysHuman here would gate every production deploy on upgrade day. The
+        // admin opts in. Restoring AlwaysHuman is NOT a bug fix; it requires
+        // deleting this assertion and its reasoning.
         // Safety is not weakened: DeploymentPipelineWorkflow's business-mode gate
         // (:243 → WaitForDeploymentApprovalActivity) is untouched, and 43-9
         // adopts the autonomy gate by OR, never by replacement.
-        foreach (var wire in new[] { "effect:deploy.promote-prod", "effect:deploy.rollback", "effect:mcp.tool.invoke" })
+        //
+        // RENAMED 2026-07-30 (was DeployAndMcp_ShipAtMin_PerEpicDecisionD1):
+        // effect:mcp.tool.invoke left this set — the deploy half of the D1
+        // argument still stands, the MCP half does not. See
+        // McpToolInvoke_ShipsAlwaysHuman_BecauseTheCiHalfCannotExist.
+        foreach (var wire in new[] { "effect:deploy.promote-prod", "effect:deploy.rollback" })
             ActionCatalog.Get(ActionKey.Parse(wire)).DefaultMinAutonomy.Should().Be(AutonomyDial.Min, wire);
+    }
+
+    /// <summary>
+    /// The MCP governance decision (2026-07-30). This is the deliberate exception
+    /// to the deploy rule directly above, and the two must be read together:
+    /// deploy ships at Min because D2's safety net (unclassified at runtime,
+    /// unmergeable in CI) genuinely covers it — a new deploy route is visible to
+    /// the 43-8 harnesses. MCP ships AlwaysHuman because that net has a hole
+    /// exactly its shape: no harness can enumerate a remote MCP server's tools,
+    /// so an MCP capability NEVER becomes unmergeable and the runtime tolerance
+    /// is unpaid-for.
+    /// </summary>
+    [Test]
+    public void McpToolInvoke_ShipsAlwaysHuman_BecauseTheCiHalfCannotExist()
+    {
+        ActionCatalog.Get(ActionKey.Parse("effect:mcp.tool.invoke"))
+            .DefaultMinAutonomy.Should().Be(AutonomyDial.AlwaysHuman);
+
+        // Still a DEFAULT, not a refusal: an admin policy row re-opens it, which
+        // is what makes this a tightening rather than a removal of a capability.
+        ActionCatalog.Get(ActionKey.Parse("effect:mcp.tool.invoke"))
+            .Enforceable.Should().BeTrue();
+        AutonomyDial.IsValidThreshold(
+            ActionCatalog.Get(ActionKey.Parse("effect:mcp.tool.invoke")).DefaultMinAutonomy)
+            .Should().BeTrue("a default the admin API would reject is a rule with no off switch");
     }
 
     [Test]

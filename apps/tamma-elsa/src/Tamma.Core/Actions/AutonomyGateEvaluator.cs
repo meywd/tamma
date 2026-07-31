@@ -80,6 +80,31 @@ namespace Tamma.Core.Actions;
 /// allows) and sets the <c>degraded</c> audit tag. During a control-plane outage
 /// the carve-outs are the surfaces that STAY OPEN, which is exactly why they
 /// need an audit row.</para>
+///
+/// <para><b>BREAK-GLASS bypasses DEGRADATION ONLY — never a real denial (F11
+/// close, 2026-07-30).</b> An engaged <see cref="BreakGlassState"/> suspends the
+/// <see cref="AutonomyDial.AlwaysHuman"/> substitution that a degraded input
+/// triggers, and nothing else. Concretely, everything below still bites while it
+/// is engaged:
+/// <list type="bullet">
+/// <item>a resolved <c>Enabled = false</c> still DENIES (checked above the
+/// degradation branch, deliberately);</item>
+/// <item>a resolved <c>AllowedRoles</c> restriction still DENIES;</item>
+/// <item>a threshold that came from a SUCCESSFULLY-READ row still applies — in
+/// the acceptance-rules-degraded case the rows WERE read, so the ladder's answer
+/// is kept and only the unreadable legacy floor is skipped;</item>
+/// <item>a shipped default that blocks still blocks — in the snapshot-degraded
+/// case there are provably no rows to keep (<see cref="GovernancePolicySnapshot.Unavailable"/>
+/// carries none), so the fallback is <see cref="ActionDescriptor.DefaultMinAutonomy"/>,
+/// which for e.g. <c>document-type:design</c> or <c>effect:mcp.tool.invoke</c> is
+/// itself <see cref="AutonomyDial.AlwaysHuman"/>.</item>
+/// </list>
+/// So the override can only ever restore the answer the system would have given
+/// had the unreadable input said "nothing" — it can never produce an answer more
+/// permissive than a healthy read of the rows it could not see would have
+/// allowed at their most permissive. A bypassed decision is stamped
+/// <see cref="ActionAssignmentSource.BreakGlass"/> so it is distinguishable in
+/// provenance from both a healthy decision and a degraded-denied one.</para>
 /// </summary>
 public static class AutonomyGateEvaluator
 {
@@ -101,6 +126,15 @@ public static class AutonomyGateEvaluator
     public const string ReasonAcceptanceRulesUnavailable = "acceptance-rules-unavailable";
 
     /// <summary>
+    /// The fail-closed substitution was SUSPENDED by an engaged break-glass
+    /// override (F11) and the decision came out automated. It appears ONLY where
+    /// the decision would otherwise have been the degraded block — never on a
+    /// denial that a successfully-read policy row produced, which keeps its own
+    /// reason.
+    /// </summary>
+    public const string ReasonBreakGlassBypass = "break-glass-bypass";
+
+    /// <summary>
     /// Evaluate one action against a policy snapshot and the principal's
     /// resolved BASE acceptance rules (the dial + the legacy always-escalate
     /// list — Story 43-5 AC11's <c>ResolveBase*Async</c> provides it).
@@ -113,10 +147,16 @@ public static class AutonomyGateEvaluator
     /// for a failed read: that is precisely the fail-open this parameter exists
     /// to make unrepresentable.
     /// </param>
+    /// <param name="breakGlass">
+    /// The operator's break-glass override (F11), or null / not-engaged for the
+    /// ordinary posture. When engaged it suspends the fail-closed substitution
+    /// for an UNREADABLE input and NOTHING else — see the type doc.
+    /// </param>
     public static AutonomyDecision Evaluate(
         AutonomyQuery query,
         GovernancePolicySnapshot snapshot,
-        ResolvedAcceptanceRules? baseRules)
+        ResolvedAcceptanceRules? baseRules,
+        BreakGlassState? breakGlass = null)
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -144,6 +184,11 @@ public static class AutonomyGateEvaluator
             : baseRules is null ? ReasonAcceptanceRulesUnavailable
             : null;
 
+        // F11 — the break-glass override applies ONLY where there is degradation
+        // to bypass. `bypassing` is false on every healthy evaluation, so an
+        // engaged override changes nothing at all while the control plane is up.
+        var bypassing = degradedReason is not null && breakGlass is { IsEngaged: true };
+
         if (!ActionCatalog.TryGet(query.Action, out var descriptor) || descriptor is null)
         {
             // Epic decision D2 — unclassified is allowed at RUNTIME (and
@@ -156,6 +201,12 @@ public static class AutonomyGateEvaluator
             // PROVENANCE changes: `Unavailable` records that this allow was
             // decided over an unreadable policy input, which is also what carries
             // it past the volume gate into the audit stream with `degraded=true`.
+            //
+            // Break-glass (F11) is deliberately NOT stamped here even when
+            // engaged: this allow was never going to be blocked, so the override
+            // bypassed nothing. `BreakGlass` provenance means "the fail-closed
+            // path was suspended for THIS decision" and must stay narrow enough
+            // to be worth auditing.
             return new AutonomyDecision(
                 AutonomyOutcome.Automated, query.Action, default, default,
                 dial, AutonomyDial.Min,
@@ -176,9 +227,9 @@ public static class AutonomyGateEvaluator
 
         // ── The threshold ladder (principal ladder + platform ceiling — the
         //    same composition the Seam B tool-loop gate reads) ───────────────
-        var (effectiveMin, source) = ResolveEffectiveMinAutonomy(descriptor, snapshot);
+        var (effectiveMin, source) = ResolveEffectiveMinAutonomy(descriptor, snapshot, breakGlass);
 
-        if (baseRules is null)
+        if (baseRules is null && !bypassing)
         {
             // The base-rules read FAILED. The legacy always-escalate floor lives
             // in that body, and it can only RAISE — so "I could not read it"
@@ -188,6 +239,19 @@ public static class AutonomyGateEvaluator
             // failure (F6): triage-intake, which ships at Min with a live legacy
             // floor, became AUTOMATED on a blip.
             (effectiveMin, source) = (AutonomyDial.AlwaysHuman, ActionAssignmentSource.Unavailable);
+        }
+        else if (baseRules is null)
+        {
+            // BREAK-GLASS, acceptance-rules half (F11). The ASSIGNMENT ROWS were
+            // read successfully in this branch (degradedReason is checked in a
+            // fixed order — a non-authoritative snapshot wins, so reaching here
+            // with null baseRules means the snapshot IS authoritative). So
+            // `effectiveMin` above is a REAL, successfully-read resolution and is
+            // kept verbatim: the override skips the unreadable LEGACY FLOOR and
+            // nothing else. If that real resolution blocks, it still blocks —
+            // this is the anti-backdoor boundary, and it is why the assignment
+            // is not overwritten here.
+            source = ActionAssignmentSource.BreakGlass;
         }
         else if (LegacyAlwaysEscalates(descriptor.Key, baseRules.Rules)
             && AutonomyDial.AlwaysHuman > effectiveMin)
@@ -255,7 +319,7 @@ public static class AutonomyGateEvaluator
             return Decision(AutonomyOutcome.Denied, ReasonRoleNotAllowed);
         }
 
-        if (degradedReason is not null)
+        if (degradedReason is not null && !bypassing)
         {
             // FAIL CLOSED. Enforced is forced TRUE: a degraded decision that a
             // seam is free to ignore is the fail-open hole wearing a warning
@@ -270,12 +334,22 @@ public static class AutonomyGateEvaluator
                 enforcedOverride: true);
         }
 
+        // BREAK-GLASS falls THROUGH to the ordinary dial comparison below rather
+        // than returning an allow (F11). That is the whole anti-backdoor design:
+        // the two denials above (Enabled=false, AllowedRoles) have already had
+        // their say, and the threshold applied below is a real one — the
+        // successfully-read ladder in the acceptance-rules-degraded case, the
+        // shipped default in the snapshot-degraded case (where there are provably
+        // no rows). An action pinned above the dial by either is STILL blocked.
+
         // THE v1 dial semantics: automated iff dial >= MinAutonomy.
         // AlwaysHuman is strictly above Max, so it blocks at every valid dial
         // position with no special case.
         if (dial >= effectiveMin)
         {
-            return Decision(AutonomyOutcome.Automated, ReasonAutomated);
+            return Decision(
+                AutonomyOutcome.Automated,
+                bypassing ? ReasonBreakGlassBypass : ReasonAutomated);
         }
 
         // Below the threshold: a person decides where a human wait can exist;
@@ -312,16 +386,31 @@ public static class AutonomyGateEvaluator
     /// default, because an unread table cannot testify that no ceiling exists.
     /// A LOADED-and-empty table is a completely different answer and still
     /// resolves to the shipped default.</para>
+    ///
+    /// <para><b>F11:</b> an engaged <paramref name="breakGlass"/> suspends that
+    /// substitution and falls back to
+    /// <see cref="ActionDescriptor.DefaultMinAutonomy"/> with
+    /// <see cref="ActionAssignmentSource.BreakGlass"/> provenance. This CANNOT
+    /// discard a stored policy row: a non-authoritative snapshot carries none by
+    /// construction (<see cref="GovernancePolicySnapshot.Unavailable"/>), which
+    /// is why the bypass is sited inside this branch and not around the whole
+    /// method. And it is not automatically permissive — a descriptor whose
+    /// shipped default is <see cref="AutonomyDial.AlwaysHuman"/> still blocks.</para>
     /// </summary>
     public static (int EffectiveMinAutonomy, ActionAssignmentSource Source)
-        ResolveEffectiveMinAutonomy(ActionDescriptor descriptor, GovernancePolicySnapshot snapshot)
+        ResolveEffectiveMinAutonomy(
+            ActionDescriptor descriptor,
+            GovernancePolicySnapshot snapshot,
+            BreakGlassState? breakGlass = null)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         ArgumentNullException.ThrowIfNull(snapshot);
 
         if (!snapshot.IsAuthoritative)
         {
-            return (AutonomyDial.AlwaysHuman, ActionAssignmentSource.Unavailable);
+            return breakGlass is { IsEngaged: true }
+                ? (descriptor.DefaultMinAutonomy, ActionAssignmentSource.BreakGlass)
+                : (AutonomyDial.AlwaysHuman, ActionAssignmentSource.Unavailable);
         }
 
         var actionWire = descriptor.Key.ToWire();

@@ -128,14 +128,74 @@ public class ToolLoopAutonomyGateTests
         // Unclassified is allowed at RUNTIME, unmergeable in CI (the startup
         // validator + sweeps are the merge gate) — a catalog gap must never
         // stall a live workflow.
+        //
+        // The exemplar was `mcp__some_server__some_tool` until 2026-07-30. It is
+        // now a genuinely unknown name, because MCP names are no longer
+        // uncatalogued — see
+        // An_mcp_tool_name_is_NOT_uncatalogued_it_resolves_to_the_mcp_effect below.
+        // Epic D2 itself is unchanged and still pinned here.
         var gate = new CatalogDefaultToolLoopAutonomyGate(
             dial: AutonomyDial.Min, minAutonomyOverride: _ => AutonomyDial.AlwaysHuman);
 
-        var decision = gate.Evaluate("mcp__some_server__some_tool", "{}");
+        var decision = gate.Evaluate("frobnicate_the_widget", "{}");
 
         decision.Outcome.Should().Be(ToolLoopGateOutcome.Allowed);
         decision.Reason.Should().Be("uncatalogued");
         decision.ActionKey.Should().BeNull();
+    }
+
+    /// <summary>
+    /// THE MCP governance decision (2026-07-30) at the one gate that enforces
+    /// today.
+    ///
+    /// <para><b>Why this family is carved out of epic D2 while every other
+    /// unknown name is not.</b> D2's bargain is "an unclassified action is allowed
+    /// at RUNTIME because it is UNMERGEABLE IN CI". For every other capability the
+    /// second half is real — the 43-8 harnesses sweep routes, executors,
+    /// activities and background actors out of this tree. No harness can
+    /// enumerate the tools of an MCP server: they live in another process, behind
+    /// <c>POST /api/kb/mcp/tools/invoke</c>, and adding a server or a tool changes
+    /// nothing in this repository. So for MCP the CI half never fires, the
+    /// runtime tolerance is never paid for, and "allowed because it will be
+    /// caught" would be false.</para>
+    ///
+    /// <para>Deliberately narrow: this changes the <c>mcp__*</c> family ONLY.
+    /// Making all uncatalogued names deny would be a far larger behaviour change
+    /// and is NOT what this decision does — the test above is its guard.</para>
+    /// </summary>
+    [TestCase("mcp__some_server__some_tool")]
+    [TestCase("mcp__github__create_issue")]
+    [TestCase("MCP__Shouty__Server")]
+    public void An_mcp_tool_name_is_NOT_uncatalogued_it_resolves_to_the_mcp_effect(string name)
+    {
+        var gate = new CatalogDefaultToolLoopAutonomyGate(AutonomyDial.Min);
+
+        var decision = gate.Evaluate(name, "{}");
+
+        decision.ActionKey.Should().Be(
+            new ActionKey(ActionNamespace.Effect, ExternalEffect.McpToolInvoke.ToWire()),
+            "every mcp__server__tool name lands on the ONE coarse catalog member");
+        decision.Reason.Should().NotBe("uncatalogued");
+        decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied,
+            "effect:mcp.tool.invoke ships AlwaysHuman, so the shipped default denies "
+            + "until an admin opts in");
+        decision.Reason.Should().Be("always-human");
+    }
+
+    /// <summary>
+    /// And it is a DEFAULT, not a hardcoded refusal: one action-scoped policy row
+    /// at the floor re-opens the family. This is the reversibility the decision
+    /// rests on — if it were not cheaply reversible, tightening a capability an
+    /// operator may legitimately want would be the wrong call.
+    /// </summary>
+    [Test]
+    public void An_admin_policy_row_re_opens_mcp()
+    {
+        var gate = new CatalogDefaultToolLoopAutonomyGate(
+            dial: AutonomyDial.Min, minAutonomyOverride: _ => AutonomyDial.Min);
+
+        gate.Evaluate("mcp__some_server__some_tool", "{}")
+            .Outcome.Should().Be(ToolLoopGateOutcome.Allowed);
     }
 
     [Test]

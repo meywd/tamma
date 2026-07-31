@@ -41,6 +41,20 @@ public sealed class AuditChainCheckpointOptions
 /// the audit projector host — it runs as a Tamma.Api <see cref="BackgroundService"/>
 /// that invokes the service directly. On-demand checkpointing reuses the same
 /// service from the admin endpoint.</para>
+///
+/// <para><b>No liveness watchdog here, deliberately</b> (2026-07-30 follow-up).
+/// <see cref="PostgresAdvisoryLockLease.WatchLiveness"/> exists for critical
+/// sections long enough that the lock session can plausibly die inside them; a
+/// tick writes one signed checkpoint per active scope and is over in seconds,
+/// with the same connection actively in use throughout. And the cost of the
+/// hazard here is small and self-correcting: if this pod's leader lock silently
+/// dropped mid-tick and a second pod won the hour, the result is a duplicate
+/// checkpoint row for an hour — an append-only tamper-evidence anchor written
+/// twice, not data lost. Compare <c>TenantMoveService</c> (a dump/restore, where
+/// two concurrent movers destroy a tenant's schema) and
+/// <c>KekRotationCoordinator</c> (a fleet-wide re-encrypt, where two concurrent
+/// rotations leave rows encrypted under a key no pod has); those two are
+/// watched.</para>
 /// </summary>
 public sealed class AuditChainCheckpointScheduler : BackgroundService
 {
@@ -107,6 +121,16 @@ public sealed class AuditChainCheckpointScheduler : BackgroundService
     /// <summary>Test-only single-tick driver (bypasses the loop + fire-minute gate).</summary>
     public Task RunOnceAsync(CancellationToken ct) => WriteAllAsync(ct);
 
+    /// <summary>
+    /// Test-only: run exactly one <see cref="TickAsync"/> and let it THROW.
+    /// <see cref="ExecuteAsync"/>'s loop deliberately swallows a failing tick
+    /// (WARN-and-continue), which makes the fail-closed paths — notably an
+    /// unusable lock connection string — unobservable from outside. This
+    /// exists so those can be asserted on directly; it is not a second entry
+    /// point (<see cref="RunOnceAsync"/> is the checkpoint-only one).
+    /// </summary>
+    internal Task TickForTestAsync(CancellationToken ct) => TickAsync(ct);
+
     private async Task TickAsync(CancellationToken ct)
     {
         var now = _clock.GetUtcNow();
@@ -137,10 +161,19 @@ public sealed class AuditChainCheckpointScheduler : BackgroundService
         PostgresAdvisoryLockLease? lease = null;
         if (isPg)
         {
-            var connectionString = cp.Database.GetConnectionString()
-                ?? throw new InvalidOperationException(
-                    "The control-plane context exposes no connection string, so the "
-                    + "audit-checkpoint leader lock cannot be taken on a dedicated session.");
+            // Configuration first, EF second, each rejected unless it still
+            // carries credentials. EF's Database.GetConnectionString() — what
+            // this used to read directly — comes back with the password
+            // stripped whenever an NpgsqlDataSource is registered in DI, which
+            // is the production shape; the lock would then fail to open, this
+            // pod would read that as "another pod is the leader", and the hour
+            // would get no checkpoints from anyone. Throws, naming the
+            // mechanism, when nothing usable resolves.
+            var connectionString = PostgresAdvisoryLock.ResolveSessionConnectionString(
+                scope.ServiceProvider.GetService<IConfiguration>(),
+                cp,
+                "the audit-chain checkpoint leader election",
+                _logger);
 
             // Same key, same pg_try_advisory_lock(bigint) call as before.
             lease = await PostgresAdvisoryLock.TryAcquireAsync(
