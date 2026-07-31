@@ -474,9 +474,31 @@ public class KekRotationPostFixTests
         status.Phase.Should().Be(KekRotationPhase.Failed,
             "PF-S8: transient Npgsql error during lock acquisition must "
             + "fail closed, not silently flip acquired = true");
-        status.FailureReason.Should().Contain("another rotation is already in progress",
-            "the rotation must use the same canonical failure reason as the "
-            + "lock-already-held path so operators see one clean failure shape");
+
+        // EXPECTATION CHANGED 2026-07-31 (review F5). This used to require the
+        // reason to be "another rotation is already in progress on this
+        // cluster", on the stated grounds that "the rotation must use the same
+        // canonical failure reason as the lock-already-held path so operators
+        // see one clean failure shape". That reasoning is wrong, and it is the
+        // same operator-visible untruth the whole 2026-07-30 advisory-lock
+        // audit was about: there is no other rotation. The database is
+        // unreachable. An operator told "another rotation is in progress" goes
+        // looking for a pod that does not exist, waits for it to finish, and
+        // never touches the thing that is actually broken.
+        //
+        // ONE FAIL-CLOSED POSTURE, TWO REASONS. The posture — Failed, nothing
+        // re-encrypted, nothing promoted — is what must be shared, and it still
+        // is (asserted above). The reason must distinguish "the gate said no"
+        // from "the gate could not be asked".
+        status.Phase.Should().Be(KekRotationPhase.Failed);
+        status.FailureReason.Should().Contain("gate could not be evaluated",
+            "a lock attempt that never got an answer is not a lock attempt that "
+            + "was refused");
+        status.FailureReason.Should().Contain("NpgsqlException",
+            "…and naming the error type points the operator at the database");
+        status.FailureReason.Should().NotContain("another rotation is already in progress",
+            "there is no other rotation — that reason belongs to the path where "
+            + "pg_try_advisory_lock actually returned false");
     }
 
     // ── PF-C3 — lock survives EF context disposal ───────────────────

@@ -103,6 +103,30 @@ public sealed class AuditChainCheckpointScheduler : BackgroundService
             {
                 break;
             }
+            catch (AdvisoryLockConnectionStringException ex)
+            {
+                // 2026-07-31 review. Everything else here is WARN-and-continue
+                // because a tick can fail transiently and the next one is 30s
+                // away. This one cannot: it is a permanent CONFIGURATION fault
+                // (no usable / a malformed control-plane connection string),
+                // so it will fail identically every tick, forever, and the
+                // consequence is that this deployment writes NO tamper-evidence
+                // anchors at all while looking healthy. That deserves ERROR,
+                // and a message that says what is not happening rather than
+                // just what threw.
+                //
+                // Deliberately still CONTINUE rather than crash the host: the
+                // checkpoint loop is opt-in (RunOnStartup) and taking a whole
+                // API down over a background-scheduler misconfiguration trades
+                // a compliance gap for an outage. The escalation is the alert;
+                // the operator's fix is a config change and a restart.
+                _logger.LogError(ex,
+                    "audit.chain.checkpoint.misconfigured — NO audit-chain checkpoints are being "
+                    + "written by this deployment. The hourly leader election cannot open its "
+                    + "dedicated advisory-lock session, and this will not fix itself: it is a "
+                    + "connection-string fault, not a transient one. Every hour it persists is an "
+                    + "hour with no tamper-evidence anchor for any scope.");
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "AuditChainCheckpointScheduler tick threw; continuing.");

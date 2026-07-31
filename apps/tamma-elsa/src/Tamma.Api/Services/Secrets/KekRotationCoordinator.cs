@@ -489,6 +489,11 @@ public sealed class KekRotationCoordinator
 
         PostgresAdvisoryLockLease? lockLease = null;
         bool acquired;
+        // Set when the gate could not even be EVALUATED (bad configuration, a
+        // database that would not answer). Distinguished from a gate that was
+        // evaluated and refused, because "another rotation is already in
+        // progress" is a lie in the first case and the operator acts on it.
+        string? acquisitionFailure = null;
         try
         {
             if (dataSource is null)
@@ -514,8 +519,7 @@ public sealed class KekRotationCoordinator
                 // false by default), so a connection re-parsed from it cannot
                 // authenticate; the lock attempt would throw NpgsqlException,
                 // fall into the PF-S8 fail-closed branch below, and abort
-                // EVERY rotation with the untrue "another rotation is already
-                // in progress". Story 44-1 hit the same trap (see the note at
+                // EVERY rotation. Story 44-1 hit the same trap (see the note at
                 // Program.cs on the migrate-all sweep). The credentials-
                 // bearing string is the control plane's own, and the singleton
                 // NpgsqlDataSource is built from exactly that string
@@ -527,12 +531,22 @@ public sealed class KekRotationCoordinator
                 if (connectionString is null)
                 {
                     // Fail closed, never open: an unresolvable lock target is
-                    // not permission to rotate.
+                    // not permission to rotate. And say SO — reporting a
+                    // configuration fault as "another rotation is already in
+                    // progress" is the exact operator-visible untruth this
+                    // whole audit is about.
                     _logger.LogWarning(
                         "tenant.kek.rotate aborted: no usable control-plane connection string "
                         + "for the cluster-wide advisory lock lockKey={LockKey}",
                         AdvisoryLockKey);
                     acquired = false;
+                    acquisitionFailure =
+                        "the cluster-wide rotation gate could not be evaluated: no usable "
+                        + "control-plane connection string for its dedicated advisory-lock "
+                        + "session. NpgsqlDataSource.ConnectionString never carries the "
+                        + "password and EF inherits that laundered string whenever one is "
+                        + "registered in DI — set ConnectionStrings:ControlPlane. No rotation "
+                        + "was started and nothing was re-encrypted.";
                 }
                 else
                 {
@@ -553,18 +567,34 @@ public sealed class KekRotationCoordinator
             }
             throw;
         }
-        catch (NpgsqlException ex)
+        catch (Exception ex)
         {
-            // PF-S8: a transient Postgres error during lock acquisition
-            // is NOT a free pass. Two pods racing the rotation would
-            // both flip to "acquired" under the previous (broken)
-            // catch-all. Fail closed: log + bail, the operator hits
-            // /start again once the database is healthy.
+            // PF-S8: a failure during lock acquisition is NOT a free pass.
+            // Two pods racing the rotation would both flip to "acquired"
+            // under the original (broken) catch-all-and-continue. Fail
+            // closed: log + bail, the operator hits /start again once the
+            // deployment is healthy.
+            //
+            // 2026-07-31 review, F5 — this used to catch NpgsqlException
+            // only, and fail-closed is not the same as fail-STUCK. A
+            // malformed connection string ("Host=h;Bogus=1") reaches
+            // TryAcquireAsync and comes back out of its connection-string
+            // rewrite as an ArgumentException, which escaped this method
+            // ENTIRELY — before the try/finally that owns the status. The
+            // phase stayed Running forever, _activeRotationId was never
+            // cleared, the Task.Run faulted unobserved, and /status reported
+            // a rotation that could never finish or be retried. The seam now
+            // refuses a malformed string itself, and this catch is total so
+            // no future exception type can reopen the hole: EVERY way of
+            // failing to take the gate ends as Failed with a reason.
             _logger.LogWarning(ex,
-                "tenant.kek.rotate aborted: transient Npgsql error during "
-                + "advisory lock acquisition lockKey={LockKey}",
-                AdvisoryLockKey);
+                "tenant.kek.rotate aborted: {ErrorType} during advisory lock acquisition "
+                + "lockKey={LockKey}", ex.GetType().Name, AdvisoryLockKey);
             acquired = false;
+            acquisitionFailure =
+                $"the cluster-wide rotation gate could not be evaluated ({ex.GetType().Name}): "
+                + RedactForEvent(ex)
+                + ". No rotation was started and nothing was re-encrypted.";
             if (lockLease is not null)
             {
                 await lockLease.DisposeAsync().ConfigureAwait(false);
@@ -578,11 +608,17 @@ public sealed class KekRotationCoordinator
             {
                 Phase = KekRotationPhase.Failed,
                 CompletedAt = DateTimeOffset.UtcNow,
-                FailureReason = "another rotation is already in progress on this cluster",
+                FailureReason = acquisitionFailure
+                    ?? "another rotation is already in progress on this cluster",
             });
             _logger.LogWarning(
-                "tenant.kek.rotate aborted: advisory lock {LockKey} held by another pod",
-                AdvisoryLockKey);
+                "tenant.kek.rotate aborted: advisory lock {LockKey} not taken (evaluated={Evaluated})",
+                AdvisoryLockKey, acquisitionFailure is null);
+            // The retry path sets _activeRotationId BEFORE the background task
+            // starts, so a rotation that never took the gate must clear it —
+            // otherwise the coordinator carries a pointer to a row it is not
+            // working on.
+            lock (_lock) { _activeRotationId = null; }
             return;
         }
 
@@ -1079,7 +1115,7 @@ public sealed class KekRotationCoordinator
     /// resulting error reads as "someone else holds the gate", i.e. it would
     /// silently disable rotation forever.</para>
     /// </summary>
-    private static string? ResolveLockConnectionString(
+    private string? ResolveLockConnectionString(
         IServiceProvider scopedProvider)
     {
         var cfg = scopedProvider.GetService<IConfiguration>();
@@ -1089,8 +1125,13 @@ public sealed class KekRotationCoordinator
         // The context is only consulted for its connection string; created and
         // disposed here rather than held, so the lock never rides it.
         using var cp = cpFactory?.CreateDbContext();
+        // The logger is threaded through (it used to be null) because the seam
+        // is where the two refusals are TOLD APART: a laundered password logs a
+        // warning naming the mechanism, a malformed string logs an error naming
+        // the typo. Swallowing that left the operator with only the
+        // coordinator's status text (2026-07-31 review, F5).
         return PostgresAdvisoryLock.TryResolveSessionConnectionString(
-            cfg, cp, logger: null, site: "the cluster-wide KEK rotation gate");
+            cfg, cp, _logger, site: "the cluster-wide KEK rotation gate");
     }
 
     private static async Task<Guid> PersistRotationStartAsync(

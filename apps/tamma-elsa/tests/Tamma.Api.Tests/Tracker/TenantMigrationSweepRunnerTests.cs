@@ -514,6 +514,46 @@ public class TenantMigrationSweepRunnerTests
     }
 
     [Test]
+    public async Task Disposing_mid_run_is_not_reported_to_the_operator_as_a_lost_cluster_lock()
+    {
+        // 2026-07-31 review, F2. The test above forbade only the strings
+        // "ObjectDisposed"/"disposed", so it passed silently through the actual
+        // defect: Dispose() ENDED the lease session (a synchronous path that
+        // cannot await) while the run's liveness watchdog was still probing it,
+        // and the probe — correctly, in every other context — read a closed
+        // session as LOCK LOST. ExecuteAsync's catch then wrote the operator
+        // "The cluster-wide sweep lock was lost mid-run (a pooler/proxy drop,
+        // an idle timeout, or a terminated backend)" about a pod that was
+        // simply asked to stop, and marked the result partial. That sends
+        // someone hunting a database incident that never happened.
+        //
+        // Dispose now stops the heartbeat BEFORE ending the session, honouring
+        // the ordering contract that the async paths already honoured. The
+        // fast heartbeat is what makes the old race reachable at all here; the
+        // DETERMINISTIC proof of the ordering property is in
+        // PostgresAdvisoryLockTests
+        // .A_synchronous_host_that_stops_the_heartbeat_first_is_not_reported_as_lock_loss —
+        // this test pins the operator-visible consequence at the site.
+        var sweeper = new GatedSweeper();
+        var runner = NewFastHeartbeatRunner(sweeper);
+
+        var start = await runner.StartAsync(dryRun: false);
+        start.Accepted.Should().BeTrue();
+        await sweeper.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.Delay(400); // several genuine heartbeats while the lock is held
+
+        runner.Dispose();
+
+        var run = await WaitForTerminalAsync(runner, start.Run!.RunId);
+        run.State.Should().Be(TenantMigrationSweepRunState.Failed);
+        run.Error.Should().NotContain("lock was lost",
+            "an orderly pod shutdown must not be reported as a lost cluster-wide gate — "
+            + "the two have completely different operator responses, and only one of them "
+            + "is 'nothing is wrong'");
+        run.Error.Should().NotContain("ABORTED");
+    }
+
+    [Test]
     public async Task Disposing_mid_run_ends_the_lock_session_instead_of_parking_the_lock_on_a_pooled_connection()
     {
         // THE DEFECT (2026-07-31, found as a CI flake in
@@ -683,9 +723,10 @@ public class TenantMigrationSweepRunnerTests
                 SELECT 1 FROM pg_locks
                 WHERE locktype = 'advisory'
                   AND granted
+                  AND mode = 'ExclusiveLock'
                   AND objsubid = 1
                   AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
-                  AND ((classid::bigint << 32) + objid::bigint) = @k
+                  AND ((classid::bigint << 32) | objid::bigint) = @k
             );
             """;
         cmd.Parameters.AddWithValue("k", TenantMigrationSweepRunner.AdvisoryLockKey);
@@ -708,9 +749,10 @@ public class TenantMigrationSweepRunnerTests
             FROM pg_locks
             WHERE locktype = 'advisory'
               AND granted
+              AND mode = 'ExclusiveLock'
               AND objsubid = 1
               AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
-              AND ((classid::bigint << 32) + objid::bigint) = @k;
+              AND ((classid::bigint << 32) | objid::bigint) = @k;
             """;
         cmd.Parameters.AddWithValue("k", TenantMigrationSweepRunner.AdvisoryLockKey);
         return (bool?)await cmd.ExecuteScalarAsync() == true;

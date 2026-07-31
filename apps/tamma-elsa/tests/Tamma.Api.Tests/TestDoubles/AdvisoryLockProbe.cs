@@ -30,10 +30,18 @@ internal static class AdvisoryLockProbe
     /// The backend pid holding advisory lock <paramref name="key"/> on this
     /// database, or null if nobody holds it.
     ///
-    /// <para>The <c>|</c> (not <c>+</c>) reconstruction of the 64-bit key
-    /// from <c>classid</c>/<c>objid</c> is deliberate: keys derived from
-    /// <c>hashtextextended</c> are frequently negative, and the OR form
-    /// round-trips those correctly.</para>
+    /// <para>The <c>|</c> reconstruction of the 64-bit key from
+    /// <c>classid</c>/<c>objid</c> is a STYLE choice, matching
+    /// <c>PostgresAdvisoryLockKey.HeldByThisBackendSql</c> and the sweep
+    /// runner's cross-pod probe so all three read the same. <c>+</c> is
+    /// exactly equivalent — the high term is always a multiple of 2^32 and the
+    /// low term always in <c>[0, 2^32)</c>, so the bits never overlap and int8
+    /// never overflows. Verified on postgres:17 over 500k random
+    /// <c>(classid, objid)</c> pairs plus every boundary case: 0 differences,
+    /// negatives included. An earlier comment here claimed negative
+    /// <c>hashtextextended</c> keys FORCED the OR form; that was false and is
+    /// corrected here so nobody "fixes" a working site (2026-07-31 review,
+    /// F3).</para>
     /// </summary>
     public static async Task<int?> HolderPidAsync(string connectionString, long key)
     {
@@ -44,6 +52,7 @@ internal static class AdvisoryLockProbe
             SELECT pid FROM pg_locks
             WHERE locktype = 'advisory'
               AND granted
+              AND mode = 'ExclusiveLock'
               AND objsubid = 1
               AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
               AND ((classid::bigint << 32) | objid::bigint) = @k
@@ -110,6 +119,7 @@ internal static class AdvisoryLockProbe
             SELECT pg_terminate_backend(pid) FROM pg_locks
             WHERE locktype = 'advisory'
               AND granted
+              AND mode = 'ExclusiveLock'
               AND objsubid = 1
               AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
               AND ((classid::bigint << 32) | objid::bigint) = @k;

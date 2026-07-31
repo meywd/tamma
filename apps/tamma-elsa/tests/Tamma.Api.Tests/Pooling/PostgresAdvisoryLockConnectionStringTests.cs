@@ -213,6 +213,90 @@ public class PostgresAdvisoryLockConnectionStringTests
             "an appsettings default of \"\" must not mask a missing override");
     }
 
+    // ───────────── malformed input: fail CLOSED, not fail STUCK ─────────────
+
+    [Test]
+    public void HasCredentials_is_a_total_predicate_over_malformed_strings()
+    {
+        // 2026-07-31 review, F5. This is a yes/no question asked of
+        // operator-supplied configuration, so it must ANSWER rather than
+        // throw — a predicate that throws pushes the failure onto whichever
+        // caller happens to have the weakest catch, which is exactly what
+        // happened at the KEK gate. It used to catch ArgumentException only,
+        // so the FormatException/OverflowException shapes escaped.
+        PostgresAdvisoryLock.HasCredentials("Host=h;Bogus=1").Should().BeFalse(
+            "an unknown keyword throws ArgumentException out of the builder");
+        PostgresAdvisoryLock.HasCredentials("Host=h;Port=abc;Password=p").Should().BeFalse(
+            "a well-known keyword with an unparseable value throws FormatException");
+        PostgresAdvisoryLock.HasCredentials("Host=h;Port=99999999999;Password=p")
+            .Should().BeFalse("…and an out-of-range one throws OverflowException");
+        PostgresAdvisoryLock.HasCredentials(null).Should().BeFalse();
+        PostgresAdvisoryLock.HasCredentials("   ").Should().BeFalse();
+        PostgresAdvisoryLock.HasCredentials("Host=h;Username=u;Password=p").Should().BeTrue(
+            "…and a well-formed credentialed string still answers yes");
+    }
+
+    [Test]
+    public void A_malformed_configured_string_is_refused_at_the_seam_not_passed_on()
+    {
+        // THE FAIL-STUCK BUG (2026-07-31 review, F5). HasCredentials answers
+        // false for "Host=h;Bogus=1" — not because the password is missing but
+        // because the string does not PARSE — so tier 3 ("configuration
+        // verbatim, even without a password", for trust-auth deployments)
+        // handed the malformed string straight back. The ArgumentException
+        // then surfaced three frames later, out of TryAcquireAsync's
+        // Pooling=false rewrite, in a stack frame no caller's catch list was
+        // written for. At the KEK gate nothing caught it at all: it escaped
+        // RunRotationAsync ahead of the try/finally that owns the status, so
+        // the phase stayed Running forever — fail STUCK, not fail closed.
+        //
+        // A typo in a connection string must be refused BY the seam that owns
+        // the decision, and named.
+        const string malformed = "Host=h;Database=d;Username=u;Bogus=1";
+
+        PostgresAdvisoryLock.TryResolveSessionConnectionString(
+                Config(("ConnectionStrings:ControlPlane", malformed)), efContext: null)
+            .Should().BeNull("a string Npgsql cannot parse is not a lock target");
+
+        var act = () => PostgresAdvisoryLock.ResolveSessionConnectionString(
+            Config(("ConnectionStrings:ControlPlane", malformed)),
+            efContext: null,
+            site: "the widget gate");
+
+        act.Should().Throw<AdvisoryLockConnectionStringException>()
+            .WithMessage("*MALFORMED*")
+            .WithMessage("*the widget gate*")
+            .WithMessage("*ConnectionStrings:ControlPlane*",
+                "a typo is a different operator story from a laundered password, and the "
+                + "message has to say which one this is");
+
+        // …and the same refusal for an unparseable VALUE, not just an
+        // unparseable keyword.
+        var badPort = () => PostgresAdvisoryLock.ResolveSessionConnectionString(
+            Config(("ConnectionStrings:ControlPlane", "Host=h;Port=abc;Password=p")),
+            efContext: null,
+            site: "the widget gate");
+        badPort.Should().Throw<AdvisoryLockConnectionStringException>()
+            .WithMessage("*MALFORMED*");
+    }
+
+    [Test]
+    public void The_refusal_type_separates_a_permanent_config_fault_from_a_transient_one()
+    {
+        // Callers branch on this: AuditChainCheckpointScheduler's loop is
+        // WARN-and-continue for a tick that failed transiently, but a
+        // connection-string fault fails identically forever and means the
+        // deployment writes NO tamper-evidence anchors — so it escalates on
+        // the TYPE rather than on message-sniffing.
+        var act = () => PostgresAdvisoryLock.ResolveSessionConnectionString(
+            configuration: null, efContext: null, site: "the widget gate");
+
+        act.Should().Throw<AdvisoryLockConnectionStringException>();
+        act.Should().Throw<InvalidOperationException>(
+            "it derives from InvalidOperationException so every pre-existing catch and "
+            + "every pre-existing test still matches");
+    }
+
     // ───────────── key order, pinned against the host's own resolver ─────────────
 
     [Test]

@@ -1348,6 +1348,14 @@ public class TenantMoveServiceConcurrencyTests
         // destructive steps. Release is never signalled: if the move did not
         // abort it would sit in pg_dump until GatedRunner's own 60s timeout,
         // so failing PROMPTLY with the right error is the abort.
+        //
+        // 2026-07-31 review, F1: the double now SWALLOWS the cancellation and
+        // returns ExitCode -1 / TimedOut false, exactly as the production
+        // DefaultProcessRunner does — see GatedRunner.RunAsync. Against the
+        // pre-fix service that turns this test red with
+        // "pg_dump failed (exit -1) during tenant move step 'dump'", which is
+        // precisely the bare, misleading error an operator was actually
+        // getting while this test claimed the diagnosis worked.
         var tenantId = Guid.NewGuid();
         await SeedPlacedTenantAsync(tenantId);
 
@@ -1367,12 +1375,17 @@ public class TenantMoveServiceConcurrencyTests
             "the test must actually kill the lock-holding backend");
 
         var act = async () => await move.WaitAsync(TimeSpan.FromSeconds(30));
-        (await act.Should().ThrowAsync<InvalidOperationException>(
+        var thrown = (await act.Should().ThrowAsync<InvalidOperationException>(
                 "a move that has lost its exclusivity guarantee must not keep dumping, "
                 + "dropping and restoring — and a bare OperationCanceledException would "
                 + "report it as a shutdown that did not happen"))
             .WithMessage("*LOST mid-move*")
             .WithMessage("*re-run the move*");
+
+        thrown.Which.Message.Should().NotContain("exit -1",
+            "the whole value of the wrapper is the DIAGNOSIS. Reporting the lost gate as "
+            + "'pg_dump failed (exit -1)' — which is what the real process runner's swallowed "
+            + "cancellation produces — sends an operator to look at pg_dump");
 
         runner.Ran.Should().NotContain(
             f => f.Contains("pg_restore", StringComparison.Ordinal),
@@ -1582,6 +1595,26 @@ public class TenantMoveServiceConcurrencyTests
             get { lock (_ran) return _ran.ToArray(); }
         }
 
+        /// <summary>
+        /// <b>Behaves like <see cref="DefaultProcessRunner"/> on cancellation,
+        /// deliberately</b> (2026-07-31 review, F1).
+        ///
+        /// <para>This double used to let the <see cref="OperationCanceledException"/>
+        /// escape — a shape the REAL runner cannot produce. Production's
+        /// <c>DefaultProcessRunner</c> catches the OCE raised by its token,
+        /// kills the process tree, and RETURNS
+        /// <c>ProcessRunResult(ExitCode: -1, TimedOut: !ct.IsCancellationRequested)</c>
+        /// — and under a watchdog abort <c>ct</c> IS cancelled, so
+        /// <c>TimedOut</c> is false. So the move's lock-loss diagnosis, which
+        /// filtered on <c>catch (OperationCanceledException) when (LockLost)</c>,
+        /// was unreachable in production: the operator got a bare "pg_dump
+        /// failed (exit -1)", exactly the misleading error the wrapper existed
+        /// to eliminate, while the test that "proved" the diagnosis passed on
+        /// the strength of a fiction. A test that only passes against an
+        /// unrealistic double is worse than no test — so the double now mirrors
+        /// the real one, and the production code re-raises the cancellation
+        /// itself.</para>
+        /// </summary>
         public async Task<ProcessRunResult> RunAsync(
             ProcessRunRequest request, CancellationToken ct = default)
         {
@@ -1589,7 +1622,32 @@ public class TenantMoveServiceConcurrencyTests
             if (Path.GetFileName(request.FileName) == "pg_dump")
             {
                 Entered.TrySetResult();
-                await Release.Task.WaitAsync(TimeSpan.FromSeconds(60), ct);
+                try
+                {
+                    await Release.Task.WaitAsync(TimeSpan.FromSeconds(60), ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    // DefaultProcessRunner.cs:106-124: swallow, kill the tree,
+                    // report a failed run. TimedOut is FALSE here because the
+                    // caller's token is what was cancelled.
+                    return new ProcessRunResult(
+                        ExitCode: -1,
+                        StdOut: string.Empty,
+                        StdErr: string.Empty,
+                        TimedOut: !ct.IsCancellationRequested,
+                        DurationSeconds: 0);
+                }
+                catch (TimeoutException)
+                {
+                    // …and the runner's own hard timeout, which IS TimedOut.
+                    return new ProcessRunResult(
+                        ExitCode: -1,
+                        StdOut: string.Empty,
+                        StdErr: string.Empty,
+                        TimedOut: true,
+                        DurationSeconds: 60);
+                }
             }
             return new ProcessRunResult(0, "", "", false, 0);
         }

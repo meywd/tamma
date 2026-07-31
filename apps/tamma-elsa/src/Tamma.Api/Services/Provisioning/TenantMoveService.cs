@@ -243,11 +243,23 @@ public sealed class TenantMoveService : ITenantMoveService
         {
             await MoveCoreAsync(tenantId, targetDatabaseId, moveGuard?.Token ?? ct);
         }
-        catch (OperationCanceledException ex) when (moveGuard?.LockLost == true)
+        catch (Exception ex) when (moveGuard?.LockLost == true)
         {
             // A bare "operation cancelled" here would send an operator looking
             // for a shutdown that did not happen. Name what actually went
             // wrong, and what state the tenant is in.
+            //
+            // Deliberately NOT filtered on OperationCanceledException
+            // (2026-07-31 review, F1). The abort travels through whatever the
+            // innermost seam turns the cancellation into, and the seam that
+            // matters here — IProcessRunner, where a move spends its minutes
+            // of idle lock time — SWALLOWS the OperationCanceledException and
+            // returns a failed ProcessRunResult instead (see RunPgToolAsync,
+            // which now re-raises, and DefaultProcessRunner, which is why it
+            // has to). Filtering on the exception TYPE made the diagnosis
+            // depend on which double the test happened to use; filtering on
+            // LockLost — the fact that actually decides the story — does not.
+            // The original exception is preserved as InnerException.
             throw new InvalidOperationException(
                 $"The per-tenant move gate for '{tenantId}' was LOST mid-move: the control-plane "
                 + "session holding pg_try_advisory_lock died (a pooler/proxy drop, an idle "
@@ -607,6 +619,29 @@ public sealed class TenantMoveService : ITenantMoveService
                 TimeoutSeconds: _options.TimeoutSeconds),
             ct).ConfigureAwait(false);
 
+        // ── the runner SWALLOWS cancellation; re-raise it before reading the
+        // result (2026-07-31 review, F1) ─────────────────────────────────────
+        // This is the seam the whole lock-loss diagnosis has to survive, and
+        // it did not. The minutes-long idle window that a pooler recycle / idle
+        // timeout / pg_terminate_backend kills is spent inside THIS call, so
+        // when the move's watchdog cancels `ct` it is DefaultProcessRunner that
+        // observes the OperationCanceledException — and it catches it, kills
+        // the process tree, and returns ProcessRunResult(ExitCode: -1,
+        // TimedOut: !ct.IsCancellationRequested), i.e. TimedOut FALSE under a
+        // watchdog abort. Interpreting that result throws
+        // InvalidOperationException("pg_dump failed (exit -1) …"), which
+        // MoveAsync's `catch (OperationCanceledException) when (LockLost)`
+        // filter can never see — so the operator got exactly the bare,
+        // misleading error the wrapper was added to eliminate. The move still
+        // aborted safely; only the diagnosis was lost, which was the wrapper's
+        // entire value.
+        //
+        // Unconditional rather than "only when the tool failed": a lost gate
+        // means this move must stop whatever the tool returned. Without a
+        // watchdog `ct` is the caller's token, where an OperationCanceledException
+        // is the correct and long-standing response to cancellation anyway.
+        ct.ThrowIfCancellationRequested();
+
         if (result.TimedOut)
             throw new InvalidOperationException(
                 $"{fileName} timed out after {_options.TimeoutSeconds}s during tenant move "
@@ -964,9 +999,15 @@ public sealed class TenantMoveService : ITenantMoveService
             // carries credentials. EF's Database.GetConnectionString() — what
             // this used to read directly — comes back with the password
             // stripped whenever an NpgsqlDataSource is registered in DI, which
-            // is the production shape. The lock would then throw on open and
-            // every move would abort with the untrue "already in progress".
-            // Throws, naming the mechanism, when nothing usable resolves.
+            // is the production shape. Every move would then abort on the
+            // lock's OPEN, with NpgsqlException("No password has been provided
+            // but the backend requires one …") — a message that names neither
+            // the move nor the laundering that caused it. (Not "already in
+            // progress": that is what the fail-CLOSED reading of a genuinely
+            // refused lock says, and TryAcquireAsync propagates a failed open
+            // rather than returning null. An earlier version of this comment
+            // overstated it — 2026-07-31 review, F7.) Throws, naming the
+            // mechanism, when nothing usable resolves.
             connectionString = PostgresAdvisoryLock.ResolveSessionConnectionString(
                 _configuration, db, $"the tenant-move gate for '{tenantId}'", _logger);
         }

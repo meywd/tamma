@@ -337,12 +337,22 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
     /// <para>Fully qualified (Finding 1.6). <c>pg_locks</c> is CLUSTER-wide and
     /// advisory locks are per-database, so an unqualified match reported a
     /// sweep running when a lock with the same key was held in a completely
-    /// different database on the same cluster. And <c>objsubid</c> distinguishes
+    /// different database on the same cluster. <c>objsubid</c> distinguishes
     /// the one-argument <c>pg_advisory_lock(bigint)</c> form (1) from the
     /// two-argument <c>(int, int)</c> form (2), whose halves reassemble to the
-    /// same 64-bit value — a different lock entirely. This is the only
+    /// same 64-bit value — a different lock entirely. And <c>mode =
+    /// 'ExclusiveLock'</c> excludes a SHARE-mode lock on the same key, which
+    /// excludes nobody and therefore is not a sweep. This is the only
     /// cross-pod signal an operator gets; a false "a sweep is running" sends
     /// them to look for a run that does not exist.</para>
+    ///
+    /// <para>The <c>|</c> reassembly matches
+    /// <see cref="PostgresAdvisoryLockKey.HeldByThisBackendSql"/> — this site
+    /// used <c>+</c>, which is EXACTLY equivalent (the halves never share
+    /// bits; verified on postgres:17 over 500k random pairs and every boundary
+    /// case, negatives included). Made identical purely so the two predicates
+    /// read the same and nobody has to wonder whether the difference means
+    /// something. It does not.</para>
     /// </summary>
     private const string AnyoneHoldsTheSweepLockSql =
         """
@@ -350,9 +360,10 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
             SELECT 1 FROM pg_locks
             WHERE locktype = 'advisory'
               AND granted
+              AND mode = 'ExclusiveLock'
               AND objsubid = 1
               AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
-              AND ((classid::bigint << 32) + objid::bigint) = @k
+              AND ((classid::bigint << 32) | objid::bigint) = @k
         );
         """;
 
@@ -377,11 +388,33 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
         // A dry run (no lease) and a non-Postgres provider (no lock) both
         // fall through to the plain shutdown token.
         var clusterLock = lease?.Lock;
-        var watchdog = clusterLock?.WatchLiveness(
-            LockHeartbeatInterval,
-            _shutdown.Token,
-            _logger,
-            $"tenant.migration_sweep runId={run.RunId}");
+        PostgresAdvisoryLockWatchdog? watchdog = null;
+        try
+        {
+            watchdog = clusterLock?.WatchLiveness(
+                LockHeartbeatInterval,
+                _shutdown.Token,
+                _logger,
+                $"tenant.migration_sweep runId={run.RunId}");
+        }
+        catch (ObjectDisposedException)
+        {
+            // Dispose() took the lease out from under us between reading
+            // lease.Lock and arming the watchdog. Nothing to watch; the
+            // shutdown token below already carries the stop.
+        }
+
+        // Publish it so Dispose() — which cannot await, and which ENDS the
+        // lease session — can stop the heartbeat FIRST, as the ordering
+        // contract requires. If the lease has already been taken, the
+        // watchdog is stopped here instead: it would otherwise probe a dead
+        // session and report an orderly shutdown as a lost cluster lock
+        // (2026-07-31 review, F2).
+        if (watchdog is not null && lease?.TryPublishWatchdog(watchdog) != true)
+        {
+            watchdog.StopHeartbeat(WatchdogStopTimeout);
+        }
+
         var workToken = watchdog?.Token ?? _shutdown.Token;
 
         try
@@ -435,7 +468,11 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
             // The shared watchdog's DisposeAsync does exactly that and does
             // NOT cancel the work token, so a run that finished normally
             // cannot be retro-cancelled here.
-            if (watchdog is not null) await watchdog.DisposeAsync().ConfigureAwait(false);
+            if (watchdog is not null)
+            {
+                lease?.TakeWatchdog();
+                await watchdog.DisposeAsync().ConfigureAwait(false);
+            }
 
             if (lease is not null) await ReleaseAsync(lease).ConfigureAwait(false);
             if (tookDryRunSlot) Interlocked.Decrement(ref _dryRunsInFlight);
@@ -545,6 +582,22 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
 
         RunLease? lease;
         lock (_gate) { lease = _localRun; _localRun = null; }
+
+        // ORDERING CONTRACT (PostgresAdvisoryLockLease.WatchLiveness): the
+        // watchdog must stop BEFORE the session it probes is ended — they ride
+        // the same single connection. This used to end the session outright and
+        // leave the run's watchdog to be disposed later, on ExecuteAsync's
+        // thread; the in-flight probe then found a closed session, reported it
+        // as loss (which is the right reading everywhere else), cancelled the
+        // work token, and ExecuteAsync's catch told the operator "the
+        // cluster-wide sweep lock was lost mid-run — a pooler/proxy drop, an
+        // idle timeout, or a terminated backend" about a pod that was simply
+        // asked to stop (2026-07-31 review, F2). StopHeartbeat is the
+        // synchronous half of the contract; the bounded wait is normally
+        // microseconds because _shutdown.Cancel() above has already cancelled
+        // the loop's token.
+        lease?.TakeWatchdog()?.StopHeartbeat(WatchdogStopTimeout);
+
         // TakeLock is interlocked: if ReleaseAsync is concurrently ending
         // the run, exactly one of us gets the lease and disposes it once.
         // DisposeSession (rather than DisposeAsync) because this path cannot
@@ -557,10 +610,27 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
         lease?.TakeLock()?.DisposeSession();
     }
 
+    /// <summary>
+    /// How long <see cref="Dispose"/> waits for the run's liveness heartbeat
+    /// to exit before ending the lease session anyway. The loop's token is
+    /// already cancelled by then, so this is normally microseconds; the bound
+    /// exists so a thread-pool stall cannot hold a stopping pod open. Missing
+    /// the deadline costs at worst the spurious "lock lost" this ordering
+    /// exists to prevent — never a leaked lock, because the session is ended
+    /// either way.
+    /// </summary>
+    private static readonly TimeSpan WatchdogStopTimeout = TimeSpan.FromSeconds(5);
+
     /// <summary>The mutable half of a run: what has to be released when it ends.</summary>
     private sealed class RunLease(Guid runId, DateTimeOffset startedAt)
     {
+        // One lock over both slots, not two Interlockeds: TryPublishWatchdog
+        // has to decide "is the lease still alive?" and store the watchdog as
+        // ONE step, or Dispose can slip between the two and end the session
+        // with a heartbeat nobody will ever stop.
+        private readonly object _sync = new();
         private PostgresAdvisoryLockLease? _lock;
+        private PostgresAdvisoryLockWatchdog? _watchdog;
 
         public Guid RunId { get; } = runId;
         public DateTimeOffset StartedAt { get; } = startedAt;
@@ -572,8 +642,8 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
         /// </summary>
         public PostgresAdvisoryLockLease? Lock
         {
-            get => Volatile.Read(ref _lock);
-            set => Volatile.Write(ref _lock, value);
+            get { lock (_sync) return _lock; }
+            set { lock (_sync) _lock = value; }
         }
 
         /// <summary>
@@ -581,6 +651,42 @@ public sealed class TenantMigrationSweepRunner : ITenantMigrationSweepRunner, ID
         /// both end a run and both used to read-then-null, so both could
         /// dispose the same connection (Finding 1.5, second half).
         /// </summary>
-        public PostgresAdvisoryLockLease? TakeLock() => Interlocked.Exchange(ref _lock, null);
+        public PostgresAdvisoryLockLease? TakeLock()
+        {
+            lock (_sync)
+            {
+                var held = _lock;
+                _lock = null;
+                return held;
+            }
+        }
+
+        /// <summary>
+        /// Hand the run's liveness heartbeat to the lease so a synchronous
+        /// <see cref="TenantMigrationSweepRunner.Dispose"/> can stop it BEFORE
+        /// ending the session it probes (2026-07-31 review, F2). Returns false
+        /// when the lease has already been taken — the run must then stop the
+        /// watchdog itself, because nobody else will.
+        /// </summary>
+        public bool TryPublishWatchdog(PostgresAdvisoryLockWatchdog watchdog)
+        {
+            lock (_sync)
+            {
+                if (_lock is null) return false;
+                _watchdog = watchdog;
+                return true;
+            }
+        }
+
+        /// <summary>Atomically claim the heartbeat for stopping.</summary>
+        public PostgresAdvisoryLockWatchdog? TakeWatchdog()
+        {
+            lock (_sync)
+            {
+                var watching = _watchdog;
+                _watchdog = null;
+                return watching;
+            }
+        }
     }
 }

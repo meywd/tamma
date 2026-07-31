@@ -301,6 +301,67 @@ public class PostgresAdvisoryLockTests
         await watchdog.DisposeAsync(); // idempotent
     }
 
+    [Test]
+    public async Task A_synchronous_host_that_stops_the_heartbeat_first_is_not_reported_as_lock_loss()
+    {
+        // 2026-07-31 review, F2 — the ORDERING CONTRACT, and what breaking it
+        // costs. The watchdog and the lease ride the SAME single session, so a
+        // host that ends the session while the heartbeat is still running hands
+        // the probe a dead connection — which the probe reports as LOCK LOST,
+        // correctly in every other context. For a pod that was simply asked to
+        // stop, that is a false and alarming story: the operator is told the
+        // cluster-wide lock was lost to "a pooler/proxy drop, an idle timeout,
+        // or a terminated backend" and goes looking for a database incident
+        // that never happened.
+        //
+        // An IDisposable host (TenantMigrationSweepRunner.Dispose) cannot await
+        // DisposeAsync, and before StopHeartbeat existed it had no way to
+        // honour the contract at all. Both halves are pinned here: the
+        // violation produces the false loss, the contract order does not.
+        const long violated = 0x7A11_000AL;
+        const long honoured = 0x7A11_000BL;
+
+        // ── the violation: end the session with the heartbeat still running ──
+        var doomed = await PostgresAdvisoryLock.TryAcquireAsync(
+            _cs, PostgresAdvisoryLockKey.FromInt64(violated));
+        var unstopped = doomed!.WatchLiveness(
+            TimeSpan.FromMilliseconds(50), CancellationToken.None, site: "test");
+        doomed.DisposeSession();
+        await WaitForCancellationAsync(unstopped.Token, TimeSpan.FromSeconds(10));
+        unstopped.LockLost.Should().BeTrue(
+            "this is WHY the order matters — a heartbeat left running over an ended session "
+            + "reports loss, which is exactly what an orderly shutdown must not produce");
+        await unstopped.DisposeAsync();
+
+        // ── the contract: stop the heartbeat first, then end the session ──
+        var lease = await PostgresAdvisoryLock.TryAcquireAsync(
+            _cs, PostgresAdvisoryLockKey.FromInt64(honoured));
+        var watchdog = lease!.WatchLiveness(
+            TimeSpan.FromMilliseconds(50), CancellationToken.None, site: "test");
+        await Task.Delay(200); // several genuine probes while the lock is held
+        watchdog.LockLost.Should().BeFalse("the lock is genuinely held at this point");
+
+        watchdog.StopHeartbeat(TimeSpan.FromSeconds(5)).Should().BeTrue(
+            "the heartbeat must actually be confirmed stopped — a timed-out stop means the "
+            + "ordering could not be honoured and the caller is back in the case above");
+        lease.DisposeSession();
+        await Task.Delay(200); // several intervals' worth of "would have probed"
+
+        watchdog.LockLost.Should().BeFalse(
+            "an orderly synchronous shutdown is a shutdown, not a lost lock");
+        watchdog.Token.IsCancellationRequested.Should().BeFalse(
+            "…and StopHeartbeat must not cancel the work token either — it is the "
+            // (DisposeAsync has the same guarantee; StopHeartbeat is its sync half.)
+            + "counterpart of DisposeAsync, which pins the same property");
+
+        (await AdvisoryLockProbe.IsHeldAsync(_cs, honoured)).Should().BeFalse(
+            "and the lock is still released — ending the non-pooled session is what does "
+            + "that, and stopping the heartbeat first changes none of it");
+
+        await watchdog.DisposeAsync();
+        await lease.DisposeAsync();
+    }
+
     private static async Task WaitForCancellationAsync(CancellationToken token, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;

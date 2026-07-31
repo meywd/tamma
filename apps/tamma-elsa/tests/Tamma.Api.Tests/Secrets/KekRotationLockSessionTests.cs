@@ -372,9 +372,237 @@ public class KekRotationLockSessionTests
             + "as 'cancelled' would zero the staged key and strand the already-rotated rows");
     }
 
-    private static async Task SeedRotatableTenantsAsync(
+    [Test]
+    public async Task A_genuine_cancellation_under_an_armed_watchdog_is_reported_as_cancelled_not_as_loss()
+    {
+        // The OTHER branch of the same catch, which nothing covered: the
+        // watchdog is armed and the token IS cancelled, but the lock was never
+        // lost — the operator (or the host) cancelled. The two stories share a
+        // token and an exception type and differ only by LockLost, so the
+        // branch that reads LockLost has to be pinned from BOTH sides or a
+        // future "simplification" can make every cancellation report a lost
+        // cluster gate.
+        //
+        // The persisted state differs too, and that difference matters more
+        // than the wording: a lock-loss abort is a PARTIAL rotation and must
+        // stay resumable (row 'failed', staged secondary KEPT), while a
+        // cancellation is over (row 'cancelled', staged secondary ZEROED).
+        // Getting this backwards either strands half-rotated rows or leaves a
+        // stale key sitting in the control plane.
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(ControlPlaneConfig());
+        services.AddDbContextFactory<ControlPlaneDbContext>(o => o.UseNpgsql(_cs));
+        services.AddSingleton<IPlatformEventRepository, NoopPlatformEventRepository>();
+        services.AddSingleton(NpgsqlDataSource.Create(_cs));
+        await using var sp = services.BuildServiceProvider();
+
+        var factory = sp.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
+        await using (var boot = await factory.CreateDbContextAsync())
+        {
+            await boot.Database.EnsureCreatedAsync();
+        }
+
+        var primary = BuildKek(seed: 1);
+        await SeedRotatableTenantsAsync(factory, primary, count: 2);
+
+        using var operatorCts = new CancellationTokenSource();
+        var canceller = new CancellingResolver(_cs, operatorCts);
+
+        var coordinator = new KekRotationCoordinator(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            BuildProvider(primary),
+            canceller,
+            NullLogger<KekRotationCoordinator>.Instance)
+        {
+            LockHeartbeatInterval = TimeSpan.FromMilliseconds(150),
+        };
+
+        coordinator.Start(BuildKek(seed: 95), operatorCts.Token);
+        await coordinator.WaitForCompletionAsync();
+
+        canceller.GateWasHeld.Should().BeTrue(
+            "the rotation must genuinely have held the gate when it was cancelled — "
+            + "otherwise no watchdog was armed and this proves nothing about the branch");
+
+        var status = coordinator.GetStatus();
+        status.Phase.Should().Be(KekRotationPhase.Failed);
+        status.FailureReason.Should().Be("rotation cancelled");
+        status.FailureReason.Should().NotContain("LOST",
+            "the gate was never lost — telling an operator it was sends them hunting a "
+            + "pooler/idle-timeout incident that did not happen");
+
+        await using var check = await factory.CreateDbContextAsync();
+        var row = await check.KekRotations
+            .OrderByDescending(r => r.StartedAt).FirstAsync();
+        row.Status.Should().Be("cancelled",
+            "a cancelled rotation is over; only a lock-loss abort is persisted as 'failed', "
+            + "which is what /retry looks for");
+        row.StagedSecondaryProtected.Should().BeNull(
+            "…and the staged key is zeroed, because nothing is going to resume this");
+
+        RunningTaskOf(coordinator).IsCompletedSuccessfully.Should().BeFalse(
+            "a genuine cancellation RETHROWS — that is the difference from the lock-loss "
+            + "branch, which returns so a lost gate is never reported to the host as an "
+            + "orderly shutdown");
+    }
+
+    [Test]
+    public async Task Retry_after_a_lock_loss_abort_finishes_the_rotation_from_where_it_stopped()
+    {
+        // The lock-loss abort's whole promise to the operator is the last
+        // sentence of its status message: "re-run /api/admin/kek/retry to
+        // finish the rotation from where it stopped". Nothing covered that
+        // end-to-end — only that the row was left in a shape /retry LOOKS for.
+        // The gap matters because the resumability depends on three separate
+        // decisions agreeing (row persisted 'failed' not 'cancelled', staged
+        // secondary kept not zeroed, the primary NOT promoted), and any one of
+        // them silently strands the rows already re-encrypted under a key no
+        // pod will ever hold.
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(ControlPlaneConfig());
+        services.AddDbContextFactory<ControlPlaneDbContext>(o => o.UseNpgsql(_cs));
+        services.AddSingleton<IPlatformEventRepository, NoopPlatformEventRepository>();
+        services.AddSingleton(NpgsqlDataSource.Create(_cs));
+        await using var sp = services.BuildServiceProvider();
+
+        var factory = sp.GetRequiredService<IDbContextFactory<ControlPlaneDbContext>>();
+        await using (var boot = await factory.CreateDbContextAsync())
+        {
+            await boot.Database.EnsureCreatedAsync();
+        }
+
+        var primary = BuildKek(seed: 1);
+        var tenantIds = await SeedRotatableTenantsAsync(factory, primary, count: 2);
+
+        var saboteur = new LockKillingResolver(_cs);
+        var provider = BuildProvider(primary);
+        var coordinator = new KekRotationCoordinator(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            provider,
+            saboteur,
+            NullLogger<KekRotationCoordinator>.Instance)
+        {
+            LockHeartbeatInterval = TimeSpan.FromMilliseconds(150),
+        };
+
+        // ── act 1: lose the gate mid-fleet ──────────────────────────────
+        coordinator.Start(BuildKek(seed: 96));
+        await coordinator.WaitForCompletionAsync();
+
+        saboteur.Killed.Should().BeTrue("the abort must be caused by a real lost gate");
+        coordinator.GetStatus().Phase.Should().Be(KekRotationPhase.Failed);
+        provider.GetActiveVersion().Should().Be(1,
+            "a partial rotation must NOT promote — the old primary still has rows to read");
+
+        // ── act 2: the operator does what the status told them to ───────
+        var retry = await coordinator.RetryAsync(principal: null);
+        retry.Success.Should().BeTrue(
+            "the lock-loss abort promises /retry will work; if the row had been persisted "
+            + "'cancelled' (or its staged key zeroed) there would be nothing to resume. "
+            + "Reason: " + retry.Reason);
+        await coordinator.WaitForCompletionAsync();
+
+        var status = coordinator.GetStatus();
+        status.Phase.Should().Be(KekRotationPhase.Completed,
+            "the retry finishes the fleet. FailureReason: " + status.FailureReason);
+        provider.GetActiveVersion().Should().Be(2, "…and only NOW is the new key promoted");
+
+        await using var check = await factory.CreateDbContextAsync();
+        foreach (var id in tenantIds)
+        {
+            var tenant = await check.Tenants.IgnoreQueryFilters()
+                .FirstAsync(t => t.Id == id);
+            check.Entry(tenant).Property<short>("KekVersion").CurrentValue
+                .Should().Be(2,
+                    "every row must end on the new key — including the one the aborted run "
+                    + "had already done, which is the row a fresh /start would have orphaned");
+        }
+
+        var row = await check.KekRotations
+            .OrderByDescending(r => r.StartedAt).FirstAsync();
+        row.Status.Should().Be("completed");
+        row.StagedSecondaryProtected.Should().BeNull(
+            "a completed rotation zeroes the staged key — it is live now");
+    }
+
+    [Test]
+    public async Task A_rotation_whose_gate_cannot_be_evaluated_fails_closed_instead_of_wedging()
+    {
+        // 2026-07-31 review, F5 — fail CLOSED is not the same as fail STUCK.
+        //
+        // "Host=h;Bogus=1" is refused by HasCredentials (it does not parse),
+        // so the resolution seam's trust-auth tier used to hand it straight
+        // back, and TryAcquireAsync's Pooling=false rewrite then threw an
+        // ArgumentException. Nothing here caught it — the acquisition's catch
+        // list was OperationCanceledException + NpgsqlException — so it escaped
+        // RunRotationAsync ahead of the try/finally that owns the status. Phase
+        // stayed Running FOREVER, _activeRotationId was never cleared, the
+        // Task.Run faulted unobserved, and /status reported a rotation that
+        // could neither finish nor be retried. A typo in appsettings must not
+        // be able to do that.
+        var malformed = "Host=nowhere;Database=cp;Username=u;Bogus=1";
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton<IConfiguration>(
+            new ConfigurationBuilder().AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["ConnectionStrings:ControlPlane"] = malformed,
+                }).Build());
+        // EF's view carries no password either, so the seam cannot fall back to
+        // it — indistinguishable from the laundered production shape.
+        services.AddDbContextFactory<ControlPlaneDbContext>(o => o.UseNpgsql(
+            new NpgsqlConnectionStringBuilder(_cs) { Password = null }.ConnectionString));
+        services.AddSingleton<IPlatformEventRepository, NoopPlatformEventRepository>();
+        services.AddSingleton(NpgsqlDataSource.Create(_cs));
+        await using var sp = services.BuildServiceProvider();
+
+        var coordinator = new KekRotationCoordinator(
+            sp.GetRequiredService<IServiceScopeFactory>(),
+            BuildProvider(BuildKek(seed: 1)),
+            new NoopTenantConnectionResolver(),
+            NullLogger<KekRotationCoordinator>.Instance);
+
+        coordinator.Start(BuildKek(seed: 97));
+        await coordinator.WaitForCompletionAsync();
+
+        var status = coordinator.GetStatus();
+        status.Phase.Should().NotBe(KekRotationPhase.Running,
+            "a rotation that could not even EVALUATE its gate must reach a terminal phase — "
+            + "leaving /status pinned at Running is an operation that can never finish and "
+            + "can never be retried");
+        status.Phase.Should().Be(KekRotationPhase.Failed);
+        status.FailureReason.Should().Contain("gate could not be evaluated",
+            "the operator needs to know the GATE is the problem, not the rotation");
+        status.FailureReason.Should().NotContain("another rotation is already in progress",
+            "that is the exact operator-visible untruth this whole audit exists to remove — "
+            + "there is no other rotation, there is a broken connection string");
+
+        RunningTaskOf(coordinator).IsCompletedSuccessfully.Should().BeTrue(
+            "and nothing may escape the background task unobserved");
+    }
+
+    /// <summary>
+    /// The coordinator's in-flight rotation task. Private because nothing in
+    /// production needs it; read here because "returned" versus "rethrew" is a
+    /// real, load-bearing difference between the lock-loss and cancellation
+    /// branches and is otherwise unobservable (WaitForCompletionAsync swallows).
+    /// </summary>
+    private static Task RunningTaskOf(KekRotationCoordinator coordinator)
+    {
+        var field = typeof(KekRotationCoordinator).GetField(
+            "_runningTask",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        field.Should().NotBeNull("the coordinator still schedules its rotation on a Task");
+        return (Task)field!.GetValue(coordinator)!;
+    }
+
+    private static async Task<List<Guid>> SeedRotatableTenantsAsync(
         IDbContextFactory<ControlPlaneDbContext> factory, byte[] primary, int count)
     {
+        var ids = new List<Guid>();
         await using var ctx = await factory.CreateDbContextAsync();
         for (var i = 0; i < count; i++)
         {
@@ -394,8 +622,52 @@ public class KekRotationLockSessionTests
                 AesGcmConnectionStringDecryptor.EncryptWithKey(
                     "Host=h;Database=t;Username=u;Password=p", primary);
             entry.Property("KekVersion").CurrentValue = (short)1;
+            ids.Add(tenant.Id);
         }
         await ctx.SaveChangesAsync();
+        return ids;
+    }
+
+    /// <summary>
+    /// Cancels the operator's token from inside the guarded per-tenant loop —
+    /// the genuine-cancellation counterpart of
+    /// <see cref="LockKillingResolver"/>, with the gate still healthily held.
+    /// Records that the gate WAS held, so the test cannot pass vacuously
+    /// against a rotation that never armed a watchdog.
+    /// </summary>
+    private sealed class CancellingResolver(string connectionString, CancellationTokenSource cts)
+        : ITenantConnectionResolver
+    {
+        private int _evictions;
+
+        public bool GateWasHeld { get; private set; }
+
+        public async ValueTask EvictAsync(Guid tenantId, CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Increment(ref _evictions) != 1) return;
+
+            GateWasHeld = await AdvisoryLockProbe.HolderPidAsync(
+                connectionString, KekRotationCoordinator.AdvisoryLockKey) is not null;
+
+            await cts.CancelAsync();
+            // Stand in for the rest of a slow re-encrypt; the cancellation
+            // reaches the loop through the same token a lost lock would use.
+            await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+        }
+
+        public ValueTask<NpgsqlDataSource> GetDataSourceAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public ValueTask<NpgsqlDataSource> GetElsaDataSourceAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public ValueTask<ITenantConnectionLease> LeaseAsync(
+            Guid tenantId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+
+        public TenantConnectionPoolStats GetStats() => new(0, 0, 0);
     }
 
     /// <summary>

@@ -146,8 +146,41 @@ public static class PostgresAdvisoryLock
     public const string LegacyAdminConnectionStringKey = "DefaultConnection";
 
     /// <summary>
+    /// Can Npgsql parse this string at all? A string that cannot be parsed
+    /// must never leave <see cref="TryResolveSessionConnectionString"/> —
+    /// see the fail-STUCK note there.
+    ///
+    /// <para>The catch list is the total set <see cref="NpgsqlConnectionStringBuilder"/>
+    /// can raise for malformed input: an unknown keyword throws
+    /// <see cref="ArgumentException"/> ("Couldn't set bogus"), while a
+    /// well-known keyword with an unparseable value throws
+    /// <see cref="FormatException"/> or <see cref="OverflowException"/>
+    /// (<c>Port=abc</c>, <c>Port=99999999999</c>) or
+    /// <see cref="InvalidCastException"/>. Catching only
+    /// <see cref="ArgumentException"/> — which this used to do — left those
+    /// last three escaping a predicate whose whole job is to answer a yes/no
+    /// question.</para>
+    /// </summary>
+    private static bool TryParse(
+        string connectionString, out NpgsqlConnectionStringBuilder? builder)
+    {
+        try
+        {
+            builder = new NpgsqlConnectionStringBuilder(connectionString);
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or FormatException
+                                       or OverflowException or InvalidCastException
+                                       or NotSupportedException)
+        {
+            builder = null;
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Is this connection string usable for opening a NEW session — i.e.
-    /// does it still carry a password?
+    /// is it parseable, and does it still carry a password?
     ///
     /// <para>A password-less string is the specific trap the 2026-07-30
     /// audit fell into. Npgsql defaults <c>PersistSecurityInfo</c> to false,
@@ -161,19 +194,18 @@ public static class PostgresAdvisoryLock
     /// lock attempt as "did not acquire", that turns a silent credential
     /// loss into a permanently-closed gate, reported to the operator as
     /// "someone else is already running".</para>
+    ///
+    /// <para>A string Npgsql cannot parse answers <c>false</c> as well — see
+    /// <see cref="TryParse"/>. That is a TOTAL predicate on purpose: it is
+    /// called on operator-supplied configuration, and a predicate that can
+    /// throw instead of answering pushes the failure onto whichever caller
+    /// happens to have the weakest catch.</para>
     /// </summary>
     public static bool HasCredentials(string? connectionString)
     {
         if (string.IsNullOrWhiteSpace(connectionString)) return false;
-        try
-        {
-            return !string.IsNullOrEmpty(
-                new NpgsqlConnectionStringBuilder(connectionString).Password);
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
+        return TryParse(connectionString, out var builder)
+               && !string.IsNullOrEmpty(builder!.Password);
     }
 
     /// <summary>
@@ -220,12 +252,26 @@ public static class PostgresAdvisoryLock
     ///     what a container without configuration (unit fixtures that bind
     ///     a context straight to a container) has to use.</description></item>
     ///   <item><description><b>Configuration verbatim, even without a
-    ///     password.</b> A trust-auth / integrated-security deployment
-    ///     legitimately has none, and configuration is never laundered — so
-    ///     a missing password THERE means the deployment genuinely has no
-    ///     password, not that one was stripped. Refusing this tier would
-    ///     cost those deployments the lock entirely.</description></item>
+    ///     password — provided Npgsql can PARSE it.</b> A trust-auth /
+    ///     integrated-security deployment legitimately has none, and
+    ///     configuration is never laundered — so a missing password THERE
+    ///     means the deployment genuinely has no password, not that one was
+    ///     stripped. Refusing this tier would cost those deployments the
+    ///     lock entirely. A string Npgsql cannot parse is a different animal
+    ///     and is refused: see below.</description></item>
     /// </list>
+    ///
+    /// <para><b>A malformed string is refused here, not passed on</b>
+    /// (2026-07-31 review, F5). <c>HasCredentials("Host=h;Bogus=1")</c> is
+    /// false — not because the password is missing but because the string
+    /// does not parse — so tier 3 used to hand the malformed string back
+    /// verbatim, and the <see cref="ArgumentException"/> then surfaced from
+    /// <see cref="ToUnpooledConnectionString"/> inside
+    /// <see cref="TryAcquireAsync"/>, i.e. from a completely different stack
+    /// frame than the one that made the decision. At the KEK site nothing
+    /// caught it and the rotation failed STUCK rather than closed (phase
+    /// pinned at <c>Running</c> forever). A typo in a connection string must
+    /// fail closed with a named error, at the seam that owns the decision.</para>
     ///
     /// <para>What is deliberately NOT a tier: a password-less string that
     /// only EF produced. That is indistinguishable from a laundered one, and
@@ -245,7 +291,23 @@ public static class PostgresAdvisoryLock
         DbContext? efContext,
         ILogger? logger = null,
         string? site = null)
+        => TryResolveSessionConnectionString(
+            configuration, efContext, out _, logger, site);
+
+    /// <inheritdoc cref="TryResolveSessionConnectionString(IConfiguration?, DbContext?, ILogger?, string?)"/>
+    /// <param name="malformed">Set when the refusal was caused by a
+    /// connection string Npgsql cannot PARSE, rather than by one that merely
+    /// lost its password. The two are different operator stories — a typo to
+    /// fix versus a laundering mechanism to understand — so the throwing
+    /// wrapper says which.</param>
+    public static string? TryResolveSessionConnectionString(
+        IConfiguration? configuration,
+        DbContext? efContext,
+        out bool malformed,
+        ILogger? logger = null,
+        string? site = null)
     {
+        malformed = false;
         var fromConfiguration = FromConfiguration(configuration);
         if (HasCredentials(fromConfiguration)) return fromConfiguration;
 
@@ -258,6 +320,27 @@ public static class PostgresAdvisoryLock
 
         if (!string.IsNullOrWhiteSpace(fromConfiguration))
         {
+            if (!TryParse(fromConfiguration, out _))
+            {
+                // Fail CLOSED, and here rather than three frames later inside
+                // TryAcquireAsync's connection-string rewrite, where the
+                // exception type is an ArgumentException that reads like a
+                // programming error and escapes callers whose catch lists were
+                // written for Npgsql failures.
+                logger?.LogError(
+                    "pg.advisory_lock.connection_string_malformed site={Site} — the configured "
+                    + "control-plane connection string cannot be parsed by Npgsql (a typo'd or "
+                    + "unknown keyword, or an unparseable value such as Port=abc). Refusing to "
+                    + "open a lock session from it. Fix ConnectionStrings:{ControlPlaneKey} "
+                    + "(or {AdminKey} / {LegacyKey}).",
+                    site ?? "unknown",
+                    ControlPlaneConnectionStringKey,
+                    AdminConnectionStringKey,
+                    LegacyAdminConnectionStringKey);
+                malformed = true;
+                return null;
+            }
+
             logger?.LogDebug(
                 "pg.advisory_lock.connection_string site={Site} source=configuration_without_password "
                 + "(trust-auth / integrated-security deployment: configuration is raw, so a missing "
@@ -286,22 +369,56 @@ public static class PostgresAdvisoryLock
     /// fail-closed path is an exception rather than a status flip. The
     /// message names the mechanism, because "connection string missing" sends
     /// an operator looking in the wrong place.
+    ///
+    /// <para>Throws <see cref="AdvisoryLockConnectionStringException"/> — a
+    /// named type so a caller can tell a permanent CONFIGURATION fault from a
+    /// transient database one and log it accordingly (see
+    /// <c>AuditChainCheckpointScheduler</c>, which escalates it).</para>
     /// </summary>
     public static string ResolveSessionConnectionString(
         IConfiguration? configuration,
         DbContext? efContext,
         string site,
         ILogger? logger = null)
-        => TryResolveSessionConnectionString(configuration, efContext, logger, site)
-           ?? throw new InvalidOperationException(
-               $"No usable control-plane connection string for {site}'s dedicated advisory-lock "
-               + "session. The lock must be taken on its own NON-POOLED session, which means "
-               + "re-opening from a connection string — and the only candidate available here "
-               + "carries no password. NpgsqlDataSource.ConnectionString never carries one, and "
-               + "EF's Database.GetConnectionString() inherits that laundered string whenever an "
-               + $"NpgsqlDataSource is registered in DI. Set ConnectionStrings:"
-               + $"{ControlPlaneConnectionStringKey} (or {AdminConnectionStringKey} / "
-               + $"{LegacyAdminConnectionStringKey}) — refusing to continue unguarded.");
+    {
+        var resolved = TryResolveSessionConnectionString(
+            configuration, efContext, out var malformed, logger, site);
+        if (resolved is not null) return resolved;
+
+        throw new AdvisoryLockConnectionStringException(
+            malformed
+                ? $"The configured control-plane connection string for {site}'s dedicated "
+                  + "advisory-lock session is MALFORMED — Npgsql cannot parse it (a typo'd or "
+                  + "unknown keyword, or an unparseable value such as Port=abc). The lock must "
+                  + "be taken on its own NON-POOLED session, which means re-opening from a "
+                  + "connection string, and this one cannot be re-opened. Fix "
+                  + $"ConnectionStrings:{ControlPlaneConnectionStringKey} (or "
+                  + $"{AdminConnectionStringKey} / {LegacyAdminConnectionStringKey}) — refusing "
+                  + "to continue unguarded."
+                : $"No usable control-plane connection string for {site}'s dedicated advisory-lock "
+                  + "session. The lock must be taken on its own NON-POOLED session, which means "
+                  + "re-opening from a connection string — and the only candidate available here "
+                  + "carries no password. NpgsqlDataSource.ConnectionString never carries one, and "
+                  + "EF's Database.GetConnectionString() inherits that laundered string whenever an "
+                  + "NpgsqlDataSource is registered in DI. Set ConnectionStrings:"
+                  + $"{ControlPlaneConnectionStringKey} (or {AdminConnectionStringKey} / "
+                  + $"{LegacyAdminConnectionStringKey}) — refusing to continue unguarded.");
+    }
+}
+
+/// <summary>
+/// The lock session's connection string could not be resolved: either no
+/// candidate still carried credentials, or the configured one is malformed.
+/// Either way it is a permanent CONFIGURATION fault — a redeploy fixes it, a
+/// retry does not — which is why it has its own type rather than being one
+/// more <see cref="InvalidOperationException"/> in a log.
+///
+/// <para>Derives from <see cref="InvalidOperationException"/> so every
+/// existing catch and every existing test that expects one still matches.</para>
+/// </summary>
+public sealed class AdvisoryLockConnectionStringException : InvalidOperationException
+{
+    public AdvisoryLockConnectionStringException(string message) : base(message) { }
 }
 
 /// <summary>
@@ -361,20 +478,46 @@ public readonly record struct PostgresAdvisoryLockKey
     /// "Is this exact advisory lock still granted to the session running
     /// this query?"
     ///
-    /// <para>Fully qualified on purpose. <c>pg_locks</c> is CLUSTER-wide
-    /// while advisory locks are per-database, so an unqualified match finds
-    /// a same-keyed lock held in a completely different database on the same
-    /// cluster. <c>objsubid</c> distinguishes the one-argument
-    /// <c>pg_advisory_lock(bigint)</c> form (1) from the two-argument
-    /// <c>(int, int)</c> form (2), whose halves reassemble to the same 64-bit
-    /// value but are a different lock entirely. And <c>pid =
-    /// pg_backend_pid()</c> is the point of the whole exercise: the question
-    /// is not "does anyone hold this key" — someone else holding it is
-    /// exactly the disaster being watched for — but "do <b>I</b> still".</para>
+    /// <para>Qualified on every axis <c>pg_locks</c> exposes. <c>pg_locks</c>
+    /// is CLUSTER-wide while advisory locks are per-database, so an
+    /// unqualified match finds a same-keyed lock held in a completely
+    /// different database on the same cluster. <c>objsubid</c> distinguishes
+    /// the one-argument <c>pg_advisory_lock(bigint)</c> form (1) from the
+    /// two-argument <c>(int, int)</c> form (2), whose halves reassemble to
+    /// the same 64-bit value but are a different lock entirely. <c>mode =
+    /// 'ExclusiveLock'</c> excludes a SHARE-mode lock on the same key
+    /// (<c>pg_advisory_lock_shared</c> records <c>ShareLock</c>) — nothing in
+    /// this codebase takes one, but "the predicate is satisfied by a lock
+    /// that does not exclude anybody" is not a property a liveness check
+    /// should have. And <c>pid = pg_backend_pid()</c> is the point of the
+    /// whole exercise: the question is not "does anyone hold this key" —
+    /// someone else holding it is exactly the disaster being watched for —
+    /// but "do <b>I</b> still".</para>
     ///
-    /// <para>The 64-bit key is reassembled with <c>|</c> rather than
-    /// <c>+</c> because <c>hashtextextended</c> keys are frequently negative
-    /// and the OR form round-trips those without relying on wrap-around.</para>
+    /// <para><b>The one axis that cannot be qualified</b> (2026-07-31 review,
+    /// F6): <c>pg_locks</c> has no column distinguishing a SESSION-scoped
+    /// advisory lock from a TRANSACTION-scoped one
+    /// (<c>pg_advisory_xact_lock</c>) — both are <c>locktype='advisory'</c>,
+    /// <c>mode='ExclusiveLock'</c>, <c>objsubid=1</c>. Verified against
+    /// postgres:17. So an xact-scoped lock on the SAME key in the SAME
+    /// backend would satisfy this predicate and mask the loss of the session
+    /// lock. No caller does that, and it would take a deliberate collision on
+    /// a namespaced constant to arrange; it is recorded rather than defended
+    /// against, because the defence does not exist in the catalog.</para>
+    ///
+    /// <para>The 64-bit key is reassembled with <c>|</c>. <b><c>+</c> would be
+    /// exactly equivalent</b> — the high term is always a multiple of 2^32 and
+    /// the low term always in <c>[0, 2^32)</c>, so the bits never overlap and
+    /// int8 never overflows; verified on postgres:17 over 500k random
+    /// <c>(classid, objid)</c> pairs plus every boundary case, 0 differences,
+    /// negatives included. The choice is stylistic (it reads as "reassemble
+    /// two halves"), NOT a correctness requirement: an earlier comment here
+    /// claimed <c>hashtextextended</c> keys being negative forced the OR
+    /// form, and that claim was simply false. It is stated plainly so a future
+    /// reader does not "fix" the other reassembly site or hunt a bug that is
+    /// not there. Kept identical to the sweep runner's cross-pod probe and to
+    /// the tests' <c>AdvisoryLockProbe</c> purely so all three read the
+    /// same.</para>
     /// </summary>
     internal string HeldByThisBackendSql() =>
         $"""
@@ -382,6 +525,7 @@ public readonly record struct PostgresAdvisoryLockKey
             SELECT 1 FROM pg_locks
             WHERE locktype = 'advisory'
               AND granted
+              AND mode = 'ExclusiveLock'
               AND objsubid = 1
               AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
               AND pid = pg_backend_pid()
@@ -487,7 +631,14 @@ public sealed class PostgresAdvisoryLockLease : IAsyncDisposable
     /// Both use the same single session, and a probe racing the release
     /// would either fault on a concurrently-executing command or report a
     /// spurious loss. <c>await using</c> in declaration order (lease first,
-    /// watchdog second) gets this right; the reverse does not.</para>
+    /// watchdog second) gets this right; the reverse does not.
+    /// <b>A synchronous host</b> — a stopping pod's <c>Dispose</c>, which
+    /// ends the session via <see cref="DisposeSession"/> — honours the same
+    /// contract with <see cref="PostgresAdvisoryLockWatchdog.StopHeartbeat"/>
+    /// first. Violating the order does not corrupt anything, but it turns an
+    /// orderly shutdown into a reported LOCK LOSS, which is a false and
+    /// alarming story to put in front of an operator (2026-07-31 review,
+    /// F2).</para>
     /// </summary>
     /// <param name="interval">How often to re-verify. Judge it against the
     /// shape of the guarded work: the probe is one indexed <c>pg_locks</c>
@@ -631,6 +782,20 @@ public sealed class PostgresAdvisoryLockWatchdog : IAsyncDisposable
                 if (token.IsCancellationRequested) return;
                 if (await _lease.StillHeldAsync(token).ConfigureAwait(false)) continue;
 
+                // Re-check AFTER the probe, not only before it (2026-07-31
+                // review, F2). StillHeldAsync answers "no" for a session that
+                // has been closed or is mid-teardown, and a stopping host
+                // cancels this token and then ends the lease session — so
+                // between the check above and the probe's own
+                // Volatile.Read(ref _session) there is a window in which an
+                // ORDERLY shutdown looks exactly like a lost lock. Reporting
+                // "the cluster lock was lost" for a pod that was asked to stop
+                // sends an operator hunting a pooler incident that never
+                // happened. A genuine loss with no cancellation in sight is
+                // unaffected: the token is only cancelled here by the caller,
+                // the host, or a loss already recorded.
+                if (token.IsCancellationRequested) return;
+
                 Interlocked.Exchange(ref _lost, 1);
                 _logger?.LogError(
                     "pg.advisory_lock.lost site={Site} key={Key} — ABORTING the guarded work: the "
@@ -653,6 +818,47 @@ public sealed class PostgresAdvisoryLockWatchdog : IAsyncDisposable
             _logger?.LogWarning(ex,
                 "pg.advisory_lock.watchdog_failed site={Site} key={Key} — liveness is no longer "
                 + "being verified for this critical section", _site, _lease.Key.Description);
+        }
+    }
+
+    /// <summary>
+    /// Synchronous heartbeat stop, for <see cref="IDisposable"/> hosts (a
+    /// stopping pod's <c>Dispose</c>) that cannot await — the counterpart of
+    /// <see cref="PostgresAdvisoryLockLease.DisposeSession"/>, and it must be
+    /// called BEFORE it for the same reason
+    /// <see cref="DisposeAsync"/> must precede
+    /// <see cref="PostgresAdvisoryLockLease.DisposeAsync"/>: both ride the
+    /// same single session.
+    ///
+    /// <para>Without this a synchronous host had no way to honour the ordering
+    /// contract at all — it could only end the session and let the in-flight
+    /// probe discover a dead connection, which the probe (correctly, in every
+    /// other context) reports as LOCK LOST. An orderly pod shutdown then
+    /// surfaced to the operator as "the cluster-wide lock was lost mid-run"
+    /// (2026-07-31 review, F2).</para>
+    ///
+    /// <para>Does not cancel <see cref="Token"/>, does not dispose anything —
+    /// a later <see cref="DisposeAsync"/> still does the full teardown and is
+    /// unaffected by having been preceded by this.</para>
+    /// </summary>
+    /// <param name="timeout">How long to wait for the heartbeat to exit. The
+    /// loop is cancelled first, so the wait is normally microseconds; the
+    /// bound exists so a thread-pool stall cannot hold a stopping pod open.</param>
+    /// <returns>True when the heartbeat is confirmed stopped; false when the
+    /// wait timed out, i.e. the ordering could NOT be honoured.</returns>
+    public bool StopHeartbeat(TimeSpan timeout)
+    {
+        try { _loop.Cancel(); }
+        catch (ObjectDisposedException) { return true; /* already torn down */ }
+
+        try
+        {
+            return _heartbeat.Wait(timeout);
+        }
+        catch
+        {
+            // RunAsync swallows everything; belt and braces.
+            return true;
         }
     }
 

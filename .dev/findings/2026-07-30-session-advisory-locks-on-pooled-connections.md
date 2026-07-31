@@ -15,7 +15,14 @@ here as open, not fixed.
 > it and its bespoke copy deleted. All four sites now resolve their lock-session connection string
 > through one seam on `PostgresAdvisoryLock`. See **"Closing the two open items"** at the end of
 > this document, which also records **why the EF password-stripping shape could not be reproduced
-> in a container** — it is a process-wide EF Core cache property, not a container one.
+> in a container** — the reproducible cause is a container that registers an `NpgsqlDataSource`
+> alongside the context. *(This line originally claimed a process-wide EF Core cache property; that
+> stronger claim is now marked unreproduced — see F4 in "Adversarial review of the watchdog pass".)*
+
+> **UPDATE 2026-07-31 — an adversarial review of the watchdog commit (`3b738cc`) found seven
+> issues, two of them corrections to claims in THIS document.** Nothing unsafe, but the move's
+> lock-loss diagnosis was unreachable in production and the test that "proved" it was measuring a
+> fiction. See **"Adversarial review of the watchdog pass"** at the end.
 
 ## The mechanism
 
@@ -287,9 +294,21 @@ direction. It was the full run that caught the password-stripping regression abo
 `PostgresAdvisoryLockLease.WatchLiveness(interval, callerToken, logger, site)` returns a
 `PostgresAdvisoryLockWatchdog` that:
 
-- re-reads `pg_locks` **from the lease session itself**, pinned to `pid = pg_backend_pid()`, fully
-  qualified by database and `objsubid = 1`, with the 64-bit key reassembled using `|` (not `+`)
-  so `hashtextextended` keys — frequently negative — round-trip;
+- re-reads `pg_locks` **from the lease session itself**, pinned to `pid = pg_backend_pid()`,
+  qualified by database, `objsubid = 1` and `mode = 'ExclusiveLock'`, with the 64-bit key
+  reassembled using `|`;
+  > **Corrected 2026-07-31 (F3).** This bullet originally said "`|` (not `+`) so `hashtextextended`
+  > keys — frequently negative — round-trip". **That rationale is false.** `|` and `+` are exactly
+  > equivalent here: the high term is always a multiple of 2^32 and the low term always in
+  > `[0, 2^32)`, so the bits never overlap and int8 never overflows. Verified on `postgres:17-alpine`
+  > over 500k random `(classid, objid)` pairs plus every boundary combination — 0 differences,
+  > negatives included (the reviewer's independent run over 2,000,000 pairs plus `-1`,
+  > `long.MinValue`, `long.MaxValue`, `0xFFFFFFFF80000000`, `0x0000000080000000`,
+  > `0x8000000000000001` agreed). The choice is **stylistic**. It is now `|` at all four sites
+  > (`PostgresAdvisoryLockKey.HeldByThisBackendSql`, `TenantMigrationSweepRunner`'s cross-pod probe,
+  > `AdvisoryLockProbe`, and the sweep tests' own probes) purely so they read the same — the tree
+  > used to be split `|`/`+`, which invites a future reader to "fix" a working site or hunt a bug
+  > that is not there. `mode = 'ExclusiveLock'` was added in the same pass (F6).
 - treats **any** failed probe as loss, because the dominant reason a command on the lease
   connection throws is that the backend is gone;
 - exposes `Token` (a `CancellationTokenSource` linked to the caller's) which it cancels on loss,
@@ -376,35 +395,55 @@ Wiring: `TenantMigrationSweepRunner` and `TenantMoveService` gained an **optiona
 directly keep the EF route and are unaffected). `AuditChainCheckpointScheduler` resolves
 `IConfiguration` from its per-tick scope. `KekRotationCoordinator` already did.
 
-### Why no container reproduced the stripping — the actual mechanism
+### Why no container reproduced the stripping — the mechanism, stated at the strength it is proven
 
 This was the loose end from the first pass ("no test container reproduces the production shape").
-It is now understood, and it is worse than "the container was wired differently":
 
-> **Whether Npgsql's EF provider picks up a DI-registered `NpgsqlDataSource` — and therefore
-> whether EF's connection string comes back stripped — is decided by EF Core's PROCESS-WIDE
-> internal service-provider cache, populated by whichever context of that options shape is built
-> FIRST in the process.**
+**What reproduces, deterministically:**
 
-Two probes proved it. Build a data-source-less container first, and every later context in that
-process keeps its password even when a data source *is* registered. Build a data-source-bearing
-one first, and every later context loses it — including ones whose own container has no data
-source. Observed directly in the suite too: `AuditChainCheckpointSchedulerLockTests` sees a
-credentialed EF string when the whole fixture runs and a stripped one when the same test runs
-alone.
+> **A `ControlPlaneDbContext` resolved from a DI container that also has an `NpgsqlDataSource`
+> registered comes back from `Database.GetConnectionString()` with the password STRIPPED.** Npgsql's
+> EF provider mints the context's `DbConnection` from the data source, and
+> `NpgsqlDataSource.ConnectionString` never carries the password (`PersistSecurityInfo` defaults to
+> false). This is the production shape (`Program.cs` registers a singleton CP data source next to
+> the EF factory), it is pinned by `PostgresAdvisoryLockConnectionStringTests`, and it is the whole
+> reason the resolution seam prefers raw configuration.
 
-Consequences, both recorded here because they generalise:
+**What is NOT proven — read this before citing the strong form.** An earlier version of this
+section claimed something much larger: that the behaviour is decided by EF Core's *process-wide*
+internal service-provider cache, first-context-wins, so that *"build a data-source-bearing context
+first and every later context loses its password — including ones whose own container has no data
+source"*, and that `AuditChainCheckpointSchedulerLockTests` therefore flip-flops depending on what
+ran before it.
 
-- **The audit's inability to reproduce it was not a wiring mistake.** It is a per-process property,
-  so the same code reproduces or does not reproduce depending on what ran earlier.
-- **No test may assert on it.** Any `HasCredentials(ef.GetConnectionString())` assertion is a coin
-  flip that depends on test ordering — a flake generator. The pins therefore *simulate* the
-  laundering deterministically: a context bound to an explicitly password-less connection string is
-  indistinguishable, at the seam, from one Npgsql stripped. That is what every new pinning test
-  does.
-- **It also means production can flip.** A deployment that today gets a credentialed EF string can
-  start getting a stripped one after an unrelated change to startup ordering. That is precisely why
-  the durable fix is "prefer configuration", not "the EF route works for us".
+> **Marked UNREPRODUCED as of 2026-07-31 (F4).** A reviewer probing in one process observed: bare
+> context before → `HasCredentials=True`; DI context with a data source → `False` (deterministic,
+> as above); bare context **after** → **`True`**. The poisoning did **not** propagate to a later
+> context whose own container has no data source. And `AuditChainCheckpointSchedulerLockTests`
+> passed 5/5 run alone — the very fixture named above as flip-flopping.
+>
+> That is **one ordering, not a proof of absence**: the strong form is not disproven, and EF Core
+> genuinely does cache internal service providers per options shape, so a shape-collision route to
+> it remains plausible. It is downgraded from "established mechanism" to "hypothesis that has not
+> reproduced", and nothing should be justified by it alone.
+
+Consequences, restated against what actually holds:
+
+- **The audit's inability to reproduce it was not a wiring mistake.** The deterministic form needs a
+  data source registered *in the same container* as the context — which the first pass's fixtures
+  did not have. That is sufficient to explain the miss; the process-wide story is not needed.
+- **No test may assert on `HasCredentials(ef.GetConnectionString())`** — but for the narrow reason:
+  it is a property of *how the fixture's container is wired*, easy to get subtly wrong, and it
+  couples a lock test to Npgsql-provider internals that are not the thing under test. (If the strong
+  form is ever confirmed, add "and it depends on test ordering" here.) The pins therefore *simulate*
+  the laundering deterministically: a context bound to an explicitly password-less connection string
+  is indistinguishable, at the seam, from one Npgsql stripped. That is what every pinning test does,
+  and it is the right shape either way.
+- **Production can still change under you.** A deployment that today gets a credentialed EF string
+  starts getting a stripped one the moment an `NpgsqlDataSource` is registered alongside the context
+  — an unrelated feature's wiring change. That is why the durable fix is "prefer configuration", not
+  "the EF route works for us". This consequence survives the correction intact; it never needed the
+  process-wide claim.
 
 ## Tests added in this pass
 
@@ -446,7 +485,7 @@ there, so the assertions were reduced to the observable behaviour):
 | Pre-fix behaviour observed | Fixed-code expectation |
 |---|---|
 | KEK: `phase=Completed`, `evictions=2` after the gate's backend was killed — the rotation re-encrypted the *next* tenant with the cluster gate open, and took the full 31s unguarded delay to do it | aborts at eviction 1 with "rotation lock was LOST" |
-| Move: sat in `pg_dump` for the full 60s after the gate died, then `TimeoutException` | prompt `InvalidOperationException` "… LOST mid-move …" |
+| Move: sat in `pg_dump` for the full 60s after the gate died, then `TimeoutException` | prompt `InvalidOperationException` "… LOST mid-move …" *(the pin that produced this row was later found to be measuring a fiction — see F1 in the 2026-07-31 section)* |
 | Sweep, password-less EF string: `NpgsqlException: No password has been provided but the backend requires one` out of `StartAsync` | start accepted (configuration route) / `InvalidOperationException` naming the trap |
 | Audit, password-less EF string: `leaderLockHeld=False checkpointCalls=0` — the hour gets no checkpoints from anyone | leader elected, checkpoints written |
 | Move, password-less EF string + externally-held gate: `NpgsqlException: No password has been provided …` | stands down with "already in progress" (i.e. the real gate was evaluated) |
@@ -470,3 +509,187 @@ Two smaller things worth naming rather than leaving implicit:
   overlap needs a fenced token (a control-plane lease row with a monotonically increasing epoch
   checked at every write), which is a much larger change and is not warranted by anything observed
   here.
+
+---
+
+# Adversarial review of the watchdog pass (2026-07-31)
+
+A review of `3b738cc` found seven things wrong with the *follow-up* pass above — none of them a
+safety hole (every gate still fails closed, every abort still aborts before the destructive step),
+all of them either a broken DIAGNOSIS, a test that measured a fiction, or a claim in this document
+stated more strongly than the evidence supports. Two of the seven are corrections to things this
+document asserted; those are corrected in place above as well as recorded here.
+
+## F1 (MEDIUM) — the move's lock-loss diagnosis was unreachable in production
+
+`MoveAsync` filtered on `catch (OperationCanceledException) when (moveGuard?.LockLost == true)`.
+But the minutes-long idle window a lost gate has to be detected in is spent inside
+`RunPgToolAsync` → `IProcessRunner.RunAsync(…, ct)`, and production's `DefaultProcessRunner`
+**catches that `OperationCanceledException`**, kills the process tree, and returns
+`ProcessRunResult(ExitCode: -1, TimedOut: !ct.IsCancellationRequested)` — and under a watchdog
+abort `ct` *is* cancelled, so `TimedOut` is **false**. `RunPgToolAsync` therefore threw
+`InvalidOperationException("pg_dump failed (exit -1) …")`, which the filter could never see. The
+operator got exactly the bare, misleading error the wrapper existed to eliminate. Restore had the
+same shape.
+
+**The test that "proved" it passed only because the double was unrealistic.** `GatedRunner` let the
+`OperationCanceledException` escape — a shape `DefaultProcessRunner` cannot produce. A pin that
+only passes against an unrealistic double is worse than no pin: it converts an untested path into a
+tested-looking one.
+
+Fixed on both sides:
+
+- `RunPgToolAsync` calls `ct.ThrowIfCancellationRequested()` **before interpreting the result** —
+  the runner swallows cancellation, so the caller re-raises it. One line covers dump and restore
+  alike (restore never reaches `EnsureRestoreSucceeded` with a bogus result).
+- `MoveAsync`'s filter is now `catch (Exception ex) when (moveGuard?.LockLost == true)`, keeping the
+  original as `InnerException`. Filtering on the exception TYPE made the diagnosis depend on which
+  seam happened to observe the cancellation; filtering on `LockLost` — the fact that decides the
+  story — does not.
+- `GatedRunner` now mirrors `DefaultProcessRunner`: it swallows the OCE and returns
+  `ExitCode: -1, TimedOut: false` (and `TimedOut: true` for its own hard timeout).
+
+**Confirmed discriminating by execution**: with the double fixed and the production fix reverted,
+`A_move_whose_lock_holding_backend_dies_mid_dump_aborts_instead_of_restoring_on_unguarded` fails
+with `InvalidOperationException :: pg_dump failed (exit -1) during tenant move step 'dump'`. The
+test also now asserts the message does **not** contain `exit -1`.
+
+> Deliberately NOT changed: `DefaultProcessRunner` itself. Its swallow-and-report contract is
+> depended on by `LocalExecutor` and every other caller, and it is outside this lane. The fix
+> belongs at the seam that has a cancellation policy — the move.
+
+## F2 (LOW-MEDIUM) — a clean pod shutdown was reported as a lost cluster lock
+
+`TenantMigrationSweepRunner.Dispose()` violated the ordering contract documented on
+`WatchLiveness`: it ended the lease session (`lease?.TakeLock()?.DisposeSession()`) while the run's
+watchdog was still probing that same session, with the watchdog disposed later on `ExecuteAsync`'s
+thread. The in-flight probe then found a closed session and reported LOSS — the right reading
+everywhere else — so `ExecuteAsync`'s catch told the operator *"The cluster-wide sweep lock was
+lost mid-run (a pooler/proxy drop, an idle timeout, or a terminated backend)"* about a pod that was
+simply asked to stop, and marked the result partial. `_shutdown.Cancel()` mitigated it but left a
+window between the loop's cancellation check and the probe's own read of the session.
+
+The existing pin forbade only the strings `"ObjectDisposed"`/`"disposed"`, so it passed straight
+through this.
+
+Fixed:
+
+- `PostgresAdvisoryLockWatchdog.StopHeartbeat(timeout)` — the synchronous half of the ordering
+  contract, counterpart to `PostgresAdvisoryLockLease.DisposeSession()`. Before it existed an
+  `IDisposable` host had **no way** to honour the contract at all. It cancels the loop, waits
+  (bounded) for the heartbeat to exit, cancels nothing else, and disposes nothing, so a later
+  `DisposeAsync` is unaffected.
+- `RunLease` gained a watchdog slot published under the same lock as the lease slot
+  (`TryPublishWatchdog` / `TakeWatchdog`), so `Dispose` can reach it; `Dispose` stops the heartbeat
+  before ending the session.
+- `PostgresAdvisoryLockWatchdog.RunAsync` re-checks `token.IsCancellationRequested` **after** the
+  probe as well as before it. That closes the residual window generically: a stopping host cancels
+  first and ends the session second, so a "no" that arrives with the token already cancelled is a
+  shutdown, not a loss.
+
+Pins: `PostgresAdvisoryLockTests
+.A_synchronous_host_that_stops_the_heartbeat_first_is_not_reported_as_lock_loss` pins **both**
+halves deterministically — the violating order (end the session, leave the heartbeat running) sets
+`LockLost`, the contract order does not — and
+`TenantMigrationSweepRunnerTests.Disposing_mid_run_is_not_reported_to_the_operator_as_a_lost_cluster_lock`
+pins the operator-visible consequence at the site. The site-level one is honest about being
+probabilistic against the old code (the race is narrow); the deterministic proof is the
+primitive-level one. The other two Dispose paths honoured the contract already and were not
+touched.
+
+## F3 (LOW) — the `|`-not-`+` rationale was false, and repeated in the commit message
+
+See the corrected bullet under "What shipped" above. `|` and `+` are exactly equivalent; the tree
+was split between them; it is now uniformly `|` with the rationale rewritten to say what is true
+(stylistic) at all four sites plus this document. Nothing about behaviour changed.
+
+## F4 (LOW) — the EF-cache claim was stated far past its evidence
+
+See "Why no container reproduced the stripping" above, rewritten. The deterministic narrow form
+(*a context resolved from a container that also registers an `NpgsqlDataSource` loses its
+password*) is kept and is what everything relies on; the process-wide first-context-wins form is
+marked **unreproduced**, not false — one contrary ordering is not a proof of absence. The practical
+guidance ("no test may assert on EF's string") is kept, re-attached to the real reason.
+
+## F5 (LOW) — a malformed connection string escaped the seam; at the KEK site that was fail-STUCK
+
+`HasCredentials("Host=h;Bogus=1")` answered false because the string does not PARSE, so the
+resolution seam's third tier (*configuration verbatim, for trust-auth deployments*) handed the
+malformed string back verbatim; `ToUnpooledConnectionString` then threw `ArgumentException` from a
+different stack frame. `KekRotationCoordinator`'s acquisition caught only
+`OperationCanceledException` and `NpgsqlException`, so it escaped `RunRotationAsync` **ahead of the
+try/finally that owns the status**: phase pinned at `Running` forever, `_activeRotationId` never
+cleared, the `Task.Run` faulted unobserved, `/status` reporting a rotation that could neither
+finish nor be retried. Fail closed and fail stuck are not the same thing.
+
+Fixed:
+
+- `HasCredentials` is now a **total** predicate (`ArgumentException`, `FormatException`,
+  `OverflowException`, `InvalidCastException`, `NotSupportedException` — `Port=abc` and
+  `Port=99999999999` used to escape it).
+- Tier 3 refuses a string Npgsql cannot parse, logging at ERROR, and
+  `ResolveSessionConnectionString` throws the new
+  **`AdvisoryLockConnectionStringException`** with a distinct MALFORMED message. It derives from
+  `InvalidOperationException`, so every existing catch and every existing pin still matches.
+- The KEK acquisition catch is total (`catch (Exception)`, still after the OCE catch). Every way of
+  failing to take the gate now ends as `Failed` **with a reason that says the gate could not be
+  EVALUATED** — the old code reported a configuration fault as *"another rotation is already in
+  progress on this cluster"*, which is the exact operator-visible untruth this whole audit exists to
+  remove. `_activeRotationId` is cleared on that path.
+- `ResolveLockConnectionString` now passes the coordinator's logger to the seam (it passed `null`),
+  which is where the malformed-vs-laundered distinction is actually made.
+
+## F6 / F7 (INFO)
+
+- **`mode`**: `HeldByThisBackendSql` did not filter `pg_locks.mode`, so a same-backend SHARE-mode
+  advisory lock would satisfy a predicate whose job is "am I still excluding people?". Added
+  `AND mode = 'ExclusiveLock'` there, in the sweep runner's cross-pod probe, and in the test probes.
+  The `pg_advisory_xact_lock` axis named in the review **cannot** be filtered: `pg_locks` has no
+  column distinguishing a session-scoped advisory lock from a transaction-scoped one (verified on
+  `postgres:17` — both are `advisory` / `ExclusiveLock` / `objsubid=1`). The doc comment now says
+  "qualified on every axis `pg_locks` exposes" and names that one as out of reach, instead of
+  claiming to be fully qualified.
+- **The move's pre-fix symptom**: `TenantMoveService`'s comment claimed the password-stripped string
+  made *"every move abort with the untrue 'already in progress'"*. It did not — a failed OPEN
+  propagates, so the real symptom was `NpgsqlException("No password has been provided but the
+  backend requires one …")`, which the table in this document already recorded correctly. Comment
+  fixed.
+
+## Coverage added
+
+- `KekRotationLockSessionTests.A_genuine_cancellation_under_an_armed_watchdog_is_reported_as_cancelled_not_as_loss`
+  — the other side of the branch that reads `LockLost`. Only the loss side was pinned, so nothing
+  stopped a "simplification" making every cancellation report a lost cluster gate. Asserts the
+  reason is exactly `"rotation cancelled"`, the row is `cancelled` with the staged key **zeroed**
+  (vs `failed` + kept), and that the rotation **rethrew** rather than returning.
+- `KekRotationLockSessionTests.Retry_after_a_lock_loss_abort_finishes_the_rotation_from_where_it_stopped`
+  — the abort's promise to the operator ("re-run `/api/admin/kek/retry`"), end to end: gate killed
+  mid-fleet, no promotion, `/retry`, fleet completes, every tenant on the new key, row `completed`
+  with the staged key zeroed. The resumability depends on three decisions agreeing and none of them
+  was covered together.
+- `KekRotationLockSessionTests.A_rotation_whose_gate_cannot_be_evaluated_fails_closed_instead_of_wedging`
+  — F5's fail-STUCK pin.
+- `PostgresAdvisoryLockConnectionStringTests` (+3) — `HasCredentials` totality, the malformed
+  refusal and its named type.
+
+## Decided, not fixed: the audit scheduler's unresolvable-connection-string path
+
+`AuditChainCheckpointScheduler`'s loop is WARN-and-continue for every failing tick. An unresolvable
+(or malformed) lock connection string is not like the other failures: it fails **identically every
+tick, forever**, and the consequence is that the deployment writes no tamper-evidence anchors at
+all while looking healthy.
+
+**Chosen: escalate the level, keep continuing.** The loop now catches
+`AdvisoryLockConnectionStringException` separately and logs at **ERROR** with a message that says
+what is *not happening* ("NO audit-chain checkpoints are being written by this deployment … this
+will not fix itself") rather than what threw. It does **not** crash the host: the checkpoint loop is
+opt-in (`RunOnStartup`) and taking a whole API down over a background-scheduler misconfiguration
+trades a compliance gap for an outage. The escalation is the alert; the fix is a config change and a
+restart. Branching on the exception TYPE rather than sniffing the message is why
+`AdvisoryLockConnectionStringException` exists.
+
+Rejected alternatives, for the record: a health-check contribution (the scheduler has no health
+seam today, and a degraded/unhealthy API over an opt-in background loop is the outage trade again);
+and dedupe-to-once-per-hour (the tick retries every 30s from `FireAtMinute` on, so this is ~90
+errors/hour, which is loud — but a compliance surface silently producing nothing is exactly the case
+where loud is correct).
