@@ -849,3 +849,85 @@ consent mechanism; a smooth slider over 13 meaningful positions is false UI.
 | Date       | Version | Changes                                        | Author |
 | ---------- | ------- | ---------------------------------------------- | ------ |
 | 2026-08-01 | 1.1.0   | Depth pass: approval scopes, chain rules, shell resolution, toggle encoding, signal coverage, unification α, telemetry ACs | Claude |
+
+### The dial, position by position — what each level unlocks
+
+The inverse of the assignment table: the 13 detents. "Unlocks" = becomes
+orchestrator-approved (the acceptance step still runs; a person stops being
+the approver). Cumulative: at dial N everything at ≤N is automated.
+
+
+**Level 10** — unlocks 44 (44 of 197 automated at dial 10):
+
+- agent-action: `analyze-assessment-response`, `analyze-security-incident`, `assess-capacity`, `assess-technical-risk`, `assess-vulnerability`, `audit-accessibility`, `audit-dependencies`, `clarify-requirements`, `context-scan`, `coordinate-release`, `create-tasks`, `debug-rootcause`, `decompose-issue`, `define-acceptance-criteria`, `diagnose-incident`, `facilitate-retro`, `generate-assessment-questions`, `incident-rootcause`, `manage-regression`, `monitor-health`, `plan-debugging`, `plan-incident-response`, `plan-roadmap`, `plan-scope`, `plan-test-strategy`, `prioritize-backlog`, `research`, `resolve-blocker`, `score-ambiguity`, `threat-model`, `track-impediments`, `triage-context-scan`, `triage-defect`, `triage-intake`, `triage-pr`, `triage-tech-debt`, `triage-technical`
+- automation: `action-catalog-startup-validator`, `governance-policy-snapshot-priming-service`, `provider-settings-store-priming-service`
+- tool: `file_read`, `get_acceptance_rules`, `git_operations.read`, `search_code`
+
+**Level 20** — unlocks 3 (47 of 197 automated at dial 20):
+
+- agent-action: `audit-secrets`, `plan-deployment`
+- effect: `secret.reveal`
+
+**Level 30** — unlocks 52 (99 of 197 automated at dial 30):
+
+- agent-action: `report-status`, `summarize-changes`, `summarize-stakeholder`, `summarize-technical`, `synthesize-standup`, `update-changelog`, `write-adr`, `write-api-docs`, `write-postmortem`, `write-release-notes`, `write-retro-narrative`, `write-runbook`, `write-user-docs`
+- automation: `agent-seeder`, `alert-rule-evaluator`, `audit-chain-checkpoint-scheduler`, `audit-projector`, `built-in-alert-rule-seeder`, `channel-outbox-sweeper`, `convention-store-seeder`, `engine-registry-heartbeat-service`, `entitlement-cache-invalidation-listener`, `hourly-analytics-rollup-scheduler`, `notification-dispatcher`, `platform-task-worker`, `pool-warmup-service`, `provider-session-cleanup-service`, `reveal-token-sweeper`, `task-queue-processor`, `tenant-scheduled-trigger-service`, `tenant-status-invalidation-listener`, `workflow-seeder`, `workflow-sync-service`
+- effect: `engine.channel-outbox.enqueue`, `engine.document.persist`, `engine.document.set-status`, `mentorship.session.pause`, `mentorship.session.resume`, `schedule.create`, `schedule.delete`, `schedule.update`, `tracker.preferences.delete`, `tracker.preferences.set`, `tracker.project.create`, `tracker.project.update`, `tracker.work-item.assign`, `tracker.work-item.create`, `tracker.work-item.set-status`, `tracker.work-item.update`
+- platform-task: `billing.webhook.followup`, `plan.activate_scheduled`
+- tool: `file_write`
+
+**Level 45** — unlocks 26 (125 of 197 automated at dial 45):
+
+- agent-action: `address-review-comments`, `author-ui-spec`, `debug`, `design-api-contract`, `design-data-model`, `design-integration`, `design-system`, `draft-user-flow`, `implement-feature`, `implement-fix`, `implement-infrastructure`, `incorporate-answers`, `plan-fix`, `plan-implementation`, `plan-migration-strategy`, `plan-refactor`, `plan-sprint`, `plan-system-design`, `propose-design`, `refactor`, `write-regression-test`, `write-test-cases`, `write-tests`
+- effect: `engine.events.append`, `engine.platform-events.append`, `llm.call`
+
+**Level 50** — unlocks 3 (128 of 197 automated at dial 50):
+
+- agent-action: `exploratory-test`
+- effect: `ci.tests.trigger`
+- tool: `run_tests`
+
+**Level 55** — unlocks 27 (155 of 197 automated at dial 55):
+
+- agent-action: `code-review`, `code-review-architecture`, `code-review-coverage`, `code-review-security`, `mentor-feedback`, `plan-review`, `plan-review-security`, `review-acceptance`, `review-compliance`, `review-design`, `review-docs`, `review-feasibility`, `review-operability`, `review-scope`, `review-testability`, `self-review`, `verify-acceptance`
+- document-type: `ambiguity-assessment`, `backlog-ordering`, `clarification`, `decomposition`, `diagnosis`, `findings`, `prose`, `test-plan`, `test-spec`, `triage-decision`
+
+**Level 60** — unlocks 4 (159 of 197 automated at dial 60):
+
+- document-type: `acceptance-criteria`, `plan`, `review`, `ux-spec`
+
+**Level 65** — unlocks 12 (171 of 197 automated at dial 65):
+
+- automation: `retire-sweep`, `secret-auto-rotation-scheduler`
+- effect: `git.branch.create`, `git.issue.patch`, `git.pull-request.create`, `git.release.create`, `jira.ticket.patch`
+- platform-task: `RETIRE_SECRET_VERSION`, `billing.customer.create`, `provisioning.tenant`, `provisioning.tenant.v2`
+- tool: `git_operations.write`
+
+**Level 75** — unlocks 7 (178 of 197 automated at dial 75):
+
+- automation: `outbox-slack-sender`, `outbox-smtp-sender`
+- effect: `git.pull-request.merge`, `notify.email.send`, `notify.slack.queue`, `tracker.project.delete`, `tracker.work-item.delete`
+
+**Level 80** — unlocks 8 (186 of 197 automated at dial 80):
+
+- agent-action: `configure-cicd`
+- document-type: `design`
+- effect: `agent-dispatch.run`, `mcp.tool.invoke`, `mentorship.session.start`, `process.spawn`
+- platform-task: `tenant.move`
+- tool: `shell_execute`
+
+**Level 85** — unlocks 1 (187 of 197 automated at dial 85):
+
+- document-type: `sprint-plan`
+
+**Level 90** — unlocks 3 (190 of 197 automated at dial 90):
+
+- document-type: `threat-model`
+- effect: `git.branch.delete`, `mentorship.session.cancel`
+
+**Level 95** — unlocks 7 (197 of 197 automated at dial 95):
+
+- agent-action: `deploy`, `rollback`
+- automation: `tenant-cleanup-requested-trigger`, `tenant-delete-requested-trigger`
+- effect: `deploy.promote-prod`, `deploy.rollback`
+- platform-task: `provisioning.tenant.deprovision`
