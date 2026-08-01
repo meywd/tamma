@@ -1350,3 +1350,45 @@ issue deletion.
 | Date       | Version | Changes                                  | Author |
 | ---------- | ------- | ---------------------------------------- | ------ |
 | 2026-08-01 | 1.3.0   | Full 197-action zone table (supersedes the M1/M2 numbers); missing-action hunt: 9 ladder keys + 18 live-code keys proposed; delete-PR found impossible (close-pr reserved instead) | meywd + Claude |
+
+---
+
+## Amendment 4 — 2026-08-01: two product-owner corrections
+
+### Secret reads: the SYSTEM fetching a credential is not the MODEL reading one
+
+`secret.reveal` (Enforceable=false) covers system plumbing: an approved
+action fetches its credential mid-flight. That stays unenforceable — gating
+it would re-ask a human for something already approved.
+
+But an **LLM reading a secret is a different action**. Once a secret enters
+model context it can leak into transcripts, provider logs, or any output.
+That is not plumbing; it is exfiltration surface.
+
+- New key: `effect:secret.read-into-model` — **level 90** (manage-secrets
+  zone), enforceable. Any path that would place a secret value into LLM
+  context performs THIS action, not `secret.reveal`.
+- Known reachable path today: `shell_execute` inherits the full API
+  environment, so `env` in a tool call puts every secret into model context
+  as an UNGOVERNED read. The sandbox work (Amendment 2-D: env-strip) is what
+  closes the path; until then the gap is recorded here, not hidden.
+
+### "Human-operated" exemptions require a HUMAN credential
+
+A GitHub Action (or any CI/service caller) is automation, not a person. The
+`human-operated` justification class in `KnownUngovernedEndpoints` — and any
+future enforcement exemption reasoning "a person is pressing the button" —
+holds ONLY when the caller is a human session. It does not hold for API-key
+or service-token callers: the `ScheduleManage` policy accepts the ApiKey
+scheme, so "reached by a person, never by an agent" is an assumption, not a
+property (found 2026-08-01 on the four scheduled-trigger routes).
+
+Rule for 43-9's seams: an exemption or observe-only carve-out that is
+justified by human operation must check the caller's credential type. A
+service-credential caller on such a route is gated like automation. The
+enforcement filter already sees the principal; this is one predicate, not a
+new system.
+
+| Date       | Version | Changes                                                  | Author |
+| ---------- | ------- | -------------------------------------------------------- | ------ |
+| 2026-08-01 | 1.4.0   | secret.read-into-model minted at 90; human-operated exemptions require human credential; PR ops story 31-13 | meywd + Claude |
