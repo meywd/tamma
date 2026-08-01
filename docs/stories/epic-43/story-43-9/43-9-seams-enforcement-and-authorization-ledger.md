@@ -1,6 +1,112 @@
 # Story 43-9: The Five Seams, Enforcement Live, and the Authorization Ledger
 
-Status: drafted — **partially superseded by shipped code; read the 2026-08-01 amendment before starting**
+Status: **implemented 2026-08-01** (with three recorded gaps and one pin that must move) — read the 2026-08-01 amendment, then the implementation record immediately below it
+
+---
+
+## IMPLEMENTATION RECORD — 2026-08-01
+
+What landed, against the amendment's "REMAINING WORK" list. Everything the amendment marked
+**DONE** was left alone.
+
+| Remaining item | State | Where |
+|---|---|---|
+| AC3 — Seam A observe-only | **DONE** | `LlmCallEndpoints.CallLlm` evaluates `agent-action:{request.Action}`, audits, and always proceeds (`ObserveAutonomyAsync`, which returns `void` on purpose so there is nothing to branch on). Both arms pinned: `LlmCallSeamAObserveOnlyTests.LlmCallSeam_NeverBlocks_EvenUnderEnforce` (behaviour) and `GovernedEndpointEnforcementSweepTests.LlmCallRoute_IsBound_ButNotEnforced` (wiring). |
+| AC7/AC8 — Seam C filter + opt-in | **DONE** | `Infrastructure/GovernanceEnforcement.cs` (the D15 opt-in for BOTH planes + the shared core) and `Infrastructure/AutonomyGateEndpointFilter.cs`. **16** routes opt in; the set is pinned exactly by `GovernedEndpointEnforcementSweepTests`. |
+| AC9 — Seam D helper + call sites | **PARTIAL** | `Services/Actions/BackgroundActionGate.cs` (scope-per-tick, deny-only, catches everything). **5 of 29 actors opt in** — see gap 2 below. |
+| AC10/AC11 — Seam E | **DONE** | `Tamma.Activities/Policy/{GovernanceEvaluateModels,CheckActionGateActivity}.cs`, `TammaApiClient.EvaluateGovernanceAsync`, `Endpoints/GovernanceEvaluateEndpoints.cs`, and the third **OR** term in `DeploymentPipelineWorkflow`. |
+| AC13 — decide + pending routes | **DONE** | `Endpoints/ActionAuthorizationEndpoints.cs`, mapped on the existing `/api/actions` group. |
+| AC12 — the ledger consult + 2 fields + the TTL reader | **DONE** | `AutonomyDecision` gained `AuthorizationId`/`CoveredBy`; `AutonomyGateService.ConsultLedgerAsync`; `Services/Actions/ActionAuthorizationRequests.cs` is the first and only reader of `Tamma:Governance:AuthorizationTtlHours`. |
+| AC2 — the anti-no-op PAIR per new seam | **DONE for C, D, E; the A pair is shaped differently** | Seam C: `ShippedDefaults_DoNotAlterControlFlow_atSeamC` + `TighteningOneAction_DoesAlterControlFlow_atSeamC`. Seam D: `AnAutomatedDecision_runsTheTick` + `Denied_tick_is_skipped_and_audited`. Seam E: `ShippedDefaults_DoNotAlterControlFlow_atSeamE` + `GateRequiresHuman_AddsAWaitWhereThereWasNone`. **Seam A has no second half by construction** — it must never alter control flow, so its pair is "never blocks" + "the evaluation really happens" (`TheSeam_actuallyEvaluates_soTheNeverBlocksTestIsNotVacuous`), which is the anti-vacuity guarantee AC2's second half exists to provide. |
+| §C-bis — the five routes naming 43-9 as binding owner | **ALL FIVE DECIDED** | See below. |
+| D17 — the two ratchets | **DONE, as specified** | Named/dated/reviewed per-item exception sets, each count-pinned and shrink-only, each registered in its assembly's `RatchetDisciplineTests`. Neither underlying baseline moved. |
+
+### §C-bis — the five routes, decided
+
+- **`POST /api/kb/mcp/tools/invoke`** — **NOT bound, NOT enforced** (D16). The justification in
+  `KnownUngovernedEndpoints` was rewritten to record the reversal and its reason: since 2026-07-30
+  `effect:mcp.tool.invoke` ships `AlwaysHuman`, so a binding here would hard-block the route on day
+  one — a behaviour change a story must argue for, not inherit.
+- **The four `/api/admin/scheduled-triggers/*` routes** — **NOT bound**, reclassified from
+  `binding-owned-by Story 43-9` to `human-operated`, because the epic's own general rule for
+  `/api/admin/*` is that a surface reached by a person and never by an agent must not be gated, and
+  their catalogued effects are already classified `RouteOnly` ("reached from the dashboard, not the
+  engine"). `run-now` was **split out onto its own line** under this file's rule that a member whose
+  consequence differs in KIND gets its own entry: it EXECUTES where the other three CONFIGURE. Its
+  reason is the same but stronger — a person is pressing the button, and the workflow the fire
+  dispatches is governed at its own seams when it runs, so gating it would gate the human on
+  themselves AND double-gate the dispatch.
+- No count pin moved: all five stay in the baseline.
+
+### The three gaps, stated rather than buried
+
+1. **The controller plane has the MECHANISM but no production opt-in.** D15 reasoning #4 is
+   honoured — `EnforcesGovernanceAttribute` exists, is an MVC `IAsyncActionFilter` (an
+   `IEndpointFilter` does not run for controller endpoints), shares the metadata interface with the
+   minimal-API marker, and is exercised end-to-end by
+   `AutonomyGateEndpointFilterTests.TheControllerAttribute_producesTheSame409`. But the four
+   `MentorshipController` actions do **not** opt in: `MentorshipController.cs` was outside this
+   story's file scope, and they are human-operated UI surfaces the epic's general rule says should
+   not be gated anyway. `TheControllerPlane_hasAnOptInMechanism_evenThoughNoControllerOptsInYet`
+   pins both facts, so neither can drift silently.
+2. **Seam D covers 5 of 29 background actors, and it CANNOT cover all 29.** Two structural reasons
+   the plan's "modify each of the hosted services" did not account for: (a) the **6
+   `Tamma.ElsaServer` actors are unreachable** — that host registers no governance stack at all
+   (`ElsaServer.csproj` references only `Tamma.Activities`), so gating them needs a mediation hop
+   this story does not build; (b) **two actors would be circular** —
+   `ActionCatalogStartupValidator` is the boot check that validates the catalog the gate reads, and
+   `GovernancePolicySnapshotPrimingService` primes the snapshot the gate reads, so a gate call
+   inside either is a governance component asking itself for permission to exist. Boot-time
+   one-shot seeders and LISTEN/NOTIFY invalidation listeners have no "tick" to gate. The five that
+   opted in are the recurring effectful sweepers with a single clean tick boundary and an
+   already-injected provider: `ChannelOutboxSweeper`, `OutboxSlackSender`, `OutboxSmtpSender`,
+   `TaskQueueProcessor`, `RevealTokenSweeper`. The rest is follow-up work, not a claim.
+3. **Seam C's `authorizationId` is null unless the caller supplies a correlation id.** The ledger is
+   keyed by `(principal, correlationId, target)`, and none of the 16 opted-in mediation routes puts
+   a correlation id on the wire today (`TammaApiClient` sends `X-Tenant-Id` and nothing else). The
+   filter reads `X-Tamma-Correlation-Id` or `?correlationId=`, so the field is real and populated
+   wherever one is present — and Seam E, where the deploy correlation genuinely exists, always
+   supplies one. Threading a correlation through the 17 client methods is the follow-up that makes
+   the ledger bite at Seam C too.
+
+### One pin that MUST move, and is not this story's to move
+
+`Tamma.Activities.Tests/Workflows/DeploymentPipelineWorkflowTests.ApprovalNeeded_GatesProd_DevModeBypassesToProd`
+asserts a DIRECT edge `EmitUatSuccess → ProdApprovalNeeded`. AC11 requires inserting
+`CheckActionGateActivity` on exactly that edge, so the pin's LETTER must change; its MEANING ("after
+UAT success the pipeline decides whether prod needs approval") is preserved and is separately
+asserted by the new `DeploymentPipelineGateTests`. Every other edge into and out of
+`ProdApprovalNeeded` is also pinned, so there is no siting that satisfies AC11 and leaves this
+assertion untouched. Required replacement:
+
+```csharp
+HasEdge("EmitUatSuccess", null, "CheckProdDeployGate").Should().BeTrue();
+HasEdge("CheckProdDeployGate", "Automated", "ProdApprovalNeeded").Should().BeTrue();
+HasEdge("CheckProdDeployGate", "RequiresHuman", "ProdApprovalNeeded").Should().BeTrue();
+```
+
+### Count pins moved
+
+| Pin | Before | After | Kind |
+|---|---|---|---|
+| `KnownUngovernedEndpoints.PinnedInScopeCount` | 237 | 239 | plain literal, no direction rule — two new mutating routes (`POST /api/v1/governance/evaluate`, `POST /api/actions/authorizations/{id:guid}/decide`) |
+| `MediationClientEffectSweepTests.The_sweep_actually_sees_the_client_surface` | 36 | 37 | review-gated bump; its own message has always said "move this number in the same commit" |
+| `Tamma.Api.Tests.Actions.RatchetDisciplineTests.TheRegistry_isCountPinned` | 1 | 2 | review-gated registry bump (a new ratchet was DECLARED) |
+| `Tamma.Activities.Tests.Actions.RatchetDisciplineTests.TheRegistry_isCountPinned` | 3 | 4 | same |
+| `KnownUngovernedEndpoints.ExceptionPinHistory` | — | `[2]` | NEW shrink-only ratchet, seeded |
+| `MediationClientEffectSweepTests.NonEffectExceptionPinHistory` | — | `[1]` | NEW shrink-only ratchet, seeded |
+| `KnownUngovernedEndpoints.PinnedCount` / `PinHistory` | 216 / `[237,216]` | **unchanged** | the D17 point |
+| `KnownNonEffectClientMethods` / `NonEffectPinHistory` | 19 / `[19]` | **unchanged** | the D17 point |
+
+**Deleted:** `GovernedEndpointCoverageSweepTests.PreProvisionedJustificationKeyword_isStillUnused` —
+43-8's one open handover, whose own failure message said to delete rather than widen it once 43-9
+used the arm.
+
+**D17 seeded the endpoint exception set at 2, not 1.** The plan budgeted one exception (the
+gate-evaluation route). Implementing it produced two routes that cannot be governed without
+circularity, in opposite directions: the route that ASKS the gate, and the route a person uses to
+OVERRIDE it. Gating the second would mean an admin needs a grant in order to issue a grant — the
+deadlock the ledger exists to prevent.
 
 ---
 

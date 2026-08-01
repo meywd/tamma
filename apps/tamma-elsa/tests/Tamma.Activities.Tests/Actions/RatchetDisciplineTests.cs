@@ -90,6 +90,20 @@ public class RatchetDisciplineTests
             ToolCatalogAllowlistTests.CitesASource,
             () => ToolCatalogAllowlists.NotDiRegisteredTools.Count,
             ToolCatalogAllowlistTests.NotDiRegisteredToolsPinHistory),
+
+        // Story 43-9 D17 — the reviewed exception set that relieves
+        // KnownNonEffectClientMethods' shrink-only pin is itself a ratchet, and is
+        // DECLARED here for exactly the reason this fixture exists: an escape
+        // hatch nobody asserted the three properties against would be worse than
+        // the pin it relieves.
+        new("KnownNonEffectClientMethods.ReviewedExceptions",
+            typeof(MediationClientEffectSweepTests),
+            nameof(MediationClientEffectSweepTests.ExceptionSet_entriesAreDatedAndAttributed_andStillExist),
+            MediationClientEffectSweepTests.ExceptionRatchetStalenessProbe,
+            MediationClientEffectSweepTests.ExceptionRatchetJustifications,
+            MediationClientEffectSweepTests.RatchetClassifies,
+            MediationClientEffectSweepTests.ExceptionRatchetCount,
+            MediationClientEffectSweepTests.NonEffectExceptionPinHistory),
     ];
 
     /// <summary>
@@ -120,12 +134,15 @@ public class RatchetDisciplineTests
     {
         // ANTI-VACUITY: every assertion below iterates the registry, so a shrunken
         // registry would make the fixture pass while covering nothing.
-        Ratchets().Should().HaveCount(3,
-            "three of Story 43-8's four ratchets live in Tamma.Activities.Tests "
-            + "(KnownNonEffectClientMethods, UnattributedActivities, NotDiRegisteredTools); the "
-            + "fourth, KnownUngovernedEndpoints, is declared in the sibling fixture in "
-            + "Tamma.Api.Tests. If you added a ratchet to this assembly, DECLARE it above and bump "
-            + "this number — that is the whole point of this fixture.");
+        Ratchets().Should().HaveCount(4,
+            "3 → 4 (Story 43-9 D17, 2026-08-01): the KnownNonEffectClientMethods REVIEWED "
+            + "EXCEPTION SET joins the three Story 43-8 ratchets that live in "
+            + "Tamma.Activities.Tests (KnownNonEffectClientMethods, UnattributedActivities, "
+            + "NotDiRegisteredTools); KnownUngovernedEndpoints and its own exception set are "
+            + "declared in the sibling fixture in Tamma.Api.Tests. This registry pin is a "
+            + "REVIEW-GATED BUMP, not a ratchet — unlike the pins it guards, it is meant to rise "
+            + "when a new ratchet is declared. If you added a ratchet to this assembly, DECLARE it "
+            + "above and bump this number; that is the whole point of this fixture.");
 
         Ratchets().Select(r => r.Name).Should().OnlyHaveUniqueItems();
     }

@@ -127,9 +127,12 @@ public class TemplateExampleConformanceTests
             [("product_owner", "plan-roadmap")] = new("prose", "41-4",
                 "example instructs the legacy plan wire; 41-4 produces prose (roadmap, audience=stakeholder) " +
                 "once 41-1c lands the prose document type"),
-            [("product_owner", "prioritize-backlog")] = new("backlog-ordering", "41-3",
-                "example instructs the retired P0-P3 / severity / ownerRole triage vocabulary; 41-1b mints " +
-                "the BacklogOrdering document type this cell will produce"),
+            // (product_owner, prioritize-backlog) REMOVED (Story 41-3, 2026-08-01):
+            // BacklogPrioritizationWorkflow binds the cell, so it moved to
+            // ContractBindingTests.Bindings and test 1 now owns it. Its template was rewritten
+            // from the single-item P0-P3 / severity / ownerRole triage vocabulary to the
+            // backlog-ordering wire (a total order over the referenced set) in the same change —
+            // a bound cell may never be baselined here (test 3). Pin 14 → 13.
             [("devops", "plan-incident-response")] = new("plan", "41-22",
                 "example instructs the legacy plan wire — files as {path, action} objects plus a " +
                 "\"dependencies\" key — MALFORMED_PAYLOAD against Plan"),
@@ -191,7 +194,11 @@ public class TemplateExampleConformanceTests
     /// rewritten to the AcceptanceCriteria wire, and its baseline entry deleted.
     /// 15 → 14 (2026-07-29, Story 41-9): (architect, write-adr) was BOUND, its template
     /// rewritten from the markdown issue-comment report to the prose envelope
-    /// (kind=adr, audience=engineering), and its baseline entry deleted.</para>
+    /// (kind=adr, audience=engineering), and its baseline entry deleted.
+    /// 14 → 13 (2026-08-01, Story 41-3): (product_owner, prioritize-backlog) was BOUND, its
+    /// template rewritten from the single-item P0-P3 / ownerRole triage vocabulary to the
+    /// backlog-ordering wire (a total order over the referenced item set), and its baseline
+    /// entry deleted.</para>
     ///
     /// <para><b>The direction rule is now ASSERTED, not only written</b> (43-8
     /// follow-up F2, 2026-07-29). Until this change the shrink-only property was
@@ -204,7 +211,7 @@ public class TemplateExampleConformanceTests
     /// strictly decreasing after its one documented widening — so RAISING the pin
     /// requires appending a value that makes the fixture RED.</para>
     /// </summary>
-    private const int KnownNonConformingTemplateCount = 14;
+    private const int KnownNonConformingTemplateCount = 13;
 
     /// <summary>
     /// The pin's recorded high-water history, oldest first. Index 0 → 1 is the ONE
@@ -221,7 +228,7 @@ public class TemplateExampleConformanceTests
     /// this buys is that widening the baseline can no longer be a one-literal change
     /// that reads like routine maintenance.</para>
     /// </summary>
-    private static readonly int[] PinHistory = [11, 16, 15, 14];
+    private static readonly int[] PinHistory = [11, 16, 15, 14, 13];
 
     // NOTE (2026-07-29): the PlannedFutureTypeKeys escape hatch is gone — 41-1b
     // registered test-plan / acceptance-criteria / backlog-ordering and 41-1c

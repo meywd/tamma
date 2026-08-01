@@ -12,6 +12,7 @@ using FlowEndpoint = Elsa.Workflows.Activities.Flowchart.Models.Endpoint;
 using FlowConnection = Elsa.Workflows.Activities.Flowchart.Models.Connection;
 
 using Tamma.Activities.ADL;
+using Tamma.Activities.Policy;
 using Tamma.Api.Services.Agents;
 using static Tamma.ElsaServer.Workflows.ActivityDisplayTextExtensions;
 
@@ -239,9 +240,52 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         // 4. Production approval gate (P0 item 3) — Business Mode (or an explicit
         //    requireProdApproval flag) requires a human checkpoint before prod.
         // ================================================================
+        // ── Story 43-9 Seam E (AC11, D10) — the ONE v1 adoption of the autonomy
+        //    gate in a workflow graph, and it is ADDITIVE.
+        //
+        //    ON THE EFFECT, NOT THE AGENT-ACTION. StageDeployDispatch (below) is
+        //    SHARED across qa / uat / production, so one `agent-action:deploy`
+        //    member cannot tell a staging deploy from a production one. Gating
+        //    `effect:deploy.promote-prod` at the prod-approval DECISION can — and
+        //    it is what the admin's deploy-control dial actually names. The shared
+        //    dispatch is deliberately NOT gated (pinned by
+        //    Gate_is_on_the_effect_not_the_shared_dispatch).
+        //
+        //    BY OR, NEVER BY REPLACEMENT. `prodApprovalNeeded` already fires
+        //    unconditionally for business mode; replacing that predicate with a
+        //    threshold check would be STRICTLY WEAKER for business-mode tenants —
+        //    a governance epic that removed an existing gate. The new term can only
+        //    ADD a wait, never remove one, which is also why the activity may fail
+        //    open on a transport error: a null gate contributes nothing and the
+        //    pipeline behaves exactly as it does today.
+        var gateOutcome = builder.WithVariable<string>("ProdGateOutcome", "");
+        var checkProdGate = new CheckActionGateActivity
+        {
+            Id = "CheckProdDeployGate", Name = "Check Prod Deploy Gate",
+            ActionKey = new Input<string>("effect:deploy.promote-prod"),
+            Operation = new Input<string?>("deployment-pipeline:prod-approval"),
+            Target = new Input<string?>(ctx => repository.Get(ctx)),
+            TenantId = new Input<string?>(ctx => tenantId.Get(ctx)),
+            // CorrelationId is left unset ON PURPOSE: the activity defaults it to
+            // its own WorkflowExecutionContext.Id, which is the pipeline INSTANCE
+            // id — stable across every retry inside this run, which is exactly the
+            // scope one human grant must cover. (An Input<> lambda receives an
+            // ExpressionExecutionContext and cannot reach the workflow context, so
+            // spelling it here is not merely redundant, it is not expressible.)
+            Outcome = new Output<string?>(gateOutcome),
+        };
+        checkProdGate.SetDisplayText("Check Prod Deploy Gate");
+
         var prodApprovalNeeded = new FlowDecision(ctx =>
             string.Equals(mode.Get(ctx)?.Trim(), "business", StringComparison.OrdinalIgnoreCase)
-            || requireProdApproval.Get(ctx))
+            || requireProdApproval.Get(ctx)
+            // NEW (43-9 AC11) — additive only. The activity writes the wire
+            // outcome; anything the gate treats as a block routes into the
+            // EXISTING WaitForDeploymentApprovalActivity rather than a new wait.
+            || string.Equals(
+                gateOutcome.Get(ctx)?.Trim(),
+                GovernanceEvaluateResponse.OutcomeRequiresHuman,
+                StringComparison.OrdinalIgnoreCase))
         { Id = "ProdApprovalNeeded", Name = "Prod Approval Needed?" };
         prodApprovalNeeded.SetDisplayText("Prod Approval Needed?");
 
@@ -472,8 +516,8 @@ public class DeploymentPipelineWorkflow : WorkflowBase
                 // UAT
                 emitUatStarted, uatDeployCall, extractUatResult, uatOk, emitUatSuccess,
                 uatRetryCheck, uatIncrement, emitUatFailed,
-                // Prod approval gate
-                prodApprovalNeeded, waitProdApproval, emitProdApproved, emitProdRejected,
+                // Prod approval gate (+ 43-9 Seam E's additive check)
+                checkProdGate, prodApprovalNeeded, waitProdApproval, emitProdApproved, emitProdRejected,
                 // Prod
                 emitProdStarted, prodDeployCall, extractProdResult, prodOk, emitProdSuccess,
                 prodRetryCheck, prodIncrement, emitProdFailed,
@@ -511,7 +555,15 @@ public class DeploymentPipelineWorkflow : WorkflowBase
                 Connect(uatDeployCall, extractUatResult),
                 Connect(extractUatResult, uatOk),
                 ConnectOutcome(uatOk, "True", emitUatSuccess),
-                Connect(emitUatSuccess, prodApprovalNeeded),
+                // 43-9 Seam E — the gate check sits BETWEEN the UAT success event
+                // and the approval decision, so the decision reads a variable that
+                // has already been written. BOTH of its outcomes converge on the
+                // same next node: the activity's job is to SET `gateOutcome`, and
+                // the routing decision stays where it already was. Wiring the two
+                // edges to different nodes would be a second, competing prod gate.
+                Connect(emitUatSuccess, checkProdGate),
+                ConnectOutcome(checkProdGate, "Automated", prodApprovalNeeded),
+                ConnectOutcome(checkProdGate, "RequiresHuman", prodApprovalNeeded),
                 ConnectOutcome(uatOk, "False", uatRetryCheck),
                 ConnectOutcome(uatRetryCheck, "True", uatIncrement),
                 Connect(uatIncrement, emitUatStarted),       // re-run UAT

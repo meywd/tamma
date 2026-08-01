@@ -95,6 +95,20 @@ public class RatchetDisciplineTests
             KnownUngovernedEndpoints.IsClassified,
             () => KnownUngovernedEndpoints.All.Count,
             KnownUngovernedEndpoints.PinHistory),
+
+        // Story 43-9 D17 — the reviewed exception set is itself a ratchet, and is
+        // DECLARED here for exactly the reason this fixture exists: an escape
+        // hatch that nobody asserted the three properties against would be worse
+        // than the shrink-only pin it relieves.
+        new("KnownUngovernedEndpoints.ReviewedExceptions",
+            typeof(GovernedEndpointCoverageSweepTests),
+            nameof(GovernedEndpointCoverageSweepTests.ExceptionSet_routesStillExistAndAreStillUnbound),
+            GovernedEndpointCoverageSweepTests.ExceptionRatchetStalenessProbe,
+            () => KnownUngovernedEndpoints.ReviewedUngovernedExceptions
+                .Select(e => e.Justification).ToArray(),
+            KnownUngovernedEndpoints.IsClassified,
+            () => KnownUngovernedEndpoints.ReviewedUngovernedExceptions.Count,
+            KnownUngovernedEndpoints.ExceptionPinHistory),
     ];
 
     /// <summary>Placeholders no ratchet's classifier may ever accept.</summary>
@@ -106,11 +120,14 @@ public class RatchetDisciplineTests
         // ANTI-VACUITY. Every assertion below iterates the registry; an empty or
         // shrunken registry would make this whole fixture pass while covering
         // nothing — the failure mode Epic 43 exists to prevent.
-        Ratchets().Should().HaveCount(1,
-            "one Story 43-8 ratchet lives in Tamma.Api.Tests (KnownUngovernedEndpoints); the other "
-            + "three live in Tamma.Activities.Tests and are covered by the sibling fixture there. "
-            + "If you added a ratchet to this assembly, DECLARE it above and bump this number — "
-            + "that is the whole point of this fixture.");
+        Ratchets().Should().HaveCount(2,
+            "1 → 2 (Story 43-9 D17, 2026-08-01): the KnownUngovernedEndpoints REVIEWED EXCEPTION "
+            + "SET joins the KnownUngovernedEndpoints baseline in this assembly; the other three "
+            + "43-8 ratchets live in Tamma.Activities.Tests and are covered by the sibling fixture "
+            + "there. This registry pin is a REVIEW-GATED BUMP, not a ratchet — unlike the pins it "
+            + "guards, it is meant to rise when a new ratchet is declared. If you added a ratchet "
+            + "to this assembly, DECLARE it above and bump this number; that is the whole point of "
+            + "this fixture.");
 
         Ratchets().Select(r => r.Name).Should().OnlyHaveUniqueItems();
     }

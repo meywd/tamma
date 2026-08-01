@@ -2932,6 +2932,24 @@ actionsPolicy.MapPut("/policy/actions/{ns}/{key}/enabled", ActionPolicyEndpoints
 actionsPolicy.MapPut("/policy/actions/{ns}/{key}/roles", ActionPolicyEndpoints.PutActionRoles).RequireAuthorization("ActionsManage");
 actionsPolicy.MapDelete("/policy/actions/{ns}/{key}", ActionPolicyEndpoints.DeleteAction).RequireAuthorization("ActionsManage");
 
+// ── Story 43-9 AC13 — the AUTHORIZATION LEDGER's human surface ──
+// A live enforcing gate that can answer "a person must decide" with no way for a
+// person to decide would be a hang, not a gate: these two routes are what make
+// Seam C's 409 and Seam E's RequiresHuman actionable, which is why they ship in
+// the SAME change as the enforcement opt-in.
+// ROUTE ORDERING: the literal /authorizations segment is registered here, after
+// the /policy/... literals and their parameterized siblings, and its own
+// parameterized child carries a :guid constraint. `authorizations` can never be
+// swallowed by /policy/actions/{ns}/{key} — different first segment — and the
+// ordering is explicit rather than constraint-dependent (the /api/acceptance-rules
+// /defaults trap).
+// RBAC: the LIST is AuthenticatedAny (inherited from the group — everyone needs to
+// see what is waiting on them); the DECIDE takes ActionsManage, because granting
+// an authorization IS exercising the autonomy policy.
+actionsPolicy.MapGet("/authorizations", ActionAuthorizationEndpoints.ListAuthorizations);
+actionsPolicy.MapPost("/authorizations/{id:guid}/decide", ActionAuthorizationEndpoints.Decide)
+    .RequireAuthorization("ActionsManage");
+
 // The PLATFORM CEILING — platform-owner only (epic 43 README OQ4: the
 // ceiling is the load-bearing protection; a tenant admin can never lower a
 // platform gate because the evaluator composes it with max()).
@@ -3117,19 +3135,34 @@ engine.MapGet("/cycle-results", EngineEndpoints.GetCycleResults);
 // Gated to EngineServiceOnly (service principal) — NOT WorkflowsManage, which
 // every tenant owner/admin holds and would let them forge audit events (I4).
 // Story 43-8 AC1 step 3 (carve-out §A1 #2, closed 2026-07-30): `.Governs(key)`
-// binds this route to its catalog member. METADATA ONLY — Story 43-9 adds
-// `.AddEndpointFilter<ActionGateFilter>()` inside GovernsExtensions.Governs, so
-// annotating and enforcing stay one call and nothing here changes behaviour today.
+// binds this route to its catalog member. STILL METADATA ONLY.
 // The bound member's descriptor SiteKey must equal "{METHOD} {RawText}" of this
 // very route (GovernedEndpointBindingSweepTests) — bind a route to its OWN member.
+//
+// STORY 43-9 DECISION D15 — the SECOND line, `.EnforcesGovernance()`, is what
+// makes a bound route actually gate. 43-8 planned for 43-9 to attach the filter
+// INSIDE Governs() "so annotating and enforcing stay one call"; that design was
+// OVERTURNED, for three reasons recorded on IGovernanceEnforcementMetadata:
+// (1) one line inside Governs() would have flipped 17 routes into live 409 gates
+// at once with no per-route review; (2) `POST /api/v1/llm/call` (Seam A) must be
+// incapable of blocking in EVERY version, and the cleanest way to guarantee that
+// is that it never writes the second line — a structural fact rather than a
+// carve-out keyed on an action name inside a filter; (3) the four
+// `[Governs]`-bound MentorshipController actions never pass through
+// GovernsExtensions at all, so a filter added there would have enforced 17 routes
+// and silently skipped 4 while reading as "all bindings are enforced".
+// The opted-in set is pinned EXACTLY by GovernedEndpointEnforcementSweepTests, so
+// both an accidental addition and an accidental omission fail the build.
 engine.MapPost("/events", EngineEndpoints.AppendEvents).RequireAuthorization("EngineServiceOnly")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineEventsAppend.ToWire()));
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineEventsAppend.ToWire()))
+    .EnforcesGovernance();
 // Engine→platform_events callback: cross-tenant lifecycle / analytics events that the
 // engine drains from its in-process list and POSTs here for durable control-plane
 // persistence + in-process fan-out. Gated EngineServiceOnly (same rationale as /events).
 engine.MapPost("/platform-events", EngineEndpoints.AppendPlatformEvents)
     .RequireAuthorization("EngineServiceOnly")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EnginePlatformEventsAppend.ToWire()));
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EnginePlatformEventsAppend.ToWire()))
+    .EnforcesGovernance();
 // Audit finding 002 — `agent-available` is a GET liveness probe (no body),
 // not a POST registration call. The previous wiring as POST silently drifted
 // from the TS contract.
@@ -3141,10 +3174,12 @@ engine.MapGet("/agent-available", EngineEndpoints.AgentAvailable);
 // EngineServiceOnly (same rationale as /events): the service principal only.
 engine.MapPost("/documents", DocumentEndpoints.PersistFromEngine)
     .RequireAuthorization("EngineServiceOnly")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineDocumentPersist.ToWire()));
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineDocumentPersist.ToWire()))
+    .EnforcesGovernance();
 engine.MapPost("/documents/{documentId:guid}/status", DocumentEndpoints.SetStatusFromEngine)
     .RequireAuthorization("EngineServiceOnly")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineDocumentSetStatus.ToWire()));
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineDocumentSetStatus.ToWire()))
+    .EnforcesGovernance();
 
 // ── Story 39-18: engine→API channel enqueue seam (D2) ──
 // The lifecycle engine publishes AcceptanceRequest / escalation / guidance messages
@@ -3153,7 +3188,8 @@ engine.MapPost("/documents/{documentId:guid}/status", DocumentEndpoints.SetStatu
 // a user JWT can never forge a channel message into another tenant's stream.
 engine.MapPost("/channel/outbox", ChannelEndpoints.EnqueueFromEngine)
     .RequireAuthorization("EngineServiceOnly")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineChannelOutboxEnqueue.ToWire()));
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineChannelOutboxEnqueue.ToWire()))
+    .EnforcesGovernance();
 
 // ── User dashboard: Repos & Workflow Runs (Story 21-4) ──
 // Tenant-facing read surface behind the SPA's /repos + /runs destinations.
@@ -3315,10 +3351,32 @@ app.MapPost("/api/v1/llm/chat", SaaSEndpoints.LlmChat).RequireAuthorization();
 // handler. The handler delegates to IManagedAgent.RunAsync and maps via
 // ToHttpResult under the §2.4 status discipline (200 / 200 success:false
 // +httpStatusCode / 400 / 403; NEVER a raw 5xx).
+// SEAM A — BOUND, DELIBERATELY NOT ENFORCED (Story 43-9 AC3 / epic D2 / D15).
+// `.Governs(...)` names what this route performs, for the drift harnesses and the
+// admin UI. There is NO `.EnforcesGovernance()` here and there must never be one:
+// a RequiresHuman returned at this route reaches a DispatchWorkflow whose CALLING
+// workflow has no human route in 44 of 45 cases (it would suspend with nobody able
+// to resume it), and blocking here AND at Seam E would double-gate deploy, since
+// the deployment pipeline reaches the model through this very route while Seam E
+// gates the prod-approval decision. Agent-action enforcement lives ONLY at Seam E.
+// The handler still OBSERVES (evaluate → audit → always proceed).
+// Pinned both ways: LlmCallSeam_NeverBlocks_EvenUnderEnforce (behaviour) and
+// LlmCallRoute_IsBound_ButNotEnforced (wiring).
 app.MapPost("/api/v1/llm/call", LlmCallEndpoints.CallLlm)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("CallLlm")
     .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.LlmCall.ToWire()));
+
+// ── Story 43-9 Seam E (AC10, D9) — the engine's gate-evaluation mediation route ──
+// Tamma.ElsaServer registers no repository and mediates everything through
+// TammaApiClient, so CheckActionGateActivity cannot inject IAutonomyGate; it asks
+// here instead. THE ROUTE CANNOT GATE ITSELF: it mints no ExternalEffect member
+// (it is a read), carries no .Governs binding by design, and is baselined in
+// KnownUngovernedEndpoints with the justification
+// `gate-evaluation-endpoint-cannot-gate-itself`. Anything else is circular.
+app.MapPost("/api/v1/governance/evaluate", GovernanceEvaluateEndpoints.Evaluate)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("EvaluateGovernance");
 
 // ── Story 32-23 — the streaming run tap (human SSE plane) ──
 // GET /api/v1/llm/runs/{correlationId}/stream — a live, READ-ONLY view of a
@@ -3341,22 +3399,26 @@ app.MapGet("/api/v1/llm/runs/{correlationId}/stream", LlmRunStreamEndpoints.Stre
 app.MapPost("/api/v1/git/{owner}/{repo}/branches", GitEndpoints.CreateBranch)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitCreateBranch")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitBranchCreate.ToWire()));
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitBranchCreate.ToWire()))
+    .EnforcesGovernance();
 app.MapPost("/api/v1/git/{owner}/{repo}/pull-requests", GitEndpoints.CreatePullRequest)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitCreatePullRequest")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestCreate.ToWire()));
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestCreate.ToWire()))
+    .EnforcesGovernance();
 app.MapPut("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/merge", GitEndpoints.MergePullRequest)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitMergePullRequest")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestMerge.ToWire()));
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestMerge.ToWire()))
+    .EnforcesGovernance();
 app.MapGet("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/comments", GitEndpoints.GetPullRequestComments)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitGetPullRequestComments");
 app.MapPatch("/api/v1/git/{owner}/{repo}/issues/{n:int}", GitEndpoints.UpdateIssue)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitUpdateIssue")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitIssuePatch.ToWire()));
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitIssuePatch.ToWire()))
+    .EnforcesGovernance();
 
 // ── Story 38 (Phase 1) — GitHub "extra ops" (commits + file-changes reads,
 // standalone branch delete) the engine's context/debug/integration activities call
@@ -3372,7 +3434,8 @@ app.MapGet("/api/v1/git/{owner}/{repo}/file-changes", GitEndpoints.GetFileChange
 app.MapDelete("/api/v1/git/{owner}/{repo}/branches", GitEndpoints.DeleteBranch)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitDeleteBranch")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitBranchDelete.ToWire()));
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitBranchDelete.ToWire()))
+    .EnforcesGovernance();
 
 // ── Epic 38 follow-up #21 — deployment-pipeline release step. Create a GitHub
 // release/tag for the shipped version. Same engine-only plane + guard→token→
@@ -3380,14 +3443,16 @@ app.MapDelete("/api/v1/git/{owner}/{repo}/branches", GitEndpoints.DeleteBranch)
 app.MapPost("/api/v1/git/{owner}/{repo}/releases", GitEndpoints.CreateRelease)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitCreateRelease")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitReleaseCreate.ToWire()));
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitReleaseCreate.ToWire()))
+    .EnforcesGovernance();
 
 // ── Story 38 (Phase 1) — CI (GitHub Actions) step mediation ──
 // Same engine-only plane + guard→token→platform→one-event mediation as git.
 app.MapPost("/api/v1/ci/{owner}/{repo}/test-runs", CiEndpoints.TriggerTests)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("CiTriggerTests")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.CiTestsTrigger.ToWire()));
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.CiTestsTrigger.ToWire()))
+    .EnforcesGovernance();
 app.MapGet("/api/v1/ci/{owner}/{repo}/build-status", CiEndpoints.GetBuildStatus)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("CiGetBuildStatus");
@@ -3401,7 +3466,8 @@ app.MapGet("/api/v1/jira/tickets/{ticketId}", JiraEndpoints.GetTicket)
 app.MapPatch("/api/v1/jira/tickets/{ticketId}", JiraEndpoints.UpdateTicket)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("JiraUpdateTicket")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.JiraTicketPatch.ToWire()));
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.JiraTicketPatch.ToWire()))
+    .EnforcesGovernance();
 
 // ── Story 38-2 (Epic 38) — agent-dispatch step mediation (Class C) ──
 // Same engine-only plane as /api/v1/git and /api/v1/llm/call: the engine's thin
@@ -3414,7 +3480,8 @@ app.MapPatch("/api/v1/jira/tickets/{ticketId}", JiraEndpoints.UpdateTicket)
 app.MapPost("/api/v1/agent-dispatch/{owner}/{repo}/runs", AgentDispatchEndpoints.TriggerRun)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("DispatchAgentRun")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.AgentDispatchRun.ToWire()));
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.AgentDispatchRun.ToWire()))
+    .EnforcesGovernance();
 app.MapGet("/api/v1/agent-dispatch/{owner}/{repo}/runs", AgentDispatchEndpoints.DiscoverRun)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("DiscoverAgentRun");
@@ -3438,7 +3505,8 @@ app.MapGet("/api/v1/agent-dispatch/{owner}/{repo}/installation", AgentDispatchEn
 app.MapPost("/api/v1/notifications/slack", NotificationEndpoints.QueueSlack)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("QueueSlackNotification")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.NotifySlackQueue.ToWire()));
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.NotifySlackQueue.ToWire()))
+    .EnforcesGovernance();
 
 // ── Story 38 (Phase 1) — email step mediation ──
 // Same engine-only plane as the Slack notification: the engine posts an
@@ -3448,7 +3516,8 @@ app.MapPost("/api/v1/notifications/slack", NotificationEndpoints.QueueSlack)
 app.MapPost("/api/v1/notifications/email", EmailEndpoints.SendEmail)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("SendEmailNotification")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.NotifyEmailSend.ToWire()));
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.NotifyEmailSend.ToWire()))
+    .EnforcesGovernance();
 app.MapPost("/api/v1/workflows/{id}/status", SaaSEndpoints.UpdateWorkflowStatus).RequireAuthorization();
 app.MapPost("/api/v1/workflows/{id}/result", SaaSEndpoints.PostWorkflowResult).RequireAuthorization();
 app.MapPost("/api/v1/installations/{id}/rotate-key", SaaSEndpoints.RotateInstallationKey).RequireAuthorization();

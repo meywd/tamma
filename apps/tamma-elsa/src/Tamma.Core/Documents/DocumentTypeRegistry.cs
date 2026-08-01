@@ -201,6 +201,16 @@ public static class DocumentTypeRegistry
             new WorkflowDocumentInterface("adr-authoring",
                 new[] { DocumentTypeKey.Design, DocumentTypeKey.Findings },
                 DocumentTypeKey.Prose, false),
+            // Story 41-3 — backlog-prioritization CONSUMES the accepted TriageDecision and
+            // Findings of each candidate item (bounded per-item reads: the store has no set
+            // query) and PRODUCES the typed BacklogOrdering that 41-6's sprint planning and
+            // 41-4's roadmap read back. Both consumed edges are OPTIONAL, fail-closed reads —
+            // a never-triaged backlog is still rankable from titles and summaries — but they
+            // are real edges the graph has fetch nodes for, so the row declares them (the same
+            // correction 41-9's row records). Real lifecycle binding ⇒ non-provisional.
+            new WorkflowDocumentInterface("backlog-prioritization",
+                new[] { DocumentTypeKey.TriageDecision, DocumentTypeKey.Findings },
+                DocumentTypeKey.BacklogOrdering, false),
         };
     }
 }

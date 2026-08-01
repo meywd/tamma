@@ -275,6 +275,80 @@ public class MediationClientEffectSweepTests
     ];
 
     // ====================================================================
+    // Story 43-9 DECISION D17 — the NAMED, DATED, REVIEWED exception set
+    // ====================================================================
+
+    /// <summary>One reviewed exception to the shrink-only non-effect baseline.</summary>
+    /// <param name="Method">Exact method name on <see cref="TammaApiClient"/>.</param>
+    /// <param name="AddedOn">ISO date the exception was reviewed.</param>
+    /// <param name="Story">The story that reviewed it.</param>
+    /// <param name="Justification">Why it performs no catalogued effect; must classify.</param>
+    internal sealed record ReviewedException(
+        string Method, string AddedOn, string Story, string Justification);
+
+    /// <summary>
+    /// <b>Story 43-9 D17.</b> Genuinely non-effect client methods added AFTER
+    /// <see cref="KnownNonEffectClientMethods"/> became shrink-only.
+    ///
+    /// <para><b>Why an exception set rather than a bigger pin.</b>
+    /// <see cref="NonEffectPinHistory"/> is strictly decreasing and its last
+    /// element IS the pin, asserted here and again from the registry by
+    /// <c>RatchetDisciplineTests</c>. So appending 20 is red by design and editing
+    /// 19 in place is the undeclared re-widening the ratchet exists to catch. That
+    /// is right for a baseline of methods that SHOULD eventually be classified as
+    /// effects — but it makes a genuinely read-only NEW method unrepresentable,
+    /// and a rule that forbids the honest answer eventually forces a dishonest
+    /// one: classify a read as an effect, or move it to a base class this sweep's
+    /// <c>DeclaredOnly</c> discovery cannot see (a hole this fixture's own
+    /// doc-comment already names). Both are worse than an exception a reviewer
+    /// sees in the diff.</para>
+    ///
+    /// <para><b>Why it cannot become a blanket escape hatch.</b> It is keyed by
+    /// EXACT METHOD NAME, so a different new method still goes red; each entry
+    /// carries a date, the reviewing story and a justification that must pass
+    /// <see cref="RatchetClassifies"/>; the set is itself count-pinned and
+    /// shrink-only; it is declared in <c>RatchetDisciplineTests.Ratchets()</c>; and
+    /// staleness applies both ways — an entry whose method no longer exists, or
+    /// which becomes mapped to an <see cref="ExternalEffect"/>, fails until
+    /// deleted. The rejected alternative was the count-level "name the index that
+    /// may rise" precedent, which is ANONYMOUS: any future method could occupy the
+    /// widened slot.</para>
+    ///
+    /// <para><see cref="KnownNonEffectClientMethods"/> stays at 19 and its history
+    /// stays <c>[19]</c>. The exception set is unioned into the classifier's
+    /// "is this method accounted for" check and EXCLUDED from that count pin, so
+    /// unreviewed growth of the baseline is still impossible.</para>
+    /// </summary>
+    internal static readonly IReadOnlyList<ReviewedException> ReviewedNonEffectExceptions =
+    [
+        new("EvaluateGovernanceAsync", "2026-08-01", "Story 43-9",
+            "read-only: Seam E's gate-evaluation call (POST /api/v1/governance/evaluate). It ASKS "
+            + "whether the system may perform a catalogued action by itself and changes nothing "
+            + "outside Tamma; the effect it asks ABOUT is separately catalogued and separately "
+            + "bound. Mapping this to an ExternalEffect would catalogue the question as though it "
+            + "were the answer."),
+    ];
+
+    /// <summary>The exception set's own count pin — shrink-only, seeded 2026-08-01.</summary>
+    internal static readonly int[] NonEffectExceptionPinHistory = [1];
+
+    /// <summary>Exception method names, for the union the classifier consumes.</summary>
+    private static IReadOnlyDictionary<string, string> ExceptionsAsBaseline() =>
+        ReviewedNonEffectExceptions.ToDictionary(
+            e => e.Method, e => e.Justification, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The baseline UNIONED with the reviewed exceptions — what "accounted for"
+    /// means. The COUNT PINS deliberately see the two collections separately.
+    /// </summary>
+    private static IReadOnlyDictionary<string, string> AccountedForClientMethods()
+    {
+        var union = new Dictionary<string, string>(KnownNonEffectClientMethods, StringComparer.Ordinal);
+        foreach (var (name, justification) in ExceptionsAsBaseline()) union[name] = justification;
+        return union;
+    }
+
+    // ====================================================================
     // Discovery + the classifier, as pure functions over their inputs
     // ====================================================================
 
@@ -439,10 +513,17 @@ public class MediationClientEffectSweepTests
         // EffectPerformingSites or KnownNonEffectClientMethods and neither of the
         // other two pins moved. That is why 36/19/17 are unchanged by a change that
         // genuinely widened the lens.
-        discovered.Should().HaveCount(36,
+        // 36 → 37 (Story 43-9, 2026-08-01): + EvaluateGovernanceAsync, Seam E's
+        // gate-evaluation read. This pin is a LEGITIMATE bump-with-review — its
+        // own message has always said "move this number in the same commit" — and
+        // it is NOT a ratchet, unlike NonEffectClientMethods_countIsPinned, which
+        // stays at 19 because the new method is accounted for by the D17 reviewed
+        // exception set rather than by widening the baseline.
+        discovered.Should().HaveCount(37,
             "the mediation surface is pinned exactly: 17 effect-performing + 19 baselined "
-            + "non-effect methods. A change here is a new (or removed) mediation method — decide "
-            + "whether it is a governed effect, then move this number in the same commit.");
+            + "non-effect + 1 reviewed-exception method. A change here is a new (or removed) "
+            + "mediation method — decide whether it is a governed effect, then move this number "
+            + "in the same commit.");
     }
 
     [Test]
@@ -452,7 +533,9 @@ public class MediationClientEffectSweepTests
             typeof(TammaApiClient),
             Enum.GetValues<ExternalEffect>(),
             EffectPerformingSites,
-            KnownNonEffectClientMethods);
+            // UNIONED with the D17 reviewed exceptions: a method is "accounted
+            // for" if it is mapped, baselined, OR carries a named exception.
+            AccountedForClientMethods());
 
         problems.Should().BeEmpty(
             "the mediation seam and the effect:* plane must agree in BOTH directions:"
@@ -570,10 +653,95 @@ public class MediationClientEffectSweepTests
         // still 36, because TammaApiClient happens to expose no non-Task method today —
         // see The_sweep_actually_sees_the_client_surface for the measurement.
         KnownNonEffectClientMethods.Should().HaveCount(19,
-            "36 public instance mediation methods − 17 effect-performing = 19. If this fails because a "
-            + "new mediation method was added, that is the ratchet working: decide whether it is a "
-            + "governed effect before bumping the number.");
+            "37 public instance mediation methods − 17 effect-performing − 1 D17 reviewed "
+            + "exception = 19. If this fails because a new mediation method was added, that is the "
+            + "ratchet working: decide whether it is a governed effect. Do NOT bump this number — "
+            + "it is shrink-only. A genuinely non-effect new method goes in "
+            + "ReviewedNonEffectExceptions, named and dated.");
     }
+
+    // ====================================================================
+    // Story 43-9 D17 — the reviewed exception set's own three properties
+    // ====================================================================
+
+    [Test]
+    public void ExceptionSet_countIsPinned_andIsMechanicallyShrinkOnly()
+    {
+        NonEffectExceptionPinHistory.Should().NotBeEmpty();
+
+        ReviewedNonEffectExceptions.Should().HaveCount(NonEffectExceptionPinHistory[^1],
+            "the exception set is count-pinned. Seeded at 1 on 2026-08-01 by Story 43-9 "
+            + "(EvaluateGovernanceAsync). A second entry must be argued for — the whole point of "
+            + "keying exceptions BY METHOD NAME is that one exception does not buy the next.");
+
+        for (var i = 1; i < NonEffectExceptionPinHistory.Length; i++)
+        {
+            NonEffectExceptionPinHistory[i].Should()
+                .BeLessThan(NonEffectExceptionPinHistory[i - 1],
+                    "an exception set that can grow without a decrease is an escape hatch");
+        }
+    }
+
+    [Test]
+    public void ExceptionSet_entriesAreDatedAndAttributed_andStillExist()
+    {
+        var live = ClientMethods(typeof(TammaApiClient))
+            .Select(m => m.Name).ToHashSet(StringComparer.Ordinal);
+        var mapped = EffectPerformingSites.Values
+            .Where(s => s.ClientMethod is not null)
+            .Select(s => s.ClientMethod!)
+            .ToHashSet(StringComparer.Ordinal);
+
+        var problems = new List<string>();
+        foreach (var e in ReviewedNonEffectExceptions)
+        {
+            if (!DateOnly.TryParse(e.AddedOn, out _) || string.IsNullOrWhiteSpace(e.Story))
+                problems.Add($"  {e.Method}: addedOn='{e.AddedOn}' story='{e.Story}' — a named, "
+                    + "dated, reviewed exception must actually carry all three.");
+            if (!RatchetClassifies(e.Justification))
+                problems.Add($"  {e.Method}: unclassified justification '{e.Justification}'.");
+            // Staleness, both ways (D17(5)).
+            if (!live.Contains(e.Method))
+                problems.Add($"  {e.Method}: no such method on TammaApiClient any more — DELETE the exception.");
+            if (mapped.Contains(e.Method))
+                problems.Add($"  {e.Method}: is now mapped to an ExternalEffect — DELETE the exception.");
+            if (KnownNonEffectClientMethods.ContainsKey(e.Method))
+                problems.Add($"  {e.Method}: is in BOTH the baseline and the exception set — pick one.");
+        }
+
+        problems.Should().BeEmpty(
+            "the D17 exception set must be as disciplined as the ratchet it relieves:"
+            + Environment.NewLine + string.Join(Environment.NewLine, problems));
+    }
+
+    /// <summary>
+    /// The exception set's justifications / classifier / count / staleness probe,
+    /// for the meta-test in <c>RatchetDisciplineTests</c>.
+    /// </summary>
+    internal static IReadOnlyList<string> ExceptionRatchetJustifications() =>
+        ReviewedNonEffectExceptions.Select(e => e.Justification).ToArray();
+
+    /// <summary>Live entry count of the exception set, for the meta-test.</summary>
+    internal static int ExceptionRatchetCount() => ReviewedNonEffectExceptions.Count;
+
+    /// <summary>
+    /// Drives the REAL <see cref="Classify"/> with an EXCEPTION-shaped entry whose
+    /// method is now mapped to an effect — the stale case, proving the exception
+    /// set drains rather than accumulating.
+    /// </summary>
+    internal static IReadOnlyList<string> ExceptionRatchetStalenessProbe() =>
+        Classify(
+            typeof(FixtureClient),
+            [ExternalEffect.LlmCall],
+            FixtureSites,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["ReadSomethingAsync"] = "read-only: fixture",
+                // Mapped by FixtureSites AND present here: the stale shape.
+                ["DeleteTheUniverseAsync"] = "read-only: fixture exception",
+            })
+        .Where(p => p.Contains("DELETE its KnownNonEffectClientMethods entry", StringComparison.Ordinal))
+        .ToArray();
 
     [Test]
     public void NonEffectClientMethods_justificationsAreClassified()

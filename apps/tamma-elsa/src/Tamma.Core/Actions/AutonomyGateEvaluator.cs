@@ -150,6 +150,19 @@ public static class AutonomyGateEvaluator
     public const string ReasonBreakGlassBypass = "break-glass-bypass";
 
     /// <summary>
+    /// Story 43-9 AC12 — a live human GRANT in <c>action_authorizations</c>
+    /// covered this action for this correlation, so a
+    /// <see cref="AutonomyOutcome.RequiresHuman"/> resolution proceeds
+    /// automatically. It is NOT produced here: the evaluator is pure and the
+    /// ledger is a database. <c>AutonomyGateService</c> stamps it after
+    /// <c>IActionAuthorizationLedger.TryConsumeAsync</c> succeeds, together with
+    /// <see cref="AutonomyDecision.AuthorizationId"/> and
+    /// <see cref="AutonomyDecision.CoveredBy"/>. The constant lives here so the
+    /// reason vocabulary stays in one place.
+    /// </summary>
+    public const string ReasonCoveredByAuthorization = "covered-by-authorization";
+
+    /// <summary>
     /// Evaluate one action against a policy snapshot and the principal's
     /// resolved BASE acceptance rules (the dial + the legacy always-escalate
     /// list — Story 43-5 AC11's <c>ResolveBase*Async</c> provides it).

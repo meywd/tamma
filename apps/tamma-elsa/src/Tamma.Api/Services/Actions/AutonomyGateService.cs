@@ -1,5 +1,6 @@
 using Tamma.Core.Actions;
 using Tamma.Core.Documents.Policy;
+using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Services.Actions;
 
@@ -45,6 +46,35 @@ namespace Tamma.Api.Services.Actions;
 /// the audit stream as <c>ACTION.GATE.BREAK_GLASS_BYPASS</c> on the
 /// NON-swallowing append path, so an unrecordable bypass fails rather than
 /// happening silently.</para>
+///
+/// <para><b>THE LEDGER CONSULT (Story 43-9 AC12).</b> After the pure evaluation
+/// and before the audit row, a <see cref="AutonomyOutcome.RequiresHuman"/>
+/// decision is offered to <see cref="IActionAuthorizationLedger.TryConsumeAsync"/>
+/// for this <c>(principal, correlationId)</c>. A live grant — action-scoped, or
+/// group-scoped covering this member — turns it into
+/// <see cref="AutonomyOutcome.Automated"/> stamped with
+/// <see cref="AutonomyDecision.AuthorizationId"/> and
+/// <see cref="AutonomyDecision.CoveredBy"/>. That is the whole point of the
+/// ledger: ONE human decision covers one deploy, not one per retry and not one
+/// per seam. Four boundaries, each deliberate:
+/// <list type="bullet">
+/// <item><b>Only <c>RequiresHuman</c> is offered.</b> A
+/// <see cref="AutonomyOutcome.Denied"/> is either a non-escalatable target
+/// (nobody could have been asked, so no grant can exist honestly) or a
+/// disabled/role-excluded row, which a grant must not be able to override —
+/// a grant answers "may the system do this without asking again", never "may
+/// this happen at all".</item>
+/// <item><b>Only an ENFORCED decision is offered.</b> An observe-only
+/// resolution proceeds regardless; consuming a single-use grant for it would
+/// burn the person's decision on a seam that was never going to block.</item>
+/// <item><b>No correlation id, no consult.</b> The ledger is scoped by
+/// correlation by construction; without one there is no run for a decision to
+/// cover.</item>
+/// <item><b>A ledger failure keeps the block.</b> The catch below does not
+/// re-open the gate — an unreadable ledger is ignorance, and ignorance may not
+/// be read as a grant (the F6 posture, applied to this input too).</item>
+/// </list>
+/// </para>
 /// </summary>
 public sealed class AutonomyGateService : IAutonomyGate
 {
@@ -53,6 +83,7 @@ public sealed class AutonomyGateService : IAutonomyGate
     private readonly IAcceptanceRulesResolver _acceptanceRules;
     private readonly ActionGateEventsService _events;
     private readonly IGovernanceBreakGlass? _breakGlass;
+    private readonly IActionAuthorizationLedger? _ledger;
     private readonly ILogger<AutonomyGateService>? _logger;
     private readonly TimeProvider _time;
 
@@ -63,7 +94,8 @@ public sealed class AutonomyGateService : IAutonomyGate
         ActionGateEventsService events,
         IGovernanceBreakGlass? breakGlass = null,
         ILogger<AutonomyGateService>? logger = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IActionAuthorizationLedger? ledger = null)
     {
         _breakGlass = breakGlass;
         ArgumentNullException.ThrowIfNull(principals);
@@ -76,6 +108,12 @@ public sealed class AutonomyGateService : IAutonomyGate
         _events = events;
         _logger = logger;
         _time = timeProvider ?? TimeProvider.System;
+        // NULLABLE by registration, not by preference: the ledger is registered
+        // only when a control-plane DbContext factory is wired
+        // (ActionCatalogGovernanceServiceCollectionExtensions), exactly like the
+        // assignment repository. A host without one has no grants to consult and
+        // every RequiresHuman simply stays RequiresHuman — fail-closed.
+        _ledger = ledger;
     }
 
     /// <inheritdoc />
@@ -139,8 +177,77 @@ public sealed class AutonomyGateService : IAutonomyGate
                 .ConfigureAwait(false);
         }
 
+        decision = await ConsultLedgerAsync(decision, query, principal, ct).ConfigureAwait(false);
+
         await _events.EmitDecisionAsync(decision, query).ConfigureAwait(false);
         return decision;
+    }
+
+    /// <summary>
+    /// AC12 — one human decision covers one correlation. Returns the decision
+    /// unchanged unless a live grant covering this action was consumed, in which
+    /// case it comes back <see cref="AutonomyOutcome.Automated"/> carrying the
+    /// grant's id and target. See the class doc for why only an ENFORCED
+    /// <see cref="AutonomyOutcome.RequiresHuman"/> with a correlation id is
+    /// offered, and why a ledger failure keeps the block.
+    /// </summary>
+    private async Task<AutonomyDecision> ConsultLedgerAsync(
+        AutonomyDecision decision,
+        AutonomyQuery query,
+        GovernancePrincipal principal,
+        CancellationToken ct)
+    {
+        if (_ledger is null
+            || decision.Outcome != AutonomyOutcome.RequiresHuman
+            || !decision.Enforced
+            || string.IsNullOrWhiteSpace(query.CorrelationId))
+        {
+            return decision;
+        }
+
+        Tamma.Data.Entities.ActionAuthorization? grant;
+        try
+        {
+            grant = await _ledger.TryConsumeAsync(
+                principal.TenantId, principal.UserId, query.CorrelationId!,
+                decision.Action.ToWire(), ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            // NOT a re-open. "I could not read the grant table" is not "there is
+            // a grant" — the decision keeps its block and the failure is loud.
+            _logger?.LogError(ex,
+                "Authorization-ledger consult FAILED for {ActionKey} (correlation {CorrelationId}); "
+                + "the requires-human decision STANDS.",
+                decision.Action.ToWire(), query.CorrelationId);
+            await _events.EmitEvaluationFailedAsync(
+                decision.Action.ToWire(), ex.Message, principal.TenantId, principal.UserId)
+                .ConfigureAwait(false);
+            return decision;
+        }
+
+        if (grant is null) return decision;
+
+        // `group:` is prefixed so an auditor can tell a group grant from an
+        // action grant at a glance; an action-scoped target is already a fully
+        // qualified `ns:key` wire and needs no prefix.
+        var coveredBy = string.Equals(grant.TargetKind, "group", StringComparison.Ordinal)
+            ? $"group:{grant.TargetKey}"
+            : grant.TargetKey;
+
+        await _events.EmitAuthorizedAsync(
+            principal.TenantId, principal.UserId,
+            decision.Action.ToWire(), query.CorrelationId!, grant.Id)
+            .ConfigureAwait(false);
+
+        return decision with
+        {
+            Outcome = AutonomyOutcome.Automated,
+            Reason = AutonomyGateEvaluator.ReasonCoveredByAuthorization,
+            AuthorizationId = grant.Id,
+            CoveredBy = coveredBy,
+        };
     }
 
     /// <summary>

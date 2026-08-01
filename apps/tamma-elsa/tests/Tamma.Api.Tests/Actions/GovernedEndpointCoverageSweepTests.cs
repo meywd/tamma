@@ -309,32 +309,124 @@ public class GovernedEndpointCoverageSweepTests
             + Environment.NewLine + string.Join(Environment.NewLine, duplicates));
     }
 
+    // NOTE (Story 43-9, 2026-08-01) — `PreProvisionedJustificationKeyword_isStillUnused`
+    // WAS HERE and is DELETED, as 43-8 §A3 step 3 instructed. It pinned the
+    // `gate-evaluation-endpoint-cannot-gate-itself` classifier arm at ZERO uses,
+    // because the route it was minted for did not exist yet. 43-9 landed
+    // POST /api/v1/governance/evaluate, so the arm is LIVE. 43-8's own failure
+    // message said to delete the test rather than widen it — "an unused arm and a
+    // used arm are different facts" — and its live use is now asserted by
+    // ExceptionSet_entriesAreClassified plus the coverage rule itself.
+
+    // ====================================================================
+    // Story 43-9 D17 — the reviewed exception set's own three properties
+    // ====================================================================
+
     [Test]
-    public void PreProvisionedJustificationKeyword_isStillUnused()
+    public void ExceptionSet_countIsPinned_andIsMechanicallyShrinkOnly()
     {
-        // Review F18(b). `gate-evaluation-endpoint-cannot-gate-itself` is a
-        // classifier arm with ZERO uses: AC11 names it for the route Story 43-9 adds
-        // (POST /api/v1/governance/evaluate), which does not exist yet. A vocabulary
-        // arm nothing classifies is normally dead weight; this one is kept
-        // deliberately, so the fact that it is pre-provisioned is ASSERTED rather
-        // than left as a comment a reader has to trust.
-        var uses = KnownUngovernedEndpoints.All
-            .Where(e => e.Justification.Contains(
-                "gate-evaluation-endpoint-cannot-gate-itself", StringComparison.OrdinalIgnoreCase))
+        // The exception set is a ratchet in its own right, with the SAME three
+        // properties as the baseline it sits beside. Without this, "a named
+        // exception" would be a place to put anything.
+        KnownUngovernedEndpoints.ExceptionPinHistory.Should().NotBeEmpty();
+
+        KnownUngovernedEndpoints.ReviewedUngovernedExceptions.Should()
+            .HaveCount(KnownUngovernedEndpoints.ExceptionPinHistory[^1],
+                "the exception set is count-pinned. Seeded at 2 on 2026-08-01 by Story 43-9: the "
+                + "gate-evaluation route and the authorization-decide route, both ungoverned by "
+                + "CIRCULARITY rather than by backlog. A third entry must be argued for.");
+
+        for (var i = 1; i < KnownUngovernedEndpoints.ExceptionPinHistory.Length; i++)
+        {
+            KnownUngovernedEndpoints.ExceptionPinHistory[i].Should()
+                .BeLessThan(KnownUngovernedEndpoints.ExceptionPinHistory[i - 1],
+                    "an exception set that can grow without a decrease is an escape hatch, which "
+                    + "is precisely what D17's shape requirements forbid");
+        }
+    }
+
+    [Test]
+    public void ExceptionSet_entriesAreDatedAndAttributed()
+    {
+        // A "named, dated, reviewed" exception that carries no date and names no
+        // reviewer is just a second baseline. Assert the metadata is really there.
+        var problems = KnownUngovernedEndpoints.ReviewedUngovernedExceptions
+            .Where(e => !DateOnly.TryParse(e.AddedOn, out _)
+                        || string.IsNullOrWhiteSpace(e.Story)
+                        || !KnownUngovernedEndpoints.IsClassified(e.Justification))
+            .Select(e => $"  {e.Method} {e.Pattern}: addedOn='{e.AddedOn}' story='{e.Story}'")
+            .ToList();
+
+        problems.Should().BeEmpty(
+            "every exception must carry an ISO date, the reviewing story id, and a justification "
+            + "that passes the SAME classifier as the baseline:"
+            + Environment.NewLine + string.Join(Environment.NewLine, problems));
+    }
+
+    [Test]
+    public void ExceptionSet_doesNotOverlapTheBaseline()
+    {
+        // An entry in both would be counted once by BySiteKey and twice by the two
+        // pins — a way to inflate one number while the other hides it.
+        var baseline = KnownUngovernedEndpoints.All
+            .Select(e => $"{e.Method} {e.Pattern}").ToHashSet(StringComparer.Ordinal);
+
+        var overlap = KnownUngovernedEndpoints.ReviewedUngovernedExceptions
+            .Where(e => baseline.Contains($"{e.Method} {e.Pattern}"))
             .Select(e => $"  {e.Method} {e.Pattern}")
             .ToList();
 
-        uses.Should().BeEmpty(
-            "measured 2026-07-29: 0 uses, because the gate-evaluation route arrives with Story 43-9. "
-            + "When 43-9 lands it, DELETE this test (the arm is live from then on) rather than "
-            + "widening it — an unused arm and a used arm are different facts:"
-            + Environment.NewLine + string.Join(Environment.NewLine, uses));
+        overlap.Should().BeEmpty(
+            "a route belongs to the backlog baseline OR to the reviewed exception set, never both:"
+            + Environment.NewLine + string.Join(Environment.NewLine, overlap));
+    }
+
+    [Test]
+    public void ExceptionSet_routesStillExistAndAreStillUnbound()
+    {
+        // Staleness, both ways (D17(5)). The generic staleness arm in Classify()
+        // already covers these because BySiteKey unions them in, but that arm
+        // reports them as BASELINE entries; this one names the exception set, so a
+        // failure points at the file that has to change.
+        var live = InScopeEndpoints().ToLookup(f => f.SiteKey, StringComparer.Ordinal);
+
+        var problems = KnownUngovernedEndpoints.ReviewedUngovernedExceptions
+            .Select(e =>
+            {
+                var key = $"{e.Method} {e.Pattern}";
+                if (!live[key].Any())
+                    return $"  {key}: a reviewed exception for a route that no longer exists — DELETE it.";
+                if (live[key].All(f => f.IsGoverned))
+                    return $"  {key}: a reviewed exception for a route that is now BOUND — DELETE it.";
+                return null;
+            })
+            .Where(m => m is not null).Select(m => m!).ToList();
+
+        problems.Should().BeEmpty(
+            "the exception set must drain like any other ratchet:"
+            + Environment.NewLine + string.Join(Environment.NewLine, problems));
+    }
+
+    /// <summary>
+    /// The exception set's staleness probe for the meta-test: drives the REAL
+    /// coverage classifier with an exception-shaped entry whose route is now bound.
+    /// </summary>
+    internal static IReadOnlyList<string> ExceptionRatchetStalenessProbe()
+    {
+        var key = new ActionKey(ActionNamespace.Effect, ExternalEffect.EngineEventsAppend.ToWire());
+        var (_, stale) = Classify(
+            [Fact("POST", "/api/fixture/exception-probe", key)],
+            Baseline(new KnownUngovernedEndpoints.Entry(
+                "POST", "/api/fixture/exception-probe",
+                "gate-evaluation-endpoint-cannot-gate-itself: fixture")));
+        return stale;
     }
 
     [Test]
     public void Baseline_justificationsAreClassified()
     {
         var unclassified = KnownUngovernedEndpoints.All
+            .Concat(KnownUngovernedEndpoints.ExceptionsAsEntries)
             .Where(e => !KnownUngovernedEndpoints.IsClassified(e.Justification))
             .Select(e => $"  {e.Method} {e.Pattern}: '{e.Justification}'")
             .ToList();

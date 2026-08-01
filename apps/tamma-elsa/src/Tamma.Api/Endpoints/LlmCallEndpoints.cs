@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Tamma.Api.Services.Actions;
 using Tamma.Api.Services.Agents;
 using Tamma.Core;
+using Tamma.Core.Actions;
 using Tamma.Core.Logging;
 using Tamma.Data;
 
@@ -44,6 +46,30 @@ namespace Tamma.Api.Endpoints;
 /// against an unexpected throw from the composition layer, the handler wraps the
 /// call and maps any escape into a typed key-free <c>PROVIDER_ERROR</c> body with
 /// a transient <c>httpStatusCode</c> of 0 (which RetryCheck WILL retry).</para>
+///
+/// <para><b>SEAM A — OBSERVE-ONLY IN EVERY VERSION</b> (Story 43-9 AC3, epic
+/// decision D2). The handler evaluates the autonomy gate for
+/// <c>agent-action:{request.Action}</c> when the request names one, writes the
+/// audit row, and then <b>always proceeds, whatever the outcome</b>. Two
+/// independent reasons, either sufficient:</para>
+/// <list type="number">
+///   <item>a <c>RequiresHuman</c> returned HERE reaches a <c>DispatchWorkflow</c>
+///   whose CALLING workflow has no human route in 44 of 45 cases — the workflow
+///   would suspend with nobody able to resume it, which is strictly worse than
+///   proceeding;</item>
+///   <item>blocking here AND at Seam E would DOUBLE-GATE deploy: the deployment
+///   pipeline reaches the model through this very route
+///   (<c>DeploymentPipelineWorkflow.StageDeployDispatch</c> → <c>llm-call</c>)
+///   while Seam E gates the prod-approval decision. Agent-action enforcement
+///   therefore lives ONLY at Seam E, where a real human wait exists.</item>
+/// </list>
+/// <para>This is structural, not a carve-out: under Story 43-9's D15 the route
+/// carries <c>.Governs(effect:llm.call)</c> (a BINDING — metadata) and
+/// deliberately does NOT carry <c>.EnforcesGovernance()</c> (the OPT-IN). Both
+/// arms are pinned — <c>LlmCallSeam_NeverBlocks_EvenUnderEnforce</c> for the
+/// behaviour and <c>LlmCallRoute_IsBound_ButNotEnforced</c> for the wiring — so
+/// a future author who "completes" Seam A goes red on the wiring, not only on a
+/// behaviour test that a filter change could route around.</para>
 /// </summary>
 public static class LlmCallEndpoints
 {
@@ -60,9 +86,20 @@ public static class LlmCallEndpoints
         IManagedAgent managed,
         ILlmCallResponseMapper mapper,
         ILoggerFactory loggerFactory,
-        CancellationToken ct)
+        CancellationToken ct,
+        IAutonomyGate? autonomyGate = null,
+        IGovernancePrincipalResolver? principals = null)
     {
         var logger = loggerFactory.CreateLogger("Tamma.Api.Endpoints.LlmCallEndpoints");
+
+        // ── SEAM A — OBSERVE ONLY, IN EVERY VERSION (AC3 / epic D2) ─────────
+        // Evaluate, audit, and PROCEED. There is deliberately no branch on the
+        // outcome below this call and there must never be one: see the class
+        // doc for the 44-of-45 no-human-route reason and the deploy
+        // double-gating reason. The evaluation is wrapped because an observing
+        // seam must not be able to fail a call it is not allowed to block.
+        await ObserveAutonomyAsync(request, autonomyGate, principals, logger, ct)
+            .ConfigureAwait(false);
 
         // Finding C1 — the AUTHORITATIVE tenant is the auth-derived ambient
         // tenant (ITenantContext, populated by TenantContextMiddleware from the
@@ -157,5 +194,64 @@ public static class LlmCallEndpoints
         }
 
         return mapper.ToHttpResult(run);
+    }
+
+    /// <summary>
+    /// Seam A's whole implementation: evaluate <c>agent-action:{Action}</c> when
+    /// the request names one, and return. It has NO return value on purpose —
+    /// there is nothing a caller could branch on, which is the cheapest way to
+    /// make "Seam A never blocks" true by construction rather than by discipline.
+    ///
+    /// <para>The gate itself writes the audit row
+    /// (<c>ActionGateEventsService.EmitDecisionAsync</c>), so this method neither
+    /// duplicates nor suppresses it. Note the volume gate: a shipped-default
+    /// allow emits nothing, which is why a 40-step run does not write 40 "nothing
+    /// happened" rows — but a resolution that came from a real policy row, a
+    /// degraded read, or a block DOES get a row, and that is the observation this
+    /// seam exists to produce.</para>
+    ///
+    /// <para>Every failure is swallowed at WARNING. An observe-only seam that can
+    /// 500 the request it is observing would be a blocking seam with extra steps
+    /// — precisely the outcome D2 forbids.</para>
+    /// </summary>
+    private static async Task ObserveAutonomyAsync(
+        LlmCallRequest request,
+        IAutonomyGate? gate,
+        IGovernancePrincipalResolver? principals,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (gate is null || string.IsNullOrWhiteSpace(request.Action)) return;
+
+        try
+        {
+            var principal = principals is null
+                ? GovernancePrincipal.Platform
+                : await principals.ResolveAsync(caller: null, ct).ConfigureAwait(false);
+
+            // The agent-action plane, not effect:llm.call: the interesting
+            // question at this seam is WHICH agent step is running, and the
+            // effect member is what the ROUTE is bound to for the drift
+            // harnesses. An uncatalogued action key resolves Automated with
+            // reason `uncatalogued` (epic D2) rather than throwing.
+            _ = await gate.EvaluateAsync(
+                new AutonomyQuery(
+                    new ActionKey(ActionNamespace.AgentAction, request.Action!),
+                    principal,
+                    Role: request.Role,
+                    Operation: "POST /api/v1/llm/call",
+                    Target: request.Action,
+                    CorrelationId: request.CorrelationId),
+                ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Seam A autonomy observation failed for action={Action}; the call PROCEEDS "
+                + "(this seam never blocks, in any version). correlationId={CorrelationId}",
+                LogSanitizer.Clean(request.Action),
+                LogSanitizer.Clean(request.CorrelationId));
+        }
     }
 }

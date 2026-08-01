@@ -113,12 +113,22 @@ public class GovernanceHostFixture
     /// <param name="Kind">Which registration shape produced it (see <see cref="EndpointKind"/>).</param>
     /// <param name="DisplayName">Endpoint display name, for failure messages only.</param>
     /// <param name="Action">The bound catalog action, when the endpoint carries gate metadata.</param>
+    /// <param name="EnforcesGovernance">
+    /// Story 43-9 D15 — whether the endpoint separately opted INTO enforcement
+    /// (<c>.EnforcesGovernance()</c> for a minimal API, <c>[EnforcesGovernance]</c>
+    /// for a controller action). Binding and enforcing are two different facts:
+    /// <see cref="IsGoverned"/> says WHICH action a route performs,
+    /// this says whether the gate DECIDES it. Defaulted so the many existing
+    /// synthetic <c>EndpointFact</c>s in this folder's discrimination tests keep
+    /// compiling unchanged.
+    /// </param>
     public sealed record EndpointFact(
         string Method,
         string Pattern,
         string Kind,
         string DisplayName,
-        ActionKey? Action)
+        ActionKey? Action,
+        bool EnforcesGovernance = false)
     {
         /// <summary>The ratchet/baseline key: <c>"POST /api/v1/thing"</c>.</summary>
         public string SiteKey => $"{Method} {Pattern}";
@@ -172,6 +182,12 @@ public class GovernanceHostFixture
             var pattern = route.RoutePattern.RawText ?? "(no-pattern)";
             if (!pattern.StartsWith('/')) pattern = "/" + pattern;
             var gate = endpoint.Metadata.GetMetadata<IActionGateMetadata>();
+            // Story 43-9 D15 — the enforcement opt-in is a SECOND, independent
+            // piece of metadata. Both authoring planes implement the same
+            // interface (a minimal-API marker record and an MVC filter attribute),
+            // so one lookup sees both; that is the whole reason the interface
+            // exists rather than the filter being attached inside Governs().
+            var enforced = endpoint.Metadata.GetMetadata<IGovernanceEnforcementMetadata>() is not null;
             var kind = ClassifyKind(endpoint, pattern);
 
             var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
@@ -184,12 +200,12 @@ public class GovernanceHostFixture
                 // keyed on an explicit POST would have silently dropped all seven —
                 // the exact "sweep that reads as coverage" failure this story is
                 // about.
-                facts.Add(new EndpointFact("*", pattern, kind, endpoint.DisplayName ?? pattern, gate?.Action));
+                facts.Add(new EndpointFact("*", pattern, kind, endpoint.DisplayName ?? pattern, gate?.Action, enforced));
                 continue;
             }
 
             facts.AddRange(methods.Select(m =>
-                new EndpointFact(m.ToUpperInvariant(), pattern, kind, endpoint.DisplayName ?? pattern, gate?.Action)));
+                new EndpointFact(m.ToUpperInvariant(), pattern, kind, endpoint.DisplayName ?? pattern, gate?.Action, enforced)));
         }
 
         return facts;

@@ -49,7 +49,9 @@ public class WorkflowInterfaceGraphTests
         // moved none either.
         // Story 41-9 — 17 → 18: added the adr-authoring edge (consumes [design, findings],
         // produces prose). Same lockstep, same reason: one conscious edit per producing workflow.
-        DocumentTypeRegistry.WorkflowInterfaces.Should().HaveCount(18);
+        // Story 41-3 — 18 → 19: added the backlog-prioritization edge (consumes
+        // [triage-decision, findings], produces backlog-ordering). Same lockstep.
+        DocumentTypeRegistry.WorkflowInterfaces.Should().HaveCount(19);
     }
 
     [Test]
@@ -135,6 +137,11 @@ public class WorkflowInterfaceGraphTests
             // Story 41-9 — the ADR binding (consumes [design, findings], produces prose) is the
             // reference prose-on-lifecycle binding; real binding ⇒ non-provisional.
             "adr-authoring",
+            // Story 41-3 — the backlog-prioritization binding (consumes [triage-decision,
+            // findings] through bounded per-item reads, produces backlog-ordering) is a real
+            // document-lifecycle binding ⇒ non-provisional. Omitting it here while the seed row
+            // says Provisional=false fails the bidirectional half of this assertion.
+            "backlog-prioritization",
         };
 
         DocumentTypeRegistry.WorkflowInterfaces

@@ -57,6 +57,19 @@ public sealed class RevealTokenSweeper : BackgroundService
         {
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
             {
+                // Seam D (Story 43-9 AC9) — ONE gate call per tick, deny-only.
+                // Sited in ExecuteAsync rather than inside RunOneSweepAsync so the
+                // internal single-iteration seam this class exposes for tests
+                // stays a pure "do the work" call.
+                if (!await Tamma.Api.Services.Actions.BackgroundActionGateAccessor
+                        .MayRunTickAsync(
+                            _scopeFactory,
+                            Tamma.Core.Actions.BackgroundActor.RevealTokenSweeper,
+                            tenantId: null, stoppingToken).ConfigureAwait(false))
+                {
+                    continue;
+                }
+
                 await RunOneSweepAsync(stoppingToken).ConfigureAwait(false);
             }
         }

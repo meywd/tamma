@@ -289,6 +289,31 @@ public sealed record AutonomyQuery(
 /// Story 43-9's seams. <see cref="Enforced"/> false means observe-only: the
 /// outcome is reported but a seam must not block on it.
 /// </summary>
+/// <param name="AuthorizationId">
+/// Story 43-9 AC12 — the <c>action_authorizations</c> row this decision is tied
+/// to, when there is one. Two DIFFERENT facts share the field, told apart by
+/// <see cref="CoveredBy"/>:
+/// <list type="bullet">
+/// <item>with <see cref="CoveredBy"/> NON-null: the id of the GRANT that was
+/// consumed to turn a <see cref="AutonomyOutcome.RequiresHuman"/> into an
+/// <see cref="AutonomyOutcome.Automated"/> — one human decision covering the
+/// whole correlation rather than one per retry;</item>
+/// <item>with <see cref="CoveredBy"/> null: the id of the PENDING request a
+/// seam minted so the person has something to decide (the id a Seam C 409
+/// hands back to the caller).</item>
+/// </list>
+/// The pure <see cref="AutonomyGateEvaluator"/> NEVER sets either — the ledger
+/// is a database and the evaluator has no I/O. Both are stamped by
+/// <c>AutonomyGateService</c> (the consult) and the seams (the request).
+/// </param>
+/// <param name="CoveredBy">
+/// The wire string of the ledger grant's TARGET that covered this action — the
+/// action key wire for an action-scoped grant, the group wire for a
+/// group-scoped one. Non-null iff a grant was consumed. It is the group case
+/// that makes the field worth carrying: an auditor must be able to see that one
+/// <c>deploy-control</c> grant covered a member of that group, not a decision
+/// taken about the member itself.
+/// </param>
 public sealed record AutonomyDecision(
     AutonomyOutcome Outcome,
     ActionKey Action,
@@ -300,7 +325,9 @@ public sealed record AutonomyDecision(
     bool Enforced,
     bool Enabled,
     IReadOnlyList<string>? AllowedRoles,
-    string Reason);
+    string Reason,
+    Guid? AuthorizationId = null,
+    string? CoveredBy = null);
 
 /// <summary>
 /// THE autonomy gate (Story 43-5): resolves whether an action is automated,

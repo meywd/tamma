@@ -127,7 +127,17 @@ public sealed class OutboxSlackSender : BackgroundService
         {
             try
             {
-                await ProcessOnceAsync(stoppingToken).ConfigureAwait(false);
+                // Seam D (Story 43-9 AC9) — ONE gate call per tick, deny-only.
+                // See BackgroundActionGate for why an evaluation ERROR answers
+                // "run" rather than stopping every sweeper on a CP blip.
+                if (await Tamma.Api.Services.Actions.BackgroundActionGateAccessor
+                        .MayRunTickAsync(
+                            _serviceProvider,
+                            Tamma.Core.Actions.BackgroundActor.OutboxSlackSender,
+                            tenantId: null, stoppingToken).ConfigureAwait(false))
+                {
+                    await ProcessOnceAsync(stoppingToken).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

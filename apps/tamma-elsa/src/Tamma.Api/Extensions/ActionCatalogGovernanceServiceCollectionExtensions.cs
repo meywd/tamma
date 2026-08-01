@@ -83,6 +83,26 @@ public static class ActionCatalogGovernanceServiceCollectionExtensions
         services.TryAddScoped<ActionGateEventsService>();
         services.TryAddScoped<IAutonomyGate, AutonomyGateService>();
 
+        // Story 43-9 AC12(c)/AC13 — the REQUEST half of the ledger, and the one
+        // reader `Tamma:Governance:AuthorizationTtlHours` has ever had. Singleton
+        // because it holds only the resolved TTL and delegates to the singleton
+        // ledger; the principal it keys a row to is passed in by the caller, never
+        // resolved here (a re-resolution without the caller's claims would key
+        // some rows to the wrong principal and the consult would never find them).
+        services.TryAddSingleton<IActionAuthorizationRequests>(sp =>
+            new ActionAuthorizationRequests(
+                sp.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>(),
+                sp.GetService<IActionAuthorizationLedger>(),
+                sp.GetService<ILogger<ActionAuthorizationRequests>>()));
+
+        // Story 43-9 Seam D — the deny-only background gate. SINGLETON, and it
+        // takes IServiceScopeFactory rather than IAutonomyGate: the gate and the
+        // principal resolver are SCOPED (they read the scoped ITenantContext /
+        // IEventRepository), and injecting a scoped service into a singleton
+        // IHostedService is a startup crash, not a test failure. Every tick makes
+        // its own scope.
+        services.TryAddSingleton<IBackgroundActionGate, BackgroundActionGate>();
+
         // ── Seam B — the tool-loop gate ─────────────────────────────────────
         // Story 43-5 data-source seam: the 43-4 gate class, now fed by the
         // 43-5 assignment ladder (SCOPED — it reads the scoped ITenantContext;

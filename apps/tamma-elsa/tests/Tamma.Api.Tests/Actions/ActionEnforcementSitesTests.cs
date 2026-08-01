@@ -198,7 +198,25 @@ public class ActionEnforcementSitesTests
             + "were reconciled independently and one of them is wrong.");
 
         bound.Count.Should().Be(21);
-        baselined.Count.Should().Be(KnownUngovernedEndpoints.PinnedCount);
+
+        // Story 43-9 D17, 2026-08-01 — `baselined` is now the UNION of two
+        // separately-pinned collections, so it can no longer equal PinnedCount
+        // alone. The partition property is unchanged and is what this test exists
+        // for; the arithmetic is restated rather than relaxed:
+        //   • KnownUngovernedEndpoints.All (216) — the ungoverned BACKLOG, strictly
+        //     shrink-only, because "a new ungoverned route is not a reason to raise
+        //     the pin, it is the signal the ratchet exists to produce";
+        //   • ReviewedUngovernedExceptions (2) — routes that CANNOT be governed
+        //     without circularity (the gate-evaluation route, and the route a
+        //     person uses to override a gate denial), each named, dated and
+        //     reviewed, itself count-pinned and itself shrink-only.
+        // Asserting both terms means neither can absorb growth from the other.
+        baselined.Count.Should().Be(
+            KnownUngovernedEndpoints.PinnedCount
+            + KnownUngovernedEndpoints.ExceptionPinHistory[^1]);
+        KnownUngovernedEndpoints.All.Count.Should().Be(KnownUngovernedEndpoints.PinnedCount);
+        KnownUngovernedEndpoints.ReviewedUngovernedExceptions.Count.Should()
+            .Be(KnownUngovernedEndpoints.ExceptionPinHistory[^1]);
     }
 
     // ====================================================================

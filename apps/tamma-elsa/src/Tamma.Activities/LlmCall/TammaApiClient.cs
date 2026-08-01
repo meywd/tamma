@@ -420,6 +420,42 @@ public class TammaApiClient
         return PostAsync<Models.EmailCallResponse>(url, request, tenantId, ct);
     }
 
+    // ----- Governance (Story 43-9 Seam E) --------------------------------
+
+    /// <summary>
+    /// Story 43-9 <b>Seam E</b> (AC10, D9) — ask the API whether the system may
+    /// perform a catalogued action by itself right now:
+    /// <c>POST /api/v1/governance/evaluate</c> (<c>EngineServiceOnly</c>).
+    ///
+    /// <para><b>It is a READ and mints no <c>ExternalEffect</c> member.</b> The
+    /// route is deliberately UNGOVERNED — the gate-evaluation endpoint cannot gate
+    /// itself without being circular — and carries that exact justification in
+    /// <c>KnownUngovernedEndpoints</c>.</para>
+    ///
+    /// <para><b>It is also the one method that had to widen a strictly-decreasing
+    /// ratchet</b> (Story 43-9 Decision D17). <c>KnownNonEffectClientMethods</c>
+    /// is count-pinned at 19 with a shrink-only history, so a genuinely read-only
+    /// new method could not be baselined without either mis-classifying it as an
+    /// effect or splitting the client so the sweep stops seeing it. It is instead
+    /// listed in a NAMED, DATED, per-method exception set that is itself
+    /// count-pinned and shrink-only — see
+    /// <c>MediationClientEffectSweepTests.ReviewedNonEffectExceptions</c>.</para>
+    ///
+    /// <para>Returns <c>null</c> on any non-2xx or transport failure, like every
+    /// other method here. The CALLER decides what null means; for
+    /// <c>CheckActionGateActivity</c> it means FAIL OPEN, because Seam E's one
+    /// adoption is an additive OR term and a control-plane blip must not stall a
+    /// deployment pipeline that would have proceeded anyway.</para>
+    /// </summary>
+    public Task<Policy.GovernanceEvaluateResponse?> EvaluateGovernanceAsync(
+        Policy.GovernanceEvaluateRequest request,
+        string? tenantId = null,
+        CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/governance/evaluate";
+        return PostAsync<Policy.GovernanceEvaluateResponse>(url, request, tenantId, ct);
+    }
+
     // ----- Provider Health ---------------------------------------------
 
     public Task<ProviderHealthStatus?> GetProviderHealthAsync(

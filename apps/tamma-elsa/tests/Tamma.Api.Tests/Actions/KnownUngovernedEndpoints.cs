@@ -29,8 +29,22 @@ namespace Tamma.Api.Tests.Actions;
 /// MACHINERY, not prose: <c>ActionEnforcementSites</c> computes the enforcement
 /// sites per action from this same endpoint metadata and the admin API serialises
 /// them as <c>enforcementSites</c>, so a catalog row with an EMPTY array must render
-/// as "not enforced anywhere yet" rather than as governed. Note also that a binding
-/// is metadata today: Story 43-9 attaches the filter that evaluates the gate.</para>
+/// as "not enforced anywhere yet" rather than as governed. <b>Updated 2026-08-01
+/// (Story 43-9 D15):</b> a binding is STILL metadata — <c>.Governs(key)</c> never
+/// enforces. Enforcement is a separate per-route opt-in
+/// (<c>.EnforcesGovernance()</c> / <c>[EnforcesGovernance]</c>), so "bound" and
+/// "enforced" are two different populations and
+/// <c>GovernedEndpointEnforcementSweepTests</c> pins the second EXACTLY. Today: 16
+/// of the 21 bound routes enforce; <c>POST /api/v1/llm/call</c> is bound and
+/// deliberately never enforces (Seam A); the four <c>MentorshipController</c>
+/// actions are bound and not yet opted in.</para>
+///
+/// <para><b>TWO shrink-only collections live here, not one</b> (Story 43-9 D17):
+/// <see cref="All"/> is the ungoverned BACKLOG — routes that should eventually be
+/// governed — and <see cref="ReviewedUngovernedExceptions"/> is the set of routes
+/// that CANNOT be governed without circularity. Keeping them apart is what lets the
+/// backlog pin stay strictly-decreasing while a genuinely necessary new ungoverned
+/// route is still representable, named and dated.</para>
 ///
 /// <para><b>Justifications are grouped by route family, deliberately.</b> Writing
 /// ~230 individually-reasoned sentences would produce ~230 paraphrases of the same
@@ -84,14 +98,14 @@ internal static class KnownUngovernedEndpoints
 
         // The gate-evaluation endpoint itself.
         //
-        // PRE-PROVISIONED, ZERO USES as of 2026-07-29 (review F18(b)). The route it
-        // classifies — POST /api/v1/governance/evaluate — does not exist yet; Story
-        // 43-9 adds it and AC11 names this exact string as the justification it must
-        // enter the baseline with. It is kept rather than deleted so 43-9's diff is
-        // the route plus one baseline entry, not a vocabulary negotiation, and it is
-        // NOT dead weight a reviewer must guess about: its use count is pinned at 0
-        // by GovernedEndpointCoverageSweepTests.PreProvisionedJustificationKeyword_
-        // isStillUnused, which goes red the day 43-9 uses it.
+        // LIVE as of 2026-08-01 (Story 43-9). It was pre-provisioned with ZERO uses
+        // on 2026-07-29 (review F18(b)) and its use count was pinned at 0 by
+        // GovernedEndpointCoverageSweepTests.PreProvisionedJustificationKeyword_
+        // isStillUnused. 43-9 landed POST /api/v1/governance/evaluate, so that test
+        // is DELETED rather than widened — an unused arm and a used arm are
+        // different facts, and 43-8's own failure message said which way to resolve
+        // it. The route it classifies is in ReviewedUngovernedExceptions, not in the
+        // shrink-only baseline: see the D17 note there for why.
         "gate-evaluation-endpoint-cannot-gate-itself",
 
         // No catalog member exists for this capability at all; cataloguing it is a
@@ -154,7 +168,81 @@ internal static class KnownUngovernedEndpoints
     /// <c>Baseline_countIsPinned</c> must be reconciled separately. Today:
     /// 237 in scope, 216 baselined, 21 bound.</para>
     /// </summary>
-    internal const int PinnedInScopeCount = 237;
+    internal const int PinnedInScopeCount = 239;
+
+    // =======================================================================
+    // Story 43-9 DECISION D17 — the NAMED, DATED, REVIEWED exception set
+    // =======================================================================
+
+    /// <summary>
+    /// One reviewed exception to the shrink-only baseline.
+    /// </summary>
+    /// <param name="Method">Upper-case HTTP method.</param>
+    /// <param name="Pattern">Raw route pattern.</param>
+    /// <param name="AddedOn">ISO date the exception was reviewed.</param>
+    /// <param name="Story">The story that reviewed it.</param>
+    /// <param name="Justification">Why it is not governed; must classify.</param>
+    internal sealed record Exception(
+        string Method, string Pattern, string AddedOn, string Story, string Justification);
+
+    /// <summary>
+    /// <b>Story 43-9 D17.</b> Routes that are ungoverned by NECESSITY, not by
+    /// backlog, and that arrived AFTER <see cref="PinnedCount"/> became
+    /// shrink-only.
+    ///
+    /// <para><b>Why this exists at all.</b> <see cref="PinnedCount"/> is the last
+    /// element of a strictly-decreasing <see cref="PinHistory"/>, asserted twice
+    /// (in <c>GovernedEndpointCoverageSweepTests</c> and again from the registry by
+    /// <c>RatchetDisciplineTests</c>). That is exactly right for the ungoverned
+    /// BACKLOG — "a new ungoverned route is not a reason to raise the pin, it is
+    /// the signal the ratchet exists to produce". But it makes a route that CANNOT
+    /// be governed unrepresentable: 216 → 217 is red by design, and editing 216 in
+    /// place is the undeclared re-widening the ratchet exists to catch. The two
+    /// alternatives were worse — bind a route that must not be bound, or move it
+    /// somewhere the sweep does not look.</para>
+    ///
+    /// <para><b>Why it cannot become a blanket escape hatch.</b> It is keyed
+    /// PER ROUTE, so a different new route still goes red; each entry carries a
+    /// date, the reviewing story and a justification that must pass the SAME
+    /// classifier as the baseline; the set is itself count-pinned and itself
+    /// shrink-only; it is declared in <c>RatchetDisciplineTests.Ratchets()</c> so
+    /// all three AC8 properties are asserted against it; and staleness applies
+    /// both ways — an entry whose route no longer exists, or which becomes bound,
+    /// fails until deleted. The rejected alternative was the count-level
+    /// "name the index that may rise" precedent, which is ANONYMOUS: any future
+    /// route could occupy the widened slot.</para>
+    ///
+    /// <para><b>SEEDED AT 2, not 1.</b> Story 43-9's plan budgeted one exception
+    /// (the gate-evaluation route). Implementing it produced TWO ungoverned
+    /// routes that cannot be governed, both for the same circularity reason in
+    /// different directions: the route that ASKS the gate, and the route a person
+    /// uses to OVERRIDE it. Gating the second would mean an admin needs a grant in
+    /// order to issue a grant — the exact deadlock the authorization ledger
+    /// exists to prevent. Recorded here rather than smuggled into one entry.</para>
+    /// </summary>
+    internal static readonly IReadOnlyList<Exception> ReviewedUngovernedExceptions =
+    [
+        new("POST", "/api/v1/governance/evaluate", "2026-08-01", "Story 43-9",
+            "gate-evaluation-endpoint-cannot-gate-itself: the engine's mediation route to the "
+            + "autonomy gate (Tamma.ElsaServer registers no repository and cannot inject "
+            + "IAutonomyGate, so CheckActionGateActivity asks over HTTP). It mints no "
+            + "ExternalEffect member because it is a READ. Binding it would be circular — the "
+            + "route would have to evaluate the gate to decide whether it may evaluate the gate."),
+
+        new("POST", "/api/actions/authorizations/{id:guid}/decide", "2026-08-01", "Story 43-9",
+            "human-operated: the authorization ledger's decision surface — a person grants or "
+            + "denies one pending authorization from the dashboard, behind ActionsManage. It is "
+            + "THE override for a gate denial, so gating it would require a grant in order to "
+            + "issue a grant: an admin whose deploy was blocked could never unblock it. Same "
+            + "circularity as the gate-evaluation route, in the opposite direction."),
+    ];
+
+    /// <summary>The exception set's own count pin — shrink-only, seeded 2026-08-01.</summary>
+    internal static readonly int[] ExceptionPinHistory = [2];
+
+    /// <summary>Exception entries as baseline entries, for the coverage rule's lookup.</summary>
+    internal static IEnumerable<Entry> ExceptionsAsEntries =>
+        ReviewedUngovernedExceptions.Select(e => new Entry(e.Method, e.Pattern, e.Justification));
 
     /// <summary>The baseline itself.</summary>
     internal static readonly IReadOnlyList<Entry> All =
@@ -184,7 +272,7 @@ internal static class KnownUngovernedEndpoints
         new("DELETE", "/api/admin/providers/{key}/settings",
             "human-operated: platform-owner admin console mutation behind PlatformOwnerAccess; reached by a person, never by an agent, so gating it would gate a human on themselves"),
         new("DELETE", "/api/admin/scheduled-triggers/{id:guid}",
-            "binding-owned-by Story 43-9: catalogued as effect:schedule.create|update|delete (Story 41-30); the route exists, the binding does not yet"),
+            "human-operated: platform-owner scheduled-trigger CONFIGURATION behind PlatformOwnerAccess. DECIDED 2026-08-01 by Story 43-9 (§C-bis), which this entry used to name as the binding owner: it is NOT bound, and the previous 'binding-owned-by Story 43-9' text was an expectation nobody had taken. Reasoning: the epic's general rule for /api/admin/* is that a surface reached by a person and never by an agent must not be gated, because gating it gates a human on themselves; and the catalogued effects this route family performs (effect:schedule.create|update|delete) are classified RouteOnly in MediationClientEffectSweepTests precisely because they are reached from the dashboard, not through the engine mediation client. What the schedule ARMS is governed at its own seams when it fires. A future story that binds this owns the behaviour change"),
         new("DELETE", "/api/admin/service-keys/{id}",
             "human-operated: platform-owner admin console mutation behind PlatformOwnerAccess; reached by a person, never by an agent, so gating it would gate a human on themselves"),
         new("DELETE", "/api/admin/tenant-databases/{databaseId:guid}",
@@ -292,9 +380,9 @@ internal static class KnownUngovernedEndpoints
         new("POST", "/api/admin/providers",
             "human-operated: platform-owner admin console mutation behind PlatformOwnerAccess; reached by a person, never by an agent, so gating it would gate a human on themselves"),
         new("POST", "/api/admin/scheduled-triggers/",
-            "binding-owned-by Story 43-9: catalogued as effect:schedule.create|update|delete (Story 41-30); the route exists, the binding does not yet"),
+            "human-operated: platform-owner scheduled-trigger CONFIGURATION behind PlatformOwnerAccess. DECIDED 2026-08-01 by Story 43-9 (§C-bis), which this entry used to name as the binding owner: it is NOT bound, and the previous 'binding-owned-by Story 43-9' text was an expectation nobody had taken. Reasoning: the epic's general rule for /api/admin/* is that a surface reached by a person and never by an agent must not be gated, because gating it gates a human on themselves; and the catalogued effects this route family performs (effect:schedule.create|update|delete) are classified RouteOnly in MediationClientEffectSweepTests precisely because they are reached from the dashboard, not through the engine mediation client. What the schedule ARMS is governed at its own seams when it fires. A future story that binds this owns the behaviour change"),
         new("POST", "/api/admin/scheduled-triggers/{id:guid}/run-now",
-            "binding-owned-by Story 43-9: catalogued as effect:schedule.create|update|delete (Story 41-30); the route exists, the binding does not yet"),
+            "human-operated: platform-owner MANUAL FIRE of an existing scheduled trigger behind PlatformOwnerAccess. SPLIT OUT from the schedule-CRUD family on 2026-08-01 (Story 43-9 §C-bis) under this file's own rule that a member whose consequence differs in KIND gets its own line: run-now EXECUTES where the other three CONFIGURE, so a reviewer scanning this file must see it without reading route patterns. It is still ungoverned for the same reason, and the reason is stronger here than for CRUD: a person is pressing the button, and the workflow the fire dispatches is itself governed at its own seams when it runs — gating this would gate the human on themselves AND double-gate the dispatch. A future story that binds it owns the behaviour change"),
         new("POST", "/api/admin/secrets",
             "human-operated: platform-owner admin console mutation behind PlatformOwnerAccess; reached by a person, never by an agent, so gating it would gate a human on themselves"),
         new("POST", "/api/admin/secrets/{id:guid}/retire-version/{versionNumber:int}",
@@ -391,7 +479,7 @@ internal static class KnownUngovernedEndpoints
         new("POST", "/api/kb/mcp/servers/{id}/stop",
             "no-catalog-member: MCP-SERVER LIFECYCLE — the stop half of the pair above; same absent catalog member, same absent drift signal"),
         new("POST", "/api/kb/mcp/tools/invoke",
-            "binding-owned-by Story 43-9: the direct MCP tool-invocation proxy and the ONE route effect:mcp.tool.invoke actually names. 43-9 attaches the .Governs binding plus the enforcement filter"),
+            "binding-owned-by Story 43-9: the direct MCP tool-invocation proxy and the ONE route effect:mcp.tool.invoke actually names. DECISION REVERSED 2026-08-01 (Story 43-9 D16, §C): 43-9 deliberately does NOT bind or enforce this route, and this entry stays. Reason: on 2026-07-30 effect:mcp.tool.invoke was reversed to ship min: AutonomyDial.AlwaysHuman, because epic D2 tolerates an unclassified action at runtime only on the strength of the drift harnesses making it unmergeable in CI, and NO CI harness can enumerate a remote MCP server's tools — for MCP that half of the bargain does not exist and never will. So a binding here would NOT be behaviour-preserving: it would hard-block the route on day one, which is a behaviour change a story must argue for rather than inherit from a helper. Blast radius is independently empty today: no MCP tool executor is registered, so an mcp__* name already terminates as an unknown tool. A future story that binds it owns that behaviour change"),
         new("POST", "/api/kb/rag/query",
             "no-catalog-member: knowledge-base / RAG proxy write; the sidecar surface past the proxy is ungoverned and no catalog member covers it"),
         new("POST", "/api/kb/vector-db/search",
@@ -555,7 +643,7 @@ internal static class KnownUngovernedEndpoints
         new("PUT", "/api/admin/providers/{key}/settings",
             "human-operated: platform-owner admin console mutation behind PlatformOwnerAccess; reached by a person, never by an agent, so gating it would gate a human on themselves"),
         new("PUT", "/api/admin/scheduled-triggers/{id:guid}",
-            "binding-owned-by Story 43-9: catalogued as effect:schedule.create|update|delete (Story 41-30); the route exists, the binding does not yet"),
+            "human-operated: platform-owner scheduled-trigger CONFIGURATION behind PlatformOwnerAccess. DECIDED 2026-08-01 by Story 43-9 (§C-bis), which this entry used to name as the binding owner: it is NOT bound, and the previous 'binding-owned-by Story 43-9' text was an expectation nobody had taken. Reasoning: the epic's general rule for /api/admin/* is that a surface reached by a person and never by an agent must not be gated, because gating it gates a human on themselves; and the catalogued effects this route family performs (effect:schedule.create|update|delete) are classified RouteOnly in MediationClientEffectSweepTests precisely because they are reached from the dashboard, not through the engine mediation client. What the schedule ARMS is governed at its own seams when it fires. A future story that binds this owns the behaviour change"),
         new("PUT", "/api/admin/tenants/{tenantId:guid}/plan",
             "human-operated: platform-owner admin console mutation behind PlatformOwnerAccess; reached by a person, never by an agent, so gating it would gate a human on themselves"),
         new("PUT", "/api/admin/users/{id}/role",
@@ -602,8 +690,15 @@ internal static class KnownUngovernedEndpoints
             "no-catalog-member: agent / workflow / document orchestration write with no catalog member; classifying this family is epic README open question 5"),
     ];
 
-    /// <summary>Indexed by <c>"{METHOD} {pattern}"</c>.</summary>
+    /// <summary>
+    /// Indexed by <c>"{METHOD} {pattern}"</c> — the baseline UNIONED with the
+    /// reviewed exception set (Story 43-9 D17(4)). The union is what makes an
+    /// exception "accounted for" by the coverage rule; the COUNT PINS deliberately
+    /// see the two collections separately, so unreviewed growth of the baseline is
+    /// still impossible and growth of the exception set is its own visible number.
+    /// </summary>
     internal static readonly IReadOnlyDictionary<string, Entry> BySiteKey =
-        All.GroupBy(e => $"{e.Method} {e.Pattern}", StringComparer.Ordinal)
+        All.Concat(ExceptionsAsEntries)
+            .GroupBy(e => $"{e.Method} {e.Pattern}", StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 }

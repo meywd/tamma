@@ -293,6 +293,27 @@ public class ContractBindingTests
                 One("\"kind\""), One("\"audience\""), One("\"title\""), One("\"body\""),
             ]),
 
+            // BacklogPrioritizationWorkflow (Story 41-3) binds the
+            // (product_owner, prioritize-backlog) cell as the produce step of its
+            // document-lifecycle binding. The shape authority is the typed validator
+            // Tamma.Core/Documents/Types/BacklogOrdering.cs
+            // (BacklogOrderingDocumentType.Validate) — ≥1 item, unique item ids, ranks the
+            // unique gap-free 1..N sequence (no ties — arithmetic, not schema), and a
+            // rationale plus BOTH a value and an effort estimate on every item. The six token
+            // groups below are 41-1b's PendingProducerCells entry moved VERBATIM (that table's
+            // promise: the binding story adopts the pinned contract without rewriting it), and
+            // they are the same six Core-side pins RenderContractTokenTests.BacklogOrderingTokens
+            // holds. The shipped template — which ranked a SINGLE item and instructed the retired
+            // P0-P3 / severity / ownerRole triage vocabulary, i.e. very nearly TriageDecision's
+            // wire, and carried NONE of these six tokens — was REWRITTEN to the backlog-ordering
+            // wire in the same change (version 1 → 2, maxTokens 2048 → 8192; the 39-15 D7 /
+            // 41-2 / 41-9 precedent), and its KnownNonConformingTemplates baseline deleted.
+            [("product_owner", "prioritize-backlog")] = new("BacklogOrderingDocumentType.Validate",
+            [
+                One("\"items\""), One("\"itemId\""), One("\"rank\""),
+                One("\"rationale\""), One("\"value\""), One("\"effort\""),
+            ]),
+
             // DeploymentPipelineWorkflow.ParseStageStatus (DeploymentPipelineWorkflow.cs
             // ~l.669-702): FAIL-CLOSED — a stage only succeeds on an explicit
             // status:"success"; a reply with no "status" field is a failed deploy.
@@ -749,17 +770,12 @@ public class ContractBindingTests
             // (EveryBoundCell_TemplateStillCarriesEveryParserRequiredToken) plus the
             // example-conformance gate now own the cell. 6 entries → 5.
 
-            // BacklogOrdering.cs "Producing cell (41-1b D4)". Template rewrite is 41-3's
-            // job (it still instructs the retired P0-P3 triage vocabulary — baselined).
-            [("product_owner", "prioritize-backlog")] = new(
-                new CellContract("BacklogOrderingDocumentType.Validate",
-                [
-                    One("\"items\""), One("\"itemId\""), One("\"rank\""),
-                    One("\"rationale\""), One("\"value\""), One("\"effort\""),
-                ]),
-                "41-3 (backlog prioritization and grooming)",
-                "no compiled dispatch site exists until 41-3 lands its workflow; the shape authority " +
-                "is typed (BacklogOrdering.cs)"),
+            // GRADUATED (Story 41-3, 2026-08-01): (product_owner, prioritize-backlog).
+            // BacklogPrioritizationWorkflow now dispatches the pair, so
+            // EveryPendingProducerCell_IsUndispatched_AndClassifiedNowhereElse would fail on a
+            // surviving entry here. Its IntendedContract (the six BacklogOrdering token groups)
+            // moved VERBATIM into Bindings above, and the template-token gate plus the
+            // example-conformance gate now own the cell. 5 entries → 4.
 
             // TestPlan.cs "Producing cell (41-1b D4)". Template rewrite is 41-13's job
             // (it still instructs the legacy plan wire — baselined).

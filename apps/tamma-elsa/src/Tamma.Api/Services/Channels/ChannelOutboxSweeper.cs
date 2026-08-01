@@ -68,7 +68,20 @@ public sealed class ChannelOutboxSweeper : BackgroundService
         {
             try
             {
-                await SweepOnceAsync(stoppingToken);
+                // Seam D (Story 43-9 AC9) — ONE gate call per tick. Deny-only: a
+                // sweeper cannot suspend for a person, so automation:* collapses a
+                // below-threshold resolution to Denied and this tick is skipped.
+                // The helper catches everything internally and answers true on an
+                // evaluation ERROR (deny on a decision, never on an error), so it
+                // can never stop the host.
+                if (await Tamma.Api.Services.Actions.BackgroundActionGateAccessor
+                        .MayRunTickAsync(
+                            _serviceProvider,
+                            Tamma.Core.Actions.BackgroundActor.ChannelOutboxSweeper,
+                            tenantId: null, stoppingToken).ConfigureAwait(false))
+                {
+                    await SweepOnceAsync(stoppingToken);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

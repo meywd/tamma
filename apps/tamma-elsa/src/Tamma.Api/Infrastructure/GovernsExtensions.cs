@@ -7,12 +7,23 @@ namespace Tamma.Api.Infrastructure;
 /// <see cref="ActionGateMetadata"/>.
 ///
 /// <para>
-/// <c>.Governs(key)</c> attaches metadata ONLY. It does not enforce anything: Story
-/// 43-9 adds <c>.AddEndpointFilter&lt;ActionGateFilter&gt;()</c> here, so that
-/// annotating a route and enforcing on it remain one call. Landing the metadata
-/// first is deliberate — the drift harnesses must be able to see a binding before
-/// enforcement is attached to it, otherwise 43-9 would attach enforcement to a
-/// surface nothing verifies.
+/// <c>.Governs(key)</c> attaches metadata ONLY, and — <b>corrected 2026-08-01 by
+/// Story 43-9's Decision D15</b> — it always will. This doc-comment used to say
+/// that 43-9 would add <c>.AddEndpointFilter&lt;ActionGateFilter&gt;()</c> HERE
+/// "so that annotating a route and enforcing on it remain one call". That design
+/// is OVERTURNED. Enforcement is a separate, visible, per-route opt-in:
+/// <see cref="EnforcesGovernanceExtensions.EnforcesGovernance"/> for minimal APIs
+/// and <see cref="EnforcesGovernanceAttribute"/> for controller actions. The three
+/// reasons — blast radius, Seam A's "never blocks" being structural rather than a
+/// keyed carve-out, and the fact that the controller-attribute plane never passes
+/// through this method at all — are recorded on
+/// <see cref="IGovernanceEnforcementMetadata"/>.
+/// </para>
+///
+/// <para>
+/// 43-8's other claim is unaffected and still true: landing the metadata first was
+/// deliberate, because the drift harnesses must be able to see a binding before
+/// enforcement is attached to it.
 /// </para>
 ///
 /// <para>

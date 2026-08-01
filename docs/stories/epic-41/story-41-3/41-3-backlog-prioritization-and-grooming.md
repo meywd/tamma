@@ -1,6 +1,40 @@
 # Story 41-3: Backlog Prioritization & Grooming Workflow
 
-Status: drafted
+Status: implemented (2026-08-01) — `BacklogPrioritizationWorkflow` (`DefinitionId = backlog-prioritization`)
+ships as a thin binding over `document-lifecycle`; `BacklogBindingHelper` (`public static class`) owns the
+`backlog:{repository}:{backlogScope}` anchor and the shared **`NormalizeSegment`** transform 41-4/41-6
+delegate to (that name is this story's to give — the sibling plans never named it); the
+`prioritize-backlog` template was rewritten from the single-item P0–P3 / `ownerRole` triage vocabulary to
+the `backlog-ordering` wire (version 1 → 2, `maxTokens` 2048 → 8192) and its example validates with
+**zero** violations; the cell GRADUATED from `ContractBindingTests.PendingProducerCells` (5 → 4) into
+`Bindings` (18 → 19 entries) with its intended contract adopted verbatim, its
+`TemplateExampleConformanceTests.KnownNonConformingTemplates` baseline was deleted (pin 14 → 13,
+`PinHistory` `[11,16,15,14]` → `[11,16,15,14,13]`), and the `WorkflowInterfaceGraphTests` edge pin moved
+18 → 19 with `backlog-prioritization` added to the bidirectional `reconciled` array.
+
+**Claim boundary.** This story ships the *workflow* half. AC2's evidence contract is proven by resolving
+the three per-item read expressions out of the BUILT graph
+(`BacklogPrioritizationWorkflowStructureTests.EvidenceGathering_ReadsBothFindingsAnchorsPerItem_NotJustTheBareId`),
+**not** by an end-to-end Testcontainers run: every lifecycle execution fixture in the tree is `[Explicit]`
+and documented as failing when invoked (the bare-provider harness never resumes a
+`Kind=ActivityKind.Task` activity — `ProseLifecycleExecutionTests`, diagnosed 2026-07-29), so the
+implementation plan's `BacklogPrioritizationLifecycleExecutionTests` (a)–(f) would have been a fixture
+that never runs. See the 2026-08-01 implementation note below.
+
+## Implementation note — 2026-08-01
+
+- **The plan's `{FreshRun, LifecycleAccepted}` FlowDecision set is three, not two.** The graph carries
+  `{FreshRun, OrderingDrafted, LifecycleAccepted}`, mirroring the landed 41-2 binding. With only two
+  gates, `BACKLOG.GROOMING.ORDERED` could fire only on the accept branch — so a run that drafted an
+  ordering and was then rejected would leave no record that an ordering was ever produced, and `.ORDERED`
+  would be redundant with `.ACCEPTED`. `.ORDERED` now means "the lifecycle produced and validated an
+  ordering draft" and carries `itemCount` / `evidenceHits`.
+- **`itemId` is passed through, not pinned.** 44-3's open Cross-Story Contract C2 is still open: the
+  binding echoes whatever `itemId` the caller supplies (falling back to the derived issue id when the
+  caller supplies none), and the template instructs the model to echo it verbatim. The DIFFERENT field
+  `itemIssueId` — the 39-11 store read key — IS required to be `{repository}#{issueNumber}`, and an item
+  in any other form is recorded as an explicit evidence MISS (`BacklogBindingHelper.SeedEvidence`) rather
+  than silently treated as "no evidence", per AC2.
 
 ## User Story
 
