@@ -931,3 +931,59 @@ the approver). Cumulative: at dial N everything at ≤N is automated.
 - automation: `tenant-cleanup-requested-trigger`, `tenant-delete-requested-trigger`
 - effect: `deploy.promote-prod`, `deploy.rollback`
 - platform-task: `provisioning.tenant.deprovision`
+---
+
+## Amendment 3 — 2026-08-01: ZONES (product owner). Supersedes the containment bands and the empty-96-100 rule
+
+The product owner replaced the derived bands with named capability zones, in
+this order, at 5-point steps. 95-100 is VALID and holds the most dangerous
+actions (deletes). At dial 100 everything still automates (level <= dial).
+Merge and deploy each span several levels by TARGET importance.
+
+| Level | Zone | What sits there |
+|---|---|---|
+| 5 | Read-only | analysis, research, triage, read tools (`file_read`, `search_code`, `git_operations.read`) |
+| 10 | Sensitive reads | `audit-secrets`, `secret.reveal` |
+| 15 | Write documentation | docs, changelogs, ADR prose, status reports |
+| 20 | Write own records | Tamma tracker items, projects, schedules, housekeeping jobs |
+| 25 | Write code on a branch | `implement-*`, `refactor`, `write-tests`, `file_write` (workspace) |
+| 30 | Run tests | `run_tests`, `ci.tests.trigger`, `exploratory-test` |
+| 35 | Create branch / create PR | `git.branch.create`, `git.pull-request.create`, `release.create` (draft surface) |
+| 40 | Approve PRs / routine docs | `code-review*`, `review-*`, routine document acceptances |
+| 45 | Approve binding docs | `plan`, `acceptance-criteria`, `design`, `sprint-plan`, `threat-model` acceptances |
+| 50 | Bypass PR checks | **no catalog action exists — must be minted** |
+| 55 | Merge to dev trunk | merge, target = dev |
+| 60 | Merge to qa trunk | merge, target = qa |
+| 65 | Merge to main | merge, target = main |
+| 70 | Deploy to dev | **default dial sits here** |
+| 75 | Deploy to qa; external messages | `notify.slack.*`, `notify.email.*` + outbox senders |
+| 80 | Deploy to uat; unbounded execution | `shell_execute` (unsandboxed), `process.spawn`, `agent-dispatch.run`, `mcp.tool.invoke` |
+| 85 | Deploy to staging; create infrastructure | tenant/app provisioning, `billing.customer.create` |
+| 90 | Deploy to prod; manage secrets | `deploy.promote-prod`, secret rotation/retire |
+| 95 | Delete branch / delete PR / rollback | `git.branch.delete`, PR deletion, `deploy.rollback` |
+| 100 | Delete resources / infrastructure | tenant teardown, `provisioning.tenant.deprovision`, tenant move |
+
+Consequences for the implementation:
+
+1. **Per-target actions.** One `merge` action cannot carry three levels. The
+   catalog splits by target: `git.merge.dev` / `git.merge.qa` / `git.merge.main`
+   (target read from the PR base branch), and deploy per environment
+   (`deploy.dev|qa|uat|staging|prod`) - the pipeline already has the stages;
+   the catalog keys follow them. Same for delete where target matters.
+2. **`bypass-pr-checks` is a new action** (level 50). Nothing in the tree
+   performs it today; minting the key reserves the slot before anything does.
+3. **95-100 empty is DEAD.** Deletes live there. The earlier reasoning
+   ("an action at 99 is always-human in disguise") is answered by the rule
+   itself: a tenant that wants automated deletes sets the dial there, and at
+   100 everything runs.
+4. **Amendment 2's mechanics survive** (approval scopes, grant minting from
+   workflow approvals, toggle encoding, signal coverage, shell sandbox note);
+   only its level NUMBERS and the reserved-band rule are superseded.
+5. The full 197-row remap onto zones is the implementation table; rows above
+   list the anchors. Actions the ladder does not name (LLM call, event
+   appends, KB writes) keep their Amendment-1 relative order inside the
+   nearest zone below 50.
+
+| Date       | Version | Changes                                  | Author |
+| ---------- | ------- | ---------------------------------------- | ------ |
+| 2026-08-01 | 1.2.0   | Product-owner zone model at 5-point steps; per-target merge/deploy; 95-100 in use; new bypass-pr-checks action | meywd + Claude |
