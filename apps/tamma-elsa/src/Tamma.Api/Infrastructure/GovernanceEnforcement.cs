@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Tamma.Api.Services.Actions;
 using Tamma.Core.Actions;
+using Tamma.Core.Logging;
 
 namespace Tamma.Api.Infrastructure;
 
@@ -216,7 +217,13 @@ internal static class AutonomyGateEnforcement
                 "Governance enforcement is opted in for {Method} {Path} but {Missing}. The request "
                 + "is REFUSED (409 {Code}) rather than silently ungoverned; this is a wiring fault, "
                 + "not a policy decision.",
-                http.Request.Method, http.Request.Path,
+                // Method and Path are attacker-controlled: a percent-encoded %0A
+                // decodes into PathString.Value, and this message asserts a
+                // governance outcome. A forged copy of THIS line is a false audit
+                // record, so it goes through the same LogSanitizer every other
+                // request-path log site in the API uses.
+                LogSanitizer.Clean(http.Request.Method),
+                LogSanitizer.Clean(http.Request.Path.Value),
                 binding is null
                     ? "the endpoint carries no .Governs(actionKey) binding"
                     : "no IAutonomyGate is registered in this host",
@@ -258,7 +265,14 @@ internal static class AutonomyGateEnforcement
                 "Autonomy gate evaluation FAILED for {Action} at {Method} {Path}; the request "
                 + "PROCEEDS ungated (deny on a decision, never on an error) and "
                 + "ACTION.GATE.EVALUATION_FAILED is emitted.",
-                binding.Action.ToWire(), http.Request.Method, http.Request.Path);
+                // Sanitized for the same reason as the wiring-fault log above, and
+                // more urgently: this line says the request PROCEEDED UNGATED, so a
+                // forged copy could convince an auditor a gate was bypassed when it
+                // was not — or hide a real one in noise. Action comes from the
+                // catalog, not the request, so it needs no cleaning.
+                binding.Action.ToWire(),
+                LogSanitizer.Clean(http.Request.Method),
+                LogSanitizer.Clean(http.Request.Path.Value));
 
             var events = services.GetService<ActionGateEventsService>();
             if (events is not null)
