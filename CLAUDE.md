@@ -517,19 +517,6 @@ Tamma is designed to autonomously develop features for itself. This means:
 - **Discussions**: https://github.com/meywd/tamma/discussions
 - **Wiki**: https://github.com/meywd/tamma/wiki
 
-## Automation Levels (product rules — decided by the product owner 2026-08-01, Story 43-11)
-
-- Levels run **1–100**. Every action in the catalog has a level at which it becomes automated. The admin sets the deployment's level; **default 70**.
-- At or below the level: automated and **greyed in the UI** — the level owns it, no individual switch. Above the level: individual per-action toggles.
-- **Acceptance is always a workflow step.** Nothing signs off its own output. The dial only changes WHO approves: the orchestrator (automated), a human, or a review panel. "Self-accept" does not exist.
-- **At 100 everything is automated.** The only things that pull in a person at 100 are runtime signals: ambiguity above threshold, or a review panel that cannot agree.
-- **96–100 is kept empty.** An action parked at 99 would be "human at every dial anyone actually uses" — the old `AlwaysHuman = 101` sentinel in disguise. Every action must sit at a level a real deployment might reach; the band is headroom for future riskier-than-prod actions.
-- Do NOT ship a descriptor at `AutonomyDial.AlwaysHuman`. The sentinel survives only for two runtime cases: an action name not in the catalog at all, and an unreadable policy (an outage response, not a classification).
-- **MCP is a pipe, not an action.** An MCP tool is classified by what it does (create an issue, delete a branch), never blanket-gated for arriving over MCP. Servers/tools are passed per llm-call step by the calling workflow, not a global pool.
-- An approval has a **scope**: the level (standing, platform), a tenant toggle (standing, admin), one run, or one call. High-frequency actions (e.g. shell per tool-call) must be coverable by one ask per run — per-call asks train humans to stop reading.
-- A workflow's human approval step must mint the matching ledger grant — one approval system, never two that disagree.
-- Any workflow producing output or effects with no acceptance step is a defect (Story 39-24 lists them).
-
 ## Operating Modes
 
 Tamma deploys in one of two modes, chosen at process startup. Mode determines who is the **principal** (the entity that owns settings, prompts, providers, secrets) and what RBAC applies.
