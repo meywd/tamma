@@ -943,7 +943,7 @@ Merge and deploy each span several levels by TARGET importance.
 | Level | Zone | What sits there |
 |---|---|---|
 | 5 | Read-only | analysis, research, triage, read tools (`file_read`, `search_code`, `git_operations.read`) |
-| 10 | Sensitive reads | `audit-secrets`, `secret.reveal` |
+| 10 | Sensitive metadata reads | `audit-secrets` (metadata only — values = `secret.read` at 90) |
 | 15 | Write documentation | docs, changelogs, ADR prose, status reports |
 | 20 | Write own records | Tamma tracker items, projects, schedules, housekeeping jobs |
 | 25 | Write code on a branch | `implement-*`, `refactor`, `write-tests`, `file_write` (workspace) |
@@ -1355,23 +1355,28 @@ issue deletion.
 
 ## Amendment 4 — 2026-08-01: two product-owner corrections
 
-### Secret reads: the SYSTEM fetching a credential is not the MODEL reading one
+### Secret read is ONE action at 90 (corrected — product owner)
 
-`secret.reveal` (Enforceable=false) covers system plumbing: an approved
-action fetches its credential mid-flight. That stays unenforceable — gating
-it would re-ask a human for something already approved.
+The catalog lists actions performed DIRECTLY by a human or an LLM. Under
+that rule:
 
-But an **LLM reading a secret is a different action**. Once a secret enters
-model context it can leak into transcripts, provider logs, or any output.
-That is not plumbing; it is exfiltration surface.
-
-- New key: `effect:secret.read-into-model` — **level 90** (manage-secrets
-  zone), enforceable. Any path that would place a secret value into LLM
-  context performs THIS action, not `secret.reveal`.
-- Known reachable path today: `shell_execute` inherits the full API
-  environment, so `env` in a tool call puts every secret into model context
-  as an UNGOVERNED read. The sandbox work (Amendment 2-D: env-strip) is what
-  closes the path; until then the gap is recorded here, not hidden.
+- **`effect:secret.read` — level 90**, manage-secrets zone, enforceable. An
+  LLM reading a secret value puts it in model context, where it can leak
+  into transcripts, provider logs, or output. That is a top-zone action, not
+  a "sensitive read" at 10.
+- The system fetching a credential so an approved deploy can run is
+  MACHINERY, not a catalog action — nobody (human or LLM) is performing it.
+  The old `secret.reveal` key at 10 with Enforceable=false is retired from
+  the level table; the plumbing keeps its audit row and reveal-token expiry,
+  off the dial.
+- The earlier two-key split (`secret.reveal` + `secret.read-into-model`) is
+  collapsed into the one `secret.read` at 90.
+- `agent-action:audit-secrets` stays at 10 ONLY if the audit reads metadata
+  (names, ages, rotation state) and never values. If it reads values, it is
+  `secret.read` and sits at 90. Implementation must pin this with a test.
+- Known live path: `shell_execute` inherits the full API environment, so
+  `env` in a tool call is an ungoverned `secret.read` today. Closed by the
+  sandbox (env-strip), recorded until then.
 
 ### Who the dial governs: the LLM, and nothing else (corrected)
 
