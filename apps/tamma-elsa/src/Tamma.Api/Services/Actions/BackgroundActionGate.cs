@@ -31,6 +31,23 @@ namespace Tamma.Api.Services.Actions;
 /// broken gate silently means "all sweepers ungated") is mitigated by alerting on
 /// <c>EVALUATION_FAILED</c> volume, not by flipping the direction.</para>
 ///
+/// <para><b>TWO THINGS ARE NOT "AN EVALUATION ERROR", and both were being read as
+/// one</b> (adversarial review, 2026-08-01):</para>
+/// <list type="bullet">
+///   <item><b>F2 — a DECISION whose audit row failed.</b>
+///   <see cref="AutonomyGateDecisionUnrecordedException"/> means the gate decided
+///   and only the record of it is missing. It is caught before the catch-all and
+///   the decision is re-applied, so a gated-off actor stays off. The two failures
+///   are correlated — 43-5's fail-closed degradation fires when the control plane
+///   is unreadable and <c>domain_events</c> lives in the same Postgres — so
+///   without this one blip both produced the denial and cancelled it.</item>
+///   <item><b>F9 — a HANG.</b> A catch covers a throw, not a gate that never
+///   returns; an unbounded evaluation stalls the sweeper's loop indefinitely,
+///   which is neither open nor closed. Every evaluation runs under
+///   <see cref="AutonomyGateDeadline"/>, and a timeout resolves into the fail-open
+///   arm above.</item>
+/// </list>
+///
 /// <para><b>SCOPE PER TICK — getting this wrong is a startup crash.</b>
 /// <see cref="IAutonomyGate"/> and <see cref="IGovernancePrincipalResolver"/> are
 /// registered SCOPED (they read the scoped <c>ITenantContext</c>,
@@ -79,6 +96,9 @@ public sealed class BackgroundActionGate : IBackgroundActionGate
 
         var key = new ActionKey(ActionNamespace.Automation, actor.ToWire());
 
+        // F9 — a catch covers a THROW, not a HANG. A gate that never returns
+        // would otherwise stall this sweeper's loop forever.
+        using var deadline = AutonomyGateDeadline.CreateLinkedSource(ct);
         try
         {
             await using var scope = _scopes.CreateAsyncScope();
@@ -100,26 +120,30 @@ public sealed class BackgroundActionGate : IBackgroundActionGate
                     Role: null,
                     Operation: "background-tick",
                     Target: actor.ToWire(),
-                    CorrelationId: null),
-                ct).ConfigureAwait(false);
+                    CorrelationId: null,
+                    // F4 — this seam DOES block (it skips the tick), so it is
+                    // entitled to spend a grant. It never actually consults the
+                    // ledger, because it has no correlation to key one to and
+                    // because an automation target is never escalatable, but the
+                    // flag states the seam's capability rather than leaving a
+                    // future correlation-carrying caller to discover it.
+                    SeamCanBlock: true),
+                deadline.Token).ConfigureAwait(false);
 
-            if (!decision.Enforced || decision.Outcome == AutonomyOutcome.Automated)
-            {
-                return true;
-            }
-
-            // The tick is SKIPPED. The audit row was already written by the gate
-            // on the non-swallowing path (an enforced denial is never swallowed),
-            // so this log is operator ergonomics, not the record.
-            _logger?.LogInformation(
-                "Background actor {Actor} is gated OFF by autonomy policy "
-                + "(outcome={Outcome}, effectiveMinAutonomy={EffectiveMin}, source={Source}, "
-                + "tenant={TenantId}); this tick is skipped.",
-                actor.ToWire(), decision.Outcome, decision.EffectiveMinAutonomy,
-                decision.Source, tenantId);
-            return false;
+            return Apply(decision, actor, tenantId);
         }
-        catch (OperationCanceledException) { throw; }
+        catch (AutonomyGateDecisionUnrecordedException unrecorded)
+        {
+            // F2 — NOT an evaluation error: the gate decided, only the record
+            // failed. Answering "run the tick" here would let one Postgres blip
+            // both produce a fail-closed denial and cancel it.
+            _logger?.LogError(unrecorded,
+                "Autonomy gate DECIDED {Outcome} for background actor {Actor} (tenant={TenantId}) "
+                + "but the audit row could not be written. The decision STANDS.",
+                unrecorded.Decision.Outcome, actor.ToWire(), tenantId);
+            return Apply(unrecorded.Decision, actor, tenantId);
+        }
+        catch (OperationCanceledException) when (!AutonomyGateDeadline.IsDeadline(ct)) { throw; }
         catch (Exception ex)
         {
             // FAIL OPEN, and never out of this method: an escaping exception in a
@@ -133,6 +157,31 @@ public sealed class BackgroundActionGate : IBackgroundActionGate
             await TryEmitEvaluationFailedAsync(key, ex).ConfigureAwait(false);
             return true;
         }
+    }
+
+    /// <summary>
+    /// The tick answer for one decision — the SAME predicate whether the decision
+    /// arrived normally or attached to an unrecorded-decision failure (F2), so the
+    /// two paths cannot drift.
+    /// </summary>
+    private bool Apply(AutonomyDecision decision, BackgroundActor actor, Guid? tenantId)
+    {
+        if (!decision.Enforced || decision.Outcome == AutonomyOutcome.Automated)
+        {
+            return true;
+        }
+
+        // The tick is SKIPPED. The audit row is written by the gate on the
+        // non-swallowing path (an enforced denial is never swallowed) — or, when
+        // that append itself failed, the F2 log above is the loud record — so this
+        // log is operator ergonomics, not the record.
+        _logger?.LogInformation(
+            "Background actor {Actor} is gated OFF by autonomy policy "
+            + "(outcome={Outcome}, effectiveMinAutonomy={EffectiveMin}, source={Source}, "
+            + "tenant={TenantId}); this tick is skipped.",
+            actor.ToWire(), decision.Outcome, decision.EffectiveMinAutonomy,
+            decision.Source, tenantId);
+        return false;
     }
 
     /// <summary>

@@ -96,6 +96,19 @@ public class LlmCallSeamAObserveOnlyTests
             => throw new InvalidOperationException("control plane unreachable");
     }
 
+    /// <summary>
+    /// A gate that throws <see cref="OperationCanceledException"/> for a reason
+    /// that has NOTHING to do with the caller: an internal linked-CTS deadline, an
+    /// EF cancellation on a pooled command, a Polly timeout. The request's own
+    /// token is never cancelled.
+    /// </summary>
+    private sealed class GateSideCancellationGate : IAutonomyGate
+    {
+        public Task<AutonomyDecision> EvaluateAsync(AutonomyQuery query, CancellationToken ct = default)
+            => throw new OperationCanceledException(
+                "internal gate deadline", new CancellationTokenSource(0).Token);
+    }
+
     private sealed class FixedPrincipal : IGovernancePrincipalResolver
     {
         public Task<GovernancePrincipal> ResolveAsync(
@@ -112,14 +125,15 @@ public class LlmCallSeamAObserveOnlyTests
     };
 
     private static Task<IResult> Call(
-        IAutonomyGate? gate, RecordingAgent agent, LlmCallRequest? request = null) =>
+        IAutonomyGate? gate, RecordingAgent agent, LlmCallRequest? request = null,
+        CancellationToken ct = default) =>
         LlmCallEndpoints.CallLlm(
             request ?? Request(),
             new FixedTenant(null),
             agent,
             new PassthroughMapper(),
             NullLoggerFactory.Instance,
-            CancellationToken.None,
+            ct,
             gate,
             new FixedPrincipal());
 
@@ -211,5 +225,52 @@ public class LlmCallSeamAObserveOnlyTests
         var agent = new RecordingAgent();
         await Call(gate: null, agent);
         agent.Runs.Should().Be(1);
+    }
+
+    // ====================================================================
+    // 2026-08-01 review finding F7 — the observing seam must not be able to
+    // fail a call it is not permitted to block, by ANY exception type
+    // ====================================================================
+
+    [Test]
+    public async Task AGateSideCancellation_onAnUncancelledRequest_doesNotFailTheCall()
+    {
+        // F7. `AnObservationFailure_doesNotFailTheCall` above only covers exceptions
+        // that are not OperationCanceledException — the observer had a
+        // `catch (OperationCanceledException) { throw; }` ahead of its swallow-all,
+        // so an OCE raised INSIDE the gate escaped and failed the LLM call. That is
+        // control flow, on the one seam whose whole contract is that it has none.
+        //
+        // The request's token is CancellationToken.None: nothing the caller did
+        // caused this. The realistic sources are an internal linked-CTS deadline in
+        // the gate, an EF cancellation on a pooled command, or a Polly timeout —
+        // all NEW failure surface on a route that made no gate call before Story
+        // 43-9.
+        var agent = new RecordingAgent();
+
+        var act = async () => await Call(new GateSideCancellationGate(), agent, ct: CancellationToken.None);
+
+        await act.Should().NotThrowAsync<OperationCanceledException>(
+            "an OperationCanceledException the CALLER did not cause is just another observation "
+            + "failure; letting it through makes Seam A able to fail a call it may not block");
+        agent.Runs.Should().Be(1,
+            "and the dispatch must still have happened — Seam A never blocks, in any version");
+    }
+
+    [Test]
+    public async Task AGenuineCallerCancellation_stillPropagates()
+    {
+        // THE ANTI-OVERSHOOT HALF. The fix must narrow the rethrow to a real caller
+        // abort, not delete it: when the client HAS aborted, there is no point
+        // running the provider, and swallowing the cancellation would turn an
+        // aborted request into a billed model call.
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        var agent = new RecordingAgent();
+
+        var act = async () => await Call(new GateSideCancellationGate(), agent, ct: cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        agent.Runs.Should().Be(0, "an aborted request must not reach the provider");
     }
 }

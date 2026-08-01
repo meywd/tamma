@@ -201,9 +201,15 @@ public sealed class EfActionAuthorizationLedger : IActionAuthorizationLedger
 
     /// <inheritdoc />
     public async Task<ActionAuthorization?> DecideAsync(
+        Guid? tenantId, Guid? userId,
         Guid id, bool granted, Guid decidedByUserId, string? reason,
         CancellationToken ct = default)
     {
+        if (tenantId is not null && userId is not null)
+        {
+            throw new ArgumentException("At most one principal key may be set.");
+        }
+
         await using var db = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
         var now = DateTime.UtcNow;
         var state = granted ? "granted" : "denied";
@@ -212,8 +218,19 @@ public sealed class EfActionAuthorizationLedger : IActionAuthorizationLedger
         // time-expired pending row can never be decided) makes concurrent
         // grant-vs-deny mutually exclusive: exactly one caller's UPDATE
         // affects the row; the other returns null and the caller 409s.
+        //
+        // F6 (2026-08-01): the principal predicate rides the SAME conditional
+        // UPDATE rather than a preceding SELECT — a check-then-write ownership
+        // test is exactly the shape F1 removed from this file, and a foreign
+        // decide must be arbitrated by Postgres like every other transition. A
+        // non-owner's UPDATE simply affects 0 rows, so it is INDISTINGUISHABLE
+        // from "already decided" / "expired" / "no such row": the endpoint
+        // answers all four identically and the surface is not an existence
+        // oracle for another principal's correlation ids.
         var affected = await db.ActionAuthorizations
             .Where(a => a.Id == id
+                && a.TenantId == tenantId
+                && a.UserId == userId
                 && a.State == "pending"
                 && (a.ExpiresAtUtc == null || a.ExpiresAtUtc > now))
             .ExecuteUpdateAsync(s => s

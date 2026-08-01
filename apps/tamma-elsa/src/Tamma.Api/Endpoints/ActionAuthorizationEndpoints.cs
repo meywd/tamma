@@ -37,6 +37,17 @@ public sealed record DecideAuthorizationRequest(
 /// arrive here and through the six landed resume endpoints; that is what killed
 /// the superseded <c>WaitForToolAuthorizationActivity</c> design wholesale.</para>
 ///
+/// <para><b>BOTH ROUTES ARE PRINCIPAL-SCOPED</b> (adversarial review F6,
+/// 2026-08-01). The LIST always was, with a comment explaining that merely
+/// ENUMERATING another principal's rows is a capability disclosure — but the
+/// DECIDE passed only the id, and the ledger filtered on <c>Id</c> and
+/// <c>State</c> with no principal predicate. The id is handed to the caller in the
+/// Seam C 409 body and the Seam E response, so in SaaS any tenant admin holding
+/// one could GRANT another tenant's blocked effect: RBAC said "you may decide
+/// authorizations", and nothing said "yours". The principal now rides the ledger's
+/// conditional UPDATE, and a foreign row is answered with the same 409 as a
+/// missing one.</para>
+///
 /// <para><b>RBAC</b>, matching the acceptance-rules / action-policy posture: the
 /// LIST rides <c>AuthenticatedAny</c> (every role-holder needs to see what is
 /// waiting on them), the DECIDE takes <c>ActionsManage</c> (tenant_owner /
@@ -180,16 +191,30 @@ public static class ActionAuthorizationEndpoints
             });
         }
 
+        // F6 (adversarial review, 2026-08-01) — resolved BEFORE the transition,
+        // because the transition is now scoped to it. See the ledger's DecideAsync
+        // remarks: the id travels in the Seam C 409 body and the Seam E response,
+        // so an unscoped decide let any holder of a guid grant another principal's
+        // blocked effect.
+        var gp = await principals.ResolveAsync(caller, ct).ConfigureAwait(false);
+
         var granted = wanted == DecisionGranted;
-        var row = await ledger.DecideAsync(id, granted, actor, body.Reason, ct).ConfigureAwait(false);
+        var row = await ledger
+            .DecideAsync(gp.TenantId, gp.UserId, id, granted, actor, body.Reason, ct)
+            .ConfigureAwait(false);
 
         if (row is null)
         {
             // The ledger's CAS returned 0 rows: missing, already decided, past
-            // expiry, or it lost a concurrent grant-vs-deny race. All four are
-            // 409 — the request conflicts with the row's current state — and NOT
-            // 404, which would turn the endpoint into an existence oracle for
-            // another principal's correlation ids.
+            // expiry, owned by ANOTHER governance principal, or it lost a
+            // concurrent grant-vs-deny race. All five are 409 — the request
+            // conflicts with the row's current state — and NOT 404/403, either of
+            // which would turn the endpoint into an existence oracle for another
+            // principal's correlation ids. That matters MORE for the foreign-owner
+            // case than for the others: a distinct status for "exists but is not
+            // yours" would confirm the existence of a live run in another tenant,
+            // and the guids are handed out in denial bodies. One indistinguishable
+            // answer for all five is the non-disclosing choice.
             return Results.Conflict(new
             {
                 code = "ACTION_AUTHORIZATION.NOT_PENDING",
@@ -199,7 +224,6 @@ public static class ActionAuthorizationEndpoints
             });
         }
 
-        var gp = await principals.ResolveAsync(caller, ct).ConfigureAwait(false);
         if (!granted)
         {
             await events.EmitAuthorizationDeniedAsync(

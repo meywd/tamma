@@ -80,7 +80,10 @@ namespace Tamma.ElsaServer.Workflows;
 /// Flow:
 ///   Init (status=failed default) → QA STARTED → QA Deploy (llm-call) → Extract → QA OK?
 ///     ├─ Yes → QA SUCCESS → UAT STARTED → UAT Deploy → Extract → UAT OK?
-///     │   ├─ Yes → UAT SUCCESS → ProdApprovalNeeded?
+///     │   ├─ Yes → UAT SUCCESS → CheckProdDeployGate (43-9 Seam E)
+///     │   │   ├─ Denied → SetProdGateDenied → REJECTED → SetProdFailed (NO prod deploy,
+///     │   │   │            and NOT the approval wait — see finding F1 at the gate node)
+///     │   │   └─ Automated | RequiresHuman → ProdApprovalNeeded?
 ///     │   │   ├─ Yes(business) → APPROVAL_REQUESTED gate
 ///     │   │   │     ├─ Approve → APPROVED → Prod STARTED → Prod Deploy → Extract → Prod OK?
 ///     │   │   │     ├─ Reject  → REJECTED → SetProdFailed
@@ -258,7 +261,42 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         //    ADD a wait, never remove one, which is also why the activity may fail
         //    open on a transport error: a null gate contributes nothing and the
         //    pipeline behaves exactly as it does today.
+        //
+        // ── 2026-08-01 review finding F1 — A DENIAL IS NOT AN ESCALATION ──
+        //    As shipped, this seam had a MONOTONICITY INVERSION. The activity
+        //    folded `denied` onto its RequiresHuman EDGE, but BOTH edges were wired
+        //    to `prodApprovalNeeded`, so the edge choice was behaviourally inert;
+        //    the only thing that routed was `gateOutcome`, and the predicate
+        //    compared it against "requires-human" ONLY. Result, proved by invoking
+        //    the real FlowDecision delegate:
+        //        dev / requireProdApproval=false / "requires-human" -> True  (wait)
+        //        dev / requireProdApproval=false / "denied"         -> False (NO WAIT)
+        //    i.e. setting effect:deploy.promote-prod to AlwaysHuman added a
+        //    production wait, but DISABLING the action — the strictly stronger
+        //    admin setting — added nothing and production deployed with no human.
+        //    (`denied` is reachable here two ways: an Enabled=false row on the
+        //    action or its deploy-control group, and ANY AllowedRoles restriction,
+        //    because this call passes Role unset so every restriction excludes it.)
+        //
+        //    THE FIX, AND WHY IT IS A HARD STOP RATHER THAN A WAIT. `denied` now
+        //    takes its own edge into a REFUSAL terminal, not into
+        //    WaitForDeploymentApprovalActivity. A denial is not "a person may
+        //    approve this": the human on that wait is approving a DEPLOYMENT, and
+        //    letting them approve past an action an admin DISABLED would make the
+        //    standing approval flow an override for governance — the deploy-control
+        //    dial would be advisory. So a denial ends the pipeline at
+        //    PRODUCTION.REJECTED → SetProdFailed → PIPELINE.FAILED: loud, terminal,
+        //    attributable (the gate's reason rides `stageError` into both events),
+        //    and with no production deploy.
+        //
+        //    THE PREDICATE STILL TREATS `denied` AS BLOCKING TOO. That term is a
+        //    safety net, not the routing: today the Denied edge means the predicate
+        //    never sees `denied`. But the whole defect above was a predicate that
+        //    silently disagreed with the edges, so the predicate is now monotone on
+        //    its own — if a future author re-points the Denied edge back at this
+        //    decision, the worst case is an extra human wait, never a free deploy.
         var gateOutcome = builder.WithVariable<string>("ProdGateOutcome", "");
+        var gateReason = builder.WithVariable<string>("ProdGateReason", "");
         var checkProdGate = new CheckActionGateActivity
         {
             Id = "CheckProdDeployGate", Name = "Check Prod Deploy Gate",
@@ -273,21 +311,41 @@ public class DeploymentPipelineWorkflow : WorkflowBase
             // ExpressionExecutionContext and cannot reach the workflow context, so
             // spelling it here is not merely redundant, it is not expressible.)
             Outcome = new Output<string?>(gateOutcome),
+            // Bound so a refusal can NAME what refused it: `denied` with no reason
+            // is an operator staring at a stopped pipeline with nothing to act on.
+            Reason = new Output<string?>(gateReason),
         };
         checkProdGate.SetDisplayText("Check Prod Deploy Gate");
 
         var prodApprovalNeeded = new FlowDecision(ctx =>
             string.Equals(mode.Get(ctx)?.Trim(), "business", StringComparison.OrdinalIgnoreCase)
             || requireProdApproval.Get(ctx)
-            // NEW (43-9 AC11) — additive only. The activity writes the wire
-            // outcome; anything the gate treats as a block routes into the
-            // EXISTING WaitForDeploymentApprovalActivity rather than a new wait.
-            || string.Equals(
-                gateOutcome.Get(ctx)?.Trim(),
-                GovernanceEvaluateResponse.OutcomeRequiresHuman,
-                StringComparison.OrdinalIgnoreCase))
+            // 43-9 AC11, corrected by F1 — additive only. The activity writes the
+            // wire outcome; ANY outcome the gate treats as a block (requires-human
+            // OR denied) routes into the EXISTING WaitForDeploymentApprovalActivity
+            // rather than a new wait. `automated`, `unavailable` and the unwritten
+            // "" stay non-blocking, which is what keeps the shipped-default and
+            // fail-open behaviours byte-identical to before Story 43-9.
+            || IsBlockingGateOutcome(gateOutcome.Get(ctx)))
         { Id = "ProdApprovalNeeded", Name = "Prod Approval Needed?" };
         prodApprovalNeeded.SetDisplayText("Prod Approval Needed?");
+
+        // The refusal terminal for a DENIED gate resolution. It writes the gate's
+        // reason into the shared stage-error variable, which EmitDeployEvent maps
+        // onto the audit payload's `reason` — so both PRODUCTION.REJECTED and the
+        // PIPELINE.FAILED terminal say WHY production was refused.
+        var setProdGateDenied = new SetVariable
+        {
+            Id = "SetProdGateDenied", Name = "Prod Gate Denied",
+            Variable = stageError,
+            Value = new Input<object?>(ctx =>
+            {
+                var reason = gateReason.Get(ctx);
+                return (object)("production promotion refused by the autonomy gate"
+                    + (string.IsNullOrWhiteSpace(reason) ? "" : $": {reason.Trim()}"));
+            })
+        };
+        setProdGateDenied.SetDisplayText("Prod Gate Denied");
 
         var waitProdApproval = new WaitForDeploymentApprovalActivity
         {
@@ -517,7 +575,8 @@ public class DeploymentPipelineWorkflow : WorkflowBase
                 emitUatStarted, uatDeployCall, extractUatResult, uatOk, emitUatSuccess,
                 uatRetryCheck, uatIncrement, emitUatFailed,
                 // Prod approval gate (+ 43-9 Seam E's additive check)
-                checkProdGate, prodApprovalNeeded, waitProdApproval, emitProdApproved, emitProdRejected,
+                checkProdGate, setProdGateDenied,
+                prodApprovalNeeded, waitProdApproval, emitProdApproved, emitProdRejected,
                 // Prod
                 emitProdStarted, prodDeployCall, extractProdResult, prodOk, emitProdSuccess,
                 prodRetryCheck, prodIncrement, emitProdFailed,
@@ -557,13 +616,22 @@ public class DeploymentPipelineWorkflow : WorkflowBase
                 ConnectOutcome(uatOk, "True", emitUatSuccess),
                 // 43-9 Seam E — the gate check sits BETWEEN the UAT success event
                 // and the approval decision, so the decision reads a variable that
-                // has already been written. BOTH of its outcomes converge on the
-                // same next node: the activity's job is to SET `gateOutcome`, and
-                // the routing decision stays where it already was. Wiring the two
-                // edges to different nodes would be a second, competing prod gate.
+                // has already been written. Automated and RequiresHuman converge on
+                // the SAME next node: for those two the activity's job is to SET
+                // `gateOutcome` and the routing decision stays where it already was
+                // — splitting them would be a second, competing prod gate.
+                //
+                // DENIED DOES NOT CONVERGE (F1). It is the one resolution the
+                // approval decision must not be allowed to answer, because the only
+                // answer it has is "a human may approve", and a denial is precisely
+                // the case where no human on this graph may. It goes to a refusal
+                // terminal instead. All three edges are wired — pinned by
+                // DeploymentPipelineGateTests.EveryGateOutcome_isWired_noDanglingEdge.
                 Connect(emitUatSuccess, checkProdGate),
-                ConnectOutcome(checkProdGate, "Automated", prodApprovalNeeded),
-                ConnectOutcome(checkProdGate, "RequiresHuman", prodApprovalNeeded),
+                ConnectOutcome(checkProdGate, CheckActionGateActivity.EdgeAutomated, prodApprovalNeeded),
+                ConnectOutcome(checkProdGate, CheckActionGateActivity.EdgeRequiresHuman, prodApprovalNeeded),
+                ConnectOutcome(checkProdGate, CheckActionGateActivity.EdgeDenied, setProdGateDenied),
+                Connect(setProdGateDenied, emitProdRejected),
                 ConnectOutcome(uatOk, "False", uatRetryCheck),
                 ConnectOutcome(uatRetryCheck, "True", uatIncrement),
                 Connect(uatIncrement, emitUatStarted),       // re-run UAT
@@ -830,6 +898,36 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         };
         sv.SetDisplayText(name);
         return sv;
+    }
+
+    /// <summary>
+    /// Story 43-9 Seam E, corrected by the 2026-08-01 review finding F1 — the
+    /// gate-outcome half of the production-approval predicate.
+    ///
+    /// <para>Returns true for every wire the gate treats as a BLOCK
+    /// (<c>requires-human</c> and <c>denied</c>) and false for
+    /// <c>automated</c>, <c>unavailable</c> and the unwritten <c>""</c>. The
+    /// denied arm is what closes F1's monotonicity inversion: disabling
+    /// <c>effect:deploy.promote-prod</c>, or putting any <c>AllowedRoles</c>
+    /// restriction on it, resolves to <c>denied</c>, and a `denied` that fell
+    /// through this predicate as "no opinion" deployed production with no human.
+    /// Blocking on it makes the predicate MONOTONE: every strengthening of the
+    /// admin's setting is at least as blocking as the one below it.</para>
+    ///
+    /// <para>An UNRECOGNISED wire is deliberately NOT blocking here. The edge
+    /// selection in <see cref="CheckActionGateActivity.SelectEdge"/> already fails
+    /// an unknown enforced answer closed onto <c>RequiresHuman</c>, so it never
+    /// reaches this predicate with the raw unknown wire; treating an unknown
+    /// string as a block HERE would instead make any future non-blocking wire
+    /// (say an <c>allowed-with-audit</c>) silently start stalling production
+    /// pipelines on an old engine build. Public + pure so the test drives the same
+    /// function the workflow does.</para>
+    /// </summary>
+    public static bool IsBlockingGateOutcome(string? outcomeWire)
+    {
+        var wire = outcomeWire?.Trim();
+        return string.Equals(wire, GovernanceEvaluateResponse.OutcomeRequiresHuman, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(wire, GovernanceEvaluateResponse.OutcomeDenied, StringComparison.OrdinalIgnoreCase);
     }
 
     private static SetVariable CreateFailureNode(

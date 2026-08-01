@@ -283,16 +283,19 @@ public class GovernedEndpointCoverageSweepTests
             "the pin IS the last recorded high-water value; changing one without the other is the "
             + "shape of an undeclared re-widening");
 
-        for (var i = 1; i < KnownUngovernedEndpoints.PinHistory.Length; i++)
-        {
-            KnownUngovernedEndpoints.PinHistory[i].Should()
-                .BeLessThan(KnownUngovernedEndpoints.PinHistory[i - 1],
-                    $"pin history entry #{i} ({KnownUngovernedEndpoints.PinHistory[i]}) must be "
-                    + $"strictly smaller than #{i - 1} ({KnownUngovernedEndpoints.PinHistory[i - 1]}). "
-                    + "An entry may only leave this baseline by being GOVERNED or by ceasing to "
-                    + "exist. A new ungoverned route is not a reason to raise the pin — it is the "
-                    + "signal the ratchet exists to produce.");
-        }
+        // Review F3 (2026-08-01): the loop below constrains the TAIL of the history
+        // and never its HEAD, so [237, 216] could be rewritten as [300, 250] and stay
+        // green. The seed is restated in THIS file so re-seeding is a two-file edit.
+        var problems = PinHistoryProblems(
+            "KnownUngovernedEndpoints.PinHistory",
+            BaselinePinSeed,
+            KnownUngovernedEndpoints.PinHistory);
+
+        problems.Should().BeEmpty(
+            "An entry may only leave this baseline by being GOVERNED or by ceasing to exist. A new "
+            + "ungoverned route is not a reason to raise the pin — it is the signal the ratchet "
+            + "exists to produce:"
+            + Environment.NewLine + string.Join(Environment.NewLine, problems));
     }
 
     [Test]
@@ -322,6 +325,68 @@ public class GovernedEndpointCoverageSweepTests
     // Story 43-9 D17 — the reviewed exception set's own three properties
     // ====================================================================
 
+    /// <summary>
+    /// The value <see cref="KnownUngovernedEndpoints.ExceptionPinHistory"/> was
+    /// SEEDED at on 2026-08-01, restated HERE — a different file from the array —
+    /// so that re-seeding the history is a two-file edit a reviewer sees, not a
+    /// one-literal edit nobody does.
+    ///
+    /// <para><b>Review F3.</b> Without this, the shrink-only loop below is VACUOUS:
+    /// the history has ONE element, <c>for (i = 1; i &lt; Length; i++)</c> never
+    /// runs, and nothing at all constrained <c>[2]</c> → <c>[3]</c>. Binding the head
+    /// makes the property non-vacuous at length 1: the only legal histories are
+    /// <c>[2]</c> followed by strictly-decreasing values, so the set can shrink and
+    /// cannot grow.</para>
+    /// </summary>
+    internal const int ExceptionPinSeed = 2;
+
+    /// <summary>
+    /// The value <see cref="KnownUngovernedEndpoints.PinHistory"/> was seeded at on
+    /// 2026-07-29, restated here for the same reason as
+    /// <see cref="ExceptionPinSeed"/>: the shrink-only loop constrains the TAIL of
+    /// the history but never its head, so <c>[237, 216]</c> could be rewritten as
+    /// <c>[300, 250]</c> and stay green.
+    /// </summary>
+    internal const int BaselinePinSeed = 237;
+
+    /// <summary>
+    /// THE PIN HISTORY RULE, as a pure predicate so the live assertion and the
+    /// discrimination proofs drive the SAME rule rather than two copies. A history
+    /// is legal iff it is non-empty, starts at its declared seed, and strictly
+    /// decreases thereafter.
+    /// </summary>
+    internal static IReadOnlyList<string> PinHistoryProblems(string name, int seed, int[] history)
+    {
+        var problems = new List<string>();
+
+        if (history.Length == 0)
+        {
+            problems.Add($"  {name}: has no pin history — the pin is a bare literal.");
+            return problems;
+        }
+
+        if (history[0] != seed)
+        {
+            problems.Add(
+                $"  {name}: its history STARTS at {history[0]} but the recorded seed is {seed}. "
+                + "A history whose head can move is not a record — it can be silently RE-SEEDED "
+                + "at a larger value, and at length 1 the strictly-decreasing loop below never "
+                + "executes, so nothing else would notice.");
+        }
+
+        for (var i = 1; i < history.Length; i++)
+        {
+            if (history[i] >= history[i - 1])
+            {
+                problems.Add(
+                    $"  {name}: pin history {history[i - 1]} → {history[i]} is not a decrease. "
+                    + "A ratchet that turns both ways is not a ratchet.");
+            }
+        }
+
+        return problems;
+    }
+
     [Test]
     public void ExceptionSet_countIsPinned_andIsMechanicallyShrinkOnly()
     {
@@ -336,13 +401,40 @@ public class GovernedEndpointCoverageSweepTests
                 + "gate-evaluation route and the authorization-decide route, both ungoverned by "
                 + "CIRCULARITY rather than by backlog. A third entry must be argued for.");
 
-        for (var i = 1; i < KnownUngovernedEndpoints.ExceptionPinHistory.Length; i++)
-        {
-            KnownUngovernedEndpoints.ExceptionPinHistory[i].Should()
-                .BeLessThan(KnownUngovernedEndpoints.ExceptionPinHistory[i - 1],
-                    "an exception set that can grow without a decrease is an escape hatch, which "
-                    + "is precisely what D17's shape requirements forbid");
-        }
+        // Review F3: head-binding is what makes the shrink-only property mean
+        // something at length 1. Before it, [2] → [3] was a ONE-LITERAL edit and
+        // every test in this fixture stayed green.
+        var problems = PinHistoryProblems(
+            "KnownUngovernedEndpoints.ExceptionPinHistory",
+            ExceptionPinSeed,
+            KnownUngovernedEndpoints.ExceptionPinHistory);
+
+        problems.Should().BeEmpty(
+            "an exception set that can grow without a decrease is an escape hatch, which is "
+            + "precisely what D17's shape requirements forbid:"
+            + Environment.NewLine + string.Join(Environment.NewLine, problems));
+    }
+
+    [Test]
+    public void ExceptionSet_membershipIsPinnedByRoute()
+    {
+        // Review F3. A COUNT pin cannot tell "an exception was added" from "a
+        // backlog entry was relabelled an exception while the backlog pin dropped"
+        // — the reviewer's mutation was exactly the second, and it read as
+        // governance PROGRESS. Pinning the MEMBERSHIP, in this file rather than in
+        // the file that holds the list, makes admitting a route a change a reviewer
+        // reads as a sentence rather than as a number.
+        KnownUngovernedEndpoints.ReviewedUngovernedExceptions
+            .Select(e => $"{e.Method} {e.Pattern}")
+            .Should().BeEquivalentTo(
+                new[]
+                {
+                    "POST /api/v1/governance/evaluate",
+                    "POST /api/actions/authorizations/{id:guid}/decide",
+                },
+                "these two routes, and only these two, are ungoverned by CIRCULARITY. Admitting a "
+                + "third is a governance decision: name it here, argue the circularity in its "
+                + "justification, and do NOT pay for it by dropping the backlog pin.");
     }
 
     [Test]
@@ -350,17 +442,97 @@ public class GovernedEndpointCoverageSweepTests
     {
         // A "named, dated, reviewed" exception that carries no date and names no
         // reviewer is just a second baseline. Assert the metadata is really there.
+        //
+        // Review F3: the classifier here is the STRICTER exception classifier, not
+        // IsClassified. Requiring "the SAME classifier as the baseline" was the
+        // blanket escape hatch — every one of the 216 backlog entries passes it by
+        // construction, so a verbatim copy of a backlog justification bought an
+        // exception.
         var problems = KnownUngovernedEndpoints.ReviewedUngovernedExceptions
             .Where(e => !DateOnly.TryParse(e.AddedOn, out _)
                         || string.IsNullOrWhiteSpace(e.Story)
-                        || !KnownUngovernedEndpoints.IsClassified(e.Justification))
+                        || !KnownUngovernedEndpoints.IsExceptionJustified(e.Justification))
             .Select(e => $"  {e.Method} {e.Pattern}: addedOn='{e.AddedOn}' story='{e.Story}'")
             .ToList();
 
         problems.Should().BeEmpty(
             "every exception must carry an ISO date, the reviewing story id, and a justification "
-            + "that passes the SAME classifier as the baseline:"
+            + "that passes the STRICTER exception classifier — it must argue the CIRCULARITY that "
+            + "is the whole reason this set exists, not merely classify as the baseline does:"
             + Environment.NewLine + string.Join(Environment.NewLine, problems));
+    }
+
+    // ====================================================================
+    // Review F3 — the exception classifier must be STRICTLY stronger than
+    // the baseline classifier, proved against the live backlog
+    // ====================================================================
+
+    [Test]
+    public void Discrimination_noBacklogJustification_wouldSatisfyTheExceptionClassifier()
+    {
+        // THE F3 PROOF. The reviewer moved DELETE /api/acceptance-rules/{documentTypeKey}
+        // into the exception set with its justification COPIED VERBATIM, and 41/41
+        // tests passed. Every backlog justification must therefore be REJECTED as an
+        // exception justification — otherwise "reviewed exception" is just a second
+        // name for "backlog entry", and the two pins can be traded against each
+        // other while the diff reads as progress.
+        var launderable = KnownUngovernedEndpoints.All
+            .Where(e => KnownUngovernedEndpoints.IsExceptionJustified(e.Justification))
+            .Select(e => $"  {e.Method} {e.Pattern}: '{e.Justification}'")
+            .ToList();
+
+        launderable.Should().BeEmpty(
+            $"{launderable.Count} of {KnownUngovernedEndpoints.All.Count} backlog justifications "
+            + "would buy a D17 reviewed exception verbatim. An exception exists for a route that "
+            + "CANNOT be governed because gating it is circular; a backlog entry exists for a "
+            + "route nobody has got to yet. If a backlog line satisfies the exception classifier, "
+            + "the classifier is not doing the one job it has:"
+            + Environment.NewLine + string.Join(Environment.NewLine, launderable));
+    }
+
+    [Test]
+    public void Discrimination_theExceptionClassifierIsStrictlyStronger_notMerelyDifferent()
+    {
+        // Both directions, so the fix cannot be "a different classifier that happens
+        // to reject the backlog": everything the exception classifier accepts must
+        // also classify as the baseline, and the placeholders must still be rejected.
+        foreach (var e in KnownUngovernedEndpoints.ReviewedUngovernedExceptions)
+        {
+            KnownUngovernedEndpoints.IsClassified(e.Justification).Should().BeTrue(
+                "an exception justification is a baseline justification PLUS an argument, never "
+                + $"something outside the vocabulary: '{e.Justification}'");
+        }
+
+        foreach (var placeholder in new[] { "", "   ", "TODO", "legacy", "circular" })
+        {
+            KnownUngovernedEndpoints.IsExceptionJustified(placeholder).Should().BeFalse(
+                $"'{placeholder}' must not buy an exception — in particular the bare word "
+                + "'circular' must not, or the new requirement degenerates into a magic word");
+        }
+    }
+
+    [Test]
+    public void Discrimination_aReSeededPinHistoryIsReported()
+    {
+        // The arm ExceptionSet_countIsPinned_andIsMechanicallyShrinkOnly relies on.
+        // Drive the REAL rule with the reviewer's exact edit — [2] re-seeded to [3].
+        PinHistoryProblems("fixture", 2, [3]).Should().ContainSingle()
+            .Which.Should().Contain("RE-SEEDED",
+                "a length-1 history re-seeded upward is precisely the F3 mutation; if the rule "
+                + "stays silent here the shrink-only property is vacuous");
+
+        PinHistoryProblems("fixture", 2, [2]).Should().BeEmpty(
+            "the complement: the seeded history itself must be legal, or the rule is just always "
+            + "red and proves nothing");
+
+        PinHistoryProblems("fixture", 2, [2, 1]).Should().BeEmpty(
+            "shrinking is the direction the ratchet is FOR");
+
+        PinHistoryProblems("fixture", 2, [2, 3]).Should().ContainSingle()
+            .Which.Should().Contain("is not a decrease");
+
+        PinHistoryProblems("fixture", 2, []).Should().ContainSingle()
+            .Which.Should().Contain("bare literal");
     }
 
     [Test]

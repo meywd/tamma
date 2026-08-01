@@ -71,6 +71,18 @@ public class RatchetDisciplineTests
     /// <param name="Classifier">The owning fixture's REAL justification classifier.</param>
     /// <param name="LiveCount">The ratchet's current entry count.</param>
     /// <param name="PinHistory">The count pin's recorded high-water history.</param>
+    /// <param name="PinSeed">
+    /// The value <paramref name="PinHistory"/> was SEEDED at, restated HERE — in the
+    /// registry, a different file from the array — so re-seeding is a two-file edit.
+    ///
+    /// <para><b>Review F3 (2026-08-01), proved by mutation.</b> Without this, the
+    /// strictly-decreasing check below is VACUOUS for every length-1 history, and
+    /// three of this epic's five ratchets have one. Nothing bound the first element,
+    /// so <c>[2]</c> → <c>[3]</c> was a one-literal edit that no test in either
+    /// assembly noticed. Head-binding is what makes "shrink-only" mean something at
+    /// length 1: the only legal histories are <c>[seed]</c> followed by
+    /// strictly-decreasing values.</para>
+    /// </param>
     internal sealed record RatchetDeclaration(
         string Name,
         Type OwningFixture,
@@ -79,7 +91,8 @@ public class RatchetDisciplineTests
         Func<IReadOnlyList<string>> Justifications,
         Func<string, bool> Classifier,
         Func<int> LiveCount,
-        int[] PinHistory);
+        int[] PinHistory,
+        int PinSeed);
 
     /// <summary>
     /// THE REGISTRY for this assembly. Count-pinned by
@@ -94,7 +107,8 @@ public class RatchetDisciplineTests
             () => KnownUngovernedEndpoints.All.Select(e => e.Justification).ToArray(),
             KnownUngovernedEndpoints.IsClassified,
             () => KnownUngovernedEndpoints.All.Count,
-            KnownUngovernedEndpoints.PinHistory),
+            KnownUngovernedEndpoints.PinHistory,
+            GovernedEndpointCoverageSweepTests.BaselinePinSeed),
 
         // Story 43-9 D17 — the reviewed exception set is itself a ratchet, and is
         // DECLARED here for exactly the reason this fixture exists: an escape
@@ -106,9 +120,14 @@ public class RatchetDisciplineTests
             GovernedEndpointCoverageSweepTests.ExceptionRatchetStalenessProbe,
             () => KnownUngovernedEndpoints.ReviewedUngovernedExceptions
                 .Select(e => e.Justification).ToArray(),
-            KnownUngovernedEndpoints.IsClassified,
+            // Review F3: the STRICTER exception classifier, not IsClassified. The
+            // meta-test's forward arm then proves the live exceptions really do
+            // argue their circularity, and its backward arm proves the stricter
+            // rule still rejects placeholders.
+            KnownUngovernedEndpoints.IsExceptionJustified,
             () => KnownUngovernedEndpoints.ReviewedUngovernedExceptions.Count,
-            KnownUngovernedEndpoints.ExceptionPinHistory),
+            KnownUngovernedEndpoints.ExceptionPinHistory,
+            GovernedEndpointCoverageSweepTests.ExceptionPinSeed),
     ];
 
     /// <summary>Placeholders no ratchet's classifier may ever accept.</summary>
@@ -231,16 +250,11 @@ public class RatchetDisciplineTests
                     + $"{ratchet.PinHistory[^1]} (the last recorded high-water value).");
             }
 
-            for (var i = 1; i < ratchet.PinHistory.Length; i++)
-            {
-                if (ratchet.PinHistory[i] >= ratchet.PinHistory[i - 1])
-                {
-                    problems.Add(
-                        $"  {ratchet.Name}: pin history {ratchet.PinHistory[i - 1]} → "
-                        + $"{ratchet.PinHistory[i]} is not a decrease. A ratchet that turns both "
-                        + "ways is not a ratchet.");
-                }
-            }
+            // Review F3: BIND THE HEAD. Without this the loop below is vacuous for
+            // any length-1 history, and a seeded pin could be silently re-seeded
+            // upward with a one-literal edit.
+            problems.AddRange(GovernedEndpointCoverageSweepTests.PinHistoryProblems(
+                ratchet.Name, ratchet.PinSeed, ratchet.PinHistory));
         }
 
         problems.Should().BeEmpty(
@@ -269,12 +283,55 @@ public class RatchetDisciplineTests
             + "EveryRatchet_classifiesItsJustifications_andRejectsPlaceholders reports");
 
         var risingPin = Declaration(pinHistory: [5, 9]);
-        risingPin.PinHistory[1].Should().BeGreaterThan(risingPin.PinHistory[0],
-            "a rising history is what EveryRatchet_hasACountPin_thatIsMechanicallyShrinkOnly reports");
+        GovernedEndpointCoverageSweepTests
+            .PinHistoryProblems(risingPin.Name, 5, risingPin.PinHistory)
+            .Should().NotBeEmpty(
+                "a rising history is what EveryRatchet_hasACountPin_thatIsMechanicallyShrinkOnly "
+                + "reports");
 
         var emptyHistory = Declaration(pinHistory: []);
         emptyHistory.PinHistory.Should().BeEmpty(
             "no history at all means the pin is a bare literal, which the same arm reports");
+    }
+
+    [Test]
+    public void Discrimination_aSilentlyReSeededPinWouldBeCaught()
+    {
+        // Review F3, the arm added 2026-08-01. THE defect: a length-1 history made
+        // the strictly-decreasing loop vacuous, so [2] → [3] passed every test in
+        // both assemblies. Prove the arm the meta-test now runs reports it.
+        var reSeeded = Declaration(pinHistory: [3]);
+
+        GovernedEndpointCoverageSweepTests
+            .PinHistoryProblems(reSeeded.Name, 2, reSeeded.PinHistory)
+            .Should().NotBeEmpty(
+                "a seeded-at-2 ratchet whose history now reads [3] has been re-seeded upward. If "
+                + "this arm stays silent, 'the exception set is itself count-pinned and itself "
+                + "shrink-only' is prose with nothing behind it — the exact claim review F3 "
+                + "falsified by mutation.");
+
+        GovernedEndpointCoverageSweepTests
+            .PinHistoryProblems(reSeeded.Name, 3, reSeeded.PinHistory)
+            .Should().BeEmpty(
+                "the complement: a history that DOES start at its declared seed is legal, so the "
+                + "arm is discriminating rather than always red");
+    }
+
+    [Test]
+    public void EveryRatchet_declaresTheSeedItsHistoryActuallyStartsAt()
+    {
+        // Anti-vacuity for the seed itself: a declaration whose PinSeed is simply
+        // copied from PinHistory[0] at runtime would satisfy the arm above while
+        // constraining nothing. Every seed here is a LITERAL in this file, and this
+        // test states the numbers so the pair is visible in one place.
+        Ratchets().ToDictionary(r => r.Name, r => r.PinSeed)
+            .Should().BeEquivalentTo(new Dictionary<string, int>
+            {
+                ["KnownUngovernedEndpoints"] = 237,
+                ["KnownUngovernedEndpoints.ReviewedExceptions"] = 2,
+            },
+            "these are the values the two pins were SEEDED at. Changing one is a re-seed and must "
+            + "be argued for in the diff, never a silent literal edit.");
     }
 
     private static RatchetDeclaration Declaration(
@@ -288,5 +345,6 @@ public class RatchetDisciplineTests
             () => ["human-operated: fixture"],
             classifier ?? KnownUngovernedEndpoints.IsClassified,
             () => 1,
-            pinHistory ?? [1]);
+            pinHistory ?? [1],
+            (pinHistory ?? [1]).Length > 0 ? (pinHistory ?? [1])[0] : 0);
 }

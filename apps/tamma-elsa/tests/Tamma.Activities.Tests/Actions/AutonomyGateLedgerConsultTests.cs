@@ -126,6 +126,7 @@ public class AutonomyGateLedgerConsultTests
         }
 
         public Task<ActionAuthorization?> DecideAsync(
+            Guid? tenantId, Guid? userId,
             Guid id, bool granted, Guid decidedByUserId, string? reason,
             CancellationToken ct = default) => throw new NotSupportedException();
     }
@@ -180,7 +181,7 @@ public class AutonomyGateLedgerConsultTests
         var (gate, _) = Build(new ScriptedLedger(grant: null));
 
         var decision = await gate.EvaluateAsync(
-            new AutonomyQuery(HumanPinned, Principal, CorrelationId: "run-1"));
+            new AutonomyQuery(HumanPinned, Principal, CorrelationId: "run-1", SeamCanBlock: true));
 
         decision.Outcome.Should().Be(AutonomyOutcome.RequiresHuman);
         decision.AuthorizationId.Should().BeNull();
@@ -195,7 +196,7 @@ public class AutonomyGateLedgerConsultTests
         var (gate, events) = Build(new ScriptedLedger(grant));
 
         var decision = await gate.EvaluateAsync(
-            new AutonomyQuery(HumanPinned, Principal, CorrelationId: "run-1"));
+            new AutonomyQuery(HumanPinned, Principal, CorrelationId: "run-1", SeamCanBlock: true));
 
         decision.Outcome.Should().Be(AutonomyOutcome.Automated,
             "one human decision covers the run — that is what the ledger is for");
@@ -219,7 +220,7 @@ public class AutonomyGateLedgerConsultTests
         var (gate, _) = Build(new ScriptedLedger(grant));
 
         var decision = await gate.EvaluateAsync(
-            new AutonomyQuery(HumanPinned, Principal, CorrelationId: "run-1"));
+            new AutonomyQuery(HumanPinned, Principal, CorrelationId: "run-1", SeamCanBlock: true));
 
         decision.Outcome.Should().Be(AutonomyOutcome.Automated);
         decision.CoveredBy.Should().Be($"group:{ActionGroup.ReviewAndAcceptance.ToWire()}",
@@ -238,7 +239,8 @@ public class AutonomyGateLedgerConsultTests
         var ledger = new ScriptedLedger(Grant("action", HumanPinned.ToWire()));
         var (gate, _) = Build(ledger);
 
-        var decision = await gate.EvaluateAsync(new AutonomyQuery(HumanPinned, Principal));
+        var decision = await gate.EvaluateAsync(
+            new AutonomyQuery(HumanPinned, Principal, SeamCanBlock: true));
 
         ledger.Consulted.Should().BeEmpty(
             "the ledger is scoped by correlation by construction; without one there is no run "
@@ -258,7 +260,7 @@ public class AutonomyGateLedgerConsultTests
 
         var decision = await gate.EvaluateAsync(new AutonomyQuery(
             new ActionKey(ActionNamespace.Effect, ExternalEffect.GitBranchCreate.ToWire()),
-            Principal, CorrelationId: "run-1"));
+            Principal, CorrelationId: "run-1", SeamCanBlock: true));
 
         decision.Outcome.Should().Be(AutonomyOutcome.Automated);
         ledger.Consulted.Should().BeEmpty();
@@ -272,7 +274,7 @@ public class AutonomyGateLedgerConsultTests
         var (gate, events) = Build(new ScriptedLedger(grant: null, throws: true));
 
         var decision = await gate.EvaluateAsync(
-            new AutonomyQuery(HumanPinned, Principal, CorrelationId: "run-1"));
+            new AutonomyQuery(HumanPinned, Principal, CorrelationId: "run-1", SeamCanBlock: true));
 
         decision.Outcome.Should().Be(AutonomyOutcome.RequiresHuman,
             "an unreadable ledger must never be read as a grant");
@@ -288,7 +290,7 @@ public class AutonomyGateLedgerConsultTests
         var (gate, _) = Build(ledger: null);
 
         var decision = await gate.EvaluateAsync(
-            new AutonomyQuery(HumanPinned, Principal, CorrelationId: "run-1"));
+            new AutonomyQuery(HumanPinned, Principal, CorrelationId: "run-1", SeamCanBlock: true));
 
         decision.Outcome.Should().Be(AutonomyOutcome.RequiresHuman);
     }

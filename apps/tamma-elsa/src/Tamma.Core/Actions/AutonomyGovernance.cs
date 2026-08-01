@@ -276,13 +276,34 @@ public sealed record BreakGlassState(
 /// <param name="Target">Optional free-text target tag for audit.</param>
 /// <param name="CorrelationId">Optional run correlation id for audit + the
 /// authorization ledger.</param>
+/// <param name="SeamCanBlock">
+/// Adversarial review F4 (2026-08-01) — whether the SEAM asking this question is
+/// capable of blocking on the answer. It gates the single-use ledger consult, and
+/// nothing else.
+///
+/// <para><b>Why this and not <c>Enforced</c>.</b> The consult used to be gated on
+/// <c>decision.Enforced</c>, which under epic D1 defaults TRUE — so Seam A
+/// (<c>POST /api/v1/llm/call</c>), the one route whose entire design property is
+/// "never blocks in any version", consumed a live grant on every call naming an
+/// action with a correlation id. A single-use grant burned by a seam that was
+/// never going to block is a human decision spent on nothing: the real, blocking
+/// ask that follows finds no grant and escalates again. <c>Enforced</c> answers
+/// "did the ADMIN ask for this to block"; this answers "CAN this caller block" —
+/// two different facts, and the consult needs both.</para>
+///
+/// <para><b>It defaults to FALSE, deliberately.</b> A seam that forgets to say so
+/// simply does not consume a grant, which leaves a <c>RequiresHuman</c> as
+/// <c>RequiresHuman</c> — the fail-CLOSED direction. The opposite default would
+/// make every future observe-only caller burn grants by omission.</para>
+/// </param>
 public sealed record AutonomyQuery(
     ActionKey Action,
     GovernancePrincipal Principal,
     string? Role = null,
     string? Operation = null,
     string? Target = null,
-    string? CorrelationId = null);
+    string? CorrelationId = null,
+    bool SeamCanBlock = false);
 
 /// <summary>
 /// One gate decision with every evaluated policy input, for audit tags and for
@@ -328,6 +349,55 @@ public sealed record AutonomyDecision(
     string Reason,
     Guid? AuthorizationId = null,
     string? CoveredBy = null);
+
+/// <summary>
+/// Adversarial review F2 (2026-08-01) — <b>the gate DECIDED, and the decision
+/// could not be RECORDED.</b> Thrown by the gate implementation when the
+/// non-swallowing audit append for an enforced denial/escalation fails
+/// (<c>ActionGateEventsService</c> deliberately rethrows those: a block with no
+/// audit row is a compliance hole).
+///
+/// <para><b>Why it must be a distinct type.</b> Every 43-9 seam wraps the gate in
+/// a catch-all that fails OPEN, on the stated posture "deny on a DECISION, never
+/// on an ERROR". A rethrown audit failure is not an error in that sense — the
+/// decision exists, it blocks, and only the record of it is missing. Before this
+/// type the two were indistinguishable, so a genuine enforced DENIAL whose append
+/// failed was read as a transient fault and the request PROCEEDED. That is not a
+/// remote coincidence: 43-5's fail-closed degradation fires exactly when the
+/// control plane is unreadable, and <c>domain_events</c> lives in the SAME
+/// Postgres, so one blip produces the fail-closed decision AND the failing append
+/// together.</para>
+///
+/// <para>A seam that can act on it re-applies <see cref="Decision"/> (see
+/// <see cref="Blocks"/>); a seam that cannot lets it propagate, which is the
+/// fail-CLOSED behaviour the tool-loop seam already had.</para>
+/// </summary>
+public sealed class AutonomyGateDecisionUnrecordedException : Exception
+{
+    /// <summary>Create the wrapper for a decision whose audit row failed.</summary>
+    public AutonomyGateDecisionUnrecordedException(AutonomyDecision decision, Exception inner)
+        : base(
+            $"The autonomy gate decided '{decision?.Outcome}' for "
+            + $"'{decision?.Action.ToWire()}' but the decision could not be recorded in the "
+            + "audit stream. The decision STANDS — an unrecordable block is still a block.",
+            inner)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        Decision = decision;
+    }
+
+    /// <summary>The decision that WAS made, and whose audit row failed.</summary>
+    public AutonomyDecision Decision { get; }
+
+    /// <summary>
+    /// Whether <see cref="Decision"/> is one a seam must block on: enforced, and
+    /// not <see cref="AutonomyOutcome.Automated"/>. The same predicate every seam
+    /// applies to a decision it received normally — an audit failure changes
+    /// nothing about it.
+    /// </summary>
+    public bool Blocks =>
+        Decision.Enforced && Decision.Outcome != AutonomyOutcome.Automated;
+}
 
 /// <summary>
 /// THE autonomy gate (Story 43-5): resolves whether an action is automated,

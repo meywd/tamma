@@ -505,7 +505,15 @@ public class AutonomyGateServiceFailurePostureTests
 
         var act = async () => await gate.EvaluateAsync(Query("agent-action:triage-intake"));
 
-        await act.Should().ThrowAsync<InvalidOperationException>();
+        // Adversarial review F2 (2026-08-01) — the throw is now TYPED. It still
+        // propagates (that is this test's property, unchanged) but it carries the
+        // decision, so a seam can tell "the gate could not decide" from "the gate
+        // decided and we could not record it" instead of reading every rethrown
+        // audit failure as a transient fault and failing OPEN. The original
+        // exception is the InnerException, asserted here so the wrapper cannot
+        // become a way to lose what actually went wrong.
+        (await act.Should().ThrowAsync<AutonomyGateDecisionUnrecordedException>())
+            .Which.InnerException.Should().BeOfType<InvalidOperationException>();
         events.Appended.Should().BeEmpty();
     }
 

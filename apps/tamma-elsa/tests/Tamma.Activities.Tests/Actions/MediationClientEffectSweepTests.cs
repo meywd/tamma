@@ -275,6 +275,117 @@ public class MediationClientEffectSweepTests
     ];
 
     // ====================================================================
+    // The EXCEPTION classifier — strictly stronger than RatchetClassifies.
+    // Review finding F3 (2026-08-01), PROVED BY MUTATION on the sibling
+    // ratchet (KnownUngovernedEndpoints) and reproduced here.
+    // ====================================================================
+
+    /// <summary>
+    /// The vocabulary a <see cref="ReviewedNonEffectExceptions"/> entry must use ON
+    /// TOP OF <see cref="JustificationKeywords"/>.
+    ///
+    /// <para><b>Why a second vocabulary exists</b> (review F3). D17's claim that the
+    /// exception set "cannot become a blanket escape hatch" rested on each entry
+    /// passing <see cref="RatchetClassifies"/> — which is precisely what all 19
+    /// baseline entries do by construction. A reviewer proved the sibling case on
+    /// <c>KnownUngovernedEndpoints</c>: move an ordinary baseline entry into the
+    /// exception set with its justification COPIED VERBATIM, re-seed the exception
+    /// pin, drop the baseline pin so the laundering reads as PROGRESS, everything
+    /// green. The identical edit works here — <c>GetBudgetAsync</c> out of
+    /// <see cref="KnownNonEffectClientMethods"/>, into
+    /// <see cref="ReviewedNonEffectExceptions"/> verbatim, pin 19 → 18,
+    /// <see cref="NonEffectExceptionPinHistory"/> <c>[1]</c> → <c>[2]</c>: 23 of 23
+    /// tests passed.</para>
+    ///
+    /// <para><b>What separates the two sets.</b> The baseline is a LABEL — "read-only:
+    /// reads commits" — for a method nobody has had to argue about. An exception is
+    /// the claim that cataloguing this method as an effect would be WRONG, and the
+    /// reason is the same circularity the endpoint side records: the gate-evaluation
+    /// call is the question, not the act, so gating it would require a grant in
+    /// order to ask whether a grant is needed. An exception must say that, in words.
+    /// This vocabulary occurs ZERO times across all 19 baseline justifications
+    /// (asserted by <see cref="Discrimination_noBaselineJustification_wouldSatisfyTheExceptionClassifier"/>).</para>
+    /// </summary>
+    private static readonly string[] ExceptionCircularityKeywords =
+    [
+        "circular",
+        "circularity",
+        "deadlock",
+    ];
+
+    /// <summary>
+    /// Floor on an exception justification's length. An exception is an ARGUMENT,
+    /// not a label: the seeded entry runs 345 characters, while the longest of the
+    /// 19 baseline justifications is 167.
+    /// </summary>
+    private const int MinExceptionJustificationLength = 200;
+
+    /// <summary>
+    /// Whether a justification is strong enough to buy an entry in
+    /// <see cref="ReviewedNonEffectExceptions"/> — MATERIALLY stronger than
+    /// <see cref="RatchetClassifies"/>, which is all the baseline requires.
+    /// </summary>
+    internal static bool ExceptionRatchetClassifies(string justification)
+    {
+        if (!RatchetClassifies(justification)) return false;
+
+        var text = justification.Trim();
+
+        if (!ExceptionCircularityKeywords.Any(k => text.Contains(k, StringComparison.OrdinalIgnoreCase)))
+            return false;
+
+        if (text.Length < MinExceptionJustificationLength) return false;
+
+        // Never a VERBATIM copy of a live baseline justification — the exact
+        // laundering the reviewer performed on the sibling ratchet.
+        return !KnownNonEffectClientMethods.Values.Any(v => string.Equals(
+            v.Trim(), text, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// THE PIN HISTORY RULE for this assembly's ratchets, as a pure predicate so the
+    /// live assertions and the discrimination proofs drive the SAME rule. A history
+    /// is legal iff it is non-empty, STARTS AT ITS DECLARED SEED, and strictly
+    /// decreases thereafter.
+    ///
+    /// <para><b>Review F3.</b> The head-binding is the new part. Every one of this
+    /// assembly's four pin histories has LENGTH 1, so the strictly-decreasing loop
+    /// they all ran was vacuous and nothing at all constrained
+    /// <c>[1]</c> → <c>[2]</c>.</para>
+    /// </summary>
+    internal static IReadOnlyList<string> PinHistoryProblems(string name, int seed, int[] history)
+    {
+        var problems = new List<string>();
+
+        if (history.Length == 0)
+        {
+            problems.Add($"  {name}: has no pin history — the pin is a bare literal.");
+            return problems;
+        }
+
+        if (history[0] != seed)
+        {
+            problems.Add(
+                $"  {name}: its history STARTS at {history[0]} but the recorded seed is {seed}. "
+                + "A history whose head can move is not a record — it can be silently RE-SEEDED "
+                + "at a larger value, and at length 1 the strictly-decreasing check never "
+                + "executes, so nothing else would notice.");
+        }
+
+        for (var i = 1; i < history.Length; i++)
+        {
+            if (history[i] >= history[i - 1])
+            {
+                problems.Add(
+                    $"  {name}: pin history {history[i - 1]} → {history[i]} is not a decrease. "
+                    + "A ratchet that turns both ways is not a ratchet.");
+            }
+        }
+
+        return problems;
+    }
+
+    // ====================================================================
     // Story 43-9 DECISION D17 — the NAMED, DATED, REVIEWED exception set
     // ====================================================================
 
@@ -306,13 +417,26 @@ public class MediationClientEffectSweepTests
     /// <para><b>Why it cannot become a blanket escape hatch.</b> It is keyed by
     /// EXACT METHOD NAME, so a different new method still goes red; each entry
     /// carries a date, the reviewing story and a justification that must pass
-    /// <see cref="RatchetClassifies"/>; the set is itself count-pinned and
-    /// shrink-only; it is declared in <c>RatchetDisciplineTests.Ratchets()</c>; and
-    /// staleness applies both ways — an entry whose method no longer exists, or
+    /// <see cref="ExceptionRatchetClassifies"/>; its MEMBERSHIP is pinned by method
+    /// name in <see cref="ExceptionSet_membershipIsPinnedByMethod"/>; the set is
+    /// count-pinned by a history whose HEAD is bound to its seed and whose tail must
+    /// strictly decrease; it is declared in <c>RatchetDisciplineTests.Ratchets()</c>;
+    /// and staleness applies both ways — an entry whose method no longer exists, or
     /// which becomes mapped to an <see cref="ExternalEffect"/>, fails until
     /// deleted. The rejected alternative was the count-level "name the index that
     /// may rise" precedent, which is ANONYMOUS: any future method could occupy the
     /// widened slot.</para>
+    ///
+    /// <para><b>CORRECTION 2026-08-01 (review F3) — the paragraph above used to say
+    /// "a justification that must pass <c>RatchetClassifies</c>", and the set was
+    /// pinned by COUNT ALONE with a one-element history. Both were the escape hatch,
+    /// not the guard against it: all 19 baseline entries pass
+    /// <c>RatchetClassifies</c> by construction, and
+    /// <c>for (i = 1; i &lt; Length; i++)</c> over a one-element array asserts
+    /// nothing. Moving <c>GetBudgetAsync</c> here with its justification COPIED
+    /// VERBATIM, re-seeding <see cref="NonEffectExceptionPinHistory"/> to
+    /// <c>[2]</c> and dropping the baseline pin 19 → 18 left 23 of 23 tests
+    /// GREEN.</b></para>
     ///
     /// <para><see cref="KnownNonEffectClientMethods"/> stays at 19 and its history
     /// stays <c>[19]</c>. The exception set is unioned into the classifier's
@@ -326,11 +450,29 @@ public class MediationClientEffectSweepTests
             + "whether the system may perform a catalogued action by itself and changes nothing "
             + "outside Tamma; the effect it asks ABOUT is separately catalogued and separately "
             + "bound. Mapping this to an ExternalEffect would catalogue the question as though it "
-            + "were the answer."),
+            + "were the answer, and the result would be circular: CheckActionGateActivity would "
+            + "have to clear the gate before it were allowed to ask the gate anything, so the "
+            + "first denial would deadlock every later evaluation. Same circularity the endpoint "
+            + "side records for POST /api/v1/governance/evaluate itself, stated at the client "
+            + "seam. (Circularity clause added 2026-08-01 under review F3: the argument was always "
+            + "the reason for this entry, but until F3 nothing required an exception to WRITE it, "
+            + "so a copied baseline label bought an exception just as well.)"),
     ];
 
     /// <summary>The exception set's own count pin — shrink-only, seeded 2026-08-01.</summary>
     internal static readonly int[] NonEffectExceptionPinHistory = [1];
+
+    /// <summary>
+    /// The value <see cref="NonEffectExceptionPinHistory"/> was SEEDED at, and the
+    /// value <see cref="NonEffectPinHistory"/> was seeded at. Restated as named
+    /// constants that the pin-history rule checks, so a re-seed is a change to a
+    /// named seed rather than an invisible edit to the array's first element
+    /// (review F3).
+    /// </summary>
+    internal const int NonEffectExceptionPinSeed = 1;
+
+    /// <summary>See <see cref="NonEffectExceptionPinSeed"/>.</summary>
+    internal const int NonEffectPinSeed = 19;
 
     /// <summary>Exception method names, for the union the classifier consumes.</summary>
     private static IReadOnlyDictionary<string, string> ExceptionsAsBaseline() =>
@@ -636,12 +778,15 @@ public class MediationClientEffectSweepTests
             "the pin IS the last recorded high-water value; changing one without the other is the "
             + "shape of an undeclared re-widening");
 
-        for (var i = 1; i < NonEffectPinHistory.Length; i++)
-        {
-            NonEffectPinHistory[i].Should().BeLessThan(NonEffectPinHistory[i - 1],
-                $"pin history entry #{i} must be strictly smaller than #{i - 1}. A method leaves "
-                + "this baseline by becoming a governed effect, never by the list growing.");
-        }
+        // Review F3 (2026-08-01): BIND THE HEAD. The loop below constrains the TAIL
+        // of the history and never its first element, and this history has LENGTH 1
+        // so the loop never runs at all.
+        var problems = PinHistoryProblems(
+            nameof(NonEffectPinHistory), NonEffectPinSeed, NonEffectPinHistory);
+
+        problems.Should().BeEmpty(
+            "A method leaves this baseline by becoming a governed effect, never by the list "
+            + "growing:" + Environment.NewLine + string.Join(Environment.NewLine, problems));
     }
 
     [Test]
@@ -674,12 +819,93 @@ public class MediationClientEffectSweepTests
             + "(EvaluateGovernanceAsync). A second entry must be argued for — the whole point of "
             + "keying exceptions BY METHOD NAME is that one exception does not buy the next.");
 
-        for (var i = 1; i < NonEffectExceptionPinHistory.Length; i++)
+        // Review F3: head-binding is what makes shrink-only mean anything at
+        // length 1. Before it, [1] → [2] was a ONE-LITERAL edit and all 23 tests
+        // in this fixture and the meta-test stayed green.
+        var problems = PinHistoryProblems(
+            nameof(NonEffectExceptionPinHistory),
+            NonEffectExceptionPinSeed,
+            NonEffectExceptionPinHistory);
+
+        problems.Should().BeEmpty(
+            "an exception set that can grow without a decrease is an escape hatch:"
+            + Environment.NewLine + string.Join(Environment.NewLine, problems));
+    }
+
+    [Test]
+    public void ExceptionSet_membershipIsPinnedByMethod()
+    {
+        // Review F3. A COUNT pin cannot tell "an exception was added" from "a
+        // baseline entry was relabelled an exception while the baseline pin
+        // dropped" — the second reads as governance PROGRESS in the diff. Pinning
+        // the MEMBERSHIP makes admitting a method a sentence a reviewer reads.
+        ReviewedNonEffectExceptions.Select(e => e.Method)
+            .Should().BeEquivalentTo(
+                new[] { "EvaluateGovernanceAsync" },
+                "this method, and only this method, is a D17 reviewed exception. Admitting a "
+                + "second is a governance decision: name it here, argue the circularity in its "
+                + "justification, and do NOT pay for it by dropping the baseline pin.");
+    }
+
+    [Test]
+    public void Discrimination_noBaselineJustification_wouldSatisfyTheExceptionClassifier()
+    {
+        // THE F3 PROOF for this ratchet. Every baseline justification must be
+        // REJECTED as an exception justification — otherwise "reviewed exception"
+        // is a second name for "baseline entry" and the two pins can be traded
+        // against each other while the diff reads as progress.
+        var launderable = KnownNonEffectClientMethods
+            .Where(kv => ExceptionRatchetClassifies(kv.Value))
+            .Select(kv => $"  {kv.Key}: '{kv.Value}'")
+            .ToList();
+
+        launderable.Should().BeEmpty(
+            $"{launderable.Count} of {KnownNonEffectClientMethods.Count} baseline justifications "
+            + "would buy a D17 reviewed exception verbatim. An exception is the claim that "
+            + "cataloguing the method as an effect would be WRONG because doing so is circular; a "
+            + "baseline entry is a label for a method nobody has argued about:"
+            + Environment.NewLine + string.Join(Environment.NewLine, launderable));
+    }
+
+    [Test]
+    public void Discrimination_theExceptionClassifierIsStrictlyStronger_notMerelyDifferent()
+    {
+        foreach (var e in ReviewedNonEffectExceptions)
         {
-            NonEffectExceptionPinHistory[i].Should()
-                .BeLessThan(NonEffectExceptionPinHistory[i - 1],
-                    "an exception set that can grow without a decrease is an escape hatch");
+            RatchetClassifies(e.Justification).Should().BeTrue(
+                "an exception justification is a baseline justification PLUS an argument, never "
+                + $"something outside the vocabulary: '{e.Justification}'");
         }
+
+        foreach (var placeholder in new[] { "", "   ", "TODO", "n/a", "circular" })
+        {
+            ExceptionRatchetClassifies(placeholder).Should().BeFalse(
+                $"'{placeholder}' must not buy an exception — in particular the bare word "
+                + "'circular' must not, or the new requirement degenerates into a magic word");
+        }
+    }
+
+    [Test]
+    public void Discrimination_aReSeededPinHistoryIsReported()
+    {
+        // Drive the REAL pin rule with the sibling reviewer's exact edit shape.
+        PinHistoryProblems("fixture", 1, [2]).Should().ContainSingle()
+            .Which.Should().Contain("RE-SEEDED",
+                "a length-1 history re-seeded upward is the F3 mutation; if the rule stays silent "
+                + "here the shrink-only property is vacuous");
+
+        PinHistoryProblems("fixture", 1, [1]).Should().BeEmpty(
+            "the complement: the seeded history itself must be legal, or the rule is always red "
+            + "and proves nothing");
+
+        PinHistoryProblems("fixture", 19, [19, 18]).Should().BeEmpty(
+            "shrinking is the direction the ratchet is FOR");
+
+        PinHistoryProblems("fixture", 19, [19, 20]).Should().ContainSingle()
+            .Which.Should().Contain("is not a decrease");
+
+        PinHistoryProblems("fixture", 1, []).Should().ContainSingle()
+            .Which.Should().Contain("bare literal");
     }
 
     [Test]
@@ -698,7 +924,10 @@ public class MediationClientEffectSweepTests
             if (!DateOnly.TryParse(e.AddedOn, out _) || string.IsNullOrWhiteSpace(e.Story))
                 problems.Add($"  {e.Method}: addedOn='{e.AddedOn}' story='{e.Story}' — a named, "
                     + "dated, reviewed exception must actually carry all three.");
-            if (!RatchetClassifies(e.Justification))
+            // Review F3: the STRICTER exception classifier, not RatchetClassifies.
+            // Requiring only what the baseline requires is what made this set a
+            // blanket escape hatch.
+            if (!ExceptionRatchetClassifies(e.Justification))
                 problems.Add($"  {e.Method}: unclassified justification '{e.Justification}'.");
             // Staleness, both ways (D17(5)).
             if (!live.Contains(e.Method))

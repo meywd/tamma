@@ -216,19 +216,36 @@ public class AutonomyGateEndpointFilterTests
     }
 
     [Test]
-    public async Task ADenialWithoutACorrelationId_hasANullAuthorizationId_andMintsNothing()
+    public async Task ADenialWithoutACorrelationId_stillMintsARowUnderARouteDerivedCorrelation()
     {
+        // PIN MOVED by adversarial review F5 (2026-08-01). It previously asserted
+        // that a caller sending no correlation id gets a NULL authorizationId and
+        // no row — which was true, and was the bug: NOT ONE opted-in route sends
+        // the header or the query value (they are all engine mediation routes
+        // called by TammaApiClient, which sets neither), so that was EVERY real
+        // request. The 409 nonetheless told the caller to "Grant the pending
+        // authorization (POST …/{id}/decide)" with no id and no row in existence:
+        // an unactionable block, clearable only by editing policy.
+        //
+        // The old comment's reasoning still holds and is why the fix is a
+        // DETERMINISTIC route-derived correlation rather than a per-request id:
+        // the ledger is keyed by (principal, correlation, target), so the value
+        // must be re-derivable by the retry that follows the human's grant.
         var requests = new StubRequests(Guid.NewGuid());
         var (http, _) = Context(new ScriptedGate(Blocked()), authorizations: requests);
 
         var (_, body, _) = await RunFilter(http);
 
         using var doc = JsonDocument.Parse(body);
-        doc.RootElement.GetProperty("authorizationId").ValueKind.Should().Be(JsonValueKind.Null,
-            "the ledger is keyed by (principal, correlation, target); a grant keyed to a "
-            + "request-scoped identity could never be found again, so we say null rather than "
-            + "mint something unusable");
-        requests.Calls.Should().BeEmpty();
+        doc.RootElement.GetProperty("authorizationId").ValueKind.Should().Be(JsonValueKind.String,
+            "a 409 that names a decide endpoint must name a row that exists");
+        requests.Calls.Should().ContainSingle().Which.Should().Be(
+            "route:POST /api/v1/git/acme/widget/branches",
+            "the derived correlation is the METHOD and the CONCRETE path — deterministic, so "
+            + "the retry re-finds the grant, and narrow, so a grant for one repo does not cover "
+            + "another");
+        doc.RootElement.GetProperty("correlationId").GetString().Should()
+            .StartWith("route:", "a derived correlation is marked as such for the auditor");
     }
 
     private sealed class StubRequests(Guid id) : IActionAuthorizationRequests

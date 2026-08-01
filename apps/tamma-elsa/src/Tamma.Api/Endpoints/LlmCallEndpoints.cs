@@ -213,6 +213,19 @@ public static class LlmCallEndpoints
     /// <para>Every failure is swallowed at WARNING. An observe-only seam that can
     /// 500 the request it is observing would be a blocking seam with extra steps
     /// — precisely the outcome D2 forbids.</para>
+    ///
+    /// <para><b>Including cancellations the caller did not cause</b> (2026-08-01
+    /// review finding F7). This used to carry a bare
+    /// <c>catch (OperationCanceledException) { throw; }</c> ahead of the
+    /// swallow-all, which let an <c>OperationCanceledException</c> raised INSIDE
+    /// the gate — an internal linked-CTS deadline, an EF cancellation on a pooled
+    /// command, a Polly timeout — escape and fail the LLM call on an UNCANCELLED
+    /// request. That is control flow, on the one seam whose entire contract is
+    /// that it has none, and it was new failure surface on a route that made no
+    /// gate call at all before Story 43-9. The rethrow is now narrowed to a
+    /// GENUINE caller abort (<c>ct.IsCancellationRequested</c>): when the client
+    /// really has gone away there is no point running the provider, and swallowing
+    /// that would turn an aborted request into a billed model call.</para>
     /// </summary>
     private static async Task ObserveAutonomyAsync(
         LlmCallRequest request,
@@ -244,7 +257,11 @@ public static class LlmCallEndpoints
                     CorrelationId: request.CorrelationId),
                 ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) { throw; }
+        // F7 — ONLY a genuine caller abort propagates. A cancellation raised inside
+        // the gate on an uncancelled request is an observation failure like any
+        // other and is swallowed below; an observing seam must not be able to fail
+        // a call it is not permitted to block.
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             logger.LogWarning(ex,

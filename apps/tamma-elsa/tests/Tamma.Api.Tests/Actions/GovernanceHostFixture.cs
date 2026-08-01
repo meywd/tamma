@@ -43,6 +43,20 @@ namespace Tamma.Api.Tests.Actions;
 ///   exists in SaaS mode is invisible here and ships uncatalogued.</item>
 ///   <item><b>Effects inside a handler.</b> A binding names a SITE. A new capability
 ///   grown inside an already-bound handler changes nothing any harness observes.</item>
+///   <item><b>Whether the enforcement FILTER is attached</b>, as opposed to the
+///   enforcement MARKER. <see cref="EndpointFact.EnforcesGovernance"/> is computed
+///   from <c>IGovernanceEnforcementMetadata</c> alone, because ASP.NET Core
+///   records endpoint filters as factories rather than as metadata — there is
+///   nothing to reflect over. Adversarial review F8 (2026-08-01) closed the
+///   dangerous half of that gap in the PRODUCTION code rather than here:
+///   <see cref="AutonomyGateEndpointFilter"/> now REFUSES to gate a route carrying
+///   no marker (409 <c>ACTION.GATE.MISCONFIGURED</c>), so a route can no longer
+///   enforce while this fixture reports it unenforced. The remaining direction —
+///   a marker attached WITHOUT the filter, which would read as enforced here while
+///   the route gates nothing — is only reachable by hand-writing
+///   <c>.WithMetadata(new GovernanceEnforcementMetadata())</c>;
+///   <c>.EnforcesGovernance()</c> attaches both and is the only supported
+///   spelling. Recorded, not hidden.</item>
 /// </list>
 /// </summary>
 [SetUpFixture]

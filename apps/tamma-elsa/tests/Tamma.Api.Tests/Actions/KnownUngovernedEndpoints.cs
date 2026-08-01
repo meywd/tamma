@@ -118,6 +118,85 @@ internal static class KnownUngovernedEndpoints
         !string.IsNullOrWhiteSpace(justification)
         && JustificationKeywords.Any(k => justification.Contains(k, StringComparison.OrdinalIgnoreCase));
 
+    // =======================================================================
+    // The EXCEPTION classifier — strictly stronger than IsClassified.
+    // Review finding F3 (2026-08-01), PROVED BY MUTATION.
+    // =======================================================================
+
+    /// <summary>
+    /// The vocabulary an <see cref="ReviewedUngovernedExceptions"/> entry must use
+    /// ON TOP OF <see cref="JustificationKeywords"/>.
+    ///
+    /// <para><b>Why a second vocabulary exists</b> (review F3). The D17 doc-comment
+    /// below claims the exception set "cannot become a blanket escape hatch" because
+    /// each entry "must pass the SAME classifier as the baseline". That sentence was
+    /// the defect: passing the same classifier is exactly what every one of the 216
+    /// backlog entries already does. A reviewer proved it by moving an ordinary
+    /// backlog entry (<c>DELETE /api/acceptance-rules/{documentTypeKey}</c>) into
+    /// the exception set with its justification COPIED VERBATIM, bumping
+    /// <see cref="ExceptionPinHistory"/> to <c>[3]</c> and DROPPING
+    /// <see cref="PinnedCount"/> 216 → 215 — so the laundering read as governance
+    /// PROGRESS in the diff — and the whole fixture stayed green.</para>
+    ///
+    /// <para><b>What separates the two sets.</b> The backlog is "nobody has got to
+    /// this yet". The exception set is "gating this is CIRCULAR — the route would
+    /// have to pass the gate in order to decide whether it may run the gate". So an
+    /// exception must actually make that argument, in words. This vocabulary occurs
+    /// ZERO times across all 216 backlog justifications (measured, and asserted by
+    /// <c>GovernedEndpointCoverageSweepTests.Discrimination_noBacklogJustification_
+    /// wouldSatisfyTheExceptionClassifier</c>), so a copied backlog line cannot
+    /// satisfy it and an author who wants to launder one must write a circularity
+    /// claim that is false — a lie a reviewer can see, rather than a relabelling
+    /// nobody can.</para>
+    /// </summary>
+    internal static readonly string[] ExceptionCircularityKeywords =
+    [
+        "circular",
+        "circularity",
+        "deadlock",
+    ];
+
+    /// <summary>
+    /// Floor on an exception justification's length. An exception is an ARGUMENT,
+    /// not a label: the two seeded entries run 344 and 566 characters, while the
+    /// backlog's median is 154. This is a floor, not the discriminator — 22 backlog
+    /// justifications clear it — the discriminator is
+    /// <see cref="ExceptionCircularityKeywords"/>.
+    /// </summary>
+    internal const int MinExceptionJustificationLength = 200;
+
+    /// <summary>
+    /// Whether a justification is strong enough to buy an entry in
+    /// <see cref="ReviewedUngovernedExceptions"/> — MATERIALLY stronger than
+    /// <see cref="IsClassified"/>, which is all the baseline requires.
+    /// </summary>
+    internal static bool IsExceptionJustified(string justification)
+    {
+        // 1. It is still a baseline-classifiable justification — an exception is a
+        //    baseline justification PLUS an argument, never something outside the
+        //    vocabulary.
+        if (!IsClassified(justification)) return false;
+
+        var text = justification.Trim();
+
+        // 2. It ARGUES the circularity that is the only reason this set exists.
+        //    Zero of the 216 backlog justifications do; a copied backlog line is
+        //    therefore rejected, and laundering one requires WRITING a circularity
+        //    claim — which is either true (fine, that is the bar) or a visible lie.
+        if (!ExceptionCircularityKeywords.Any(k => text.Contains(k, StringComparison.OrdinalIgnoreCase)))
+            return false;
+
+        // 3. It is an argument, not a label. Stops the bare word "circular" being
+        //    appended to a one-line backlog reason as a magic token.
+        if (text.Length < MinExceptionJustificationLength) return false;
+
+        // 4. It is not a VERBATIM copy of a live backlog justification — the exact
+        //    laundering the reviewer performed. Read at call time, not in a static
+        //    initialiser, because `All` is declared below this method.
+        return !All.Any(e => string.Equals(
+            e.Justification.Trim(), text, StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>
     /// The count pin (AC8(c)). SEEDED 2026-07-29 from the sweep itself. May only go
     /// DOWN, and every decrement must come with the deleted entry in the same diff.
@@ -203,14 +282,29 @@ internal static class KnownUngovernedEndpoints
     ///
     /// <para><b>Why it cannot become a blanket escape hatch.</b> It is keyed
     /// PER ROUTE, so a different new route still goes red; each entry carries a
-    /// date, the reviewing story and a justification that must pass the SAME
-    /// classifier as the baseline; the set is itself count-pinned and itself
-    /// shrink-only; it is declared in <c>RatchetDisciplineTests.Ratchets()</c> so
-    /// all three AC8 properties are asserted against it; and staleness applies
-    /// both ways — an entry whose route no longer exists, or which becomes bound,
-    /// fails until deleted. The rejected alternative was the count-level
-    /// "name the index that may rise" precedent, which is ANONYMOUS: any future
-    /// route could occupy the widened slot.</para>
+    /// date, the reviewing story and a justification that must pass
+    /// <see cref="IsExceptionJustified"/>; its MEMBERSHIP is pinned by route in
+    /// <c>GovernedEndpointCoverageSweepTests.ExceptionSet_membershipIsPinnedByRoute</c>;
+    /// the set is count-pinned by a history whose HEAD is bound to its seed and
+    /// whose tail must strictly decrease; it is declared in
+    /// <c>RatchetDisciplineTests.Ratchets()</c> so all three AC8 properties are
+    /// asserted against it; and staleness applies both ways — an entry whose route
+    /// no longer exists, or which becomes bound, fails until deleted. The rejected
+    /// alternative was the count-level "name the index that may rise" precedent,
+    /// which is ANONYMOUS: any future route could occupy the widened slot.</para>
+    ///
+    /// <para><b>CORRECTION 2026-08-01 (review F3) — the paragraph above used to
+    /// say "a justification that must pass the SAME classifier as the baseline",
+    /// and the set was pinned by COUNT ALONE with a one-element history. All three
+    /// of those were the escape hatch, not the guard against it. A reviewer moved
+    /// an ordinary backlog entry (<c>DELETE /api/acceptance-rules/{documentTypeKey}</c>)
+    /// into this set with its justification COPIED VERBATIM and a made-up story id,
+    /// set <see cref="ExceptionPinHistory"/> to <c>[3]</c>, and dropped
+    /// <see cref="PinnedCount"/> 216 → 215 with history <c>[237, 216, 215]</c> — so
+    /// the laundering read in the diff as governance PROGRESS — and 41 of 41 tests
+    /// passed, this file's own <c>ExceptionSet_*</c> tests included. Every "why it
+    /// cannot become an escape hatch" clause above is now backed by an assertion
+    /// that has been watched to fail on that exact mutation.</b></para>
     ///
     /// <para><b>SEEDED AT 2, not 1.</b> Story 43-9's plan budgeted one exception
     /// (the gate-evaluation route). Implementing it produced TWO ungoverned

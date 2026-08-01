@@ -45,6 +45,19 @@ public class RatchetDisciplineTests
     /// <param name="Classifier">The owning fixture's REAL justification classifier.</param>
     /// <param name="LiveCount">The ratchet's current entry count.</param>
     /// <param name="PinHistory">The count pin's recorded high-water history.</param>
+    /// <param name="PinSeed">
+    /// The value <paramref name="PinHistory"/> was SEEDED at, restated HERE — in the
+    /// registry, a different file from every array it describes — so re-seeding is a
+    /// two-file edit.
+    ///
+    /// <para><b>Review F3 (2026-08-01), proved by mutation.</b> ALL FOUR of this
+    /// assembly's pin histories have LENGTH 1, so the strictly-decreasing check
+    /// below never executed for any of them and nothing bound their first element:
+    /// <c>[1]</c> → <c>[2]</c> was a one-literal edit no test in either assembly
+    /// noticed. Head-binding is what makes "shrink-only" mean something at length 1:
+    /// the only legal histories are <c>[seed]</c> followed by strictly-decreasing
+    /// values.</para>
+    /// </param>
     internal sealed record RatchetDeclaration(
         string Name,
         Type OwningFixture,
@@ -53,7 +66,8 @@ public class RatchetDisciplineTests
         Func<IReadOnlyList<string>> Justifications,
         Func<string, bool> Classifier,
         Func<int> LiveCount,
-        int[] PinHistory);
+        int[] PinHistory,
+        int PinSeed);
 
     /// <summary>THE REGISTRY for this assembly. Count-pinned by <see cref="TheRegistry_isCountPinned"/>.</summary>
     internal static IReadOnlyList<RatchetDeclaration> Ratchets() =>
@@ -65,7 +79,8 @@ public class RatchetDisciplineTests
             MediationClientEffectSweepTests.RatchetJustifications,
             MediationClientEffectSweepTests.RatchetClassifies,
             MediationClientEffectSweepTests.RatchetCount,
-            MediationClientEffectSweepTests.NonEffectPinHistory),
+            MediationClientEffectSweepTests.NonEffectPinHistory,
+            19),
 
         new("UnattributedActivities",
             typeof(UnattributedActivitySweepTests),
@@ -74,7 +89,8 @@ public class RatchetDisciplineTests
             UnattributedActivitySweepTests.RatchetJustifications,
             UnattributedActivitySweepTests.RatchetClassifies,
             () => UnattributedActivitySweepTests.RatchetJustifications().Count,
-            UnattributedActivitySweepTests.UnattributedPinHistory),
+            UnattributedActivitySweepTests.UnattributedPinHistory,
+            9),
 
         // Story 43-4's ratchet, consumed here (43-8 AC8 names it as one of the four;
         // this story asserts its DISCIPLINE, it does not own its content). Its
@@ -89,7 +105,8 @@ public class RatchetDisciplineTests
             () => ToolCatalogAllowlists.NotDiRegisteredTools.Select(e => e.Justification).ToArray(),
             ToolCatalogAllowlistTests.CitesASource,
             () => ToolCatalogAllowlists.NotDiRegisteredTools.Count,
-            ToolCatalogAllowlistTests.NotDiRegisteredToolsPinHistory),
+            ToolCatalogAllowlistTests.NotDiRegisteredToolsPinHistory,
+            1),
 
         // Story 43-9 D17 — the reviewed exception set that relieves
         // KnownNonEffectClientMethods' shrink-only pin is itself a ratchet, and is
@@ -101,9 +118,11 @@ public class RatchetDisciplineTests
             nameof(MediationClientEffectSweepTests.ExceptionSet_entriesAreDatedAndAttributed_andStillExist),
             MediationClientEffectSweepTests.ExceptionRatchetStalenessProbe,
             MediationClientEffectSweepTests.ExceptionRatchetJustifications,
-            MediationClientEffectSweepTests.RatchetClassifies,
+            // Review F3: the STRICTER exception classifier, not RatchetClassifies.
+            MediationClientEffectSweepTests.ExceptionRatchetClassifies,
             MediationClientEffectSweepTests.ExceptionRatchetCount,
-            MediationClientEffectSweepTests.NonEffectExceptionPinHistory),
+            MediationClientEffectSweepTests.NonEffectExceptionPinHistory,
+            1),
     ];
 
     /// <summary>
@@ -236,16 +255,11 @@ public class RatchetDisciplineTests
                     + $"{ratchet.PinHistory[^1]} (the last recorded high-water value).");
             }
 
-            for (var i = 1; i < ratchet.PinHistory.Length; i++)
-            {
-                if (ratchet.PinHistory[i] >= ratchet.PinHistory[i - 1])
-                {
-                    problems.Add(
-                        $"  {ratchet.Name}: pin history {ratchet.PinHistory[i - 1]} → "
-                        + $"{ratchet.PinHistory[i]} is not a decrease. A ratchet that turns both "
-                        + "ways is not a ratchet.");
-                }
-            }
+            // Review F3: BIND THE HEAD. Without this the strictly-decreasing rule
+            // is vacuous for any length-1 history — and all four of this assembly's
+            // histories have length 1.
+            problems.AddRange(MediationClientEffectSweepTests.PinHistoryProblems(
+                ratchet.Name, ratchet.PinSeed, ratchet.PinHistory));
         }
 
         problems.Should().BeEmpty(
@@ -270,11 +284,57 @@ public class RatchetDisciplineTests
             + "EveryRatchet_classifiesItsJustifications_andRejectsPlaceholders rejects");
 
         var risingPin = Declaration(pinHistory: [5, 9]);
-        risingPin.PinHistory[1].Should().BeGreaterThan(risingPin.PinHistory[0],
-            "a rising history is what EveryRatchet_hasACountPin_thatIsMechanicallyShrinkOnly rejects");
+        MediationClientEffectSweepTests
+            .PinHistoryProblems(risingPin.Name, 5, risingPin.PinHistory)
+            .Should().NotBeEmpty(
+                "a rising history is what EveryRatchet_hasACountPin_thatIsMechanicallyShrinkOnly "
+                + "rejects");
 
         Declaration(pinHistory: []).PinHistory.Should().BeEmpty(
             "no history at all means the pin is a bare literal, rejected by the same arm");
+    }
+
+    [Test]
+    public void Discrimination_aSilentlyReSeededPinWouldBeCaught()
+    {
+        // Review F3, the arm added 2026-08-01. THE defect: every history in this
+        // assembly has length 1, so the strictly-decreasing loop was vacuous and
+        // [1] → [2] passed all 23 tests. Prove the arm the meta-test now runs
+        // reports it.
+        var reSeeded = Declaration(pinHistory: [2]);
+
+        MediationClientEffectSweepTests
+            .PinHistoryProblems(reSeeded.Name, 1, reSeeded.PinHistory)
+            .Should().NotBeEmpty(
+                "a seeded-at-1 ratchet whose history now reads [2] has been re-seeded upward. If "
+                + "this arm stays silent, 'the set is itself count-pinned and itself shrink-only' "
+                + "is prose with nothing behind it — the exact claim review F3 falsified by "
+                + "mutation.");
+
+        MediationClientEffectSweepTests
+            .PinHistoryProblems(reSeeded.Name, 2, reSeeded.PinHistory)
+            .Should().BeEmpty(
+                "the complement: a history that DOES start at its declared seed is legal, so the "
+                + "arm is discriminating rather than always red");
+    }
+
+    [Test]
+    public void EveryRatchet_declaresTheSeedItsHistoryActuallyStartsAt()
+    {
+        // Anti-vacuity for the seed itself: a declaration whose PinSeed were simply
+        // copied from PinHistory[0] at runtime would satisfy the arm above while
+        // constraining nothing. Every seed in the registry is a LITERAL in this
+        // file; this test states the numbers so the pairs are visible in one place.
+        Ratchets().ToDictionary(r => r.Name, r => r.PinSeed)
+            .Should().BeEquivalentTo(new Dictionary<string, int>
+            {
+                ["KnownNonEffectClientMethods"] = 19,
+                ["UnattributedActivities"] = 9,
+                ["NotDiRegisteredTools"] = 1,
+                ["KnownNonEffectClientMethods.ReviewedExceptions"] = 1,
+            },
+            "these are the values the four pins were SEEDED at. Changing one is a re-seed and must "
+            + "be argued for in the diff, never a silent literal edit.");
     }
 
     [Test]
@@ -303,5 +363,6 @@ public class RatchetDisciplineTests
             () => ["read-only: fixture"],
             classifier ?? MediationClientEffectSweepTests.RatchetClassifies,
             () => 1,
-            pinHistory ?? [1]);
+            pinHistory ?? [1],
+            (pinHistory ?? [1]).Length > 0 ? (pinHistory ?? [1])[0] : 0);
 }

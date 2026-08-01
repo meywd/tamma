@@ -31,6 +31,16 @@ namespace Tamma.Api.Services.Actions;
 /// <c>system-default</c> and is always enforced — is guaranteed an audit row
 /// (<c>.REQUIRES_HUMAN</c>/<c>.DENIED</c> emission is not swallowed).</para>
 ///
+/// <para><b>WHEN THAT GUARANTEED ROW CANNOT BE WRITTEN (review F2,
+/// 2026-08-01).</b> The non-swallowing emission rethrows, and that rethrow used to
+/// leave this method as an anonymous exception — which every 43-9 seam's catch-all
+/// reads as a transient fault and answers by PROCEEDING. So the exception raised
+/// because a denial happened became the reason the denial did not. It is now
+/// wrapped in <see cref="AutonomyGateDecisionUnrecordedException"/>, which carries
+/// the decision, so a seam re-applies the block instead of guessing. The wrapping
+/// is deliberately WIDE: it covers the break-glass row and the decision row, i.e.
+/// every audit emission that happens AFTER a decision exists.</para>
+///
 /// <para>"Read failed" and "read succeeded, no overrides exist" are DIFFERENT
 /// answers here: the latter returns a real
 /// <see cref="ResolvedAcceptanceRules"/> carrying
@@ -64,9 +74,15 @@ namespace Tamma.Api.Services.Actions;
 /// disabled/role-excluded row, which a grant must not be able to override —
 /// a grant answers "may the system do this without asking again", never "may
 /// this happen at all".</item>
-/// <item><b>Only an ENFORCED decision is offered.</b> An observe-only
-/// resolution proceeds regardless; consuming a single-use grant for it would
-/// burn the person's decision on a seam that was never going to block.</item>
+/// <item><b>Only a decision a seam can actually BLOCK on is offered</b> —
+/// <see cref="AutonomyQuery.SeamCanBlock"/> AND
+/// <see cref="AutonomyDecision.Enforced"/>. Consuming a single-use grant for a
+/// resolution that proceeds regardless would burn the person's decision on a
+/// seam that was never going to block. Review F4 (2026-08-01): this guard used
+/// to read <c>Enforced</c> alone, which under epic D1 defaults TRUE — so Seam A,
+/// the observe-only route, reached <c>TryConsumeAsync</c> on every call naming an
+/// action with a correlation id, and the real ask that followed found
+/// nothing.</item>
 /// <item><b>No correlation id, no consult.</b> The ledger is scoped by
 /// correlation by construction; without one there is no run for a decision to
 /// cover.</item>
@@ -162,32 +178,75 @@ public sealed class AutonomyGateService : IAutonomyGate
                 decision.Action.ToWire(), breakGlass.ExpiresAtUtc, breakGlass.ReasonOrUnspecified,
                 decision.Outcome, decision.EffectiveMinAutonomy, decision.AutonomyLevel);
 
-            await _events.EmitBreakGlassBypassAsync(
-                decision.Action.ToWire(),
-                decision.Group.ToWire(),
-                breakGlass,
-                seam: "autonomy-gate",
-                outcome: decision.Outcome.ToString().ToLowerInvariant(),
-                autonomyLevel: decision.AutonomyLevel,
-                effectiveMinAutonomy: decision.EffectiveMinAutonomy,
-                tenantId: principal.TenantId,
-                userId: principal.UserId,
-                correlationId: query.CorrelationId,
-                degradedReason: decision.Reason)
+            await RecordAsync(
+                decision,
+                () => _events.EmitBreakGlassBypassAsync(
+                    decision.Action.ToWire(),
+                    decision.Group.ToWire(),
+                    breakGlass,
+                    seam: "autonomy-gate",
+                    outcome: decision.Outcome.ToString().ToLowerInvariant(),
+                    autonomyLevel: decision.AutonomyLevel,
+                    effectiveMinAutonomy: decision.EffectiveMinAutonomy,
+                    tenantId: principal.TenantId,
+                    userId: principal.UserId,
+                    correlationId: query.CorrelationId,
+                    degradedReason: decision.Reason))
                 .ConfigureAwait(false);
         }
 
         decision = await ConsultLedgerAsync(decision, query, principal, ct).ConfigureAwait(false);
 
-        await _events.EmitDecisionAsync(decision, query).ConfigureAwait(false);
+        var recorded = decision;
+        await RecordAsync(recorded, () => _events.EmitDecisionAsync(recorded, query))
+            .ConfigureAwait(false);
         return decision;
+    }
+
+    /// <summary>
+    /// Adversarial review F2 (2026-08-01) — run one NON-SWALLOWING audit emission
+    /// for a decision that has already been MADE, and re-label its failure so a
+    /// seam cannot mistake it for "the gate could not decide".
+    ///
+    /// <para><see cref="ActionGateEventsService"/> deliberately rethrows the append
+    /// failure for an enforced denial/escalation (43-5 AC13: a block with no audit
+    /// row is a compliance hole). That rethrow used to arrive at each 43-9 seam's
+    /// catch-all as an anonymous <see cref="Exception"/>, and every one of those
+    /// catch-alls fails OPEN on the stated posture "deny on a DECISION, never on an
+    /// ERROR" — so the exception raised BECAUSE a denial happened was read as
+    /// evidence that no denial happened, and the request proceeded. The identical
+    /// append is fail-CLOSED at the tool-loop seam (a throw aborts the call) and
+    /// was fail-OPEN at the three seams this wave added; nothing noticed the
+    /// polarity flip.</para>
+    ///
+    /// <para>The exception still PROPAGATES — a caller that ignores it keeps the
+    /// tool-loop's fail-closed behaviour — but it now carries the decision, so a
+    /// seam that can act re-applies the block instead of guessing.</para>
+    /// </summary>
+    private async Task RecordAsync(AutonomyDecision decision, Func<Task> emit)
+    {
+        try
+        {
+            await emit().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (AutonomyGateDecisionUnrecordedException) { throw; }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex,
+                "The autonomy gate decided {Outcome} for {ActionKey} (enforced={Enforced}, "
+                + "source={Source}) but the audit row could NOT be written. The decision STANDS: "
+                + "an unrecordable block is still a block, never a transient fault.",
+                decision.Outcome, decision.Action.ToWire(), decision.Enforced, decision.Source);
+            throw new AutonomyGateDecisionUnrecordedException(decision, ex);
+        }
     }
 
     /// <summary>
     /// AC12 — one human decision covers one correlation. Returns the decision
     /// unchanged unless a live grant covering this action was consumed, in which
     /// case it comes back <see cref="AutonomyOutcome.Automated"/> carrying the
-    /// grant's id and target. See the class doc for why only an ENFORCED
+    /// grant's id and target. See the class doc for why only a BLOCKABLE, ENFORCED
     /// <see cref="AutonomyOutcome.RequiresHuman"/> with a correlation id is
     /// offered, and why a ledger failure keeps the block.
     /// </summary>
@@ -197,8 +256,14 @@ public sealed class AutonomyGateService : IAutonomyGate
         GovernancePrincipal principal,
         CancellationToken ct)
     {
+        // F4 (2026-08-01) — BOTH halves of "this ask can actually block":
+        // `SeamCanBlock` is the CALLER's capability, `Enforced` is the ADMIN's
+        // instruction. Gating on `Enforced` alone let Seam A — which never blocks
+        // in any version — burn single-use grants, because under epic D1 enforce
+        // DEFAULTS to true.
         if (_ledger is null
             || decision.Outcome != AutonomyOutcome.RequiresHuman
+            || !query.SeamCanBlock
             || !decision.Enforced
             || string.IsNullOrWhiteSpace(query.CorrelationId))
         {

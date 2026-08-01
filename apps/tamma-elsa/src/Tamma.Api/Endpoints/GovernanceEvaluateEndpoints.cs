@@ -33,6 +33,17 @@ namespace Tamma.Api.Endpoints;
 /// — the typed service principal that <c>ApiKeyAuthHandler</c> mints for a
 /// <c>service</c>-scope key. A user JWT authenticates but never produces one ⇒
 /// 403.</para>
+///
+/// <para><b>A DECISION THAT COULD NOT BE AUDITED IS STILL ANSWERED</b>
+/// (adversarial review F2, 2026-08-01). The gate rethrows a failed audit append
+/// for an enforced denial, and this handler had no catch, so that arrived as a
+/// 500 — which <c>CheckActionGateActivity</c> reads as <c>unavailable</c> and
+/// treats as the Automated edge, i.e. the production deployment proceeds with no
+/// wait. Since the two failures are correlated (43-5's fail-closed degradation
+/// fires when the control plane is unreadable, and <c>domain_events</c> lives in
+/// the SAME Postgres) that turned one DB blip into a silently ungated deploy. The
+/// decision is now projected onto the wire whether or not its audit row
+/// landed.</para>
 /// </summary>
 public static class GovernanceEvaluateEndpoints
 {
@@ -65,17 +76,41 @@ public static class GovernanceEvaluateEndpoints
             });
         }
 
-        var principal = await principals.ResolveAsync(caller: null, ct).ConfigureAwait(false);
+        // F9 — a catch covers a THROW, not a HANG. Without this a gate that never
+        // returns holds the engine's HTTP call open until the client disconnects.
+        using var deadline = AutonomyGateDeadline.CreateLinkedSource(ct);
+        var principal = await principals.ResolveAsync(caller: null, deadline.Token)
+            .ConfigureAwait(false);
 
-        var decision = await gate.EvaluateAsync(
-            new AutonomyQuery(
-                actionKey,
-                principal,
-                request.Role,
-                request.Operation,
-                request.Target,
-                request.CorrelationId),
-            ct).ConfigureAwait(false);
+        AutonomyDecision decision;
+        try
+        {
+            decision = await gate.EvaluateAsync(
+                new AutonomyQuery(
+                    actionKey,
+                    principal,
+                    request.Role,
+                    request.Operation,
+                    request.Target,
+                    request.CorrelationId,
+                    // F4 — the engine WAITS on this answer (that is the whole
+                    // point of the mediation route), so this seam blocks and may
+                    // spend a single-use grant.
+                    SeamCanBlock: true),
+                deadline.Token).ConfigureAwait(false);
+        }
+        catch (AutonomyGateDecisionUnrecordedException unrecorded)
+        {
+            // F2 — the gate DECIDED and only the audit row failed. Letting this
+            // escape produced a 500, which CheckActionGateActivity reads as
+            // `unavailable` and treats as the Automated edge: a blip in the one
+            // Postgres that holds BOTH action_assignments and domain_events turned
+            // the fail-closed denial it had just produced into a deployment that
+            // proceeded with no wait. The decision is projected onto the wire
+            // exactly as if the row had been written; the failure is already
+            // logged at ERROR by the gate.
+            decision = unrecorded.Decision;
+        }
 
         Guid? authorizationId = decision.AuthorizationId;
         if (authorizationId is null
@@ -84,7 +119,7 @@ public static class GovernanceEvaluateEndpoints
             && !string.IsNullOrWhiteSpace(request.CorrelationId))
         {
             authorizationId = await authorizations
-                .RequestAsync(principal, decision, request.CorrelationId!, ct)
+                .RequestAsync(principal, decision, request.CorrelationId!, deadline.Token)
                 .ConfigureAwait(false);
         }
 

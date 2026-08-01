@@ -176,6 +176,20 @@ internal sealed record GovernanceDenial(object Body);
 ///   re-open the fail-closed posture inside the gate: an unreadable POLICY input
 ///   is a decision (<c>Unavailable</c> provenance, <c>Enforced</c> forced true)
 ///   and still blocks here.</item>
+///   <item><b>A DECISION THAT COULD NOT BE RECORDED still BLOCKS</b> (review F2,
+///   2026-08-01). <see cref="AutonomyGateDecisionUnrecordedException"/> is not a
+///   transient fault: the gate decided, and only the audit row failed. It is
+///   caught BEFORE the catch-all and the decision it carries is re-applied. The
+///   distinction matters because the two failures are CORRELATED — 43-5's
+///   fail-closed degradation fires exactly when the control plane is unreadable,
+///   and <c>domain_events</c> lives in the same Postgres — so without it one DB
+///   blip produced the fail-closed decision and then converted it back into a
+///   pass.</item>
+///   <item><b>A HANG is bounded</b> (review F9). Every evaluation runs under
+///   <see cref="AutonomyGateDeadline"/>: a catch covers a throw, not a gate that
+///   never returns, and an unbounded evaluation hangs the request until the
+///   client disconnects — neither open nor closed. A timeout resolves into the
+///   transient arm above.</item>
 /// </list>
 /// </summary>
 internal static class AutonomyGateEnforcement
@@ -196,7 +210,16 @@ internal static class AutonomyGateEnforcement
 
     /// <summary>
     /// Evaluate the gate for the current request. Returns <c>null</c> to proceed,
-    /// or the 409 denial. NEVER throws: see the class doc's failure posture.
+    /// or the 409 denial. See the class doc's failure posture.
+    ///
+    /// <para><b>It throws exactly one thing</b> (review F10, 2026-08-01 — the doc
+    /// previously claimed "NEVER throws" while doing this): an
+    /// <see cref="OperationCanceledException"/> when <paramref name="ct"/> — the
+    /// CALLER's token, i.e. the client disconnected or the host is shutting down —
+    /// is cancelled. That is not a governance failure and must not be laundered
+    /// into a governance decision in either direction. The
+    /// <see cref="AutonomyGateDeadline"/> timeout is a different cancellation and
+    /// is handled here, not rethrown.</para>
     /// </summary>
     internal static async Task<GovernanceDenial?> EvaluateAsync(
         HttpContext http, CancellationToken ct)
@@ -209,8 +232,16 @@ internal static class AutonomyGateEnforcement
 
         var binding = http.GetEndpoint()?.Metadata.GetMetadata<IActionGateMetadata>();
         var gate = services.GetService<IAutonomyGate>();
+        // F10 — resolved OUT HERE, with the other static wiring. It used to sit
+        // inside the try below as GetRequiredService<>(), so a host that
+        // registered the gate but not the resolver threw into the TRANSIENT
+        // catch-all and the request PROCEEDED — a static wiring fault failing
+        // OPEN, against this class's own stated split. Not reachable today (both
+        // are registered by the same extension method), which is precisely why it
+        // needs to be structural rather than incidental.
+        var principals = services.GetService<IGovernancePrincipalResolver>();
 
-        if (binding is null || gate is null)
+        if (binding is null || gate is null || principals is null)
         {
             // FAIL CLOSED — static wiring, not a blip. See the class doc.
             logger?.LogError(
@@ -226,24 +257,29 @@ internal static class AutonomyGateEnforcement
                 LogSanitizer.Clean(http.Request.Path.Value),
                 binding is null
                     ? "the endpoint carries no .Governs(actionKey) binding"
-                    : "no IAutonomyGate is registered in this host",
+                    : gate is null
+                        ? "no IAutonomyGate is registered in this host"
+                        : "no IGovernancePrincipalResolver is registered in this host",
                 MisconfiguredCode);
 
             return new GovernanceDenial(new
             {
                 code = MisconfiguredCode,
                 error = "This endpoint opted into governance enforcement but the gate cannot be "
-                    + "evaluated for it (missing binding or missing gate registration).",
+                    + "evaluated for it (missing binding, missing gate registration, or missing "
+                    + "principal resolver).",
             });
         }
 
         AutonomyDecision decision;
         GovernancePrincipal principal;
         var correlationId = ResolveCorrelationId(http);
+        // F9 — a catch covers a THROW, not a HANG.
+        using var deadline = AutonomyGateDeadline.CreateLinkedSource(ct);
         try
         {
-            var principals = services.GetRequiredService<IGovernancePrincipalResolver>();
-            principal = await principals.ResolveAsync(http.User, ct).ConfigureAwait(false);
+            principal = await principals.ResolveAsync(http.User, deadline.Token)
+                .ConfigureAwait(false);
 
             decision = await gate.EvaluateAsync(
                 new AutonomyQuery(
@@ -252,10 +288,34 @@ internal static class AutonomyGateEnforcement
                     Role: null,
                     Operation: $"{http.Request.Method} {http.Request.Path}",
                     Target: http.Request.Path.Value,
-                    CorrelationId: correlationId),
-                ct).ConfigureAwait(false);
+                    CorrelationId: correlationId,
+                    // F4 — Seam C BLOCKS, so it may spend a single-use grant.
+                    SeamCanBlock: true),
+                deadline.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) { throw; }
+        catch (AutonomyGateDecisionUnrecordedException unrecorded)
+        {
+            // F2 — NOT a transient fault. The gate decided; only the record of it
+            // failed. Answering "proceed" here is how a blip in the one Postgres
+            // that holds BOTH action_assignments and domain_events turns a
+            // fail-closed denial back into a pass.
+            logger?.LogError(unrecorded,
+                "Autonomy gate DECIDED {Outcome} for {Action} at {Method} {Path} but the audit row "
+                + "could not be written. The decision STANDS — an unrecordable block is still a "
+                + "block, never a transient fault.",
+                unrecorded.Decision.Outcome,
+                unrecorded.Decision.Action.ToWire(),
+                LogSanitizer.Clean(http.Request.Method),
+                LogSanitizer.Clean(http.Request.Path.Value));
+
+            if (!unrecorded.Blocks) return null;
+            return Denial(unrecorded.Decision, correlationId, authorizationId: null);
+        }
+        catch (OperationCanceledException) when (!AutonomyGateDeadline.IsDeadline(ct))
+        {
+            // The CALLER cancelled (client gone / host stopping). Not governance.
+            throw;
+        }
         catch (Exception ex)
         {
             // FAIL OPEN — deny on a DECISION, never on an ERROR (D8 posture,
@@ -295,22 +355,26 @@ internal static class AutonomyGateEnforcement
 
         // AC12(c) — mint (or re-find) the PENDING row a person decides on, so
         // the 409's authorizationId is something the caller can act on rather
-        // than a null field. Only possible with a correlation id: the ledger is
-        // keyed by (principal, correlation, target) and a grant keyed to a
-        // request-scoped identity could never be found again.
+        // than a null field. `correlationId` is never null here (see
+        // ResolveCorrelationId), so a row is always attempted; the id comes back
+        // null only when the ledger itself is unavailable, which is honest.
         Guid? authorizationId = null;
-        if (correlationId is not null)
+        var requests = services.GetService<IActionAuthorizationRequests>();
+        if (requests is not null)
         {
-            var requests = services.GetService<IActionAuthorizationRequests>();
-            if (requests is not null)
-            {
-                authorizationId = await requests
-                    .RequestAsync(principal, decision, correlationId, ct)
-                    .ConfigureAwait(false);
-            }
+            authorizationId = await requests
+                .RequestAsync(principal, decision, correlationId, ct)
+                .ConfigureAwait(false);
         }
 
-        return new GovernanceDenial(new
+        return Denial(decision, correlationId, authorizationId);
+    }
+
+    /// <summary>The 409 body — one shape, whether the decision arrived normally
+    /// or came back attached to an unrecorded-decision failure (F2).</summary>
+    private static GovernanceDenial Denial(
+        AutonomyDecision decision, string correlationId, Guid? authorizationId) =>
+        new(new
         {
             code = RequiresHumanCode,
             action = decision.Action.ToWire(),
@@ -325,31 +389,74 @@ internal static class AutonomyGateEnforcement
                 + "without a person. Grant the pending authorization "
                 + "(POST /api/actions/authorizations/{id}/decide) or lower the action's threshold.",
         });
-    }
 
     /// <summary>
     /// The run a gate decision belongs to: the <see cref="CorrelationHeader"/>
-    /// header, else a <c>?correlationId=</c> query value, else null. NEVER the
-    /// request body (reading it here would consume the stream the handler binds
-    /// from) and never a per-request identity such as
+    /// header, else a <c>?correlationId=</c> query value, else the ROUTE-DERIVED
+    /// correlation below. NEVER the request body (reading it here would consume
+    /// the stream the handler binds from) and never a per-request identity such as
     /// <c>HttpContext.TraceIdentifier</c> — a correlation that changes on every
     /// retry cannot carry one human decision across a run, which is the entire
     /// purpose of the ledger.
+    ///
+    /// <para><b>Why it can no longer return null</b> (review F5, 2026-08-01). Not
+    /// one opted-in route sends the header or the query value — every one of them
+    /// is an engine mediation route called by <c>TammaApiClient</c>, which sets
+    /// neither — so this returned null on every real request, no pending row was
+    /// ever minted at Seam C, and the 409 nonetheless told the caller to "Grant the
+    /// pending authorization (POST …/{id}/decide)" with no id and no row in
+    /// existence. The 409 was unactionable: the block could not be cleared by a
+    /// person, only by editing policy.</para>
+    ///
+    /// <para><b>The derived value is the METHOD and the CONCRETE PATH.</b> That
+    /// makes it DETERMINISTIC — the retry of the same request derives the same
+    /// correlation and finds the grant a person made — which is the one property
+    /// the ledger needs (it is keyed by principal + correlation + target, which is
+    /// why a per-request id would be useless). It is narrow: the concrete path,
+    /// not the route pattern, so a grant for <c>acme/widget</c> does not cover
+    /// <c>acme/other</c>; and it is still SINGLE-USE, so the grant covers the next
+    /// call and no more. It is prefixed <c>route:</c> so an auditor can tell a
+    /// derived correlation from a run correlation the caller supplied.</para>
+    ///
+    /// <para>The query string is deliberately EXCLUDED from the derived value: it
+    /// is caller-controlled and unbounded, so including it would let a caller mint
+    /// an unbounded number of distinct pending rows for one effect.</para>
     /// </summary>
-    private static string? ResolveCorrelationId(HttpContext http)
+    private static string ResolveCorrelationId(HttpContext http)
     {
         if (http.Request.Headers.TryGetValue(CorrelationHeader, out var header))
         {
             var value = header.ToString();
-            if (!string.IsNullOrWhiteSpace(value)) return value;
+            if (!string.IsNullOrWhiteSpace(value)) return Bounded(value);
         }
 
         if (http.Request.Query.TryGetValue("correlationId", out var query))
         {
             var value = query.ToString();
-            if (!string.IsNullOrWhiteSpace(value)) return value;
+            if (!string.IsNullOrWhiteSpace(value)) return Bounded(value);
         }
 
-        return null;
+        return Bounded($"{DerivedCorrelationPrefix}{http.Request.Method} {http.Request.Path.Value}");
     }
+
+    /// <summary>Marks a correlation this seam derived rather than one the caller
+    /// named.</summary>
+    internal const string DerivedCorrelationPrefix = "route:";
+
+    /// <summary>
+    /// <c>action_authorizations.CorrelationId</c> is <c>varchar(200)</c>. A value
+    /// past that would make the ledger insert fail (and the 409 carry a null id
+    /// again), so an over-long correlation collapses to a DETERMINISTIC digest of
+    /// itself rather than being truncated — truncation would silently merge two
+    /// different long correlations into one grant.
+    /// </summary>
+    private static string Bounded(string value) =>
+        value.Length <= MaxCorrelationLength
+            ? value
+            : "sha256:" + Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+
+    /// <summary>The ledger column's width.</summary>
+    internal const int MaxCorrelationLength = 200;
 }

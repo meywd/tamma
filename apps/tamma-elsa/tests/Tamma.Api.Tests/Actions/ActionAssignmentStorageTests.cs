@@ -286,7 +286,7 @@ public class ActionAssignmentStorageTests
             .Which.SqlState.Should().Be("23505");
 
         // …but after a denial a fresh request is legal.
-        (await ledger.DecideAsync(first.Id, granted: false, Guid.NewGuid(), "no")).Should().NotBeNull();
+        (await ledger.DecideAsync(tid, null, first.Id, granted: false, Guid.NewGuid(), "no")).Should().NotBeNull();
         var third = await ledger.RequestAsync(
             tid, null, "wf-1", "action", "effect:deploy.promote-prod", null, null);
         third.Id.Should().NotBe(first.Id);
@@ -302,7 +302,7 @@ public class ActionAssignmentStorageTests
         // Action-scoped grant covers itself, once.
         var request = await ledger.RequestAsync(
             tid, null, "wf-1", "action", "effect:deploy.promote-prod", null, 70);
-        await ledger.DecideAsync(request.Id, granted: true, decider, null);
+        await ledger.DecideAsync(tid, null, request.Id, granted: true, decider, null);
 
         var consumed = await ledger.TryConsumeAsync(
             tid, null, "wf-1", "effect:deploy.promote-prod");
@@ -317,7 +317,7 @@ public class ActionAssignmentStorageTests
         // resolved from ActionCatalog inside the ledger — F2).
         var groupRequest = await ledger.RequestAsync(
             tid, null, "wf-2", "group", "deploy-control", null, 70);
-        await ledger.DecideAsync(groupRequest.Id, granted: true, decider, null);
+        await ledger.DecideAsync(tid, null, groupRequest.Id, granted: true, decider, null);
         (await ledger.TryConsumeAsync(
                 tid, null, "wf-2", "effect:deploy.rollback"))
             .Should().NotBeNull("a group grant covers every member of that group");
@@ -326,7 +326,7 @@ public class ActionAssignmentStorageTests
         var expired = await ledger.RequestAsync(
             tid, null, "wf-3", "action", "effect:deploy.promote-prod", null, 70,
             ttl: TimeSpan.FromMilliseconds(-1));
-        await ledger.DecideAsync(expired.Id, granted: true, decider, null);
+        await ledger.DecideAsync(tid, null, expired.Id, granted: true, decider, null);
         // (DecideAsync refuses expired pending rows → returns null; verify.)
         var decidedExpired = await ledger.TryConsumeAsync(
             tid, null, "wf-3", "effect:deploy.promote-prod");
@@ -350,7 +350,7 @@ public class ActionAssignmentStorageTests
         // A deploy-control group grant…
         var request = await ledger.RequestAsync(
             tid, null, "wf-f2", "group", "deploy-control", null, 70);
-        await ledger.DecideAsync(request.Id, granted: true, Guid.NewGuid(), null);
+        await ledger.DecideAsync(tid, null, request.Id, granted: true, Guid.NewGuid(), null);
 
         // …must NOT cover tool:shell_execute (command-execution group), no
         // matter what group the caller claims: membership is resolved from
@@ -364,6 +364,40 @@ public class ActionAssignmentStorageTests
             .Should().NotBeNull("the failed non-member consume must not burn the grant");
     }
 
+    // ── Adversarial review F6 (2026-08-01) — DECIDING is principal-scoped ──
+
+    [Test]
+    public async Task Decide_RefusesAForeignPrincipalsRow()
+    {
+        // `ListAuthorizations` is principal-scoped with a comment explaining that
+        // merely ENUMERATING another principal's rows is a capability disclosure —
+        // but the ability to DECIDE one was unscoped, and the id is handed out in
+        // the Seam C 409 body and the Seam E response. In SaaS that let any tenant
+        // admin holding a guid GRANT tenant A's blocked effect.
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var owner = Guid.NewGuid();
+        var attacker = Guid.NewGuid();
+
+        var row = await ledger.RequestAsync(
+            owner, null, "wf-f6", "action", "effect:deploy.promote-prod", null, 70);
+
+        (await ledger.DecideAsync(attacker, null, row.Id, granted: true, Guid.NewGuid(), "mine now"))
+            .Should().BeNull("a foreign principal may not decide another principal's authorization");
+
+        // Deciding is scoped by PRINCIPAL, not by decider: a single-user row is
+        // not reachable from a tenant principal either.
+        (await ledger.DecideAsync(null, attacker, row.Id, granted: true, Guid.NewGuid(), null))
+            .Should().BeNull("the user plane may not decide a tenant-plane row");
+
+        // The row is untouched and the real owner can still decide it.
+        await using (var db = _factory.CreateDbContext())
+        {
+            db.ActionAuthorizations.Single(a => a.Id == row.Id).State.Should().Be("pending");
+        }
+        (await ledger.DecideAsync(owner, null, row.Id, granted: true, Guid.NewGuid(), "ok"))
+            .Should().NotBeNull("the owning principal still decides its own row");
+    }
+
     // ── Adversarial review F1 — CAS: exactly one winner under concurrency ──
 
     [Test]
@@ -374,7 +408,7 @@ public class ActionAssignmentStorageTests
 
         var request = await ledger.RequestAsync(
             tid, null, "wf-race", "action", "effect:deploy.promote-prod", null, 70);
-        await ledger.DecideAsync(request.Id, granted: true, Guid.NewGuid(), null);
+        await ledger.DecideAsync(tid, null, request.Id, granted: true, Guid.NewGuid(), null);
 
         // The reviewer's probe shape: multiple contexts race the same grant.
         // Each TryConsumeAsync call creates its OWN DbContext (factory-made),
@@ -416,12 +450,12 @@ public class ActionAssignmentStorageTests
         var grantTask = Task.Run(async () =>
         {
             await barrier.Task;
-            return await ledger.DecideAsync(request.Id, granted: true, granter, "yes");
+            return await ledger.DecideAsync(tid, null, request.Id, granted: true, granter, "yes");
         });
         var denyTask = Task.Run(async () =>
         {
             await barrier.Task;
-            return await ledger.DecideAsync(request.Id, granted: false, denier, "no");
+            return await ledger.DecideAsync(tid, null, request.Id, granted: false, denier, "no");
         });
         barrier.SetResult();
         var outcomes = await Task.WhenAll(grantTask, denyTask);
@@ -466,7 +500,7 @@ public class ActionAssignmentStorageTests
             "the stale row is transitioned out of the partial unique index");
 
         // And the fresh row is decidable — the whole point of unblocking.
-        (await ledger.DecideAsync(fresh.Id, granted: true, Guid.NewGuid(), null))
+        (await ledger.DecideAsync(tid, null, fresh.Id, granted: true, Guid.NewGuid(), null))
             .Should().NotBeNull();
     }
 
@@ -480,7 +514,7 @@ public class ActionAssignmentStorageTests
         // grant reaches 24h after the decision.
         var request = await ledger.RequestAsync(
             tid, null, "wf-f3b", "action", "effect:deploy.promote-prod", null, 70);
-        (await ledger.DecideAsync(request.Id, granted: true, Guid.NewGuid(), null))
+        (await ledger.DecideAsync(tid, null, request.Id, granted: true, Guid.NewGuid(), null))
             .Should().NotBeNull();
         await ExecAsync(
             """
@@ -505,14 +539,14 @@ public class ActionAssignmentStorageTests
 
         var request = await ledger.RequestAsync(
             tid, null, "wf-9", "action", "effect:deploy.promote-prod", null, 70);
-        (await ledger.DecideAsync(request.Id, true, Guid.NewGuid(), null)).Should().NotBeNull();
-        (await ledger.DecideAsync(request.Id, false, Guid.NewGuid(), null))
+        (await ledger.DecideAsync(tid, null, request.Id, true, Guid.NewGuid(), null)).Should().NotBeNull();
+        (await ledger.DecideAsync(tid, null, request.Id, false, Guid.NewGuid(), null))
             .Should().BeNull("a decided row cannot be re-decided (the caller 409s)");
 
         var expiring = await ledger.RequestAsync(
             tid, null, "wf-10", "action", "effect:deploy.promote-prod", null, 70,
             ttl: TimeSpan.FromMilliseconds(-1));
-        (await ledger.DecideAsync(expiring.Id, true, Guid.NewGuid(), null))
+        (await ledger.DecideAsync(tid, null, expiring.Id, true, Guid.NewGuid(), null))
             .Should().BeNull("an expired pending row cannot be granted");
     }
 

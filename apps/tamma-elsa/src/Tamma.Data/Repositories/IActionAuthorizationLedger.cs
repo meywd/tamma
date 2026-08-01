@@ -60,8 +60,30 @@ public interface IActionAuthorizationLedger
     /// single-statement UPDATE (<c>WHERE state = 'pending'</c> and not past
     /// expiry): under a concurrent grant-vs-deny race exactly one caller wins
     /// (F1). Returns the updated row, or null when the row is missing,
-    /// already decided, expired, or lost the race.</summary>
+    /// already decided, expired, lost the race, or <b>belongs to a different
+    /// governance principal</b>.
+    ///
+    /// <para><b>The principal is a REQUIRED parameter, not an optional filter</b>
+    /// (adversarial review F6, 2026-08-01). This transition used to match on
+    /// <c>Id</c> and <c>State</c> alone: anyone holding the guid could decide
+    /// anyone's row, and the guid is handed out in the Seam C 409 body and the
+    /// Seam E response, so in SaaS any tenant admin could GRANT another tenant's
+    /// blocked effect. <c>ListAuthorizations</c> was already principal-scoped,
+    /// with a comment explaining that merely ENUMERATING another principal's rows
+    /// is a capability disclosure — deciding one is strictly worse. It is
+    /// positional and mandatory so that every existing and future call site has to
+    /// state which principal is acting, rather than inheriting an unscoped
+    /// default.</para>
+    ///
+    /// <para><b>The principal is the row's OWNER, not the decider.</b>
+    /// <paramref name="decidedByUserId"/> records WHO pressed the button (audit);
+    /// <paramref name="tenantId"/>/<paramref name="userId"/> say WHOSE ledger the
+    /// row must be in. In SaaS those are different by construction — a tenant
+    /// admin decides a tenant-scoped row.</para></summary>
+    /// <param name="tenantId">The acting governance principal's tenant, or null.</param>
+    /// <param name="userId">The acting governance principal's user, or null.</param>
     Task<ActionAuthorization?> DecideAsync(
+        Guid? tenantId, Guid? userId,
         Guid id, bool granted, Guid decidedByUserId, string? reason,
         CancellationToken ct = default);
 }

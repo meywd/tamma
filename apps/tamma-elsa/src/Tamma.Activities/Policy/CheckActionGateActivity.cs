@@ -44,13 +44,41 @@ namespace Tamma.Activities.Policy;
 ///   for an observe-only (<c>enforced = false</c>) resolution and for a transport
 ///   failure; <see cref="Enforced"/> and <see cref="Outcome"/> are surfaced as
 ///   outputs so a graph that cares can tell them apart.</item>
-///   <item><c>RequiresHuman</c> — a person decides.</item>
-/// </list>
-/// There is deliberately no <c>Denied</c> outcome: a <c>denied</c> resolution
-/// (a disabled action, a role restriction, a non-escalatable target) is routed to
-/// <c>RequiresHuman</c> so the graph's SAFE edge is taken. Minting a third edge
-/// that every adopting workflow would have to remember to wire is how a governance
-/// activity acquires an unrouted outcome and silently falls through.</para>
+///   <item><c>RequiresHuman</c> — a person decides. Also the outcome for any
+///   enforced wire this activity does not recognise: an unknown non-<c>automated</c>
+///   answer fails CLOSED onto the safe edge.</item>
+///   <item><c>Denied</c> — the system may not do this and <b>no person on this
+///   graph may authorise it either</b>.</item>
+/// </list></para>
+///
+/// <para><b>Why <c>Denied</c> is its own edge (2026-08-01 review finding F1).</b>
+/// It used to be folded into <c>RequiresHuman</c>, on the argument that a third
+/// edge is one every adopting workflow must remember to wire and an unrouted
+/// outcome silently falls through. That argument was sound about the RISK and
+/// wrong about the REMEDY, and the fold-in produced a MONOTONICITY INVERSION at
+/// the one live adoption: setting <c>effect:deploy.promote-prod</c> to
+/// <c>AlwaysHuman</c> added a production wait, but DISABLING the action — the
+/// strictly stronger admin setting — added nothing, because the deployment
+/// pipeline routes on the <c>Outcome</c> VARIABLE (which carried the raw
+/// <c>denied</c> wire) and wired both edges to the same node, making the edge
+/// choice behaviourally inert.
+///
+/// <para>The two ways a catalogued effect resolves to <c>denied</c> are an
+/// <c>Enabled = false</c> row and an <c>AllowedRoles</c> restriction that excludes
+/// the actor. Neither is "a person may approve this": a human clicking Approve on
+/// a deployment card is approving a DEPLOYMENT, not re-enabling an action an
+/// admin switched off. Routing a denial into a standing approval flow would let
+/// the approval flow override the admin — so it gets its own edge and each
+/// adopting graph decides what a hard refusal means for it. The
+/// remember-to-wire-it risk is answered by a STRUCTURAL TEST that every
+/// <c>CheckActionGateActivity</c> in a workflow has all three outcomes connected
+/// (<c>DeploymentPipelineGateTests.EveryGateOutcome_isWired_noDanglingEdge</c>),
+/// which turns a forgotten edge into a build failure instead of a silent
+/// fall-through.</para></para>
+///
+/// <para><b>Observe-only still never hard-refuses.</b> <c>enforced = false</c>
+/// takes the <c>Automated</c> edge whatever the wire says, so an admin's "report
+/// but do not block" can never route a graph into a refusal terminal.</para>
 /// </summary>
 [Activity(
     "Tamma.Policy",
@@ -58,9 +86,22 @@ namespace Tamma.Activities.Policy;
     "Ask the autonomy gate whether the system may perform a catalogued action by itself",
     Kind = ActivityKind.Task
 )]
-[FlowNode("Automated", "RequiresHuman")]
+[FlowNode("Automated", "RequiresHuman", "Denied")]
 public class CheckActionGateActivity : Activity
 {
+    /// <summary>The allow / proceed edge.</summary>
+    public const string EdgeAutomated = "Automated";
+
+    /// <summary>The "a person decides" edge.</summary>
+    public const string EdgeRequiresHuman = "RequiresHuman";
+
+    /// <summary>The hard-refusal edge — nobody on this graph may authorise it.</summary>
+    public const string EdgeDenied = "Denied";
+
+    /// <summary>Every edge this activity can complete with, for structural sweeps.</summary>
+    public static readonly IReadOnlyList<string> Edges =
+        new[] { EdgeAutomated, EdgeRequiresHuman, EdgeDenied };
+
     private readonly ILogger<CheckActionGateActivity>? _logger;
     private readonly TammaApiClient? _apiClient;
 
@@ -156,7 +197,7 @@ public class CheckActionGateActivity : Activity
             Outcome.Set(context, OutcomeUnavailable);
             Enforced.Set(context, false);
             Reason.Set(context, "gate-unavailable");
-            await context.CompleteActivityWithOutcomesAsync("Automated");
+            await context.CompleteActivityWithOutcomesAsync(EdgeAutomated);
             return;
         }
 
@@ -165,16 +206,39 @@ public class CheckActionGateActivity : Activity
         Reason.Set(context, response.Reason);
         AuthorizationId.Set(context, response.AuthorizationId?.ToString());
 
-        // Observe-only resolutions take the Automated edge: `enforced = false` is
-        // the admin's explicit "report but do not block", and honouring it here is
-        // what lets an operator watch a tightening before it bites.
-        var blocks = response.Enforced
-            && !string.Equals(
-                response.Outcome,
-                GovernanceEvaluateResponse.OutcomeAutomated,
-                StringComparison.Ordinal);
+        await context.CompleteActivityWithOutcomesAsync(
+            SelectEdge(response.Enforced, response.Outcome));
+    }
 
-        await context.CompleteActivityWithOutcomesAsync(blocks ? "RequiresHuman" : "Automated");
+    /// <summary>
+    /// Map one resolved decision onto an edge. Pure, so the routing rule is
+    /// testable without an Elsa execution context.
+    ///
+    /// <list type="bullet">
+    ///   <item>Observe-only resolutions take <c>Automated</c>: <c>enforced = false</c>
+    ///   is the admin's explicit "report but do not block", and honouring it here is
+    ///   what lets an operator watch a tightening before it bites.</item>
+    ///   <item><c>denied</c> takes <c>Denied</c> — a hard refusal, NOT an escalation
+    ///   (see the class doc).</item>
+    ///   <item>Everything else enforced and non-<c>automated</c> takes
+    ///   <c>RequiresHuman</c>, INCLUDING a wire this build does not recognise: an
+    ///   unknown enforced answer fails closed onto the safe edge rather than
+    ///   proceeding.</item>
+    /// </list>
+    /// </summary>
+    public static string SelectEdge(bool enforced, string? outcomeWire)
+    {
+        var wire = outcomeWire?.Trim();
+
+        if (!enforced
+            || string.Equals(wire, GovernanceEvaluateResponse.OutcomeAutomated, StringComparison.OrdinalIgnoreCase))
+        {
+            return EdgeAutomated;
+        }
+
+        return string.Equals(wire, GovernanceEvaluateResponse.OutcomeDenied, StringComparison.OrdinalIgnoreCase)
+            ? EdgeDenied
+            : EdgeRequiresHuman;
     }
 
     private static string? Normalize(string? raw)
