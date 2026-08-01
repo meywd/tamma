@@ -960,7 +960,7 @@ Merge and deploy each span several levels by TARGET importance.
 | 80 | Deploy to uat; unbounded execution | `shell_execute` (unsandboxed), `process.spawn`, `agent-dispatch.run`, `mcp.tool.invoke` |
 | 85 | Deploy to staging; create infrastructure | tenant/app provisioning, `billing.customer.create` |
 | 90 | Deploy to prod; manage secrets | `deploy.promote-prod`, secret rotation/retire |
-| 95 | Delete branch / delete PR / rollback | `git.branch.delete`, PR deletion, `deploy.rollback` |
+| 95 | Delete branch / rollback | `git.branch.delete`, `deploy.rollback`, tracker hard-deletes |
 | 100 | Delete resources / infrastructure | tenant teardown, `provisioning.tenant.deprovision`, tenant move |
 
 Consequences for the implementation:
@@ -1312,12 +1312,7 @@ Capabilities the ladder names, or the code performs, with no catalog key.
 | `effect:deploy.staging` | 85 | staging stage |
 | `effect:deploy.prod` | 90 | absorbs `deploy.promote-prod` on split |
 
-**Delete PR (ladder 95): impossible as stated.** GitHub cannot delete PRs —
-only close. `IGitPlatformClient` supports open, get, list-files, merge — **no
-close, no reopen**; `GitMediationService` likewise. Nothing closes a PR today.
-Recommendation: drop "delete PR" from the ladder; reserve
-`effect:git.pull-request.close` at **35** (reversible by reopen, so 95
-overstates it) for when the client gains close support.
+**Delete PR: withdrawn (product owner, 2026-08-01) — the ladder item meant delete BRANCH, which already sits at 95.** For the record: GitHub cannot delete PRs (close only), and `IGitPlatformClient` supports neither close nor reopen today. `git.pull-request.close` stays reserved at 35 as a genuine missing capability, unrelated to the 95 zone.
 
 **Live code with no catalog key (found in the hunt):**
 
