@@ -1373,21 +1373,31 @@ That is not plumbing; it is exfiltration surface.
   as an UNGOVERNED read. The sandbox work (Amendment 2-D: env-strip) is what
   closes the path; until then the gap is recorded here, not hidden.
 
-### "Human-operated" exemptions require a HUMAN credential
+### Who the dial governs: the LLM, and nothing else (corrected)
 
-A GitHub Action (or any CI/service caller) is automation, not a person. The
-`human-operated` justification class in `KnownUngovernedEndpoints` — and any
-future enforcement exemption reasoning "a person is pressing the button" —
-holds ONLY when the caller is a human session. It does not hold for API-key
-or service-token callers: the `ScheduleManage` policy accepts the ApiKey
-scheme, so "reached by a person, never by an agent" is an assumption, not a
-property (found 2026-08-01 on the four scheduled-trigger routes).
+An earlier draft of this amendment said service-credential callers get
+gated like automation. Wrong. There are three caller kinds and the dial
+governs exactly one:
 
-Rule for 43-9's seams: an exemption or observe-only carve-out that is
-justified by human operation must check the caller's credential type. A
-service-credential caller on such a route is gated like automation. The
-enforcement filter already sees the principal; this is one predicate, not a
-new system.
+- **A human** — never gated. Gating a person on themselves is absurd.
+- **Deterministic automation** (GitHub Actions, cron, schedulers, scripts,
+  Tamma's own background jobs) — never gated. On a human-only team there is
+  no approval process for CI reading its secrets: the approval WAS the human
+  writing and merging the workflow. Same here. If an LLM authored that
+  config, the gate already fired where the LLM acted — at the merge (55-65)
+  or the config write — not at every later run of the machinery.
+- **An LLM/agent** — the only nondeterministic actor. The dial, the levels,
+  the grants: all of it exists for this caller and only this caller.
+
+Consequence: gate where the LLM DECIDES; everything deterministic
+downstream of a passed gate inherits the approval. An outbox sender
+delivering an LLM-written message is not making a decision — the decision
+was gated at enqueue. A GitHub Action reading a secret is not making a
+decision — the decision was merging the workflow.
+
+The 29 `automation:*` catalog entries stay for inventory and audit, but
+they are not dial-gated actors; Seam D applies only where a background job
+executes an LLM decision that was never gated upstream.
 
 | Date       | Version | Changes                                                  | Author |
 | ---------- | ------- | -------------------------------------------------------- | ------ |
