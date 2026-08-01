@@ -987,3 +987,371 @@ Consequences for the implementation:
 | Date       | Version | Changes                                  | Author |
 | ---------- | ------- | ---------------------------------------- | ------ |
 | 2026-08-01 | 1.2.0   | Product-owner zone model at 5-point steps; per-target merge/deploy; 95-100 in use; new bypass-pr-checks action | meywd + Claude |
+
+## Zone assignment — full table (supersedes the M1 numbers)
+
+All 197 catalogued actions, grouped by zone level. **Old** is the M1/M2
+(Amendment 1) number; **Zone** is the Amendment-3 assignment. JUDGMENT marks
+rows the zone rules did not decide; the note says why the nearest zone was
+picked. Verified against `ActionCatalog.Descriptors.cs` (197 descriptors:
+96 agent-action, 17 document-type, 8 tool, 39 effect, 29 automation,
+8 platform-task — the file's own header comments say 35 effects and 27
+automations; both are stale).
+
+### Level 5 — Read-only (45)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `agent-action:analyze-assessment-response` | 10 | 5 | |
+| `agent-action:analyze-security-incident` | 10 | 5 | |
+| `agent-action:assess-capacity` | 10 | 5 | |
+| `agent-action:assess-technical-risk` | 10 | 5 | |
+| `agent-action:assess-vulnerability` | 10 | 5 | |
+| `agent-action:audit-accessibility` | 10 | 5 | |
+| `agent-action:audit-dependencies` | 10 | 5 | no secret material |
+| `agent-action:clarify-requirements` | 10 | 5 | |
+| `agent-action:context-scan` | 10 | 5 | |
+| `agent-action:coordinate-release` | 10 | 5 | sequencing thought, not pipeline control |
+| `agent-action:create-tasks` | 10 | 5 | |
+| `agent-action:debug-rootcause` | 10 | 5 | |
+| `agent-action:decompose-issue` | 10 | 5 | |
+| `agent-action:define-acceptance-criteria` | 10 | 5 | |
+| `agent-action:diagnose-incident` | 10 | 5 | |
+| `agent-action:facilitate-retro` | 10 | 5 | |
+| `agent-action:generate-assessment-questions` | 10 | 5 | |
+| `agent-action:incident-rootcause` | 10 | 5 | |
+| `agent-action:manage-regression` | 10 | 5 | |
+| `agent-action:monitor-health` | 10 | 5 | |
+| `agent-action:plan-debugging` | 10 | 5 | ordering thought, not a binding artifact |
+| `agent-action:plan-deployment` | 20 | 5 | planning thought about production |
+| `agent-action:plan-incident-response` | 10 | 5 | |
+| `agent-action:plan-roadmap` | 10 | 5 | |
+| `agent-action:plan-scope` | 10 | 5 | |
+| `agent-action:plan-test-strategy` | 10 | 5 | |
+| `agent-action:prioritize-backlog` | 10 | 5 | |
+| `agent-action:research` | 10 | 5 | |
+| `agent-action:resolve-blocker` | 10 | 5 | |
+| `agent-action:score-ambiguity` | 10 | 5 | |
+| `agent-action:threat-model` | 10 | 5 | the thinking; the acceptance sits at 45 |
+| `agent-action:track-impediments` | 10 | 5 | |
+| `agent-action:triage-context-scan` | 10 | 5 | |
+| `agent-action:triage-defect` | 10 | 5 | |
+| `agent-action:triage-intake` | 10 | 5 | legacy AlwaysEscalate floor still wins via max() |
+| `agent-action:triage-pr` | 10 | 5 | |
+| `agent-action:triage-tech-debt` | 10 | 5 | |
+| `agent-action:triage-technical` | 10 | 5 | |
+| `tool:file_read` | 10 | 5 | |
+| `tool:get_acceptance_rules` | 10 | 5 | read tool |
+| `tool:search_code` | 10 | 5 | |
+| `tool:git_operations.read` | 10 | 5 | known hole: subcommand-only grading; args can mutate |
+| `automation:action-catalog-startup-validator` | 10 | 5 | startup validator |
+| `automation:governance-policy-snapshot-priming-service` | 10 | 5 | priming service |
+| `automation:provider-settings-store-priming-service` | 10 | 5 | priming service |
+
+### Level 10 — Sensitive reads (2)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `agent-action:audit-secrets` | 20 | 10 | |
+| `effect:secret.reveal` | 20 | 10 | descriptor is `Enforceable=false` — the level is recorded, never enforced |
+
+### Level 15 — Write documentation (13)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `agent-action:report-status` | 30 | 15 | |
+| `agent-action:summarize-changes` | 30 | 15 | |
+| `agent-action:summarize-stakeholder` | 30 | 15 | |
+| `agent-action:summarize-technical` | 30 | 15 | |
+| `agent-action:synthesize-standup` | 30 | 15 | |
+| `agent-action:update-changelog` | 30 | 15 | |
+| `agent-action:write-adr` | 30 | 15 | |
+| `agent-action:write-api-docs` | 30 | 15 | |
+| `agent-action:write-postmortem` | 30 | 15 | |
+| `agent-action:write-release-notes` | 30 | 15 | |
+| `agent-action:write-retro-narrative` | 30 | 15 | |
+| `agent-action:write-runbook` | 30 | 15 | |
+| `agent-action:write-user-docs` | 30 | 15 | |
+
+### Level 20 — Write Tamma's own records (42)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `effect:engine.events.append` | 45 | 20 | internal, observe-only seam |
+| `effect:engine.platform-events.append` | 45 | 20 | internal, observe-only seam |
+| `effect:engine.document.persist` | 30 | 20 | |
+| `effect:engine.document.set-status` | 30 | 20 | |
+| `effect:llm.call` | 45 | 20 | internal, observe-only seam (Seam A never blocks) |
+| `effect:schedule.create` | 30 | 20 | |
+| `effect:schedule.update` | 30 | 20 | |
+| `effect:schedule.delete` | 30 | 20 | |
+| `effect:tracker.project.create` | 30 | 20 | |
+| `effect:tracker.project.update` | 30 | 20 | |
+| `effect:tracker.project.delete` | 75 | **95** | JUDGMENT->fixed: irreversible destroy of user work; deletes live at 95-100 per the model |
+| `effect:tracker.work-item.create` | 30 | 20 | |
+| `effect:tracker.work-item.update` | 30 | 20 | |
+| `effect:tracker.work-item.delete` | 75 | **95** | JUDGMENT->fixed: irreversible destroy of user work; deletes live at 95-100 per the model |
+| `effect:tracker.work-item.assign` | 30 | 20 | |
+| `effect:tracker.work-item.set-status` | 30 | 20 | |
+| `effect:tracker.preferences.set` | 30 | 20 | |
+| `effect:tracker.preferences.delete` | 30 | 20 | |
+| `effect:mentorship.session.start` | 80 | 20 | JUDGMENT — rule says session ops→20, but it launches an autonomous agent run, same consequence as `agent-dispatch.run` (80) |
+| `effect:mentorship.session.pause` | 30 | 20 | |
+| `effect:mentorship.session.resume` | 30 | 20 | |
+| `effect:mentorship.session.cancel` | 90 | 20 | JUDGMENT — destructive (run abandoned); 95 arguable |
+| `automation:agent-seeder` | 30 | 20 | |
+| `automation:alert-rule-evaluator` | 30 | 20 | |
+| `automation:audit-chain-checkpoint-scheduler` | 30 | 20 | |
+| `automation:audit-projector` | 30 | 20 | |
+| `automation:built-in-alert-rule-seeder` | 30 | 20 | |
+| `automation:convention-store-seeder` | 30 | 20 | |
+| `automation:engine-registry-heartbeat-service` | 30 | 20 | |
+| `automation:entitlement-cache-invalidation-listener` | 30 | 20 | |
+| `automation:hourly-analytics-rollup-scheduler` | 30 | 20 | |
+| `automation:platform-task-worker` | 30 | 20 | dispatched tasks carry their own levels |
+| `automation:pool-warmup-service` | 30 | 20 | |
+| `automation:provider-session-cleanup-service` | 30 | 20 | |
+| `automation:reveal-token-sweeper` | 30 | 20 | |
+| `automation:task-queue-processor` | 30 | 20 | |
+| `automation:tenant-scheduled-trigger-service` | 30 | 20 | dispatched workflows separately governed |
+| `automation:tenant-status-invalidation-listener` | 30 | 20 | |
+| `automation:workflow-seeder` | 30 | 20 | |
+| `automation:workflow-sync-service` | 30 | 20 | |
+| `platform-task:billing.webhook.followup` | 30 | 20 | |
+| `platform-task:plan.activate_scheduled` | 30 | 20 | JUDGMENT — internal pricing record, nearest zone |
+
+### Level 25 — Write code on a branch (24)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `agent-action:address-review-comments` | 45 | 25 | |
+| `agent-action:author-ui-spec` | 45 | 25 | binding artifact — closer to code than prose |
+| `agent-action:design-api-contract` | 45 | 25 | binding artifact |
+| `agent-action:design-data-model` | 45 | 25 | binding artifact |
+| `agent-action:design-integration` | 45 | 25 | binding artifact |
+| `agent-action:design-system` | 45 | 25 | binding artifact |
+| `agent-action:draft-user-flow` | 45 | 25 | binding artifact |
+| `agent-action:implement-feature` | 45 | 25 | |
+| `agent-action:implement-fix` | 45 | 25 | |
+| `agent-action:implement-infrastructure` | 45 | 25 | IaC on a branch is code-write (43-3 D5.1); the deploy is gated separately |
+| `agent-action:incorporate-answers` | 45 | 25 | edits the binding requirement artifact |
+| `agent-action:plan-fix` | 45 | 25 | binding artifact |
+| `agent-action:plan-implementation` | 45 | 25 | binding artifact |
+| `agent-action:plan-migration-strategy` | 45 | 25 | binding artifact |
+| `agent-action:plan-refactor` | 45 | 25 | binding artifact |
+| `agent-action:plan-sprint` | 45 | 25 | authoring; the human-pinned acceptance sits at 45 |
+| `agent-action:plan-system-design` | 45 | 25 | binding artifact |
+| `agent-action:propose-design` | 45 | 25 | authoring; the human-pinned acceptance sits at 45 |
+| `agent-action:refactor` | 45 | 25 | |
+| `agent-action:write-regression-test` | 45 | 25 | |
+| `agent-action:write-test-cases` | 45 | 25 | |
+| `agent-action:write-tests` | 45 | 25 | |
+| `tool:file_write` | 30 | 25 | |
+| `tool:git_operations.write` | 65 | 25 | FLAG — includes `push`, which is visible off-box; 35 arguable |
+
+### Level 30 — Run tests (4)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `agent-action:debug` | 45 | 30 | JUDGMENT — owner named "debug execution", but the catalog grades it code authoring ("fix through code changes"); 25 also fits |
+| `agent-action:exploratory-test` | 50 | 30 | |
+| `effect:ci.tests.trigger` | 50 | 30 | |
+| `tool:run_tests` | 50 | 30 | |
+
+### Level 35 — Create branch / PR (5)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `effect:git.branch.create` | 65 | 35 | |
+| `effect:git.pull-request.create` | 65 | 35 | |
+| `effect:git.release.create` | 65 | 35 | |
+| `effect:git.issue.patch` | 65 | 35 | FLAG for owner — visible outside and recallable, but arguably external comms (75) |
+| `effect:jira.ticket.patch` | 65 | 35 | FLAG for owner — same question as git.issue.patch |
+
+### Level 40 — Approve PRs / routine docs (27)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `agent-action:code-review` | 55 | 40 | |
+| `agent-action:code-review-architecture` | 55 | 40 | |
+| `agent-action:code-review-coverage` | 55 | 40 | |
+| `agent-action:code-review-security` | 55 | 40 | |
+| `agent-action:mentor-feedback` | 55 | 40 | |
+| `agent-action:plan-review` | 55 | 40 | |
+| `agent-action:plan-review-security` | 55 | 40 | |
+| `agent-action:review-acceptance` | 55 | 40 | |
+| `agent-action:review-compliance` | 55 | 40 | |
+| `agent-action:review-design` | 55 | 40 | |
+| `agent-action:review-docs` | 55 | 40 | |
+| `agent-action:review-feasibility` | 55 | 40 | |
+| `agent-action:review-operability` | 55 | 40 | |
+| `agent-action:review-scope` | 55 | 40 | |
+| `agent-action:review-testability` | 55 | 40 | |
+| `agent-action:self-review` | 55 | 40 | |
+| `agent-action:verify-acceptance` | 55 | 40 | |
+| `document-type:ambiguity-assessment` | 55 | 40 | |
+| `document-type:backlog-ordering` | 55 | 40 | |
+| `document-type:clarification` | 55 | 40 | |
+| `document-type:decomposition` | 55 | 40 | |
+| `document-type:diagnosis` | 55 | 40 | |
+| `document-type:findings` | 55 | 40 | |
+| `document-type:prose` | 55 | 40 | |
+| `document-type:test-plan` | 55 | 40 | |
+| `document-type:test-spec` | 55 | 40 | |
+| `document-type:triage-decision` | 55 | 40 | |
+
+### Level 45 — Approve binding docs (7)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `document-type:plan` | 60 | 45 | |
+| `document-type:acceptance-criteria` | 60 | 45 | |
+| `document-type:review` | 60 | 45 | |
+| `document-type:ux-spec` | 60 | 45 | |
+| `document-type:design` | 80 | 45 | FLAG — ships `AcceptorRequirement.Human` today; 45 automates it at dial ≥45 |
+| `document-type:sprint-plan` | 85 | 45 | FLAG — same: shipped human-pinned |
+| `document-type:threat-model` | 90 | 45 | FLAG — same: shipped human-pinned |
+
+### Level 50 — Bypass PR checks (1)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `agent-action:configure-cicd` | 80 | 50 | JUDGMENT — editing pipeline config is the power to remove the checks; nearest zone |
+
+`effect:git.checks.bypass` itself does not exist — see Missing actions.
+
+### Levels 55 / 60 — Merge to dev / qa (0)
+
+Empty until the per-target merge keys are minted — see Missing actions.
+
+### Level 65 — Merge to main (1)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `effect:git.pull-request.merge` | 75 | 65 | JUDGMENT — one coarse key today; carries the worst target (main) until split into `git.merge.dev/qa/main` |
+
+### Level 70 — Deploy to dev (0)
+
+Empty until per-environment deploy keys are minted — see Missing actions.
+
+### Level 75 — Deploy qa / external messages (7)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `effect:notify.slack.queue` | 75 | 75 | |
+| `effect:notify.email.send` | 75 | 75 | |
+| `automation:outbox-slack-sender` | 75 | 75 | |
+| `automation:outbox-smtp-sender` | 75 | 75 | |
+| `effect:engine.channel-outbox.enqueue` | 30 | 75 | JUDGMENT — enqueue becomes a sent message once the sweeper drains; same consequence as notify.slack.queue |
+| `automation:channel-outbox-sweeper` | 30 | 75 | JUDGMENT — it is an outbox sender by function |
+| `automation:notification-dispatcher` | 30 | 75 | JUDGMENT — delivers alerts through external channels (`IAlertChannel.SendAsync`) |
+
+### Level 80 — Deploy uat / unbounded execution (4)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `tool:shell_execute` | 80 | 80 | |
+| `effect:process.spawn` | 80 | 80 | |
+| `effect:agent-dispatch.run` | 80 | 80 | |
+| `effect:mcp.tool.invoke` | 80 | 80 | FLAG — ships AlwaysHuman by the 2026-07-30 governance reversal (no CI drift signal for MCP); a fixed 80 undoes that decision |
+
+### Level 85 — Deploy staging / create infrastructure (3)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `platform-task:provisioning.tenant` | 65 | 85 | |
+| `platform-task:provisioning.tenant.v2` | 65 | 85 | |
+| `platform-task:billing.customer.create` | 65 | 85 | |
+
+### Level 90 — Deploy prod / manage secrets (5)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `effect:deploy.promote-prod` | 95 | 90 | |
+| `agent-action:deploy` | 95 | 90 | JUDGMENT — one coarse key spanning all environments; carries the worst (prod) until per-env split |
+| `automation:secret-auto-rotation-scheduler` | 65 | 90 | |
+| `automation:retire-sweep` | 65 | 90 | |
+| `platform-task:RETIRE_SECRET_VERSION` | 65 | 90 | |
+
+### Level 95 — Delete branch / rollback (3)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `effect:git.branch.delete` | 90 | 95 | |
+| `effect:deploy.rollback` | 95 | 95 | |
+| `agent-action:rollback` | 95 | 95 | |
+
+### Level 100 — Delete resources / infrastructure (4)
+
+| Action key | Old | Zone | Notes |
+|---|---|---|---|
+| `platform-task:provisioning.tenant.deprovision` | 95 | 100 | |
+| `platform-task:tenant.move` | 80 | 100 | |
+| `automation:tenant-cleanup-requested-trigger` | 95 | 100 | |
+| `automation:tenant-delete-requested-trigger` | 95 | 100 | |
+
+**Count check**: 45+2+13+42+24+4+5+27+7+1+1+7+4+3+5+3+4 = 197. Every
+descriptor appears exactly once.
+
+## Missing actions
+
+Capabilities the ladder names, or the code performs, with no catalog key.
+"Nothing yet" means reserve the key before anything performs it.
+
+**Ladder slots with no key:**
+
+| Proposed key | Zone | Performed today by |
+|---|---|---|
+| `effect:git.checks.bypass` | 50 | nothing yet — reserve the key |
+| `effect:git.merge.dev` | 55 | `GitEndpoints.MergePullRequest` when the PR base is dev (coarse key today) |
+| `effect:git.merge.qa` | 60 | same route, base = qa |
+| `effect:git.merge.main` | 65 | same route, base = main; retire coarse `git.pull-request.merge` on split |
+| `effect:deploy.dev` | 70 | `DeploymentPipelineWorkflow` dev stage (only the prod transition is catalogued) |
+| `effect:deploy.qa` | 75 | qa stage |
+| `effect:deploy.uat` | 80 | uat stage |
+| `effect:deploy.staging` | 85 | staging stage |
+| `effect:deploy.prod` | 90 | absorbs `deploy.promote-prod` on split |
+
+**Delete PR (ladder 95): impossible as stated.** GitHub cannot delete PRs —
+only close. `IGitPlatformClient` supports open, get, list-files, merge — **no
+close, no reopen**; `GitMediationService` likewise. Nothing closes a PR today.
+Recommendation: drop "delete PR" from the ladder; reserve
+`effect:git.pull-request.close` at **35** (reversible by reopen, so 95
+overstates it) for when the client gains close support.
+
+**Live code with no catalog key (found in the hunt):**
+
+| Proposed key | Zone | Performed today by |
+|---|---|---|
+| `effect:git.issue.create` | 35 | `POST /api/engine/create-issue` (`EngineEndpoints.CreateIssue` → Octokit callback) — live and ungoverned; `SingleIssueCycleWorkflow` also dispatches a nonexistent `create-issues` workflow, so more issue creation is coming |
+| `effect:git.issue.comment` | 35 | `POST /api/engine/issue-comment` — posts platform comments today; same 35-vs-75 flag as `git.issue.patch` |
+| `effect:git.issue.labels.set` / `.remove` | 35 | `POST` + `DELETE /api/engine/issue-labels` — live, uncatalogued |
+| `effect:git.pr.review-comment.create` | 40 | `IGitPlatformClient.CreatePullRequestReviewCommentAsync` — drivers implement it; no production caller found |
+| `effect:git.webhook.register` | 85 | `IGitPlatformClient.RegisterWebhookAsync` — a repo-settings write; drivers implement it, no governed caller found |
+| `effect:engine.context.store` | 20 | `POST /api/engine/store-context` ← `StoreRoleFindingActivity` (KB/vector write; 39-24 flagged it unaccepted — it is also uncatalogued) |
+| `effect:kb.vectors.upsert` | 20 | `POST /api/kb/vector-db/upsert` (human SettingsManage route) |
+| `effect:kb.vectors.delete` | 95 | `DELETE /api/kb/vector-db/delete` and `DELETE /api/kb/index` (clear) — deletes of stored knowledge |
+| `effect:kb.index.trigger` | 20 | `POST /api/kb/index/trigger` |
+| `effect:mcp.server.start` / `.stop` | 80 | `POST /api/kb/mcp/servers/{id}/start\|stop` — the descriptor comment already notes these have no member |
+| `effect:secret.create` | 90 | `POST /api/admin/secrets` + org route — human-only (PlatformOwner / org admin); agent-reachable only via the shell-curl bypass |
+| `effect:secret.rotate` | 90 | admin rotate routes + `POST /api/v1/secrets/{id}/rotate` |
+| `effect:secret.version.retire` | 90 | admin retire-version routes — `platform-task:RETIRE_SECRET_VERSION` covers only the background handler, not the admin route |
+| `effect:engine.ci.trigger` (or bind to `ci.tests.trigger`) | 30 | `POST /api/engine/trigger-ci` — a second, uncatalogued CI-trigger route |
+| `effect:engine.task.execute` | 20 | `POST /api/engine/execute-task` — LLM execution without tools; same seam class as `llm.call` |
+| `effect:engine.command` | 20 | `POST /api/engine/command` |
+| `effect:engine.cycle-result` | 20 | `POST /api/engine/cycle-result` |
+| `tool:git_operations.force-push` | 95 | reachable TODAY via `tool:git_operations.write` args (`push --force` passes the metachar screen); needs an arg-level split, not just a key |
+
+**Checked and clean:** all six DI-registered tool executors (`file_read`,
+`file_write`, `search_code`, `shell_execute`, `git_operations`, `run_tests`)
+plus `get_acceptance_rules` have catalog members. `TammaApiClient`'s
+`[PerformsEffect]` methods all map to catalogued effects; its unattributed
+provider-session trio (`CreateProvider`/`ExecuteProvider`/`DisposeProvider`)
+is a second model-invocation seam worth binding under `llm.call` or its own
+key. **Not supported anywhere, nothing to catalog until built:** tag/release
+deletion, branch protection, wiki writes, repo settings edits, PR reopen,
+issue deletion.
+
+| Date       | Version | Changes                                  | Author |
+| ---------- | ------- | ---------------------------------------- | ------ |
+| 2026-08-01 | 1.3.0   | Full 197-action zone table (supersedes the M1/M2 numbers); missing-action hunt: 9 ladder keys + 18 live-code keys proposed; delete-PR found impossible (close-pr reserved instead) | meywd + Claude |
