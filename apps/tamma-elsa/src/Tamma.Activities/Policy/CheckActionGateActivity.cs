@@ -6,6 +6,7 @@ using Elsa.Workflows.Attributes;
 using Elsa.Workflows.Models;
 using Microsoft.Extensions.Logging;
 using Tamma.Activities.LlmCall;
+using Tamma.Core.Logging;
 
 namespace Tamma.Activities.Policy;
 
@@ -183,7 +184,12 @@ public class CheckActionGateActivity : Activity
             // fault). An activity that THREW here would fault the deployment
             // pipeline over a governance read, which is strictly worse than the
             // OR term contributing nothing.
-            _logger?.LogWarning(ex, "Action-gate evaluation threw for {ActionKey}", actionKey);
+            // actionKey and correlationId are Inputs, so a workflow definition — not
+            // only this pipeline's literal — can set them. CodeQL did not flag these
+            // two (the taint arrives via workflow input rather than straight off the
+            // request), but the vector is the same one, so they are cleaned the same way.
+            _logger?.LogWarning(ex, "Action-gate evaluation threw for {ActionKey}",
+                LogSanitizer.Clean(actionKey));
         }
 
         if (response is null)
@@ -192,7 +198,7 @@ public class CheckActionGateActivity : Activity
                 "Action-gate evaluation UNAVAILABLE for {ActionKey} (correlation {CorrelationId}); "
                 + "taking the Automated edge so the pre-existing approval predicate is unchanged. "
                 + "This is fail-open on an ERROR, not on a decision.",
-                actionKey, correlationId);
+                LogSanitizer.Clean(actionKey), LogSanitizer.Clean(correlationId));
 
             Outcome.Set(context, OutcomeUnavailable);
             Enforced.Set(context, false);

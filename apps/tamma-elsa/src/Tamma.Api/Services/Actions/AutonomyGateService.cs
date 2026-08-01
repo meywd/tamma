@@ -1,4 +1,5 @@
 using Tamma.Core.Actions;
+using Tamma.Core.Logging;
 using Tamma.Core.Documents.Policy;
 using Tamma.Data.Repositories;
 
@@ -285,7 +286,10 @@ public sealed class AutonomyGateService : IAutonomyGate
             _logger?.LogError(ex,
                 "Authorization-ledger consult FAILED for {ActionKey} (correlation {CorrelationId}); "
                 + "the requires-human decision STANDS.",
-                decision.Action.ToWire(), query.CorrelationId);
+                // Caller-supplied, and this line asserts a block STOOD — a forged copy
+                // is a false governance record, so it goes through LogSanitizer like
+                // every other user-controlled value the API logs.
+                decision.Action.ToWire(), LogSanitizer.Clean(query.CorrelationId));
             await _events.EmitEvaluationFailedAsync(
                 decision.Action.ToWire(), ex.Message, principal.TenantId, principal.UserId)
                 .ConfigureAwait(false);

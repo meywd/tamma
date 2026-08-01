@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Tamma.Core.Actions;
+using Tamma.Core.Logging;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Services.Actions;
@@ -128,7 +129,11 @@ public sealed class ActionAuthorizationRequests : IActionAuthorizationRequests
             _logger?.LogWarning(ex,
                 "Could not record a pending authorization for {ActionKey} in correlation "
                 + "{CorrelationId}; the denial STANDS and is audited, the 409 simply carries no "
-                + "authorizationId.", decision.Action.ToWire(), correlationId);
+                + "authorizationId.",
+                // correlationId is caller-supplied (X-Tamma-Correlation-Id header or
+                // ?correlationId=), so it is a log-forging vector; the action key comes
+                // from the catalog and needs no cleaning.
+                decision.Action.ToWire(), LogSanitizer.Clean(correlationId));
             return null;
         }
     }
