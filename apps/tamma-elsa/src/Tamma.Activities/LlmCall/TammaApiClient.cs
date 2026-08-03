@@ -315,6 +315,77 @@ public class TammaApiClient
         return SendJsonAsync<GitCallResponse>(HttpMethod.Put, url, request, tenantId, ct);
     }
 
+    // ----- Story 31-13 — the 7 PR-lifecycle verbs (close / reopen / comment /
+    //       review-comment / reviewers / labels / draft). Each is one governed
+    //       git write on the /api/v1/git/{owner}/{repo}/pull-requests/{n}/…
+    //       mediation plane; the per-tenant token is resolved + used server-side.
+    //       Return null on any non-2xx (guard 403 / token 503 / auth 401 /
+    //       transport / a governance 409), which the thin activity maps to its
+    //       Error edge (fail-closed). ----------------------------------------
+
+    /// <summary>Story 31-13 — <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/close</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestClose)]
+    public virtual Task<GitCallResponse?> ClosePullRequestAsync(
+        string repo, int prNumber, GitClosePrRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests/{prNumber}/close";
+        return PostAsync<GitCallResponse>(url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 31-13 — <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/reopen</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestReopen)]
+    public virtual Task<GitCallResponse?> ReopenPullRequestAsync(
+        string repo, int prNumber, GitReopenPrRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests/{prNumber}/reopen";
+        return PostAsync<GitCallResponse>(url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 31-13 — <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/comments</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestComment)]
+    public virtual Task<GitCallResponse?> CommentOnPullRequestAsync(
+        string repo, int prNumber, GitPrCommentRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests/{prNumber}/comments";
+        return PostAsync<GitCallResponse>(url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 31-13 — <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/review-comments</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestReviewComment)]
+    public virtual Task<GitCallResponse?> ReviewCommentOnPullRequestAsync(
+        string repo, int prNumber, GitPrReviewCommentRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests/{prNumber}/review-comments";
+        return PostAsync<GitCallResponse>(url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 31-13 — <c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/reviewers</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestRequestReviewers)]
+    public virtual Task<GitCallResponse?> RequestPullRequestReviewersAsync(
+        string repo, int prNumber, GitPrReviewersRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests/{prNumber}/reviewers";
+        return PostAsync<GitCallResponse>(url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 31-13 — <c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/labels</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestLabel)]
+    public virtual Task<GitCallResponse?> SetPullRequestLabelsAsync(
+        string repo, int prNumber, GitPrLabelsRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests/{prNumber}/labels";
+        return SendJsonAsync<GitCallResponse>(HttpMethod.Put, url, request, tenantId, ct);
+    }
+
+    /// <summary>Story 31-13 — <c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/draft</c>.</summary>
+    [PerformsEffect(ExternalEffect.GitPullRequestSetDraft)]
+    public virtual Task<GitCallResponse?> SetPullRequestDraftAsync(
+        string repo, int prNumber, GitPrDraftRequest request, string? tenantId = null, CancellationToken ct = default)
+    {
+        var url = $"{_baseUrl}/api/v1/git/{RepoPath(repo)}/pull-requests/{prNumber}/draft";
+        return SendJsonAsync<GitCallResponse>(HttpMethod.Put, url, request, tenantId, ct);
+    }
+
     /// <summary>Story 38-1 (AC5) — <c>PATCH /api/v1/git/{owner}/{repo}/issues/{n}</c>.</summary>
     [PerformsEffect(ExternalEffect.GitIssuePatch)]
     public Task<GitCallResponse?> UpdateIssueStatusAsync(

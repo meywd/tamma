@@ -116,7 +116,8 @@ public class MediationClientEffectSweepTests
     private static readonly IReadOnlyDictionary<ExternalEffect, EffectSite> EffectPerformingSites =
         new Dictionary<ExternalEffect, EffectSite>
         {
-            // ── The 17 mutating mediation-client methods (AC4's enumerated set) ──
+            // ── The 24 mutating mediation-client methods (AC4's enumerated set;
+            //    17 + Story 31-13's 7 PR-lifecycle verbs) ──
             [ExternalEffect.LlmCall] = new(SiteKind.MediationClient, "CallLlmAsync",
                 "the engine's only path to a model call"),
             [ExternalEffect.GitBranchCreate] = new(SiteKind.MediationClient, "CreateBranchAsync",
@@ -201,34 +202,36 @@ public class MediationClientEffectSweepTests
             [ExternalEffect.TrackerPreferencesDelete] = new(SiteKind.RouteOnly, null,
                 "native tracker route (Story 44-2); tenant tracker configuration written from the UI"),
 
-            // ── Story 31-13 — PR operations + the formerly-ungoverned issue callbacks ──
-            // RouteOnly: enforceable-but-unbound descriptors (no .Governs binding yet,
-            // and no TammaApiClient method — those land in a later commit). The routes
-            // named in each descriptor SiteKey do not exist yet; classified RouteOnly
-            // because when a caller appears it will be a human-/UI-facing route, not the
-            // engine's mediation client.
-            [ExternalEffect.GitPullRequestClose] = new(SiteKind.RouteOnly, null,
-                "Story 31-13 PR op; no TammaApiClient method yet (lands in a later commit)"),
-            [ExternalEffect.GitPullRequestReopen] = new(SiteKind.RouteOnly, null,
-                "Story 31-13 PR op; no TammaApiClient method yet (lands in a later commit)"),
-            [ExternalEffect.GitPullRequestComment] = new(SiteKind.RouteOnly, null,
-                "Story 31-13 PR op; no TammaApiClient method yet (lands in a later commit)"),
-            [ExternalEffect.GitPullRequestReviewComment] = new(SiteKind.RouteOnly, null,
-                "Story 31-13 PR review output; no TammaApiClient method yet (lands in a later commit)"),
-            [ExternalEffect.GitPullRequestRequestReviewers] = new(SiteKind.RouteOnly, null,
-                "Story 31-13 PR op; no TammaApiClient method yet (lands in a later commit)"),
-            [ExternalEffect.GitPullRequestLabel] = new(SiteKind.RouteOnly, null,
-                "Story 31-13 PR op; no TammaApiClient method yet (lands in a later commit)"),
-            [ExternalEffect.GitPullRequestSetDraft] = new(SiteKind.RouteOnly, null,
-                "Story 31-13 PR op; no TammaApiClient method yet (lands in a later commit)"),
+            // ── Story 31-13 — PR operations (step 8: now client-backed) ──
+            // The 7 PR verbs are performed by the engine's mediation client — each is
+            // a governed git write on the /api/v1/git/{owner}/{repo}/pull-requests/{n}/…
+            // plane, called by a TammaApiClient method carrying [PerformsEffect].
+            [ExternalEffect.GitPullRequestClose] = new(SiteKind.MediationClient, "ClosePullRequestAsync",
+                "engine-mediated git write"),
+            [ExternalEffect.GitPullRequestReopen] = new(SiteKind.MediationClient, "ReopenPullRequestAsync",
+                "engine-mediated git write"),
+            [ExternalEffect.GitPullRequestComment] = new(SiteKind.MediationClient, "CommentOnPullRequestAsync",
+                "engine-mediated git write"),
+            [ExternalEffect.GitPullRequestReviewComment] = new(SiteKind.MediationClient, "ReviewCommentOnPullRequestAsync",
+                "engine-mediated git write (review output)"),
+            [ExternalEffect.GitPullRequestRequestReviewers] = new(SiteKind.MediationClient, "RequestPullRequestReviewersAsync",
+                "engine-mediated git write"),
+            [ExternalEffect.GitPullRequestLabel] = new(SiteKind.MediationClient, "SetPullRequestLabelsAsync",
+                "engine-mediated git write"),
+            [ExternalEffect.GitPullRequestSetDraft] = new(SiteKind.MediationClient, "SetPullRequestDraftAsync",
+                "engine-mediated git write"),
+
+            // ── Story 31-13 — the formerly-ungoverned issue callbacks. RouteOnly:
+            // called by IssueCallbackClient / HttpTriageApplyClient, NOT the engine's
+            // TammaApiClient — no mediation-client method exists (or should).
             [ExternalEffect.GitIssueCreate] = new(SiteKind.RouteOnly, null,
-                "Story 31-13 issue callback; no TammaApiClient method yet (lands in a later commit)"),
+                "Story 31-13 issue callback; reached via IssueCallbackClient / HttpTriageApplyClient, not the engine mediation client"),
             [ExternalEffect.GitIssueComment] = new(SiteKind.RouteOnly, null,
-                "Story 31-13 issue callback; no TammaApiClient method yet (lands in a later commit)"),
+                "Story 31-13 issue callback; reached via IssueCallbackClient / HttpTriageApplyClient, not the engine mediation client"),
             [ExternalEffect.GitIssueLabelsSet] = new(SiteKind.RouteOnly, null,
-                "Story 31-13 issue callback; no TammaApiClient method yet (lands in a later commit)"),
+                "Story 31-13 issue callback; reached via IssueCallbackClient / HttpTriageApplyClient, not the engine mediation client"),
             [ExternalEffect.GitIssueLabelsRemove] = new(SiteKind.RouteOnly, null,
-                "Story 31-13 issue callback; no TammaApiClient method yet (lands in a later commit)"),
+                "Story 31-13 issue callback; reached via IssueCallbackClient / HttpTriageApplyClient, not the engine mediation client"),
 
             // ── Story 43-8 AC1 step 2 (carve-out §A1 #1, closed 2026-07-30) ──
             // The four MentorshipController [HttpPost] actions. RouteOnly: they are
@@ -731,8 +734,12 @@ public class MediationClientEffectSweepTests
         // it is NOT a ratchet, unlike NonEffectClientMethods_countIsPinned, which
         // stays at 19 because the new method is accounted for by the D17 reviewed
         // exception set rather than by widening the baseline.
-        discovered.Should().HaveCount(37,
-            "the mediation surface is pinned exactly: 17 effect-performing + 19 baselined "
+        // 37 → 44 (Story 31-13, step 8): + the 7 PR-lifecycle verb methods
+        // (Close/Reopen/CommentOn/ReviewCommentOn/RequestReviewers/SetLabels/SetDraft),
+        // each carrying [PerformsEffect] and mapped in EffectPerformingSites. This pin
+        // is a bump-with-review, not a ratchet — "move this number in the same commit".
+        discovered.Should().HaveCount(44,
+            "the mediation surface is pinned exactly: 24 effect-performing + 19 baselined "
             + "non-effect + 1 reviewed-exception method. A change here is a new (or removed) "
             + "mediation method — decide whether it is a governed effect, then move this number "
             + "in the same commit.");
@@ -788,12 +795,13 @@ public class MediationClientEffectSweepTests
             .Where(m => m.GetCustomAttributes<PerformsEffectAttribute>(inherit: false).Any())
             .ToList();
 
-        attributed.Should().HaveCount(17,
-            "all 17 mutating TammaApiClient methods carry [PerformsEffect] (the merge method carries "
-            + "three since Story 43-12's per-target split, but it is still ONE method). If this is 0 "
-            + "the attributes were stripped and the agreement check below is vacuous; if it is higher, "
-            + "a method was attributed without a corresponding EffectPerformingSites entry — decide "
-            + "which effect it performs, in the table, first.");
+        attributed.Should().HaveCount(24,
+            "all 24 mutating TammaApiClient methods carry [PerformsEffect] (17 + Story 31-13's 7 "
+            + "PR-lifecycle verbs; the merge method carries three since Story 43-12's per-target "
+            + "split, but it is still ONE method). If this is 0 the attributes were stripped and the "
+            + "agreement check below is vacuous; if it is higher, a method was attributed without a "
+            + "corresponding EffectPerformingSites entry — decide which effect it performs, in the "
+            + "table, first.");
 
         var problems = new List<string>();
 
@@ -825,11 +833,13 @@ public class MediationClientEffectSweepTests
     public void MediationClientSites_countIsPinned()
     {
         EffectPerformingSites.Values.Count(s => s.Kind == SiteKind.MediationClient)
-            .Should().Be(19,
+            .Should().Be(26,
                 "17 -> 19 (Story 43-12): the coarse git.pull-request.merge (1 MediationClient entry) is "
                 + "retired and replaced by the per-target trio git.merge.{dev,qa,main} (3 entries, all "
-                + "sharing MergePullRequestAsync). A change here means a mediation method became (or "
-                + "stopped being) a governed effect — that is a governance decision, not a refactor.");
+                + "sharing MergePullRequestAsync). 19 -> 26 (Story 31-13, step 8): the 7 PR-lifecycle "
+                + "verbs flip from RouteOnly to MediationClient as their TammaApiClient methods land. A "
+                + "change here means a mediation method became (or stopped being) a governed effect — "
+                + "that is a governance decision, not a refactor.");
     }
 
     /// <summary>
@@ -874,7 +884,7 @@ public class MediationClientEffectSweepTests
         // still 36, because TammaApiClient happens to expose no non-Task method today —
         // see The_sweep_actually_sees_the_client_surface for the measurement.
         KnownNonEffectClientMethods.Should().HaveCount(19,
-            "37 public instance mediation methods − 17 effect-performing − 1 D17 reviewed "
+            "44 public instance mediation methods − 24 effect-performing − 1 D17 reviewed "
             + "exception = 19. If this fails because a new mediation method was added, that is the "
             + "ratchet working: decide whether it is a governed effect. Do NOT bump this number — "
             + "it is shrink-only. A genuinely non-effect new method goes in "

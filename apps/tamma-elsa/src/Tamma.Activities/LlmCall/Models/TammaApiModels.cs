@@ -397,6 +397,75 @@ public sealed record GitCreateReleaseRequest
     [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
 }
 
+// ============================================================
+// Story 31-13 — PR-lifecycle verb wire requests. These mirror the JSON shapes of
+// Tamma.Api's Services/Git PR request records for the 7 engine→API PR-lifecycle
+// endpoints POST/PUT /api/v1/git/{owner}/{repo}/pull-requests/{n}/... . They carry
+// NO token (the API resolves the per-tenant credential server-side) and use
+// [JsonPropertyName] camelCase to match the API's CamelCase serialization.
+// ============================================================
+
+/// <summary>Mirrors <c>Tamma.Api.Services.Git.ClosePrRequest</c>
+/// (<c>POST .../pull-requests/{n}/close</c>).</summary>
+public sealed record GitClosePrRequest
+{
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
+/// <summary>Mirrors <c>Tamma.Api.Services.Git.ReopenPrRequest</c>
+/// (<c>POST .../pull-requests/{n}/reopen</c>).</summary>
+public sealed record GitReopenPrRequest
+{
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
+/// <summary>Mirrors <c>Tamma.Api.Services.Git.PrCommentRequest</c>
+/// (<c>POST .../pull-requests/{n}/comments</c>).</summary>
+public sealed record GitPrCommentRequest
+{
+    [JsonPropertyName("body")] public string Body { get; init; } = string.Empty;
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
+/// <summary>Mirrors <c>Tamma.Api.Services.Git.PrReviewCommentRequest</c>
+/// (<c>POST .../pull-requests/{n}/review-comments</c>). When
+/// <see cref="CommitId"/> is null/empty the API resolves the PR head SHA.</summary>
+public sealed record GitPrReviewCommentRequest
+{
+    [JsonPropertyName("body")] public string Body { get; init; } = string.Empty;
+    [JsonPropertyName("commitId")] public string? CommitId { get; init; }
+    [JsonPropertyName("path")] public string Path { get; init; } = string.Empty;
+    [JsonPropertyName("line")] public int Line { get; init; }
+    [JsonPropertyName("side")] public string Side { get; init; } = "RIGHT";
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
+/// <summary>Mirrors <c>Tamma.Api.Services.Git.PrReviewersRequest</c>
+/// (<c>POST .../pull-requests/{n}/reviewers</c>).</summary>
+public sealed record GitPrReviewersRequest
+{
+    [JsonPropertyName("reviewers")] public IReadOnlyList<string> Reviewers { get; init; } = Array.Empty<string>();
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
+/// <summary>Mirrors <c>Tamma.Api.Services.Git.PrLabelsRequest</c>
+/// (<c>PUT .../pull-requests/{n}/labels</c>). One op carrying both arrays; add
+/// applies first, then remove.</summary>
+public sealed record GitPrLabelsRequest
+{
+    [JsonPropertyName("addLabels")] public IReadOnlyList<string>? AddLabels { get; init; }
+    [JsonPropertyName("removeLabels")] public IReadOnlyList<string>? RemoveLabels { get; init; }
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
+/// <summary>Mirrors <c>Tamma.Api.Services.Git.PrDraftRequest</c>
+/// (<c>PUT .../pull-requests/{n}/draft</c>).</summary>
+public sealed record GitPrDraftRequest
+{
+    [JsonPropertyName("draft")] public bool Draft { get; init; }
+    [JsonPropertyName("correlationId")] public string CorrelationId { get; init; } = string.Empty;
+}
+
 /// <summary>
 /// Engine→API wire response for the git-mediation endpoints. Mirrors
 /// <c>Tamma.Api.Services.Git.GitMediationResult</c>. KEY-FREE: only the
@@ -416,6 +485,12 @@ public sealed record GitCallResponse
     [JsonPropertyName("prUrl")] public string? PrUrl { get; init; }
     [JsonPropertyName("reused")] public bool? Reused { get; init; }
     [JsonPropertyName("isDraft")] public bool? IsDraft { get; init; }
+
+    // Story 31-13 — PR-lifecycle verb results. PrState carries the post-op PR
+    // state ("closed" after close / "open" after reopen); CommentId is the new
+    // comment/review-comment id.
+    [JsonPropertyName("prState")] public string? PrState { get; init; }
+    [JsonPropertyName("commentId")] public int? CommentId { get; init; }
 
     [JsonPropertyName("merged")] public bool? Merged { get; init; }
     [JsonPropertyName("mergeSha")] public string? MergeSha { get; init; }
