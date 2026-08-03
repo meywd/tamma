@@ -1510,3 +1510,47 @@ executes an LLM decision that was never gated upstream.
 | ---------- | ------- | -------------------------------------------------------- | ------ |
 | 2026-08-01 | 1.4.0   | secret.read-into-model minted at 90; human-operated exemptions require human credential; PR ops story 31-13 | meywd + Claude |
 | 2026-08-01 | 1.5.0   | Caller-kind re-audit of all 197 + minted keys under Amendment 4's rule: 120 LLM / 7 HUMAN / 28 DUAL stay dial-governed (156 rows incl. secret.read); 42 rows (29 automation, 8 platform-task, 5 plumbing-only effects incl. retired secret.reveal and the engine append/persist seams) moved to a level-free machinery inventory with named performers; mentorship + schedule effects reclassified HUMAN, tracker + mcp.tool.invoke DUAL; engine.context.store and engine.cycle-result reclassified machinery; git.webhook.register and engine.command left UNDECIDED | meywd + Claude |
+
+---
+
+## Execution order for the follow-up stories (from the nine implementation plans, 2026-08-03)
+
+Derived from each plan's stated dependencies; the plans are next to their
+stories.
+
+**Wave A — parallel, nothing blocks them:**
+- 43-13 caller-kind predicate (everything gate-adjacent wants it first)
+- 39-25 ambiguity threading (no shared files with anything)
+- 40-8 create-issues workflow (its route gets catalogued later by 31-13)
+
+**Wave B — one lane, one PR train, in this order:**
+- 43-16 phase 1 -> 43-11 core (Min=1, the full remap, machinery split) ->
+  43-16 phase 2.
+- GATED on the product owner answering 43-16 AC7: at the default dial of 70
+  the zones automate design / sprint-plan / threat-model acceptance
+  (level 45 < 70). Accept, or move those three levels above 70. Phase 2
+  does not ship without the recorded answer.
+- Nothing that mints sub-70 keys can land before this wave: the dial still
+  validates [70,100] and a level-35 key is a boot failure.
+
+**Wave C — parallel after B:**
+- 43-12 per-target merge/deploy keys (grew 3d -> ~5.5d: QA/UAT stage waits
+  and the multi-binding harness ripple)
+- 43-15 toggles + dial UI (needs 43-13's IsMachinery and B's levels)
+
+**Wave D — serialized (shared pin files and shared InlineToolLoopRunner /
+TammaApiClient regions):**
+- 43-14 approval scopes + grant minting (wants 43-12's keys)
+- 42-10 shell sandbox + secret.read (AC5/AC8 need 43-13)
+- 31-13 PR operations (its client methods inherit 43-14's correlation
+  header; second lander on the pin files rebases counts)
+
+One honest edge from 42-10's plan, recorded not resolved: the secret-reveal
+route is deliberately anonymous, and 43-13 fails anonymous callers closed
+to LLM — so an unauthenticated human (pasted curl) gets 409 below dial 90.
+Trusting anonymity would un-gate exactly the curl bypass, so the 409
+stands, pinned by test.
+
+| Date       | Version | Changes                                    | Author |
+| ---------- | ------- | ------------------------------------------ | ------ |
+| 2026-08-03 | 1.6.0   | Execution order from the nine impl plans   | Claude |
