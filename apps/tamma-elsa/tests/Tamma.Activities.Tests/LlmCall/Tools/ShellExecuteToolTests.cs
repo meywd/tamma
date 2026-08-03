@@ -276,4 +276,71 @@ public class ShellExecuteToolTests
         // which may come from the inner (timeout) or outer catch depending on timing.
         result.Success.Should().BeFalse();
     }
+
+    // ── Story 42-10 (AC1) — the child env is the allowlist, always ──
+
+    [Test]
+    public async Task ExecuteAsync_ChildEnvironment_ExcludesSecretCanaries()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Ignore("Shell tests use /bin/bash, skipping on Windows.");
+            return;
+        }
+
+        // The P0 guarantee end-to-end: a secret set in the API process env must not
+        // appear in the real shell child's `env`. (The allowlist PASS-THROUGH is
+        // proven deterministically in ProcessEnvironmentAllowlistTests, which does
+        // not depend on what this test host happens to export.)
+        Environment.SetEnvironmentVariable("TAMMA_TEST_LEAKED_SECRET", "leak-me");
+        try
+        {
+            var result = await _tool.ExecuteAsync("env-1", """{"command": "env"}""");
+            result.Success.Should().BeTrue("env runs in the child");
+            result.Output.Should().NotContain("TAMMA_TEST_LEAKED_SECRET",
+                "a secret in the API process env must never reach the shell child (P0 fix)");
+            result.Output.Should().NotContain("leak-me", "not even the secret value leaks");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TAMMA_TEST_LEAKED_SECRET", null);
+        }
+    }
+
+    // ── Story 42-10 (AC4) — CWD confinement under the sandboxed profile ──
+
+    private ShellExecuteTool SandboxedTool() =>
+        new(_loggerMock.Object, new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ToolExecution:WorkspaceRoot"] = _workspaceRoot,
+                ["ToolExecution:ShellTimeoutSeconds"] = "5",
+                ["Tools:Shell:Sandboxed"] = "true",
+            })
+            .Build());
+
+    [Test]
+    public async Task ExecuteAsync_Sandboxed_RejectsAReadOutsideTheWorkspace()
+    {
+        var result = await SandboxedTool().ExecuteAsync("cwd-1", """{"command": "cat /etc/passwd"}""");
+        result.Success.Should().BeFalse();
+        result.Output.Should().Contain("workspace confinement",
+            "the sandboxed profile confines the command to the workspace root");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_Unsandboxed_IsUnchanged_ByConfinement()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Ignore("Shell tests use /bin/bash, skipping on Windows.");
+            return;
+        }
+
+        // The DEFAULT tool (_tool) is unsandboxed: the confinement screen is a no-op,
+        // so an absolute-path read runs exactly as before this story.
+        var result = await _tool.ExecuteAsync("cwd-2", """{"command": "cat /etc/hostname"}""");
+        result.Output.Should().NotContain("workspace confinement",
+            "unsandboxed behaviour is byte-identical — no confinement screen");
+    }
 }

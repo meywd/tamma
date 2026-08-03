@@ -231,13 +231,14 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void Secrets_has_the_4_expected_members()
+    public void Secrets_has_the_5_expected_members()
     {
         // audit-secrets sits here, not planning-and-analysis: subject dominates
-        // verb for this group (43-3 D5.4).
+        // verb for this group (43-3 D5.4). 42-10 added effect:secret.read (level
+        // 90) — the LLM value-read — alongside the machinery reveal.
         WiresIn(ActionGroup.Secrets).Should().BeEquivalentTo(new[]
         {
-            "agent-action:audit-secrets", "effect:secret.reveal",
+            "agent-action:audit-secrets", "effect:secret.reveal", "effect:secret.read",
             "automation:secret-auto-rotation-scheduler", "automation:retire-sweep",
         });
     }
@@ -269,8 +270,10 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void The_per_group_counts_sum_to_205()
+    public void The_per_group_counts_sum_to_206()
     {
+        // 205 → 206 (Story 42-10): +1 in secrets — effect:secret.read (level 90),
+        // the LLM value-read alongside the machinery reveal; nothing else moves.
         // 197 → 205 (Story 43-12): source-control-write 6 → 10 (retire the coarse
         // merge, add the merge trio + checks.bypass + webhook.register) and
         // deploy-control 6 → 10 (retire promote-prod, add the deploy quintet) —
@@ -302,11 +305,11 @@ public class ActionGroupMembershipTests
             [ActionGroup.DeployControl] = 10,
             [ActionGroup.ExternalComms] = 2,
             [ActionGroup.ModelInvocation] = 7,
-            [ActionGroup.Secrets] = 4,
+            [ActionGroup.Secrets] = 5,
             [ActionGroup.PlatformAutomation] = 43,
         };
 
-        counts.Values.Sum().Should().Be(205);
+        counts.Values.Sum().Should().Be(206);
         foreach (var (group, count) in counts)
             ActionCatalog.ByGroup[group].Should().HaveCount(count, $"group '{group.ToWire()}'");
     }

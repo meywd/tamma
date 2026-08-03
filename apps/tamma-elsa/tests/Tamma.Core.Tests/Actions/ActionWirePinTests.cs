@@ -52,7 +52,9 @@ public class ActionWirePinTests
             "git.checks.bypass", "git.webhook.register",
             "git.issue.patch", "jira.ticket.patch",
             "ci.tests.trigger", "agent-dispatch.run", "notify.slack.queue", "notify.email.send",
-            "mcp.tool.invoke", "secret.reveal", "process.spawn",
+            // 42-10 — secret.read (level 90) is declared adjacent to secret.reveal;
+            // this list is enum-order-sensitive, so it sits between reveal and spawn.
+            "mcp.tool.invoke", "secret.reveal", "secret.read", "process.spawn",
             // 43-12 — the coarse deploy.promote-prod is RETIRED; deploy splits by
             // target env (dev 70 / qa 75 / uat 80 / staging 85 / prod 90). dev+staging
             // are RESERVED (no pipeline stage exists — QA->UAT->Prod only).

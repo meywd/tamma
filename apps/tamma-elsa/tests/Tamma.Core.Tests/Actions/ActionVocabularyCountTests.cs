@@ -51,7 +51,7 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void ExternalEffect_has_47_members()
+    public void ExternalEffect_has_48_members()
     {
         // Derivation: grep 'RequireAuthorization("EngineServiceOnly")'
         // src/Tamma.Api/Program.cs → 26 routes, 17 MUTATING (5 engine-group
@@ -84,7 +84,11 @@ public class ActionVocabularyCountTests
         // env, 70/75/80/85/90 — dev+staging RESERVED, no pipeline stage exists),
         // git.checks.bypass (50, reserved) and git.webhook.register (85, reserved,
         // DUAL-dormant) (+10).
-        Enum.GetValues<ExternalEffect>().Should().HaveCount(47);
+        // 47 -> 48 (Story 42-10): + effect:secret.read (level 90, manage-secrets
+        // zone) — an LLM reading a secret VALUE into model context (43-11
+        // Amendment 4). effect:secret.reveal is NOT removed (it stays as the
+        // machinery plumbing fetch), so this is +1, not a swap.
+        Enum.GetValues<ExternalEffect>().Should().HaveCount(48);
     }
 
     [Test]
@@ -136,9 +140,12 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void TotalCatalogMembers_is_205()
+    public void TotalCatalogMembers_is_206()
     {
-        // 96 + 17 + 8 + 47 + 29 + 8 = 205 — was 197 (effect 39): Story 43-12
+        // 96 + 17 + 8 + 48 + 29 + 8 = 206 — was 205 (effect 47): Story 42-10 minted
+        // effect:secret.read (level 90) — an LLM reading a secret value into model
+        // context (43-11 Amendment 4); secret.reveal stays as machinery, so +1.
+        // 205 — was 197 (effect 39): Story 43-12
         // retired 2 coarse effects (git.pull-request.merge, deploy.promote-prod) and
         // minted 10 per-target merge/deploy zone-ladder keys (see
         // ExternalEffect_has_47_members). Earlier: was 193 (effect 35): Story 43-8
@@ -154,7 +161,7 @@ public class ActionVocabularyCountTests
         // (80 + 10 + 22 + 26 + …); the agent-action plane grew by 16 (Story
         // 41-1a), the document-type plane by 6 (Story 41-1b), and
         // effect/automation by 3 + 1 (Story 41-30).
-        ActionCatalog.All.Should().HaveCount(205);
-        ActionCatalog.ByKey.Should().HaveCount(205);
+        ActionCatalog.All.Should().HaveCount(206);
+        ActionCatalog.ByKey.Should().HaveCount(206);
     }
 }

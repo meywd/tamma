@@ -161,8 +161,14 @@ public class MediationClientEffectSweepTests
 
             // ── Route-only: performed by a human-facing caller, never by the engine ──
             [ExternalEffect.SecretReveal] = new(SiteKind.RouteOnly, null,
-                "GET /api/v1/secrets/reveal/{token}; informational-only and never enforceable, so no "
+                "GET /api/v1/secrets/reveal/{token}; machinery plumbing fetch (off the dial), so no "
                 + "mediation-client method exists to attribute"),
+            // 42-10 — an LLM reading a secret value into context. Enforced at the reveal
+            // route for LLM callers; no engine-side mediation-client method (the engine
+            // has no reveal caller), so RouteOnly like secret.reveal.
+            [ExternalEffect.SecretRead] = new(SiteKind.RouteOnly, null,
+                "GET /api/v1/secrets/reveal/{token} — LLM-caller value read into model context; "
+                + "enforced for LLM callers, no engine mediation-client method"),
             [ExternalEffect.McpToolInvoke] = new(SiteKind.RouteOnly, null,
                 "the C# surface is the KB proxy route POST /api/kb/mcp/tools/invoke (SiteKey corrected "
                 + "2026-07-29, review F16 — it previously named a start|stop alternation that is not a "

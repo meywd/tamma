@@ -145,13 +145,22 @@ public enum ExternalEffect
     [Wire("mcp.tool.invoke")] McpToolInvoke,
 
     /// <summary><c>GET /api/v1/secrets/reveal/{token}</c> —
-    /// <c>SecretEndpoints.RevealSecret</c>. INFORMATIONAL ONLY, NEVER ENFORCEABLE
-    /// (epic README open question 2, ANSWERED 2026-07-25): reading a secret never
-    /// requires a human — the reveal is how an already-authorized action gets its
-    /// credential, and it can fire many times inside one run. What governs a
-    /// secret is the action that needs it. <c>ActionDescriptor.Enforceable</c> is
-    /// <c>false</c> for this member alone.</summary>
+    /// <c>SecretEndpoints.RevealSecret</c>, the PLUMBING credential fetch. This is
+    /// MACHINERY (43-11 Amendment 4): the reveal is how an already-authorized
+    /// action gets its credential, it can fire many times inside one run, and
+    /// deterministic plumbing is never gated. <c>Enforceable=false</c>,
+    /// <c>IsMachinery=true</c>. What the dial governs is <see cref="SecretRead"/> —
+    /// an LLM reading a secret VALUE into its context — not this fetch.</summary>
     [Wire("secret.reveal")] SecretReveal,
+
+    /// <summary>An LLM reads a secret VALUE into model context (43-11 Amendment 4:
+    /// "secret read is ONE action at 90", manage-secrets zone). Distinct from
+    /// <see cref="SecretReveal"/>'s plumbing fetch: a value entering a model
+    /// transcript can leak, so it is a gated, audited decision. Enforced for real
+    /// where an LLM-caller (43-13) reaches the reveal route; best-effort graded in
+    /// the tool loop for shell reads. Caller-kind LLM — the dial governs the LLM
+    /// only.</summary>
+    [Wire("secret.read")] SecretRead,
 
     /// <summary>OS process spawn inside the tool loop —
     /// <c>ShellExecuteTool</c>'s <c>ProcessStartInfo</c> (also reached by

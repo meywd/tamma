@@ -448,13 +448,20 @@ public static partial class ActionCatalog
         Effect(ExternalEffect.McpToolInvoke, ActionGroup.ModelInvocation, ActionRisk.Command, "Invoke MCP tool", "Invoke an MCP tool. ONE COARSE MEMBER — no per-server/per-tool granularity, and NO drift signal: adding a server, or a tool on an existing server, changes nothing in this catalog and nothing in CI. Because the 'unclassified is unmergeable in CI' half of epic D2 cannot exist here, it sits in the unbounded-execution zone (level 80): a person decides at the shipped default dial, and it automates only once an operator raises the dial to 80 or higher.",
             "POST /api/kb/mcp/tools/invoke — KbEndpoints.InvokeMcpTool", reversible: false,
             min: 80),
-        // INFORMATIONAL ONLY, NEVER ENFORCEABLE (epic README OQ2, answered
-        // 2026-07-25): the reveal is how an authorized action gets its credential;
-        // gating it would demand a human per credential fetch. Enforceable=false is
-        // the descriptor-property modelling the answer requires of 43-2.
-        Effect(ExternalEffect.SecretReveal, ActionGroup.Secrets, ActionRisk.ReadOnly, "Reveal secret", "Read a secret value for an already-authorized use (informational only — never enforceable; what governs a secret is the action that needs it).",
+        // MACHINERY (43-11 Amendment 4): the reveal is the plumbing credential
+        // fetch — how an authorized action gets its credential; gating it would
+        // demand a human per fetch. Enforceable=false, machinery=true, off the
+        // dial. What the dial governs is effect:secret.read below.
+        Effect(ExternalEffect.SecretReveal, ActionGroup.Secrets, ActionRisk.ReadOnly, "Reveal secret", "Plumbing credential fetch for an already-authorized use (machinery — off the dial; what governs an LLM seeing a secret value is effect:secret.read).",
             "GET /api/v1/secrets/reveal/{token} — SecretEndpoints.RevealSecret",
             sensitive: SensitiveActionCatalog.SecretReveal, enforceable: false, machinery: true),
+        // 43-11 Amendment 4 / Story 42-10: an LLM reading a secret VALUE into model
+        // context is ONE action at 90 (manage-secrets zone). A value in a transcript
+        // can leak, so it is always a gated, audited decision. Distinct SiteKey from
+        // secret.reveal or DUPLICATE_SITE_KEY boots the app. Caller-kind LLM (43-13).
+        Effect(ExternalEffect.SecretRead, ActionGroup.Secrets, ActionRisk.ReadOnly, "Read secret value", "An LLM reads a secret value into model context (top-zone, level 90). Enforced at the reveal route for LLM callers; best-effort graded for shell reads in the tool loop.",
+            "GET /api/v1/secrets/reveal/{token} — LLM-caller value read into model context (42-10)",
+            reversible: false, sensitive: SensitiveActionCatalog.SecretRead, enforceable: true, min: 90),
         Effect(ExternalEffect.ProcessSpawn, ActionGroup.CommandExecution, ActionRisk.Command, "Spawn process", "Spawn an OS process inside the tool loop.",
             "Tamma.Activities.LlmCall.Tools.ShellExecuteTool → ProcessStartInfo", reversible: false, min: 80),
         // Story 43-12 — the coarse effect:deploy.promote-prod is RETIRED; deploy

@@ -28,7 +28,7 @@ public class ActionCatalogLevelTests
         DialRows.Where(d => dial >= d.DefaultMinAutonomy).Select(d => d.Key.ToWire()).ToHashSet();
 
     /// <summary>
-    /// THE explicit (actionKey → zone level) table for all 163 dial rows (was 155; Story 43-12 +10 per-target merge/deploy keys −2 retired coarse keys)
+    /// THE explicit (actionKey → zone level) table for all 164 dial rows (was 163; Story 42-10 +1 effect:secret.read at 90; was 155; Story 43-12 +10 per-target merge/deploy keys −2 retired coarse keys)
     /// (Story 43-11 AC4, re-audit: 197 − 42 machinery). Transcribed from the
     /// zone-model derivation, NOT generated from the catalog — it is the
     /// independent pin the descriptor is compared against.
@@ -210,9 +210,13 @@ public class ActionCatalogLevelTests
         //    git.webhook.register is DUAL-dormant) ──
         ["effect:deploy.staging"] = 85,
         ["effect:git.webhook.register"] = 85,
-        // ── Level 90 — deploy prod (2) — 43-12 (was the coarse deploy.promote-prod) ──
+        // ── Level 90 — deploy prod (2) — 43-12 (was the coarse deploy.promote-prod) —
+        //    plus manage-secrets read (1) — 42-10 ──
         ["agent-action:deploy"] = 90,
         ["effect:deploy.prod"] = 90,
+        // 42-10 — an LLM reading a secret VALUE into model context (43-11 Amendment 4:
+        // "secret read is ONE action at 90", manage-secrets zone).
+        ["effect:secret.read"] = 90,
         // ── Level 95 — delete / rollback / hard deletes (6) ──
         ["agent-action:rollback"] = 95,
         ["document-type:sprint-plan"] = 95,
@@ -237,7 +241,7 @@ public class ActionCatalogLevelTests
         missing.Should().BeEmpty("keys in the table with no catalog dial row");
         extra.Should().BeEmpty("catalog dial rows absent from the table");
         mismatched.Should().BeEmpty("a level moved without updating BOTH the descriptor and this table");
-        actual.Should().HaveCount(163, "163 = 205 catalog rows − 42 machinery (Story 43-12: +10 per-target merge/deploy keys − 2 retired coarse keys)");
+        actual.Should().HaveCount(164, "164 = 206 catalog rows − 42 machinery (Story 42-10: +1 effect:secret.read at 90; Story 43-12: +10 per-target merge/deploy keys − 2 retired coarse keys)");
     }
 
     [Test]
@@ -322,6 +326,8 @@ public class ActionCatalogLevelTests
             ["effect:deploy.staging"] = (MoveDecision.Accept, "staging deploy — 85 (RESERVED: no staging pipeline stage exists yet)"),
             ["effect:deploy.prod"] = (MoveDecision.Accept, "production promotion — 90; the business-mode gate is untouched and joins by OR"),
             ["effect:git.webhook.register"] = (MoveDecision.Accept, "registers a durable ingress path (create-infrastructure zone) — 85 (RESERVED / DUAL-dormant)"),
+            // 42-10 — an LLM reading a secret value into model context (manage-secrets zone).
+            ["effect:secret.read"] = (MoveDecision.Accept, "a secret value in a model transcript can leak, and cannot be un-read — 90"),
             ["agent-action:rollback"] = (MoveDecision.Accept, "production rollback — 95"),
             ["effect:deploy.rollback"] = (MoveDecision.Accept, "production rollback branch — 95"),
             ["effect:git.branch.delete"] = (MoveDecision.Accept, "destroys something outside the deployment — 95"),
