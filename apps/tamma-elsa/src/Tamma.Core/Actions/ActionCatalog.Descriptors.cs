@@ -365,14 +365,18 @@ public static partial class ActionCatalog
             "POST /api/v1/notifications/slack — NotificationEndpoints.QueueSlack", reversible: false, min: 75),
         Effect(ExternalEffect.NotifyEmailSend, ActionGroup.ExternalComms, ActionRisk.Mutating, "Send email", "Send an outbound email (a sent message cannot be unsent).",
             "POST /api/v1/notifications/email — EmailEndpoints.SendEmail", reversible: false, min: 75),
-        // SHIPS AlwaysHuman — REVERSED 2026-07-30 (epic governance decision on MCP;
-        // see docs/stories/epic-43/README.md → Drift prevention → "MCP: the one
-        // family where the CI half cannot exist").
+        // SHIPS AT LEVEL 80 (the unbounded-execution zone) — the earlier
+        // AlwaysHuman treatment (reversed 2026-07-30) was itself superseded by the
+        // zone model (Story 43-11, 2026-08-03). MCP is no longer human-at-every-dial;
+        // it is human at the SHIPPED default dial of 70 (80 > 70 → below-min-autonomy)
+        // and automates once a deployment dials to ≥ 80, alongside shell_execute and
+        // agent-dispatch, which is the honest cost of not having a per-server/per-tool
+        // gate. The MCP-needs-a-person default therefore holds only until an operator
+        // raises the dial, not unconditionally. See docs/stories/epic-43/story-43-11
+        // (Amendment 4 / re-audit) for why 80 rather than AlwaysHuman.
         //
-        // It previously shipped at Min under 43-3 D3/C4 ("under enforcing-v1 an
-        // AlwaysHuman default would gate every MCP invocation on day one — a
-        // behaviour change in a behaviour-preserving story"). That reasoning is
-        // superseded, not forgotten, on two grounds:
+        // The reasoning that put MCP above the ordinary tolerance still stands and
+        // is why 80 (not 25/35 like the other tool effects):
         //
         //  1. THE SAFETY ARGUMENT DOES NOT HOLD FOR MCP. Epic D2 tolerates an
         //     unclassified action at RUNTIME because the drift harnesses make it
@@ -391,11 +395,9 @@ public static partial class ActionCatalog
         //     SettingsManage endpoint, not an agent path. Nothing that works today
         //     stops working.
         //
-        // Reversible by ONE admin policy row (action scope, min = AutonomyDial.Min)
-        // the moment MCP can be catalogued per server/tool and swept — that is the
-        // intended off switch, and it is why this is a DEFAULT rather than an
-        // Enforceable=false or a hardcoded refusal.
-        // Pinned by McpToolInvoke_ShipsAlwaysHuman_BecauseTheCiHalfCannotExist.
+        // Reversible by an admin lowering the dial or, once MCP can be catalogued
+        // per server/tool and swept, a per-action policy row.
+        // Pinned by McpToolInvoke_ShipsAtTheUnboundedExecutionZone.
         //
         // SiteKey corrected 2026-07-29 (adversarial review F16). It previously read
         // "POST /api/kb/mcp/servers/{id}/start|stop", which is not a route pattern:
@@ -409,7 +411,7 @@ public static partial class ActionCatalog
         // invocation; it has no catalog member of its own and gaining one is a
         // vocabulary decision, not a SiteKey repair. Risk grade deliberately
         // UNCHANGED (the DefaultMinAutonomy is not — see the block above).
-        Effect(ExternalEffect.McpToolInvoke, ActionGroup.ModelInvocation, ActionRisk.Command, "Invoke MCP tool", "Invoke an MCP tool. ONE COARSE MEMBER — no per-server/per-tool granularity, and NO drift signal: adding a server, or a tool on an existing server, changes nothing in this catalog and nothing in CI. Because the 'unclassified is unmergeable in CI' half of epic D2 cannot exist here, this member REQUIRES A HUMAN BY DEFAULT; an admin policy row re-opens it.",
+        Effect(ExternalEffect.McpToolInvoke, ActionGroup.ModelInvocation, ActionRisk.Command, "Invoke MCP tool", "Invoke an MCP tool. ONE COARSE MEMBER — no per-server/per-tool granularity, and NO drift signal: adding a server, or a tool on an existing server, changes nothing in this catalog and nothing in CI. Because the 'unclassified is unmergeable in CI' half of epic D2 cannot exist here, it sits in the unbounded-execution zone (level 80): a person decides at the shipped default dial, and it automates only once an operator raises the dial to 80 or higher.",
             "POST /api/kb/mcp/tools/invoke — KbEndpoints.InvokeMcpTool", reversible: false,
             min: 80),
         // INFORMATIONAL ONLY, NEVER ENFORCEABLE (epic README OQ2, answered

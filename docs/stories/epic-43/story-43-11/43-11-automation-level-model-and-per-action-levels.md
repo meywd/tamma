@@ -1020,7 +1020,9 @@ Three rules applied throughout:
 Consequences for the implementation:
 
 - AC3/AC4/AC5's "197-row" quantifications now range over the **156 dial rows**
-  (155 of the 197 + `effect:secret.read`, minted by Amendment 4). Machinery
+  (155 of the 197 + `effect:secret.read`, specced by Amendment 4 but **not yet in
+  the catalog** — it is minted and enforced by Story 42-10 in Wave D, so the
+  SHIPPED catalog is 155 dial + 42 machinery = 197 until then). Machinery
   descriptors carry **no** `DefaultMinAutonomy` semantics — the descriptor
   keeps its key, group, risk and site for audit/drift, and the level field is
   explicitly not-applicable.
@@ -1287,7 +1289,7 @@ in Missing actions.
 |---|---|---|---|---|
 | `effect:deploy.promote-prod` | LLM | 95 | 90 | `DeploymentPipelineWorkflow` decision |
 | `agent-action:deploy` | LLM | 95 | 90 | JUDGMENT — one coarse key spanning all environments; carries the worst (prod) until per-env split |
-| `effect:secret.read` | LLM | — | 90 | minted by Amendment 4 — an LLM reading a secret value puts it in model context; enforceable, replaces retired `secret.reveal` on the dial |
+| `effect:secret.read` | LLM | — | 90 | specced by Amendment 4, **minted by Story 42-10 (Wave D)** — not in the shipped catalog yet; an LLM reading a secret value puts it in model context; enforceable, replaces retired `secret.reveal` on the dial |
 
 The 1.3.0 rotation/retire rows here (`automation:secret-auto-rotation-scheduler`,
 `automation:retire-sweep`, `platform-task:RETIRE_SECRET_VERSION`) are machinery
