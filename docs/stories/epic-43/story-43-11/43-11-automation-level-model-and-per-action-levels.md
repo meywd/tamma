@@ -262,7 +262,7 @@ Grouped by `ActionGroup` (`ActionGroup.cs:41-87`), sorted by proposed level. **N
 | `document-type:review` | 70 | 60 | I1c · MutRev — accepted by the 7-role majority panel (`AcceptanceDefaults.For`), not one reviewer |
 | `document-type:ux-spec` | 70 | 60 | I1c · MutRev — accepted by the 7-role majority panel (`AcceptanceDefaults.For`), not one reviewer |
 | `document-type:design` | **101** | **80** | I1c · MutRev — ships `AcceptorRequirement.Human` today (`AcceptanceDefaults.cs`) — the only three that do |
-| `document-type:sprint-plan` | **101** | **85** | I1c · MutRev — ships `AcceptorRequirement.Human` today (`AcceptanceDefaults.cs`) — the only three that do |
+| `document-type:sprint-plan` | **101** | **95** | product owner 2026-08-03: sprint acceptance is 95+ |
 | `document-type:threat-model` | **101** | **90** | I1c · MutRev — ships `AcceptorRequirement.Human` today (`AcceptanceDefaults.cs`) — the only three that do |
 
 #### `docs` — 13 actions
@@ -509,7 +509,7 @@ The `LevelPreviewControl` (43-7 AC8) stays display-only and must **not** change 
 |---|---|---|---|
 | `document-type:design` | 101 | 80 | ≥ 80 |
 | `effect:mcp.tool.invoke` | 101 | 80 | ≥ 80 |
-| `document-type:sprint-plan` | 101 | 85 | ≥ 85 |
+| `document-type:sprint-plan` | 101 | **95** | product owner 2026-08-03: sprint acceptance is 95+ |
 | `document-type:threat-model` | 101 | 90 | ≥ 90 |
 
 At the shipped default dial of 70 **all four remain gated**, so no upgrade loosens anything on day one. The 2026-07-30 MCP governance decision (`README.md:548`, `ActionCatalogDefaultsTests.cs:44-69`) survives in substance — MCP still needs a person at every dial position a deployment ships with — but it stops being unconditional, which is required by "at 100 everything is automated".
@@ -534,7 +534,7 @@ At the shipped default dial of 70 **all four remain gated**, so no upgrade loose
 | Action | Site | 101 → | Why |
 |---|---|---|---|
 | `document-type:design` | `Descriptors.cs:241` | **80** | O2: it ships `AcceptorRequirement.Human` today; a design is what everything is built against. |
-| `document-type:sprint-plan` | `Descriptors.cs:253` | **85** | O2: a capacity commitment is a commitment made to people outside the system. |
+| `document-type:sprint-plan` | `Descriptors.cs:253` | **95** | product owner 2026-08-03: sprint acceptance is 95+ |
 | `document-type:threat-model` | `Descriptors.cs:255` | **90** | O2: unmitigated high-risk escalation is a security-owned call. |
 | `effect:mcp.tool.invoke` | `Descriptors.cs:388` | **80** | I2 · Command — unbounded reach outside the deployment, and (the 2026-07-30 reason) no CI harness can enumerate a remote server's tools. |
 
@@ -950,7 +950,7 @@ Merge and deploy each span several levels by TARGET importance.
 | 30 | Run tests | `run_tests`, `ci.tests.trigger`, `exploratory-test` |
 | 35 | Create branch / create PR | `git.branch.create`, `git.pull-request.create`, `release.create` (draft surface) |
 | 40 | Approve PRs / routine docs | `code-review*`, `review-*`, routine document acceptances |
-| 45 | Approve binding docs | `plan`, `acceptance-criteria`, `design`, `sprint-plan`, `threat-model` acceptances |
+| 45 | Approve binding docs | `plan`, `acceptance-criteria`, `design`, `threat-model` acceptances (`sprint-plan` moved to 95, owner 2026-08-03) |
 | 50 | Bypass PR checks | **no catalog action exists — must be minted** |
 | 55 | Merge to dev trunk | merge, target = dev |
 | 60 | Merge to qa trunk | merge, target = qa |
@@ -1226,7 +1226,7 @@ two tracker deletes stay on the dial at 95 below.
 | `document-type:review` | DUAL | 60 | 45 | same |
 | `document-type:ux-spec` | DUAL | 60 | 45 | same |
 | `document-type:design` | DUAL | 80 | 45 | FLAG — ships `AcceptorRequirement.Human` today; 45 automates it at dial ≥45 |
-| `document-type:sprint-plan` | DUAL | 85 | 45 | FLAG — same: shipped human-pinned |
+| `document-type:sprint-plan` | DUAL | **95** | product owner 2026-08-03: sprint acceptance is 95+ | FLAG — same: shipped human-pinned |
 | `document-type:threat-model` | DUAL | 90 | 45 | FLAG — same: shipped human-pinned |
 
 ### Level 50 — Bypass PR checks (1)
@@ -1554,3 +1554,15 @@ stands, pinned by test.
 | Date       | Version | Changes                                    | Author |
 | ---------- | ------- | ------------------------------------------ | ------ |
 | 2026-08-03 | 1.6.0   | Execution order from the nine impl plans   | Claude |
+
+### AC7 answer — 2026-08-03 (partial)
+
+Product owner: **sprint-plan acceptance is 95** — never orchestrator-approved
+below a near-max dial. Applied in the dial table. Design and threat-model
+acceptance REMAIN at 45 (automated at the default dial of 70) as the zone
+model's answer, standing unless the owner says otherwise. 43-16 AC7's gate
+is satisfied for sprint-plan and resolved-by-default for the other two.
+
+| Date       | Version | Changes                        | Author |
+| ---------- | ------- | ------------------------------ | ------ |
+| 2026-08-03 | 1.7.0   | sprint-plan acceptance -> 95   | meywd  |
