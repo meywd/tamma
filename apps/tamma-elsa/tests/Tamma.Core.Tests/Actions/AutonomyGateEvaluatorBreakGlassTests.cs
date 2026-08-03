@@ -174,22 +174,25 @@ public class AutonomyGateEvaluatorBreakGlassTests
     }
 
     /// <summary>
-    /// The snapshot-degraded branch falls back to the SHIPPED DEFAULT, not to
-    /// "allow". A member whose shipped default is AlwaysHuman therefore still
-    /// blocks with the override engaged — which is the whole reason
-    /// <c>effect:mcp.tool.invoke</c> was moved to AlwaysHuman rather than being
-    /// special-cased in a gate.
+    /// The snapshot-degraded branch falls back to the SHIPPED DEFAULT LEVEL, not to
+    /// "allow". A member whose shipped level is ABOVE the dial therefore still
+    /// blocks with the override engaged — the break-glass override skips the
+    /// unreadable-policy substitution, but the shipped level vs. the dial is a real,
+    /// non-degraded comparison. (Story 43-11: no member ships AlwaysHuman any more;
+    /// these three sit at the unbounded-execution / production / delete zones, all
+    /// above the default dial of 70.)
     /// </summary>
-    [TestCase("effect:mcp.tool.invoke")]
-    [TestCase("document-type:design")]
-    [TestCase("document-type:threat-model")]
-    public void EngagedAndSnapshotUnavailable_AnAlwaysHumanShippedDefault_StillBlocks(string wire)
+    [TestCase("tool:shell_execute", 80)]
+    [TestCase("agent-action:deploy", 90)]
+    [TestCase("effect:git.branch.delete", 95)]
+    public void EngagedAndSnapshotUnavailable_AnAboveDialShippedDefault_StillBlocks(string wire, int level)
     {
         var decision = Evaluate(wire, GovernancePolicySnapshot.Unavailable, BaseRules(), Engaged);
 
-        decision.Outcome.Should().Be(AutonomyOutcome.RequiresHuman);
-        decision.EffectiveMinAutonomy.Should().Be(AutonomyDial.AlwaysHuman);
-        decision.Reason.Should().Be(AutonomyGateEvaluator.ReasonAlwaysHuman);
+        decision.Outcome.Should().Be(AutonomyOutcome.RequiresHuman,
+            "the shipped level exceeds the default dial of 70, so it blocks even under the override");
+        decision.EffectiveMinAutonomy.Should().Be(level,
+            "the degraded branch falls back to the shipped zone level, not AlwaysHuman");
         decision.Source.Should().Be(ActionAssignmentSource.Unavailable,
             "MEDIUM-1: the override did not permit this — it blocked. The honest provenance is "
             + "the DEGRADED one (which is also what keeps the `degraded` audit tag true); "

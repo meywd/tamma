@@ -27,7 +27,7 @@ namespace Tamma.Core.Documents.Policy;
 /// </summary>
 public sealed record AcceptanceRules
 {
-    /// <summary>How much the orchestrator decides itself (70 = supervised baseline, 100 = full auto). Validated 70–100.</summary>
+    /// <summary>How much the orchestrator decides itself (70 = supervised default, 100 = full auto). Validated against <c>AutonomyDial.IsValidLevel</c> — the range is [1,100] since Story 43-11.</summary>
     [JsonPropertyName("autonomyLevel")]
     public required int AutonomyLevel { get; init; }
 
@@ -82,8 +82,11 @@ public sealed record AcceptanceRules
     /// <exception cref="TammaError">Code <c>ACCEPTANCE_RULES.INVALID</c>.</exception>
     public AcceptanceRules Validate()
     {
-        if (AutonomyLevel is < 70 or > 100)
-            throw Invalid(nameof(AutonomyLevel), $"AutonomyLevel must be within [70, 100]; got {AutonomyLevel}.");
+        // Story 43-1 AC2 / 43-11: the bound is the ONE named constant pair, never a
+        // restated literal — so widening the dial (Min 70 → 1) takes effect on every
+        // stored rule without a second edit here.
+        if (!AutonomyDial.IsValidLevel(AutonomyLevel))
+            throw Invalid(nameof(AutonomyLevel), $"AutonomyLevel must be within [{AutonomyDial.Min}, {AutonomyDial.Max}]; got {AutonomyLevel}.");
         if (MaxRevisionRounds is < 1 or > 10)
             throw Invalid(nameof(MaxRevisionRounds), $"MaxRevisionRounds must be within [1, 10]; got {MaxRevisionRounds}.");
         if (MaxValidationRepairAttempts is < 0 or > 10)

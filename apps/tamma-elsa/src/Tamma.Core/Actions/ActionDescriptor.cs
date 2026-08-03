@@ -16,13 +16,15 @@ namespace Tamma.Core.Actions;
 /// <param name="Title">One-line UI title (43-7 renders it; empty is a boot failure).</param>
 /// <param name="Summary">One-line UI summary (empty is a boot failure).</param>
 /// <param name="DefaultMinAutonomy">
-/// The shipped default threshold: automated iff <c>currentDial &gt;= DefaultMinAutonomy</c>.
-/// Range <c>[AutonomyDial.Min, AutonomyDial.AlwaysHuman]</c> — ALWAYS written as
-/// <see cref="AutonomyDial"/> named constants, NEVER literals (a literal would
-/// not move when the dial does, and would collide with 43-1's drift guard).
-/// Shipped values reproduce today's behaviour exactly (epic decision D1): the
-/// only <see cref="AutonomyDial.AlwaysHuman"/> member is
-/// <c>document-type:design</c>.
+/// The shipped zone level: a DIAL-GOVERNED action is automated iff
+/// <c>currentDial &gt;= DefaultMinAutonomy</c>. Range <c>[AutonomyDial.Min, AutonomyDial.Max]</c>
+/// — a LEVEL, not a threshold; <see cref="AutonomyDial.AlwaysHuman"/> is NOT a
+/// legal descriptor value any more (Story 43-11 M6). Written as a plain integer
+/// literal per action (Story 43-11 D2 — a level of 45 means forty-five and must
+/// NOT move when <see cref="AutonomyDial.Min"/> moves), pinned by
+/// <c>ActionCatalogLevelTests</c>. For a MACHINERY row (<see cref="IsMachinery"/>)
+/// this field is NOT-APPLICABLE: the evaluator short-circuits before the dial
+/// comparison, so the value (left at <see cref="AutonomyDial.Min"/>) is inert.
 /// </param>
 /// <param name="SiteKey">
 /// The performing site in code (route + method, executor class, hosted-service

@@ -219,9 +219,15 @@ public class AcceptanceRulesEndpointsTests
         tc.SetTenantId(Guid.NewGuid());
         var user = Principal(userId, "owner");
 
-        // Sanity: design ships `human` before anyone edits anything.
-        AcceptanceDefaults.For(DocumentTypeKey.Design).AcceptorRequirement
+        // Sanity: below design's level (45) its DERIVED floor is `human` (Story
+        // 43-16 — the floor is no longer a stored constant on For(Design)).
+        AcceptanceFloors.ShippedFloorFor(DocumentTypeKey.Design, 40)
             .Should().Be(AcceptorRequirement.Human);
+
+        // Put the dial below design's level so its human floor is in force.
+        (await Exec(await AcceptanceRulesEndpoints.Upsert(
+            "base", Req(40), _store, user, tc, Mode(TammaMode.SingleUser))))
+            .Status.Should().Be(StatusCodes.Status200OK);
 
         // An UNRELATED edit (autonomy only), body silent about acceptorRequirement.
         var result = await AcceptanceRulesEndpoints.Upsert(
@@ -344,9 +350,12 @@ public class AcceptanceRulesEndpointsTests
         tc.SetTenantId(Guid.NewGuid());
         var user = Principal(userId, "owner");
 
-        // The most hostile shape: the base PUT STATES `any` outright.
+        // The most hostile shape: the base PUT STATES `any` outright. Dial 40 is
+        // BELOW every human-pinned type's level (design/threat-model 45,
+        // sprint-plan 95), so the DERIVED floor (Story 43-16) is Human for all
+        // three — the discriminating position where CD-1 is demonstrable.
         (await Exec(await AcceptanceRulesEndpoints.Upsert(
-            "base", ReqWithAcceptor(AcceptorRequirement.Any, 80),
+            "base", ReqWithAcceptor(AcceptorRequirement.Any, 40),
             _store, user, tc, Mode(TammaMode.SingleUser))))
             .Status.Should().Be(StatusCodes.Status200OK);
 
@@ -358,7 +367,7 @@ public class AcceptanceRulesEndpointsTests
             var resolved = await _store.ResolveAsync(userId, type);
             resolved.Source.Should().Be(AcceptanceRulesSource.PrincipalDefault,
                 "the base row still supplies every OTHER field wholesale (39-5 D2 stands)");
-            resolved.Rules.AutonomyLevel.Should().Be(80, "…including the dial it was written for");
+            resolved.Rules.AutonomyLevel.Should().Be(40, "…including the dial it was written for");
             resolved.Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human,
                 $"'{type.ToWire()}' ships a human acceptor FLOOR — a base row, which stands "
                 + "in for every document type at once, cannot express intent about this one "
@@ -388,8 +397,10 @@ public class AcceptanceRulesEndpointsTests
         tc.SetTenantId(Guid.NewGuid());
         var user = Principal(userId, "owner");
 
+        // Base dial 40 is below design's level (45), so its derived human floor is
+        // in force (Story 43-16) — the value preserve-on-absent must carry forward.
         await Exec(await AcceptanceRulesEndpoints.Upsert(
-            "base", ReqWithAcceptor(AcceptorRequirement.Any, 80),
+            "base", ReqWithAcceptor(AcceptorRequirement.Any, 40),
             _store, user, tc, Mode(TammaMode.SingleUser)));
 
         // An unrelated per-type edit, silent about acceptorRequirement.
@@ -458,8 +469,10 @@ public class AcceptanceRulesEndpointsTests
         tc.SetTenantId(tenantId);
         var user = Principal(Guid.NewGuid(), "owner");
 
+        // Dial 40 is below every human-pinned type's level — the derived floor is
+        // Human on the tenant path exactly as on the user path (Story 43-16).
         await Exec(await AcceptanceRulesEndpoints.Upsert(
-            "base", ReqWithAcceptor(AcceptorRequirement.Any, 80),
+            "base", ReqWithAcceptor(AcceptorRequirement.Any, 40),
             _store, user, tc, Mode(TammaMode.SaaS)));
 
         foreach (var type in new[]
@@ -470,7 +483,7 @@ public class AcceptanceRulesEndpointsTests
             var resolved = await _store.ResolveForTenantAsync(tenantId, type);
             resolved.Source.Should().Be(AcceptanceRulesSource.PrincipalDefault,
                 "the tenant base row still supplies every OTHER field wholesale");
-            resolved.Rules.AutonomyLevel.Should().Be(80);
+            resolved.Rules.AutonomyLevel.Should().Be(40);
             resolved.Rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human,
                 $"'{type.ToWire()}' ships a human acceptor FLOOR, and a TENANT base row is "
                 + "just as unable to express intent about one type as a user base row is");
@@ -498,8 +511,9 @@ public class AcceptanceRulesEndpointsTests
         tc.SetTenantId(tenantId);
         var user = Principal(Guid.NewGuid(), "owner");
 
+        // Base dial 40 keeps design's derived human floor in force (Story 43-16).
         await Exec(await AcceptanceRulesEndpoints.Upsert(
-            "base", ReqWithAcceptor(AcceptorRequirement.Any, 80),
+            "base", ReqWithAcceptor(AcceptorRequirement.Any, 40),
             _store, user, tc, Mode(TammaMode.SaaS)));
 
         // An unrelated per-type edit, silent about acceptorRequirement.
@@ -567,8 +581,10 @@ public class AcceptanceRulesEndpointsTests
         AcceptanceDefaults.For(DocumentTypeKey.ThreatModel).ReviewerSelection.ReviewerRole
             .Should().Be("security");
 
+        // Base dial 40 is below threat-model's level (45), so its derived human
+        // acceptor floor bites while the reviewer selection is still shadowed.
         await Exec(await AcceptanceRulesEndpoints.Upsert(
-            "base", Req(80), _store, user, tc, Mode(TammaMode.SingleUser)));
+            "base", Req(40), _store, user, tc, Mode(TammaMode.SingleUser)));
 
         var resolved = await _store.ResolveAsync(userId, DocumentTypeKey.ThreatModel);
         resolved.Rules.ReviewerSelection.ReviewerRole.Should().Be("architect",
@@ -704,6 +720,12 @@ public class AcceptanceRulesEndpointsTests
         // DELETE never reads the body, so it is the repair.
         (await Exec(await AcceptanceRulesEndpoints.Delete(
             "design", _store, principal, tc, Mode(TammaMode.SingleUser))))
+            .Status.Should().Be(StatusCodes.Status200OK);
+
+        // A base dial below design's level (45) puts its derived human floor in
+        // force (Story 43-16), so the repaired omitting save preserves it.
+        (await Exec(await AcceptanceRulesEndpoints.Upsert(
+            "base", Req(40), _store, principal, tc, Mode(TammaMode.SingleUser))))
             .Status.Should().Be(StatusCodes.Status200OK);
 
         // …and the PUT that previously 400'd now succeeds.

@@ -228,11 +228,17 @@ public static class AutonomyGateEvaluator
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(snapshot);
 
-        // The most conservative dial when the rules are unreadable: the dial is
-        // "how much the system may decide itself", so the LOWEST valid position
-        // is the safe assumption. (Dial degrade was already safe; it is the
-        // FLOOR loss that made the old fallback dangerous.)
-        var dial = baseRules?.Rules.AutonomyLevel ?? AutonomyDial.Min;
+        // The dial when the base rules are unreadable: the SHIPPED DEFAULT dial
+        // (AcceptanceDefaults.DefaultAutonomyLevel), which is exactly what "no base
+        // row exists" resolves to — so a failed read and an absent row agree.
+        // NOTE (Story 43-11): this was `?? AutonomyDial.Min` when Min was 70 and
+        // Min == the default were only INCIDENTALLY equal (the plan's C2). After
+        // the widen (Min → 1), falling back to Min would drop the degraded/break-
+        // glass dial to 1 and make break-glass unable to permit ANY dial action
+        // during an outage — a regression, not the intended "supervised baseline".
+        // The fail-closed FLOOR loss (the real F6 danger) is still handled below by
+        // substituting AlwaysHuman for the unreadable legacy-escalate floor.
+        var dial = baseRules?.Rules.AutonomyLevel ?? AcceptanceDefaults.DefaultAutonomyLevel;
 
         // ── Degradation (F6): WHICH input we could not read, if any. Checked in
         //    a fixed order so the audit reason is deterministic when both are

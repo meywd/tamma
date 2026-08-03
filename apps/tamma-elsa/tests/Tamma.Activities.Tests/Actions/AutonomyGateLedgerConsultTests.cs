@@ -136,10 +136,17 @@ public class AutonomyGateLedgerConsultTests
     private static readonly GovernancePrincipal Principal =
         GovernancePrincipal.ForUser(Guid.NewGuid());
 
-    /// <summary>An action whose SHIPPED default pins it to a human, so the gate
-    /// produces a real RequiresHuman with no policy rows at all.</summary>
+    /// <summary>An action whose SHIPPED zone level (80, unbounded-execution) sits
+    /// ABOVE the default dial (70), so the gate produces a real RequiresHuman with
+    /// no policy rows at all. (Story 43-11: no member ships AlwaysHuman any more;
+    /// agent-dispatch.run at 80 is the honest "needs a person at the default dial"
+    /// example, replacing the former document-type:design pick which now sits at 45
+    /// and automates at 70.)</summary>
     private static readonly ActionKey HumanPinned =
-        new(ActionNamespace.DocumentType, DocumentTypeKey.Design.ToWire());
+        new(ActionNamespace.Effect, ExternalEffect.AgentDispatchRun.ToWire());
+
+    /// <summary>The group HumanPinned belongs to (for the group-grant seam test).</summary>
+    private static readonly ActionGroup HumanPinnedGroup = ActionGroup.ModelInvocation;
 
     private static (AutonomyGateService Gate, RecordingEvents Events) Build(
         IActionAuthorizationLedger? ledger)
@@ -216,14 +223,14 @@ public class AutonomyGateLedgerConsultTests
         // AC12's named test. A GROUP-scoped grant covers a MEMBER, and the
         // decision says so — `group:` prefixed, so an auditor can tell at a glance
         // that a group decision (not a decision about this action) let it through.
-        var grant = Grant("group", ActionGroup.ReviewAndAcceptance.ToWire());
+        var grant = Grant("group", HumanPinnedGroup.ToWire());
         var (gate, _) = Build(new ScriptedLedger(grant));
 
         var decision = await gate.EvaluateAsync(
             new AutonomyQuery(HumanPinned, Principal, CorrelationId: "run-1", SeamCanBlock: true));
 
         decision.Outcome.Should().Be(AutonomyOutcome.Automated);
-        decision.CoveredBy.Should().Be($"group:{ActionGroup.ReviewAndAcceptance.ToWire()}",
+        decision.CoveredBy.Should().Be($"group:{HumanPinnedGroup.ToWire()}",
             "the group case is why CoveredBy is worth carrying at all: without the prefix a "
             + "group grant and an action grant would be indistinguishable in the audit stream");
         decision.AuthorizationId.Should().Be(grant.Id);
@@ -341,9 +348,9 @@ public class AutonomyGateLedgerConsultTests
             ledger);
 
         var decision = new AutonomyDecision(
-            AutonomyOutcome.RequiresHuman, HumanPinned, ActionGroup.ReviewAndAcceptance,
-            ActionRisk.Mutating, 1, 99, ActionAssignmentSource.SystemDefault,
-            Enforced: true, Enabled: true, AllowedRoles: null, Reason: "always-human");
+            AutonomyOutcome.RequiresHuman, HumanPinned, HumanPinnedGroup,
+            ActionRisk.Command, 1, 99, ActionAssignmentSource.SystemDefault,
+            Enforced: true, Enabled: true, AllowedRoles: null, Reason: "below-min-autonomy");
 
         var id = await requests.RequestAsync(Principal, decision, "run-1");
 

@@ -183,7 +183,8 @@ public class AcceptanceGuardrailsTests
         // bound, not the pre-gate class short-circuit).
         var rules = (AcceptanceDefaults.Rules with
         {
-            AutonomyLevel = rng.Next(70, 101),
+            // Story 43-11 AC14: draw from the whole widened dial, not [70,100].
+            AutonomyLevel = rng.Next(AutonomyDial.Min, AutonomyDial.Max + 1),
             MaxRevisionRounds = rng.Next(1, 11),
             MaxValidationRepairAttempts = rng.Next(0, 11),
             AmbiguityEscalationThreshold = Math.Round(rng.NextDouble(), 3),

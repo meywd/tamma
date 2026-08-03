@@ -1,3 +1,5 @@
+using Tamma.Core.Actions;
+
 namespace Tamma.Core.Documents.Policy;
 
 /// <summary>
@@ -27,12 +29,11 @@ namespace Tamma.Core.Documents.Policy;
 /// (<see cref="AcceptorRequirement.Any"/> &lt; <see cref="AcceptorRequirement.Human"/>).
 /// It is the SAME shape the epic already uses everywhere else that a policy
 /// input can only tighten: <c>AutonomyGateEvaluator</c>'s platform ceiling and
-/// its legacy always-escalate floor both compose by <c>max()</c>, and the action
-/// catalog already hardcodes <c>document-type:design|sprint-plan|threat-model</c>
-/// at <c>AutonomyDial.AlwaysHuman</c> <i>because</i> those types ship
-/// <c>AcceptorRequirement.Human</c> — so before this fix, one base PUT put the
-/// catalog and the acceptance-rules resolver into open disagreement about
-/// whether a design needs a person.</para>
+/// its legacy always-escalate floor both compose by <c>max()</c>. Story 43-16
+/// makes the floor's VALUE derived from the same catalog level the gate reads
+/// (<see cref="ShippedFloorFor"/>): the catalog and the acceptance resolver can
+/// no longer disagree about whether a document type needs a person, because they
+/// read one number.</para>
 ///
 /// <para><b>The tier-1 exemption is the product decision.</b> The floor is
 /// applied to the BASE tier and the SYSTEM-DEFAULT tier (where it is a no-op),
@@ -65,24 +66,45 @@ public static class AcceptanceFloors
     public static AcceptorRequirement Max(AcceptorRequirement a, AcceptorRequirement b) =>
         (AcceptorRequirement)System.Math.Max((int)a, (int)b);
 
-    /// <summary>The shipped, non-lowerable acceptor floor for a document type.</summary>
-    public static AcceptorRequirement ShippedFloorFor(DocumentTypeKey type) =>
-        AcceptanceDefaults.For(type).AcceptorRequirement;
+    /// <summary>
+    /// The shipped, non-lowerable acceptor floor for a document type — DERIVED
+    /// (Story 43-16, form α): <see cref="AcceptorRequirement.Human"/> while the
+    /// resolved dial is BELOW the document type's catalog level, <see cref="AcceptorRequirement.Any"/>
+    /// at or above it. One source of truth for "who accepts this type at this dial":
+    /// the document-type's <c>DefaultMinAutonomy</c> in the action catalog against
+    /// the dial. The three human-pinned types (<c>design</c>, <c>sprint-plan</c>,
+    /// <c>threat-model</c>) no longer carry a stored <c>AcceptorRequirement.Human</c>
+    /// — that constant IS this comparison, expressed once.
+    ///
+    /// <para><b>"The dial" is the BASE row's <c>AutonomyLevel</c></b> (the value
+    /// <c>AutonomyGateEvaluator.cs:196</c> resolves — <c>baseRules?.Rules.AutonomyLevel
+    /// ?? AutonomyDial.Min</c>), NEVER a per-type row's own level. It is an explicit
+    /// caller-supplied parameter here precisely so a per-type autonomy edit cannot
+    /// silently move that type's acceptor (Story 43-11 Amendment 2-G — load-bearing;
+    /// pinned by AcceptanceRulesEndpointsTests' base-dial caveat test).</para>
+    /// </summary>
+    public static AcceptorRequirement ShippedFloorFor(DocumentTypeKey type, int dial) =>
+        dial < ActionCatalog.Get(new ActionKey(ActionNamespace.DocumentType, type.ToWire())).DefaultMinAutonomy
+            ? AcceptorRequirement.Human
+            : AcceptorRequirement.Any;
 
     /// <summary>
     /// Raise <paramref name="resolved"/>'s <see cref="AcceptorRequirement"/> to
-    /// the shipped floor for <paramref name="type"/> when a NON-per-type tier
-    /// produced it. Returns the same instance untouched when nothing needs
-    /// raising, so the common path allocates nothing and the
+    /// the shipped floor for <paramref name="type"/> at <paramref name="baseDial"/>
+    /// when a NON-per-type tier produced it. Returns the same instance untouched
+    /// when nothing needs raising, so the common path allocates nothing and the
     /// <see cref="ResolvedAcceptanceRules.AcceptorRequirementFloored"/> flag is
-    /// only ever true when the floor actually bit.
+    /// only ever true when the floor actually bit. <paramref name="baseDial"/> is
+    /// the BASE row's dial (see <see cref="ShippedFloorFor"/>), passed explicitly
+    /// by the caller — never read off <paramref name="resolved"/>, which may be a
+    /// per-type row.
     /// </summary>
     public static ResolvedAcceptanceRules ApplyShippedAcceptorFloor(
-        ResolvedAcceptanceRules resolved, DocumentTypeKey type)
+        ResolvedAcceptanceRules resolved, DocumentTypeKey type, int baseDial)
     {
         ArgumentNullException.ThrowIfNull(resolved);
 
-        var floored = Max(resolved.Rules.AcceptorRequirement, ShippedFloorFor(type));
+        var floored = Max(resolved.Rules.AcceptorRequirement, ShippedFloorFor(type, baseDial));
         if (floored == resolved.Rules.AcceptorRequirement)
         {
             return resolved;

@@ -95,19 +95,22 @@ public class ToolLoopAutonomyGateSeamTests
     [Test]
     public async Task The_real_gate_with_shipped_defaults_changes_nothing()
     {
-        // Behaviour preservation (epic D1): the production gate at the shipped
-        // dial default allows every shipped tool — the loop output is
-        // byte-identical to a pre-gate run.
+        // At the shipped dial default (70) every tool whose zone level is AT/BELOW
+        // 70 runs unimpeded — the loop output is byte-identical to a pre-gate run
+        // for those tools. (shell_execute sits at 80 and is now gated at the
+        // default dial — see An_always_human_threshold_denies_through_the_real_gate
+        // and Shell_execute_is_denied_at_the_default_dial; here we exercise the
+        // still-automated file tools.)
         var executed = new List<string>();
         var handler = new SequencedCapturingHandler(
             ToolUse(("tc-1", "file_read", """{"path":"README.md"}"""),
-                    ("tc-2", "shell_execute", """{"command":"echo hi"}""")),
+                    ("tc-2", "file_write", """{"path":"x.txt","content":"hi"}""")),
             EndTurn("done", 5, 2));
 
         var runner = NewRunner(handler, new CatalogDefaultToolLoopAutonomyGate(), RegistryRecording(executed));
         var result = await RunAsync(runner);
 
-        executed.Should().Equal(new[] { "file_read", "shell_execute" });
+        executed.Should().Equal(new[] { "file_read", "file_write" });
         handler.CapturedBodies[1].Should().NotContain("denied by autonomy policy");
         result.Response.Success.Should().BeTrue();
     }

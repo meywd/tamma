@@ -135,18 +135,19 @@ public class AcceptanceDefaultsDriftTests
         rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Any);
     }
 
-    // ── Story 39-13 D4 — the per-type acceptor requirement (autonomy floor) ──
+    // ── Story 43-16 — the acceptor requirement is DERIVED, not stored ──
 
     [Test]
-    public void Design_defaults_to_a_human_acceptor()
+    public void Design_ships_no_stored_human_acceptor_the_floor_is_derived()
     {
-        // 39-13 D4: "Design pinned to human by default". Reviewer selection is UNCHANGED
-        // (single architect, unanimous) — only who answers the accept decision is pinned.
+        // Story 43-16 (form α): the human acceptor for design is no longer a
+        // stored constant — it is derived from design's catalog level against the
+        // dial (see AcceptanceFloors.ShippedFloorFor and
+        // ActionCatalogDefaultsTests.ShippedAcceptorFloor_IsTheCatalogLevel…).
+        // For(Design) therefore returns Any; the reviewer stays single-architect.
         var rules = AcceptanceDefaults.For(DocumentTypeKey.Design);
-        rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human);
+        rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Any);
         rules.ReviewerSelection.Should().Be(AcceptanceDefaults.Rules.ReviewerSelection);
-        rules.AutonomyLevel.Should().Be(AcceptanceDefaults.DefaultAutonomyLevel,
-            "the human pin is independent of the autonomy dial, not a lower dial");
     }
 
     [TestCase(DocumentTypeKey.Findings)]
@@ -163,30 +164,21 @@ public class AcceptanceDefaultsDriftTests
     [TestCase(DocumentTypeKey.TestPlan)]
     [TestCase(DocumentTypeKey.UxSpec)]
     [TestCase(DocumentTypeKey.Prose)]
-    public void Every_unpinned_type_imposes_no_acceptor_floor(DocumentTypeKey type) =>
-        AcceptanceDefaults.For(type).AcceptorRequirement.Should().Be(AcceptorRequirement.Any,
-            "the field is additive — only 'design' (39-13 D4) and the 41-1b pair " +
-            "'sprint-plan'/'threat-model' (41-1b D1) ship a non-default value");
-
+    // Story 43-16 extends the set 14 → 17: no type ships a stored acceptor floor
+    // any longer, so the former human-pinned trio joins the list.
+    [TestCase(DocumentTypeKey.Design)]
     [TestCase(DocumentTypeKey.SprintPlan)]
     [TestCase(DocumentTypeKey.ThreatModel)]
-    public void The_41_1b_human_pinned_types_get_a_human_acceptor(DocumentTypeKey type)
-    {
-        // 41-1b D1: a capacity commitment (sprint-plan) and an unmitigated
-        // high-risk escalation call (threat-model) are human decisions — the same
-        // posture 39-13 D4 gave design. Only WHO answers the accept decision is
-        // pinned; the autonomy dial itself is untouched.
-        var rules = AcceptanceDefaults.For(type);
-        rules.AcceptorRequirement.Should().Be(AcceptorRequirement.Human);
-        rules.AutonomyLevel.Should().Be(AcceptanceDefaults.DefaultAutonomyLevel,
-            "the human pin is independent of the autonomy dial, not a lower dial");
-    }
+    public void Every_type_imposes_no_stored_acceptor_floor(DocumentTypeKey type) =>
+        AcceptanceDefaults.For(type).AcceptorRequirement.Should().Be(AcceptorRequirement.Any,
+            "the stored acceptor requirement is uniformly Any (Story 43-16) — the "
+            + "human floor for design/sprint-plan/threat-model is derived, not stored");
 
     [Test]
-    public void Design_sprint_plan_and_threat_model_are_the_only_types_with_an_acceptor_floor() =>
+    public void No_type_ships_a_stored_acceptor_floor() =>
         Enum.GetValues<DocumentTypeKey>()
             .Where(t => AcceptanceDefaults.For(t).AcceptorRequirement != AcceptorRequirement.Any)
-            .Should().Equal(DocumentTypeKey.Design, DocumentTypeKey.SprintPlan, DocumentTypeKey.ThreatModel);
+            .Should().BeEmpty("Story 43-16 moved the acceptor floor from a stored constant to a derivation");
 
     [Test]
     public void Every_per_type_default_is_valid()

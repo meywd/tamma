@@ -249,12 +249,12 @@ public class AutonomyGateEvaluatorTests
     [Test]
     public void ShippedTriageDefault_StillEscalates_ViaLegacyFloor()
     {
-        // triage-intake ships MinAutonomy = Min in the catalog (43-3 D7): the
-        // live TriageBindingHelper AlwaysEscalate entry supplies the floor via
-        // max() — duplicating it as a catalog default would make deleting the
-        // legacy entry fail to lower the threshold.
+        // triage-intake ships the read-only zone level (5) in the catalog (43-3
+        // D7, 43-11 remap): the live TriageBindingHelper AlwaysEscalate entry
+        // supplies the human floor via max() — duplicating it as a catalog default
+        // would make deleting the legacy entry fail to lower the threshold.
         ActionCatalog.Get(Key("agent-action:triage-intake")).DefaultMinAutonomy
-            .Should().Be(AutonomyDial.Min);
+            .Should().Be(5);
 
         var baseRules = BaseRules(alwaysEscalate: new[]
         {
@@ -266,10 +266,11 @@ public class AutonomyGateEvaluatorTests
         withEntry.EffectiveMinAutonomy.Should().Be(AutonomyDial.AlwaysHuman);
         withEntry.Source.Should().Be(ActionAssignmentSource.AlwaysEscalateLegacy);
 
-        // Deleting the legacy entry lowers the threshold back to the default.
+        // Deleting the legacy entry lowers the threshold back to the shipped
+        // catalog level (the read-only zone, 5) — no longer AutonomyDial.Min.
         var withoutEntry = Evaluate(
             Key("agent-action:triage-intake"), GovernancePolicySnapshot.Empty, BaseRules());
-        withoutEntry.EffectiveMinAutonomy.Should().Be(AutonomyDial.Min);
+        withoutEntry.EffectiveMinAutonomy.Should().Be(5);
         withoutEntry.Source.Should().Be(ActionAssignmentSource.SystemDefault);
     }
 
@@ -528,7 +529,7 @@ public class AutonomyGateEvaluatorTests
     public void UnreadableBaseRules_CannotConcludeThereIsNoLegacyFloor()
     {
         var key = Key("agent-action:triage-intake");
-        ActionCatalog.Get(key).DefaultMinAutonomy.Should().Be(AutonomyDial.Min);
+        ActionCatalog.Get(key).DefaultMinAutonomy.Should().Be(5);
 
         // Read SUCCEEDED, and the principal genuinely has no always-escalate
         // entry: automated. (This is what the old fallback pretended to know.)

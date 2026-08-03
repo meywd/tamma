@@ -19,12 +19,18 @@ public class AcceptanceRulesModelTests
     public void Valid_record_passes_validation() =>
         AcceptanceTestData.ValidRules().Invoking(r => r.Validate()).Should().NotThrow();
 
-    // ── Autonomy 70–100 ──
-    [TestCase(69, false)]
-    [TestCase(70, true)]
-    [TestCase(100, true)]
-    [TestCase(101, false)]
-    public void AutonomyLevel_is_bounded_70_to_100(int level, bool ok) =>
+    // ── Autonomy [Min,Max] — the bound is the named constant pair, so the widen
+    //    (Min 70 → 1, Story 43-11) takes effect here with no literal to chase. ──
+    private static IEnumerable<TestCaseData> AutonomyBoundCases()
+    {
+        yield return new TestCaseData(AutonomyDial.Min - 1, false);
+        yield return new TestCaseData(AutonomyDial.Min, true);
+        yield return new TestCaseData(AutonomyDial.Max, true);
+        yield return new TestCaseData(AutonomyDial.Max + 1, false);
+    }
+
+    [TestCaseSource(nameof(AutonomyBoundCases))]
+    public void AutonomyLevel_is_bounded_by_the_dial_constants(int level, bool ok) =>
         Assert(AcceptanceTestData.ValidRules() with { AutonomyLevel = level }, ok);
 
     // ── Rounds 1–10 ──

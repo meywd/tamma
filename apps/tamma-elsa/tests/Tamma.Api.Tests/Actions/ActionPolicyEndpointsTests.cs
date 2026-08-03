@@ -462,9 +462,9 @@ public class ActionPolicyEndpointsTests
         await using (var db = Db())
         {
             db.ActionAssignments.Single(a => a.TargetKey == "tool:file_write")
-                .MinAutonomy.Should().Be(AutonomyDial.Min,
-                    "with no rows the current effective is the shipped default — "
-                    + "the pin is behaviour-preserving at write time");
+                .MinAutonomy.Should().Be(25,
+                    "with no rows the current effective is the shipped default (file_write's "
+                    + "code-write zone level, 25) — the pin is behaviour-preserving at write time");
         }
 
         // The later group tightening…
@@ -477,7 +477,7 @@ public class ActionPolicyEndpointsTests
         var policy = await admin.GetFromJsonAsync<JsonElement>("/api/actions/policy");
         var fileWrite = policy.GetProperty("actions").EnumerateArray()
             .Single(a => a.GetProperty("key").GetString() == "tool:file_write");
-        fileWrite.GetProperty("minAutonomy").GetInt32().Should().Be(AutonomyDial.Min);
+        fileWrite.GetProperty("minAutonomy").GetInt32().Should().Be(25);
         fileWrite.GetProperty("source").GetString().Should().Be("action-override",
             "provenance surfaces the pin so an admin can see why the group row lost");
     }
@@ -584,7 +584,8 @@ public class ActionPolicyEndpointsTests
             .Single(a => a.GetProperty("key").GetString() == "tool:file_write");
         fileWrite.GetProperty("source").GetString().Should().Be("system-default",
             "DELETE removes the row and the next tier takes over — never a zeroed value");
-        fileWrite.GetProperty("minAutonomy").GetInt32().Should().Be(AutonomyDial.Min);
+        fileWrite.GetProperty("minAutonomy").GetInt32().Should().Be(25,
+            "the shipped default for tool:file_write is the code-write zone level (25)");
 
         (await admin.DeleteAsync(route)).StatusCode.Should().Be(HttpStatusCode.NotFound);
     }

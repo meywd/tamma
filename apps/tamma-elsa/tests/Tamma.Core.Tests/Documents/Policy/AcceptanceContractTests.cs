@@ -95,7 +95,9 @@ public class AcceptanceContractTests
         var lineage = new[] { document };
 
         AcceptanceRequest? first = null;
-        for (var level = 70; level <= 100; level++)
+        // Story 43-11 AC14: sweep the WHOLE widened dial [1,100], not a hardcoded
+        // [70,100] — otherwise the new 1–69 band ships unexercised.
+        foreach (var level in AutonomyDial.ValidLevels())
         {
             var rules = new ResolvedAcceptanceRules(
                 AcceptanceDefaults.Rules with { AutonomyLevel = level },

@@ -32,31 +32,45 @@ public class ToolLoopAutonomyGateTests
     [TestCase("git_operations")]
     [TestCase("Bash")]
     [TestCase("Write")]
-    public void Shipped_defaults_allow_every_tool_at_every_valid_dial(string toolName)
+    public void Every_tool_is_allowed_at_the_top_of_the_dial(string toolName)
     {
-        // Epic D1: v1 enforces WITH defaults that reproduce today's behaviour —
-        // every tool descriptor ships DefaultMinAutonomy = AutonomyDial.Min, so
-        // no dial position can deny a shipped default.
-        foreach (var dial in AutonomyDial.ValidLevels())
-        {
-            var gate = new CatalogDefaultToolLoopAutonomyGate(dial);
-            var decision = gate.Evaluate(toolName, "{}");
+        // Story 43-11: "at 100 everything is automated" — every tool automates at
+        // the max dial. (Below Max the dial now BITES: shell_execute sits at 80, so
+        // it is denied below 80 — see Shell_execute_is_denied_at_the_default_dial.)
+        var decision = new CatalogDefaultToolLoopAutonomyGate(AutonomyDial.Max).Evaluate(toolName, "{}");
 
-            decision.Outcome.Should().Be(ToolLoopGateOutcome.Allowed,
-                $"'{toolName}' at dial {dial} must be allowed under shipped defaults (behaviour-preserving v1)");
-        }
+        decision.Outcome.Should().Be(ToolLoopGateOutcome.Allowed,
+            $"'{toolName}' must be allowed at the max dial (100)");
     }
 
     [Test]
     public void Production_constructor_uses_the_shipped_dial_default_and_allows()
     {
-        var decision = new CatalogDefaultToolLoopAutonomyGate().Evaluate("shell_execute", "{}");
+        // The production constructor uses the shipped DEFAULT dial (70). A tool at
+        // or below 70 (file_write = 25) is allowed.
+        var decision = new CatalogDefaultToolLoopAutonomyGate().Evaluate("file_write", "{}");
 
         decision.Outcome.Should().Be(ToolLoopGateOutcome.Allowed);
         decision.Dial.Should().Be(AcceptanceDefaults.DefaultAutonomyLevel);
-        decision.MinAutonomy.Should().Be(AutonomyDial.Min);
-        decision.ActionKey.Should().Be(Tool(ToolAction.ShellExecute));
+        decision.MinAutonomy.Should().Be(25);
+        decision.ActionKey.Should().Be(Tool(ToolAction.FileWrite));
         decision.Reason.Should().Be("at-or-above-min-autonomy");
+    }
+
+    [Test]
+    public void Shell_execute_is_denied_at_the_default_dial()
+    {
+        // THE day-one behaviour change (Story 43-11 OQ1 / Amendment 2-D):
+        // shell_execute sits at 80 (unbounded execution, holding the deployment's
+        // secrets), above the shipped default dial of 70 — so every agent shell
+        // call at the default dial now suspends for a person.
+        var decision = new CatalogDefaultToolLoopAutonomyGate().Evaluate("shell_execute", "{}");
+
+        decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied);
+        decision.Dial.Should().Be(AcceptanceDefaults.DefaultAutonomyLevel);
+        decision.MinAutonomy.Should().Be(80);
+        decision.ActionKey.Should().Be(Tool(ToolAction.ShellExecute));
+        decision.Reason.Should().Be("below-min-autonomy");
     }
 
     // ── Denied: dial below the effective threshold ──────────────────────────
@@ -177,9 +191,9 @@ public class ToolLoopAutonomyGateTests
             "every mcp__server__tool name lands on the ONE coarse catalog member");
         decision.Reason.Should().NotBe("uncatalogued");
         decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied,
-            "effect:mcp.tool.invoke ships AlwaysHuman, so the shipped default denies "
-            + "until an admin opts in");
-        decision.Reason.Should().Be("always-human");
+            "effect:mcp.tool.invoke ships level 80 (unbounded execution); at dial 1 the "
+            + "shipped default denies until an admin opts in or the dial reaches 80");
+        decision.Reason.Should().Be("below-min-autonomy");
     }
 
     /// <summary>
@@ -229,9 +243,10 @@ public class ToolLoopAutonomyGateTests
     public void Gating_git_writes_denies_push_but_not_status()
     {
         // The whole point of the read/write split: git push independently
-        // gateable while git status stays automated.
+        // gateable while git status stays automated. Dial = the default (70), above
+        // git-read's level (5) so read stays automated; write is pinned AlwaysHuman.
         var gate = new CatalogDefaultToolLoopAutonomyGate(
-            dial: AutonomyDial.Min,
+            dial: AcceptanceDefaults.DefaultAutonomyLevel,
             minAutonomyOverride: d => d.Key == Tool(ToolAction.GitOperationsWrite)
                 ? AutonomyDial.AlwaysHuman
                 : d.DefaultMinAutonomy);

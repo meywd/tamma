@@ -73,12 +73,15 @@ public sealed class AcceptanceRulesService : IAcceptanceRulesResolver
 
         var baseOverride = await _repository.GetAsync(userId, null);
         if (baseOverride is not null)
+        {
             // CD-1: one base row stands in for every document type and cannot
             // express intent about any one of them — so it may not lower a
-            // shipped human acceptor floor.
+            // shipped human acceptor floor. The floor is DERIVED from the BASE
+            // row's own dial (Story 43-16) — this row IS the base row.
+            var materialized = Materialize(baseOverride, AcceptanceRulesSource.PrincipalDefault, key);
             return AcceptanceFloors.ApplyShippedAcceptorFloor(
-                Materialize(baseOverride, AcceptanceRulesSource.PrincipalDefault, key),
-                documentType);
+                materialized, documentType, materialized.Rules.AutonomyLevel);
+        }
 
         return SystemDefault(documentType, key);
     }
@@ -97,11 +100,14 @@ public sealed class AcceptanceRulesService : IAcceptanceRulesResolver
 
         var baseOverride = await _repository.GetByTenantAsync(tenantId, null);
         if (baseOverride is not null)
+        {
             // CD-1 — identical rule on the SaaS path (the tenant base row is one
-            // row for every document type, same as the single-user one).
+            // row for every document type, same as the single-user one). The
+            // floor is derived from the base row's own dial (Story 43-16).
+            var materialized = Materialize(baseOverride, AcceptanceRulesSource.PrincipalDefault, key);
             return AcceptanceFloors.ApplyShippedAcceptorFloor(
-                Materialize(baseOverride, AcceptanceRulesSource.PrincipalDefault, key),
-                documentType);
+                materialized, documentType, materialized.Rules.AutonomyLevel);
+        }
 
         return SystemDefault(documentType, key);
     }
@@ -263,13 +269,21 @@ public sealed class AcceptanceRulesService : IAcceptanceRulesResolver
             ResolvedAt: _time.GetUtcNow());
     }
 
-    private ResolvedAcceptanceRules SystemDefault(DocumentTypeKey type, string key) =>
-        new(
+    private ResolvedAcceptanceRules SystemDefault(DocumentTypeKey type, string key)
+    {
+        // Tier 3: the shipped static default. Its acceptor floor is DERIVED
+        // (Story 43-16) — For(type) no longer bakes in Human, so apply the floor
+        // against the SYSTEM-DEFAULT base dial (AcceptanceDefaults.Rules.AutonomyLevel,
+        // what ResolveBase* returns when no base row exists — AutonomyGateEvaluator.cs:196).
+        var resolved = new ResolvedAcceptanceRules(
             Rules: AcceptanceDefaults.For(type),
             Source: AcceptanceRulesSource.SystemDefault,
             Version: 1,
             DocumentTypeKey: key,
             ResolvedAt: _time.GetUtcNow());
+        return AcceptanceFloors.ApplyShippedAcceptorFloor(
+            resolved, type, AcceptanceDefaults.Rules.AutonomyLevel);
+    }
 
     private async Task EmitMutationAsync(
         Guid? tenantId, Guid? actingUserId, AcceptanceRulesOverride saved, bool wasCreated, int autonomyLevel)

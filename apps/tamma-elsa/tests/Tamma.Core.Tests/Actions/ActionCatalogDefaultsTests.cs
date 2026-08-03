@@ -7,174 +7,109 @@ using Tamma.Core.Documents.Policy;
 namespace Tamma.Core.Tests.Actions;
 
 /// <summary>
-/// The behaviour-preserving shipped defaults (Story 43-3 AC7–AC9, epic decision
-/// D1: v1 ENFORCES, so day one must reproduce today's behaviour EXACTLY).
-///
-/// <para>
-/// Derivation rule (43-3 D4): a member ships <c>AlwaysHuman</c> if and only if,
-/// TODAY, a person must act before it can complete. Applying it yields a
-/// ONE-member set — smaller than design.md §3.1's "~15", and the honest answer:
-/// Tamma gates almost nothing today, and a catalog that claims otherwise on day
-/// one is a catalog that changed behaviour while claiming not to.
-/// </para>
+/// The shipped catalog levels (Story 43-11, the zone model). Day one no longer
+/// "reproduces today's uniform behaviour": every dial-governed action carries an
+/// explicitly-chosen zone level in [1,100], so moving the dial changes the
+/// automated set. The exhaustive (key → level) table and the strict-subset
+/// property live in <see cref="ActionCatalogLevelTests"/>; this fixture pins the
+/// invariants that survived the remap and the handful of individually-argued rows.
 /// </summary>
 [TestFixture]
 public class ActionCatalogDefaultsTests
 {
-    /// <summary>
-    /// THE explicit AlwaysHuman table. Growing it later is a reviewed decision —
-    /// add a line here AND in the descriptor, with the evidence that a person
-    /// must act today.
-    /// </summary>
-    private static readonly string[] ShippedAlwaysHuman =
-    {
-        // AcceptanceDefaults.For(Design) ships AcceptorRequirement.Human — at
-        // 43-3 time the ONLY production occurrence (AcceptanceDefaults.cs; 43-3
-        // C2). design.md §3.1's "the 10 document-types with a human acceptor" is
-        // VERIFIED FALSE: Plan/Review get panel SELECTION (a reviewer roster),
-        // not a human acceptor. Under enforcing-v1 that error would have gated
-        // nine document types on day one.
-        "document-type:design",
-        // Story 41-1b D1 grew the AcceptorRequirement.Human set by two — the
-        // catalog default follows the real AcceptanceDefaults switch (43-3 D4):
-        // a sprint commitment and an unmitigated-high-risk escalation call are
-        // human decisions from the day the types exist, so this is not a
-        // behaviour change on an existing surface.
-        "document-type:sprint-plan",
-        "document-type:threat-model",
-        // 3 → 4 (2026-07-30, the MCP governance decision). This one is NOT
-        // derived from "a person must act today" — it is the deliberate,
-        // reviewed exception to 43-3 D4, and the reasoning is different in kind:
-        //
-        //   Epic D2 tolerates an UNCLASSIFIED action at runtime because the drift
-        //   harnesses make it unmergeable in CI. MCP is the one capability family
-        //   for which that second half CANNOT EXIST — an MCP server's tool list
-        //   lives in another process and no harness in this tree can enumerate
-        //   it, so adding a server, or a tool on a server, never becomes
-        //   unmergeable. Shipping it at Min meant an open capability class that
-        //   was simultaneously unenforceable and drift-invisible.
-        //
-        // The behaviour-preserving obligation is still met, which is why this is
-        // a default rather than a hard refusal: NO MCP EXECUTOR IS REGISTERED, so
-        // no agent path can invoke MCP today (ToolExecutorRegistry holds
-        // file_read/file_write/search_code/shell_execute/git_operations/
-        // run_tests). The one live MCP surface, POST /api/kb/mcp/tools/invoke, is
-        // a human-authenticated SettingsManage route. Nothing that worked
-        // yesterday stops working.
-        //
-        // Reversal is ONE admin policy row (action scope, min = AutonomyDial.Min)
-        // — deliberately cheap, because the right long-term answer is per-server /
-        // per-tool catalog members plus a sweep, and this default should be
-        // revisited the moment those exist (epic open question 1).
-        "effect:mcp.tool.invoke",
-    };
-
     [Test]
-    public void ShippedDefaults_ReproduceTodaysGatingBehaviour()
+    public void NoShippedDescriptor_CarriesAlwaysHuman()
     {
-        var alwaysHuman = ActionCatalog.All
+        // Story 43-11 M6 / AC6: the four rows that used to ship AlwaysHuman
+        // (design/sprint-plan/threat-model acceptances, mcp.tool.invoke) came onto
+        // real levels. NO shipped descriptor carries the 101 sentinel any more —
+        // "at 100 everything is automated" is true by construction.
+        ActionCatalog.All
             .Where(d => d.DefaultMinAutonomy == AutonomyDial.AlwaysHuman)
-            .Select(d => d.Key.ToWire());
+            .Should().BeEmpty("no shipped descriptor may carry AlwaysHuman (43-11 M6)");
 
-        alwaysHuman.Should().BeEquivalentTo(ShippedAlwaysHuman,
-            "the AlwaysHuman set is derived (a person must act TODAY), small, and explicit — 43-3 D4");
+        // Every shipped value is a LEVEL, not merely a valid threshold. Machinery
+        // rows sit at AutonomyDial.Min (inert — they never reach the dial).
+        ActionCatalog.All.Should().OnlyContain(d => AutonomyDial.IsValidLevel(d.DefaultMinAutonomy),
+            "the shipped value is a dial position, never the AlwaysHuman sentinel");
     }
 
     [Test]
-    public void EveryOtherMember_DefaultsToMin()
+    public void ShippedAcceptorFloor_IsTheCatalogLevelAgainstTheDial_ForEveryTypeAtEveryDial()
     {
-        // The complement: a member added later lands as automated-at-the-floor and
-        // the choice is visible in the diff, never implicit.
-        var others = ActionCatalog.All.Where(d => !ShippedAlwaysHuman.Contains(d.Key.ToWire()));
-
-        others.Should().OnlyContain(d => d.DefaultMinAutonomy == AutonomyDial.Min);
-    }
-
-    [Test]
-    public void DesignDocumentType_MatchesAcceptanceDefaults()
-    {
-        // Reads the REAL shipped switch so the two surfaces cannot diverge (43-3
-        // AC8/C2): design's default is AlwaysHuman BECAUSE AcceptanceDefaults
-        // pins its acceptor to a human; every other type is Any and ships Min.
+        // Story 43-16 (form α): the acceptor floor is DERIVED, not a stored
+        // constant — the ONE source of truth is the document-type's catalog level
+        // against the dial. Pinned as a biconditional over every DocumentTypeKey ×
+        // every valid dial position: the shipped floor is Human ⟺ the dial is
+        // below that type's DefaultMinAutonomy. This is the lockstep guard that
+        // replaces DesignDocumentType_MatchesAcceptanceDefaults: moving a
+        // document-type level without the derivation (or vice versa) goes red.
         foreach (var type in Enum.GetValues<DocumentTypeKey>())
         {
-            var descriptor = ActionCatalog.Get(new ActionKey(ActionNamespace.DocumentType, type.ToWire()));
-            var acceptor = AcceptanceDefaults.For(type).AcceptorRequirement;
+            var level = ActionCatalog
+                .Get(new ActionKey(ActionNamespace.DocumentType, type.ToWire()))
+                .DefaultMinAutonomy;
 
-            if (acceptor == AcceptorRequirement.Human)
+            foreach (var dial in AutonomyDial.ValidLevels())
             {
-                type.Should().BeOneOf(new[]
-                    {
-                        DocumentTypeKey.Design, DocumentTypeKey.SprintPlan, DocumentTypeKey.ThreatModel,
-                    },
-                    "AcceptorRequirement.Human occurs for exactly design (39-13 D4) plus " +
-                    "sprint-plan/threat-model (Story 41-1b D1)");
-                descriptor.DefaultMinAutonomy.Should().Be(AutonomyDial.AlwaysHuman);
-            }
-            else
-            {
-                descriptor.DefaultMinAutonomy.Should().Be(AutonomyDial.Min,
-                    $"'{type.ToWire()}' has no human acceptor today");
+                var floor = AcceptanceFloors.ShippedFloorFor(type, dial);
+                if (dial < level)
+                    floor.Should().Be(AcceptorRequirement.Human,
+                        $"'{type.ToWire()}' (level {level}) needs a person at dial {dial}");
+                else
+                    floor.Should().Be(AcceptorRequirement.Any,
+                        $"'{type.ToWire()}' (level {level}) is orchestrator-approved at dial {dial}");
             }
         }
     }
 
     [Test]
-    public void Deploy_ShipsAtMin_PerEpicDecisionD1()
+    public void DeployAndRollback_ShipAtTheProductionZone()
     {
-        // BINDING deviation from design.md §3.1 (43-3 D3/C4): the design proposed
-        // AlwaysHuman for these, reasoning "enforce defaults false so nothing
-        // changes". Epic decision D1 removed that shield — v1 ENFORCES — so
-        // AlwaysHuman here would gate every production deploy on upgrade day. The
-        // admin opts in. Restoring AlwaysHuman is NOT a bug fix; it requires
-        // deleting this assertion and its reasoning.
-        // Safety is not weakened: DeploymentPipelineWorkflow's business-mode gate
-        // (:243 → WaitForDeploymentApprovalActivity) is untouched, and 43-9
-        // adopts the autonomy gate by OR, never by replacement.
-        //
-        // RENAMED 2026-07-30 (was DeployAndMcp_ShipAtMin_PerEpicDecisionD1):
-        // effect:mcp.tool.invoke left this set — the deploy half of the D1
-        // argument still stands, the MCP half does not. See
-        // McpToolInvoke_ShipsAlwaysHuman_BecauseTheCiHalfCannotExist.
-        foreach (var wire in new[] { "effect:deploy.promote-prod", "effect:deploy.rollback" })
-            ActionCatalog.Get(ActionKey.Parse(wire)).DefaultMinAutonomy.Should().Be(AutonomyDial.Min, wire);
+        // Was Deploy_ShipsAtMin_PerEpicDecisionD1 (deploy/rollback shipped at the
+        // uniform Min). Under the zone model these carry the production/tenant
+        // destruction levels: promote-prod is the deploy-to-prod zone (90),
+        // rollback is the delete/rollback zone (95). The existing business-mode
+        // gate (DeploymentPipelineWorkflow.cs:243) is untouched; 43-9 joins by OR.
+        ActionCatalog.Get(ActionKey.Parse("effect:deploy.promote-prod")).DefaultMinAutonomy.Should().Be(90);
+        ActionCatalog.Get(ActionKey.Parse("effect:deploy.rollback")).DefaultMinAutonomy.Should().Be(95);
+        ActionCatalog.Get(ActionKey.Parse("agent-action:deploy")).DefaultMinAutonomy.Should().Be(90);
+        ActionCatalog.Get(ActionKey.Parse("agent-action:rollback")).DefaultMinAutonomy.Should().Be(95);
     }
 
-    /// <summary>
-    /// The MCP governance decision (2026-07-30). This is the deliberate exception
-    /// to the deploy rule directly above, and the two must be read together:
-    /// deploy ships at Min because D2's safety net (unclassified at runtime,
-    /// unmergeable in CI) genuinely covers it — a new deploy route is visible to
-    /// the 43-8 harnesses. MCP ships AlwaysHuman because that net has a hole
-    /// exactly its shape: no harness can enumerate a remote MCP server's tools,
-    /// so an MCP capability NEVER becomes unmergeable and the runtime tolerance
-    /// is unpaid-for.
-    /// </summary>
     [Test]
-    public void McpToolInvoke_ShipsAlwaysHuman_BecauseTheCiHalfCannotExist()
+    public void McpToolInvoke_ShipsAtTheUnboundedExecutionZone()
     {
+        // Was McpToolInvoke_ShipsAlwaysHuman_BecauseTheCiHalfCannotExist. The
+        // 2026-07-30 MCP governance decision SURVIVES IN SUBSTANCE — mcp still
+        // needs a person at every dial position a deployment ships with (default
+        // 70 < 80) — but it is no longer UNCONDITIONAL: at dial ≥ 80 it automates,
+        // which is what "at 100 everything is automated" requires. I2 · Command:
+        // unbounded reach outside the deployment.
         ActionCatalog.Get(ActionKey.Parse("effect:mcp.tool.invoke"))
-            .DefaultMinAutonomy.Should().Be(AutonomyDial.AlwaysHuman);
+            .DefaultMinAutonomy.Should().Be(80);
 
-        // Still a DEFAULT, not a refusal: an admin policy row re-opens it, which
-        // is what makes this a tightening rather than a removal of a capability.
+        // Still a DEFAULT, not a refusal: an admin policy row re-opens it.
         ActionCatalog.Get(ActionKey.Parse("effect:mcp.tool.invoke"))
             .Enforceable.Should().BeTrue();
-        AutonomyDial.IsValidThreshold(
+        AutonomyDial.IsValidLevel(
             ActionCatalog.Get(ActionKey.Parse("effect:mcp.tool.invoke")).DefaultMinAutonomy)
             .Should().BeTrue("a default the admin API would reject is a rule with no off switch");
     }
 
     [Test]
-    public void TriageIntake_ShipsAtMin_FloorComesFromAlwaysEscalate()
+    public void TriageIntake_ShipsAtTheReadOnlyZone_FloorComesFromAlwaysEscalate()
     {
-        // 43-3 D7: TriageBindingHelper ships a live EscalationClass(AgentAction,
-        // TriageIntake) — 43-5's evaluator contributes AlwaysHuman as a max()
-        // FLOOR from that legacy surface. Duplicating it as a catalog default
-        // would make deleting the legacy entry fail to lower the threshold. The
-        // composed outcome is pinned by 43-5's ShippedTriageDefault_StillEscalates.
+        // 43-3 D7 (unchanged in substance, only the catalog number moved):
+        // TriageBindingHelper ships a live EscalationClass(AgentAction,
+        // TriageIntake) — 43-5's evaluator contributes AlwaysHuman as a max() FLOOR
+        // from that legacy surface, so triage-intake's EFFECTIVE threshold does not
+        // move at all. Duplicating the floor as a catalog level would make deleting
+        // the legacy entry fail to lower the threshold. The catalog level is the
+        // read-only zone (5); the composed outcome is pinned by 43-5's
+        // ShippedTriageDefault_StillEscalates.
         ActionCatalog.Get(ActionKey.Parse("agent-action:triage-intake"))
-            .DefaultMinAutonomy.Should().Be(AutonomyDial.Min);
+            .DefaultMinAutonomy.Should().Be(5);
     }
 
     [Test]
@@ -189,6 +124,10 @@ public class ActionCatalogDefaultsTests
     [Test]
     public void UnclassifiedFallback_is_AlwaysHuman()
     {
+        // The 101 sentinel is NOT deleted (Story 43-11 M6): it survives for three
+        // live jobs — this UnclassifiedFallback, the fail-closed unreadable-policy
+        // substitution, and the legacy always-escalate floor. What ended is its use
+        // as a shipped descriptor default (NoShippedDescriptor_CarriesAlwaysHuman).
         ActionCatalog.UnclassifiedFallback.Should().Be(AutonomyDial.AlwaysHuman);
     }
 }

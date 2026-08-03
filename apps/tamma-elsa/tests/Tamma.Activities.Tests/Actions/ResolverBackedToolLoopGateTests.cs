@@ -78,7 +78,9 @@ public class ResolverBackedToolLoopGateTests
         a.Should().Be(b,
             "with zero assignment rows the ladder returns every shipped default — "
             + "the 43-5 data-source swap must change nothing on day one");
-        a.Outcome.Should().Be(ToolLoopGateOutcome.Allowed);
+        // NB: the outcome itself is no longer uniformly Allowed (Story 43-11 —
+        // shell_execute sits at 80, above the default dial of 70, so it and its
+        // alias `Bash` are Denied here); the byte-identical PARITY is the pin.
     }
 
     // ── Assignment rows now bite on the tool loop ───────────────────────────
@@ -231,8 +233,9 @@ public class ResolverBackedToolLoopGateTests
     {
         var decision = Gate(GovernancePolicySnapshot.Empty).Evaluate("mcp__server__tool", "{}");
 
-        decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied);
-        decision.Reason.Should().Be("always-human");
+        decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied,
+            "mcp.tool.invoke sits at 80 (unbounded-execution zone), above the default dial of 70");
+        decision.Reason.Should().Be("below-min-autonomy");
         decision.ActionKey.Should().Be(
             new ActionKey(ActionNamespace.Effect, ExternalEffect.McpToolInvoke.ToWire()));
     }
@@ -256,7 +259,7 @@ public class ResolverBackedToolLoopGateTests
 
         decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied,
             "the trimmed name is the name; whitespace is not a namespace");
-        decision.Reason.Should().Be("always-human");
+        decision.Reason.Should().Be("below-min-autonomy");
         decision.ActionKey.Should().Be(
             new ActionKey(ActionNamespace.Effect, ExternalEffect.McpToolInvoke.ToWire()));
     }
@@ -337,7 +340,11 @@ public class ResolverBackedToolLoopGateTests
     {
         var gate = GateWithBreakGlass(GovernancePolicySnapshot.Unavailable, EngagedOverride);
 
-        foreach (var toolName in new[] { "file_read", "file_write", "shell_execute", "run_tests" })
+        // Tools whose shipped level is AT/BELOW the default dial (70): break-glass
+        // falls back to the shipped default and permits them. shell_execute (80) is
+        // deliberately excluded — it is above the default dial, so it stays denied
+        // even under the override (Story 43-11 OQ1).
+        foreach (var toolName in new[] { "file_read", "file_write", "run_tests", "search_code" })
         {
             var decision = gate.Evaluate(toolName, "{}");
 
@@ -357,13 +364,16 @@ public class ResolverBackedToolLoopGateTests
     /// engaged.
     /// </summary>
     [Test]
-    public void BreakGlassEngaged_DoesNotOpenAnAlwaysHumanShippedDefault()
+    public void BreakGlassEngaged_DoesNotOpenAnAboveDialShippedDefault()
     {
+        // Break-glass falls back to the SHIPPED DEFAULT, not to "allow" — so a
+        // member whose shipped level (mcp.tool.invoke = 80) is above the default
+        // dial (70) is still refused while the override is engaged.
         var decision = GateWithBreakGlass(GovernancePolicySnapshot.Unavailable, EngagedOverride)
             .Evaluate("mcp__server__tool", "{}");
 
         decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied);
-        decision.Reason.Should().Be("always-human");
+        decision.Reason.Should().Be("below-min-autonomy");
     }
 
     /// <summary>
