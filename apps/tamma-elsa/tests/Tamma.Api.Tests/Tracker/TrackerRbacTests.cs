@@ -325,11 +325,25 @@ public class TrackerRbacTests
         mutating.Should().HaveCount(10, "AC2's ten mutating tracker routes");
         catalogued.Should().BeEquivalentTo(mutating);
 
-        // …and every one ships behaviour-preserving (nothing gates them today).
-        ActionCatalog.ByGroup[ActionGroup.IssueTracking]
+        // …and every one carries its zone level (Story 43-11, 2026-08-03).
+        // WAS OnlyContain(== AutonomyDial.Min): that encoded the pre-zone world
+        // where every action defaulted to Min and "nothing gates them today" was
+        // literally true. Under the zone model the tracker WRITES sit at 20
+        // (write-own-records) and the two DELETES at 95 (irreversible destroy of
+        // user work — deletes live at 95-100). For the only live caller today, the
+        // human dashboard, nothing changes (a human is never gated, 43-13); the 95
+        // bites only when an LLM path performs a delete, which is the intended
+        // day-one change. Pinned per-key so a future remap cannot silently drift.
+        var byKey = ActionCatalog.ByGroup[ActionGroup.IssueTracking]
             .Select(k => ActionCatalog.ByKey[k])
             .Where(d => d.Key.Key.StartsWith("tracker.", StringComparison.Ordinal))
-            .Should().OnlyContain(d => d.DefaultMinAutonomy == AutonomyDial.Min);
+            .ToDictionary(d => d.Key.Key, d => d.DefaultMinAutonomy);
+
+        byKey["tracker.work-item.delete"].Should().Be(95);
+        byKey["tracker.project.delete"].Should().Be(95);
+        byKey.Where(kv => kv.Key is not ("tracker.work-item.delete" or "tracker.project.delete"))
+            .Should().OnlyContain(kv => kv.Value == 20,
+                "every non-delete tracker write is level 20 (write-own-records zone)");
     }
 
     // ── Route-table helpers ────────────────────────────────────────────────
