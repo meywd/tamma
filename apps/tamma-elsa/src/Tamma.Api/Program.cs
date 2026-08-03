@@ -2604,8 +2604,16 @@ app.MapGet("/api/v1/tenants/{tenantId:guid}/status",
 // caller with the token can exchange it exactly once, and the rate
 // limit on SecretReveal (10/min/user or anon) frustrates brute-force
 // guessing attempts without needing a login.
+// Story 42-10 (AC5, D6) — an LLM reading a secret value into context is
+// effect:secret.read at level 90. The reveal route is deliberately anonymous
+// (the token IS the auth), and 43-13's CallerKindResolver grades anonymous as
+// LLM (fail-closed): a tool-loop curl of the reveal URL is gated at 90, while an
+// authenticated dashboard exchange resolves as Human and passes ungated. So the
+// gate binds here without a second route.
 app.MapGet("/api/v1/secrets/reveal/{token}", SecretEndpoints.RevealSecret)
-    .RequireRateLimiting("SecretReveal");
+    .RequireRateLimiting("SecretReveal")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.SecretRead.ToWire()))
+    .EnforcesGovernance();
 
 // Story 29-6 (audit gap #2) — platform-scope trigger of the AUDITED
 // rotate-secret SAGA workflow. Mints a fresh correlation id, takes the

@@ -172,11 +172,11 @@ public class ActionEnforcementSitesTests
         // sites for rows that have none.
         var withSites = ActionCatalog.All.Count(d => Live.For(d.Key).Count > 0);
 
-        withSites.Should().Be(23,
-            "23 catalog rows are bound (Story 43-12: 21 → 23): the 19 mediation effects (the merge "
-            + "trio git.merge.{dev,qa,main} replaced the coarse merge, +2) and the 4 mentorship "
-            + "effects. Every other row reports an empty array and MUST render as 'not enforced "
-            + "anywhere yet'.");
+        withSites.Should().Be(24,
+            "24 catalog rows have a live site (Story 42-10: 23 → 24, + effect:secret.read at the "
+            + "reveal route): the 19 mediation effects (the merge trio git.merge.{dev,qa,main} "
+            + "replaced the coarse merge, +2), the 4 mentorship effects, and secret.read. Every "
+            + "other row reports an empty array and MUST render as 'not enforced anywhere yet'.");
 
         ActionCatalog.All.Count.Should().BeGreaterThan(withSites * 5,
             "the governed share is a small minority of the catalog. That is the fact AC9 exists to "
@@ -205,7 +205,7 @@ public class ActionEnforcementSitesTests
             + $"surface ({KnownUngovernedEndpoints.PinnedInScopeCount}). If this fails the two pins "
             + "were reconciled independently and one of them is wrong.");
 
-        bound.Count.Should().Be(21);
+        bound.Count.Should().Be(22);
 
         // Story 43-9 D17, 2026-08-01 — `baselined` is now the UNION of two
         // separately-pinned collections, so it can no longer equal PinnedCount

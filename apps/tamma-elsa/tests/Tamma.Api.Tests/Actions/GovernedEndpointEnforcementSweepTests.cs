@@ -90,6 +90,10 @@ public class GovernedEndpointEnforcementSweepTests
             // outbound comms
             "POST /api/v1/notifications/slack",
             "POST /api/v1/notifications/email",
+            // Story 42-10 — an LLM reading a secret value into context (secret.read
+            // at 90). Anonymous grades as LLM (fail-closed), so the tool-loop curl of
+            // the reveal URL is gated; an authenticated human passes.
+            "GET /api/v1/secrets/reveal/{token}",
         };
 
     /// <summary>Endpoints carrying the D15 enforcement opt-in, off the booted host.</summary>
@@ -134,9 +138,9 @@ public class GovernedEndpointEnforcementSweepTests
             + "binding is still there — which is exactly why this set is pinned in both "
             + "directions:" + Environment.NewLine + string.Join(Environment.NewLine, missing));
 
-        live.Should().HaveCount(16,
-            "16 mediation routes opt into enforcement in Story 43-9 (17 .Governs bindings minus "
-            + "POST /api/v1/llm/call, which is Seam A and never enforces).");
+        live.Should().HaveCount(17,
+            "16 mediation routes (Story 43-9) + the reveal route (Story 42-10, secret.read) "
+            + "opt into enforcement.");
     }
 
     [Test]

@@ -222,7 +222,10 @@ internal static class KnownUngovernedEndpoints
     /// "Command accepted" no-op — was DELETED (route + handler + DTO); its stale
     /// baseline entry goes in the same diff and the ratchet turns the way it
     /// celebrates (strictly down).</para>
-    internal const int PinnedCount = 215;
+    /// <para><b>215 → 214 (Story 42-10).</b> GET /api/v1/secrets/reveal/{token} is
+    /// no longer baselined — it now binds effect:secret.read and enforces (an LLM
+    /// value-read gates at 90). The baseline entry is deleted in the same diff.</para>
+    internal const int PinnedCount = 214;
 
     /// <summary>
     /// The pin's recorded high-water history, oldest first; every element must be
@@ -236,7 +239,7 @@ internal static class KnownUngovernedEndpoints
     /// which is the defect <c>ContractBindingTests.cs:255-271</c> has and this epic's
     /// ratchets must not inherit.</para>
     /// </summary>
-    internal static readonly int[] PinHistory = [237, 216, 215];
+    internal static readonly int[] PinHistory = [237, 216, 215, 214];
 
     /// <summary>
     /// The pinned size of the in-scope mutating surface (Correction 4: derive it at
@@ -432,8 +435,10 @@ internal static class KnownUngovernedEndpoints
             "binding-owned-by Story 44-2: catalogued as an effect:tracker.* member; the native tracker's routes ship with descriptors but no .Governs binding yet"),
         new("DELETE", "/api/workflows/instances/{id}",
             "no-catalog-member: agent / workflow / document orchestration write with no catalog member; classifying this family is epic README open question 5"),
-        new("GET", "/api/v1/secrets/reveal/{token}",
-            "engine-mediation: catalogued as effect:secret.reveal and deliberately NEVER enforceable (Enforceable=false) — the reveal is how an already-authorized action fetches its credential"),
+        // Story 42-10 — the reveal route is NO LONGER baselined: it now binds
+        // effect:secret.read and .EnforcesGovernance() (an LLM value-read gates at
+        // 90; an authenticated human passes). Its "deliberately never enforceable"
+        // justification became false the moment the route enforced.
         new("PATCH", "/api/admin/providers/{key}",
             "human-operated: platform-owner admin console mutation behind PlatformOwnerAccess; reached by a person, never by an agent, so gating it would gate a human on themselves"),
         new("PATCH", "/api/admin/tenant-databases/{databaseId:guid}",
