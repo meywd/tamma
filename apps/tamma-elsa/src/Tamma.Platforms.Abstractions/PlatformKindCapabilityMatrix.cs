@@ -41,6 +41,10 @@ public static class PlatformKindCapabilityMatrix
                 PlatformCapability.WebhookHmac,
                 PlatformCapability.PerAppInstallationAuth,
                 PlatformCapability.ListAccessibleRepos,
+                // Story 31-13 — GitHub is the only driver that performs the full
+                // PR lifecycle (close/reopen/reviewers/labels/draft) today; the
+                // live surface is GitHubIntegrationService + GitMediationService.
+                PlatformCapability.PrLifecycle,
             }.ToFrozenSet(),
 
             [PlatformKind.Gitea] = new[]
