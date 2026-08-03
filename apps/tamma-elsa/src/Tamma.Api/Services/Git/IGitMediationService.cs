@@ -46,4 +46,30 @@ public interface IGitMediationService
     /// guard→token→platform→one-event.
     /// </summary>
     Task<GitMediationResult> CreateReleaseAsync(Guid? tenantId, string repo, CreateReleaseRequest body, CancellationToken ct = default);
+
+    // ============================================================
+    // Story 31-13 — the 7 PR-lifecycle verbs, each on the same
+    // guard→token→platform→exactly-one-terminal-event plane.
+    // ============================================================
+
+    /// <summary>Close an open PR (PATCH state=closed). Reversible via reopen. Write op.</summary>
+    Task<GitMediationResult> ClosePullRequestAsync(Guid? tenantId, string repo, int prNumber, ClosePrRequest body, CancellationToken ct = default);
+
+    /// <summary>Reopen a closed PR (PATCH state=open). The inverse of close. Write op.</summary>
+    Task<GitMediationResult> ReopenPullRequestAsync(Guid? tenantId, string repo, int prNumber, ReopenPrRequest body, CancellationToken ct = default);
+
+    /// <summary>Post an issue-style comment on the PR (a PR IS an issue on GitHub). Write op.</summary>
+    Task<GitMediationResult> CommentOnPullRequestAsync(Guid? tenantId, string repo, int prNumber, PrCommentRequest body, CancellationToken ct = default);
+
+    /// <summary>Post a review comment anchored to a diff line. Write op.</summary>
+    Task<GitMediationResult> ReviewCommentOnPullRequestAsync(Guid? tenantId, string repo, int prNumber, PrReviewCommentRequest body, CancellationToken ct = default);
+
+    /// <summary>Request reviewers for the PR (failure surfaced, not swallowed). Write op.</summary>
+    Task<GitMediationResult> RequestPullRequestReviewersAsync(Guid? tenantId, string repo, int prNumber, PrReviewersRequest body, CancellationToken ct = default);
+
+    /// <summary>Add and/or remove PR labels in ONE op (D2 — first failure is a loud typed failure). Write op.</summary>
+    Task<GitMediationResult> UpdatePullRequestLabelsAsync(Guid? tenantId, string repo, int prNumber, PrLabelsRequest body, CancellationToken ct = default);
+
+    /// <summary>Toggle the PR's draft state (GraphQL-backed on GitHub). Write op.</summary>
+    Task<GitMediationResult> SetPullRequestDraftAsync(Guid? tenantId, string repo, int prNumber, PrDraftRequest body, CancellationToken ct = default);
 }
