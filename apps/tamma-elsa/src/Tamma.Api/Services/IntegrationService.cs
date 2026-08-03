@@ -142,6 +142,49 @@ public class IntegrationService : IIntegrationService
             : new GitHubReleaseResult { Success = false, Error = result.Error };
     }
 
+    // Story 31-13 — PR lifecycle verbs (delegate + unwrap, throwing on failure to
+    // match this facade's non-Result contract).
+
+    public async Task<GitHubPullRequestDetail> ClosePullRequestAsync(string repository, int pullRequestNumber)
+    {
+        var result = await _github.ClosePullRequestAsync(repository, pullRequestNumber);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Error);
+        return result.Data!;
+    }
+
+    public async Task<GitHubPullRequestDetail> ReopenPullRequestAsync(string repository, int pullRequestNumber)
+    {
+        var result = await _github.ReopenPullRequestAsync(repository, pullRequestNumber);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Error);
+        return result.Data!;
+    }
+
+    public async Task<GitHubReviewComment> PostPullRequestReviewCommentAsync(string repository, int pullRequestNumber, string body, string? commitId, string path, int line, string side = "RIGHT")
+    {
+        var result = await _github.PostPullRequestReviewCommentAsync(repository, pullRequestNumber, body, commitId, path, line, side);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Error);
+        return result.Data!;
+    }
+
+    public async Task<bool> RequestReviewersAsync(string repository, int pullRequestNumber, IReadOnlyList<string> reviewers)
+    {
+        var result = await _github.RequestReviewersAsync(repository, pullRequestNumber, reviewers);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Error);
+        return result.Data;
+    }
+
+    public async Task<GitHubPullRequestDetail> SetPullRequestDraftAsync(string repository, int pullRequestNumber, bool draft)
+    {
+        var result = await _github.SetPullRequestDraftAsync(repository, pullRequestNumber, draft);
+        if (!result.Success)
+            throw new InvalidOperationException(result.Error);
+        return result.Data!;
+    }
+
     public async Task<GitHubPullRequestDetail> GetGitHubPullRequestAsync(string repository, int pullRequestNumber)
     {
         var result = await _github.GetGitHubPullRequestAsync(repository, pullRequestNumber);

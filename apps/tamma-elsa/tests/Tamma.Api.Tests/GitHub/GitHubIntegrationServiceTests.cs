@@ -505,6 +505,144 @@ public class GitHubIntegrationServiceTests
     }
 
     // ================================================================
+    // Story 31-13 — PR lifecycle verbs (close / reopen / review-comment /
+    // request-reviewers / set-draft) on the live GitHub REST+GraphQL surface.
+    // ================================================================
+
+    [Test]
+    public async Task ClosePullRequest_SendsPatch_WithStateClosed()
+    {
+        _handler.OnPatch("/repos/o/r/pulls/7",
+            """{ "number": 7, "state": "closed", "draft": false, "base": { "ref": "main" } }""");
+
+        var result = await CreateService().ClosePullRequestAsync("o/r", 7);
+
+        result.Success.Should().BeTrue();
+        result.Data!.State.Should().Be("closed", "the returned detail reflects the canned response");
+        result.Data.Number.Should().Be(7);
+
+        var patch = _handler.RequireRequest(HttpMethod.Patch, "/repos/o/r/pulls/7");
+        patch.Path.Should().Be("/repos/o/r/pulls/7");
+        JsonDocument.Parse(patch.Body).RootElement
+            .GetProperty("state").GetString().Should().Be("closed");
+    }
+
+    [Test]
+    public async Task Reopen_SendsPatch_WithStateOpen()
+    {
+        _handler.OnPatch("/repos/o/r/pulls/7",
+            """{ "number": 7, "state": "open", "draft": false }""");
+
+        var result = await CreateService().ReopenPullRequestAsync("o/r", 7);
+
+        result.Success.Should().BeTrue();
+        result.Data!.State.Should().Be("open");
+
+        var patch = _handler.RequireRequest(HttpMethod.Patch, "/repos/o/r/pulls/7");
+        JsonDocument.Parse(patch.Body).RootElement
+            .GetProperty("state").GetString().Should().Be("open");
+    }
+
+    [Test]
+    public async Task ReviewComment_PostsToPullsComments_WithAnchor()
+    {
+        _handler.OnPost("/repos/o/r/pulls/7/comments",
+            """{ "id": 100, "body": "nit", "path": "src/a.cs", "line": 10, "user": { "login": "bot" }, "created_at": "2026-01-01T00:00:00Z" }""");
+
+        var result = await CreateService()
+            .PostPullRequestReviewCommentAsync("o/r", 7, "nit", "sha-1", "src/a.cs", 10);
+
+        result.Success.Should().BeTrue();
+        result.Data!.Id.Should().Be(100);
+        result.Data.Author.Should().Be("bot");
+
+        var post = _handler.RequireRequest(HttpMethod.Post, "/repos/o/r/pulls/7/comments");
+        var body = JsonDocument.Parse(post.Body).RootElement;
+        body.GetProperty("commit_id").GetString().Should().Be("sha-1");
+        body.GetProperty("path").GetString().Should().Be("src/a.cs");
+        body.GetProperty("line").GetInt32().Should().Be(10);
+    }
+
+    [Test]
+    public async Task ReviewComment_NoCommitId_FetchesHeadSha_ThenPosts()
+    {
+        // commitId omitted → the service must GET the PR and read head.sha first.
+        _handler.OnGet("/repos/o/r/pulls/7",
+            """{ "number": 7, "head": { "sha": "head-sha-99" } }""");
+        _handler.OnPost("/repos/o/r/pulls/7/comments",
+            """{ "id": 101, "body": "nit", "path": "src/a.cs", "line": 3, "user": { "login": "bot" }, "created_at": "2026-01-01T00:00:00Z" }""");
+
+        var result = await CreateService()
+            .PostPullRequestReviewCommentAsync("o/r", 7, "nit", commitId: null, "src/a.cs", 3);
+
+        result.Success.Should().BeTrue();
+
+        // The preceding GET for head.sha must have happened.
+        _handler.RequireRequest(HttpMethod.Get, "/repos/o/r/pulls/7");
+        var post = _handler.RequireRequest(HttpMethod.Post, "/repos/o/r/pulls/7/comments");
+        JsonDocument.Parse(post.Body).RootElement
+            .GetProperty("commit_id").GetString().Should().Be("head-sha-99",
+                "the resolved head SHA must anchor the comment");
+    }
+
+    [Test]
+    public async Task RequestReviewers_ReturnsTypedResult_InsteadOfSwallowing()
+    {
+        // A non-2xx must be SURFACED (the promotion) — not swallowed as it was on
+        // the private best-effort create-PR path.
+        _handler.OnPost("/repos/o/r/pulls/7/requested_reviewers", "forbidden", HttpStatusCode.Forbidden);
+
+        var result = await CreateService()
+            .RequestReviewersAsync("o/r", 7, new[] { "alice" });
+
+        result.Success.Should().BeFalse("the governed verb surfaces the failure rather than swallowing it");
+        result.Error.Should().StartWith("403");
+
+        _handler.RequireRequest(HttpMethod.Post, "/repos/o/r/pulls/7/requested_reviewers");
+    }
+
+    [Test]
+    public async Task RequestReviewers_Success_ReturnsOkTrue()
+    {
+        _handler.OnPost("/repos/o/r/pulls/7/requested_reviewers", "{}");
+
+        var result = await CreateService()
+            .RequestReviewersAsync("o/r", 7, new[] { "alice", "bob" });
+
+        result.Success.Should().BeTrue();
+        result.Data.Should().BeTrue();
+
+        var post = _handler.RequireRequest(HttpMethod.Post, "/repos/o/r/pulls/7/requested_reviewers");
+        JsonDocument.Parse(post.Body).RootElement
+            .GetProperty("reviewers").EnumerateArray().Select(e => e.GetString())
+            .Should().Contain(new[] { "alice", "bob" });
+    }
+
+    [Test]
+    public async Task SetDraft_FetchesNodeId_ThenCallsGraphQL()
+    {
+        // GitHub REST cannot toggle draft — the service fetches node_id via REST,
+        // then runs the GraphQL mutation.
+        _handler.OnGet("/repos/o/r/pulls/7",
+            """{ "number": 7, "node_id": "PR_node_abc" }""");
+        _handler.OnPost("/graphql",
+            """{ "data": { "convertPullRequestToDraft": { "pullRequest": { "isDraft": true, "state": "OPEN", "number": 7 } } } }""");
+
+        var result = await CreateService().SetPullRequestDraftAsync("o/r", 7, draft: true);
+
+        result.Success.Should().BeTrue();
+        result.Data!.IsDraft.Should().BeTrue("the canned GraphQL response reports isDraft:true");
+
+        // A GET for node_id must precede the GraphQL POST.
+        _handler.RequireRequest(HttpMethod.Get, "/repos/o/r/pulls/7");
+        var gql = _handler.RequireRequest(HttpMethod.Post, "/graphql");
+        var body = JsonDocument.Parse(gql.Body).RootElement;
+        body.GetProperty("variables").GetProperty("pullRequestId").GetString()
+            .Should().Be("PR_node_abc", "the mutation must carry the resolved node_id");
+        body.GetProperty("query").GetString().Should().Contain("convertPullRequestToDraft");
+    }
+
+    // ================================================================
     // Route-aware fake handler
     // ================================================================
 
