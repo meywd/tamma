@@ -33,3 +33,25 @@ reachable today: all 16 enforced routes are EngineServiceOnly, so a human
 credential never reaches a machinery effect. Recorded as a latent
 consequence of "a human is never gated" — revisit if any machinery effect
 ever gains a human-reachable route.
+
+## Wave C review (2026-08-03) — three minor findings, fixed/recorded
+
+- F1 (fixed): three live example strings still cited the RETIRED
+  effect:deploy.promote-prod as the canonical key example — including a
+  user-facing 400 error body (GovernanceEvaluateEndpoints.cs:76). A user
+  copying it verbatim would get reason=uncatalogued. Repointed all three
+  (that endpoint + CheckActionGateActivity Input desc + GovernanceEvaluateModels
+  XML doc) to effect:deploy.prod. 43-12's AC2 "grep returns zero hits" was
+  contradicted by these; now true for live example strings (retirement
+  annotations legitimately still name the old wire).
+- F2 (recorded, not fixed — legacy): packages/orchestrator/src/transports/
+  remote.ts:80 still POSTs to the deleted /api/engine/command. packages/* is
+  the superseded TS runtime (CLAUDE.md); the C# route/handler/DTO are gone, so
+  the behaviour changes from a fake 200 to a 404 on a dead caller. Left as-is;
+  the active runtime is clean.
+- F3 (fixed): my own 43-19 commit + sprint-status line used present tense
+  ("Adds the two stage-entry gates") for a DRAFTED, docs-only story, which read
+  as claiming code. The reviewer rightly flagged it — the exact overstatement
+  class this session keeps correcting in others. sprint-status line reworded to
+  "WILL add … (DRAFTED, no code yet)". The story is Status: drafted; no gate
+  code was added.

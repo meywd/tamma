@@ -73,7 +73,7 @@ public static class GovernanceEvaluateEndpoints
             {
                 code = "ACTION.GATE.BAD_KEY",
                 error = "action must be a well-formed catalog key wire, e.g. "
-                    + "'effect:deploy.promote-prod'.",
+                    + "'effect:deploy.prod'.",
             });
         }
 

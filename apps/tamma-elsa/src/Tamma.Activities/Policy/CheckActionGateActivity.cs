@@ -106,7 +106,7 @@ public class CheckActionGateActivity : Activity
     private readonly ILogger<CheckActionGateActivity>? _logger;
     private readonly TammaApiClient? _apiClient;
 
-    [Input(Description = "Catalog key wire, e.g. effect:deploy.promote-prod")]
+    [Input(Description = "Catalog key wire, e.g. effect:deploy.prod")]
     public Input<string> ActionKey { get; set; } = default!;
 
     [Input(Description = "Optional acting agent-role wire")]

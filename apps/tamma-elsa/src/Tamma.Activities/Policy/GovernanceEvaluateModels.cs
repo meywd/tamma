@@ -17,7 +17,7 @@ namespace Tamma.Activities.Policy;
 /// the engine through its own reference, and <c>Tamma.Api</c> through the
 /// reference it already has. Neither end owns a private copy of the contract.</para>
 /// </summary>
-/// <param name="Action">The catalog key wire, e.g. <c>effect:deploy.promote-prod</c>.</param>
+/// <param name="Action">The catalog key wire, e.g. <c>effect:deploy.prod</c>.</param>
 /// <param name="Role">Optional acting agent-role wire (checked against a resolved AllowedRoles restriction).</param>
 /// <param name="Operation">Optional free-text operation tag, for audit only.</param>
 /// <param name="Target">Optional free-text target tag, for audit only.</param>
