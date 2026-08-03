@@ -1,6 +1,6 @@
 # Story 42-10: Shell Sandbox Profile and `secret.read` Enforcement
 
-Status: drafted
+Status: implemented (2026-08-03 — landed in three commits: part 1 env-allowlist P0 + CWD confinement + secret.read minted at 90; part 2a reveal-route enforcement + audit-secrets metadata pin; part 2b profile-dependent shell level 40/80 + sandbox startup verifier + Seam B secret-read grading)
 
 Implements: Story 43-11 **Amendment 2, section D** (shell's level is a property of the executor) and **Amendment 4** ("Secret read is ONE action at 90"). Sits in Epic 42 because the deliverable is tool-executor hardening, not catalog policy.
 
