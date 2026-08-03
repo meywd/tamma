@@ -29,6 +29,22 @@ using Tamma.Platforms.GitLab;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Story 42-10 (AC3, D4) — compose the shell execution PROFILE before any catalog
+// access. The catalog freezes the shell/process.spawn shipped level (80
+// unsandboxed / 40 sandboxed) at first touch, so this MUST precede Validate()
+// below; ActionCatalogStartupValidator re-checks the frozen level against config
+// and refuses to boot on a mismatch (a wrong ordering is fail-loud, not silent).
+Tamma.Core.Actions.ShellExecutionProfile.Initialize(
+    builder.Configuration.GetValue("Tools:Shell:Sandboxed", false));
+
+// Story 42-10 (AC2, D3) — verify the shell SANDBOX guarantees at composition when
+// the profile is declared: with Tools:Shell:Sandboxed=true, refuse to boot unless
+// the egress mechanism is attested and (when a probe host is configured)
+// unreachable, and the workspace root is set. A no-op when unsandboxed. Inline
+// (like ActionCatalog.Validate above) rather than a hosted service, so it is not
+// itself a catalogued BackgroundActor.
+Tamma.Api.Services.Tools.ShellSandboxStartupValidator.VerifyOrThrow(builder.Configuration);
+
 // Story 43-2 AC13 — validate the Action Catalog at boot so a catalog
 // violation (missing descriptor, broken group partition, bad key) fails
 // startup with its ACTION.CATALOG.* code instead of surfacing on the first

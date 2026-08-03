@@ -30,13 +30,16 @@ namespace Tamma.Api.Services.Actions;
 internal sealed class ActionCatalogStartupValidator : Microsoft.Extensions.Hosting.IHostedService
 {
     private readonly IToolExecutorRegistry _registry;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<ActionCatalogStartupValidator> _logger;
 
     public ActionCatalogStartupValidator(
         IToolExecutorRegistry registry,
+        IConfiguration configuration,
         ILogger<ActionCatalogStartupValidator> logger)
     {
         _registry = registry;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -49,11 +52,25 @@ internal sealed class ActionCatalogStartupValidator : Microsoft.Extensions.Hosti
         _ = ActionCatalog.ByKey.Count;
 
         var violations = Check(ValidatorInputs.Live(_registry));
+
+        // Story 42-10 (D4) — the shell/process.spawn shipped level is a PROFILE
+        // input frozen into the (static) catalog at first touch. Re-derive the
+        // expected level from configuration and assert the frozen catalog agrees:
+        // a mismatch means the catalog was touched before ShellExecutionProfile
+        // was composed (an ordering fault), and the fail-loud posture is to refuse
+        // to boot rather than ship the wrong level silently.
+        violations = violations
+            .Concat(CheckShellProfile(
+                ActionCatalog.Get(new ActionKey(ActionNamespace.Tool, ToolAction.ShellExecute.ToWire())).DefaultMinAutonomy,
+                ActionCatalog.Get(new ActionKey(ActionNamespace.Effect, ExternalEffect.ProcessSpawn.ToWire())).DefaultMinAutonomy,
+                _configuration.GetValue("Tools:Shell:Sandboxed", false),
+                ShellExecutionProfile.IsInitialized))
+            .ToList();
         if (violations.Count > 0)
         {
             throw new TammaError(
                 "ACTION.CATALOG.TOOL_VOCABULARY_INVALID",
-                "The tool vocabularies disagree with the action catalog; Tamma.Api refuses to start "
+                "The action catalog failed boot validation; Tamma.Api refuses to start "
                 + $"({violations.Count} violation(s)):{Environment.NewLine}"
                 + string.Join(Environment.NewLine, violations.Select(v => $"  {v.Code}: {v.Detail}")),
                 new Dictionary<string, object?>
@@ -125,6 +142,51 @@ internal sealed class ActionCatalogStartupValidator : Microsoft.Extensions.Hosti
                 return ex.Types.Where(t => t is not null)!;
             }
         }
+    }
+
+    /// <summary>
+    /// Story 42-10 (D4) — the shell-profile consistency check. Pure over its
+    /// inputs (the D7 test seam): the catalog's frozen shell/process.spawn level
+    /// must equal what the deployment's <c>Tools:Shell:Sandboxed</c> config
+    /// implies (40 sandboxed / 80 not), and the profile must have been composed.
+    /// A mismatch is an ordering fault — the catalog froze before
+    /// <c>ShellExecutionProfile.Initialize</c> ran.
+    /// </summary>
+    internal static IReadOnlyList<Violation> CheckShellProfile(
+        int catalogShellLevel, int catalogProcessSpawnLevel, bool configSandboxed, bool profileInitialized)
+    {
+        var violations = new List<Violation>();
+        var expected = configSandboxed
+            ? ShellExecutionProfile.SandboxedLevel
+            : ShellExecutionProfile.UnsandboxedLevel;
+
+        if (!profileInitialized)
+        {
+            violations.Add(new Violation(
+                "ACTION.CATALOG.SHELL_PROFILE_UNCOMPOSED",
+                "ShellExecutionProfile.Initialize was never called before catalog validation — the "
+                + "host composition is missing the profile step, so the shell shipped level is "
+                + "whatever the static default happened to be."));
+        }
+
+        foreach (var (name, level) in new[]
+                 {
+                     ("tool:shell_execute", catalogShellLevel),
+                     ("effect:process.spawn", catalogProcessSpawnLevel),
+                 })
+        {
+            if (level != expected)
+            {
+                violations.Add(new Violation(
+                    "ACTION.CATALOG.SHELL_PROFILE_MISMATCH",
+                    $"Catalogued '{name}' ships DefaultMinAutonomy {level}, but Tools:Shell:Sandboxed="
+                    + $"{configSandboxed} implies {expected}. The catalog was almost certainly touched "
+                    + "before ShellExecutionProfile.Initialize ran; move the Initialize call earlier in "
+                    + "host composition."));
+            }
+        }
+
+        return violations;
     }
 
     /// <summary>

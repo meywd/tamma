@@ -14,6 +14,12 @@ using Tamma.ElsaServer.Workflows;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Story 42-10 (AC3, D4) — compose the shell execution profile before any catalog
+// access, so the shell/process.spawn shipped level freezes correctly (same guard
+// and ordering as Tamma.Api's Program.cs).
+Tamma.Core.Actions.ShellExecutionProfile.Initialize(
+    builder.Configuration.GetValue("Tools:Shell:Sandboxed", false));
+
 // Story 43-2 AC13 — validate the Action Catalog at boot so a catalog
 // violation fails startup as an unwrapped TammaError with its
 // ACTION.CATALOG.* code in the message, instead of surfacing mid-workflow

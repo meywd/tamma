@@ -131,7 +131,9 @@ public static class ActionCatalogGovernanceServiceCollectionExtensions
             sp.GetRequiredService<IGovernancePolicySnapshotProvider>(),
             sp.GetRequiredService<ITenantContext>(),
             sp.GetService<ILogger<CatalogDefaultToolLoopAutonomyGate>>(),
-            sp.GetService<IGovernanceBreakGlass>()));
+            sp.GetService<IGovernanceBreakGlass>(),
+            // Story 42-10 (D7) — the shell secret-read screen's configurable paths.
+            sp.GetService<IConfiguration>()?.GetSection("Tools:Shell:SecretPaths").Get<string[]>()));
 
         // ── Story 43-8 AC9 — enforcementSites ───────────────────────────────
         // Computes, per ActionKey, the concrete bound sites (routes carrying

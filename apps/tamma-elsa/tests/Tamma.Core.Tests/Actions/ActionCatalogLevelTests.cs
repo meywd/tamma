@@ -226,6 +226,34 @@ public class ActionCatalogLevelTests
         ["effect:tracker.work-item.delete"] = 95,
     };
 
+    [TestCase(true, ShellExecutionProfile.SandboxedLevel)]
+    [TestCase(false, ShellExecutionProfile.UnsandboxedLevel)]
+    public void ShellAndProcessSpawn_ShippedLevel_IsProfileDependent(bool sandboxed, int expected)
+    {
+        // Story 42-10 (AC3, D9) — both profile arms in ONE run via the
+        // BuildDescriptors(int) seam (the static catalog freezes at the shipped
+        // 80 in a test process, so the sandboxed 40 arm cannot be read from it).
+        var descriptors = ActionCatalog.BuildDescriptors(
+            sandboxed ? ShellExecutionProfile.SandboxedLevel : ShellExecutionProfile.UnsandboxedLevel);
+
+        int LevelOf(string wire) =>
+            descriptors.Single(d => d.Key.ToWire() == wire).DefaultMinAutonomy;
+
+        LevelOf("tool:shell_execute").Should().Be(expected);
+        LevelOf("effect:process.spawn").Should().Be(expected,
+            "process.spawn shares the shell executor, so it earns the same profile-dependent level");
+    }
+
+    [Test]
+    public void LevelTable_PinsTheShippedUnsandboxedShellLevel()
+    {
+        // The static LevelTable above pins the SHIPPED (unsandboxed) 80 for the two
+        // shell rows — the sandboxed 40 arm is a deployment opt-in, exercised by the
+        // parameterized test above, never the frozen shipped catalog.
+        LevelTable["tool:shell_execute"].Should().Be(ShellExecutionProfile.UnsandboxedLevel);
+        LevelTable["effect:process.spawn"].Should().Be(ShellExecutionProfile.UnsandboxedLevel);
+    }
+
     [Test]
     public void EveryDialAction_HasItsAssignedLevel()
     {

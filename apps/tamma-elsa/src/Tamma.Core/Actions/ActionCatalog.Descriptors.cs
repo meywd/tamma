@@ -95,7 +95,17 @@ public static partial class ActionCatalog
             risk, reversible, title, summary, AutonomyDial.Min, site, sensitive,
             IsMachinery: true);
 
-    private static IReadOnlyList<ActionDescriptor> BuildDescriptors() => new[]
+    private static IReadOnlyList<ActionDescriptor> BuildDescriptors() =>
+        BuildDescriptors(ShellExecutionProfile.ShippedMinAutonomy);
+
+    /// <summary>
+    /// Story 42-10 (D4, D9) — the catalog-build seam that makes the shell/process.spawn
+    /// shipped level a PROFILE input. The public parameterless overload reads
+    /// <see cref="ShellExecutionProfile.ShippedMinAutonomy"/> (80 unsandboxed / 40
+    /// sandboxed); this overload lets the 43-11 level-table test exercise BOTH arms
+    /// in one run without touching the static profile ambient.
+    /// </summary>
+    internal static IReadOnlyList<ActionDescriptor> BuildDescriptors(int shellShippedLevel) => new[]
     {
         // ── agent-action (96) — AgentAction.cs declaration order (80 + the 16
         //    Epic 41 tokens, Story 41-1a; groups follow the 43-3 partition rule
@@ -296,8 +306,11 @@ public static partial class ActionCatalog
             "Tamma.Activities.LlmCall.Tools.FileWriteTool", min: 25),
         Tool(ToolAction.SearchCode, ActionGroup.CodeRead, ActionRisk.ReadOnly, "Search code", "Search code in the workspace.",
             "Tamma.Activities.LlmCall.Tools.SearchCodeTool", min: 5),
-        Tool(ToolAction.ShellExecute, ActionGroup.CommandExecution, ActionRisk.Command, "Execute shell command", "Run a shell command in the workspace (known bypass: can reach any governed route by curl).",
-            "Tamma.Activities.LlmCall.Tools.ShellExecuteTool", reversible: false, min: 80),
+        // Story 42-10 (AC3, D4) — profile-dependent: 80 unsandboxed / 40 sandboxed.
+        // The value is a catalog-build INPUT (max() cannot lower a shipped level), and
+        // process.spawn below shares it (same executor).
+        Tool(ToolAction.ShellExecute, ActionGroup.CommandExecution, ActionRisk.Command, "Execute shell command", "Run a shell command in the workspace (known bypass: can reach any governed route by curl; the sandboxed profile blocks egress and confines CWD, earning the lower level).",
+            "Tamma.Activities.LlmCall.Tools.ShellExecuteTool", reversible: false, min: shellShippedLevel),
         Tool(ToolAction.RunTests, ActionGroup.CiAndTest, ActionRisk.Command, "Run tests", "Execute the test suite in the workspace.",
             "Tamma.Activities.LlmCall.Tools.RunTestsTool", min: 30),
         Tool(ToolAction.GetAcceptanceRules, ActionGroup.CodeRead, ActionRisk.ReadOnly, "Read acceptance rules", "Read the resolved acceptance policy (principal-bound, per-session tool; deliberately not DI-registered — Story 39-5 D6).",
@@ -462,8 +475,10 @@ public static partial class ActionCatalog
         Effect(ExternalEffect.SecretRead, ActionGroup.Secrets, ActionRisk.ReadOnly, "Read secret value", "An LLM reads a secret value into model context (top-zone, level 90). Enforced at the reveal route for LLM callers; best-effort graded for shell reads in the tool loop.",
             "GET /api/v1/secrets/reveal/{token} — LLM-caller value read into model context (42-10)",
             reversible: false, sensitive: SensitiveActionCatalog.SecretRead, enforceable: true, min: 90),
+        // Story 42-10 (AC3, D4) — same executor as tool:shell_execute, same
+        // profile-dependent shipped level (80 unsandboxed / 40 sandboxed).
         Effect(ExternalEffect.ProcessSpawn, ActionGroup.CommandExecution, ActionRisk.Command, "Spawn process", "Spawn an OS process inside the tool loop.",
-            "Tamma.Activities.LlmCall.Tools.ShellExecuteTool → ProcessStartInfo", reversible: false, min: 80),
+            "Tamma.Activities.LlmCall.Tools.ShellExecuteTool → ProcessStartInfo", reversible: false, min: shellShippedLevel),
         // Story 43-12 — the coarse effect:deploy.promote-prod is RETIRED; deploy
         // splits by target environment into the zone-ladder quintet
         // (dev 70 / qa 75 / uat 80 / staging 85 / prod 90). CORRECTION to Amendment

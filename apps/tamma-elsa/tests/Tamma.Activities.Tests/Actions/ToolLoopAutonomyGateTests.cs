@@ -73,6 +73,38 @@ public class ToolLoopAutonomyGateTests
         decision.Reason.Should().Be("below-min-autonomy");
     }
 
+    // ── Story 42-10 (AC6, D7) — the shell secret-read reclassification ──────
+
+    [TestCase("env")]
+    [TestCase("printenv")]
+    [TestCase("cat .env")]
+    public void A_shell_command_that_reads_a_secret_reclassifies_to_secret_read(string command)
+    {
+        // At dial 85, shell_execute (80) automates but secret.read (90) does not,
+        // so the reclassification is what flips the outcome — proving the grading
+        // changed the action, not just the level.
+        var gate = new CatalogDefaultToolLoopAutonomyGate(dial: 85);
+
+        var decision = gate.Evaluate("shell_execute", $"{{\"command\":\"{command}\"}}");
+
+        decision.ActionKey.Should().Be(new ActionKey(ActionNamespace.Effect, ExternalEffect.SecretRead.ToWire()),
+            "a secret-reading shell command is graded as effect:secret.read, not tool:shell_execute");
+        decision.MinAutonomy.Should().Be(90);
+        decision.Outcome.Should().Be(ToolLoopGateOutcome.Denied, "secret.read (90) is above dial 85");
+    }
+
+    [Test]
+    public void A_plain_shell_command_stays_tool_shell_execute()
+    {
+        var gate = new CatalogDefaultToolLoopAutonomyGate(dial: 85);
+
+        var decision = gate.Evaluate("shell_execute", "{\"command\":\"ls -la\"}");
+
+        decision.ActionKey.Should().Be(Tool(ToolAction.ShellExecute));
+        decision.MinAutonomy.Should().Be(80);
+        decision.Outcome.Should().Be(ToolLoopGateOutcome.Allowed, "shell_execute (80) is at or below dial 85");
+    }
+
     // ── Denied: dial below the effective threshold ──────────────────────────
 
     [Test]

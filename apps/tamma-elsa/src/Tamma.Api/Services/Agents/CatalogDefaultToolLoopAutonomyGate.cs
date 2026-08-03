@@ -51,6 +51,9 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
     private readonly Tamma.Data.ITenantContext? _tenantContext;
     private readonly Actions.IGovernanceBreakGlass? _breakGlass;
     private readonly ILogger<CatalogDefaultToolLoopAutonomyGate>? _logger;
+    // Story 42-10 (AC6, D7) — the configured secret-bearing paths the shell
+    // secret-read screen grades against; defaults to ShellSecretReadScreen's.
+    private readonly IReadOnlyList<string>? _shellSecretPaths;
 
     /// <summary>Production constructor — shipped dial default, shipped catalog thresholds.</summary>
     public CatalogDefaultToolLoopAutonomyGate(
@@ -82,7 +85,8 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
         Actions.IGovernancePolicySnapshotProvider snapshots,
         Tamma.Data.ITenantContext tenantContext,
         ILogger<CatalogDefaultToolLoopAutonomyGate>? logger = null,
-        Actions.IGovernanceBreakGlass? breakGlass = null)
+        Actions.IGovernanceBreakGlass? breakGlass = null,
+        IReadOnlyList<string>? shellSecretPaths = null)
     {
         ArgumentNullException.ThrowIfNull(snapshots);
         ArgumentNullException.ThrowIfNull(tenantContext);
@@ -91,6 +95,7 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
         _tenantContext = tenantContext;
         _breakGlass = breakGlass;
         _logger = logger;
+        _shellSecretPaths = shellSecretPaths;
     }
 
     /// <summary>
@@ -238,7 +243,7 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
     /// </summary>
     internal static bool IsAutomated(int minAutonomy, int dial) => dial >= minAutonomy;
 
-    private static bool TryResolveKey(string toolName, string? argumentsJson, out ActionKey key)
+    private bool TryResolveKey(string toolName, string? argumentsJson, out ActionKey key)
     {
         key = default;
         if (string.IsNullOrWhiteSpace(toolName)) return false;
@@ -261,7 +266,42 @@ public sealed class CatalogDefaultToolLoopAutonomyGate : IToolLoopAutonomyGate
             return ToolNameAliases.TryResolveGit(TryReadSubcommand(argumentsJson), out key);
         }
 
-        return ToolNameAliases.TryResolve(toolName, out key);
+        if (!ToolNameAliases.TryResolve(toolName, out key))
+        {
+            return false;
+        }
+
+        // Story 42-10 (AC6, D7) — a shell command that READS a secret value is
+        // reclassified from tool:shell_execute to effect:secret.read (level 90),
+        // the same resolution-time split as git_operations above. Best-effort (the
+        // sandbox is the control); named gaps documented on ShellSecretReadScreen.
+        if (key.Ns == ActionNamespace.Tool
+            && string.Equals(key.Key, ToolAction.ShellExecute.ToWire(), StringComparison.Ordinal)
+            && Actions.ShellSecretReadScreen.Matches(TryReadCommand(argumentsJson), _shellSecretPaths))
+        {
+            key = new ActionKey(ActionNamespace.Effect, ExternalEffect.SecretRead.ToWire());
+        }
+
+        return true;
+    }
+
+    /// <summary>Read the shell tool's <c>command</c> argument (null when absent/unparseable).</summary>
+    private static string? TryReadCommand(string? argumentsJson)
+    {
+        if (string.IsNullOrWhiteSpace(argumentsJson)) return null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(argumentsJson);
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("command", out var cmd)
+                   && cmd.ValueKind == System.Text.Json.JsonValueKind.String
+                ? cmd.GetString()
+                : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     private static string? TryReadSubcommand(string? argumentsJson)
