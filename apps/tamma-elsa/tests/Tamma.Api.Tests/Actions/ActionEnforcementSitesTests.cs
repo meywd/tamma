@@ -273,10 +273,12 @@ public class ActionEnforcementSitesTests
             .WhoseValue.Should().ContainSingle()
             .Which.Should().Be("method: Tamma.Activities.LlmCall.TammaApiClient.CallLlmAsync");
 
-        sites.Should().HaveCount(19,
+        sites.Should().HaveCount(26,
             "with no endpoints at all, the ONLY sites are the [PerformsEffect] methods. Story 43-12: "
             + "17 → 19 because MergePullRequestAsync now carries three attributes (git.merge.{dev,qa,"
-            + "main}) — one method, three effect KEYS — so the distinct-key count is 19.");
+            + "main}) — one method, three effect KEYS — so the distinct-key count is 19. Story 31-13: "
+            + "19 → 26, + the 7 PR-lifecycle verb methods (Close/Reopen/Comment/ReviewComment/"
+            + "RequestReviewers/SetLabels/SetDraft), each one method with one distinct effect key.");
     }
 
     [Test]
