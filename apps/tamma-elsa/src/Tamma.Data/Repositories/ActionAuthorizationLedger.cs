@@ -45,6 +45,7 @@ public sealed class EfActionAuthorizationLedger : IActionAuthorizationLedger
         string? reason,
         int? autonomyLevelAtRequest,
         TimeSpan? ttl = null,
+        string scope = "single-use",
         CancellationToken ct = default)
     {
         if (tenantId is not null && userId is not null)
@@ -54,6 +55,9 @@ public sealed class EfActionAuthorizationLedger : IActionAuthorizationLedger
         ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
         ArgumentException.ThrowIfNullOrWhiteSpace(targetKind);
         ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
+        ArgumentException.ThrowIfNullOrWhiteSpace(scope);
+
+        var wantsStanding = string.Equals(scope, "correlation-standing", StringComparison.Ordinal);
 
         await using var db = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
 
@@ -76,6 +80,37 @@ public sealed class EfActionAuthorizationLedger : IActionAuthorizationLedger
             {
                 if (open.ExpiresAtUtc is not DateTime exp || exp > now)
                 {
+                    // Review 5c — a STANDING request over a live weaker row for
+                    // the same key ELEVATES it, so a tool-loop "cover the run"
+                    // ask cannot be left riding a coexisting single-use grant (a
+                    // Seam-C 409 that landed first, or a repeat). A single-use
+                    // request never downgrades a standing row (idempotent return).
+                    if (wantsStanding
+                        && !string.Equals(open.Scope, "correlation-standing", StringComparison.Ordinal))
+                    {
+                        var elevated = await db.ActionAuthorizations
+                            .Where(a => a.Id == open.Id
+                                && a.Scope != "correlation-standing"
+                                && (a.State == "pending" || a.State == "granted")
+                                && (a.ExpiresAtUtc == null || a.ExpiresAtUtc > now))
+                            .ExecuteUpdateAsync(s => s.SetProperty(a => a.Scope, "correlation-standing"), ct)
+                            .ConfigureAwait(false);
+                        if (elevated == 1)
+                        {
+                            return await db.ActionAuthorizations
+                                .AsNoTracking()
+                                .FirstAsync(a => a.Id == open.Id, ct)
+                                .ConfigureAwait(false);
+                        }
+                        // Lost the race (decided/consumed/expired concurrently) — re-loop.
+                        if (attempt >= 2)
+                        {
+                            throw new InvalidOperationException(
+                                "Authorization request repeatedly lost the scope-elevation race.");
+                        }
+                        continue;
+                    }
+
                     return open; // idempotent: one LIVE open request per (principal, run, target)
                 }
 
@@ -103,6 +138,10 @@ public sealed class EfActionAuthorizationLedger : IActionAuthorizationLedger
                 TargetKind = targetKind,
                 TargetKey = targetKey,
                 State = "pending",
+                // Review 5c — the scope the row carries once granted; DecideAsync
+                // preserves it, so a standing pending ask becomes a standing grant
+                // without a second decision.
+                Scope = scope,
                 RequestedAtUtc = now,
                 ExpiresAtUtc = now + (ttl ?? DefaultTtl),
                 Reason = reason,
@@ -304,12 +343,41 @@ public sealed class EfActionAuthorizationLedger : IActionAuthorizationLedger
 
                 if (live)
                 {
-                    // A live granted single-use row occupies the slot — a mint in
-                    // the same correlation subsumes it; return it as covering
-                    // (a standing upgrade of a granted row is out of scope — the
-                    // single-use row already covers the next call, and the open
-                    // index forbids a second row for this key).
-                    return open;
+                    // A live granted single-use row occupies the slot. Review 5b —
+                    // the mint's INTENT is standing coverage for the whole run, so
+                    // UPGRADE the row in place (one CAS) instead of returning the
+                    // single-use one. Returning it as-is silently reduced the run
+                    // to one-call coverage AND made EmitGrantMintedAsync record a
+                    // correlation-standing grant that did not exist. Upgrading is
+                    // legal: the open unique index forbids a second ROW, not an
+                    // UPDATE of this one; and a standing grant covers regardless of
+                    // ConsumedAtUtc, so this also revives a row whose single use
+                    // was already spent.
+                    var upgraded = await db.ActionAuthorizations
+                        .Where(a => a.Id == open.Id
+                            && a.State == "granted"
+                            && a.Scope != "correlation-standing"
+                            && (a.ExpiresAtUtc == null || a.ExpiresAtUtc > now))
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(a => a.Scope, "correlation-standing")
+                            .SetProperty(a => a.ExpiresAtUtc, now + (ttl ?? DefaultTtl))
+                            .SetProperty(a => a.Reason, a => reason ?? a.Reason), ct)
+                        .ConfigureAwait(false);
+                    if (upgraded == 1)
+                    {
+                        return await db.ActionAuthorizations
+                            .AsNoTracking()
+                            .FirstAsync(a => a.Id == open.Id, ct)
+                            .ConfigureAwait(false);
+                    }
+                    // Already standing (a concurrent minter won), or expired/decided
+                    // out from under us — re-loop to re-read the settled row.
+                    if (attempt >= 2)
+                    {
+                        throw new InvalidOperationException(
+                            "Standing-grant mint repeatedly lost the granted-row upgrade race.");
+                    }
+                    continue;
                 }
 
                 // Time-expired open row deadlocks the key (the partial unique

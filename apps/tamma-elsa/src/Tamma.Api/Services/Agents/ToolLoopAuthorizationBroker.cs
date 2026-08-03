@@ -1,4 +1,5 @@
 using Tamma.Api.Services.Actions;
+using Tamma.Data.Entities;
 using Tamma.Data.Repositories;
 
 namespace Tamma.Api.Services.Agents;
@@ -46,24 +47,26 @@ public sealed class ToolLoopAuthorizationBroker
     }
 
     /// <summary>
-    /// Is a live grant covering <paramref name="actionKeyWire"/> present for this
-    /// run? A correlation-standing grant returns true on every call (never
-    /// consumed); a single-use grant returns true once. False when nothing covers
-    /// — the caller then mints the pending ask.
+    /// The live grant covering <paramref name="actionKeyWire"/> for this run, or
+    /// null if nothing covers (the caller then mints the pending ask). A
+    /// correlation-standing grant covers every call (never consumed); a single-use
+    /// grant covers once. Returning the grant (not a bool) lets the caller record a
+    /// durable ACTION.GATE.AUTHORIZED row tying the executed call to the grant that
+    /// let it through (review 5a) — a covered denial must not proceed on a
+    /// transient log alone.
     /// </summary>
-    public async Task<bool> TryCoverAsync(
+    public async Task<ActionAuthorization?> TryCoverAsync(
         string actionKeyWire, string correlationId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(actionKeyWire) || string.IsNullOrWhiteSpace(correlationId))
         {
-            return false;
+            return null;
         }
 
         var principal = await _principals.ResolveAsync(caller: null, ct).ConfigureAwait(false);
-        var grant = await _ledger.TryConsumeAsync(
+        return await _ledger.TryConsumeAsync(
             principal.TenantId, principal.UserId, correlationId, actionKeyWire, ct)
             .ConfigureAwait(false);
-        return grant is not null;
     }
 
     /// <summary>
@@ -87,7 +90,14 @@ public sealed class ToolLoopAuthorizationBroker
                 principal.TenantId, principal.UserId, correlationId,
                 targetKind: "action", targetKey: actionKeyWire,
                 reason: "tool-loop autonomy-gate denial (Seam B)",
-                autonomyLevelAtRequest: autonomyLevelAtRequest, ttl: null, ct: ct)
+                autonomyLevelAtRequest: autonomyLevelAtRequest, ttl: null,
+                // Review 5c — the tool-loop ask is inherently "cover this run":
+                // shell fires tens of times per run, so a single-use grant would
+                // force one human ask per call. Minting the pending row STANDING
+                // means the human's one "yes" (via DecideAsync, which preserves
+                // scope) covers every subsequent call — the broker's whole reason
+                // to exist. Non-tool-loop asks (Seam C) keep the single-use default.
+                scope: "correlation-standing", ct: ct)
                 .ConfigureAwait(false);
             return row.Id;
         }

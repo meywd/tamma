@@ -21,6 +21,14 @@ public interface IActionAuthorizationLedger
     /// fresh pending row minted, so an unattended request can never deadlock
     /// its (principal, correlation, target) key forever (adversarial review
     /// F3, 2026-07-29).
+    ///
+    /// <para><b>Story 43-14 <paramref name="scope"/> (review 5c).</b> The scope
+    /// the row carries once granted: <c>single-use</c> (default — one call, the
+    /// Seam-C 409 shape) or <c>correlation-standing</c> (covers every ask in the
+    /// run — the tool-loop shape, so ONE human "yes" covers the loop of N shell
+    /// calls). A standing request over a live weaker row for the same key
+    /// ELEVATES it (a repeat/collision cannot leave the run on a one-call grant);
+    /// a single-use request never downgrades a standing row.</para>
     /// </summary>
     Task<ActionAuthorization> RequestAsync(
         Guid? tenantId,
@@ -31,6 +39,7 @@ public interface IActionAuthorizationLedger
         string? reason,
         int? autonomyLevelAtRequest,
         TimeSpan? ttl = null,
+        string scope = "single-use",
         CancellationToken ct = default);
 
     /// <summary>

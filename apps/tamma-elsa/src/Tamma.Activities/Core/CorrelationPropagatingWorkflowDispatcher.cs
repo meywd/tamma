@@ -18,6 +18,17 @@ namespace Tamma.Activities.Core;
 /// <para>An explicitly-set correlation is NEVER overridden (<c>??=</c>), so a
 /// caller that wants a distinct correlation keeps it. Outside a workflow
 /// execution the ambient is null and the request is passed through unchanged.</para>
+///
+/// <para><b>INVARIANT for anyone adding a definition-dispatch (review finding 4).</b>
+/// Propagation is deliberately "broaden to all": every child dispatched from
+/// within a run inherits that run's correlation, and a correlation-standing grant
+/// covers EVERY ask on its correlation without being consumed. That is correct
+/// only while every definition-dispatched child is genuinely part of the run. A
+/// fire-and-forget child (notification, analytics, cleanup) that performs a gated
+/// effect and is dispatched from inside a GRANTED run would ride the parent's
+/// standing grant — set that child's <c>CorrelationId</c> to a distinct value at
+/// the dispatch site so it does not. Today no such child performs a gated effect,
+/// so this is a guard on future code, not a live hole.</para>
 /// </summary>
 public sealed class CorrelationPropagatingWorkflowDispatcher : IWorkflowDispatcher
 {

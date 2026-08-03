@@ -129,7 +129,7 @@ public class AutonomyGateSeamPostureTests
         public Task<ActionAuthorization> RequestAsync(
             Guid? tenantId, Guid? userId, string correlationId, string targetKind,
             string targetKey, string? reason, int? autonomyLevelAtRequest,
-            TimeSpan? ttl = null, CancellationToken ct = default)
+            TimeSpan? ttl = null, string scope = "single-use", CancellationToken ct = default)
             => Task.FromResult(new ActionAuthorization
             {
                 Id = Guid.NewGuid(), TenantId = tenantId, UserId = userId,

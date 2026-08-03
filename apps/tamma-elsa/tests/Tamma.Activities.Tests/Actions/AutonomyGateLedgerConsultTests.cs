@@ -99,7 +99,7 @@ public class AutonomyGateLedgerConsultTests
         public Task<ActionAuthorization> RequestAsync(
             Guid? tenantId, Guid? userId, string correlationId, string targetKind, string targetKey,
             string? reason, int? autonomyLevelAtRequest, TimeSpan? ttl = null,
-            CancellationToken ct = default)
+            string scope = "single-use", CancellationToken ct = default)
         {
             Requested.Add((targetKind, targetKey, ttl));
             return Task.FromResult(new ActionAuthorization
@@ -383,7 +383,7 @@ public class AutonomyGateLedgerConsultTests
         public Task<ActionAuthorization> RequestAsync(
             Guid? tenantId, Guid? userId, string correlationId, string targetKind, string targetKey,
             string? reason, int? autonomyLevelAtRequest, TimeSpan? ttl = null,
-            CancellationToken ct = default) => throw new NotSupportedException();
+            string scope = "single-use", CancellationToken ct = default) => throw new NotSupportedException();
 
         public Task<ActionAuthorization?> TryConsumeAsync(
             Guid? tenantId, Guid? userId, string correlationId, string actionKeyWire,

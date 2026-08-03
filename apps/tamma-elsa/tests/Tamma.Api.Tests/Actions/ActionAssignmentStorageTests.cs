@@ -787,4 +787,93 @@ public class ActionAssignmentStorageTests
         (await ledger.TryConsumeAsync(tid, null, "run-mix", "effect:deploy.prod"))
             .Should().BeNull("the single-use grant was consumed once");
     }
+
+    // ════════════════════════════════════════════════════════════════════
+    // Review 5b/5c fixes (2026-08-03) — a mint's standing INTENT is never
+    // silently reduced to single-use, and the tool-loop ask reaches the loop.
+    // ════════════════════════════════════════════════════════════════════
+
+    [Test]
+    public async Task MintStandingGrant_UpgradesAGrantedSingleUseRow_EvenAfterItWasSpent()
+    {
+        // Review 5b: a live GRANTED SINGLE-USE row pre-exists at mint time (a Seam C
+        // 409 decided granted before the chain approval fires). The mint must not
+        // return it as-is — that silently reduced the run to one-call coverage AND
+        // made the audit record a correlation-standing grant that did not exist.
+        // Here the single-use grant is even SPENT first, proving the upgrade revives
+        // it. RED before the fix: MintStandingGrantAsync returned `open` unchanged,
+        // so the post-mint asks below would fail (Scope single-use, already consumed).
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var tid = Guid.NewGuid();
+
+        var su = await ledger.RequestAsync(
+            tid, null, "run-5b", "action", "tool:shell_execute", "seam-c", 80);
+        await ledger.DecideAsync(tid, null, su.Id, granted: true, Guid.NewGuid(), null);
+        // Spend the single use.
+        (await ledger.TryConsumeAsync(tid, null, "run-5b", "tool:shell_execute"))!
+            .ConsumedAtUtc.Should().NotBeNull();
+
+        var minted = await ledger.MintStandingGrantAsync(
+            tid, null, "run-5b", "action", "tool:shell_execute", Guid.NewGuid(), "run may use shell");
+        minted.Id.Should().Be(su.Id, "the granted row is upgraded in place, not duplicated");
+        minted.Scope.Should().Be("correlation-standing", "the mint's standing intent is honoured");
+
+        for (var i = 0; i < 3; i++)
+        {
+            (await ledger.TryConsumeAsync(tid, null, "run-5b", "tool:shell_execute"))
+                .Should().NotBeNull($"ask #{i + 1} rides the upgraded standing grant");
+        }
+    }
+
+    [Test]
+    public async Task RequestWithStandingScope_BecomesAStandingGrantWhenDecided()
+    {
+        // Review 5c: the tool-loop broker mints its pending ask with
+        // correlation-standing scope, so the human's ONE "yes" (DecideAsync, which
+        // preserves scope) covers every subsequent shell call — the broker's whole
+        // reason to exist. RED before the fix: RequestAsync always minted single-use,
+        // DecideAsync never touched scope, so the second ask re-blocked.
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var tid = Guid.NewGuid();
+
+        var pending = await ledger.RequestAsync(
+            tid, null, "run-5c", "action", "tool:shell_execute", "seam-b denial", 80,
+            scope: "correlation-standing");
+        pending.Scope.Should().Be("correlation-standing", "the pending row carries the requested scope");
+
+        await ledger.DecideAsync(tid, null, pending.Id, granted: true, Guid.NewGuid(), null);
+
+        for (var i = 0; i < 3; i++)
+        {
+            var covered = await ledger.TryConsumeAsync(tid, null, "run-5c", "tool:shell_execute");
+            covered.Should().NotBeNull($"shell call #{i + 1} rides the one standing approval");
+            covered!.ConsumedAtUtc.Should().BeNull("a standing grant is never consumed");
+        }
+    }
+
+    [Test]
+    public async Task StandingRequest_ElevatesAPreExistingSingleUsePendingRow()
+    {
+        // Review 5c collision arm: a single-use pending row (Seam C 409) already
+        // occupies the slot when the tool-loop asks with standing scope. The
+        // standing request ELEVATES it so the run is not left on one-call coverage.
+        // A single-use request never downgrades a standing row.
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var tid = Guid.NewGuid();
+
+        var single = await ledger.RequestAsync(
+            tid, null, "run-5c2", "action", "tool:shell_execute", "seam-c", 80);
+        single.Scope.Should().Be("single-use");
+
+        var elevated = await ledger.RequestAsync(
+            tid, null, "run-5c2", "action", "tool:shell_execute", "seam-b", 80,
+            scope: "correlation-standing");
+        elevated.Id.Should().Be(single.Id, "the same open row is elevated, not duplicated");
+        elevated.Scope.Should().Be("correlation-standing");
+
+        // A single-use request afterwards must NOT downgrade it.
+        var stillStanding = await ledger.RequestAsync(
+            tid, null, "run-5c2", "action", "tool:shell_execute", "seam-c again", 80);
+        stillStanding.Scope.Should().Be("correlation-standing", "single-use never downgrades standing");
+    }
 }

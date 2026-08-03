@@ -150,7 +150,7 @@ public class ActionTelemetryReaderTests
 
         public Task<ActionAuthorization> RequestAsync(
             Guid? t, Guid? u, string c, string tk, string key, string? r, int? lvl,
-            TimeSpan? ttl = null, CancellationToken ct = default) =>
+            TimeSpan? ttl = null, string scope = "single-use", CancellationToken ct = default) =>
             throw new NotSupportedException();
         public Task<ActionAuthorization?> TryConsumeAsync(
             Guid? t, Guid? u, string c, string wire, CancellationToken ct = default) =>

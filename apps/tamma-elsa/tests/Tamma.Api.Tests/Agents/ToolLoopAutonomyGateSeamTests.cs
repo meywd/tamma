@@ -331,6 +331,112 @@ public class ToolLoopAutonomyGateSeamTests
         events.Appended.Should().BeEmpty();
     }
 
+    // ── Review 5a (2026-08-03) — a denied call that a grant COVERS proceeds, and
+    //    that override is recorded on the durable audit path ──────────────────
+
+    [Test]
+    public async Task A_denied_call_a_grant_covers_executes_AND_writes_an_authorized_row()
+    {
+        // Review 5a: a denied tool call that PROCEEDS on a correlation-standing
+        // grant is a security-relevant override and must leave a durable
+        // ACTION.GATE.AUTHORIZED row tying the executed call to the authorizing
+        // grant — not just a transient INFO log. RED before the fix: the covered
+        // branch logged and continued with no _actionGateEvents emission.
+        var events = new RecordingEventRepository();
+        var executed = new List<string>();
+        var handler = new SequencedCapturingHandler(
+            ToolUse(("tc-1", "shell_execute", """{"command":"deploy.sh"}""")),
+            EndTurn("done", 5, 2));
+
+        var grant = new Tamma.Data.Entities.ActionAuthorization
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Guid.NewGuid(),
+            CorrelationId = "corr-gate",
+            TargetKind = "action",
+            TargetKey = "tool:shell_execute",
+            State = "granted",
+            Scope = "correlation-standing",
+            RequestedAtUtc = DateTime.UtcNow,
+        };
+        var broker = new ToolLoopAuthorizationBroker(
+            new StandingCoverLedger(grant),
+            new FixedPrincipalResolver(grant.TenantId, null));
+
+        var runner = NewRunner(
+            handler, DenyShellGate(), RegistryRecording(executed),
+            actionGateEvents: new Tamma.Api.Services.Actions.ActionGateEventsService(events),
+            authorizationBroker: broker);
+
+        await RunAsync(runner);
+
+        executed.Should().Equal(new[] { "shell_execute" },
+            "the denied call is COVERED by the standing grant, so it proceeds to execution");
+
+        var authorized = events.Appended.Should().ContainSingle(e =>
+            e.Type == Tamma.Api.Services.Actions.ActionGateEventsService.AuthorizedType,
+            "a covered denial writes a durable AUTHORIZED row").Subject;
+        using var tags = JsonDocument.Parse(authorized.Tags!);
+        tags.RootElement.GetProperty("actionKey").GetString().Should().Be("tool:shell_execute");
+        tags.RootElement.GetProperty("correlationId").GetString().Should().Be("corr-gate");
+        tags.RootElement.GetProperty("authorizationId").GetString().Should().Be(grant.Id.ToString());
+    }
+
+    /// <summary>A gate that denies shell_execute (with an ActionKey so the covered
+    /// branch has a wire to consult) and allows everything else.</summary>
+    private static IToolLoopAutonomyGate DenyShellGate()
+    {
+        var gate = new Mock<IToolLoopAutonomyGate>();
+        gate.Setup(g => g.Evaluate(It.IsAny<string>(), It.IsAny<string?>()))
+            .Returns((string name, string? _) => name == "shell_execute"
+                ? new ToolLoopGateDecision(
+                    ToolLoopGateOutcome.Denied,
+                    new Tamma.Core.Actions.ActionKey(Tamma.Core.Actions.ActionNamespace.Tool, "shell_execute"),
+                    AutonomyDial.AlwaysHuman, AutonomyDial.Min, "always-human")
+                : new ToolLoopGateDecision(
+                    ToolLoopGateOutcome.Allowed, null, null, AutonomyDial.Min, "at-or-above-min-autonomy"));
+        return gate.Object;
+    }
+
+    /// <summary>A ledger whose <c>TryConsumeAsync</c> returns the one standing
+    /// grant for its (correlation, action); everything else throws (unused here).</summary>
+    private sealed class StandingCoverLedger(Tamma.Data.Entities.ActionAuthorization grant)
+        : Tamma.Data.Repositories.IActionAuthorizationLedger
+    {
+        public Task<Tamma.Data.Entities.ActionAuthorization?> TryConsumeAsync(
+            Guid? tenantId, Guid? userId, string correlationId, string actionKeyWire,
+            CancellationToken ct = default)
+            => Task.FromResult(
+                string.Equals(correlationId, grant.CorrelationId, StringComparison.Ordinal)
+                && string.Equals(actionKeyWire, grant.TargetKey, StringComparison.Ordinal)
+                    ? grant : null);
+
+        public Task<Tamma.Data.Entities.ActionAuthorization> RequestAsync(
+            Guid? tenantId, Guid? userId, string correlationId, string targetKind, string targetKey,
+            string? reason, int? autonomyLevelAtRequest, TimeSpan? ttl = null,
+            string scope = "single-use", CancellationToken ct = default)
+            => throw new NotSupportedException();
+        public Task<Tamma.Data.Entities.ActionAuthorization> MintStandingGrantAsync(
+            Guid? tenantId, Guid? userId, string correlationId, string targetKind, string targetKey,
+            Guid decidedByUserId, string? reason, TimeSpan? ttl = null, CancellationToken ct = default)
+            => throw new NotSupportedException();
+        public Task<Tamma.Data.Entities.ActionAuthorization?> DecideAsync(
+            Guid? tenantId, Guid? userId, Guid id, bool granted, Guid decidedByUserId,
+            string? reason, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<Tamma.Data.Entities.ActionAuthorization>> ListDecidedSinceAsync(
+            Guid? tenantId, Guid? userId, DateTime sinceUtc, CancellationToken ct = default)
+            => throw new NotSupportedException();
+    }
+
+    /// <summary>Resolves a fixed governance principal (no HTTP context needed).</summary>
+    private sealed class FixedPrincipalResolver(Guid? tenantId, Guid? userId)
+        : Tamma.Api.Services.Actions.IGovernancePrincipalResolver
+    {
+        public Task<Tamma.Core.Actions.GovernancePrincipal> ResolveAsync(
+            System.Security.Claims.ClaimsPrincipal? caller = null, CancellationToken ct = default)
+            => Task.FromResult(new Tamma.Core.Actions.GovernancePrincipal(tenantId, userId));
+    }
+
     /// <summary>A gate whose every decision is a break-glass bypass.</summary>
     private static IToolLoopAutonomyGate BypassingGate()
     {
@@ -412,7 +518,8 @@ public class ToolLoopAutonomyGateSeamTests
     private static InlineToolLoopRunner NewRunner(
         HttpMessageHandler handler, IToolLoopAutonomyGate gate, IToolExecutorRegistry registry,
         ParallelToolExecutor? parallelExecutor = null,
-        Tamma.Api.Services.Actions.ActionGateEventsService? actionGateEvents = null)
+        Tamma.Api.Services.Actions.ActionGateEventsService? actionGateEvents = null,
+        ToolLoopAuthorizationBroker? authorizationBroker = null)
     {
         var factory = new Mock<IHttpClientFactory>();
         factory.Setup(f => f.CreateClient(It.IsAny<string>()))
@@ -421,7 +528,8 @@ public class ToolLoopAutonomyGateSeamTests
             NullLogger<InlineToolLoopRunner>.Instance, factory.Object, configuration: null,
             sanitizer: null, autonomyGate: gate, toolRegistry: registry,
             parallelExecutor: parallelExecutor,
-            actionGateEvents: actionGateEvents);
+            actionGateEvents: actionGateEvents,
+            authorizationBroker: authorizationBroker);
     }
 
     private static LlmProviderConfig Config() => new()

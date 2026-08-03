@@ -394,15 +394,30 @@ public sealed class InlineToolLoopRunner : IInlineToolLoopRunner
                     // via the open-row index → exactly one pending row for a loop
                     // of N shell calls).
                     var actionKeyWire = gateDecision.ActionKey?.ToWire();
-                    if (_authorizationBroker is not null && actionKeyWire is not null
-                        && await _authorizationBroker
+                    var coveringGrant = _authorizationBroker is not null && actionKeyWire is not null
+                        ? await _authorizationBroker
                             .TryCoverAsync(actionKeyWire, workflowInstanceId, cancellationToken)
-                            .ConfigureAwait(false))
+                            .ConfigureAwait(false)
+                        : null;
+                    if (coveringGrant is not null)
                     {
+                        // Review 5a — a denied call that PROCEEDS on a grant is a
+                        // security-relevant override and must leave a durable audit
+                        // row, exactly like the Seam-C consume path, not just a
+                        // transient log. EmitAuthorizedAsync is best-effort (the
+                        // grant ROW is the primary record; the block-not-recorded
+                        // rule protects denials, and this is an authorization).
+                        if (_actionGateEvents is not null)
+                        {
+                            await _actionGateEvents.EmitAuthorizedAsync(
+                                coveringGrant.TenantId, coveringGrant.UserId,
+                                actionKeyWire!, workflowInstanceId, coveringGrant.Id)
+                                .ConfigureAwait(false);
+                        }
                         _logger?.LogInformation(
-                            "Tool call {ToolName} denied by the sync gate but COVERED by a "
-                            + "correlation-standing grant for run {Correlation}; proceeding.",
-                            tc.ToolName, workflowInstanceId);
+                            "Tool call {ToolName} denied by the sync gate but COVERED by grant "
+                            + "{AuthorizationId} ({Scope}) for run {Correlation}; proceeding.",
+                            tc.ToolName, coveringGrant.Id, coveringGrant.Scope, workflowInstanceId);
                         continue; // covered — do not reject; fall through to execution
                     }
 
