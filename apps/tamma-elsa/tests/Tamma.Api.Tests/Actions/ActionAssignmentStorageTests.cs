@@ -266,21 +266,21 @@ public class ActionAssignmentStorageTests
         var tid = Guid.NewGuid();
 
         var first = await ledger.RequestAsync(
-            tid, null, "wf-1", "action", "effect:deploy.promote-prod", "please", 70);
+            tid, null, "wf-1", "action", "effect:deploy.prod", "please", 70);
         first.State.Should().Be("pending");
         first.RequestedAtUtc.Should().NotBe(default, "RequestedAtUtc is NOT NULL from day one");
         first.ExpiresAtUtc.Should().NotBeNull("the default +24h TTL applies");
 
         // A second request while one is open returns the SAME row.
         var second = await ledger.RequestAsync(
-            tid, null, "wf-1", "action", "effect:deploy.promote-prod", null, null);
+            tid, null, "wf-1", "action", "effect:deploy.prod", null, null);
         second.Id.Should().Be(first.Id);
 
         // The partial unique index rejects a raw second open row…
         var raw = () => ExecAsync(
             """
             INSERT INTO action_authorizations ("TenantId", "UserId", "CorrelationId", "TargetKind", "TargetKey")
-            VALUES (@tid, NULL, 'wf-1', 'action', 'effect:deploy.promote-prod');
+            VALUES (@tid, NULL, 'wf-1', 'action', 'effect:deploy.prod');
             """, ("tid", tid));
         (await raw.Should().ThrowAsync<PostgresException>())
             .Which.SqlState.Should().Be("23505");
@@ -288,7 +288,7 @@ public class ActionAssignmentStorageTests
         // …but after a denial a fresh request is legal.
         (await ledger.DecideAsync(tid, null, first.Id, granted: false, Guid.NewGuid(), "no")).Should().NotBeNull();
         var third = await ledger.RequestAsync(
-            tid, null, "wf-1", "action", "effect:deploy.promote-prod", null, null);
+            tid, null, "wf-1", "action", "effect:deploy.prod", null, null);
         third.Id.Should().NotBe(first.Id);
     }
 
@@ -301,16 +301,16 @@ public class ActionAssignmentStorageTests
 
         // Action-scoped grant covers itself, once.
         var request = await ledger.RequestAsync(
-            tid, null, "wf-1", "action", "effect:deploy.promote-prod", null, 70);
+            tid, null, "wf-1", "action", "effect:deploy.prod", null, 70);
         await ledger.DecideAsync(tid, null, request.Id, granted: true, decider, null);
 
         var consumed = await ledger.TryConsumeAsync(
-            tid, null, "wf-1", "effect:deploy.promote-prod");
+            tid, null, "wf-1", "effect:deploy.prod");
         consumed.Should().NotBeNull();
         consumed!.ConsumedAtUtc.Should().NotBeNull();
 
         (await ledger.TryConsumeAsync(
-                tid, null, "wf-1", "effect:deploy.promote-prod"))
+                tid, null, "wf-1", "effect:deploy.prod"))
             .Should().BeNull("a consumed grant does not cover a second call");
 
         // Group-scoped grant covers every member of the group (membership
@@ -324,18 +324,18 @@ public class ActionAssignmentStorageTests
 
         // An expired grant does not cover.
         var expired = await ledger.RequestAsync(
-            tid, null, "wf-3", "action", "effect:deploy.promote-prod", null, 70,
+            tid, null, "wf-3", "action", "effect:deploy.prod", null, 70,
             ttl: TimeSpan.FromMilliseconds(-1));
         await ledger.DecideAsync(tid, null, expired.Id, granted: true, decider, null);
         // (DecideAsync refuses expired pending rows → returns null; verify.)
         var decidedExpired = await ledger.TryConsumeAsync(
-            tid, null, "wf-3", "effect:deploy.promote-prod");
+            tid, null, "wf-3", "effect:deploy.prod");
         decidedExpired.Should().BeNull("an expired grant never covers");
 
         // A pending (undecided) grant does not cover.
-        await ledger.RequestAsync(tid, null, "wf-4", "action", "effect:deploy.promote-prod", null, 70);
+        await ledger.RequestAsync(tid, null, "wf-4", "action", "effect:deploy.prod", null, 70);
         (await ledger.TryConsumeAsync(
-                tid, null, "wf-4", "effect:deploy.promote-prod"))
+                tid, null, "wf-4", "effect:deploy.prod"))
             .Should().BeNull("only a granted row covers");
     }
 
@@ -360,7 +360,7 @@ public class ActionAssignmentStorageTests
                 "a group grant covers only catalog members of that group (review F2)");
 
         // The grant is still live and still covers a genuine member.
-        (await ledger.TryConsumeAsync(tid, null, "wf-f2", "effect:deploy.promote-prod"))
+        (await ledger.TryConsumeAsync(tid, null, "wf-f2", "effect:deploy.prod"))
             .Should().NotBeNull("the failed non-member consume must not burn the grant");
     }
 
@@ -379,7 +379,7 @@ public class ActionAssignmentStorageTests
         var attacker = Guid.NewGuid();
 
         var row = await ledger.RequestAsync(
-            owner, null, "wf-f6", "action", "effect:deploy.promote-prod", null, 70);
+            owner, null, "wf-f6", "action", "effect:deploy.prod", null, 70);
 
         (await ledger.DecideAsync(attacker, null, row.Id, granted: true, Guid.NewGuid(), "mine now"))
             .Should().BeNull("a foreign principal may not decide another principal's authorization");
@@ -407,7 +407,7 @@ public class ActionAssignmentStorageTests
         var tid = Guid.NewGuid();
 
         var request = await ledger.RequestAsync(
-            tid, null, "wf-race", "action", "effect:deploy.promote-prod", null, 70);
+            tid, null, "wf-race", "action", "effect:deploy.prod", null, 70);
         await ledger.DecideAsync(tid, null, request.Id, granted: true, Guid.NewGuid(), null);
 
         // The reviewer's probe shape: multiple contexts race the same grant.
@@ -421,7 +421,7 @@ public class ActionAssignmentStorageTests
             {
                 await barrier.Task;
                 return await ledger.TryConsumeAsync(
-                    tid, null, "wf-race", "effect:deploy.promote-prod");
+                    tid, null, "wf-race", "effect:deploy.prod");
             })
             .ToArray();
         barrier.SetResult();
@@ -442,7 +442,7 @@ public class ActionAssignmentStorageTests
         var tid = Guid.NewGuid();
 
         var request = await ledger.RequestAsync(
-            tid, null, "wf-race-2", "action", "effect:deploy.promote-prod", null, 70);
+            tid, null, "wf-race-2", "action", "effect:deploy.prod", null, 70);
 
         var granter = Guid.NewGuid();
         var denier = Guid.NewGuid();
@@ -481,7 +481,7 @@ public class ActionAssignmentStorageTests
         var tid = Guid.NewGuid();
 
         var stale = await ledger.RequestAsync(
-            tid, null, "wf-f3", "action", "effect:deploy.promote-prod", null, 70,
+            tid, null, "wf-f3", "action", "effect:deploy.prod", null, 70,
             ttl: TimeSpan.FromMilliseconds(-1));
         stale.State.Should().Be("pending");
 
@@ -489,7 +489,7 @@ public class ActionAssignmentStorageTests
         // row (which DecideAsync refuses), and the partial unique index
         // blocked a fresh insert — the key was dead forever.
         var fresh = await ledger.RequestAsync(
-            tid, null, "wf-f3", "action", "effect:deploy.promote-prod", "retry", 70);
+            tid, null, "wf-f3", "action", "effect:deploy.prod", "retry", 70);
 
         fresh.Id.Should().NotBe(stale.Id, "a time-expired open row is closed, not returned");
         fresh.State.Should().Be("pending");
@@ -513,7 +513,7 @@ public class ActionAssignmentStorageTests
         // Grant while live, then push the expiry into the past — the shape a
         // grant reaches 24h after the decision.
         var request = await ledger.RequestAsync(
-            tid, null, "wf-f3b", "action", "effect:deploy.promote-prod", null, 70);
+            tid, null, "wf-f3b", "action", "effect:deploy.prod", null, 70);
         (await ledger.DecideAsync(tid, null, request.Id, granted: true, Guid.NewGuid(), null))
             .Should().NotBeNull();
         await ExecAsync(
@@ -523,7 +523,7 @@ public class ActionAssignmentStorageTests
             WHERE "Id" = @id;
             """, ("id", request.Id));
 
-        (await ledger.TryConsumeAsync(tid, null, "wf-f3b", "effect:deploy.promote-prod"))
+        (await ledger.TryConsumeAsync(tid, null, "wf-f3b", "effect:deploy.prod"))
             .Should().BeNull("the consume predicate excludes expired-by-time grants");
 
         await using var db = _factory.CreateDbContext();
@@ -538,13 +538,13 @@ public class ActionAssignmentStorageTests
         var tid = Guid.NewGuid();
 
         var request = await ledger.RequestAsync(
-            tid, null, "wf-9", "action", "effect:deploy.promote-prod", null, 70);
+            tid, null, "wf-9", "action", "effect:deploy.prod", null, 70);
         (await ledger.DecideAsync(tid, null, request.Id, true, Guid.NewGuid(), null)).Should().NotBeNull();
         (await ledger.DecideAsync(tid, null, request.Id, false, Guid.NewGuid(), null))
             .Should().BeNull("a decided row cannot be re-decided (the caller 409s)");
 
         var expiring = await ledger.RequestAsync(
-            tid, null, "wf-10", "action", "effect:deploy.promote-prod", null, 70,
+            tid, null, "wf-10", "action", "effect:deploy.prod", null, 70,
             ttl: TimeSpan.FromMilliseconds(-1));
         (await ledger.DecideAsync(tid, null, expiring.Id, true, Guid.NewGuid(), null))
             .Should().BeNull("an expired pending row cannot be granted");

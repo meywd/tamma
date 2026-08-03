@@ -197,7 +197,13 @@ public static partial class ActionCatalog
         // say so).
         Agent(AgentAction.ImplementInfrastructure, ActionGroup.Authoring, ActionRisk.Mutating, "Implement infrastructure", "Author infrastructure-as-code changes (authoring, not deploy-control — 43-3 D5.1).", min: 25),
         Agent(AgentAction.ConfigureCicd, ActionGroup.DeployControl, ActionRisk.Mutating, "Configure CI/CD", "Change CI/CD pipeline configuration.", min: 50),
-        Agent(AgentAction.Deploy, ActionGroup.DeployControl, ActionRisk.Destructive, "Deploy", "Deploy to an environment (the work phase; the prod stage transition is effect:deploy.promote-prod).", reversible: false, min: 90),
+        // Story 43-12 AC7 — agent-action:deploy / :rollback STAY (they are
+        // RolePhaseMap prompt-taxonomy cells, not effect seams; retiring them would
+        // break the role/action taxonomy for no governance gain). Pinned at 90 / 95
+        // (= the worst per-env targets). Enforcement keys on the per-environment
+        // effect:deploy.* keys (dev 70 / qa 75 / uat 80 / staging 85 / prod 90) and
+        // effect:deploy.rollback — not on these agent-action cells.
+        Agent(AgentAction.Deploy, ActionGroup.DeployControl, ActionRisk.Destructive, "Deploy", "Deploy to an environment (the work phase; enforcement is on the per-environment effect:deploy.* keys — prod is effect:deploy.prod).", reversible: false, min: 90),
         Agent(AgentAction.Rollback, ActionGroup.DeployControl, ActionRisk.Destructive, "Rollback", "Roll an environment back (the work phase; the prod branch is effect:deploy.rollback).", reversible: false, min: 95),
         Agent(AgentAction.MonitorHealth, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Monitor health", "Observe system health signals.", min: 5),
         Agent(AgentAction.DiagnoseIncident, ActionGroup.PlanningAndAnalysis, ActionRisk.ReadOnly, "Diagnose incident", "Diagnose a production incident; produces understanding.", min: 5),
@@ -312,7 +318,7 @@ public static partial class ActionCatalog
         Tool(ToolAction.GitOperationsWrite, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Git write operations", "Write-graded git subcommands (add/commit/push/checkout/stash/pull) — includes push.",
             "Tamma.Activities.LlmCall.Tools.GitOperationsTool (write-graded GitSubcommand members)", min: 25),
 
-        // ── effect (35) ──────────────────────────────────────────────────────
+        // ── effect (47) ──────────────────────────────────────────────────────
 
         // The five `machinery: true` effects below are 43-11's "effects fired
         // only by plumbing" (Story 43-13): automatic event flushes, the
@@ -344,12 +350,40 @@ public static partial class ActionCatalog
             "DELETE /api/v1/git/{owner}/{repo}/branches — GitEndpoints.DeleteBranch", reversible: false, min: 95),
         Effect(ExternalEffect.GitPullRequestCreate, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Create pull request", "Open a pull request on the git platform (known bypass: defeatable by git push under tool:git_operations.write).",
             "POST /api/v1/git/{owner}/{repo}/pull-requests — GitEndpoints.CreatePullRequest", min: 35),
-        // SiteKey carries `{n:int}` (corrected 2026-07-30, 43-8 AC1 step 3) — the
-        // live pattern is MapPut("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/merge").
-        Effect(ExternalEffect.GitPullRequestMerge, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Merge pull request", "Merge a pull request on the git platform.",
-            "PUT /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/merge — GitEndpoints.MergePullRequest", reversible: false, min: 65),
+        // Story 43-12 — the coarse effect:git.pull-request.merge is RETIRED; merge
+        // splits by PR base branch into the zone-ladder trio (55/60/65). All THREE
+        // bind the ONE merge route (multi-binding, Program.cs) and a per-request
+        // selector picks the key from the PR base, failing closed to git.merge.main.
+        // Grading is the coarse key's, carried: SourceControlWrite, Mutating,
+        // reversible:false (a merge cannot be un-merged). The three SiteKeys share
+        // the SAME route part (so the binding sweep's RoutePartOf == route holds for
+        // all three) but differ in the handler-description suffix, so the effect
+        // plane's DUPLICATE_SITE_KEY uniqueness is satisfied.
+        Effect(ExternalEffect.GitMergeDev, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Merge pull request to dev", "Merge a pull request whose base branch is the dev trunk.",
+            "PUT /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/merge — GitEndpoints.MergePullRequest (PR base 'dev')", reversible: false, min: 55),
+        Effect(ExternalEffect.GitMergeQa, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Merge pull request to qa", "Merge a pull request whose base branch is the qa trunk.",
+            "PUT /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/merge — GitEndpoints.MergePullRequest (PR base 'qa')", reversible: false, min: 60),
+        Effect(ExternalEffect.GitMergeMain, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Merge pull request to main", "Merge a pull request whose base branch is main (and the fail-closed default for any other or unreadable base).",
+            "PUT /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/merge — GitEndpoints.MergePullRequest (PR base 'main'; fail-closed default)", reversible: false, min: 65),
         Effect(ExternalEffect.GitReleaseCreate, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Create release", "Cut a release on the git platform.",
             "POST /api/v1/git/{owner}/{repo}/releases — GitEndpoints.CreateRelease", min: 35),
+        // Story 43-12 — RESERVED rows (no performer in the tree). Each carries a
+        // reserved SiteKey that matches no route, so the binding sweep ignores it and
+        // IActionEnforcementSites.For(key) is empty — which is exactly the
+        // "not enforced anywhere yet" state AC5 requires the policy view to render.
+        // git.checks.bypass → SourceControlWrite, Mutating, reversible:false (a merge
+        // that rode the bypass cannot be un-ridden).
+        Effect(ExternalEffect.GitChecksBypass, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Bypass required checks", "Bypass the required-status-checks gate on a merge. RESERVED (Story 43-12): zone level 50, no action in the tree performs it — the key is reserved before anything does so the first caller cannot ship ungoverned.",
+            "RESERVED (Story 43-12) — no performer in the tree: nothing bypasses required checks yet", reversible: false, min: 50),
+        // git.webhook.register → SourceControlWrite, Mutating, reversible:true (a
+        // webhook can be deleted). DUAL-dormant (Story 43-13 pointer): drivers
+        // implement IGitPlatformClient.RegisterWebhookAsync but no caller exists;
+        // classification is DUAL (admin setup by hand, or an LLM onboarding flow) and
+        // per Story 43-13 the level binds only an LLM path. If the first real caller
+        // turns out to be provisioning plumbing, this row moves to the machinery
+        // inventory in the wiring PR.
+        Effect(ExternalEffect.GitWebhookRegister, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Register webhook", "Register a repo webhook, minting a durable ingress path (the level-85 'create infrastructure' zone). RESERVED / DUAL-dormant (Story 43-12): drivers implement RegisterWebhookAsync but no caller exists; classification is DUAL and per Story 43-13 the level binds only an LLM path. If the first caller is provisioning plumbing, this row moves to the machinery inventory in the wiring PR.",
+            "RESERVED (Story 43-12) — no performer in the tree: IGitPlatformClient.RegisterWebhookAsync is implemented by drivers but has no production caller", min: 85),
         // SiteKey carries `{n:int}` (corrected 2026-07-30, 43-8 AC1 step 3) — the
         // live pattern is MapPatch("/api/v1/git/{owner}/{repo}/issues/{n:int}").
         Effect(ExternalEffect.GitIssuePatch, ActionGroup.IssueTracking, ActionRisk.Mutating, "Update issue", "Update an issue on the git platform.",
@@ -423,11 +457,31 @@ public static partial class ActionCatalog
             sensitive: SensitiveActionCatalog.SecretReveal, enforceable: false, machinery: true),
         Effect(ExternalEffect.ProcessSpawn, ActionGroup.CommandExecution, ActionRisk.Command, "Spawn process", "Spawn an OS process inside the tool loop.",
             "Tamma.Activities.LlmCall.Tools.ShellExecuteTool → ProcessStartInfo", reversible: false, min: 80),
-        // Ships at Min, NOT AlwaysHuman (43-3 D3/C4): v1 enforces, so AlwaysHuman
-        // here would gate every production deploy on upgrade day. The existing
-        // business-mode human gate (DeploymentPipelineWorkflow.cs:243 →
-        // WaitForDeploymentApprovalActivity) is UNTOUCHED and 43-9 joins it by OR.
-        Effect(ExternalEffect.DeployPromoteProd, ActionGroup.DeployControl, ActionRisk.Destructive, "Promote to production", "Production promotion stage transition (the deploy itself runs inside the LLM tool loop — see the deploy-control group description).",
+        // Story 43-12 — the coarse effect:deploy.promote-prod is RETIRED; deploy
+        // splits by target environment into the zone-ladder quintet
+        // (dev 70 / qa 75 / uat 80 / staging 85 / prod 90). CORRECTION to Amendment
+        // 3: the shipped pipeline is QA -> UAT -> Prod ONLY
+        // (DeploymentPipelineWorkflow.cs:113) — no dev or staging stage exists — so
+        // effect:deploy.dev and effect:deploy.staging are RESERVED rows (real
+        // catalog rows at their zone levels, no performer) until a pipeline stage
+        // exists. deploy.prod ships behaviour-identically to the retired
+        // promote-prod: Seam E gates it at the prod-approval decision (the existing
+        // business-mode human gate is UNTOUCHED; 43-9 joins it by OR). Grading:
+        // deploy.prod → Destructive/irreversible (promote-prod's grading, carried);
+        // the non-prod environments → Command/reversible:true (a non-prod
+        // environment is redeployable — a judgement call).
+        Effect(ExternalEffect.DeployDev, ActionGroup.DeployControl, ActionRisk.Command, "Deploy to dev", "Deploy to the dev environment. RESERVED (Story 43-12): zone level 70, no dev stage exists in DeploymentPipelineWorkflow (QA->UAT->Prod only) — nothing performs it.",
+            "RESERVED (Story 43-12) — no performer in the tree: the dev stage does not exist in DeploymentPipelineWorkflow", min: 70),
+        Effect(ExternalEffect.DeployQa, ActionGroup.DeployControl, ActionRisk.Command, "Deploy to qa", "QA stage transition (the deploy itself runs inside the LLM tool loop — see the deploy-control group description). A non-prod environment is redeployable, so reversible.",
+            "Tamma.ElsaServer.Workflows.DeploymentPipelineWorkflow — QA stage transition", min: 75),
+        Effect(ExternalEffect.DeployUat, ActionGroup.DeployControl, ActionRisk.Command, "Deploy to uat", "UAT stage transition (the deploy itself runs inside the LLM tool loop — see the deploy-control group description). A non-prod environment is redeployable, so reversible.",
+            "Tamma.ElsaServer.Workflows.DeploymentPipelineWorkflow — UAT stage transition", min: 80),
+        Effect(ExternalEffect.DeployStaging, ActionGroup.DeployControl, ActionRisk.Command, "Deploy to staging", "Deploy to the staging environment. RESERVED (Story 43-12): zone level 85, no staging stage exists in DeploymentPipelineWorkflow (QA->UAT->Prod only) — nothing performs it.",
+            "RESERVED (Story 43-12) — no performer in the tree: the staging stage does not exist in DeploymentPipelineWorkflow", min: 85),
+        // deploy.prod ships behaviour-identically to the retired promote-prod: Seam E
+        // gates it at the prod-approval decision; the existing business-mode human
+        // gate is UNTOUCHED and 43-9 joins it by OR.
+        Effect(ExternalEffect.DeployProd, ActionGroup.DeployControl, ActionRisk.Destructive, "Promote to production", "Production promotion stage transition (the deploy itself runs inside the LLM tool loop — see the deploy-control group description).",
             "Tamma.ElsaServer.Workflows.DeploymentPipelineWorkflow — production stage transition", reversible: false, min: 90),
         Effect(ExternalEffect.DeployRollback, ActionGroup.DeployControl, ActionRisk.Destructive, "Roll back production", "Production rollback branch (same LLM-tool-loop limitation as promote).",
             "Tamma.ElsaServer.Workflows.DeploymentPipelineWorkflow — RollbackProduction branch", reversible: false, min: 95),

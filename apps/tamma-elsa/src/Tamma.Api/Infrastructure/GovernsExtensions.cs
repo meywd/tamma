@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using Tamma.Core.Actions;
 
 namespace Tamma.Api.Infrastructure;
@@ -35,9 +36,26 @@ namespace Tamma.Api.Infrastructure;
 /// </summary>
 public static class GovernsExtensions
 {
-    /// <summary>Binds a minimal-API endpoint to a catalogued action.</summary>
+    /// <summary>Binds a minimal-API endpoint to a catalogued action. May be called
+    /// more than once on the same route (Story 43-12) — each call adds one
+    /// <see cref="ActionGateMetadata"/>. A route with MORE THAN ONE binding MUST
+    /// also attach a key selector (<see cref="SelectsGovernanceKeyWith{TSelector}"/>)
+    /// or the enforcement seam fails closed with
+    /// <c>ACTION.GATE.MISCONFIGURED</c>.</summary>
     public static RouteHandlerBuilder Governs(this RouteHandlerBuilder builder, ActionKey action) =>
         builder.WithMetadata(new ActionGateMetadata(action));
+
+    /// <summary>
+    /// Story 43-12 (D2) — attach the per-request key selector a MULTI-BINDING route
+    /// uses to pick WHICH of its bound keys the gate evaluates for a given request.
+    /// The selector type is resolved from DI at request time (so it can inject
+    /// services such as the git mediation client); it must be registered.
+    /// </summary>
+    public static RouteHandlerBuilder SelectsGovernanceKeyWith<TSelector>(this RouteHandlerBuilder builder)
+        where TSelector : class, IActionKeySelector =>
+        builder.WithMetadata(new ActionKeySelectorMetadata(typeof(TSelector)));
+
+    // --- Story 43-12 (D2) multi-binding key selection ---
 
     // REMOVED 2026-07-29 (adversarial review F17): a
     // `Governs(this RouteGroupBuilder, ActionKey)` overload also shipped here. It
@@ -50,3 +68,38 @@ public static class GovernsExtensions
     // single-route group can still call .Governs on the RouteHandlerBuilder that
     // MapPost/MapPut/… returns. Story 43-9 binds routes individually.
 }
+
+/// <summary>
+/// Story 43-12 (D2) — resolves WHICH catalog key a multi-binding route's gate
+/// evaluates for a specific request. A route whose action depends on the request
+/// (the merge route: the key depends on the PR's base branch, which no static
+/// metadata can express) carries several <see cref="IActionGateMetadata"/> bindings
+/// plus one selector; the enforcement seam invokes the selector to pick.
+///
+/// <para><b>Fail-closed is the selector's own job.</b> A selector that cannot read
+/// what it needs to decide returns the STRICTEST candidate (a DECISION, per AC3),
+/// not an exception — an exception here would ride Seam C's transient fail-OPEN arm,
+/// which is the opposite of fail-closed. See
+/// <c>MergeTargetActionKeySelector</c>.</para>
+/// </summary>
+public interface IActionKeySelector
+{
+    /// <summary>
+    /// Pick one of <paramref name="candidates"/> (the route's bound keys, in binding
+    /// order) for THIS request. Never throws for a read it could not do — it returns
+    /// the fail-closed candidate instead.
+    /// </summary>
+    Task<ActionKey> SelectAsync(HttpContext http, IReadOnlyList<ActionKey> candidates, CancellationToken ct);
+}
+
+/// <summary>The endpoint metadata marker naming the selector type a multi-binding
+/// route uses. Resolved from DI by the enforcement seam.</summary>
+public interface IActionKeySelectorMetadata
+{
+    /// <summary>The <see cref="IActionKeySelector"/> implementation type to resolve.</summary>
+    Type SelectorType { get; }
+}
+
+/// <inheritdoc cref="IActionKeySelectorMetadata" />
+/// <param name="SelectorType">The selector implementation type to resolve from DI.</param>
+public sealed record ActionKeySelectorMetadata(Type SelectorType) : IActionKeySelectorMetadata;

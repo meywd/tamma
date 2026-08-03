@@ -43,9 +43,21 @@ public class ActionWirePinTests
             "engine.events.append", "engine.platform-events.append", "engine.document.persist",
             "engine.document.set-status", "engine.channel-outbox.enqueue",
             "llm.call", "git.branch.create", "git.branch.delete", "git.pull-request.create",
-            "git.pull-request.merge", "git.release.create", "git.issue.patch", "jira.ticket.patch",
+            // 43-12 — the coarse git.pull-request.merge is RETIRED; merge splits by PR
+            // base branch into the zone-ladder trio (dev 55 / qa 60 / main 65).
+            "git.merge.dev", "git.merge.qa", "git.merge.main",
+            "git.release.create",
+            // 43-12 — RESERVED source-control-write keys (no performer in the tree):
+            // git.checks.bypass (50) and git.webhook.register (85, DUAL-dormant).
+            "git.checks.bypass", "git.webhook.register",
+            "git.issue.patch", "jira.ticket.patch",
             "ci.tests.trigger", "agent-dispatch.run", "notify.slack.queue", "notify.email.send",
-            "mcp.tool.invoke", "secret.reveal", "process.spawn", "deploy.promote-prod", "deploy.rollback",
+            "mcp.tool.invoke", "secret.reveal", "process.spawn",
+            // 43-12 — the coarse deploy.promote-prod is RETIRED; deploy splits by
+            // target env (dev 70 / qa 75 / uat 80 / staging 85 / prod 90). dev+staging
+            // are RESERVED (no pipeline stage exists — QA->UAT->Prod only).
+            "deploy.dev", "deploy.qa", "deploy.uat", "deploy.staging", "deploy.prod",
+            "deploy.rollback",
             // 41-30 — the scheduled-trigger admin surface (tree-truth reconcile).
             "schedule.create", "schedule.update", "schedule.delete",
             // 44-2 — the NATIVE tracker's ten mutating routes. `tracker.` prefixed

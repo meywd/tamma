@@ -301,8 +301,13 @@ public class TammaApiClient
         return PostAsync<GitCallResponse>(url, request, tenantId, ct);
     }
 
-    /// <summary>Story 38-1 (AC5) — <c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n}/merge</c>.</summary>
-    [PerformsEffect(ExternalEffect.GitPullRequestMerge)]
+    /// <summary>Story 38-1 (AC5) — <c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n}/merge</c>.
+    /// Story 43-12: the coarse effect:git.pull-request.merge is retired; this ONE method
+    /// performs one of the per-target merge keys (chosen at the gate by the PR base
+    /// branch), so it carries all three [PerformsEffect] attributes.</summary>
+    [PerformsEffect(ExternalEffect.GitMergeDev)]
+    [PerformsEffect(ExternalEffect.GitMergeQa)]
+    [PerformsEffect(ExternalEffect.GitMergeMain)]
     public Task<GitCallResponse?> MergePullRequestAsync(
         string repo, int prNumber, GitMergePrRequest request, string? tenantId = null, CancellationToken ct = default)
     {
@@ -1107,8 +1112,8 @@ public class TammaApiClient
                 .ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
-                // F5 — see GetAsync. PUT/PATCH carry two enforced routes
-                // (git pull-request merge, git issue patch, jira ticket patch).
+                // F5 — see GetAsync. PUT/PATCH carry enforced routes
+                // (git merge {dev,qa,main}, git issue patch, jira ticket patch).
                 if (await TryRecordGovernanceDenialAsync(response, ct).ConfigureAwait(false))
                     return null;
 

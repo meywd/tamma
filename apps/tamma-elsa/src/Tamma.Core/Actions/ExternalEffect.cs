@@ -20,7 +20,11 @@ namespace Tamma.Core.Actions;
 /// <c>tracker.preferences.*</c>, on the TrackerView/TrackerManage-gated
 /// <c>/api</c> routes) = 35 — plus Story 43-8's four MENTORSHIP SESSION
 /// LIFECYCLE mutations (<c>mentorship.session.*</c>, the repo's only
-/// attribute-routed controller) = 39.
+/// attribute-routed controller) = 39 — plus Story 43-12's per-target
+/// merge/deploy zone-ladder edit: retire the two coarse effects
+/// (git.pull-request.merge + deploy.promote-prod, -2) and mint
+/// git.merge.{dev,qa,main}, deploy.{dev,qa,uat,staging,prod}, git.checks.bypass,
+/// git.webhook.register (+10) = 47.
 ///
 /// <para>
 /// LIMITATION (43-2 D9, recorded not hidden): unlike <c>agent-action</c> /
@@ -67,11 +71,41 @@ public enum ExternalEffect
     /// <summary><c>POST /api/v1/git/{owner}/{repo}/pull-requests</c> — <c>GitEndpoints.CreatePullRequest</c>.</summary>
     [Wire("git.pull-request.create")] GitPullRequestCreate,
 
-    /// <summary><c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n}/merge</c> — <c>GitEndpoints.MergePullRequest</c>.</summary>
-    [Wire("git.pull-request.merge")] GitPullRequestMerge,
+    // ── Story 43-12 — the coarse effect:git.pull-request.merge is RETIRED and
+    //    split per PR base branch (43-11 Amendment 3's zone ladder: merge to dev
+    //    55 / qa 60 / main 65). The merge route binds all three and a per-request
+    //    selector (MergeTargetActionKeySelector) picks by the PR's base, failing
+    //    closed to git.merge.main. All three are performed by the ONE method
+    //    TammaApiClient.MergePullRequestAsync ([PerformsEffect] × 3). ──
+
+    /// <summary>Merge into the <c>dev</c> trunk — zone level 55.
+    /// <c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n}/merge</c> when the PR base is <c>dev</c>.</summary>
+    [Wire("git.merge.dev")] GitMergeDev,
+
+    /// <summary>Merge into the <c>qa</c> trunk — zone level 60.
+    /// <c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n}/merge</c> when the PR base is <c>qa</c>.</summary>
+    [Wire("git.merge.qa")] GitMergeQa,
+
+    /// <summary>Merge into <c>main</c> (and the fail-closed default for any other/unreadable base) — zone level 65.
+    /// <c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n}/merge</c>.</summary>
+    [Wire("git.merge.main")] GitMergeMain,
 
     /// <summary><c>POST /api/v1/git/{owner}/{repo}/releases</c> — <c>GitEndpoints.CreateRelease</c>.</summary>
     [Wire("git.release.create")] GitReleaseCreate,
+
+    /// <summary>RESERVED (Story 43-12) — bypass the required-status-checks gate on a
+    /// merge (zone level 50). NO action in the tree performs it; the key is reserved
+    /// before anything does, so the first caller cannot ship ungoverned.</summary>
+    [Wire("git.checks.bypass")] GitChecksBypass,
+
+    /// <summary>RESERVED (Story 43-12) — register a repo webhook, minting a durable
+    /// ingress path (zone level 85, "create infrastructure"). Drivers implement
+    /// <c>IGitPlatformClient.RegisterWebhookAsync</c> but NO caller exists;
+    /// classified DUAL-dormant (admin setup by hand, or an LLM onboarding flow) —
+    /// per Story 43-13 the level binds only an LLM path. If the first real caller
+    /// turns out to be provisioning plumbing, this row moves to the machinery
+    /// inventory in the wiring PR.</summary>
+    [Wire("git.webhook.register")] GitWebhookRegister,
 
     /// <summary><c>PATCH /api/v1/git/{owner}/{repo}/issues/{n}</c> — <c>GitEndpoints.UpdateIssue</c>.</summary>
     [Wire("git.issue.patch")] GitIssuePatch,
@@ -125,13 +159,41 @@ public enum ExternalEffect
     /// catalogued as tools).</summary>
     [Wire("process.spawn")] ProcessSpawn,
 
-    /// <summary>Production promotion stage transition in
-    /// <c>Tamma.ElsaServer/Workflows/DeploymentPipelineWorkflow</c>. NOTE (epic
-    /// risk 8): production deploy is an LLM tool loop, not a typed activity —
-    /// gating this effect gates the STAGE TRANSITION; the deploy itself happens
-    /// inside the loop under <c>tool:shell_execute</c>. This limitation must
-    /// surface in the <c>deploy-control</c> group description, not only here.</summary>
-    [Wire("deploy.promote-prod")] DeployPromoteProd,
+    // ── Story 43-12 — the coarse effect:deploy.promote-prod is RETIRED and split
+    //    per target environment (43-11 Amendment 3's zone ladder: dev 70 / qa 75 /
+    //    uat 80 / staging 85 / prod 90). CORRECTION: the shipped pipeline is
+    //    QA -> UAT -> Prod ONLY (DeploymentPipelineWorkflow.cs:113) — there is no
+    //    dev or staging stage — so effect:deploy.dev and effect:deploy.staging are
+    //    RESERVED keys (real catalog rows at their zone levels, no performer) until
+    //    a pipeline stage exists. Seam E gates effect:deploy.prod where it gated
+    //    deploy.promote-prod. ──
+
+    /// <summary>RESERVED (Story 43-12) — deploy to <c>dev</c> (zone level 70). No
+    /// dev stage exists in <c>DeploymentPipelineWorkflow</c> (QA->UAT->Prod only), so
+    /// no action performs it; reserved at its zone level.</summary>
+    [Wire("deploy.dev")] DeployDev,
+
+    /// <summary>Deploy to <c>qa</c> (zone level 75) — the QA stage transition in
+    /// <c>Tamma.ElsaServer/Workflows/DeploymentPipelineWorkflow</c>.</summary>
+    [Wire("deploy.qa")] DeployQa,
+
+    /// <summary>Deploy to <c>uat</c> (zone level 80) — the UAT stage transition in
+    /// <c>Tamma.ElsaServer/Workflows/DeploymentPipelineWorkflow</c>.</summary>
+    [Wire("deploy.uat")] DeployUat,
+
+    /// <summary>RESERVED (Story 43-12) — deploy to <c>staging</c> (zone level 85). No
+    /// staging stage exists in <c>DeploymentPipelineWorkflow</c> (QA->UAT->Prod only),
+    /// so no action performs it; reserved at its zone level.</summary>
+    [Wire("deploy.staging")] DeployStaging,
+
+    /// <summary>Production promotion stage transition (zone level 90) in
+    /// <c>Tamma.ElsaServer/Workflows/DeploymentPipelineWorkflow</c> — Seam E gates
+    /// this at the prod-approval decision. NOTE (epic risk 8): production deploy is
+    /// an LLM tool loop, not a typed activity — gating this effect gates the STAGE
+    /// TRANSITION; the deploy itself happens inside the loop under
+    /// <c>tool:shell_execute</c>. This limitation must surface in the
+    /// <c>deploy-control</c> group description, not only here.</summary>
+    [Wire("deploy.prod")] DeployProd,
 
     /// <summary>Production rollback branch (<c>RollbackProduction</c>) in
     /// <c>Tamma.ElsaServer/Workflows/DeploymentPipelineWorkflow</c>. Same

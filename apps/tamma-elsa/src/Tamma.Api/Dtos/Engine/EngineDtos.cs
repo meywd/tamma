@@ -2,7 +2,8 @@ using System.Text.Json;
 
 namespace Tamma.Api.Dtos.Engine;
 
-public record SendCommandRequest(string Command, object? Args);
+// Story 43-12 — SendCommandRequest DELETED with the POST /api/engine/command route
+// and handler (a 200 "Command accepted" no-op — a false affordance and audit hole).
 
 /// <summary>
 /// Audit finding 004 — restored the TS shape:

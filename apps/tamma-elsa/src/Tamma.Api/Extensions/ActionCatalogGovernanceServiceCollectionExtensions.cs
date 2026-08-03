@@ -83,6 +83,11 @@ public static class ActionCatalogGovernanceServiceCollectionExtensions
         services.TryAddScoped<ActionGateEventsService>();
         services.TryAddScoped<IAutonomyGate, AutonomyGateService>();
 
+        // Story 43-15 (Amendment 2-H) — the dial-diff telemetry reader (fire
+        // counts off the git/agent-dispatch mediation families + approve rates
+        // from decided grants). Scoped: IEventRepository is scoped.
+        services.TryAddScoped<ActionTelemetryReader>();
+
         // Story 43-9 AC12(c)/AC13 — the REQUEST half of the ledger, and the one
         // reader `Tamma:Governance:AuthorizationTtlHours` has ever had. Singleton
         // because it holds only the resolved TTL and delegates to the singleton

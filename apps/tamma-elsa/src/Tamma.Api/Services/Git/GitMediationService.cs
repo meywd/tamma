@@ -81,6 +81,10 @@ public sealed class GitMediationService : IGitMediationService
         => ExecuteGuardedAsync(tenantId, repo, GitEventTypes.PrCommentsReadOperation, GitEventTypes.PrCommentsReadFailed, correlationId, ct,
             () => GetPullRequestCommentsCoreAsync(tenantId, repo, prNumber, correlationId, ct));
 
+    public Task<GitMediationResult> GetPullRequestAsync(Guid? tenantId, string repo, int prNumber, string correlationId, CancellationToken ct = default)
+        => ExecuteGuardedAsync(tenantId, repo, GitEventTypes.PrDetailsReadOperation, GitEventTypes.PrDetailsReadFailed, correlationId, ct,
+            () => GetPullRequestCoreAsync(tenantId, repo, prNumber, correlationId, ct));
+
     public Task<GitMediationResult> GetCommitsAsync(Guid? tenantId, string repo, string branch, DateTime? since, string correlationId, CancellationToken ct = default)
         => ExecuteGuardedAsync(tenantId, repo, GitEventTypes.CommitsReadOperation, GitEventTypes.CommitsReadFailed, correlationId, ct,
             () => GetCommitsCoreAsync(tenantId, repo, branch, since, correlationId, ct));
@@ -466,6 +470,41 @@ public sealed class GitMediationService : IGitMediationService
         };
         await EmitAsync(GitEventTypes.PrCommentsReadSuccess, op, tenantId, repo, correlationId, cred.Source, null,
             new { prNumber, commentCount = comments.Count }, ct).ConfigureAwait(false);
+        return ok;
+    }
+
+    // ===================================================================
+    // Read PR details (Story 43-12) — the merge-target base-branch read
+    // ===================================================================
+
+    private async Task<GitMediationResult> GetPullRequestCoreAsync(Guid? tenantId, string repo, int prNumber, string correlationId, CancellationToken ct)
+    {
+        var op = GitEventTypes.PrDetailsReadOperation;
+
+        var gate = await GuardOrDenyAsync(tenantId, repo, op, GitEventTypes.PrDetailsReadFailed, correlationId, ct).ConfigureAwait(false);
+        if (gate is not null) return gate;
+
+        var cred = await _tokenResolver.ResolveAsync(tenantId, repo, ct).ConfigureAwait(false);
+        if (cred is null)
+            return await TokenUnavailableAsync(tenantId, repo, op, GitEventTypes.PrDetailsReadFailed, correlationId, ct).ConfigureAwait(false);
+
+        var github = _githubFactory.Create(cred.Token);
+        var res = await github.GetGitHubPullRequestAsync(repo, prNumber).ConfigureAwait(false);
+
+        if (!res.Success || res.Data is null)
+            return await ReadFailAsync(tenantId, repo, op, GitEventTypes.PrDetailsReadFailed, correlationId, cred.Source, res.Error, new { prNumber }, ct).ConfigureAwait(false);
+
+        var ok = new GitMediationResult
+        {
+            Success = true,
+            CredentialSource = cred.Source,
+            Outcome = "Done",
+            PrNumber = res.Data.Number,
+            TargetBranch = res.Data.BaseBranch,
+            CorrelationId = correlationId,
+        };
+        await EmitAsync(GitEventTypes.PrDetailsReadSuccess, op, tenantId, repo, correlationId, cred.Source, null,
+            new { prNumber, baseBranch = res.Data.BaseBranch }, ct).ConfigureAwait(false);
         return ok;
     }
 

@@ -663,6 +663,11 @@ builder.Services.AddSingleton<Tamma.Api.Services.Git.IGitHubClientFactory,
     Tamma.Api.Services.Git.GitHubClientFactory>();
 builder.Services.AddScoped<Tamma.Api.Services.Git.IGitMediationService,
     Tamma.Api.Services.Git.GitMediationService>();
+// Story 43-12 — the merge route's per-request key selector (multi-binding: it picks
+// git.merge.dev|qa|main from the PR base branch, failing closed to git.merge.main).
+// Registered as itself; the enforcement seam resolves it by the type the route's
+// IActionKeySelectorMetadata names.
+builder.Services.AddScoped<Tamma.Api.Services.Git.MergeTargetActionKeySelector>();
 
 // ── Story 38 (Phase 1) — CI / JIRA / email step mediation ──
 // CI (GitHub Actions) reuses the git guard + token resolver (CI runs on the same
@@ -2923,6 +2928,9 @@ var actionsPolicy = app.MapGroup("/api/actions").RequireAuthorization("Authentic
 actionsPolicy.MapGet("/dial", ActionPolicyEndpoints.GetDial);
 actionsPolicy.MapGet("/catalog", ActionPolicyEndpoints.GetCatalog);
 actionsPolicy.MapGet("/policy", ActionPolicyEndpoints.GetPolicy);
+// Story 43-15 (AC5) — the detent diff preview. A GET (out of the coverage
+// sweep's scope, D5); registered before the parameterized /policy/* siblings.
+actionsPolicy.MapGet("/policy/diff", ActionPolicyEndpoints.GetPolicyDiff);
 actionsPolicy.MapPost("/policy/reset", ActionPolicyEndpoints.ResetPolicy).RequireAuthorization("ActionsManage");
 actionsPolicy.MapPut("/policy/groups/{group}/threshold", ActionPolicyEndpoints.PutGroupThreshold).RequireAuthorization("ActionsManage");
 actionsPolicy.MapDelete("/policy/groups/{group}", ActionPolicyEndpoints.DeleteGroup).RequireAuthorization("ActionsManage");
@@ -3098,7 +3106,12 @@ providers.MapGet("/providers/sessions", ProviderEndpoints.ListSessions);
 
 // ── Engine ──
 var engine = app.MapGroup("/api/engine").RequireAuthorization("WorkflowsView");
-engine.MapPost("/command", EngineEndpoints.SendCommand).RequireAuthorization("WorkflowsManage");
+// Story 43-12 — DELETED: POST /api/engine/command (EngineEndpoints.SendCommand).
+// It answered 200 "Command accepted" and performed nothing — a false affordance,
+// an audit hole (a 200 with no event row), and a standing invitation to grow
+// ungoverned behaviour. Cataloguing a no-op would pin governance vocabulary to a
+// lie; the honest fix is to remove the route. A real engine-command surface, if
+// ever built, arrives with its own catalog key and enforcement in the same PR.
 engine.MapGet("/state", EngineEndpoints.GetState);
 engine.MapGet("/stats", EngineEndpoints.GetStats);
 engine.MapGet("/plan", EngineEndpoints.GetPlan);
@@ -3409,7 +3422,14 @@ app.MapPost("/api/v1/git/{owner}/{repo}/pull-requests", GitEndpoints.CreatePullR
 app.MapPut("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/merge", GitEndpoints.MergePullRequest)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitMergePullRequest")
-    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestMerge.ToWire()))
+    // Story 43-12 — the coarse effect:git.pull-request.merge is retired; the merge
+    // splits by PR base branch. The route binds all three per-target keys and a
+    // per-request selector (MergeTargetActionKeySelector) picks the one the gate
+    // evaluates, failing closed to git.merge.main.
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitMergeDev.ToWire()))
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitMergeQa.ToWire()))
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitMergeMain.ToWire()))
+    .SelectsGovernanceKeyWith<Tamma.Api.Services.Git.MergeTargetActionKeySelector>()
     .EnforcesGovernance();
 app.MapGet("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/comments", GitEndpoints.GetPullRequestComments)
     .RequireAuthorization("EngineServiceOnly")

@@ -121,9 +121,13 @@ public class GovernedEndpointBindingSweepTests
     [Test]
     public void EveryBoundEndpoint_ResolvesInTheCatalog_AndItsSiteKeyMatchesTheRoute()
     {
+        // Story 43-12 — check EVERY binding, not just the first: the merge route
+        // carries three (git.merge.{dev,qa,main}), and all three descriptors' SiteKeys
+        // must have the same route part as this route (they share it, differing only
+        // in the handler-description suffix so the effect-plane's DUPLICATE_SITE_KEY
+        // uniqueness still holds).
         var bindings = GovernanceHostFixture.Endpoints
-            .Where(f => f.Action is not null)
-            .Select(f => (f.Method, f.Pattern, Action: f.Action!.Value));
+            .SelectMany(f => f.BoundActions.Select(a => (f.Method, f.Pattern, Action: a)));
 
         var problems = Classify(bindings);
 

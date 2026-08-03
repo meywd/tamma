@@ -50,7 +50,7 @@ public class SeamEMediationTests
         JsonSerializer.Serialize(new
         {
             code,
-            action = "effect:git.pull-request.merge",
+            action = "effect:git.merge.main",
             group = "merge-control",
             effectiveMinAutonomy = 99,
             autonomyLevel = 1,
@@ -83,7 +83,7 @@ public class SeamEMediationTests
         var payload = JsonSerializer.Serialize(new
         {
             outcome = "requires-human",
-            action = "effect:deploy.promote-prod",
+            action = "effect:deploy.prod",
             group = "deploy-control",
             autonomyLevel = 1,
             effectiveMinAutonomy = 99,
@@ -96,7 +96,7 @@ public class SeamEMediationTests
         var client = Build(handler);
 
         var result = await client.EvaluateGovernanceAsync(
-            new GovernanceEvaluateRequest("effect:deploy.promote-prod", CorrelationId: "run-7"));
+            new GovernanceEvaluateRequest("effect:deploy.prod", CorrelationId: "run-7"));
 
         handler.LastRequest!.Method.Should().Be(HttpMethod.Post);
         handler.LastRequest.RequestUri!.AbsolutePath.Should().Be("/api/v1/governance/evaluate",
@@ -124,7 +124,7 @@ public class SeamEMediationTests
         var client = Build(handler);
 
         var result = await client.EvaluateGovernanceAsync(
-            new GovernanceEvaluateRequest("effect:deploy.promote-prod"));
+            new GovernanceEvaluateRequest("effect:deploy.prod"));
 
         result.Should().BeNull(
             "the client discriminates on IsSuccessStatusCode only; a 503 is a null, and the "
@@ -199,7 +199,7 @@ public class SeamEMediationTests
             "the whole point of F5 — the caller can now tell a policy refusal from an outage");
         deniedClient.LastGovernanceDenial!.Code.Should().Be(
             TammaApiGovernanceDenial.RequiresHumanCode);
-        deniedClient.LastGovernanceDenial.Action.Should().Be("effect:git.pull-request.merge");
+        deniedClient.LastGovernanceDenial.Action.Should().Be("effect:git.merge.main");
         deniedClient.LastGovernanceDenial.AuthorizationId.Should().Be(authorizationId);
         deniedClient.LastGovernanceDenial.IsClearableByAHuman.Should().BeTrue(
             "a requires-human denial carrying a pending row IS clearable — that is the one case "

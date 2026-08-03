@@ -17,7 +17,7 @@ namespace Tamma.Activities.Tests.Workflows;
 /// Story 43-9 <b>AC11</b> — Seam E's ONE v1 adoption: the deployment pipeline's
 /// production-approval decision gains a third <b>OR</b> term fed by
 /// <see cref="CheckActionGateActivity"/>, evaluated on
-/// <c>effect:deploy.promote-prod</c>.
+/// <c>effect:deploy.prod</c> (Story 43-12: the coarse deploy.promote-prod was retired).
 ///
 /// <para><b>Both halves of AC11 are load-bearing and both are pinned here.</b></para>
 /// <list type="bullet">
@@ -29,7 +29,7 @@ namespace Tamma.Activities.Tests.Workflows;
 ///   <item><b>On the EFFECT, not the agent-action.</b> <c>StageDeployDispatch</c>
 ///   is SHARED across qa / uat / production, so one <c>agent-action:deploy</c>
 ///   member cannot tell a staging deploy from a production one. Gating
-///   <c>effect:deploy.promote-prod</c> at the prod-approval decision can.</item>
+///   <c>effect:deploy.prod</c> at the prod-approval decision can.</item>
 /// </list>
 ///
 /// <para><b>2026-08-01 review finding F1 — these behaviour tests now drive the
@@ -135,7 +135,7 @@ public class DeploymentPipelineGateTests
     [Test]
     public void Gate_is_on_the_effect_not_the_shared_dispatch()
     {
-        Gate().ActionKey.Expression?.Value.Should().Be("effect:deploy.promote-prod",
+        Gate().ActionKey.Expression?.Value.Should().Be("effect:deploy.prod",
             "gating agent-action:deploy would gate the SHARED StageDeployDispatch, which cannot "
             + "distinguish qa / uat / production — the same member would gate a staging deploy as "
             + "though it were a production promotion");
@@ -251,7 +251,7 @@ public class DeploymentPipelineGateTests
     {
         // The whole point of the story, at the one seam with a real human wait:
         // dev mode, no explicit flag — today this deploys straight through — and a
-        // tenant admin who set effect:deploy.promote-prod to human-only now gets a
+        // tenant admin who set effect:deploy.prod to human-only now gets a
         // wait.
         ApprovalNeeded("dev", requireProdApproval: false,
             gateOutcome: GovernanceEvaluateResponse.OutcomeAutomated).Should().BeFalse(
@@ -266,7 +266,7 @@ public class DeploymentPipelineGateTests
     [Test]
     public void ShippedDefaults_DoNotAlterControlFlow_atSeamE()
     {
-        // AC2 for this seam. effect:deploy.promote-prod ships at AutonomyDial.Min,
+        // AC2 for this seam. effect:deploy.prod ships at level 90,
         // so with no policy rows the gate answers `automated` and every routing
         // decision is byte-identical to before this story.
         foreach (var mode in new[] { "dev", "business", "" })
@@ -311,7 +311,7 @@ public class DeploymentPipelineGateTests
         // edge". That edge led to the SAME node as Automated, so it protected
         // nothing: dev mode + requireProdApproval=false + `denied` deployed to
         // production with no human, which an admin reaches by DISABLING
-        // effect:deploy.promote-prod or putting any AllowedRoles restriction on it
+        // effect:deploy.prod or putting any AllowedRoles restriction on it
         // or its deploy-control group (this call passes Role unset, so every
         // restriction excludes it).
         ApprovalNeeded("dev", requireProdApproval: false,

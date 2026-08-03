@@ -141,8 +141,12 @@ public sealed class ActionEnforcementSites : IActionEnforcementSites
         {
             if (endpoint is not RouteEndpoint route) continue;
 
-            var gate = endpoint.Metadata.GetMetadata<IActionGateMetadata>();
-            if (gate is null) continue;
+            // Story 43-12 — a route may carry MULTIPLE bindings (the merge route
+            // binds git.merge.{dev,qa,main} + a per-request selector). Read ALL
+            // bindings so every bound key gets this route as a site, not just the
+            // last one GetMetadata<T>() would return.
+            var gates = endpoint.Metadata.GetOrderedMetadata<IActionGateMetadata>();
+            if (gates is null || gates.Count == 0) continue;
 
             // Normalised exactly as GovernanceHostFixture normalises it: an
             // attribute-routed controller pattern comes back WITHOUT a leading slash
@@ -154,21 +158,24 @@ public sealed class ActionEnforcementSites : IActionEnforcementSites
             var methods = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
             if (methods is null || methods.Count == 0)
             {
-                Add(gate.Action, $"{RoutePrefix}* {pattern}");
+                foreach (var gate in gates)
+                    Add(gate.Action, $"{RoutePrefix}* {pattern}");
                 continue;
             }
 
-            foreach (var method in methods)
-                Add(gate.Action, $"{RoutePrefix}{method.ToUpperInvariant()} {pattern}");
+            foreach (var gate in gates)
+                foreach (var method in methods)
+                    Add(gate.Action, $"{RoutePrefix}{method.ToUpperInvariant()} {pattern}");
         }
 
         foreach (var method in mediationClient.GetMethods(
                      BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
         {
-            var performs = method.GetCustomAttribute<PerformsEffectAttribute>(inherit: false);
-            if (performs is null) continue;
-
-            Add(performs.Key, $"{MethodPrefix}{mediationClient.FullName}.{method.Name}");
+            // Story 43-12 — GetCustomAttributes (plural): a method may carry more
+            // than one [PerformsEffect] (MergePullRequestAsync performs one of
+            // git.merge.{dev,qa,main}). GetCustomAttribute<T> throws on multiples.
+            foreach (var performs in method.GetCustomAttributes<PerformsEffectAttribute>(inherit: false))
+                Add(performs.Key, $"{MethodPrefix}{mediationClient.FullName}.{method.Name}");
         }
 
         return byAction.ToFrozenDictionary(

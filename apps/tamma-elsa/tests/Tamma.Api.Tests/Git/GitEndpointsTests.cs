@@ -301,6 +301,13 @@ public class GitEndpointsTests
             return Task.FromResult(NextComments ?? new GitMediationResult { Success = true, Outcome = "Done", Comments = new List<PrCommentDto>() });
         }
 
+        // Story 43-12 — the PR-details read used by the merge-target key selector.
+        public Task<GitMediationResult> GetPullRequestAsync(Guid? tenantId, string repo, int prNumber, string correlationId, CancellationToken ct = default)
+        {
+            LastTenantId = tenantId; LastRepo = repo;
+            return Task.FromResult(new GitMediationResult { Success = true, Outcome = "Done", TargetBranch = "main" });
+        }
+
         public Task<GitMediationResult> GetCommitsAsync(Guid? tenantId, string repo, string branch, DateTime? since, string correlationId, CancellationToken ct = default)
         {
             LastTenantId = tenantId; LastRepo = repo;

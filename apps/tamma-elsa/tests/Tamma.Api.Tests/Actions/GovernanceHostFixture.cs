@@ -142,13 +142,25 @@ public class GovernanceHostFixture
         string Kind,
         string DisplayName,
         ActionKey? Action,
-        bool EnforcesGovernance = false)
+        bool EnforcesGovernance = false,
+        IReadOnlyList<ActionKey>? Actions = null)
     {
         /// <summary>The ratchet/baseline key: <c>"POST /api/v1/thing"</c>.</summary>
         public string SiteKey => $"{Method} {Pattern}";
 
         /// <summary>Whether this endpoint carries an <see cref="IActionGateMetadata"/> binding.</summary>
         public bool IsGoverned => Action is not null;
+
+        /// <summary>
+        /// Story 43-12 — ALL bindings on this endpoint (a route may carry more than
+        /// one: the merge route binds git.merge.{dev,qa,main}). <see cref="Action"/>
+        /// stays the FIRST binding for back-compat; consumers that must see every
+        /// bound key (the enforcement-sites agreement check, the binding sweep) read
+        /// this. Synthetic facts that pass only <see cref="Action"/> get a
+        /// single-element list here.
+        /// </summary>
+        public IReadOnlyList<ActionKey> BoundActions =>
+            Actions ?? (Action is { } a ? new[] { a } : Array.Empty<ActionKey>());
     }
 
     /// <summary><see cref="EndpointFact.Kind"/> values.</summary>
@@ -195,7 +207,14 @@ public class GovernanceHostFixture
             // whichever authoring shape produced the route.
             var pattern = route.RoutePattern.RawText ?? "(no-pattern)";
             if (!pattern.StartsWith('/')) pattern = "/" + pattern;
-            var gate = endpoint.Metadata.GetMetadata<IActionGateMetadata>();
+            // Story 43-12 — read ALL bindings (GetOrderedMetadata), not just the last
+            // (GetMetadata). The merge route carries three. The first is the fact's
+            // Action (back-compat); BoundActions carries them all.
+            var gates = endpoint.Metadata.GetOrderedMetadata<IActionGateMetadata>();
+            var gate = gates.Count > 0 ? gates[0] : null;
+            var boundActions = gates.Count > 0
+                ? gates.Select(g => g.Action).ToArray()
+                : null;
             // Story 43-9 D15 — the enforcement opt-in is a SECOND, independent
             // piece of metadata. Both authoring planes implement the same
             // interface (a minimal-API marker record and an MVC filter attribute),
@@ -214,12 +233,12 @@ public class GovernanceHostFixture
                 // keyed on an explicit POST would have silently dropped all seven —
                 // the exact "sweep that reads as coverage" failure this story is
                 // about.
-                facts.Add(new EndpointFact("*", pattern, kind, endpoint.DisplayName ?? pattern, gate?.Action, enforced));
+                facts.Add(new EndpointFact("*", pattern, kind, endpoint.DisplayName ?? pattern, gate?.Action, enforced, boundActions));
                 continue;
             }
 
             facts.AddRange(methods.Select(m =>
-                new EndpointFact(m.ToUpperInvariant(), pattern, kind, endpoint.DisplayName ?? pattern, gate?.Action, enforced)));
+                new EndpointFact(m.ToUpperInvariant(), pattern, kind, endpoint.DisplayName ?? pattern, gate?.Action, enforced, boundActions)));
         }
 
         return facts;

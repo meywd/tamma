@@ -475,6 +475,10 @@ public class GitHubIntegrationService : IGitHubIntegrationService
                 MergeableState = pr.TryGetProperty("mergeable_state", out var mst) && mst.ValueKind == JsonValueKind.String
                     ? mst.GetString() : null,
                 IsDraft = pr.TryGetProperty("draft", out var d) && d.ValueKind == JsonValueKind.True,
+                // Story 43-12 — the base/target branch, for merge-target key selection.
+                BaseBranch = pr.TryGetProperty("base", out var b) && b.ValueKind == JsonValueKind.Object
+                             && b.TryGetProperty("ref", out var br) && br.ValueKind == JsonValueKind.String
+                    ? br.GetString() ?? string.Empty : string.Empty,
             };
             return IntegrationResult<GitHubPullRequestDetail>.Ok(detail);
         }

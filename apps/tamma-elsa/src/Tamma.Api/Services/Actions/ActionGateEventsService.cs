@@ -227,10 +227,16 @@ public sealed class ActionGateEventsService
 
     /// <summary>An admin changed an assignment (43-6's write path; the change
     /// itself is the durable fact — this event is best-effort).</summary>
+    /// <param name="dialAtMint">Story 43-15 (Amendment 2-E) — the dial position
+    /// when a per-action TOGGLE was minted. The toggle row itself always stores
+    /// <c>AutonomyDial.Min</c> ("automated, period"), a constant function of the
+    /// dial; the mint-time dial is provenance and lives HERE, in the audit event,
+    /// never in the arithmetic. Null for every non-toggle assignment change.</param>
     public Task EmitAssignmentChangedAsync(
         Guid? tenantId, Guid? userId, Guid? actorUserId,
         string scope, string targetKind, string targetKey,
-        string field, object? oldValue, object? newValue)
+        string field, object? oldValue, object? newValue,
+        int? dialAtMint = null)
     {
         var tags = new Dictionary<string, string?>
         {
@@ -242,12 +248,51 @@ public sealed class ActionGateEventsService
         if (tenantId is Guid t) tags["tenantId"] = t.ToString();
         if (userId is Guid u) tags["userId"] = u.ToString();
         if (actorUserId is Guid a) tags["actorUserId"] = a.ToString();
+        if (dialAtMint is int d) tags["dialAtMint"] = d.ToString();
         return AppendAsync(AssignmentChangedType, tenantId, tags,
             new Dictionary<string, object?>
             {
                 ["field"] = field,
                 ["oldValue"] = oldValue,
                 ["newValue"] = newValue,
+                ["dialAtMint"] = dialAtMint,
+            },
+            mustNotSwallow: false);
+    }
+
+    /// <summary>
+    /// Story 43-15 (D7) — SERVER-authored record that lowering the base dial left
+    /// one or more per-action toggles standing above the new dial. Emitted from
+    /// the acceptance-rules base-row write when the dial DECREASES; the surviving
+    /// toggle wires are the durable list an auditor reviews. "Declining the bulk
+    /// revoke" is then structural: this event with its list, followed — or not —
+    /// by the individual <see cref="AssignmentChangedType"/> deletions.
+    /// Best-effort, like <see cref="AssignmentChangedType"/> — the assignment
+    /// rows are the durable fact.
+    /// </summary>
+    public const string TogglesSurvivedDialLowerType =
+        "ACTION.GATE.TOGGLES_SURVIVED_DIAL_LOWER";
+
+    /// <summary>Emit the dial-lower survival record (D7).</summary>
+    public Task EmitTogglesSurvivedDialLowerAsync(
+        Guid? tenantId, Guid? userId, Guid? actorUserId,
+        int fromDial, int toDial, IReadOnlyList<string> survivingToggleWires)
+    {
+        var tags = new Dictionary<string, string?>
+        {
+            ["fromDial"] = fromDial.ToString(),
+            ["toDial"] = toDial.ToString(),
+            ["survivingCount"] = survivingToggleWires.Count.ToString(),
+        };
+        if (tenantId is Guid t) tags["tenantId"] = t.ToString();
+        if (userId is Guid u) tags["userId"] = u.ToString();
+        if (actorUserId is Guid a) tags["actorUserId"] = a.ToString();
+        return AppendAsync(TogglesSurvivedDialLowerType, tenantId, tags,
+            new Dictionary<string, object?>
+            {
+                ["fromDial"] = fromDial,
+                ["toDial"] = toDial,
+                ["survivingToggles"] = survivingToggleWires,
             },
             mustNotSwallow: false);
     }

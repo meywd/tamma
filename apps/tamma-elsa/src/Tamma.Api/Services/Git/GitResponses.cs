@@ -34,6 +34,12 @@ public sealed record GitMediationResult
     public bool? Reused { get; init; }
     public bool? IsDraft { get; init; }
 
+    // ── pr details read (Story 43-12 — merge-target key selection) ──
+    /// <summary>The PR's base/target branch (the branch being merged into). Set by
+    /// <see cref="IGitMediationService.GetPullRequestAsync"/>; null when unreadable
+    /// (the selector then fails closed to git.merge.main).</summary>
+    public string? TargetBranch { get; init; }
+
     // ── merge ──
     public bool? Merged { get; init; }
     public string? MergeSha { get; init; }

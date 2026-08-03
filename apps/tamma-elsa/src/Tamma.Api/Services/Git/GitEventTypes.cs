@@ -16,6 +16,10 @@ public static class GitEventTypes
     public const string IssueUpdateOperation = "issue_update";
     public const string PrCommentsReadOperation = "pr_comments_read";
 
+    // Story 43-12 — read a PR's details (base branch) before the merge gate decides
+    // which per-target key (git.merge.dev|qa|main) applies. Same mediation plane.
+    public const string PrDetailsReadOperation = "pr_details_read";
+
     // Story 38 (Phase 1) — the GitHub "extra ops" the engine's context / debug /
     // integration activities call on the composite today (commits + file-changes
     // reads and the standalone branch delete). Mediated here on the same
@@ -43,6 +47,9 @@ public static class GitEventTypes
 
     public const string PrCommentsReadSuccess = "GIT.PR_COMMENTS_READ.SUCCESS";
     public const string PrCommentsReadFailed = "GIT.PR_COMMENTS_READ.FAILED";
+
+    public const string PrDetailsReadSuccess = "GIT.PR_DETAILS_READ.SUCCESS";
+    public const string PrDetailsReadFailed = "GIT.PR_DETAILS_READ.FAILED";
 
     public const string CommitsReadSuccess = "GIT.COMMITS_READ.SUCCESS";
     public const string CommitsReadFailed = "GIT.COMMITS_READ.FAILED";

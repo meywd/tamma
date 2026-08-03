@@ -447,8 +447,10 @@ Grouped by `ActionGroup` (`ActionGroup.cs:41-87`), sorted by proposed level. **N
 
 **The rules, which the API must enforce:**
 
-1. **Level-owned** — an action whose shipped level is `≤` the principal's current dial. The level owns it. `PUT …/threshold` on a level-owned action returns **409 `ACTION_POLICY.LEVEL_OWNED`**, naming the level and the dial. It cannot be individually switched off, because switching it off is what raising the dial is *for*, in reverse.
-2. **Above the level** — an action whose shipped level is `>` the dial. `PUT …/threshold` is permitted, and the **only legal value is the caller's current dial** (turn this one on now) — any other value is 400. That is what makes the surface a toggle rather than a second, hidden dial. `DELETE` removes it.
+> **SUPERSEDED by Amendment 2-E, implemented in Story 43-15.** Rules 1 and 2 below described level-ownership keyed on the *shipped level alone* and a toggle stored at *the caller's current dial*. Both were state-machined and found to fail: the shipped-level predicate is bypassed by group rows (OQ6), and a row at dial-at-mint silently dies on a later dial drop. As of 43-15 the toggle stores **`min_autonomy = AutonomyDial.Min`** ("automated, period") and the `levelOwned`/409 predicate keys on **the ladder WITHOUT the action row** (group rows and the ceiling included). See `docs/stories/epic-43/story-43-15/` and `AutonomyGateEvaluator.ResolveLadderWithoutActionRow`.
+
+1. **Level-owned** — an action the ladder-without-the-action-row already automates at the principal's current dial (its shipped level `≤` dial, OR a group/ceiling row automates it). The level owns it. `PUT …/threshold` returns **409 `ACTION_POLICY.LEVEL_OWNED`**, naming the resolution, the dial and the owning source.
+2. **Above the level** — an action the ladder-without-the-row does *not* automate at the dial. `PUT …/threshold` is permitted, and the **only legal value is `AutonomyDial.Min`** (~superseded: not "the caller's current dial") — any other value is 400. That is what makes the surface a toggle. `DELETE` removes it and the response names the surviving source.
 3. **`enabled` is orthogonal and always writable.** "This deployment never sends email" is a real requirement at every level and is not a level question.
 4. **The platform ceiling still wins.** The ladder composes by `max()` (`AutonomyGateEvaluator.cs:11-17`, F10: "adding a row on either plane can only make the resolution more restrictive"), so a ceiling row of 95 on `effect:deploy.promote-prod` holds it shut even for a tenant admin who toggled it on. **A toggle is never an escalation of privilege.**
 5. **Group-scope rows are unchanged**, and are the admin's power tool for bulk work. Rule 1 applies to `action`-scope rows only — see **OQ6**.
@@ -465,7 +467,7 @@ Lands in `packages/dashboard`, on the page Story 43-7 specifies (`/admin/actions
 **What the API must return for that to be renderable** — `GET /api/actions/policy?level=NN` (`ActionPolicyEndpoints.cs:98-181`) already returns `minAutonomy`, `source`, `enforce`, `enabled`, `automatedAtLevel` (`:144`) and `enforcementSites` (`:154`). It must additionally return, and change:
 
 - `shippedLevel` — the descriptor's `DefaultMinAutonomy`, so the UI can say *why* a row is dimmed without a second lookup against `/catalog`.
-- `levelOwned` — `shippedLevel <= viewLevel`, computed with the same comparison the gate uses.
+- `levelOwned` — ~`shippedLevel <= viewLevel`~ **SUPERSEDED by 43-15**: `viewLevel >= ladderWithoutRow` (the ladder resolved WITHOUT the principal's action row — group rows and the ceiling included), computed with the same comparison the gate uses. Story 43-15 also adds `ladderWithoutRow` and `toggleAboveDial` to the payload.
 - `editable` — **`!levelOwned`**, replacing the unconditional `editable = true` at `ActionPolicyEndpoints.cs:148` and its S3 comment.
 - `reason` — the human string the dimmed row shows, server-authored so the UI does not restate policy.
 
@@ -1568,3 +1570,4 @@ is satisfied for sprint-plan and resolved-by-default for the other two.
 | Date       | Version | Changes                        | Author |
 | ---------- | ------- | ------------------------------ | ------ |
 | 2026-08-03 | 1.7.0   | sprint-plan acceptance -> 95   | meywd  |
+| 2026-08-03 | 1.8.0   | Story 43-12 correction: Amendment 3's "the pipeline already has the stages" is FALSE for dev and staging — `DeploymentPipelineWorkflow` ships QA -> UAT -> Prod ONLY. `effect:deploy.dev` (70) and `effect:deploy.staging` (85) are therefore RESERVED keys (real catalog rows at their zone levels, no performer) until a pipeline stage exists; they are not live gates. The per-target merge (`git.merge.dev|qa|main` 55/60/65) and deploy (`deploy.qa|uat|prod` 75/80/90) keys plus `git.checks.bypass` (50) and `git.webhook.register` (85) landed via Story 43-12. | Claude |

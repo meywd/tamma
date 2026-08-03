@@ -91,6 +91,11 @@ public class MediationClientEffectSweepTests
 
         /// <summary>An in-process site with no HTTP hop at all (a tool, a workflow branch).</summary>
         InProcess,
+
+        /// <summary>Story 43-12 — a RESERVED key: a real catalog row minted at its zone
+        /// level with NO performer in the tree yet (git.checks.bypass, git.webhook.register,
+        /// deploy.dev, deploy.staging). Named so the first caller cannot ship ungoverned.</summary>
+        Reserved,
     }
 
     /// <summary>One effect member's declared performing site.</summary>
@@ -120,8 +125,15 @@ public class MediationClientEffectSweepTests
                 "engine-mediated git write"),
             [ExternalEffect.GitPullRequestCreate] = new(SiteKind.MediationClient, "CreatePullRequestAsync",
                 "engine-mediated git write"),
-            [ExternalEffect.GitPullRequestMerge] = new(SiteKind.MediationClient, "MergePullRequestAsync",
-                "engine-mediated git write"),
+            // Story 43-12 — the coarse git.pull-request.merge is retired; the per-target
+            // trio all map to the ONE method MergePullRequestAsync (it carries three
+            // [PerformsEffect] attributes; the gate picks the key by the PR base branch).
+            [ExternalEffect.GitMergeDev] = new(SiteKind.MediationClient, "MergePullRequestAsync",
+                "engine-mediated git write (PR base 'dev')"),
+            [ExternalEffect.GitMergeQa] = new(SiteKind.MediationClient, "MergePullRequestAsync",
+                "engine-mediated git write (PR base 'qa')"),
+            [ExternalEffect.GitMergeMain] = new(SiteKind.MediationClient, "MergePullRequestAsync",
+                "engine-mediated git write (PR base 'main'; fail-closed default)"),
             [ExternalEffect.GitReleaseCreate] = new(SiteKind.MediationClient, "CreateReleaseAsync",
                 "engine-mediated git write"),
             [ExternalEffect.GitIssuePatch] = new(SiteKind.MediationClient, "UpdateIssueStatusAsync",
@@ -204,11 +216,31 @@ public class MediationClientEffectSweepTests
             // ── In-process: no HTTP hop, so no route sweep can ever see them ──
             [ExternalEffect.ProcessSpawn] = new(SiteKind.InProcess, null,
                 "ShellExecuteTool's ProcessStartInfo, inside the tool loop — invisible to any route sweep"),
-            [ExternalEffect.DeployPromoteProd] = new(SiteKind.InProcess, null,
-                "DeploymentPipelineWorkflow's production stage transition; the deploy itself runs inside "
-                + "the LLM tool loop, so this gates the TRANSITION only"),
+            // Story 43-12 — the coarse deploy.promote-prod is retired; the shipped
+            // pipeline is QA -> UAT -> Prod ONLY, so only these three env keys have a
+            // performing site (the stage transition). Seam E gates deploy.prod.
+            [ExternalEffect.DeployQa] = new(SiteKind.InProcess, null,
+                "DeploymentPipelineWorkflow's QA stage transition; the deploy itself runs inside the LLM tool loop"),
+            [ExternalEffect.DeployUat] = new(SiteKind.InProcess, null,
+                "DeploymentPipelineWorkflow's UAT stage transition; the deploy itself runs inside the LLM tool loop"),
+            [ExternalEffect.DeployProd] = new(SiteKind.InProcess, null,
+                "DeploymentPipelineWorkflow's production stage transition (Seam E gates it); the deploy "
+                + "itself runs inside the LLM tool loop, so this gates the TRANSITION only"),
             [ExternalEffect.DeployRollback] = new(SiteKind.InProcess, null,
                 "DeploymentPipelineWorkflow's RollbackProduction branch; same tool-loop limitation as promote"),
+            // Story 43-12 — RESERVED keys: real catalog rows at their zone levels with
+            // no performer in the tree yet. deploy.dev / deploy.staging have no pipeline
+            // stage (QA -> UAT -> Prod only); git.checks.bypass has nothing that bypasses
+            // checks; git.webhook.register's driver method has no production caller.
+            [ExternalEffect.DeployDev] = new(SiteKind.Reserved, null,
+                "RESERVED (Story 43-12): no dev stage exists in DeploymentPipelineWorkflow (QA -> UAT -> Prod only)"),
+            [ExternalEffect.DeployStaging] = new(SiteKind.Reserved, null,
+                "RESERVED (Story 43-12): no staging stage exists in DeploymentPipelineWorkflow (QA -> UAT -> Prod only)"),
+            [ExternalEffect.GitChecksBypass] = new(SiteKind.Reserved, null,
+                "RESERVED (Story 43-12): nothing in the tree bypasses required checks yet"),
+            [ExternalEffect.GitWebhookRegister] = new(SiteKind.Reserved, null,
+                "RESERVED (Story 43-12): IGitPlatformClient.RegisterWebhookAsync is driver-implemented but "
+                + "has no production caller; DUAL-dormant (Story 43-13)"),
         };
 
     // ====================================================================
@@ -584,9 +616,12 @@ public class MediationClientEffectSweepTests
                 problems.Add($"  effect:{effect.ToWire()}: empty site justification.");
         }
 
-        // catalog → code (c): two effects may not claim the same method.
+        // catalog → code (c): two effects may not claim the same method — EXCEPT the
+        // per-target merge trio (Story 43-12), which legitimately share
+        // MergePullRequestAsync (that one method carries three [PerformsEffect]
+        // attributes and the gate picks the key by the PR base branch).
         var duplicated = sites.Values
-            .Where(s => s.ClientMethod is not null)
+            .Where(s => s.ClientMethod is not null && s.ClientMethod != "MergePullRequestAsync")
             .GroupBy(s => s.ClientMethod!, StringComparer.Ordinal)
             .Where(g => g.Count() > 1);
         problems.AddRange(duplicated.Select(g =>
@@ -710,35 +745,40 @@ public class MediationClientEffectSweepTests
         // guarantee while guaranteeing nothing, which is the failure mode this whole
         // story exists to prevent. Assert the attributed count FIRST, so the loop
         // below can never silently become a no-op again.
+        // Story 43-12 — GetCustomAttributes (plural): MergePullRequestAsync now carries
+        // THREE [PerformsEffect] attributes, and GetCustomAttribute<T> throws
+        // AmbiguousMatchException on multiples. The attributed-method COUNT is still 17
+        // (17 distinct methods; the merge method is one of them).
         var attributed = ClientMethods(typeof(TammaApiClient))
-            .Where(m => m.GetCustomAttribute<PerformsEffectAttribute>(inherit: false) is not null)
+            .Where(m => m.GetCustomAttributes<PerformsEffectAttribute>(inherit: false).Any())
             .ToList();
 
         attributed.Should().HaveCount(17,
-            "all 17 mutating TammaApiClient methods carry [PerformsEffect] as of 2026-07-30 (43-8 AC4 "
-            + "step 7). If this is 0 the attributes were stripped and the agreement check below is "
-            + "vacuous; if it is higher, a method was attributed without a corresponding "
-            + "EffectPerformingSites entry — decide which effect it performs, in the table, first.");
+            "all 17 mutating TammaApiClient methods carry [PerformsEffect] (the merge method carries "
+            + "three since Story 43-12's per-target split, but it is still ONE method). If this is 0 "
+            + "the attributes were stripped and the agreement check below is vacuous; if it is higher, "
+            + "a method was attributed without a corresponding EffectPerformingSites entry — decide "
+            + "which effect it performs, in the table, first.");
 
         var problems = new List<string>();
 
         foreach (var method in ClientMethods(typeof(TammaApiClient)))
         {
-            var attribute = method.GetCustomAttribute<PerformsEffectAttribute>(inherit: false);
-            if (attribute is null) continue;
-
-            if (!EffectPerformingSites.TryGetValue(attribute.Effect, out var site))
+            foreach (var attribute in method.GetCustomAttributes<PerformsEffectAttribute>(inherit: false))
             {
-                problems.Add(
-                    $"  {method.Name}: [PerformsEffect({attribute.Effect})] names an effect with no "
-                    + "EffectPerformingSites entry.");
-                continue;
-            }
+                if (!EffectPerformingSites.TryGetValue(attribute.Effect, out var site))
+                {
+                    problems.Add(
+                        $"  {method.Name}: [PerformsEffect({attribute.Effect})] names an effect with no "
+                        + "EffectPerformingSites entry.");
+                    continue;
+                }
 
-            if (site.ClientMethod != method.Name)
-                problems.Add(
-                    $"  {method.Name}: [PerformsEffect({attribute.Effect})] disagrees with the table, "
-                    + $"which maps that effect to '{site.ClientMethod ?? "(no client method)"}'.");
+                if (site.ClientMethod != method.Name)
+                    problems.Add(
+                        $"  {method.Name}: [PerformsEffect({attribute.Effect})] disagrees with the table, "
+                        + $"which maps that effect to '{site.ClientMethod ?? "(no client method)"}'.");
+            }
         }
 
         problems.Should().BeEmpty(
@@ -750,10 +790,11 @@ public class MediationClientEffectSweepTests
     public void MediationClientSites_countIsPinned()
     {
         EffectPerformingSites.Values.Count(s => s.Kind == SiteKind.MediationClient)
-            .Should().Be(17,
-                "AC4 enumerates exactly 17 mutating TammaApiClient methods. A change here means a "
-                + "mediation method became (or stopped being) a governed effect — that is a "
-                + "governance decision, not a refactor.");
+            .Should().Be(19,
+                "17 -> 19 (Story 43-12): the coarse git.pull-request.merge (1 MediationClient entry) is "
+                + "retired and replaced by the per-target trio git.merge.{dev,qa,main} (3 entries, all "
+                + "sharing MergePullRequestAsync). A change here means a mediation method became (or "
+                + "stopped being) a governed effect — that is a governance decision, not a refactor.");
     }
 
     /// <summary>

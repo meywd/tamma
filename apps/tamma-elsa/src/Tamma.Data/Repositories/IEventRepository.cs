@@ -208,4 +208,25 @@ public interface IEventRepository
             "QueryEventsAsync is not implemented by this IEventRepository. " +
             "The time-travel event query (Story 4-7) reads only through the " +
             "tenant-scoped EventRepository, which routes via ITenantDbContextFactory.");
+
+    /// <summary>
+    /// Story 43-15 (Amendment 2-H) — COUNT events whose <see cref="DomainEvent.Type"/>
+    /// starts with <paramref name="typePrefix"/> and whose
+    /// <see cref="DomainEvent.CreatedAt"/> is at/after <paramref name="sinceUtc"/>,
+    /// for the given <paramref name="tenantId"/> (null = the single-user /
+    /// platform plane). Backs the dial-diff preview's per-action fire count, read
+    /// off the git/agent-dispatch mediation families — the ONLY fire-count sources
+    /// that exist today (the actionKey index and Seam decision events do not; see
+    /// <c>ActionTelemetryReader</c>).
+    ///
+    /// <para>Window-bounded by construction (the caller caps it at 30 days). No
+    /// supporting index on <see cref="DomainEvent.Type"/> — an admin-cadence read,
+    /// not a hot path.</para>
+    ///
+    /// <para>Default returns 0 ("no telemetry channel here") so a lightweight
+    /// double is never a fire-count source; the real <c>EventRepository</c>
+    /// overrides it.</para>
+    /// </summary>
+    Task<int> CountByTypePrefixSinceAsync(Guid? tenantId, string typePrefix, DateTime sinceUtc)
+        => Task.FromResult(0);
 }

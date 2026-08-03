@@ -249,7 +249,7 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         //    ON THE EFFECT, NOT THE AGENT-ACTION. StageDeployDispatch (below) is
         //    SHARED across qa / uat / production, so one `agent-action:deploy`
         //    member cannot tell a staging deploy from a production one. Gating
-        //    `effect:deploy.promote-prod` at the prod-approval DECISION can — and
+        //    `effect:deploy.prod` at the prod-approval DECISION can — and
         //    it is what the admin's deploy-control dial actually names. The shared
         //    dispatch is deliberately NOT gated (pinned by
         //    Gate_is_on_the_effect_not_the_shared_dispatch).
@@ -271,7 +271,7 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         //    the real FlowDecision delegate:
         //        dev / requireProdApproval=false / "requires-human" -> True  (wait)
         //        dev / requireProdApproval=false / "denied"         -> False (NO WAIT)
-        //    i.e. setting effect:deploy.promote-prod to AlwaysHuman added a
+        //    i.e. setting effect:deploy.prod to AlwaysHuman added a
         //    production wait, but DISABLING the action — the strictly stronger
         //    admin setting — added nothing and production deployed with no human.
         //    (`denied` is reachable here two ways: an Enabled=false row on the
@@ -300,7 +300,10 @@ public class DeploymentPipelineWorkflow : WorkflowBase
         var checkProdGate = new CheckActionGateActivity
         {
             Id = "CheckProdDeployGate", Name = "Check Prod Deploy Gate",
-            ActionKey = new Input<string>("effect:deploy.promote-prod"),
+            // Story 43-12 — rebound from the retired coarse effect:deploy.promote-prod
+            // to the per-target effect:deploy.prod (zone level 90). Behaviour-identical
+            // at every dial position (the descriptor grading is carried verbatim).
+            ActionKey = new Input<string>("effect:deploy.prod"),
             Operation = new Input<string?>("deployment-pipeline:prod-approval"),
             Target = new Input<string?>(ctx => repository.Get(ctx)),
             TenantId = new Input<string?>(ctx => tenantId.Get(ctx)),
@@ -908,7 +911,7 @@ public class DeploymentPipelineWorkflow : WorkflowBase
     /// (<c>requires-human</c> and <c>denied</c>) and false for
     /// <c>automated</c>, <c>unavailable</c> and the unwritten <c>""</c>. The
     /// denied arm is what closes F1's monotonicity inversion: disabling
-    /// <c>effect:deploy.promote-prod</c>, or putting any <c>AllowedRoles</c>
+    /// <c>effect:deploy.prod</c>, or putting any <c>AllowedRoles</c>
     /// restriction on it, resolves to <c>denied</c>, and a `denied` that fell
     /// through this predicate as "no opinion" deployed production with no human.
     /// Blocking on it makes the predicate MONOTONE: every strengthening of the

@@ -86,4 +86,24 @@ public interface IActionAuthorizationLedger
         Guid? tenantId, Guid? userId,
         Guid id, bool granted, Guid decidedByUserId, string? reason,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Story 43-15 (Amendment 2-H) — the DECIDED grant rows for one principal
+    /// since <paramref name="sinceUtc"/> (both <c>granted</c> and <c>denied</c>,
+    /// keyed by their <c>DecidedAtUtc</c>). Backs the dial-diff preview's
+    /// per-action approve rate = <c>granted / (granted + denied)</c> per
+    /// <c>TargetKey</c>. GROUP grants are NOT attributed to member actions in v1
+    /// (the reader only reads <c>action</c>-kind rows) — a deliberate simplification
+    /// recorded in <c>ActionTelemetryReader</c>.
+    ///
+    /// <para>Read-only aggregate — the grant table is structurally EMPTY until
+    /// something is gated and decided (the H chicken-and-egg), so an empty result
+    /// is the ordinary case and the reader renders "no data", never a 0% rate.</para>
+    ///
+    /// <para>Default returns an empty list so a lightweight double is never an
+    /// approve-rate source; the real ledger overrides it.</para>
+    /// </summary>
+    Task<IReadOnlyList<ActionAuthorization>> ListDecidedSinceAsync(
+        Guid? tenantId, Guid? userId, DateTime sinceUtc, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<ActionAuthorization>>(Array.Empty<ActionAuthorization>());
 }

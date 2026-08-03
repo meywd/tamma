@@ -16,6 +16,15 @@ public interface IGitMediationService
     Task<GitMediationResult> UpdateIssueAsync(Guid? tenantId, string repo, int issueNumber, UpdateIssueRequest body, CancellationToken ct = default);
     Task<GitMediationResult> GetPullRequestCommentsAsync(Guid? tenantId, string repo, int prNumber, string correlationId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Story 43-12 — read a PR's details (its base/target branch) so the merge gate
+    /// can resolve the per-target catalog key (<c>git.merge.dev|qa|main</c>) BEFORE
+    /// deciding. Read op — guard→token→platform→one event. On any failure the
+    /// result's <see cref="GitMediationResult.TargetBranch"/> is null and the caller
+    /// (the selector) fails closed to <c>git.merge.main</c>.
+    /// </summary>
+    Task<GitMediationResult> GetPullRequestAsync(Guid? tenantId, string repo, int prNumber, string correlationId, CancellationToken ct = default);
+
     // Story 38 (Phase 1) — GitHub "extra ops" the engine's context/debug/integration
     // activities call on the composite today, mediated on the same plane.
 

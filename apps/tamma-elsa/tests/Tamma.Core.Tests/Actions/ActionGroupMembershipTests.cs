@@ -147,12 +147,19 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void SourceControlWrite_has_the_6_expected_members()
+    public void SourceControlWrite_has_the_10_expected_members()
     {
+        // 6 -> 10 (Story 43-12): the coarse effect:git.pull-request.merge is RETIRED
+        // and replaced by the per-target trio git.merge.{dev,qa,main} (+3 net +2);
+        // plus the two RESERVED source-control-write keys git.checks.bypass (50) and
+        // git.webhook.register (85, DUAL-dormant) (+2). Net 6 -> 10.
         WiresIn(ActionGroup.SourceControlWrite).Should().BeEquivalentTo(new[]
         {
             "tool:git_operations.write", "effect:git.branch.create", "effect:git.branch.delete",
-            "effect:git.pull-request.create", "effect:git.pull-request.merge", "effect:git.release.create",
+            "effect:git.pull-request.create",
+            "effect:git.merge.dev", "effect:git.merge.qa", "effect:git.merge.main",
+            "effect:git.release.create",
+            "effect:git.checks.bypass", "effect:git.webhook.register",
         });
     }
 
@@ -179,13 +186,19 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void DeployControl_has_the_6_expected_members()
+    public void DeployControl_has_the_10_expected_members()
     {
         // implement-infrastructure is deliberately NOT here (43-3 D5.1).
+        // 6 -> 10 (Story 43-12): the coarse effect:deploy.promote-prod is RETIRED and
+        // replaced by the per-target quintet deploy.{dev,qa,uat,staging,prod}
+        // (dev+staging RESERVED — no pipeline stage exists). Net 6 -> 10.
         WiresIn(ActionGroup.DeployControl).Should().BeEquivalentTo(new[]
         {
             "agent-action:plan-deployment", "agent-action:configure-cicd", "agent-action:deploy",
-            "agent-action:rollback", "effect:deploy.promote-prod", "effect:deploy.rollback",
+            "agent-action:rollback",
+            "effect:deploy.dev", "effect:deploy.qa", "effect:deploy.uat",
+            "effect:deploy.staging", "effect:deploy.prod",
+            "effect:deploy.rollback",
         });
     }
 
@@ -256,8 +269,12 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void The_per_group_counts_sum_to_197()
+    public void The_per_group_counts_sum_to_205()
     {
+        // 197 → 205 (Story 43-12): source-control-write 6 → 10 (retire the coarse
+        // merge, add the merge trio + checks.bypass + webhook.register) and
+        // deploy-control 6 → 10 (retire promote-prod, add the deploy quintet) —
+        // nothing else moves.
         // 193 → 197: +4 mentorship-session effects, ALL in model-invocation
         // (Story 43-8) — the group goes 3 → 7 and nothing else moves.
         // 183 → 193: +10 native-tracker effects, ALL in issue-tracking
@@ -280,16 +297,16 @@ public class ActionGroupMembershipTests
             [ActionGroup.CommandExecution] = 2,
             [ActionGroup.CiAndTest] = 3,
             [ActionGroup.SourceControlRead] = 1,
-            [ActionGroup.SourceControlWrite] = 6,
+            [ActionGroup.SourceControlWrite] = 10,
             [ActionGroup.IssueTracking] = 12,
-            [ActionGroup.DeployControl] = 6,
+            [ActionGroup.DeployControl] = 10,
             [ActionGroup.ExternalComms] = 2,
             [ActionGroup.ModelInvocation] = 7,
             [ActionGroup.Secrets] = 4,
             [ActionGroup.PlatformAutomation] = 43,
         };
 
-        counts.Values.Sum().Should().Be(197);
+        counts.Values.Sum().Should().Be(205);
         foreach (var (group, count) in counts)
             ActionCatalog.ByGroup[group].Should().HaveCount(count, $"group '{group.ToWire()}'");
     }

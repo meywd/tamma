@@ -28,7 +28,7 @@ public class ActionCatalogLevelTests
         DialRows.Where(d => dial >= d.DefaultMinAutonomy).Select(d => d.Key.ToWire()).ToHashSet();
 
     /// <summary>
-    /// THE explicit (actionKey → zone level) table for all 155 dial rows
+    /// THE explicit (actionKey → zone level) table for all 163 dial rows (was 155; Story 43-12 +10 per-target merge/deploy keys −2 retired coarse keys)
     /// (Story 43-11 AC4, re-audit: 197 − 42 machinery). Transcribed from the
     /// zone-model derivation, NOT generated from the catalog — it is the
     /// independent pin the descriptor is compared against.
@@ -182,22 +182,37 @@ public class ActionCatalogLevelTests
         ["document-type:review"] = 45,
         ["document-type:threat-model"] = 45,
         ["document-type:ux-spec"] = 45,
-        // ── Level 50 — bypass PR checks (1) ──
+        // ── Level 50 — bypass PR checks (2) ──
         ["agent-action:configure-cicd"] = 50,
-        // ── Level 65 — merge to main (1) ──
-        ["effect:git.pull-request.merge"] = 65,
-        // ── Level 75 — external messages (3) ──
+        // 43-12 — the reserved checks-bypass key (no performer in the tree yet).
+        ["effect:git.checks.bypass"] = 50,
+        // ── Level 55 — merge to dev (1) — 43-12 per-target merge split ──
+        ["effect:git.merge.dev"] = 55,
+        // ── Level 60 — merge to qa (1) — 43-12 ──
+        ["effect:git.merge.qa"] = 60,
+        // ── Level 65 — merge to main (1) — 43-12 (was the coarse git.pull-request.merge) ──
+        ["effect:git.merge.main"] = 65,
+        // ── Level 70 — deploy dev (1) — 43-12; RESERVED (no dev pipeline stage) ──
+        ["effect:deploy.dev"] = 70,
+        // ── Level 75 — external messages (3) + deploy qa (1, 43-12) ──
         ["effect:engine.channel-outbox.enqueue"] = 75,
         ["effect:notify.email.send"] = 75,
         ["effect:notify.slack.queue"] = 75,
-        // ── Level 80 — unbounded execution (4) ──
+        ["effect:deploy.qa"] = 75,
+        // ── Level 80 — unbounded execution (4) + deploy uat (1, 43-12) ──
         ["effect:agent-dispatch.run"] = 80,
         ["effect:mcp.tool.invoke"] = 80,
         ["effect:process.spawn"] = 80,
         ["tool:shell_execute"] = 80,
-        // ── Level 90 — deploy prod (2) ──
+        ["effect:deploy.uat"] = 80,
+        // ── Level 85 — deploy staging + register webhook (2, 43-12) — both RESERVED /
+        //    create-infrastructure zone (deploy.staging has no pipeline stage;
+        //    git.webhook.register is DUAL-dormant) ──
+        ["effect:deploy.staging"] = 85,
+        ["effect:git.webhook.register"] = 85,
+        // ── Level 90 — deploy prod (2) — 43-12 (was the coarse deploy.promote-prod) ──
         ["agent-action:deploy"] = 90,
-        ["effect:deploy.promote-prod"] = 90,
+        ["effect:deploy.prod"] = 90,
         // ── Level 95 — delete / rollback / hard deletes (6) ──
         ["agent-action:rollback"] = 95,
         ["document-type:sprint-plan"] = 95,
@@ -222,7 +237,7 @@ public class ActionCatalogLevelTests
         missing.Should().BeEmpty("keys in the table with no catalog dial row");
         extra.Should().BeEmpty("catalog dial rows absent from the table");
         mismatched.Should().BeEmpty("a level moved without updating BOTH the descriptor and this table");
-        actual.Should().HaveCount(155, "155 = 197 catalog rows − 42 machinery");
+        actual.Should().HaveCount(163, "163 = 205 catalog rows − 42 machinery (Story 43-12: +10 per-target merge/deploy keys − 2 retired coarse keys)");
     }
 
     [Test]
@@ -299,7 +314,14 @@ public class ActionCatalogLevelTests
             ["effect:agent-dispatch.run"] = (MoveDecision.Accept, "external agent run, unbounded reach — 80"),
             ["effect:mcp.tool.invoke"] = (MoveDecision.Accept, "unbounded reach + no CI drift signal (2026-07-30 MCP decision survives in substance) — 80"),
             ["agent-action:deploy"] = (MoveDecision.Accept, "production/tenant, irreversibly — 90"),
-            ["effect:deploy.promote-prod"] = (MoveDecision.Accept, "production promotion — 90; the business-mode gate is untouched and joins by OR"),
+            // 43-12 — the coarse deploy.promote-prod split into per-env keys. Only the
+            // envs ABOVE the default dial (70) carry a decision here: qa 75, uat 80,
+            // staging 85, prod 90 (dev 70 sits AT the default, not above it).
+            ["effect:deploy.qa"] = (MoveDecision.Accept, "qa stage transition — 75; a working autonomous run raises its dial"),
+            ["effect:deploy.uat"] = (MoveDecision.Accept, "uat stage transition — 80"),
+            ["effect:deploy.staging"] = (MoveDecision.Accept, "staging deploy — 85 (RESERVED: no staging pipeline stage exists yet)"),
+            ["effect:deploy.prod"] = (MoveDecision.Accept, "production promotion — 90; the business-mode gate is untouched and joins by OR"),
+            ["effect:git.webhook.register"] = (MoveDecision.Accept, "registers a durable ingress path (create-infrastructure zone) — 85 (RESERVED / DUAL-dormant)"),
             ["agent-action:rollback"] = (MoveDecision.Accept, "production rollback — 95"),
             ["effect:deploy.rollback"] = (MoveDecision.Accept, "production rollback branch — 95"),
             ["effect:git.branch.delete"] = (MoveDecision.Accept, "destroys something outside the deployment — 95"),

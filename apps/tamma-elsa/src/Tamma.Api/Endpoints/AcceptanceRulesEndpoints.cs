@@ -131,9 +131,37 @@ public static class AcceptanceRulesEndpoints
         AcceptanceRulesService store,
         ClaimsPrincipal principal,
         ITenantContext tenantContext,
-        ITammaModeProvider modeProvider)
+        ITammaModeProvider modeProvider,
+        // Story 43-15 (D7) — optional so existing direct-call unit tests compile;
+        // DI injects both for the HTTP path. The dial-lower survival record is
+        // skipped when either is absent (best-effort).
+        Tamma.Data.Repositories.IActionAssignmentRepository? actionRepo = null,
+        Tamma.Api.Services.Actions.ActionGateEventsService? actionEvents = null)
     {
         var userId = principal.GetUserId();
+
+        // Story 43-15 (D7) — when the BASE row's dial DECREASES, per-action
+        // toggles standing above the new dial survive VISIBLY. Capture the old
+        // dial before the write so the drop can be detected; best-effort, the
+        // toggle rows are the durable fact.
+        var isBaseRow = string.Equals(
+            documentTypeKey, AcceptanceRulesService.BaseRowKeyLiteral, StringComparison.Ordinal);
+        int? oldDial = null;
+        if (isBaseRow)
+        {
+            try
+            {
+                var current = modeProvider.Mode == TammaMode.SaaS
+                        && tenantContext.TenantId is Guid tid0
+                    ? await store.ResolveBaseForTenantAsync(tid0)
+                    : await store.ResolveBaseAsync(userId);
+                oldDial = current.Rules.AutonomyLevel;
+            }
+            catch
+            {
+                // No readable old dial → skip the survival record (best-effort).
+            }
+        }
 
         // Story 43-0 — a field the caller did not send is PRESERVED, never invented.
         // `acceptorRequirement` is the only optional member of the body; resolve
@@ -195,9 +223,93 @@ public static class AcceptanceRulesEndpoints
             return Results.BadRequest(new { error = te.Message, code = te.Code });
         }
 
+        // Story 43-15 (D7) — enumerate surviving toggles on a base-row dial DROP.
+        if (isBaseRow && oldDial is int from && rules.AutonomyLevel < from
+            && actionRepo is not null && actionEvents is not null)
+        {
+            await EmitTogglesSurvivedDialLowerAsync(
+                from, rules.AutonomyLevel, userId, tenantContext, modeProvider,
+                rules, actionRepo!, actionEvents!);
+        }
+
         // Return the freshly resolved rules (with provenance) for the type.
         return await GetResolved(documentTypeKey, store, principal, tenantContext, modeProvider);
     }
+
+    /// <summary>
+    /// Story 43-15 (D7) — SERVER-authored survival record. Enumerates the
+    /// principal's per-action toggles (action rows at <see cref="AutonomyDial.Min"/>)
+    /// whose ladder-WITHOUT-the-row resolution exceeds the new dial, and emits ONE
+    /// <c>ACTION.GATE.TOGGLES_SURVIVED_DIAL_LOWER</c> naming them. Best-effort — it
+    /// never fails the dial write; the toggle rows are the durable fact, and
+    /// "declining the bulk revoke" is structural (this event, then no deletions).
+    /// </summary>
+    private static async Task EmitTogglesSurvivedDialLowerAsync(
+        int fromDial, int toDial, Guid? callerUserId,
+        ITenantContext tenantContext, ITammaModeProvider modeProvider,
+        AcceptanceRules newRules,
+        Tamma.Data.Repositories.IActionAssignmentRepository actionRepo,
+        Tamma.Api.Services.Actions.ActionGateEventsService actionEvents)
+    {
+        try
+        {
+            var (tid, uid) = modeProvider.Mode == TammaMode.SaaS
+                    && tenantContext.TenantId is Guid t
+                ? ((Guid?)t, (Guid?)null)
+                : (null, callerUserId);
+
+            var principalRows = await actionRepo.ListForPrincipalAsync(tid, uid);
+            var platformRows = await actionRepo.ListPlatformAsync();
+            var snapshot = Tamma.Core.Actions.GovernancePolicySnapshot.FromSuccessfulRead(
+                RowsByKind(platformRows, "action"), RowsByKind(platformRows, "group"),
+                RowsByKind(principalRows, "action"), RowsByKind(principalRows, "group"));
+            var baseRules = new ResolvedAcceptanceRules(
+                newRules, AcceptanceRulesSource.SystemDefault, 1, "base", DateTimeOffset.UtcNow);
+
+            var surviving = new List<string>();
+            foreach (var row in principalRows)
+            {
+                if (!string.Equals(row.TargetKind, "action", StringComparison.Ordinal)
+                    || row.MinAutonomy != Tamma.Core.Documents.Policy.AutonomyDial.Min)
+                {
+                    continue;
+                }
+                if (!Tamma.Core.Actions.ActionKey.TryParse(row.TargetKey, out var k)
+                    || !Tamma.Core.Actions.ActionCatalog.TryGet(k, out var d) || d is null
+                    || d.IsMachinery)
+                {
+                    continue;
+                }
+                var withoutRow = Tamma.Core.Actions.AutonomyGateEvaluator
+                    .ResolveLadderWithoutActionRow(d, snapshot, baseRules);
+                if (withoutRow.EffectiveMinAutonomy > toDial)
+                {
+                    surviving.Add(row.TargetKey);
+                }
+            }
+
+            if (surviving.Count > 0)
+            {
+                await actionEvents.EmitTogglesSurvivedDialLowerAsync(
+                    tid, uid, callerUserId, fromDial, toDial, surviving);
+            }
+        }
+        catch
+        {
+            // Best-effort audit — never break the dial write over it.
+        }
+    }
+
+    private static IReadOnlyDictionary<string, Tamma.Core.Actions.ActionAssignmentValue>
+        RowsByKind(
+            IReadOnlyList<Tamma.Data.Entities.ActionAssignment> rows, string kind)
+        => rows
+            .Where(r => string.Equals(r.TargetKind, kind, StringComparison.Ordinal))
+            .ToDictionary(
+                r => r.TargetKey,
+                r => new Tamma.Core.Actions.ActionAssignmentValue(
+                    r.MinAutonomy, r.Enforce, r.Enabled, r.AllowedRoles),
+                StringComparer.Ordinal);
 
     // =======================================================================
     // Delete → reset to next tier (AcceptanceRulesManage)

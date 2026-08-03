@@ -248,6 +248,25 @@ public sealed class EfActionAuthorizationLedger : IActionAuthorizationLedger
             : null; // missing, already decided, or expired → the caller 409s
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ActionAuthorization>> ListDecidedSinceAsync(
+        Guid? tenantId, Guid? userId, DateTime sinceUtc, CancellationToken ct = default)
+    {
+        if (tenantId is not null && userId is not null)
+        {
+            throw new ArgumentException("At most one principal key may be set.");
+        }
+
+        await using var db = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        return await db.ActionAuthorizations
+            .AsNoTracking()
+            .Where(a => a.TenantId == tenantId && a.UserId == userId
+                && (a.State == "granted" || a.State == "denied")
+                && a.DecidedAtUtc != null && a.DecidedAtUtc >= sinceUtc)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
     private static bool IsUniqueViolation(DbUpdateException ex) =>
         ex.InnerException is Npgsql.PostgresException pg && pg.SqlState == "23505";
 }

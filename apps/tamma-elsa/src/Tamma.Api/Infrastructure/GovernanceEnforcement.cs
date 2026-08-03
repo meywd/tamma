@@ -230,7 +230,15 @@ internal static class AutonomyGateEnforcement
         var logger = services.GetService<ILoggerFactory>()
             ?.CreateLogger("Tamma.Api.Infrastructure.AutonomyGateEnforcement");
 
-        var binding = http.GetEndpoint()?.Metadata.GetMetadata<IActionGateMetadata>();
+        var endpoint = http.GetEndpoint();
+        // Story 43-12 (D2) — read ALL bindings, not just the last. Exactly one → the
+        // legacy path unchanged. More than one → this route's key depends on the
+        // request, so it MUST carry an IActionKeySelectorMetadata; the selector is
+        // resolved from DI and invoked below (inside the deadline). A multi-binding
+        // route WITHOUT a usable selector is a static wiring fault and fails CLOSED,
+        // the same posture as a missing binding.
+        var bindings = endpoint?.Metadata.GetOrderedMetadata<IActionGateMetadata>()
+            ?? (IReadOnlyList<IActionGateMetadata>)Array.Empty<IActionGateMetadata>();
         var gate = services.GetService<IAutonomyGate>();
         // F10 — resolved OUT HERE, with the other static wiring. It used to sit
         // inside the try below as GetRequiredService<>(), so a host that
@@ -241,7 +249,16 @@ internal static class AutonomyGateEnforcement
         // needs to be structural rather than incidental.
         var principals = services.GetService<IGovernancePrincipalResolver>();
 
-        if (binding is null || gate is null || principals is null)
+        IActionKeySelector? selector = null;
+        if (bindings.Count > 1)
+        {
+            var selectorMeta = endpoint?.Metadata.GetMetadata<IActionKeySelectorMetadata>();
+            selector = selectorMeta is null
+                ? null
+                : services.GetService(selectorMeta.SelectorType) as IActionKeySelector;
+        }
+
+        if (bindings.Count == 0 || gate is null || principals is null || (bindings.Count > 1 && selector is null))
         {
             // FAIL CLOSED — static wiring, not a blip. See the class doc.
             logger?.LogError(
@@ -255,11 +272,13 @@ internal static class AutonomyGateEnforcement
                 // request-path log site in the API uses.
                 LogSanitizer.Clean(http.Request.Method),
                 LogSanitizer.Clean(http.Request.Path.Value),
-                binding is null
+                bindings.Count == 0
                     ? "the endpoint carries no .Governs(actionKey) binding"
                     : gate is null
                         ? "no IAutonomyGate is registered in this host"
-                        : "no IGovernancePrincipalResolver is registered in this host",
+                        : principals is null
+                            ? "no IGovernancePrincipalResolver is registered in this host"
+                            : "the endpoint carries multiple .Governs bindings but no usable IActionKeySelector (a per-request key selector is required for a multi-binding route)",
                 MisconfiguredCode);
 
             return new GovernanceDenial(new
@@ -273,17 +292,30 @@ internal static class AutonomyGateEnforcement
 
         AutonomyDecision decision;
         GovernancePrincipal principal;
+        // Default so the fail-open log below always has a key even if a throw beats
+        // the selector; reassigned inside the try for the multi-binding case.
+        var action = bindings[0].Action;
         var correlationId = ResolveCorrelationId(http);
         // F9 — a catch covers a THROW, not a HANG.
         using var deadline = AutonomyGateDeadline.CreateLinkedSource(ct);
         try
         {
+            // Story 43-12 (D2) — resolve the per-request key. Single binding → its
+            // key. Multiple → the selector picks (fail-closed to the STRICTEST
+            // candidate internally, so this is a DECISION path — a selector never
+            // throws for an unreadable input, so it cannot ride the fail-open arm).
+            if (bindings.Count > 1)
+            {
+                action = await selector!.SelectAsync(http, bindings.Select(b => b.Action).ToList(), deadline.Token)
+                    .ConfigureAwait(false);
+            }
+
             principal = await principals.ResolveAsync(http.User, deadline.Token)
                 .ConfigureAwait(false);
 
             decision = await gate.EvaluateAsync(
                 new AutonomyQuery(
-                    binding.Action,
+                    action,
                     principal,
                     Role: null,
                     Operation: $"{http.Request.Method} {http.Request.Path}",
@@ -335,7 +367,7 @@ internal static class AutonomyGateEnforcement
                 // forged copy could convince an auditor a gate was bypassed when it
                 // was not — or hide a real one in noise. Action comes from the
                 // catalog, not the request, so it needs no cleaning.
-                binding.Action.ToWire(),
+                action.ToWire(),
                 LogSanitizer.Clean(http.Request.Method),
                 LogSanitizer.Clean(http.Request.Path.Value));
 
@@ -343,7 +375,7 @@ internal static class AutonomyGateEnforcement
             if (events is not null)
             {
                 await events.EmitEvaluationFailedAsync(
-                    binding.Action.ToWire(), ex.Message, tenantId: null, userId: null)
+                    action.ToWire(), ex.Message, tenantId: null, userId: null)
                     .ConfigureAwait(false);
             }
             return null;

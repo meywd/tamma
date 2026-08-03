@@ -68,13 +68,33 @@ public class ActionCatalogDefaultsTests
     {
         // Was Deploy_ShipsAtMin_PerEpicDecisionD1 (deploy/rollback shipped at the
         // uniform Min). Under the zone model these carry the production/tenant
-        // destruction levels: promote-prod is the deploy-to-prod zone (90),
-        // rollback is the delete/rollback zone (95). The existing business-mode
-        // gate (DeploymentPipelineWorkflow.cs:243) is untouched; 43-9 joins by OR.
-        ActionCatalog.Get(ActionKey.Parse("effect:deploy.promote-prod")).DefaultMinAutonomy.Should().Be(90);
+        // destruction levels. Story 43-12 split the coarse effect:deploy.promote-prod
+        // into per-env keys: prod is the deploy-to-prod zone (90) and lands on
+        // effect:deploy.prod; rollback is the delete/rollback zone (95). The existing
+        // business-mode gate (DeploymentPipelineWorkflow) is untouched; 43-9 joins by OR.
+        ActionCatalog.Get(ActionKey.Parse("effect:deploy.prod")).DefaultMinAutonomy.Should().Be(90);
         ActionCatalog.Get(ActionKey.Parse("effect:deploy.rollback")).DefaultMinAutonomy.Should().Be(95);
         ActionCatalog.Get(ActionKey.Parse("agent-action:deploy")).DefaultMinAutonomy.Should().Be(90);
         ActionCatalog.Get(ActionKey.Parse("agent-action:rollback")).DefaultMinAutonomy.Should().Be(95);
+    }
+
+    [Test]
+    public void PerTargetMergeAndDeployKeys_ShipAtTheirZoneLevels()
+    {
+        // Story 43-12 — the per-target merge/deploy zone-ladder keys. Merge splits by
+        // PR base branch (dev 55 / qa 60 / main 65); deploy splits by target env
+        // (dev 70 / qa 75 / uat 80 / staging 85 / prod 90). Plus the two reserved
+        // source-control-write keys: git.checks.bypass (50) and git.webhook.register (85).
+        ActionCatalog.Get(ActionKey.Parse("effect:git.merge.dev")).DefaultMinAutonomy.Should().Be(55);
+        ActionCatalog.Get(ActionKey.Parse("effect:git.merge.qa")).DefaultMinAutonomy.Should().Be(60);
+        ActionCatalog.Get(ActionKey.Parse("effect:git.merge.main")).DefaultMinAutonomy.Should().Be(65);
+        ActionCatalog.Get(ActionKey.Parse("effect:deploy.dev")).DefaultMinAutonomy.Should().Be(70);
+        ActionCatalog.Get(ActionKey.Parse("effect:deploy.qa")).DefaultMinAutonomy.Should().Be(75);
+        ActionCatalog.Get(ActionKey.Parse("effect:deploy.uat")).DefaultMinAutonomy.Should().Be(80);
+        ActionCatalog.Get(ActionKey.Parse("effect:deploy.staging")).DefaultMinAutonomy.Should().Be(85);
+        ActionCatalog.Get(ActionKey.Parse("effect:deploy.prod")).DefaultMinAutonomy.Should().Be(90);
+        ActionCatalog.Get(ActionKey.Parse("effect:git.checks.bypass")).DefaultMinAutonomy.Should().Be(50);
+        ActionCatalog.Get(ActionKey.Parse("effect:git.webhook.register")).DefaultMinAutonomy.Should().Be(85);
     }
 
     [Test]

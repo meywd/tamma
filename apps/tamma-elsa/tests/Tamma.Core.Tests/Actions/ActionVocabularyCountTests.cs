@@ -51,7 +51,7 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void ExternalEffect_has_39_members()
+    public void ExternalEffect_has_47_members()
     {
         // Derivation: grep 'RequireAuthorization("EngineServiceOnly")'
         // src/Tamma.Api/Program.cs → 26 routes, 17 MUTATING (5 engine-group
@@ -77,7 +77,14 @@ public class ActionVocabularyCountTests
         // POST /api/Mentorship/start DISPATCHES the tamma-autonomous-mentorship Elsa
         // workflow rather than merely writing a row, which is the same kind of
         // consequence as effect:schedule.create and effect:agent-dispatch.run.
-        Enum.GetValues<ExternalEffect>().Should().HaveCount(39);
+        // 39 -> 47 (Story 43-12): the per-target merge/deploy zone-ladder edit.
+        // RETIRED the two coarse effects git.pull-request.merge + deploy.promote-prod
+        // (-2); MINTED git.merge.{dev,qa,main} (the merge splits by PR base branch,
+        // 55/60/65), deploy.{dev,qa,uat,staging,prod} (the deploy splits by target
+        // env, 70/75/80/85/90 — dev+staging RESERVED, no pipeline stage exists),
+        // git.checks.bypass (50, reserved) and git.webhook.register (85, reserved,
+        // DUAL-dormant) (+10).
+        Enum.GetValues<ExternalEffect>().Should().HaveCount(47);
     }
 
     [Test]
@@ -129,9 +136,12 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void TotalCatalogMembers_is_197()
+    public void TotalCatalogMembers_is_205()
     {
-        // 96 + 17 + 8 + 39 + 29 + 8 = 197 — was 193 (effect 35): Story 43-8
+        // 96 + 17 + 8 + 47 + 29 + 8 = 205 — was 197 (effect 39): Story 43-12
+        // retired 2 coarse effects (git.pull-request.merge, deploy.promote-prod) and
+        // minted 10 per-target merge/deploy zone-ladder keys (see
+        // ExternalEffect_has_47_members). Earlier: was 193 (effect 35): Story 43-8
         // added the four mentorship-session effects (see
         // ExternalEffect_has_39_members). Earlier: was 183 (effect 25): Story 44-2
         // added the native tracker's ten mutating routes to the effect plane
@@ -144,7 +154,7 @@ public class ActionVocabularyCountTests
         // (80 + 10 + 22 + 26 + …); the agent-action plane grew by 16 (Story
         // 41-1a), the document-type plane by 6 (Story 41-1b), and
         // effect/automation by 3 + 1 (Story 41-30).
-        ActionCatalog.All.Should().HaveCount(197);
-        ActionCatalog.ByKey.Should().HaveCount(197);
+        ActionCatalog.All.Should().HaveCount(205);
+        ActionCatalog.ByKey.Should().HaveCount(205);
     }
 }

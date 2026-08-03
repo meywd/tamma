@@ -403,6 +403,13 @@ public class GitHubPullRequestDetail
     public string? MergeableState { get; set; }
 
     public bool IsDraft { get; set; }
+
+    /// <summary>
+    /// The PR's base/target branch (GitHub <c>base.ref</c> — the branch being merged
+    /// into). Story 43-12 reads this so the merge gate can resolve the per-target
+    /// key (<c>git.merge.dev|qa|main</c>). Empty when the platform response omitted it.
+    /// </summary>
+    public string BaseBranch { get; set; } = string.Empty;
 }
 
 /// <summary>

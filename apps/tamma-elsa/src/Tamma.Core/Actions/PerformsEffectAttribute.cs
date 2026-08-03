@@ -26,7 +26,13 @@ namespace Tamma.Core.Actions;
 /// </para>
 /// </summary>
 /// <param name="effect">The catalogued <c>effect:*</c> member this site performs.</param>
-[AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = true)]
+// AllowMultiple = TRUE (Story 43-12): after the per-target merge split,
+// TammaApiClient.MergePullRequestAsync performs one of git.merge.{dev,qa,main},
+// so the method plane must carry all three — or
+// ActionEnforcementSitesTests.EveryMediationEffect_hasBothARouteSiteAndAMethodSite
+// is unsatisfiable for dev/qa. Both readers move to GetCustomAttributes in the
+// same change (GetCustomAttribute<T> throws AmbiguousMatchException on multiples).
+[AttributeUsage(AttributeTargets.Method, AllowMultiple = true, Inherited = true)]
 public sealed class PerformsEffectAttribute(ExternalEffect effect) : Attribute
 {
     /// <summary>The catalogued <c>effect:*</c> member this site performs.</summary>

@@ -218,7 +218,11 @@ internal static class KnownUngovernedEndpoints
     /// ratchets). Raising this pin now requires appending a value that makes the
     /// fixture RED.</para>
     /// </summary>
-    internal const int PinnedCount = 216;
+    /// <para><b>216 → 215 (Story 43-12).</b> POST /api/engine/command — a 200
+    /// "Command accepted" no-op — was DELETED (route + handler + DTO); its stale
+    /// baseline entry goes in the same diff and the ratchet turns the way it
+    /// celebrates (strictly down).</para>
+    internal const int PinnedCount = 215;
 
     /// <summary>
     /// The pin's recorded high-water history, oldest first; every element must be
@@ -232,7 +236,7 @@ internal static class KnownUngovernedEndpoints
     /// which is the defect <c>ContractBindingTests.cs:255-271</c> has and this epic's
     /// ratchets must not inherit.</para>
     /// </summary>
-    internal static readonly int[] PinHistory = [237, 216];
+    internal static readonly int[] PinHistory = [237, 216, 215];
 
     /// <summary>
     /// The pinned size of the in-scope mutating surface (Correction 4: derive it at
@@ -247,7 +251,10 @@ internal static class KnownUngovernedEndpoints
     /// <c>Baseline_countIsPinned</c> must be reconciled separately. Today:
     /// 237 in scope, 216 baselined, 21 bound.</para>
     /// </summary>
-    internal const int PinnedInScopeCount = 239;
+    // Story 43-12 — 239 → 238: POST /api/engine/command was DELETED from the host, so
+    // the in-scope mutating surface has one fewer endpoint (215 baselined + 2
+    // exceptions + 21 bound = 238).
+    internal const int PinnedInScopeCount = 238;
 
     // =======================================================================
     // Story 43-9 DECISION D17 — the NAMED, DATED, REVIEWED exception set
@@ -535,8 +542,10 @@ internal static class KnownUngovernedEndpoints
             "no-catalog-member: agent / workflow / document orchestration write with no catalog member; classifying this family is epic README open question 5"),
         new("POST", "/api/documents/escalations/{escalationId}/resolve",
             "no-catalog-member: ESCALATION RESOLUTION — closes an escalated document review and releases the suspended lifecycle. Split onto its own justification line 2026-07-29 (review F15): resolving an escalation is the very act the escalation ring exists to require a decision for, so grouping it with the generic 'agent / workflow / document orchestration write' family hid the highest-stakes route in that family. Cataloguing it is epic README open question 5"),
-        new("POST", "/api/engine/command",
-            "no-catalog-member: an ENGINE ORCHESTRATION CALLBACK on the /api/engine group (WorkflowsManage, not EngineServiceOnly) with no catalog member of its own. Justification corrected 2026-07-30 when Story 43-8 AC1 step 3 landed the real bindings: these entries previously read 'an EngineServiceOnly route … its catalogued effect:* member exists and Story 43-9 binds it', which was a family paraphrase and is now provably false — all 17 route-backed effect:* members ARE bound, and none of them names this route. Cataloguing this family is epic README open question 5"),
+        // Story 43-12 — DELETED the /api/engine/command baseline entry with the route
+        // itself (POST /api/engine/command was a 200 "Command accepted" no-op; deleting
+        // the route made this entry stale, so it goes in the same commit and the pins
+        // decrement: PinnedCount 216 → 215, PinnedInScopeCount 239 → 238).
         new("POST", "/api/engine/create-issue",
             "no-catalog-member: an ENGINE ORCHESTRATION CALLBACK on the /api/engine group (WorkflowsManage, not EngineServiceOnly) with no catalog member of its own. Justification corrected 2026-07-30 when Story 43-8 AC1 step 3 landed the real bindings: these entries previously read 'an EngineServiceOnly route … its catalogued effect:* member exists and Story 43-9 binds it', which was a family paraphrase and is now provably false — all 17 route-backed effect:* members ARE bound, and none of them names this route. Cataloguing this family is epic README open question 5"),
         new("POST", "/api/engine/cycle-result",

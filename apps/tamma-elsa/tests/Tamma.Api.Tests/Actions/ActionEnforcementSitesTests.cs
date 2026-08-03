@@ -38,14 +38,19 @@ public class ActionEnforcementSitesTests
     private static IActionEnforcementSites Live =>
         GovernanceHostFixture.Services.GetRequiredService<IActionEnforcementSites>();
 
-    /// <summary>The 17 mediation effects: bound on BOTH the route and method planes.</summary>
+    /// <summary>The 19 mediation effects: bound on BOTH the route and method planes.
+    /// Story 43-12: the coarse GitPullRequestMerge is retired and replaced by the
+    /// per-target trio — all three bind the merge route (multi-binding) and the ONE
+    /// MergePullRequestAsync method ([PerformsEffect] × 3), so each has a route AND a
+    /// method site. 17 → 19.</summary>
     private static readonly ExternalEffect[] MediationEffects =
     [
         ExternalEffect.EngineEventsAppend, ExternalEffect.EnginePlatformEventsAppend,
         ExternalEffect.EngineDocumentPersist, ExternalEffect.EngineDocumentSetStatus,
         ExternalEffect.EngineChannelOutboxEnqueue, ExternalEffect.LlmCall,
         ExternalEffect.GitBranchCreate, ExternalEffect.GitBranchDelete,
-        ExternalEffect.GitPullRequestCreate, ExternalEffect.GitPullRequestMerge,
+        ExternalEffect.GitPullRequestCreate,
+        ExternalEffect.GitMergeDev, ExternalEffect.GitMergeQa, ExternalEffect.GitMergeMain,
         ExternalEffect.GitReleaseCreate, ExternalEffect.GitIssuePatch,
         ExternalEffect.JiraTicketPatch, ExternalEffect.CiTestsTrigger,
         ExternalEffect.AgentDispatchRun, ExternalEffect.NotifySlackQueue,
@@ -76,8 +81,9 @@ public class ActionEnforcementSitesTests
         // route) pairs exist, this goes red rather than the API and the sweep
         // quietly telling an admin different things.
         var fromHarness = GovernanceHostFixture.Endpoints
-            .Where(f => f.Action is not null)
-            .Select(f => (f.Action!.Value, Site: $"{ActionEnforcementSites.RoutePrefix}{f.SiteKey}"))
+            // Story 43-12 — every bound key (the merge route carries three), so a
+            // multi-binding route contributes its route as a site for each key.
+            .SelectMany(f => f.BoundActions.Select(a => (Value: a, Site: $"{ActionEnforcementSites.RoutePrefix}{f.SiteKey}")))
             .Distinct()
             .OrderBy(x => x.Value.ToWire(), StringComparer.Ordinal)
             .ThenBy(x => x.Site, StringComparer.Ordinal)
@@ -166,9 +172,11 @@ public class ActionEnforcementSitesTests
         // sites for rows that have none.
         var withSites = ActionCatalog.All.Count(d => Live.For(d.Key).Count > 0);
 
-        withSites.Should().Be(21,
-            "21 catalog rows are bound: the 17 mediation effects and the 4 mentorship effects. "
-            + "Every other row reports an empty array and MUST render as 'not enforced anywhere yet'.");
+        withSites.Should().Be(23,
+            "23 catalog rows are bound (Story 43-12: 21 → 23): the 19 mediation effects (the merge "
+            + "trio git.merge.{dev,qa,main} replaced the coarse merge, +2) and the 4 mentorship "
+            + "effects. Every other row reports an empty array and MUST render as 'not enforced "
+            + "anywhere yet'.");
 
         ActionCatalog.All.Count.Should().BeGreaterThan(withSites * 5,
             "the governed share is a small minority of the catalog. That is the fact AC9 exists to "
@@ -261,10 +269,10 @@ public class ActionEnforcementSitesTests
             .WhoseValue.Should().ContainSingle()
             .Which.Should().Be("method: Tamma.Activities.LlmCall.TammaApiClient.CallLlmAsync");
 
-        sites.Should().HaveCount(17,
-            "with no endpoints at all, the ONLY sites are the 17 [PerformsEffect] methods — this is "
-            + "the method plane §A2 said enforcementSites could not enumerate while the mapping "
-            + "lived in a test-side table");
+        sites.Should().HaveCount(19,
+            "with no endpoints at all, the ONLY sites are the [PerformsEffect] methods. Story 43-12: "
+            + "17 → 19 because MergePullRequestAsync now carries three attributes (git.merge.{dev,qa,"
+            + "main}) — one method, three effect KEYS — so the distinct-key count is 19.");
     }
 
     [Test]

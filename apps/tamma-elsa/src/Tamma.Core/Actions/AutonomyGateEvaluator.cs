@@ -643,6 +643,94 @@ public static class AutonomyGateEvaluator
     }
 
     /// <summary>
+    /// Story 43-15 (43-11 Amendment 2-E, closes OQ6) — the effective threshold
+    /// the ladder would resolve to <b>WITHOUT the principal's action-scope
+    /// row</b>: the level-ownership predicate and the <c>PUT …/threshold</c>
+    /// 409 key on THIS value, never on the shipped level alone. Composition
+    /// mirrors <see cref="ResolveEffectiveMinAutonomy"/> exactly, minus one
+    /// term — the principal ACTION row is dropped:
+    /// <list type="number">
+    /// <item>principal GROUP row <c>??</c> shipped default;</item>
+    /// <item>platform ceiling (action <b>and</b> group rows — the ceiling is
+    /// NOT a toggle and stays in) by <c>max()</c>;</item>
+    /// <item>the legacy always-escalate floor by <c>max()</c>, via the same
+    /// internal <see cref="LegacyAlwaysEscalates"/> the gate uses.</item>
+    /// </list>
+    ///
+    /// <para><b>Why the action row is dropped and the group row is not:</b> a
+    /// per-action toggle is the thing whose ownership is in question — "is this
+    /// action ALREADY automated at the dial by something OTHER than the
+    /// principal's own action row?". A group row lowering a whole group below
+    /// the dial DOES already automate its members, so it makes them level-owned
+    /// (409 on the per-action toggle) — that is the group-row bypass Amendment
+    /// 2-E verified, closed here rather than documented. Symmetrically a
+    /// ceiling/floor holding a below-dial action shut raises the resolution
+    /// above the dial, so the action is NOT level-owned and stays editable.</para>
+    ///
+    /// <para><b>F6:</b> a non-authoritative snapshot fails CLOSED to
+    /// <see cref="AutonomyDial.AlwaysHuman"/> / <see cref="ActionAssignmentSource.Unavailable"/>
+    /// — an unread table cannot testify that no ceiling/group row exists. A null
+    /// <paramref name="baseRules"/> (the base-rules read FAILED) likewise cannot
+    /// rule out a legacy floor, so it also fails closed — mirroring
+    /// <c>Evaluate</c>'s <c>:339-349</c> branch.</para>
+    /// </summary>
+    public static (int EffectiveMinAutonomy, ActionAssignmentSource Source)
+        ResolveLadderWithoutActionRow(
+            ActionDescriptor descriptor,
+            GovernancePolicySnapshot snapshot,
+            ResolvedAcceptanceRules? baseRules)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        // Fail closed on an unreadable snapshot, exactly like
+        // ResolveEffectiveMinAutonomy (:612-617) — ignorance is not absence.
+        if (!snapshot.IsAuthoritative)
+        {
+            return (AutonomyDial.AlwaysHuman, ActionAssignmentSource.Unavailable);
+        }
+
+        var actionWire = descriptor.Key.ToWire();
+        var groupWire = descriptor.Group.ToWire();
+
+        var principalGroup = Row(snapshot.PrincipalGroupRows, groupWire);
+        var platformAction = Row(snapshot.PlatformActionRows, actionWire);
+        var platformGroup = Row(snapshot.PlatformGroupRows, groupWire);
+
+        // Principal ladder WITHOUT the action row: group ?? shipped default.
+        var (effectiveMin, source) =
+            principalGroup?.MinAutonomy is int pg
+                ? (pg, ActionAssignmentSource.GroupOverride)
+                : (descriptor.DefaultMinAutonomy, ActionAssignmentSource.SystemDefault);
+
+        // Platform ceiling: action → group, composes by max() (can only raise).
+        var ceiling = platformAction?.MinAutonomy ?? platformGroup?.MinAutonomy;
+        if (ceiling is int c && c > effectiveMin)
+        {
+            (effectiveMin, source) = (c, ActionAssignmentSource.PlatformCeiling);
+        }
+
+        // Legacy always-escalate floor. A null baseRules means the read FAILED
+        // (F6) — the floor cannot be ruled out, so fail closed. A non-null
+        // baseRules with no matching class contributes nothing.
+        if (baseRules is null)
+        {
+            if (AutonomyDial.AlwaysHuman > effectiveMin)
+            {
+                return (AutonomyDial.AlwaysHuman, ActionAssignmentSource.Unavailable);
+            }
+        }
+        else if (LegacyAlwaysEscalates(descriptor.Key, baseRules.Rules)
+            && AutonomyDial.AlwaysHuman > effectiveMin)
+        {
+            (effectiveMin, source) =
+                (AutonomyDial.AlwaysHuman, ActionAssignmentSource.AlwaysEscalateLegacy);
+        }
+
+        return (effectiveMin, source);
+    }
+
+    /// <summary>
     /// The D8 bridge — TRUE iff the principal's legacy
     /// <see cref="AcceptanceRules.AlwaysEscalate"/> list pins this key to a
     /// person, decided by <see cref="AcceptanceGuardrails.TryPreGate"/> itself
