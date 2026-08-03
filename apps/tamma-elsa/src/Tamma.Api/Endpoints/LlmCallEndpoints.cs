@@ -88,7 +88,8 @@ public static class LlmCallEndpoints
         ILoggerFactory loggerFactory,
         CancellationToken ct,
         IAutonomyGate? autonomyGate = null,
-        IGovernancePrincipalResolver? principals = null)
+        IGovernancePrincipalResolver? principals = null,
+        HttpContext? http = null)
     {
         var logger = loggerFactory.CreateLogger("Tamma.Api.Endpoints.LlmCallEndpoints");
 
@@ -98,7 +99,7 @@ public static class LlmCallEndpoints
         // doc for the 44-of-45 no-human-route reason and the deploy
         // double-gating reason. The evaluation is wrapped because an observing
         // seam must not be able to fail a call it is not allowed to block.
-        await ObserveAutonomyAsync(request, autonomyGate, principals, logger, ct)
+        await ObserveAutonomyAsync(request, autonomyGate, principals, http, logger, ct)
             .ConfigureAwait(false);
 
         // Finding C1 — the AUTHORITATIVE tenant is the auth-derived ambient
@@ -231,6 +232,7 @@ public static class LlmCallEndpoints
         LlmCallRequest request,
         IAutonomyGate? gate,
         IGovernancePrincipalResolver? principals,
+        HttpContext? http,
         ILogger logger,
         CancellationToken ct)
     {
@@ -254,7 +256,13 @@ public static class LlmCallEndpoints
                     Role: request.Role,
                     Operation: "POST /api/v1/llm/call",
                     Target: request.Action,
-                    CorrelationId: request.CorrelationId),
+                    CorrelationId: request.CorrelationId,
+                    // Story 43-13 — same resolver, same answer as Seam E: the
+                    // route is EngineServiceOnly, so this resolves Llm
+                    // (fail-closed). With no HttpContext (direct test calls)
+                    // the AutonomyQuery default — also Llm — applies. The
+                    // observe-only posture is unchanged either way.
+                    Caller: http is null ? CallerKind.Llm : CallerKindResolver.Resolve(http)),
                 ct).ConfigureAwait(false);
         }
         // F7 — ONLY a genuine caller abort propagates. A cancellation raised inside

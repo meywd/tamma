@@ -81,7 +81,18 @@ public sealed class ActionGateEventsService
             _ => AllowedType,
         };
 
-        if (type == AllowedType && decision.Source == ActionAssignmentSource.SystemDefault)
+        if (type == AllowedType
+            && decision.Source == ActionAssignmentSource.SystemDefault
+            // Story 43-13 (D9) — ONE carve-out: an allow whose reason is "the
+            // caller is a person" is precisely the caller-kind predicate's work
+            // product and must reach the audit stream even at SystemDefault
+            // source ("passed because human" must be distinguishable from
+            // "automated at level"). Volume risk is bounded: human traffic on
+            // enforced routes is zero today (all 16 are EngineServiceOnly).
+            // Machinery short-circuit allows deliberately keep SystemDefault
+            // source and STAY suppressed — Seam D would otherwise emit one row
+            // per actor per tick.
+            && decision.Reason != AutonomyGateEvaluator.ReasonCallerHuman)
         {
             return; // volume gate — "nothing happened" rows are noise
         }
@@ -109,6 +120,10 @@ public sealed class ActionGateEventsService
                 ? "true" : "false",
             ["breakGlass"] =
                 decision.Source == ActionAssignmentSource.BreakGlass ? "true" : "false",
+            // Story 43-13 AC8 — WHO the decision was taken for, so the trail
+            // distinguishes "passed because human" from "automated at level"
+            // from "machinery, not dial-governed".
+            ["callerKind"] = query.Caller.ToWire(),
         };
         if (query.Role is not null) tags["role"] = query.Role;
         if (query.CorrelationId is not null) tags["correlationId"] = query.CorrelationId;

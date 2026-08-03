@@ -405,19 +405,32 @@ public class AutonomyGateEvaluatorTests
     [Test]
     public void Outcome_IsDeniedNotRequiresHuman_ForNonEscalatableTargets()
     {
-        // Every automation:* member is non-escalatable (Seam D can only deny —
-        // a sweeper cannot wait for a person).
+        // REWRITTEN by Story 43-13: every automation:* member is machinery, so
+        // a stored AlwaysHuman THRESHOLD row is now INERT (the short-circuit
+        // sits at the dial comparison) — the recorded semantic change. The
+        // Denied-not-RequiresHuman collapse this test used to pin on the
+        // healthy path survives on the two levers machinery keeps: the
+        // degraded path (Degraded_DeniesRatherThanEscalates_WhereNoHumanWaitExists)
+        // and enabled=false, asserted here.
         var actor = ActionCatalog.All.First(d => d.Key.Ns == ActionNamespace.Automation);
-        var snapshot = Snapshot(
+
+        var threshold = Snapshot(
             principalActions: new(StringComparer.Ordinal)
             {
                 [actor.Key.ToWire()] = Value(min: AutonomyDial.AlwaysHuman),
             });
+        Evaluate(actor.Key, threshold).Outcome.Should().Be(AutonomyOutcome.Automated,
+            "a threshold row on a machinery target is inert (43-13; the 43-6 API "
+            + "refuses to write one — this pins that a STORED one is ignored too)");
 
-        var decision = Evaluate(actor.Key, snapshot);
-
-        decision.Outcome.Should().Be(AutonomyOutcome.Denied,
-            "there is no human on that path and calling it escalation would be a lie");
+        var disabled = Snapshot(
+            principalActions: new(StringComparer.Ordinal)
+            {
+                [actor.Key.ToWire()] = Value(enabled: false),
+            });
+        Evaluate(actor.Key, disabled).Outcome.Should().Be(AutonomyOutcome.Denied,
+            "there is no human on that path and calling it escalation would be a lie; "
+            + "enabled=false is the admin's off-switch for machinery");
     }
 
     [Test]

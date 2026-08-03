@@ -1,7 +1,18 @@
 # `SingleIssueCycleWorkflow` defer/split branches dispatch `"create-issues"`, a workflow definition that does not exist — both triage outcomes dead-end
 
 - **Date:** 2026-08-02
-- **Status:** OPEN — story filed ([40-8](../../docs/stories/epic-40/story-40-8/40-8-triage-outcome-dead-ends-and-the-create-issues-workflow.md))
+- **Status:** RESOLVED (2026-08-03, Story [40-8](../../docs/stories/epic-40/story-40-8/40-8-triage-outcome-dead-ends-and-the-create-issues-workflow.md)) —
+  `CreateIssuesWorkflow` (`DefinitionId = "create-issues"`, `apps/tamma-elsa/src/Tamma.ElsaServer/Workflows/CreateIssuesWorkflow.cs`)
+  now declares the id both dispatch sites target: it creates one platform issue per draft via the
+  mediated `POST /api/engine/create-issue` route (`CreateIssuesActivity`, activity-side
+  `IIssueCreateClient` seam), always completes (malformed/empty input → 0 created + warning; per-item
+  failure → loud `ISSUES.CREATE_ITEM.FAILED` + Failure outcome routed to Finish), and is idempotent on
+  re-run (platform-side exact-title dedupe — a crash re-run never double-creates). The CLASS is closed
+  by the structural guard `DispatchTargetStructuralTests.EveryDispatchedDefinitionId_ResolvesToADeclaredWorkflow`
+  (`tests/Tamma.Activities.Tests/Workflows/DispatchTargetStructuralTests.cs`), which was run RED against
+  the pre-fix tree on exactly these two sites — the test that would have caught this at introduction.
+  The `MentorshipController` second instance is capture-pinned there on a shrink-only known-mismatch
+  allowlist (the one-word fix is owned by the Api lane; the entry fails the build once fixed until deleted).
 - **Found by:** Story 39-24's acceptance audit (recorded there as "separate defect, file separately",
   `docs/stories/epic-39/story-39-24/39-24-acceptance-step-coverage.md:494-500`) and independently by
   the Epic 41 README's definition-id sweep (`docs/stories/epic-41/README.md:592-597`). Filed during

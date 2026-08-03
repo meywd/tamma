@@ -49,6 +49,7 @@ public class TaskCreationWorkflow : WorkflowBase
 {
     private const string PlanDocumentType = "plan";
     private const string ProducerScope = "task-creation";
+    private const string AmbiguityAssessmentDocumentType = "ambiguity-assessment";
 
     protected override void Build(IWorkflowBuilder builder)
     {
@@ -73,6 +74,10 @@ public class TaskCreationWorkflow : WorkflowBase
         var consumedPlanDocId = builder.WithVariable<string>("ConsumedPlanDocId", "");
         var consumedPlanJson  = builder.WithVariable<string>("ConsumedPlanJson", "");
         var consumedPlanLineage = builder.WithVariable<string>();
+
+        // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
+        var assessmentFound = builder.WithVariable<bool>();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
 
         // ── 39-10 re-entry position (D8) ───────────────────────────────
         var reEntryPositionJson = builder.WithVariable<string>();
@@ -165,34 +170,57 @@ public class TaskCreationWorkflow : WorkflowBase
         };
         fetchConsumedPlan.SetDisplayText("Fetch Accepted System Plan");
 
+        // ── Step 3b (39-25 leg 1): fetch the latest ACCEPTED ambiguity-assessment ──
+        // Read on the BASE issue id (the run's identity — the anchor the assessment is
+        // persisted under), NOT the producer-scoped id the plan lifecycle keys on.
+        // Fail-closed: no accepted assessment ⇒ the ambiguityScore key is OMITTED.
+        var fetchAmbiguityAssessment = new FetchLatestAcceptedDocumentActivity
+        {
+            Id = "FetchAmbiguityAssessment", Name = "Fetch Accepted Ambiguity Assessment",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentTypeKey = new(AmbiguityAssessmentDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Found = new(assessmentFound),
+            DocumentJson = new(assessmentJson),
+        };
+        fetchAmbiguityAssessment.SetDisplayText("Fetch Accepted Ambiguity Assessment");
+
         // ── Step 4: Dispatch the generic document lifecycle ────────────
         var dispatchLifecycle = new DispatchWorkflow
         {
             Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
             WorkflowDefinitionId = new("document-lifecycle"),
-            Input = new(ctx => new Dictionary<string, object>
+            Input = new(ctx =>
             {
-                ["documentType"]          = PlanDocumentType,
-                ["producerRole"]          = AgentRole.SeniorDeveloper.ToWire(),
-                ["producerAction"]        = AgentAction.CreateTasks.ToWire(),
-                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                var input = new Dictionary<string, object>
                 {
-                    ["workItemJson"] = workItemJson.Get(ctx) ?? "",
-                    // D2 — the consumed plan is the runtime carrier; fold it into the DECLARED
-                    // contextFindings variable (create-tasks.md declares {{contextFindings}}),
-                    // NOT a new (render-dropped) key.
-                    ["contextFindings"] = planJson.Get(ctx) ?? "",
-                    ["planJson"]     = planJson.Get(ctx) ?? "",
-                    ["contextIds"]   = contextIds.Get(ctx) ?? "[]",
-                    ["repository"]   = repository.Get(ctx) ?? "",
-                }),
-                // 39-6 D11 — repair/revise notes land in the DECLARED carrier.
-                ["feedbackVariableName"] = "contextFindings",
-                // D2 — producer-scoped issue id isolates this lifecycle's slice from the system plan.
-                ["issueId"]             = scopedIssueId.Get(ctx) ?? "",
-                ["correlationId"]       = scopedIssueId.Get(ctx) ?? "",
-                ["tenantId"]            = tenantId.Get(ctx) ?? "",
-                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                    ["documentType"]          = PlanDocumentType,
+                    ["producerRole"]          = AgentRole.SeniorDeveloper.ToWire(),
+                    ["producerAction"]        = AgentAction.CreateTasks.ToWire(),
+                    ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                    {
+                        ["workItemJson"] = workItemJson.Get(ctx) ?? "",
+                        // D2 — the consumed plan is the runtime carrier; fold it into the DECLARED
+                        // contextFindings variable (create-tasks.md declares {{contextFindings}}),
+                        // NOT a new (render-dropped) key.
+                        ["contextFindings"] = planJson.Get(ctx) ?? "",
+                        ["planJson"]     = planJson.Get(ctx) ?? "",
+                        ["contextIds"]   = contextIds.Get(ctx) ?? "[]",
+                        ["repository"]   = repository.Get(ctx) ?? "",
+                    }),
+                    // 39-6 D11 — repair/revise notes land in the DECLARED carrier.
+                    ["feedbackVariableName"] = "contextFindings",
+                    // D2 — producer-scoped issue id isolates this lifecycle's slice from the system plan.
+                    ["issueId"]             = scopedIssueId.Get(ctx) ?? "",
+                    ["correlationId"]       = scopedIssueId.Get(ctx) ?? "",
+                    ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                    ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                };
+                // 39-25 — thread the accepted assessment's score; ABSENT when none (null stays null).
+                if (LifecycleBindingHelper.TryReadAssessmentScore(
+                        assessmentFound.Get(ctx), assessmentJson.Get(ctx)) is double ambiguityScore)
+                    input["ambiguityScore"] = ambiguityScore;
+                return input;
             }),
             WaitForCompletion = new(true),
             Result = new(lifecycleResult),
@@ -248,7 +276,7 @@ public class TaskCreationWorkflow : WorkflowBase
             Activities =
             {
                 readInputs, computeReEntry, readPositionStage, freshRun,
-                fetchConsumedPlan, dispatchLifecycle, readLifecycleExit, exposeOutput,
+                fetchConsumedPlan, fetchAmbiguityAssessment, dispatchLifecycle, readLifecycleExit, exposeOutput,
             },
             Connections =
             {
@@ -257,8 +285,11 @@ public class TaskCreationWorkflow : WorkflowBase
                 new(readPositionStage, freshRun),
 
                 new(new FlowEndpoint(freshRun, "True"),  new FlowEndpoint(fetchConsumedPlan)),
-                new(fetchConsumedPlan, dispatchLifecycle),
-                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(dispatchLifecycle)),
+                // 39-25 — the ambiguity fetch is the SINGLE predecessor of the dispatch,
+                // so it runs on every path that actually dispatches (fresh + re-entry).
+                new(fetchConsumedPlan, fetchAmbiguityAssessment),
+                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(fetchAmbiguityAssessment)),
+                new(fetchAmbiguityAssessment, dispatchLifecycle),
 
                 new(dispatchLifecycle, readLifecycleExit),
                 new(readLifecycleExit, exposeOutput),

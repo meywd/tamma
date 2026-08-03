@@ -127,7 +127,15 @@ public sealed class BackgroundActionGate : IBackgroundActionGate
                     // because an automation target is never escalatable, but the
                     // flag states the seam's capability rather than leaving a
                     // future correlation-carrying caller to discover it.
-                    SeamCanBlock: true),
+                    SeamCanBlock: true,
+                    // Story 43-13 AC6 — the DECLARATION, not a bypass: this is
+                    // the ONE in-process site that may say Machinery (it has no
+                    // wire spelling). The dial comparison is skipped for the
+                    // tick, but enabled=false still denies and the fail-closed
+                    // unreadable-policy posture still bites — Seam D keeps its
+                    // Amendment-4 job of denying a background job that would
+                    // execute an un-gated upstream LLM decision.
+                    Caller: CallerKind.Machinery),
                 deadline.Token).ConfigureAwait(false);
 
             return Apply(decision, actor, tenantId);

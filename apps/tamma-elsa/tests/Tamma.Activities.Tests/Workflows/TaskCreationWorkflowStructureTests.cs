@@ -90,8 +90,10 @@ public class TaskCreationWorkflowStructureTests
     public void Workflow_CarriesTheReEntryAndConsumedPlanFetchNodes()
     {
         AllActivities().OfType<ComputeReEntryPositionActivity>().Should().ContainSingle();
-        AllActivities().OfType<FetchLatestAcceptedDocumentActivity>().Should().ContainSingle(
-            "the consumed system plan is read via the store read seam for lineage (D2/D8)");
+        AllActivities().OfType<FetchLatestAcceptedDocumentActivity>().Select(a => a.Id).OrderBy(x => x)
+            .Should().BeEquivalentTo(new[] { "FetchAmbiguityAssessment", "FetchConsumedPlan" },
+                "the consumed system plan is read via the store read seam for lineage (D2/D8), and " +
+                "39-25 adds the accepted ambiguity-assessment fetch that threads leg 1");
     }
 
     [Test]

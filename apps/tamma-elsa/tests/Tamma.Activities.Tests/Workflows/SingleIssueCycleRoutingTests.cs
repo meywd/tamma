@@ -114,6 +114,41 @@ public class SingleIssueCycleRoutingTests
         hasConnection.Should().BeTrue("ReportSplit should connect to Finish");
     }
 
+    // ================================================================
+    // Story 40-8 (AC5, D6) — the defer/split dispatches must thread tenantId
+    // into the create-issues child so its drained ISSUES.CREATE* events are
+    // tenant-tagged (EventPersistenceMiddleware.ResolveTenantId reads the
+    // child's TenantId workflow variable, which the child fills from this input).
+    // ================================================================
+
+    [Test]
+    public void DeferDispatch_CarriesTenantIdInput()
+    {
+        var input = TaxonomyDriftBuildTests.MaterializeDispatchInput(
+            nameof(SingleIssueCycleWorkflow), "CreateDeferredIssues");
+
+        input.Should().NotBeNull("the CreateDeferredIssues dispatch Input must materialise");
+        input!.Keys.Should().Contain("tenantId",
+            "the Defer branch must pass tenantId to create-issues, or the child's audit events " +
+            "drain tenant-unscoped (40-8 AC5)");
+        input.Keys.Should().Contain("repository").And.Contain("issuesJson",
+            "the existing defer payload shape must be preserved");
+    }
+
+    [Test]
+    public void SplitDispatch_CarriesTenantIdInput()
+    {
+        var input = TaxonomyDriftBuildTests.MaterializeDispatchInput(
+            nameof(SingleIssueCycleWorkflow), "CreateSplitIssues");
+
+        input.Should().NotBeNull("the CreateSplitIssues dispatch Input must materialise");
+        input!.Keys.Should().Contain("tenantId",
+            "the Split branch must pass tenantId to create-issues, or the child's audit events " +
+            "drain tenant-unscoped (40-8 AC5)");
+        input.Keys.Should().Contain("repository").And.Contain("issuesJson",
+            "the existing split payload shape must be preserved");
+    }
+
     [Test]
     public void NeedsHumanPath_ConnectsTo_ReportNeedsHuman()
     {

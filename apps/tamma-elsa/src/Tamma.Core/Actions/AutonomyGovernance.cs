@@ -296,6 +296,17 @@ public sealed record BreakGlassState(
 /// <c>RequiresHuman</c> — the fail-CLOSED direction. The opposite default would
 /// make every future observe-only caller burn grants by omission.</para>
 /// </param>
+/// <param name="Caller">
+/// Story 43-13 (43-11 Amendment 4) — WHO is asking. <b>Defaults to
+/// <see cref="CallerKind.Llm"/>, and the default IS the design (AC3,
+/// fail-closed):</b> a caller that says nothing is treated as the model acting,
+/// so "forgot to declare" resolves to the gated path. Set
+/// <see cref="CallerKind.Human"/> only from the single resolver reading the
+/// typed auth principal (<c>CallerKindResolver</c>, Tamma.Api);
+/// <see cref="CallerKind.Machinery"/> may ONLY be set by in-process declaration
+/// (Seam D's <c>BackgroundActionGate</c>) — it has no wire spelling and must
+/// never be derivable from request state.
+/// </param>
 public sealed record AutonomyQuery(
     ActionKey Action,
     GovernancePrincipal Principal,
@@ -303,7 +314,8 @@ public sealed record AutonomyQuery(
     string? Operation = null,
     string? Target = null,
     string? CorrelationId = null,
-    bool SeamCanBlock = false);
+    bool SeamCanBlock = false,
+    CallerKind Caller = CallerKind.Llm);
 
 /// <summary>
 /// One gate decision with every evaluated policy input, for audit tags and for

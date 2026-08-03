@@ -40,6 +40,7 @@ public class DebugDiagnosisWorkflow : WorkflowBase
 {
     public const string DebugDiagnosisDefinitionId = "debug-diagnosis";
     private const string DiagnosisDocumentType = "diagnosis";
+    private const string AmbiguityAssessmentDocumentType = "ambiguity-assessment";
 
     protected override void Build(IWorkflowBuilder builder)
     {
@@ -61,6 +62,10 @@ public class DebugDiagnosisWorkflow : WorkflowBase
         var supersedesDocId = builder.WithVariable<string>("SupersedesDocumentId", "");
         var tenantId        = builder.WithVariable<string>("TenantId", "");
         var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
+
+        // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
+        var assessmentFound = builder.WithVariable<bool>();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
 
         // ── 39-10 re-entry position (D8) ───────────────────────────────
         var reEntryPositionJson = builder.WithVariable<string>();
@@ -115,33 +120,55 @@ public class DebugDiagnosisWorkflow : WorkflowBase
         };
         computeReEntry.SetDisplayText("Compute Re-Entry Position");
 
+        // ── Story 39-25 (leg 1): fetch the latest ACCEPTED ambiguity-assessment ──
+        // Fail-closed: no accepted assessment for this run's anchor ⇒ Found=false ⇒ the
+        // ambiguityScore dispatch key below is OMITTED (never a fabricated 0.0).
+        var fetchAmbiguityAssessment = new FetchLatestAcceptedDocumentActivity
+        {
+            Id = "FetchAmbiguityAssessment", Name = "Fetch Accepted Ambiguity Assessment",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentTypeKey = new(AmbiguityAssessmentDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Found = new(assessmentFound),
+            DocumentJson = new(assessmentJson),
+        };
+        fetchAmbiguityAssessment.SetDisplayText("Fetch Accepted Ambiguity Assessment");
+
         // ── Step 3: Dispatch the generic document lifecycle ────────────
         var dispatchLifecycle = new DispatchWorkflow
         {
             Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
             WorkflowDefinitionId = new("document-lifecycle"),
-            Input = new(ctx => new Dictionary<string, object>
+            Input = new(ctx =>
             {
-                ["documentType"]          = DiagnosisDocumentType,
-                ["producerRole"]          = AgentRole.SeniorDeveloper.ToWire(),
-                ["producerAction"]        = AgentAction.DebugRootcause.ToWire(),
-                // Fold the debug context into the debug-rootcause cell's DECLARED variables
-                // (errorContext / stackTrace / relevantCode / recentChanges / conventions) —
-                // an undeclared key is silently dropped at render (the render-drop lesson).
-                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                var input = new Dictionary<string, object>
                 {
-                    ["errorContext"]  = errorContext.Get(ctx) ?? "",
-                    ["stackTrace"]    = FoldStackTrace(testContext.Get(ctx), reproContext.Get(ctx)),
-                    ["relevantCode"]  = codeContext.Get(ctx) ?? "",
-                    ["recentChanges"] = FoldRecentChanges(gitContext.Get(ctx), previousContext.Get(ctx), supersedesDocId.Get(ctx)),
-                    ["conventions"]   = "",
-                }),
-                // Repair/revise notes land in the DECLARED errorContext carrier (39-6 D11).
-                ["feedbackVariableName"] = "errorContext",
-                ["issueId"]             = issueId.Get(ctx) ?? "",
-                ["correlationId"]       = issueId.Get(ctx) ?? "",
-                ["tenantId"]            = tenantId.Get(ctx) ?? "",
-                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                    ["documentType"]          = DiagnosisDocumentType,
+                    ["producerRole"]          = AgentRole.SeniorDeveloper.ToWire(),
+                    ["producerAction"]        = AgentAction.DebugRootcause.ToWire(),
+                    // Fold the debug context into the debug-rootcause cell's DECLARED variables
+                    // (errorContext / stackTrace / relevantCode / recentChanges / conventions) —
+                    // an undeclared key is silently dropped at render (the render-drop lesson).
+                    ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                    {
+                        ["errorContext"]  = errorContext.Get(ctx) ?? "",
+                        ["stackTrace"]    = FoldStackTrace(testContext.Get(ctx), reproContext.Get(ctx)),
+                        ["relevantCode"]  = codeContext.Get(ctx) ?? "",
+                        ["recentChanges"] = FoldRecentChanges(gitContext.Get(ctx), previousContext.Get(ctx), supersedesDocId.Get(ctx)),
+                        ["conventions"]   = "",
+                    }),
+                    // Repair/revise notes land in the DECLARED errorContext carrier (39-6 D11).
+                    ["feedbackVariableName"] = "errorContext",
+                    ["issueId"]             = issueId.Get(ctx) ?? "",
+                    ["correlationId"]       = issueId.Get(ctx) ?? "",
+                    ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                    ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                };
+                // 39-25 — thread the accepted assessment's score; ABSENT when none (null stays null).
+                if (LifecycleBindingHelper.TryReadAssessmentScore(
+                        assessmentFound.Get(ctx), assessmentJson.Get(ctx)) is double ambiguityScore)
+                    input["ambiguityScore"] = ambiguityScore;
+                return input;
             }),
             WaitForCompletion = new(true),
             Result = new(lifecycleResult),
@@ -193,12 +220,14 @@ public class DebugDiagnosisWorkflow : WorkflowBase
             Start = readInputs,
             Activities =
             {
-                readInputs, computeReEntry, dispatchLifecycle, readLifecycleExit, exposeOutput,
+                readInputs, computeReEntry, fetchAmbiguityAssessment, dispatchLifecycle, readLifecycleExit, exposeOutput,
             },
             Connections =
             {
                 new(readInputs, computeReEntry),
-                new(computeReEntry, dispatchLifecycle),
+                // 39-25 — the ambiguity fetch is the single predecessor of the dispatch.
+                new(computeReEntry, fetchAmbiguityAssessment),
+                new(fetchAmbiguityAssessment, dispatchLifecycle),
                 new(dispatchLifecycle, readLifecycleExit),
                 new(readLifecycleExit, exposeOutput),
             }

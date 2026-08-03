@@ -41,6 +41,7 @@ public class DesignProposalWorkflow : WorkflowBase
 {
     private const string DesignDocumentType = "design";
     private const string DesignDeliveryDefinitionId = "design-proposal-delivery";
+    private const string AmbiguityAssessmentDocumentType = "ambiguity-assessment";
 
     protected override void Build(IWorkflowBuilder builder)
     {
@@ -59,6 +60,10 @@ public class DesignProposalWorkflow : WorkflowBase
         var conventions  = builder.WithVariable<string>();
         var tenantId     = builder.WithVariable<string>("TenantId", "");
         var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
+
+        // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
+        var assessmentFound = builder.WithVariable<bool>();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
 
         // ── 39-10 re-entry position ────────────────────────────────────
         var reEntryPositionJson = builder.WithVariable<string>();
@@ -133,35 +138,57 @@ public class DesignProposalWorkflow : WorkflowBase
         };
         readPositionStage.SetDisplayText("Read Position Stage");
 
+        // ── Story 39-25 (leg 1): fetch the latest ACCEPTED ambiguity-assessment ──
+        // Fail-closed: no accepted assessment for this run's anchor ⇒ Found=false ⇒ the
+        // ambiguityScore dispatch key below is OMITTED (never a fabricated 0.0).
+        var fetchAmbiguityAssessment = new FetchLatestAcceptedDocumentActivity
+        {
+            Id = "FetchAmbiguityAssessment", Name = "Fetch Accepted Ambiguity Assessment",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentTypeKey = new(AmbiguityAssessmentDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Found = new(assessmentFound),
+            DocumentJson = new(assessmentJson),
+        };
+        fetchAmbiguityAssessment.SetDisplayText("Fetch Accepted Ambiguity Assessment");
+
         // ── Step 3: Dispatch the generic document lifecycle ────────────
         var dispatchLifecycle = new DispatchWorkflow
         {
             Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
             WorkflowDefinitionId = new("document-lifecycle"),
-            Input = new(ctx => new Dictionary<string, object>
+            Input = new(ctx =>
             {
-                ["documentType"]          = DesignDocumentType,
-                ["producerRole"]          = AgentRole.Architect.ToWire(),
-                ["producerAction"]        = AgentAction.ProposeDesign.ToWire(),
-                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                var input = new Dictionary<string, object>
                 {
-                    ["workItemJson"]    = requirement.Get(ctx) ?? "",
-                    ["contextFindings"] = constraints.Get(ctx) ?? "",
-                    ["repository"]      = repository.Get(ctx) ?? "",
-                    ["conventions"]     = conventions.Get(ctx) ?? "",
-                }),
-                ["issueId"]             = issueId.Get(ctx) ?? "",
-                ["correlationId"]       = issueId.Get(ctx) ?? "",
-                // Thread the binding's sessionId as the lifecycle decision-session id so the
-                // DesignResumeEndpoint adapter resolves the same accept-gate bookmark (D4).
-                ["sessionId"]           = sessionId.Get(ctx),
-                ["tenantId"]            = tenantId.Get(ctx) ?? "",
-                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
-                // Pre-ACCEPT delivery hook (D5): post the proposal to the issue before the human
-                // decides, emitting DESIGN.PROPOSAL.GENERATED/DELIVERED via the delivery workflow.
-                ["deliveryWorkflowDefinitionId"] = DesignDeliveryDefinitionId,
-                ["repository"]          = repository.Get(ctx) ?? "",
-                ["issueNumber"]         = issueNumber.Get(ctx),
+                    ["documentType"]          = DesignDocumentType,
+                    ["producerRole"]          = AgentRole.Architect.ToWire(),
+                    ["producerAction"]        = AgentAction.ProposeDesign.ToWire(),
+                    ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                    {
+                        ["workItemJson"]    = requirement.Get(ctx) ?? "",
+                        ["contextFindings"] = constraints.Get(ctx) ?? "",
+                        ["repository"]      = repository.Get(ctx) ?? "",
+                        ["conventions"]     = conventions.Get(ctx) ?? "",
+                    }),
+                    ["issueId"]             = issueId.Get(ctx) ?? "",
+                    ["correlationId"]       = issueId.Get(ctx) ?? "",
+                    // Thread the binding's sessionId as the lifecycle decision-session id so the
+                    // DesignResumeEndpoint adapter resolves the same accept-gate bookmark (D4).
+                    ["sessionId"]           = sessionId.Get(ctx),
+                    ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                    ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                    // Pre-ACCEPT delivery hook (D5): post the proposal to the issue before the human
+                    // decides, emitting DESIGN.PROPOSAL.GENERATED/DELIVERED via the delivery workflow.
+                    ["deliveryWorkflowDefinitionId"] = DesignDeliveryDefinitionId,
+                    ["repository"]          = repository.Get(ctx) ?? "",
+                    ["issueNumber"]         = issueNumber.Get(ctx),
+                };
+                // 39-25 — thread the accepted assessment's score; ABSENT when none (null stays null).
+                if (LifecycleBindingHelper.TryReadAssessmentScore(
+                        assessmentFound.Get(ctx), assessmentJson.Get(ctx)) is double ambiguityScore)
+                    input["ambiguityScore"] = ambiguityScore;
+                return input;
             }),
             WaitForCompletion = new(true),
             Result = new(lifecycleResult),
@@ -263,7 +290,7 @@ public class DesignProposalWorkflow : WorkflowBase
             Activities =
             {
                 readInputs, computeReEntry, readPositionStage,
-                dispatchLifecycle, readLifecycleExit,
+                fetchAmbiguityAssessment, dispatchLifecycle, readLifecycleExit,
                 acceptedGate, rejectedGate, emitApproved, emitRejected, emitFailed,
                 exposeOutput,
             },
@@ -271,7 +298,9 @@ public class DesignProposalWorkflow : WorkflowBase
             {
                 new(readInputs, computeReEntry),
                 new(computeReEntry, readPositionStage),
-                new(readPositionStage, dispatchLifecycle),
+                // 39-25 — the ambiguity fetch is the single predecessor of the dispatch.
+                new(readPositionStage, fetchAmbiguityAssessment),
+                new(fetchAmbiguityAssessment, dispatchLifecycle),
 
                 new(dispatchLifecycle, readLifecycleExit),
                 new(readLifecycleExit, acceptedGate),

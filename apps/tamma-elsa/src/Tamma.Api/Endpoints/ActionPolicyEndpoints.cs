@@ -122,6 +122,11 @@ public static class ActionPolicyEndpoints
 
         var actions = ActionCatalog.All.Select(d =>
         {
+            // Story 43-13 — deliberately on the defaulted Caller (Llm): the
+            // policy view is the LLM-path view by definition — it renders what
+            // the dial would do to the MODEL, which is the only caller the dial
+            // governs (43-11 Amendment 4). Machinery rows short-circuit inside
+            // the evaluator; surfacing that flag on this payload is 43-15's job.
             var decision = AutonomyGateEvaluator.Evaluate(
                 new AutonomyQuery(d.Key, gp), snapshot, baseRules);
             return new
@@ -555,45 +560,47 @@ public static class ActionPolicyEndpoints
                 StringComparer.Ordinal);
 
     /// <summary>
-    /// Adversarial review F5 (2026-07-29): a GROUP threshold write must pass
-    /// the same per-action validation the action route applies to each member
-    /// it will govern. A mid-range value on a group containing
-    /// non-escalatable (<c>automation:*</c>) members would silently behave as
-    /// Deny for them — the exact value the action route 400s. Non-enforceable
-    /// members are exempt: the evaluator never blocks on them, so a group
-    /// threshold cannot harm them (and the secrets group, which contains
-    /// <c>effect:secret.reveal</c>, must stay writable at any legal value).
-    /// Returns the 400 naming every offending member, or null when the write
-    /// is legal for the whole group.
+    /// Story 43-13 D7 — the wire code for a threshold write on a MACHINERY
+    /// target (or a group with nothing but machinery to govern). Distinct from
+    /// <c>ACTION_POLICY.INVALID</c>: the value may be perfectly legal — it is
+    /// the TARGET that the dial does not govern (43-11 Amendment 4).
+    /// </summary>
+    internal const string MachineryNotDialGovernedCode =
+        "ACTION_POLICY.MACHINERY_NOT_DIAL_GOVERNED";
+
+    /// <summary>
+    /// Adversarial review F5 (2026-07-29), REWRITTEN by Story 43-13 (D7): a
+    /// machinery member is provably INERT to a group threshold — the evaluator
+    /// short-circuits it before the dial comparison — so the old rejection of
+    /// mid-range values on groups containing non-escalatable
+    /// (<c>automation:*</c>) members policed rows no threshold can reach any
+    /// more, and is removed: mid-range group writes are legal whenever the
+    /// group has at least one enforceable DIAL member. A group with NO such
+    /// member takes no threshold at all — a 200 that governs nothing is the
+    /// false affordance this epic keeps hunting down. (No shipped group is in
+    /// that state today — even platform-automation carries
+    /// <c>effect:engine.channel-outbox.enqueue</c> and the three
+    /// <c>schedule.*</c> dial rows — so the branch is a guard for a future
+    /// re-partition, pinned by the code rather than reachable data.)
+    /// Returns the 400, or null when the write is legal for the whole group.
     /// </summary>
     private static IResult? InvalidGroupThreshold(ActionGroup group, int minAutonomy)
     {
-        if (minAutonomy == AutonomyDial.Min || minAutonomy == AutonomyDial.AlwaysHuman)
-        {
-            return null; // the two-state values are legal for every member
-        }
-
-        var offenders = ActionCatalog.ByGroup[group]
+        var governable = ActionCatalog.ByGroup[group]
             .Select(k => ActionCatalog.ByKey[k])
-            .Where(d => d.Enforceable && !d.EscalatableToHuman)
-            .Select(d => d.Key.ToWire())
-            .OrderBy(w => w, StringComparer.Ordinal)
-            .ToArray();
-        if (offenders.Length == 0)
+            .Any(d => d.Enforceable && !d.IsMachinery);
+        if (governable)
         {
             return null;
         }
 
         return Results.BadRequest(new
         {
-            error = $"minAutonomy {minAutonomy} is mid-range, and group '{group.ToWire()}' "
-                + "contains member(s) that are not escalatable to a human — a mid-range "
-                + "threshold would silently behave as Deny for: "
-                + string.Join(", ", offenders)
-                + $". Use {AutonomyDial.Min} (automated) or {AutonomyDial.AlwaysHuman} (off), "
-                + "or set per-action thresholds on the escalatable members.",
-            code = "ACTION_POLICY.INVALID",
-            members = offenders,
+            error = $"every enforceable member of group '{group.ToWire()}' is machinery "
+                + "(Story 43-13: deterministic services are never dial-governed), so a "
+                + $"minAutonomy of {minAutonomy} here could govern nothing. Switch an actor "
+                + "off with its per-action enabled=false instead.",
+            code = MachineryNotDialGovernedCode,
         });
     }
 
@@ -602,6 +609,21 @@ public static class ActionPolicyEndpoints
         if (minAutonomy is not int value) return null; // missing-field handled separately
         return descriptor =>
         {
+            // Story 43-13 (D7) — MACHINERY first, for ANY value, and ahead of
+            // the enforceability check (for effect:secret.reveal the machinery
+            // classification is the stronger, newer fact). The evaluator never
+            // resolves a machinery row through the dial, so accepting a
+            // threshold here — even Min, which the old two-state rule allowed —
+            // would store a row that does nothing.
+            if (descriptor.IsMachinery)
+                return Results.BadRequest(new
+                {
+                    error = $"'{descriptor.Key.ToWire()}' is machinery (Story 43-13, 43-11 "
+                        + "Amendment 4): deterministic services and plumbing are never "
+                        + "dial-governed, so no threshold may be assigned. Use enabled=false "
+                        + "to switch the actor off.",
+                    code = MachineryNotDialGovernedCode,
+                });
             if (!AutonomyDial.IsValidThreshold(value))
                 return InvalidThreshold(value);
             if (!descriptor.Enforceable)
@@ -611,17 +633,10 @@ public static class ActionPolicyEndpoints
                         + "can never be enforced and may not be assigned (epic OQ2).",
                     code = "ACTION_POLICY.NOT_ENFORCEABLE",
                 });
-            // automation:* targets are two-state (a sweeper cannot wait for a
-            // person — Seam D is deny-only): only Min or AlwaysHuman.
-            if (!descriptor.EscalatableToHuman
-                && value != AutonomyDial.Min && value != AutonomyDial.AlwaysHuman)
-                return Results.BadRequest(new
-                {
-                    error = $"'{descriptor.Key.ToWire()}' is not escalatable to a human; a "
-                        + $"mid-range threshold would silently behave as Deny. Use "
-                        + $"{AutonomyDial.Min} (automated) or {AutonomyDial.AlwaysHuman} (off).",
-                    code = "ACTION_POLICY.INVALID",
-                });
+            // The old two-state (Min/AlwaysHuman) rule for non-escalatable
+            // targets is GONE (43-13 AC5): every EscalatableToHuman=false row
+            // is an automation:* row and every one is machinery, so the branch
+            // above subsumes it entirely.
             return null;
         };
     }

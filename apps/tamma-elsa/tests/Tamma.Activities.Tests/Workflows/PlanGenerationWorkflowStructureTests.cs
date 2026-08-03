@@ -96,8 +96,10 @@ public class PlanGenerationWorkflowStructureTests
     public void Workflow_CarriesTheReEntryFetchAndStoreNodes()
     {
         AllActivities().OfType<ComputeReEntryPositionActivity>().Should().ContainSingle();
-        AllActivities().OfType<FetchLatestAcceptedDocumentActivity>().Should().ContainSingle(
-            "the consumed decomposition is read via the 39-14 store read seam (D4/D8)");
+        AllActivities().OfType<FetchLatestAcceptedDocumentActivity>().Select(a => a.Id).OrderBy(x => x)
+            .Should().BeEquivalentTo(new[] { "FetchAmbiguityAssessment", "FetchDecomposition" },
+                "the consumed decomposition is read via the 39-14 store read seam (D4/D8), and 39-25 " +
+                "adds the accepted ambiguity-assessment fetch that threads leg 1");
         AllActivities().OfType<StoreRoleFindingActivity>().Should().ContainSingle(
             "one aggregate-review store keeps the CONTEXT.STORE_ROLE.* family alive (D5)");
     }

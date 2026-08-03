@@ -246,10 +246,21 @@ public class BacklogPrioritizationWorkflowStructureTests
         loops[0].Id.Should().Be("GatherEvidence");
 
         var inLoop = StructureWalk.All(loops[0]).OfType<FetchLatestAcceptedDocumentActivity>().ToList();
-        var everywhere = AllActivities().OfType<FetchLatestAcceptedDocumentActivity>().ToList();
+        // 39-25 — the ONE run-scoped ambiguity-assessment fetch (keyed on the backlog anchor,
+        // not a per-item id) legitimately lives OUTSIDE the loop; every PER-ITEM read must
+        // still be inside it. Filter on the DocumentTypeKey literal to preserve the pin's intent.
+        var everywhere = AllActivities().OfType<FetchLatestAcceptedDocumentActivity>()
+            .Where(f => MaterializeDelegate<string>(
+                ReadExpression(f, nameof(FetchLatestAcceptedDocumentActivity.DocumentTypeKey)))
+                != "ambiguity-assessment")
+            .ToList();
         everywhere.Should().HaveCount(inLoop.Count,
-            "every store read lives INSIDE the bounded loop — an unrolled read outside it is an " +
-            "N-node graph in disguise");
+            "every per-item store read lives INSIDE the bounded loop — an unrolled read outside " +
+            "it is an N-node graph in disguise (the single run-scoped 39-25 ambiguity fetch is " +
+            "the only permitted outside read)");
+        AllActivities().OfType<FetchLatestAcceptedDocumentActivity>()
+            .Should().HaveCount(inLoop.Count + 1,
+                "exactly one fetch — the 39-25 run-scoped ambiguity-assessment read — sits outside the loop");
     }
 
     [Test]

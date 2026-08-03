@@ -17,6 +17,16 @@ namespace Tamma.Api.Services.Agents;
 /// lie (epic README, Seam B). A denial becomes a rejected-tool-call entry that
 /// the loop's existing machinery feeds back to the model as a tool result — no
 /// exception, no new plumbing.</para>
+///
+/// <para><b>The caller kind here is STRUCTURALLY <see cref="CallerKind.Llm"/>
+/// (Story 43-13 D10)</b> — this seam takes no <see cref="CallerKind"/> and never
+/// calls <c>AutonomyGateEvaluator.Evaluate</c>: its input is a MODEL-EMITTED
+/// tool call by construction (<c>InlineToolLoopRunner</c> dispatches what the
+/// model asked for), which is stronger than a passed flag — a constant plumbed
+/// through this sync interface could be mis-set; the input's provenance cannot.
+/// The threshold it reads (<c>ResolveEffectiveMinAutonomy</c>) is therefore
+/// always the LLM-path view, which is exactly the view 43-11's dial table
+/// assigns. Pinned by <c>CallerKindResidencyTests</c>.</para>
 /// </summary>
 public interface IToolLoopAutonomyGate
 {

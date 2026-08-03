@@ -56,6 +56,7 @@ public static class GovernanceEvaluateEndpoints
         IAutonomyGate gate,
         IGovernancePrincipalResolver principals,
         IActionAuthorizationRequests authorizations,
+        HttpContext http,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -96,7 +97,14 @@ public static class GovernanceEvaluateEndpoints
                     // F4 — the engine WAITS on this answer (that is the whole
                     // point of the mediation route), so this seam blocks and may
                     // spend a single-use grant.
-                    SeamCanBlock: true),
+                    SeamCanBlock: true,
+                    // Story 43-13 — the route is EngineServiceOnly, so the only
+                    // principal that can reach it is a ServiceAuthPrincipal and
+                    // the resolver answers Llm (fail-closed: deterministic
+                    // workflow steps share TammaApiClient with LLM steps and
+                    // cannot be told apart). Resolved rather than hard-coded so
+                    // the ONE computation site stays single-sourced (AC1).
+                    Caller: CallerKindResolver.Resolve(http)),
                 deadline.Token).ConfigureAwait(false);
         }
         catch (AutonomyGateDecisionUnrecordedException unrecorded)

@@ -104,8 +104,10 @@ public class AdrAuthoringWorkflowStructureTests
     {
         AllActivities().OfType<ComputeReEntryPositionActivity>().Should().ContainSingle();
         AllActivities().OfType<FetchLatestAcceptedDocumentActivity>().Select(a => a.Id).OrderBy(x => x)
-            .Should().BeEquivalentTo(new[] { "FetchConsumedDesign", "FetchConsumedFindings" },
-                "D2 — the ADR is seeded from the accepted Design (41-10 / design-proposal) and Findings");
+            .Should().BeEquivalentTo(
+                new[] { "FetchAmbiguityAssessment", "FetchConsumedDesign", "FetchConsumedFindings" },
+                "D2 — the ADR is seeded from the accepted Design (41-10 / design-proposal) and Findings; " +
+                "39-25 adds the accepted ambiguity-assessment fetch that threads leg 1");
     }
 
     [Test]

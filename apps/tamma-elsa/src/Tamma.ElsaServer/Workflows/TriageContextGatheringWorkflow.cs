@@ -40,6 +40,7 @@ namespace Tamma.ElsaServer.Workflows;
 public class TriageContextGatheringWorkflow : WorkflowBase
 {
     private const string FindingsDocumentType = "findings";
+    private const string AmbiguityAssessmentDocumentType = "ambiguity-assessment";
 
     protected override void Build(IWorkflowBuilder builder)
     {
@@ -61,6 +62,10 @@ public class TriageContextGatheringWorkflow : WorkflowBase
         var reEntryPositionJson = builder.WithVariable<string>();
         var reEntryDocJson = builder.WithVariable<string>();
         var positionStage = builder.WithVariable<string>("PositionStage", "produce");
+
+        // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
+        var assessmentFound = builder.WithVariable<bool>();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
 
         // ── Dispatched lifecycle result + typed exit ───────────────────
         var lifecycleResult = builder.WithVariable<IDictionary<string, object>?>();
@@ -138,28 +143,53 @@ public class TriageContextGatheringWorkflow : WorkflowBase
             _ => TriageContextEvents.Started, repository, itemNumber, tenantId, itemType,
             _ => "", _ => 0);
 
+        // ── Story 39-25 (leg 1): fetch the latest ACCEPTED ambiguity-assessment ──
+        // Fail-closed: no accepted assessment for this run's anchor ⇒ Found=false ⇒ the
+        // ambiguityScore dispatch key below is OMITTED (never a fabricated 0.0).
+        // This binding holds only the triage-context SCOPED anchor (its issueId variable);
+        // an assessment would have to be persisted under that scope to thread. Honest null
+        // in practice; the read stays fail-closed.
+        var fetchAmbiguityAssessment = new FetchLatestAcceptedDocumentActivity
+        {
+            Id = "FetchAmbiguityAssessment", Name = "Fetch Accepted Ambiguity Assessment",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentTypeKey = new(AmbiguityAssessmentDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Found = new(assessmentFound),
+            DocumentJson = new(assessmentJson),
+        };
+        fetchAmbiguityAssessment.SetDisplayText("Fetch Accepted Ambiguity Assessment");
+
         // ── Step 3: Dispatch the generic document lifecycle ────────────
         var dispatchLifecycle = new DispatchWorkflow
         {
             Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
             WorkflowDefinitionId = new("document-lifecycle"),
-            Input = new(ctx => new Dictionary<string, object>
+            Input = new(ctx =>
             {
-                ["documentType"] = FindingsDocumentType,
-                ["producerRole"] = AgentRole.Developer.ToWire(),
-                ["producerAction"] = AgentAction.TriageContextScan.ToWire(),
-                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                var input = new Dictionary<string, object>
                 {
-                    ["workItemJson"] = itemJson.Get(ctx) ?? "",
-                    ["workItemType"] = itemType.Get(ctx) ?? "",
-                    ["previousFindings"] = "{}",
-                    ["repository"] = repository.Get(ctx) ?? "",
-                }),
-                ["feedbackVariableName"] = "previousFindings",
-                ["issueId"] = issueId.Get(ctx) ?? "",
-                ["correlationId"] = issueId.Get(ctx) ?? "",
-                ["tenantId"] = tenantId.Get(ctx) ?? "",
-                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                    ["documentType"] = FindingsDocumentType,
+                    ["producerRole"] = AgentRole.Developer.ToWire(),
+                    ["producerAction"] = AgentAction.TriageContextScan.ToWire(),
+                    ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                    {
+                        ["workItemJson"] = itemJson.Get(ctx) ?? "",
+                        ["workItemType"] = itemType.Get(ctx) ?? "",
+                        ["previousFindings"] = "{}",
+                        ["repository"] = repository.Get(ctx) ?? "",
+                    }),
+                    ["feedbackVariableName"] = "previousFindings",
+                    ["issueId"] = issueId.Get(ctx) ?? "",
+                    ["correlationId"] = issueId.Get(ctx) ?? "",
+                    ["tenantId"] = tenantId.Get(ctx) ?? "",
+                    ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                };
+                // 39-25 — thread the accepted assessment's score; ABSENT when none (null stays null).
+                if (LifecycleBindingHelper.TryReadAssessmentScore(
+                        assessmentFound.Get(ctx), assessmentJson.Get(ctx)) is double ambiguityScore)
+                    input["ambiguityScore"] = ambiguityScore;
+                return input;
             }),
             WaitForCompletion = new(true),
             Result = new(lifecycleResult),
@@ -225,7 +255,7 @@ public class TriageContextGatheringWorkflow : WorkflowBase
             Activities =
             {
                 readInputs, computeReEntry, readPositionStage, freshRun,
-                emitStarted, dispatchLifecycle, readLifecycleExit,
+                emitStarted, fetchAmbiguityAssessment, dispatchLifecycle, readLifecycleExit,
                 lifecycleAcceptedGate, wasCompleteReEntry, emitCompleted, emitFailed,
                 exposeOutput,
             },
@@ -236,8 +266,11 @@ public class TriageContextGatheringWorkflow : WorkflowBase
                 new(readPositionStage, freshRun),
 
                 new(new FlowEndpoint(freshRun, "True"), new FlowEndpoint(emitStarted)),
-                new(emitStarted, dispatchLifecycle),
-                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(dispatchLifecycle)),
+                // 39-25 — the ambiguity fetch is the single predecessor of the dispatch,
+                // so it runs on every path that actually dispatches (fresh + re-entry).
+                new(emitStarted, fetchAmbiguityAssessment),
+                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(fetchAmbiguityAssessment)),
+                new(fetchAmbiguityAssessment, dispatchLifecycle),
 
                 new(dispatchLifecycle, readLifecycleExit),
                 new(readLifecycleExit, lifecycleAcceptedGate),

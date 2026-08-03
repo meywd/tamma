@@ -152,8 +152,10 @@ public class AcceptanceCriteriaAuthoringWorkflowStructureTests
             "clause (c) of ResumableStandardStructuralTests — the LatestStateReEntry declaration is " +
             "honoured by a real node, not a hand-rolled guard");
         AllActivities().OfType<FetchLatestAcceptedDocumentActivity>().Select(a => a.Id).OrderBy(x => x)
-            .Should().BeEquivalentTo(new[] { "FetchConsumedClarification", "FetchConsumedFindings" },
-                "D2 — both consumed documents are read through the 39-14 fail-closed store seam");
+            .Should().BeEquivalentTo(
+                new[] { "FetchAmbiguityAssessment", "FetchConsumedClarification", "FetchConsumedFindings" },
+                "D2 — both consumed documents are read through the 39-14 fail-closed store seam; " +
+                "39-25 adds the accepted ambiguity-assessment fetch that threads leg 1");
     }
 
     [Test]

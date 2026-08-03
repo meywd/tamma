@@ -292,27 +292,104 @@ public class ActionPolicyEndpointsTests
     }
 
     [Test]
-    public async Task AutomationTarget_RejectsMidRangeThreshold()
+    public async Task MachineryTarget_RejectsAnyThreshold_NamingTheClassification()
     {
+        // Story 43-13 AC5 — REPLACES AutomationTarget_RejectsMidRangeThreshold:
+        // the old two-state rule (Min/AlwaysHuman legal on automation targets)
+        // is gone, because the evaluator never resolves a machinery row through
+        // the dial — a stored threshold, ANY threshold, would be a row that
+        // does nothing. Red state before 43-13: Min and AlwaysHuman were 200s.
         var user = Guid.NewGuid();
         using var admin = Client(user, "admin");
 
-        var midRange = await admin.PutAsJsonAsync(
-            "/api/actions/policy/actions/automation/channel-outbox-sweeper/threshold",
-            new { minAutonomy = 85 });
-        midRange.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "a sweeper cannot wait for a person — a mid-range threshold would silently "
-            + "behave as Deny while displaying as 'human below level N'");
-
-        (await admin.PutAsJsonAsync(
+        foreach (var value in new[] { AutonomyDial.Min, 85, AutonomyDial.AlwaysHuman })
+        {
+            var response = await admin.PutAsJsonAsync(
                 "/api/actions/policy/actions/automation/channel-outbox-sweeper/threshold",
-                new { minAutonomy = AutonomyDial.AlwaysHuman }))
-            .StatusCode.Should().Be(HttpStatusCode.OK, "the two-state OFF value is legal");
+                new { minAutonomy = value });
+
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+                $"minAutonomy {value}: 'automation:channel-outbox-sweeper' is machinery "
+                + "(43-11 Amendment 4) and the dial does not govern it — enabled=false is "
+                + "the off-switch");
+            (await response.Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("code").GetString()
+                .Should().Be("ACTION_POLICY.MACHINERY_NOT_DIAL_GOVERNED");
+        }
     }
 
     [Test]
-    public async Task NonEnforceableTarget_SecretReveal_RejectsAThresholdWrite()
+    public async Task AnEngineAppendEffect_ThresholdIsAlsoRejected()
     {
+        // The cleanest fail-first case in the story: effect:engine.events.append
+        // is escalatable AND enforceable, so before 43-13 a mid-range write
+        // SUCCEEDED — the plumbing effects were dial rows nobody meant to dial.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        var response = await admin.PutAsJsonAsync(
+            "/api/actions/policy/actions/effect/engine.events.append/threshold",
+            new { minAutonomy = 85 });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "the automatic event flush is plumbing (43-11's machinery inventory) — gating "
+            + "it would break the audit trail, not govern a decision");
+        (await response.Content.ReadFromJsonAsync<JsonElement>())
+            .GetProperty("code").GetString()
+            .Should().Be("ACTION_POLICY.MACHINERY_NOT_DIAL_GOVERNED");
+    }
+
+    [Test]
+    public async Task MachineryTarget_EnabledWrite_StaysLegal()
+    {
+        // PUT …/enabled is untouched at every step (43-13 D7): it is the
+        // admin's ONLY remaining off-switch for a machinery actor.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        (await admin.PutAsJsonAsync(
+                "/api/actions/policy/actions/automation/channel-outbox-sweeper/enabled",
+                new { enabled = false }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        await using var db = Db();
+        db.ActionAssignments.Single(a => a.TargetKey == "automation:channel-outbox-sweeper")
+            .Enabled.Should().BeFalse();
+    }
+
+    [Test]
+    public async Task AMidRangeGroupWrite_IsLegal_WhenTheGroupHasDialMembers()
+    {
+        // Story 43-13 D7 — the group rule rewrite. platform-automation contains
+        // 39 machinery rows AND four dial rows (engine.channel-outbox.enqueue,
+        // schedule.create/update/delete); a group threshold is provably inert
+        // for the machinery members (the evaluator never reads it), so the old
+        // mid-range 400 policed nothing and is removed. Red state before
+        // 43-13: this write was a 400 naming the automation members.
+        var user = Guid.NewGuid();
+        using var admin = Client(user, "admin");
+
+        var response = await admin.PutAsJsonAsync(
+            "/api/actions/policy/groups/platform-automation/threshold",
+            new { minAutonomy = 85 });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "the write legitimately governs the group's dial members");
+
+        await using var db = Db();
+        db.ActionAssignments.Single(a => a.TargetKey == "platform-automation")
+            .MinAutonomy.Should().Be(85);
+    }
+
+    [Test]
+    public async Task SecretReveal_ReportsMachineryNotUnenforceable()
+    {
+        // Story 43-13 D7 precedence pin (formerly
+        // NonEnforceableTarget_SecretReveal_RejectsAThresholdWrite, which
+        // asserted ACTION_POLICY.NOT_ENFORCEABLE): still a 400 — but the
+        // machinery classification is the stronger, newer fact and wins the
+        // error code. The evaluator's not-enforceable carve-out (epic OQ2) is
+        // unchanged; only the API's refusal message moved.
         var user = Guid.NewGuid();
         using var admin = Client(user, "admin");
 
@@ -320,11 +397,10 @@ public class ActionPolicyEndpointsTests
             "/api/actions/policy/actions/effect/secret.reveal/threshold",
             new { minAutonomy = AutonomyDial.AlwaysHuman });
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "reading a secret never requires a human (epic OQ2) — the row is informational "
-            + "and no admin-raised threshold on it may ever be enforced");
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await response.Content.ReadFromJsonAsync<JsonElement>())
-            .GetProperty("code").GetString().Should().Be("ACTION_POLICY.NOT_ENFORCEABLE");
+            .GetProperty("code").GetString()
+            .Should().Be("ACTION_POLICY.MACHINERY_NOT_DIAL_GOVERNED");
     }
 
     // ── Adversarial review F4 — field writes never revert the threshold ────
@@ -406,58 +482,49 @@ public class ActionPolicyEndpointsTests
             "provenance surfaces the pin so an admin can see why the group row lost");
     }
 
-    // ── Adversarial review F5 — group writes validate every member ─────────
+    // ── Group writes: machinery members are inert (43-13 D7 rewrote F5) ────
 
     [Test]
-    public async Task GroupWrite_MidRangeOnAGroupWithNonEscalatableMembers_Is400NamingThem()
+    public async Task GroupWrite_MidRangeOnAGroupWithMachineryMembers_IsLegal_TheyAreInert()
     {
+        // REWRITTEN by Story 43-13 (formerly
+        // GroupWrite_MidRangeOnAGroupWithNonEscalatableMembers_Is400NamingThem,
+        // the F5 pin): the old 400 protected automation:* members from a
+        // mid-range value silently behaving as Deny — but the evaluator now
+        // short-circuits every machinery row BEFORE the dial comparison, so a
+        // group threshold provably cannot reach them and the rejection policed
+        // nothing. The secrets group's two automation members are inert; its
+        // DIAL member (agent-action:audit-secrets) is what the write governs.
         var user = Guid.NewGuid();
-
-        // The offenders, computed from the catalog (the secrets group carries
-        // two automation:* members; its non-enforceable effect:secret.reveal
-        // member is exempt — the evaluator never blocks on it).
-        var expected = Tamma.Core.Actions.ActionCatalog
-            .ByGroup[Tamma.Core.Actions.ActionGroup.Secrets]
-            .Select(k => Tamma.Core.Actions.ActionCatalog.ByKey[k])
-            .Where(d => d.Enforceable && !d.EscalatableToHuman)
-            .Select(d => d.Key.ToWire())
-            .OrderBy(w => w, StringComparer.Ordinal)
-            .ToArray();
-        expected.Should().NotBeEmpty("the probe needs a group with automation members");
 
         using (var admin = Client(user, "admin"))
         {
-            var response = await admin.PutAsJsonAsync(
-                "/api/actions/policy/groups/secrets/threshold", new { minAutonomy = 85 });
-            response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-                "the action route 400s a mid-range threshold on these members — the group "
-                + "route must not smuggle the same value in as a silent Deny");
-            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-            body.GetProperty("code").GetString().Should().Be("ACTION_POLICY.INVALID");
-            body.GetProperty("members").EnumerateArray().Select(m => m.GetString())
-                .Should().BeEquivalentTo(expected, "the 400 names every offending member");
+            (await admin.PutAsJsonAsync(
+                    "/api/actions/policy/groups/secrets/threshold", new { minAutonomy = 85 }))
+                .StatusCode.Should().Be(HttpStatusCode.OK,
+                    "the write governs the group's dial members; the machinery members "
+                    + "never consult it (43-13 AC4)");
 
-            // The two-state values stay legal for the same group…
+            // The two-state values stay legal too…
             (await admin.PutAsJsonAsync(
                     "/api/actions/policy/groups/secrets/threshold",
                     new { minAutonomy = AutonomyDial.AlwaysHuman }))
                 .StatusCode.Should().Be(HttpStatusCode.OK);
 
-            // …and a clean group (no automation members) accepts mid-range.
+            // …and a group with no machinery members is unchanged.
             (await admin.PutAsJsonAsync(
                     "/api/actions/policy/groups/deploy-control/threshold",
                     new { minAutonomy = 85 }))
                 .StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
-        // The ceiling route applies the SAME member validation.
+        // The ceiling route accepts the same write.
         using (var platformAdmin = Client(user, "member", platformRole: "platform_admin"))
         {
-            var ceiling = await platformAdmin.PutAsJsonAsync(
-                "/api/admin/actions/ceiling/groups/secrets/threshold", new { minAutonomy = 85 });
-            ceiling.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-            (await ceiling.Content.ReadFromJsonAsync<JsonElement>())
-                .GetProperty("code").GetString().Should().Be("ACTION_POLICY.INVALID");
+            (await platformAdmin.PutAsJsonAsync(
+                    "/api/admin/actions/ceiling/groups/secrets/threshold",
+                    new { minAutonomy = 85 }))
+                .StatusCode.Should().Be(HttpStatusCode.OK);
         }
     }
 

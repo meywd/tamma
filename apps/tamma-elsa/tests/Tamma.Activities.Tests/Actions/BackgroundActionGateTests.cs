@@ -11,11 +11,13 @@ namespace Tamma.Activities.Tests.Actions;
 /// <summary>
 /// Story 43-9 <b>Seam D</b> (AC9) — the deny-only background gate.
 ///
-/// <para>The other half of AC9 — that the admin API refuses a mid-range threshold
-/// on a non-escalatable <c>automation:*</c> target with <c>ACTION_POLICY.INVALID</c>
-/// — shipped with Story 43-6 and is pinned by
-/// <c>ActionPolicyEndpointsTests.AutomationTarget_RejectsMidRangeThreshold</c>. It
-/// is deliberately not duplicated here.</para>
+/// <para>The other half of AC9 — that the admin API refuses a threshold write on
+/// an <c>automation:*</c> target — shipped with Story 43-6 as a mid-range
+/// <c>ACTION_POLICY.INVALID</c> and was WIDENED by Story 43-13 to ANY value
+/// (<c>ACTION_POLICY.MACHINERY_NOT_DIAL_GOVERNED</c> — every automation row is
+/// machinery and never dial-governed); pinned by
+/// <c>ActionPolicyEndpointsTests.MachineryTarget_RejectsAnyThreshold_NamingTheClassification</c>.
+/// It is deliberately not duplicated here.</para>
 /// </summary>
 [TestFixture]
 public class BackgroundActionGateTests
@@ -93,6 +95,10 @@ public class BackgroundActionGateTests
         mayRun.Should().BeFalse("an admin who switched this actor off must actually stop it");
         inner.Calls.Should().Be(1, "ONE gate call per tick — not per item, not per scope");
         inner.Queries[0].Action.Should().Be(new ActionKey(ActionNamespace.Automation, Actor.ToWire()));
+        inner.Queries[0].Caller.Should().Be(CallerKind.Machinery,
+            "Story 43-13 AC6 — Seam D is the ONE in-process site that declares Machinery "
+            + "(the kind has no wire spelling); before the declaration the query landed on "
+            + "the fail-closed Llm default");
 
         // The audit row is written by the gate itself on the NON-swallowing path
         // (an enforced denial is never swallowed), which is why the helper does

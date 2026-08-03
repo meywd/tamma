@@ -290,7 +290,12 @@ internal static class AutonomyGateEnforcement
                     Target: http.Request.Path.Value,
                     CorrelationId: correlationId,
                     // F4 — Seam C BLOCKS, so it may spend a single-use grant.
-                    SeamCanBlock: true),
+                    SeamCanBlock: true,
+                    // Story 43-13 — WHO is asking, from the ONE resolver: a
+                    // user credential passes ungated (ReasonCallerHuman); the
+                    // engine token and everything not provably human is the
+                    // LLM, fail-closed.
+                    Caller: CallerKindResolver.Resolve(http)),
                 deadline.Token).ConfigureAwait(false);
         }
         catch (AutonomyGateDecisionUnrecordedException unrecorded)

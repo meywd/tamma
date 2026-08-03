@@ -120,6 +120,22 @@ namespace Tamma.Core.Actions;
 /// the old blanket stamp emitted bypass rows for denials the override had never
 /// touched — and, because that append deliberately does not swallow, could fail
 /// the whole evaluation over one.</para>
+///
+/// <para><b>THE DIAL GOVERNS THE LLM, AND NOTHING ELSE (Story 43-13, 43-11
+/// Amendment 4).</b> Three caller kinds (<see cref="CallerKind"/>): a HUMAN is
+/// never gated — the short-circuit sits BEFORE every policy check, because the
+/// dial, the disable, the roles and the fail-closed degradation are all controls
+/// on the SYSTEM's autonomy and none of them may block a person on themselves.
+/// MACHINERY (the 42 <see cref="ActionDescriptor.IsMachinery"/> rows, and any
+/// caller declared <see cref="CallerKind.Machinery"/> in-process) is never
+/// DIAL-gated — the short-circuit sits AT the dial comparison, so
+/// <c>enabled = false</c>, role restrictions and the fail-closed degradation
+/// still deny, and only the threshold ladder's outcome is bypassed. Everything
+/// else — including every engine-token call — is the LLM, by the fail-closed
+/// default on <see cref="AutonomyQuery.Caller"/>, and takes the ordinary dial
+/// path. A stored threshold row on a machinery target is consequently INERT
+/// (and the 43-6 API refuses to write one); the admin's off-switch for a
+/// machinery actor is <c>enabled = false</c>.</para>
 /// </summary>
 public static class AutonomyGateEvaluator
 {
@@ -131,6 +147,29 @@ public static class AutonomyGateEvaluator
     public const string ReasonAutomated = "at-or-above-min-autonomy";
     public const string ReasonAlwaysHuman = "always-human";
     public const string ReasonBelowMinAutonomy = "below-min-autonomy";
+
+    /// <summary>
+    /// Story 43-13 (43-11 Amendment 4) — the caller is a PERSON
+    /// (<see cref="CallerKind.Human"/>). The dial is never consulted: it is a
+    /// control on the SYSTEM's autonomy, and every policy input here (enabled,
+    /// roles, degradation, threshold) is a control on autonomous action, so none
+    /// of them applies to a human acting through their own credential. Ordinary
+    /// RBAC already ran before the gate did.
+    /// </summary>
+    public const string ReasonCallerHuman = "caller-human";
+
+    /// <summary>
+    /// Story 43-13 (43-11 Amendment 4) — the target is deterministic MACHINERY
+    /// (<see cref="ActionDescriptor.IsMachinery"/>) or the caller declared
+    /// itself so in-process (<see cref="CallerKind.Machinery"/>): the
+    /// threshold/dial ladder's OUTCOME is not applied — dial, action/group
+    /// rows, platform ceiling and the AlwaysHuman sentinel are all bypassed,
+    /// which is why a machinery row decides identically at every dial position.
+    /// <c>enabled = false</c> still denies (checked above this short-circuit —
+    /// the admin's only off-switch once thresholds are gone), role restrictions
+    /// still deny, and an unreadable policy input still fails closed.
+    /// </summary>
+    public const string ReasonMachineryNotDialGoverned = "machinery-not-dial-governed";
 
     /// <summary>Fail-closed: the assignment snapshot has never loaded, so the
     /// absence of a ceiling/disable row proves nothing (F6).</summary>
@@ -243,6 +282,23 @@ public static class AutonomyGateEvaluator
                     : ActionAssignmentSource.Unavailable,
                 Enforced: false, Enabled: true, AllowedRoles: null,
                 Reason: ReasonUncatalogued);
+        }
+
+        // ── Story 43-13 (D5) — a HUMAN caller short-circuits BEFORE any policy
+        //    input is consulted. The dial, the enabled off-switch, role
+        //    restrictions and the fail-closed degradation are all controls on
+        //    the SYSTEM's autonomy; Amendment 4's test ("gating a person on
+        //    themselves is absurd") applies to each of them, so a person passes
+        //    even during a control-plane outage. Ordinary RBAC still applies —
+        //    it ran before the gate did. Sited after the uncatalogued branch so
+        //    the decision still carries the descriptor's group/risk.
+        if (query.Caller == CallerKind.Human)
+        {
+            return new AutonomyDecision(
+                AutonomyOutcome.Automated, descriptor.Key, descriptor.Group, descriptor.Risk,
+                dial, AutonomyDial.Min, ActionAssignmentSource.SystemDefault,
+                Enforced: false, Enabled: true, AllowedRoles: null,
+                Reason: ReasonCallerHuman);
         }
 
         var actionWire = descriptor.Key.ToWire();
@@ -406,6 +462,30 @@ public static class AutonomyGateEvaluator
         // successfully-read ladder in the acceptance-rules-degraded case, the
         // shipped default in the snapshot-degraded case (where there are provably
         // no rows). An action pinned above the dial by either is STILL blocked.
+
+        // ── Story 43-13 (D4) — MACHINERY is never dial-governed. Sited AT the
+        //    dial comparison, deliberately: everything above still applies to
+        //    machinery — enabled=false denies (the admin's only off-switch once
+        //    thresholds are gone; 43-11 M3 rule 3 says it is orthogonal to the
+        //    level), role restrictions deny, and F6's fail-closed degradation
+        //    still bites (an unreadable table cannot testify that no disable
+        //    row exists). What is bypassed is the threshold ladder's OUTCOME —
+        //    dial, action/group rows, platform ceiling, the AlwaysHuman
+        //    sentinel — which is exactly "identical decisions at dial 1 and
+        //    dial 100", the pinned proof. Two paths in: the 42 machinery
+        //    descriptor rows (whoever asks), and a caller that declared itself
+        //    Machinery in-process (Seam D's helper; no wire spelling exists).
+        //    SystemDefault source keeps these allows suppressed by the
+        //    `.ALLOWED` volume gate — Seam D would otherwise emit one row per
+        //    actor per tick (D9).
+        if (descriptor.IsMachinery || query.Caller == CallerKind.Machinery)
+        {
+            return new AutonomyDecision(
+                AutonomyOutcome.Automated, descriptor.Key, descriptor.Group, descriptor.Risk,
+                dial, AutonomyDial.Min, ActionAssignmentSource.SystemDefault,
+                Enforced: false, Enabled: enabled, AllowedRoles: allowedRoles,
+                Reason: ReasonMachineryNotDialGoverned);
+        }
 
         // THE v1 dial semantics: automated iff dial >= MinAutonomy.
         // AlwaysHuman is strictly above Max, so it blocks at every valid dial

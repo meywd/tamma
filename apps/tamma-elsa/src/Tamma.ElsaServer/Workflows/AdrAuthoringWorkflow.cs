@@ -62,6 +62,7 @@ public class AdrAuthoringWorkflow : WorkflowBase
     private const string ProseDocumentType = "prose";
     private const string DesignDocumentType = "design";
     private const string FindingsDocumentType = "findings";
+    private const string AmbiguityAssessmentDocumentType = "ambiguity-assessment";
 
     protected override void Build(IWorkflowBuilder builder)
     {
@@ -91,6 +92,10 @@ public class AdrAuthoringWorkflow : WorkflowBase
         var findingsDocId   = builder.WithVariable<string>("FindingsDocId", "");
         var findingsJson    = builder.WithVariable<string>("FindingsJson", "");
         var findingsLineage = builder.WithVariable<string>();
+
+        // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
+        var assessmentFound = builder.WithVariable<bool>();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
 
         // ── 39-10 re-entry position ────────────────────────────────────
         var reEntryPositionJson = builder.WithVariable<string>();
@@ -217,35 +222,59 @@ public class AdrAuthoringWorkflow : WorkflowBase
         };
         fetchFindings.SetDisplayText("Fetch Accepted Findings");
 
+        // ── Story 39-25 (leg 1): fetch the latest ACCEPTED ambiguity-assessment ──
+        // Fail-closed: no accepted assessment for this run's anchor ⇒ Found=false ⇒ the
+        // ambiguityScore dispatch key below is OMITTED (never a fabricated 0.0).
+        // Read on the BASE issue id (the run identity the assessment is persisted under),
+        // like FetchConsumedDesign/Findings — NOT the prose-family producer scope.
+        var fetchAmbiguityAssessment = new FetchLatestAcceptedDocumentActivity
+        {
+            Id = "FetchAmbiguityAssessment", Name = "Fetch Accepted Ambiguity Assessment",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentTypeKey = new(AmbiguityAssessmentDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Found = new(assessmentFound),
+            DocumentJson = new(assessmentJson),
+        };
+        fetchAmbiguityAssessment.SetDisplayText("Fetch Accepted Ambiguity Assessment");
+
         // ── Step 4: Dispatch the generic document lifecycle ────────────
         var dispatchLifecycle = new DispatchWorkflow
         {
             Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
             WorkflowDefinitionId = new("document-lifecycle"),
-            Input = new(ctx => new Dictionary<string, object>
+            Input = new(ctx =>
             {
-                ["documentType"]          = ProseDocumentType,
-                ["producerRole"]          = AgentRole.Architect.ToWire(),
-                ["producerAction"]        = AgentAction.WriteAdr.ToWire(),
-                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                var input = new Dictionary<string, object>
                 {
-                    ["workItemJson"] = workItemJson.Get(ctx) ?? "",
-                    // D5 — the seed context rides the DECLARED `findings` carrier
-                    // (write-adr.md declares role, workItemJson, findings, audience).
-                    ["findings"] = AdrBindingHelper.BuildDecisionContext(
-                        designJson.Get(ctx), findingsJson.Get(ctx), decisionContext.Get(ctx)),
-                    ["audience"] = audience.Get(ctx) ?? AdrBindingHelper.DefaultAudience,
-                }),
-                // 39-6 D11 / 39-15 render-drop lesson — repair/revise notes land in a DECLARED key.
-                ["feedbackVariableName"] = "findings",
-                // D3 — producer-scoped so a sibling prose producer's document for the same issue
-                // is not mistaken for this binding's latest-accepted.
-                ["issueId"]             = scopedIssueId.Get(ctx) ?? "",
-                ["correlationId"]       = scopedIssueId.Get(ctx) ?? "",
-                ["sessionId"]           = sessionId.Get(ctx),
-                ["tenantId"]            = tenantId.Get(ctx) ?? "",
-                // D7 — acceptance posture is the caller's; the binding hardcodes none.
-                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                    ["documentType"]          = ProseDocumentType,
+                    ["producerRole"]          = AgentRole.Architect.ToWire(),
+                    ["producerAction"]        = AgentAction.WriteAdr.ToWire(),
+                    ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                    {
+                        ["workItemJson"] = workItemJson.Get(ctx) ?? "",
+                        // D5 — the seed context rides the DECLARED `findings` carrier
+                        // (write-adr.md declares role, workItemJson, findings, audience).
+                        ["findings"] = AdrBindingHelper.BuildDecisionContext(
+                            designJson.Get(ctx), findingsJson.Get(ctx), decisionContext.Get(ctx)),
+                        ["audience"] = audience.Get(ctx) ?? AdrBindingHelper.DefaultAudience,
+                    }),
+                    // 39-6 D11 / 39-15 render-drop lesson — repair/revise notes land in a DECLARED key.
+                    ["feedbackVariableName"] = "findings",
+                    // D3 — producer-scoped so a sibling prose producer's document for the same issue
+                    // is not mistaken for this binding's latest-accepted.
+                    ["issueId"]             = scopedIssueId.Get(ctx) ?? "",
+                    ["correlationId"]       = scopedIssueId.Get(ctx) ?? "",
+                    ["sessionId"]           = sessionId.Get(ctx),
+                    ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                    // D7 — acceptance posture is the caller's; the binding hardcodes none.
+                    ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                };
+                // 39-25 — thread the accepted assessment's score; ABSENT when none (null stays null).
+                if (LifecycleBindingHelper.TryReadAssessmentScore(
+                        assessmentFound.Get(ctx), assessmentJson.Get(ctx)) is double ambiguityScore)
+                    input["ambiguityScore"] = ambiguityScore;
+                return input;
             }),
             WaitForCompletion = new(true),
             Result = new(lifecycleResult),
@@ -348,7 +377,7 @@ public class AdrAuthoringWorkflow : WorkflowBase
             Activities =
             {
                 readInputs, computeReEntry, readPositionStage, freshRun,
-                emitStarted, fetchDesign, fetchFindings,
+                emitStarted, fetchDesign, fetchFindings, fetchAmbiguityAssessment,
                 dispatchLifecycle, readLifecycleExit,
                 draftedGate, emitDrafted, acceptedGate, emitAccepted, emitFailed,
                 exposeOutput,
@@ -362,8 +391,11 @@ public class AdrAuthoringWorkflow : WorkflowBase
                 new(new FlowEndpoint(freshRun, "True"),  new FlowEndpoint(emitStarted)),
                 new(emitStarted, fetchDesign),
                 new(fetchDesign, fetchFindings),
-                new(fetchFindings, dispatchLifecycle),
-                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(dispatchLifecycle)),
+                // 39-25 — the ambiguity fetch is the single predecessor of the dispatch,
+                // so it runs on every path that actually dispatches (fresh + re-entry).
+                new(fetchFindings, fetchAmbiguityAssessment),
+                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(fetchAmbiguityAssessment)),
+                new(fetchAmbiguityAssessment, dispatchLifecycle),
 
                 new(dispatchLifecycle, readLifecycleExit),
                 new(readLifecycleExit, draftedGate),

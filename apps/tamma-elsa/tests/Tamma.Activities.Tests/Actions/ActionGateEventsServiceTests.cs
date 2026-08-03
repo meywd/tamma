@@ -99,7 +99,32 @@ public class ActionGateEventsServiceTests
         tags["correlationId"].Should().Be("wf-1");
         tags["issueId"].Should().Be("42");
         tags["tenantId"].Should().Be(tid.ToString());
+        tags["callerKind"].Should().Be("llm",
+            "Story 43-13 AC8 — every decision row names WHO it was decided for; the "
+            + "query above declares no caller, so the fail-closed default (llm) is what "
+            + "must appear on the wire");
         tags.Should().NotContainKey("userId", "the principal is tenant-scoped");
+    }
+
+    [Test]
+    public async Task DecisionEvent_CarriesTheDeclaredCallerKind()
+    {
+        // The other two wire spellings (43-13 D9): a Human decision and a
+        // Machinery decision are distinguishable in the trail.
+        var repo = new FakeEventRepository();
+        var service = new ActionGateEventsService(repo);
+
+        await service.EmitDecisionAsync(
+            Decision(AutonomyOutcome.RequiresHuman),
+            Query() with { Caller = CallerKind.Human });
+        await service.EmitDecisionAsync(
+            Decision(AutonomyOutcome.RequiresHuman),
+            Query() with { Caller = CallerKind.Machinery });
+
+        var kinds = repo.Appended
+            .Select(e => JsonSerializer.Deserialize<Dictionary<string, string?>>(e.Tags!)!["callerKind"])
+            .ToArray();
+        kinds.Should().Equal("human", "machinery");
     }
 
     [Test]
@@ -117,6 +142,46 @@ public class ActionGateEventsServiceTests
             Decision(AutonomyOutcome.Automated, ActionAssignmentSource.GroupOverride), Query());
         repo.Appended.Should().ContainSingle()
             .Which.Type.Should().Be(ActionGateEventsService.AllowedType);
+    }
+
+    [Test]
+    public async Task AHumanAllow_IsNotVolumeGated()
+    {
+        // Story 43-13 D9 — a "passed because human" allow is the new predicate's
+        // work product and must reach the trail even at SystemDefault source.
+        var repo = new FakeEventRepository();
+        var service = new ActionGateEventsService(repo);
+
+        await service.EmitDecisionAsync(
+            Decision(AutonomyOutcome.Automated, ActionAssignmentSource.SystemDefault) with
+            {
+                Reason = AutonomyGateEvaluator.ReasonCallerHuman,
+            },
+            Query() with { Caller = CallerKind.Human });
+
+        var evt = repo.Appended.Should().ContainSingle().Which;
+        evt.Type.Should().Be(ActionGateEventsService.AllowedType);
+        JsonSerializer.Deserialize<Dictionary<string, string?>>(evt.Tags!)!["callerKind"]
+            .Should().Be("human");
+    }
+
+    [Test]
+    public async Task AMachineryAllow_IsVolumeGated()
+    {
+        // Story 43-13 D9 — the machinery short-circuit keeps SystemDefault
+        // source and STAYS suppressed: Seam D would otherwise emit one row per
+        // actor per tick, all saying "nothing is ever going to happen here".
+        var repo = new FakeEventRepository();
+        var service = new ActionGateEventsService(repo);
+
+        await service.EmitDecisionAsync(
+            Decision(AutonomyOutcome.Automated, ActionAssignmentSource.SystemDefault) with
+            {
+                Reason = AutonomyGateEvaluator.ReasonMachineryNotDialGoverned,
+            },
+            Query() with { Caller = CallerKind.Machinery });
+
+        repo.Appended.Should().BeEmpty();
     }
 
     [Test]

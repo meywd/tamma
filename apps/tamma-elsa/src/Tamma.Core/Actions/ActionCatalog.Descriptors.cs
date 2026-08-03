@@ -55,24 +55,35 @@ public static partial class ActionCatalog
     private static ActionDescriptor Effect(
         ExternalEffect effect, ActionGroup group, ActionRisk risk, string title, string summary, string site,
         bool reversible = true, string? sensitive = null, bool enforceable = true,
-        int min = AutonomyDial.Min) =>
+        int min = AutonomyDial.Min, bool machinery = false) =>
+        // `machinery` (Story 43-13): TRUE only for the 5 plumbing-only effects
+        // in 43-11's machinery inventory — deterministic writes executing
+        // decisions gated elsewhere. Every other effect is dial-governed.
         new(new ActionKey(ActionNamespace.Effect, effect.ToWire()), group, risk, reversible,
-            title, summary, min, site, sensitive, EscalatableToHuman: true, Enforceable: enforceable);
+            title, summary, min, site, sensitive, EscalatableToHuman: true, Enforceable: enforceable,
+            IsMachinery: machinery);
 
     private static ActionDescriptor Automation(
         BackgroundActor actor, ActionGroup group, ActionRisk risk, string title, string summary, string site,
         bool reversible = true, string? sensitive = null) =>
         // EscalatableToHuman is FALSE for the whole plane: a sweeper cannot
         // suspend for a person — Seam D (43-9) can only deny (pinned by
-        // ActionDescriptorMetadataTests).
+        // ActionDescriptorMetadataTests). IsMachinery is TRUE for the whole
+        // plane (Story 43-13 / 43-11 Amendment 4): a background service is
+        // deterministic machinery and never resolves through the dial.
         new(new ActionKey(ActionNamespace.Automation, actor.ToWire()), group, risk, reversible,
-            title, summary, AutonomyDial.Min, site, sensitive, EscalatableToHuman: false);
+            title, summary, AutonomyDial.Min, site, sensitive, EscalatableToHuman: false,
+            IsMachinery: true);
 
     private static ActionDescriptor Task(
         PlatformTaskKind kind, ActionRisk risk, string title, string summary, string site,
         bool reversible = true, string? sensitive = null) =>
+        // IsMachinery is TRUE for the whole plane (Story 43-13): a task handler
+        // executes an admin request (a human, never gated) or an external
+        // system's webhook — the ACTION is the request, not the handler.
         new(new ActionKey(ActionNamespace.PlatformTask, kind.ToWire()), ActionGroup.PlatformAutomation,
-            risk, reversible, title, summary, AutonomyDial.Min, site, sensitive);
+            risk, reversible, title, summary, AutonomyDial.Min, site, sensitive,
+            IsMachinery: true);
 
     private static IReadOnlyList<ActionDescriptor> BuildDescriptors() => new[]
     {
@@ -293,12 +304,17 @@ public static partial class ActionCatalog
 
         // ── effect (35) ──────────────────────────────────────────────────────
 
+        // The five `machinery: true` effects below are 43-11's "effects fired
+        // only by plumbing" (Story 43-13): automatic event flushes, the
+        // deterministic persist of what the LLM authored, lifecycle mechanics,
+        // and the system's own reveal-token exchange. Gating any of them gates
+        // bookkeeping, not a decision.
         Effect(ExternalEffect.EngineEventsAppend, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Append domain events", "Engine appends DCB events through the mediation seam.",
-            "POST /api/engine/events — EngineEndpoints.AppendEvents", reversible: false),
+            "POST /api/engine/events — EngineEndpoints.AppendEvents", reversible: false, machinery: true),
         Effect(ExternalEffect.EnginePlatformEventsAppend, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Append platform events", "Engine appends platform events through the mediation seam.",
-            "POST /api/engine/platform-events — EngineEndpoints.AppendPlatformEvents", reversible: false),
+            "POST /api/engine/platform-events — EngineEndpoints.AppendPlatformEvents", reversible: false, machinery: true),
         Effect(ExternalEffect.EngineDocumentPersist, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Persist document", "Engine persists a document envelope through the mediation seam.",
-            "POST /api/engine/documents — DocumentEndpoints.PersistFromEngine"),
+            "POST /api/engine/documents — DocumentEndpoints.PersistFromEngine", machinery: true),
         // SiteKey carries the ROUTE CONSTRAINT `{documentId:guid}`, corrected
         // 2026-07-30 (Story 43-8 AC1 step 3, carve-out §A1 #2). The live pattern is
         // `engine.MapPost("/documents/{documentId:guid}/status", …)`; 43-8's binding
@@ -307,7 +323,7 @@ public static partial class ActionCatalog
         // been rejected the moment the route was bound — the same class of defect as
         // the six tracker SiteKeys corrected in wave 4 (adversarial review MODERATE-5).
         Effect(ExternalEffect.EngineDocumentSetStatus, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Set document status", "Engine transitions a document's lifecycle status.",
-            "POST /api/engine/documents/{documentId:guid}/status — DocumentEndpoints.SetStatusFromEngine"),
+            "POST /api/engine/documents/{documentId:guid}/status — DocumentEndpoints.SetStatusFromEngine", machinery: true),
         Effect(ExternalEffect.EngineChannelOutboxEnqueue, ActionGroup.PlatformAutomation, ActionRisk.Mutating, "Enqueue channel message", "Engine enqueues an outbound channel message.",
             "POST /api/engine/channel/outbox — ChannelEndpoints.EnqueueFromEngine"),
         Effect(ExternalEffect.LlmCall, ActionGroup.ModelInvocation, ActionRisk.Mutating, "LLM call", "Dispatch an LLM call (Seam A observes and never blocks — epic decision D1: 44 of 45 calling workflows have no human route).",
@@ -392,7 +408,7 @@ public static partial class ActionCatalog
         // the descriptor-property modelling the answer requires of 43-2.
         Effect(ExternalEffect.SecretReveal, ActionGroup.Secrets, ActionRisk.ReadOnly, "Reveal secret", "Read a secret value for an already-authorized use (informational only — never enforceable; what governs a secret is the action that needs it).",
             "GET /api/v1/secrets/reveal/{token} — SecretEndpoints.RevealSecret",
-            sensitive: SensitiveActionCatalog.SecretReveal, enforceable: false),
+            sensitive: SensitiveActionCatalog.SecretReveal, enforceable: false, machinery: true),
         Effect(ExternalEffect.ProcessSpawn, ActionGroup.CommandExecution, ActionRisk.Command, "Spawn process", "Spawn an OS process inside the tool loop.",
             "Tamma.Activities.LlmCall.Tools.ShellExecuteTool → ProcessStartInfo", reversible: false),
         // Ships at Min, NOT AlwaysHuman (43-3 D3/C4): v1 enforces, so AlwaysHuman

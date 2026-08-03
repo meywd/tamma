@@ -41,6 +41,7 @@ public class TriagePODecisionWorkflow : WorkflowBase
 {
     private const string TriageDecisionDocumentType = "triage-decision";
     private const int TriageRosterSize = 4;
+    private const string AmbiguityAssessmentDocumentType = "ambiguity-assessment";
 
     protected override void Build(IWorkflowBuilder builder)
     {
@@ -58,6 +59,10 @@ public class TriagePODecisionWorkflow : WorkflowBase
         var findingsDocumentId = builder.WithVariable<string>("FindingsDocumentId", "");
         var acceptanceRulesJson = builder.WithVariable<string>("AcceptanceRulesJson", "");
         var itemNumber = builder.WithVariable<int>("ItemNumber", 0);
+
+        // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
+        var assessmentFound = builder.WithVariable<bool>();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
 
         // ── 39-10 re-entry position ────────────────────────────────────
         var reEntryPositionJson = builder.WithVariable<string>();
@@ -177,33 +182,55 @@ public class TriagePODecisionWorkflow : WorkflowBase
             _ => TriageEvents.PanelStarted, repository, itemNumber, tenantId,
             _ => TriageRosterSize, _ => 0, _ => "[]");
 
+        // ── Story 39-25 (leg 1): fetch the latest ACCEPTED ambiguity-assessment ──
+        // Fail-closed: no accepted assessment for this run's anchor ⇒ Found=false ⇒ the
+        // ambiguityScore dispatch key below is OMITTED (never a fabricated 0.0).
+        var fetchAmbiguityAssessment = new FetchLatestAcceptedDocumentActivity
+        {
+            Id = "FetchAmbiguityAssessment", Name = "Fetch Accepted Ambiguity Assessment",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentTypeKey = new(AmbiguityAssessmentDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Found = new(assessmentFound),
+            DocumentJson = new(assessmentJson),
+        };
+        fetchAmbiguityAssessment.SetDisplayText("Fetch Accepted Ambiguity Assessment");
+
         // ── Step 3: Dispatch the generic document lifecycle ────────────
         var dispatchLifecycle = new DispatchWorkflow
         {
             Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
             WorkflowDefinitionId = new("document-lifecycle"),
-            Input = new(ctx => new Dictionary<string, object>
+            Input = new(ctx =>
             {
-                ["documentType"] = TriageDecisionDocumentType,
-                ["producerRole"] = AgentRole.ProductOwner.ToWire(),
-                ["producerAction"] = AgentAction.TriageIntake.ToWire(),
-                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                var input = new Dictionary<string, object>
                 {
-                    ["itemJson"] = itemJson.Get(ctx) ?? "",
-                    // The gathered Findings context is folded into the DECLARED contextFindings
-                    // carrier (render-drop lesson); repair/revise notes land in the same carrier.
-                    ["contextFindings"] = contextJson.Get(ctx) ?? "{}",
-                    ["repository"] = repository.Get(ctx) ?? "",
-                }),
-                ["feedbackVariableName"] = "contextFindings",
-                ["issueId"] = issueId.Get(ctx) ?? "",
-                ["correlationId"] = issueId.Get(ctx) ?? "",
-                ["tenantId"] = tenantId.Get(ctx) ?? "",
-                // Behavior-preserving triage default rules (panel roster + quorum 2 + needs-human
-                // always-escalate) unless the caller/store passes an explicit override.
-                ["acceptanceRulesJson"] = string.IsNullOrWhiteSpace(acceptanceRulesJson.Get(ctx))
-                    ? TriageBindingHelper.DefaultTriageRulesJson()
-                    : acceptanceRulesJson.Get(ctx)!,
+                    ["documentType"] = TriageDecisionDocumentType,
+                    ["producerRole"] = AgentRole.ProductOwner.ToWire(),
+                    ["producerAction"] = AgentAction.TriageIntake.ToWire(),
+                    ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                    {
+                        ["itemJson"] = itemJson.Get(ctx) ?? "",
+                        // The gathered Findings context is folded into the DECLARED contextFindings
+                        // carrier (render-drop lesson); repair/revise notes land in the same carrier.
+                        ["contextFindings"] = contextJson.Get(ctx) ?? "{}",
+                        ["repository"] = repository.Get(ctx) ?? "",
+                    }),
+                    ["feedbackVariableName"] = "contextFindings",
+                    ["issueId"] = issueId.Get(ctx) ?? "",
+                    ["correlationId"] = issueId.Get(ctx) ?? "",
+                    ["tenantId"] = tenantId.Get(ctx) ?? "",
+                    // Behavior-preserving triage default rules (panel roster + quorum 2 + needs-human
+                    // always-escalate) unless the caller/store passes an explicit override.
+                    ["acceptanceRulesJson"] = string.IsNullOrWhiteSpace(acceptanceRulesJson.Get(ctx))
+                        ? TriageBindingHelper.DefaultTriageRulesJson()
+                        : acceptanceRulesJson.Get(ctx)!,
+                };
+                // 39-25 — thread the accepted assessment's score; ABSENT when none (null stays null).
+                if (LifecycleBindingHelper.TryReadAssessmentScore(
+                        assessmentFound.Get(ctx), assessmentJson.Get(ctx)) is double ambiguityScore)
+                    input["ambiguityScore"] = ambiguityScore;
+                return input;
             }),
             WaitForCompletion = new(true),
             Result = new(lifecycleResult),
@@ -309,7 +336,7 @@ public class TriagePODecisionWorkflow : WorkflowBase
             {
                 readInputs, computeReEntry, readPositionStage, freshRun,
                 inputsPresent, buildSkipped, emitSkipped,
-                emitStarted, emitPanelStarted, dispatchLifecycle, readLifecycleExit,
+                emitStarted, emitPanelStarted, fetchAmbiguityAssessment, dispatchLifecycle, readLifecycleExit,
                 lifecycleAcceptedGate, wasCompleteReEntry,
                 emitPanelCompleted, emitCompleted, emitPanelFailed, emitFailed,
                 setOutputs,
@@ -328,10 +355,13 @@ public class TriagePODecisionWorkflow : WorkflowBase
 
                 new(new FlowEndpoint(inputsPresent, "True"), new FlowEndpoint(emitStarted)),
                 new(emitStarted, emitPanelStarted),
-                new(emitPanelStarted, dispatchLifecycle),
+                // 39-25 — the ambiguity fetch is the single predecessor of the dispatch,
+                // so it runs on every path that actually dispatches (fresh + re-entry).
+                new(emitPanelStarted, fetchAmbiguityAssessment),
 
-                // Re-entry → straight to dispatch (no double STARTED/PANEL.STARTED emit).
-                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(dispatchLifecycle)),
+                // Re-entry → fetch → dispatch (no double STARTED/PANEL.STARTED emit).
+                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(fetchAmbiguityAssessment)),
+                new(fetchAmbiguityAssessment, dispatchLifecycle),
 
                 new(dispatchLifecycle, readLifecycleExit),
                 new(readLifecycleExit, lifecycleAcceptedGate),

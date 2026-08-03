@@ -61,6 +61,7 @@ public class AcceptanceCriteriaAuthoringWorkflow : WorkflowBase
     private const string AcceptanceCriteriaDocumentType = "acceptance-criteria";
     private const string ClarificationDocumentType = "clarification";
     private const string FindingsDocumentType = "findings";
+    private const string AmbiguityAssessmentDocumentType = "ambiguity-assessment";
 
     protected override void Build(IWorkflowBuilder builder)
     {
@@ -95,6 +96,10 @@ public class AcceptanceCriteriaAuthoringWorkflow : WorkflowBase
         var findingsDocId   = builder.WithVariable<string>("FindingsDocId", "");
         var findingsJson    = builder.WithVariable<string>("FindingsJson", "");
         var findingsLineage = builder.WithVariable<string>();
+
+        // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
+        var assessmentFound = builder.WithVariable<bool>();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
 
         // ── 39-10 re-entry position (D5) ───────────────────────────────
         var reEntryPositionJson = builder.WithVariable<string>();
@@ -221,43 +226,65 @@ public class AcceptanceCriteriaAuthoringWorkflow : WorkflowBase
         };
         fetchFindings.SetDisplayText("Fetch Accepted Findings");
 
+        // ── Story 39-25 (leg 1): fetch the latest ACCEPTED ambiguity-assessment ──
+        // Fail-closed: no accepted assessment for this run's anchor ⇒ Found=false ⇒ the
+        // ambiguityScore dispatch key below is OMITTED (never a fabricated 0.0).
+        var fetchAmbiguityAssessment = new FetchLatestAcceptedDocumentActivity
+        {
+            Id = "FetchAmbiguityAssessment", Name = "Fetch Accepted Ambiguity Assessment",
+            IssueId = new(ctx => issueId.Get(ctx)),
+            DocumentTypeKey = new(AmbiguityAssessmentDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Found = new(assessmentFound),
+            DocumentJson = new(assessmentJson),
+        };
+        fetchAmbiguityAssessment.SetDisplayText("Fetch Accepted Ambiguity Assessment");
+
         // ── Step 4: Dispatch the generic document lifecycle ────────────
         var dispatchLifecycle = new DispatchWorkflow
         {
             Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
             WorkflowDefinitionId = new("document-lifecycle"),
-            Input = new(ctx => new Dictionary<string, object>
+            Input = new(ctx =>
             {
-                ["documentType"]          = AcceptanceCriteriaDocumentType,
-                ["producerRole"]          = AgentRole.ProductOwner.ToWire(),
-                ["producerAction"]        = AgentAction.DefineAcceptanceCriteria.ToWire(),
-                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                var input = new Dictionary<string, object>
                 {
-                    ["workItemJson"] = workItemJson.Get(ctx) ?? "",
-                    // D3 — the consumed Clarification + Findings ride the DECLARED carrier.
-                    ["contextFindings"] = AcceptanceCriteriaBindingHelper.BuildContextFindings(
-                        clarificationJson.Get(ctx), findingsJson.Get(ctx)),
-                    ["conventions"] = conventions.Get(ctx) ?? "",
-                }),
-                // 39-6 D11 — repair/revise notes land in the DECLARED carrier (D3).
-                ["feedbackVariableName"] = "contextFindings",
-                // F7 — thread the binding's sessionId as the lifecycle's decision-session
-                // id (AdrAuthoringWorkflow:245, DesignProposalWorkflow:157) so the accept
-                // decision is correlatable to this run rather than to a UUID the child
-                // minted and nobody upstream ever sees.
-                ["sessionId"]           = sessionId.Get(ctx),
-                // D4 / AC3 follow-up (2026-07-29) — the SINGLE parent slot, handed to the
-                // lifecycle BEFORE the produce so the minted draft's envelope (and hence
-                // the persisted `document_instances` row) carries the Issue → Clarification
-                // → AcceptanceCriteria edge. Computing it only on the way out, as this
-                // binding originally did, left the edge in the workflow output and the
-                // DRAFTED payload while the persisted row's parent stayed null.
-                ["parentDocumentId"]    = AcceptanceCriteriaBindingHelper.ChooseParentDocumentId(
-                                              clarificationDocId.Get(ctx), findingsDocId.Get(ctx)),
-                ["issueId"]             = issueId.Get(ctx) ?? "",
-                ["correlationId"]       = issueId.Get(ctx) ?? "",
-                ["tenantId"]            = tenantId.Get(ctx) ?? "",
-                ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                    ["documentType"]          = AcceptanceCriteriaDocumentType,
+                    ["producerRole"]          = AgentRole.ProductOwner.ToWire(),
+                    ["producerAction"]        = AgentAction.DefineAcceptanceCriteria.ToWire(),
+                    ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                    {
+                        ["workItemJson"] = workItemJson.Get(ctx) ?? "",
+                        // D3 — the consumed Clarification + Findings ride the DECLARED carrier.
+                        ["contextFindings"] = AcceptanceCriteriaBindingHelper.BuildContextFindings(
+                            clarificationJson.Get(ctx), findingsJson.Get(ctx)),
+                        ["conventions"] = conventions.Get(ctx) ?? "",
+                    }),
+                    // 39-6 D11 — repair/revise notes land in the DECLARED carrier (D3).
+                    ["feedbackVariableName"] = "contextFindings",
+                    // F7 — thread the binding's sessionId as the lifecycle's decision-session
+                    // id (AdrAuthoringWorkflow:245, DesignProposalWorkflow:157) so the accept
+                    // decision is correlatable to this run rather than to a UUID the child
+                    // minted and nobody upstream ever sees.
+                    ["sessionId"]           = sessionId.Get(ctx),
+                    // D4 / AC3 follow-up (2026-07-29) — the SINGLE parent slot, handed to the
+                    // lifecycle BEFORE the produce so the minted draft's envelope (and hence
+                    // the persisted `document_instances` row) carries the Issue → Clarification
+                    // → AcceptanceCriteria edge. Computing it only on the way out, as this
+                    // binding originally did, left the edge in the workflow output and the
+                    // DRAFTED payload while the persisted row's parent stayed null.
+                    ["parentDocumentId"]    = AcceptanceCriteriaBindingHelper.ChooseParentDocumentId(
+                                                  clarificationDocId.Get(ctx), findingsDocId.Get(ctx)),
+                    ["issueId"]             = issueId.Get(ctx) ?? "",
+                    ["correlationId"]       = issueId.Get(ctx) ?? "",
+                    ["tenantId"]            = tenantId.Get(ctx) ?? "",
+                    ["acceptanceRulesJson"] = acceptanceRulesJson.Get(ctx) ?? "",
+                };
+                // 39-25 — thread the accepted assessment's score; ABSENT when none (null stays null).
+                if (LifecycleBindingHelper.TryReadAssessmentScore(
+                        assessmentFound.Get(ctx), assessmentJson.Get(ctx)) is double ambiguityScore)
+                    input["ambiguityScore"] = ambiguityScore;
+                return input;
             }),
             WaitForCompletion = new(true),
             Result = new(lifecycleResult),
@@ -370,7 +397,7 @@ public class AcceptanceCriteriaAuthoringWorkflow : WorkflowBase
             Activities =
             {
                 readInputs, computeReEntry, readPositionStage, freshRun,
-                emitStarted, fetchClarification, fetchFindings,
+                emitStarted, fetchClarification, fetchFindings, fetchAmbiguityAssessment,
                 dispatchLifecycle, readLifecycleExit,
                 draftedGate, emitDrafted, acceptedGate, emitAccepted, emitFailed,
                 exposeOutput,
@@ -384,8 +411,11 @@ public class AcceptanceCriteriaAuthoringWorkflow : WorkflowBase
                 new(new FlowEndpoint(freshRun, "True"),  new FlowEndpoint(emitStarted)),
                 new(emitStarted, fetchClarification),
                 new(fetchClarification, fetchFindings),
-                new(fetchFindings, dispatchLifecycle),
-                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(dispatchLifecycle)),
+                // 39-25 — the ambiguity fetch is the single predecessor of the dispatch,
+                // so it runs on every path that actually dispatches (fresh + re-entry).
+                new(fetchFindings, fetchAmbiguityAssessment),
+                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(fetchAmbiguityAssessment)),
+                new(fetchAmbiguityAssessment, dispatchLifecycle),
 
                 new(dispatchLifecycle, readLifecycleExit),
                 new(readLifecycleExit, draftedGate),

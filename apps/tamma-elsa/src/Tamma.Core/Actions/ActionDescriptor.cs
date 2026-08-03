@@ -55,6 +55,18 @@ namespace Tamma.Core.Actions;
 /// 2026-07-25: reading a secret never requires a human — the catalog row is
 /// informational, and no admin-raised threshold on it may ever be enforced).
 /// </param>
+/// <param name="IsMachinery">
+/// Story 43-13 (43-11 Amendment 4 + the caller-kind re-audit's machinery
+/// inventory): TRUE for the 42 rows that are deterministic machinery — all 29
+/// <c>automation:*</c>, all 8 <c>platform-task:*</c>, and the 5 plumbing-only
+/// effects (<c>engine.events.append</c>, <c>engine.platform-events.append</c>,
+/// <c>engine.document.persist</c>, <c>engine.document.set-status</c>,
+/// <c>secret.reveal</c>). These rows keep key/group/risk/site for audit and
+/// drift but carry NO level semantics: the evaluator never resolves them through
+/// the dial (terminal <c>ReasonMachineryNotDialGoverned</c>), and the 43-6 API
+/// rejects threshold writes on them. <c>enabled = false</c>, role restrictions
+/// and the fail-closed unreadable-policy posture still apply.
+/// </param>
 public sealed record ActionDescriptor(
     ActionKey Key,
     ActionGroup Group,
@@ -66,4 +78,5 @@ public sealed record ActionDescriptor(
     string SiteKey,
     string? SensitiveActionCode = null,
     bool EscalatableToHuman = true,
-    bool Enforceable = true);
+    bool Enforceable = true,
+    bool IsMachinery = false);

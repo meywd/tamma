@@ -83,6 +83,7 @@ public class BacklogPrioritizationWorkflow : WorkflowBase
 
     /// <summary>The DECLARED evidence/feedback carrier the rewritten cell places in its body (D4).</summary>
     private const string EvidenceVariableName = "evidence";
+    private const string AmbiguityAssessmentDocumentType = "ambiguity-assessment";
 
     protected override void Build(IWorkflowBuilder builder)
     {
@@ -125,6 +126,10 @@ public class BacklogPrioritizationWorkflow : WorkflowBase
         var triageContextFindingsDocId   = builder.WithVariable<string>("TriageContextFindingsDocId", "");
         var triageContextFindingsJson    = builder.WithVariable<string>("TriageContextFindingsJson", "");
         var triageContextFindingsLineage = builder.WithVariable<string>();
+
+        // ── Story 39-25 — threaded ambiguity score (leg 1) ─────────────
+        var assessmentFound = builder.WithVariable<bool>();
+        var assessmentJson  = builder.WithVariable<string>("AssessmentJson", "{}");
 
         // ── 39-10 re-entry position (D6) ───────────────────────────────
         var reEntryPositionJson = builder.WithVariable<string>();
@@ -346,35 +351,60 @@ public class BacklogPrioritizationWorkflow : WorkflowBase
         };
         gatherEvidence.SetDisplayText("Gather Ranking Evidence");
 
+        // ── Story 39-25 (leg 1): fetch the latest ACCEPTED ambiguity-assessment ──
+        // Fail-closed: no accepted assessment for this run's anchor ⇒ Found=false ⇒ the
+        // ambiguityScore dispatch key below is OMITTED (never a fabricated 0.0).
+        // Run-scoped, keyed on the D2 set anchor (a BacklogOrdering has no single issue);
+        // OUTSIDE the bounded per-item evidence loop. Honest null in practice — no assessment
+        // is ever persisted under a backlog anchor today; the read stays fail-closed.
+        var fetchAmbiguityAssessment = new FetchLatestAcceptedDocumentActivity
+        {
+            Id = "FetchAmbiguityAssessment", Name = "Fetch Accepted Ambiguity Assessment",
+            IssueId = new(ctx => backlogAnchor.Get(ctx)),
+            DocumentTypeKey = new(AmbiguityAssessmentDocumentType),
+            TenantId = new(ctx => tenantId.Get(ctx)),
+            Found = new(assessmentFound),
+            DocumentJson = new(assessmentJson),
+        };
+        fetchAmbiguityAssessment.SetDisplayText("Fetch Accepted Ambiguity Assessment");
+
         // ── Step 5: Dispatch the generic document lifecycle ────────────
         var dispatchLifecycle = new DispatchWorkflow
         {
             Id = "DispatchLifecycle", Name = "Dispatch Document Lifecycle",
             WorkflowDefinitionId = new("document-lifecycle"),
-            Input = new(ctx => new Dictionary<string, object>
+            Input = new(ctx =>
             {
-                ["documentType"]          = BacklogOrderingDocumentType,
-                ["producerRole"]          = AgentRole.ProductOwner.ToWire(),
-                ["producerAction"]        = AgentAction.PrioritizeBacklog.ToWire(),
-                ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                var input = new Dictionary<string, object>
                 {
-                    // Every key below is DECLARED by prioritize-backlog.md's front matter and
-                    // PLACED in its body — an undeclared key is dropped at render, and a declared
-                    // key with no {{placeholder}} is a no-op (story AC7c).
-                    ["itemsJson"]   = producerItemsJson.Get(ctx) ?? "[]",
-                    ["repoContext"] = repoContext.Get(ctx) ?? "",
-                    ["evidence"]    = evidence.Get(ctx) ?? "",
-                }),
-                // 39-6 D11 / D4 — repair/revise notes land in the DECLARED carrier.
-                ["feedbackVariableName"] = EvidenceVariableName,
-                ["sessionId"]            = sessionId.Get(ctx),
-                // D2 — the set-scoped anchor IS the lifecycle's issue id; a BacklogOrdering has
-                // no real issue to hang on and the store has no other read key.
-                ["issueId"]              = backlogAnchor.Get(ctx) ?? "",
-                ["correlationId"]        = backlogAnchor.Get(ctx) ?? "",
-                ["repository"]           = repository.Get(ctx) ?? "",
-                ["tenantId"]             = tenantId.Get(ctx) ?? "",
-                ["acceptanceRulesJson"]  = acceptanceRulesJson.Get(ctx) ?? "",
+                    ["documentType"]          = BacklogOrderingDocumentType,
+                    ["producerRole"]          = AgentRole.ProductOwner.ToWire(),
+                    ["producerAction"]        = AgentAction.PrioritizeBacklog.ToWire(),
+                    ["producerVariablesJson"] = JsonSerializer.Serialize(new Dictionary<string, object>
+                    {
+                        // Every key below is DECLARED by prioritize-backlog.md's front matter and
+                        // PLACED in its body — an undeclared key is dropped at render, and a declared
+                        // key with no {{placeholder}} is a no-op (story AC7c).
+                        ["itemsJson"]   = producerItemsJson.Get(ctx) ?? "[]",
+                        ["repoContext"] = repoContext.Get(ctx) ?? "",
+                        ["evidence"]    = evidence.Get(ctx) ?? "",
+                    }),
+                    // 39-6 D11 / D4 — repair/revise notes land in the DECLARED carrier.
+                    ["feedbackVariableName"] = EvidenceVariableName,
+                    ["sessionId"]            = sessionId.Get(ctx),
+                    // D2 — the set-scoped anchor IS the lifecycle's issue id; a BacklogOrdering has
+                    // no real issue to hang on and the store has no other read key.
+                    ["issueId"]              = backlogAnchor.Get(ctx) ?? "",
+                    ["correlationId"]        = backlogAnchor.Get(ctx) ?? "",
+                    ["repository"]           = repository.Get(ctx) ?? "",
+                    ["tenantId"]             = tenantId.Get(ctx) ?? "",
+                    ["acceptanceRulesJson"]  = acceptanceRulesJson.Get(ctx) ?? "",
+                };
+                // 39-25 — thread the accepted assessment's score; ABSENT when none (null stays null).
+                if (LifecycleBindingHelper.TryReadAssessmentScore(
+                        assessmentFound.Get(ctx), assessmentJson.Get(ctx)) is double ambiguityScore)
+                    input["ambiguityScore"] = ambiguityScore;
+                return input;
             }),
             WaitForCompletion = new(true),
             Result = new(lifecycleResult),
@@ -489,7 +519,7 @@ public class BacklogPrioritizationWorkflow : WorkflowBase
             Activities =
             {
                 readInputs, computeReEntry, readPositionStage, freshRun,
-                emitStarted, gatherEvidence,
+                emitStarted, gatherEvidence, fetchAmbiguityAssessment,
                 dispatchLifecycle, readLifecycleExit,
                 orderedGate, emitOrdered, acceptedGate, emitAccepted, emitFailed,
                 exposeOutput,
@@ -502,8 +532,11 @@ public class BacklogPrioritizationWorkflow : WorkflowBase
 
                 new(new FlowEndpoint(freshRun, "True"),  new FlowEndpoint(emitStarted)),
                 new(emitStarted, gatherEvidence),
-                new(gatherEvidence, dispatchLifecycle),
-                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(dispatchLifecycle)),
+                // 39-25 — the ambiguity fetch (OUTSIDE the bounded loop, run-scoped) is the
+                // single predecessor of the dispatch on both the fresh and re-entry paths.
+                new(gatherEvidence, fetchAmbiguityAssessment),
+                new(new FlowEndpoint(freshRun, "False"), new FlowEndpoint(fetchAmbiguityAssessment)),
+                new(fetchAmbiguityAssessment, dispatchLifecycle),
 
                 new(dispatchLifecycle, readLifecycleExit),
                 new(readLifecycleExit, orderedGate),
