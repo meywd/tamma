@@ -147,12 +147,16 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void SourceControlWrite_has_the_10_expected_members()
+    public void SourceControlWrite_has_the_17_expected_members()
     {
         // 6 -> 10 (Story 43-12): the coarse effect:git.pull-request.merge is RETIRED
         // and replaced by the per-target trio git.merge.{dev,qa,main} (+3 net +2);
         // plus the two RESERVED source-control-write keys git.checks.bypass (50) and
         // git.webhook.register (85, DUAL-dormant) (+2). Net 6 -> 10.
+        // 10 -> 17 (Story 31-13): +7 PR operation verbs
+        // git.pull-request.{close,reopen,comment,review-comment,request-reviewers,
+        // label,set-draft} (enforceable-but-unbound; review-comment at level 40, the
+        // rest at 35).
         WiresIn(ActionGroup.SourceControlWrite).Should().BeEquivalentTo(new[]
         {
             "tool:git_operations.write", "effect:git.branch.create", "effect:git.branch.delete",
@@ -160,11 +164,15 @@ public class ActionGroupMembershipTests
             "effect:git.merge.dev", "effect:git.merge.qa", "effect:git.merge.main",
             "effect:git.release.create",
             "effect:git.checks.bypass", "effect:git.webhook.register",
+            "effect:git.pull-request.close", "effect:git.pull-request.reopen",
+            "effect:git.pull-request.comment", "effect:git.pull-request.review-comment",
+            "effect:git.pull-request.request-reviewers", "effect:git.pull-request.label",
+            "effect:git.pull-request.set-draft",
         });
     }
 
     [Test]
-    public void IssueTracking_has_the_12_expected_members()
+    public void IssueTracking_has_the_16_expected_members()
     {
         // 2 → 12 (Story 44-2): the NATIVE tracker's ten mutating routes join the
         // two EXTERNAL-tracker mutations. The group's partition rule is kind of
@@ -173,6 +181,9 @@ public class ActionGroupMembershipTests
         // which was deliberately NOT filed under platform-automation (that
         // would bury a tenant's default project in the same lever as the outbox
         // sweeper, invisible to anyone gating the tracker).
+        // 12 → 16 (Story 31-13): +4 formerly-ungoverned issue callbacks
+        // git.issue.{create,comment,labels.set,labels.remove} (enforceable-but-unbound,
+        // level 35) — each completes by changing an issue on the tracker.
         WiresIn(ActionGroup.IssueTracking).Should().BeEquivalentTo(new[]
         {
             "effect:git.issue.patch", "effect:jira.ticket.patch",
@@ -182,6 +193,8 @@ public class ActionGroupMembershipTests
             "effect:tracker.work-item.delete", "effect:tracker.work-item.assign",
             "effect:tracker.work-item.set-status",
             "effect:tracker.preferences.set", "effect:tracker.preferences.delete",
+            "effect:git.issue.create", "effect:git.issue.comment",
+            "effect:git.issue.labels.set", "effect:git.issue.labels.remove",
         });
     }
 
@@ -270,8 +283,10 @@ public class ActionGroupMembershipTests
     }
 
     [Test]
-    public void The_per_group_counts_sum_to_206()
+    public void The_per_group_counts_sum_to_217()
     {
+        // 206 → 217 (Story 31-13): source-control-write 10 → 17 (+7 PR ops) and
+        // issue-tracking 12 → 16 (+4 issue callbacks) — nothing else moves.
         // 205 → 206 (Story 42-10): +1 in secrets — effect:secret.read (level 90),
         // the LLM value-read alongside the machinery reveal; nothing else moves.
         // 197 → 205 (Story 43-12): source-control-write 6 → 10 (retire the coarse
@@ -300,8 +315,8 @@ public class ActionGroupMembershipTests
             [ActionGroup.CommandExecution] = 2,
             [ActionGroup.CiAndTest] = 3,
             [ActionGroup.SourceControlRead] = 1,
-            [ActionGroup.SourceControlWrite] = 10,
-            [ActionGroup.IssueTracking] = 12,
+            [ActionGroup.SourceControlWrite] = 17,
+            [ActionGroup.IssueTracking] = 16,
             [ActionGroup.DeployControl] = 10,
             [ActionGroup.ExternalComms] = 2,
             [ActionGroup.ModelInvocation] = 7,
@@ -309,7 +324,7 @@ public class ActionGroupMembershipTests
             [ActionGroup.PlatformAutomation] = 43,
         };
 
-        counts.Values.Sum().Should().Be(206);
+        counts.Values.Sum().Should().Be(217);
         foreach (var (group, count) in counts)
             ActionCatalog.ByGroup[group].Should().HaveCount(count, $"group '{group.ToWire()}'");
     }

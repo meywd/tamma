@@ -51,7 +51,7 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void ExternalEffect_has_48_members()
+    public void ExternalEffect_has_59_members()
     {
         // Derivation: grep 'RequireAuthorization("EngineServiceOnly")'
         // src/Tamma.Api/Program.cs → 26 routes, 17 MUTATING (5 engine-group
@@ -88,7 +88,13 @@ public class ActionVocabularyCountTests
         // zone) — an LLM reading a secret VALUE into model context (43-11
         // Amendment 4). effect:secret.reveal is NOT removed (it stays as the
         // machinery plumbing fetch), so this is +1, not a swap.
-        Enum.GetValues<ExternalEffect>().Should().HaveCount(48);
+        // 48 -> 59 (Story 31-13): +11 PR + issue operations. The 7 PR verbs
+        // git.pull-request.{close,reopen,comment,review-comment,request-reviewers,
+        // label,set-draft} (source-control-write) and the 4 issue callbacks
+        // git.issue.{create,comment,labels.set,labels.remove} (issue-tracking).
+        // Enforceable-but-unbound descriptors (no .Governs binding yet — the same
+        // green pattern effect:secret.read used when first minted).
+        Enum.GetValues<ExternalEffect>().Should().HaveCount(59);
     }
 
     [Test]
@@ -140,8 +146,10 @@ public class ActionVocabularyCountTests
     }
 
     [Test]
-    public void TotalCatalogMembers_is_206()
+    public void TotalCatalogMembers_is_217()
     {
+        // 96 + 17 + 8 + 59 + 29 + 8 = 217 — was 206 (effect 48): Story 31-13 added
+        // the 11 PR + issue-callback effects (see ExternalEffect_has_59_members).
         // 96 + 17 + 8 + 48 + 29 + 8 = 206 — was 205 (effect 47): Story 42-10 minted
         // effect:secret.read (level 90) — an LLM reading a secret value into model
         // context (43-11 Amendment 4); secret.reveal stays as machinery, so +1.
@@ -161,7 +169,7 @@ public class ActionVocabularyCountTests
         // (80 + 10 + 22 + 26 + …); the agent-action plane grew by 16 (Story
         // 41-1a), the document-type plane by 6 (Story 41-1b), and
         // effect/automation by 3 + 1 (Story 41-30).
-        ActionCatalog.All.Should().HaveCount(206);
-        ActionCatalog.ByKey.Should().HaveCount(206);
+        ActionCatalog.All.Should().HaveCount(217);
+        ActionCatalog.ByKey.Should().HaveCount(217);
     }
 }

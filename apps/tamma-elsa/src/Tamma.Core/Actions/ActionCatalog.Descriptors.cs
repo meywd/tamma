@@ -331,7 +331,7 @@ public static partial class ActionCatalog
         Tool(ToolAction.GitOperationsWrite, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Git write operations", "Write-graded git subcommands (add/commit/push/checkout/stash/pull) — includes push.",
             "Tamma.Activities.LlmCall.Tools.GitOperationsTool (write-graded GitSubcommand members)", min: 25),
 
-        // ── effect (47) ──────────────────────────────────────────────────────
+        // ── effect (59) — 48 + 11 (Story 31-13: 7 PR ops + 4 issue callbacks) ─
 
         // The five `machinery: true` effects below are 43-11's "effects fired
         // only by plumbing" (Story 43-13): automatic event flushes, the
@@ -397,12 +397,43 @@ public static partial class ActionCatalog
         // inventory in the wiring PR.
         Effect(ExternalEffect.GitWebhookRegister, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Register webhook", "Register a repo webhook, minting a durable ingress path (the level-85 'create infrastructure' zone). RESERVED / DUAL-dormant (Story 43-12): drivers implement RegisterWebhookAsync but no caller exists; classification is DUAL and per Story 43-13 the level binds only an LLM path. If the first caller is provisioning plumbing, this row moves to the machinery inventory in the wiring PR.",
             "RESERVED (Story 43-12) — no performer in the tree: IGitPlatformClient.RegisterWebhookAsync is implemented by drivers but has no production caller", min: 85),
+        // Story 31-13 — PR operations (source-control-write). Enforceable-but-unbound:
+        // the routes named in each SiteKey do not exist yet (no .Governs binding), the
+        // same green pattern effect:secret.read used when first minted. review-comment
+        // is PR review OUTPUT, so it sits in the level-40 "Approve PRs" zone; the rest
+        // are level 35 (create branch / PR zone).
+        Effect(ExternalEffect.GitPullRequestClose, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Close pull request", "Close a pull request on the git platform.",
+            "POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/close — GitEndpoints.ClosePullRequest", min: 35),
+        Effect(ExternalEffect.GitPullRequestReopen, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Reopen pull request", "Reopen a closed pull request on the git platform.",
+            "POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/reopen — GitEndpoints.ReopenPullRequest", min: 35),
+        Effect(ExternalEffect.GitPullRequestComment, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Comment on pull request", "Post a comment on a pull request.",
+            "POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/comments — GitEndpoints.PostPullRequestComment", min: 35),
+        Effect(ExternalEffect.GitPullRequestReviewComment, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Post PR review comment", "Post a review comment on a pull request (review output — the 'Approve PRs' zone).",
+            "POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/review-comments — GitEndpoints.PostPullRequestReviewComment", min: 40),
+        Effect(ExternalEffect.GitPullRequestRequestReviewers, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Request PR reviewers", "Request reviewers on a pull request.",
+            "POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/reviewers — GitEndpoints.RequestReviewers", min: 35),
+        Effect(ExternalEffect.GitPullRequestLabel, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Set pull request labels", "Set the labels on a pull request.",
+            "PUT /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/labels — GitEndpoints.SetPullRequestLabels", min: 35),
+        Effect(ExternalEffect.GitPullRequestSetDraft, ActionGroup.SourceControlWrite, ActionRisk.Mutating, "Set pull request draft state", "Toggle a pull request between draft and ready-for-review.",
+            "PUT /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/draft — GitEndpoints.SetPullRequestDraft", min: 35),
         // SiteKey carries `{n:int}` (corrected 2026-07-30, 43-8 AC1 step 3) — the
         // live pattern is MapPatch("/api/v1/git/{owner}/{repo}/issues/{n:int}").
         Effect(ExternalEffect.GitIssuePatch, ActionGroup.IssueTracking, ActionRisk.Mutating, "Update issue", "Update an issue on the git platform.",
             "PATCH /api/v1/git/{owner}/{repo}/issues/{n:int} — GitEndpoints.UpdateIssue", min: 35),
         Effect(ExternalEffect.JiraTicketPatch, ActionGroup.IssueTracking, ActionRisk.Mutating, "Update Jira ticket", "Update a Jira ticket.",
             "PATCH /api/v1/jira/tickets/{ticketId} — JiraEndpoints.UpdateTicket", min: 35),
+        // Story 31-13 — the formerly-ungoverned issue callbacks (issue-tracking).
+        // Enforceable-but-unbound: the /api/engine/* routes named here do not exist
+        // yet (no .Governs binding) — the same green pattern effect:secret.read used
+        // when first minted. All level 35.
+        Effect(ExternalEffect.GitIssueCreate, ActionGroup.IssueTracking, ActionRisk.Mutating, "Create issue", "Create an issue on the git platform.",
+            "POST /api/engine/create-issue — EngineEndpoints.CreateIssue", min: 35),
+        Effect(ExternalEffect.GitIssueComment, ActionGroup.IssueTracking, ActionRisk.Mutating, "Comment on issue", "Post a comment on an issue.",
+            "POST /api/engine/issue-comment — EngineEndpoints.PostIssueComment", min: 35),
+        Effect(ExternalEffect.GitIssueLabelsSet, ActionGroup.IssueTracking, ActionRisk.Mutating, "Set issue labels", "Add labels to an issue.",
+            "POST /api/engine/issue-labels — EngineEndpoints.PostIssueLabels", min: 35),
+        Effect(ExternalEffect.GitIssueLabelsRemove, ActionGroup.IssueTracking, ActionRisk.Mutating, "Remove issue label", "Remove a label from an issue.",
+            "DELETE /api/engine/issue-labels/{repo}/{issueNumber}/{label} — EngineEndpoints.DeleteIssueLabel", min: 35),
         Effect(ExternalEffect.CiTestsTrigger, ActionGroup.CiAndTest, ActionRisk.Command, "Trigger CI tests", "Trigger a CI test run.",
             "POST /api/v1/ci/{owner}/{repo}/test-runs — CiEndpoints.TriggerTests", min: 30),
         Effect(ExternalEffect.AgentDispatchRun, ActionGroup.ModelInvocation, ActionRisk.Command, "Dispatch agent run", "Trigger an external agent run.",

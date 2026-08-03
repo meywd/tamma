@@ -201,6 +201,35 @@ public class MediationClientEffectSweepTests
             [ExternalEffect.TrackerPreferencesDelete] = new(SiteKind.RouteOnly, null,
                 "native tracker route (Story 44-2); tenant tracker configuration written from the UI"),
 
+            // ── Story 31-13 — PR operations + the formerly-ungoverned issue callbacks ──
+            // RouteOnly: enforceable-but-unbound descriptors (no .Governs binding yet,
+            // and no TammaApiClient method — those land in a later commit). The routes
+            // named in each descriptor SiteKey do not exist yet; classified RouteOnly
+            // because when a caller appears it will be a human-/UI-facing route, not the
+            // engine's mediation client.
+            [ExternalEffect.GitPullRequestClose] = new(SiteKind.RouteOnly, null,
+                "Story 31-13 PR op; no TammaApiClient method yet (lands in a later commit)"),
+            [ExternalEffect.GitPullRequestReopen] = new(SiteKind.RouteOnly, null,
+                "Story 31-13 PR op; no TammaApiClient method yet (lands in a later commit)"),
+            [ExternalEffect.GitPullRequestComment] = new(SiteKind.RouteOnly, null,
+                "Story 31-13 PR op; no TammaApiClient method yet (lands in a later commit)"),
+            [ExternalEffect.GitPullRequestReviewComment] = new(SiteKind.RouteOnly, null,
+                "Story 31-13 PR review output; no TammaApiClient method yet (lands in a later commit)"),
+            [ExternalEffect.GitPullRequestRequestReviewers] = new(SiteKind.RouteOnly, null,
+                "Story 31-13 PR op; no TammaApiClient method yet (lands in a later commit)"),
+            [ExternalEffect.GitPullRequestLabel] = new(SiteKind.RouteOnly, null,
+                "Story 31-13 PR op; no TammaApiClient method yet (lands in a later commit)"),
+            [ExternalEffect.GitPullRequestSetDraft] = new(SiteKind.RouteOnly, null,
+                "Story 31-13 PR op; no TammaApiClient method yet (lands in a later commit)"),
+            [ExternalEffect.GitIssueCreate] = new(SiteKind.RouteOnly, null,
+                "Story 31-13 issue callback; no TammaApiClient method yet (lands in a later commit)"),
+            [ExternalEffect.GitIssueComment] = new(SiteKind.RouteOnly, null,
+                "Story 31-13 issue callback; no TammaApiClient method yet (lands in a later commit)"),
+            [ExternalEffect.GitIssueLabelsSet] = new(SiteKind.RouteOnly, null,
+                "Story 31-13 issue callback; no TammaApiClient method yet (lands in a later commit)"),
+            [ExternalEffect.GitIssueLabelsRemove] = new(SiteKind.RouteOnly, null,
+                "Story 31-13 issue callback; no TammaApiClient method yet (lands in a later commit)"),
+
             // ── Story 43-8 AC1 step 2 (carve-out §A1 #1, closed 2026-07-30) ──
             // The four MentorshipController [HttpPost] actions. RouteOnly: they are
             // reached from a UI, never through the engine's mediation client, so no

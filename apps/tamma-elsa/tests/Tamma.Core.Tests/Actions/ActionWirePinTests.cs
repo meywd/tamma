@@ -50,7 +50,15 @@ public class ActionWirePinTests
             // 43-12 — RESERVED source-control-write keys (no performer in the tree):
             // git.checks.bypass (50) and git.webhook.register (85, DUAL-dormant).
             "git.checks.bypass", "git.webhook.register",
+            // 31-13 — the 7 PR operation verbs (source-control-write), declared
+            // between git.webhook.register and git.issue.patch; enum-order-sensitive.
+            "git.pull-request.close", "git.pull-request.reopen", "git.pull-request.comment",
+            "git.pull-request.review-comment", "git.pull-request.request-reviewers",
+            "git.pull-request.label", "git.pull-request.set-draft",
             "git.issue.patch", "jira.ticket.patch",
+            // 31-13 — the 4 formerly-ungoverned issue callbacks (issue-tracking),
+            // declared immediately after jira.ticket.patch.
+            "git.issue.create", "git.issue.comment", "git.issue.labels.set", "git.issue.labels.remove",
             "ci.tests.trigger", "agent-dispatch.run", "notify.slack.queue", "notify.email.send",
             // 42-10 — secret.read (level 90) is declared adjacent to secret.reveal;
             // this list is enum-order-sensitive, so it sits between reveal and spawn.

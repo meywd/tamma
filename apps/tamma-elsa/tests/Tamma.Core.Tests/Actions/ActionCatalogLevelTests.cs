@@ -28,8 +28,8 @@ public class ActionCatalogLevelTests
         DialRows.Where(d => dial >= d.DefaultMinAutonomy).Select(d => d.Key.ToWire()).ToHashSet();
 
     /// <summary>
-    /// THE explicit (actionKey → zone level) table for all 164 dial rows (was 163; Story 42-10 +1 effect:secret.read at 90; was 155; Story 43-12 +10 per-target merge/deploy keys −2 retired coarse keys)
-    /// (Story 43-11 AC4, re-audit: 197 − 42 machinery). Transcribed from the
+    /// THE explicit (actionKey → zone level) table for all 175 dial rows (was 164; Story 31-13 +11 PR/issue effect keys, all dial rows at 35/40; was 163; Story 42-10 +1 effect:secret.read at 90; was 155; Story 43-12 +10 per-target merge/deploy keys −2 retired coarse keys)
+    /// (Story 43-11 AC4, re-audit: 217 − 42 machinery). Transcribed from the
     /// zone-model derivation, NOT generated from the catalog — it is the
     /// independent pin the descriptor is compared against.
     /// </summary>
@@ -141,13 +141,26 @@ public class ActionCatalogLevelTests
         ["agent-action:exploratory-test"] = 30,
         ["effect:ci.tests.trigger"] = 30,
         ["tool:run_tests"] = 30,
-        // ── Level 35 — create branch / PR (5) ──
+        // ── Level 35 — create branch / PR (15) ──
         ["effect:git.branch.create"] = 35,
         ["effect:git.issue.patch"] = 35,
         ["effect:git.pull-request.create"] = 35,
         ["effect:git.release.create"] = 35,
         ["effect:jira.ticket.patch"] = 35,
-        // ── Level 40 — approve PRs / routine docs (27) ──
+        // 31-13 — PR operation verbs + issue callbacks (review-comment is at 40).
+        ["effect:git.pull-request.close"] = 35,
+        ["effect:git.pull-request.reopen"] = 35,
+        ["effect:git.pull-request.comment"] = 35,
+        ["effect:git.pull-request.request-reviewers"] = 35,
+        ["effect:git.pull-request.label"] = 35,
+        ["effect:git.pull-request.set-draft"] = 35,
+        ["effect:git.issue.create"] = 35,
+        ["effect:git.issue.comment"] = 35,
+        ["effect:git.issue.labels.set"] = 35,
+        ["effect:git.issue.labels.remove"] = 35,
+        // ── Level 40 — approve PRs / routine docs (28) ──
+        // 31-13 — PR review output sits in the "Approve PRs" zone.
+        ["effect:git.pull-request.review-comment"] = 40,
         ["agent-action:code-review"] = 40,
         ["agent-action:code-review-architecture"] = 40,
         ["agent-action:code-review-coverage"] = 40,
@@ -269,7 +282,7 @@ public class ActionCatalogLevelTests
         missing.Should().BeEmpty("keys in the table with no catalog dial row");
         extra.Should().BeEmpty("catalog dial rows absent from the table");
         mismatched.Should().BeEmpty("a level moved without updating BOTH the descriptor and this table");
-        actual.Should().HaveCount(164, "164 = 206 catalog rows − 42 machinery (Story 42-10: +1 effect:secret.read at 90; Story 43-12: +10 per-target merge/deploy keys − 2 retired coarse keys)");
+        actual.Should().HaveCount(175, "175 = 217 catalog rows − 42 machinery (Story 31-13: +11 PR/issue effect keys, all dial rows at 35/40; Story 42-10: +1 effect:secret.read at 90; Story 43-12: +10 per-target merge/deploy keys − 2 retired coarse keys)");
     }
 
     [Test]

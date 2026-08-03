@@ -107,11 +107,48 @@ public enum ExternalEffect
     /// inventory in the wiring PR.</summary>
     [Wire("git.webhook.register")] GitWebhookRegister,
 
+    // ── Story 31-13 — PR operations + the formerly-ungoverned issue callbacks ──
+
+    /// <summary><c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/close</c> — <c>GitEndpoints.ClosePullRequest</c>.</summary>
+    [Wire("git.pull-request.close")] GitPullRequestClose,
+
+    /// <summary><c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/reopen</c> — <c>GitEndpoints.ReopenPullRequest</c>.</summary>
+    [Wire("git.pull-request.reopen")] GitPullRequestReopen,
+
+    /// <summary><c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/comments</c> — <c>GitEndpoints.PostPullRequestComment</c>.</summary>
+    [Wire("git.pull-request.comment")] GitPullRequestComment,
+
+    /// <summary><c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/review-comments</c> — <c>GitEndpoints.PostPullRequestReviewComment</c>.</summary>
+    [Wire("git.pull-request.review-comment")] GitPullRequestReviewComment,
+
+    /// <summary><c>POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/reviewers</c> — <c>GitEndpoints.RequestReviewers</c>.</summary>
+    [Wire("git.pull-request.request-reviewers")] GitPullRequestRequestReviewers,
+
+    /// <summary><c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/labels</c> — <c>GitEndpoints.SetPullRequestLabels</c>.</summary>
+    [Wire("git.pull-request.label")] GitPullRequestLabel,
+
+    /// <summary><c>PUT /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/draft</c> — <c>GitEndpoints.SetPullRequestDraft</c>.</summary>
+    [Wire("git.pull-request.set-draft")] GitPullRequestSetDraft,
+
     /// <summary><c>PATCH /api/v1/git/{owner}/{repo}/issues/{n}</c> — <c>GitEndpoints.UpdateIssue</c>.</summary>
     [Wire("git.issue.patch")] GitIssuePatch,
 
     /// <summary><c>PATCH /api/v1/jira/tickets/{ticketId}</c> — <c>JiraEndpoints.UpdateTicket</c>.</summary>
     [Wire("jira.ticket.patch")] JiraTicketPatch,
+
+    // ── Story 31-13 — the formerly-ungoverned issue callbacks (native/engine issue ops) ──
+
+    /// <summary><c>POST /api/engine/create-issue</c> — <c>EngineEndpoints.CreateIssue</c>.</summary>
+    [Wire("git.issue.create")] GitIssueCreate,
+
+    /// <summary><c>POST /api/engine/issue-comment</c> — <c>EngineEndpoints.PostIssueComment</c>.</summary>
+    [Wire("git.issue.comment")] GitIssueComment,
+
+    /// <summary><c>POST /api/engine/issue-labels</c> — <c>EngineEndpoints.PostIssueLabels</c>.</summary>
+    [Wire("git.issue.labels.set")] GitIssueLabelsSet,
+
+    /// <summary><c>DELETE /api/engine/issue-labels/{repo}/{issueNumber}/{label}</c> — <c>EngineEndpoints.DeleteIssueLabel</c>.</summary>
+    [Wire("git.issue.labels.remove")] GitIssueLabelsRemove,
 
     /// <summary><c>POST /api/v1/ci/{owner}/{repo}/test-runs</c> — <c>CiEndpoints.TriggerTests</c>.</summary>
     [Wire("ci.tests.trigger")] CiTestsTrigger,
