@@ -132,7 +132,13 @@ public class CallLlmActivity : Activity
         var tenantIdRaw = TenantId.Get(context);
 
         var tools = DeserializeTools(toolsJson)?.Select(t => t.Name).ToList();
-        var correlationId = context.WorkflowExecutionContext.Id;
+        // Story 43-14 (AC4) — the RUN correlation (the cycle instance id, threaded
+        // as the Elsa correlation), NOT this sub-workflow's own instance id. A
+        // grant a human minted at approval is keyed by the run correlation; a
+        // sub-workflow that sent its own id would never match it and would 409.
+        var correlationId = string.IsNullOrWhiteSpace(context.WorkflowExecutionContext.CorrelationId)
+            ? context.WorkflowExecutionContext.Id
+            : context.WorkflowExecutionContext.CorrelationId!;
 
         var request = new LlmCallApiRequest
         {

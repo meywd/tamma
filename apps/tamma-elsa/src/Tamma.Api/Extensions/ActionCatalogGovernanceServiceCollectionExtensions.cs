@@ -100,6 +100,19 @@ public static class ActionCatalogGovernanceServiceCollectionExtensions
                 sp.GetService<IActionAuthorizationLedger>(),
                 sp.GetService<ILogger<ActionAuthorizationRequests>>()));
 
+        // Story 43-14 — the approval-grant minter (workflow approvals mint
+        // correlation-standing grants). Scoped: it resolves the scoped principal
+        // resolver + scoped event service. Only wired when the ledger is (a CP
+        // DB factory is present) — without a ledger there is nothing to mint into.
+        if (services.Any(d => d.ServiceType == typeof(IDbContextFactory<ControlPlaneDbContext>)))
+        {
+            services.TryAddScoped<ApprovalGrantMinter>();
+            // Story 43-14 (D6) — the Seam B denial-path broker (one shell ask per
+            // run). Optional-nullable in InlineToolLoopRunner; wired only with a
+            // ledger. Scoped: resolves the scoped principal resolver.
+            services.TryAddScoped<ToolLoopAuthorizationBroker>();
+        }
+
         // Story 43-9 Seam D — the deny-only background gate. SINGLETON, and it
         // takes IServiceScopeFactory rather than IAutonomyGate: the gate and the
         // principal resolver are SCOPED (they read the scoped ITenantContext /

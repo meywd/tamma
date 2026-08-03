@@ -41,6 +41,12 @@ public sealed class ActionGateEventsService
     public const string EvaluationFailedType = "ACTION.GATE.EVALUATION_FAILED";
     public const string AssignmentChangedType = "ACTION.GATE.ASSIGNMENT_CHANGED";
 
+    /// <summary>Story 43-14 (AC8, D9) — a workflow approval MINTED a
+    /// correlation-standing grant. Carries actor, workflow instance, chain, scope,
+    /// correlation and the target set, so a human's "yes" and the grants it
+    /// produced are one auditable fact.</summary>
+    public const string GrantMintedType = "ACTION.GATE.GRANT_MINTED";
+
     /// <summary>
     /// F11 — ONE row per decision that the break-glass override let through a
     /// degraded read instead of failing closed. Distinct type, not a tag on
@@ -311,6 +317,43 @@ public sealed class ActionGateEventsService
         if (userId is Guid u) tags["userId"] = u.ToString();
         return AppendAsync(AuthorizedType, tenantId, tags,
             new Dictionary<string, object?>(), mustNotSwallow: false);
+    }
+
+    /// <summary>
+    /// Story 43-14 (AC8, D9) — record that a workflow's human approval minted
+    /// correlation-standing grants for a chain's gated targets. On the SWALLOWING
+    /// path: the grant ROW is the durable record (the block-not-recorded rule of
+    /// D12/43-9 protects denials, not grants), so a mint that cannot be audited
+    /// still mints. Records actor (<paramref name="decidedByUserId"/> +
+    /// <paramref name="approver"/>), the workflow instance, chain name, scope and
+    /// the minted target set (AC8).
+    /// </summary>
+    public Task EmitGrantMintedAsync(
+        Guid? tenantId, Guid? userId,
+        string chainName, string correlationId, string? workflowInstanceId,
+        Guid decidedByUserId, string? approver,
+        IReadOnlyList<string> targetKeys)
+    {
+        var tags = new Dictionary<string, string?>
+        {
+            ["chain"] = chainName,
+            ["correlationId"] = correlationId,
+            ["scope"] = "correlation-standing",
+            ["decidedByUserId"] = decidedByUserId.ToString(),
+            ["targetCount"] = targetKeys.Count.ToString(),
+        };
+        if (workflowInstanceId is not null) tags["workflowInstanceId"] = workflowInstanceId;
+        if (approver is not null) tags["approver"] = approver;
+        if (tenantId is Guid t) tags["tenantId"] = t.ToString();
+        if (userId is Guid u) tags["userId"] = u.ToString();
+        return AppendAsync(GrantMintedType, tenantId, tags,
+            new Dictionary<string, object?>
+            {
+                ["chain"] = chainName,
+                ["targets"] = targetKeys,
+                ["approver"] = approver,
+            },
+            mustNotSwallow: false);
     }
 
     /// <summary>A pending authorization was denied by a person.</summary>

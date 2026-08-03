@@ -160,28 +160,51 @@ public sealed class EfActionAuthorizationLedger : IActionAuthorizationLedger
         var now = DateTime.UtcNow;
 
         // An action grant covers itself; a group grant covers every member of
-        // that group. Expired or consumed grants do not cover (AC4).
-        var candidateIds = await db.ActionAuthorizations
+        // that group. Expired grants do not cover (AC4). Story 43-14: a
+        // single-use grant that is already consumed does not cover; a
+        // correlation-standing grant is never consumed (ConsumedAtUtc stays
+        // NULL) so it keeps covering — the predicate admits it regardless.
+        var candidates = await db.ActionAuthorizations
             .AsNoTracking()
             .Where(a => a.TenantId == tenantId && a.UserId == userId
                 && a.CorrelationId == correlationId
                 && a.State == "granted"
-                && a.ConsumedAtUtc == null
                 && (a.ExpiresAtUtc == null || a.ExpiresAtUtc > now)
+                && (a.Scope == "correlation-standing" || a.ConsumedAtUtc == null)
                 && ((a.TargetKind == "action" && a.TargetKey == actionKeyWire)
                     || (groupWire != null && a.TargetKind == "group" && a.TargetKey == groupWire)))
-            .OrderBy(a => a.TargetKind) // deterministic: an action grant wins over a group grant
-            .Select(a => a.Id)
+            // Story 43-14 D1 — standing before single-use ("correlation-standing"
+            // < "single-use" ordinally) so a repeat ask rides the standing grant
+            // instead of burning a coexisting single-use one; then an action
+            // grant wins over a group grant (deterministic).
+            .OrderBy(a => a.Scope)
+            .ThenBy(a => a.TargetKind)
+            .Select(a => new { a.Id, a.Scope })
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
-        foreach (var id in candidateIds)
+        foreach (var candidate in candidates)
         {
-            // F1 CAS: only the caller whose conditional UPDATE affects the row
-            // consumes it — a concurrent consumer of the same grant loses
-            // (affected == 0) and falls through to the next candidate / null.
+            // Story 43-14 D1 — a correlation-standing grant is SATISFIED without
+            // a write: return it as covering, ConsumedAtUtc untouched. It covers
+            // every ask in its correlation and dies only by expiry. (No CAS is
+            // needed: the only mutations a granted row can undergo are
+            // single-use consumption and time expiry, and expiry is checked in
+            // the SELECT predicate above.)
+            if (string.Equals(candidate.Scope, "correlation-standing", StringComparison.Ordinal))
+            {
+                return await db.ActionAuthorizations
+                    .AsNoTracking()
+                    .FirstAsync(a => a.Id == candidate.Id, ct)
+                    .ConfigureAwait(false);
+            }
+
+            // Single-use — F1 CAS: only the caller whose conditional UPDATE
+            // affects the row consumes it; a concurrent consumer of the same
+            // grant loses (affected == 0) and falls through to the next
+            // candidate / null.
             var affected = await db.ActionAuthorizations
-                .Where(a => a.Id == id
+                .Where(a => a.Id == candidate.Id
                     && a.State == "granted"
                     && a.ConsumedAtUtc == null
                     && (a.ExpiresAtUtc == null || a.ExpiresAtUtc > now))
@@ -191,12 +214,146 @@ public sealed class EfActionAuthorizationLedger : IActionAuthorizationLedger
             {
                 return await db.ActionAuthorizations
                     .AsNoTracking()
-                    .FirstAsync(a => a.Id == id, ct)
+                    .FirstAsync(a => a.Id == candidate.Id, ct)
                     .ConfigureAwait(false);
             }
         }
 
         return null;
+    }
+
+    /// <inheritdoc />
+    public async Task<ActionAuthorization> MintStandingGrantAsync(
+        Guid? tenantId,
+        Guid? userId,
+        string correlationId,
+        string targetKind,
+        string targetKey,
+        Guid decidedByUserId,
+        string? reason,
+        TimeSpan? ttl = null,
+        CancellationToken ct = default)
+    {
+        if (tenantId is not null && userId is not null)
+        {
+            throw new ArgumentException("At most one principal key may be set.");
+        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(correlationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetKind);
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
+
+        await using var db = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
+
+        // Bounded retry: each pass tries to (a) upgrade an existing OPEN row for
+        // this (principal, correlation, target) to a granted correlation-standing
+        // grant, or (b) insert a fresh one. A concurrent minter/requester that
+        // wins the open-row unique index is re-read on the next pass.
+        for (var attempt = 0; ; attempt++)
+        {
+            var now = DateTime.UtcNow;
+            var open = await db.ActionAuthorizations
+                .AsNoTracking()
+                .FirstOrDefaultAsync(
+                    a => a.TenantId == tenantId && a.UserId == userId
+                        && a.CorrelationId == correlationId
+                        && a.TargetKind == targetKind && a.TargetKey == targetKey
+                        && (a.State == "pending" || a.State == "granted"),
+                    ct)
+                .ConfigureAwait(false);
+
+            if (open is not null)
+            {
+                var live = open.ExpiresAtUtc is not DateTime exp || exp > now;
+                if (live && string.Equals(open.State, "granted", StringComparison.Ordinal)
+                    && string.Equals(open.Scope, "correlation-standing", StringComparison.Ordinal))
+                {
+                    return open; // idempotent — a second mint in this correlation is a no-op
+                }
+
+                if (live && string.Equals(open.State, "pending", StringComparison.Ordinal))
+                {
+                    // Upgrade the pending row (e.g. one Seam C 409 minted) to a
+                    // granted correlation-standing grant with ONE conditional
+                    // UPDATE — the DecideAsync CAS shape plus the scope set.
+                    var upgraded = await db.ActionAuthorizations
+                        .Where(a => a.Id == open.Id && a.State == "pending"
+                            && (a.ExpiresAtUtc == null || a.ExpiresAtUtc > now))
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(a => a.State, "granted")
+                            .SetProperty(a => a.Scope, "correlation-standing")
+                            .SetProperty(a => a.DecidedAtUtc, now)
+                            .SetProperty(a => a.DecidedByUserId, decidedByUserId)
+                            .SetProperty(a => a.ExpiresAtUtc, now + (ttl ?? DefaultTtl))
+                            .SetProperty(a => a.Reason, a => reason ?? a.Reason), ct)
+                        .ConfigureAwait(false);
+                    if (upgraded == 1)
+                    {
+                        return await db.ActionAuthorizations
+                            .AsNoTracking()
+                            .FirstAsync(a => a.Id == open.Id, ct)
+                            .ConfigureAwait(false);
+                    }
+                    // Lost the race (decided/expired concurrently) — re-loop.
+                    if (attempt >= 2)
+                    {
+                        throw new InvalidOperationException(
+                            "Standing-grant mint repeatedly lost the open-row transition race.");
+                    }
+                    continue;
+                }
+
+                if (live)
+                {
+                    // A live granted single-use row occupies the slot — a mint in
+                    // the same correlation subsumes it; return it as covering
+                    // (a standing upgrade of a granted row is out of scope — the
+                    // single-use row already covers the next call, and the open
+                    // index forbids a second row for this key).
+                    return open;
+                }
+
+                // Time-expired open row deadlocks the key (the partial unique
+                // index blocks a fresh insert). Close it (CAS) so the insert
+                // below can arbitrate — the same F3 posture as RequestAsync.
+                await db.ActionAuthorizations
+                    .Where(a => a.Id == open.Id
+                        && (a.State == "pending" || a.State == "granted")
+                        && a.ExpiresAtUtc != null && a.ExpiresAtUtc <= now)
+                    .ExecuteUpdateAsync(s => s.SetProperty(a => a.State, "expired"), ct)
+                    .ConfigureAwait(false);
+            }
+
+            var row = new ActionAuthorization
+            {
+                TenantId = tenantId,
+                UserId = userId,
+                CorrelationId = correlationId,
+                TargetKind = targetKind,
+                TargetKey = targetKey,
+                State = "granted",
+                Scope = "correlation-standing",
+                RequestedAtUtc = now,
+                DecidedAtUtc = now,
+                DecidedByUserId = decidedByUserId,
+                ExpiresAtUtc = now + (ttl ?? DefaultTtl),
+                Reason = reason,
+            };
+            db.ActionAuthorizations.Add(row);
+            try
+            {
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+                return row;
+            }
+            catch (DbUpdateException ex) when (IsUniqueViolation(ex))
+            {
+                db.Entry(row).State = EntityState.Detached;
+                if (attempt >= 2)
+                {
+                    throw new InvalidOperationException(
+                        "Standing-grant mint repeatedly lost the open-row unique-index race.");
+                }
+            }
+        }
     }
 
     /// <inheritdoc />

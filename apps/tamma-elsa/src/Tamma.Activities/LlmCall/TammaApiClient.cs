@@ -395,6 +395,7 @@ public class TammaApiClient
         {
             using var request = new HttpRequestMessage(HttpMethod.Delete, url);
             AddTenantHeader(request, tenantId);
+            AddCorrelationHeader(request);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(response.IsSuccessStatusCode, (int)response.StatusCode, null, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
@@ -714,6 +715,7 @@ public class TammaApiClient
         {
             using var request = new HttpRequestMessage(HttpMethod.Delete, url);
             AddTenantHeader(request, tenantId);
+            AddCorrelationHeader(request);
             var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(
                 response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
@@ -763,6 +765,7 @@ public class TammaApiClient
                 Content = JsonContent.Create(body, options: JsonOpts),
             };
             AddTenantHeader(request, tenantId?.ToString());
+            AddCorrelationHeader(request);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(
                 response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
@@ -813,6 +816,7 @@ public class TammaApiClient
             Content = JsonContent.Create(request, options: JsonOpts),
         };
         AddTenantHeader(httpRequest, tenantId);
+        AddCorrelationHeader(httpRequest);
         using var response = await _httpClient.SendAsync(httpRequest, ct).ConfigureAwait(false);
         await RecordHealthAsync(
             response.IsSuccessStatusCode, (int)response.StatusCode, null, ct).ConfigureAwait(false);
@@ -851,6 +855,7 @@ public class TammaApiClient
             Content = JsonContent.Create(body, options: JsonOpts),
         };
         AddTenantHeader(httpRequest, tenantId);
+        AddCorrelationHeader(httpRequest);
         using var response = await _httpClient.SendAsync(httpRequest, ct).ConfigureAwait(false);
         await RecordHealthAsync(
             response.IsSuccessStatusCode, (int)response.StatusCode, null, ct).ConfigureAwait(false);
@@ -909,6 +914,7 @@ public class TammaApiClient
                 Content = JsonContent.Create(body, options: JsonOpts),
             };
             AddTenantHeader(request, tenantId);
+            AddCorrelationHeader(request);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(
                 response.IsSuccessStatusCode, (int)response.StatusCode, null, ct).ConfigureAwait(false);
@@ -963,6 +969,7 @@ public class TammaApiClient
             {
                 Content = JsonContent.Create(body, options: JsonOpts),
             };
+            AddCorrelationHeader(request);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(
                 response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
@@ -1000,6 +1007,7 @@ public class TammaApiClient
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             AddTenantHeader(request, tenantId);
+            AddCorrelationHeader(request);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(
                 response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
@@ -1050,6 +1058,7 @@ public class TammaApiClient
                 Content = JsonContent.Create(body, options: JsonOpts),
             };
             AddTenantHeader(request, tenantId);
+            AddCorrelationHeader(request);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(
                 response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
@@ -1106,6 +1115,7 @@ public class TammaApiClient
                 Content = JsonContent.Create(body, options: JsonOpts),
             };
             AddTenantHeader(request, tenantId);
+            AddCorrelationHeader(request);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(
                 response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
@@ -1148,6 +1158,7 @@ public class TammaApiClient
                 Content = JsonContent.Create(body, options: JsonOpts),
             };
             AddTenantHeader(request, tenantId);
+            AddCorrelationHeader(request);
             using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
             await RecordHealthAsync(
                 response.IsSuccessStatusCode, (int)response.StatusCode, null, ct)
@@ -1194,4 +1205,45 @@ public class TammaApiClient
             request.Headers.TryAddWithoutValidation("X-Tenant-Id", tenantId);
         }
     }
+
+    /// <summary>
+    /// Story 43-14 (AC4) — stamp the RUN correlation (<c>X-Tamma-Correlation-Id</c>)
+    /// on every mediation call so Seam C
+    /// (<c>GovernanceEnforcement.ResolveCorrelationId</c>) sees the SAME
+    /// correlation the human's approval-minted grant is keyed by, and a chain's
+    /// calls all present one correlation instead of each deriving its own
+    /// <c>route:</c> value. The value is <see cref="RunCorrelation.Current"/> —
+    /// null outside a workflow run, in which case the header is absent and Seam C's
+    /// route-derived fallback stands.
+    ///
+    /// <para>Bounded to the ledger column width the same way Seam C bounds it
+    /// (<c>GovernanceEnforcement.Bounded</c>: over-long collapses to a
+    /// <c>sha256:</c> digest, never truncates) so both ends agree on the key.</para>
+    /// </summary>
+    private static void AddCorrelationHeader(HttpRequestMessage request)
+    {
+        var correlation = Tamma.Activities.Core.RunCorrelation.Current;
+        if (!string.IsNullOrWhiteSpace(correlation))
+        {
+            request.Headers.TryAddWithoutValidation(
+                CorrelationHeaderName, BoundCorrelation(correlation!));
+        }
+    }
+
+    /// <summary>Seam C's <c>GovernanceEnforcement.CorrelationHeader</c> — kept in
+    /// sync as a literal here to avoid a Tamma.Activities → Tamma.Api reference.</summary>
+    internal const string CorrelationHeaderName = "X-Tamma-Correlation-Id";
+
+    /// <summary>The ledger column width Seam C bounds to
+    /// (<c>GovernanceEnforcement.MaxCorrelationLength</c>).</summary>
+    private const int MaxCorrelationLength = 200;
+
+    /// <summary>Mirror of <c>GovernanceEnforcement.Bounded</c> so an over-long
+    /// correlation produces the identical key on both ends.</summary>
+    private static string BoundCorrelation(string value) =>
+        value.Length <= MaxCorrelationLength
+            ? value
+            : "sha256:" + Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 }

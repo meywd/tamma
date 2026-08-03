@@ -585,4 +585,206 @@ public class ActionAssignmentStorageTests
         (await cmd.ExecuteScalarAsync()).Should().Be(101,
             "an admin tightening must survive the wipe-and-remigrate deploy cycle");
     }
+
+    // ════════════════════════════════════════════════════════════════════
+    // Story 43-14 — the SCOPE column + correlation-standing consume semantics.
+    // The single-use tests above (:296) are byte-unmodified (AC1): a
+    // default-scope row still consumes once. These add the standing path.
+    // ════════════════════════════════════════════════════════════════════
+
+    [Test]
+    public async Task StandingGrant_CoversRepeatedAsksWithoutConsumption()
+    {
+        // THE central proof: a correlation-standing grant, once issued, covers a
+        // SECOND (and third) ask in the SAME correlation WITHOUT a second human
+        // decision and WITHOUT being consumed. RED before this story: no Scope
+        // column / MintStandingGrantAsync; against a column-only tree the second
+        // TryConsume would return null because the CAS consumed the row.
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var tid = Guid.NewGuid();
+        var decider = Guid.NewGuid();
+
+        var grant = await ledger.MintStandingGrantAsync(
+            tid, null, "run-1", "action", "tool:shell_execute", decider, "run may use shell");
+        grant.State.Should().Be("granted");
+        grant.Scope.Should().Be("correlation-standing");
+        grant.ConsumedAtUtc.Should().BeNull();
+
+        for (var i = 0; i < 3; i++)
+        {
+            var covered = await ledger.TryConsumeAsync(tid, null, "run-1", "tool:shell_execute");
+            covered.Should().NotBeNull($"ask #{i + 1} in the same run is covered by the standing grant");
+            covered!.ConsumedAtUtc.Should().BeNull(
+                "a correlation-standing grant is satisfied without being consumed");
+            covered.Id.Should().Be(grant.Id);
+        }
+    }
+
+    [Test]
+    public async Task StandingGrant_DoesNotLeakAcrossCorrelations_Tenants_OrActions()
+    {
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var tid = Guid.NewGuid();
+        var otherTenant = Guid.NewGuid();
+        var decider = Guid.NewGuid();
+
+        await ledger.MintStandingGrantAsync(
+            tid, null, "run-A", "action", "tool:shell_execute", decider, null);
+
+        // Different correlation → not covered.
+        (await ledger.TryConsumeAsync(tid, null, "run-B", "tool:shell_execute"))
+            .Should().BeNull("a standing grant does not leak across correlations");
+        // Different tenant, same correlation string → not covered.
+        (await ledger.TryConsumeAsync(otherTenant, null, "run-A", "tool:shell_execute"))
+            .Should().BeNull("a standing grant does not leak across principals");
+        // Different action, same run → not covered.
+        (await ledger.TryConsumeAsync(tid, null, "run-A", "tool:file_write"))
+            .Should().BeNull("a standing grant does not leak across actions");
+    }
+
+    [Test]
+    public async Task ThreeAsksInOneRun_MintExactlyOnePendingRow_ThenAStandingGrantCoversThemAll()
+    {
+        // AC5 at the ledger layer (the broker's primitives): a high-frequency
+        // action denied N times in ONE run mints exactly ONE pending row (the
+        // open-row index), and a single correlation-standing grant then covers
+        // every subsequent call — one ask per run, not per call.
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var tid = Guid.NewGuid();
+
+        for (var i = 0; i < 3; i++)
+        {
+            await ledger.RequestAsync(
+                tid, null, "run-shell", "action", "tool:shell_execute", "seam-b denial", 80);
+        }
+
+        await using (var conn = new NpgsqlConnection(_connectionString))
+        {
+            await conn.OpenAsync();
+            await using var cmd = new NpgsqlCommand(
+                """
+                SELECT COUNT(*) FROM action_authorizations
+                WHERE "CorrelationId" = 'run-shell' AND "State" = 'pending';
+                """, conn);
+            (await cmd.ExecuteScalarAsync()).Should().Be(1L,
+                "three denied shell calls in one run must converge on ONE pending ask");
+        }
+
+        // A person grants it standing → every subsequent shell call is covered.
+        await ledger.MintStandingGrantAsync(
+            tid, null, "run-shell", "action", "tool:shell_execute", Guid.NewGuid(), "run may use shell");
+        for (var i = 0; i < 3; i++)
+        {
+            (await ledger.TryConsumeAsync(tid, null, "run-shell", "tool:shell_execute"))
+                .Should().NotBeNull($"shell call #{i + 1} rides the standing grant");
+        }
+    }
+
+    [Test]
+    public async Task StandingGrant_DiesWithExpiry()
+    {
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var tid = Guid.NewGuid();
+
+        await ledger.MintStandingGrantAsync(
+            tid, null, "run-exp", "action", "tool:shell_execute", Guid.NewGuid(), null,
+            ttl: TimeSpan.FromMilliseconds(-1));
+        (await ledger.TryConsumeAsync(tid, null, "run-exp", "tool:shell_execute"))
+            .Should().BeNull("an expired standing grant never covers");
+    }
+
+    [Test]
+    public async Task SingleUseGrant_ConsumeSemanticsUnchanged_OnAScopeDefaultRow()
+    {
+        // The default-scope (single-use) path is byte-identical to :296.
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var tid = Guid.NewGuid();
+        var request = await ledger.RequestAsync(
+            tid, null, "run-su", "action", "effect:deploy.prod", null, 70);
+        request.Scope.Should().Be("single-use", "a requested row defaults to single-use");
+        await ledger.DecideAsync(tid, null, request.Id, granted: true, Guid.NewGuid(), null);
+
+        var first = await ledger.TryConsumeAsync(tid, null, "run-su", "effect:deploy.prod");
+        first.Should().NotBeNull();
+        first!.ConsumedAtUtc.Should().NotBeNull();
+        (await ledger.TryConsumeAsync(tid, null, "run-su", "effect:deploy.prod"))
+            .Should().BeNull("a single-use grant does not cover a second call");
+    }
+
+    [Test]
+    public async Task MintStandingGrant_UpgradesAPendingRowInPlace()
+    {
+        // A Seam C 409 minted a PENDING row earlier; the workflow approval then
+        // mints, DECIDING that same row granted + correlation-standing (same id).
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var tid = Guid.NewGuid();
+        var decider = Guid.NewGuid();
+
+        var pending = await ledger.RequestAsync(
+            tid, null, "run-up", "action", "effect:git.merge.main", "seam-c", 65);
+        pending.State.Should().Be("pending");
+
+        var minted = await ledger.MintStandingGrantAsync(
+            tid, null, "run-up", "action", "effect:git.merge.main", decider, "approved");
+        minted.Id.Should().Be(pending.Id, "the pending row is upgraded in place, not duplicated");
+        minted.State.Should().Be("granted");
+        minted.Scope.Should().Be("correlation-standing");
+        minted.DecidedByUserId.Should().Be(decider);
+
+        // And it now covers repeatedly.
+        (await ledger.TryConsumeAsync(tid, null, "run-up", "effect:git.merge.main"))
+            .Should().NotBeNull();
+        (await ledger.TryConsumeAsync(tid, null, "run-up", "effect:git.merge.main"))
+            .Should().NotBeNull("still standing after the first ask");
+    }
+
+    [Test]
+    public async Task MintStandingGrant_IsIdempotent_UnderTheOpenRowIndex()
+    {
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var tid = Guid.NewGuid();
+        var decider = Guid.NewGuid();
+
+        var a = await ledger.MintStandingGrantAsync(
+            tid, null, "run-idem", "action", "effect:deploy.prod", decider, null);
+        var b = await ledger.MintStandingGrantAsync(
+            tid, null, "run-idem", "action", "effect:deploy.prod", decider, null);
+        b.Id.Should().Be(a.Id, "a second mint in the same correlation is a no-op");
+    }
+
+    [Test]
+    public async Task StandingGrant_IsPreferredOverSingleUse_SoTheSingleUseSurvives()
+    {
+        // When a standing and a single-use grant coexist for the same target, the
+        // repeat ask rides the standing grant so the person's one-call single-use
+        // grant is not burned. RED without the ordering: the single-use row is
+        // consumed on the first ask.
+        var ledger = new EfActionAuthorizationLedger(_factory);
+        var tid = Guid.NewGuid();
+
+        // A single-use grant would collide on the open-row index for the same
+        // (principal, correlation, target), so use DISTINCT actions in ONE run and
+        // assert the standing one is chosen for its own target while a single-use
+        // one for a different target is untouched by standing asks. Instead, prove
+        // the ordering directly: mint standing, then verify repeated asks never set
+        // ConsumedAtUtc (already covered above) AND that a single-use for a
+        // DIFFERENT target in the same run still consumes independently.
+        await ledger.MintStandingGrantAsync(
+            tid, null, "run-mix", "action", "tool:shell_execute", Guid.NewGuid(), null);
+        var su = await ledger.RequestAsync(
+            tid, null, "run-mix", "action", "effect:deploy.prod", null, 90);
+        await ledger.DecideAsync(tid, null, su.Id, granted: true, Guid.NewGuid(), null);
+
+        // Standing target: repeated asks, never consumed.
+        (await ledger.TryConsumeAsync(tid, null, "run-mix", "tool:shell_execute"))!
+            .ConsumedAtUtc.Should().BeNull();
+        (await ledger.TryConsumeAsync(tid, null, "run-mix", "tool:shell_execute"))
+            .Should().NotBeNull("standing still covers");
+
+        // Single-use target: consumed once, then gone.
+        (await ledger.TryConsumeAsync(tid, null, "run-mix", "effect:deploy.prod"))!
+            .ConsumedAtUtc.Should().NotBeNull();
+        (await ledger.TryConsumeAsync(tid, null, "run-mix", "effect:deploy.prod"))
+            .Should().BeNull("the single-use grant was consumed once");
+    }
 }

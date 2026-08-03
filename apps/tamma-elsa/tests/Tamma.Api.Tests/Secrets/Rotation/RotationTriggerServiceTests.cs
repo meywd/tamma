@@ -170,6 +170,10 @@ public sealed class RotationTriggerServiceTests
         public Task SendSignalAsync(string instanceId, string signalName, object? payload = null) => Task.CompletedTask;
         public Task<MergeApprovalResumeResult> ResumeMergeApprovalAsync(int i, int p, string? t, string? r, string d, string? f, string? a) =>
             Task.FromResult(new MergeApprovalResumeResult(false, false, null));
+        public Task<ApprovalGateLocation> LocateMergeApprovalGateAsync(int i, int p, string? t, string? r) =>
+            Task.FromResult(new ApprovalGateLocation(false, null, null));
+        public Task<ApprovalGateLocation> LocateDeploymentApprovalGateAsync(int i, string? t, string? r, string? sha) =>
+            Task.FromResult(new ApprovalGateLocation(false, null, null));
         public Task<MergeApprovalResumeResult> ResumeDeploymentApprovalAsync(int i, string? t, string? r, string? sha, string d, string? f, string? a) =>
             Task.FromResult(new MergeApprovalResumeResult(false, false, null));
         public Task<MergeApprovalResumeResult> ResumeBlockerResolutionAsync(Guid sid, string k, string? l, bool res, string? pt, string? det, string? sr, string? resolver) =>

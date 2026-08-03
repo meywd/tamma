@@ -141,6 +141,40 @@ builder.Services.AddElsa(elsa =>
     elsa.AddWorkflowsFrom<LlmCallWorkflow>();
 });
 
+// Story 43-14 (D5) — decorate IWorkflowDispatcher so every dispatched
+// sub-workflow inherits the run correlation (the cycle instance id) from the
+// ambient RunCorrelation, with ZERO per-dispatch-site edits. Registered AFTER
+// AddElsa so Elsa's own IWorkflowDispatcher is the decorated inner instance.
+// Manual decoration (no Scrutor dependency in this repo): capture Elsa's
+// descriptor, then re-register the interface to a factory that wraps the inner.
+{
+    var innerDescriptor = builder.Services.LastOrDefault(
+        d => d.ServiceType == typeof(Elsa.Workflows.Runtime.IWorkflowDispatcher));
+    if (innerDescriptor is not null)
+    {
+        builder.Services.Remove(innerDescriptor);
+        builder.Services.Add(new Microsoft.Extensions.DependencyInjection.ServiceDescriptor(
+            typeof(Elsa.Workflows.Runtime.IWorkflowDispatcher),
+            sp =>
+            {
+                Elsa.Workflows.Runtime.IWorkflowDispatcher inner = innerDescriptor switch
+                {
+                    { ImplementationInstance: Elsa.Workflows.Runtime.IWorkflowDispatcher i } => i,
+                    { ImplementationFactory: { } f } =>
+                        (Elsa.Workflows.Runtime.IWorkflowDispatcher)f(sp),
+                    { ImplementationType: { } t } =>
+                        (Elsa.Workflows.Runtime.IWorkflowDispatcher)
+                            Microsoft.Extensions.DependencyInjection.ActivatorUtilities
+                                .CreateInstance(sp, t),
+                    _ => throw new InvalidOperationException(
+                        "IWorkflowDispatcher descriptor has no resolvable implementation."),
+                };
+                return new Tamma.Activities.Core.CorrelationPropagatingWorkflowDispatcher(inner);
+            },
+            innerDescriptor.Lifetime));
+    }
+}
+
 // Story 28-10 — scheduler that fires HourlyAnalyticsRollupWorkflow on
 // the configured cron offset (default: minute 5 of every hour, UTC).
 // Lightweight in-process scheduler — preferred over an external cron
@@ -449,6 +483,14 @@ app.MapPost("/elsa/api/adl/merge-approval/resume",
     Tamma.ElsaServer.Endpoints.MergeApprovalResumeEndpoint.Resume)
     .RequireAuthorization();
 
+// Story 43-14 (D3) — the LOCATE half of the seam: find the bookmark + its run
+// correlation WITHOUT running, so Tamma.Api can mint the merge-composite
+// correlation-standing grant BEFORE it resumes (Resume runs the merge
+// synchronously; a mint after would lose the race). Same auth as resume.
+app.MapPost("/elsa/api/adl/merge-approval/locate",
+    Tamma.ElsaServer.Endpoints.MergeApprovalResumeEndpoint.Locate)
+    .RequireAuthorization();
+
 // Completeness audit P0 item 3 — in-process resume seam for the deployment
 // pipeline's production-approval human gate. Tamma.Api's tenant-scoped,
 // RBAC-gated POST /api/adl/deploy-approval/resume forwards here; this endpoint
@@ -457,6 +499,12 @@ app.MapPost("/elsa/api/adl/merge-approval/resume",
 // engine-control-surface / RequireAuthorization rationale as the merge gate.
 app.MapPost("/elsa/api/adl/deploy-approval/resume",
     Tamma.ElsaServer.Endpoints.DeploymentApprovalResumeEndpoint.Resume)
+    .RequireAuthorization();
+
+// Story 43-14 (D3) — LOCATE half for the deploy gate (mint deploy-tail grants
+// before resume). Same auth as resume.
+app.MapPost("/elsa/api/adl/deploy-approval/locate",
+    Tamma.ElsaServer.Endpoints.DeploymentApprovalResumeEndpoint.Locate)
     .RequireAuthorization();
 
 // Follow-up #15 — in-process resume seam for the blocker-diagnosis progressive

@@ -245,4 +245,43 @@ public class ActionGateEventsServiceTests
                 tid, null, null, "principal", "action", "x", "enforce", null, true))
             .Should().NotThrowAsync("the assignment row is the durable fact");
     }
+
+    // ── Story 43-14 (AC8, D9) — the GRANT_MINTED audit event ──
+
+    [Test]
+    public async Task GrantMinted_CarriesActorInstanceScopeAndTargets()
+    {
+        var repo = new FakeEventRepository();
+        var service = new ActionGateEventsService(repo);
+        var tid = Guid.NewGuid();
+        var decider = Guid.NewGuid();
+        var targets = new[] { "effect:deploy.prod", "effect:git.release.create" };
+
+        await service.EmitGrantMintedAsync(
+            tid, null, "deploy-tail", "run-9", "wf-instance-3", decider, "alice@x.com", targets);
+
+        var evt = repo.Appended.Should().ContainSingle().Which;
+        evt.Type.Should().Be(ActionGateEventsService.GrantMintedType);
+        var tags = JsonSerializer.Deserialize<Dictionary<string, string?>>(evt.Tags!)!;
+        tags["chain"].Should().Be("deploy-tail");
+        tags["correlationId"].Should().Be("run-9");
+        tags["scope"].Should().Be("correlation-standing");
+        tags["workflowInstanceId"].Should().Be("wf-instance-3");
+        tags["decidedByUserId"].Should().Be(decider.ToString());
+        tags["approver"].Should().Be("alice@x.com");
+        tags["targetCount"].Should().Be("2");
+    }
+
+    [Test]
+    public async Task GrantMintedEmissionFailure_IsSwallowed()
+    {
+        // D9 — the grant ROW is the durable record; a mint that cannot be audited
+        // still mints (the block-not-recorded rule protects denials, not grants).
+        var repo = new FakeEventRepository { Throw = true };
+        var service = new ActionGateEventsService(repo);
+        await service.Invoking(s => s.EmitGrantMintedAsync(
+                Guid.NewGuid(), null, "merge-composite", "run-1", null, Guid.NewGuid(), null,
+                new[] { "effect:git.merge.main" }))
+            .Should().NotThrowAsync();
+    }
 }

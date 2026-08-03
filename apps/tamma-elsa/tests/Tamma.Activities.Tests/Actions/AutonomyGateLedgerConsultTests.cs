@@ -365,4 +365,86 @@ public class AutonomyGateLedgerConsultTests
             + "it. A human who wants that does it deliberately from the admin surface.");
         ledger.Requested[0].TargetKey.Should().Be(HumanPinned.ToWire());
     }
+
+    // ====================================================================
+    // Story 43-14 — a correlation-standing grant covers a SECOND ask in the
+    // same run (the Amendment 2-B defect shape), and does NOT leak across
+    // correlations. The single-use path stays the ScriptedLedger tests above.
+    // ====================================================================
+
+    /// <summary>A ledger that returns a correlation-standing grant ONLY for the
+    /// scripted correlation (never consumed → covers every ask on that run),
+    /// null for any other correlation.</summary>
+    private sealed class CorrelationScopedStandingLedger(string coveredCorrelation, ActionAuthorization grant)
+        : IActionAuthorizationLedger
+    {
+        public int Consults { get; private set; }
+
+        public Task<ActionAuthorization> RequestAsync(
+            Guid? tenantId, Guid? userId, string correlationId, string targetKind, string targetKey,
+            string? reason, int? autonomyLevelAtRequest, TimeSpan? ttl = null,
+            CancellationToken ct = default) => throw new NotSupportedException();
+
+        public Task<ActionAuthorization?> TryConsumeAsync(
+            Guid? tenantId, Guid? userId, string correlationId, string actionKeyWire,
+            CancellationToken ct = default)
+        {
+            Consults++;
+            // A standing grant is never consumed — the same row comes back each time.
+            return Task.FromResult(
+                string.Equals(correlationId, coveredCorrelation, StringComparison.Ordinal)
+                    ? grant : null);
+        }
+
+        public Task<ActionAuthorization?> DecideAsync(
+            Guid? tenantId, Guid? userId, Guid id, bool granted, Guid decidedByUserId,
+            string? reason, CancellationToken ct = default) => throw new NotSupportedException();
+    }
+
+    private static ActionAuthorization StandingGrant(string targetKey) => new()
+    {
+        Id = Guid.NewGuid(),
+        UserId = Principal.UserId,
+        CorrelationId = "run-1",
+        TargetKind = "action",
+        TargetKey = targetKey,
+        State = "granted",
+        Scope = "correlation-standing",
+        RequestedAtUtc = DateTime.UtcNow.AddMinutes(-5),
+        ConsumedAtUtc = null, // never consumed
+    };
+
+    [Test]
+    public async Task AStandingGrant_CoversASecondAskInTheSameRun()
+    {
+        // The exact Amendment 2-B defect shape: without a standing grant the
+        // second ask re-blocks (RequiresHuman). With one, BOTH asks pass.
+        var ledger = new CorrelationScopedStandingLedger("run-1", StandingGrant(HumanPinned.ToWire()));
+        var (gate, _) = Build(ledger);
+
+        var first = await gate.EvaluateAsync(
+            new AutonomyQuery(HumanPinned, Principal, CorrelationId: "run-1", SeamCanBlock: true));
+        var second = await gate.EvaluateAsync(
+            new AutonomyQuery(HumanPinned, Principal, CorrelationId: "run-1", SeamCanBlock: true));
+
+        first.Outcome.Should().Be(AutonomyOutcome.Automated);
+        second.Outcome.Should().Be(AutonomyOutcome.Automated,
+            "a correlation-standing grant covers EVERY ask in its run — one approval, not one per call");
+        first.Reason.Should().Be(AutonomyGateEvaluator.ReasonCoveredByAuthorization);
+        second.Reason.Should().Be(AutonomyGateEvaluator.ReasonCoveredByAuthorization);
+        ledger.Consults.Should().Be(2, "the gate consults on every ask; the ledger decides coverage");
+    }
+
+    [Test]
+    public async Task AStandingGrant_DoesNotLeakAcrossCorrelations()
+    {
+        var ledger = new CorrelationScopedStandingLedger("run-1", StandingGrant(HumanPinned.ToWire()));
+        var (gate, _) = Build(ledger);
+
+        var other = await gate.EvaluateAsync(
+            new AutonomyQuery(HumanPinned, Principal, CorrelationId: "run-2", SeamCanBlock: true));
+
+        other.Outcome.Should().Be(AutonomyOutcome.RequiresHuman,
+            "a standing grant for run-1 must not cover run-2");
+    }
 }

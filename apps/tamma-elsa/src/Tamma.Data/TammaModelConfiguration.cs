@@ -1311,6 +1311,10 @@ internal static class TammaModelConfiguration
                 t.HasCheckConstraint(
                     "ck_action_authorizations_target_kind",
                     "\"TargetKind\" IN ('action','group')");
+                // Story 43-14 — the grant's consume scope.
+                t.HasCheckConstraint(
+                    "ck_action_authorizations_scope",
+                    "\"Scope\" IN ('single-use','correlation-standing')");
             });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasDefaultValueSql("gen_random_uuid()");
@@ -1318,6 +1322,8 @@ internal static class TammaModelConfiguration
             entity.Property(e => e.TargetKind).IsRequired().HasMaxLength(16);
             entity.Property(e => e.TargetKey).IsRequired().HasMaxLength(200);
             entity.Property(e => e.State).IsRequired().HasMaxLength(16).HasDefaultValue("pending");
+            // Story 43-14 — single-use (today) | correlation-standing.
+            entity.Property(e => e.Scope).IsRequired().HasMaxLength(32).HasDefaultValue("single-use");
             // NOT NULL from day one (AC4).
             entity.Property(e => e.RequestedAtUtc).IsRequired().HasDefaultValueSql("now()");
             entity.Property(e => e.Reason).HasMaxLength(1000);

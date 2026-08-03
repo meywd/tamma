@@ -41,12 +41,21 @@ public interface IActionAuthorizationLedger
     /// never from caller input (adversarial review F2: a caller-supplied group
     /// wire let a grant for one group be consumed for an action outside it).
     /// An action key with no catalog entry can only be covered by an exact
-    /// action-scoped grant. An expired grant does not cover; a consumed grant
-    /// does not cover a second call. Consumption is a conditional
-    /// single-statement UPDATE (CAS) — under concurrency exactly one caller
-    /// consumes a given grant (F1). On success the grant's
-    /// <c>ConsumedAtUtc</c> is stamped and the row returned; null when no
-    /// covering grant exists (or every candidate was consumed concurrently).
+    /// action-scoped grant. An expired grant does not cover.
+    ///
+    /// <para><b>Story 43-14 — scope-aware (Amendment 2-A).</b> A
+    /// <c>single-use</c> grant (the default; today's semantics) is consumed by a
+    /// conditional single-statement UPDATE (CAS) — under concurrency exactly one
+    /// caller consumes it (F1), its <c>ConsumedAtUtc</c> is stamped, and a second
+    /// call does NOT cover. A <c>correlation-standing</c> grant is SATISFIED for
+    /// every ask matching (principal, correlation, target) WITHOUT any write: its
+    /// <c>ConsumedAtUtc</c> stays NULL and it keeps covering until it expires or
+    /// its correlation ends. When both a standing and a single-use grant coexist
+    /// for the same target, the standing grant is preferred so the person's
+    /// one-call single-use grant is not burned by a repeat ask.</para>
+    ///
+    /// <para>On success the covering grant is returned; null when no covering
+    /// grant exists (or every single-use candidate was consumed concurrently).</para>
     /// </summary>
     Task<ActionAuthorization?> TryConsumeAsync(
         Guid? tenantId,
@@ -54,6 +63,41 @@ public interface IActionAuthorizationLedger
         string correlationId,
         string actionKeyWire,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Story 43-14 (Amendment 2-B) — MINT a <c>correlation-standing</c> grant
+    /// directly in the <c>granted</c> state, at a workflow's human-approval
+    /// decision point. A workflow approval is not a request-then-decide: the row
+    /// is born granted so the resumed workflow's next mediated call passes Seam C
+    /// via <c>ReasonCoveredByAuthorization</c> instead of 409ing a human's "yes".
+    ///
+    /// <para>Idempotent under the open-row unique index
+    /// (principal, correlation, target):
+    /// <list type="bullet">
+    ///   <item><description>a pending row from an earlier Seam C 409 is DECIDED
+    ///   granted + upgraded to <c>correlation-standing</c> (one conditional
+    ///   UPDATE, the <c>DecideAsync</c> CAS shape);</description></item>
+    ///   <item><description>a granted row is returned as-is (a second mint in the
+    ///   same correlation is a no-op);</description></item>
+    ///   <item><description>otherwise a fresh granted row is inserted, with the
+    ///   same bounded unique-violation retry <see cref="RequestAsync"/> uses.</description></item>
+    /// </list></para>
+    /// </summary>
+    /// <remarks>Default throws — only the real EF ledger mints. A lightweight
+    /// double that never mints (the gate-consult path only reads) keeps
+    /// compiling without stubbing this.</remarks>
+    Task<ActionAuthorization> MintStandingGrantAsync(
+        Guid? tenantId,
+        Guid? userId,
+        string correlationId,
+        string targetKind,
+        string targetKey,
+        Guid decidedByUserId,
+        string? reason,
+        TimeSpan? ttl = null,
+        CancellationToken ct = default)
+        => throw new NotSupportedException(
+            "This IActionAuthorizationLedger implementation does not mint standing grants.");
 
     /// <summary>Transition a row to granted/denied (the 43-9 decision path;
     /// shipped here so the state machine has one owner). A conditional
