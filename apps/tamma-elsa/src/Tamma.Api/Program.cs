@@ -3158,10 +3158,23 @@ engine.MapPost("/query-context", EngineEndpoints.QueryContext);
 engine.MapGet("/repo-config", EngineEndpoints.GetRepoConfig);
 engine.MapGet("/issues", EngineEndpoints.GetIssues);
 engine.MapGet("/security-alerts", EngineEndpoints.GetSecurityAlerts);
-engine.MapPost("/issue-comment", EngineEndpoints.PostIssueComment).RequireAuthorization("WorkflowsManage");
-engine.MapPost("/issue-labels", EngineEndpoints.PostIssueLabels).RequireAuthorization("WorkflowsManage");
-engine.MapDelete("/issue-labels/{repo}/{issueNumber}/{label}", EngineEndpoints.DeleteIssueLabel).RequireAuthorization("WorkflowsManage");
-engine.MapPost("/create-issue", EngineEndpoints.CreateIssue).RequireAuthorization("WorkflowsManage");
+// Story 31-13 — the four formerly-ungoverned issue callbacks gain catalog keys
+// + enforcement (D9, D15). Auth is UNCHANGED (WorkflowsManage) — governance keys
+// on the action, not the caller's badge. Behaviour-preserving at the shipped dial
+// (level 35 < 70 ⇒ automated); their KnownUngovernedEndpoints baseline entries are
+// deleted in the same commit, so the ungoverned baseline SHRINKS by 4.
+engine.MapPost("/issue-comment", EngineEndpoints.PostIssueComment).RequireAuthorization("WorkflowsManage")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitIssueComment.ToWire()))
+    .EnforcesGovernance();
+engine.MapPost("/issue-labels", EngineEndpoints.PostIssueLabels).RequireAuthorization("WorkflowsManage")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitIssueLabelsSet.ToWire()))
+    .EnforcesGovernance();
+engine.MapDelete("/issue-labels/{repo}/{issueNumber}/{label}", EngineEndpoints.DeleteIssueLabel).RequireAuthorization("WorkflowsManage")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitIssueLabelsRemove.ToWire()))
+    .EnforcesGovernance();
+engine.MapPost("/create-issue", EngineEndpoints.CreateIssue).RequireAuthorization("WorkflowsManage")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitIssueCreate.ToWire()))
+    .EnforcesGovernance();
 engine.MapPost("/trigger-ci", EngineEndpoints.TriggerCi).RequireAuthorization("WorkflowsManage");
 engine.MapPost("/execute-task", EngineEndpoints.ExecuteTask).RequireAuthorization("WorkflowsManage");
 engine.MapPost("/cycle-result", EngineEndpoints.PostCycleResult).RequireAuthorization("WorkflowsManage");
@@ -3488,6 +3501,47 @@ app.MapPost("/api/v1/git/{owner}/{repo}/releases", GitEndpoints.CreateRelease)
     .RequireAuthorization("EngineServiceOnly")
     .WithName("GitCreateRelease")
     .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitReleaseCreate.ToWire()))
+    .EnforcesGovernance();
+
+// ── Story 31-13 — the 7 PR-lifecycle verbs (close/reopen/comment/review-comment/
+// reviewers/labels/draft). Same engine-only plane + guard→token→platform→one-event
+// mediation as the git-platform ops above; each opts into enforcement (D15) at its
+// 43-11 zone level (35, review-comment 40 — review OUTPUT). Behaviour-preserving at
+// the shipped dial (70): 35/40 < 70 ⇒ automated.
+app.MapPost("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/close", GitEndpoints.ClosePullRequest)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitClosePullRequest")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestClose.ToWire()))
+    .EnforcesGovernance();
+app.MapPost("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/reopen", GitEndpoints.ReopenPullRequest)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitReopenPullRequest")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestReopen.ToWire()))
+    .EnforcesGovernance();
+app.MapPost("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/comments", GitEndpoints.PostPullRequestComment)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitPostPullRequestComment")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestComment.ToWire()))
+    .EnforcesGovernance();
+app.MapPost("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/review-comments", GitEndpoints.PostPullRequestReviewComment)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitPostPullRequestReviewComment")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestReviewComment.ToWire()))
+    .EnforcesGovernance();
+app.MapPost("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/reviewers", GitEndpoints.RequestReviewers)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitRequestReviewers")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestRequestReviewers.ToWire()))
+    .EnforcesGovernance();
+app.MapPut("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/labels", GitEndpoints.SetPullRequestLabels)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitSetPullRequestLabels")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestLabel.ToWire()))
+    .EnforcesGovernance();
+app.MapPut("/api/v1/git/{owner}/{repo}/pull-requests/{n:int}/draft", GitEndpoints.SetPullRequestDraft)
+    .RequireAuthorization("EngineServiceOnly")
+    .WithName("GitSetPullRequestDraft")
+    .Governs(new ActionKey(ActionNamespace.Effect, ExternalEffect.GitPullRequestSetDraft.ToWire()))
     .EnforcesGovernance();
 
 // ── Story 38 (Phase 1) — CI (GitHub Actions) step mediation ──

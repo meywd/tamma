@@ -94,6 +94,22 @@ public class GovernedEndpointEnforcementSweepTests
             // at 90). Anonymous grades as LLM (fail-closed), so the tool-loop curl of
             // the reveal URL is gated; an authenticated human passes.
             "GET /api/v1/secrets/reveal/{token}",
+            // Story 31-13 — the 7 PR-lifecycle verbs (35, review-comment 40). Born
+            // bound + enforcing; behaviour-preserving at the shipped dial (< 70).
+            "POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/close",
+            "POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/reopen",
+            "POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/comments",
+            "POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/review-comments",
+            "POST /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/reviewers",
+            "PUT /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/labels",
+            "PUT /api/v1/git/{owner}/{repo}/pull-requests/{n:int}/draft",
+            // Story 31-13 — the 4 formerly-ungoverned issue callbacks, now bound +
+            // enforcing (their KnownUngovernedEndpoints baseline entries are deleted
+            // in the same commit). Auth unchanged (WorkflowsManage); level 35 < 70.
+            "POST /api/engine/create-issue",
+            "POST /api/engine/issue-comment",
+            "POST /api/engine/issue-labels",
+            "DELETE /api/engine/issue-labels/{repo}/{issueNumber}/{label}",
         };
 
     /// <summary>Endpoints carrying the D15 enforcement opt-in, off the booted host.</summary>
@@ -138,8 +154,9 @@ public class GovernedEndpointEnforcementSweepTests
             + "binding is still there — which is exactly why this set is pinned in both "
             + "directions:" + Environment.NewLine + string.Join(Environment.NewLine, missing));
 
-        live.Should().HaveCount(17,
+        live.Should().HaveCount(28,
             "16 mediation routes (Story 43-9) + the reveal route (Story 42-10, secret.read) "
+            + "+ the 11 PR/issue verbs (Story 31-13: 7 PR-lifecycle routes + 4 issue callbacks) "
             + "opt into enforcement.");
     }
 
