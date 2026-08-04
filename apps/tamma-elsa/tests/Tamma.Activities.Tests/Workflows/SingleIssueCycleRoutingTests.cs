@@ -411,11 +411,17 @@ public class SingleIssueCycleRoutingTests
             c.Target.Activity.Id == "CiGate")
             .Should().BeTrue("the CI gate must be entered when the TDD loop is done");
 
+        // Reachability, not adjacency: the CI-passed edge now runs through
+        // MarkPrReadyForReview (the cycle opens its PR as a DRAFT and GitHub cannot
+        // merge a draft, so it is un-drafted before the gate). The invariant this
+        // test protects is unchanged — only a CI PASS may reach the merge gate.
+        ReachableFromPort("CiOk", "True").Should().Contain("MergeApprovalGate",
+            "only a CI pass may proceed to the merge-approval gate");
         _flowchart.Connections.Any(c =>
             c.Source.Activity.Id == "CiOk" &&
             c.Source.Port == "True" &&
-            c.Target.Activity.Id == "MergeApprovalGate")
-            .Should().BeTrue("only a CI pass may proceed to the merge-approval gate");
+            c.Target.Activity.Id == "MarkPrReadyForReview")
+            .Should().BeTrue("the CI-passed edge marks the draft PR ready before the gate");
     }
 
     [Test]

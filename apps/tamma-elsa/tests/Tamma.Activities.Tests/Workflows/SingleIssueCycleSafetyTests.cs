@@ -167,7 +167,10 @@ public class SingleIssueCycleSafetyTests
         // TDD loop done → CI gate; CI passed → merge-approval gate.
         HasEdge("HasMoreTasks", "CiGate", "False").Should().BeTrue(
             "the TDD loop completion must enter the CI gate");
-        HasEdge("CiOk", "MergeApprovalGate", "True").Should().BeTrue(
+        // Reachability, not adjacency — MarkPrReadyForReview now sits on this edge
+        // (the PR is opened as a draft and GitHub cannot merge a draft). The
+        // invariant is unchanged: only a CI PASS may reach the merge gate.
+        ReachableFromPort("CiOk", "True").Should().Contain("MergeApprovalGate",
             "only a CI pass may proceed to the merge-approval gate");
 
         // A CI failure must NOT reach the merge gate (no merge of red CI).

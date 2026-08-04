@@ -636,6 +636,25 @@ public class SingleIssueCycleWorkflow : WorkflowBase
         // fire), leaving the issue stuck `tamma-processing` with no terminal
         // reported to the orchestrator.
         // ================================================================
+        // Mark the PR READY FOR REVIEW before the merge gate. The cycle opens its PR
+        // as a DRAFT (CreatePullRequest is passed draft = true) and GitHub REFUSES to
+        // merge a draft PR — so without this step the cycle passes CI, asks a human to
+        // approve the merge, and then the gate's approval path attempts a merge that
+        // cannot succeed. Story 31-13 shipped the governed draft verb; this is where
+        // the loop actually uses it. A failure must NOT reach the gate (approving a
+        // merge that cannot happen is worse than failing loudly), so the Error outcome
+        // routes to the shared fail-the-cycle sink.
+        var markPrReady = new SetPullRequestDraftActivity
+        {
+            Id = "MarkPrReadyForReview",
+            Name = "Mark PR Ready For Review",
+            Repository = new Input<string>(ctx => repository.Get(ctx)),
+            PrNumber = new Input<int>(ctx => prNumber.Get(ctx)),
+            Draft = new Input<bool>(false),
+            TenantId = new Input<string?>(ctx => tenantId.Get(ctx)),
+        };
+        markPrReady.SetDisplayText("Mark PR Ready For Review");
+
         var mergeApprovalGate = new DispatchWorkflow
         {
             Id = "MergeApprovalGate",
@@ -1041,7 +1060,7 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 initTaskLoop, hasMoreTasks, extractCurrentTask, tddForTask, incrementTask,
                 dispatchTddRetry, tddRetryOk, notifyTddRetry, notifyTddFailed,
                 ciGate, ciOk, notifyCiPassed,
-                dispatchCodeReview, mergeApprovalGate,
+                dispatchCodeReview, markPrReady, mergeApprovalGate,
                 extractGateOutcome, gateOutcomeSwitch,
                 notifyMergeRejected, notifyMergeEscalated, notifyMergeTimeout,
                 waitForMerged, closeIssue, deploymentPipeline, deployOk,
@@ -1206,7 +1225,13 @@ public class SingleIssueCycleWorkflow : WorkflowBase
                 // CI passed → notify + dispatch code review + merge-approval gate.
                 ConnectOutcome(ciOk, "True", notifyCiPassed),
                 ConnectOutcome(ciOk, "True", dispatchCodeReview),
-                ConnectOutcome(ciOk, "True", mergeApprovalGate),
+                // CI passed → mark the PR ready (it was opened as a draft, and GitHub
+                // cannot merge a draft) and only THEN open the merge gate. A failed
+                // un-draft fails the cycle loud rather than gating a merge that
+                // could never complete.
+                ConnectOutcome(ciOk, "True", markPrReady),
+                ConnectOutcome(markPrReady, "DraftSet", mergeApprovalGate),
+                ConnectOutcome(markPrReady, "Error", emitStepFailed),
 
                 // 11b-12. Merge-Approval Gate (human merge/test/reject + acts on it)
                 //         → branch on the gate `outcome`. ONLY merge → WaitForPRMerged.
