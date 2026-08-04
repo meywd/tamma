@@ -12,8 +12,11 @@ namespace Tamma.Api.Services.Agents;
 ///
 /// <para><b>Behaviour-preserving by construction:</b> every shipped
 /// <c>tool:*</c> descriptor carries <c>DefaultMinAutonomy = AutonomyDial.Min</c>
-/// (43-3 D4), and the v1 dial is the shipped default
-/// (<see cref="AcceptanceDefaults.DefaultAutonomyLevel"/> = <see cref="AutonomyDial.Min"/>),
+/// (43-3 D4), which is at or below the shipped dial
+/// (<see cref="AcceptanceDefaults.DefaultAutonomyLevel"/> = 70, whereas
+/// <see cref="AutonomyDial.Min"/> = 1 — these are NOT the same number; an earlier
+/// version of this comment equated them, which is false and misled a later reader
+/// into reasoning about the whole catalog as if it shipped at the floor),
 /// so on day one every tool call this gate sees is <c>Allowed</c> — the gate is
 /// live, and it bites the moment policy makes a threshold exceed the dial.
 /// Story 43-5 replaces the threshold/dial legs with the resolver ladder
